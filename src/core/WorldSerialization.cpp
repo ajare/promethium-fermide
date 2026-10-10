@@ -711,7 +711,10 @@ namespace core
 		// Version 68 adds declared compound-resource compositions and authored
 		// constituent-balanced conversions (#391); pre-68 documents carrying
 		// `composition` or `conversions` are refused rather than silently dropped.
-		serializer.writeUint32("version", 68);
+		// Version 69 adds authored solar arrays and External equipment load
+		// groups (#393); pre-69 documents carrying `solarArrays` or
+		// `equipmentLoads` are refused rather than silently dropped.
+		serializer.writeUint32("version", 69);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -791,6 +794,78 @@ namespace core
 						serializer.beginMap("");
 						serializer.writeString("storeId", flow.storeId);
 						serializer.writeDouble("yieldPerSecond", flow.yieldPerSecond);
+						serializer.endMap();
+					}
+					serializer.endArray();
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.solarArrays.empty())
+			{
+				// Authored solar configuration only; evaluated illumination and
+				// delivered supply are runtime state.
+				serializer.beginArray("solarArrays");
+				for (auto const& array : mStationSystemsSettings.solarArrays)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", array.id);
+					serializer.writeDouble("capacityKW", array.capacityKW);
+					serializer.beginMap("illumination");
+					serializer.writeDouble("constantLevel", array.illumination.constantLevel);
+					serializer.writeDouble("periodSeconds", array.illumination.periodSeconds);
+					serializer.beginArray("segments");
+					for (auto const& segment : array.illumination.segments)
+					{
+						serializer.beginMap("");
+						serializer.writeDouble("startSeconds", segment.startSeconds);
+						serializer.writeDouble("level", segment.level);
+						serializer.endMap();
+					}
+					serializer.endArray();
+					serializer.endMap();
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.equipmentLoads.empty())
+			{
+				// Authored load contracts only; allocation results, delivered
+				// fractions and exchange flows are runtime state.
+				serializer.beginArray("equipmentLoads");
+				for (auto const& load : mStationSystemsSettings.equipmentLoads)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", load.id);
+					serializer.writeDouble("electricalDemandKW", load.electricalDemandKW);
+					serializer.beginMap("operatingProfile");
+					serializer.writeDouble("constantLevel", load.operatingProfile.constantLevel);
+					serializer.writeDouble("periodSeconds", load.operatingProfile.periodSeconds);
+					serializer.beginArray("segments");
+					for (auto const& segment : load.operatingProfile.segments)
+					{
+						serializer.beginMap("");
+						serializer.writeDouble("startSeconds", segment.startSeconds);
+						serializer.writeDouble("level", segment.level);
+						serializer.endMap();
+					}
+					serializer.endArray();
+					serializer.endMap();
+					serializer.writeDouble("heatOutputKW", load.heatOutputKW);
+					serializer.writeString("thermalClass", load.thermalClass);
+					serializer.writeString("coolingDisposition",
+						load.coolingDisposition == StationCoolingDisposition::Exported
+							? "exported" : "coolingService");
+					serializer.writeDouble("criticalFloorKW", load.criticalFloorKW);
+					serializer.writeInt32("priority", load.priority);
+					serializer.writeDouble("maxCurtailment", load.maxCurtailment);
+					serializer.beginArray("materialExchanges");
+					for (auto const& exchange : load.materialExchanges)
+					{
+						serializer.beginMap("");
+						serializer.writeString("storeId", exchange.storeId);
+						serializer.writeDouble("ratePerSecond", exchange.ratePerSecond);
+						serializer.writeBool("consumes", exchange.consumes);
 						serializer.endMap();
 					}
 					serializer.endArray();
@@ -1682,7 +1757,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 68)
+		if (version < 1 || version > 69)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1787,6 +1862,90 @@ namespace core
 					}
 					serializer.endArray();
 					stationSettings.conversions.push_back(std::move(conversion));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("solarArrays"))
+			{
+				if (version < 69) throw SerializationException(
+					"Station solar arrays require World schema 69");
+				serializer.beginArray("solarArrays");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					SolarArraySettings array;
+					array.id = serializer.readString("id");
+					array.capacityKW = serializer.readDouble("capacityKW");
+					serializer.beginMap("illumination");
+					array.illumination.constantLevel = serializer.readDouble("constantLevel");
+					array.illumination.periodSeconds = serializer.readDouble("periodSeconds");
+					serializer.beginArray("segments");
+					while (serializer.nextArrayItem())
+					{
+						serializer.beginMap("");
+						ProfileSegmentSettings segment;
+						segment.startSeconds = serializer.readDouble("startSeconds");
+						segment.level = serializer.readDouble("level");
+						array.illumination.segments.push_back(segment);
+						serializer.endMap();
+					}
+					serializer.endArray();
+					serializer.endMap();
+					stationSettings.solarArrays.push_back(std::move(array));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("equipmentLoads"))
+			{
+				if (version < 69) throw SerializationException(
+					"Station external equipment loads require World schema 69");
+				serializer.beginArray("equipmentLoads");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					EquipmentLoadSettings load;
+					load.id = serializer.readString("id");
+					load.electricalDemandKW = serializer.readDouble("electricalDemandKW");
+					serializer.beginMap("operatingProfile");
+					load.operatingProfile.constantLevel = serializer.readDouble("constantLevel");
+					load.operatingProfile.periodSeconds = serializer.readDouble("periodSeconds");
+					serializer.beginArray("segments");
+					while (serializer.nextArrayItem())
+					{
+						serializer.beginMap("");
+						ProfileSegmentSettings segment;
+						segment.startSeconds = serializer.readDouble("startSeconds");
+						segment.level = serializer.readDouble("level");
+						load.operatingProfile.segments.push_back(segment);
+						serializer.endMap();
+					}
+					serializer.endArray();
+					serializer.endMap();
+					load.heatOutputKW = serializer.readDouble("heatOutputKW");
+					load.thermalClass = serializer.readString("thermalClass");
+					auto const disposition = serializer.readString("coolingDisposition");
+					if (disposition == "exported") load.coolingDisposition = StationCoolingDisposition::Exported;
+					else if (disposition == "coolingService") load.coolingDisposition = StationCoolingDisposition::CoolingService;
+					else throw SerializationException(
+						"Unknown Station load cooling disposition '" + disposition + "'");
+					load.criticalFloorKW = serializer.readDouble("criticalFloorKW");
+					load.priority = serializer.readInt32("priority");
+					load.maxCurtailment = serializer.readDouble("maxCurtailment");
+					serializer.beginArray("materialExchanges");
+					while (serializer.nextArrayItem())
+					{
+						serializer.beginMap("");
+						EquipmentMaterialExchangeSettings exchange;
+						exchange.storeId = serializer.readString("storeId");
+						exchange.ratePerSecond = serializer.readDouble("ratePerSecond");
+						exchange.consumes = serializer.readBool("consumes");
+						load.materialExchanges.push_back(std::move(exchange));
+						serializer.endMap();
+					}
+					serializer.endArray();
+					stationSettings.equipmentLoads.push_back(std::move(load));
 					serializer.endMap();
 				}
 				serializer.endArray();

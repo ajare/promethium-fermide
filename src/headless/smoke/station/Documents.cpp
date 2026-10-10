@@ -214,7 +214,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 68", "version: 64");
+		replaceAll(legacy, "version: 69", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -231,14 +231,14 @@ namespace
 			"authored store fields missing or live inventory leaked");
 		bool refused = false;
 		auto staleStores = withField;
-		replaceAll(staleStores, "version: 68", "version: 65");
+		replaceAll(staleStores, "version: 69", "version: 65");
 		auto const staleStoresPath = directory / "stale-stores.world.yaml";
 		writeFile(staleStoresPath, staleStores);
 		try { (void)core::loadWorldDocument(staleStoresPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-66 document carrying resource stores was silently accepted");
 		auto staleTransfers = withField;
-		replaceAll(staleTransfers, "version: 68", "version: 66");
+		replaceAll(staleTransfers, "version: 69", "version: 66");
 		auto const staleTransfersPath = directory / "stale-transfers.world.yaml";
 		writeFile(staleTransfersPath, staleTransfers);
 		refused = false;
@@ -246,7 +246,7 @@ namespace
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-67 document carrying resource transfers was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 68", "version: 64");
+		replaceAll(stale, "version: 69", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
 		refused = false;
@@ -384,7 +384,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 68", "version: 67");
+			replaceAll(stale, "version: 69", "version: 67");
 			auto const stalePath = directory / "stale-compounds.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -405,6 +405,128 @@ namespace
 			require(refused, "a malformed moisture fraction was accepted from a file");
 		}
 	}
+	// #393: authored solar arrays and External equipment load contracts
+	// travel through the real file seams as authored settings only; a
+	// reopened World replays the eclipse-supply scenario identically, and
+	// pre-69 documents carrying the new fields are refused rather than
+	// silently dropped.
+	void powerFiles(smoke::Context const& context)
+	{
+		namespace filesystem = std::filesystem;
+		auto const directory = context.temporaryRoot() / "station-power";
+		filesystem::create_directories(directory);
+		core::ProfileSettings illumination;
+		illumination.periodSeconds = 120.0;
+		illumination.segments = {{0.0, 1.0}, {60.0, 0.0}};
+		core::SolarArraySettings solar;
+		solar.id = "orbital";
+		solar.capacityKW = 10.0;
+		solar.illumination = illumination;
+		core::EquipmentLoadSettings heavy;
+		heavy.id = "heavy";
+		heavy.electricalDemandKW = 8.0;
+		heavy.heatOutputKW = 3.0;
+		heavy.thermalClass = "warm";
+		heavy.coolingDisposition = core::StationCoolingDisposition::Exported;
+		heavy.criticalFloorKW = 4.0;
+		heavy.priority = 5;
+		heavy.maxCurtailment = 0.25;
+		heavy.materialExchanges.push_back({"water", 6.0, true});
+		core::EquipmentLoadSettings cold;
+		cold.id = "cold";
+		cold.electricalDemandKW = 2.0;
+		cold.thermalClass = "low";
+		cold.coolingDisposition = core::StationCoolingDisposition::CoolingService;
+		core::World original("Power Round Trip", 2, 2);
+		enable(original, 2.0f, {{"water", "kg", 100.0, 50.0, 0.0}});
+		auto settings = original.getStationSystemsSettings();
+		settings.solarArrays.push_back(solar);
+		settings.equipmentLoads.push_back(heavy);
+		settings.equipmentLoads.push_back(cold);
+		require(original.configureStationSystems(settings, true), "Power settings edit failed");
+		original.resumeSimulation();
+		// 61 simulated seconds: the eclipse leg, where nothing generates.
+		require(original.advanceTicks(3660), "Power original run failed");
+		auto const expected = original.getStationSystemsSnapshot();
+		require(expected.power.sources.size() == 1
+			&& std::abs(expected.power.availableGenerationKW) < 1e-9
+			&& expected.power.loads.size() == 2
+			&& expected.power.loads[0].id == "heavy"
+			&& expected.power.loads[0].status == core::StationTransferStatus::Rejected
+			&& std::abs(expected.power.loads[0].unmetCriticalKW - 4.0) < 1e-9
+			&& expected.power.loads[1].id == "cold"
+			&& !expected.power.loads[1].admitted,
+			"Power scenario produced the wrong observable state");
+		for (auto const* suffix : {".world.yaml", ".world"})
+		{
+			auto const path = directory / (std::string("power") + suffix);
+			original.saveTo(path.string());
+			auto const document = readFile(path);
+			require(document.find("solarArrays") != std::string::npos
+				&& document.find("capacityKW") != std::string::npos
+				&& document.find("equipmentLoads") != std::string::npos
+				&& document.find("criticalFloorKW") != std::string::npos
+				&& document.find("coolingDisposition") != std::string::npos
+				&& document.find("materialExchanges") != std::string::npos,
+				"authored power fields missing from the document");
+			for (auto const* liveState : {"suppliedKW", "unmetCriticalKW", "deliveredFraction",
+				"heatExportedKW", "unmetCoolingKW", "lastIllumination"})
+				require(document.find(liveState) == std::string::npos,
+					std::string("live power state leaked into the document: ") + liveState);
+			auto const reopened = core::loadWorldDocument(path);
+			require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+				"power settings did not survive the file round trip");
+			reopened->resumeSimulation();
+			require(reopened->advanceTicks(3660), "Power reopened run failed");
+			require(reopened->getStationSystemsSnapshot() == expected,
+				"power scenario is not reproducible from the document");
+			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
+				"power event history is not reproducible from the document");
+		}
+		// A pre-69 document carrying the new fields is refused.
+		auto const withField = serializeYaml(original);
+		{
+			auto stale = withField;
+			replaceAll(stale, "version: 69", "version: 68");
+			auto const stalePath = directory / "stale-power.world.yaml";
+			writeFile(stalePath, stale);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(stalePath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a pre-69 document carrying solar arrays or equipment loads was silently accepted");
+		}
+		// Malformed power values in a file are rejected.
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "capacityKW: 10", "capacityKW: -5");
+			auto const malformedPath = directory / "malformed-capacity.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a malformed solar capacity was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "coolingDisposition: coolingService", "coolingDisposition: freezer");
+			auto const malformedPath = directory / "malformed-disposition.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "an unknown cooling disposition was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "criticalFloorKW: 4", "criticalFloorKW: 9");
+			auto const malformedPath = directory / "malformed-floor.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a critical floor above the declared demand was accepted from a file");
+		}
+	}
 }
 
 void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
@@ -414,4 +536,5 @@ void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"legacyFiles", legacyAndMalformedFiles});
 	checks.push_back({"structuralReplay", structuralReplay});
 	checks.push_back({"compoundFiles", compoundFiles});
+	checks.push_back({"powerFiles", powerFiles});
 }

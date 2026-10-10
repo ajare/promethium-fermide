@@ -471,6 +471,153 @@ namespace
 					* std::max(1.0, std::abs(entry.starting)),
 				"Editor compound run exceeded constituent tolerance");
 	}
+	void powerWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		std::string text; io.ClipboardUserData = &text;
+		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
+		DocumentHistory history;
+		StationSystemsWindow window;
+		// The power draft extends past the default display height; give the
+		// headless test enough room and scroll as the compound tests do.
+		io.DisplaySize = {1200, 1700};
+		auto world = std::make_shared<core::World>("Power editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		core::StationSystemsSettings initial;
+		initial.enabled = true;
+		initial.observationIntervalSeconds = 1.0f;
+		initial.stores.push_back({"water", "kg", 100.0, 50.0, 0.0});
+		core::ProfileSettings fullSun;
+		fullSun.constantLevel = 1.0;
+		initial.solarArrays.push_back({"field", 10.0, fullSun});
+		core::EquipmentLoadSettings shop;
+		shop.id = "shop";
+		shop.electricalDemandKW = 6.0;
+		shop.thermalClass = "moderate";
+		initial.equipmentLoads.push_back(shop);
+		require(world->configureStationSystems(initial, false, &diagnostic), diagnostic.c_str());
+		auto frame = [&]
+		{
+			ImGui::NewFrame(); text.clear(); ImGui::LogToClipboard();
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 980});
+			window.render(world, history); ImGui::LogFinish(); ImGui::Render();
+		};
+		auto clickPoint = [&](ImVec2 point)
+		{
+			io.AddMousePosEvent(point.x, point.y); frame();
+			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
+		};
+		auto point = [&](char const* label)
+		{
+			io.AddMousePosEvent(400.0f, 400.0f);
+			io.AddMouseWheelEvent(0.0f, 1000.0f); frame();
+			for (int pass = 0; pass < 16; ++pass)
+			{
+				auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
+				for (float y = 45; y < 975; y += 5)
+					for (float x = 18; x < 940; x += 15)
+					{
+						io.AddMousePosEvent(x, y); frame(); frame();
+						if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
+					}
+				io.AddMousePosEvent(400.0f, 400.0f);
+				io.AddMouseWheelEvent(0.0f, -10.0f); frame();
+			}
+			throw std::runtime_error(std::string("Missing Station control: ") + label);
+		};
+		auto typeValue = [&](char const* label, char const* value)
+		{
+			clickPoint(point(label));
+			io.AddKeyEvent(ImGuiMod_Ctrl, true); io.AddKeyEvent(ImGuiKey_A, true); frame();
+			io.AddKeyEvent(ImGuiKey_A, false); io.AddKeyEvent(ImGuiMod_Ctrl, false);
+			io.AddInputCharactersUTF8(value); frame();
+			io.AddKeyEvent(ImGuiKey_Enter, true); frame(); io.AddKeyEvent(ImGuiKey_Enter, false); frame();
+		};
+		window.visible = true; frame(); frame();
+		require(text.find("1 solar array(s), 1 external load(s)") != std::string::npos,
+			"Authored solar/load counts missing from the window");
+		require(text.find("field: capacity 10.000 kW") != std::string::npos,
+			"Solar source display missing installed capacity");
+		// Run under full sun: the live view shows the supplied service,
+		// the surplus and the power totals, and ticking never dirties the
+		// authored document.
+		world->markSaved();
+		world->resumeSimulation(); require(world->advanceTicks(60), "Power editor run failed");
+		world->pauseSimulation(); frame();
+		require(text.find("field: capacity 10.000 kW, illumination 1.000, available 10.000 kW")
+			!= std::string::npos, "Live solar output not displayed");
+		require(text.find("shop: full | requested 6.000 kW, supplied 6.000 kW, unmet 0.000 kW")
+			!= std::string::npos, "Live load service not displayed");
+		require(text.find("Power totals: generation 10.000 kW, requested 6.000, supplied 6.000, unmet 0.000, unmet critical 0.000, surplus 4.000")
+			!= std::string::npos, "Power totals not displayed");
+		require(!world->isModified(), "Power ticking dirtied the authored document");
+		// Draft a second load through the real controls; an unknown thermal
+		// class is refused with a visible diagnostic and no mutation.
+		clickPoint(point("Add load"));
+		typeValue("Load 1 thermal class", "cryogenic");
+		clickPoint(point("Apply settings"));
+		clickPoint(point("Confirm World reset")); frame();
+		require(text.find("unknown thermal service class 'cryogenic'") != std::string::npos,
+			"Invalid thermal class diagnostic not shown");
+		require(world->getStationSystemsSettings().equipmentLoads.size() == 1
+			&& history.undoCount() == 0 && world->getSimulationTick() == 60,
+			"Invalid load draft mutated the authored settings");
+		// Repair the class and author the protected floor and curtailment;
+		// the confirmed reset applies the new contract.
+		typeValue("Load 1 thermal class", "warm");
+		typeValue("Load 1 critical floor kW", "2");
+		typeValue("Load 1 max curtailment", "0.5");
+		clickPoint(point("Confirm World reset"));
+		require(world->getStationSystemsSettings().equipmentLoads.size() == 2
+			&& world->getStationSystemsSettings().equipmentLoads[1].criticalFloorKW == 2.0
+			&& world->getStationSystemsSettings().equipmentLoads[1].maxCurtailment == 0.5
+			&& history.undoCount() == 1 && world->getSimulationTick() == 0,
+			"Repaired load draft did not apply through the reset-confirmed flow");
+		// A load that requires a cooling service is shown as not admitted,
+		// with its heat need visible as unmet cooling.
+		clickPoint(point("Add load"));
+		clickPoint(point("Load 2 requires cooling service"));
+		typeValue("Load 2 thermal class", "low");
+		typeValue("Load 2 heat output kW", "1.5");
+		clickPoint(point("Apply settings"));
+		require(world->getStationSystemsSettings().equipmentLoads.size() == 3
+			&& world->getStationSystemsSettings().equipmentLoads[2].coolingDisposition
+				== core::StationCoolingDisposition::CoolingService
+			&& history.undoCount() == 2, "Cooling-service load did not apply");
+		world->markSaved();
+		world->resumeSimulation(); require(world->advanceTicks(60), "Cooling-blocked run failed");
+		world->pauseSimulation(); frame();
+		require(text.find("not admitted: no cooling service of class 'low' is available (unmet cooling 1.500 kW)")
+			!= std::string::npos, "Unmet cooling not displayed in the window");
+		// Turn the solar array periodic with an eclipse leg and watch the
+		// live illumination fall to zero through the eclipse.
+		clickPoint(point("Solar 0 periodic illumination"));
+		clickPoint(point("Add segment to solar 0"));
+		clickPoint(point("Apply settings"));
+		clickPoint(point("Confirm World reset"));
+		require(world->getStationSystemsSettings().solarArrays[0].illumination.periodSeconds == 120.0
+			&& world->getStationSystemsSettings().solarArrays[0].illumination.segments.size() == 2
+			&& world->getStationSystemsSettings().solarArrays[0].illumination.segments[1].startSeconds == 60.0
+			&& world->getStationSystemsSettings().solarArrays[0].illumination.segments[1].level == 0.0
+			&& history.undoCount() == 3, "Periodic illumination did not apply");
+		world->markSaved();
+		world->resumeSimulation(); require(world->advanceTicks(3660), "Eclipse editor run failed");
+		world->pauseSimulation(); frame();
+		require(text.find("field: capacity 10.000 kW, illumination 0.000, available 0.000 kW")
+			!= std::string::npos, "Eclipse illumination not displayed live");
+		require(text.find("shop: rejected | requested 6.000 kW, supplied 0.000 kW, unmet 6.000 kW")
+			!= std::string::npos, "Eclipse shortfall not displayed live");
+		require(!world->isModified(), "Eclipse run dirtied the authored document");
+		bool sawEclipse = false;
+		for (auto const& event : world->getStationSystemsEvents())
+			if (event.message.find("Solar array 'field' entered eclipse") != std::string::npos)
+				sawEclipse = true;
+			require(sawEclipse, "Eclipse transition missing from the window's event log");
+	}
 }
 void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
@@ -478,4 +625,5 @@ void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 	checks.push_back({"station/storeWorkflow", storeWorkflow});
 	checks.push_back({"station/transferWorkflow", transferWorkflow});
 	checks.push_back({"station/compoundWorkflow", compoundWorkflow});
+	checks.push_back({"station/powerWorkflow", powerWorkflow});
 }

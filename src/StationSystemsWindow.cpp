@@ -25,11 +25,12 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		world->getSimulationTick() * static_cast<double>(core::World::getFixedTimestep()),
 		static_cast<unsigned long long>(world->getSimulationTick()));
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
-	ImGui::TextWrapped("Slice 2c: authored finite Resource stores, bounded transfers and compound-resource conversions. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Within a tick, transfers apply first, then conversions. Observation interval is a provisional display/event setting, not a separate simulation clock.");
+	ImGui::TextWrapped("Slice 3: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation and External equipment load supply. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation and cooling-infeasible loads are not admitted. Within a tick, power allocates first, then transfers, then conversions. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s)",
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s)",
 		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
-		authored.stores.size(), authored.transfers.size(), authored.conversions.size());
+		authored.stores.size(), authored.transfers.size(), authored.conversions.size(),
+		authored.solarArrays.size(), authored.equipmentLoads.size());
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
@@ -206,6 +207,181 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			mDraft.conversions.push_back(std::move(conversion));
 		}
 	}
+	ImGui::SeparatorText("Draft solar arrays (kW; illumination is a fraction of full sun, 0..1)");
+	for (size_t index = 0; index < mDraft.solarArrays.size(); ++index)
+	{
+		auto& array = mDraft.solarArrays[index];
+		auto const row = std::to_string(index);
+		ImGui::PushItemWidth(220);
+		char solarIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(solarIdBuffer, array.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Solar " + row + " id").c_str(), solarIdBuffer, sizeof(solarIdBuffer)))
+			array.id = solarIdBuffer;
+		ImGui::InputDouble(("Solar " + row + " capacity kW").c_str(), &array.capacityKW, 0.0, 0.0, "%.3f");
+		bool solarPeriodic = array.illumination.periodSeconds > 0.0;
+		if (ImGui::Checkbox(("Solar " + row + " periodic illumination").c_str(), &solarPeriodic))
+		{
+			if (solarPeriodic)
+			{
+				if (array.illumination.periodSeconds <= 0.0) array.illumination.periodSeconds = 120.0;
+				if (array.illumination.segments.empty())
+					array.illumination.segments.push_back({0.0, 1.0});
+			}
+			else
+			{
+				array.illumination.periodSeconds = 0.0;
+				array.illumination.segments.clear();
+			}
+		}
+		if (!solarPeriodic)
+			ImGui::InputDouble(("Solar " + row + " constant illumination").c_str(),
+				&array.illumination.constantLevel, 0.0, 0.0, "%.3f");
+		else
+		{
+			ImGui::InputDouble(("Solar " + row + " period seconds").c_str(),
+				&array.illumination.periodSeconds, 0.0, 0.0, "%.1f");
+			for (size_t segment = 0; segment < array.illumination.segments.size(); ++segment)
+			{
+				auto& stretch = array.illumination.segments[segment];
+				auto const segmentRow = "Solar " + row + " segment " + std::to_string(segment);
+				ImGui::InputDouble((segmentRow + " start").c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+				ImGui::SameLine();
+				ImGui::InputDouble((segmentRow + " level").c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+				ImGui::SameLine();
+				if (ImGui::Button(("Remove " + segmentRow).c_str()))
+					array.illumination.segments.erase(
+						array.illumination.segments.begin() + static_cast<std::ptrdiff_t>(segment));
+				}
+			if (array.illumination.segments.size() < core::MaxStationProfileSegments
+				&& ImGui::Button(("Add segment to solar " + row).c_str()))
+				array.illumination.segments.push_back(
+					{array.illumination.periodSeconds * 0.5, 0.0});
+			}
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove solar array " + row).c_str()))
+			mDraft.solarArrays.erase(mDraft.solarArrays.begin() + static_cast<std::ptrdiff_t>(index));
+		ImGui::PopItemWidth();
+	}
+	if (mDraft.solarArrays.size() < core::MaxStationSolarArrays && ImGui::Button("Add solar array"))
+	{
+		core::SolarArraySettings array;
+		array.capacityKW = 10.0;
+		for (size_t candidate = mDraft.solarArrays.size() + 1;; ++candidate)
+		{
+			array.id = "solar" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.solarArrays.begin(), mDraft.solarArrays.end(),
+				[&](core::SolarArraySettings const& existing) { return existing.id == array.id; });
+			if (!taken) break;
+		}
+		mDraft.solarArrays.push_back(std::move(array));
+	}
+	ImGui::SeparatorText("Draft external equipment loads (kW; heat and material exchanges scale with delivered power)");
+	for (size_t index = 0; index < mDraft.equipmentLoads.size(); ++index)
+	{
+		auto& load = mDraft.equipmentLoads[index];
+		auto const row = std::to_string(index);
+		ImGui::PushItemWidth(220);
+		char loadIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(loadIdBuffer, load.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Load " + row + " id").c_str(), loadIdBuffer, sizeof(loadIdBuffer)))
+			load.id = loadIdBuffer;
+		ImGui::InputDouble(("Load " + row + " electrical demand kW").c_str(),
+			&load.electricalDemandKW, 0.0, 0.0, "%.3f");
+		bool loadPeriodic = load.operatingProfile.periodSeconds > 0.0;
+		if (ImGui::Checkbox(("Load " + row + " periodic duty").c_str(), &loadPeriodic))
+		{
+			if (loadPeriodic)
+			{
+				if (load.operatingProfile.periodSeconds <= 0.0) load.operatingProfile.periodSeconds = 120.0;
+				if (load.operatingProfile.segments.empty())
+					load.operatingProfile.segments.push_back({0.0, 1.0});
+			}
+			else
+			{
+				load.operatingProfile.periodSeconds = 0.0;
+				load.operatingProfile.segments.clear();
+			}
+		}
+		if (!loadPeriodic)
+			ImGui::InputDouble(("Load " + row + " constant duty").c_str(),
+				&load.operatingProfile.constantLevel, 0.0, 0.0, "%.3f");
+		else
+		{
+			ImGui::InputDouble(("Load " + row + " duty period seconds").c_str(),
+				&load.operatingProfile.periodSeconds, 0.0, 0.0, "%.1f");
+			for (size_t segment = 0; segment < load.operatingProfile.segments.size(); ++segment)
+			{
+				auto& stretch = load.operatingProfile.segments[segment];
+				auto const segmentRow = "Load " + row + " duty segment " + std::to_string(segment);
+				ImGui::InputDouble((segmentRow + " start").c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+				ImGui::SameLine();
+				ImGui::InputDouble((segmentRow + " level").c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+				ImGui::SameLine();
+				if (ImGui::Button(("Remove " + segmentRow).c_str()))
+					load.operatingProfile.segments.erase(
+						load.operatingProfile.segments.begin() + static_cast<std::ptrdiff_t>(segment));
+				}
+			if (load.operatingProfile.segments.size() < core::MaxStationProfileSegments
+				&& ImGui::Button(("Add duty segment to load " + row).c_str()))
+				load.operatingProfile.segments.push_back(
+					{load.operatingProfile.periodSeconds * 0.5, 0.0});
+			}
+		ImGui::InputDouble(("Load " + row + " heat output kW").c_str(), &load.heatOutputKW, 0.0, 0.0, "%.3f");
+		char thermalClassBuffer[16]{};
+		std::strncpy(thermalClassBuffer, load.thermalClass.c_str(), sizeof(thermalClassBuffer) - 1);
+		if (ImGui::InputText(("Load " + row + " thermal class").c_str(),
+			thermalClassBuffer, sizeof(thermalClassBuffer)))
+			load.thermalClass = thermalClassBuffer;
+		bool requiresCooling = load.coolingDisposition == core::StationCoolingDisposition::CoolingService;
+		if (ImGui::Checkbox(("Load " + row + " requires cooling service").c_str(), &requiresCooling))
+			load.coolingDisposition = requiresCooling
+				? core::StationCoolingDisposition::CoolingService
+				: core::StationCoolingDisposition::Exported;
+		ImGui::InputDouble(("Load " + row + " critical floor kW").c_str(),
+			&load.criticalFloorKW, 0.0, 0.0, "%.3f");
+		ImGui::InputInt(("Load " + row + " priority").c_str(), &load.priority);
+		ImGui::InputDouble(("Load " + row + " max curtailment").c_str(),
+			&load.maxCurtailment, 0.0, 0.0, "%.3f");
+		for (size_t exchange = 0; exchange < load.materialExchanges.size(); ++exchange)
+		{
+			auto& flow = load.materialExchanges[exchange];
+			auto const exchangeRow = "Load " + row + " exchange " + std::to_string(exchange);
+			char exchangeStoreBuffer[core::MaxStationStoreIdLength + 1]{};
+			std::strncpy(exchangeStoreBuffer, flow.storeId.c_str(), core::MaxStationStoreIdLength);
+			if (ImGui::InputText((exchangeRow + " store").c_str(),
+				exchangeStoreBuffer, sizeof(exchangeStoreBuffer)))
+				flow.storeId = exchangeStoreBuffer;
+			ImGui::SameLine();
+			ImGui::InputDouble((exchangeRow + " rate").c_str(), &flow.ratePerSecond, 0.0, 0.0, "%.3f");
+			ImGui::SameLine();
+			ImGui::Checkbox((exchangeRow + " consumes").c_str(), &flow.consumes);
+			ImGui::SameLine();
+			if (ImGui::Button(("Remove " + exchangeRow).c_str()))
+				load.materialExchanges.erase(
+					load.materialExchanges.begin() + static_cast<std::ptrdiff_t>(exchange));
+		}
+		if (load.materialExchanges.size() < core::MaxStationLoadMaterialExchanges
+			&& ImGui::Button(("Add exchange to load " + row).c_str()))
+			load.materialExchanges.push_back({});
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove load " + row).c_str()))
+			mDraft.equipmentLoads.erase(mDraft.equipmentLoads.begin() + static_cast<std::ptrdiff_t>(index));
+		ImGui::PopItemWidth();
+	}
+	if (mDraft.equipmentLoads.size() < core::MaxStationEquipmentLoads && ImGui::Button("Add load"))
+	{
+		core::EquipmentLoadSettings load;
+		load.electricalDemandKW = 5.0;
+		load.thermalClass = "moderate";
+		for (size_t candidate = mDraft.equipmentLoads.size() + 1;; ++candidate)
+		{
+			load.id = "load" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.equipmentLoads.begin(), mDraft.equipmentLoads.end(),
+				[&](core::EquipmentLoadSettings const& existing) { return existing.id == load.id; });
+			if (!taken) break;
+		}
+		mDraft.equipmentLoads.push_back(std::move(load));
+	}
 	bool const draftChanged = mDraft != authored;
 	ImGui::TextUnformatted(draftChanged
 		? "Draft differs from the authored start conditions."
@@ -313,6 +489,39 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		ImGui::Text("Balance %s: starting %.3f, current %.3f, lost %.3f, residual %.9f (tolerance %.1e)",
 			balance.unit.c_str(), balance.totalStarting, balance.totalCurrent,
 			balance.lost, balance.residual, snapshot.balanceTolerance);
+	ImGui::SeparatorText("Solar generation (live; output = installed capacity x illumination)");
+	if (snapshot.power.sources.empty()) ImGui::TextDisabled("No solar arrays authored.");
+	for (auto const& source : snapshot.power.sources)
+		ImGui::Text("%s: capacity %.3f kW, illumination %.3f, available %.3f kW%s",
+			source.id.c_str(), source.capacityKW, source.illumination, source.availableKW,
+			source.disabled ? " (disabled: zero installed capacity)" : "");
+	ImGui::SeparatorText("External equipment loads (live; protected critical floors allocate first, then discretionary demand by priority)");
+	if (snapshot.power.loads.empty()) ImGui::TextDisabled("No external equipment loads authored.");
+	for (auto const& load : snapshot.power.loads)
+	{
+		char const* status = "idle";
+		switch (load.status)
+		{
+		case core::StationTransferStatus::Full: status = "full"; break;
+		case core::StationTransferStatus::Partial: status = "curtailed"; break;
+		case core::StationTransferStatus::Rejected: status = "rejected"; break;
+		case core::StationTransferStatus::Idle: break;
+		}
+		ImGui::Text("%s: %s | requested %.3f kW, supplied %.3f kW, unmet %.3f kW | floor %.3f, unmet critical %.3f | delivered %.1f%% | heat exported %.3f kW (priority %d, class %s)",
+			load.id.c_str(), status, load.requestedKW, load.suppliedKW, load.unmetKW,
+			load.criticalFloorKW, load.unmetCriticalKW, load.deliveredFraction * 100.0,
+			load.heatExportedKW, load.priority, load.thermalClass.c_str());
+		if (!load.admitted)
+			ImGui::Text("  not admitted: %s (unmet cooling %.3f kW)",
+				load.blockReason.c_str(), load.unmetCoolingKW);
+		for (auto const& flow : load.materialExchanges)
+			ImGui::Text("  exchange %s (%s): requested %.3f, completed %.3f",
+				flow.storeId.c_str(), flow.unit.c_str(), flow.requested, flow.completed);
+	}
+	ImGui::Text("Power totals: generation %.3f kW, requested %.3f, supplied %.3f, unmet %.3f, unmet critical %.3f, surplus %.3f, exported heat %.3f kW",
+		snapshot.power.availableGenerationKW, snapshot.power.totalRequestedKW,
+		snapshot.power.totalSuppliedKW, snapshot.power.totalUnmetKW,
+		snapshot.power.unmetCriticalKW, snapshot.power.surplusKW, snapshot.power.exportedHeatKW);
 	if (snapshot.enabled && !snapshot.healthy)
 		ImGui::TextWrapped("Station software failure: the World is paused. The failed tick was not committed. Reset the World to reconstruct Station systems; resume cannot retry failed scripts.");
 	for (auto const& diagnostic : world->getStationSystemsDiagnostics())

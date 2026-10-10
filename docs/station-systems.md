@@ -1,4 +1,4 @@
-# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers and compound resources (#386–#391)
+# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources and solar-supplied external loads (#386–#391, #393)
 
 Station systems are opt-in per World and disabled in existing documents. Open
 **View > Station Systems** or use the
@@ -249,33 +249,125 @@ compositions and conversions in the draft with full validation
 reporting, and shows live conversion statuses and the constituent
 balance ledger beside the existing views.
 
+### Solar supply for external equipment loads (#393)
+
+Authors configure solar arrays and named External equipment load groups
+(CONTEXT.md) per World. Each solar array declares an installed capacity in
+kW and an illumination/eclipse profile: a repeating piecewise-constant
+profile whose level is a fraction of full sun (0..1), or a constant
+level when no period is declared. Solar production follows installed
+capacity times evaluated illumination — sunshine is never firm
+continuous capacity — and a zero-capacity array is disabled and
+contributes nothing. Allocated power can never exceed the generation
+actually available this tick.
+
+Each external load group declares its full-operation electrical demand
+and a repeating operating profile that scales it, its heat output, a
+required thermal service class (`low`, `moderate`, `warm` or
+`generation`), a cooling disposition, up to two material exchanges with
+existing Resource stores, a protected critical floor, an integer service
+priority and an allowed curtailment fraction. Load groups exclude
+equipment whose demands are already calculated within the Station
+systems, so internal equipment is never counted twice.
+
+Allocation runs on the World tick before the resource ledger, in the
+declared deterministic order (priority descending, declaration order for
+ties) and in two passes: protected critical floors first — ahead of all
+discretionary demand — then discretionary demand. A load is never
+supplied below its minimum operable level, `demand × (1 − allowed
+curtailment)`: if the remaining pool cannot reach that level the load
+takes nothing and the pool stays available for loads that can use it. A
+critical floor the generation cannot meet remains explicit unmet
+critical demand; it is never silently reclassified as permissible
+curtailment. Eclipse and sunlight transitions, curtailment, refusals
+and unmet critical floors are announced in the event log on their status
+transitions.
+
+Missing cooling is never silently supplied. A load whose disposition is
+`coolingService` requires a cooling service of its declared thermal
+class; this slice provides no cooling capacity in any class, so such a
+load is not admitted: it draws no power, produces no station heat, and
+its need stays visible as unmet cooling. Loads with the `exported`
+disposition declare that their heat leaves the station through an
+explicit export boundary — an accounted external exchange at the
+delivered power fraction, not a hidden infinite sink.
+
+Declared material exchanges scale with the delivered power fraction:
+curtailed equipment consumes and delivers less. Draws take only
+qualified material above the store's protected reserve; deliveries are
+clamped at the destination's remaining capacity. Completed amounts book
+at the external boundary — draws are losses, deliveries are negative
+losses — so the per-unit and per-constituent ledgers stay closed and
+the conservation audit is unchanged.
+
+The snapshot publishes actual versus requested service: per-source
+capacity, evaluated illumination, available kW and the disabled flag;
+per-load requested/supplied/unmet kW, critical floor and unmet
+critical, delivered fraction, exported heat and unmet cooling,
+admission state with the block reason, and per-exchange
+requested/completed amounts; plus station totals for generation,
+requested, supplied, unmet, unmet critical, surplus and exported heat.
+The bundled Lua lifecycle model receives the descriptors as plain
+immutable values, mirrors the same two-pass allocation inside each
+private sandbox and audits every tick that allocated power never exceeds
+generation and no load is supplied above its request.
+
+World schema 69 persists the authored arrays and load contracts (units:
+kW, seconds, fractions); a pre-69 document carrying `solarArrays` or
+`equipmentLoads` is refused rather than silently dropped. Allocation
+results, delivered fractions and exchange flows remain runtime-only:
+Load and Reset reconstruct them from the authored starting conditions.
+The separate Station Systems window drafts solar arrays (capacity,
+constant or periodic illumination with segments) and equipment loads
+(demand, duty profile, heat, thermal class, cooling disposition,
+critical floor, priority, curtailment and material exchanges) with full
+validation reporting, and shows the live source output, per-load
+actual/requested service, unmet cooling and power totals beside the
+existing views.
+
 ## Explicit scope limit
 
 This slice implements lifecycle, authored finite store configuration,
-bounded transfers between stores, and compound-resource composition and
-conversion accounting. It still adds no crew demand, production from
-external inputs, treatment/clearance workflows, deliveries or ejection. Completed tick counts are
-observability, not power, oxygen, heat or endurance estimates. It
-invents no process coefficients, production or consumption. Physical
-power/ECLSS/thermal models, external crew/equipment inputs, alarms,
-trends and supervisory allocation belong to the subsequent #385 slices.
-Agent behaviour, movement, physiology and random streams are unchanged.
+bounded transfers between stores, compound-resource composition and
+conversion accounting, and solar-supplied external equipment load
+allocation. It still adds no crew demand, treatment/clearance
+workflows, deliveries or ejection, no cooling capacity in any thermal
+service class (cooling-service loads are refused, not cooled), no
+batteries or thermal generation, and no thermal reservoir temperature
+dynamics. Completed tick counts are
+observability, not oxygen, heat or endurance estimates. It
+invents no process coefficients beyond the authored demand, capacity
+and profile values. ECLSS/thermal models, crew inputs, alarms,
+trends and broader supervisory allocation belong to the subsequent #385
+slices. Agent behaviour, movement, physiology and random streams are
+unchanged.
 
 Acceptance coverage uses World ticking/snapshots/events/diagnostics (including
 real script failure fixtures, store boundary fixtures: zero/empty/full
 stores, malformed values, isolated Worlds and no runtime dirtying of authored
-documents, and transfer fixtures: full/partial/rejected outcomes,
+documents, transfer fixtures: full/partial/rejected outcomes,
 protected-reserve and capacity blocking, priority allocation among
 competing requests, conservation residuals within tolerance, and a
-contained protected-reserve violation; and compound fixtures: refused
+contained protected-reserve violation; compound fixtures: refused
 compositions and impossible yields naming the created constituent,
 balanced conversion runs with reported constituent residuals, partial
 throughput under protected reserves, capacity-refused conversions that
 consume nothing, competing-conversion priority, gram-normalized
 constituents, cross-composition transfer refusal, reset reproducibility,
-compound file round trips and pre-68 refusal, plus the compound editing
-workflow in the separate window), real file save/reopen round trips in
-YAML and binary, failed-write and legacy/malformed-file handling, paused
-structural rebuild preservation,
+compound file round trips and pre-68 refusal; and power fixtures:
+refused solar/load configurations, full-sun full supply with explicit
+surplus, zero-capacity source disablement, eclipse/sunrise transitions
+with explicit unmet demand and deterministic replay, priority allocation
+with the loser's unmet remainder visible, critical-floor protection
+ahead of higher-priority discretionary demand and explicit unmet
+critical shortfall under a starved source, curtailment-floor refusal
+leaving the pool for flexible loads, cooling-infeasible loads never
+admitted with unmet cooling visible, material exchanges scaled by the
+delivered fraction under protected-reserve and capacity clamps with
+closed boundary ledgers, and intact Lua descriptor crossing with
+contained construction refusal), real file save/reopen round trips in
+YAML and binary including the solar/load scenario reproduction and
+pre-69/malformed refusals, failed-write and legacy/malformed-file
+handling, paused structural rebuild preservation,
 and the existing CPU ImGui and document-history seams. Run `ctest -R
 '^station-'` in Release.

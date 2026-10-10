@@ -1,10 +1,12 @@
--- Station systems slice 2c: lifecycle, authored finite Resource stores,
--- bounded authored transfers and compound-resource conversions. Every
--- system executes this factory in its own budgeted private sandbox.
--- Stores, transfer rules and conversion rules arrive as plain immutable
--- descriptor values; each object initialises its own copy and re-checks
--- the finite-capacity, per-unit conservation and per-constituent
--- compound conservation invariants every tick. The host applies the
+-- Station systems slice 3: lifecycle, authored finite Resource stores,
+-- bounded authored transfers, compound-resource conversions, solar
+-- generation and External equipment load supply. Every system executes
+-- this factory in its own budgeted private sandbox.
+-- Stores, transfer rules, conversion rules, solar arrays and equipment
+-- load contracts arrive as plain immutable descriptor values; each
+-- object initialises its own copy and re-checks the finite-capacity,
+-- per-unit conservation, per-constituent compound conservation and
+-- power-allocation invariants every tick. The host applies the
 -- authoritative ledger; this mirror audits the same rules inside the
 -- sandbox so a corrupt crossing or model drift fails contained through
 -- the integrated error path.
@@ -37,16 +39,19 @@ local function toKg(unit, mass)
     return mass
 end
 
-return function(name, stores, transfers, conversions)
+return function(name, stores, transfers, conversions, solar, loads)
     assert(type(name) == "string")
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
     assert(type(conversions) == "table", "resource conversion descriptors missing")
+    assert(type(solar) == "table", "solar array descriptors missing")
+    assert(type(loads) == "table", "equipment load descriptors missing")
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
         starting_totals = {}, unit_loss = {},
         starting_constituents = {}, constituent_loss = {},
+        solar = {}, loads = {}, load_order = {},
     }
     local by_id = {}
     for index = 1, #stores do
@@ -199,6 +204,135 @@ return function(name, stores, transfers, conversions)
             priority = conversion.priority,
         }
     end
+    -- Repeating piecewise-constant profile: a zero period is a constant
+    -- level; a positive period repeats segments that start at 0 and rise
+    -- strictly. Evaluation takes the last segment started at or before the
+    -- current phase, so period boundaries are never ambiguous.
+    local function checkProfile(profile, where)
+        assert(type(profile) == 'table', where .. ' must be a table')
+        assert(type(profile.periodSeconds) == 'number'
+            and profile.periodSeconds == profile.periodSeconds
+            and profile.periodSeconds >= 0 and profile.periodSeconds < math.huge,
+            where .. ' period must be finite and non-negative')
+        if profile.periodSeconds == 0 then
+            assert(profile.segments == nil or #profile.segments == 0,
+                where .. ': a constant profile must not declare segments')
+            local level = profile.constantLevel or 1
+            assert(type(level) == 'number' and level == level and level >= 0 and level <= 1,
+                where .. ' constant level must be finite and from 0 to 1')
+            return
+        end
+        assert(type(profile.segments) == 'table' and #profile.segments >= 1
+            and #profile.segments <= 8,
+            where .. ' needs between 1 and 8 segments')
+        assert(profile.segments[1].startSeconds == 0,
+            where .. ': the first segment must start at 0')
+        local previous = -1
+        for _, segment in ipairs(profile.segments) do
+            assert(type(segment.startSeconds) == 'number'
+                and segment.startSeconds == segment.startSeconds
+                and segment.startSeconds >= 0 and segment.startSeconds < profile.periodSeconds,
+                where .. ': segment start must be finite and inside the period')
+            assert(type(segment.level) == 'number' and segment.level == segment.level
+                and segment.level >= 0 and segment.level <= 1,
+                where .. ': segment level must be finite and from 0 to 1')
+            assert(segment.startSeconds > previous, where .. ': segments must strictly increase')
+            previous = segment.startSeconds
+        end
+    end
+    local function readProfile(profile)
+        local segments = {}
+        for index = 1, #(profile.segments or {}) do
+            segments[index] = {
+                startSeconds = profile.segments[index].startSeconds,
+                level = profile.segments[index].level,
+            }
+        end
+        return {
+            constantLevel = profile.constantLevel or 1,
+            periodSeconds = profile.periodSeconds,
+            segments = segments,
+        }
+    end
+    for index = 1, #solar do
+        local array = solar[index]
+        assert(type(array) == 'table', 'solar array descriptor must be a table')
+        assert(type(array.id) == 'string' and #array.id > 0, 'solar array needs an id')
+        assert(type(array.capacityKW) == 'number' and array.capacityKW == array.capacityKW
+            and array.capacityKW >= 0 and array.capacityKW < math.huge,
+            'solar array capacity must be finite and non-negative (0 disables)')
+        checkProfile(array.illumination, 'solar array ' .. array.id .. ' illumination profile')
+        object.solar[index] = {
+            id = array.id,
+            capacityKW = array.capacityKW,
+            illumination = readProfile(array.illumination),
+            lastIllumination = 0,
+            lastAvailable = 0,
+        }
+    end
+    for index = 1, #loads do
+        local load = loads[index]
+        assert(type(load) == 'table', 'equipment load descriptor must be a table')
+        assert(type(load.id) == 'string' and #load.id > 0, 'equipment load needs an id')
+        assert(type(load.demandKW) == 'number' and load.demandKW == load.demandKW
+            and load.demandKW >= 0 and load.demandKW < math.huge,
+            'equipment load demand must be finite and non-negative')
+        assert(type(load.heatKW) == 'number' and load.heatKW == load.heatKW
+            and load.heatKW >= 0 and load.heatKW < math.huge,
+            'equipment load heat output must be finite and non-negative')
+        assert(load.thermalClass == 'low' or load.thermalClass == 'moderate'
+            or load.thermalClass == 'warm' or load.thermalClass == 'generation',
+            'equipment load needs a declared thermal service class')
+        assert(load.cooling == 'exported' or load.cooling == 'coolingService',
+            'equipment load needs a declared cooling disposition')
+        assert(type(load.criticalFloorKW) == 'number'
+            and load.criticalFloorKW == load.criticalFloorKW
+            and load.criticalFloorKW >= 0 and load.criticalFloorKW <= load.demandKW,
+            'equipment load critical floor must be finite and within the demand')
+        assert(type(load.priority) == 'number' and load.priority == load.priority
+            and load.priority == math.tointeger(load.priority),
+            'equipment load priority must be a finite integer')
+        assert(type(load.maxCurtailment) == 'number'
+            and load.maxCurtailment == load.maxCurtailment
+            and load.maxCurtailment >= 0 and load.maxCurtailment <= 1,
+            'equipment load allowed curtailment must be finite and from 0 to 1')
+        checkProfile(load.profile, 'equipment load ' .. load.id .. ' operating profile')
+        local exchanges = {}
+        for flowIndex = 1, #(load.exchanges or {}) do
+            local exchange = load.exchanges[flowIndex]
+            local store = by_id[exchange.store]
+            assert(store ~= nil, 'equipment load exchange store is unknown')
+            assert(type(exchange.rate) == 'number' and exchange.rate == exchange.rate
+                and exchange.rate > 0 and exchange.rate < math.huge,
+                'equipment load exchange rate must be finite and positive')
+            exchanges[flowIndex] = {
+                store = store,
+                rate = exchange.rate,
+                consumes = exchange.consumes and true or false,
+                lastCompleted = 0,
+            }
+        end
+        object.loads[index] = {
+            id = load.id,
+            demandKW = load.demandKW,
+            profile = readProfile(load.profile),
+            heatKW = load.heatKW,
+            thermalClass = load.thermalClass,
+            cooling = load.cooling,
+            criticalFloorKW = load.criticalFloorKW,
+            priority = load.priority,
+            maxCurtailment = load.maxCurtailment,
+            exchanges = exchanges,
+            lastLevel = 0,
+            requested = 0,
+            supplied = 0,
+            unmetCritical = 0,
+            deliveredFraction = 0,
+            heatExported = 0,
+            unmetCooling = 0,
+            admitted = false,
+        }
+    end
     -- Declared deterministic order: priority descending, declaration index
     -- ascending. Including the index makes the comparator a total order, so
     -- the result cannot depend on sort stability.
@@ -214,6 +348,23 @@ return function(name, stores, transfers, conversions)
         if a.priority ~= b.priority then return a.priority > b.priority end
         return left < right
     end)
+    for index = 1, #object.loads do object.load_order[index] = index end
+    table.sort(object.load_order, function(left, right)
+        local a, b = object.loads[left], object.loads[right]
+        if a.priority ~= b.priority then return a.priority > b.priority end
+        return left < right
+    end)
+    local function evaluateProfile(profile, elapsed)
+        if profile.periodSeconds <= 0 then return profile.constantLevel end
+        local phase = elapsed % profile.periodSeconds
+        if phase < 0 then phase = phase + profile.periodSeconds end
+        local level = profile.segments[1].level
+        for _, segment in ipairs(profile.segments) do
+            if segment.startSeconds > phase then break end
+            level = segment.level
+        end
+        return level
+    end
     local function checkFiniteLimits(self)
         for index = 1, #self.stores do
             local store = self.stores[index]
@@ -321,9 +472,107 @@ return function(name, stores, transfers, conversions)
             end
         end
     end
+    -- Mirror of the host power ledger: solar output follows installed
+    -- capacity and evaluated illumination; allocation runs in two passes
+    -- (protected critical floors first, then discretionary demand) in the
+    -- declared deterministic order. Allocated power can never exceed the
+    -- generation actually available this tick, and no load is supplied
+    -- above its request. A load that requires a cooling service is never
+    -- admitted in this slice: it draws nothing and its cooling need stays
+    -- visible as unmet cooling rather than being silently absorbed.
+    local function applyPower(self, elapsed, fixed_seconds)
+        local generation = 0
+        for _, array in ipairs(self.solar) do
+            local illumination = evaluateProfile(array.illumination, elapsed)
+            local available = array.capacityKW > 0 and array.capacityKW * illumination or 0
+            array.lastIllumination = illumination
+            array.lastAvailable = available
+            generation = generation + available
+        end
+        local availableGeneration = generation
+        local supplied = {}
+        for _, index in ipairs(self.load_order) do
+            local load = self.loads[index]
+            load.lastLevel = evaluateProfile(load.profile, elapsed)
+            load.requested = load.demandKW * load.lastLevel
+            load.admitted = load.cooling == 'exported'
+            load.unmetCritical = 0
+            supplied[index] = 0
+            if load.admitted and load.requested > 0 then
+                local floor = math.min(load.criticalFloorKW, load.requested)
+                local give = math.min(floor, generation)
+                supplied[index] = give
+                generation = generation - give
+                load.unmetCritical = floor - give
+            end
+        end
+        for _, index in ipairs(self.load_order) do
+            local load = self.loads[index]
+            if load.admitted and load.requested > 0 then
+                local remaining = load.requested - supplied[index]
+                if remaining > 0 then
+                    local candidate = math.min(remaining, generation)
+                    local minOperating = load.requested * (1 - load.maxCurtailment)
+                    if supplied[index] + candidate + 1e-12 >= minOperating then
+                        supplied[index] = supplied[index] + candidate
+                        generation = generation - candidate
+                    end
+                end
+            end
+        end
+        for index, load in ipairs(self.loads) do
+            local amount = supplied[index] or 0
+            load.supplied = amount
+            load.deliveredFraction = load.requested > 0 and amount / load.requested or 0
+            load.heatExported = load.admitted and load.heatKW * load.deliveredFraction or 0
+            load.unmetCooling = load.admitted and 0 or load.heatKW * load.lastLevel
+            -- Declared material exchanges scale with the delivered power
+            -- fraction and book at the external boundary: draws are
+            -- losses, deliveries are negative losses, so the station
+            -- ledgers stay closed.
+            for _, exchange in ipairs(load.exchanges) do
+                local store = exchange.store
+                local requested = exchange.rate * fixed_seconds * load.deliveredFraction
+                local completed = 0
+                if exchange.consumes then
+                    local drawable = math.max(0, store.qualified - store.protected_reserve)
+                    completed = math.min(requested, drawable)
+                    store.qualified = store.qualified - completed
+                    self.unit_loss[store.unit] = (self.unit_loss[store.unit] or 0) + completed
+                    if store.composition then
+                        addConstituents(self.constituent_loss, store.composition,
+                            toKg(store.unit, completed), 1)
+                    end
+                else
+                    local headroom = store.capacity - (store.qualified + store.unqualified)
+                    completed = math.min(requested, headroom)
+                    store.qualified = store.qualified + completed
+                    self.unit_loss[store.unit] = (self.unit_loss[store.unit] or 0) - completed
+                    if store.composition then
+                        addConstituents(self.constituent_loss, store.composition,
+                            toKg(store.unit, completed), -1)
+                    end
+                end
+                exchange.lastCompleted = completed
+            end
+        end
+        -- Allocation audit: allocated power never exceeds generation and
+        -- no load receives more than it requested. Shortages are valid;
+        -- an over-allocation is a software failure and fails contained.
+        local totalSupplied = 0
+        for index = 1, #self.loads do totalSupplied = totalSupplied + (supplied[index] or 0) end
+        local generationBound = BALANCE_TOLERANCE * math.max(1.0, math.abs(availableGeneration))
+        assert(totalSupplied <= availableGeneration + generationBound,
+            'power allocation exceeded available generation')
+        for index = 1, #self.loads do
+            assert((supplied[index] or 0) <= self.loads[index].requested + generationBound,
+                'load supplied above its requested service')
+        end
+    end
     function object:advance(world_tick, fixed_seconds)
         assert(world_tick > 0 and fixed_seconds > 0)
         checkFiniteLimits(self)
+        applyPower(self, world_tick * fixed_seconds, fixed_seconds)
         applyTransfers(self, fixed_seconds)
         applyConversions(self, fixed_seconds)
         checkFiniteLimits(self)

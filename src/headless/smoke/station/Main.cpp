@@ -84,7 +84,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 68"), 11, "version: 65");
+		text.replace(text.find("version: 69"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -808,6 +808,559 @@ namespace
 			"Lua conversion assertion failure not contained at construction");
 		core::setStationSystemsSourceLoader({});
 	}
+	void power(smoke::Context const&)
+	{
+		// #393: solar generation follows installed capacity and the
+		// illumination/eclipse profile; External equipment loads declare
+		// demand, profile, heat, thermal class, material exchanges, a
+		// protected critical floor, priority and allowed curtailment.
+		// Allocation never exceeds generation, shortages stay explicit and
+		// cooling-infeasible loads are never silently supplied.
+		auto const approx = [](double actual, double expected)
+		{ return std::abs(actual - expected) < 1e-3; };
+		auto sawEvent = [](core::World& world, std::string const& needle)
+		{
+			for (auto const& event : world.getStationSystemsEvents())
+				if (event.message.find(needle) != std::string::npos) return true;
+			return false;
+		};
+		auto constantProfile = [](double level)
+		{
+			core::ProfileSettings profile;
+			profile.constantLevel = level;
+			return profile;
+		};
+		auto array = [](std::string const& id, double capacityKW, core::ProfileSettings illumination)
+		{
+			return core::SolarArraySettings{id, capacityKW, std::move(illumination)};
+		};
+		auto load = [](std::string const& id, double demandKW, std::string const& thermalClass,
+			core::StationCoolingDisposition cooling, double floorKW, int priority, double maxCurtailment)
+		{
+			core::EquipmentLoadSettings settings;
+			settings.id = id;
+			settings.electricalDemandKW = demandKW;
+			settings.thermalClass = thermalClass;
+			settings.coolingDisposition = cooling;
+			settings.criticalFloorKW = floorKW;
+			settings.priority = priority;
+			settings.maxCurtailment = maxCurtailment;
+			return settings;
+		};
+		auto configure = [](core::World& world,
+			std::vector<core::ResourceStoreSettings> stores,
+			std::vector<core::SolarArraySettings> solar,
+			std::vector<core::EquipmentLoadSettings> loads)
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = std::move(stores);
+			settings.solarArrays = std::move(solar);
+			settings.equipmentLoads = std::move(loads);
+			return std::pair(world.configureStationSystems(settings, true, &diagnostic), diagnostic);
+		};
+		// Invalid solar or load configuration is refused before anything runs.
+		core::World refused("Refused", 2, 2);
+		refused.pauseSimulation(); refused.finishBuild(); refused.markSaved();
+		{
+			std::vector<std::pair<std::vector<core::SolarArraySettings>,
+				std::vector<core::EquipmentLoadSettings>>> bad;
+			bad.push_back({{array("", 10, constantProfile(1))}, {}});
+			bad.push_back({{array("a", 10, constantProfile(1)), array("a", 5, constantProfile(1))}, {}});
+			bad.push_back({{array("a", -1, constantProfile(1))}, {}});
+			bad.push_back({{array("a", std::numeric_limits<double>::quiet_NaN(), constantProfile(1))}, {}});
+			bad.push_back({{array("a", 10, constantProfile(1.5))}, {}});
+			bad.push_back({{array("a", 10, constantProfile(-0.1))}, {}});
+			{
+				core::ProfileSettings profile;
+				profile.periodSeconds = 100;
+				profile.segments = {{1.0, 1.0}};
+				bad.push_back({{array("a", 10, profile)}, {}});
+			}
+			{
+				core::ProfileSettings profile;
+				profile.periodSeconds = 100;
+				profile.segments = {{0.0, 1.0}, {50.0, 0.5}, {40.0, 0.0}};
+				bad.push_back({{array("a", 10, profile)}, {}});
+			}
+			{
+				core::ProfileSettings profile;
+				profile.periodSeconds = 100;
+				profile.segments = {{0.0, 1.0}, {100.0, 0.0}};
+				bad.push_back({{array("a", 10, profile)}, {}});
+			}
+			{
+				core::ProfileSettings profile;
+				profile.periodSeconds = 100;
+				for (int index = 0; index <= static_cast<int>(core::MaxStationProfileSegments); ++index)
+					profile.segments.push_back({index == 0 ? 0.0 : static_cast<double>(index) * 10.0, 1.0});
+				bad.push_back({{array("a", 10, profile)}, {}});
+			}
+			{
+				core::ProfileSettings profile;
+				profile.constantLevel = 1.0;
+				profile.segments = {{0.0, 1.0}};
+				bad.push_back({{array("a", 10, profile)}, {}});
+			}
+			{
+				std::vector<core::SolarArraySettings> tooMany;
+				for (size_t index = 0; index <= core::MaxStationSolarArrays; ++index)
+					tooMany.push_back(array("solar" + std::to_string(index), 1, constantProfile(1)));
+				bad.push_back({std::move(tooMany), {}});
+			}
+			bad.push_back({{}, {load("", 5, "warm", core::StationCoolingDisposition::Exported, 0, 0, 1)}});
+			bad.push_back({{}, {load("a", 5, "cryogenic", core::StationCoolingDisposition::Exported, 0, 0, 1)}});
+			bad.push_back({{}, {load("a", 5, "warm", core::StationCoolingDisposition::Exported, 6, 0, 1)}});
+			bad.push_back({{}, {load("a", 5, "warm", core::StationCoolingDisposition::Exported, 0, 0, 1.5)}});
+			bad.push_back({{}, {load("a", 5, "warm", core::StationCoolingDisposition::Exported, 0, 0, -0.5)}});
+			bad.push_back({{}, {load("a", -2, "warm", core::StationCoolingDisposition::Exported, 0, 0, 1)}});
+			{
+				auto bad2 = load("a", 5, "warm", core::StationCoolingDisposition::Exported, 0, 0, 1);
+				bad2.heatOutputKW = -1;
+				bad.push_back({{}, {bad2}});
+			}
+			{
+				auto bad2 = load("a", 5, "warm", core::StationCoolingDisposition::Exported, 0, 0, 1);
+				bad2.materialExchanges.push_back({"missing", 1.0, true});
+				bad.push_back({{}, {bad2}});
+			}
+			{
+				auto bad2 = load("a", 5, "warm", core::StationCoolingDisposition::Exported, 0, 0, 1);
+				bad2.materialExchanges.push_back({"water", 1.0, true});
+				bad2.materialExchanges.push_back({"water", 2.0, false});
+				bad.push_back({{}, {bad2}});
+			}
+			{
+				auto bad2 = load("a", 5, "warm", core::StationCoolingDisposition::Exported, 0, 0, 1);
+				bad2.materialExchanges.push_back({"water", 0.0, true});
+				bad.push_back({{}, {bad2}});
+			}
+			{
+				auto bad2 = load("a", 5, "warm", core::StationCoolingDisposition::Exported, 0, 0, 1);
+				for (size_t index = 0; index <= core::MaxStationLoadMaterialExchanges; ++index)
+					bad2.materialExchanges.push_back({"water", 1.0, index % 2 == 0});
+				bad2.materialExchanges[1].storeId = "brine";
+				bad.push_back({{}, {bad2}});
+			}
+			{
+				std::vector<core::EquipmentLoadSettings> tooMany;
+				for (size_t index = 0; index <= core::MaxStationEquipmentLoads; ++index)
+					tooMany.push_back(load("load" + std::to_string(index), 1, "low",
+						core::StationCoolingDisposition::Exported, 0, 0, 1));
+				bad.push_back({{}, std::move(tooMany)});
+			}
+			for (auto const& [solar, loads] : bad)
+			{
+				auto const [ok, diagnostic] = configure(refused,
+					{{"water", "kg", 100, 50, 0}, {"brine", "kg", 100, 0, 0}}, solar, loads);
+				require(!ok && !diagnostic.empty(), "Invalid solar/load configuration accepted");
+				require(!refused.getStationSystemsSnapshot().enabled && !refused.isModified(),
+					"Rejected solar/load configuration mutated the World");
+			}
+		}
+		// Full sun with ample capacity: the load is served fully, surplus
+		// and exported heat are explicit, and ticking never dirties the file.
+		core::World sunny("Sunny", 2, 2);
+		sunny.pauseSimulation(); sunny.finishBuild();
+		require(configure(sunny, {},
+			{array("array", 10.0, constantProfile(1.0))},
+			{load("workshop", 6.0, "moderate", core::StationCoolingDisposition::Exported, 0.0, 0, 1.0)}).first,
+			"Full-sun scenario refused");
+		sunny.markSaved();
+		sunny.resumeSimulation();
+		require(sunny.advanceTicks(60), "Full-sun run failed");
+		{
+			auto const snap = sunny.getStationSystemsSnapshot();
+			require(snap.power.sources.size() == 1
+				&& approx(snap.power.sources[0].availableKW, 10.0)
+				&& approx(snap.power.sources[0].illumination, 1.0)
+				&& !snap.power.sources[0].disabled, "Solar source output not published");
+			require(snap.power.loads.size() == 1
+				&& snap.power.loads[0].id == "workshop"
+				&& snap.power.loads[0].status == core::StationTransferStatus::Full
+				&& approx(snap.power.loads[0].requestedKW, 6.0)
+				&& approx(snap.power.loads[0].suppliedKW, 6.0)
+				&& approx(snap.power.loads[0].unmetKW, 0.0)
+				&& approx(snap.power.loads[0].deliveredFraction, 1.0)
+				&& approx(snap.power.loads[0].heatExportedKW, 0.0)
+				&& snap.power.loads[0].admitted, "Load service not fully supplied");
+			require(approx(snap.power.totalSuppliedKW, 6.0)
+				&& approx(snap.power.surplusKW, 4.0)
+				&& snap.power.totalSuppliedKW <= snap.power.availableGenerationKW + 1e-9,
+				"Allocation totals wrong or exceeded generation");
+			require(sawEvent(sunny, "Load 'workshop' supplying fully"),
+				"Load full-supply transition missing from the event log");
+			require(!sunny.isModified(), "Power ticking dirtied the authored document");
+		}
+		// Zero installed capacity disables the source: nothing is generated
+		// and the load's unmet demand stays explicit.
+		core::World dark("Dark", 2, 2);
+		dark.pauseSimulation(); dark.finishBuild();
+		require(configure(dark, {},
+			{array("dead", 0.0, constantProfile(1.0))},
+			{load("lamp", 1.0, "low", core::StationCoolingDisposition::Exported, 0.0, 0, 1.0)}).first,
+			"Zero-capacity scenario refused");
+		dark.resumeSimulation();
+		require(dark.advanceTicks(30), "Zero-capacity run failed");
+		{
+			auto const snap = dark.getStationSystemsSnapshot();
+			require(snap.power.sources[0].disabled && approx(snap.power.sources[0].availableKW, 0.0),
+				"Zero-capacity array not reported as disabled");
+			require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
+				&& approx(snap.power.loads[0].unmetKW, 1.0)
+				&& approx(snap.power.totalSuppliedKW, 0.0),
+				"Disabled source did not leave the load explicitly unmet");
+			require(sawEvent(dark, "Load 'lamp' rejected: electrical supply is unavailable"),
+				"Load rejection reason missing from the event log");
+		}
+		// Eclipse cycle: supply follows the illumination profile, the load
+		// goes unmet through eclipse and recovers with sunlight; the whole
+		// transition sequence replays identically after reset.
+		core::World eclipse("Eclipse", 2, 2);
+		eclipse.pauseSimulation(); eclipse.finishBuild();
+		{
+			core::ProfileSettings illumination;
+			illumination.periodSeconds = 120.0;
+			illumination.segments = {{0.0, 1.0}, {60.0, 0.0}};
+			require(configure(eclipse, {},
+				{array("orbital", 10.0, illumination)},
+				{load("station", 10.0, "moderate", core::StationCoolingDisposition::Exported, 0.0, 0, 1.0)}).first,
+				"Eclipse scenario refused");
+			eclipse.resumeSimulation();
+			require(eclipse.advanceTicks(3599), "Sunlit leg failed");
+			require(eclipse.getStationSystemsSnapshot().power.loads[0].status == core::StationTransferStatus::Full,
+				"Load not fully supplied during sunlight");
+			require(eclipse.advanceTick(), "Eclipse entry tick failed");
+			{
+				auto const snap = eclipse.getStationSystemsSnapshot();
+				require(approx(snap.power.availableGenerationKW, 0.0)
+					&& approx(snap.power.sources[0].illumination, 0.0),
+					"Illumination did not fall to zero at eclipse entry");
+				require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
+					&& approx(snap.power.loads[0].unmetKW, 10.0),
+					"Eclipse did not leave the load demand explicitly unmet");
+				require(sawEvent(eclipse, "Solar array 'orbital' entered eclipse"),
+					"Eclipse transition missing from the event log");
+			}
+			require(eclipse.advanceTicks(3599), "Eclipse leg failed");
+			require(eclipse.getStationSystemsSnapshot().power.loads[0].status == core::StationTransferStatus::Rejected,
+				"Load recovered during eclipse");
+			require(eclipse.advanceTick(), "Sunrise tick failed");
+			{
+				auto const snap = eclipse.getStationSystemsSnapshot();
+				require(snap.power.loads[0].status == core::StationTransferStatus::Full
+					&& approx(snap.power.totalSuppliedKW, 10.0),
+					"Load did not recover with sunlight");
+				require(sawEvent(eclipse, "Solar array 'orbital' returned to sunlight"),
+					"Sunrise transition missing from the event log");
+				eclipse.pauseSimulation();
+				auto const expected = eclipse.getStationSystemsSnapshot();
+				auto const expectedEvents = eclipse.getStationSystemsEvents();
+				eclipse.resetSimulation();
+				eclipse.resumeSimulation();
+				require(eclipse.advanceTicks(7200), "Eclipse replay failed");
+				require(eclipse.getStationSystemsSnapshot() == expected
+					&& eclipse.getStationSystemsEvents() == expectedEvents,
+					"Eclipse transition sequence not reproducible after reset");
+			}
+		}
+		// Prioritization: the higher-priority load is served first and the
+		// loser's unmet request stays visible; snapshot order is the
+		// declared allocation order.
+		core::World competing("Competing", 2, 2);
+		competing.pauseSimulation(); competing.finishBuild();
+		require(configure(competing, {},
+			{array("field", 10.0, constantProfile(1.0))},
+			{load("low", 8.0, "moderate", core::StationCoolingDisposition::Exported, 0.0, 0, 1.0),
+				load("high", 8.0, "moderate", core::StationCoolingDisposition::Exported, 0.0, 5, 1.0)}).first,
+			"Priority scenario refused");
+		competing.resumeSimulation();
+		require(competing.advanceTicks(60), "Priority run failed");
+		{
+			auto const snap = competing.getStationSystemsSnapshot();
+			require(snap.power.loads[0].id == "high" && snap.power.loads[1].id == "low",
+				"Loads not published in the declared allocation order");
+			require(snap.power.loads[0].status == core::StationTransferStatus::Full
+				&& approx(snap.power.loads[0].suppliedKW, 8.0),
+				"Higher-priority load not served fully");
+			require(snap.power.loads[1].status == core::StationTransferStatus::Partial
+				&& approx(snap.power.loads[1].suppliedKW, 2.0)
+				&& approx(snap.power.loads[1].unmetKW, 6.0),
+				"Lower-priority remainder not visible as curtailment");
+			require(approx(snap.power.totalSuppliedKW, 10.0)
+				&& approx(snap.power.surplusKW, 0.0)
+				&& snap.power.totalSuppliedKW <= snap.power.availableGenerationKW + 1e-9,
+				"Competing allocation exceeded generation");
+			require(sawEvent(competing, "Load 'low' curtailed: supplied 2.000000 of 8.000000 kW"),
+				"Curtailed amounts missing from the event log");
+		}
+		// Critical floors are protected ahead of all discretionary demand,
+		// regardless of priority; a floor generation cannot meet remains
+		// explicit unmet critical demand.
+		core::World critical("Critical", 2, 2);
+		critical.pauseSimulation(); critical.finishBuild();
+		require(configure(critical, {},
+			{array("field", 10.0, constantProfile(1.0))},
+			{load("critical", 8.0, "warm", core::StationCoolingDisposition::Exported, 4.0, 0, 1.0),
+				load("discretionary", 8.0, "moderate", core::StationCoolingDisposition::Exported, 0.0, 9, 1.0)}).first,
+			"Critical-floor scenario refused");
+		critical.resumeSimulation();
+		require(critical.advanceTicks(60), "Critical-floor run failed");
+		{
+			auto const snap = critical.getStationSystemsSnapshot();
+			require(snap.power.loads[0].id == "discretionary"
+				&& snap.power.loads[1].id == "critical",
+				"Critical scenario loads not in declared allocation order");
+			require(approx(snap.power.loads[1].suppliedKW, 4.0)
+				&& approx(snap.power.loads[1].unmetCriticalKW, 0.0),
+				"Critical floor not protected ahead of discretionary demand");
+			require(approx(snap.power.loads[0].suppliedKW, 6.0)
+				&& approx(snap.power.totalSuppliedKW, 10.0),
+				"Discretionary demand did not take the exact remainder");
+		}
+		// Under a starved source the floor itself goes short: the deficit
+		// stays visible as unmet critical demand, never reclassified as
+		// permissible curtailment.
+		critical.pauseSimulation();
+		require(configure(critical, {},
+			{array("field", 3.0, constantProfile(1.0))},
+			{load("critical", 8.0, "warm", core::StationCoolingDisposition::Exported, 4.0, 0, 1.0),
+				load("discretionary", 8.0, "moderate", core::StationCoolingDisposition::Exported, 0.0, 9, 1.0)}).first,
+			"Starved-floor scenario refused");
+		critical.resumeSimulation();
+		require(critical.advanceTicks(60), "Starved-floor run failed");
+		{
+			auto const snap = critical.getStationSystemsSnapshot();
+			require(approx(snap.power.loads[1].suppliedKW, 3.0)
+				&& approx(snap.power.loads[1].unmetCriticalKW, 1.0)
+				&& approx(snap.power.unmetCriticalKW, 1.0),
+				"Unmet critical floor not explicit under a starved source");
+			require(approx(snap.power.loads[0].suppliedKW, 0.0)
+				&& snap.power.loads[0].status == core::StationTransferStatus::Rejected,
+				"Discretionary load drew power reserved for the critical floor");
+			require(snap.power.totalSuppliedKW <= snap.power.availableGenerationKW + 1e-9,
+				"Starved allocation exceeded generation");
+			require(sawEvent(critical, "Load 'critical' critical floor unmet: short 1.000000 kW"),
+				"Unmet critical floor transition missing from the event log");
+		}
+		// Allowed curtailment: a load may not be run below its minimum
+		// operable supply, so it takes nothing and the pool stays available
+		// for a load that can use it.
+		core::World curtail("Curtail", 2, 2);
+		curtail.pauseSimulation(); curtail.finishBuild();
+		require(configure(curtail, {},
+			{array("field", 5.0, constantProfile(1.0))},
+			{load("rigid", 10.0, "warm", core::StationCoolingDisposition::Exported, 0.0, 5, 0.2),
+				load("flexible", 10.0, "moderate", core::StationCoolingDisposition::Exported, 0.0, 0, 1.0)}).first,
+			"Curtailment scenario refused");
+		curtail.resumeSimulation();
+		require(curtail.advanceTicks(60), "Curtailment run failed");
+		{
+			auto const snap = curtail.getStationSystemsSnapshot();
+			require(snap.power.loads[0].id == "rigid"
+				&& snap.power.loads[0].status == core::StationTransferStatus::Rejected
+				&& approx(snap.power.loads[0].suppliedKW, 0.0),
+				"Load below its minimum operable level was still supplied");
+			require(sawEvent(curtail, "Load 'rigid' rejected: below the minimum operable supply level"),
+				"Curtailment-floor refusal reason missing from the event log");
+			require(snap.power.loads[1].id == "flexible"
+				&& approx(snap.power.loads[1].suppliedKW, 5.0),
+				"Refused load consumed pool that the flexible load could use");
+		}
+		// Missing cooling is never silently supplied: a load that requires
+		// a cooling service is not admitted, draws no power, and its heat
+		// need stays visible as unmet cooling.
+		core::World hot("Hot", 2, 2);
+		hot.pauseSimulation(); hot.finishBuild();
+		require(configure(hot, {},
+			{array("field", 10.0, constantProfile(1.0))},
+			[&]
+			{
+				auto chiller = load("chiller", 5.0, "warm",
+					core::StationCoolingDisposition::CoolingService, 0.0, 5, 1.0);
+				chiller.heatOutputKW = 3.0;
+				return std::vector<core::EquipmentLoadSettings>{chiller,
+					load("exporter", 8.0, "moderate", core::StationCoolingDisposition::Exported, 0.0, 0, 1.0)};
+			}()).first,
+			"Cooling-infeasible scenario refused");
+		hot.resumeSimulation();
+		require(hot.advanceTicks(60), "Cooling-infeasible run failed");
+		{
+			auto const snap = hot.getStationSystemsSnapshot();
+			require(!snap.power.loads[0].admitted
+				&& snap.power.loads[0].status == core::StationTransferStatus::Rejected
+				&& approx(snap.power.loads[0].suppliedKW, 0.0)
+				&& approx(snap.power.loads[0].heatExportedKW, 0.0)
+				&& approx(snap.power.loads[0].unmetCoolingKW, 3.0),
+				"Cooling-infeasible load was admitted, produced station heat, or its cooling need was hidden");
+			require(approx(snap.power.unmetCriticalKW, 0.0),
+				"Blocked load invented unmet critical demand");
+			require(sawEvent(hot, "Load 'chiller' rejected: no cooling service of class 'warm' is available"),
+				"Cooling refusal reason missing from the event log");
+			require(snap.power.loads[1].status == core::StationTransferStatus::Full
+				&& approx(snap.power.totalSuppliedKW, 8.0)
+				&& approx(snap.power.totalRequestedKW, 13.0),
+				"Blocked load did not leave its demand visible in the totals");
+		}
+		// Declared material exchanges scale with the delivered power
+		// fraction, respect protected reserves and destination capacity,
+		// and keep the per-unit boundary ledger closed.
+		core::World exchanged("Exchanged", 2, 2);
+		exchanged.pauseSimulation(); exchanged.finishBuild();
+		require(configure(exchanged,
+			{{"water", "kg", 100.0, 50.0, 0.0}, {"brine", "kg", 20.0, 0.0, 0.0}},
+			{array("field", 10.0, constantProfile(1.0))},
+			[&]
+			{
+				auto reactor = load("reactor", 10.0, "warm",
+					core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
+				reactor.heatOutputKW = 2.0;
+				reactor.materialExchanges.push_back({"water", 6.0, true});
+				reactor.materialExchanges.push_back({"brine", 3.0, false});
+				return std::vector<core::EquipmentLoadSettings>{reactor};
+			}()).first, "Material exchange scenario refused");
+		exchanged.resumeSimulation();
+		require(exchanged.advanceTicks(10), "Material exchange run failed");
+		{
+			auto const snap = exchanged.getStationSystemsSnapshot();
+			// One sixth of a second at 6 kg/s drawn and 3 kg/s delivered.
+			require(approx(snap.stores[0].currentQualified, 49.0)
+				&& approx(snap.stores[1].currentQualified, 0.5),
+				"Material exchange amounts wrong");
+			require(snap.power.loads[0].materialExchanges.size() == 2
+				&& approx(snap.power.loads[0].materialExchanges[0].requested, 0.1)
+				&& approx(snap.power.loads[0].materialExchanges[0].completed, 0.1)
+				&& approx(snap.power.loads[0].materialExchanges[1].completed, 0.05),
+				"Exchange flows not published per store");
+			// The kg ledger closes over the external boundary exchange:
+			// 1 kg drawn leaves, 0.5 kg delivered enters.
+			require(std::abs(snap.balances[0].residual) < 1e-9
+				&& approx(snap.balances[0].lost, 0.5),
+				"External material exchange broke the boundary ledger");
+			require(approx(snap.power.loads[0].heatExportedKW, 2.0)
+				&& approx(snap.power.exportedHeatKW, 2.0),
+				"Exported heat not accounted at the declared boundary");
+		}
+		// Curtailed delivery scales the exchanges: half power, half exchange.
+		exchanged.pauseSimulation();
+		require(configure(exchanged,
+			{{"water", "kg", 100.0, 50.0, 0.0}, {"brine", "kg", 20.0, 0.0, 0.0}},
+			{array("field", 5.0, constantProfile(1.0))},
+			[&]
+			{
+				auto reactor = load("reactor", 10.0, "warm",
+					core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
+				reactor.heatOutputKW = 2.0;
+				reactor.materialExchanges.push_back({"water", 6.0, true});
+				reactor.materialExchanges.push_back({"brine", 3.0, false});
+				return std::vector<core::EquipmentLoadSettings>{reactor};
+			}()).first, "Scaled exchange scenario refused");
+		exchanged.resumeSimulation();
+		require(exchanged.advanceTicks(10), "Scaled exchange run failed");
+		{
+			auto const snap = exchanged.getStationSystemsSnapshot();
+			require(approx(snap.power.loads[0].deliveredFraction, 0.5)
+				&& approx(snap.stores[0].currentQualified, 49.5)
+				&& approx(snap.stores[1].currentQualified, 0.25),
+				"Exchanges did not scale with the delivered power fraction");
+			require(std::abs(snap.balances[0].residual) < 1e-9,
+				"Scaled exchanges broke the boundary ledger");
+		}
+		// A protected reserve is never drawn by an equipment exchange and a
+		// full destination store clamps delivery without overflow.
+		core::World bounded("Bounded", 2, 2);
+		bounded.pauseSimulation(); bounded.finishBuild();
+		require(configure(bounded,
+			{{"water", "kg", 100.0, 11.0, 0.0, 10.0}, {"brine", "kg", 0.4, 0.0, 0.0}},
+			{array("field", 10.0, constantProfile(1.0))},
+			[&]
+			{
+				auto reactor = load("reactor", 10.0, "warm",
+					core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
+				reactor.materialExchanges.push_back({"water", 6.0, true});
+				reactor.materialExchanges.push_back({"brine", 3.0, false});
+				return std::vector<core::EquipmentLoadSettings>{reactor};
+			}()).first, "Bounded exchange scenario refused");
+		bounded.resumeSimulation();
+		require(bounded.advanceTicks(60), "Bounded exchange run failed");
+		{
+			auto const snap = bounded.getStationSystemsSnapshot();
+			// One second at 6 kg/s against 1 kg drawable above the reserve:
+			// only 1 kg leaves the water store.
+			require(approx(snap.stores[0].currentQualified, 10.0),
+				"Equipment exchange drew into the protected reserve");
+			// The brine store fills at 0.4 kg; delivery clamps at capacity.
+			require(approx(snap.stores[1].currentQualified, 0.4)
+				&& snap.stores[1].currentQualified <= 0.4 + 1e-9,
+				"Equipment delivery overflowed the destination store");
+			require(std::abs(snap.balances[0].residual) < 1e-9,
+				"Bounded exchanges broke the boundary ledger");
+		}
+		// The bundled Lua model mirrors the allocation and its audits hold
+		// through the eclipse cycle (the runs above used it); descriptors
+		// cross the sandbox boundary intact and a mismatched model is
+		// refused at construction.
+		struct SourceScope { ~SourceScope() { core::setStationSystemsSourceLoader({}); } } scope;
+		core::setStationSystemsSourceLoader([] {
+			return "return function(name, stores, transfers, conversions, solar, loads) "
+				"assert(#solar == 1); local a = solar[1]; "
+				"assert(a.id == 'orbital' and a.capacityKW == 10); "
+				"assert(a.illumination.periodSeconds == 120); "
+				"assert(#a.illumination.segments == 2); "
+				"assert(a.illumination.segments[2].startSeconds == 60 and a.illumination.segments[2].level == 0); "
+				"assert(#loads == 2); local l = loads[1]; "
+				"assert(l.id == 'heavy' and l.demandKW == 8 and l.priority == 5); "
+				"assert(l.cooling == 'exported' and l.criticalFloorKW == 4 and l.maxCurtailment == 0.25); "
+				"assert(l.thermalClass == 'warm' and l.heatKW == 3); "
+				"assert(#l.exchanges == 2); "
+				"assert(l.exchanges[1].store == 'water' and l.exchanges[1].rate == 6 and l.exchanges[1].consumes == true); "
+				"assert(l.exchanges[2].store == 'brine' and l.exchanges[2].consumes == false); "
+				"assert(loads[2].cooling == 'coolingService' and loads[2].thermalClass == 'low'); "
+				"return {advance=function(self, tick) return tick end} end";
+		});
+		core::World boundary("Boundary", 2, 2);
+		boundary.pauseSimulation(); boundary.finishBuild();
+		{
+			core::ProfileSettings illumination;
+			illumination.periodSeconds = 120.0;
+			illumination.segments = {{0.0, 1.0}, {60.0, 0.0}};
+			auto heavy = load("heavy", 8.0, "warm",
+				core::StationCoolingDisposition::Exported, 4.0, 5, 0.25);
+			heavy.heatOutputKW = 3.0;
+			heavy.operatingProfile = illumination;
+			heavy.materialExchanges.push_back({"water", 6.0, true});
+			heavy.materialExchanges.push_back({"brine", 3.0, false});
+			auto cold = load("cold", 2.0, "low",
+				core::StationCoolingDisposition::CoolingService, 0.0, 0, 1.0);
+			require(configure(boundary,
+				{{"water", "kg", 100.0, 50.0, 0.0}, {"brine", "kg", 20.0, 0.0, 0.0}},
+				{array("orbital", 10.0, illumination)}, {heavy, cold}).first,
+				"Power descriptors did not cross the Lua boundary intact");
+			boundary.resumeSimulation();
+			require(boundary.advanceTicks(120), "Power boundary fixture run failed");
+		}
+		core::setStationSystemsSourceLoader([] {
+			return "return function(name, stores, transfers, conversions, solar, loads) "
+				"assert(#loads == 99, 'expected 99 loads') "
+				"return {advance=function(self, tick) return tick end} end";
+		});
+		core::World refusedLua("RefusedLua", 2, 2);
+		refusedLua.pauseSimulation(); refusedLua.finishBuild();
+		std::string diagnostic;
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 1.0f;
+		settings.solarArrays.push_back(array("field", 10.0, constantProfile(1.0)));
+		settings.equipmentLoads.push_back(load("a", 1.0, "low",
+			core::StationCoolingDisposition::Exported, 0.0, 0, 1.0));
+		require(!refusedLua.configureStationSystems(settings, false, &diagnostic)
+			&& diagnostic.find("expected 99 loads") != std::string::npos
+			&& !refusedLua.getStationSystemsSnapshot().enabled,
+			"Lua load assertion failure not contained at construction");
+		core::setStationSystemsSourceLoader({});
+	}
 	void failures(smoke::Context const&)
 	{
 		SourceScope scope;
@@ -887,7 +1440,7 @@ namespace
 }
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"failures", failures}};
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

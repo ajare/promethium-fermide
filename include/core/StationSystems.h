@@ -130,6 +130,105 @@ namespace core
 		Rejected, // nothing could be supplied
 	};
 
+	// Declared thermal service classes (#393), distinguished by their
+	// permitted interface temperatures and compatible heat-transfer
+	// requirements (CONTEXT.md). Spare capacity in one class is never
+	// automatically usable by another. This slice provides no cooling
+	// capacity in any class: a load that requires a cooling service is
+	// explicitly infeasible rather than silently absorbed by a hidden sink.
+	inline constexpr std::array<char const*, 4> StationThermalServiceClasses{
+		"low", "moderate", "warm", "generation"};
+
+	// One constant stretch of a repeating profile: the level holds from
+	// startSeconds until the next segment (or the end of the period).
+	struct ProfileSegmentSettings
+	{
+		double startSeconds{0.0};
+		double level{0.0};
+		bool operator==(ProfileSegmentSettings const&) const = default;
+	};
+	// A deterministic repeating piecewise-constant profile over simulated
+	// time, used for solar illumination and equipment operating profiles.
+	// A zero period means a constant level; a positive period repeats the
+	// declared segments, the first of which must start at 0. Levels are
+	// fractions in [0, 1] of the field the profile scales (full sun, full
+	// demand). Evaluation at a period boundary takes the later segment, so
+	// the profile is right-continuous and never ambiguous.
+	struct ProfileSettings
+	{
+		double constantLevel{1.0}; // used when periodSeconds == 0
+		double periodSeconds{0.0}; // 0 = constant level, no segments
+		std::vector<ProfileSegmentSettings> segments;
+		bool operator==(ProfileSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationProfileSegments{8};
+
+	// A configured solar array: declared installed capacity in kW and an
+	// illumination/eclipse profile. Sunshine is not firm continuous
+	// capacity; zero installed capacity disables the array entirely.
+	struct SolarArraySettings
+	{
+		std::string id;
+		double capacityKW{0.0}; // installed capacity, >= 0; 0 disables
+		ProfileSettings illumination; // fraction of full sun, [0, 1]
+		bool operator==(SolarArraySettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationSolarArrays{4};
+
+	// Where a load's heat goes. Exported means the heat leaves the station
+	// through an explicitly declared export boundary — an accounted
+	// external exchange, not a hidden infinite sink. CoolingService means
+	// the heat requires a cooling service of the load's declared thermal
+	// class; until such a service exists the load is not feasible and is
+	// admitted never, so missing cooling is never silently supplied.
+	enum class StationCoolingDisposition : std::uint8_t
+	{
+		Exported,
+		CoolingService,
+	};
+
+	// One declared material exchange of an External equipment load group
+	// with a station Resource store, at the load's full-operation rate.
+	// Consuming draws qualified material above the store's protected
+	// reserve; producing delivers into the store's remaining capacity.
+	// Both scale with the load's delivered power fraction: equipment that
+	// is curtailed exchanges less, and never exchanges what it cannot.
+	struct EquipmentMaterialExchangeSettings
+	{
+		std::string storeId;
+		double ratePerSecond{0.0}; // store units per simulated second at full operation
+		bool consumes{true};       // true: draw from the store; false: deliver into it
+		bool operator==(EquipmentMaterialExchangeSettings const&) const = default;
+	};
+
+	// A named External equipment load group (CONTEXT.md): station
+	// equipment outside the Station systems, with declared electrical
+	// demand and operating profile, heat output, required thermal service
+	// class, cooling disposition, material exchanges, a protected
+	// critical floor, a service priority and an allowed curtailment
+	// fraction. Equipment whose demands are already calculated within the
+	// Station systems is excluded by definition — it is never counted
+	// here again. The critical floor is protected ahead of all
+	// discretionary demand; allowed curtailment is the largest fraction
+	// of the request the load may be cut by, so the minimum operable
+	// supply is demand * (1 - maxCurtailment).
+	struct EquipmentLoadSettings
+	{
+		std::string id;
+		double electricalDemandKW{0.0}; // full-operation demand, >= 0
+		ProfileSettings operatingProfile; // duty level multiplies the demand
+		double heatOutputKW{0.0};       // heat rejected at full operation, >= 0
+		std::string thermalClass;       // required cooling service class
+		StationCoolingDisposition coolingDisposition{StationCoolingDisposition::Exported};
+		double criticalFloorKW{0.0};    // protected minimum supply, <= demand
+		int priority{0};                // higher allocates first
+		double maxCurtailment{1.0};     // allowed curtailment fraction, [0, 1]
+		std::vector<EquipmentMaterialExchangeSettings> materialExchanges;
+		bool operator==(EquipmentLoadSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationEquipmentLoads{16};
+	inline constexpr size_t MaxStationLoadMaterialExchanges{2};
+
 	struct StationSystemsSettings
 	{
 		bool enabled{false};
@@ -137,8 +236,16 @@ namespace core
 		std::vector<ResourceStoreSettings> stores;
 		std::vector<ResourceTransferSettings> transfers;
 		std::vector<ResourceConversionSettings> conversions;
+		std::vector<SolarArraySettings> solarArrays;
+		std::vector<EquipmentLoadSettings> equipmentLoads;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
+	// Profile shape validation and deterministic evaluation: the level of
+	// the last segment started at or before the current phase of the
+	// repeating period, or the constant level when there is no period.
+	bool validateStationProfile(ProfileSettings const&, std::string const& where,
+		std::string& diagnostic);
+	double evaluateStationProfile(ProfileSettings const&, double elapsedSeconds);
 	bool validateStationSystemsSettings(StationSystemsSettings const&, std::string& diagnostic);
 	inline constexpr std::array<char const*, 4> StationSystemNames{
 		"Power", "ECLSS", "Thermal control", "Monitoring/supervision"};
@@ -236,6 +343,64 @@ namespace core
 		bool operator==(StationConstituentBalanceSnapshot const&) const = default;
 	};
 
+	// One solar array as of the most recent tick: installed capacity, the
+	// evaluated illumination and the generation it could deliver. A
+	// zero-capacity array is disabled and contributes nothing.
+	struct StationSolarSourceSnapshot
+	{
+		std::string id;
+		double capacityKW{0.0};
+		double illumination{0.0};   // evaluated profile level, [0, 1]
+		double availableKW{0.0};    // capacity * illumination
+		bool disabled{false};       // zero installed capacity
+		bool operator==(StationSolarSourceSnapshot const&) const = default;
+	};
+	// One External equipment load group as of the most recent tick: what
+	// it requested, what was actually supplied, the unmet remainder, the
+	// protected floor and any unmet critical shortfall, the delivered
+	// fraction, exported heat or unmet cooling, and its scaled material
+	// exchanges. A cooling-infeasible load is not admitted: it draws no
+	// power and its cooling need stays visible as unmet cooling.
+	struct StationEquipmentLoadSnapshot
+	{
+		std::string id;
+		int priority{0};
+		std::string thermalClass;
+		StationCoolingDisposition coolingDisposition{StationCoolingDisposition::Exported};
+		double profileLevel{0.0};
+		double requestedKW{0.0};
+		double suppliedKW{0.0};
+		double unmetKW{0.0};
+		double criticalFloorKW{0.0};
+		double unmetCriticalKW{0.0};
+		double deliveredFraction{0.0};
+		double heatExportedKW{0.0};   // heat leaving via the declared export boundary
+		double unmetCoolingKW{0.0};   // cooling need with no feasible service
+		bool admitted{false};
+		std::string blockReason;
+		StationTransferStatus status{StationTransferStatus::Idle};
+		std::vector<StationConversionFlowSnapshot> materialExchanges;
+		bool operator==(StationEquipmentLoadSnapshot const&) const = default;
+	};
+	// The station-wide electrical picture: generation actually available
+	// this tick against total requested service, what was supplied and
+	// left unmet, unmet critical floors, untaken surplus and exported
+	// heat. Allocated power never exceeds available generation; shortages
+	// are explicit results, never silent clamping.
+	struct StationPowerSnapshot
+	{
+		double availableGenerationKW{0.0};
+		double totalRequestedKW{0.0};
+		double totalSuppliedKW{0.0};
+		double totalUnmetKW{0.0};
+		double unmetCriticalKW{0.0};
+		double surplusKW{0.0};
+		double exportedHeatKW{0.0};
+		std::vector<StationSolarSourceSnapshot> sources;
+		std::vector<StationEquipmentLoadSnapshot> loads;
+		bool operator==(StationPowerSnapshot const&) const = default;
+	};
+
 	struct StationSystemsSnapshot
 	{
 		bool enabled{false};
@@ -248,6 +413,7 @@ namespace core
 		std::vector<StationConversionSnapshot> conversions;
 		std::vector<StationBalanceSnapshot> balances;
 		std::vector<StationConstituentBalanceSnapshot> constituentBalances;
+		StationPowerSnapshot power;
 		double balanceTolerance{StationBalanceTolerance};
 		bool operator==(StationSystemsSnapshot const&) const = default;
 	};

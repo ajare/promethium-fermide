@@ -70,7 +70,7 @@ pf_add_smoke_module(pf-smoke-station
     LABELS "core;station"
     TIMEOUT 60
 )
-foreach(check lifecycle batching persistence stores transfers compounds failures fileRoundTrip writeFailure legacyFiles structuralReplay compoundFiles)
+foreach(check lifecycle batching persistence stores transfers compounds power failures fileRoundTrip writeFailure legacyFiles structuralReplay compoundFiles powerFiles)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()
@@ -590,11 +590,13 @@ add_test(NAME station-editor-transfers COMMAND pf-smoke-editor --check station/t
 set_tests_properties(station-editor-transfers PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
 add_test(NAME station-editor-compounds COMMAND pf-smoke-editor --check station/compoundWorkflow)
 set_tests_properties(station-editor-compounds PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+add_test(NAME station-editor-power COMMAND pf-smoke-editor --check station/powerWorkflow)
+set_tests_properties(station-editor-power PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 
 pf_add_smoke_contract(NAME smoke-editor-contract COMMAND ${CMAKE_COMMAND}
     "-DEDITOR=$<TARGET_FILE:pf-smoke-editor>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/EditorContract.cmake")
-set_tests_properties(smoke-editor-contract PROPERTIES LABELS "harness;editor" TIMEOUT 300)
+set_tests_properties(smoke-editor-contract PROPERTIES LABELS "harness;editor" TIMEOUT 480)
 
 # The historical *-contract entries retain EVERY exhaustive assertion and remain
 # in unfiltered CTest. Lightweight lanes reuse their inventories and time budgets.

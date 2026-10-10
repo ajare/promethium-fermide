@@ -264,6 +264,7 @@ set(editor_names
     station/storeWorkflow
     station/transferWorkflow
     station/compoundWorkflow
+    station/powerWorkflow
 )
 
 if(DEFINED LANE)
@@ -310,12 +311,12 @@ foreach(tier IN ITEMS editor)
     foreach(index RANGE 1 8)
         file(APPEND "${project}/CTestTestfile.cmake"
             "add_test(${module}-${index} \"${binary}\")\n"
-            "set_tests_properties(${module}-${index} PROPERTIES TIMEOUT 120 WORKING_DIRECTORY \"${work}\" PASS_REGULAR_EXPRESSION \"SUMMARY ${module} pass=${count} fail=0 skip=0\" FAIL_REGULAR_EXPRESSION \"FAIL ${module}\")\n")
+            "set_tests_properties(${module}-${index} PROPERTIES TIMEOUT 240 WORKING_DIRECTORY \"${work}\" PASS_REGULAR_EXPRESSION \"SUMMARY ${module} pass=${count} fail=0 skip=0\" FAIL_REGULAR_EXPRESSION \"FAIL ${module}\")\n")
     endforeach()
 endforeach()
 find_program(ctest NAMES ctest REQUIRED)
 execute_process(COMMAND "${ctest}" --test-dir "${project}" -j 8 --output-on-failure
-    RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 240)
+    RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 420)
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "Concurrent Editor invocations failed: ${result}\n${out}\n${err}")
 endif()

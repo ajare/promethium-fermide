@@ -49,6 +49,23 @@ namespace core
 			std::vector<ResourceStoreSettings> const* stores;
 			std::vector<ResourceTransferSettings> const* transfers;
 			std::vector<ResourceConversionSettings> const* conversions;
+			std::vector<SolarArraySettings> const* solar;
+			std::vector<EquipmentLoadSettings> const* loads;
+			static void pushProfile(lua_State* state, ProfileSettings const& profile)
+			{
+				lua_createtable(state, 0, 3);
+				lua_pushnumber(state, profile.constantLevel); lua_setfield(state, -2, "constantLevel");
+				lua_pushnumber(state, profile.periodSeconds); lua_setfield(state, -2, "periodSeconds");
+				lua_createtable(state, static_cast<int>(profile.segments.size()), 0);
+				for (size_t index = 0; index < profile.segments.size(); ++index)
+				{
+					lua_createtable(state, 0, 2);
+					lua_pushnumber(state, profile.segments[index].startSeconds); lua_setfield(state, -2, "startSeconds");
+					lua_pushnumber(state, profile.segments[index].level); lua_setfield(state, -2, "level");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_setfield(state, -2, "segments");
+			}
 			int operator()(lua_State* state) const
 			{
 				script::pushPrivateEnvironment(state);
@@ -129,7 +146,48 @@ namespace core
 					lua_setfield(state, -2, "outputs");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 4, 1);
+				// Authored solar array and External equipment load descriptors
+				// cross the same boundary as plain immutable values (#393);
+				// each sandbox mirrors and audits the supply allocation itself.
+				lua_createtable(state, static_cast<int>(solar->size()), 0);
+				for (size_t index = 0; index < solar->size(); ++index)
+				{
+					auto const& array = (*solar)[index];
+					lua_createtable(state, 0, 3);
+					lua_pushstring(state, array.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushnumber(state, array.capacityKW); lua_setfield(state, -2, "capacityKW");
+					pushProfile(state, array.illumination); lua_setfield(state, -2, "illumination");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_createtable(state, static_cast<int>(loads->size()), 0);
+				for (size_t index = 0; index < loads->size(); ++index)
+				{
+					auto const& load = (*loads)[index];
+					lua_createtable(state, 0, 9);
+					lua_pushstring(state, load.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushnumber(state, load.electricalDemandKW); lua_setfield(state, -2, "demandKW");
+					pushProfile(state, load.operatingProfile); lua_setfield(state, -2, "profile");
+					lua_pushnumber(state, load.heatOutputKW); lua_setfield(state, -2, "heatKW");
+					lua_pushstring(state, load.thermalClass.c_str()); lua_setfield(state, -2, "thermalClass");
+					lua_pushstring(state, load.coolingDisposition == StationCoolingDisposition::Exported
+						? "exported" : "coolingService"); lua_setfield(state, -2, "cooling");
+					lua_pushnumber(state, load.criticalFloorKW); lua_setfield(state, -2, "criticalFloorKW");
+					lua_pushinteger(state, load.priority); lua_setfield(state, -2, "priority");
+					lua_pushnumber(state, load.maxCurtailment); lua_setfield(state, -2, "maxCurtailment");
+					lua_createtable(state, static_cast<int>(load.materialExchanges.size()), 0);
+					for (size_t flow = 0; flow < load.materialExchanges.size(); ++flow)
+					{
+						auto const& exchange = load.materialExchanges[flow];
+						lua_createtable(state, 0, 3);
+						lua_pushstring(state, exchange.storeId.c_str()); lua_setfield(state, -2, "store");
+						lua_pushnumber(state, exchange.ratePerSecond); lua_setfield(state, -2, "rate");
+						lua_pushboolean(state, exchange.consumes ? 1 : 0); lua_setfield(state, -2, "consumes");
+						lua_rawseti(state, -2, static_cast<int>(flow) + 1);
+					}
+					lua_setfield(state, -2, "exchanges");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 6, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -213,6 +271,51 @@ namespace core
 				+ composition.potassium + composition.otherMinerals));
 			ledger["energy"] += sign * dry * composition.energyKJPerKgDry;
 		}
+	}
+	bool validateStationProfile(ProfileSettings const& profile, std::string const& where,
+		std::string& diagnostic)
+	{
+		auto refuse = [&](std::string text) { diagnostic = where + ": " + std::move(text); return false; };
+		if (!std::isfinite(profile.periodSeconds) || profile.periodSeconds < 0.0)
+			return refuse("period must be finite and non-negative");
+		if (profile.periodSeconds == 0.0)
+		{
+			if (!profile.segments.empty())
+				return refuse("a constant profile must not declare segments");
+			if (!std::isfinite(profile.constantLevel)
+				|| profile.constantLevel < 0.0 || profile.constantLevel > 1.0)
+				return refuse("constant level must be finite and from 0 to 1");
+			return true;
+		}
+		if (profile.segments.empty() || profile.segments.size() > MaxStationProfileSegments)
+			return refuse("a periodic profile needs between 1 and "
+				+ std::to_string(MaxStationProfileSegments) + " segments");
+		if (profile.segments.front().startSeconds != 0.0)
+			return refuse("the first segment must start at 0");
+		for (size_t index = 0; index < profile.segments.size(); ++index)
+		{
+			auto const& segment = profile.segments[index];
+			if (!std::isfinite(segment.startSeconds) || segment.startSeconds < 0.0
+				|| segment.startSeconds >= profile.periodSeconds)
+				return refuse("segment start must be finite and inside the period");
+			if (!std::isfinite(segment.level) || segment.level < 0.0 || segment.level > 1.0)
+				return refuse("segment level must be finite and from 0 to 1");
+			if (index > 0 && segment.startSeconds <= profile.segments[index - 1].startSeconds)
+				return refuse("segments must start in strictly increasing order");
+		}
+		return true;
+	}
+	double evaluateStationProfile(ProfileSettings const& profile, double elapsedSeconds)
+	{
+		if (profile.periodSeconds <= 0.0) return profile.constantLevel;
+		auto const phase = std::fmod(std::max(0.0, elapsedSeconds), profile.periodSeconds);
+		double level = profile.segments.front().level;
+		for (auto const& segment : profile.segments)
+		{
+			if (segment.startSeconds > phase) break;
+			level = segment.level;
+		}
+		return level;
 	}
 	bool validateStationSystemsSettings(StationSystemsSettings const& settings, std::string& diagnostic)
 	{
@@ -373,6 +476,73 @@ namespace core
 						+ " exceeds declared input " + std::to_string(supplied));
 			}
 		}
+		if (settings.solarArrays.size() > MaxStationSolarArrays)
+			return refuse("Station solar arrays are limited to "
+				+ std::to_string(MaxStationSolarArrays) + " entries");
+		std::set<std::string> solarIds;
+		for (auto const& array : settings.solarArrays)
+		{
+			auto const where = "Station solar array '" + array.id + "'";
+			if (array.id.empty()) return refuse("Station solar array id must not be empty");
+			if (array.id.size() > MaxStationStoreIdLength)
+				return refuse("Station solar array id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!solarIds.insert(array.id).second) return refuse(where + " id is duplicated");
+			// Zero installed capacity is legal and disables the array; it is
+			// never mistaken for a source that can carry a load.
+			if (!std::isfinite(array.capacityKW) || array.capacityKW < 0.0)
+				return refuse(where + " installed capacity must be finite and non-negative (0 disables the array)");
+			if (!validateStationProfile(array.illumination, where + " illumination profile", diagnostic))
+				return false;
+		}
+		if (settings.equipmentLoads.size() > MaxStationEquipmentLoads)
+			return refuse("Station external equipment loads are limited to "
+				+ std::to_string(MaxStationEquipmentLoads) + " entries");
+		std::set<std::string> loadIds;
+		for (auto const& load : settings.equipmentLoads)
+		{
+			auto const where = "Station equipment load '" + load.id + "'";
+			if (load.id.empty()) return refuse("Station equipment load id must not be empty");
+			if (load.id.size() > MaxStationStoreIdLength)
+				return refuse("Station equipment load id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!loadIds.insert(load.id).second) return refuse(where + " id is duplicated");
+			if (!std::isfinite(load.electricalDemandKW) || load.electricalDemandKW < 0.0)
+				return refuse(where + " electrical demand must be finite and non-negative");
+			if (!std::isfinite(load.heatOutputKW) || load.heatOutputKW < 0.0)
+				return refuse(where + " heat output must be finite and non-negative");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				load.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + load.thermalClass
+					+ "'; declared classes are: low, moderate, warm, generation");
+			if (load.coolingDisposition != StationCoolingDisposition::Exported
+				&& load.coolingDisposition != StationCoolingDisposition::CoolingService)
+				return refuse(where + " has an unknown cooling disposition");
+			if (!std::isfinite(load.criticalFloorKW) || load.criticalFloorKW < 0.0)
+				return refuse(where + " critical floor must be finite and non-negative");
+			if (load.criticalFloorKW > load.electricalDemandKW)
+				return refuse(where + " critical floor exceeds the declared electrical demand");
+			if (!std::isfinite(load.maxCurtailment) || load.maxCurtailment < 0.0 || load.maxCurtailment > 1.0)
+				return refuse(where + " allowed curtailment must be finite and from 0 to 1");
+			if (!validateStationProfile(load.operatingProfile, where + " operating profile", diagnostic))
+				return false;
+			if (load.materialExchanges.size() > MaxStationLoadMaterialExchanges)
+				return refuse(where + " material exchanges are limited to "
+					+ std::to_string(MaxStationLoadMaterialExchanges) + " entries");
+			std::set<std::string> exchangeStores;
+			for (auto const& exchange : load.materialExchanges)
+			{
+				auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
+						[&](ResourceStoreSettings const& store) { return store.id == exchange.storeId; });
+				if (it == settings.stores.end())
+					return refuse(where + " material exchange references unknown store '" + exchange.storeId + "'");
+				if (!exchangeStores.insert(exchange.storeId).second)
+					return refuse(where + " exchanges with store '" + exchange.storeId + "' more than once");
+				if (!std::isfinite(exchange.ratePerSecond) || exchange.ratePerSecond <= 0.0)
+					return refuse(where + " material exchange rate for store '" + exchange.storeId
+						+ "' must be finite and positive");
+			}
+		}
 		diagnostic.clear(); return true;
 	}
 	void setStationSystemsSourceLoader(StationSystemsSourceLoader loader) { sourceLoader = std::move(loader); }
@@ -424,16 +594,66 @@ namespace core
 			StationTransferStatus status{StationTransferStatus::Idle};
 			std::string stallReason;
 		};
+		// The authoritative ledger of one configured solar array. Output
+		// follows installed capacity and evaluated illumination; a
+		// zero-capacity array is disabled and contributes nothing.
+		struct SolarState
+		{
+			SolarArraySettings authored;
+			double lastIllumination{0.0};
+			double lastAvailableKW{0.0};
+			bool lastDisabled{false};
+			bool lastEclipse{true};
+		};
+		// The authoritative ledger of one External equipment load group.
+		// Allocation runs in two passes: protected critical floors first,
+		// then discretionary demand, both in the declared deterministic
+		// order (priority descending, declaration order for ties). A load
+		// that requires a cooling service is never admitted in this slice:
+		// it draws no power and its cooling need stays visible as unmet
+		// cooling rather than being silently supplied.
+		struct LoadExchangeState
+		{
+			size_t storeIndex{0};
+			double ratePerSecond{0.0};
+			bool consumes{true};
+			double lastRequested{0.0};
+			double lastCompleted{0.0};
+		};
+		struct LoadState
+		{
+			EquipmentLoadSettings authored;
+			std::vector<LoadExchangeState> exchanges;
+			double lastProfileLevel{0.0};
+			double lastRequestedKW{0.0};
+			double lastSuppliedKW{0.0};
+			double lastUnmetKW{0.0};
+			double lastUnmetCriticalKW{0.0};
+			double lastDeliveredFraction{0.0};
+			double lastHeatExportedKW{0.0};
+			double lastUnmetCoolingKW{0.0};
+			bool lastAdmitted{false};
+			std::string lastBlockReason;
+			std::string lastShortfallReason;
+			bool lastCriticalUnmet{false};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
 		std::vector<TransferState> transfers;
 		std::vector<ConversionState> conversions;
+		std::vector<SolarState> solarArrays;
+		std::vector<LoadState> loads;
 		// Competing transfers are allocated in priority order (higher first),
 		// ties resolved by declaration order: a declared deterministic order.
 		std::vector<size_t> transferOrder;
 		// Conversions run after all transfers within the same tick, in the
 		// same declared deterministic order.
 		std::vector<size_t> conversionOrder;
+		// Electrical supply is allocated to external loads before resource
+		// transfers and conversions run, in the same declared deterministic
+		// order, so allocation never depends on iteration accidents.
+		std::vector<size_t> loadOrder;
 		// Per-unit totals at run start, the conservation boundary (#390),
 		// plus the cumulative per-unit mass removed by declared conversion
 		// losses (#391): each unit's ledger closes over its own consumed
@@ -445,6 +665,9 @@ namespace core
 		// current + lost must equal starting within tolerance.
 		ConstituentLedger startingConstituents;
 		ConstituentLedger constituentLoss;
+		// Generation left untaken after this tick's allocation, for the
+		// power snapshot's surplus reporting.
+		double lastAvailableGenerationKW{0.0};
 		std::array<std::unique_ptr<ScriptObject>, 4> objects;
 		StationSystemsSnapshot snapshot;
 		std::vector<StationSystemsEvent> events;
@@ -466,6 +689,15 @@ namespace core
 			std::vector<StationTransferStatus> previousConversionStatus;
 			previousConversionStatus.reserve(conversions.size());
 			for (auto const& conversion : conversions) previousConversionStatus.push_back(conversion.status);
+			std::vector<StationTransferStatus> previousLoadStatus;
+			previousLoadStatus.reserve(loads.size());
+			for (auto const& load : loads) previousLoadStatus.push_back(load.status);
+			std::vector<bool> previousCriticalUnmet;
+			previousCriticalUnmet.reserve(loads.size());
+			for (auto const& load : loads) previousCriticalUnmet.push_back(load.lastCriticalUnmet);
+			std::vector<bool> previousEclipse;
+			previousEclipse.reserve(solarArrays.size());
+			for (auto const& array : solarArrays) previousEclipse.push_back(array.lastEclipse);
 			std::vector<double> qualified, unqualified;
 			qualified.reserve(stores.size());
 			unqualified.reserve(stores.size());
@@ -476,6 +708,133 @@ namespace core
 			}
 			std::vector<double> flowIn(stores.size(), 0.0), flowOut(stores.size(), 0.0);
 			std::vector<std::string> stallReason(transfers.size());
+			// The declared loss ledgers are staged up front: a failed tick
+			// never books losses, exchanges or allocations it did not commit.
+			ConstituentLedger stagedLoss = constituentLoss;
+			std::map<std::string, double> stagedUnitLoss = unitLoss;
+			// Solar supply and external equipment allocation run before the
+			// resource ledger: the electrical service a load receives bounds
+			// its heat and material exchanges, and allocated power can never
+			// exceed the generation actually available this tick.
+			auto const elapsed = static_cast<double>(tick) * World::getFixedTimestep();
+			double availableGeneration = 0.0;
+			for (auto& array : solarArrays)
+			{
+				array.lastIllumination = evaluateStationProfile(array.authored.illumination, elapsed);
+				array.lastDisabled = array.authored.capacityKW <= 0.0;
+				array.lastAvailableKW = array.lastDisabled
+					? 0.0 : array.authored.capacityKW * array.lastIllumination;
+				array.lastEclipse = !array.lastDisabled && array.lastAvailableKW <= 0.0;
+				availableGeneration += array.lastAvailableKW;
+			}
+			std::vector<double> supplied(loads.size(), 0.0);
+			// Pass 1: protected critical floors allocate ahead of every
+			// discretionary request, in the declared priority order. A
+			// floor that generation cannot meet remains explicit unmet
+			// critical demand, never a silently permitted curtailment.
+			for (auto const index : loadOrder)
+			{
+				auto& load = loads[index];
+				load.lastShortfallReason.clear();
+				load.lastProfileLevel = evaluateStationProfile(load.authored.operatingProfile, elapsed);
+				load.lastRequestedKW = load.authored.electricalDemandKW * load.lastProfileLevel;
+				load.lastAdmitted = load.authored.coolingDisposition
+					== StationCoolingDisposition::Exported;
+				load.lastBlockReason = load.lastAdmitted ? std::string{}
+					: "no cooling service of class '" + load.authored.thermalClass + "' is available";
+				load.lastUnmetCriticalKW = 0.0;
+				if (!load.lastAdmitted || load.lastRequestedKW <= 0.0) continue;
+				auto const floor = std::min(load.authored.criticalFloorKW, load.lastRequestedKW);
+				auto const give = std::min(floor, availableGeneration);
+				supplied[index] += give;
+				availableGeneration -= give;
+				load.lastUnmetCriticalKW = floor - give;
+			}
+			// Pass 2: discretionary demand in the same declared order. A
+			// load is never supplied below its minimum operable level,
+			// demand * (1 - allowed curtailment): if the remaining pool
+			// cannot reach that level the load takes nothing this tick.
+			for (auto const index : loadOrder)
+			{
+				auto& load = loads[index];
+				if (!load.lastAdmitted || load.lastRequestedKW <= 0.0) continue;
+				auto const remaining = load.lastRequestedKW - supplied[index];
+				if (remaining <= 0.0) continue;
+				auto const candidate = std::min(remaining, availableGeneration);
+				auto const minOperating = load.lastRequestedKW * (1.0 - load.authored.maxCurtailment);
+				if (supplied[index] + candidate + 1e-12 >= minOperating)
+				{
+					supplied[index] += candidate;
+					availableGeneration -= candidate;
+				}
+				else
+					load.lastShortfallReason = "below the minimum operable supply level";
+			}
+			for (size_t index = 0; index < loads.size(); ++index)
+			{
+				auto& load = loads[index];
+				load.lastSuppliedKW = supplied[index];
+				load.lastUnmetKW = load.lastRequestedKW - supplied[index];
+				load.lastDeliveredFraction = load.lastRequestedKW > 0.0
+					? supplied[index] / load.lastRequestedKW : 0.0;
+				// Exported heat is an explicit external boundary exchange at
+				// the delivered fraction. A cooling-infeasible load never
+				// runs, so it produces no station heat; its cooling need is
+				// reported as unmet cooling instead of being absorbed.
+				load.lastHeatExportedKW = load.lastAdmitted
+					? load.authored.heatOutputKW * load.lastDeliveredFraction : 0.0;
+				load.lastUnmetCoolingKW = load.lastAdmitted
+					? 0.0 : load.authored.heatOutputKW * load.lastProfileLevel;
+				load.lastCriticalUnmet = load.lastUnmetCriticalKW > 1e-12;
+				if (load.lastRequestedKW <= 0.0) load.status = StationTransferStatus::Idle;
+				else if (!load.lastAdmitted || supplied[index] <= 1e-12)
+					load.status = StationTransferStatus::Rejected;
+				else if (supplied[index] >= load.lastRequestedKW - 1e-12)
+					load.status = StationTransferStatus::Full;
+				else load.status = StationTransferStatus::Partial;
+				// Declared material exchanges scale with the delivered power
+				// fraction: curtailed equipment consumes and delivers less,
+				// never draws into a protected reserve and never overfills a
+				// destination. Completed amounts book at the external
+				// boundary — draws are losses, deliveries are negative
+				// losses — so the station ledgers stay closed.
+				for (auto& exchange : load.exchanges)
+				{
+					auto const& exchangeStore = stores[exchange.storeIndex].authored;
+					auto const requested = exchange.ratePerSecond * static_cast<double>(seconds)
+						* load.lastDeliveredFraction;
+					double completed = 0.0;
+					if (exchange.consumes)
+					{
+						auto const drawable = std::max(0.0,
+							qualified[exchange.storeIndex] - exchangeStore.protectedReserve);
+						completed = std::min(requested, drawable);
+						qualified[exchange.storeIndex] -= completed;
+						flowOut[exchange.storeIndex] += completed;
+					}
+					else
+					{
+						auto const headroom = exchangeStore.capacity
+							- (qualified[exchange.storeIndex] + unqualified[exchange.storeIndex]);
+						completed = std::min(requested, headroom);
+						qualified[exchange.storeIndex] += completed;
+						flowIn[exchange.storeIndex] += completed;
+					}
+					exchange.lastRequested = requested;
+					exchange.lastCompleted = completed;
+					stagedUnitLoss[exchangeStore.unit] += exchange.consumes ? completed : -completed;
+					if (exchangeStore.composition)
+					{
+						ConstituentLedger delta;
+						addComposition(delta, *exchangeStore.composition,
+							massToKg(exchangeStore.unit, completed),
+							exchange.consumes ? -1.0 : 1.0);
+						for (auto const& [constituent, change] : delta)
+							stagedLoss[constituent] -= change;
+					}
+				}
+			}
+			lastAvailableGenerationKW = availableGeneration;
 			for (auto const index : transferOrder)
 			{
 				auto& transfer = transfers[index];
@@ -505,10 +864,6 @@ namespace core
 						: (headroom <= 0.0 ? "destination store is at capacity" : "limited supply");
 			}
 			// Conversions run against the staged post-transfer inventory.
-			// The declared loss ledger is staged too: a failed tick never
-			// books losses it did not commit.
-			ConstituentLedger stagedLoss = constituentLoss;
-			std::map<std::string, double> stagedUnitLoss = unitLoss;
 			for (auto const index : conversionOrder)
 			{
 				auto& conversion = conversions[index];
@@ -678,6 +1033,41 @@ namespace core
 					: std::string("Conversion '") + conversion.authored.id + "' partial: " + conversion.stallReason;
 				events.push_back({tick, message});
 			}
+			// Solar and external load transitions are announced so the event
+			// log records eclipse changes, curtailment and unmet critical
+			// floors without flooding every tick.
+			for (auto const index : loadOrder)
+			{
+				auto const& load = loads[index];
+				if (load.status != previousLoadStatus[index])
+				{
+					if (load.status == StationTransferStatus::Full)
+						events.push_back({tick, "Load '" + load.authored.id + "' supplying fully"});
+					else if (load.status == StationTransferStatus::Rejected)
+						events.push_back({tick, "Load '" + load.authored.id + "' rejected: "
+							+ (!load.lastAdmitted ? load.lastBlockReason
+								: (load.lastShortfallReason.empty()
+									? std::string("electrical supply is unavailable")
+									: load.lastShortfallReason))});
+					else
+						events.push_back({tick, "Load '" + load.authored.id + "' curtailed: supplied "
+							+ std::to_string(load.lastSuppliedKW) + " of "
+							+ std::to_string(load.lastRequestedKW) + " kW"});
+				}
+				if (load.lastCriticalUnmet != previousCriticalUnmet[index])
+					events.push_back({tick, load.lastCriticalUnmet
+						? "Load '" + load.authored.id + "' critical floor unmet: short "
+							+ std::to_string(load.lastUnmetCriticalKW) + " kW"
+						: std::string("Load '") + load.authored.id + "' critical floor restored"});
+			}
+			for (size_t index = 0; index < solarArrays.size(); ++index)
+			{
+				auto const& array = solarArrays[index];
+				if (array.lastEclipse == previousEclipse[index] || array.lastDisabled) continue;
+				events.push_back({tick, array.lastEclipse
+					? "Solar array '" + array.authored.id + "' entered eclipse"
+					: "Solar array '" + array.authored.id + "' returned to sunlight"});
+			}
 			return true;
 		}
 	};
@@ -716,6 +1106,22 @@ namespace core
 		std::stable_sort(mImpl->conversionOrder.begin(), mImpl->conversionOrder.end(),
 			[&](size_t left, size_t right)
 			{ return mImpl->conversions[left].authored.priority > mImpl->conversions[right].authored.priority; });
+		for (auto const& array : settings.solarArrays)
+			mImpl->solarArrays.push_back({array});
+		for (auto const& load : settings.equipmentLoads)
+		{
+			Impl::LoadState state;
+			state.authored = load;
+			for (auto const& exchange : load.materialExchanges)
+				state.exchanges.push_back({storeIndex[exchange.storeId], exchange.ratePerSecond,
+					exchange.consumes});
+			mImpl->loads.push_back(std::move(state));
+		}
+		mImpl->loadOrder.resize(mImpl->loads.size());
+		std::iota(mImpl->loadOrder.begin(), mImpl->loadOrder.end(), size_t{0});
+		std::stable_sort(mImpl->loadOrder.begin(), mImpl->loadOrder.end(),
+			[&](size_t left, size_t right)
+			{ return mImpl->loads[left].authored.priority > mImpl->loads[right].authored.priority; });
 		// The compound conservation boundary is fixed at run start from the
 		// authored starting inventory of every compound store (#391).
 		for (auto const& store : mImpl->stores)
@@ -730,7 +1136,8 @@ namespace core
 		{
 			auto object = std::make_unique<ScriptObject>();
 			Construction construction{object.get(), &source, StationSystemNames[i],
-				&settings.stores, &settings.transfers, &settings.conversions};
+				&settings.stores, &settings.transfers, &settings.conversions,
+				&settings.solarArrays, &settings.equipmentLoads};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -745,8 +1152,10 @@ namespace core
 		}
 		mImpl->events.push_back({0, "Station systems initialized with "
 			+ std::to_string(settings.stores.size()) + " resource store(s), "
-			+ std::to_string(settings.transfers.size()) + " transfer(s) and "
-			+ std::to_string(settings.conversions.size()) + " conversion(s)"});
+			+ std::to_string(settings.transfers.size()) + " transfer(s), "
+			+ std::to_string(settings.conversions.size()) + " conversion(s), "
+			+ std::to_string(settings.solarArrays.size()) + " solar array(s) and "
+			+ std::to_string(settings.equipmentLoads.size()) + " external equipment load(s)"});
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
 	bool StationSystemsRuntime::advance(uint64_t tick, float seconds)
@@ -795,7 +1204,8 @@ namespace core
 		// conservation or limit violation never publishes a partial result
 		// and never clamps material. It fails the whole tick through the
 		// integrated error path instead.
-		if (!mImpl->transferOrder.empty() || !mImpl->conversionOrder.empty())
+		if (!mImpl->transferOrder.empty() || !mImpl->conversionOrder.empty()
+			|| !mImpl->loads.empty() || !mImpl->solarArrays.empty())
 		{
 			std::string violation;
 			if (!mImpl->applyLedger(tick, seconds, violation))
@@ -879,6 +1289,51 @@ namespace core
 				starting, current, lost, current + lost - starting});
 		}
 		result.balanceTolerance = StationBalanceTolerance;
+		// The power snapshot reports the most recent tick's solar supply
+		// and external equipment allocation in the declared order.
+		for (auto const& array : mImpl->solarArrays)
+			result.power.sources.push_back({array.authored.id, array.authored.capacityKW,
+				array.lastIllumination, array.lastAvailableKW, array.lastDisabled});
+		double totalRequested = 0.0, totalSupplied = 0.0, totalUnmetCritical = 0.0, totalHeat = 0.0;
+		double totalAvailable = 0.0;
+		for (auto const index : mImpl->loadOrder)
+		{
+			auto const& load = mImpl->loads[index];
+			StationEquipmentLoadSnapshot loadResult;
+			loadResult.id = load.authored.id;
+			loadResult.priority = load.authored.priority;
+			loadResult.thermalClass = load.authored.thermalClass;
+			loadResult.coolingDisposition = load.authored.coolingDisposition;
+			loadResult.profileLevel = load.lastProfileLevel;
+			loadResult.requestedKW = load.lastRequestedKW;
+			loadResult.suppliedKW = load.lastSuppliedKW;
+			loadResult.unmetKW = load.lastUnmetKW;
+			loadResult.criticalFloorKW = load.authored.criticalFloorKW;
+			loadResult.unmetCriticalKW = load.lastUnmetCriticalKW;
+			loadResult.deliveredFraction = load.lastDeliveredFraction;
+			loadResult.heatExportedKW = load.lastHeatExportedKW;
+			loadResult.unmetCoolingKW = load.lastUnmetCoolingKW;
+			loadResult.admitted = load.lastAdmitted;
+			loadResult.blockReason = load.lastBlockReason;
+			loadResult.status = load.status;
+			for (auto const& exchange : load.exchanges)
+				loadResult.materialExchanges.push_back({mImpl->stores[exchange.storeIndex].authored.id,
+					mImpl->stores[exchange.storeIndex].authored.unit,
+					exchange.lastRequested, exchange.lastCompleted});
+			totalRequested += load.lastRequestedKW;
+			totalSupplied += load.lastSuppliedKW;
+			totalUnmetCritical += load.lastUnmetCriticalKW;
+			totalHeat += load.lastHeatExportedKW;
+			result.power.loads.push_back(std::move(loadResult));
+		}
+		for (auto const& array : mImpl->solarArrays) totalAvailable += array.lastAvailableKW;
+		result.power.availableGenerationKW = totalAvailable;
+		result.power.totalRequestedKW = totalRequested;
+		result.power.totalSuppliedKW = totalSupplied;
+		result.power.totalUnmetKW = totalRequested - totalSupplied;
+		result.power.unmetCriticalKW = totalUnmetCritical;
+		result.power.surplusKW = mImpl->lastAvailableGenerationKW;
+		result.power.exportedHeatKW = totalHeat;
 		return result;
 	}
 	std::vector<StationSystemsEvent> const& StationSystemsRuntime::events() const { return mImpl->events; }
