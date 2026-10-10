@@ -68,12 +68,14 @@ pf_add_smoke_module(pf-smoke-station
     SOURCES station/Main.cpp station/Documents.cpp
     LIBRARIES promethium-fermide-core
     LABELS "core;station"
-    TIMEOUT 60
+    TIMEOUT 600
 )
 foreach(check lifecycle batching persistence stores transfers compounds power batteries failures fileRoundTrip writeFailure legacyFiles structuralReplay compoundFiles powerFiles batteryFiles)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()
+# The #547 analytical hour-scale crossings run multi-hour simulated runs.
+set_tests_properties(station-batteries PROPERTIES TIMEOUT 240)
 
 pf_add_smoke_module(pf-smoke-simulation
     NAME simulation

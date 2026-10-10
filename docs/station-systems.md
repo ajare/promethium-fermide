@@ -338,7 +338,11 @@ initialised from it and never written back. Charge and discharge power
 limits are per tick, and charge/discharge efficiencies are applied at
 the bus boundary: charging stores bus kWh x charge efficiency and
 discharging delivers stored kWh drawn x discharge efficiency, so both
-conversion directions book their losses. Efficiency must be greater
+conversion directions book their losses. Every kW <-> kWh crossing
+multiplies or divides by elapsed hours: a fixed-tick duration is
+converted from seconds to hours (divided by 3600) before it meets a
+power value, so 1 kW over one second moves 1/3600 kWh and over one
+hour exactly 1 kWh. Efficiency must be greater
 than zero and at most one; usable energy can never exceed the nameplate,
 so no policy can invent storage the battery does not have. Zero usable
 energy disables the battery entirely — it stores nothing and delivers

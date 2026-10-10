@@ -447,12 +447,15 @@ namespace
 		require(original.configureStationSystems(settings, false, &diagnostic),
 			"Battery settings edit failed: " + diagnostic);
 		original.resumeSimulation();
-		// One second into the first eclipse: the battery is mid-ride.
+		// One second into the first eclipse: the battery is mid-ride. It
+		// charged during the preceding minute of sun, so stored is above
+		// its starting value but well inside the nameplate, and the
+		// eclipse leg shows live discharge (#547: energy is kW x hours).
 		require(original.advanceTicks(3660), "Battery original run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		require(expected.power.batteries.size() == 1
-			&& expected.power.batteries[0].storedKWh < 8.0
-			&& expected.power.batteries[0].storedKWh > 2.0
+			&& expected.power.batteries[0].storedKWh > 8.0
+			&& expected.power.batteries[0].storedKWh < 10.0
 			&& expected.power.batteryDischargeKW > 0.0,
 			"Battery scenario produced the wrong observable state");
 		for (auto const* suffix : {".world.yaml", ".world"})

@@ -550,7 +550,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
     local function batteryDisabled(battery)
         return battery.usableKWh <= 0
     end
-    local function deliverableKW(battery, dt)
+    local function deliverableKW(battery, dtHours)
         if batteryDisabled(battery) then return 0 end
         local drawable = math.max(0, battery.stored - batteryReserve(battery))
         -- The discharge power limit is per tick: whatever this battery
@@ -558,23 +558,24 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
         -- allocation passes can never jointly exceed the cap.
         local byPower = battery.maxDischargeKW - battery.last_discharge
         return math.max(0, math.min(byPower,
-            drawable * battery.dischargeEfficiency / dt))
+            drawable * battery.dischargeEfficiency / dtHours))
     end
     -- Route a power need through the batteries in declaration order and
-    -- return what they actually delivered.
-    local function drawBatteries(self, needKW, dt)
+    -- return what they actually delivered. dtHours is the crossing
+    -- duration in HOURS: kW x hours = kWh, never kW x seconds (#547).
+    local function drawBatteries(self, needKW, dtHours)
         if needKW <= 0 then return 0 end
         local remaining = needKW
         for _, battery in ipairs(self.batteries) do
             if remaining <= 1e-15 then break end
             if not batteryDisabled(battery) then
-                local cap = deliverableKW(battery, dt)
+                local cap = deliverableKW(battery, dtHours)
                 local give = math.min(remaining, cap)
                 if give > 0 then
-                    local drawn = give * dt / battery.dischargeEfficiency
+                    local drawn = give * dtHours / battery.dischargeEfficiency
                     battery.stored = battery.stored - drawn
                     battery.discharged = battery.discharged + drawn
-                    battery.delivered = battery.delivered + give * dt
+                    battery.delivered = battery.delivered + give * dtHours
                     battery.last_discharge = battery.last_discharge + give
                 end
                 remaining = remaining - give
@@ -583,6 +584,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
         return needKW - remaining
     end
     local function applyPower(self, elapsed, fixed_seconds)
+        -- Energy crossings use hours: a fixed tick is a fraction of a
+        -- second, so its duration must be divided by 3600 before it
+        -- multiplies or divides a kW value into kWh (#547).
+        local fixed_hours = fixed_seconds / 3600
         local generation = 0
         for _, array in ipairs(self.solar) do
             local illumination = evaluateProfile(array.illumination, elapsed)
@@ -610,7 +615,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
                 local fromGeneration = math.min(floor, generation)
                 generation = generation - fromGeneration
                 local stillNeeded = floor - fromGeneration
-                local fromBattery = drawBatteries(self, stillNeeded, fixed_seconds)
+                local fromBattery = drawBatteries(self, stillNeeded, fixed_hours)
                 supplied[index] = fromGeneration + fromBattery
                 batterySupplied = batterySupplied + fromBattery
                 load.unmetCritical = stillNeeded - fromBattery
@@ -625,7 +630,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
                     local afterGeneration = remaining - fromGeneration
                     local batteryCapable = 0
                     for _, battery in ipairs(self.batteries) do
-                        batteryCapable = batteryCapable + deliverableKW(battery, fixed_seconds)
+                        batteryCapable = batteryCapable + deliverableKW(battery, fixed_hours)
                     end
                     local batteryAsk = math.min(afterGeneration, batteryCapable)
                     local minOperating = load.requested * (1 - load.maxCurtailment)
@@ -636,7 +641,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
                         -- capped ask, so each battery's recorded request
                         -- and shortfall show the limitation the
                         -- allocation actually ran into.
-                        local drawn = drawBatteries(self, afterGeneration, fixed_seconds)
+                        local drawn = drawBatteries(self, afterGeneration, fixed_hours)
                         supplied[index] = supplied[index] + drawn
                         batterySupplied = batterySupplied + drawn
                     end
@@ -654,17 +659,17 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
                 if headroom > 0 then
                     local busKW = math.min(battery.maxChargeKW, generation)
                     if busKW > 0 then
-                        local storedGain = math.min(busKW * fixed_seconds
+                        local storedGain = math.min(busKW * fixed_hours
                             * battery.chargeEfficiency, headroom)
                         if storedGain > 0 then
                             local busUsed = storedGain / battery.chargeEfficiency
                             battery.stored = battery.stored + storedGain
                             battery.charged = battery.charged + storedGain
                             battery.charge_input = battery.charge_input + busUsed
-                            battery.last_charge = busUsed / fixed_seconds
+                            battery.last_charge = busUsed / fixed_hours
                             -- The pool is in power units: subtract the bus
                             -- power the battery actually took.
-                            generation = generation - busUsed / fixed_seconds
+                            generation = generation - busUsed / fixed_hours
                         end
                     end
                 end

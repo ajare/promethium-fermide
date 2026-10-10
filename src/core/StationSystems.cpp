@@ -808,6 +808,12 @@ namespace core
 			// its heat and material exchanges, and allocated power can never
 			// exceed the generation actually available this tick.
 			auto const elapsed = static_cast<double>(tick) * World::getFixedTimestep();
+			// Power is kW and stored energy is kWh: every crossing between
+			// them is power x elapsed hours. A fixed tick is a fraction of a
+			// second, so its duration must be converted to hours before it
+			// multiplies or divides a power value (#547); consuming seconds
+			// directly inflates every energy amount 3600x.
+			auto const hours = static_cast<double>(seconds) / 3600.0;
 			double availableGeneration = 0.0;
 			for (auto& array : solarArrays)
 			{
@@ -828,11 +834,13 @@ namespace core
 			{ return battery.authored.nameplateKWh - battery.authored.usableKWh; };
 			auto const batteryDisabled = [](BatteryState const& battery)
 			{ return battery.authored.usableKWh <= 0.0; };
-			auto const deliverableKW = [&](BatteryState const& battery, double dt)
+			// dtHours is the crossing duration in HOURS: the energy drawable
+			// above the reserve converts into a power ceiling only through it.
+			auto const deliverableKW = [&](BatteryState const& battery, double dtHours)
 			{
 				if (batteryDisabled(battery)) return 0.0;
 				auto const drawable = std::max(0.0, battery.stored - batteryReserve(battery));
-				auto const byEnergy = drawable * battery.authored.dischargeEfficiency / dt;
+				auto const byEnergy = drawable * battery.authored.dischargeEfficiency / dtHours;
 				// The discharge power limit is per tick: whatever this battery
 				// already delivered this tick counts against it, so the two
 				// allocation passes can never jointly exceed the cap.
@@ -857,15 +865,15 @@ namespace core
 				{
 					if (remaining <= 1e-15) break;
 					if (batteryDisabled(battery)) continue;
-					auto const cap = deliverableKW(battery, static_cast<double>(seconds));
+					auto const cap = deliverableKW(battery, hours);
 					auto const give = std::min(remaining, cap);
 					if (give > 0.0)
 					{
-						auto const drawn = give * static_cast<double>(seconds)
+						auto const drawn = give * hours
 							/ battery.authored.dischargeEfficiency;
 						battery.stored -= drawn;
 						battery.dischargedKWh += drawn;
-						battery.deliveredKWh += give * static_cast<double>(seconds);
+						battery.deliveredKWh += give * hours;
 						battery.lastDischargeKW += give;
 					}
 					battery.lastDischargeRequestedKW += remaining;
@@ -921,7 +929,7 @@ namespace core
 				auto const afterGeneration = remaining - fromGeneration;
 				double batteryCapableKW{0.0};
 				for (auto const& battery : batteries)
-					batteryCapableKW += deliverableKW(battery, static_cast<double>(seconds));
+					batteryCapableKW += deliverableKW(battery, hours);
 				auto const batteryAsk = std::min(afterGeneration, batteryCapableKW);
 				auto const minOperating = load.lastRequestedKW * (1.0 - load.authored.maxCurtailment);
 				if (supplied[index] + fromGeneration + batteryAsk + 1e-12 >= minOperating)
@@ -1020,17 +1028,17 @@ namespace core
 				if (headroom <= 0.0) continue;
 				auto const busKW = std::min(battery.authored.maxChargeKW, availableGeneration);
 				if (busKW <= 0.0) continue;
-				auto const storedGain = std::min(busKW * static_cast<double>(seconds)
+				auto const storedGain = std::min(busKW * hours
 					* battery.authored.chargeEfficiency, headroom);
 				if (storedGain <= 0.0) continue;
 				auto const busUsed = storedGain / battery.authored.chargeEfficiency;
 				battery.stored += storedGain;
 				battery.chargedKWh += storedGain;
 				battery.chargeInputKWh += busUsed;
-				battery.lastChargeKW = busUsed / static_cast<double>(seconds);
+				battery.lastChargeKW = busUsed / hours;
 				// The pool is in power units: subtract the bus power the
 				// battery actually took, not the tick's energy.
-				availableGeneration -= busUsed / static_cast<double>(seconds);
+				availableGeneration -= busUsed / hours;
 			}
 			// Publish each battery's observable state for this tick: the
 			// reserve and saturation flags and the discharge service status.
