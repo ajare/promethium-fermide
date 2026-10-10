@@ -1,15 +1,17 @@
--- Station systems slice 3: lifecycle, authored finite Resource stores,
+-- Station systems slice 5: lifecycle, authored finite Resource stores,
 -- bounded authored transfers, compound-resource conversions, solar
--- generation and External equipment load supply. Every system executes
--- this factory in its own budgeted private sandbox.
--- Stores, transfer rules, conversion rules, solar arrays and equipment
--- load contracts arrive as plain immutable descriptor values; each
--- object initialises its own copy and re-checks the finite-capacity,
--- per-unit conservation, per-constituent compound conservation and
--- power-allocation invariants every tick. The host applies the
--- authoritative ledger; this mirror audits the same rules inside the
--- sandbox so a corrupt crossing or model drift fails contained through
--- the integrated error path.
+-- generation, External equipment load supply and rechargeable battery
+-- banks. Every system executes this factory in its own budgeted private
+-- sandbox.
+-- Stores, transfer rules, conversion rules, solar arrays, equipment
+-- load contracts and battery descriptors arrive as plain immutable
+-- descriptor values; each object initialises its own copy and re-checks
+-- the finite-capacity, per-unit conservation, per-constituent compound
+-- conservation, power-allocation and battery energy-conservation
+-- invariants every tick. The host applies the authoritative ledger;
+-- this mirror audits the same rules inside the sandbox so a corrupt
+-- crossing or model drift fails contained through the integrated error
+-- path.
 local BALANCE_TOLERANCE = 1e-9
 
 -- Compound constituents are accounted in kg; the energy term in kJ.
@@ -39,19 +41,20 @@ local function toKg(unit, mass)
     return mass
 end
 
-return function(name, stores, transfers, conversions, solar, loads)
+return function(name, stores, transfers, conversions, solar, loads, batteries)
     assert(type(name) == "string")
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
     assert(type(conversions) == "table", "resource conversion descriptors missing")
     assert(type(solar) == "table", "solar array descriptors missing")
     assert(type(loads) == "table", "equipment load descriptors missing")
+    assert(type(batteries) == "table", "battery descriptors missing")
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
         starting_totals = {}, unit_loss = {},
         starting_constituents = {}, constituent_loss = {},
-        solar = {}, loads = {}, load_order = {},
+        solar = {}, loads = {}, load_order = {}, batteries = {},
     }
     local by_id = {}
     for index = 1, #stores do
@@ -333,6 +336,63 @@ return function(name, stores, transfers, conversions, solar, loads)
             admitted = false,
         }
     end
+    -- Battery banks: nameplate energy is the installed total, usable
+    -- energy the cyclable slice above the derived reserve floor
+    -- (nameplate - usable). Stored energy starts at the authored value
+    -- and is runtime state; charge and discharge efficiencies are
+    -- applied at the bus boundary so losses stay accounted and free
+    -- energy is impossible in either direction.
+    for index = 1, #batteries do
+        local battery = batteries[index]
+        assert(type(battery) == 'table', 'battery descriptor must be a table')
+        assert(type(battery.id) == 'string' and #battery.id > 0, 'battery needs an id')
+        assert(type(battery.nameplateKWh) == 'number'
+            and battery.nameplateKWh == battery.nameplateKWh
+            and battery.nameplateKWh >= 0 and battery.nameplateKWh < math.huge,
+            'battery nameplate energy must be finite and non-negative')
+        assert(type(battery.usableKWh) == 'number'
+            and battery.usableKWh == battery.usableKWh
+            and battery.usableKWh >= 0 and battery.usableKWh <= battery.nameplateKWh,
+            'battery usable energy must be finite and within the nameplate energy')
+        assert(type(battery.startingStoredKWh) == 'number'
+            and battery.startingStoredKWh == battery.startingStoredKWh
+            and battery.startingStoredKWh >= 0
+            and battery.startingStoredKWh <= battery.nameplateKWh,
+            'battery starting stored energy must be finite and within the nameplate energy')
+        assert(type(battery.maxChargeKW) == 'number'
+            and battery.maxChargeKW == battery.maxChargeKW
+            and battery.maxChargeKW >= 0 and battery.maxChargeKW < math.huge,
+            'battery charge power limit must be finite and non-negative')
+        assert(type(battery.maxDischargeKW) == 'number'
+            and battery.maxDischargeKW == battery.maxDischargeKW
+            and battery.maxDischargeKW >= 0 and battery.maxDischargeKW < math.huge,
+            'battery discharge power limit must be finite and non-negative')
+        assert(type(battery.chargeEfficiency) == 'number'
+            and battery.chargeEfficiency == battery.chargeEfficiency
+            and battery.chargeEfficiency > 0 and battery.chargeEfficiency <= 1,
+            'battery charge efficiency must be greater than 0 and at most 1')
+        assert(type(battery.dischargeEfficiency) == 'number'
+            and battery.dischargeEfficiency == battery.dischargeEfficiency
+            and battery.dischargeEfficiency > 0 and battery.dischargeEfficiency <= 1,
+            'battery discharge efficiency must be greater than 0 and at most 1')
+        object.batteries[index] = {
+            id = battery.id,
+            nameplateKWh = battery.nameplateKWh,
+            usableKWh = battery.usableKWh,
+            startingStored = battery.startingStoredKWh,
+            maxChargeKW = battery.maxChargeKW,
+            maxDischargeKW = battery.maxDischargeKW,
+            chargeEfficiency = battery.chargeEfficiency,
+            dischargeEfficiency = battery.dischargeEfficiency,
+            stored = battery.startingStoredKWh,
+            charged = 0,
+            discharged = 0,
+            delivered = 0,
+            charge_input = 0,
+            last_charge = 0,
+            last_discharge = 0,
+        }
+    end
     -- Declared deterministic order: priority descending, declaration index
     -- ascending. Including the index makes the comparator a total order, so
     -- the result cannot depend on sort stability.
@@ -475,11 +535,53 @@ return function(name, stores, transfers, conversions, solar, loads)
     -- Mirror of the host power ledger: solar output follows installed
     -- capacity and evaluated illumination; allocation runs in two passes
     -- (protected critical floors first, then discretionary demand) in the
-    -- declared deterministic order. Allocated power can never exceed the
-    -- generation actually available this tick, and no load is supplied
-    -- above its request. A load that requires a cooling service is never
-    -- admitted in this slice: it draws nothing and its cooling need stays
-    -- visible as unmet cooling rather than being silently absorbed.
+    -- declared deterministic order. Battery discharge rides the same pool,
+    -- covering what generation could not reach within the reserve floor,
+    -- the discharge power limit and the discharge efficiency; charging
+    -- takes only the surplus no load took. Allocated power can never
+    -- exceed generation plus actual battery output, and no load is
+    -- supplied above its request. A load that requires a cooling service
+    -- is never admitted in this slice: it draws nothing and its cooling
+    -- need stays visible as unmet cooling rather than being silently
+    -- absorbed.
+    local function batteryReserve(battery)
+        return battery.nameplateKWh - battery.usableKWh
+    end
+    local function batteryDisabled(battery)
+        return battery.usableKWh <= 0
+    end
+    local function deliverableKW(battery, dt)
+        if batteryDisabled(battery) then return 0 end
+        local drawable = math.max(0, battery.stored - batteryReserve(battery))
+        -- The discharge power limit is per tick: whatever this battery
+        -- already delivered this tick counts against it, so the two
+        -- allocation passes can never jointly exceed the cap.
+        local byPower = battery.maxDischargeKW - battery.last_discharge
+        return math.max(0, math.min(byPower,
+            drawable * battery.dischargeEfficiency / dt))
+    end
+    -- Route a power need through the batteries in declaration order and
+    -- return what they actually delivered.
+    local function drawBatteries(self, needKW, dt)
+        if needKW <= 0 then return 0 end
+        local remaining = needKW
+        for _, battery in ipairs(self.batteries) do
+            if remaining <= 1e-15 then break end
+            if not batteryDisabled(battery) then
+                local cap = deliverableKW(battery, dt)
+                local give = math.min(remaining, cap)
+                if give > 0 then
+                    local drawn = give * dt / battery.dischargeEfficiency
+                    battery.stored = battery.stored - drawn
+                    battery.discharged = battery.discharged + drawn
+                    battery.delivered = battery.delivered + give * dt
+                    battery.last_discharge = battery.last_discharge + give
+                end
+                remaining = remaining - give
+            end
+        end
+        return needKW - remaining
+    end
     local function applyPower(self, elapsed, fixed_seconds)
         local generation = 0
         for _, array in ipairs(self.solar) do
@@ -490,6 +592,11 @@ return function(name, stores, transfers, conversions, solar, loads)
             generation = generation + available
         end
         local availableGeneration = generation
+        for _, battery in ipairs(self.batteries) do
+            battery.last_charge = 0
+            battery.last_discharge = 0
+        end
+        local batterySupplied = 0
         local supplied = {}
         for _, index in ipairs(self.load_order) do
             local load = self.loads[index]
@@ -500,10 +607,13 @@ return function(name, stores, transfers, conversions, solar, loads)
             supplied[index] = 0
             if load.admitted and load.requested > 0 then
                 local floor = math.min(load.criticalFloorKW, load.requested)
-                local give = math.min(floor, generation)
-                supplied[index] = give
-                generation = generation - give
-                load.unmetCritical = floor - give
+                local fromGeneration = math.min(floor, generation)
+                generation = generation - fromGeneration
+                local stillNeeded = floor - fromGeneration
+                local fromBattery = drawBatteries(self, stillNeeded, fixed_seconds)
+                supplied[index] = fromGeneration + fromBattery
+                batterySupplied = batterySupplied + fromBattery
+                load.unmetCritical = stillNeeded - fromBattery
             end
         end
         for _, index in ipairs(self.load_order) do
@@ -511,11 +621,51 @@ return function(name, stores, transfers, conversions, solar, loads)
             if load.admitted and load.requested > 0 then
                 local remaining = load.requested - supplied[index]
                 if remaining > 0 then
-                    local candidate = math.min(remaining, generation)
+                    local fromGeneration = math.min(remaining, generation)
+                    local afterGeneration = remaining - fromGeneration
+                    local batteryCapable = 0
+                    for _, battery in ipairs(self.batteries) do
+                        batteryCapable = batteryCapable + deliverableKW(battery, fixed_seconds)
+                    end
+                    local batteryAsk = math.min(afterGeneration, batteryCapable)
                     local minOperating = load.requested * (1 - load.maxCurtailment)
-                    if supplied[index] + candidate + 1e-12 >= minOperating then
-                        supplied[index] = supplied[index] + candidate
-                        generation = generation - candidate
+                    if supplied[index] + fromGeneration + batteryAsk + 1e-12 >= minOperating then
+                        supplied[index] = supplied[index] + fromGeneration
+                        generation = generation - fromGeneration
+                        -- Route the full remaining need, not just the
+                        -- capped ask, so each battery's recorded request
+                        -- and shortfall show the limitation the
+                        -- allocation actually ran into.
+                        local drawn = drawBatteries(self, afterGeneration, fixed_seconds)
+                        supplied[index] = supplied[index] + drawn
+                        batterySupplied = batterySupplied + drawn
+                    end
+                end
+            end
+        end
+        -- Charge from the surplus left after every allocation: batteries
+        -- take only generation no load took, within the charge power
+        -- limit, the headroom below nameplate and the charge efficiency.
+        -- A battery that discharged this tick never charges in the same
+        -- tick, so no cycle can circulate energy.
+        for _, battery in ipairs(self.batteries) do
+            if not batteryDisabled(battery) and generation > 0 and battery.last_discharge <= 0 then
+                local headroom = battery.nameplateKWh - battery.stored
+                if headroom > 0 then
+                    local busKW = math.min(battery.maxChargeKW, generation)
+                    if busKW > 0 then
+                        local storedGain = math.min(busKW * fixed_seconds
+                            * battery.chargeEfficiency, headroom)
+                        if storedGain > 0 then
+                            local busUsed = storedGain / battery.chargeEfficiency
+                            battery.stored = battery.stored + storedGain
+                            battery.charged = battery.charged + storedGain
+                            battery.charge_input = battery.charge_input + busUsed
+                            battery.last_charge = busUsed / fixed_seconds
+                            -- The pool is in power units: subtract the bus
+                            -- power the battery actually took.
+                            generation = generation - busUsed / fixed_seconds
+                        end
                     end
                 end
             end
@@ -556,17 +706,41 @@ return function(name, stores, transfers, conversions, solar, loads)
                 exchange.lastCompleted = completed
             end
         end
-        -- Allocation audit: allocated power never exceeds generation and
-        -- no load receives more than it requested. Shortages are valid;
-        -- an over-allocation is a software failure and fails contained.
+        -- Allocation audit: allocated power never exceeds generation plus
+        -- actual battery output and no load receives more than it
+        -- requested. Shortages are valid; an over-allocation is a
+        -- software failure and fails contained.
         local totalSupplied = 0
         for index = 1, #self.loads do totalSupplied = totalSupplied + (supplied[index] or 0) end
-        local generationBound = BALANCE_TOLERANCE * math.max(1.0, math.abs(availableGeneration))
-        assert(totalSupplied <= availableGeneration + generationBound,
-            'power allocation exceeded available generation')
+        local generationBound = BALANCE_TOLERANCE
+            * math.max(1.0, math.abs(availableGeneration) + batterySupplied)
+        assert(totalSupplied <= availableGeneration + batterySupplied + generationBound,
+            'power allocation exceeded generation plus battery output')
         for index = 1, #self.loads do
             assert((supplied[index] or 0) <= self.loads[index].requested + generationBound,
                 'load supplied above its requested service')
+        end
+        -- Battery energy audit: stored energy stays inside the nameplate,
+        -- the ledger closes over charge and discharge, nothing is
+        -- delivered for free, nothing is stored from nothing, and the
+        -- reserve floor is never breached.
+        for _, battery in ipairs(self.batteries) do
+            local bound = BALANCE_TOLERANCE * math.max(1.0, math.abs(battery.startingStored))
+            assert(battery.stored == battery.stored and battery.stored >= 0,
+                'battery stored energy went negative')
+            assert(battery.stored <= battery.nameplateKWh + bound,
+                'battery stored energy exceeded its nameplate capacity')
+            local floor = math.min(battery.startingStored, batteryReserve(battery))
+            assert(battery.stored >= floor - bound,
+                'battery drawn below its reserve floor')
+            local residual = battery.startingStored - battery.discharged
+                + battery.charged - battery.stored
+            assert(math.abs(residual) <= bound,
+                'battery energy ledger residual exceeds tolerance')
+            assert(battery.delivered <= battery.discharged + bound,
+                'battery delivered more energy than it drew from storage')
+            assert(battery.charged <= battery.charge_input + bound,
+                'battery stored more energy than the bus supplied to it')
         end
     end
     function object:advance(world_tick, fixed_seconds)

@@ -25,12 +25,12 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		world->getSimulationTick() * static_cast<double>(core::World::getFixedTimestep()),
 		static_cast<unsigned long long>(world->getSimulationTick()));
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
-	ImGui::TextWrapped("Slice 3: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation and External equipment load supply. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation and cooling-infeasible loads are not admitted. Within a tick, power allocates first, then transfers, then conversions. Observation interval is a provisional display/event setting, not a separate simulation clock.");
+	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply and rechargeable batteries. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Within a tick, power allocates first, then transfers, then conversions. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s)",
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies)",
 		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
 		authored.stores.size(), authored.transfers.size(), authored.conversions.size(),
-		authored.solarArrays.size(), authored.equipmentLoads.size());
+		authored.solarArrays.size(), authored.equipmentLoads.size(), authored.batteries.size());
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
@@ -382,6 +382,52 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		}
 		mDraft.equipmentLoads.push_back(std::move(load));
 	}
+	ImGui::SeparatorText("Draft batteries (kWh; usable energy is the cyclable slice above the reserve floor = nameplate - usable)");
+	for (size_t index = 0; index < mDraft.batteries.size(); ++index)
+	{
+		auto& battery = mDraft.batteries[index];
+		auto const row = std::to_string(index);
+		ImGui::PushItemWidth(220);
+		char batteryIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(batteryIdBuffer, battery.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Battery " + row + " id").c_str(), batteryIdBuffer, sizeof(batteryIdBuffer)))
+			battery.id = batteryIdBuffer;
+		ImGui::InputDouble(("Battery " + row + " nameplate kWh").c_str(),
+			&battery.nameplateKWh, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Battery " + row + " usable kWh").c_str(),
+			&battery.usableKWh, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Battery " + row + " starting stored kWh").c_str(),
+			&battery.startingStoredKWh, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Battery " + row + " max charge kW").c_str(),
+			&battery.maxChargeKW, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Battery " + row + " max discharge kW").c_str(),
+			&battery.maxDischargeKW, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Battery " + row + " charge efficiency").c_str(),
+			&battery.chargeEfficiency, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Battery " + row + " discharge efficiency").c_str(),
+			&battery.dischargeEfficiency, 0.0, 0.0, "%.3f");
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove battery " + row).c_str()))
+			mDraft.batteries.erase(mDraft.batteries.begin() + static_cast<std::ptrdiff_t>(index));
+		ImGui::PopItemWidth();
+	}
+	if (mDraft.batteries.size() < core::MaxStationBatteries && ImGui::Button("Add battery"))
+	{
+		core::BatterySettings battery;
+		battery.nameplateKWh = 10.0;
+		battery.usableKWh = 8.0;
+		battery.startingStoredKWh = 8.0;
+		battery.maxChargeKW = 2.0;
+		battery.maxDischargeKW = 4.0;
+		for (size_t candidate = mDraft.batteries.size() + 1;; ++candidate)
+		{
+			battery.id = "battery" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.batteries.begin(), mDraft.batteries.end(),
+				[&](core::BatterySettings const& existing) { return existing.id == battery.id; });
+			if (!taken) break;
+		}
+		mDraft.batteries.push_back(std::move(battery));
+	}
 	bool const draftChanged = mDraft != authored;
 	ImGui::TextUnformatted(draftChanged
 		? "Draft differs from the authored start conditions."
@@ -518,10 +564,36 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			ImGui::Text("  exchange %s (%s): requested %.3f, completed %.3f",
 				flow.storeId.c_str(), flow.unit.c_str(), flow.requested, flow.completed);
 	}
-	ImGui::Text("Power totals: generation %.3f kW, requested %.3f, supplied %.3f, unmet %.3f, unmet critical %.3f, surplus %.3f, exported heat %.3f kW",
+	ImGui::Text("Power totals: generation %.3f kW, requested %.3f, supplied %.3f, unmet %.3f, unmet critical %.3f, surplus %.3f, exported heat %.3f kW, battery discharge %.3f kW, battery charge %.3f kW, battery shortfall %.3f kW",
 		snapshot.power.availableGenerationKW, snapshot.power.totalRequestedKW,
 		snapshot.power.totalSuppliedKW, snapshot.power.totalUnmetKW,
-		snapshot.power.unmetCriticalKW, snapshot.power.surplusKW, snapshot.power.exportedHeatKW);
+		snapshot.power.unmetCriticalKW, snapshot.power.surplusKW, snapshot.power.exportedHeatKW,
+		snapshot.power.batteryDischargeKW, snapshot.power.batteryChargeKW,
+		snapshot.power.batteryShortfallKW);
+	ImGui::SeparatorText("Batteries (live; reserve = nameplate - usable is never dischargeable; discharge covers deficits on the same pool, charging takes only surplus)");
+	if (snapshot.power.batteries.empty()) ImGui::TextDisabled("No batteries authored.");
+	for (auto const& battery : snapshot.power.batteries)
+	{
+		char const* status = "idle";
+		switch (battery.status)
+		{
+		case core::StationTransferStatus::Full: status = "discharging"; break;
+		case core::StationTransferStatus::Partial: status = "discharge-limited"; break;
+		case core::StationTransferStatus::Rejected: status = "cannot-discharge"; break;
+		case core::StationTransferStatus::Idle: break;
+		}
+		ImGui::Text("%s: %s | stored %.3f of nameplate %.3f kWh (usable %.3f, reserve %.3f never dischargeable) | SoC %.1f%% | charge %.3f kW, discharge %.3f kW (eff %.2f/%.2f) | cumulative losses %.3f kWh",
+			battery.id.c_str(), status, battery.storedKWh, battery.nameplateKWh,
+			battery.usableKWh, battery.reserveKWh, battery.stateOfCharge * 100.0,
+			battery.lastChargeKW, battery.lastDischargeKW,
+			battery.chargeEfficiency, battery.dischargeEfficiency, battery.lossesKWh);
+		if (battery.disabled)
+			ImGui::Text("  disabled: zero usable energy cannot store or deliver anything");
+		else if (battery.atReserve)
+			ImGui::Text("  at reserve floor: no usable energy remains above the reserve");
+		else if (battery.saturated)
+			ImGui::Text("  saturated: stored energy is at nameplate capacity");
+	}
 	if (snapshot.enabled && !snapshot.healthy)
 		ImGui::TextWrapped("Station software failure: the World is paused. The failed tick was not committed. Reset the World to reconstruct Station systems; resume cannot retry failed scripts.");
 	for (auto const& diagnostic : world->getStationSystemsDiagnostics())

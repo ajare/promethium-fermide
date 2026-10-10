@@ -618,6 +618,133 @@ namespace
 				sawEclipse = true;
 			require(sawEclipse, "Eclipse transition missing from the window's event log");
 	}
+	void batteryWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		std::string text; io.ClipboardUserData = &text;
+		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
+		DocumentHistory history;
+		StationSystemsWindow window;
+		// The battery draft extends past the default display height; give
+		// the headless test enough room and scroll as the power tests do.
+		io.DisplaySize = {1200, 1700};
+		auto world = std::make_shared<core::World>("Battery editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		core::StationSystemsSettings initial;
+		initial.enabled = true;
+		initial.observationIntervalSeconds = 1.0f;
+		core::ProfileSettings fullSun;
+		fullSun.constantLevel = 1.0;
+		initial.solarArrays.push_back({"field", 10.0, fullSun});
+		core::EquipmentLoadSettings shop;
+		shop.id = "shop";
+		shop.electricalDemandKW = 6.0;
+		shop.thermalClass = "moderate";
+		initial.equipmentLoads.push_back(shop);
+		initial.batteries.push_back({"bank", 10.0, 8.0, 8.0, 2.0, 4.0, 1.0, 1.0});
+		require(world->configureStationSystems(initial, false, &diagnostic), diagnostic.c_str());
+		auto frame = [&]
+		{
+			ImGui::NewFrame(); text.clear(); ImGui::LogToClipboard();
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 980});
+			window.render(world, history); ImGui::LogFinish(); ImGui::Render();
+		};
+		auto clickPoint = [&](ImVec2 point)
+		{
+			io.AddMousePosEvent(point.x, point.y); frame();
+			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
+		};
+		auto point = [&](char const* label)
+		{
+			io.AddMousePosEvent(400.0f, 400.0f);
+			io.AddMouseWheelEvent(0.0f, 1000.0f); frame();
+			for (int pass = 0; pass < 16; ++pass)
+			{
+				auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
+				for (float y = 45; y < 975; y += 5)
+					for (float x = 18; x < 940; x += 15)
+					{
+						io.AddMousePosEvent(x, y); frame(); frame();
+						if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
+					}
+				io.AddMousePosEvent(400.0f, 400.0f);
+				io.AddMouseWheelEvent(0.0f, -10.0f); frame();
+			}
+			throw std::runtime_error(std::string("Missing Station control: ") + label);
+		};
+		auto typeValue = [&](char const* label, char const* value)
+		{
+			clickPoint(point(label));
+			io.AddKeyEvent(ImGuiMod_Ctrl, true); io.AddKeyEvent(ImGuiKey_A, true); frame();
+			io.AddKeyEvent(ImGuiKey_A, false); io.AddKeyEvent(ImGuiMod_Ctrl, false);
+			io.AddInputCharactersUTF8(value); frame();
+			io.AddKeyEvent(ImGuiKey_Enter, true); frame(); io.AddKeyEvent(ImGuiKey_Enter, false); frame();
+		};
+		window.visible = true; frame(); frame();
+		require(text.find("1 battery(ies)") != std::string::npos,
+			"Authored battery count missing from the window");
+		require(text.find("bank: idle | stored 8.000 of nameplate 10.000 kWh (usable 8.000, reserve 2.000 never dischargeable)")
+			!= std::string::npos, "Authored battery reserve policy not displayed");
+		// Charge from surplus under full sun: the live view shows the
+		// charging power and the document stays clean while ticking.
+		world->markSaved();
+		world->resumeSimulation(); require(world->advanceTicks(60), "Battery editor charge run failed");
+		world->pauseSimulation(); frame();
+		require(text.find("battery discharge 0.000 kW, battery charge 2.000 kW, battery shortfall 0.000 kW")
+			!= std::string::npos, "Live battery charging totals not displayed");
+		require(!world->isModified(), "Battery charging dirtied the authored document");
+		// Turn the array periodic with an eclipse leg and watch the live
+		// discharge carry the deficit.
+		clickPoint(point("Solar 0 periodic illumination"));
+		clickPoint(point("Add segment to solar 0"));
+		clickPoint(point("Apply settings"));
+		clickPoint(point("Confirm World reset"));
+		require(world->getStationSystemsSettings().solarArrays[0].illumination.segments.size() == 2
+			&& history.undoCount() == 1, "Periodic illumination did not apply");
+		world->markSaved();
+		world->resumeSimulation(); require(world->advanceTicks(3660), "Battery editor eclipse run failed");
+		world->pauseSimulation(); frame();
+		require(text.find("bank: discharge-limited |") != std::string::npos
+			&& text.find("battery discharge 4.000 kW") != std::string::npos
+			&& text.find("battery shortfall 2.000 kW") != std::string::npos,
+			"Live battery discharge during eclipse not displayed");
+		require(!world->isModified(), "Battery eclipse run dirtied the authored document");
+		bool sawDeficitSupport = false;
+		for (auto const& event : world->getStationSystemsEvents())
+			if (event.message.find("Battery 'bank' discharge limited: supplied 4.000000 of 6.000000 kW")
+				!= std::string::npos)
+				sawDeficitSupport = true;
+		require(sawDeficitSupport, "Battery discharge transition missing from the window's event log");
+		// Draft a second battery through the real controls; usable energy
+		// above the nameplate is refused with a visible diagnostic and no
+		// mutation of the authored settings or history.
+		clickPoint(point("Add battery"));
+		typeValue("Battery 1 usable kWh", "15");
+		clickPoint(point("Apply settings"));
+		clickPoint(point("Confirm World reset")); frame();
+		require(text.find("usable energy exceeds the nameplate energy") != std::string::npos,
+			"Invalid battery usable energy diagnostic not shown");
+		require(world->getStationSystemsSettings().batteries.size() == 1
+			&& history.undoCount() == 1 && world->getSimulationTick() == 3660,
+			"Invalid battery draft mutated the authored settings");
+		// Repair the drafted value; the confirmed reset applies the new
+		// contract and the live view reconstructs from authored state.
+		typeValue("Battery 1 usable kWh", "6");
+		clickPoint(point("Confirm World reset"));
+		require(world->getStationSystemsSettings().batteries.size() == 2
+			&& world->getStationSystemsSettings().batteries[1].usableKWh == 6.0
+			&& history.undoCount() == 2 && world->getSimulationTick() == 0,
+			"Repaired battery draft did not apply through the reset-confirmed flow");
+		frame();
+		require(text.find("2 battery(ies)") != std::string::npos
+			&& text.find("battery2: idle | stored 8.000 of nameplate 10.000 kWh (usable 6.000, reserve 4.000 never dischargeable)")
+				!= std::string::npos,
+			"Applied battery not reflected in the window");
+	}
 }
 void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
@@ -626,4 +753,5 @@ void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 	checks.push_back({"station/transferWorkflow", transferWorkflow});
 	checks.push_back({"station/compoundWorkflow", compoundWorkflow});
 	checks.push_back({"station/powerWorkflow", powerWorkflow});
+	checks.push_back({"station/batteryWorkflow", batteryWorkflow});
 }

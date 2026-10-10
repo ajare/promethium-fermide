@@ -265,6 +265,7 @@ set(editor_names
     station/transferWorkflow
     station/compoundWorkflow
     station/powerWorkflow
+    station/batteryWorkflow
 )
 
 if(DEFINED LANE)

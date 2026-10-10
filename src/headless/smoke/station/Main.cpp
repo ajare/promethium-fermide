@@ -84,7 +84,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 69"), 11, "version: 65");
+		text.replace(text.find("version: 70"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -1361,6 +1361,422 @@ namespace
 			"Lua load assertion failure not contained at construction");
 		core::setStationSystemsSourceLoader({});
 	}
+	void batteries(smoke::Context const&)
+	{
+		// #394: authored batteries separate nameplate and usable energy,
+		// keep the reserve floor undischargeable, book charge/discharge
+		// losses, ride deficits through the same load allocation pool as
+		// generation, and recharge only from surplus.
+		auto const approx = [](double actual, double expected)
+		{ return std::abs(actual - expected) < 1e-3; };
+		auto sawEvent = [](core::World& world, std::string const& needle)
+		{
+			for (auto const& event : world.getStationSystemsEvents())
+				if (event.message.find(needle) != std::string::npos) return true;
+			return false;
+		};
+		auto constantProfile = [](double level)
+		{
+			core::ProfileSettings profile;
+			profile.constantLevel = level;
+			return profile;
+		};
+		auto array = [](std::string const& id, double capacityKW, core::ProfileSettings illumination)
+		{
+			return core::SolarArraySettings{id, capacityKW, std::move(illumination)};
+		};
+		auto load = [](std::string const& id, double demandKW, int priority, double maxCurtailment = 1.0)
+		{
+			core::EquipmentLoadSettings settings;
+			settings.id = id;
+			settings.electricalDemandKW = demandKW;
+			settings.thermalClass = "moderate";
+			settings.coolingDisposition = core::StationCoolingDisposition::Exported;
+			settings.priority = priority;
+			settings.maxCurtailment = maxCurtailment;
+			return settings;
+		};
+		auto battery = [](std::string const& id, double nameplateKWh, double usableKWh,
+			double startingStoredKWh, double maxChargeKW, double maxDischargeKW,
+			double chargeEfficiency = 1.0, double dischargeEfficiency = 1.0)
+		{
+			core::BatterySettings settings;
+			settings.id = id;
+			settings.nameplateKWh = nameplateKWh;
+			settings.usableKWh = usableKWh;
+			settings.startingStoredKWh = startingStoredKWh;
+			settings.maxChargeKW = maxChargeKW;
+			settings.maxDischargeKW = maxDischargeKW;
+			settings.chargeEfficiency = chargeEfficiency;
+			settings.dischargeEfficiency = dischargeEfficiency;
+			return settings;
+		};
+		auto configure = [](core::World& world,
+			std::vector<core::SolarArraySettings> solar,
+			std::vector<core::EquipmentLoadSettings> loads,
+			std::vector<core::BatterySettings> batteries)
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.solarArrays = std::move(solar);
+			settings.equipmentLoads = std::move(loads);
+			settings.batteries = std::move(batteries);
+			return std::pair(world.configureStationSystems(settings, true, &diagnostic), diagnostic);
+		};
+		// Invalid battery configuration is refused before anything runs.
+		core::World refused("Refused", 2, 2);
+		refused.pauseSimulation(); refused.finishBuild(); refused.markSaved();
+		for (auto const& bad : {
+			battery("", 10, 8, 8, 2, 4),
+			battery(std::string(65, 'x'), 10, 8, 8, 2, 4),
+			battery("a", -1, 8, 8, 2, 4),
+			battery("a", std::numeric_limits<double>::quiet_NaN(), 8, 8, 2, 4),
+			battery("a", 10, 11, 8, 2, 4),
+			battery("a", 10, -1, 8, 2, 4),
+			battery("a", 10, 8, 11, 2, 4),
+			battery("a", 10, 8, -1, 2, 4),
+			battery("a", 10, 8, 8, -1, 4),
+			battery("a", 10, 8, 8, 2, -1),
+			battery("a", 10, 8, 8, 2, 4, 0.0, 1.0),
+			battery("a", 10, 8, 8, 2, 4, 1.5, 1.0),
+			battery("a", 10, 8, 8, 2, 4, 1.0, 0.0),
+			battery("a", 10, 8, 8, 2, 4, 1.0, -0.5),
+			battery("a", 10, 8, 8, 2, 4, std::numeric_limits<double>::quiet_NaN(), 1.0) })
+		{
+			auto const [ok, diagnostic] = configure(refused, {}, {}, {bad});
+			require(!ok && !diagnostic.empty(), "Invalid battery configuration accepted");
+			require(!refused.getStationSystemsSnapshot().enabled && !refused.isModified(),
+				"Rejected battery configuration mutated the World");
+		}
+		{
+			std::vector<core::BatterySettings> tooMany;
+			for (size_t index = 0; index <= core::MaxStationBatteries; ++index)
+				tooMany.push_back(battery("b" + std::to_string(index), 1, 1, 1, 1, 1));
+			require(!configure(refused, {}, {}, tooMany).first, "Battery count limit not enforced");
+		}
+		// Surplus charging and saturation: the battery takes only the
+		// generation no load took, fills to nameplate, and the surplus
+		// returns once there is no headroom left.
+		core::World charging("Charging", 2, 2);
+		charging.pauseSimulation(); charging.finishBuild();
+		require(configure(charging,
+			{array("field", 10.0, constantProfile(1.0))},
+			{load("shop", 6.0, 0)},
+			{battery("bank", 10.0, 8.0, 2.0, 2.0, 4.0)}).first, "Charging scenario refused");
+		charging.markSaved();
+		charging.resumeSimulation();
+		require(charging.advanceTicks(60), "Charging run failed");
+		{
+			auto const snap = charging.getStationSystemsSnapshot();
+			require(snap.power.batteries.size() == 1
+				&& approx(snap.power.batteries[0].storedKWh, 4.0)
+				&& approx(snap.power.batteryChargeKW, 2.0)
+				&& approx(snap.power.batteryDischargeKW, 0.0)
+				&& approx(snap.power.surplusKW, 2.0),
+				"Surplus charging did not take exactly the untaken generation");
+			require(snap.power.batteries[0].reserveKWh == 2.0
+				&& snap.power.batteries[0].usableKWh == 8.0
+				&& approx(snap.power.batteries[0].stateOfCharge, 0.4),
+				"Reserve policy not visible in the snapshot");
+			require(!charging.isModified(), "Battery charging dirtied the authored document");
+		}
+		require(charging.advanceTicks(181), "Charging-to-full run failed");
+		{
+			auto const snap = charging.getStationSystemsSnapshot();
+			require(approx(snap.power.batteries[0].storedKWh, 10.0)
+				&& snap.power.batteries[0].saturated
+				&& approx(snap.power.batteryChargeKW, 0.0)
+				&& approx(snap.power.surplusKW, 4.0),
+				"Saturated battery still drew charge or surplus not restored");
+			require(approx(snap.power.batteries[0].chargedKWh, 8.0)
+				&& approx(snap.power.batteries[0].chargeInputKWh, 8.0)
+				&& approx(snap.power.batteries[0].residualKWh, 0.0)
+				&& approx(snap.power.batteries[0].lossesKWh, 0.0),
+				"Charge ledger did not close");
+			require(sawEvent(charging, "Battery 'bank' fully charged: stored energy reached nameplate capacity"),
+				"Saturation transition missing from the event log");
+		}
+		// Eclipse ride-through, exhaustion and recovery across two full
+		// cycles, replayed identically after reset.
+		core::World eclipse("Eclipse", 2, 2);
+		eclipse.pauseSimulation(); eclipse.finishBuild();
+		{
+			core::ProfileSettings illumination;
+			illumination.periodSeconds = 120.0;
+			illumination.segments = {{0.0, 1.0}, {60.0, 0.0}};
+			require(configure(eclipse,
+				{array("orbital", 10.0, illumination)},
+				{load("station", 6.0, 0)},
+				{battery("bank", 10.0, 8.0, 8.0, 2.0, 4.0)}).first, "Eclipse battery scenario refused");
+			eclipse.resumeSimulation();
+			// One second of sun: the battery tops up to nameplate.
+			require(eclipse.advanceTicks(60), "Eclipse sun leg failed");
+			require(approx(eclipse.getStationSystemsSnapshot().power.batteries[0].storedKWh, 10.0),
+				"Battery did not charge during sunlight");
+			// Enter eclipse at t=60s (tick 3600) and ride it for one
+			// second: the battery carries 4 kW of the load.
+			require(eclipse.advanceTicks(3539), "Eclipse entry failed");
+			require(eclipse.advanceTicks(60), "Eclipse ride-through leg failed");
+			{
+				auto const snap = eclipse.getStationSystemsSnapshot();
+				require(approx(snap.power.availableGenerationKW, 0.0)
+					&& approx(snap.power.batteries[0].storedKWh, 6.0)
+					&& approx(snap.power.batteryDischargeKW, 4.0)
+					&& approx(snap.power.batteryShortfallKW, 2.0),
+					"Battery did not ride the eclipse deficit through the shared pool");
+				require(snap.power.loads[0].status == core::StationTransferStatus::Partial
+					&& approx(snap.power.loads[0].suppliedKW, 4.0)
+					&& approx(snap.power.loads[0].unmetKW, 2.0)
+					&& approx(snap.power.totalSuppliedKW, 4.0),
+					"Load service during battery ride-through not integrated");
+				require(snap.power.totalSuppliedKW
+					<= snap.power.availableGenerationKW + snap.power.batteryDischargeKW + 1e-9,
+					"Integrated supply exceeded generation plus battery output");
+				require(snap.power.batteries[0].status == core::StationTransferStatus::Partial,
+					"Power-limited discharge not visible in the battery status");
+			}
+			// Two seconds into eclipse: the usable energy is gone; the
+			// reserve floor stops the discharge and the load goes fully
+			// unmet with the shortfall visible.
+			require(eclipse.advanceTicks(60), "Eclipse exhaustion leg failed");
+			{
+				auto const snap = eclipse.getStationSystemsSnapshot();
+				require(approx(snap.power.batteries[0].storedKWh, 2.0)
+					&& snap.power.batteries[0].atReserve,
+					"Battery did not stop exactly at its reserve floor");
+				require(sawEvent(eclipse, "Battery 'bank' exhausted: usable energy depleted to the reserve floor"),
+					"Exhaustion transition missing from the event log");
+			}
+			require(eclipse.advanceTicks(60), "Post-exhaustion leg failed");
+			{
+				auto const snap = eclipse.getStationSystemsSnapshot();
+				require(approx(snap.power.batteries[0].storedKWh, 2.0)
+					&& approx(snap.power.batteryDischargeKW, 0.0)
+					&& approx(snap.power.batteryShortfallKW, 6.0),
+					"Exhausted battery still delivered energy or shortfall not visible");
+				require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
+					&& approx(snap.power.loads[0].suppliedKW, 0.0),
+					"Load not fully unmet after battery exhaustion");
+			}
+			// Sunrise at t=120s: charging resumes and the battery
+			// recovers above the reserve floor.
+			require(eclipse.advanceTicks(3421), "Second eclipse leg failed");
+			require(eclipse.advanceTick(), "Sunrise tick failed");
+			{
+				auto const snap = eclipse.getStationSystemsSnapshot();
+				require(!snap.power.batteries[0].atReserve
+					&& snap.power.batteryChargeKW > 0.0,
+					"Battery did not recover and recharge at sunrise");
+				require(sawEvent(eclipse, "Battery 'bank' recovered above the reserve floor"),
+					"Recovery transition missing from the event log");
+			}
+			// Run out two full eclipse cycles and replay them identically.
+			require(eclipse.advanceTicks(7199), "Cycle continuation failed");
+			eclipse.pauseSimulation();
+			auto const expected = eclipse.getStationSystemsSnapshot();
+			auto const expectedEvents = eclipse.getStationSystemsEvents();
+			require(expected.worldTick == 14400, "Cycle run did not reach the expected tick");
+			eclipse.resetSimulation();
+			eclipse.resumeSimulation();
+			require(eclipse.advanceTicks(14400), "Eclipse battery replay failed");
+			require(eclipse.getStationSystemsSnapshot() == expected
+				&& eclipse.getStationSystemsEvents() == expectedEvents,
+				"Repeated eclipse battery cycles not deterministic after reset");
+		}
+		// Power-limited ride-through with no generation at all: the
+		// discharge power cap bounds the support and the remainder stays
+		// explicit unmet demand.
+		core::World limited("Limited", 2, 2);
+		limited.pauseSimulation(); limited.finishBuild();
+		require(configure(limited, {},
+			{load("lamp", 3.0, 0)},
+			{battery("cell", 10.0, 10.0, 10.0, 0.0, 1.0)}).first, "Power-limit scenario refused");
+		limited.resumeSimulation();
+		require(limited.advanceTicks(60), "Power-limit run failed");
+		{
+			auto const snap = limited.getStationSystemsSnapshot();
+			require(approx(snap.power.batteryDischargeKW, 1.0)
+				&& approx(snap.power.batteryShortfallKW, 2.0)
+				&& approx(snap.power.loads[0].suppliedKW, 1.0)
+				&& approx(snap.power.loads[0].unmetKW, 2.0)
+				&& approx(snap.power.batteries[0].storedKWh, 9.0),
+				"Discharge power limit not enforced or remainder not explicit");
+			require(approx(snap.power.batteries[0].deliveredKWh, 1.0)
+				&& approx(snap.power.batteries[0].dischargedKWh, 1.0),
+				"Lossless discharge ledger wrong");
+		}
+		// Efficiency losses are accounted on both sides: charging stores
+		// less than the bus supplied, discharge delivers less than the
+		// stored energy drawn, and the ledger closes over the losses.
+		core::World losses("Losses", 2, 2);
+		losses.pauseSimulation(); losses.finishBuild();
+		require(configure(losses,
+			{array("field", 10.0, constantProfile(1.0))},
+			{load("shop", 6.0, 0)},
+			{battery("bank", 10.0, 10.0, 2.0, 2.0, 4.0, 0.5, 0.5)}).first,
+			"Charge-loss scenario refused");
+		losses.resumeSimulation();
+		require(losses.advanceTicks(60), "Charge-loss run failed");
+		{
+			auto const snap = losses.getStationSystemsSnapshot();
+			require(approx(snap.power.batteries[0].chargedKWh, 1.0)
+				&& approx(snap.power.batteries[0].chargeInputKWh, 2.0)
+				&& approx(snap.power.batteries[0].storedKWh, 3.0)
+				&& approx(snap.power.batteries[0].lossesKWh, 1.0)
+				&& approx(snap.power.batteries[0].residualKWh, 0.0),
+				"Charge efficiency loss not booked or ledger not closed");
+			require(approx(snap.power.surplusKW, 2.0),
+				"Surplus not reduced by the full bus power the battery consumed");
+		}
+		core::World discharging("Discharging", 2, 2);
+		discharging.pauseSimulation(); discharging.finishBuild();
+		require(configure(discharging, {},
+			{load("lamp", 1.0, 0)},
+			{battery("cell", 10.0, 10.0, 10.0, 0.0, 100.0, 1.0, 0.5)}).first,
+			"Discharge-loss scenario refused");
+		discharging.resumeSimulation();
+		require(discharging.advanceTicks(60), "Discharge-loss run failed");
+		{
+			auto const snap = discharging.getStationSystemsSnapshot();
+			require(approx(snap.power.batteries[0].dischargedKWh, 2.0)
+				&& approx(snap.power.batteries[0].deliveredKWh, 1.0)
+				&& approx(snap.power.batteries[0].storedKWh, 8.0)
+				&& approx(snap.power.batteries[0].lossesKWh, 1.0)
+				&& approx(snap.power.batteries[0].residualKWh, 0.0),
+				"Discharge efficiency loss not booked or ledger not closed");
+			require(snap.power.batteries[0].deliveredKWh
+				<= snap.power.batteries[0].dischargedKWh + 1e-9,
+				"Battery delivered more energy than it drew (free energy)");
+		}
+		// Zero usable capacity disables the battery: it stores nothing,
+		// delivers nothing, and the load behaves as if absent.
+		core::World zeroed("Zeroed", 2, 2);
+		zeroed.pauseSimulation(); zeroed.finishBuild();
+		require(configure(zeroed, {},
+			{load("lamp", 1.0, 0)},
+			{battery("dead", 10.0, 0.0, 5.0, 5.0, 5.0)}).first, "Zero-capacity scenario refused");
+		zeroed.resumeSimulation();
+		require(zeroed.advanceTicks(60), "Zero-capacity run failed");
+		{
+			auto const snap = zeroed.getStationSystemsSnapshot();
+			require(snap.power.batteries[0].disabled
+				&& approx(snap.power.batteries[0].storedKWh, 5.0)
+				&& approx(snap.power.batteryDischargeKW, 0.0)
+				&& approx(snap.power.batteryChargeKW, 0.0),
+				"Zero-usable-capacity battery not disabled or still moved energy");
+			require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
+				&& approx(snap.power.loads[0].unmetKW, 1.0),
+				"Disabled battery changed the load outcome");
+		}
+		// Critical floors are protected through the battery too: during
+		// eclipse the critical load's floor is served from stored energy
+		// ahead of discretionary demand.
+		core::World critical("Critical", 2, 2);
+		critical.pauseSimulation(); critical.finishBuild();
+		{
+			core::ProfileSettings eclipseProfile;
+			eclipseProfile.periodSeconds = 120.0;
+			eclipseProfile.segments = {{0.0, 0.0}, {60.0, 1.0}};
+			auto lifeSupport = load("lifeSupport", 8.0, 0);
+			lifeSupport.criticalFloorKW = 2.0;
+			require(configure(critical,
+				{array("orbital", 10.0, eclipseProfile)},
+				{lifeSupport, load("workshop", 8.0, 9)},
+				{battery("bank", 10.0, 10.0, 10.0, 0.0, 3.0)}).first,
+				"Critical-battery scenario refused");
+			critical.resumeSimulation();
+			require(critical.advanceTicks(60), "Critical-battery run failed");
+			{
+				auto const snap = critical.getStationSystemsSnapshot();
+				require(snap.power.loads[0].id == "workshop"
+					&& snap.power.loads[1].id == "lifeSupport",
+					"Critical-battery loads not in declared allocation order");
+				require(approx(snap.power.loads[1].suppliedKW, 2.0)
+					&& approx(snap.power.loads[1].unmetCriticalKW, 0.0),
+					"Critical floor not protected from battery energy during eclipse");
+				require(approx(snap.power.loads[0].suppliedKW, 1.0)
+					&& approx(snap.power.batteryDischargeKW, 3.0),
+					"Discretionary demand took energy reserved for the critical floor");
+				require(approx(snap.power.batteries[0].storedKWh, 7.0),
+					"Battery discharge ledger wrong under critical protection");
+			}
+		}
+		// A load that cannot reach its minimum operable level even with
+		// battery energy takes nothing, and the stored energy stays put.
+		core::World rigid("Rigid", 2, 2);
+		rigid.pauseSimulation(); rigid.finishBuild();
+		require(configure(rigid, {},
+			{load("kiln", 10.0, 0, 0.0)},
+			{battery("cell", 10.0, 10.0, 10.0, 0.0, 3.0)}).first,
+			"Rigid-load battery scenario refused");
+		rigid.resumeSimulation();
+		require(rigid.advanceTicks(60), "Rigid-load run failed");
+		{
+			auto const snap = rigid.getStationSystemsSnapshot();
+			require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
+				&& approx(snap.power.loads[0].suppliedKW, 0.0)
+				&& approx(snap.power.batteries[0].storedKWh, 10.0)
+				&& approx(snap.power.batteryDischargeKW, 0.0),
+				"Battery supplied a load below its minimum operable level");
+			require(sawEvent(rigid, "Load 'kiln' rejected: below the minimum operable supply level"),
+				"Rigid-load refusal reason missing from the event log");
+		}
+		// The reserve floor is never drawn: discharge stops exactly at
+		// nameplate minus usable, never below.
+		core::World reserve("Reserve", 2, 2);
+		reserve.pauseSimulation(); reserve.finishBuild();
+		require(configure(reserve, {},
+			{load("lamp", 20.0, 0)},
+			{battery("cell", 10.0, 8.0, 3.0, 0.0, 100.0)}).first,
+			"Reserve-floor scenario refused");
+		reserve.resumeSimulation();
+		require(reserve.advanceTicks(120), "Reserve-floor run failed");
+		{
+			auto const snap = reserve.getStationSystemsSnapshot();
+			require(approx(snap.power.batteries[0].storedKWh, 2.0)
+				&& snap.power.batteries[0].atReserve
+				&& snap.power.batteries[0].storedKWh >= 2.0 - 1e-9,
+				"Discharge drew into the reserve floor");
+			require(approx(snap.power.batteries[0].deliveredKWh, 1.0),
+				"Reserve-floor delivery wrong");
+		}
+		// The bundled Lua model receives the battery descriptors intact
+		// and mirrors the same ledger; a mismatched model is refused at
+		// construction.
+		struct SourceScope { ~SourceScope() { core::setStationSystemsSourceLoader({}); } } scope;
+		core::setStationSystemsSourceLoader([] {
+			return "return function(name, stores, transfers, conversions, solar, loads, batteries) "
+				"assert(#batteries == 1); local b = batteries[1]; "
+				"assert(b.id == 'bank' and b.nameplateKWh == 10 and b.usableKWh == 8); "
+				"assert(b.startingStoredKWh == 8 and b.maxChargeKW == 2 and b.maxDischargeKW == 4); "
+				"assert(b.chargeEfficiency == 1 and b.dischargeEfficiency == 1); "
+				"return {advance=function(self, tick) return tick end} end";
+		});
+		core::World boundary("Boundary", 2, 2);
+		boundary.pauseSimulation(); boundary.finishBuild();
+		require(configure(boundary, {}, {},
+			{battery("bank", 10.0, 8.0, 8.0, 2.0, 4.0)}).first,
+			"Battery descriptors did not cross the Lua boundary intact");
+		boundary.resumeSimulation();
+		require(boundary.advanceTicks(60), "Battery boundary fixture run failed");
+		core::setStationSystemsSourceLoader([] {
+			return "return function(name, stores, transfers, conversions, solar, loads, batteries) "
+				"assert(#batteries == 99, 'expected 99 batteries') "
+				"return {advance=function(self, tick) return tick end} end";
+		});
+		core::World refusedLua("RefusedLua", 2, 2);
+		refusedLua.pauseSimulation(); refusedLua.finishBuild();
+		std::string diagnostic;
+		require(!refusedLua.configureStationSystems({true, 1.0f, {}, {}, {}, {}, {},
+				{battery("bank", 10.0, 8.0, 8.0, 2.0, 4.0)}},
+				false, &diagnostic)
+			&& diagnostic.find("expected 99 batteries") != std::string::npos
+			&& !refusedLua.getStationSystemsSnapshot().enabled,
+			"Lua battery assertion failure not contained at construction");
+		core::setStationSystemsSourceLoader({});
+	}
 	void failures(smoke::Context const&)
 	{
 		SourceScope scope;
@@ -1440,7 +1856,7 @@ namespace
 }
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power}, {"failures", failures}};
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power}, {"batteries", batteries}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

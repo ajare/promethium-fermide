@@ -214,7 +214,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 69", "version: 64");
+		replaceAll(legacy, "version: 70", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -231,14 +231,14 @@ namespace
 			"authored store fields missing or live inventory leaked");
 		bool refused = false;
 		auto staleStores = withField;
-		replaceAll(staleStores, "version: 69", "version: 65");
+		replaceAll(staleStores, "version: 70", "version: 65");
 		auto const staleStoresPath = directory / "stale-stores.world.yaml";
 		writeFile(staleStoresPath, staleStores);
 		try { (void)core::loadWorldDocument(staleStoresPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-66 document carrying resource stores was silently accepted");
 		auto staleTransfers = withField;
-		replaceAll(staleTransfers, "version: 69", "version: 66");
+		replaceAll(staleTransfers, "version: 70", "version: 66");
 		auto const staleTransfersPath = directory / "stale-transfers.world.yaml";
 		writeFile(staleTransfersPath, staleTransfers);
 		refused = false;
@@ -246,7 +246,7 @@ namespace
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-67 document carrying resource transfers was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 69", "version: 64");
+		replaceAll(stale, "version: 70", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
 		refused = false;
@@ -384,7 +384,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 69", "version: 67");
+			replaceAll(stale, "version: 70", "version: 67");
 			auto const stalePath = directory / "stale-compounds.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -403,6 +403,131 @@ namespace
 			try { (void)core::loadWorldDocument(malformedPath); }
 			catch (std::exception const&) { refused = true; }
 			require(refused, "a malformed moisture fraction was accepted from a file");
+		}
+	}
+	// #394: authored battery contracts travel through the real file seams
+	// as authored settings only; stored energy and loss ledgers are runtime
+	// state reconstructed on load, a reopened World replays the eclipse
+	// battery scenario identically, and pre-70 documents carrying the new
+	// fields are refused rather than silently dropped.
+	void batteryFiles(smoke::Context const& context)
+	{
+		namespace filesystem = std::filesystem;
+		auto const directory = context.temporaryRoot() / "station-batteries";
+		filesystem::create_directories(directory);
+		core::ProfileSettings illumination;
+		illumination.periodSeconds = 120.0;
+		illumination.segments = {{0.0, 1.0}, {60.0, 0.0}};
+		core::SolarArraySettings solar;
+		solar.id = "orbital";
+		solar.capacityKW = 10.0;
+		solar.illumination = illumination;
+		core::EquipmentLoadSettings stationLoad;
+		stationLoad.id = "station";
+		stationLoad.electricalDemandKW = 6.0;
+		stationLoad.thermalClass = "moderate";
+		stationLoad.coolingDisposition = core::StationCoolingDisposition::Exported;
+		core::BatterySettings bank;
+		bank.id = "bank";
+		bank.nameplateKWh = 10.0;
+		bank.usableKWh = 8.0;
+		bank.startingStoredKWh = 8.0;
+		bank.maxChargeKW = 2.0;
+		bank.maxDischargeKW = 4.0;
+		core::World original("Battery Round Trip", 2, 2);
+		original.pauseSimulation();
+		original.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 2.0f;
+		settings.solarArrays.push_back(solar);
+		settings.equipmentLoads.push_back(stationLoad);
+		settings.batteries.push_back(bank);
+		std::string diagnostic;
+		require(original.configureStationSystems(settings, false, &diagnostic),
+			"Battery settings edit failed: " + diagnostic);
+		original.resumeSimulation();
+		// One second into the first eclipse: the battery is mid-ride.
+		require(original.advanceTicks(3660), "Battery original run failed");
+		auto const expected = original.getStationSystemsSnapshot();
+		require(expected.power.batteries.size() == 1
+			&& expected.power.batteries[0].storedKWh < 8.0
+			&& expected.power.batteries[0].storedKWh > 2.0
+			&& expected.power.batteryDischargeKW > 0.0,
+			"Battery scenario produced the wrong observable state");
+		for (auto const* suffix : {".world.yaml", ".world"})
+		{
+			auto const path = directory / (std::string("battery") + suffix);
+			original.saveTo(path.string());
+			auto const document = readFile(path);
+			require(document.find("batteries") != std::string::npos
+				&& document.find("nameplateKWh") != std::string::npos
+				&& document.find("usableKWh") != std::string::npos
+				&& document.find("startingStoredKWh") != std::string::npos
+				&& document.find("maxChargeKW") != std::string::npos
+				&& document.find("maxDischargeKW") != std::string::npos
+				&& document.find("chargeEfficiency") != std::string::npos
+				&& document.find("dischargeEfficiency") != std::string::npos,
+				"authored battery fields missing from the document");
+			for (auto const* liveState : {"storedKWh", "stateOfCharge", "lastChargeKW",
+				"lastDischargeKW", "chargeInputKWh", "residualKWh", "atReserve", "saturated"})
+				require(document.find(liveState) == std::string::npos,
+					std::string("live battery state leaked into the document: ") + liveState);
+			auto const reopened = core::loadWorldDocument(path);
+			require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+				"battery settings did not survive the file round trip");
+			require(reopened->getStationSystemsSnapshot().power.batteries.size() == 1
+				&& reopened->getStationSystemsSnapshot().power.batteries[0].storedKWh == 8.0,
+				"reopened World did not reconstruct stored energy from the authored starting value");
+			reopened->resumeSimulation();
+			require(reopened->advanceTicks(3660), "Battery reopened run failed");
+			require(reopened->getStationSystemsSnapshot() == expected,
+				"battery scenario is not reproducible from the document");
+			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
+				"battery event history is not reproducible from the document");
+		}
+		// A pre-70 document carrying the new fields is refused.
+		auto const withField = serializeYaml(original);
+		{
+			auto stale = withField;
+			replaceAll(stale, "version: 70", "version: 69");
+			auto const stalePath = directory / "stale-batteries.world.yaml";
+			writeFile(stalePath, stale);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(stalePath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a pre-70 document carrying batteries was silently accepted");
+		}
+		// Malformed battery values in a file are rejected.
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "usableKWh: 8", "usableKWh: 15");
+			auto const malformedPath = directory / "malformed-usable.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a usable energy above the nameplate was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "chargeEfficiency: 1", "chargeEfficiency: 0");
+			auto const malformedPath = directory / "malformed-efficiency.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a zero charge efficiency was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "startingStoredKWh: 8", "startingStoredKWh: 12");
+			auto const malformedPath = directory / "malformed-starting.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a starting stored energy above the nameplate was accepted from a file");
 		}
 	}
 	// #393: authored solar arrays and External equipment load contracts
@@ -487,7 +612,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 69", "version: 68");
+			replaceAll(stale, "version: 70", "version: 68");
 			auto const stalePath = directory / "stale-power.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -537,4 +662,5 @@ void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"structuralReplay", structuralReplay});
 	checks.push_back({"compoundFiles", compoundFiles});
 	checks.push_back({"powerFiles", powerFiles});
+	checks.push_back({"batteryFiles", batteryFiles});
 }

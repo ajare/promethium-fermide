@@ -51,6 +51,7 @@ namespace core
 			std::vector<ResourceConversionSettings> const* conversions;
 			std::vector<SolarArraySettings> const* solar;
 			std::vector<EquipmentLoadSettings> const* loads;
+			std::vector<BatterySettings> const* batteries;
 			static void pushProfile(lua_State* state, ProfileSettings const& profile)
 			{
 				lua_createtable(state, 0, 3);
@@ -187,7 +188,25 @@ namespace core
 					lua_setfield(state, -2, "exchanges");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 6, 1);
+				// Authored battery descriptors cross the same boundary as plain
+				// immutable values (#394); each sandbox mirrors the discharge and
+				// charge ledger and audits its own energy conservation.
+				lua_createtable(state, static_cast<int>(batteries->size()), 0);
+				for (size_t index = 0; index < batteries->size(); ++index)
+				{
+					auto const& battery = (*batteries)[index];
+					lua_createtable(state, 0, 8);
+					lua_pushstring(state, battery.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushnumber(state, battery.nameplateKWh); lua_setfield(state, -2, "nameplateKWh");
+					lua_pushnumber(state, battery.usableKWh); lua_setfield(state, -2, "usableKWh");
+					lua_pushnumber(state, battery.startingStoredKWh); lua_setfield(state, -2, "startingStoredKWh");
+					lua_pushnumber(state, battery.maxChargeKW); lua_setfield(state, -2, "maxChargeKW");
+					lua_pushnumber(state, battery.maxDischargeKW); lua_setfield(state, -2, "maxDischargeKW");
+					lua_pushnumber(state, battery.chargeEfficiency); lua_setfield(state, -2, "chargeEfficiency");
+					lua_pushnumber(state, battery.dischargeEfficiency); lua_setfield(state, -2, "dischargeEfficiency");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 7, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -543,6 +562,42 @@ namespace core
 						+ "' must be finite and positive");
 			}
 		}
+		if (settings.batteries.size() > MaxStationBatteries)
+			return refuse("Station batteries are limited to "
+				+ std::to_string(MaxStationBatteries) + " entries");
+		std::set<std::string> batteryIds;
+		for (auto const& battery : settings.batteries)
+		{
+			auto const where = "Station battery '" + battery.id + "'";
+			if (battery.id.empty()) return refuse("Station battery id must not be empty");
+			if (battery.id.size() > MaxStationStoreIdLength)
+				return refuse("Station battery id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!batteryIds.insert(battery.id).second) return refuse(where + " id is duplicated");
+			if (!std::isfinite(battery.nameplateKWh) || battery.nameplateKWh < 0.0)
+				return refuse(where + " nameplate energy must be finite and non-negative");
+			// Usable energy is the cyclable slice above the reserve floor; it
+			// can never exceed the installed nameplate, so no policy can
+			// invent storage the battery does not have.
+			if (!std::isfinite(battery.usableKWh) || battery.usableKWh < 0.0)
+				return refuse(where + " usable energy must be finite and non-negative");
+			if (battery.usableKWh > battery.nameplateKWh)
+				return refuse(where + " usable energy exceeds the nameplate energy");
+			if (!std::isfinite(battery.startingStoredKWh) || battery.startingStoredKWh < 0.0)
+				return refuse(where + " starting stored energy must be finite and non-negative");
+			if (battery.startingStoredKWh > battery.nameplateKWh)
+				return refuse(where + " starting stored energy exceeds the nameplate energy");
+			if (!std::isfinite(battery.maxChargeKW) || battery.maxChargeKW < 0.0)
+				return refuse(where + " maximum charge power must be finite and non-negative");
+			if (!std::isfinite(battery.maxDischargeKW) || battery.maxDischargeKW < 0.0)
+				return refuse(where + " maximum discharge power must be finite and non-negative");
+			if (!std::isfinite(battery.chargeEfficiency)
+				|| battery.chargeEfficiency <= 0.0 || battery.chargeEfficiency > 1.0)
+				return refuse(where + " charge efficiency must be finite and greater than 0 up to 1");
+			if (!std::isfinite(battery.dischargeEfficiency)
+				|| battery.dischargeEfficiency <= 0.0 || battery.dischargeEfficiency > 1.0)
+				return refuse(where + " discharge efficiency must be finite and greater than 0 up to 1");
+		}
 		diagnostic.clear(); return true;
 	}
 	void setStationSystemsSourceLoader(StationSystemsSourceLoader loader) { sourceLoader = std::move(loader); }
@@ -638,12 +693,35 @@ namespace core
 			bool lastCriticalUnmet{false};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
+		// The authoritative ledger of one configured battery bank (#394).
+		// Discharge covers the load demand generation could not reach, on
+		// the same allocation pool — never a second budget — and charging
+		// takes only the surplus no load took. The reserve floor
+		// (nameplate - usable) is never dischargeable, and both conversion
+		// directions book their losses so free energy never appears.
+		struct BatteryState
+		{
+			BatterySettings authored;
+			double stored{0.0};
+			double lastChargeKW{0.0};
+			double lastDischargeKW{0.0};
+			double lastDischargeRequestedKW{0.0};
+			double lastDischargeShortfallKW{0.0};
+			double chargedKWh{0.0};
+			double dischargedKWh{0.0};
+			double deliveredKWh{0.0};
+			double chargeInputKWh{0.0};
+			bool lastAtReserve{false};
+			bool lastSaturated{false};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
 		std::vector<TransferState> transfers;
 		std::vector<ConversionState> conversions;
 		std::vector<SolarState> solarArrays;
 		std::vector<LoadState> loads;
+		std::vector<BatteryState> batteries;
 		// Competing transfers are allocated in priority order (higher first),
 		// ties resolved by declaration order: a declared deterministic order.
 		std::vector<size_t> transferOrder;
@@ -665,9 +743,13 @@ namespace core
 		// current + lost must equal starting within tolerance.
 		ConstituentLedger startingConstituents;
 		ConstituentLedger constituentLoss;
-		// Generation left untaken after this tick's allocation, for the
-		// power snapshot's surplus reporting.
+		// Generation left untaken after this tick's allocation and battery
+		// charging, for the power snapshot's surplus reporting.
 		double lastAvailableGenerationKW{0.0};
+		// Discharge need routed to the battery bank this tick that the bank
+		// could not deliver (#394). Tracked at allocation level so the bank
+		// shortfall never double-counts per-battery routing.
+		double lastBatteryShortfallKW{0.0};
 		std::array<std::unique_ptr<ScriptObject>, 4> objects;
 		StationSystemsSnapshot snapshot;
 		std::vector<StationSystemsEvent> events;
@@ -698,6 +780,15 @@ namespace core
 			std::vector<bool> previousEclipse;
 			previousEclipse.reserve(solarArrays.size());
 			for (auto const& array : solarArrays) previousEclipse.push_back(array.lastEclipse);
+			std::vector<StationTransferStatus> previousBatteryStatus;
+			previousBatteryStatus.reserve(batteries.size());
+			for (auto const& battery : batteries) previousBatteryStatus.push_back(battery.status);
+			std::vector<bool> previousBatteryReserve;
+			previousBatteryReserve.reserve(batteries.size());
+			for (auto const& battery : batteries) previousBatteryReserve.push_back(battery.lastAtReserve);
+			std::vector<bool> previousBatterySaturated;
+			previousBatterySaturated.reserve(batteries.size());
+			for (auto const& battery : batteries) previousBatterySaturated.push_back(battery.lastSaturated);
 			std::vector<double> qualified, unqualified;
 			qualified.reserve(stores.size());
 			unqualified.reserve(stores.size());
@@ -728,10 +819,68 @@ namespace core
 				availableGeneration += array.lastAvailableKW;
 			}
 			std::vector<double> supplied(loads.size(), 0.0);
+			// Battery discharge feeds the same allocation pool as generation,
+			// never a second budget: it covers the remainder of a load's
+			// request that generation could not reach, within the state-of-
+			// charge reserve floor, the discharge power limit and the
+			// discharge efficiency, in declared battery order.
+			auto const batteryReserve = [](BatteryState const& battery)
+			{ return battery.authored.nameplateKWh - battery.authored.usableKWh; };
+			auto const batteryDisabled = [](BatteryState const& battery)
+			{ return battery.authored.usableKWh <= 0.0; };
+			auto const deliverableKW = [&](BatteryState const& battery, double dt)
+			{
+				if (batteryDisabled(battery)) return 0.0;
+				auto const drawable = std::max(0.0, battery.stored - batteryReserve(battery));
+				auto const byEnergy = drawable * battery.authored.dischargeEfficiency / dt;
+				// The discharge power limit is per tick: whatever this battery
+				// already delivered this tick counts against it, so the two
+				// allocation passes can never jointly exceed the cap.
+				auto const byPower = battery.authored.maxDischargeKW - battery.lastDischargeKW;
+				return std::max(0.0, std::min(byPower, byEnergy));
+			};
+			for (auto& battery : batteries)
+			{
+				battery.lastChargeKW = 0.0;
+				battery.lastDischargeKW = 0.0;
+				battery.lastDischargeRequestedKW = 0.0;
+				battery.lastDischargeShortfallKW = 0.0;
+			}
+			// Route a power need through the batteries in declaration order
+			// and return what they actually delivered. Each battery records
+			// the need routed to it and whatever it could not supply.
+			auto const drawBatteries = [&](double needKW)
+			{
+				if (needKW <= 0.0) return 0.0;
+				auto remaining = needKW;
+				for (auto& battery : batteries)
+				{
+					if (remaining <= 1e-15) break;
+					if (batteryDisabled(battery)) continue;
+					auto const cap = deliverableKW(battery, static_cast<double>(seconds));
+					auto const give = std::min(remaining, cap);
+					if (give > 0.0)
+					{
+						auto const drawn = give * static_cast<double>(seconds)
+							/ battery.authored.dischargeEfficiency;
+						battery.stored -= drawn;
+						battery.dischargedKWh += drawn;
+						battery.deliveredKWh += give * static_cast<double>(seconds);
+						battery.lastDischargeKW += give;
+					}
+					battery.lastDischargeRequestedKW += remaining;
+					battery.lastDischargeShortfallKW += remaining - give;
+					remaining -= give;
+				}
+				return needKW - remaining;
+			};
+			double batterySuppliedKW{0.0};
+			double batteryShortfallKW{0.0};
 			// Pass 1: protected critical floors allocate ahead of every
 			// discretionary request, in the declared priority order. A
-			// floor that generation cannot meet remains explicit unmet
-			// critical demand, never a silently permitted curtailment.
+			// floor that generation cannot meet is offered to the batteries
+			// before it remains explicit unmet critical demand; it is never
+			// silently reclassified as permissible curtailment.
 			for (auto const index : loadOrder)
 			{
 				auto& load = loads[index];
@@ -745,27 +894,51 @@ namespace core
 				load.lastUnmetCriticalKW = 0.0;
 				if (!load.lastAdmitted || load.lastRequestedKW <= 0.0) continue;
 				auto const floor = std::min(load.authored.criticalFloorKW, load.lastRequestedKW);
-				auto const give = std::min(floor, availableGeneration);
-				supplied[index] += give;
-				availableGeneration -= give;
-				load.lastUnmetCriticalKW = floor - give;
+				auto const fromGeneration = std::min(floor, availableGeneration);
+				supplied[index] += fromGeneration;
+				availableGeneration -= fromGeneration;
+				auto const stillNeeded = floor - fromGeneration;
+				auto const fromBattery = drawBatteries(stillNeeded);
+				supplied[index] += fromBattery;
+				batterySuppliedKW += fromBattery;
+				batteryShortfallKW += stillNeeded - fromBattery;
+				load.lastUnmetCriticalKW = stillNeeded - fromBattery;
 			}
 			// Pass 2: discretionary demand in the same declared order. A
 			// load is never supplied below its minimum operable level,
-			// demand * (1 - allowed curtailment): if the remaining pool
-			// cannot reach that level the load takes nothing this tick.
+			// demand * (1 - allowed curtailment): if generation plus any
+			// available battery output still cannot reach that level the
+			// load takes nothing this tick, leaving both pools for loads
+			// that can use them. Generation is taken before battery
+			// energy, so stored energy is preserved rather than wasted.
 			for (auto const index : loadOrder)
 			{
 				auto& load = loads[index];
 				if (!load.lastAdmitted || load.lastRequestedKW <= 0.0) continue;
 				auto const remaining = load.lastRequestedKW - supplied[index];
 				if (remaining <= 0.0) continue;
-				auto const candidate = std::min(remaining, availableGeneration);
+				auto const fromGeneration = std::min(remaining, availableGeneration);
+				auto const afterGeneration = remaining - fromGeneration;
+				double batteryCapableKW{0.0};
+				for (auto const& battery : batteries)
+					batteryCapableKW += deliverableKW(battery, static_cast<double>(seconds));
+				auto const batteryAsk = std::min(afterGeneration, batteryCapableKW);
 				auto const minOperating = load.lastRequestedKW * (1.0 - load.authored.maxCurtailment);
-				if (supplied[index] + candidate + 1e-12 >= minOperating)
+				if (supplied[index] + fromGeneration + batteryAsk + 1e-12 >= minOperating)
 				{
-					supplied[index] += candidate;
-					availableGeneration -= candidate;
+					supplied[index] += fromGeneration;
+					availableGeneration -= fromGeneration;
+					// Route the full remaining need, not just the capped ask,
+					// so each battery's recorded request and shortfall show the
+					// limitation the allocation actually ran into; the bank
+					// still delivers no more than it was capable of.
+					auto const drawn = drawBatteries(afterGeneration);
+					supplied[index] += drawn;
+					batterySuppliedKW += drawn;
+					// The shortfall is what the load needed beyond generation
+					// that the battery bank could not deliver, not merely what
+					// was asked of it after capping by capability.
+					batteryShortfallKW += afterGeneration - drawn;
 				}
 				else
 					load.lastShortfallReason = "below the minimum operable supply level";
@@ -834,7 +1007,55 @@ namespace core
 					}
 				}
 			}
+			// Charge from the surplus left after every allocation: batteries
+			// take only generation no load took, within the charge power
+			// limit, the headroom below nameplate and the charge efficiency.
+			// A battery that discharged this tick never charges in the same
+			// tick, so no charge/discharge cycle can circulate energy.
+			for (auto& battery : batteries)
+			{
+				if (batteryDisabled(battery) || availableGeneration <= 0.0) continue;
+				if (battery.lastDischargeKW > 0.0) continue;
+				auto const headroom = battery.authored.nameplateKWh - battery.stored;
+				if (headroom <= 0.0) continue;
+				auto const busKW = std::min(battery.authored.maxChargeKW, availableGeneration);
+				if (busKW <= 0.0) continue;
+				auto const storedGain = std::min(busKW * static_cast<double>(seconds)
+					* battery.authored.chargeEfficiency, headroom);
+				if (storedGain <= 0.0) continue;
+				auto const busUsed = storedGain / battery.authored.chargeEfficiency;
+				battery.stored += storedGain;
+				battery.chargedKWh += storedGain;
+				battery.chargeInputKWh += busUsed;
+				battery.lastChargeKW = busUsed / static_cast<double>(seconds);
+				// The pool is in power units: subtract the bus power the
+				// battery actually took, not the tick's energy.
+				availableGeneration -= busUsed / static_cast<double>(seconds);
+			}
+			// Publish each battery's observable state for this tick: the
+			// reserve and saturation flags and the discharge service status.
+			for (auto& battery : batteries)
+			{
+				if (batteryDisabled(battery))
+				{
+					battery.lastAtReserve = false;
+					battery.lastSaturated = false;
+					battery.status = StationTransferStatus::Idle;
+					continue;
+				}
+				auto const reserve = batteryReserve(battery);
+				battery.lastAtReserve = battery.stored <= reserve + 1e-12;
+				auto const nameplate = battery.authored.nameplateKWh;
+				battery.lastSaturated = battery.stored >= nameplate - 1e-12;
+				if (battery.lastDischargeKW > 1e-12)
+					battery.status = battery.lastDischargeShortfallKW <= 1e-12
+						? StationTransferStatus::Full : StationTransferStatus::Partial;
+				else if (battery.lastDischargeRequestedKW > 1e-12)
+					battery.status = StationTransferStatus::Rejected;
+				else battery.status = StationTransferStatus::Idle;
+			}
 			lastAvailableGenerationKW = availableGeneration;
+			lastBatteryShortfallKW = batteryShortfallKW;
 			for (auto const index : transferOrder)
 			{
 				auto& transfer = transfers[index];
@@ -991,6 +1212,47 @@ namespace core
 						+ " for '" + constituent + "' exceeds tolerance "
 						+ std::to_string(StationBalanceTolerance), false;
 			}
+			// Battery energy boundary (#394): stored energy stays within the
+			// authored nameplate, the ledger closes over charge and discharge,
+			// and neither direction may deliver or store more energy than it
+			// took in — free energy is a conservation violation, never a
+			// silent rounding. The reserve floor is never drawn below the
+			// lower of the starting stored energy and the reserve itself.
+			for (auto const& battery : batteries)
+			{
+				auto const where = "battery '" + battery.authored.id + "'";
+				auto const bound = StationBalanceTolerance
+					* std::max(1.0, std::abs(battery.authored.startingStoredKWh));
+				if (!std::isfinite(battery.stored) || battery.stored < 0.0)
+					return violation = "battery " + where + " holds non-finite or negative stored energy", false;
+				if (battery.stored > battery.authored.nameplateKWh + bound)
+					return violation = "battery " + where + " stored energy exceeds its nameplate capacity", false;
+				auto const floor = std::min(battery.authored.startingStoredKWh,
+						battery.authored.nameplateKWh - battery.authored.usableKWh);
+				if (battery.stored < floor - bound)
+					return violation = "battery " + where + " was drawn below its reserve floor", false;
+				auto const residual = battery.authored.startingStoredKWh - battery.dischargedKWh
+					+ battery.chargedKWh - battery.stored;
+				if (!std::isfinite(residual) || std::abs(residual) > bound)
+					return violation = "battery " + where + " energy ledger residual "
+						+ std::to_string(residual) + " exceeds tolerance "
+						+ std::to_string(StationBalanceTolerance), false;
+				if (battery.deliveredKWh > battery.dischargedKWh + bound)
+					return violation = "battery " + where + " delivered more energy than it drew from storage", false;
+				if (battery.chargedKWh > battery.chargeInputKWh + bound)
+					return violation = "battery " + where + " stored more energy than the bus supplied to it", false;
+			}
+			// The single-pool audit: total supplied service never exceeds
+			// generation plus what the batteries actually delivered.
+			{
+				double totalSupplied = 0.0, totalGeneration = 0.0, totalDischarged = 0.0;
+				for (auto const& load : loads) totalSupplied += load.lastSuppliedKW;
+				for (auto const& array : solarArrays) totalGeneration += array.lastAvailableKW;
+				for (auto const& battery : batteries) totalDischarged += battery.lastDischargeKW;
+				auto const bound = StationBalanceTolerance * std::max(1.0, totalGeneration + totalDischarged);
+				if (totalSupplied > totalGeneration + totalDischarged + bound)
+					return violation = "total supplied power exceeds generation plus battery output", false;
+			}
 			for (size_t index = 0; index < stores.size(); ++index)
 			{
 				stores[index].currentQualified = qualified[index];
@@ -1068,6 +1330,39 @@ namespace core
 					? "Solar array '" + array.authored.id + "' entered eclipse"
 					: "Solar array '" + array.authored.id + "' returned to sunlight"});
 			}
+			// Battery transitions are announced so the event log records
+			// exhaustion, saturation and discharge limitation without
+			// flooding every tick.
+			for (size_t index = 0; index < batteries.size(); ++index)
+			{
+				auto const& battery = batteries[index];
+				if (battery.authored.usableKWh <= 0.0) continue;
+				if (battery.status != previousBatteryStatus[index])
+				{
+					if (battery.status == StationTransferStatus::Full)
+						events.push_back({tick, "Battery '" + battery.authored.id
+							+ "' discharging to cover the deficit"});
+					else if (battery.status == StationTransferStatus::Partial)
+						events.push_back({tick, "Battery '" + battery.authored.id
+							+ "' discharge limited: supplied " + std::to_string(battery.lastDischargeKW)
+							+ " of " + std::to_string(battery.lastDischargeRequestedKW) + " kW"});
+					else if (battery.status == StationTransferStatus::Rejected)
+						events.push_back({tick, "Battery '" + battery.authored.id
+							+ "' cannot discharge: " + (battery.lastAtReserve
+								? std::string("usable energy is at the reserve floor")
+								: std::string("no discharge power capability is available"))});
+				}
+				if (battery.lastAtReserve != previousBatteryReserve[index])
+					events.push_back({tick, battery.lastAtReserve
+						? "Battery '" + battery.authored.id
+							+ "' exhausted: usable energy depleted to the reserve floor"
+						: "Battery '" + battery.authored.id + "' recovered above the reserve floor"});
+				if (battery.lastSaturated != previousBatterySaturated[index])
+					events.push_back({tick, battery.lastSaturated
+						? "Battery '" + battery.authored.id
+							+ "' fully charged: stored energy reached nameplate capacity"
+						: "Battery '" + battery.authored.id + "' left full charge"});
+			}
 			return true;
 		}
 	};
@@ -1122,6 +1417,22 @@ namespace core
 		std::stable_sort(mImpl->loadOrder.begin(), mImpl->loadOrder.end(),
 			[&](size_t left, size_t right)
 			{ return mImpl->loads[left].authored.priority > mImpl->loads[right].authored.priority; });
+		// Stored energy is runtime state initialised from the authored
+		// starting value; the reserve and saturation flags start consistent
+		// with it so the first tick reports transitions, not the initial
+		// condition (#394).
+		for (auto const& battery : settings.batteries)
+		{
+			Impl::BatteryState state;
+			state.authored = battery;
+			state.stored = battery.startingStoredKWh;
+			if (battery.usableKWh > 0.0)
+			{
+				state.lastAtReserve = state.stored <= battery.nameplateKWh - battery.usableKWh + 1e-12;
+				state.lastSaturated = state.stored >= battery.nameplateKWh - 1e-12;
+			}
+			mImpl->batteries.push_back(std::move(state));
+		}
 		// The compound conservation boundary is fixed at run start from the
 		// authored starting inventory of every compound store (#391).
 		for (auto const& store : mImpl->stores)
@@ -1137,7 +1448,7 @@ namespace core
 			auto object = std::make_unique<ScriptObject>();
 			Construction construction{object.get(), &source, StationSystemNames[i],
 				&settings.stores, &settings.transfers, &settings.conversions,
-				&settings.solarArrays, &settings.equipmentLoads};
+				&settings.solarArrays, &settings.equipmentLoads, &settings.batteries};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -1154,8 +1465,9 @@ namespace core
 			+ std::to_string(settings.stores.size()) + " resource store(s), "
 			+ std::to_string(settings.transfers.size()) + " transfer(s), "
 			+ std::to_string(settings.conversions.size()) + " conversion(s), "
-			+ std::to_string(settings.solarArrays.size()) + " solar array(s) and "
-			+ std::to_string(settings.equipmentLoads.size()) + " external equipment load(s)"});
+			+ std::to_string(settings.solarArrays.size()) + " solar array(s), "
+			+ std::to_string(settings.equipmentLoads.size()) + " external equipment load(s) and "
+			+ std::to_string(settings.batteries.size()) + " battery(ies)"});
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
 	bool StationSystemsRuntime::advance(uint64_t tick, float seconds)
@@ -1205,7 +1517,7 @@ namespace core
 		// and never clamps material. It fails the whole tick through the
 		// integrated error path instead.
 		if (!mImpl->transferOrder.empty() || !mImpl->conversionOrder.empty()
-			|| !mImpl->loads.empty() || !mImpl->solarArrays.empty())
+			|| !mImpl->loads.empty() || !mImpl->solarArrays.empty() || !mImpl->batteries.empty())
 		{
 			std::string violation;
 			if (!mImpl->applyLedger(tick, seconds, violation))
@@ -1334,6 +1646,48 @@ namespace core
 		result.power.unmetCriticalKW = totalUnmetCritical;
 		result.power.surplusKW = mImpl->lastAvailableGenerationKW;
 		result.power.exportedHeatKW = totalHeat;
+		// The battery snapshot reports the authored nameplate/usable/reserve
+		// policy beside the runtime stored energy, the last tick's charge and
+		// discharge power, and the cumulative loss ledger (#394).
+		double totalBatteryDischarge = 0.0, totalBatteryCharge = 0.0;
+		for (auto const& battery : mImpl->batteries)
+		{
+			StationBatterySnapshot batteryResult;
+			batteryResult.id = battery.authored.id;
+			batteryResult.nameplateKWh = battery.authored.nameplateKWh;
+			batteryResult.usableKWh = battery.authored.usableKWh;
+			batteryResult.reserveKWh = battery.authored.nameplateKWh - battery.authored.usableKWh;
+			batteryResult.startingStoredKWh = battery.authored.startingStoredKWh;
+			batteryResult.storedKWh = battery.stored;
+			batteryResult.stateOfCharge = battery.authored.nameplateKWh > 0.0
+				? battery.stored / battery.authored.nameplateKWh : 0.0;
+			batteryResult.maxChargeKW = battery.authored.maxChargeKW;
+			batteryResult.maxDischargeKW = battery.authored.maxDischargeKW;
+			batteryResult.chargeEfficiency = battery.authored.chargeEfficiency;
+			batteryResult.dischargeEfficiency = battery.authored.dischargeEfficiency;
+			batteryResult.lastChargeKW = battery.lastChargeKW;
+			batteryResult.lastDischargeKW = battery.lastDischargeKW;
+			batteryResult.lastDischargeRequestedKW = battery.lastDischargeRequestedKW;
+			batteryResult.lastDischargeShortfallKW = battery.lastDischargeShortfallKW;
+			batteryResult.chargedKWh = battery.chargedKWh;
+			batteryResult.dischargedKWh = battery.dischargedKWh;
+			batteryResult.deliveredKWh = battery.deliveredKWh;
+			batteryResult.chargeInputKWh = battery.chargeInputKWh;
+			batteryResult.lossesKWh = (battery.dischargedKWh - battery.deliveredKWh)
+				+ (battery.chargeInputKWh - battery.chargedKWh);
+			batteryResult.residualKWh = battery.authored.startingStoredKWh - battery.dischargedKWh
+				+ battery.chargedKWh - battery.stored;
+			batteryResult.disabled = battery.authored.usableKWh <= 0.0;
+			batteryResult.atReserve = battery.lastAtReserve;
+			batteryResult.saturated = battery.lastSaturated;
+			batteryResult.status = battery.status;
+			totalBatteryDischarge += battery.lastDischargeKW;
+			totalBatteryCharge += battery.lastChargeKW;
+			result.power.batteries.push_back(std::move(batteryResult));
+		}
+		result.power.batteryDischargeKW = totalBatteryDischarge;
+		result.power.batteryChargeKW = totalBatteryCharge;
+		result.power.batteryShortfallKW = mImpl->lastBatteryShortfallKW;
 		return result;
 	}
 	std::vector<StationSystemsEvent> const& StationSystemsRuntime::events() const { return mImpl->events; }

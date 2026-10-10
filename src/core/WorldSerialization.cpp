@@ -714,7 +714,10 @@ namespace core
 		// Version 69 adds authored solar arrays and External equipment load
 		// groups (#393); pre-69 documents carrying `solarArrays` or
 		// `equipmentLoads` are refused rather than silently dropped.
-		serializer.writeUint32("version", 69);
+		// Version 70 adds authored rechargeable battery banks (#394); a
+		// pre-70 document carrying `batteries` is refused rather than
+		// silently dropped.
+		serializer.writeUint32("version", 70);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -869,6 +872,26 @@ namespace core
 						serializer.endMap();
 					}
 					serializer.endArray();
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.batteries.empty())
+			{
+				// Authored battery limits only; stored energy, loss ledgers and
+				// per-tick charge/discharge results are runtime state.
+				serializer.beginArray("batteries");
+				for (auto const& battery : mStationSystemsSettings.batteries)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", battery.id);
+					serializer.writeDouble("nameplateKWh", battery.nameplateKWh);
+					serializer.writeDouble("usableKWh", battery.usableKWh);
+					serializer.writeDouble("startingStoredKWh", battery.startingStoredKWh);
+					serializer.writeDouble("maxChargeKW", battery.maxChargeKW);
+					serializer.writeDouble("maxDischargeKW", battery.maxDischargeKW);
+					serializer.writeDouble("chargeEfficiency", battery.chargeEfficiency);
+					serializer.writeDouble("dischargeEfficiency", battery.dischargeEfficiency);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -1757,7 +1780,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 69)
+		if (version < 1 || version > 70)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1946,6 +1969,28 @@ namespace core
 					}
 					serializer.endArray();
 					stationSettings.equipmentLoads.push_back(std::move(load));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("batteries"))
+			{
+				if (version < 70) throw SerializationException(
+					"Station batteries require World schema 70");
+				serializer.beginArray("batteries");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					BatterySettings battery;
+					battery.id = serializer.readString("id");
+					battery.nameplateKWh = serializer.readDouble("nameplateKWh");
+					battery.usableKWh = serializer.readDouble("usableKWh");
+					battery.startingStoredKWh = serializer.readDouble("startingStoredKWh");
+					battery.maxChargeKW = serializer.readDouble("maxChargeKW");
+					battery.maxDischargeKW = serializer.readDouble("maxDischargeKW");
+					battery.chargeEfficiency = serializer.readDouble("chargeEfficiency");
+					battery.dischargeEfficiency = serializer.readDouble("dischargeEfficiency");
+					stationSettings.batteries.push_back(std::move(battery));
 					serializer.endMap();
 				}
 				serializer.endArray();

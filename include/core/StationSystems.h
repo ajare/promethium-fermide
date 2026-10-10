@@ -229,6 +229,32 @@ namespace core
 	inline constexpr size_t MaxStationEquipmentLoads{16};
 	inline constexpr size_t MaxStationLoadMaterialExchanges{2};
 
+	// A configured rechargeable battery bank (#394). Nameplate energy is the
+	// installed total; usable energy is the slice above the reserve floor the
+	// battery policy allows to cycle. The reserve is the derived remainder
+	// (nameplate - usable): it is never dischargeable, is never counted as
+	// available energy, and is published in the snapshot so the reserve
+	// policy is explicit rather than implicit. Stored energy is runtime state
+	// initialised from the authored starting value; only the authored limits
+	// travel in documents. Charge and discharge efficiencies are applied at
+	// the bus boundary: charging stores bus kWh * chargeEfficiency and
+	// discharging delivers stored kWh drawn * dischargeEfficiency, so the
+	// difference is an accounted loss — never free energy in either
+	// direction. Zero usable energy disables the battery entirely.
+	struct BatterySettings
+	{
+		std::string id;
+		double nameplateKWh{0.0};         // installed nameplate energy, >= 0
+		double usableKWh{0.0};            // cyclable energy above the reserve, [0, nameplate]; 0 disables
+		double startingStoredKWh{0.0};    // initial stored energy, [0, nameplate]
+		double maxChargeKW{0.0};         // charge power limit, >= 0
+		double maxDischargeKW{0.0};      // discharge power limit, >= 0
+		double chargeEfficiency{1.0};    // stored kWh per bus kWh, (0, 1]
+		double dischargeEfficiency{1.0}; // delivered kWh per stored kWh drawn, (0, 1]
+		bool operator==(BatterySettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationBatteries{8};
+
 	struct StationSystemsSettings
 	{
 		bool enabled{false};
@@ -238,6 +264,7 @@ namespace core
 		std::vector<ResourceConversionSettings> conversions;
 		std::vector<SolarArraySettings> solarArrays;
 		std::vector<EquipmentLoadSettings> equipmentLoads;
+		std::vector<BatterySettings> batteries;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// Profile shape validation and deterministic evaluation: the level of
@@ -382,11 +409,50 @@ namespace core
 		std::vector<StationConversionFlowSnapshot> materialExchanges;
 		bool operator==(StationEquipmentLoadSnapshot const&) const = default;
 	};
+	// One battery bank as of the most recent tick: the authored nameplate,
+	// usable and derived reserve energies beside the runtime's stored energy
+	// and state of charge, the last tick's charge/discharge power, and the
+	// cumulative energy ledger that keeps losses visible. The residual
+	// (starting - discharged + charged - stored) must stay within the
+	// declared tolerance; delivered must never exceed drawn and stored must
+	// never exceed what the bus supplied on charge — free energy is a
+	// conservation violation, never a silent rounding.
+	struct StationBatterySnapshot
+	{
+		std::string id;
+		double nameplateKWh{0.0};
+		double usableKWh{0.0};
+		double reserveKWh{0.0};          // nameplate - usable: never dischargeable
+		double startingStoredKWh{0.0};
+		double storedKWh{0.0};
+		double stateOfCharge{0.0};      // stored / nameplate
+		double maxChargeKW{0.0};
+		double maxDischargeKW{0.0};
+		double chargeEfficiency{1.0};
+		double dischargeEfficiency{1.0};
+		double lastChargeKW{0.0};        // bus power taken for charging this tick
+		double lastDischargeKW{0.0};    // power delivered to the bus this tick
+		double lastDischargeRequestedKW{0.0};   // discharge routed to this battery
+		double lastDischargeShortfallKW{0.0};    // routed but not delivered this tick
+		double chargedKWh{0.0};         // cumulative energy added to storage
+		double dischargedKWh{0.0};     // cumulative energy drawn from storage
+		double deliveredKWh{0.0};      // cumulative energy delivered to the bus
+		double chargeInputKWh{0.0};    // cumulative bus energy consumed by charging
+		double lossesKWh{0.0};         // cumulative charge + discharge losses
+		double residualKWh{0.0};       // starting - discharged + charged - stored
+		bool disabled{false};          // zero usable capacity
+		bool atReserve{false};         // stored is at the reserve floor
+		bool saturated{false};         // stored is at nameplate capacity
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationBatterySnapshot const&) const = default;
+	};
 	// The station-wide electrical picture: generation actually available
 	// this tick against total requested service, what was supplied and
 	// left unmet, unmet critical floors, untaken surplus and exported
-	// heat. Allocated power never exceeds available generation; shortages
-	// are explicit results, never silent clamping.
+	// heat. Allocated power never exceeds generation plus battery output;
+	// shortages are explicit results, never silent clamping. Battery
+	// discharge and charge ride the same allocation pool as generation —
+	// they are never a second power budget.
 	struct StationPowerSnapshot
 	{
 		double availableGenerationKW{0.0};
@@ -396,8 +462,12 @@ namespace core
 		double unmetCriticalKW{0.0};
 		double surplusKW{0.0};
 		double exportedHeatKW{0.0};
+		double batteryDischargeKW{0.0};   // power delivered from batteries this tick
+		double batteryChargeKW{0.0};      // bus power taken by charging this tick
+		double batteryShortfallKW{0.0};   // routed to batteries but not delivered
 		std::vector<StationSolarSourceSnapshot> sources;
 		std::vector<StationEquipmentLoadSnapshot> loads;
+		std::vector<StationBatterySnapshot> batteries;
 		bool operator==(StationPowerSnapshot const&) const = default;
 	};
 

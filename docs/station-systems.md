@@ -325,15 +325,84 @@ validation reporting, and shows the live source output, per-load
 actual/requested service, unmet cooling and power totals beside the
 existing views.
 
+### Finite batteries and electrical deficits (#394)
+
+Authors configure rechargeable battery banks per World. Each battery
+separates nameplate energy (the installed total, kWh) from usable energy
+(the cyclable slice above the reserve floor). The reserve is the derived
+remainder, nameplate minus usable: it is never dischargeable, is never
+counted as available energy, and is published in the snapshot so the
+reserve policy is explicit rather than implicit. Starting stored energy
+is authored within the nameplate; current stored energy is runtime state
+initialised from it and never written back. Charge and discharge power
+limits are per tick, and charge/discharge efficiencies are applied at
+the bus boundary: charging stores bus kWh x charge efficiency and
+discharging delivers stored kWh drawn x discharge efficiency, so both
+conversion directions book their losses. Efficiency must be greater
+than zero and at most one; usable energy can never exceed the nameplate,
+so no policy can invent storage the battery does not have. Zero usable
+energy disables the battery entirely — it stores nothing and delivers
+nothing.
+
+Battery discharge rides the same allocation pool as generation; it is
+never a second power budget. In the protected pass, a critical floor
+generation cannot meet is offered to the batteries before it remains
+explicit unmet critical demand. In the discretionary pass, the demand
+generation leaves over is offered to the batteries under the same
+minimum-operable rule: if generation plus available battery output
+still cannot reach `demand x (1 - allowed curtailment)`, the load takes
+nothing. Generation is always taken before stored energy, so finite
+energy is preserved rather than wasted. The per-tick discharge power cap
+is shared across both passes: whatever a battery already delivered this
+tick counts against its own limit, so the passes can never jointly
+exceed it. Discharge draws only energy above the reserve floor and
+never drives stored energy below the lower of the starting value and
+the reserve. Charging takes only the surplus no load took, within the
+charge power limit and the headroom below nameplate; a battery that
+discharged this tick never charges in the same tick, so no cycle can
+circulate energy.
+
+Conservation is audited every tick in the host and mirrored inside each
+private Lua sandbox: stored energy stays within the nameplate and never
+goes negative, the ledger closes (starting - discharged + charged -
+stored within tolerance), a battery never delivers more energy than it
+drew from storage and never stores more than the bus supplied — free
+energy is a conservation violation that fails the whole tick through
+the integrated error path, never a silent rounding. The total-supplied
+audit likewise holds against generation plus actual battery output.
+
+The snapshot publishes energy, power, reserve and shortfall: per
+battery the nameplate, usable and reserve kWh, starting and current
+stored energy, state of charge, the power and efficiency limits, the
+last tick's charge and discharge power, the discharge request routed to
+the battery and its shortfall, the cumulative charged/delivered/input
+ledger with losses and residual, and the disabled/at-reserve/saturated
+flags; plus station totals for battery discharge, charge and shortfall
+beside the existing power totals. Exhaustion (usable energy depleted to
+the reserve floor), recovery above the floor, saturation at nameplate
+and discharge limitation are announced in the event log on their status
+transitions. World schema 70 persists the authored battery contracts
+(units: kWh, kW, fractions); a pre-70 document carrying `batteries` is
+refused rather than silently dropped. Stored energy, loss ledgers and
+per-tick results remain runtime-only: Load and Reset reconstruct them
+from the authored starting conditions, and repeated eclipse cycles
+replay identically. The separate Station Systems window drafts
+batteries (nameplate, usable, starting stored, charge and discharge
+power, efficiencies) with full validation reporting, and shows the
+live stored energy, visible reserve floor, state of charge, charge and
+discharge power, cumulative losses and the battery totals beside the
+existing views.
+
 ## Explicit scope limit
 
 This slice implements lifecycle, authored finite store configuration,
 bounded transfers between stores, compound-resource composition and
-conversion accounting, and solar-supplied external equipment load
-allocation. It still adds no crew demand, treatment/clearance
+conversion accounting, solar-supplied external equipment load
+allocation, and finite battery storage with charge/discharge losses.
+It still adds no crew demand, treatment/clearance
 workflows, deliveries or ejection, no cooling capacity in any thermal
-service class (cooling-service loads are refused, not cooled), no
-batteries or thermal generation, and no thermal reservoir temperature
+service class (cooling-service loads are refused, not cooled), and no
+termal reservoir temperature
 dynamics. Completed tick counts are
 observability, not oxygen, heat or endurance estimates. It
 invents no process coefficients beyond the authored demand, capacity
@@ -365,9 +434,23 @@ leaving the pool for flexible loads, cooling-infeasible loads never
 admitted with unmet cooling visible, material exchanges scaled by the
 delivered fraction under protected-reserve and capacity clamps with
 closed boundary ledgers, and intact Lua descriptor crossing with
-contained construction refusal), real file save/reopen round trips in
-YAML and binary including the solar/load scenario reproduction and
-pre-69/malformed refusals, failed-write and legacy/malformed-file
+contained construction refusal; and battery fixtures: refused battery
+configurations, surplus charging with the untaken generation exactly
+consumed, saturation at nameplate with surplus restored, eclipse
+ride-through with the deficit carried through the shared pool and the
+shortfall visible, exhaustion exactly at the reserve floor with the
+load fully unmet afterwards, sunrise recovery and recharge, power-
+limited ride-through with the remainder explicit, charge and discharge
+efficiency losses booked with the ledger closed and no free energy,
+zero-usable-capacity disablement, critical-floor protection from stored
+energy ahead of discretionary demand, minimum-operable refusal leaving
+stored energy untouched, reserve-never-drawn, deterministic repeated
+eclipse cycles with identical reset replay, and intact Lua battery
+descriptor crossing with contained construction refusal), real file
+save/reopen round trips in
+YAML and binary including the solar/load and battery scenario
+reproduction and pre-69/pre-70/malformed refusals, failed-write and
+legacy/malformed-file
 handling, paused structural rebuild preservation,
 and the existing CPU ImGui and document-history seams. Run `ctest -R
 '^station-'` in Release.
