@@ -84,7 +84,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 65"), 11, "version: 64");
+		text.replace(text.find("version: 66"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -98,6 +98,114 @@ namespace
 		require(world.getSimulationTick() == 0 && world.getStationSystemsSnapshot().worldTick == 0, "Confirmed change did not reset World");
 	}
 	struct SourceScope { ~SourceScope() { core::setStationSystemsSourceLoader({}); } };
+	void stores(smoke::Context const&)
+	{
+		auto store = [](std::string const& id, std::string const& unit, double capacity,
+			double qualified, double unqualified)
+		{
+			return core::ResourceStoreSettings{id, unit, capacity, qualified, unqualified};
+		};
+		auto configure = [&](core::World& world, std::vector<core::ResourceStoreSettings> authored)
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true; settings.stores = std::move(authored);
+			return std::pair(world.configureStationSystems(settings, true, &diagnostic), diagnostic);
+		};
+		core::World world("Stores", 2, 2); world.pauseSimulation(); world.finishBuild();
+		world.markSaved();
+		// Invalid or non-finite configuration is rejected before running.
+		for (auto const& bad : {
+			std::vector{store("", "kg", 10, 0, 0)},
+			std::vector{store(std::string(65, 'x'), "kg", 10, 0, 0)},
+			std::vector{store("a", "kg", 10, 1, 0), store("a", "L", 10, 1, 0)},
+			std::vector{store("a", "gallons", 10, 1, 0)},
+			std::vector{store("a", "", 10, 1, 0)},
+			std::vector{store("a", "kg", 0, 0, 0)},
+			std::vector{store("a", "kg", -5, 0, 0)},
+			std::vector{store("a", "kg", std::numeric_limits<double>::infinity(), 1, 0)},
+			std::vector{store("a", "kg", std::numeric_limits<double>::quiet_NaN(), 1, 0)},
+			std::vector{store("a", "kg", 10, -1, 0)},
+			std::vector{store("a", "kg", 10, 0, -0.5)},
+			std::vector{store("a", "kg", 10, std::numeric_limits<double>::infinity(), 0)},
+			std::vector{store("a", "kg", 10, 6, 5)},
+			std::vector{store("a", "kg", 10, 11, 0)}})
+		{
+			auto const [ok, diagnostic] = configure(world, bad);
+			require(!ok && !diagnostic.empty(), "Invalid store configuration accepted");
+			require(!world.getStationSystemsSnapshot().enabled && !world.isModified(),
+				"Rejected store configuration mutated the World");
+		}
+		std::vector<core::ResourceStoreSettings> tooMany;
+		for (size_t i = 0; i <= core::MaxStationResourceStores; ++i)
+			tooMany.push_back(store("store" + std::to_string(i), "kg", 10, 1, 1));
+		require(!configure(world, tooMany).first, "Store count limit not enforced");
+		// Zero/empty/full stores and mixed qualification are accepted; the
+		// snapshot separates units, capacity, initial and current quantities.
+		auto const accepted = configure(world, {store("o2", "kg", 1000, 800, 100),
+			store("water", "L", 500, 0, 250), store("empty", "kg", 10, 0, 0),
+			store("full", "kWh", 42, 42, 0)});
+		require(accepted.first, accepted.second.c_str());
+		auto const authored = world.getStationSystemsSnapshot();
+		require(authored.stores.size() == 4
+			&& authored.stores[0].id == "o2" && authored.stores[0].unit == "kg"
+			&& authored.stores[0].capacity == 1000.0
+			&& authored.stores[0].startingQualified == 800.0
+			&& authored.stores[0].startingUnqualified == 100.0
+			&& authored.stores[0].currentQualified == 800.0
+			&& authored.stores[1].currentUnqualified == 250.0
+			&& authored.stores[2].currentQualified == 0.0 && authored.stores[2].currentUnqualified == 0.0
+			&& authored.stores[3].currentQualified == 42.0, "Authored stores not reflected in snapshot");
+		require(world.getStationSystemsEvents().back().message.find("4 resource store(s)")
+			!= std::string::npos, "Lua runtime init event missing store count");
+		// Current inventory is runtime state: ticking never edits the authored
+		// document and no process drifts the quantities in this slice.
+		world.markSaved();
+		world.resumeSimulation(); require(world.advanceTicks(120), "Store run failed");
+		require(!world.isModified(), "Station ticking dirtied the authored document");
+		require(world.getStationSystemsSnapshot().stores == authored.stores,
+			"Store state drifted without any process");
+		// Isolated Worlds own independent store sets.
+		core::World other("Other", 2, 2); other.pauseSimulation(); other.finishBuild();
+		require(configure(other, {store("co2", "kg", 50, 10, 5)}).first, "Second World store config failed");
+		require(other.getStationSystemsSnapshot().stores.size() == 1
+			&& other.getStationSystemsSnapshot().stores[0].id == "co2"
+			&& world.getStationSystemsSnapshot().stores.size() == 4,
+			"Store state leaked between Worlds");
+		// Reset reconstructs current inventory from the authored starting values.
+		world.resetSimulation();
+		require(world.getStationSystemsSnapshot().stores == authored.stores, "Reset changed stores");
+		world.resumeSimulation(); require(world.advanceTicks(60), "Post-reset store run failed");
+		require(world.getStationSystemsSnapshot().stores == authored.stores,
+			"Stores changed during the post-reset run");
+		// The bundled Lua model receives the descriptors: a fixture that
+		// demands them constructs intact, and one that rejects the crossing
+		// fails atomically at construction with its diagnostic.
+		SourceScope scope;
+		core::setStationSystemsSourceLoader([] {
+			return "return function(name, stores) assert(type(stores) == 'table'); "
+				"for i = 1, #stores do local s = stores[i]; assert(s.capacity > 0); "
+				"assert(s.qualified + s.unqualified <= s.capacity) end; "
+				"return {advance=function(self,tick) return tick end} end";
+		});
+		core::World boundary("Boundary", 2, 2); boundary.pauseSimulation(); boundary.finishBuild();
+		require(configure(boundary, {store("h2", "kg", 8, 8, 0)}).first,
+			"Store descriptors did not cross the Lua boundary intact");
+		boundary.resumeSimulation(); require(boundary.advanceTicks(10), "Boundary fixture run failed");
+		require(boundary.getStationSystemsSnapshot().stores.size() == 1
+			&& boundary.getStationSystemsSnapshot().stores[0].id == "h2",
+			"Boundary fixture store lost");
+		core::setStationSystemsSourceLoader([] {
+			return "return function(name, stores) assert(#stores == 99, 'expected 99 stores') "
+				"return {advance=function(self,tick) return tick end} end";
+		});
+		core::World refused("Refused", 2, 2); refused.pauseSimulation(); refused.finishBuild();
+		std::string diagnostic;
+		require(!refused.configureStationSystems({true, 1.0f, {store("a", "kg", 1, 1, 0)}}, false, &diagnostic)
+			&& diagnostic.find("expected 99 stores") != std::string::npos
+			&& !refused.getStationSystemsSnapshot().enabled,
+			"Lua store assertion failure not contained at construction");
+	}
 	void failures(smoke::Context const&)
 	{
 		SourceScope scope;
@@ -177,7 +285,7 @@ namespace
 }
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"persistence", persistence}, {"failures", failures}};
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"persistence", persistence}, {"stores", stores}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

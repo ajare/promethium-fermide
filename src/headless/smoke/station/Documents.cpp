@@ -66,12 +66,13 @@ namespace
 			text.replace(at, from.size(), to);
 	}
 
-	void enable(core::World& world, float intervalSeconds)
+	void enable(core::World& world, float intervalSeconds,
+		std::vector<core::ResourceStoreSettings> stores = {})
 	{
 		world.pauseSimulation();
 		world.finishBuild();
 		std::string diagnostic;
-		require(world.configureStationSystems({true, intervalSeconds}, false, &diagnostic),
+		require(world.configureStationSystems({true, intervalSeconds, std::move(stores)}, false, &diagnostic),
 			"Could not enable Station systems: " + diagnostic);
 	}
 
@@ -84,7 +85,7 @@ namespace
 		require(document.find("observationIntervalSeconds") != std::string::npos,
 			"observation interval missing from the document");
 		for (auto const* liveState : {"completedTicks", "elapsedSeconds", "healthy",
-			"lifecycle", "advance", "worldTick"})
+			"lifecycle", "advance", "worldTick", "currentQualified", "currentUnqualified"})
 			require(document.find(liveState) == std::string::npos,
 				std::string("live station or Lua state leaked into the document: ") + liveState);
 	}
@@ -98,12 +99,14 @@ namespace
 		filesystem::create_directories(directory);
 
 		core::World original("Round Trip", 2, 2);
-		enable(original, 2.0f);
+		enable(original, 2.0f, {{"o2", "kg", 1000.0, 800.0, 100.0},
+			{"water", "L", 500.0, 0.0, 250.0}, {"ballast", "kg", 42.0, 42.0, 0.0}});
 		original.resumeSimulation();
 		require(original.advanceTicks(120), "original scenario run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		auto const expectedEvents = original.getStationSystemsEvents();
-		require(expected.worldTick == 120 && expectedEvents.size() == 2,
+		require(expected.worldTick == 120 && expectedEvents.size() == 2
+			&& expected.stores.size() == 3,
 			"original scenario produced the wrong observable history");
 
 		for (auto const* suffix : {".world.yaml", ".world"})
@@ -112,9 +115,11 @@ namespace
 			original.saveTo(path.string());
 			requireSettingsOnly(readFile(path));
 
-			auto reopened = core::loadWorldDocument(path);
+			auto const reopened = core::loadWorldDocument(path);
 			require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
 				"authored settings did not survive the file round trip");
+			require(reopened->getStationSystemsSnapshot().stores == expected.stores,
+				"reopened World did not reconstruct the authored stores");
 			auto const fresh = reopened->getStationSystemsSnapshot();
 			require(fresh.enabled && fresh.worldTick == 0 && fresh.elapsedSeconds == 0.0
 				&& fresh.completedTicks == std::array<uint64_t, 4>{},
@@ -195,7 +200,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 65", "version: 64");
+		replaceAll(legacy, "version: 66", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -204,13 +209,24 @@ namespace
 			"a legacy document enabled Station systems");
 
 		core::World station("Station", 2, 2);
-		enable(station, 2.0f);
+		enable(station, 2.0f, {{"o2", "kg", 1000.0, 800.0, 100.0}});
 		auto const withField = serializeYaml(station);
+		require(withField.find("startingQualified") != std::string::npos
+			&& withField.find("currentQualified") == std::string::npos,
+			"authored store fields missing or live inventory leaked");
+		bool refused = false;
+		auto staleStores = withField;
+		replaceAll(staleStores, "version: 66", "version: 65");
+		auto const staleStoresPath = directory / "stale-stores.world.yaml";
+		writeFile(staleStoresPath, staleStores);
+		try { (void)core::loadWorldDocument(staleStoresPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a pre-66 document carrying resource stores was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 65", "version: 64");
+		replaceAll(stale, "version: 66", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
-		bool refused = false;
+		refused = false;
 		try { (void)core::loadWorldDocument(stalePath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-65 document carrying Station data was silently accepted");
@@ -232,6 +248,17 @@ namespace
 		require(refused, "a malformed Station interval was accepted from a file");
 		require(loadedWorld.getStationSystemsSnapshot() == before,
 			"a malformed file disturbed the loaded World");
+
+		auto malformedStore = withField;
+		replaceAll(malformedStore, "capacity: 1000", "capacity: -1");
+		auto const malformedStorePath = directory / "malformed-store.world.yaml";
+		writeFile(malformedStorePath, malformedStore);
+		refused = false;
+		try { (void)core::loadWorldDocument(malformedStorePath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a malformed store capacity was accepted from a file");
+		require(loadedWorld.getStationSystemsSnapshot() == before,
+			"a malformed store file disturbed the loaded World");
 	}
 
 	// A paused structural rebuild keeps the live station and its settings;

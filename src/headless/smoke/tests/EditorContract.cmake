@@ -261,6 +261,7 @@ set(editor_names
     roomHeightScale/history
     roomHeightScale/occupiedPoseHistory
     station/windowWorkflow
+    station/storeWorkflow
 )
 
 if(DEFINED LANE)

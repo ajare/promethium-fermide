@@ -705,12 +705,30 @@ namespace core
 		// Version 63 adds independently inherited Remote Access panels overrides.
 		// Version 64 adds independently inherited Remote BoothWindow shutters overrides.
 		// Version 65 adds authored opt-in Station systems; never a Lua checkpoint.
-		serializer.writeUint32("version", 65);
+		// Version 66 adds authored finite Station Resource stores (#389).
+		serializer.writeUint32("version", 66);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
 			serializer.writeBool("enabled", mStationSystemsSettings.enabled);
 			serializer.writeFloat("observationIntervalSeconds", mStationSystemsSettings.observationIntervalSeconds);
+			if (!mStationSystemsSettings.stores.empty())
+			{
+				// Only authored starting conditions travel; current inventory is
+				// runtime state and is reconstructed from these values on load.
+				serializer.beginArray("stores");
+				for (auto const& store : mStationSystemsSettings.stores)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", store.id);
+					serializer.writeString("unit", store.unit);
+					serializer.writeDouble("capacity", store.capacity);
+					serializer.writeDouble("startingQualified", store.startingQualified);
+					serializer.writeDouble("startingUnqualified", store.startingUnqualified);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
 			serializer.endMap();
 		}
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
@@ -1595,7 +1613,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 65)
+		if (version < 1 || version > 66)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1606,6 +1624,24 @@ namespace core
 			serializer.beginMap("stationSystems");
 			stationSettings.enabled = serializer.readBool("enabled");
 			stationSettings.observationIntervalSeconds = serializer.readFloat("observationIntervalSeconds");
+			if (serializer.hasField("stores"))
+			{
+				if (version < 66) throw SerializationException("Station resource stores require World schema 66");
+				serializer.beginArray("stores");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					ResourceStoreSettings store;
+					store.id = serializer.readString("id");
+					store.unit = serializer.readString("unit");
+					store.capacity = serializer.readDouble("capacity");
+					store.startingQualified = serializer.readDouble("startingQualified");
+					store.startingUnqualified = serializer.readDouble("startingUnqualified");
+					stationSettings.stores.push_back(std::move(store));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
 			serializer.endMap();
 			std::string diagnostic;
 			if (!validateStationSystemsSettings(stationSettings, diagnostic)) throw SerializationException(diagnostic);

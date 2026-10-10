@@ -2,6 +2,8 @@
 #include "core/World.h"
 #include "DocumentEdit.h"
 #include "imgui/imgui.h"
+#include <algorithm>
+#include <cstring>
 
 void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, DocumentHistory& history)
 {
@@ -23,14 +25,51 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		world->getSimulationTick() * static_cast<double>(core::World::getFixedTimestep()),
 		static_cast<unsigned long long>(world->getSimulationTick()));
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
-	ImGui::TextWrapped("Lifecycle slice only: no resource production, consumption or endurance model yet. Observation interval is a provisional display/event setting, not a separate simulation clock.");
+	ImGui::TextWrapped("Slice 2a: authored finite Resource stores only; no production, consumption or transfers yet. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s",
-		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds);
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s)",
+		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
+		authored.stores.size());
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
 	ImGui::InputFloat("Observation interval (seconds)", &mDraft.observationIntervalSeconds, 0.1f, 1.0f, "%.2f");
+	for (size_t index = 0; index < mDraft.stores.size(); ++index)
+	{
+		auto& store = mDraft.stores[index];
+		auto const row = std::to_string(index);
+		ImGui::PushItemWidth(220);
+		char idBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(idBuffer, store.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Store " + row + " id").c_str(), idBuffer, sizeof(idBuffer)))
+			store.id = idBuffer;
+		char unitBuffer[8]{};
+		std::strncpy(unitBuffer, store.unit.c_str(), sizeof(unitBuffer) - 1);
+		if (ImGui::InputText(("Store " + row + " unit").c_str(), unitBuffer, sizeof(unitBuffer)))
+			store.unit = unitBuffer;
+		ImGui::InputDouble(("Store " + row + " capacity").c_str(), &store.capacity, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Store " + row + " starting usable").c_str(), &store.startingQualified, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Store " + row + " starting held").c_str(), &store.startingUnqualified, 0.0, 0.0, "%.3f");
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove store " + row).c_str()))
+			mDraft.stores.erase(mDraft.stores.begin() + static_cast<std::ptrdiff_t>(index));
+		ImGui::PopItemWidth();
+	}
+	if (ImGui::Button("Add store"))
+	{
+		core::ResourceStoreSettings store;
+		store.unit = "kg";
+		store.capacity = 100.0;
+		store.startingQualified = 50.0;
+		for (size_t candidate = mDraft.stores.size() + 1;; ++candidate)
+		{
+			store.id = "store" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.stores.begin(), mDraft.stores.end(),
+				[&](core::ResourceStoreSettings const& existing) { return existing.id == store.id; });
+			if (!taken) break;
+		}
+		mDraft.stores.push_back(std::move(store));
+	}
 	bool const draftChanged = mDraft != authored;
 	ImGui::TextUnformatted(draftChanged
 		? "Draft differs from the authored start conditions."
@@ -73,6 +112,12 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	for (size_t i = 0; i < core::StationSystemNames.size(); ++i)
 		ImGui::Text("%s: %llu completed ticks", core::StationSystemNames[i],
 			static_cast<unsigned long long>(snapshot.completedTicks[i]));
+	ImGui::SeparatorText("Resource stores (live; current inventory is runtime state, not authored)");
+	if (snapshot.stores.empty()) ImGui::TextDisabled("No Resource stores authored.");
+	for (auto const& store : snapshot.stores)
+		ImGui::Text("%s (%s): usable %.3f, held %.3f of capacity %.3f | initial usable %.3f, initial held %.3f",
+			store.id.c_str(), store.unit.c_str(), store.currentQualified, store.currentUnqualified,
+			store.capacity, store.startingQualified, store.startingUnqualified);
 	if (snapshot.enabled && !snapshot.healthy)
 		ImGui::TextWrapped("Station software failure: the World is paused. The failed tick was not committed. Reset the World to reconstruct Station systems; resume cannot retry failed scripts.");
 	for (auto const& diagnostic : world->getStationSystemsDiagnostics())

@@ -3,7 +3,9 @@
 #include "core/SerializationException.h"
 #include "BundledStationSystemsSource.h"
 #include "ScriptSandbox.h"
+#include <algorithm>
 #include <cmath>
+#include <set>
 
 namespace core
 {
@@ -42,6 +44,7 @@ namespace core
 			ScriptObject* object;
 			std::string const* source;
 			char const* name;
+			std::vector<ResourceStoreSettings> const* stores;
 			int operator()(lua_State* state) const
 			{
 				script::pushPrivateEnvironment(state);
@@ -49,7 +52,22 @@ namespace core
 					return lua_error(state);
 				lua_pushvalue(state, -2); lua_setupvalue(state, -2, 1);
 				lua_call(state, 0, 1);
-				lua_pushstring(state, name); lua_call(state, 1, 1);
+				lua_pushstring(state, name);
+				// Authored store descriptors cross the sandbox boundary as plain
+				// immutable values; the Lua model initialises its own copy.
+				lua_createtable(state, static_cast<int>(stores->size()), 0);
+				for (size_t index = 0; index < stores->size(); ++index)
+				{
+					auto const& store = (*stores)[index];
+					lua_createtable(state, 0, 5);
+					lua_pushstring(state, store.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, store.unit.c_str()); lua_setfield(state, -2, "unit");
+					lua_pushnumber(state, store.capacity); lua_setfield(state, -2, "capacity");
+					lua_pushnumber(state, store.startingQualified); lua_setfield(state, -2, "qualified");
+					lua_pushnumber(state, store.startingUnqualified); lua_setfield(state, -2, "unqualified");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 2, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -79,14 +97,47 @@ namespace core
 				return 0;
 			}
 		};
+		std::string declaredUnitsList()
+		{
+			std::string list;
+			for (auto const* unit : StationStoreUnits)
+			{
+				if (!list.empty()) list += ", ";
+				list += unit;
+			}
+			return list;
+		}
 	}
 	bool validateStationSystemsSettings(StationSystemsSettings const& settings, std::string& diagnostic)
 	{
+		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
 		if (!std::isfinite(settings.observationIntervalSeconds)
 			|| settings.observationIntervalSeconds < 0.1f || settings.observationIntervalSeconds > 60.0f)
+			return refuse("Station observation interval must be finite, from 0.1 to 60 seconds");
+		if (settings.stores.size() > MaxStationResourceStores)
+			return refuse("Station resource stores are limited to "
+				+ std::to_string(MaxStationResourceStores) + " entries");
+		std::set<std::string> ids;
+		for (auto const& store : settings.stores)
 		{
-			diagnostic = "Station observation interval must be finite, from 0.1 to 60 seconds";
-			return false;
+			auto const where = "Station resource store '" + store.id + "'";
+			if (store.id.empty()) return refuse("Station resource store id must not be empty");
+			if (store.id.size() > MaxStationStoreIdLength)
+				return refuse("Station resource store id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!ids.insert(store.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationStoreUnits.begin(), StationStoreUnits.end(), store.unit)
+				== StationStoreUnits.end())
+				return refuse(where + " has unknown unit '" + store.unit
+					+ "'; declared units are: " + declaredUnitsList());
+			if (!std::isfinite(store.capacity) || store.capacity <= 0.0)
+				return refuse(where + " capacity must be finite and positive");
+			if (!std::isfinite(store.startingQualified) || !std::isfinite(store.startingUnqualified))
+				return refuse(where + " starting inventory must be finite");
+			if (store.startingQualified < 0.0 || store.startingUnqualified < 0.0)
+				return refuse(where + " starting inventory must not be negative");
+			if (store.startingQualified + store.startingUnqualified > store.capacity)
+				return refuse(where + " starting inventory exceeds capacity");
 		}
 		diagnostic.clear(); return true;
 	}
@@ -94,7 +145,17 @@ namespace core
 	std::string bundledStationSystemsSource() { return std::string(kStationSystemsLua); }
 	struct StationSystemsRuntime::Impl
 	{
+		// Current inventory is runtime state only: it is initialised from the
+		// authored starting quantities when the runtime is constructed and is
+		// never written back into the authored settings or the document.
+		struct StoreState
+		{
+			ResourceStoreSettings authored;
+			double currentQualified{0.0};
+			double currentUnqualified{0.0};
+		};
 		StationSystemsSettings settings;
+		std::vector<StoreState> stores;
 		std::array<std::unique_ptr<ScriptObject>, 4> objects;
 		StationSystemsSnapshot snapshot;
 		std::vector<StationSystemsEvent> events;
@@ -105,13 +166,15 @@ namespace core
 		std::string diagnostic;
 		if (!validateStationSystemsSettings(settings, diagnostic)) throw SerializationException(diagnostic);
 		mImpl->settings = settings; mImpl->snapshot.enabled = settings.enabled;
+		for (auto const& store : settings.stores)
+			mImpl->stores.push_back({store, store.startingQualified, store.startingUnqualified});
 		if (!settings.enabled) return;
 		auto const source = sourceLoader ? sourceLoader() : bundledStationSystemsSource();
 		if (source.empty() || source.size() > 64 * 1024) throw SerializationException("Invalid Station systems source size");
 		for (size_t i = 0; i < mImpl->objects.size(); ++i)
 		{
 			auto object = std::make_unique<ScriptObject>();
-			Construction construction{object.get(), &source, StationSystemNames[i]};
+			Construction construction{object.get(), &source, StationSystemNames[i], &settings.stores};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -124,7 +187,8 @@ namespace core
 			lua_settop(object->state.get(), 0);
 			mImpl->objects[i] = std::move(object);
 		}
-		mImpl->events.push_back({0, "Station systems initialized (lifecycle only)"});
+		mImpl->events.push_back({0, "Station systems initialized with "
+			+ std::to_string(settings.stores.size()) + " resource store(s)"});
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
 	bool StationSystemsRuntime::advance(uint64_t tick, float seconds)
@@ -179,7 +243,15 @@ namespace core
 		}
 		return true;
 	}
-	StationSystemsSnapshot StationSystemsRuntime::snapshot() const { return mImpl->snapshot; }
+	StationSystemsSnapshot StationSystemsRuntime::snapshot() const
+	{
+		auto result = mImpl->snapshot;
+		for (auto const& store : mImpl->stores)
+			result.stores.push_back({store.authored.id, store.authored.unit,
+				store.authored.capacity, store.authored.startingQualified,
+				store.authored.startingUnqualified, store.currentQualified, store.currentUnqualified});
+		return result;
+	}
 	std::vector<StationSystemsEvent> const& StationSystemsRuntime::events() const { return mImpl->events; }
 	std::vector<StationSystemsDiagnostic> const& StationSystemsRuntime::diagnostics() const { return mImpl->diagnostics; }
 }

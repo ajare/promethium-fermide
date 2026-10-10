@@ -1,4 +1,4 @@
-# Station systems — lifecycle, authored scenarios and containment (#386–#388)
+# Station systems — lifecycle, authored scenarios, containment and resource stores (#386–#389)
 
 Station systems are opt-in per World and disabled in existing documents. Open
 **View > Station Systems** or use the
@@ -20,11 +20,13 @@ completed ticks, bounded events and structured software diagnostics.
   of a complete World reset (including Agent movement); cancellation preserves
   live and authored state. An unchanged apply is a no-op.
 - World schema 65 stores only settings, never ticks, events or Lua state.
-  Legacy documents default disabled; a pre-65 document carrying Station data
-  is refused rather than silently dropped. YAML, binary, load, Reset and
-  history use the existing World persistence seams. Load/Reset create fresh
-  runtimes; plain pause/resume and paused structural rebuilds retain the live
-  station instead of restarting it.
+  Schema 66 adds authored Resource stores inside the same `stationSystems`
+  map; a pre-66 document carrying `stores` is refused rather than silently
+  dropped. Legacy documents default disabled; a pre-65 document carrying
+  Station data is refused rather than silently dropped. YAML, binary, load,
+  Reset and history use the existing World persistence seams. Load/Reset
+  create fresh runtimes; plain pause/resume and paused structural rebuilds
+  retain the live station instead of restarting it.
 
 ## Reproducible scenarios (#387)
 
@@ -92,17 +94,54 @@ physical inventories or shortage outputs to validate. Later physical slices must
 represent shortages as finite valid results, not throw software exceptions. No
 station demand is derived from Agents and no Agent behaviour semantics change.
 
+### Finite Resource stores (#389)
+
+Authors declare finite starting supplies per World. Each store carries an
+identity, a declared unit, a capacity and a starting inventory split into
+qualified (usable) and unqualified (held awaiting treatment or clearance)
+quantities. The host validates every store before anything runs: ids must be
+non-empty, unique and at most 64 characters; units must come from the declared
+vocabulary (`g`, `kg`, `mL`, `L`, `m3`, `mol`, `kJ`, `MJ`, `Wh`, `kWh`);
+capacity must be finite and positive; starting quantities must be finite and
+non-negative and their sum cannot exceed capacity; at most 32 stores per World.
+Invalid or non-finite configuration is refused before a runtime is constructed
+and before the document changes, through the same paused-only Apply/reset-
+confirmation flow as the other settings.
+
+Current inventory is runtime state owned by the station runtime, initialised
+from the authored starting quantities when the runtime is constructed. It is
+never written back into the authored settings and never serialized; load and
+Reset reconstruct it from the authored values. This slice adds no production,
+consumption or transfer processes, so current quantities equal their starting
+values for the whole run; later slices change them through validated
+exchanges. The snapshot exposes each store's id, unit, capacity, starting
+qualified/unqualified and current qualified/unqualified beside the tick
+counts.
+
+Validated store descriptors cross into each system's private Lua sandbox as
+plain immutable values at construction; the bundled lifecycle model
+initialises its own copy and re-checks the finite-capacity invariants every
+tick, so a corrupt crossing fails contained exactly like any other script
+failure. The separate Station Systems window edits the store set in the draft
+(add, remove, id, unit, capacity, starting usable/held), reports validation
+errors without mutating anything, and shows the live table with units, usable
+versus held inventory, capacity and initial versus current state. Ticking
+never dirties the authored document.
+
 ## Explicit scope limit
 
-This slice implements lifecycle only. Completed tick counts are observability,
-not power, oxygen, heat or endurance estimates. It invents no process
-coefficients, resource inventories, production, consumption or conserved
-exchanges. Physical power/ECLSS/thermal models, external crew/equipment inputs,
-alarms, trends and supervisory allocation belong to the subsequent #385
-slices. Agent behaviour, movement, physiology and random streams are unchanged.
+This slice implements lifecycle and authored finite store configuration.
+Completed tick counts are observability, not power, oxygen, heat or endurance
+estimates. It invents no process coefficients, production, consumption or
+conserved exchanges. Physical power/ECLSS/thermal models, transfers between
+stores, external crew/equipment inputs, alarms, trends and supervisory
+allocation belong to the subsequent #385 slices. Agent behaviour, movement,
+physiology and random streams are unchanged.
 
 Acceptance coverage uses World ticking/snapshots/events/diagnostics (including
-real script failure fixtures), real file save/reopen round trips in YAML and
-binary, failed-write and legacy/malformed-file handling, paused structural
-rebuild preservation, and the existing CPU ImGui and document-history seams.
-Run `ctest -R '^station-'` in Release.
+real script failure fixtures and store boundary fixtures: zero/empty/full
+stores, malformed values, isolated Worlds and no runtime dirtying of authored
+documents), real file save/reopen round trips in YAML and binary, failed-write
+and legacy/malformed-file handling, paused structural rebuild preservation,
+and the existing CPU ImGui and document-history seams. Run `ctest -R
+'^station-'` in Release.

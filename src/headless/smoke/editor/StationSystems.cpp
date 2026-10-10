@@ -8,6 +8,106 @@
 
 namespace
 {
+	void storeWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		std::string text; io.ClipboardUserData = &text;
+		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Store editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		require(world->configureStationSystems({true, 1.0f, {
+			{"o2", "kg", 1000.0, 800.0, 100.0}, {"water", "L", 500.0, 0.0, 250.0}}},
+			false, &diagnostic), diagnostic.c_str());
+		auto frame = [&]
+		{
+			ImGui::NewFrame(); text.clear(); ImGui::LogToClipboard();
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 850});
+			window.render(world, history); ImGui::LogFinish(); ImGui::Render();
+		};
+		auto clickPoint = [&](ImVec2 point)
+		{
+			io.AddMousePosEvent(point.x, point.y); frame();
+			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
+		};
+		auto point = [&](char const* label)
+		{
+			auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
+			for (float y = 45; y < 850; y += 5)
+				for (float x = 18; x < 940; x += 15)
+				{
+					io.AddMousePosEvent(x, y); frame(); frame();
+					if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
+				}
+			throw std::runtime_error(std::string("Missing Station control: ") + label);
+		};
+		auto typeValue = [&](char const* label, char const* value)
+		{
+			clickPoint(point(label));
+			io.AddKeyEvent(ImGuiMod_Ctrl, true); io.AddKeyEvent(ImGuiKey_A, true); frame();
+			io.AddKeyEvent(ImGuiKey_A, false); io.AddKeyEvent(ImGuiMod_Ctrl, false);
+			io.AddInputCharactersUTF8(value); frame();
+			io.AddKeyEvent(ImGuiKey_Enter, true); frame(); io.AddKeyEvent(ImGuiKey_Enter, false); frame();
+		};
+		window.visible = true; frame(); frame();
+		// The separate window shows units, usable versus held inventory,
+		// capacity and initial versus current state.
+		require(text.find("o2 (kg): usable 800.000, held 100.000 of capacity 1000.000 | initial usable 800.000, initial held 100.000")
+			!= std::string::npos, "Store live display missing identity, units, usable/held or capacity");
+		require(text.find("water (L): usable 0.000, held 250.000 of capacity 500.000 | initial usable 0.000, initial held 250.000")
+			!= std::string::npos, "Empty-usable store display wrong");
+		require(text.find("2 resource store(s)") != std::string::npos, "Authored store count missing");
+		// Author one more store through the real controls, then edit it.
+		clickPoint(point("Add store"));
+		require(text.find("Draft differs from the authored start conditions") != std::string::npos,
+			"Added draft store not reported as a change");
+		clickPoint(point("Apply settings"));
+		require(world->getStationSystemsSettings().stores.size() == 3 && history.undoCount() == 1,
+			"Added store did not apply or commit history");
+		typeValue("Store 2 starting usable", "30");
+		clickPoint(point("Apply settings"));
+		require(world->getStationSystemsSettings().stores[2].startingQualified == 30.0
+			&& world->getStationSystemsSnapshot().stores[2].currentQualified == 30.0
+			&& history.undoCount() == 2, "Edited starting usable did not reach the live store");
+		// Invalid values are refused before running, with a visible diagnostic
+		// and no mutation of the authored document or history.
+		typeValue("Store 2 capacity", "0");
+		clickPoint(point("Apply settings")); frame();
+		require(text.find("capacity must be finite and positive") != std::string::npos,
+			"Invalid store capacity diagnostic not shown");
+		require(world->getStationSystemsSettings().stores[2].capacity == 100.0
+			&& history.undoCount() == 2, "Invalid store edit mutated state");
+		typeValue("Store 2 capacity", "75");
+		clickPoint(point("Apply settings"));
+		require(world->getStationSystemsSettings().stores[2].capacity == 75.0
+			&& history.undoCount() == 3, "Recovery capacity edit did not apply");
+		clickPoint(point("Remove store 2"));
+		clickPoint(point("Apply settings"));
+		require(world->getStationSystemsSettings().stores.size() == 2
+			&& world->getStationSystemsSnapshot().stores.size() == 2
+			&& history.undoCount() == 4, "Removed store did not apply");
+		// Running keeps the live display and never edits the authored document.
+		world->markSaved();
+		world->resumeSimulation(); require(world->advanceTicks(60), "Store editor run failed");
+		frame();
+		require(text.find("o2 (kg): usable 800.000") != std::string::npos
+			&& !world->isModified(), "Run changed the display source or dirtied the document");
+		// Undo restores the authored store set without resurrecting live state.
+		world->pauseSimulation();
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{ world = deserializeDocumentSnapshot(snapshot, world, {}); world->pauseSimulation(); return true; };
+		require(history.undo(captureDocumentSnapshot(world, history), restore)
+			&& world->getStationSystemsSettings().stores.size() == 3,
+			"Undo did not restore the authored store set");
+		require(world->getStationSystemsSnapshot().worldTick == 0
+			&& world->getStationSystemsSnapshot().stores.size() == 3,
+			"History undo resurrected live station state instead of reconstructing stores");
+	}
 	void workflow(smoke::Context const&)
 	{
 		using smoke::require;
@@ -108,4 +208,5 @@ namespace
 void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"station/windowWorkflow", workflow});
+	checks.push_back({"station/storeWorkflow", storeWorkflow});
 }
