@@ -435,11 +435,16 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
         return level
     end
     local function checkFiniteLimits(self)
+        -- #556: the finite-limit audit honors the same documented
+        -- numerical tolerance as the conservation residuals, so a
+        -- one-ulp roundoff is never a software failure, while any
+        -- genuine negative or over-capacity breach still fails.
         for index = 1, #self.stores do
             local store = self.stores[index]
-            assert(store.qualified >= 0 and store.unqualified >= 0,
+            local bound = BALANCE_TOLERANCE * math.max(1.0, store.capacity)
+            assert(store.qualified >= -bound and store.unqualified >= -bound,
                 "resource store inventory went negative")
-            assert(store.qualified + store.unqualified <= store.capacity,
+            assert(store.qualified + store.unqualified <= store.capacity + bound,
                 "resource store inventory exceeded capacity")
         end
     end
@@ -515,14 +520,26 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
             if scale > 0 then
                 local net = {}
                 for _, flow in ipairs(conversion.inputs) do
-                    local completed = flow.rate * fixed_seconds * scale
+                    local requested = flow.rate * fixed_seconds
+                    -- #556: clamp each flow to its own drawable/headroom:
+                    -- requested * (limit / requested) can round one ulp
+                    -- above the limit under the fixed float timestep, so
+                    -- the binding flow completes exactly at its limit.
+                    -- Mirrors the host ledger.
+                    local drawable = math.max(0.0, flow.store.qualified - flow.store.protected_reserve)
+                    local completed = math.min(requested * scale, drawable)
                     flow.store.qualified = flow.store.qualified - completed
+                    flow.last_completed = completed
                     addConstituents(net, flow.store.composition,
                         toKg(flow.store.unit, completed), -1)
                 end
                 for _, flow in ipairs(conversion.outputs) do
-                    local completed = flow.rate * fixed_seconds * scale
+                    local requested = flow.rate * fixed_seconds
+                    local headroom = flow.store.capacity
+                        - (flow.store.qualified + flow.store.unqualified)
+                    local completed = math.min(requested * scale, headroom)
                     flow.store.qualified = flow.store.qualified + completed
+                    flow.last_completed = completed
                     addConstituents(net, flow.store.composition,
                         toKg(flow.store.unit, completed), 1)
                 end
@@ -532,11 +549,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
                 end
                 for _, flow in ipairs(conversion.inputs) do
                     self.unit_loss[flow.store.unit] =
-                        (self.unit_loss[flow.store.unit] or 0) + flow.rate * fixed_seconds * scale
+                        (self.unit_loss[flow.store.unit] or 0) + flow.last_completed
                 end
                 for _, flow in ipairs(conversion.outputs) do
                     self.unit_loss[flow.store.unit] =
-                        (self.unit_loss[flow.store.unit] or 0) - flow.rate * fixed_seconds * scale
+                        (self.unit_loss[flow.store.unit] or 0) - flow.last_completed
                 end
             end
         end

@@ -716,6 +716,138 @@ namespace
 				require(std::abs(entry.residual) <= snap.balanceTolerance * std::max(1.0, std::abs(entry.starting)),
 					"Competing conversions broke constituent conservation");
 		}
+		// #556: an ordinary resource-limited partial conversion must not
+		// pause the Station when the binding limit is hit at a floating-
+		// point boundary. With the fixed float timestep the naive
+		// requested * (drawable / requested) rounds one ulp above the
+		// drawable amount — for the ticket's exact feed of
+		// 0.23872666246479948 kg at 353.883781659814 kg/s by
+		// ~2.8e-17 kg — and the strict zero/capacity audit reported that
+		// roundoff as a negative-inventory software failure. The
+		// allocation now clamps each flow to its own drawable/headroom,
+		// so the binding flow completes exactly at its limit, the tick
+		// stays healthy, and the residual lands inside the documented
+		// accounting tolerance without inventing or deleting material.
+		auto const roundoffFeed = 0.23872666246479948;
+		auto const roundoffRate = 353.883781659814;
+		auto const closedBalances = [](core::StationSystemsSnapshot const& snapshot,
+			std::string const& where)
+		{
+			for (auto const& entry : snapshot.balances)
+				require(std::abs(entry.residual) <= snapshot.balanceTolerance
+					* std::max(1.0, std::abs(entry.totalStarting)),
+					(where + " broke the per-unit balance").c_str());
+			for (auto const& entry : snapshot.constituentBalances)
+				require(std::abs(entry.residual) <= snapshot.balanceTolerance
+					* std::max(1.0, std::abs(entry.starting)),
+					(where + " broke constituent conservation").c_str());
+		};
+		core::World roundoff("Roundoff", 2, 2);
+		roundoff.pauseSimulation(); roundoff.finishBuild();
+		require(configure(roundoff,
+			{store("a", "kg", 10, roundoffFeed, 0, 0, food),
+				store("b", "kg", 10, 0, 0, 0, food)},
+			{}, {conversion("shift", {consume("a", roundoffRate)},
+			{produce("b", roundoffRate)}, 0)}).first,
+			"Roundoff partial-conversion fixture refused");
+		roundoff.resumeSimulation();
+		require(roundoff.advanceTick(), "Roundoff partial conversion paused the World");
+		{
+			auto const snap = roundoff.getStationSystemsSnapshot();
+			require(snap.healthy && roundoff.getStationSystemsDiagnostics().empty(),
+				"Roundoff partial conversion left the Station unhealthy");
+			require(snap.conversions[0].status == core::StationTransferStatus::Partial
+				&& snap.conversions[0].inputs[0].completed == roundoffFeed
+				&& snap.stores[0].currentQualified == 0.0,
+				"Roundoff conversion did not complete exactly at the drawable limit");
+			require(approx(snap.stores[1].currentQualified, roundoffFeed)
+				&& snap.stores[1].currentQualified <= 10.0,
+				"Roundoff conversion product not reflected in the output store");
+			closedBalances(snap, "Roundoff input-limited conversion");
+		}
+		// Capacity-limited variant: the output headroom ratio rounds above
+		// the headroom (10 - 6.5 = 3.5 exactly, product overshoots by one
+		// ulp), so the naive completion would breach the capacity line.
+		// The binding output flow must stop exactly at the headroom and
+		// fill the store to capacity.
+		core::World capRoundoff("CapRoundoff", 2, 2);
+		capRoundoff.pauseSimulation(); capRoundoff.finishBuild();
+		require(configure(capRoundoff,
+			{store("a", "kg", 100, 50, 0, 0, food),
+				store("b", "kg", 10, 6.5, 0, 0, food)},
+			{}, {conversion("fill", {consume("a", roundoffRate)},
+			{produce("b", roundoffRate)}, 0)}).first,
+			"Capacity roundoff fixture refused");
+		capRoundoff.resumeSimulation();
+		require(capRoundoff.advanceTick(), "Capacity roundoff conversion paused the World");
+		{
+			auto const snap = capRoundoff.getStationSystemsSnapshot();
+			require(snap.healthy && capRoundoff.getStationSystemsDiagnostics().empty(),
+				"Capacity roundoff conversion left the Station unhealthy");
+			require(snap.conversions[0].status == core::StationTransferStatus::Partial
+				&& snap.conversions[0].outputs[0].completed == 3.5
+				&& snap.stores[1].currentQualified == 10.0,
+				"Capacity roundoff did not stop exactly at the capacity line");
+			closedBalances(snap, "Capacity-limited roundoff conversion");
+		}
+		// Protected-reserve-limited variant: the drawable amount is the
+		// qualified inventory above the protected reserve (2.75 - 1.0 =
+		// 1.75), whose ratio product overshoots by one ulp. The binding
+		// input flow must stop exactly at the protected reserve.
+		core::World reserveRoundoff("ReserveRoundoff", 2, 2);
+		reserveRoundoff.pauseSimulation(); reserveRoundoff.finishBuild();
+		require(configure(reserveRoundoff,
+			{store("a", "kg", 10, 2.75, 0, 1.0, food),
+				store("b", "kg", 10, 0, 0, 0, food)},
+			{}, {conversion("draw", {consume("a", roundoffRate)},
+			{produce("b", roundoffRate)}, 0)}).first,
+			"Protected-reserve roundoff fixture refused");
+		reserveRoundoff.resumeSimulation();
+		require(reserveRoundoff.advanceTick(), "Reserve roundoff conversion paused the World");
+		{
+			auto const snap = reserveRoundoff.getStationSystemsSnapshot();
+			require(snap.healthy && reserveRoundoff.getStationSystemsDiagnostics().empty(),
+				"Reserve roundoff conversion left the Station unhealthy");
+			require(snap.conversions[0].status == core::StationTransferStatus::Partial
+				&& snap.conversions[0].inputs[0].completed == 1.75
+				&& snap.stores[0].currentQualified == 1.0,
+				"Reserve roundoff drew into the protected reserve");
+			closedBalances(snap, "Protected-reserve roundoff conversion");
+		}
+		// Mixed-rate multi-flow variant: two inputs and two outputs at
+		// different rates share one common completed scale; the binding
+		// input is the ticket's feed, whose product overshoots its
+		// drawable amount by one ulp while the slack input and both
+		// outputs run at the common scale. The tick stays healthy, the
+		// binding input drains exactly, and the declared loss stays
+		// positive and accounted.
+		core::World multiRoundoff("MultiRoundoff", 2, 2);
+		multiRoundoff.pauseSimulation(); multiRoundoff.finishBuild();
+		require(configure(multiRoundoff,
+			{store("a", "kg", 10, roundoffFeed, 0, 0, food),
+				store("c", "kg", 100, 50, 0, 0, food),
+				store("b", "kg", 10, 0, 0, 0, food),
+				store("d", "kg", 10, 0, 0, 0, food)},
+			{}, {conversion("multi", {consume("a", roundoffRate), consume("c", 100.0)},
+			{produce("b", 200.0), produce("d", 150.0)}, 0)}).first,
+			"Mixed-rate multi-flow roundoff fixture refused");
+		multiRoundoff.resumeSimulation();
+		require(multiRoundoff.advanceTick(), "Mixed-rate multi-flow roundoff paused the World");
+		{
+			auto const snap = multiRoundoff.getStationSystemsSnapshot();
+			require(snap.healthy && multiRoundoff.getStationSystemsDiagnostics().empty(),
+				"Mixed-rate multi-flow roundoff left the Station unhealthy");
+			require(snap.conversions[0].status == core::StationTransferStatus::Partial
+				&& snap.conversions[0].inputs[0].completed == roundoffFeed
+				&& snap.stores[0].currentQualified == 0.0,
+				"Multi-flow binding input did not complete exactly at its drawable limit");
+			require(snap.conversions[0].inputs[1].completed > 0.0
+				&& snap.conversions[0].outputs[0].completed > 0.0
+				&& snap.conversions[0].outputs[1].completed > 0.0
+				&& snap.stores[1].currentQualified < 50.0,
+				"Multi-flow slack input or outputs did not run at the common scale");
+			closedBalances(snap, "Mixed-rate multi-flow roundoff conversion");
+		}
 		// Compound transfers conserve constituents, including under a
 		// partial fill and a capacity refusal.
 		core::World pumped("Pumped", 2, 2);

@@ -1373,11 +1373,22 @@ namespace core
 						? "no input available to run" : limiter;
 					continue;
 				}
+				// #556: the binding limit is applied per flow with a min
+				// against that flow's own drawable/headroom, because
+				// requested * (limit / requested) can round one ulp above the
+				// limit under the fixed float timestep. Clamping each flow to
+				// the limit it set keeps the common completed scale within one
+				// ulp of exact, never drives a store negative or over capacity
+				// from roundoff, and the residual lands in the declared loss
+				// inside the documented accounting tolerance — no material is
+				// invented or deleted.
 				ConstituentLedger netChange;
 				for (auto& flow : conversion.inputs)
 				{
 					auto const requested = flow.ratePerSecond * static_cast<double>(seconds);
-					auto const completed = requested * scale;
+					auto const drawable = std::max(0.0, qualified[flow.storeIndex]
+						- stores[flow.storeIndex].authored.protectedReserve);
+					auto const completed = std::min(requested * scale, drawable);
 					qualified[flow.storeIndex] -= completed;
 					flow.lastRequested = requested;
 					flow.lastCompleted = completed;
@@ -1387,7 +1398,9 @@ namespace core
 				for (auto& flow : conversion.outputs)
 				{
 					auto const requested = flow.ratePerSecond * static_cast<double>(seconds);
-					auto const completed = requested * scale;
+					auto const headroom = stores[flow.storeIndex].authored.capacity
+						- (qualified[flow.storeIndex] + unqualified[flow.storeIndex]);
+					auto const completed = std::min(requested * scale, headroom);
 					qualified[flow.storeIndex] += completed;
 					flow.lastRequested = requested;
 					flow.lastCompleted = completed;
@@ -1413,9 +1426,16 @@ namespace core
 			{
 				if (!std::isfinite(qualified[index]) || !std::isfinite(unqualified[index]))
 					return violation = "transfer left non-finite inventory in store '" + stores[index].authored.id + "'", false;
-				if (qualified[index] < 0.0 || unqualified[index] < 0.0)
+				// #556: the finite-limit audit honors the same documented
+				// numerical tolerance as the conservation residuals, so a
+				// one-ulp roundoff is never a software failure, while any
+				// genuine negative or over-capacity breach still fails the
+				// whole tick.
+				auto const limitBound = StationBalanceTolerance
+					* std::max(1.0, stores[index].authored.capacity);
+				if (qualified[index] < -limitBound || unqualified[index] < -limitBound)
 					return violation = "transfer drove inventory negative in store '" + stores[index].authored.id + "'", false;
-				if (qualified[index] + unqualified[index] > stores[index].authored.capacity)
+				if (qualified[index] + unqualified[index] > stores[index].authored.capacity + limitBound)
 					return violation = "transfer exceeded capacity of store '" + stores[index].authored.id + "'", false;
 				currentTotals[stores[index].authored.unit] += qualified[index] + unqualified[index];
 			}

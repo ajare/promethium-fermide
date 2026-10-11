@@ -226,6 +226,21 @@ status transitions are announced in the event log with the limiting
 flow. A refused conversion moves nothing: input material is never
 consumed without the declared products being accepted.
 
+The binding limit is applied per flow as a minimum of the scaled
+request and that flow's own drawable amount or headroom (#556): under
+the fixed float timestep `requested × (limit ÷ requested)` can round
+one ulp above the limit, and the naive product used to drive a store
+negative (or over capacity) by ~1e-17 kg on an ordinary partial
+conversion, which the strict zero/capacity audit reported as a
+software failure. Clamping each flow to the limit it set keeps the
+common scale within one ulp of exact; the residual lands in the
+declared loss inside the documented `StationBalanceTolerance`, so no
+material is invented or deleted. The per-store finite-limit audit
+likewise honors that tolerance — a one-ulp roundoff is never a
+failure, while any genuine negative or over-capacity breach still
+fails the whole tick. The bundled Lua mirror applies the identical
+clamped allocation so host and model agree on every flow.
+
 The snapshot reports a per-constituent boundary ledger: for every
 tracked constituent, the station's starting total, current total,
 cumulative declared conversion losses, and the residual
