@@ -578,11 +578,15 @@ namespace
 			&& history.undoCount() == 1 && world->getSimulationTick() == 0,
 			"Repaired load draft did not apply through the reset-confirmed flow");
 		// A load that requires a cooling service is shown as not admitted,
-		// with its heat need visible as unmet cooling.
+		// with its heat need visible as unmet cooling — and its protected
+		// critical floor reported whole as unmet critical demand, per load
+		// and in the station totals, despite never being allocated (#550).
 		clickPoint(point("Add load"));
 		clickPoint(point("Load 2 requires cooling service"));
+		typeValue("Load 2 electrical demand kW", "3");
 		typeValue("Load 2 thermal class", "low");
 		typeValue("Load 2 heat output kW", "1.5");
+		typeValue("Load 2 critical floor kW", "1");
 		clickPoint(point("Apply settings"));
 		require(world->getStationSystemsSettings().equipmentLoads.size() == 3
 			&& world->getStationSystemsSettings().equipmentLoads[2].coolingDisposition
@@ -593,6 +597,10 @@ namespace
 		world->pauseSimulation(); frame();
 		require(text.find("not admitted: no cooling service of class 'low' is available (unmet cooling 1.500 kW)")
 			!= std::string::npos, "Unmet cooling not displayed in the window");
+		require(text.find("floor 1.000, unmet critical 1.000") != std::string::npos,
+			"Cooling-blocked critical floor not displayed per load in the window");
+		require(text.find("unmet critical 1.000, surplus") != std::string::npos,
+			"Cooling-blocked unmet critical demand not displayed in the station power totals");
 		// Turn the solar array periodic with an eclipse leg and watch the
 		// live illumination fall to zero through the eclipse.
 		clickPoint(point("Solar 0 periodic illumination"));

@@ -925,8 +925,18 @@ namespace core
 				load.lastBlockReason = load.lastAdmitted ? std::string{}
 					: "no cooling service of class '" + load.authored.thermalClass + "' is available";
 				load.lastUnmetCriticalKW = 0.0;
-				if (!load.lastAdmitted || load.lastRequestedKW <= 0.0) continue;
+				if (load.lastRequestedKW <= 0.0) continue;
 				auto const floor = std::min(load.authored.criticalFloorKW, load.lastRequestedKW);
+				// A cooling-blocked load is refused admission and receives no
+				// electrical service at all, so every watt of its protected
+				// floor stays unmet alongside the explicit unmet cooling and
+				// the refusal: the floor's shortfall must never vanish just
+				// because the load was blocked before allocation (#550).
+				if (!load.lastAdmitted)
+				{
+					load.lastUnmetCriticalKW = floor;
+					continue;
+				}
 				if (floor <= 0.0) continue;
 				auto const minOperating = load.lastRequestedKW * (1.0 - load.authored.maxCurtailment);
 				auto const claim = std::max(floor, minOperating);

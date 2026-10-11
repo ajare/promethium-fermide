@@ -625,7 +625,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
             load.unmetCritical = 0
             load.shortfall = ''
             supplied[index] = 0
-            if load.admitted and load.requested > 0 then
+            if not load.admitted and load.requested > 0 then
+                -- A cooling-blocked load receives no electrical service,
+                -- so every watt of its protected floor stays unmet rather
+                -- than vanishing with the refusal (#550).
+                load.unmetCritical = math.min(load.criticalFloorKW, load.requested)
+            elseif load.admitted and load.requested > 0 then
                 local floor = math.min(load.criticalFloorKW, load.requested)
                 if floor > 0 then
                     local minOperating = load.requested * (1 - load.maxCurtailment)

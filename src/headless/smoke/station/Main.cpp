@@ -1204,6 +1204,51 @@ namespace
 				&& approx(snap.power.totalRequestedKW, 13.0),
 				"Blocked load did not leave its demand visible in the totals");
 		}
+		// A cooling-blocked load with a protected floor must not lose that
+		// floor in the refusal: it receives no electrical service, so the
+		// whole effective floor stays explicit as unmet critical demand
+		// alongside the unmet cooling and the admission refusal, and the
+		// physical shortage never becomes a software error (#550).
+		core::World blocked("Blocked", 2, 2);
+		blocked.pauseSimulation(); blocked.finishBuild();
+		{
+			auto cryo = load("cryo", 10.0, "low",
+				core::StationCoolingDisposition::CoolingService, 5.0, 5, 1.0);
+			cryo.heatOutputKW = 5.0;
+			require(configure(blocked, {},
+				{array("field", 10.0, constantProfile(1.0))}, {cryo}).first,
+				"Cooling-blocked critical-floor scenario refused");
+			blocked.resumeSimulation();
+			require(blocked.advanceTick(), "Cooling-blocked critical-floor tick failed");
+			auto const snap = blocked.getStationSystemsSnapshot();
+			require(snap.healthy && snap.power.loads.size() == 1,
+				"Cooling-blocked critical floor turned a physical shortage into a software failure");
+			require(!snap.power.loads[0].admitted
+				&& snap.power.loads[0].status == core::StationTransferStatus::Rejected
+				&& approx(snap.power.loads[0].suppliedKW, 0.0),
+				"Cooling-blocked load was admitted or supplied");
+			require(approx(snap.power.loads[0].unmetCriticalKW, 5.0)
+				&& approx(snap.power.unmetCriticalKW, 5.0),
+				"Cooling-blocked critical floor not reported unmet per load and in the station totals");
+			require(approx(snap.power.loads[0].unmetCoolingKW, 5.0)
+				&& approx(snap.power.loads[0].heatExportedKW, 0.0),
+				"Cooling-blocked heat not visible as unmet cooling");
+			require(sawEvent(blocked, "Load 'cryo' rejected: no cooling service of class 'low' is available"),
+				"Cooling refusal reason missing from the event log");
+			require(sawEvent(blocked, "Load 'cryo' critical floor unmet: short 5.000000 kW"),
+				"Unmet critical floor transition missing for the cooling-blocked load");
+			// The unmet-critical announcement is a transition, not a flood:
+			// a steady blocked load reports it once across many ticks.
+			require(blocked.advanceTicks(59), "Cooling-blocked continuation run failed");
+			size_t unmetEvents = 0;
+			for (auto const& event : blocked.getStationSystemsEvents())
+				if (event.message.find("critical floor unmet") != std::string::npos)
+					++unmetEvents;
+			require(unmetEvents == 1,
+				"Unmet critical floor event flooded past its transition");
+			require(approx(blocked.getStationSystemsSnapshot().power.unmetCriticalKW, 5.0),
+				"Cooling-blocked unmet critical demand not sustained across ticks");
+		}
 		// Declared material exchanges scale with the delivered power
 		// fraction, respect protected reserves and destination capacity,
 		// and keep the per-unit boundary ledger closed.
