@@ -3128,7 +3128,101 @@ namespace
 		core::setStationSystemsSourceLoader({});
 		require(hostFailure.getStationSystemsSnapshot() == after,
 			"Resetting the source loader changed the failed World's snapshot");
-		unaffected.resumeSimulation(); require(unaffected.advanceTick() && unaffected.getStationSystemsSnapshot().healthy, "Failure leaked between Worlds");
+		// Non-finite derived magnitudes are never published as healthy
+		// results (#553): two finite 1e308 kW arrays sum to infinite
+		// generation. With the bundled mirror the sandbox rejects the
+		// overflowed pool itself; with a non-mirroring sandbox the host
+		// ledger audit fails the tick whole. Either way the tick fails
+		// atomically: the World pauses, the public snapshot stays exactly
+		// at the last committed tick apart from the failure status, no
+		// event is published, and a machine-visible non-finite
+		// diagnostic is recorded.
+		core::setStationSystemsSourceLoader({});
+		core::World overflow("Overflow", 2, 2);
+		overflow.pauseSimulation(); overflow.finishBuild();
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.solarArrays = {{"array-a", 1e308, {}}, {"array-b", 1e308, {}}};
+			std::string diagnostic;
+			require(overflow.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+		}
+		overflow.resumeSimulation();
+		auto const overflowBefore = overflow.getStationSystemsSnapshot();
+		auto const overflowEvents = overflow.getStationSystemsEvents();
+		require(overflowBefore.healthy && overflowBefore.worldTick == 0,
+			"Overflow fixture did not start healthy");
+		require(!overflow.advanceTick(), "Infinite generation sum published as healthy");
+		require(overflow.isSimulationPaused() && !overflow.getStationSystemsSnapshot().healthy
+			&& overflow.getSimulationTick() == 0,
+			"Non-finite output not fail-visible and synchronized");
+		auto expectedOverflow = overflowBefore;
+		expectedOverflow.healthy = false;
+		require(overflow.getStationSystemsSnapshot() == expectedOverflow,
+			"Failed non-finite tick published mutated snapshot state");
+		require(overflow.getStationSystemsEvents() == overflowEvents,
+			"Failed non-finite tick published events");
+		auto const overflowDiagnostics = overflow.getStationSystemsDiagnostics();
+		require(overflowDiagnostics.size() == 1 && overflowDiagnostics[0].worldTick == 1
+			&& overflowDiagnostics[0].message.find("finite") != std::string::npos,
+			"Non-finite output diagnostic missing or wrong");
+		// The host ledger's own finiteness audit: with a sandbox that
+		// mirrors nothing, the host must still refuse to commit an
+		// infinite generation sum and name the failed subsystem.
+		core::setStationSystemsSourceLoader([] {
+			return "return function() local n = 0 "
+				"return {advance=function() n = n + 1; return n end} end";
+		});
+		core::World hostOverflow("HostOverflow", 2, 2);
+		hostOverflow.pauseSimulation(); hostOverflow.finishBuild();
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.solarArrays = {{"array-a", 1e308, {}}, {"array-b", 1e308, {}}};
+			std::string diagnostic;
+			require(hostOverflow.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+		}
+		hostOverflow.resumeSimulation();
+		require(!hostOverflow.advanceTick(), "Host committed an infinite generation sum");
+		require(hostOverflow.isSimulationPaused() && !hostOverflow.getStationSystemsSnapshot().healthy
+			&& hostOverflow.getSimulationTick() == 0,
+			"Host non-finite failure not fail-visible and synchronized");
+		require(hostOverflow.getStationSystemsSnapshot().power.availableGenerationKW == 0.0
+			&& hostOverflow.getStationSystemsSnapshot().power.surplusKW == 0.0,
+			"Infinite generation escaped into the rolled-back snapshot");
+		auto const hostOverflowDiagnostics = hostOverflow.getStationSystemsDiagnostics();
+		require(hostOverflowDiagnostics.size() == 1
+			&& hostOverflowDiagnostics[0].system == "Power allocation"
+			&& hostOverflowDiagnostics[0].failure == Failure::ConversionError
+			&& hostOverflowDiagnostics[0].worldTick == 1
+			&& hostOverflowDiagnostics[0].message.find("non-finite") != std::string::npos,
+			"Host non-finite audit diagnostic missing or wrong");
+		// Finite extremes remain valid: a single 1e308 kW array is a
+		// finite result, its load is served fully and the surplus stays
+		// finite — the finiteness audit refuses only non-finite results
+		// and never a large-but-finite magnitude.
+		core::setStationSystemsSourceLoader({});
+		core::World huge("HugeFinite", 2, 2);
+		huge.pauseSimulation(); huge.finishBuild();
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.solarArrays = {{"array-a", 1e308, {}}};
+			core::EquipmentLoadSettings lamp;
+			lamp.id = "lamp"; lamp.electricalDemandKW = 1.0; lamp.thermalClass = "low";
+			settings.equipmentLoads = {lamp};
+			std::string diagnostic;
+			require(huge.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+		}
+		huge.resumeSimulation();
+		require(huge.advanceTicks(10) && huge.getStationSystemsSnapshot().healthy
+			&& huge.getStationSystemsSnapshot().power.availableGenerationKW == 1e308
+			&& huge.getStationSystemsSnapshot().power.surplusKW == 1e308
+			&& huge.getStationSystemsSnapshot().power.totalSuppliedKW == 1.0,
+			"Finite extreme generation refused as if non-finite");
+		unaffected.resumeSimulation();
+		require(unaffected.advanceTick() && unaffected.getStationSystemsSnapshot().healthy,
+			"Non-finite containment leaked between Worlds");
 	}
 }
 int main(int argc, char** argv)

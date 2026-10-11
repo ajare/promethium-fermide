@@ -365,6 +365,23 @@ immutable values, mirrors the same two-pass allocation inside each
 private sandbox and audits every tick that allocated power never exceeds
 generation and no load is supplied above its request.
 
+Non-finite derived magnitudes are never published as healthy results
+(#553). Individual authored values are validated finite, but sums and
+products of finite values can overflow to infinity, and an infinite
+magnitude passes every inequality audit unnoticed (`inf > inf` is
+false). The host ledger audits the finiteness of every committed
+numeric power, material and energy output and ledger intermediate —
+the generation pool as it is summed, per-source, per-load,
+per-exchange and per-battery results, transfer and conversion flow
+amounts, the loss ledgers, store inflow/outflow and the published
+station-wide totals — and the bundled Lua mirror rejects an
+overflowed generation pool and audits the same committed values in
+the sandbox. A non-finite derived result fails the tick whole through
+the contained path: nothing is published, the World pauses, and the
+structured diagnostic names the failed value. Ordinary finite
+shortages remain valid outcomes; a large-but-finite magnitude is
+never refused.
+
 World schema 69 persists the authored arrays and load contracts (units:
 kW, seconds, fractions); a pre-69 document carrying `solarArrays` or
 `equipmentLoads` is refused rather than silently dropped. Allocation

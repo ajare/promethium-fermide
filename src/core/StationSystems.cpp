@@ -802,9 +802,12 @@ namespace core
 		// published on success, and events are only appended after the
 		// audits pass; this rollback closes the remaining in-place mutation
 		// so a failed tick can never expose a partial allocation, energy
-		// draw or flow result through the public snapshot.
-		bool applyLedger(uint64_t tick, float seconds, std::string& violation)
+		// draw or flow result through the public snapshot. The violated
+		// subsystem is reported through `system` so the structured
+		// diagnostic names what failed (#553).
+		bool applyLedger(uint64_t tick, float seconds, std::string& system, std::string& violation)
 		{
+			system = "Resource transfer";
 			auto const committedTransfers = transfers;
 			auto const committedConversions = conversions;
 			auto const committedLoads = loads;
@@ -812,7 +815,7 @@ namespace core
 			auto const committedBatteries = batteries;
 			auto const committedAvailableGenerationKW = lastAvailableGenerationKW;
 			auto const committedBatteryShortfallKW = lastBatteryShortfallKW;
-			if (runLedger(tick, seconds, violation)) return true;
+			if (runLedger(tick, seconds, system, violation)) return true;
 			transfers = committedTransfers;
 			conversions = committedConversions;
 			loads = committedLoads;
@@ -831,7 +834,7 @@ namespace core
 		// material into existence or out of it: it fails the whole tick
 		// through the integrated error path, and the applyLedger wrapper
 		// restores the live ledger state this pass mutated in place (#555).
-		bool runLedger(uint64_t tick, float seconds, std::string& violation)
+		bool runLedger(uint64_t tick, float seconds, std::string& system, std::string& violation)
 		{
 			std::vector<StationTransferStatus> previousStatus;
 			previousStatus.reserve(transfers.size());
@@ -891,6 +894,18 @@ namespace core
 					? 0.0 : array.authored.capacityKW * array.lastIllumination;
 				array.lastEclipse = !array.lastDisabled && array.lastAvailableKW <= 0.0;
 				availableGeneration += array.lastAvailableKW;
+				// #553: finite installed capacities do not guarantee a
+				// finite total — two finite arrays can sum past the largest
+				// representable double into infinity, and an infinite pool
+				// drives every later allocation comparison wrong (inf > inf
+				// is false). Reject the overflowed pool before it allocates
+				// anything, so the impossible magnitude never reaches a
+				// committed result.
+				if (!std::isfinite(availableGeneration))
+				{
+					system = "Power allocation";
+					return violation = "solar generation sum overflows to a non-finite magnitude", false;
+				}
 			}
 			std::vector<double> supplied(loads.size(), 0.0);
 			// Battery discharge feeds the same allocation pool as generation,
@@ -1542,6 +1557,124 @@ namespace core
 					return violation = "load '" + load.authored.id
 						+ "' was supplied below its minimum operable supply level", false;
 			}
+			// #553: finiteness audit of every committed numeric power,
+			// material and energy output and ledger intermediate. Authored
+			// values are individually validated finite, but sums and
+			// products of finite values can overflow to infinity, and
+			// inequality audits never notice: an infinite magnitude passes
+			// every upper-bound comparison and inf > inf is false. A
+			// non-finite derived result fails the whole tick through the
+			// same contained path as any other ledger violation — the
+			// applyLedger wrapper restores the ledger, nothing is
+			// published, and the diagnostic names the value. Ordinary
+			// finite shortages are valid outcomes and are untouched here.
+			auto requireFinite = [&](double value, std::string const& what)
+			{
+				if (std::isfinite(value)) return true;
+				violation = "non-finite " + what + " is not a publishable physical result";
+				return false;
+			};
+			for (size_t index = 0; index < stores.size(); ++index)
+			{
+				auto const where = "store '" + stores[index].authored.id + "' ";
+				if (!requireFinite(flowIn[index], where + "last-tick inflow")) return false;
+				if (!requireFinite(flowOut[index], where + "last-tick outflow")) return false;
+			}
+			for (auto const& [unit, loss] : stagedUnitLoss)
+				if (!requireFinite(loss, "cumulative loss of unit '" + unit + "'")) return false;
+			for (auto const& [constituent, loss] : stagedLoss)
+				if (!requireFinite(loss, "cumulative loss of constituent '" + constituent + "'")) return false;
+			for (auto const& transfer : transfers)
+			{
+				auto const where = "transfer '" + transfer.authored.id + "' ";
+				if (!requireFinite(transfer.lastRequested, where + "requested amount")) return false;
+				if (!requireFinite(transfer.lastCompleted, where + "completed amount")) return false;
+				if (!requireFinite(transfer.lastUnmet, where + "unmet amount")) return false;
+			}
+			for (auto const& conversion : conversions)
+			{
+				auto const where = "conversion '" + conversion.authored.id + "' ";
+				if (!requireFinite(conversion.lastScale, where + "completed scale")) return false;
+				for (auto const& flow : conversion.inputs)
+				{
+					if (!requireFinite(flow.lastRequested, where + "input requested amount")) return false;
+					if (!requireFinite(flow.lastCompleted, where + "input completed amount")) return false;
+				}
+				for (auto const& flow : conversion.outputs)
+				{
+					if (!requireFinite(flow.lastRequested, where + "output requested amount")) return false;
+					if (!requireFinite(flow.lastCompleted, where + "output completed amount")) return false;
+				}
+			}
+			system = "Power allocation";
+			for (auto const& array : solarArrays)
+			{
+				auto const where = "solar array '" + array.authored.id + "' ";
+				if (!requireFinite(array.lastIllumination, where + "evaluated illumination")) return false;
+				if (!requireFinite(array.lastAvailableKW, where + "available generation")) return false;
+			}
+			for (auto const& load : loads)
+			{
+				auto const where = "equipment load '" + load.authored.id + "' ";
+				if (!requireFinite(load.lastProfileLevel, where + "operating profile level")) return false;
+				if (!requireFinite(load.lastRequestedKW, where + "requested power")) return false;
+				if (!requireFinite(load.lastSuppliedKW, where + "supplied power")) return false;
+				if (!requireFinite(load.lastUnmetKW, where + "unmet power")) return false;
+				if (!requireFinite(load.lastUnmetCriticalKW, where + "unmet critical power")) return false;
+				if (!requireFinite(load.lastDeliveredFraction, where + "delivered fraction")) return false;
+				if (!requireFinite(load.lastMaterialFraction, where + "material-feasible fraction")) return false;
+				if (!requireFinite(load.lastCappedRequestKW, where + "material-capped request")) return false;
+				if (!requireFinite(load.lastHeatExportedKW, where + "exported heat")) return false;
+				if (!requireFinite(load.lastUnmetCoolingKW, where + "unmet cooling")) return false;
+				for (auto const& exchange : load.exchanges)
+				{
+					if (!requireFinite(exchange.lastRequested, where + "exchange requested amount")) return false;
+					if (!requireFinite(exchange.lastCompleted, where + "exchange completed amount")) return false;
+					if (!requireFinite(exchange.lastUnmet, where + "exchange unmet amount")) return false;
+				}
+			}
+			for (auto const& battery : batteries)
+			{
+				auto const where = "battery '" + battery.authored.id + "' ";
+				if (!requireFinite(battery.stored, where + "stored energy")) return false;
+				if (!requireFinite(battery.lastChargeKW, where + "charge power")) return false;
+				if (!requireFinite(battery.lastDischargeKW, where + "discharge power")) return false;
+				if (!requireFinite(battery.lastDischargeRequestedKW, where + "discharge request")) return false;
+				if (!requireFinite(battery.lastDischargeShortfallKW, where + "discharge shortfall")) return false;
+				if (!requireFinite(battery.chargedKWh, where + "cumulative charged energy")) return false;
+				if (!requireFinite(battery.dischargedKWh, where + "cumulative discharged energy")) return false;
+				if (!requireFinite(battery.deliveredKWh, where + "cumulative delivered energy")) return false;
+				if (!requireFinite(battery.chargeInputKWh, where + "cumulative charge input energy")) return false;
+			}
+			if (!requireFinite(availableGeneration, "surplus generation pool")) return false;
+			if (!requireFinite(batteryShortfallKW, "battery shortfall")) return false;
+			// The snapshot publishes station-wide totals summed from the
+			// per-item results; audit the same sums so an aggregate can
+			// never overflow past the per-item checks.
+			{
+				double totalRequested = 0.0, totalSupplied = 0.0, totalUnmetCritical = 0.0;
+				double totalHeat = 0.0, totalGeneration = 0.0, totalDischarge = 0.0, totalCharge = 0.0;
+				for (auto const& load : loads)
+				{
+					totalRequested += load.lastRequestedKW;
+					totalSupplied += load.lastSuppliedKW;
+					totalUnmetCritical += load.lastUnmetCriticalKW;
+					totalHeat += load.lastHeatExportedKW;
+				}
+				for (auto const& array : solarArrays) totalGeneration += array.lastAvailableKW;
+				for (auto const& battery : batteries)
+				{
+					totalDischarge += battery.lastDischargeKW;
+					totalCharge += battery.lastChargeKW;
+				}
+				if (!requireFinite(totalRequested, "total requested power")) return false;
+				if (!requireFinite(totalSupplied, "total supplied power")) return false;
+				if (!requireFinite(totalUnmetCritical, "total unmet critical power")) return false;
+				if (!requireFinite(totalHeat, "total exported heat")) return false;
+				if (!requireFinite(totalGeneration, "total available generation")) return false;
+				if (!requireFinite(totalDischarge, "total battery discharge power")) return false;
+				if (!requireFinite(totalCharge, "total battery charge power")) return false;
+			}
 			for (size_t index = 0; index < stores.size(); ++index)
 			{
 				stores[index].currentQualified = qualified[index];
@@ -1808,11 +1941,11 @@ namespace core
 		if (!mImpl->transferOrder.empty() || !mImpl->conversionOrder.empty()
 			|| !mImpl->loads.empty() || !mImpl->solarArrays.empty() || !mImpl->batteries.empty())
 		{
-			std::string violation;
-			if (!mImpl->applyLedger(tick, seconds, violation))
+			std::string violationSystem, violation;
+			if (!mImpl->applyLedger(tick, seconds, violationSystem, violation))
 			{
 				mImpl->snapshot.healthy = false;
-				mImpl->diagnostics.push_back({tick, "Resource transfer",
+				mImpl->diagnostics.push_back({tick, violationSystem,
 					ScriptExecutionFailure::ConversionError, violation});
 				for (auto& owned : mImpl->objects) owned.reset();
 				return false;

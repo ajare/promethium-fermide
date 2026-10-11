@@ -14,6 +14,17 @@
 -- path.
 local BALANCE_TOLERANCE = 1e-9
 
+-- #553: a derived magnitude is publishable only when it is finite.
+-- Individual authored values are validated finite, but sums and
+-- products of finite values can overflow to infinity, and infinity
+-- slips through inequality audits (inf > inf is false, and an
+-- infinite pool passes every upper-bound comparison). Non-finite
+-- derived results are rejected explicitly; ordinary finite
+-- shortages remain valid outcomes.
+local function isFinite(value)
+    return type(value) == 'number' and value > -math.huge and value < math.huge
+end
+
 -- Compound constituents are accounted in kg; the energy term in kJ.
 -- The seven mass constituents partition a compound store's wet mass
 -- exactly: water is the moisture term and dryOrganics is the dry-mass
@@ -702,6 +713,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
             array.lastIllumination = illumination
             array.lastAvailable = available
             generation = generation + available
+            -- #553: finite installed capacities do not guarantee a
+            -- finite total; reject an overflowed generation pool before
+            -- it drives any allocation, mirroring the host ledger.
+            assert(isFinite(generation),
+                'solar generation sum overflows to a non-finite magnitude')
         end
         local availableGeneration = generation
         for _, battery in ipairs(self.batteries) do
@@ -952,6 +968,39 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
             assert(battery.charged <= battery.charge_input + bound,
                 'battery stored more energy than the bus supplied to it')
         end
+        -- #553: finiteness audit of every committed power/material/
+        -- energy output and ledger intermediate. Finite inputs do not
+        -- guarantee finite sums or products, and a non-finite
+        -- magnitude passes every inequality audit unnoticed, so
+        -- finiteness is checked explicitly. Finite shortages are
+        -- valid results and are untouched here.
+        for index = 1, #self.loads do
+            local load = self.loads[index]
+            local results = { load.requested, load.supplied, load.deliveredFraction,
+                load.materialFraction, load.cappedRequest, load.unmetCritical,
+                load.heatExported, load.unmetCooling }
+            for _, value in ipairs(results) do
+                assert(isFinite(value),
+                    "equipment load '" .. load.id .. "' result is not finite")
+            end
+            for _, exchange in ipairs(load.exchanges) do
+                assert(isFinite(exchange.lastRequested) and isFinite(exchange.lastCompleted)
+                    and isFinite(exchange.lastUnmet),
+                    "equipment load '" .. load.id .. "' material exchange amount is not finite")
+            end
+        end
+        for _, battery in ipairs(self.batteries) do
+            local amounts = { battery.stored, battery.charged, battery.discharged,
+                battery.delivered, battery.charge_input, battery.last_charge,
+                battery.last_discharge }
+            for _, value in ipairs(amounts) do
+                assert(isFinite(value),
+                    "battery '" .. battery.id .. "' energy amount is not finite")
+            end
+        end
+        assert(isFinite(availableGeneration), 'remaining generation pool is not finite')
+        assert(isFinite(totalSupplied), 'total supplied power is not finite')
+        assert(isFinite(batterySupplied), 'total battery supplied power is not finite')
     end
     function object:advance(world_tick, fixed_seconds)
         assert(world_tick > 0 and fixed_seconds > 0)
