@@ -15,8 +15,6 @@ namespace
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
-		std::string text; io.ClipboardUserData = &text;
-		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
 		DocumentHistory history;
 		StationSystemsWindow window;
 		auto world = std::make_shared<core::World>("Store editor", 2, 2);
@@ -25,99 +23,77 @@ namespace
 		require(world->configureStationSystems({true, 1.0f, {
 			{"o2", "kg", 1000.0, 800.0, 100.0}, {"water", "L", 500.0, 0.0, 250.0}}},
 			false, &diagnostic), diagnostic.c_str());
-		auto frame = [&]
+		headless::TestEngineDriver driver([&]
 		{
-			ImGui::NewFrame(); text.clear(); ImGui::LogToClipboard();
 			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 980});
-			window.render(world, history); ImGui::LogFinish(); ImGui::Render();
-		};
-		auto clickPoint = [&](ImVec2 point)
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+
+		driver.run("station", "storeWorkflow", [&](ImGuiTestContext* ctx)
 		{
-			io.AddMousePosEvent(point.x, point.y); frame();
-			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
-		};
-		// The compound draft is taller than one viewport: reset the scroll
-		// and wheel down until the control comes into view.
-		auto point = [&](char const* label)
-		{
-			io.AddMousePosEvent(400.0f, 400.0f);
-			io.AddMouseWheelEvent(0.0f, 1000.0f); frame();
-			for (int pass = 0; pass < 16; ++pass)
-			{
-				auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
-				for (float y = 45; y < 975; y += 5)
-					for (float x = 18; x < 940; x += 15)
-					{
-						io.AddMousePosEvent(x, y); frame(); frame();
-						if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
-					}
-				io.AddMousePosEvent(400.0f, 400.0f);
-				io.AddMouseWheelEvent(0.0f, -10.0f); frame();
-			}
-			throw std::runtime_error(std::string("Missing Station control: ") + label);
-		};
-		auto typeValue = [&](char const* label, char const* value)
-		{
-			clickPoint(point(label));
-			io.AddKeyEvent(ImGuiMod_Ctrl, true); io.AddKeyEvent(ImGuiKey_A, true); frame();
-			io.AddKeyEvent(ImGuiKey_A, false); io.AddKeyEvent(ImGuiMod_Ctrl, false);
-			io.AddInputCharactersUTF8(value); frame();
-			io.AddKeyEvent(ImGuiKey_Enter, true); frame(); io.AddKeyEvent(ImGuiKey_Enter, false); frame();
-		};
-		window.visible = true; frame(); frame();
-		// The separate window shows units, usable versus held inventory,
-		// capacity and initial versus current state.
-		require(text.find("o2 (kg): usable 800.000, held 100.000 of capacity 1000.000 | initial usable 800.000, initial held 100.000")
-			!= std::string::npos, "Store live display missing identity, units, usable/held or capacity");
-		require(text.find("water (L): usable 0.000, held 250.000 of capacity 500.000 | initial usable 0.000, initial held 250.000")
-			!= std::string::npos, "Empty-usable store display wrong");
-		require(text.find("2 resource store(s)") != std::string::npos, "Authored store count missing");
-		// Author one more store through the real controls, then edit it.
-		clickPoint(point("Add store"));
-		require(text.find("Draft differs from the authored start conditions") != std::string::npos,
-			"Added draft store not reported as a change");
-		clickPoint(point("Apply settings"));
-		require(world->getStationSystemsSettings().stores.size() == 3 && history.undoCount() == 1,
-			"Added store did not apply or commit history");
-		typeValue("Store 2 starting usable", "30");
-		clickPoint(point("Apply settings"));
-		require(world->getStationSystemsSettings().stores[2].startingQualified == 30.0
-			&& world->getStationSystemsSnapshot().stores[2].currentQualified == 30.0
-			&& history.undoCount() == 2, "Edited starting usable did not reach the live store");
-		// Invalid values are refused before running, with a visible diagnostic
-		// and no mutation of the authored document or history.
-		typeValue("Store 2 capacity", "0");
-		clickPoint(point("Apply settings")); frame();
-		require(text.find("capacity must be finite and positive") != std::string::npos,
-			"Invalid store capacity diagnostic not shown");
-		require(world->getStationSystemsSettings().stores[2].capacity == 100.0
-			&& history.undoCount() == 2, "Invalid store edit mutated state");
-		typeValue("Store 2 capacity", "75");
-		clickPoint(point("Apply settings"));
-		require(world->getStationSystemsSettings().stores[2].capacity == 75.0
-			&& history.undoCount() == 3, "Recovery capacity edit did not apply");
-		clickPoint(point("Remove store 2"));
-		clickPoint(point("Apply settings"));
-		require(world->getStationSystemsSettings().stores.size() == 2
-			&& world->getStationSystemsSnapshot().stores.size() == 2
-			&& history.undoCount() == 4, "Removed store did not apply");
-		// Running keeps the live display and never edits the authored document.
-		world->markSaved();
-		world->resumeSimulation(); require(world->advanceTicks(60), "Store editor run failed");
-		frame();
-		require(text.find("o2 (kg): usable 800.000") != std::string::npos
-			&& !world->isModified(), "Run changed the display source or dirtied the document");
-		// Undo restores the authored store set without resurrecting live state.
-		world->pauseSimulation();
-		auto restore = [&](DocumentSnapshot const& snapshot)
-		{ world = deserializeDocumentSnapshot(snapshot, world, {}); world->pauseSimulation(); return true; };
-		require(history.undo(captureDocumentSnapshot(world, history), restore)
-			&& world->getStationSystemsSettings().stores.size() == 3,
-			"Undo did not restore the authored store set");
-		require(world->getStationSystemsSnapshot().worldTick == 0
-			&& world->getStationSystemsSnapshot().stores.size() == 3,
-			"History undo resurrected live station state instead of reconstructing stores");
+			ctx->SetRef("Station Systems");
+			// The separate window shows units, usable versus held inventory,
+			// capacity and initial versus current state.
+			REQ(driver.contains("o2 (kg): usable 800.000, held 100.000 of capacity 1000.000 | initial usable 800.000, initial held 100.000"),
+				"Store live display missing identity, units, usable/held or capacity");
+			REQ(driver.contains("water (L): usable 0.000, held 250.000 of capacity 500.000 | initial usable 0.000, initial held 250.000"),
+				"Empty-usable store display wrong");
+			REQ(driver.contains("2 resource store(s)"), "Authored store count missing");
+			// Author one more store through the real controls, then edit it.
+			ctx->ItemClick("Add store");
+			REQ(driver.contains("Draft differs from the authored start conditions"),
+				"Added draft store not reported as a change");
+			ctx->ItemClick("Apply settings");
+			REQ(world->getStationSystemsSettings().stores.size() == 3 && history.undoCount() == 1,
+				"Added store did not apply or commit history");
+			ctx->ItemInputValue("Store 2 starting usable", "30");
+			ctx->ItemClick("Apply settings");
+			REQ(world->getStationSystemsSettings().stores[2].startingQualified == 30.0
+				&& world->getStationSystemsSnapshot().stores[2].currentQualified == 30.0
+				&& history.undoCount() == 2, "Edited starting usable did not reach the live store");
+			// Invalid values are refused before running, with a visible diagnostic
+			// and no mutation of the authored document or history.
+			ctx->ItemInputValue("Store 2 capacity", "0");
+			ctx->ItemClick("Apply settings");
+			ctx->Sleep(1);
+			REQ(driver.contains("capacity must be finite and positive"),
+				"Invalid store capacity diagnostic not shown");
+			REQ(world->getStationSystemsSettings().stores[2].capacity == 100.0
+				&& history.undoCount() == 2, "Invalid store edit mutated state");
+			ctx->ItemInputValue("Store 2 capacity", "75");
+			ctx->ItemClick("Apply settings");
+			REQ(world->getStationSystemsSettings().stores[2].capacity == 75.0
+				&& history.undoCount() == 3, "Recovery capacity edit did not apply");
+			driver.click(ctx, "Remove store 2");
+			driver.click(ctx, "Apply settings");
+			REQ(world->getStationSystemsSettings().stores.size() == 2
+				&& world->getStationSystemsSnapshot().stores.size() == 2
+				&& history.undoCount() == 4, "Removed store did not apply");
+			// Running keeps the live display and never edits the authored document.
+			world->markSaved();
+			world->resumeSimulation();
+			REQ(world->advanceTicks(60), "Store editor run failed");
+			ctx->Sleep(1);
+			REQ(driver.contains("o2 (kg): usable 800.000")
+				&& !world->isModified(), "Run changed the display source or dirtied the document");
+			// Undo restores the authored store set without resurrecting live state.
+			world->pauseSimulation();
+			auto restore = [&](DocumentSnapshot const& snapshot)
+			{ world = deserializeDocumentSnapshot(snapshot, world, {}); world->pauseSimulation(); return true; };
+			REQ(history.undo(captureDocumentSnapshot(world, history), restore)
+				&& world->getStationSystemsSettings().stores.size() == 3,
+				"Undo did not restore the authored store set");
+			REQ(world->getStationSystemsSnapshot().worldTick == 0
+				&& world->getStationSystemsSnapshot().stores.size() == 3,
+				"History undo resurrected live station state instead of reconstructing stores");
+		});
+		#undef REQ
+		require(driver.passed(), "Store workflow failed on the Test Engine");
 	}
+
 	void workflow(smoke::Context const&)
 	{
 		using smoke::require;
@@ -125,105 +101,110 @@ namespace
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
-		std::string text; io.ClipboardUserData = &text;
-		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
 		DocumentHistory history;
 		StationSystemsWindow window;
 		auto world = std::make_shared<core::World>("Station editor", 2, 2); world->pauseSimulation(); world->finishBuild();
-		auto frame = [&]
+		headless::TestEngineDriver driver([&]
 		{
-			ImGui::NewFrame(); text.clear(); ImGui::LogToClipboard();
 			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 850});
-			window.render(world, history); ImGui::LogFinish(); ImGui::Render();
-		};
-		window.visible = true; frame(); frame();
-		require(ImGui::FindWindowByName("Station Systems") != nullptr && text.find("Active World: Station editor") != std::string::npos,
-			"Separate top-level station window missing active World");
-		require(text.find("Draft matches the authored start conditions") != std::string::npos,
-			"Unchanged draft state not reported");
-		auto clickPoint = [&](ImVec2 point)
-		{
-			io.AddMousePosEvent(point.x, point.y); frame();
-			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
-		};
-		auto point = [&](char const* label)
-		{
-			auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
-			// The draft grows a section per authored scenario kind, so the
-			// scan covers the window's full visible height.
-			for (float y = 45; y < 845; y += 7)
-				for (float x = 18; x < 600; x += 20)
-				{
-					io.AddMousePosEvent(x, y); frame(); frame();
-					if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
-				}
-			throw std::runtime_error(std::string("Missing Station control: ") + label);
-		};
-		clickPoint(point("Enable Station systems"));
-		require(text.find("Draft differs from the authored start conditions") != std::string::npos,
-			"Draft change not reported");
-		clickPoint(point("Apply settings"));
-		require(world->getStationSystemsSettings().enabled && history.undoCount() == 1, "Enable did not commit document history");
-		require(text.find("Document: unsaved changes") != std::string::npos, "Dirty state not shown after applying settings");
-		world->markSaved(); frame();
-		require(text.find("Document: saved") != std::string::npos, "Saved state not shown after markSaved");
-		world->resumeSimulation(); require(world->advanceTicks(60), "Editor station did not tick"); frame();
-		require(text.find("Live station state: Enabled") != std::string::npos && text.find("60 completed ticks") != std::string::npos,
-			"Station live results not observable");
-		auto before = world->getStationSystemsSnapshot();
-		// Close via the real top-level ImGui close control, not disablement.
-		auto* imguiWindow = ImGui::FindWindowByName("Station Systems");
-		clickPoint({imguiWindow->Pos.x + imguiWindow->Size.x - 15, imguiWindow->Pos.y + 10});
-		require(!window.visible && world->getStationSystemsSettings().enabled && world->getStationSystemsSnapshot() == before,
-			"Closing window changed station simulation");
-		require(world->advanceTick(), "Hidden station stopped ticking");
-		window.visible = true; world->pauseSimulation(); frame();
-		clickPoint(point("Enable Station systems")); clickPoint(point("Cancel edits"));
-		require(world->getStationSystemsSettings().enabled && history.undoCount() == 1, "Cancel changed live/authored state");
-		clickPoint(point("Enable Station systems")); clickPoint(point("Apply settings")); frame();
-		require(world->getStationSystemsSettings().enabled && world->getSimulationTick() == 61
-			&& text.find("Confirm?") != std::string::npos, "Apply bypassed reset confirmation");
-		clickPoint(point("Cancel reset"));
-		require(world->getSimulationTick() == 61 && history.undoCount() == 1, "Reset cancellation mutated state");
-		clickPoint(point("Apply settings")); clickPoint(point("Confirm World reset"));
-		require(!world->getStationSystemsSettings().enabled && world->getSimulationTick() == 0 && history.undoCount() == 2,
-			"Confirmed setting did not reset World and commit history");
-		auto restore = [&](DocumentSnapshot const& snapshot)
-		{ world = deserializeDocumentSnapshot(snapshot, world, {}); world->pauseSimulation(); return true; };
-		require(history.undo(captureDocumentSnapshot(world, history), restore) && world->getStationSystemsSettings().enabled,
-			"Station undo lost configuration");
-		require(world->getStationSystemsSnapshot().worldTick == 0, "History resurrected live station Lua");
-		require(history.redo(captureDocumentSnapshot(world, history), restore) && !world->getStationSystemsSettings().enabled, "Station redo failed");
-		world = std::make_shared<core::World>("Second World", 2, 2); world->pauseSimulation(); frame();
-		require(text.find("Active World: Second World") != std::string::npos && text.find("Live station state: Disabled") != std::string::npos,
-			"Window leaked state across Worlds");
-		struct SourceScope { ~SourceScope() { core::setStationSystemsSourceLoader({}); } } sourceScope;
-		core::setStationSystemsSourceLoader([] {
-			return "return function(name) return {advance=function() return 0/0 end} end";
+			window.render(world, history);
 		});
-		world->finishBuild();
-		require(world->configureStationSystems({true, 1}), "Could not configure failure fixture");
-		world->resumeSimulation(); require(!world->advanceTick() && !world->getStationSystemsSnapshot().healthy,
-			"Failure fixture did not reach station failure"); frame();
-		require(text.find("Live station state: Failed") != std::string::npos
-			&& text.find("World status: Paused") != std::string::npos
-			&& text.find("Invalid output/accounting") != std::string::npos
-			&& text.find("non-finite") != std::string::npos
-			&& text.find("Reset the World") != std::string::npos,
-			"Station window omitted failure category, pause, diagnostic or recovery");
-		core::setStationSystemsSourceLoader({}); world->resetSimulation(); frame();
-		require(text.find("Live station state: Enabled") != std::string::npos
-			&& text.find("Software failure at tick") == std::string::npos, "Window retained reset failure");
-		world.reset(); frame(); require(text.find("No World is open.") != std::string::npos, "No active World status missing");
+		window.visible = true;
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+
+		driver.run("station", "windowWorkflow", [&](ImGuiTestContext* ctx)
+		{
+			ctx->SetRef("Station Systems");
+			REQ(ImGui::FindWindowByName("Station Systems") != nullptr
+				&& driver.contains("Active World: Station editor"),
+				"Separate top-level station window missing active World");
+			REQ(driver.contains("Draft matches the authored start conditions"),
+				"Unchanged draft state not reported");
+			ctx->ItemClick("Enable Station systems");
+			REQ(driver.contains("Draft differs from the authored start conditions"),
+				"Draft change not reported");
+			ctx->ItemClick("Apply settings");
+			REQ(world->getStationSystemsSettings().enabled && history.undoCount() == 1,
+				"Enable did not commit document history");
+			REQ(driver.contains("Document: unsaved changes"), "Dirty state not shown after applying settings");
+			world->markSaved(); ctx->Sleep(1);
+			REQ(driver.contains("Document: saved"), "Saved state not shown after markSaved");
+			world->resumeSimulation();
+			REQ(world->advanceTicks(60), "Editor station did not tick");
+			ctx->Sleep(1);
+			REQ(driver.contains("Live station state: Enabled") && driver.contains("60 completed ticks"),
+				"Station live results not observable");
+			auto const before = world->getStationSystemsSnapshot();
+			// Close via the real top-level ImGui close control, not disablement:
+			// a real press at the close-button coordinate, letting ImGui handle it.
+			auto* imguiWindow = ImGui::FindWindowByName("Station Systems");
+			ctx->MouseTeleportToPos(ImVec2(imguiWindow->Pos.x + imguiWindow->Size.x - 15,
+				imguiWindow->Pos.y + 10));
+			ctx->MouseClick();
+			ctx->Sleep(1);
+			REQ(!window.visible && world->getStationSystemsSettings().enabled
+				&& world->getStationSystemsSnapshot() == before,
+				"Closing window changed station simulation");
+			REQ(world->advanceTick(), "Hidden station stopped ticking");
+			window.visible = true; world->pauseSimulation(); ctx->Sleep(1);
+			ctx->ItemClick("Enable Station systems"); ctx->ItemClick("Cancel edits");
+			REQ(world->getStationSystemsSettings().enabled && history.undoCount() == 1,
+				"Cancel changed live/authored state");
+			ctx->ItemClick("Enable Station systems"); ctx->ItemClick("Apply settings");
+			ctx->Sleep(1);
+			REQ(world->getStationSystemsSettings().enabled && world->getSimulationTick() == 61
+				&& driver.contains("Confirm?"), "Apply bypassed reset confirmation");
+			ctx->ItemClick("Cancel reset");
+			REQ(world->getSimulationTick() == 61 && history.undoCount() == 1,
+				"Reset cancellation mutated state");
+			ctx->ItemClick("Apply settings"); ctx->ItemClick("Confirm World reset");
+			REQ(!world->getStationSystemsSettings().enabled && world->getSimulationTick() == 0
+				&& history.undoCount() == 2,
+				"Confirmed setting did not reset World and commit history");
+			auto restore = [&](DocumentSnapshot const& snapshot)
+			{ world = deserializeDocumentSnapshot(snapshot, world, {}); world->pauseSimulation(); return true; };
+			REQ(history.undo(captureDocumentSnapshot(world, history), restore)
+				&& world->getStationSystemsSettings().enabled, "Station undo lost configuration");
+			REQ(world->getStationSystemsSnapshot().worldTick == 0, "History resurrected live station Lua");
+			REQ(history.redo(captureDocumentSnapshot(world, history), restore)
+				&& !world->getStationSystemsSettings().enabled, "Station redo failed");
+			world = std::make_shared<core::World>("Second World", 2, 2); world->pauseSimulation(); ctx->Sleep(1);
+			REQ(driver.contains("Active World: Second World")
+				&& driver.contains("Live station state: Disabled"),
+				"Window leaked state across Worlds");
+			struct SourceScope { ~SourceScope() { core::setStationSystemsSourceLoader({}); } } sourceScope;
+			core::setStationSystemsSourceLoader([] {
+				return "return function(name) return {advance=function() return 0/0 end} end";
+			});
+			world->finishBuild();
+			REQ(world->configureStationSystems({true, 1}), "Could not configure failure fixture");
+			world->resumeSimulation();
+			REQ(!world->advanceTick() && !world->getStationSystemsSnapshot().healthy,
+				"Failure fixture did not reach station failure");
+			ctx->Sleep(1);
+			REQ(driver.contains("Live station state: Failed")
+				&& driver.contains("World status: Paused")
+				&& driver.contains("Invalid output/accounting")
+				&& driver.contains("non-finite")
+				&& driver.contains("Reset the World"),
+				"Station window omitted failure category, pause, diagnostic or recovery");
+			core::setStationSystemsSourceLoader({}); world->resetSimulation(); ctx->Sleep(1);
+			REQ(driver.contains("Live station state: Enabled")
+				&& !driver.contains("Software failure at tick"), "Window retained reset failure");
+			world.reset(); ctx->Sleep(1);
+			REQ(driver.contains("No World is open."), "No active World status missing");
+		});
+		#undef REQ
+		require(driver.passed(), "Station window workflow failed on the Test Engine");
 	}
+
 	void transferWorkflow(smoke::Context const&)
 	{
 		using smoke::require;
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
-		std::string text; io.ClipboardUserData = &text;
-		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
 		DocumentHistory history;
 		StationSystemsWindow window;
 		// The transfer draft extends past the default display height; ImGui
@@ -236,96 +217,66 @@ namespace
 			{{"src", "kg", 100.0, 100.0, 0.0, 20.0}, {"dst", "kg", 40.0, 0.0, 0.0},
 			{"aux", "kg", 50.0, 0.0, 0.0}},
 			{{"pump", "src", "dst", "kg", 60.0, 0}}}, false, &diagnostic), diagnostic.c_str());
-		auto frame = [&]
+		headless::TestEngineDriver driver([&]
 		{
-			ImGui::NewFrame(); text.clear(); ImGui::LogToClipboard();
 			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 980});
-			window.render(world, history); ImGui::LogFinish(); ImGui::Render();
-		};
-		auto clickPoint = [&](ImVec2 point)
-		{
-			io.AddMousePosEvent(point.x, point.y); frame();
-			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
-		};
-		// The compound draft is taller than one viewport: reset the scroll
-		// and wheel down until the control comes into view.
-		auto point = [&](char const* label)
-		{
-			io.AddMousePosEvent(400.0f, 400.0f);
-			io.AddMouseWheelEvent(0.0f, 1000.0f); frame();
-			for (int pass = 0; pass < 16; ++pass)
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+			#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+
+			driver.run("station", "transferWorkflow", [&](ImGuiTestContext* ctx)
 			{
-				auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
-				for (float y = 45; y < 975; y += 5)
-					for (float x = 18; x < 940; x += 15)
-					{
-						io.AddMousePosEvent(x, y); frame(); frame();
-						if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
-					}
-				io.AddMousePosEvent(400.0f, 400.0f);
-				io.AddMouseWheelEvent(0.0f, -10.0f); frame();
-			}
-			throw std::runtime_error(std::string("Missing Station control: ") + label);
-		};
-		auto typeValue = [&](char const* label, char const* value)
-		{
-			clickPoint(point(label));
-			io.AddKeyEvent(ImGuiMod_Ctrl, true); io.AddKeyEvent(ImGuiKey_A, true); frame();
-			io.AddKeyEvent(ImGuiKey_A, false); io.AddKeyEvent(ImGuiMod_Ctrl, false);
-			io.AddInputCharactersUTF8(value); frame();
-			io.AddKeyEvent(ImGuiKey_Enter, true); frame(); io.AddKeyEvent(ImGuiKey_Enter, false); frame();
-		};
-		window.visible = true; frame(); frame();
-		require(text.find("src (kg): usable 100.000, held 0.000 of capacity 100.000 | initial usable 100.000, initial held 0.000 | protected 20.000")
-			!= std::string::npos, "Protected reserve not shown in the live store table");
-		require(text.find("pump: src -> dst (kg) idle | requested 0.000, completed 0.000, unmet 0.000 (rate 60.000/s, priority 0)")
-			!= std::string::npos, "Authored transfer not shown in the live transfer table");
-		// Run until the destination fills: the window shows the rejection and
-		// the conserved boundary balance.
-		world->markSaved();
-		world->resumeSimulation(); require(world->advanceTicks(41), "Transfer editor run failed");
-		world->pauseSimulation(); frame();
-		require(text.find("pump: src -> dst (kg) rejected | requested 1.000, completed 0.000, unmet 1.000 (rate 60.000/s, priority 0)")
-			!= std::string::npos, "Blocked transfer rejection not observable in the window");
-		require(text.find("Balance kg: starting 100.000, current 100.000, lost 0.000, delivered 0.000, residual 0.000000000")
-			!= std::string::npos, "Boundary balance not observable in the window");
-		require(!world->isModified(), "Transfer ticking dirtied the authored document");
-		// Draft a second transfer through the real controls; an unknown
-		// source is refused with a visible diagnostic and no mutation.
-		clickPoint(point("Add transfer"));
-		typeValue("Transfer 1 source", "nope");
-		clickPoint(point("Apply settings"));
-		clickPoint(point("Confirm World reset")); frame();
-		require(text.find("references unknown source store 'nope'") != std::string::npos,
-			"Invalid transfer source diagnostic not shown");
-		require(world->getStationSystemsSettings().transfers.size() == 1 && history.undoCount() == 0
-			&& world->getSimulationTick() == 41,
-			"Invalid transfer draft mutated the authored settings");
-		// Repair the drafted source (the invalid 'nope') to the aux store and
-		// confirm again: the valid transfer applies with the required reset.
-		typeValue("Transfer 1 source", "aux");
-		clickPoint(point("Confirm World reset"));
-		require(world->getStationSystemsSettings().transfers.size() == 2 && history.undoCount() == 1
-			&& world->getSimulationTick() == 0,
-			"Repaired transfer draft did not apply through the reset-confirmed flow");
-		frame();
-		require(text.find("2 transfer(s)") != std::string::npos
-			&& text.find("aux -> dst (kg) idle") != std::string::npos,
-			"Applied transfer not reflected in the window");
-		// Remove the drafted transfer again (tick 0: no reset confirmation needed).
-		clickPoint(point("Remove transfer 1"));
-		clickPoint(point("Apply settings"));
-		require(world->getStationSystemsSettings().transfers.size() == 1 && history.undoCount() == 2,
-			"Transfer removal did not apply");
+				ctx->SetRef("Station Systems");
+			REQ(driver.contains("src (kg): usable 100.000, held 0.000 of capacity 100.000 | initial usable 100.000, initial held 0.000 | protected 20.000"), "Protected reserve not shown in the live store table");
+			REQ(driver.contains("pump: src -> dst (kg) idle | requested 0.000, completed 0.000, unmet 0.000 (rate 60.000/s, priority 0)"), "Authored transfer not shown in the live transfer table");
+			// Run until the destination fills: the window shows the rejection and
+			// the conserved boundary balance.
+			world->markSaved();
+			world->resumeSimulation(); REQ(world->advanceTicks(41), "Transfer editor run failed");
+			world->pauseSimulation(); ctx->Sleep(1);
+			REQ(driver.contains("pump: src -> dst (kg) rejected | requested 1.000, completed 0.000, unmet 1.000 (rate 60.000/s, priority 0)"), "Blocked transfer rejection not observable in the window");
+			REQ(driver.contains("Balance kg: starting 100.000, current 100.000, lost 0.000, delivered 0.000, residual 0.000000000"), "Boundary balance not observable in the window");
+			REQ(!world->isModified(), "Transfer ticking dirtied the authored document");
+			// Draft a second transfer through the real controls; an unknown
+			// source is refused with a visible diagnostic and no mutation.
+			driver.click(ctx, "Add transfer");
+			driver.typeValue(ctx, "Transfer 1 source", "nope");
+			driver.click(ctx, "Apply settings");
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(driver.contains("references unknown source store 'nope'"),
+				"Invalid transfer source diagnostic not shown");
+			REQ(world->getStationSystemsSettings().transfers.size() == 1 && history.undoCount() == 0
+				&& world->getSimulationTick() == 41,
+				"Invalid transfer draft mutated the authored settings");
+			// Repair the drafted source (the invalid 'nope') to the aux store and
+			// confirm again: the valid transfer applies with the required reset.
+			driver.typeValue(ctx, "Transfer 1 source", "aux");
+			driver.click(ctx, "Confirm World reset");
+			REQ(world->getStationSystemsSettings().transfers.size() == 2 && history.undoCount() == 1
+				&& world->getSimulationTick() == 0,
+				"Repaired transfer draft did not apply through the reset-confirmed flow");
+			ctx->Sleep(1);
+			REQ(driver.contains("2 transfer(s)")
+				&& driver.contains("aux -> dst (kg) idle"),
+				"Applied transfer not reflected in the window");
+			// Remove the drafted transfer again (tick 0: no reset confirmation needed).
+			driver.click(ctx, "Remove transfer 1");
+			driver.click(ctx, "Apply settings");
+			REQ(world->getStationSystemsSettings().transfers.size() == 1 && history.undoCount() == 2,
+				"Transfer removal did not apply");
+				});
+		#undef REQ
+		require(driver.passed(), "transferWorkflow failed on the Test Engine");
 	}
+
 	void compoundWorkflow(smoke::Context const&)
 	{
 		using smoke::require;
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
-		std::string text; io.ClipboardUserData = &text;
-		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
 		DocumentHistory history;
 		StationSystemsWindow window;
 		auto world = std::make_shared<core::World>("Compound editor", 2, 2);
@@ -339,149 +290,125 @@ namespace
 			{"biomass", "kg", 10.0, 1.0, 0.0, 0.0, biomass},
 			{"waste", "kg", 20.0, 0.0, 0.0, 0.0, waste}}},
 			false, &diagnostic), diagnostic.c_str());
-		auto frame = [&]
+		headless::TestEngineDriver driver([&]
 		{
-			ImGui::NewFrame(); text.clear(); ImGui::LogToClipboard();
 			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 980});
-			window.render(world, history); ImGui::LogFinish(); ImGui::Render();
-		};
-		auto clickPoint = [&](ImVec2 point)
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+
+		driver.run("station", "compoundWorkflow", [&](ImGuiTestContext* ctx)
 		{
-			io.AddMousePosEvent(point.x, point.y); frame();
-			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
-		};
-		// The compound draft is taller than one viewport: reset the scroll
-		// and wheel down until the control comes into view.
-		auto point = [&](char const* label)
-		{
-			io.AddMousePosEvent(400.0f, 400.0f);
-			io.AddMouseWheelEvent(0.0f, 1000.0f); frame();
-			for (int pass = 0; pass < 16; ++pass)
-			{
-				auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
-				for (float y = 45; y < 975; y += 5)
-					for (float x = 18; x < 940; x += 15)
-					{
-						io.AddMousePosEvent(x, y); frame(); frame();
-						if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
-					}
-				io.AddMousePosEvent(400.0f, 400.0f);
-				io.AddMouseWheelEvent(0.0f, -10.0f); frame();
-			}
-			throw std::runtime_error(std::string("Missing Station control: ") + label);
-		};
-		auto typeValue = [&](char const* label, char const* value)
-		{
-			clickPoint(point(label));
-			io.AddKeyEvent(ImGuiMod_Ctrl, true); io.AddKeyEvent(ImGuiKey_A, true); frame();
-			io.AddKeyEvent(ImGuiKey_A, false); io.AddKeyEvent(ImGuiMod_Ctrl, false);
-			io.AddInputCharactersUTF8(value); frame();
-			io.AddKeyEvent(ImGuiKey_Enter, true); frame(); io.AddKeyEvent(ImGuiKey_Enter, false); frame();
-		};
-		window.visible = true; frame(); frame();
-		// The live view shows the declared composition on the dry-mass
-		// basis and the constituent balance ledger.
-		require(text.find("food (kg): usable 50.000") != std::string::npos
-			&& text.find("compound (dry-mass basis): moisture 0.8000 | nutrient N 0.0500, atmospheric N 0.0000, P 0.0100, K 0.0200, other minerals 0.0200 | 17000.0 kJ/kg dry")
-				!= std::string::npos,
-			"Compound store display missing composition terms");
-		require(text.find("Constituent balances") != std::string::npos
-			&& text.find("Constituent nutrientNitrogen (kg): starting 0.540000") != std::string::npos,
-			"Constituent balance ledger missing from the window");
-		// Author a compound store through the real controls.
-		clickPoint(point("Add store"));
-		clickPoint(point("Store 3 declared composition"));
-		typeValue("Store 3 moisture fraction", "0.5");
-		typeValue("Store 3 nutrient nitrogen fraction", "0.1");
-		clickPoint(point("Apply settings"));
-		require(world->getStationSystemsSettings().stores.size() == 4
-			&& world->getStationSystemsSettings().stores[3].composition.has_value()
-			&& world->getStationSystemsSettings().stores[3].composition->moisture == 0.5
-			&& world->getStationSystemsSettings().stores[3].composition->nutrientNitrogen == 0.1
-			&& history.undoCount() == 1, "Authored composition did not apply");
-		// An impossible dry-mass total is refused with a visible diagnostic
-		// and no mutation.
-		typeValue("Store 3 phosphorus fraction", "0.95");
-		clickPoint(point("Apply settings")); frame();
-		require(text.find("dry-mass fractions sum to") != std::string::npos,
-			"Impossible dry-mass total diagnostic not shown");
-		require(world->getStationSystemsSettings().stores[3].composition->phosphorus == 0.0
-			&& history.undoCount() == 1, "Impossible composition mutated state");
-		typeValue("Store 3 phosphorus fraction", "0.05");
-		clickPoint(point("Apply settings"));
-		require(world->getStationSystemsSettings().stores[3].composition->phosphorus == 0.05
-			&& history.undoCount() == 2, "Recovery composition edit did not apply");
-		// Author the harvest conversion through the real controls.
-		clickPoint(point("Add conversion"));
-		typeValue("Conversion 0 id", "harvest");
-		typeValue("Conversion 0 input 0 store", "food");
-		typeValue("Conversion 0 input 0 rate", "60");
-		typeValue("Conversion 0 output 0 store", "biomass");
-		typeValue("Conversion 0 output 0 yield", "4.8");
-		clickPoint(point("Add output to conversion 0"));
-		typeValue("Conversion 0 output 1 store", "waste");
-		typeValue("Conversion 0 output 1 yield", "24");
-		clickPoint(point("Apply settings"));
-		require(world->getStationSystemsSettings().conversions.size() == 1
-			&& world->getStationSystemsSettings().conversions[0].id == "harvest"
-			&& world->getStationSystemsSettings().conversions[0].outputs.size() == 2
-			&& history.undoCount() == 3, "Authored conversion did not apply");
-		// A yield that would create nutrient nitrogen is refused before the
-		// run, with the offending constituent named in the window.
-		typeValue("Conversion 0 output 1 yield", "50");
-		clickPoint(point("Apply settings")); frame();
-		require(text.find("would create constituent") != std::string::npos
-			&& text.find("exceeds declared input") != std::string::npos,
-			"Yield-creating conversion diagnostic not shown in the window");
-		require(world->getStationSystemsSettings().conversions[0].outputs[1].yieldPerSecond == 24.0
-			&& history.undoCount() == 3, "Impossible yield edit mutated state");
-		typeValue("Conversion 0 output 1 yield", "24");
-		frame();
-		require(text.find("Draft matches the authored start conditions") != std::string::npos
-			&& world->getStationSystemsSettings().conversions[0].outputs[1].yieldPerSecond == 24.0
-			&& history.undoCount() == 3, "Recovery edit did not restore the authored match");
-		// Run: the live view shows the full-throughput conversion and the
-		// closing constituent ledger, and ticking never dirties the document.
-		world->markSaved();
-		world->resumeSimulation(); require(world->advanceTicks(30), "Compound editor run failed");
-		frame();
-		require(text.find("harvest: full (scale 1.000, priority 0)") != std::string::npos
-			&& text.find("consumes food (kg): requested 1.000, completed 1.000") != std::string::npos
-			&& text.find("produces waste (kg): requested 0.400, completed 0.400") != std::string::npos,
-			"Live conversion status not displayed");
-		require(!world->isModified(), "Compound ticking dirtied the authored document");
-		// Refusal is visible too: fill the biomass store and watch the
-		// conversion reject through the window.
-		world->pauseSimulation();
-		auto settings = world->getStationSystemsSettings();
-		settings.stores[1].capacity = 2.0;
-		settings.stores[1].startingQualified = 2.0;
-		require(world->configureStationSystems(settings, true), "Capacity edit failed");
-		world->resumeSimulation();
-		require(world->advanceTicks(5), "Blocked run failed");
-		frame();
-		require(text.find("harvest: rejected (scale 0.000, priority 0)") != std::string::npos
-			&& text.find("consumes food (kg): requested 1.000, completed 0.000") != std::string::npos,
-			"Conversion refusal not displayed");
-		bool sawRefusalReason = false;
-		for (auto const& event : world->getStationSystemsEvents())
-			if (event.message.find("Conversion 'harvest' rejected: output store 'biomass' headroom limits throughput")
-				!= std::string::npos) sawRefusalReason = true;
-		require(sawRefusalReason, "Conversion refusal reason missing from the event log");
-		for (auto const& entry : world->getStationSystemsSnapshot().constituentBalances)
-			require(std::abs(entry.residual)
-				<= world->getStationSystemsSnapshot().balanceTolerance
-					* std::max(1.0, std::abs(entry.starting)),
-				"Editor compound run exceeded constituent tolerance");
+			ctx->SetRef("Station Systems");
+			// The live view shows the declared composition on the dry-mass
+			// basis and the constituent balance ledger.
+			REQ(driver.contains("food (kg): usable 50.000")
+				&& driver.contains("compound (dry-mass basis): moisture 0.8000 | nutrient N 0.0500, atmospheric N 0.0000, P 0.0100, K 0.0200, other minerals 0.0200 | 17000.0 kJ/kg dry"),
+				"Compound store display missing composition terms");
+			REQ(driver.contains("Constituent balances")
+				&& driver.contains("Constituent nutrientNitrogen (kg): starting 0.540000"),
+				"Constituent balance ledger missing from the window");
+			// Author a compound store through the real controls.
+			ctx->ItemClick("Add store");
+			ctx->ItemClick("Store 3 declared composition");
+			ctx->ItemInputValue("Store 3 moisture fraction", "0.5");
+			ctx->ItemInputValue("Store 3 nutrient nitrogen fraction", "0.1");
+			ctx->ItemClick("Apply settings");
+			REQ(world->getStationSystemsSettings().stores.size() == 4
+				&& world->getStationSystemsSettings().stores[3].composition.has_value()
+				&& world->getStationSystemsSettings().stores[3].composition->moisture == 0.5
+				&& world->getStationSystemsSettings().stores[3].composition->nutrientNitrogen == 0.1
+				&& history.undoCount() == 1, "Authored composition did not apply");
+			// An impossible dry-mass total is refused with a visible diagnostic
+			// and no mutation.
+			ctx->ItemInputValue("Store 3 phosphorus fraction", "0.95");
+			ctx->ItemClick("Apply settings");
+			ctx->Sleep(1);
+			REQ(driver.contains("dry-mass fractions sum to"),
+				"Impossible dry-mass total diagnostic not shown");
+			REQ(world->getStationSystemsSettings().stores[3].composition->phosphorus == 0.0
+				&& history.undoCount() == 1, "Impossible composition mutated state");
+			ctx->ItemInputValue("Store 3 phosphorus fraction", "0.05");
+			ctx->ItemClick("Apply settings");
+			REQ(world->getStationSystemsSettings().stores[3].composition->phosphorus == 0.05
+				&& history.undoCount() == 2, "Recovery composition edit did not apply");
+			// Author the harvest conversion through the real controls.
+			ctx->ItemClick("Add conversion");
+			ctx->ItemInputValue("Conversion 0 id", "harvest");
+			ctx->ItemInputValue("Conversion 0 input 0 store", "food");
+			ctx->ItemInputValue("Conversion 0 input 0 rate", "60");
+			ctx->ItemInputValue("Conversion 0 output 0 store", "biomass");
+			ctx->ItemInputValue("Conversion 0 output 0 yield", "4.8");
+			ctx->ItemClick("Add output to conversion 0");
+			ctx->ItemInputValue("Conversion 0 output 1 store", "waste");
+			ctx->ItemInputValue("Conversion 0 output 1 yield", "24");
+			ctx->ItemClick("Apply settings");
+			REQ(world->getStationSystemsSettings().conversions.size() == 1
+				&& world->getStationSystemsSettings().conversions[0].id == "harvest"
+				&& world->getStationSystemsSettings().conversions[0].outputs.size() == 2
+				&& history.undoCount() == 3, "Authored conversion did not apply");
+			// A yield that would create nutrient nitrogen is refused before the
+			// run, with the offending constituent named in the window.
+			ctx->ItemInputValue("Conversion 0 output 1 yield", "50");
+			ctx->ItemClick("Apply settings");
+			ctx->Sleep(1);
+			REQ(driver.contains("would create constituent")
+				&& driver.contains("exceeds declared input"),
+				"Yield-creating conversion diagnostic not shown in the window");
+			REQ(world->getStationSystemsSettings().conversions[0].outputs[1].yieldPerSecond == 24.0
+				&& history.undoCount() == 3, "Impossible yield edit mutated state");
+			ctx->ItemInputValue("Conversion 0 output 1 yield", "24");
+			ctx->Sleep(1);
+			REQ(driver.contains("Draft matches the authored start conditions")
+				&& world->getStationSystemsSettings().conversions[0].outputs[1].yieldPerSecond == 24.0
+				&& history.undoCount() == 3, "Recovery edit did not restore the authored match");
+			// Run: the live view shows the full-throughput conversion and the
+			// closing constituent ledger, and ticking never dirties the document.
+			world->markSaved();
+			world->resumeSimulation();
+			REQ(world->advanceTicks(30), "Compound editor run failed");
+			ctx->Sleep(1);
+			REQ(driver.contains("harvest: full (scale 1.000, priority 0)")
+				&& driver.contains("consumes food (kg): requested 1.000, completed 1.000")
+				&& driver.contains("produces waste (kg): requested 0.400, completed 0.400"),
+				"Live conversion status not displayed");
+			REQ(!world->isModified(), "Compound ticking dirtied the authored document");
+			// Refusal is visible too: fill the biomass store and watch the
+			// conversion reject through the window.
+			world->pauseSimulation();
+			auto settings = world->getStationSystemsSettings();
+			settings.stores[1].capacity = 2.0;
+			settings.stores[1].startingQualified = 2.0;
+			REQ(world->configureStationSystems(settings, true), "Capacity edit failed");
+			world->resumeSimulation();
+			REQ(world->advanceTicks(5), "Blocked run failed");
+			ctx->Sleep(1);
+			REQ(driver.contains("harvest: rejected (scale 0.000, priority 0)")
+				&& driver.contains("consumes food (kg): requested 1.000, completed 0.000"),
+				"Conversion refusal not displayed");
+			bool sawRefusalReason = false;
+			for (auto const& event : world->getStationSystemsEvents())
+				if (event.message.find("Conversion 'harvest' rejected: output store 'biomass' headroom limits throughput")
+					!= std::string::npos) sawRefusalReason = true;
+			REQ(sawRefusalReason, "Conversion refusal reason missing from the event log");
+			for (auto const& entry : world->getStationSystemsSnapshot().constituentBalances)
+				REQ(std::abs(entry.residual)
+					<= world->getStationSystemsSnapshot().balanceTolerance
+						* std::max(1.0, std::abs(entry.starting)),
+					"Editor compound run exceeded constituent tolerance");
+		});
+		#undef REQ
+		require(driver.passed(), "Compound workflow failed on the Test Engine");
 	}
+
 	void powerWorkflow(smoke::Context const&)
 	{
 		using smoke::require;
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
-		std::string text; io.ClipboardUserData = &text;
-		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
 		DocumentHistory history;
 		StationSystemsWindow window;
 		// The power draft extends past the default display height; give the
@@ -503,140 +430,110 @@ namespace
 		shop.thermalClass = "moderate";
 		initial.equipmentLoads.push_back(shop);
 		require(world->configureStationSystems(initial, false, &diagnostic), diagnostic.c_str());
-		auto frame = [&]
+		headless::TestEngineDriver driver([&]
 		{
-			ImGui::NewFrame(); text.clear(); ImGui::LogToClipboard();
 			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 980});
-			window.render(world, history); ImGui::LogFinish(); ImGui::Render();
-		};
-		auto clickPoint = [&](ImVec2 point)
-		{
-			io.AddMousePosEvent(point.x, point.y); frame();
-			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
-		};
-		auto point = [&](char const* label)
-		{
-			io.AddMousePosEvent(400.0f, 400.0f);
-			io.AddMouseWheelEvent(0.0f, 1000.0f); frame();
-			for (int pass = 0; pass < 16; ++pass)
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+			#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+
+			driver.run("station", "powerWorkflow", [&](ImGuiTestContext* ctx)
 			{
-				auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
-				for (float y = 45; y < 975; y += 5)
-					for (float x = 18; x < 940; x += 15)
-					{
-						io.AddMousePosEvent(x, y); frame(); frame();
-						if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
-					}
-				io.AddMousePosEvent(400.0f, 400.0f);
-				io.AddMouseWheelEvent(0.0f, -10.0f); frame();
-			}
-			throw std::runtime_error(std::string("Missing Station control: ") + label);
-		};
-		auto typeValue = [&](char const* label, char const* value)
-		{
-			clickPoint(point(label));
-			io.AddKeyEvent(ImGuiMod_Ctrl, true); io.AddKeyEvent(ImGuiKey_A, true); frame();
-			io.AddKeyEvent(ImGuiKey_A, false); io.AddKeyEvent(ImGuiMod_Ctrl, false);
-			io.AddInputCharactersUTF8(value); frame();
-			io.AddKeyEvent(ImGuiKey_Enter, true); frame(); io.AddKeyEvent(ImGuiKey_Enter, false); frame();
-		};
-		window.visible = true; frame(); frame();
-		require(text.find("1 solar array(s), 1 external load(s)") != std::string::npos,
-			"Authored solar/load counts missing from the window");
-		require(text.find("field: capacity 10.000 kW") != std::string::npos,
-			"Solar source display missing installed capacity");
-		// Run under full sun: the live view shows the supplied service,
-		// the surplus and the power totals, and ticking never dirties the
-		// authored document.
-		world->markSaved();
-		world->resumeSimulation(); require(world->advanceTicks(60), "Power editor run failed");
-		world->pauseSimulation(); frame();
-		require(text.find("field: capacity 10.000 kW, illumination 1.000, available 10.000 kW")
-			!= std::string::npos, "Live solar output not displayed");
-		require(text.find("shop: full | requested 6.000 kW, supplied 6.000 kW, unmet 0.000 kW")
-			!= std::string::npos, "Live load service not displayed");
-		require(text.find("Power totals: generation 10.000 kW, requested 6.000, supplied 6.000, unmet 0.000, unmet critical 0.000, surplus 4.000")
-			!= std::string::npos, "Power totals not displayed");
-		require(!world->isModified(), "Power ticking dirtied the authored document");
-		// Draft a second load through the real controls; an unknown thermal
-		// class is refused with a visible diagnostic and no mutation.
-		clickPoint(point("Add load"));
-		typeValue("Load 1 thermal class", "cryogenic");
-		clickPoint(point("Apply settings"));
-		clickPoint(point("Confirm World reset")); frame();
-		require(text.find("unknown thermal service class 'cryogenic'") != std::string::npos,
-			"Invalid thermal class diagnostic not shown");
-		require(world->getStationSystemsSettings().equipmentLoads.size() == 1
-			&& history.undoCount() == 0 && world->getSimulationTick() == 60,
-			"Invalid load draft mutated the authored settings");
-		// Repair the class and author the protected floor and curtailment;
-		// the confirmed reset applies the new contract.
-		typeValue("Load 1 thermal class", "warm");
-		typeValue("Load 1 critical floor kW", "2");
-		typeValue("Load 1 max curtailment", "0.5");
-		clickPoint(point("Confirm World reset"));
-		require(world->getStationSystemsSettings().equipmentLoads.size() == 2
-			&& world->getStationSystemsSettings().equipmentLoads[1].criticalFloorKW == 2.0
-			&& world->getStationSystemsSettings().equipmentLoads[1].maxCurtailment == 0.5
-			&& history.undoCount() == 1 && world->getSimulationTick() == 0,
-			"Repaired load draft did not apply through the reset-confirmed flow");
-		// A load that requires a cooling service is shown as not admitted,
-		// with its heat need visible as unmet cooling — and its protected
-		// critical floor reported whole as unmet critical demand, per load
-		// and in the station totals, despite never being allocated (#550).
-		clickPoint(point("Add load"));
-		clickPoint(point("Load 2 requires cooling service"));
-		typeValue("Load 2 electrical demand kW", "3");
-		typeValue("Load 2 thermal class", "low");
-		typeValue("Load 2 heat output kW", "1.5");
-		typeValue("Load 2 critical floor kW", "1");
-		clickPoint(point("Apply settings"));
-		require(world->getStationSystemsSettings().equipmentLoads.size() == 3
-			&& world->getStationSystemsSettings().equipmentLoads[2].coolingDisposition
+				ctx->SetRef("Station Systems");
+			REQ(driver.contains("1 solar array(s), 1 external load(s)"),
+				"Authored solar/load counts missing from the window");
+			REQ(driver.contains("field: capacity 10.000 kW"),
+				"Solar source display missing installed capacity");
+			// Run under full sun: the live view shows the supplied service,
+			// the surplus and the power totals, and ticking never dirties the
+			// authored document.
+			world->markSaved();
+			world->resumeSimulation(); REQ(world->advanceTicks(60), "Power editor run failed");
+			world->pauseSimulation(); ctx->Sleep(1);
+			REQ(driver.contains("field: capacity 10.000 kW, illumination 1.000, available 10.000 kW"), "Live solar output not displayed");
+			REQ(driver.contains("shop: full | requested 6.000 kW, supplied 6.000 kW, unmet 0.000 kW"), "Live load service not displayed");
+			REQ(driver.contains("Power totals: generation 10.000 kW, requested 6.000, supplied 6.000, unmet 0.000, unmet critical 0.000, surplus 4.000"), "Power totals not displayed");
+			REQ(!world->isModified(), "Power ticking dirtied the authored document");
+			// Draft a second load through the real controls; an unknown thermal
+			// class is refused with a visible diagnostic and no mutation.
+			driver.click(ctx, "Add load");
+			driver.typeValue(ctx, "Load 1 thermal class", "cryogenic");
+			driver.click(ctx, "Apply settings");
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(driver.contains("unknown thermal service class 'cryogenic'"),
+				"Invalid thermal class diagnostic not shown");
+			REQ(world->getStationSystemsSettings().equipmentLoads.size() == 1
+				&& history.undoCount() == 0 && world->getSimulationTick() == 60,
+				"Invalid load draft mutated the authored settings");
+			// Repair the class and author the protected floor and curtailment;
+			// the confirmed reset applies the new contract.
+			driver.typeValue(ctx, "Load 1 thermal class", "warm");
+			driver.typeValue(ctx, "Load 1 critical floor kW", "2");
+			driver.typeValue(ctx, "Load 1 max curtailment", "0.5");
+			driver.click(ctx, "Confirm World reset");
+			REQ(world->getStationSystemsSettings().equipmentLoads.size() == 2
+				&& world->getStationSystemsSettings().equipmentLoads[1].criticalFloorKW == 2.0
+				&& world->getStationSystemsSettings().equipmentLoads[1].maxCurtailment == 0.5
+				&& history.undoCount() == 1 && world->getSimulationTick() == 0,
+				"Repaired load draft did not apply through the reset-confirmed flow");
+			// A load that requires a cooling service is shown as not admitted,
+			// with its heat need visible as unmet cooling — and its protected
+			// critical floor reported whole as unmet critical demand, per load
+			// and in the station totals, despite never being allocated (#550).
+			driver.click(ctx, "Add load");
+			driver.click(ctx, "Load 2 requires cooling service");
+			driver.typeValue(ctx, "Load 2 electrical demand kW", "3");
+			driver.typeValue(ctx, "Load 2 thermal class", "low");
+			driver.typeValue(ctx, "Load 2 heat output kW", "1.5");
+			driver.typeValue(ctx, "Load 2 critical floor kW", "1");
+			driver.click(ctx, "Apply settings");
+			REQ(world->getStationSystemsSettings().equipmentLoads.size() == 3
+				&& world->getStationSystemsSettings().equipmentLoads[2].coolingDisposition
 				== core::StationCoolingDisposition::CoolingService
-			&& history.undoCount() == 2, "Cooling-service load did not apply");
-		world->markSaved();
-		world->resumeSimulation(); require(world->advanceTicks(60), "Cooling-blocked run failed");
-		world->pauseSimulation(); frame();
-		require(text.find("not admitted: no cooling service of class 'low' is available (unmet cooling 1.500 kW)")
-			!= std::string::npos, "Unmet cooling not displayed in the window");
-		require(text.find("floor 1.000, unmet critical 1.000") != std::string::npos,
-			"Cooling-blocked critical floor not displayed per load in the window");
-		require(text.find("unmet critical 1.000, surplus") != std::string::npos,
-			"Cooling-blocked unmet critical demand not displayed in the station power totals");
-		// Turn the solar array periodic with an eclipse leg and watch the
-		// live illumination fall to zero through the eclipse.
-		clickPoint(point("Solar 0 periodic illumination"));
-		clickPoint(point("Add segment to solar 0"));
-		clickPoint(point("Apply settings"));
-		clickPoint(point("Confirm World reset"));
-		require(world->getStationSystemsSettings().solarArrays[0].illumination.periodSeconds == 120.0
-			&& world->getStationSystemsSettings().solarArrays[0].illumination.segments.size() == 2
-			&& world->getStationSystemsSettings().solarArrays[0].illumination.segments[1].startSeconds == 60.0
-			&& world->getStationSystemsSettings().solarArrays[0].illumination.segments[1].level == 0.0
-			&& history.undoCount() == 3, "Periodic illumination did not apply");
-		world->markSaved();
-		world->resumeSimulation(); require(world->advanceTicks(3660), "Eclipse editor run failed");
-		world->pauseSimulation(); frame();
-		require(text.find("field: capacity 10.000 kW, illumination 0.000, available 0.000 kW")
-			!= std::string::npos, "Eclipse illumination not displayed live");
-		require(text.find("shop: rejected | requested 6.000 kW, supplied 0.000 kW, unmet 6.000 kW")
-			!= std::string::npos, "Eclipse shortfall not displayed live");
-		require(!world->isModified(), "Eclipse run dirtied the authored document");
-		bool sawEclipse = false;
-		for (auto const& event : world->getStationSystemsEvents())
-			if (event.message.find("Solar array 'field' entered eclipse") != std::string::npos)
+				&& history.undoCount() == 2, "Cooling-service load did not apply");
+			world->markSaved();
+			world->resumeSimulation(); REQ(world->advanceTicks(60), "Cooling-blocked run failed");
+			world->pauseSimulation(); ctx->Sleep(1);
+			REQ(driver.contains("not admitted: no cooling service of class 'low' is available (unmet cooling 1.500 kW)"), "Unmet cooling not displayed in the window");
+			REQ(driver.contains("floor 1.000, unmet critical 1.000"),
+				"Cooling-blocked critical floor not displayed per load in the window");
+			REQ(driver.contains("unmet critical 1.000, surplus"),
+				"Cooling-blocked unmet critical demand not displayed in the station power totals");
+			// Turn the solar array periodic with an eclipse leg and watch the
+			// live illumination fall to zero through the eclipse.
+			driver.click(ctx, "Solar 0 periodic illumination");
+			driver.click(ctx, "Add segment to solar 0");
+			driver.click(ctx, "Apply settings");
+			driver.click(ctx, "Confirm World reset");
+			REQ(world->getStationSystemsSettings().solarArrays[0].illumination.periodSeconds == 120.0
+				&& world->getStationSystemsSettings().solarArrays[0].illumination.segments.size() == 2
+				&& world->getStationSystemsSettings().solarArrays[0].illumination.segments[1].startSeconds == 60.0
+				&& world->getStationSystemsSettings().solarArrays[0].illumination.segments[1].level == 0.0
+				&& history.undoCount() == 3, "Periodic illumination did not apply");
+			world->markSaved();
+			world->resumeSimulation(); REQ(world->advanceTicks(3660), "Eclipse editor run failed");
+			world->pauseSimulation(); ctx->Sleep(1);
+			REQ(driver.contains("field: capacity 10.000 kW, illumination 0.000, available 0.000 kW"), "Eclipse illumination not displayed live");
+			REQ(driver.contains("shop: rejected | requested 6.000 kW, supplied 0.000 kW, unmet 6.000 kW"), "Eclipse shortfall not displayed live");
+			REQ(!world->isModified(), "Eclipse run dirtied the authored document");
+			bool sawEclipse = false;
+			for (auto const& event : world->getStationSystemsEvents())
+				if (event.message.find("Solar array 'field' entered eclipse") != std::string::npos)
 				sawEclipse = true;
-			require(sawEclipse, "Eclipse transition missing from the window's event log");
+				REQ(sawEclipse, "Eclipse transition missing from the window's event log");
+				});
+		#undef REQ
+		require(driver.passed(), "powerWorkflow failed on the Test Engine");
 	}
+
 	void batteryWorkflow(smoke::Context const&)
 	{
 		using smoke::require;
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
-		std::string text; io.ClipboardUserData = &text;
-		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
 		DocumentHistory history;
 		StationSystemsWindow window;
 		// The battery draft extends past the default display height; give
@@ -658,104 +555,79 @@ namespace
 		initial.equipmentLoads.push_back(shop);
 		initial.batteries.push_back({"bank", 10.0, 8.0, 8.0, 2.0, 4.0, 1.0, 1.0});
 		require(world->configureStationSystems(initial, false, &diagnostic), diagnostic.c_str());
-		auto frame = [&]
+		headless::TestEngineDriver driver([&]
 		{
-			ImGui::NewFrame(); text.clear(); ImGui::LogToClipboard();
 			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 980});
-			window.render(world, history); ImGui::LogFinish(); ImGui::Render();
-		};
-		auto clickPoint = [&](ImVec2 point)
-		{
-			io.AddMousePosEvent(point.x, point.y); frame();
-			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
-		};
-		auto point = [&](char const* label)
-		{
-			io.AddMousePosEvent(400.0f, 400.0f);
-			io.AddMouseWheelEvent(0.0f, 1000.0f); frame();
-			for (int pass = 0; pass < 16; ++pass)
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+			#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+
+			driver.run("station", "batteryWorkflow", [&](ImGuiTestContext* ctx)
 			{
-				auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
-				for (float y = 45; y < 975; y += 5)
-					for (float x = 18; x < 940; x += 15)
-					{
-						io.AddMousePosEvent(x, y); frame(); frame();
-						if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
-					}
-				io.AddMousePosEvent(400.0f, 400.0f);
-				io.AddMouseWheelEvent(0.0f, -10.0f); frame();
-			}
-			throw std::runtime_error(std::string("Missing Station control: ") + label);
-		};
-		auto typeValue = [&](char const* label, char const* value)
-		{
-			clickPoint(point(label));
-			io.AddKeyEvent(ImGuiMod_Ctrl, true); io.AddKeyEvent(ImGuiKey_A, true); frame();
-			io.AddKeyEvent(ImGuiKey_A, false); io.AddKeyEvent(ImGuiMod_Ctrl, false);
-			io.AddInputCharactersUTF8(value); frame();
-			io.AddKeyEvent(ImGuiKey_Enter, true); frame(); io.AddKeyEvent(ImGuiKey_Enter, false); frame();
-		};
-		window.visible = true; frame(); frame();
-		require(text.find("1 battery(ies)") != std::string::npos,
-			"Authored battery count missing from the window");
-		require(text.find("bank: idle | stored 8.000 of nameplate 10.000 kWh (usable 8.000, reserve 2.000 never dischargeable)")
-			!= std::string::npos, "Authored battery reserve policy not displayed");
-		// Charge from surplus under full sun: the live view shows the
-		// charging power and the document stays clean while ticking.
-		world->markSaved();
-		world->resumeSimulation(); require(world->advanceTicks(60), "Battery editor charge run failed");
-		world->pauseSimulation(); frame();
-		require(text.find("battery discharge 0.000 kW, battery charge 2.000 kW, battery shortfall 0.000 kW")
-			!= std::string::npos, "Live battery charging totals not displayed");
-		require(!world->isModified(), "Battery charging dirtied the authored document");
-		// Turn the array periodic with an eclipse leg and watch the live
-		// discharge carry the deficit.
-		clickPoint(point("Solar 0 periodic illumination"));
-		clickPoint(point("Add segment to solar 0"));
-		clickPoint(point("Apply settings"));
-		clickPoint(point("Confirm World reset"));
-		require(world->getStationSystemsSettings().solarArrays[0].illumination.segments.size() == 2
-			&& history.undoCount() == 1, "Periodic illumination did not apply");
-		world->markSaved();
-		world->resumeSimulation(); require(world->advanceTicks(3660), "Battery editor eclipse run failed");
-		world->pauseSimulation(); frame();
-		require(text.find("bank: discharge-limited |") != std::string::npos
-			&& text.find("battery discharge 4.000 kW") != std::string::npos
-			&& text.find("battery shortfall 2.000 kW") != std::string::npos,
-			"Live battery discharge during eclipse not displayed");
-		require(!world->isModified(), "Battery eclipse run dirtied the authored document");
-		bool sawDeficitSupport = false;
-		for (auto const& event : world->getStationSystemsEvents())
-			if (event.message.find("Battery 'bank' discharge limited: supplied 4.000000 of 6.000000 kW")
+				ctx->SetRef("Station Systems");
+			REQ(driver.contains("1 battery(ies)"),
+				"Authored battery count missing from the window");
+			REQ(driver.contains("bank: idle | stored 8.000 of nameplate 10.000 kWh (usable 8.000, reserve 2.000 never dischargeable)"), "Authored battery reserve policy not displayed");
+			// Charge from surplus under full sun: the live view shows the
+			// charging power and the document stays clean while ticking.
+			world->markSaved();
+			world->resumeSimulation(); REQ(world->advanceTicks(60), "Battery editor charge run failed");
+			world->pauseSimulation(); ctx->Sleep(1);
+			REQ(driver.contains("battery discharge 0.000 kW, battery charge 2.000 kW, battery shortfall 0.000 kW"), "Live battery charging totals not displayed");
+			REQ(!world->isModified(), "Battery charging dirtied the authored document");
+			// Turn the array periodic with an eclipse leg and watch the live
+			// discharge carry the deficit.
+			driver.click(ctx, "Solar 0 periodic illumination");
+			driver.click(ctx, "Add segment to solar 0");
+			driver.click(ctx, "Apply settings");
+			driver.click(ctx, "Confirm World reset");
+			REQ(world->getStationSystemsSettings().solarArrays[0].illumination.segments.size() == 2
+				&& history.undoCount() == 1, "Periodic illumination did not apply");
+			world->markSaved();
+			world->resumeSimulation(); REQ(world->advanceTicks(3660), "Battery editor eclipse run failed");
+			world->pauseSimulation(); ctx->Sleep(1);
+			REQ(driver.contains("bank: discharge-limited |")
+				&& driver.contains("battery discharge 4.000 kW")
+				&& driver.contains("battery shortfall 2.000 kW"),
+				"Live battery discharge during eclipse not displayed");
+			REQ(!world->isModified(), "Battery eclipse run dirtied the authored document");
+			bool sawDeficitSupport = false;
+			for (auto const& event : world->getStationSystemsEvents())
+				if (event.message.find("Battery 'bank' discharge limited: supplied 4.000000 of 6.000000 kW")
 				!= std::string::npos)
 				sawDeficitSupport = true;
-		require(sawDeficitSupport, "Battery discharge transition missing from the window's event log");
-		// Draft a second battery through the real controls; usable energy
-		// above the nameplate is refused with a visible diagnostic and no
-		// mutation of the authored settings or history.
-		clickPoint(point("Add battery"));
-		typeValue("Battery 1 usable kWh", "15");
-		clickPoint(point("Apply settings"));
-		clickPoint(point("Confirm World reset")); frame();
-		require(text.find("usable energy exceeds the nameplate energy") != std::string::npos,
-			"Invalid battery usable energy diagnostic not shown");
-		require(world->getStationSystemsSettings().batteries.size() == 1
-			&& history.undoCount() == 1 && world->getSimulationTick() == 3660,
-			"Invalid battery draft mutated the authored settings");
-		// Repair the drafted value; the confirmed reset applies the new
-		// contract and the live view reconstructs from authored state.
-		typeValue("Battery 1 usable kWh", "6");
-		clickPoint(point("Confirm World reset"));
-		require(world->getStationSystemsSettings().batteries.size() == 2
-			&& world->getStationSystemsSettings().batteries[1].usableKWh == 6.0
-			&& history.undoCount() == 2 && world->getSimulationTick() == 0,
-			"Repaired battery draft did not apply through the reset-confirmed flow");
-		frame();
-		require(text.find("2 battery(ies)") != std::string::npos
-			&& text.find("battery2: idle | stored 8.000 of nameplate 10.000 kWh (usable 6.000, reserve 4.000 never dischargeable)")
-				!= std::string::npos,
-			"Applied battery not reflected in the window");
+			REQ(sawDeficitSupport, "Battery discharge transition missing from the window's event log");
+			// Draft a second battery through the real controls; usable energy
+			// above the nameplate is refused with a visible diagnostic and no
+			// mutation of the authored settings or history.
+			driver.click(ctx, "Add battery");
+			driver.typeValue(ctx, "Battery 1 usable kWh", "15");
+			driver.click(ctx, "Apply settings");
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(driver.contains("usable energy exceeds the nameplate energy"),
+				"Invalid battery usable energy diagnostic not shown");
+			REQ(world->getStationSystemsSettings().batteries.size() == 1
+				&& history.undoCount() == 1 && world->getSimulationTick() == 3660,
+				"Invalid battery draft mutated the authored settings");
+			// Repair the drafted value; the confirmed reset applies the new
+			// contract and the live view reconstructs from authored state.
+			driver.typeValue(ctx, "Battery 1 usable kWh", "6");
+			driver.click(ctx, "Confirm World reset");
+			REQ(world->getStationSystemsSettings().batteries.size() == 2
+				&& world->getStationSystemsSettings().batteries[1].usableKWh == 6.0
+				&& history.undoCount() == 2 && world->getSimulationTick() == 0,
+				"Repaired battery draft did not apply through the reset-confirmed flow");
+			ctx->Sleep(1);
+			REQ(driver.contains("2 battery(ies)")
+				&& driver.contains("battery2: idle | stored 8.000 of nameplate 10.000 kWh (usable 6.000, reserve 4.000 never dischargeable)"),
+				"Applied battery not reflected in the window");
+				});
+		#undef REQ
+		require(driver.passed(), "batteryWorkflow failed on the Test Engine");
 	}
+
 	// #557: removing draft rows must never touch the erased element or its
 	// nested flows after the erase. Exercise first/middle/last conversion
 	// removal over populated flows and compound stores, with cancellation
@@ -766,8 +638,6 @@ namespace
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
-		std::string text; io.ClipboardUserData = &text;
-		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
 		DocumentHistory history;
 		StationSystemsWindow window;
 		auto world = std::make_shared<core::World>("Removal editor", 2, 2);
@@ -795,102 +665,86 @@ namespace
 		}
 		std::string diagnostic;
 		require(world->configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
-		auto frame = [&]
+		headless::TestEngineDriver driver([&]
 		{
-			ImGui::NewFrame(); text.clear(); ImGui::LogToClipboard();
 			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 980});
-			window.render(world, history); ImGui::LogFinish(); ImGui::Render();
-		};
-		auto clickPoint = [&](ImVec2 point)
-		{
-			io.AddMousePosEvent(point.x, point.y); frame();
-			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
-		};
-		// The compound draft is taller than one viewport: reset the scroll
-		// and wheel down until the control comes into view.
-		auto point = [&](char const* label)
-		{
-			io.AddMousePosEvent(400.0f, 400.0f);
-			io.AddMouseWheelEvent(0.0f, 1000.0f); frame();
-			for (int pass = 0; pass < 16; ++pass)
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+			#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+
+			driver.run("station", "removalWorkflow", [&](ImGuiTestContext* ctx)
 			{
-				auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
-				for (float y = 45; y < 975; y += 5)
-					for (float x = 18; x < 940; x += 15)
-					{
-						io.AddMousePosEvent(x, y); frame(); frame();
-						if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
-					}
-				io.AddMousePosEvent(400.0f, 400.0f);
-				io.AddMouseWheelEvent(0.0f, -10.0f); frame();
-			}
-			throw std::runtime_error(std::string("Missing Station control: ") + label);
-		};
-		window.visible = true; frame(); frame();
-		require(text.find("4 resource store(s)") != std::string::npos
-			&& text.find("3 conversion(s)") != std::string::npos,
-			"Removal fixture stores or conversions not shown in the window");
-		// A removal cancelled before Apply never reaches the document.
-		clickPoint(point("Remove conversion 1"));
-		require(text.find("Draft differs from the authored start conditions") != std::string::npos,
-			"Cancelled conversion removal draft not reported");
-		clickPoint(point("Cancel edits")); frame();
-		require(world->getStationSystemsSettings().conversions.size() == 3
-			&& history.undoCount() == 0
-			&& text.find("Draft matches the authored start conditions") != std::string::npos,
-			"Cancel edits did not restore the authored conversion set");
-		// Middle conversion removal applies with the neighbours intact.
-		clickPoint(point("Remove conversion 1"));
-		clickPoint(point("Apply settings"));
-		require(world->getStationSystemsSettings().conversions.size() == 2
-			&& world->getStationSystemsSettings().conversions[0].id == "c0"
-			&& world->getStationSystemsSettings().conversions[1].id == "c2"
-			&& history.undoCount() == 1, "Middle conversion removal did not apply");
-		// First conversion removal shifts the survivor to index 0.
-		clickPoint(point("Remove conversion 0"));
-		clickPoint(point("Apply settings"));
-		require(world->getStationSystemsSettings().conversions.size() == 1
-			&& world->getStationSystemsSettings().conversions[0].id == "c2"
-			&& history.undoCount() == 2, "First conversion removal did not apply");
-		// Nested flow removal: dropping the first output of the survivor
-		// keeps the remaining flow and its declared yield.
-		clickPoint(point("Remove Conversion 0 output 0"));
-		clickPoint(point("Apply settings"));
-		require(world->getStationSystemsSettings().conversions[0].outputs.size() == 1
-			&& world->getStationSystemsSettings().conversions[0].outputs[0].storeId == "waste"
-			&& world->getStationSystemsSettings().conversions[0].outputs[0].yieldPerSecond == 24.0
-			&& history.undoCount() == 3, "Nested output flow removal did not apply");
-		// Compound store removal: the mid-list store with a declared
-		// composition disappears without disturbing its neighbours.
-		clickPoint(point("Remove store 1"));
-		clickPoint(point("Apply settings"));
-		require(world->getStationSystemsSettings().stores.size() == 3
-			&& world->getStationSystemsSettings().stores[0].id == "food"
-			&& world->getStationSystemsSettings().stores[1].id == "biomass"
-			&& world->getStationSystemsSettings().stores[2].id == "waste"
-			&& history.undoCount() == 4, "Compound store removal did not apply");
-		// Last conversion removal on a running World needs the reset
-		// confirmation; cancelling it mutates nothing.
-		world->markSaved();
-		world->resumeSimulation(); require(world->advanceTicks(30), "Removal editor run failed");
-		world->pauseSimulation(); frame();
-		clickPoint(point("Remove conversion 0"));
-		clickPoint(point("Apply settings")); frame();
-		require(text.find("Confirm?") != std::string::npos,
-			"Last conversion removal bypassed the World reset confirmation");
-		clickPoint(point("Cancel reset"));
-		require(world->getStationSystemsSettings().conversions.size() == 1
-			&& world->getSimulationTick() == 30 && history.undoCount() == 4,
-			"Reset cancellation for the last conversion mutated state");
-		clickPoint(point("Apply settings")); clickPoint(point("Confirm World reset"));
-		require(world->getStationSystemsSettings().conversions.empty()
-			&& world->getSimulationTick() == 0 && history.undoCount() == 5,
-			"Confirmed last conversion removal did not apply");
-		frame();
-		require(text.find("0 conversion(s)") != std::string::npos
-			&& text.find("Draft matches the authored start conditions") != std::string::npos,
-			"Applied removal not reflected in the window");
+				ctx->SetRef("Station Systems");
+			REQ(driver.contains("4 resource store(s)")
+				&& driver.contains("3 conversion(s)"),
+				"Removal fixture stores or conversions not shown in the window");
+			// A removal cancelled before Apply never reaches the document.
+			driver.click(ctx, "Remove conversion 1");
+			REQ(driver.contains("Draft differs from the authored start conditions"),
+				"Cancelled conversion removal draft not reported");
+			driver.click(ctx, "Cancel edits"); ctx->Sleep(1);
+			REQ(world->getStationSystemsSettings().conversions.size() == 3
+				&& history.undoCount() == 0
+				&& driver.contains("Draft matches the authored start conditions"),
+				"Cancel edits did not restore the authored conversion set");
+			// Middle conversion removal applies with the neighbours intact.
+			driver.click(ctx, "Remove conversion 1");
+			driver.click(ctx, "Apply settings");
+			REQ(world->getStationSystemsSettings().conversions.size() == 2
+				&& world->getStationSystemsSettings().conversions[0].id == "c0"
+				&& world->getStationSystemsSettings().conversions[1].id == "c2"
+				&& history.undoCount() == 1, "Middle conversion removal did not apply");
+			// First conversion removal shifts the survivor to index 0.
+			driver.click(ctx, "Remove conversion 0");
+			driver.click(ctx, "Apply settings");
+			REQ(world->getStationSystemsSettings().conversions.size() == 1
+				&& world->getStationSystemsSettings().conversions[0].id == "c2"
+				&& history.undoCount() == 2, "First conversion removal did not apply");
+			// Nested flow removal: dropping the first output of the survivor
+			// keeps the remaining flow and its declared yield.
+			driver.click(ctx, "Remove Conversion 0 output 0");
+			driver.click(ctx, "Apply settings");
+			REQ(world->getStationSystemsSettings().conversions[0].outputs.size() == 1
+				&& world->getStationSystemsSettings().conversions[0].outputs[0].storeId == "waste"
+				&& world->getStationSystemsSettings().conversions[0].outputs[0].yieldPerSecond == 24.0
+				&& history.undoCount() == 3, "Nested output flow removal did not apply");
+			// Compound store removal: the mid-list store with a declared
+			// composition disappears without disturbing its neighbours.
+			driver.click(ctx, "Remove store 1");
+			driver.click(ctx, "Apply settings");
+			REQ(world->getStationSystemsSettings().stores.size() == 3
+				&& world->getStationSystemsSettings().stores[0].id == "food"
+				&& world->getStationSystemsSettings().stores[1].id == "biomass"
+				&& world->getStationSystemsSettings().stores[2].id == "waste"
+				&& history.undoCount() == 4, "Compound store removal did not apply");
+			// Last conversion removal on a running World needs the reset
+			// confirmation; cancelling it mutates nothing.
+			world->markSaved();
+			world->resumeSimulation(); REQ(world->advanceTicks(30), "Removal editor run failed");
+			world->pauseSimulation(); ctx->Sleep(1);
+			driver.click(ctx, "Remove conversion 0");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			REQ(driver.contains("Confirm?"),
+				"Last conversion removal bypassed the World reset confirmation");
+			driver.click(ctx, "Cancel reset");
+			REQ(world->getStationSystemsSettings().conversions.size() == 1
+				&& world->getSimulationTick() == 30 && history.undoCount() == 4,
+				"Reset cancellation for the last conversion mutated state");
+			driver.click(ctx, "Apply settings"); driver.click(ctx, "Confirm World reset");
+			REQ(world->getStationSystemsSettings().conversions.empty()
+				&& world->getSimulationTick() == 0 && history.undoCount() == 5,
+				"Confirmed last conversion removal did not apply");
+			ctx->Sleep(1);
+			REQ(driver.contains("0 conversion(s)")
+				&& driver.contains("Draft matches the authored start conditions"),
+				"Applied removal not reflected in the window");
+				});
+		#undef REQ
+		require(driver.passed(), "removalWorkflow failed on the Test Engine");
 	}
+
 	// #392: resupply delivery schedules are drafted, validated and applied
 	// through the real Station Systems window controls, and the live view
 	// reports the next arrival together with accepted and refused amounts.

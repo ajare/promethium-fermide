@@ -49,6 +49,16 @@ namespace headless
 		// Resolve an item, assert it is disabled, then really press it. Returns
 		// false if the item did not resolve or was not disabled.
 		bool clickDisabled(ImGuiTestContext* ctx, ImGuiTestRef ref, char const* what);
+
+		// Canonical click. The engine's item hooks go idle between operations,
+		// and the first resolve after that gap returns geometry that is one
+		// frame stale. When a previous action changed the layout - adding or
+		// removing a row shifts everything below it - clicking straight away
+		// lands on the old position. Sleeping one frame first makes the
+		// resolve see current geometry.
+		void click(ImGuiTestContext* ctx, ImGuiTestRef ref);
+		// Same settle before typing into a field.
+		void typeValue(ImGuiTestContext* ctx, ImGuiTestRef ref, char const* value);
 		// Resolve an item and return its centre, for raw-position operations.
 		bool itemCenter(ImGuiTestContext* ctx, ImGuiTestRef ref, float* x, float* y);
 

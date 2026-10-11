@@ -122,6 +122,62 @@ namespace headless
 		return true;
 	}
 
+	void TestEngineDriver::click(ImGuiTestContext* ctx, ImGuiTestRef ref)
+	{
+		// A click has to land on the widget the caller named. Two things work
+		// against that here, both observed during migration:
+		//
+		//   * The engine's item hooks go idle between operations, and the
+		//     first query after that reports a rect one frame stale
+		//     (imgui_te_context.cpp:919).
+		//   * Adding or removing a row shifts everything below it, so a rect
+		//     read before the shift is wrong afterwards.
+		//
+		// Rather than guess a settle time, resolve, press, and then verify the
+		// hover actually landed on the intended widget. If it did not, the
+		// geometry moved under us: re-resolve and try again.
+		ImGuiTestItemInfo* info = nullptr;
+		for (int attempt = 0; attempt < 4; ++attempt)
+		{
+			ctx->Sleep(1);
+			// Warm this ref's pool entry before the item-aware move: MouseMove
+			// on an entry the hooks have not repopulated yet fails to resolve
+			// it, and every later query in the same operation then comes back
+			// empty.
+			ctx->ItemInfo(ref, ImGuiTestOpFlags_NoError);
+			ctx->Sleep(1);
+			// Item-aware move: scrolls the target into view. A raw teleport to
+			// a rect that is scrolled out of the window lands outside it and
+			// silently hits nothing.
+			ctx->MouseMove(ref);
+			ctx->Sleep(1);
+			info = ctx->ItemInfo(ref, ImGuiTestOpFlags_NoError);
+			if (info->ID == 0)
+			{
+				continue;
+			}
+			ctx->MouseTeleportToPos(info->RectFull.GetCenter());
+			ctx->Sleep(1);
+			if (ImGui::GetHoveredID() == info->ID)
+			{
+				ctx->MouseClick();
+				return;
+			}
+		}
+		// Could not confirm the hover. Press anyway so the check reports a
+		// failure on its own assertion rather than silently doing nothing.
+		if (info)
+			ctx->MouseTeleportToPos(info->RectFull.GetCenter());
+		ctx->MouseClick();
+	}
+
+	void TestEngineDriver::typeValue(ImGuiTestContext* ctx, ImGuiTestRef ref,
+		char const* value)
+	{
+		ctx->Sleep(1);
+		ctx->ItemInputValue(ref, value);
+	}
+
 	bool TestEngineDriver::clickDisabled(ImGuiTestContext* ctx, ImGuiTestRef ref,
 		char const* what)
 	{
