@@ -191,9 +191,10 @@ namespace core
 	// Declared thermal service classes (#393), distinguished by their
 	// permitted interface temperatures and compatible heat-transfer
 	// requirements (CONTEXT.md). Spare capacity in one class is never
-	// automatically usable by another. This slice provides no cooling
-	// capacity in any class: a load that requires a cooling service is
-	// explicitly infeasible rather than silently absorbed by a hidden sink.
+	// automatically usable by another. Chilled cooling capacity is
+	// provided per class by authored chillers (#397); a class without a
+	// compatible chiller has no cooling service, and spare capacity in
+	// another class never substitutes for it.
 	inline constexpr std::array<char const*, 4> StationThermalServiceClasses{
 		"low", "moderate", "warm", "generation"};
 
@@ -410,6 +411,41 @@ namespace core
 	};
 	inline constexpr size_t MaxStationCoolantLoops{8};
 
+	// A chiller (#397): a heat pump that supplies a cold service of its
+	// declared thermal service class. Its cold-side interface is a coolant
+	// loop (#396): the chiller extracts heat from the loop's circulating
+	// coolant, so the loop's actual circulation fraction caps the duty
+	// the evaporator can deliver — no circulation, no extracted heat.
+	// Its hot-side interface is a thermal reservoir that accepts the
+	// condenser heat. The configured COP assumption converts extracted
+	// heat into electrical work at the rated interface: work = extracted
+	// / cop, and the chiller's electrical demand is that work plus its
+	// running auxiliaries. Condenser heat equals extracted heat plus the
+	// work and auxiliaries actually supplied, booked at one consistent
+	// boundary: the loop loses exactly what it gives up, the sink gains
+	// exactly what the condenser rejects, and the electrical pool pays
+	// for the work — never a duplicate booking.
+	// Temperature interfaces: the chiller extracts only while the cold
+	// loop is above its chilled setpoint (the cold service is satisfied
+	// below it), and can reject only into a sink below its maximum
+	// condensing temperature — a sink at or above that interface makes
+	// the chiller infeasible rather than silently overloading it. Zero
+	// rated capacity disables the chiller entirely.
+	struct ChillerSettings
+	{
+		std::string id;
+		std::string thermalClass;           // cold service class supplied
+		std::string coldLoopId;             // coolant loop at the evaporator
+		std::string condenserReservoirId;   // reservoir accepting condenser heat
+		double ratedCoolingCapacityKW{0.0}; // extracted heat at rated, >= 0; 0 disables
+		double cop{1.0};                  // cooling per unit work at rated, > 0
+		double auxiliaryPowerKW{0.0};     // running auxiliaries, >= 0
+		double chilledSetpointC{5.0};     // no extraction at or below this cold-side temperature
+		double maxCondensingTemperatureC{45.0}; // no rejection into a sink at or above this
+		bool operator==(ChillerSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationChillers{8};
+
 	struct BatterySettings
 	{
 		std::string id;
@@ -438,6 +474,7 @@ namespace core
 		std::vector<ThermalReservoirSettings> thermalReservoirs;
 		std::vector<RadiatorSettings> radiators;
 		std::vector<CoolantLoopSettings> coolantLoops;
+		std::vector<ChillerSettings> chillers;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// Profile shape validation and deterministic evaluation: the level of
@@ -701,6 +738,10 @@ namespace core
 		// pool as external loads — never a second budget.
 		double coolantPumpKW{0.0};
 		double coolantHeaterKW{0.0};
+		// Chiller electrical service this tick (#397): compressor work
+		// plus running auxiliaries drawn from the same allocation pool —
+		// never a second budget.
+		double chillerPowerKW{0.0};
 		std::vector<StationSolarSourceSnapshot> sources;
 		std::vector<StationEquipmentLoadSnapshot> loads;
 		std::vector<StationBatterySnapshot> batteries;
@@ -742,7 +783,12 @@ namespace core
 		// (#396): the loop side of the heat-only exchanger exchange, so
 		// the reservoir ledger closes over exactly the terms that moved.
 		double lastLoopHeatKW{0.0};
-		double lastHeatInKW{0.0};       // absorbed + routed + loop this tick
+		// Condenser heat this tick rejected into this reservoir by the
+		// chillers that use it as their hot-side sink (#397): the sink
+		// side of the chiller booking, so the reservoir ledger closes
+		// over exactly the terms that moved.
+		double lastCondenserHeatKW{0.0};
+		double lastHeatInKW{0.0};       // absorbed + routed + loop + condenser this tick
 		double lastRejectedKW{0.0};     // radiator net rejection this tick
 		double lastNetKW{0.0};          // heat in minus rejected this tick
 		bool aboveLimit{false};
@@ -752,8 +798,9 @@ namespace core
 		double absorbedEnergyKJ{0.0};
 		double routedEnergyKJ{0.0};
 		double loopEnergyKJ{0.0}; // cumulative net loop exchange into the reservoir
+		double condenserEnergyKJ{0.0}; // cumulative condenser heat rejected into the reservoir
 		double rejectedEnergyKJ{0.0};
-		double residualKJ{0.0}; // starting + absorbed + routed + loop - rejected - current
+		double residualKJ{0.0}; // starting + absorbed + routed + loop + condenser - rejected - current
 		bool operator==(StationThermalReservoirSnapshot const&) const = default;
 	};
 	// One coolant loop as of the most recent tick (#396): the authored
@@ -795,6 +842,11 @@ namespace core
 		// into it. The reservoir books the exact negation — one exchange,
 		// booked once on each side.
 		double exchangeIntoLoopKW{0.0};
+		// Chiller extraction this tick (#397): heat the chiller on this
+		// cold-side loop actually extracted from the circulating coolant.
+		// It enters the loop ledger as a removal exactly once, so the
+		// loop's energy closes over it.
+		double chillerExtractionKW{0.0};
 		bool belowFreezeSetpoint{false};
 		bool disabled{false};              // zero coolant: no fluid, no service
 		double startingEnergyKJ{0.0};
@@ -802,9 +854,73 @@ namespace core
 		double pumpWorkEnergyKJ{0.0};
 		double heaterEnergyKJ{0.0};
 		double exchangedEnergyKJ{0.0};
-		double residualKJ{0.0}; // starting + pump + heater + exchanged - current
+		double extractedEnergyKJ{0.0}; // cumulative chiller extraction out of the loop
+		double residualKJ{0.0}; // starting + pump + heater + exchanged - extracted - current
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationCoolantLoopSnapshot const&) const = default;
+	};
+	// One chiller as of the most recent tick (#397): the authored
+	// contract beside the cold-side duty actually extracted, the
+	// electrical work plus auxiliaries actually supplied, the condenser
+	// heat actually rejected, and the unmet remainder. The chiller's own
+	// energy ledger closes over extracted + work = condenser within the
+	// declared tolerance: condenser heat equals extracted heat plus the
+	// work and applicable auxiliaries at one consistent boundary, never
+	// a duplicate booking. admitted with a blockReason exposes why a
+	// feasible-looking demand could not run (sink over the maximum
+	// condensing temperature, no cold-side circulation); the chilled
+	// setpoint and sink-over-temperature conditions are reported, never
+	// clamped into the integrated state.
+	struct StationChillerSnapshot
+	{
+		std::string id;
+		std::string thermalClass;
+		std::string coldLoopId;
+		std::string condenserReservoirId;
+		double ratedCoolingCapacityKW{0.0};
+		double cop{1.0};
+		double auxiliaryPowerKW{0.0};
+		double chilledSetpointC{0.0};
+		double maxCondensingTemperatureC{0.0};
+		double coolingDemandKW{0.0};      // cold service demanded this tick
+		double coolingKW{0.0};           // cold-side duty actually extracted
+		double coolingUnmetKW{0.0};
+		double deliverableKW{0.0};       // capacity capped by cold-side circulation
+		double powerDemandKW{0.0};      // work + auxiliaries demanded
+		double powerSuppliedKW{0.0};
+		double powerUnmetKW{0.0};
+		double deliveredFraction{0.0};  // fraction of the power demand supplied
+		double condenserHeatKW{0.0};    // extracted + supplied work and auxiliaries
+		double coldLoopTemperatureC{0.0};
+		double coldLoopCirculationFraction{0.0};
+		double sinkTemperatureC{0.0};
+		bool admitted{false};
+		std::string blockReason;
+		bool atChilledSetpoint{false};
+		bool sinkOverMaxCondensing{false};
+		bool disabled{false};            // zero rated capacity: no service
+		double extractedEnergyKJ{0.0};  // cumulative cold-side heat extracted
+		double workEnergyKJ{0.0};       // cumulative electrical work + auxiliaries
+		double condenserEnergyKJ{0.0};  // cumulative condenser heat rejected
+		double residualKJ{0.0};         // extracted + work - condenser
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationChillerSnapshot const&) const = default;
+	};
+	// The cold-service rollup for one thermal service class (#397):
+	// what the chillers of this class were asked to provide, what they
+	// delivered, the work and auxiliaries they drew, the condenser heat
+	// they rejected, and the demand that stayed unmet. Classes are
+	// segregated: this is the account of one class's own capacity, and
+	// another class's spare capacity never appears here.
+	struct StationCoolingClassSnapshot
+	{
+		std::string thermalClass;
+		double capacityKW{0.0};        // summed rated capacity of the class's chillers
+		double providedKW{0.0};        // cold-side duty delivered this tick
+		double unmetKW{0.0};           // demand not delivered this tick
+		double workKW{0.0};            // electrical work + auxiliaries supplied
+		double condenserKW{0.0};       // condenser heat rejected this tick
+		bool operator==(StationCoolingClassSnapshot const&) const = default;
 	};
 	struct StationThermalSnapshot
 	{
@@ -817,6 +933,15 @@ namespace core
 		// freeze-protection heating delivered this tick.
 		double totalCirculationKgPerS{0.0};
 		double totalFreezeHeatingKW{0.0};
+		// Cold-service totals by thermal service class (#397): the
+		// delivered cold-side duty, electrical work plus auxiliaries,
+		// condenser heat and unmet demand rolled up per declared class.
+		// Spare capacity in one class is never usable by another, so the
+		// rollup is per class, never a single pooled number.
+		std::vector<StationCoolingClassSnapshot> coolingByClass;
+		double totalCoolingProvidedKW{0.0};
+		double totalCoolingUnmetKW{0.0};
+		double totalCondenserHeatKW{0.0};
 		bool operator==(StationThermalSnapshot const&) const = default;
 	};
 
@@ -844,6 +969,11 @@ namespace core
 		// circulation and freeze-protection service, and each loop's
 		// closing thermal energy ledger.
 		std::vector<StationCoolantLoopSnapshot> coolantLoops;
+		// The chilled service picture (#397): per-chiller cold-side duty,
+		// work, condenser heat, unmet demand and the closing chiller
+		// energy ledger, with the per-class rollup in the thermal
+		// snapshot's coolingByClass.
+		std::vector<StationChillerSnapshot> chillers;
 		// Soonest authored arrival still pending across every delivery, for
 		// the overview's "next delivery" readout (#392).
 		bool hasNextDelivery{false};

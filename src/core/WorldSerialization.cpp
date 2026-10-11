@@ -734,7 +734,15 @@ namespace core
 		// rather than silently dropped. Coolant inventory, circulation and
 		// thermal ledgers stay runtime-only, so load and Reset reconstruct
 		// them from the authored starting conditions.
-		serializer.writeUint32("version", 73);
+		// Version 74 adds authored chillers (#397): class-matched cold
+		// services with a coolant-loop evaporator interface, a thermal-
+		// reservoir condenser sink, the configured COP and auxiliaries,
+		// and the chilled/condensing temperature interfaces; a pre-74
+		// document carrying `chillers` is refused rather than silently
+		// dropped. Cold-side duty, work, condenser heat and the chiller
+		// ledgers stay runtime-only, so load and Reset reconstruct them
+		// from the authored starting conditions.
+		serializer.writeUint32("version", 74);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -955,6 +963,28 @@ namespace core
 					serializer.writeDouble("ratedFlowKgPerS", loop.ratedFlowKgPerS);
 					serializer.writeDouble("exchangerConductanceKWPerK", loop.exchangerConductanceKWPerK);
 					serializer.writeDouble("heaterCapacityKW", loop.heaterCapacityKW);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.chillers.empty())
+			{
+				// Authored chiller contracts only; cold-side duty, work,
+				// condenser heat and the chiller energy ledger are runtime
+				// state reconstructed on load (#397).
+				serializer.beginArray("chillers");
+				for (auto const& chiller : mStationSystemsSettings.chillers)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", chiller.id);
+					serializer.writeString("thermalClass", chiller.thermalClass);
+					serializer.writeString("coldLoopId", chiller.coldLoopId);
+					serializer.writeString("condenserReservoirId", chiller.condenserReservoirId);
+					serializer.writeDouble("ratedCoolingCapacityKW", chiller.ratedCoolingCapacityKW);
+					serializer.writeDouble("cop", chiller.cop);
+					serializer.writeDouble("auxiliaryPowerKW", chiller.auxiliaryPowerKW);
+					serializer.writeDouble("chilledSetpointC", chiller.chilledSetpointC);
+					serializer.writeDouble("maxCondensingTemperatureC", chiller.maxCondensingTemperatureC);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -1883,7 +1913,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 73)
+		if (version < 1 || version > 74)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2145,6 +2175,29 @@ namespace core
 					loop.exchangerConductanceKWPerK = serializer.readDouble("exchangerConductanceKWPerK");
 					loop.heaterCapacityKW = serializer.readDouble("heaterCapacityKW");
 					stationSettings.coolantLoops.push_back(std::move(loop));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("chillers"))
+			{
+				if (version < 74) throw SerializationException(
+					"Station chillers require World schema 74");
+				serializer.beginArray("chillers");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					ChillerSettings chiller;
+					chiller.id = serializer.readString("id");
+					chiller.thermalClass = serializer.readString("thermalClass");
+					chiller.coldLoopId = serializer.readString("coldLoopId");
+					chiller.condenserReservoirId = serializer.readString("condenserReservoirId");
+					chiller.ratedCoolingCapacityKW = serializer.readDouble("ratedCoolingCapacityKW");
+					chiller.cop = serializer.readDouble("cop");
+					chiller.auxiliaryPowerKW = serializer.readDouble("auxiliaryPowerKW");
+					chiller.chilledSetpointC = serializer.readDouble("chilledSetpointC");
+					chiller.maxCondensingTemperatureC = serializer.readDouble("maxCondensingTemperatureC");
+					stationSettings.chillers.push_back(std::move(chiller));
 					serializer.endMap();
 				}
 				serializer.endArray();

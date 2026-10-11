@@ -1121,8 +1121,190 @@ namespace
 		#undef REQ
 		require(driver.passed(), "Coolant workflow failed on the Test Engine");
 	}
-}
+	// #397: chillers are drafted, validated and applied through the real
+	// Station Systems window controls, and the live view reports the cold
+	// duty, circulation-capped deliverable, COP work draw, condenser
+	// heat, per-class rollup and the closing chiller ledger.
+	void chillerWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO();
+		io.DisplaySize = {1200, 1700};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Chiller editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		core::StationSystemsSettings initial;
+		initial.enabled = true;
+		initial.observationIntervalSeconds = 2.0f;
+		core::ThermalReservoirSettings bus;
+		bus.id = "bus";
+		bus.thermalClass = "moderate";
+		bus.heatCapacityKJPerK = 1000.0;
+		bus.startingTemperatureC = 20.0;
+		bus.minTemperatureC = -50.0;
+		bus.maxTemperatureC = 100.0;
+		initial.thermalReservoirs.push_back(bus);
+		core::ThermalReservoirSettings sink;
+		sink.id = "sink";
+		sink.thermalClass = "moderate";
+		sink.heatCapacityKJPerK = 1000.0;
+		sink.startingTemperatureC = 20.0;
+		sink.minTemperatureC = -50.0;
+		sink.maxTemperatureC = 100.0;
+		initial.thermalReservoirs.push_back(sink);
+		core::CoolantLoopSettings chilled;
+		chilled.id = "chilled";
+		chilled.hazardClass = "normal";
+		chilled.reservoirId = "bus";
+		chilled.coolantCapacityKg = 100.0;
+		chilled.startingCoolantKg = 100.0;
+		chilled.specificHeatKJPerKgK = 4.0;
+		chilled.startingTemperatureC = 20.0;
+		chilled.freezeProtectionSetpointC = 0.0;
+		chilled.pumpPowerKW = 0.5;
+		chilled.ratedFlowKgPerS = 2.0;
+		chilled.exchangerConductanceKWPerK = 1.0;
+		chilled.heaterCapacityKW = 0.0;
+		initial.coolantLoops.push_back(chilled);
+		core::CoolantLoopSettings chilled2;
+		chilled2.id = "chilled2";
+		chilled2.hazardClass = "normal";
+		chilled2.reservoirId = "bus";
+		chilled2.coolantCapacityKg = 100.0;
+		chilled2.startingCoolantKg = 100.0;
+		chilled2.specificHeatKJPerKgK = 4.0;
+		chilled2.startingTemperatureC = 20.0;
+		chilled2.freezeProtectionSetpointC = 0.0;
+		chilled2.pumpPowerKW = 0.5;
+		chilled2.ratedFlowKgPerS = 2.0;
+		chilled2.exchangerConductanceKWPerK = 1.0;
+		chilled2.heaterCapacityKW = 0.0;
+		initial.coolantLoops.push_back(chilled2);
+		core::ChillerSettings ics;
+		ics.id = "ics";
+		ics.thermalClass = "moderate";
+		ics.coldLoopId = "chilled";
+		ics.condenserReservoirId = "sink";
+		ics.ratedCoolingCapacityKW = 6.0;
+		ics.cop = 3.0;
+		ics.auxiliaryPowerKW = 0.5;
+		ics.chilledSetpointC = 5.0;
+		ics.maxCondensingTemperatureC = 45.0;
+		initial.chillers.push_back(ics);
+		core::SolarArraySettings field;
+		field.id = "field";
+		field.capacityKW = 10.0;
+		initial.solarArrays.push_back(field);
+		require(world->configureStationSystems(initial, false, &diagnostic), diagnostic.c_str());
+		headless::TestEngineDriver driver([&]
+		{
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 1650});
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
 
+		driver.run("station", "chillerWorkflow", [&](ImGuiTestContext* ctx)
+		{
+			ctx->SetRef("Station Systems");
+			REQ(driver.contains("1 chiller(s)"),
+				"Authored chiller count missing from the window");
+			// Run: the live view shows the chiller at full cold duty with
+			// the COP work draw, the condenser heat, the closing ledger
+			// and the per-class rollup, and ticking never dirties the
+			// authored document.
+			world->markSaved();
+			world->resumeSimulation(); REQ(world->advanceTicks(600), "Chiller editor run failed");
+			world->pauseSimulation(); ctx->Sleep(1);
+			REQ(driver.contains("ics (moderate) chilled -> condenser sink: full service")
+				&& driver.contains("cold duty 6.000 of 6.000 kW (unmet 0.000)")
+				&& driver.contains("deliverable 6.000 kW at 100.0% circulation")
+				&& driver.contains("power 2.500 of 2.500 kW (COP 3.00, aux 0.500 kW)")
+				&& driver.contains("condenser heat 8.500 kW"),
+				"Live chiller cold-service, COP draw or condenser heat not displayed");
+			REQ(driver.contains("energy ledger (kJ)") && driver.contains("extracted"),
+				"Chiller energy ledger not displayed");
+			REQ(driver.contains("moderate: capacity 6.000 kW, provided 6.000")
+				&& driver.contains("low: capacity 0.000 kW, provided 0.000"),
+				"Per-class cold service rollup not displayed");
+			REQ(!driver.contains("SINK OVER") && !driver.contains("DISABLED")
+				&& !driver.contains("at its chilled setpoint"),
+				"Chiller condition flags wrong for a nominal run");
+			REQ(!world->isModified(), "Chiller ticking dirtied the authored document");
+			// An invalid drafted chiller is refused with a visible
+			// diagnostic and never reaches the authored settings.
+			driver.click(ctx, "Add chiller");
+			driver.typeValue(ctx, "Chiller 1 cold loop", "chilled2");
+			driver.typeValue(ctx, "Chiller 1 COP", "0");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(driver.contains("COP must be finite and positive"),
+				"Zero-COP drafted chiller diagnostic not shown");
+			REQ(world->getStationSystemsSettings().chillers.size() == 1
+				&& history.undoCount() == 0 && world->getSimulationTick() == 600,
+				"Invalid chiller draft mutated the authored settings");
+			// Repair the COP but cross the classes: the drafted chiller
+			// may not serve a class its cold-loop reservoir does not.
+			// The World is still at tick 600 (the refused apply reset
+			// nothing), so every apply below still routes through the
+			// reset-confirmation gate.
+			driver.typeValue(ctx, "Chiller 1 COP", "3");
+			driver.typeValue(ctx, "Chiller 1 thermal class", "warm");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(driver.contains("incompatible with cold loop 'chilled2'"),
+				"Cross-class cold-side coupling diagnostic not shown");
+			REQ(world->getStationSystemsSettings().chillers.size() == 1
+				&& history.undoCount() == 0,
+				"Cross-class chiller draft mutated the authored settings");
+			// A chiller coupled to an unknown cold loop is refused.
+			driver.typeValue(ctx, "Chiller 1 thermal class", "moderate");
+			driver.typeValue(ctx, "Chiller 1 cold loop", "ghost");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(driver.contains("unknown coolant loop 'ghost'"),
+				"Unknown cold-loop coupling diagnostic not shown");
+			// A chilled setpoint at or above the maximum condensing
+			// temperature is refused.
+			driver.typeValue(ctx, "Chiller 1 cold loop", "chilled2");
+			driver.typeValue(ctx, "Chiller 1 chilled setpoint C", "45");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(driver.contains("chilled setpoint must be below the maximum condensing"),
+				"Setpoint-above-max-condensing diagnostic not shown");
+			// Repair the drafted limits; the confirmed reset applies the
+			// contract and the live view restarts from authored state.
+			driver.typeValue(ctx, "Chiller 1 chilled setpoint C", "5");
+			driver.typeValue(ctx, "Chiller 1 cold loop", "chilled2");
+			driver.click(ctx, "Confirm World reset");
+			REQ(world->getStationSystemsSettings().chillers.size() == 2
+				&& world->getStationSystemsSettings().chillers[1].cop == 3.0
+				&& world->getStationSystemsSettings().chillers[1].coldLoopId == "chilled2"
+				&& world->getStationSystemsSettings().chillers[1].condenserReservoirId == "sink"
+				&& history.undoCount() == 1 && world->getSimulationTick() == 0,
+				"Repaired chiller draft did not apply through the reset-confirmed flow");
+			ctx->Sleep(1);
+			REQ(driver.contains("2 chiller(s)")
+				&& driver.contains("chiller2 (moderate) chilled2 -> condenser sink"),
+				"Applied chiller not reflected in the window");
+			// Two chillers cannot share one evaporator loop.
+			driver.click(ctx, "Add chiller");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			REQ(driver.contains("shares cold loop 'chilled'"),
+				"Shared-evaporator diagnostic not shown");
+			driver.click(ctx, "Cancel edits");
+			REQ(world->getStationSystemsSettings().chillers.size() == 2,
+				"Cancelled chiller edit did not restore the authored contracts");
+		});
+		#undef REQ
+		require(driver.passed(), "Chiller workflow failed on the Test Engine");
+	}
+}
 void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"station/windowWorkflow", workflow});
@@ -1135,4 +1317,5 @@ void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 	checks.push_back({"station/deliveryWorkflow", deliveryWorkflow});
 	checks.push_back({"station/thermalWorkflow", thermalWorkflow});
 	checks.push_back({"station/coolantWorkflow", coolantWorkflow});
+	checks.push_back({"station/chillerWorkflow", chillerWorkflow});
 }

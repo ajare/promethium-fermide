@@ -25,14 +25,14 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		world->getSimulationTick() * static_cast<double>(core::World::getFixedTimestep()),
 		static_cast<unsigned long long>(world->getSimulationTick()));
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
-	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply, rechargeable batteries, thermal reservoirs with radiator rejection, and coolant loops with freeze-protection heating. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Thermal reservoirs integrate temperature from their effective capacity under absorbed and routed equipment heat; radiators reject heat by the Stefan-Boltzmann law at the emitting temperature against the authored sink, emissivity and view factor. A load's emitted heat is booked exactly once: routed into its class-compatible reservoir or exported directly, never both. Declared temperature limits are reported, never clamped. Coolant loops hold a finite, loop-specific coolant inventory segregated by hazard class (coolant is never potable or nutrient water); the pump circulates only the coolant the loop actually holds, so an underfilled loop flows less and a dry loop flows nothing, and the freeze-protection heater thermostats the loop up to its setpoint within its capacity. Pump work and heater heat enter the loop exactly once and reach the reservoir only through the circulation-gated heat-only exchanger; the loop draw rides the same electrical pool as external loads. Within a tick, power allocates first, then coolant loops run, then thermal integrates, then transfers, then conversions. Observation interval is a provisional display/event setting, not a separate simulation clock.");
+	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply, rechargeable batteries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, and chillers supplying class-matched cold services. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Thermal reservoirs integrate temperature from their effective capacity under absorbed and routed equipment heat; radiators reject heat by the Stefan-Boltzmann law at the emitting temperature against the authored sink, emissivity and view factor. A load's emitted heat is booked exactly once: routed into its class-compatible reservoir or exported directly, never both. Declared temperature limits are reported, never clamped. Coolant loops hold a finite, loop-specific coolant inventory segregated by hazard class (coolant is never potable or nutrient water); the pump circulates only the coolant the loop actually holds, so an underfilled loop flows less and a dry loop flows nothing, and the freeze-protection heater thermostats the loop up to its setpoint within its capacity. Pump work and heater heat enter the loop exactly once and reach the reservoir only through the circulation-gated heat-only exchanger; the loop draw rides the same electrical pool as external loads. Chillers supply a cold service of their declared class through a class-matched coolant-loop evaporator and reservoir condenser: the delivered duty is capped by the loop's actual circulation, gated at the chilled setpoint, and refused while the sink is at or above the maximum condensing temperature; work at the configured COP plus auxiliaries rides the same electrical pool, and condenser heat equals extracted heat plus the work and auxiliaries actually supplied, booked once. Within a tick, power allocates first, then coolant loops and chillers run, then thermal integrates, then transfers, then conversions. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s)",
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s)",
 		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
 		authored.stores.size(), authored.transfers.size(), authored.conversions.size(),
 		authored.solarArrays.size(), authored.equipmentLoads.size(), authored.batteries.size(),
 		authored.deliveries.size(), authored.thermalReservoirs.size(), authored.radiators.size(),
-		authored.coolantLoops.size());
+		authored.coolantLoops.size(), authored.chillers.size());
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
@@ -714,6 +714,84 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		}
 		mDraft.coolantLoops.push_back(std::move(loop));
 	}
+	ImGui::SeparatorText("Draft chillers (kW cold service; class-matched loop evaporator and reservoir condenser, COP and auxiliaries; zero rated capacity disables the chiller)");
+	for (size_t index = 0; index < mDraft.chillers.size(); )
+	{
+		auto& chiller = mDraft.chillers[index];
+		auto const row = std::to_string(index);
+		bool removeChiller = false;
+		ImGui::PushItemWidth(220);
+		char chillerIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(chillerIdBuffer, chiller.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Chiller " + row + " id").c_str(),
+			chillerIdBuffer, sizeof(chillerIdBuffer)))
+			chiller.id = chillerIdBuffer;
+		char chillerClassBuffer[16]{};
+		std::strncpy(chillerClassBuffer, chiller.thermalClass.c_str(), sizeof(chillerClassBuffer) - 1);
+		if (ImGui::InputText(("Chiller " + row + " thermal class").c_str(),
+			chillerClassBuffer, sizeof(chillerClassBuffer)))
+			chiller.thermalClass = chillerClassBuffer;
+		char coldLoopBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(coldLoopBuffer, chiller.coldLoopId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Chiller " + row + " cold loop").c_str(),
+			coldLoopBuffer, sizeof(coldLoopBuffer)))
+			chiller.coldLoopId = coldLoopBuffer;
+		char condenserBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(condenserBuffer, chiller.condenserReservoirId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Chiller " + row + " condenser reservoir").c_str(),
+			condenserBuffer, sizeof(condenserBuffer)))
+			chiller.condenserReservoirId = condenserBuffer;
+		ImGui::InputDouble(("Chiller " + row + " rated cooling capacity kW").c_str(),
+			&chiller.ratedCoolingCapacityKW, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Chiller " + row + " COP").c_str(),
+			&chiller.cop, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Chiller " + row + " auxiliary power kW").c_str(),
+			&chiller.auxiliaryPowerKW, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Chiller " + row + " chilled setpoint C").c_str(),
+			&chiller.chilledSetpointC, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Chiller " + row + " max condensing temperature C").c_str(),
+			&chiller.maxCondensingTemperatureC, 0.0, 0.0, "%.3f");
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove chiller " + row).c_str()))
+			removeChiller = true;
+		ImGui::PopItemWidth();
+		if (removeChiller)
+			mDraft.chillers.erase(mDraft.chillers.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
+	if (mDraft.chillers.size() < core::MaxStationChillers && ImGui::Button("Add chiller"))
+	{
+		core::ChillerSettings chiller;
+		chiller.thermalClass = "moderate";
+		chiller.ratedCoolingCapacityKW = 5.0;
+		chiller.cop = 3.0;
+		chiller.auxiliaryPowerKW = 0.2;
+		chiller.chilledSetpointC = 5.0;
+		chiller.maxCondensingTemperatureC = 45.0;
+		if (!mDraft.coolantLoops.empty())
+			chiller.coldLoopId = mDraft.coolantLoops.front().id;
+		// Prefer a condenser sink that is not the cold loop's own host:
+		// rejecting into the reservoir the cold side cools is a heater,
+		// so the default avoids that refusal when another reservoir exists.
+		if (!mDraft.thermalReservoirs.empty())
+		{
+			std::string coldHost;
+			for (auto const& loop : mDraft.coolantLoops)
+				if (loop.id == chiller.coldLoopId) coldHost = loop.reservoirId;
+			chiller.condenserReservoirId = mDraft.thermalReservoirs.back().id;
+			for (auto const& reservoir : mDraft.thermalReservoirs)
+				if (reservoir.id != coldHost) chiller.condenserReservoirId = reservoir.id;
+		}
+		for (size_t candidate = mDraft.chillers.size() + 1;; ++candidate)
+		{
+			chiller.id = "chiller" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.chillers.begin(), mDraft.chillers.end(),
+				[&](core::ChillerSettings const& existing) { return existing.id == chiller.id; });
+			if (!taken) break;
+		}
+		mDraft.chillers.push_back(std::move(chiller));
+	}
 	bool const draftChanged = mDraft != authored;
 	ImGui::TextUnformatted(draftChanged
 		? "Draft differs from the authored start conditions."
@@ -853,13 +931,13 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 				flow.storeId.c_str(), flow.unit.c_str(), flow.requested, flow.completed,
 				flow.unmet);
 	}
-	ImGui::Text("Power totals: generation %.3f kW, requested %.3f, supplied %.3f, unmet %.3f, unmet critical %.3f, surplus %.3f, exported heat %.3f kW, battery discharge %.3f kW, battery charge %.3f kW, battery shortfall %.3f kW, coolant pump %.3f kW, freeze heating %.3f kW",
+	ImGui::Text("Power totals: generation %.3f kW, requested %.3f, supplied %.3f, unmet %.3f, unmet critical %.3f, surplus %.3f, exported heat %.3f kW, battery discharge %.3f kW, battery charge %.3f kW, battery shortfall %.3f kW, coolant pump %.3f kW, freeze heating %.3f kW, chiller power %.3f kW",
 		snapshot.power.availableGenerationKW, snapshot.power.totalRequestedKW,
 		snapshot.power.totalSuppliedKW, snapshot.power.totalUnmetKW,
 		snapshot.power.unmetCriticalKW, snapshot.power.surplusKW, snapshot.power.exportedHeatKW,
 		snapshot.power.batteryDischargeKW, snapshot.power.batteryChargeKW,
 		snapshot.power.batteryShortfallKW, snapshot.power.coolantPumpKW,
-		snapshot.power.coolantHeaterKW);
+		snapshot.power.coolantHeaterKW, snapshot.power.chillerPowerKW);
 	ImGui::SeparatorText("Batteries (live; reserve = nameplate - usable is never dischargeable; discharge covers deficits on the same pool, charging takes only surplus)");
 	if (snapshot.power.batteries.empty()) ImGui::TextDisabled("No batteries authored.");
 	for (auto const& battery : snapshot.power.batteries)
@@ -925,10 +1003,10 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			thermalReservoir.lastHeatInKW, thermalReservoir.lastHeatRoutedKW,
 			thermalReservoir.absorbedHeatKW, thermalReservoir.lastRejectedKW,
 			thermalReservoir.lastNetKW);
-		ImGui::Text("  energy ledger (kJ): starting %.3f, current %.3f, absorbed %.3f, routed %.3f, coolant exchange %.3f, rejected %.3f, residual %.9f (tolerance %.1e)",
+		ImGui::Text("  energy ledger (kJ): starting %.3f, current %.3f, absorbed %.3f, routed %.3f, coolant exchange %.3f, condenser %.3f, rejected %.3f, residual %.9f (tolerance %.1e)",
 			thermalReservoir.startingEnergyKJ, thermalReservoir.currentEnergyKJ,
 			thermalReservoir.absorbedEnergyKJ, thermalReservoir.routedEnergyKJ,
-			thermalReservoir.loopEnergyKJ,
+			thermalReservoir.loopEnergyKJ, thermalReservoir.condenserEnergyKJ,
 			thermalReservoir.rejectedEnergyKJ, thermalReservoir.residualKJ, snapshot.balanceTolerance);
 		if (thermalReservoir.aboveLimit)
 			ImGui::Text("  ABOVE the declared maximum service temperature");
@@ -942,10 +1020,11 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			radiator.id.c_str(), radiator.reservoirId.c_str(), radiator.areaM2,
 			radiator.emissivity, radiator.viewFactor, radiator.sinkTemperatureC,
 			radiator.lastRejectedKW);
-	ImGui::Text("Thermal totals: absorbed %.3f kW, routed %.3f kW, rejected %.3f kW, circulation %.3f kg/s, freeze heating %.3f kW",
+	ImGui::Text("Thermal totals: absorbed %.3f kW, routed %.3f kW, rejected %.3f kW, circulation %.3f kg/s, freeze heating %.3f kW, cold provided %.3f kW, cold unmet %.3f kW, condenser heat %.3f kW",
 		snapshot.thermal.totalAbsorbedKW, snapshot.thermal.totalRoutedKW,
 		snapshot.thermal.totalRejectedKW, snapshot.thermal.totalCirculationKgPerS,
-		snapshot.thermal.totalFreezeHeatingKW);
+		snapshot.thermal.totalFreezeHeatingKW, snapshot.thermal.totalCoolingProvidedKW,
+		snapshot.thermal.totalCoolingUnmetKW, snapshot.thermal.totalCondenserHeatKW);
 	ImGui::SeparatorText("Coolant loops (live; finite loop-specific coolant, circulation capped by inventory and power, freeze exposure reported never clamped)");
 	if (snapshot.coolantLoops.empty()) ImGui::TextDisabled("No coolant loops authored.");
 	for (auto const& loop : snapshot.coolantLoops)
@@ -964,16 +1043,56 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			loop.flowKgPerS, loop.ratedFlowKgPerS, loop.circulationFraction * 100.0,
 			loop.pumpSuppliedKW, loop.pumpDemandKW,
 			loop.heaterSuppliedKW, loop.heaterDemandKW);
-		ImGui::Text("  temperature %.3f C (setpoint %.3f C, exchange %+.3f kW) | energy ledger (kJ): starting %.3f, current %.3f, pump work %.3f, heater %.3f, exchanged %.3f, residual %.9f (tolerance %.1e)",
+		ImGui::Text("  temperature %.3f C (setpoint %.3f C, exchange %+.3f kW) | energy ledger (kJ): starting %.3f, current %.3f, pump work %.3f, heater %.3f, exchanged %.3f, chiller extracted %.3f, residual %.9f (tolerance %.1e)",
 			loop.loopTemperatureC, loop.freezeProtectionSetpointC, loop.exchangeIntoLoopKW,
 			loop.startingEnergyKJ, loop.currentEnergyKJ, loop.pumpWorkEnergyKJ,
-			loop.heaterEnergyKJ, loop.exchangedEnergyKJ, loop.residualKJ, snapshot.balanceTolerance);
+			loop.heaterEnergyKJ, loop.exchangedEnergyKJ, loop.extractedEnergyKJ,
+			loop.residualKJ, snapshot.balanceTolerance);
 		if (loop.disabled)
 			ImGui::Text("  DISABLED: the loop holds no coolant, so it pumps no flow and heats nothing");
 		if (loop.belowFreezeSetpoint)
 			ImGui::Text("  BELOW the freeze-protection setpoint: freeze exposure with %.3f kW of heating demand unmet",
 				loop.heaterUnmetKW);
 	}
+	ImGui::SeparatorText("Chillers (live; cold service capped by cold-loop circulation, gated at the chilled setpoint, refused while the condenser sink is over the maximum condensing temperature)");
+	if (snapshot.chillers.empty()) ImGui::TextDisabled("No chillers authored.");
+	for (auto const& chiller : snapshot.chillers)
+	{
+		char const* status = "idle";
+		switch (chiller.status)
+		{
+		case core::StationTransferStatus::Full: status = "full service"; break;
+		case core::StationTransferStatus::Partial: status = "partial service"; break;
+		case core::StationTransferStatus::Rejected: status = "service refused"; break;
+		case core::StationTransferStatus::Idle: break;
+		}
+		ImGui::Text("%s (%s) %s -> condenser %s: %s | cold duty %.3f of %.3f kW (unmet %.3f) | deliverable %.3f kW at %.1f%% circulation | power %.3f of %.3f kW (COP %.2f, aux %.3f kW) | condenser heat %.3f kW",
+			chiller.id.c_str(), chiller.thermalClass.c_str(), chiller.coldLoopId.c_str(),
+			chiller.condenserReservoirId.c_str(), status,
+			chiller.coolingKW, chiller.coolingDemandKW, chiller.coolingUnmetKW,
+			chiller.deliverableKW, chiller.coldLoopCirculationFraction * 100.0,
+			chiller.powerSuppliedKW, chiller.powerDemandKW, chiller.cop,
+			chiller.auxiliaryPowerKW, chiller.condenserHeatKW);
+		ImGui::Text("  cold side %.3f C (chilled setpoint %.3f C) | sink %.3f C (max condensing %.3f C) | energy ledger (kJ): extracted %.3f, work %.3f, condenser %.3f, residual %.9f (tolerance %.1e)",
+			chiller.coldLoopTemperatureC, chiller.chilledSetpointC,
+			chiller.sinkTemperatureC, chiller.maxCondensingTemperatureC,
+			chiller.extractedEnergyKJ, chiller.workEnergyKJ, chiller.condenserEnergyKJ,
+			chiller.residualKJ, snapshot.balanceTolerance);
+		if (chiller.disabled)
+			ImGui::Text("  DISABLED: zero rated cooling capacity supplies no cold service");
+		if (chiller.atChilledSetpoint)
+			ImGui::Text("  cold side at its chilled setpoint: no extraction demanded");
+		if (chiller.sinkOverMaxCondensing)
+			ImGui::Text("  SINK OVER the maximum condensing temperature: cold service refused");
+		if (!chiller.admitted && !chiller.disabled && !chiller.sinkOverMaxCondensing
+			&& chiller.coolingDemandKW > 0.0)
+			ImGui::Text("  not admitted: %s", chiller.blockReason.c_str());
+	}
+	ImGui::Text("Cold service by class:");
+	for (auto const& cooling : snapshot.thermal.coolingByClass)
+		ImGui::Text("  %s: capacity %.3f kW, provided %.3f, unmet %.3f, work %.3f, condenser %.3f kW",
+			cooling.thermalClass.c_str(), cooling.capacityKW, cooling.providedKW,
+			cooling.unmetKW, cooling.workKW, cooling.condenserKW);
 	for (auto const& diagnostic : world->getStationSystemsDiagnostics())
 	{
 		char const* kind = "Lua error";

@@ -1,4 +1,4 @@
-# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, thermal reservoirs with radiator rejection and coolant loops with freeze-protection heating (#386–#391, #393–#396)
+# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, thermal reservoirs with radiator rejection and coolant loops with freeze-protection heating and chilled thermal services (#386–#391, #393–#397)
 
 Station systems are opt-in per World and disabled in existing documents. Open
 **View > Station Systems** or use the
@@ -637,6 +637,79 @@ full validation reporting, and shows the live inventories,
 circulation, freeze service and closing ledgers beside the existing
 views.
 
+### Chilled thermal services (#397)
+
+Authors configure chillers per World. A chiller supplies a cold service
+of its declared thermal service class (`low`, `moderate`, `warm` or
+`generation`) through two class-matched interfaces: a coolant-loop
+evaporator (the cold side) and a thermal-reservoir condenser (the hot
+side). The chiller's class must match the class of the reservoir its
+cold loop serves and the class of the condenser sink; rejecting into
+the same reservoir the cold side cools is refused as a heater, not a
+cooling service, and one evaporator loop serves at most one chiller.
+Each chiller declares a rated cooling capacity (kW cold service), a
+COP, a running auxiliary draw (kW), a chilled setpoint (°C) and a
+maximum condensing temperature (°C). Zero rated capacity disables the
+chiller.
+
+The delivered duty is deterministic. The demand is the rated capacity
+while the cold loop is above the chilled setpoint and nothing at or
+below it. The duty the machine can actually deliver is capped by the
+cold loop's actual circulation fraction — heat must reach the
+evaporator, so a loop that is not moving yields no extractable heat
+and the service is refused whole rather than buying idle power. The
+chiller is refused whole while the condenser sink sits at or above the
+maximum condensing temperature: the hot-side interface cannot accept
+the heat, the chiller draws no power and books no heat, and the entire
+demand stays visible as unmet cold service. The electrical request —
+work at the configured COP plus the running auxiliaries for the
+deliverable duty — is drawn from the same generation-and-battery pool
+as external loads and coolant pumps, never a second budget. A
+curtailed grant duty-cycles the whole machine at one delivered
+fraction, so extracted heat, work and condenser heat all scale
+together.
+
+Condenser heat equals extracted heat plus the work and auxiliaries
+actually supplied — `condenser = cooling + supplied` — booked once at
+one consistent boundary. The extraction leaves the coolant loop
+exactly once (it appears in the loop's ledger as chiller extraction),
+and the sink gains it through the condenser term, so the heat is never
+double-counted: the sink's whole energy gain equals the chiller's
+extracted energy plus its supplied work energy. The chiller's ledger —
+extracted + work = condenser — closes within the declared tolerance
+every tick, in host and sandbox alike, and a residual beyond it fails
+the tick as a conservation violation rather than a silent rounding.
+
+Chillers run between the coolant-loop allocation and the loop's own
+integration: the tick's circulation is known when the chiller sizes
+its duty, and the extraction lands inside the loop's temperature
+integration. Within a tick, power allocates first, then coolant loops
+and chillers run, then thermal integrates, then transfers, then
+conversions.
+
+The snapshot publishes per-chiller status (full/partial/refused/idle),
+cold duty against demand with the unmet remainder, the
+circulation-capped deliverable duty and the loop's circulation
+fraction, power demand/supplied with the delivered fraction, the
+condenser heat rate, the chilled-setpoint and sink-over-temperature
+conditions, and the closing extracted/work/condenser ledger. A
+per-class cold-service rollup keeps the account segregated: capacity,
+provided, unmet, work and condenser per thermal service class, so a
+class with no chiller reports nothing and one class's service is never
+subsidized by another. Refusal, gating and recovery are announced as
+transition events.
+
+World schema 74 persists the authored chiller contracts (units: kW,
+°C); a pre-74 document carrying `chillers` is refused rather than
+silently dropped. Extracted heat, work, condenser bookings and the
+gating conditions stay runtime-only: Load and Reset reconstruct them
+from the authored starting conditions. The separate Station Systems
+window drafts chillers (class, cold loop, condenser sink, rated
+capacity, COP, auxiliaries, chilled setpoint and maximum condensing
+temperature) with full validation reporting, and shows the live
+duties, power draws, condenser heat, per-class totals and closing
+ledgers beside the existing views.
+
 ## Explicit scope limit
 
 This slice implements lifecycle, authored finite store configuration,
@@ -649,12 +722,13 @@ exactly-once equipment heat routing, and coolant loops with finite
 loop-specific inventories, inventory- and power-capped circulation and
 freeze-protection heating.
 It still adds no crew demand, treatment/clearance
-workflows or ejection, no cooling capacity in any thermal
-service class (cooling-service loads are refused, not cooled), no
-chillers or cold services, no dynamic coolant leak, replenishment or
+workflows or ejection, no dynamic coolant leak, replenishment or
 loop-to-loop transfer (a loop's charge is its authored inventory and
-nothing in this slice changes it), and no powered or passive thermal-buffer
-access beyond the authored reservoirs themselves. Completed tick counts are
+nothing in this slice changes it), no powered or passive thermal-buffer
+access beyond the authored reservoirs themselves, and no chilled
+service distribution beyond the class-matched rollup (no per-consumer
+cold-side metering, no cascade or multi-stage refrigeration, and no
+humidity or latent-load modelling). Completed tick counts are
 observability, not oxygen, heat or endurance estimates. It
 invents no process coefficients beyond the authored demand, capacity
 and profile values. ECLSS models, crew inputs, alarms,
@@ -747,8 +821,32 @@ replay, and intact Lua coolant descriptor crossing with contained
 construction refusal), real file
 save/reopen round trips in
 YAML and binary including the solar/load, battery and thermal scenario
-reproduction and pre-69/pre-70/pre-71/pre-72/malformed refusals, failed-write and
+reproduction and
+pre-69/pre-70/pre-71/pre-72/pre-73/pre-74/malformed refusals, failed-write and
 legacy/malformed-file
 handling, paused structural rebuild preservation,
 and the existing CPU ImGui and document-history seams. Run `ctest -R
 '^station-'` in Release.
+
+Chiller acceptance coverage: refused chiller configurations (unknown
+cold loop or condenser sink, cross-class cold-side or condenser
+coupling, rejection into the cold side's own reservoir, zero COP,
+negative rated capacity, chilled setpoint at or above the maximum
+condensing temperature, sub-absolute-zero setpoint, shared evaporator
+loop, over-budget chiller count); nominal full service with the
+work-plus-auxiliaries COP contract, condenser heat equal to extracted
+plus supplied work booked exactly once (the sink's gain equals the
+chiller's extracted plus work energy), the loop cooled and the sink
+warmed with all three ledgers closed, and the per-class rollup
+carrying the whole account with empty classes empty; electricity-
+limited cooling duty-cycled at one delivered fraction with the unmet
+remainder visible on both the cold service and the power draw;
+sink-limited refusal whole at or above the maximum condensing
+temperature with no power draw, no condenser booking and the entire
+demand visible as unmet; zero-capacity disablement; the chilled-
+setpoint gate demanding nothing at or below the setpoint; circulation
+loss refusing the service with the no-circulation reason and the whole
+demand unmet; transient supply loss through an eclipse cycle with the
+unmet demand visible during the outage, recovery announced and ledgers
+closed across the transitions; deterministic Reset replay; and intact
+Lua chiller descriptor crossing with contained construction refusal.

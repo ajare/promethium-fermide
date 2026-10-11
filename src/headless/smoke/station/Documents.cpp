@@ -214,7 +214,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 73", "version: 64");
+		replaceAll(legacy, "version: 74", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -231,14 +231,14 @@ namespace
 			"authored store fields missing or live inventory leaked");
 		bool refused = false;
 		auto staleStores = withField;
-		replaceAll(staleStores, "version: 73", "version: 65");
+		replaceAll(staleStores, "version: 74", "version: 65");
 		auto const staleStoresPath = directory / "stale-stores.world.yaml";
 		writeFile(staleStoresPath, staleStores);
 		try { (void)core::loadWorldDocument(staleStoresPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-66 document carrying resource stores was silently accepted");
 		auto staleTransfers = withField;
-		replaceAll(staleTransfers, "version: 73", "version: 66");
+		replaceAll(staleTransfers, "version: 74", "version: 66");
 		auto const staleTransfersPath = directory / "stale-transfers.world.yaml";
 		writeFile(staleTransfersPath, staleTransfers);
 		refused = false;
@@ -246,7 +246,7 @@ namespace
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-67 document carrying resource transfers was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 73", "version: 64");
+		replaceAll(stale, "version: 74", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
 		refused = false;
@@ -384,7 +384,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 73", "version: 67");
+			replaceAll(stale, "version: 74", "version: 67");
 			auto const stalePath = directory / "stale-compounds.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -493,7 +493,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 73", "version: 69");
+			replaceAll(stale, "version: 74", "version: 69");
 			auto const stalePath = directory / "stale-batteries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -615,7 +615,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 73", "version: 68");
+			replaceAll(stale, "version: 74", "version: 68");
 			auto const stalePath = directory / "stale-power.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -742,7 +742,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 73", "version: 70");
+			replaceAll(stale, "version: 74", "version: 70");
 			auto const stalePath = directory / "stale-deliveries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -870,7 +870,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 73", "version: 71");
+			replaceAll(stale, "version: 74", "version: 71");
 			auto const stalePath = directory / "stale-thermal.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1031,7 +1031,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 73", "version: 72");
+			replaceAll(stale, "version: 74", "version: 72");
 			auto const stalePath = directory / "stale-coolant.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1081,6 +1081,169 @@ namespace
 			require(refused, "starting coolant above the loop capacity was accepted from a file");
 		}
 	}
+	// #397: authored chiller contracts travel through the real file
+	// seams as contracts only; a reopened World replays the chilled
+	// service scenario identically, and pre-74 documents carrying
+	// `chillers` are refused rather than silently dropped. Cold-side
+	// duty, work, condenser heat and the chiller ledgers stay runtime-only.
+	void chillerFiles(smoke::Context const& context)
+	{
+		namespace filesystem = std::filesystem;
+		auto const directory = context.temporaryRoot() / "station-chillers";
+		filesystem::create_directories(directory);
+		core::ThermalReservoirSettings cold;
+		cold.id = "cold";
+		cold.thermalClass = "moderate";
+		cold.heatCapacityKJPerK = 1000.0;
+		cold.startingTemperatureC = 20.0;
+		cold.minTemperatureC = -50.0;
+		cold.maxTemperatureC = 200.0;
+		core::ThermalReservoirSettings sink;
+		sink.id = "sink";
+		sink.thermalClass = "moderate";
+		sink.heatCapacityKJPerK = 1000.0;
+		sink.startingTemperatureC = 20.0;
+		sink.minTemperatureC = -50.0;
+		sink.maxTemperatureC = 200.0;
+		core::CoolantLoopSettings chilled;
+		chilled.id = "chilled";
+		chilled.hazardClass = "normal";
+		chilled.reservoirId = "cold";
+		chilled.coolantCapacityKg = 100.0;
+		chilled.startingCoolantKg = 100.0;
+		chilled.specificHeatKJPerKgK = 4.0;
+		chilled.startingTemperatureC = 20.0;
+		chilled.freezeProtectionSetpointC = 0.0;
+		chilled.pumpPowerKW = 0.5;
+		chilled.ratedFlowKgPerS = 2.0;
+		chilled.exchangerConductanceKWPerK = 1.0;
+		chilled.heaterCapacityKW = 0.0;
+		core::ChillerSettings chiller;
+		chiller.id = "ics";
+		chiller.thermalClass = "moderate";
+		chiller.coldLoopId = "chilled";
+		chiller.condenserReservoirId = "sink";
+		chiller.ratedCoolingCapacityKW = 6.0;
+		chiller.cop = 3.0;
+		chiller.auxiliaryPowerKW = 0.5;
+		chiller.chilledSetpointC = 5.0;
+		chiller.maxCondensingTemperatureC = 45.0;
+		core::SolarArraySettings field;
+		field.id = "field";
+		field.capacityKW = 3.0;
+		core::World original("Chiller Round Trip", 2, 2);
+		original.pauseSimulation();
+		original.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 2.0f;
+		settings.thermalReservoirs.push_back(cold);
+		settings.thermalReservoirs.push_back(sink);
+		settings.coolantLoops.push_back(chilled);
+		settings.chillers.push_back(chiller);
+		settings.solarArrays.push_back(field);
+		std::string diagnostic;
+		require(original.configureStationSystems(settings, false, &diagnostic),
+			"Chiller settings edit failed: " + diagnostic);
+		original.resumeSimulation();
+		require(original.advanceTicks(3600), "Chiller original run failed");
+		auto const expected = original.getStationSystemsSnapshot();
+		require(expected.chillers.size() == 1
+			&& expected.chillers[0].coolingKW > 0.0
+			&& std::abs(expected.chillers[0].residualKJ) < 1e-4
+			&& std::abs(expected.thermal.reservoirs[1].residualKJ) < 1e-4
+			&& std::abs(expected.coolantLoops[0].residualKJ) < 1e-4,
+			"Chiller scenario produced the wrong observable state");
+		for (auto const* suffix : {".world.yaml", ".world"})
+		{
+			auto const path = directory / (std::string("chillers") + suffix);
+			original.saveTo(path.string());
+			auto const document = readFile(path);
+			require(document.find("chillers") != std::string::npos
+				&& document.find("thermalClass") != std::string::npos
+				&& document.find("coldLoopId") != std::string::npos
+				&& document.find("condenserReservoirId") != std::string::npos
+				&& document.find("ratedCoolingCapacityKW") != std::string::npos
+				&& document.find("cop") != std::string::npos
+				&& document.find("auxiliaryPowerKW") != std::string::npos
+				&& document.find("chilledSetpointC") != std::string::npos
+				&& document.find("maxCondensingTemperatureC") != std::string::npos,
+				"authored chiller fields missing from the document");
+			for (auto const* liveState : {"coolingUnmetKW", "powerSuppliedKW",
+				"condenserHeatKW", "deliveredFraction", "extractedEnergyKJ",
+				"workEnergyKJ", "condenserEnergyKJ", "atChilledSetpoint",
+				"sinkOverMaxCondensing"})
+				require(document.find(liveState) == std::string::npos,
+					std::string("live chiller state leaked into the document: ") + liveState);
+			auto const reopened = core::loadWorldDocument(path);
+			require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+				"chiller settings did not survive the file round trip");
+			require(reopened->getStationSystemsSnapshot().chillers.size() == 1
+				&& reopened->getStationSystemsSnapshot().chillers[0].extractedEnergyKJ == 0.0
+				&& reopened->getStationSystemsSnapshot().chillers[0].condenserHeatKW == 0.0
+				&& reopened->getStationSystemsSnapshot().thermal.reservoirs[1].condenserEnergyKJ == 0.0,
+				"reopened World did not reconstruct the authored chiller starting state");
+			reopened->resumeSimulation();
+			require(reopened->advanceTicks(3600), "Chiller reopened run failed");
+			require(reopened->getStationSystemsSnapshot() == expected,
+				"chiller scenario is not reproducible from the document");
+			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
+				"chiller event history is not reproducible from the document");
+		}
+		// A pre-74 document carrying the new fields is refused.
+		auto const withField = serializeYaml(original);
+		{
+			auto stale = withField;
+			replaceAll(stale, "version: 74", "version: 73");
+			auto const stalePath = directory / "stale-chillers.world.yaml";
+			writeFile(stalePath, stale);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(stalePath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a pre-74 document carrying chillers was silently accepted");
+		}
+		// Malformed chiller values in a file are rejected.
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "cop: 3", "cop: 0");
+			auto const malformedPath = directory / "malformed-chiller-cop.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a zero chiller COP was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "coldLoopId: chilled", "coldLoopId: ghost");
+			auto const malformedPath = directory / "malformed-chiller-loop.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a chiller on an unknown cold loop was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "condenserReservoirId: sink", "condenserReservoirId: cold");
+			auto const malformedPath = directory / "malformed-chiller-self-loop.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a chiller rejecting into its own cold-side reservoir was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "chilledSetpointC: 5", "chilledSetpointC: 50");
+			auto const malformedPath = directory / "malformed-chiller-setpoint.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a chilled setpoint above the maximum condensing temperature was accepted from a file");
+		}
+	}
 }
 
 void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
@@ -1095,4 +1258,5 @@ void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"deliveryFiles", deliveryFiles});
 	checks.push_back({"thermalFiles", thermalFiles});
 	checks.push_back({"coolantFiles", coolantFiles});
+	checks.push_back({"chillerFiles", chillerFiles});
 }

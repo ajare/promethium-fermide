@@ -68,6 +68,7 @@ namespace core
 			std::vector<ThermalReservoirSettings> const* reservoirs;
 			std::vector<RadiatorSettings> const* radiators;
 			std::vector<CoolantLoopSettings> const* coolantLoops;
+			std::vector<ChillerSettings> const* chillers;
 			static void pushProfile(lua_State* state, ProfileSettings const& profile)
 			{
 				lua_createtable(state, 0, 3);
@@ -295,7 +296,27 @@ namespace core
 					lua_pushnumber(state, loop.heaterCapacityKW); lua_setfield(state, -2, "heaterCapacityKW");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 11, 1);
+				// Authored chiller descriptors cross the same boundary as
+				// plain immutable values (#397); each sandbox mirrors the
+				// cold-side extraction, the work draw and the condenser
+				// booking, and audits the chiller energy ledger itself.
+				lua_createtable(state, static_cast<int>(chillers->size()), 0);
+				for (size_t index = 0; index < chillers->size(); ++index)
+				{
+					auto const& chiller = (*chillers)[index];
+					lua_createtable(state, 0, 9);
+					lua_pushstring(state, chiller.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, chiller.thermalClass.c_str()); lua_setfield(state, -2, "thermalClass");
+					lua_pushstring(state, chiller.coldLoopId.c_str()); lua_setfield(state, -2, "coldLoop");
+					lua_pushstring(state, chiller.condenserReservoirId.c_str()); lua_setfield(state, -2, "condenser");
+					lua_pushnumber(state, chiller.ratedCoolingCapacityKW); lua_setfield(state, -2, "ratedCoolingCapacityKW");
+					lua_pushnumber(state, chiller.cop); lua_setfield(state, -2, "cop");
+					lua_pushnumber(state, chiller.auxiliaryPowerKW); lua_setfield(state, -2, "auxiliaryPowerKW");
+					lua_pushnumber(state, chiller.chilledSetpointC); lua_setfield(state, -2, "chilledSetpointC");
+					lua_pushnumber(state, chiller.maxCondensingTemperatureC); lua_setfield(state, -2, "maxCondensingTemperatureC");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 12, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -830,6 +851,78 @@ namespace core
 			if (!std::isfinite(loop.heaterCapacityKW) || loop.heaterCapacityKW < 0.0)
 				return refuse(where + " heater capacity must be finite and non-negative");
 		}
+		// Chiller contracts (#397): the cold-side interface is a declared
+		// coolant loop and the hot-side sink a declared thermal reservoir,
+		// both of the chiller's own service class — spare capacity in
+		// another class is never usable, and a chiller that rejects its
+		// condenser heat into the very reservoir its cold side cools is a
+		// heater, not a cooling service, so it is refused rather than
+		// silently circulating heat in a circle.
+		if (settings.chillers.size() > MaxStationChillers)
+			return refuse("Station chillers are limited to "
+				+ std::to_string(MaxStationChillers) + " entries");
+		std::set<std::string> chillerIds;
+		std::set<std::string> chilledLoops;
+		for (auto const& chiller : settings.chillers)
+		{
+			auto const where = "Station chiller '" + chiller.id + "'";
+			if (chiller.id.empty()) return refuse("Station chiller id must not be empty");
+			if (chiller.id.size() > MaxStationStoreIdLength)
+				return refuse("Station chiller id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!chillerIds.insert(chiller.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				chiller.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + chiller.thermalClass
+					+ "'; declared classes are: low, moderate, warm, generation");
+			auto const loop = std::find_if(settings.coolantLoops.begin(),
+				settings.coolantLoops.end(),
+				[&](CoolantLoopSettings const& candidate) { return candidate.id == chiller.coldLoopId; });
+			if (loop == settings.coolantLoops.end())
+				return refuse(where + " cold-side interface references unknown coolant loop '"
+					+ chiller.coldLoopId + "'");
+			if (!chilledLoops.insert(chiller.coldLoopId).second)
+				return refuse(where + " shares cold loop '" + chiller.coldLoopId
+					+ "' with another chiller; one evaporator serves one chiller");
+			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(),
+				[&](ThermalReservoirSettings const& candidate) { return candidate.id == chiller.condenserReservoirId; });
+			if (sink == settings.thermalReservoirs.end())
+				return refuse(where + " condenser sink references unknown thermal reservoir '"
+					+ chiller.condenserReservoirId + "'");
+			// Class compatibility on both interfaces: the cold loop's host
+			// reservoir and the condenser sink must each declare the
+			// service class the chiller supplies.
+			auto const host = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(),
+				[&](ThermalReservoirSettings const& candidate) { return candidate.id == loop->reservoirId; });
+			if (host->thermalClass != chiller.thermalClass)
+				return refuse(where + " thermal class '" + chiller.thermalClass
+					+ "' is incompatible with cold loop '" + loop->id + "' serving reservoir '"
+					+ host->id + "' of class '" + host->thermalClass
+					+ "'; cold services are class-matched");
+			if (sink->thermalClass != chiller.thermalClass)
+				return refuse(where + " thermal class '" + chiller.thermalClass
+					+ "' is incompatible with condenser sink reservoir '" + sink->id
+					+ "' of class '" + sink->thermalClass + "'; heat routes only to the same service class");
+			if (sink->id == host->id)
+				return refuse(where + " rejects its condenser heat into reservoir '" + sink->id
+					+ "', the same reservoir its cold side cools; that is a heater, not a cooling service");
+			if (!std::isfinite(chiller.ratedCoolingCapacityKW) || chiller.ratedCoolingCapacityKW < 0.0)
+				return refuse(where + " rated cooling capacity must be finite and non-negative");
+			if (!std::isfinite(chiller.cop) || chiller.cop <= 0.0)
+				return refuse(where + " COP must be finite and positive");
+			if (!std::isfinite(chiller.auxiliaryPowerKW) || chiller.auxiliaryPowerKW < 0.0)
+				return refuse(where + " auxiliary power must be finite and non-negative");
+			if (!std::isfinite(chiller.chilledSetpointC)
+				|| chiller.chilledSetpointC <= -StationCelsiusOffset)
+				return refuse(where + " chilled setpoint must be finite and above absolute zero (-273.15 C)");
+			if (!std::isfinite(chiller.maxCondensingTemperatureC)
+				|| chiller.maxCondensingTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum condensing temperature must be finite and above absolute zero (-273.15 C)");
+			if (chiller.chilledSetpointC >= chiller.maxCondensingTemperatureC)
+				return refuse(where + " chilled setpoint must be below the maximum condensing temperature");
+		}
 		if (settings.deliveries.size() > MaxStationResourceDeliveries)
 			return refuse("Station resupply deliveries are limited to "
 				+ std::to_string(MaxStationResourceDeliveries) + " entries");
@@ -1065,12 +1158,14 @@ namespace core
 			double temperatureC{0.0};
 			double lastHeatRoutedKW{0.0};
 			double lastLoopHeatKW{0.0};
+			double lastCondenserHeatKW{0.0};
 			double lastHeatInKW{0.0};
 			double lastRejectedKW{0.0};
 			double lastNetKW{0.0};
 			double absorbedKJ{0.0};
 			double routedKJ{0.0};
 			double loopKJ{0.0};
+			double condenserKJ{0.0};
 			double rejectedKJ{0.0};
 			bool lastAboveLimit{false};
 			bool lastBelowLimit{false};
@@ -1100,11 +1195,45 @@ namespace core
 			double lastCirculationFraction{0.0};
 			double lastFlowKgPerS{0.0};
 			double lastExchangeIntoLoopKW{0.0};
+			double lastChillerExtractionKW{0.0};
 			double pumpWorkKJ{0.0};
 			double heaterKJ{0.0};
 			double exchangedKJ{0.0};
+			double extractedKJ{0.0};
 			bool lastBelowFreeze{false};
 			bool lastCirculating{false};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
+		// The authoritative ledger of one authored chiller (#397). The
+		// chiller supplies its class's cold service by extracting heat
+		// from its cold-side coolant loop, capped by the loop's actual
+		// circulation, gated by the chilled setpoint on the cold side and
+		// the maximum condensing temperature on the sink side. Electrical
+		// work plus auxiliaries are drawn from the shared generation-and-
+		// battery pool; the condenser rejects extracted heat plus the
+		// work and auxiliaries actually supplied into the sink reservoir.
+		// The chiller's energy ledger closes over extracted + work =
+		// condenser within the declared tolerance: one consistent
+		// boundary, never a duplicate booking.
+		struct ChillerState
+		{
+			ChillerSettings authored;
+			size_t loopIndex{0};
+			size_t sinkIndex{0};
+			double lastCoolingDemandKW{0.0};
+			double lastCoolingKW{0.0};
+			double lastDeliverableKW{0.0};
+			double lastPowerDemandKW{0.0};
+			double lastPowerSuppliedKW{0.0};
+			double lastCondenserKW{0.0};
+			double lastDeliveredFraction{0.0};
+			bool lastAdmitted{false};
+			std::string lastBlockReason;
+			bool lastAtSetpoint{false};
+			bool lastSinkOver{false};
+			double extractedKJ{0.0};
+			double workKJ{0.0};
+			double condenserKJ{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
 		StationSystemsSettings settings;
@@ -1118,6 +1247,7 @@ namespace core
 		std::vector<ReservoirState> reservoirs;
 		std::vector<RadiatorState> radiators;
 		std::vector<LoopState> coolantLoops;
+		std::vector<ChillerState> chillers;
 		// Competing transfers are allocated in priority order (higher first),
 		// ties resolved by declaration order: a declared deterministic order.
 		std::vector<size_t> transferOrder;
@@ -1182,6 +1312,7 @@ namespace core
 			auto const committedReservoirs = reservoirs;
 			auto const committedRadiators = radiators;
 			auto const committedCoolantLoops = coolantLoops;
+			auto const committedChillers = chillers;
 			auto const committedAvailableGenerationKW = lastAvailableGenerationKW;
 			auto const committedBatteryShortfallKW = lastBatteryShortfallKW;
 			if (runLedger(tick, seconds, system, violation)) return true;
@@ -1194,6 +1325,7 @@ namespace core
 			reservoirs = committedReservoirs;
 			radiators = committedRadiators;
 			coolantLoops = committedCoolantLoops;
+			chillers = committedChillers;
 			lastAvailableGenerationKW = committedAvailableGenerationKW;
 			lastBatteryShortfallKW = committedBatteryShortfallKW;
 			return false;
@@ -1248,6 +1380,15 @@ namespace core
 			std::vector<bool> previousCirculating;
 			previousCirculating.reserve(coolantLoops.size());
 			for (auto const& loop : coolantLoops) previousCirculating.push_back(loop.lastCirculating);
+			std::vector<StationTransferStatus> previousChillerStatus;
+			previousChillerStatus.reserve(chillers.size());
+			for (auto const& chiller : chillers) previousChillerStatus.push_back(chiller.status);
+			std::vector<bool> previousChillerAtSetpoint;
+			previousChillerAtSetpoint.reserve(chillers.size());
+			for (auto const& chiller : chillers) previousChillerAtSetpoint.push_back(chiller.lastAtSetpoint);
+			std::vector<bool> previousChillerSinkOver;
+			previousChillerSinkOver.reserve(chillers.size());
+			for (auto const& chiller : chillers) previousChillerSinkOver.push_back(chiller.lastSinkOver);
 			std::vector<double> qualified, unqualified;
 			qualified.reserve(stores.size());
 			unqualified.reserve(stores.size());
@@ -1755,7 +1896,14 @@ namespace core
 			// every loop's demand is its own service, not a competing
 			// claim class.
 			std::vector<double> loopHeatIntoReservoir(reservoirs.size(), 0.0);
+			std::vector<double> chillerExtractionByLoop(coolantLoops.size(), 0.0);
+			std::vector<double> condenserHeatBySink(reservoirs.size(), 0.0);
 			double totalCoolantPumpKW{0.0}, totalCoolantHeaterKW{0.0};
+			// The loop pass is split so the chillers (#397) can read this
+			// tick's circulation and have their extraction land inside the
+			// loop's own integration: allocation first, then chillers,
+			// then the loop integrates pump work, heater heat, exchanger
+			// exchange and chiller extraction together.
 			for (auto& loop : coolantLoops)
 			{
 				auto const disabled = loop.coolantKg <= 0.0;
@@ -1816,29 +1964,145 @@ namespace core
 					* (reservoirTemperatureC - loop.temperatureC);
 				loop.lastExchangeIntoLoopKW = exchangeIntoLoopKW;
 				loopHeatIntoReservoir[loop.reservoirIndex] -= exchangeIntoLoopKW;
+				totalCoolantPumpKW += pumpSuppliedKW;
+				totalCoolantHeaterKW += heaterSuppliedKW;
+			}
+			// Chillers (#397) run between the loop allocation and the
+			// loop's own integration, in declaration order: every loop's
+			// circulation this tick is known, and the extraction lands in
+			// the loop's temperature integration below. A chiller's cold
+			// service demand is its rated capacity; the duty it can
+			// actually deliver is capped by the cold loop's circulation
+			// fraction (heat must reach the evaporator — no circulation,
+			// no extracted heat), it is gated off at or below the chilled
+			// setpoint, and it is refused whole when the condenser sink
+			// sits at or above the maximum condensing temperature. The
+			// electrical request — work at the configured COP plus the
+			// running auxiliaries for the deliverable duty — is drawn
+			// from the same generation-and-battery pool as every other
+			// load, never a second budget. A curtailed grant duty-cycles
+			// the whole machine at one delivered fraction, so extracted
+			// heat, work and condenser heat all scale together and the
+			// condenser booking equals extracted heat plus the work and
+			// auxiliaries actually supplied at one consistent boundary.
+			double totalChillerPowerKW{0.0};
+			for (auto& chiller : chillers)
+			{
+				auto const disabled = chiller.authored.ratedCoolingCapacityKW <= 0.0;
+				auto const& loop = coolantLoops[chiller.loopIndex];
+				auto const& sink = reservoirs[chiller.sinkIndex];
+				chiller.lastAtSetpoint = !disabled
+					&& loop.temperatureC <= chiller.authored.chilledSetpointC + 1e-9;
+				chiller.lastSinkOver = !disabled
+					&& sink.temperatureC + 1e-9 >= chiller.authored.maxCondensingTemperatureC;
+				auto const coolingDemandKW = disabled || chiller.lastAtSetpoint
+					? 0.0 : chiller.authored.ratedCoolingCapacityKW;
+				chiller.lastCoolingDemandKW = coolingDemandKW;
+				chiller.lastDeliverableKW = 0.0;
+				chiller.lastPowerDemandKW = 0.0;
+				chiller.lastPowerSuppliedKW = 0.0;
+				chiller.lastCoolingKW = 0.0;
+				chiller.lastCondenserKW = 0.0;
+				chiller.lastDeliveredFraction = 0.0;
+				chiller.lastBlockReason.clear();
+				if (disabled || coolingDemandKW <= 0.0)
+				{
+					// Zero capacity disables the chiller outright; a cold
+					// side at its chilled setpoint needs no service this
+					// tick. Neither draws power nor moves heat.
+					chiller.lastAdmitted = !disabled && !chiller.lastSinkOver;
+					chiller.status = StationTransferStatus::Idle;
+					continue;
+				}
+				if (chiller.lastSinkOver)
+				{
+					// The hot-side temperature interface cannot accept the
+					// condenser heat: the chiller is refused whole, draws no
+					// power and books no heat, and its entire demand stays
+					// visible as unmet cold service.
+					chiller.lastAdmitted = false;
+					chiller.lastBlockReason = "condenser sink '" + chiller.authored.condenserReservoirId
+						+ "' is at or above the maximum condensing temperature";
+					chiller.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				chiller.lastAdmitted = true;
+				chiller.lastDeliverableKW = chiller.authored.ratedCoolingCapacityKW
+					* loop.lastCirculationFraction;
+				if (chiller.lastDeliverableKW <= 1e-12)
+				{
+					// No coolant circulation at the evaporator: there is no
+					// heat to extract, so nothing is requested and the whole
+					// demand stays unmet rather than buying idle power.
+					chiller.lastBlockReason = "no coolant circulation at the cold-side interface";
+					chiller.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				chiller.lastPowerDemandKW = chiller.lastDeliverableKW / chiller.authored.cop
+					+ chiller.authored.auxiliaryPowerKW;
+				auto const fromGeneration = std::min(chiller.lastPowerDemandKW, availableGeneration);
+				availableGeneration -= fromGeneration;
+				auto const ask = chiller.lastPowerDemandKW - fromGeneration;
+				auto const fromBattery = drawBatteries(ask);
+				auto const suppliedKW = fromGeneration + fromBattery;
+				batterySuppliedKW += fromBattery;
+				batteryShortfallKW += ask - fromBattery;
+				chiller.lastPowerSuppliedKW = suppliedKW;
+				auto const deliveredFraction = chiller.lastPowerDemandKW > 0.0
+					? suppliedKW / chiller.lastPowerDemandKW : 0.0;
+				chiller.lastDeliveredFraction = deliveredFraction;
+				auto const coolingKW = chiller.lastDeliverableKW * deliveredFraction;
+				chiller.lastCoolingKW = coolingKW;
+				// Condenser heat equals extracted heat plus the work and
+				// auxiliaries actually supplied: one boundary, booked once.
+				chiller.lastCondenserKW = coolingKW + suppliedKW;
+				chillerExtractionByLoop[chiller.loopIndex] += coolingKW;
+				condenserHeatBySink[chiller.sinkIndex] += chiller.lastCondenserKW;
+				chiller.extractedKJ += coolingKW * static_cast<double>(seconds);
+				chiller.workKJ += suppliedKW * static_cast<double>(seconds);
+				chiller.condenserKJ += chiller.lastCondenserKW * static_cast<double>(seconds);
+				totalChillerPowerKW += suppliedKW;
+				if (coolingKW + 1e-12 >= coolingDemandKW)
+					chiller.status = StationTransferStatus::Full;
+				else if (suppliedKW <= 1e-12)
+					chiller.status = StationTransferStatus::Rejected;
+				else chiller.status = StationTransferStatus::Partial;
+			}
+			// Second loop pass: integrate the loop's temperature from the
+			// pump work, heater heat, exchanger exchange and the chiller
+			// extraction that actually moved this tick, and book the loop
+			// ledger and exposed conditions. The extraction leaves the loop
+			// exactly once; the chiller books it as the cold side of its
+			// own ledger and the sink gains it through the condenser term,
+			// so the heat is never double-counted.
+			for (size_t loopIndex = 0; loopIndex < coolantLoops.size(); ++loopIndex)
+			{
+				auto& loop = coolantLoops[loopIndex];
+				auto const disabled = loop.coolantKg <= 0.0;
+				auto const extractionKW = chillerExtractionByLoop[loopIndex];
+				loop.lastChillerExtractionKW = extractionKW;
 				auto const loopCapacityKJ = loop.coolantKg * loop.authored.specificHeatKJPerKgK;
 				if (!disabled)
 				{
-					auto const heatIntoLoopKW = pumpSuppliedKW + heaterSuppliedKW;
-					loop.temperatureC += (heatIntoLoopKW + exchangeIntoLoopKW)
+					auto const heatIntoLoopKW = loop.lastPumpSuppliedKW + loop.lastHeaterSuppliedKW;
+					loop.temperatureC += (heatIntoLoopKW + loop.lastExchangeIntoLoopKW - extractionKW)
 						* static_cast<double>(seconds) / loopCapacityKJ;
-					loop.pumpWorkKJ += pumpSuppliedKW * static_cast<double>(seconds);
-					loop.heaterKJ += heaterSuppliedKW * static_cast<double>(seconds);
-					loop.exchangedKJ += exchangeIntoLoopKW * static_cast<double>(seconds);
+					loop.pumpWorkKJ += loop.lastPumpSuppliedKW * static_cast<double>(seconds);
+					loop.heaterKJ += loop.lastHeaterSuppliedKW * static_cast<double>(seconds);
+					loop.exchangedKJ += loop.lastExchangeIntoLoopKW * static_cast<double>(seconds);
+					loop.extractedKJ += extractionKW * static_cast<double>(seconds);
 				}
 				// The freeze condition is exposed, never clamped: the loop
 				// stays integrated and the shortfall stays visible.
 				loop.lastBelowFreeze = !disabled
 					&& loop.temperatureC < loop.authored.freezeProtectionSetpointC - 1e-9;
 				loop.lastCirculating = loop.lastFlowKgPerS > 1e-12;
-				totalCoolantPumpKW += pumpSuppliedKW;
-				totalCoolantHeaterKW += heaterSuppliedKW;
-				if (disabled || (pumpDemandKW <= 0.0 && heaterDemandKW <= 0.0))
+				if (disabled || (loop.lastPumpDemandKW <= 0.0 && loop.lastHeaterDemandKW <= 0.0))
 					loop.status = StationTransferStatus::Idle;
-				else if (pumpSuppliedKW + heaterSuppliedKW <= 1e-12)
+				else if (loop.lastPumpSuppliedKW + loop.lastHeaterSuppliedKW <= 1e-12)
 					loop.status = StationTransferStatus::Rejected;
-				else if (pumpSuppliedKW + 1e-12 >= pumpDemandKW
-					&& heaterSuppliedKW + 1e-12 >= heaterDemandKW)
+				else if (loop.lastPumpSuppliedKW + 1e-12 >= loop.lastPumpDemandKW
+					&& loop.lastHeaterSuppliedKW + 1e-12 >= loop.lastHeaterDemandKW)
 					loop.status = StationTransferStatus::Full;
 				else loop.status = StationTransferStatus::Partial;
 			}
@@ -1866,7 +2130,7 @@ namespace core
 					auto const capacity = reservoir.authored.heatCapacityKJPerK;
 					auto const temperatureK = reservoir.temperatureC + StationCelsiusOffset;
 					auto const heatInKW = reservoir.authored.absorbedHeatKW + routedIn[index]
-						+ loopHeatIntoReservoir[index];
+						+ loopHeatIntoReservoir[index] + condenserHeatBySink[index];
 					// Net radiative rejection at the current emitting
 					// temperature: emissivity x view factor x area x sigma
 					// x (T^4 - T_sink^4). The environmental back-radiation
@@ -1919,12 +2183,14 @@ namespace core
 					auto const newTemperatureC = reservoir.temperatureC + netKW * dt / capacity;
 					reservoir.lastHeatRoutedKW = routedIn[index];
 					reservoir.lastLoopHeatKW = loopHeatIntoReservoir[index];
+					reservoir.lastCondenserHeatKW = condenserHeatBySink[index];
 					reservoir.lastHeatInKW = heatInKW;
 					reservoir.lastRejectedKW = rejectedKW;
 					reservoir.lastNetKW = netKW;
 					reservoir.absorbedKJ += reservoir.authored.absorbedHeatKW * dt;
 					reservoir.routedKJ += routedIn[index] * dt;
 					reservoir.loopKJ += loopHeatIntoReservoir[index] * dt;
+					reservoir.condenserKJ += condenserHeatBySink[index] * dt;
 					reservoir.rejectedKJ += rejectedKW * dt;
 					reservoir.temperatureC = newTemperatureC;
 					// Declared service limits are reported as crossings,
@@ -2211,6 +2477,7 @@ namespace core
 				for (auto const& load : loads) totalSupplied += load.lastSuppliedKW;
 				for (auto const& loop : coolantLoops)
 					totalSupplied += loop.lastPumpSuppliedKW + loop.lastHeaterSuppliedKW;
+				for (auto const& chiller : chillers) totalSupplied += chiller.lastPowerSuppliedKW;
 				for (auto const& array : solarArrays) totalGeneration += array.lastAvailableKW;
 				for (auto const& battery : batteries) totalDischarged += battery.lastDischargeKW;
 				auto const bound = StationBalanceTolerance * std::max(1.0, totalGeneration + totalDischarged);
@@ -2298,11 +2565,15 @@ namespace core
 				auto const where = "thermal reservoir '" + reservoir.authored.id + "' ";
 				if (!requireFinite(reservoir.temperatureC, where +"integrated temperature")) return false;
 				if (!requireFinite(reservoir.lastHeatRoutedKW, where + "routed heat power")) return false;
+				if (!requireFinite(reservoir.lastLoopHeatKW, where + "coolant loop heat")) return false;
+				if (!requireFinite(reservoir.lastCondenserHeatKW, where + "condenser heat")) return false;
 				if (!requireFinite(reservoir.lastHeatInKW, where + "total heat inflow")) return false;
 				if (!requireFinite(reservoir.lastRejectedKW, where + "radiator rejection")) return false;
 				if (!requireFinite(reservoir.lastNetKW, where + "net heat balance")) return false;
 				if (!requireFinite(reservoir.absorbedKJ, where + "cumulative absorbed energy")) return false;
 				if (!requireFinite(reservoir.routedKJ, where + "cumulative routed energy")) return false;
+				if (!requireFinite(reservoir.loopKJ, where + "cumulative loop exchange energy")) return false;
+				if (!requireFinite(reservoir.condenserKJ, where + "cumulative condenser energy")) return false;
 				if (!requireFinite(reservoir.rejectedKJ, where + "cumulative rejected energy")) return false;
 			}
 			for (auto const& radiator : radiators)
@@ -2324,9 +2595,11 @@ namespace core
 				if (!requireFinite(loop.lastCirculationFraction, where + "circulation fraction")) return false;
 				if (!requireFinite(loop.lastFlowKgPerS, where + "circulation flow")) return false;
 				if (!requireFinite(loop.lastExchangeIntoLoopKW, where + "exchanger exchange")) return false;
+				if (!requireFinite(loop.lastChillerExtractionKW, where + "chiller extraction")) return false;
 				if (!requireFinite(loop.pumpWorkKJ, where + "cumulative pump work energy")) return false;
 				if (!requireFinite(loop.heaterKJ, where + "cumulative heater energy")) return false;
 				if (!requireFinite(loop.exchangedKJ, where + "cumulative exchanged energy")) return false;
+				if (!requireFinite(loop.extractedKJ, where + "cumulative chiller extracted energy")) return false;
 				if (loop.coolantKg < 0.0)
 					return violation = where + "coolant inventory went negative", false;
 				if (loop.coolantKg > loop.authored.coolantCapacityKg + StationBalanceTolerance
@@ -2336,10 +2609,43 @@ namespace core
 					* loop.authored.specificHeatKJPerKgK * loop.authored.startingTemperatureC;
 				auto const bound = StationBalanceTolerance * std::max(1.0, std::abs(startingEnergyKJ));
 				auto const residual = startingEnergyKJ + loop.pumpWorkKJ + loop.heaterKJ
-					+ loop.exchangedKJ - loop.coolantKg * loop.authored.specificHeatKJPerKgK
+					+ loop.exchangedKJ - loop.extractedKJ
+					- loop.coolantKg * loop.authored.specificHeatKJPerKgK
 					* loop.temperatureC;
 				if (!std::isfinite(residual) || std::abs(residual) > bound)
 					return violation = where + "thermal energy ledger residual "
+						+ std::to_string(residual) + " exceeds tolerance "
+						+ std::to_string(StationBalanceTolerance), false;
+			}
+			// Chilled service ledger (#397): the chiller's condenser heat
+			// must equal the cold-side heat it extracted plus the work and
+			// auxiliaries it was actually supplied, cumulatively and within
+			// the declared tolerance. A residual beyond it means heat was
+			// booked twice or vanished once — a conservation violation that
+			// fails the whole tick, never a silent rounding.
+			system = "Chilled thermal service";
+			for (auto const& chiller : chillers)
+			{
+				auto const where = "chiller '" + chiller.authored.id + "' ";
+				if (!requireFinite(chiller.lastCoolingDemandKW, where + "cooling demand")) return false;
+				if (!requireFinite(chiller.lastCoolingKW, where + "cold-side duty")) return false;
+				if (!requireFinite(chiller.lastDeliverableKW, where + "circulation-capped duty")) return false;
+				if (!requireFinite(chiller.lastPowerDemandKW, where + "power demand")) return false;
+				if (!requireFinite(chiller.lastPowerSuppliedKW, where + "power supplied")) return false;
+				if (!requireFinite(chiller.lastCondenserKW, where + "condenser heat")) return false;
+				if (!requireFinite(chiller.lastDeliveredFraction, where + "delivered fraction")) return false;
+				if (!requireFinite(chiller.extractedKJ, where + "cumulative extracted energy")) return false;
+				if (!requireFinite(chiller.workKJ, where + "cumulative work energy")) return false;
+				if (!requireFinite(chiller.condenserKJ, where + "cumulative condenser energy")) return false;
+				if (chiller.lastCoolingKW > chiller.lastDeliverableKW + StationBalanceTolerance)
+					return violation = where + "extracted more cold-side duty than its circulation could deliver", false;
+				if (chiller.lastPowerSuppliedKW > chiller.lastPowerDemandKW + StationBalanceTolerance)
+					return violation = where + "was supplied more power than it demanded", false;
+				auto const bound = StationBalanceTolerance
+					* std::max(1.0, std::max(std::abs(chiller.extractedKJ), std::abs(chiller.condenserKJ)));
+				auto const residual = chiller.extractedKJ + chiller.workKJ - chiller.condenserKJ;
+				if (!std::isfinite(residual) || std::abs(residual) > bound)
+					return violation = where + "condenser ledger residual "
 						+ std::to_string(residual) + " exceeds tolerance "
 						+ std::to_string(StationBalanceTolerance), false;
 			}
@@ -2413,6 +2719,7 @@ namespace core
 				if (!requireFinite(totalCharge, "total battery charge power")) return false;
 				if (!requireFinite(totalCoolantPumpKW, "total coolant pump power")) return false;
 				if (!requireFinite(totalCoolantHeaterKW, "total freeze-protection heating power")) return false;
+				if (!requireFinite(totalChillerPowerKW, "total chiller power")) return false;
 			}
 			for (size_t index = 0; index < stores.size(); ++index)
 			{
@@ -2581,6 +2888,45 @@ namespace core
 						: std::string("Coolant loop '") + loop.authored.id
 							+ "' back above its freeze-protection setpoint");
 			}
+			// Chiller transitions are announced so the event log records
+			// refusals, curtailment, the chilled-setpoint gate and the
+			// condenser sink temperature interface without flooding every
+			// tick (#397).
+			for (size_t index = 0; index < chillers.size(); ++index)
+			{
+				auto const& chiller = chillers[index];
+				if (chiller.status != previousChillerStatus[index])
+				{
+					if (chiller.status == StationTransferStatus::Rejected)
+						appendBoundedEvent(events, tick, "Chiller '" + chiller.authored.id
+							+ "' service refused: " + (chiller.lastBlockReason.empty()
+								? std::string("no electrical supply is available for its work or auxiliaries")
+								: chiller.lastBlockReason));
+					else if (chiller.status == StationTransferStatus::Full
+						&& previousChillerStatus[index] == StationTransferStatus::Rejected)
+						appendBoundedEvent(events, tick, "Chiller '" + chiller.authored.id
+							+ "' service restored: cold service supplied in full");
+					else if (chiller.status == StationTransferStatus::Partial)
+						appendBoundedEvent(events, tick, "Chiller '" + chiller.authored.id
+							+ "' curtailed: supplied " + std::to_string(chiller.lastCoolingKW)
+							+ " of " + std::to_string(chiller.lastCoolingDemandKW) + " kW cold service");
+				}
+				if (chiller.lastAtSetpoint != previousChillerAtSetpoint[index])
+					appendBoundedEvent(events, tick, chiller.lastAtSetpoint
+						? "Chiller '" + chiller.authored.id
+							+ "' cold side at its chilled setpoint: no extraction demanded"
+						: std::string("Chiller '") + chiller.authored.id
+							+ "' cold side above its chilled setpoint: cooling demand returned");
+				if (chiller.lastSinkOver != previousChillerSinkOver[index])
+					appendBoundedEvent(events, tick, chiller.lastSinkOver
+						? "Chiller '" + chiller.authored.id
+							+ "' condenser sink over its maximum condensing temperature: "
+							+ std::to_string(reservoirs[chiller.sinkIndex].temperatureC) + " >= "
+							+ std::to_string(chiller.authored.maxCondensingTemperatureC)
+							+ " C, cold service refused"
+						: std::string("Chiller '") + chiller.authored.id
+							+ "' condenser sink back below its maximum condensing temperature");
+			}
 			// Delivery arrivals are discrete scenario events rather than a
 			// continuous per-tick service, so every arrival is announced with
 			// its own quantities: the refused remainder is the account for
@@ -2681,6 +3027,21 @@ namespace core
 			state.temperatureC = loop.startingTemperatureC;
 			mImpl->coolantLoops.push_back(std::move(state));
 		}
+		// Chillers start idle with their contracts resolved to the loop
+		// and sink they couple to; every service result and ledger is
+		// runtime state reconstructed from the authored values on load
+		// and Reset (#397).
+		std::map<std::string, size_t> loopIndex;
+		for (size_t index = 0; index < mImpl->coolantLoops.size(); ++index)
+			loopIndex[mImpl->coolantLoops[index].authored.id] = index;
+		for (auto const& chiller : settings.chillers)
+		{
+			Impl::ChillerState state;
+			state.authored = chiller;
+			state.loopIndex = loopIndex[chiller.coldLoopId];
+			state.sinkIndex = reservoirIndex[chiller.condenserReservoirId];
+			mImpl->chillers.push_back(std::move(state));
+		}
 		for (auto const& load : settings.equipmentLoads)
 		{
 			Impl::LoadState state;
@@ -2757,7 +3118,7 @@ namespace core
 				&settings.stores, &settings.transfers, &settings.conversions,
 				&settings.solarArrays, &settings.equipmentLoads, &settings.batteries,
 				&settings.deliveries, &settings.thermalReservoirs, &settings.radiators,
-				&settings.coolantLoops};
+				&settings.coolantLoops, &settings.chillers};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -2779,8 +3140,9 @@ namespace core
 			+ std::to_string(settings.batteries.size()) + " battery(ies), "
 			+ std::to_string(settings.deliveries.size()) + " resupply delivery(ies), "
 				+ std::to_string(settings.thermalReservoirs.size()) + " thermal reservoir(s), "
-			+ std::to_string(settings.radiators.size()) + " radiator(s) and "
-			+ std::to_string(settings.coolantLoops.size()) + " coolant loop(s)");
+			+ std::to_string(settings.radiators.size()) + " radiator(s), "
+			+ std::to_string(settings.coolantLoops.size()) + " coolant loop(s) and "
+			+ std::to_string(settings.chillers.size()) + " chiller(s)");
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
 	bool StationSystemsRuntime::advance(uint64_t tick, float seconds)
@@ -2831,7 +3193,8 @@ namespace core
 		// integrated error path instead.
 		if (!mImpl->transferOrder.empty() || !mImpl->conversionOrder.empty()
 			|| !mImpl->loads.empty() || !mImpl->solarArrays.empty() || !mImpl->batteries.empty()
-			|| !mImpl->deliveries.empty() || !mImpl->reservoirs.empty() || !mImpl->coolantLoops.empty())
+			|| !mImpl->deliveries.empty() || !mImpl->reservoirs.empty()
+			|| !mImpl->coolantLoops.empty() || !mImpl->chillers.empty())
 		{
 			std::string violationSystem, violation;
 			if (!mImpl->applyLedger(tick, seconds, violationSystem, violation))
@@ -3018,6 +3381,12 @@ namespace core
 		}
 		result.power.coolantPumpKW = totalCoolantPump;
 		result.power.coolantHeaterKW = totalCoolantHeater;
+		// Chiller electrical service rode the same pool as external loads
+		// and coolant loops; publish the total so the window can show the
+		// chiller draw beside the others (#397).
+		double totalChillerPower = 0.0;
+		for (auto const& chiller : mImpl->chillers) totalChillerPower += chiller.lastPowerSuppliedKW;
+		result.power.chillerPowerKW = totalChillerPower;
 		// The thermal snapshot reports the authored capacity and declared
 		// limits beside the integrated temperature, the last tick's heat
 		// flows and the cumulative energy ledger (#395).
@@ -3034,6 +3403,7 @@ namespace core
 			reservoirResult.absorbedHeatKW = reservoir.authored.absorbedHeatKW;
 			reservoirResult.lastHeatRoutedKW = reservoir.lastHeatRoutedKW;
 			reservoirResult.lastLoopHeatKW = reservoir.lastLoopHeatKW;
+			reservoirResult.lastCondenserHeatKW = reservoir.lastCondenserHeatKW;
 			reservoirResult.lastHeatInKW = reservoir.lastHeatInKW;
 			reservoirResult.lastRejectedKW = reservoir.lastRejectedKW;
 			reservoirResult.lastNetKW = reservoir.lastNetKW;
@@ -3046,10 +3416,11 @@ namespace core
 			reservoirResult.absorbedEnergyKJ = reservoir.absorbedKJ;
 			reservoirResult.routedEnergyKJ = reservoir.routedKJ;
 			reservoirResult.loopEnergyKJ = reservoir.loopKJ;
+			reservoirResult.condenserEnergyKJ = reservoir.condenserKJ;
 			reservoirResult.rejectedEnergyKJ = reservoir.rejectedKJ;
 			reservoirResult.residualKJ = reservoirResult.startingEnergyKJ
 				+ reservoir.absorbedKJ + reservoir.routedKJ + reservoir.loopKJ
-				- reservoir.rejectedKJ - reservoirResult.currentEnergyKJ;
+				+ reservoir.condenserKJ - reservoir.rejectedKJ - reservoirResult.currentEnergyKJ;
 			result.thermal.totalAbsorbedKW += reservoir.authored.absorbedHeatKW;
 			result.thermal.totalRoutedKW += reservoir.lastHeatRoutedKW;
 			result.thermal.totalRejectedKW += reservoir.lastRejectedKW;
@@ -3091,6 +3462,7 @@ namespace core
 			loopResult.freezeProtectionSetpointC = loop.authored.freezeProtectionSetpointC;
 			loopResult.exchangerConductanceKWPerK = loop.authored.exchangerConductanceKWPerK;
 			loopResult.exchangeIntoLoopKW = loop.lastExchangeIntoLoopKW;
+			loopResult.chillerExtractionKW = loop.lastChillerExtractionKW;
 			loopResult.belowFreezeSetpoint = loop.lastBelowFreeze;
 			loopResult.disabled = loop.coolantKg <= 0.0;
 			loopResult.startingEnergyKJ = loop.authored.startingCoolantKg
@@ -3100,12 +3472,76 @@ namespace core
 			loopResult.pumpWorkEnergyKJ = loop.pumpWorkKJ;
 			loopResult.heaterEnergyKJ = loop.heaterKJ;
 			loopResult.exchangedEnergyKJ = loop.exchangedKJ;
+			loopResult.extractedEnergyKJ = loop.extractedKJ;
 			loopResult.residualKJ = loopResult.startingEnergyKJ + loop.pumpWorkKJ
-				+ loop.heaterKJ + loop.exchangedKJ - loopResult.currentEnergyKJ;
+				+ loop.heaterKJ + loop.exchangedKJ - loop.extractedKJ - loopResult.currentEnergyKJ;
 			loopResult.status = loop.status;
 			result.thermal.totalCirculationKgPerS += loop.lastFlowKgPerS;
 			result.thermal.totalFreezeHeatingKW += loop.lastHeaterSuppliedKW;
 			result.coolantLoops.push_back(std::move(loopResult));
+		}
+		// The chiller snapshot reports the authored contract beside the
+		// cold-side duty actually extracted, the work and auxiliaries
+		// actually supplied, the condenser heat actually rejected and the
+		// unmet remainder, plus the closing chiller energy ledger
+		// (#397). The per-class rollup keeps the cold-service account
+		// segregated by thermal service class: spare capacity in one
+		// class is never usable by another, so each class carries its own
+		// provided/unmet/work/condenser totals.
+		for (auto const& chiller : mImpl->chillers)
+		{
+			StationChillerSnapshot chillerResult;
+			chillerResult.id = chiller.authored.id;
+			chillerResult.thermalClass = chiller.authored.thermalClass;
+			chillerResult.coldLoopId = chiller.authored.coldLoopId;
+			chillerResult.condenserReservoirId = chiller.authored.condenserReservoirId;
+			chillerResult.ratedCoolingCapacityKW = chiller.authored.ratedCoolingCapacityKW;
+			chillerResult.cop = chiller.authored.cop;
+			chillerResult.auxiliaryPowerKW = chiller.authored.auxiliaryPowerKW;
+			chillerResult.chilledSetpointC = chiller.authored.chilledSetpointC;
+			chillerResult.maxCondensingTemperatureC = chiller.authored.maxCondensingTemperatureC;
+			chillerResult.coolingDemandKW = chiller.lastCoolingDemandKW;
+			chillerResult.coolingKW = chiller.lastCoolingKW;
+			chillerResult.coolingUnmetKW = chiller.lastCoolingDemandKW - chiller.lastCoolingKW;
+			chillerResult.deliverableKW = chiller.lastDeliverableKW;
+			chillerResult.powerDemandKW = chiller.lastPowerDemandKW;
+			chillerResult.powerSuppliedKW = chiller.lastPowerSuppliedKW;
+			chillerResult.powerUnmetKW = chiller.lastPowerDemandKW - chiller.lastPowerSuppliedKW;
+			chillerResult.deliveredFraction = chiller.lastDeliveredFraction;
+			chillerResult.condenserHeatKW = chiller.lastCondenserKW;
+			chillerResult.coldLoopTemperatureC = mImpl->coolantLoops[chiller.loopIndex].temperatureC;
+			chillerResult.coldLoopCirculationFraction =
+				mImpl->coolantLoops[chiller.loopIndex].lastCirculationFraction;
+			chillerResult.sinkTemperatureC = mImpl->reservoirs[chiller.sinkIndex].temperatureC;
+			chillerResult.admitted = chiller.lastAdmitted;
+			chillerResult.blockReason = chiller.lastBlockReason;
+			chillerResult.atChilledSetpoint = chiller.lastAtSetpoint;
+			chillerResult.sinkOverMaxCondensing = chiller.lastSinkOver;
+			chillerResult.disabled = chiller.authored.ratedCoolingCapacityKW <= 0.0;
+			chillerResult.extractedEnergyKJ = chiller.extractedKJ;
+			chillerResult.workEnergyKJ = chiller.workKJ;
+			chillerResult.condenserEnergyKJ = chiller.condenserKJ;
+			chillerResult.residualKJ = chiller.extractedKJ + chiller.workKJ - chiller.condenserKJ;
+			chillerResult.status = chiller.status;
+			result.thermal.totalCoolingProvidedKW += chiller.lastCoolingKW;
+			result.thermal.totalCoolingUnmetKW += chillerResult.coolingUnmetKW;
+			result.thermal.totalCondenserHeatKW += chiller.lastCondenserKW;
+			result.chillers.push_back(std::move(chillerResult));
+		}
+		for (auto const* thermalClass : StationThermalServiceClasses)
+		{
+			StationCoolingClassSnapshot classResult;
+			classResult.thermalClass = thermalClass;
+			for (auto const& chiller : mImpl->chillers)
+				if (chiller.authored.thermalClass == classResult.thermalClass)
+				{
+					classResult.capacityKW += chiller.authored.ratedCoolingCapacityKW;
+					classResult.providedKW += chiller.lastCoolingKW;
+					classResult.unmetKW += chiller.lastCoolingDemandKW - chiller.lastCoolingKW;
+					classResult.workKW += chiller.lastPowerSuppliedKW;
+					classResult.condenserKW += chiller.lastCondenserKW;
+				}
+			result.thermal.coolingByClass.push_back(std::move(classResult));
 		}
 		// The delivery snapshot reports the authored schedule beside the
 		// runtime's arrival history: what each occurrence brought in, what

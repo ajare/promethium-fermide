@@ -1,9 +1,10 @@
 -- Station systems slice 5: lifecycle, authored finite Resource stores,
 -- bounded authored transfers, compound-resource conversions, solar
 -- generation, External equipment load supply, rechargeable battery banks,
--- scheduled resupply deliveries, and thermal reservoirs with radiator
--- rejection. Every system executes this factory in its own budgeted
--- private sandbox.
+-- scheduled resupply deliveries, thermal reservoirs with radiator
+-- rejection, coolant loops with freeze-protection heating, and chillers
+-- supplying class-matched cold services. Every system executes this
+-- factory in its own budgeted private sandbox.
 -- Stores, transfer rules, conversion rules, solar arrays, equipment
 -- load contracts, battery descriptors, delivery schedules, thermal
 -- reservoir contracts and radiator contracts arrive as plain immutable
@@ -65,7 +66,7 @@ local function toKg(unit, mass)
 end
 
 return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries,
-    reservoirs, radiators, coolantLoops)
+    reservoirs, radiators, coolantLoops, chillers)
     assert(type(name) == "string")
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
@@ -77,6 +78,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     assert(type(reservoirs) == "table", "thermal reservoir descriptors missing")
     assert(type(radiators) == "table", "radiator descriptors missing")
     assert(type(coolantLoops) == "table", "coolant loop descriptors missing")
+    assert(type(chillers) == "table", "chiller descriptors missing")
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
@@ -85,6 +87,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         constituent_delivered = {},
         solar = {}, loads = {}, load_order = {}, batteries = {},
         deliveries = {}, reservoirs = {}, radiators = {}, coolant_loops = {},
+        chillers = {},
     }
     local by_id = {}
     for index = 1, #stores do
@@ -472,6 +475,90 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             lastExchange = 0,
             belowFreeze = false,
             circulating = false,
+            extractedKJ = 0,
+            chillerExtraction = 0,
+        }
+    end
+    -- Chillers (#397): a heat pump that supplies a cold service of its
+    -- declared thermal service class. The cold-side interface is a coolant
+    -- loop: the loop's actual circulation caps the duty the evaporator can
+    -- deliver, and the chilled setpoint gates the demand. The hot-side
+    -- interface is a thermal reservoir that accepts the condenser heat,
+    -- refused whole while the sink sits at or above the maximum condensing
+    -- temperature. Work at the configured COP plus running auxiliaries is
+    -- drawn from the shared pool; condenser heat equals extracted heat
+    -- plus the work and auxiliaries actually supplied, booked once at one
+    -- consistent boundary. Both interfaces are class-matched: spare
+    -- capacity in another class is never usable, and a chiller that
+    -- rejects into the reservoir its own cold side cools is a heater, not
+    -- a cooling service.
+    local coolant_loop_by_id = {}
+    for index = 1, #coolantLoops do
+        coolant_loop_by_id[coolantLoops[index].id] = object.coolant_loops[index]
+    end
+    for index = 1, #chillers do
+        local chiller = chillers[index]
+        assert(type(chiller) == 'table', 'chiller descriptor must be a table')
+        assert(type(chiller.id) == 'string' and #chiller.id > 0, 'chiller needs an id')
+        assert(chiller.thermalClass == 'low' or chiller.thermalClass == 'moderate'
+            or chiller.thermalClass == 'warm' or chiller.thermalClass == 'generation',
+            'chiller needs a declared thermal service class')
+        local coldLoop = coolant_loop_by_id[chiller.coldLoop]
+        assert(coldLoop ~= nil, 'chiller cold-side coolant loop is unknown')
+        local sink = reservoir_by_id[chiller.condenser]
+        assert(sink ~= nil, 'chiller condenser sink reservoir is unknown')
+        assert(coldLoop.reservoir.thermalClass == chiller.thermalClass,
+            'chiller cold loop must serve the same thermal service class')
+        assert(sink.thermalClass == chiller.thermalClass,
+            'chiller condenser sink must share the chiller thermal service class')
+        assert(sink ~= coldLoop.reservoir,
+            'a chiller rejecting into the reservoir its cold side cools is a heater, not a cooling service')
+        assert(type(chiller.ratedCoolingCapacityKW) == 'number'
+            and chiller.ratedCoolingCapacityKW == chiller.ratedCoolingCapacityKW
+            and chiller.ratedCoolingCapacityKW >= 0 and chiller.ratedCoolingCapacityKW < math.huge,
+            'chiller rated cooling capacity must be finite and non-negative')
+        assert(type(chiller.cop) == 'number' and chiller.cop == chiller.cop
+            and chiller.cop > 0 and chiller.cop < math.huge,
+            'chiller COP must be finite and positive')
+        assert(type(chiller.auxiliaryPowerKW) == 'number'
+            and chiller.auxiliaryPowerKW == chiller.auxiliaryPowerKW
+            and chiller.auxiliaryPowerKW >= 0 and chiller.auxiliaryPowerKW < math.huge,
+            'chiller auxiliary power must be finite and non-negative')
+        assert(type(chiller.chilledSetpointC) == 'number'
+            and chiller.chilledSetpointC == chiller.chilledSetpointC
+            and chiller.chilledSetpointC < math.huge
+            and chiller.chilledSetpointC > -KELVIN_OFFSET,
+            'chiller chilled setpoint must be finite and above absolute zero')
+        assert(type(chiller.maxCondensingTemperatureC) == 'number'
+            and chiller.maxCondensingTemperatureC == chiller.maxCondensingTemperatureC
+            and chiller.maxCondensingTemperatureC < math.huge
+            and chiller.maxCondensingTemperatureC > -KELVIN_OFFSET,
+            'chiller maximum condensing temperature must be finite and above absolute zero')
+        assert(chiller.chilledSetpointC < chiller.maxCondensingTemperatureC,
+            'chiller chilled setpoint must be below its maximum condensing temperature')
+        object.chillers[index] = {
+            id = chiller.id,
+            thermalClass = chiller.thermalClass,
+            coldLoop = coldLoop,
+            condenser = sink,
+            ratedKW = chiller.ratedCoolingCapacityKW,
+            cop = chiller.cop,
+            auxKW = chiller.auxiliaryPowerKW,
+            chilledSetpoint = chiller.chilledSetpointC,
+            maxCondensing = chiller.maxCondensingTemperatureC,
+            lastDemand = 0,
+            lastCooling = 0,
+            lastDeliverable = 0,
+            lastPowerDemand = 0,
+            lastPowerSupplied = 0,
+            lastCondenserKW = 0,
+            lastFraction = 0,
+            admitted = false,
+            atSetpoint = false,
+            sinkOver = false,
+            extractedKJ = 0,
+            workKJ = 0,
+            condenserKJ = 0,
         }
     end
     for index = 1, #loads do
@@ -1218,15 +1305,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             -- is one exchange accounted on both sides.
             local exchange = circulation * loop.conductance
                 * (loop.reservoir.temperature - loop.temperature)
-            if not disabled then
-                local heatIntoLoop = pumpSupplied + heaterSupplied
-                local loopCapacityKJ = loop.coolant * loop.cp
-                loop.temperature = loop.temperature
-                    + (heatIntoLoop + exchange) * fixed_seconds / loopCapacityKJ
-                loop.pumpWorkKJ = loop.pumpWorkKJ + pumpSupplied * fixed_seconds
-                loop.heaterKJ = loop.heaterKJ + heaterSupplied * fixed_seconds
-                loop.exchangedKJ = loop.exchangedKJ + exchange * fixed_seconds
-            end
             loop.lastPumpDemand = pumpDemand
             loop.lastPumpSupplied = pumpSupplied
             loop.lastHeaterDemand = heaterDemand
@@ -1234,15 +1312,110 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             loop.lastCirculation = circulation
             loop.lastFlow = loop.ratedFlow * circulation
             loop.lastExchange = exchange
+            assert(isFinite(loop.lastFlow) and isFinite(loop.lastExchange)
+                and isFinite(circulation)
+                and isFinite(pumpSupplied) and isFinite(heaterSupplied),
+                "coolant loop '" .. loop.id .. "' allocation result is not finite")
+        end
+        -- Chillers (#397) run between the loop allocation and the loop's
+        -- own integration, in declaration order: every loop's circulation
+        -- this tick is known, and the extraction lands in the loop's
+        -- temperature integration below. A chiller's cold service demand
+        -- is its rated capacity; the deliverable duty is capped by the
+        -- cold loop's circulation fraction (heat must reach the
+        -- evaporator), it is gated off at or below the chilled setpoint,
+        -- and it is refused whole while the condenser sink sits at or
+        -- above the maximum condensing temperature. The electrical
+        -- request - work at the configured COP plus the running
+        -- auxiliaries for the deliverable duty - is drawn from the same
+        -- generation-and-battery pool as every other load, never a
+        -- second budget. A curtailed grant duty-cycles the whole machine
+        -- at one delivered fraction, so extracted heat, work and
+        -- condenser heat all scale together and the condenser booking
+        -- equals extracted heat plus the work and auxiliaries actually
+        -- supplied at one consistent boundary.
+        for _, chiller in ipairs(self.chillers) do
+            local loop = chiller.coldLoop
+            local sink = chiller.condenser
+            local disabled = chiller.ratedKW <= 0
+            chiller.atSetpoint = not disabled
+                and loop.temperature <= chiller.chilledSetpoint + 1e-9
+            chiller.sinkOver = not disabled
+                and sink.temperature + 1e-9 >= chiller.maxCondensing
+            local coolingDemand = (disabled or chiller.atSetpoint)
+                and 0 or chiller.ratedKW
+            chiller.lastDemand = coolingDemand
+            chiller.lastCooling = 0
+            chiller.lastDeliverable = 0
+            chiller.lastPowerDemand = 0
+            chiller.lastPowerSupplied = 0
+            chiller.lastCondenserKW = 0
+            chiller.lastFraction = 0
+            chiller.admitted = not disabled and not chiller.sinkOver
+            if chiller.admitted and coolingDemand > 0 then
+                local deliverable = chiller.ratedKW * loop.lastCirculation
+                chiller.lastDeliverable = deliverable
+                if deliverable > 1e-12 then
+                    local powerDemand = deliverable / chiller.cop + chiller.auxKW
+                    chiller.lastPowerDemand = powerDemand
+                    local fromGeneration = math.min(powerDemand, generation)
+                    generation = generation - fromGeneration
+                    local fromBattery = drawBatteries(self,
+                        powerDemand - fromGeneration, fixed_hours)
+                    local supplied = fromGeneration + fromBattery
+                    batterySupplied = batterySupplied + fromBattery
+                    chiller.lastPowerSupplied = supplied
+                    local fraction = supplied / powerDemand
+                    chiller.lastFraction = fraction
+                    local cooling = deliverable * fraction
+                    chiller.lastCooling = cooling
+                    -- Condenser heat equals extracted heat plus the work
+                    -- and auxiliaries actually supplied: one boundary,
+                    -- booked once.
+                    chiller.lastCondenserKW = cooling + supplied
+                    loop.chillerExtraction = (loop.chillerExtraction or 0) + cooling
+                    chiller.extractedKJ = chiller.extractedKJ + cooling * fixed_seconds
+                    chiller.workKJ = chiller.workKJ + supplied * fixed_seconds
+                    chiller.condenserKJ = chiller.condenserKJ
+                        + chiller.lastCondenserKW * fixed_seconds
+                end
+            end
+            assert(isFinite(chiller.lastDemand) and isFinite(chiller.lastCooling)
+                and isFinite(chiller.lastDeliverable) and isFinite(chiller.lastPowerDemand)
+                and isFinite(chiller.lastPowerSupplied) and isFinite(chiller.lastCondenserKW)
+                and isFinite(chiller.lastFraction) and isFinite(chiller.extractedKJ)
+                and isFinite(chiller.workKJ) and isFinite(chiller.condenserKJ),
+                "chiller '" .. chiller.id .. "' result is not finite")
+        end
+        -- Second loop pass: integrate the loop's temperature from the
+        -- pump work, heater heat, exchanger exchange and the chiller
+        -- extraction that actually moved this tick, and expose the
+        -- freeze condition. The extraction leaves the loop exactly once;
+        -- the chiller books it as the cold side of its own ledger and
+        -- the sink gains it through the condenser term, so the heat is
+        -- never double-counted.
+        for _, loop in ipairs(self.coolant_loops) do
+            local disabled = loop.coolant <= 0
+            local extraction = loop.chillerExtraction or 0
+            loop.chillerExtraction = 0
+            if not disabled then
+                local heatIntoLoop = loop.lastPumpSupplied + loop.lastHeaterSupplied
+                local loopCapacityKJ = loop.coolant * loop.cp
+                loop.temperature = loop.temperature
+                    + (heatIntoLoop + loop.lastExchange - extraction)
+                        * fixed_seconds / loopCapacityKJ
+                loop.pumpWorkKJ = loop.pumpWorkKJ + loop.lastPumpSupplied * fixed_seconds
+                loop.heaterKJ = loop.heaterKJ + loop.lastHeaterSupplied * fixed_seconds
+                loop.exchangedKJ = loop.exchangedKJ + loop.lastExchange * fixed_seconds
+                loop.extractedKJ = (loop.extractedKJ or 0) + extraction * fixed_seconds
+            end
             -- The freeze condition is exposed, never clamped: the loop
             -- stays integrated and the shortfall stays visible.
             loop.belowFreeze = not disabled
                 and loop.temperature < loop.setpoint - 1e-9
             loop.circulating = loop.lastFlow > 1e-12
-            assert(isFinite(loop.temperature) and isFinite(loop.lastFlow)
-                and isFinite(loop.lastExchange) and isFinite(circulation)
-                and isFinite(pumpSupplied) and isFinite(heaterSupplied),
-                "coolant loop '" .. loop.id .. "' result is not finite")
+            assert(isFinite(loop.temperature) and isFinite(loop.extractedKJ),
+                "coolant loop '" .. loop.id .. "' integrated result is not finite")
         end
         -- Charge from the surplus left after every allocation: batteries
         -- take only generation no load took, within the charge power
@@ -1337,6 +1510,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         for index = 1, #self.loads do totalSupplied = totalSupplied + (supplied[index] or 0) end
         for _, loop in ipairs(self.coolant_loops) do
             totalSupplied = totalSupplied + loop.lastPumpSupplied + loop.lastHeaterSupplied
+        end
+        for _, chiller in ipairs(self.chillers) do
+            totalSupplied = totalSupplied + chiller.lastPowerSupplied
         end
         local generationBound = BALANCE_TOLERANCE
             * math.max(1.0, math.abs(availableGeneration) + batterySupplied)
@@ -1442,12 +1618,21 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             loopHeatByReservoir[loop.reservoir] =
                 (loopHeatByReservoir[loop.reservoir] or 0) - loop.lastExchange
         end
+        -- Chiller condenser heat enters the sink reservoir exactly once
+        -- (#397): the chiller booked extracted + supplied work here, and
+        -- the reservoir integrates it as its own ledger term.
+        local condenserByReservoir = {}
+        for _, chiller in ipairs(self.chillers) do
+            condenserByReservoir[chiller.condenser] =
+                (condenserByReservoir[chiller.condenser] or 0) + chiller.lastCondenserKW
+        end
         for _, reservoir in ipairs(self.reservoirs) do
             local capacity = reservoir.capacity
             local temperatureK = reservoir.temperature + KELVIN_OFFSET
             local routed = routedByReservoir[reservoir] or 0
             local loopHeat = loopHeatByReservoir[reservoir] or 0
-            local heatIn = reservoir.absorbedKW + routed + loopHeat
+            local condenser = condenserByReservoir[reservoir] or 0
+            local heatIn = reservoir.absorbedKW + routed + loopHeat + condenser
             local rejected = 0
             local minSink = reservoir.temperature
             local maxSink = reservoir.temperature
@@ -1490,6 +1675,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             reservoir.absorbedKJ = reservoir.absorbedKJ + reservoir.absorbedKW * fixed_seconds
             reservoir.routedKJ = reservoir.routedKJ + routed * fixed_seconds
             reservoir.loopKJ = (reservoir.loopKJ or 0) + loopHeat * fixed_seconds
+            reservoir.condenserKJ = (reservoir.condenserKJ or 0) + condenser * fixed_seconds
             reservoir.rejectedKJ = reservoir.rejectedKJ + rejected * fixed_seconds
             reservoir.temperature = newTemperature
             -- Declared service limits are reported as crossings, never
@@ -1510,7 +1696,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local startingEnergy = reservoir.capacity * reservoir.startingTemperature
             local bound = BALANCE_TOLERANCE * math.max(1, math.abs(startingEnergy))
             local residual = startingEnergy + reservoir.absorbedKJ + reservoir.routedKJ
-                + (reservoir.loopKJ or 0) - reservoir.rejectedKJ
+                + (reservoir.loopKJ or 0) + (reservoir.condenserKJ or 0) - reservoir.rejectedKJ
                 - reservoir.capacity * reservoir.temperature
             assert(residual == residual and math.abs(residual) <= bound,
                 "thermal energy ledger residual for reservoir '"
@@ -1537,10 +1723,38 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local startingEnergy = loop.startingCoolant * loop.cp * loop.startingTemperature
             local bound = BALANCE_TOLERANCE * math.max(1, math.abs(startingEnergy))
             local residual = startingEnergy + loop.pumpWorkKJ + loop.heaterKJ
-                + loop.exchangedKJ - loop.coolant * loop.cp * loop.temperature
+                + loop.exchangedKJ - (loop.extractedKJ or 0)
+                - loop.coolant * loop.cp * loop.temperature
             assert(residual == residual and math.abs(residual) <= bound,
                 "coolant loop '" .. loop.id .. "' thermal energy ledger residual "
                 .. 'exceeds tolerance')
+        end
+        -- Chilled service ledger (#397): the chiller's condenser heat
+        -- must equal the cold-side heat it extracted plus the work and
+        -- auxiliaries it was actually supplied, cumulatively and within
+        -- the declared tolerance. A residual beyond it means heat was
+        -- booked twice or vanished once - a conservation violation,
+        -- never a silent rounding.
+        for _, chiller in ipairs(self.chillers) do
+            local chillerBound = BALANCE_TOLERANCE * math.max(1,
+                math.max(math.abs(chiller.extractedKJ), math.abs(chiller.condenserKJ)))
+            local residual = chiller.extractedKJ + chiller.workKJ - chiller.condenserKJ
+            assert(residual == residual and math.abs(residual) <= chillerBound,
+                "chiller '" .. chiller.id .. "' condenser ledger residual "
+                .. 'exceeds tolerance')
+            local values = { chiller.lastDemand, chiller.lastCooling,
+                chiller.lastDeliverable, chiller.lastPowerDemand,
+                chiller.lastPowerSupplied, chiller.lastCondenserKW,
+                chiller.lastFraction, chiller.extractedKJ, chiller.workKJ,
+                chiller.condenserKJ }
+            for _, value in ipairs(values) do
+                assert(isFinite(value),
+                    "chiller '" .. chiller.id .. "' value is not finite")
+            end
+            assert(chiller.lastCooling <= chiller.lastDeliverable + BALANCE_TOLERANCE,
+                "chiller '" .. chiller.id .. "' extracted more than its circulation could deliver")
+            assert(chiller.lastPowerSupplied <= chiller.lastPowerDemand + BALANCE_TOLERANCE,
+                "chiller '" .. chiller.id .. "' was supplied more power than it demanded")
         end
     end
     function object:advance(world_tick, fixed_seconds)

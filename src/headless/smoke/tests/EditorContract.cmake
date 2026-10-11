@@ -270,6 +270,7 @@ set(editor_names
     station/deliveryWorkflow
     station/thermalWorkflow
     station/coolantWorkflow
+    station/chillerWorkflow
 )
 
 if(DEFINED LANE)

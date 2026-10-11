@@ -144,7 +144,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 73"), 11, "version: 65");
+		text.replace(text.find("version: 74"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -2265,8 +2265,8 @@ namespace
 		auto const bundled = core::bundledStationSystemsSource();
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -2325,8 +2325,8 @@ namespace
 		// model's own audits hold.
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -4022,13 +4022,13 @@ namespace
 			auto const bundled = core::bundledStationSystemsSource();
 			core::setStationSystemsSourceLoader([bundled] {
 				return "local factory = (function()\n" + bundled + "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers)\n"
 					"assert(#reservoirs == 1 and reservoirs[1].id == 'cabin'\n"
 					"\tand reservoirs[1].heatCapacityKJPerK == 100 and reservoirs[1].absorbedHeatKW == 0)\n"
 					"assert(#radiators == 1 and radiators[1].reservoir == 'cabin'\n"
 					"\tand radiators[1].areaM2 == 5000)\n"
 					"assert(#loads == 1 and loads[1].heatSinkId == 'cabin')\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers)\n"
 					"assert(model.reservoirs[1].temperature == 20)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
@@ -4520,7 +4520,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers)\n"
 					"assert(type(coolantLoops) == 'table' and #coolantLoops == 1, 'coolant loop descriptor crossing lost')\n"
 					"assert(coolantLoops[1].coolantCapacityKg > 0, 'corrupt coolant capacity crossing')\n"
 					"error('corrupt coolant descriptor crossing')\n"
@@ -4537,6 +4537,500 @@ namespace
 			core::setStationSystemsSourceLoader({});
 		}
 	}
+	// #397: chillers supply class-matched cold services while consuming
+	// real electricity and rejecting condenser heat. The delivered duty is
+	// capped by the cold loop's actual circulation, gated at the chilled
+	// setpoint, and refused whole while the condenser sink sits at or
+	// above the maximum condensing temperature. Work at the configured
+	// COP plus auxiliaries rides the shared generation-and-battery pool,
+	// and condenser heat equals extracted heat plus the work and
+	// auxiliaries actually supplied at one consistent boundary — never
+	// double-counted. Every ledger closes and every refusal stays visible.
+	void chillers(smoke::Context const&)
+	{
+		auto const dt = static_cast<double>(core::World::getFixedTimestep());
+		auto const approx = [](double actual, double expected, double tolerance = 1e-6)
+		{ return std::abs(actual - expected) <= tolerance; };
+		auto sawEvent = [](core::World& world, std::string const& needle)
+		{
+			for (auto const& event : world.getStationSystemsEvents())
+				if (event.message.find(needle) != std::string::npos) return true;
+			return false;
+		};
+		auto reservoir = [](std::string const& id, std::string const& thermalClass,
+			double capacityKJPerK, double startingC)
+		{
+			core::ThermalReservoirSettings settings;
+			settings.id = id;
+			settings.thermalClass = thermalClass;
+			settings.heatCapacityKJPerK = capacityKJPerK;
+			settings.startingTemperatureC = startingC;
+			settings.minTemperatureC = -50.0;
+			settings.maxTemperatureC = 200.0;
+			return settings;
+		};
+		auto loop = [](std::string const& id, std::string const& reservoirId,
+			double startingKg, double startingC, double pumpKW, double ratedFlow,
+			double conductance)
+		{
+			core::CoolantLoopSettings settings;
+			settings.id = id;
+			settings.hazardClass = "normal";
+			settings.reservoirId = reservoirId;
+			settings.coolantCapacityKg = 100.0;
+			settings.startingCoolantKg = startingKg;
+			settings.specificHeatKJPerKgK = 4.0;
+			settings.startingTemperatureC = startingC;
+			settings.freezeProtectionSetpointC = 0.0;
+			settings.pumpPowerKW = pumpKW;
+			settings.ratedFlowKgPerS = ratedFlow;
+			settings.exchangerConductanceKWPerK = conductance;
+			settings.heaterCapacityKW = 0.0;
+			return settings;
+		};
+		auto chiller = [](std::string const& id, std::string const& thermalClass,
+			std::string const& coldLoopId, std::string const& condenserId,
+			double ratedKW, double cop, double auxKW, double chilledSetpoint,
+			double maxCondensing)
+		{
+			core::ChillerSettings settings;
+			settings.id = id;
+			settings.thermalClass = thermalClass;
+			settings.coldLoopId = coldLoopId;
+			settings.condenserReservoirId = condenserId;
+			settings.ratedCoolingCapacityKW = ratedKW;
+			settings.cop = cop;
+			settings.auxiliaryPowerKW = auxKW;
+			settings.chilledSetpointC = chilledSetpoint;
+			settings.maxCondensingTemperatureC = maxCondensing;
+			return settings;
+		};
+		auto chillerConfigure = [](core::World& world,
+			std::vector<core::ThermalReservoirSettings> reservoirs,
+			std::vector<core::CoolantLoopSettings> loops,
+			std::vector<core::ChillerSettings> chillers,
+			std::vector<core::SolarArraySettings> solar = {},
+			std::vector<core::BatterySettings> batteries = {})
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.thermalReservoirs = std::move(reservoirs);
+			settings.coolantLoops = std::move(loops);
+			settings.chillers = std::move(chillers);
+			settings.solarArrays = std::move(solar);
+			settings.batteries = std::move(batteries);
+			auto const ok = world.configureStationSystems(settings, false, &diagnostic);
+			return std::make_pair(ok, diagnostic);
+		};
+		// Refused configurations: every malformed chiller contract is
+		// rejected before anything runs, and none of the refusals leaves
+		// the World changed.
+		{
+			core::World bad("ChillerBad", 2, 2);
+			bad.pauseSimulation(); bad.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.thermalReservoirs = {
+				reservoir("cold", "moderate", 1000.0, 20.0),
+				reservoir("sink", "moderate", 1000.0, 20.0),
+				reservoir("warmSink", "warm", 1000.0, 20.0) };
+			settings.coolantLoops = { loop("chilled", "cold", 100, 20.0, 0.5, 2.0, 0.0) };
+			std::string diagnostic;
+			settings.chillers = { chiller("c", "moderate", "ghost", "sink", 6, 3, 0.5, 5, 45) };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("unknown coolant loop") != std::string::npos,
+				"chiller coupled to an unknown cold loop was accepted");
+			settings.chillers = { chiller("c", "moderate", "chilled", "ghost", 6, 3, 0.5, 5, 45) };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("condenser sink references unknown thermal reservoir")
+					!= std::string::npos,
+				"chiller coupled to an unknown condenser sink was accepted");
+			settings.chillers = { chiller("c", "warm", "chilled", "warmSink", 6, 3, 0.5, 5, 45) };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("incompatible with cold loop") != std::string::npos,
+				"cross-class cold-side interface was accepted");
+			settings.chillers = { chiller("c", "moderate", "chilled", "warmSink", 6, 3, 0.5, 5, 45) };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("incompatible with condenser sink") != std::string::npos,
+				"cross-class condenser sink was accepted");
+			settings.chillers = { chiller("c", "moderate", "chilled", "cold", 6, 3, 0.5, 5, 45) };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("heater, not a cooling service") != std::string::npos,
+				"a chiller rejecting into its own cold-side reservoir was accepted");
+			settings.chillers = { chiller("c", "moderate", "chilled", "sink", 6, 0, 0.5, 5, 45) };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("COP must be finite and positive") != std::string::npos,
+				"a zero COP was accepted");
+			settings.chillers = { chiller("c", "moderate", "chilled", "sink", -1, 3, 0.5, 5, 45) };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("rated cooling capacity must be finite and non-negative")
+					!= std::string::npos,
+				"a negative rated capacity was accepted");
+			settings.chillers = { chiller("c", "moderate", "chilled", "sink", 6, 3, 0.5, 50, 45) };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("chilled setpoint must be below the maximum condensing")
+					!= std::string::npos,
+				"a chilled setpoint at or above the maximum condensing temperature was accepted");
+			settings.chillers = { chiller("c", "moderate", "chilled", "sink", 6, 3, 0.5, -300, 45) };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("chilled setpoint must be finite and above absolute zero")
+					!= std::string::npos,
+				"a sub-absolute-zero chilled setpoint was accepted");
+			settings.chillers = {
+				chiller("c1", "moderate", "chilled", "sink", 6, 3, 0.5, 5, 45),
+				chiller("c2", "moderate", "chilled", "sink", 6, 3, 0.5, 5, 45) };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("shares cold loop") != std::string::npos,
+				"two chillers on one evaporator loop were accepted");
+			std::vector<core::ChillerSettings> tooMany;
+			for (size_t index = 0; index <= core::MaxStationChillers; ++index)
+				tooMany.push_back(chiller("c" + std::to_string(index), "moderate",
+					"chilled", "sink", 6, 3, 0.5, 5, 45));
+			settings.chillers = tooMany;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("limited to") != std::string::npos,
+				"more than the declared chiller budget was accepted");
+			require(!bad.getStationSystemsSnapshot().enabled && bad.getSimulationTick() == 0,
+				"a refused chiller configuration mutated the World");
+		}
+		// Nominal full service: with ample power, a circulating cold loop
+		// and a cool sink, the chiller delivers its rated duty; work is
+		// rated/COP + auxiliaries; condenser heat equals extracted plus
+		// supplied work exactly once. The loop cools, the sink warms, and
+		// every ledger closes.
+		{
+			core::World world("ChillerNominal", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 10.0;
+			auto const [ok, diagnostic] = chillerConfigure(world,
+				{ reservoir("cold", "moderate", 1000.0, 20.0),
+				  reservoir("sink", "moderate", 1000.0, 20.0) },
+				{ loop("chilled", "cold", 100, 20.0, 0.5, 2.0, 0.0) },
+				{ chiller("chiller", "moderate", "chilled", "sink", 6.0, 3.0, 0.5, 5.0, 45.0) },
+				{ field });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(600), "nominal chiller run failed");
+			auto const& snapshot = world.getStationSystemsSnapshot();
+			require(snapshot.chillers.size() == 1, "chiller snapshot missing");
+			auto const& chillerSnap = snapshot.chillers[0];
+			require(chillerSnap.status == core::StationTransferStatus::Full
+				&& chillerSnap.admitted && !chillerSnap.disabled
+				&& !chillerSnap.atChilledSetpoint && !chillerSnap.sinkOverMaxCondensing,
+				"nominal chiller did not run at full service");
+			require(approx(chillerSnap.coolingDemandKW, 6.0)
+				&& approx(chillerSnap.coolingKW, 6.0)
+				&& approx(chillerSnap.coolingUnmetKW, 0.0),
+				"rated cold service was not delivered in full");
+			require(approx(chillerSnap.deliverableKW, 6.0)
+				&& approx(chillerSnap.coldLoopCirculationFraction, 1.0),
+				"deliverable duty did not follow full circulation");
+			require(approx(chillerSnap.powerDemandKW, 2.5)
+				&& approx(chillerSnap.powerSuppliedKW, 2.5)
+				&& approx(chillerSnap.powerUnmetKW, 0.0)
+				&& approx(chillerSnap.deliveredFraction, 1.0),
+				"work + auxiliaries did not follow the COP contract");
+			// Condenser heat equals extracted heat plus the work and
+			// auxiliaries actually supplied, at one boundary.
+			require(approx(chillerSnap.condenserHeatKW, 8.5),
+				"condenser heat is not extracted plus supplied work and auxiliaries");
+			// Exactly-once booking: the sink's whole energy gain equals
+			// the chiller's extracted heat plus its supplied work energy;
+			// the loop lost exactly the extracted amount on top of its
+			// pump work, and both ledgers close.
+			auto const& sinkSnap = snapshot.thermal.reservoirs[1];
+			auto const& loopSnap = snapshot.coolantLoops[0];
+			require(approx(sinkSnap.currentEnergyKJ - sinkSnap.startingEnergyKJ,
+				chillerSnap.extractedEnergyKJ + chillerSnap.workEnergyKJ, 1e-4),
+				"sink gain is not the chiller's extracted heat plus work, exactly once");
+			require(std::abs(chillerSnap.residualKJ) < 1e-4
+				&& std::abs(sinkSnap.residualKJ) < 1e-4
+				&& std::abs(loopSnap.residualKJ) < 1e-4,
+				"chiller, sink or loop ledger did not close");
+			require(approx(loopSnap.chillerExtractionKW, 6.0),
+				"loop does not report the chiller extraction it gave up");
+			require(loopSnap.loopTemperatureC < 20.0,
+				"extraction did not cool the cold-side loop");
+			require(sinkSnap.temperatureC > 20.0,
+				"condenser heat did not warm the sink");
+			require(approx(snapshot.power.chillerPowerKW, 2.5),
+				"chiller electrical total wrong");
+			require(approx(snapshot.thermal.totalCoolingProvidedKW, 6.0)
+				&& snapshot.thermal.totalCoolingUnmetKW == 0.0
+				&& approx(snapshot.thermal.totalCondenserHeatKW, 8.5),
+				"cold service thermal totals wrong");
+			// The per-class rollup keeps the account segregated: the
+			// moderate class carries everything, the others nothing.
+			require(snapshot.thermal.coolingByClass.size() == 4,
+				"cooling-by-class rollup incomplete");
+			for (auto const& cooling : snapshot.thermal.coolingByClass)
+			{
+				if (cooling.thermalClass == "moderate")
+					require(approx(cooling.capacityKW, 6.0)
+						&& approx(cooling.providedKW, 6.0)
+						&& approx(cooling.workKW, 2.5)
+						&& approx(cooling.condenserKW, 8.5)
+						&& cooling.unmetKW == 0.0,
+						"moderate-class cold service rollup wrong");
+				else
+					require(cooling.capacityKW == 0.0 && cooling.providedKW == 0.0
+						&& cooling.workKW == 0.0 && cooling.condenserKW == 0.0,
+						"a class with no chiller reported cold service anyway");
+			}
+		}
+		// Electricity-limited cooling: a starved pool duty-cycles the
+		// whole machine at one delivered fraction — extracted heat, work
+		// and condenser heat all scale together, and the unmet remainder
+		// stays visible on both the cold service and the power draw.
+		{
+			core::World world("ChillerPowerLimited", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 1.5;
+			auto const [ok, diagnostic] = chillerConfigure(world,
+				{ reservoir("cold", "moderate", 1000.0, 20.0),
+				  reservoir("sink", "moderate", 1000.0, 20.0) },
+				{ loop("chilled", "cold", 100, 20.0, 0.5, 2.0, 0.0) },
+				{ chiller("chiller", "moderate", "chilled", "sink", 6.0, 3.0, 0.5, 5.0, 45.0) },
+				{ field });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(600), "power-limited chiller run failed");
+			auto const& chillerSnap = world.getStationSystemsSnapshot().chillers[0];
+			// The pump takes its 0.5 kW first; the chiller gets the 1.0 kW
+			// left of its 2.5 kW demand: fraction 0.4.
+			require(approx(chillerSnap.powerDemandKW, 2.5)
+				&& approx(chillerSnap.powerSuppliedKW, 1.0)
+				&& approx(chillerSnap.deliveredFraction, 0.4),
+				"chiller draw did not follow the starved pool");
+			require(approx(chillerSnap.coolingKW, 2.4)
+				&& approx(chillerSnap.coolingUnmetKW, 3.6),
+				"cold service did not scale with the delivered fraction with unmet visible");
+			require(approx(chillerSnap.condenserHeatKW, 3.4),
+				"condenser heat did not scale with extracted plus supplied");
+			require(chillerSnap.status == core::StationTransferStatus::Partial,
+				"partially supplied chiller status wrong");
+			require(std::abs(chillerSnap.residualKJ) < 1e-4,
+				"curtailed chiller ledger did not close");
+		}
+		// Sink-limited cooling through the temperature interface: a sink
+		// at or above the maximum condensing temperature refuses the
+		// chiller whole — no power draw, no condenser booking, and the
+		// entire demand stays visible as unmet cold service.
+		{
+			core::World world("ChillerSinkLimited", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 10.0;
+			auto const [ok, diagnostic] = chillerConfigure(world,
+				{ reservoir("cold", "moderate", 1000.0, 20.0),
+				  reservoir("sink", "moderate", 1000.0, 50.0) },
+				{ loop("chilled", "cold", 100, 20.0, 0.5, 2.0, 0.0) },
+				{ chiller("chiller", "moderate", "chilled", "sink", 6.0, 3.0, 0.5, 5.0, 45.0) },
+				{ field });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(600), "sink-limited chiller run failed");
+			auto const& snapshot = world.getStationSystemsSnapshot();
+			auto const& chillerSnap = snapshot.chillers[0];
+			require(!chillerSnap.admitted && chillerSnap.sinkOverMaxCondensing,
+				"sink-over-temperature condition not exposed");
+			require(chillerSnap.status == core::StationTransferStatus::Rejected,
+				"chiller against a too-hot sink was not refused");
+			require(approx(chillerSnap.coolingDemandKW, 6.0)
+				&& chillerSnap.coolingKW == 0.0
+				&& approx(chillerSnap.coolingUnmetKW, 6.0),
+				"refused chiller did not keep its whole demand visible as unmet");
+			require(chillerSnap.powerDemandKW == 0.0 && chillerSnap.powerSuppliedKW == 0.0
+				&& chillerSnap.condenserHeatKW == 0.0,
+				"a refused chiller drew power or booked condenser heat");
+			require(chillerSnap.extractedEnergyKJ == 0.0
+				&& chillerSnap.workEnergyKJ == 0.0
+				&& chillerSnap.condenserEnergyKJ == 0.0,
+				"a refused chiller accumulated ledger energy");
+			// The sink stayed exactly where it started: nothing was pushed
+			// into a sink the chiller was refused against.
+			require(snapshot.thermal.reservoirs[1].temperatureC == 50.0
+				&& snapshot.thermal.reservoirs[1].condenserEnergyKJ == 0.0,
+				"refused condenser heat reached the sink anyway");
+			require(sawEvent(world, "condenser sink over its maximum condensing temperature")
+				&& sawEvent(world, "service refused"),
+				"sink-over refusal not announced");
+		}
+		// Zero capacity and the chilled-setpoint gate: a zero-capacity
+		// chiller is disabled and inert; a cold side at or below its
+		// chilled setpoint demands nothing even with everything else
+		// available.
+		{
+			core::World world("ChillerGates", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 10.0;
+			auto const [ok, diagnostic] = chillerConfigure(world,
+				{ reservoir("cold", "moderate", 1000.0, 20.0),
+				  reservoir("sink", "moderate", 1000.0, 20.0),
+				  reservoir("sink2", "moderate", 1000.0, 20.0) },
+				{ loop("chilled", "cold", 100, 20.0, 0.5, 2.0, 0.0),
+				  loop("coldloop", "cold", 100, 20.0, 0.5, 2.0, 0.0) },
+				{ chiller("zero", "moderate", "chilled", "sink", 0.0, 3.0, 0.5, 5.0, 45.0),
+				  chiller("gated", "moderate", "coldloop", "sink2", 6.0, 3.0, 0.5, 25.0, 45.0) },
+				{ field });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(600), "chiller gates run failed");
+			auto const& snapshot = world.getStationSystemsSnapshot();
+			auto const& zero = snapshot.chillers[0];
+			require(zero.disabled && zero.status == core::StationTransferStatus::Idle
+				&& zero.coolingDemandKW == 0.0 && zero.powerDemandKW == 0.0
+				&& zero.powerSuppliedKW == 0.0 && zero.condenserHeatKW == 0.0,
+				"a zero-capacity chiller drew power or supplied service");
+			auto const& gated = snapshot.chillers[1];
+			require(!gated.disabled && gated.atChilledSetpoint
+				&& gated.status == core::StationTransferStatus::Idle
+				&& gated.coolingDemandKW == 0.0 && gated.powerSuppliedKW == 0.0,
+				"a chiller with its cold side at the chilled setpoint still demanded service");
+			require(snapshot.thermal.reservoirs[2].temperatureC == 20.0
+				&& snapshot.thermal.reservoirs[2].condenserEnergyKJ == 0.0,
+				"a gated chiller booked heat into its sink");
+		}
+		// Circulation loss: a dry cold loop circulates nothing, so the
+		// evaporator has no heat to extract — the chiller is refused with
+		// the circulation reason and its whole demand stays unmet. No
+		// cooling is invented from a loop that is not moving.
+		{
+			core::World world("ChillerDryLoop", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 10.0;
+			auto const [ok, diagnostic] = chillerConfigure(world,
+				{ reservoir("cold", "moderate", 1000.0, 20.0),
+				  reservoir("sink", "moderate", 1000.0, 20.0) },
+				{ loop("dry", "cold", 0.0, 20.0, 1.0, 2.0, 0.0) },
+				{ chiller("chiller", "moderate", "dry", "sink", 6.0, 3.0, 0.5, 5.0, 45.0) },
+				{ field });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(600), "dry-loop chiller run failed");
+			auto const& chillerSnap = world.getStationSystemsSnapshot().chillers[0];
+			require(chillerSnap.status == core::StationTransferStatus::Rejected
+				&& chillerSnap.admitted && !chillerSnap.sinkOverMaxCondensing,
+				"dry-loop chiller refusal state wrong");
+			require(approx(chillerSnap.coolingDemandKW, 6.0)
+				&& chillerSnap.coolingKW == 0.0
+				&& approx(chillerSnap.coolingUnmetKW, 6.0),
+				"dry-loop cold service not fully unmet");
+			require(chillerSnap.powerSuppliedKW == 0.0
+				&& chillerSnap.condenserHeatKW == 0.0,
+				"dry-loop chiller drew power with no circulation");
+			require(sawEvent(world, "no coolant circulation at the cold-side interface"),
+				"dry-loop refusal reason not announced");
+		}
+		// Transient supply loss: full service under the sun, total loss
+		// through the eclipse, recovery when the sun returns — with the
+		// unmet demand visible during the outage, the refusal announced,
+		// and the ledgers closed across the whole cycle.
+		{
+			core::World world("ChillerEclipse", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::ProfileSettings cycle;
+			cycle.periodSeconds = 20.0;
+			cycle.segments = { {0.0, 1.0}, {10.0, 0.0} };
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 3.0;
+			field.illumination = cycle;
+			auto const [ok, diagnostic] = chillerConfigure(world,
+				{ reservoir("cold", "moderate", 1000.0, 20.0),
+				  reservoir("sink", "moderate", 1000.0, 20.0) },
+				{ loop("chilled", "cold", 100, 20.0, 0.5, 2.0, 0.0) },
+				{ chiller("chiller", "moderate", "chilled", "sink", 6.0, 3.0, 0.5, 5.0, 45.0) },
+				{ field });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			// Mid-sun: full service (pump 0.5 + chiller 2.5 = 3.0 kW).
+			require(world.advanceTicks(static_cast<uint64_t>(5.0 / dt)),
+				"eclipse chiller run (sunlit leg) failed");
+			auto const lit = world.getStationSystemsSnapshot().chillers[0];
+			require(lit.status == core::StationTransferStatus::Full
+				&& approx(lit.coolingKW, 6.0),
+				"full service not delivered under the sun");
+			// Mid-eclipse: nothing to run on — the whole demand is unmet.
+			// Advance to 10.5 s: the profile switched at the 10 s period
+			// boundary, and the half-second keeps the assertion clear of the
+			// boundary tick itself.
+			require(world.advanceTicks(static_cast<uint64_t>(5.5 / dt)),
+				"eclipse chiller run (dark leg) failed");
+			auto const dark = world.getStationSystemsSnapshot().chillers[0];
+			require(dark.status == core::StationTransferStatus::Rejected
+				&& dark.coolingKW == 0.0 && approx(dark.coolingUnmetKW, 6.0),
+				"eclipse left cooling supplied or the unmet remainder hidden");
+			// Back in the sun: service returns.
+			require(world.advanceTicks(static_cast<uint64_t>(14.5 / dt)),
+				"eclipse chiller run (recovery leg) failed");
+			auto const back = world.getStationSystemsSnapshot().chillers[0];
+			require(back.status == core::StationTransferStatus::Full
+				&& approx(back.coolingKW, 6.0),
+				"cold service did not recover with the sun");
+			require(sawEvent(world, "service refused")
+				&& sawEvent(world, "service restored"),
+				"eclipse refusal and recovery not announced");
+			// The ledger closed across every transition: condenser equals
+			// extracted plus work over the whole mixed run.
+			require(std::abs(back.residualKJ) < 1e-4
+				&& std::abs(world.getStationSystemsSnapshot().thermal.reservoirs[1].residualKJ) < 1e-4
+				&& std::abs(world.getStationSystemsSnapshot().coolantLoops[0].residualKJ) < 1e-4,
+				"a ledger did not close across the eclipse cycle");
+		}
+		// Deterministic replay: the same authored chiller scenario ticked
+		// twice from Reset produces identical snapshots and event history.
+		{
+			core::World world("ChillerReplay", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 2.0;
+			auto const [ok, diagnostic] = chillerConfigure(world,
+				{ reservoir("cold", "moderate", 1000.0, 20.0),
+				  reservoir("sink", "moderate", 1000.0, 20.0) },
+				{ loop("chilled", "cold", 100, 20.0, 0.5, 2.0, 1.0) },
+				{ chiller("chiller", "moderate", "chilled", "sink", 6.0, 3.0, 0.5, 5.0, 45.0) },
+				{ field });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(600), "chiller replay original run failed");
+			auto const expected = world.getStationSystemsSnapshot();
+			auto const expectedEvents = world.getStationSystemsEvents();
+			require(expected.chillers.size() == 1
+				&& expected.chillers[0].coolingKW > 0.0,
+				"chiller replay scenario produced no service");
+			world.pauseSimulation(); world.resetSimulation();
+			require(world.getStationSystemsSnapshot().elapsedSeconds == 0.0,
+				"reset did not clear the chiller runtime");
+			world.resumeSimulation();
+			require(world.advanceTicks(600), "chiller replay replay run failed");
+			require(world.getStationSystemsSnapshot() == expected,
+				"chiller scenario is not deterministic across Reset");
+			require(world.getStationSystemsEvents() == expectedEvents,
+				"chiller event history is not deterministic across Reset");
+		}
+		// The bundled Lua sandbox receives the chiller descriptors and
+		// mirrors the model: a corrupt crossing fails contained at
+		// construction through the integrated error path.
+		{
+			core::setStationSystemsSourceLoader([] {
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers)\n"
+					"assert(type(chillers) == 'table' and #chillers == 1, 'chiller descriptor crossing lost')\n"
+					"assert(chillers[1].cop > 0, 'corrupt chiller COP crossing')\n"
+					"error('corrupt chiller descriptor crossing')\n"
+					"end";
+			});
+			core::World corrupt("ChillerCorrupt", 2, 2);
+			corrupt.pauseSimulation(); corrupt.finishBuild();
+			auto const [ok, diagnostic] = chillerConfigure(corrupt,
+				{ reservoir("cold", "moderate", 1000.0, 20.0),
+				  reservoir("sink", "moderate", 1000.0, 20.0) },
+				{ loop("chilled", "cold", 100, 20.0, 0.5, 2.0, 0.0) },
+				{ chiller("chiller", "moderate", "chilled", "sink", 6.0, 3.0, 0.5, 5.0, 45.0) });
+			require(!ok && diagnostic.find("corrupt chiller descriptor crossing") != std::string::npos
+				&& !corrupt.getStationSystemsSnapshot().enabled,
+				"Corrupt chiller sandbox crossing not contained at construction");
+			core::setStationSystemsSourceLoader({});
+		}
+	}
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power},
@@ -4549,7 +5043,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"thermal", thermal}, {"coolant", coolant}, {"failures", failures}};
+		{"deliveries", deliveries}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }
