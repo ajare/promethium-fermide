@@ -3,18 +3,22 @@
 -- generation, External equipment load supply, rechargeable battery banks,
 -- scheduled resupply deliveries, thermal reservoirs with radiator
 -- rejection, coolant loops with freeze-protection heating, chillers
--- supplying class-matched cold services, and fuelled generators with
--- startup, ramp, fuel-depletion and shutdown-heat behaviour. Every
+-- supplying class-matched cold services, fuelled generators with
+-- startup, ramp, fuel-depletion and shutdown-heat behaviour, compartment
+-- atmospheres with occupancy draw, vapour constraints, leakage and
+-- scheduled airlock losses, and scheduled airlock cycles. Every
 -- system executes this factory in its own budgeted private sandbox.
 -- Stores, transfer rules, conversion rules, solar arrays, equipment
 -- load contracts, battery descriptors, delivery schedules, thermal
--- reservoir contracts, radiator contracts, chiller contracts and
--- generator contracts arrive as plain immutable descriptor values;
+-- reservoir contracts, radiator contracts, chiller contracts,
+-- generator contracts, atmosphere compartment contracts and airlock
+-- cycle contracts arrive as plain immutable descriptor values;
 -- each object initialises its own copy and re-checks the finite-capacity,
 -- per-unit conservation, per-constituent compound conservation,
 -- power-allocation, battery energy-conservation, delivery-schedule,
--- thermal energy-conservation, chiller and generator fuel-ledger
--- invariants every tick. The host applies the authoritative ledger;
+-- thermal energy-conservation, chiller and generator fuel-ledger and
+-- atmosphere per-component/thermal containment invariants every tick.
+-- The host applies the authoritative ledger;
 -- this mirror audits the same rules inside the sandbox so a corrupt
 -- crossing or model drift fails contained through the integrated error
 -- path.
@@ -24,6 +28,16 @@ local BALANCE_TOLERANCE = 1e-9
 -- core::StationCelsiusOffset for the radiator rejection law.
 local STEFAN_BOLTZMANN = 5.670374419e-14
 local KELVIN_OFFSET = 273.15
+-- Ideal-gas and humidity constants (#400): molar masses of the tracked
+-- species (kg/mol), the universal gas constant (J/(mol K)) and the
+-- latent heat of vaporization of water (kJ/kg). These are constants of
+-- the declared working fluids, mirroring the host formulas exactly.
+local MOLAR_MASS_OXYGEN = 0.0319988
+local MOLAR_MASS_NITROGEN = 0.0280134
+local MOLAR_MASS_CARBON_DIOXIDE = 0.0440095
+local MOLAR_MASS_WATER = 0.0180153
+local GAS_CONSTANT = 8.314462618
+local LATENT_HEAT_VAPORIZATION = 2257.0
 -- Schedule boundary tolerance: an occurrence scheduled exactly on the
 -- fixed-tick grid can land a few ulps either side of it, so due-ness is
 -- judged with the same tolerance the host uses. Mirrors
@@ -80,7 +94,7 @@ local function energyUnitsToKWh(unit)
 end
 
 return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries,
-    reservoirs, radiators, coolantLoops, chillers, generators)
+    reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)
     assert(type(name) == "string")
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
@@ -94,6 +108,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     assert(type(coolantLoops) == "table", "coolant loop descriptors missing")
     assert(type(chillers) == "table", "chiller descriptors missing")
     assert(type(generators) == "table", "generator descriptors missing")
+    assert(type(atmospheres) == "table", "atmosphere descriptors missing")
+    assert(type(airlockCycles) == "table", "airlock cycle descriptors missing")
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
@@ -102,7 +118,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         constituent_delivered = {},
         solar = {}, loads = {}, load_order = {}, batteries = {},
         deliveries = {}, reservoirs = {}, radiators = {}, coolant_loops = {},
-        chillers = {}, generators = {},
+        chillers = {}, generators = {}, atmospheres = {}, airlock_cycles = {},
     }
     local by_id = {}
     for index = 1, #stores do
@@ -867,6 +883,145 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             exhausted = false,
         }
     end
+    -- Compartment atmospheres (#400): a finite compartment-owned gas
+    -- inventory in a fixed volume, integrated on an authored effective
+    -- thermal capacity (air plus bonded structure) and optionally
+    -- coupled heat-only to one thermal reservoir. The ideal-gas partial
+    -- pressure and Magnus saturation formulas mirror the host exactly;
+    -- the sandbox re-audits the per-component and thermal conservation
+    -- every tick so a corrupt crossing or model drift fails contained
+    -- like any other script failure.
+    local atmosphere_by_id = {}
+    for index = 1, #atmospheres do
+        local atmosphere = atmospheres[index]
+        assert(type(atmosphere) == 'table', 'atmosphere descriptor must be a table')
+        assert(type(atmosphere.id) == 'string' and #atmosphere.id > 0, 'atmosphere needs an id')
+        assert(atmosphere.hazardClass == 'normal' or atmosphere.hazardClass == 'hazardous',
+            'atmosphere needs a declared hazard class (normal or hazardous)')
+        local function checkAmount(field, value, positive)
+            assert(type(value) == 'number' and value == value and value < math.huge
+                and (positive and value > 0 or value >= 0),
+                'atmosphere ' .. field .. ' must be finite and '
+                    .. (positive and 'positive' or 'non-negative'))
+        end
+        checkAmount('volume', atmosphere.volumeM3, true)
+        checkAmount('starting oxygen', atmosphere.startingOxygenKg, false)
+        checkAmount('starting nitrogen', atmosphere.startingNitrogenKg, false)
+        checkAmount('starting carbon dioxide', atmosphere.startingCarbonDioxideKg, false)
+        checkAmount('starting water vapour', atmosphere.startingWaterVapourKg, false)
+        assert(type(atmosphere.startingTemperatureC) == 'number'
+            and atmosphere.startingTemperatureC == atmosphere.startingTemperatureC
+            and atmosphere.startingTemperatureC > -KELVIN_OFFSET
+            and atmosphere.startingTemperatureC < math.huge,
+            'atmosphere starting temperature must be finite and above absolute zero')
+        checkAmount('thermal capacity', atmosphere.thermalCapacityKJPerK, true)
+        local reservoir
+        if atmosphere.reservoir ~= nil and atmosphere.reservoir ~= '' then
+            reservoir = reservoir_by_id[atmosphere.reservoir]
+            assert(reservoir ~= nil, 'atmosphere host thermal reservoir is unknown')
+        end
+        checkAmount('exchanger conductance', atmosphere.exchangerConductanceKWPerK, false)
+        assert(type(atmosphere.occupants) == 'number'
+            and atmosphere.occupants == math.tointeger(atmosphere.occupants)
+            and atmosphere.occupants >= 0,
+            'atmosphere occupants must be a non-negative integer')
+        checkAmount('oxygen use per occupant', atmosphere.oxygenUsePerOccupantKgPerS, false)
+        checkAmount('CO2 production per occupant', atmosphere.co2ProductionPerOccupantKgPerS, false)
+        checkAmount('sensible heat per occupant', atmosphere.sensibleHeatPerOccupantKW, false)
+        checkAmount('moisture addition per occupant', atmosphere.moistureAdditionPerOccupantKgPerS, false)
+        checkAmount('leak rate', atmosphere.leakRateKgPerS, false)
+        assert(type(atmosphere.minPressureKPa) == 'number'
+            and type(atmosphere.maxPressureKPa) == 'number'
+            and atmosphere.minPressureKPa == atmosphere.minPressureKPa
+            and atmosphere.maxPressureKPa == atmosphere.maxPressureKPa
+            and atmosphere.minPressureKPa > 0 and atmosphere.minPressureKPa < math.huge
+            and atmosphere.maxPressureKPa < math.huge
+            and atmosphere.minPressureKPa < atmosphere.maxPressureKPa,
+            'atmosphere pressure limits must be finite and positive with min below max')
+        checkAmount('minimum oxygen partial pressure', atmosphere.minOxygenPartialPressureKPa, false)
+        checkAmount('maximum CO2 partial pressure', atmosphere.maxCarbonDioxidePartialPressureKPa, false)
+        object.atmospheres[index] = {
+            id = atmosphere.id,
+            hazardClass = atmosphere.hazardClass,
+            volumeM3 = atmosphere.volumeM3,
+            oxygen = atmosphere.startingOxygenKg,
+            nitrogen = atmosphere.startingNitrogenKg,
+            carbonDioxide = atmosphere.startingCarbonDioxideKg,
+            waterVapour = atmosphere.startingWaterVapourKg,
+            startingOxygen = atmosphere.startingOxygenKg,
+            startingNitrogen = atmosphere.startingNitrogenKg,
+            startingCarbonDioxide = atmosphere.startingCarbonDioxideKg,
+            startingWaterVapour = atmosphere.startingWaterVapourKg,
+            startingTemperature = atmosphere.startingTemperatureC,
+            temperature = atmosphere.startingTemperatureC,
+            capacity = atmosphere.thermalCapacityKJPerK,
+            reservoir = reservoir,
+            conductance = atmosphere.exchangerConductanceKWPerK,
+            occupants = atmosphere.occupants,
+            oxygenUse = atmosphere.oxygenUsePerOccupantKgPerS,
+            co2Production = atmosphere.co2ProductionPerOccupantKgPerS,
+            sensibleHeat = atmosphere.sensibleHeatPerOccupantKW,
+            moistureAddition = atmosphere.moistureAdditionPerOccupantKgPerS,
+            leakRate = atmosphere.leakRateKgPerS,
+            minPressure = atmosphere.minPressureKPa,
+            maxPressure = atmosphere.maxPressureKPa,
+            minOxygenPartial = atmosphere.minOxygenPartialPressureKPa,
+            maxCo2Partial = atmosphere.maxCarbonDioxidePartialPressureKPa,
+            leakOxygen = 0, leakNitrogen = 0,
+            leakCarbonDioxide = 0, leakWaterVapour = 0,
+            cycleOxygen = 0, cycleNitrogen = 0,
+            cycleCarbonDioxide = 0, cycleWaterVapour = 0,
+            oxygenConsumed = 0, co2Produced = 0,
+            vapourAdded = 0, condensed = 0,
+            leaked = 0, recovered = 0, lost = 0,
+            occupantHeatKJ = 0, latentHeatKJ = 0, exchangedKJ = 0,
+        }
+        atmosphere_by_id[atmosphere.id] = object.atmospheres[index]
+    end
+    -- Scheduled airlock cycles (#400): scenario events on the same
+    -- deterministic schedule rule as resupply deliveries. Each
+    -- occurrence removes the authored mass capped by what the
+    -- compartment holds, split composition-proportionally into a
+    -- recovered and a lost share.
+    for index = 1, #airlockCycles do
+        local cycle = airlockCycles[index]
+        assert(type(cycle) == 'table', 'airlock cycle descriptor must be a table')
+        assert(type(cycle.id) == 'string' and #cycle.id > 0, 'airlock cycle needs an id')
+        local atmosphere = atmosphere_by_id[cycle.atmosphere]
+        assert(atmosphere ~= nil, 'airlock cycle atmosphere compartment is unknown')
+        assert(type(cycle.gasMassKg) == 'number' and cycle.gasMassKg == cycle.gasMassKg
+            and cycle.gasMassKg > 0 and cycle.gasMassKg < math.huge,
+            'airlock cycled gas mass must be finite and positive')
+        assert(type(cycle.firstSeconds) == 'number'
+            and cycle.firstSeconds == cycle.firstSeconds
+            and cycle.firstSeconds >= 0 and cycle.firstSeconds < math.huge,
+            'airlock first occurrence must be finite and non-negative')
+        assert(type(cycle.recurrenceSeconds) == 'number'
+            and cycle.recurrenceSeconds == cycle.recurrenceSeconds
+            and cycle.recurrenceSeconds >= 0 and cycle.recurrenceSeconds < math.huge,
+            'airlock recurrence must be finite and non-negative')
+        assert(type(cycle.recoveredFraction) == 'number'
+            and cycle.recoveredFraction == cycle.recoveredFraction
+            and cycle.recoveredFraction >= 0 and cycle.recoveredFraction <= 1,
+            'airlock recovered fraction must be finite and from 0 to 1')
+        assert(type(cycle.priority) == 'number' and cycle.priority == cycle.priority
+            and cycle.priority == math.tointeger(cycle.priority),
+            'airlock priority must be a finite integer')
+        object.airlock_cycles[index] = {
+            id = cycle.id,
+            atmosphere = atmosphere,
+            gasMass = cycle.gasMassKg,
+            firstSeconds = cycle.firstSeconds,
+            recurrenceSeconds = cycle.recurrenceSeconds,
+            recoveredFraction = cycle.recoveredFraction,
+            priority = cycle.priority,
+            fired = 0,
+            removedTotal = 0,
+            recoveredTotal = 0,
+            lostTotal = 0,
+            exhausted = false,
+        }
+    end
     -- Declared deterministic order: priority descending, declaration index
     -- ascending. Including the index makes the comparator a total order, so
     -- the result cannot depend on sort stability.
@@ -1025,6 +1180,162 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     -- Mirror of the host ledger: same deterministic order, same limits.
     -- Unmet material never moves and is never deleted; shortages are valid
     -- outcomes, while a conservation violation is a software failure.
+    -- Compartment atmospheres (#400): scheduled airlock cycles run first
+    -- against the tick-start inventory in the shared scenario schedule
+    -- order (occurrence time, priority descending, declaration order),
+    -- then each compartment runs its occupancy draw, vapour constraint,
+    -- leakage and thermal integration in the documented order. The
+    -- ideal-gas partial pressure and Magnus saturation formulas mirror
+    -- the host exactly; the reservoir books the exact negation of the
+    -- compartment exchange in applyThermal, so the crossing is one
+    -- exchange accounted once on each side.
+    local function partialPressureKPa(massKg, molarMassKgPerMol, volumeM3, temperatureC)
+        return massKg / molarMassKgPerMol * GAS_CONSTANT * (temperatureC + KELVIN_OFFSET)
+            / volumeM3 / 1000.0
+    end
+    local function saturationVapourPressureKPa(temperatureC)
+        return 0.61094 * math.exp(17.625 * temperatureC / (temperatureC + 243.04))
+    end
+    local function saturatedVapourMassKg(saturationKPa, volumeM3, temperatureC)
+        return saturationKPa * 1000.0 * volumeM3 * MOLAR_MASS_WATER
+            / (GAS_CONSTANT * (temperatureC + KELVIN_OFFSET))
+    end
+    local function applyAtmospheres(self, elapsed, fixed_seconds)
+        local cycles = {}
+        for index = 1, #self.airlock_cycles do
+            local cycle = self.airlock_cycles[index]
+            if not cycle.exhausted then
+                local due = occurrencesDue(cycle.firstSeconds,
+                    cycle.recurrenceSeconds, elapsed)
+                for occurrence = cycle.fired + 1, due do
+                    local when = cycle.recurrenceSeconds > 0
+                        and cycle.firstSeconds + (occurrence - 1) * cycle.recurrenceSeconds
+                        or cycle.firstSeconds
+                    cycles[#cycles + 1] = {
+                        when = when,
+                        priority = cycle.priority,
+                        declaration = index,
+                        occurrence = occurrence,
+                    }
+                end
+            end
+        end
+        table.sort(cycles, function(left, right)
+            if left.when ~= right.when then return left.when < right.when end
+            if left.priority ~= right.priority then return left.priority > right.priority end
+            return left.declaration < right.declaration
+        end)
+        for _, due in ipairs(cycles) do
+            local cycle = self.airlock_cycles[due.declaration]
+            local compartment = cycle.atmosphere
+            -- The cycle can only remove the gas the compartment
+            -- actually holds: capped by the current total mass and
+            -- split composition-proportionally, never inventing mass
+            -- and never picking a favourite species. What it removes is
+            -- booked whole: the recovered fraction into the receiver,
+            -- the remainder as lost through the outer hatch.
+            local totalMass = compartment.oxygen + compartment.nitrogen
+                + compartment.carbonDioxide + compartment.waterVapour
+            local removed = math.min(cycle.gasMass, totalMass)
+            local removedOxygen = totalMass > 0
+                and removed * compartment.oxygen / totalMass or 0
+            local removedNitrogen = totalMass > 0
+                and removed * compartment.nitrogen / totalMass or 0
+            local removedCarbonDioxide = totalMass > 0
+                and removed * compartment.carbonDioxide / totalMass or 0
+            local removedWaterVapour = totalMass > 0
+                and removed * compartment.waterVapour / totalMass or 0
+            local recovered = removed * cycle.recoveredFraction
+            local lost = removed - recovered
+            compartment.oxygen = compartment.oxygen - removedOxygen
+            compartment.nitrogen = compartment.nitrogen - removedNitrogen
+            compartment.carbonDioxide = compartment.carbonDioxide - removedCarbonDioxide
+            compartment.waterVapour = compartment.waterVapour - removedWaterVapour
+            compartment.cycleOxygen = compartment.cycleOxygen + removedOxygen
+            compartment.cycleNitrogen = compartment.cycleNitrogen + removedNitrogen
+            compartment.cycleCarbonDioxide = compartment.cycleCarbonDioxide + removedCarbonDioxide
+            compartment.cycleWaterVapour = compartment.cycleWaterVapour + removedWaterVapour
+            compartment.recovered = compartment.recovered + recovered
+            compartment.lost = compartment.lost + lost
+            cycle.fired = due.occurrence
+            cycle.removedTotal = cycle.removedTotal + removed
+            cycle.recoveredTotal = cycle.recoveredTotal + recovered
+            cycle.lostTotal = cycle.lostTotal + lost
+            if cycle.recurrenceSeconds <= 0 then cycle.exhausted = true end
+        end
+        for _, compartment in ipairs(self.atmospheres) do
+            local occupants = compartment.occupants
+            -- Occupancy is an authored load assignment: the oxygen draw
+            -- is capped by the oxygen actually present, and CO2
+            -- production plus metabolic heat scale with the fraction
+            -- of the demand actually consumed.
+            local oxygenDemand = occupants * compartment.oxygenUse * fixed_seconds
+            local oxygenConsumed = math.min(oxygenDemand, compartment.oxygen)
+            local metabolicFraction = oxygenDemand > 0
+                and oxygenConsumed / oxygenDemand or 1
+            local co2Produced = occupants * compartment.co2Production
+                * fixed_seconds * metabolicFraction
+            local vapourAdded = occupants * compartment.moistureAddition * fixed_seconds
+            compartment.oxygen = compartment.oxygen - oxygenConsumed
+            compartment.oxygenConsumed = compartment.oxygenConsumed + oxygenConsumed
+            compartment.carbonDioxide = compartment.carbonDioxide + co2Produced
+            compartment.co2Produced = compartment.co2Produced + co2Produced
+            compartment.waterVapour = compartment.waterVapour + vapourAdded
+            compartment.vapourAdded = compartment.vapourAdded + vapourAdded
+            -- Vapour constraint at the current temperature: the excess
+            -- over saturation condenses now and releases its latent
+            -- heat into the compartment this tick; the condensate
+            -- leaves the gas phase and is reported, never destroyed.
+            local saturation = saturationVapourPressureKPa(compartment.temperature)
+            local saturatedMass = saturatedVapourMassKg(saturation,
+                compartment.volumeM3, compartment.temperature)
+            local condensed = 0
+            if compartment.waterVapour > saturatedMass then
+                condensed = compartment.waterVapour - saturatedMass
+                compartment.waterVapour = saturatedMass
+                compartment.condensed = compartment.condensed + condensed
+            end
+            -- Leakage: a constant authored total-mass rate capped by
+            -- what the compartment holds, split composition-
+            -- proportionally. Never routed into another compartment.
+            local totalMass = compartment.oxygen + compartment.nitrogen
+                + compartment.carbonDioxide + compartment.waterVapour
+            local leaked = math.min(compartment.leakRate * fixed_seconds, totalMass)
+            if leaked > 0 and totalMass > 0 then
+                local leakedOxygen = leaked * compartment.oxygen / totalMass
+                local leakedNitrogen = leaked * compartment.nitrogen / totalMass
+                local leakedCarbonDioxide = leaked * compartment.carbonDioxide / totalMass
+                local leakedWaterVapour = leaked * compartment.waterVapour / totalMass
+                compartment.oxygen = compartment.oxygen - leakedOxygen
+                compartment.nitrogen = compartment.nitrogen - leakedNitrogen
+                compartment.carbonDioxide = compartment.carbonDioxide - leakedCarbonDioxide
+                compartment.waterVapour = compartment.waterVapour - leakedWaterVapour
+                compartment.leakOxygen = compartment.leakOxygen + leakedOxygen
+                compartment.leakNitrogen = compartment.leakNitrogen + leakedNitrogen
+                compartment.leakCarbonDioxide = compartment.leakCarbonDioxide + leakedCarbonDioxide
+                compartment.leakWaterVapour = compartment.leakWaterVapour + leakedWaterVapour
+            end
+            compartment.leaked = compartment.leaked + leaked
+            -- Thermal integration on the authored effective capacity:
+            -- occupant sensible heat, condensation latent heat and the
+            -- heat-only reservoir exchange. The reservoir books the
+            -- exact negation in applyThermal.
+            local occupantHeat = occupants * compartment.sensibleHeat * metabolicFraction
+            local latentHeat = condensed * LATENT_HEAT_VAPORIZATION / fixed_seconds
+            local exchange = 0
+            if compartment.reservoir then
+                exchange = compartment.conductance
+                    * (compartment.reservoir.temperature - compartment.temperature)
+                compartment.reservoir.atmosphereHeat =
+                    (compartment.reservoir.atmosphereHeat or 0) - exchange
+            end
+            compartment.temperature = compartment.temperature
+                + (occupantHeat + latentHeat + exchange) * fixed_seconds / compartment.capacity
+            compartment.occupantHeatKJ = compartment.occupantHeatKJ + occupantHeat * fixed_seconds
+            compartment.latentHeatKJ = compartment.latentHeatKJ + latentHeat * fixed_seconds
+            compartment.exchangedKJ = compartment.exchangedKJ + exchange * fixed_seconds
+        end
+    end
     local function applyTransfers(self, fixed_seconds)
         for _, index in ipairs(self.order) do
             local transfer = self.transfers[index]
@@ -1938,6 +2249,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- the generator booked waste, startup dissipation and decay heat
         -- here in applyPower, and the reservoir integrates it as its own
         -- ledger term.
+        -- Compartment exchange enters the host reservoir exactly once
+        -- (#400): the compartment booked its gained heat in
+        -- applyAtmospheres and left the exact negation here, so the
+        -- heat-only crossing is one exchange accounted on each side.
         for _, reservoir in ipairs(self.reservoirs) do
             local capacity = reservoir.capacity
             local temperatureK = reservoir.temperature + KELVIN_OFFSET
@@ -1946,7 +2261,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local condenser = condenserByReservoir[reservoir] or 0
             local generatorHeat = reservoir.generatorHeat or 0
             reservoir.generatorHeat = 0
-            local heatIn = reservoir.absorbedKW + routed + loopHeat + condenser + generatorHeat
+            local atmosphereHeat = reservoir.atmosphereHeat or 0
+            reservoir.atmosphereHeat = 0
+            local heatIn = reservoir.absorbedKW + routed + loopHeat + condenser
+                + generatorHeat + atmosphereHeat
             local rejected = 0
             local minSink = reservoir.temperature
             local maxSink = reservoir.temperature
@@ -1991,6 +2309,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             reservoir.loopKJ = (reservoir.loopKJ or 0) + loopHeat * fixed_seconds
             reservoir.condenserKJ = (reservoir.condenserKJ or 0) + condenser * fixed_seconds
             reservoir.generatorKJ = (reservoir.generatorKJ or 0) + generatorHeat * fixed_seconds
+            reservoir.atmosphereKJ = (reservoir.atmosphereKJ or 0) + atmosphereHeat * fixed_seconds
             reservoir.rejectedKJ = reservoir.rejectedKJ + rejected * fixed_seconds
             reservoir.temperature = newTemperature
             -- Declared service limits are reported as crossings, never
@@ -2012,6 +2331,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local bound = BALANCE_TOLERANCE * math.max(1, math.abs(startingEnergy))
             local residual = startingEnergy + reservoir.absorbedKJ + reservoir.routedKJ
                 + (reservoir.loopKJ or 0) + (reservoir.condenserKJ or 0) + (reservoir.generatorKJ or 0)
+                + (reservoir.atmosphereKJ or 0)
                 - reservoir.rejectedKJ
                 - reservoir.capacity * reservoir.temperature
             assert(residual == residual and math.abs(residual) <= bound,
@@ -2100,6 +2420,82 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 "generator '" .. gen.id .. "' ran while its cooling interface was unqualified")
         end
     end
+    -- Atmosphere containment ledger (#400): per-component closure and
+    -- thermal closure within the declared tolerance, mirroring the host
+    -- audit. A residual beyond it means gas vanished or appeared without
+    -- a booked pathway - an unexplained disposal, a conservation
+    -- violation, never a silent rounding.
+    local function checkAtmospheres(self)
+        for _, compartment in ipairs(self.atmospheres) do
+            local startingTotal = compartment.startingOxygen + compartment.startingNitrogen
+                + compartment.startingCarbonDioxide + compartment.startingWaterVapour
+            local bound = BALANCE_TOLERANCE * math.max(1, startingTotal)
+            assert(compartment.oxygen >= -bound and compartment.nitrogen >= -bound
+                and compartment.carbonDioxide >= -bound and compartment.waterVapour >= -bound,
+                "atmosphere '" .. compartment.id .. "' gas inventory went negative")
+            local closures = {
+                { 'oxygen', compartment.startingOxygen, 0,
+                    compartment.oxygenConsumed + compartment.leakOxygen
+                        + compartment.cycleOxygen,
+                    compartment.oxygen },
+                { 'nitrogen', compartment.startingNitrogen, 0,
+                    compartment.leakNitrogen + compartment.cycleNitrogen,
+                    compartment.nitrogen },
+                { 'carbonDioxide', compartment.startingCarbonDioxide, compartment.co2Produced,
+                    compartment.leakCarbonDioxide + compartment.cycleCarbonDioxide,
+                    compartment.carbonDioxide },
+                { 'waterVapour', compartment.startingWaterVapour, compartment.vapourAdded,
+                    compartment.condensed + compartment.leakWaterVapour
+                        + compartment.cycleWaterVapour,
+                    compartment.waterVapour },
+            }
+            for _, closure in ipairs(closures) do
+                local residual = closure[2] + closure[3] - closure[4] - closure[5]
+                assert(residual == residual and math.abs(residual) <= bound,
+                    "atmosphere '" .. compartment.id .. "' component '" .. closure[1]
+                        .. "' conservation residual exceeds tolerance")
+            end
+            -- The airlock split closes over the removal: recovered and
+            -- lost together are exactly the mass the cycles took out of
+            -- the compartment - no unexplained disposal.
+            local cycled = compartment.cycleOxygen + compartment.cycleNitrogen
+                + compartment.cycleCarbonDioxide + compartment.cycleWaterVapour
+            local splitResidual = compartment.recovered + compartment.lost - cycled
+            assert(splitResidual == splitResidual and math.abs(splitResidual) <= bound,
+                "atmosphere '" .. compartment.id
+                    .. "' airlock recovered/lost split residual exceeds tolerance")
+            -- Thermal closure: starting + occupant heat + latent heat +
+            -- exchanged from the reservoir must equal the compartment's
+            -- current capacity x temperature within the tolerance.
+            local startingEnergy = compartment.capacity * compartment.startingTemperature
+            local thermalBound = BALANCE_TOLERANCE * math.max(1, math.abs(startingEnergy))
+            local thermalResidual = startingEnergy + compartment.occupantHeatKJ
+                + compartment.latentHeatKJ + compartment.exchangedKJ
+                - compartment.capacity * compartment.temperature
+            assert(thermalResidual == thermalResidual and math.abs(thermalResidual) <= thermalBound,
+                "atmosphere '" .. compartment.id
+                    .. "' thermal energy ledger residual exceeds tolerance")
+            local values = { compartment.temperature, compartment.oxygen,
+                compartment.nitrogen, compartment.carbonDioxide, compartment.waterVapour,
+                compartment.leaked, compartment.recovered, compartment.lost,
+                compartment.condensed, compartment.oxygenConsumed, compartment.co2Produced,
+                compartment.vapourAdded, compartment.occupantHeatKJ,
+                compartment.latentHeatKJ, compartment.exchangedKJ }
+            for _, value in ipairs(values) do
+                assert(isFinite(value),
+                    "atmosphere '" .. compartment.id .. "' value is not finite")
+            end
+        end
+        for _, cycle in ipairs(self.airlock_cycles) do
+            assert(isFinite(cycle.removedTotal) and isFinite(cycle.recoveredTotal)
+                and isFinite(cycle.lostTotal),
+                "airlock cycle '" .. cycle.id .. "' ledger is not finite")
+            local bound = BALANCE_TOLERANCE * math.max(1, math.abs(cycle.removedTotal))
+            assert(math.abs(cycle.recoveredTotal + cycle.lostTotal - cycle.removedTotal) <= bound,
+                "airlock cycle '" .. cycle.id
+                    .. "' recovered/lost totals do not close over the removed mass")
+        end
+    end
     function object:advance(world_tick, fixed_seconds)
         assert(world_tick > 0 and fixed_seconds > 0)
         checkFiniteLimits(self)
@@ -2109,6 +2505,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- host ledger order.
         applyDeliveries(self, elapsed)
         applyPower(self, elapsed, fixed_seconds)
+        -- Compartments run after the loops/chillers and before thermal
+        -- integration: the compartment exchange must land inside this
+        -- tick's reservoir integration, matching the host order (#400).
+        applyAtmospheres(self, elapsed, fixed_seconds)
         applyThermal(self, fixed_seconds)
         applyTransfers(self, fixed_seconds)
         applyConversions(self, fixed_seconds)
@@ -2116,6 +2516,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         checkConservation(self)
         checkConstituentConservation(self)
         checkThermal(self)
+        checkAtmospheres(self)
         self.ticks = self.ticks + 1
         return self.ticks
     end
@@ -2123,5 +2524,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     checkConservation(object)
     checkConstituentConservation(object)
     checkThermal(object)
+    checkAtmospheres(object)
     return object
 end

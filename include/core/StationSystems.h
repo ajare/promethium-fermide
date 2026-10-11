@@ -503,6 +503,134 @@ namespace core
 	};
 	inline constexpr size_t MaxStationBatteries{8};
 
+	// Declared atmosphere hazard classes (#400). Normal and hazardous
+	// compartments are physically segregated services: every compartment
+	// owns its own gas inventory and no process in this design moves gas
+	// between compartments, so segregation is structural - a hazardous
+	// atmosphere never mixes into a normal one and vice versa.
+	inline constexpr std::array<char const*, 2> StationAtmosphereHazardClasses{
+		"normal", "hazardous"};
+	// Declared dry gas species of a compartment atmosphere (#400). Water
+	// vapour is carried as the separate humidity term rather than as a
+	// fourth dry species, because its phase is constrained by saturation.
+	inline constexpr std::array<char const*, 3> StationAtmosphereGases{
+		"oxygen", "nitrogen", "carbonDioxide"};
+	// Molar masses in kg/mol for the tracked gases; these are constants of
+	// the declared species, not authored process coefficients.
+	inline constexpr double StationMolarMassOxygenKgPerMol{0.0319988};
+	inline constexpr double StationMolarMassNitrogenKgPerMol{0.0280134};
+	inline constexpr double StationMolarMassCarbonDioxideKgPerMol{0.0440095};
+	inline constexpr double StationMolarMassWaterKgPerMol{0.0180153};
+	// Universal gas constant in J/(mol K): the documented ideal-gas
+	// assumption behind every compartment pressure. The model treats the
+	// compartment gas as an ideal mixture at uniform temperature; no
+	// real-gas corrections are promised beyond this.
+	inline constexpr double StationUniversalGasConstantJPerMolK{8.314462618};
+	// Latent heat of vaporization of water in kJ/kg: condensation inside a
+	// compartment releases this heat into the compartment's thermal state,
+	// and evaporation would absorb it. Documented constant of the working
+	// fluid, not an authored process coefficient.
+	inline constexpr double StationLatentHeatVaporizationKJPerKg{2257.0};
+	// Ideal-gas partial pressure in kPa of a dry mass of a gas species in
+	// a volume at a temperature: p = (m / M) x R x T / V.
+	double stationAtmospherePartialPressureKPa(double massKg,
+		double molarMassKgPerMol, double volumeM3, double temperatureC);
+	// Saturation water vapour pressure in kPa over liquid water at a
+	// temperature (Magnus form): p_sat = 0.61094 x exp(17.625 t / (t +
+	// 243.04)). This is the documented vapour-capacity assumption; the
+	// compartment air holds no more vapour than this at its temperature.
+	double stationSaturationVapourPressureKPa(double temperatureC);
+	// The vapour mass in kg that saturates a volume at a temperature: the
+	// inverse of the ideal-gas partial pressure at saturation.
+	double stationSaturatedVapourMassKg(double saturationKPa,
+		double volumeM3, double temperatureC);
+	// A compartment atmosphere (#400): a finite, compartment-owned gas
+	// inventory in a fixed volume, thermally integrated on an authored
+	// effective heat capacity (the air plus its bonded structure, so a
+	// change in gas mass never silently changes the thermal model), and
+	// optionally coupled heat-only to one thermal reservoir through an
+	// authored exchanger conductance. Occupancy is an authored load
+	// assignment, never derived from World entities: the compartment's
+	// occupants and their per-person metabolic rates are configured here.
+	// Documented model assumptions: ideal-gas mixture at uniform
+	// temperature; occupancy O2 draw is capped by the oxygen actually
+	// present and CO2 production plus metabolic heat scale with the
+	// fraction of the oxygen demand actually consumed; water vapour is
+	// capped by saturation at the compartment temperature, the excess
+	// condenses immediately and its latent heat is released into the
+	// compartment (the condensate leaves the gas phase and is reported,
+	// never destroyed); leakage is a constant authored total-mass rate,
+	// capped by the inventory and composition-proportional; every gram
+	// that leaves the compartment is booked as leaked, recovered or lost -
+	// there is no unexplained disposal and no automatic cross-compartment
+	// mixing. Declared pressure and gas-quality limits are reported as
+	// crossings, never enforced by clamping the integrated state; a
+	// pressure setpoint alone never proves containment.
+	struct AtmosphereSettings
+	{
+		std::string id;
+		std::string hazardClass;      // "normal" or "hazardous"
+		double volumeM3{0.0};        // compartment volume, > 0
+		double startingOxygenKg{0.0};
+		double startingNitrogenKg{0.0};
+		double startingCarbonDioxideKg{0.0};
+		double startingWaterVapourKg{0.0};
+		double startingTemperatureC{20.0};
+		double thermalCapacityKJPerK{0.0}; // effective air + structure capacity, > 0
+		// Heat-only coupling to one thermal reservoir (#400): the
+		// compartment's air never touches the reservoir, only heat flows,
+		// through the authored conductance. An empty reservoir id leaves
+		// the compartment adiabatic. The exchange is one booking accounted
+		// once on each side: the reservoir gains the exact negation of the
+		// compartment's exchange as its own ledger term.
+		std::string reservoirId;
+		double exchangerConductanceKWPerK{0.0}; // >= 0
+		// Authored occupancy/load assignment: occupants are a configured
+		// count, never derived from World Agents in this feature.
+		int occupants{0};
+		double oxygenUsePerOccupantKgPerS{0.0};
+		double co2ProductionPerOccupantKgPerS{0.0};
+		double sensibleHeatPerOccupantKW{0.0};
+		double moistureAdditionPerOccupantKgPerS{0.0};
+		double leakRateKgPerS{0.0};  // constant total-mass leak, >= 0
+		// Declared service limits, reported as crossings, never clamped.
+		// Pressure limits must be configured 0 < min < max. A zero gas
+		// quality limit means the limit is not configured; a positive
+		// minimum oxygen partial pressure exposes a life-support need and
+		// a positive maximum CO2 partial pressure exposes an air-quality
+		// limit.
+		double minPressureKPa{0.0};
+		double maxPressureKPa{0.0};
+		double minOxygenPartialPressureKPa{0.0}; // 0 = not configured
+		double maxCarbonDioxidePartialPressureKPa{0.0}; // 0 = not configured
+		bool operator==(AtmosphereSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationAtmospheres{8};
+	// A scheduled airlock cycle over one compartment (#400): a scenario
+	// event that removes a declared gas mass from the compartment at
+	// declared simulation times, reusing the same deterministic schedule
+	// rule as resupply deliveries (occurrence time, then priority
+	// descending, then declaration order). The cycle can only remove the
+	// gas the compartment actually holds: the removal is capped by the
+	// current total mass and split composition-proportionally. The
+	// recovered fraction of what was removed is booked as recovered into
+	// the recovery receiver (accounted, retained, and not usable inside
+	// this slice); the remainder is booked as lost through the outer
+	// hatch. Recovered versus lost is therefore explicit per occurrence
+	// and cumulatively - the vent is never an unexplained disposal.
+	struct AirlockCycleSettings
+	{
+		std::string id;
+		std::string atmosphereId;
+		double gasMassKg{0.0};        // mass cycled per occurrence, > 0
+		double firstOccurrenceSeconds{0.0}; // >= 0
+		double recurrenceSeconds{0.0}; // 0 = one-off, else >= one fixed tick
+		double recoveredFraction{0.0}; // [0, 1] of the removed mass recovered
+		int priority{0};               // higher allocates first among coincidents
+		bool operator==(AirlockCycleSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationAirlockCycles{16};
+
 	struct StationSystemsSettings
 	{
 		bool enabled{false};
@@ -519,6 +647,8 @@ namespace core
 		std::vector<CoolantLoopSettings> coolantLoops;
 		std::vector<ChillerSettings> chillers;
 		std::vector<GeneratorSettings> generators;
+		std::vector<AtmosphereSettings> atmospheres;
+		std::vector<AirlockCycleSettings> airlockCycles;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// Profile shape validation and deterministic evaluation: the level of
@@ -900,6 +1030,13 @@ namespace core
 		// side of the chiller booking, so the reservoir ledger closes
 		// over exactly the terms that moved.
 		double lastCondenserHeatKW{0.0};
+		// Net heat this tick from atmosphere compartments coupled to this
+		// reservoir (#400): the reservoir side of the compartment's
+		// heat-only exchanger exchange, so the reservoir ledger closes
+		// over exactly the terms that moved. Positive is the reservoir
+		// gaining from the compartment, negative is the reservoir giving
+		// heat to a colder compartment.
+		double lastAtmosphereHeatKW{0.0};
 		// Generator heat this tick routed into this reservoir by the
 		// generators that use it as their heat sink (#399): waste heat
 		// from electrical production, startup cranking dissipation and
@@ -917,8 +1054,9 @@ namespace core
 		double loopEnergyKJ{0.0}; // cumulative net loop exchange into the reservoir
 		double condenserEnergyKJ{0.0}; // cumulative condenser heat rejected into the reservoir
 		double generatorEnergyKJ{0.0}; // cumulative generator waste/startup/decay heat into the reservoir
+		double atmosphereEnergyKJ{0.0}; // cumulative net compartment exchange into the reservoir
 		double rejectedEnergyKJ{0.0};
-		double residualKJ{0.0}; // starting + absorbed + routed + loop + condenser + generator - rejected - current
+		double residualKJ{0.0}; // starting + absorbed + routed + loop + condenser + generator + atmosphere - rejected - current
 		bool operator==(StationThermalReservoirSnapshot const&) const = default;
 	};
 	// One coolant loop as of the most recent tick (#396): the authored
@@ -1063,6 +1201,125 @@ namespace core
 		bool operator==(StationThermalSnapshot const&) const = default;
 	};
 
+	// One compartment atmosphere as of the most recent tick (#400): the
+	// authored contract beside the initial versus current gas inventory,
+	// the derived absolute and partial pressures, the humidity state, the
+	// last tick's flows through every pathway (occupancy, condensation,
+	// leakage, airlock cycling), the exposed conditions and the closing
+	// per-component and thermal ledgers. The compartment's gas ledger
+	// closes per component: starting + added - consumed/condensed/leaked/
+	// cycled must equal the current inventory within the declared
+	// tolerance, and the thermal ledger closes over occupant heat, latent
+	// heat and the reservoir exchange against capacity x temperature.
+	// Every gram that left the compartment is visible as leaked,
+	// recovered or lost - containment is proven by the ledger, not by a
+	// pressure setpoint. Limits are reported, never clamped.
+	struct StationAtmosphereSnapshot
+	{
+		std::string id;
+		std::string hazardClass;
+		std::string reservoirId;      // empty: adiabatic, no thermal coupling
+		double volumeM3{0.0};
+		double thermalCapacityKJPerK{0.0};
+		double exchangerConductanceKWPerK{0.0};
+		int occupants{0};
+		double oxygenUsePerOccupantKgPerS{0.0};
+		double co2ProductionPerOccupantKgPerS{0.0};
+		double sensibleHeatPerOccupantKW{0.0};
+		double moistureAdditionPerOccupantKgPerS{0.0};
+		double leakRateKgPerS{0.0};
+		double minPressureKPa{0.0};
+		double maxPressureKPa{0.0};
+		double minOxygenPartialPressureKPa{0.0};
+		double maxCarbonDioxidePartialPressureKPa{0.0};
+		// Initial versus current conditions.
+		double startingOxygenKg{0.0};
+		double startingNitrogenKg{0.0};
+		double startingCarbonDioxideKg{0.0};
+		double startingWaterVapourKg{0.0};
+		double startingTemperatureC{0.0};
+		double startingPressureKPa{0.0}; // derived from the starting inventory
+		double oxygenKg{0.0};
+		double nitrogenKg{0.0};
+		double carbonDioxideKg{0.0};
+		double waterVapourKg{0.0};
+		double temperatureC{0.0};
+		// Derived pressures (kPa) at the current inventory and temperature.
+		double pressureKPa{0.0};       // absolute total, sum of partials
+		double oxygenPartialPressureKPa{0.0};
+		double nitrogenPartialPressureKPa{0.0};
+		double carbonDioxidePartialPressureKPa{0.0};
+		double waterVapourPartialPressureKPa{0.0};
+		double saturationVapourPressureKPa{0.0};
+		double relativeHumidity{0.0};  // vapour partial / saturation, <= 1
+		// Last tick flows.
+		double lastOxygenDemandKg{0.0};
+		double lastOxygenConsumedKg{0.0};
+		double lastOxygenUnmetKg{0.0}; // demand the inventory could not supply
+		double lastCo2ProducedKg{0.0};
+		double lastVapourAddedKg{0.0};
+		double lastVapourCondensedKg{0.0};
+		double lastLeakedKg{0.0};
+		double lastCycleRemovedKg{0.0};
+		double lastCycleRecoveredKg{0.0};
+		double lastCycleLostKg{0.0};
+		double lastOccupantHeatKW{0.0};
+		double lastLatentHeatKW{0.0};
+		double lastExchangeIntoCompartmentKW{0.0};
+		// Conditions: reported, never clamped.
+		bool abovePressureLimit{false};
+		bool belowPressureLimit{false};
+		bool lowOxygen{false};
+		bool highCarbonDioxide{false};
+		bool condensing{false};
+		bool thermallyCoupled{false};
+		// Cumulative pathway ledger: every gram that moved, by pathway.
+		double oxygenConsumedKg{0.0};
+		double co2ProducedKg{0.0};
+		double vapourAddedKg{0.0};
+		double condensedKg{0.0};
+		double leakedKg{0.0};
+		double recoveredKg{0.0};
+		double lostKg{0.0};
+		double startingEnergyKJ{0.0};
+		double currentEnergyKJ{0.0};
+		double occupantHeatEnergyKJ{0.0};
+		double latentHeatEnergyKJ{0.0};
+		double exchangedEnergyKJ{0.0};
+		double residualKJ{0.0}; // starting + occupant + latent + exchanged - current
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationAtmosphereSnapshot const&) const = default;
+	};
+	// One scheduled airlock cycle as of the most recent tick (#400): the
+	// authored schedule beside the runtime's cycle history - what each
+	// occurrence removed from its compartment, how much was recovered
+	// into the receiver and how much was lost through the outer hatch,
+	// and when the next cycle is due. A cycle that found no gas to draw
+	// is refused whole and still counts as an occurrence, so a schedule
+	// never silently disappears.
+	struct StationAirlockCycleSnapshot
+	{
+		std::string id;
+		std::string atmosphereId;
+		double gasMassKg{0.0};
+		double firstOccurrenceSeconds{0.0};
+		double recurrenceSeconds{0.0}; // 0 = one-off
+		double recoveredFraction{0.0};
+		int priority{0};
+		uint64_t occurrencesCompleted{0};
+		double lastOccurrenceSeconds{0.0};
+		double lastRemovedKg{0.0};
+		double lastRecoveredKg{0.0};
+		double lastLostKg{0.0};
+		double removedTotal{0.0};
+		double recoveredTotal{0.0};
+		double lostTotal{0.0};
+		bool exhausted{false};
+		bool hasNextOccurrence{false};
+		double nextOccurrenceSeconds{0.0};
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationAirlockCycleSnapshot const&) const = default;
+	};
 	struct StationSystemsSnapshot
 	{
 		bool enabled{false};
@@ -1092,6 +1349,13 @@ namespace core
 		// energy ledger, with the per-class rollup in the thermal
 		// snapshot's coolingByClass.
 		std::vector<StationChillerSnapshot> chillers;
+		// The atmosphere picture (#400): per-compartment initial versus
+		// current gas inventory, absolute and partial pressures, humidity,
+		// the last tick's occupancy/leak/airlock flows and the closing
+		// per-component and thermal ledgers, plus the scheduled airlock
+		// cycle history with the recovered-versus-lost split.
+		std::vector<StationAtmosphereSnapshot> atmospheres;
+		std::vector<StationAirlockCycleSnapshot> airlockCycles;
 		// Soonest authored arrival still pending across every delivery, for
 		// the overview's "next delivery" readout (#392).
 		bool hasNextDelivery{false};

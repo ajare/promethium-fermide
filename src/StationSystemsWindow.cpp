@@ -25,14 +25,15 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		world->getSimulationTick() * static_cast<double>(core::World::getFixedTimestep()),
 		static_cast<unsigned long long>(world->getSimulationTick()));
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
-	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply, rechargeable batteries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, and chillers supplying class-matched cold services. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Thermal reservoirs integrate temperature from their effective capacity under absorbed and routed equipment heat; radiators reject heat by the Stefan-Boltzmann law at the emitting temperature against the authored sink, emissivity and view factor. A load's emitted heat is booked exactly once: routed into its class-compatible reservoir or exported directly, never both. Declared temperature limits are reported, never clamped. Coolant loops hold a finite, loop-specific coolant inventory segregated by hazard class (coolant is never potable or nutrient water); the pump circulates only the coolant the loop actually holds, so an underfilled loop flows less and a dry loop flows nothing, and the freeze-protection heater thermostats the loop up to its setpoint within its capacity. Pump work and heater heat enter the loop exactly once and reach the reservoir only through the circulation-gated heat-only exchanger; the loop draw rides the same electrical pool as external loads. Chillers supply a cold service of their declared class through a class-matched coolant-loop evaporator and reservoir condenser: the delivered duty is capped by the loop's actual circulation, gated at the chilled setpoint, and refused while the sink is at or above the maximum condensing temperature; work at the configured COP plus auxiliaries rides the same electrical pool, and condenser heat equals extracted heat plus the work and auxiliaries actually supplied, booked once. Fuelled generators convert a finite energy-unit fuel inventory into bus electrical output at the declared efficiency: output is bounded by the installed rating and the ramp limit, starting only completes once the startup energy has actually been drawn from the shared pool while the class-matched sink is below its maximum sink temperature, and after output stops the configured shutdown heat and its cooling requirement persist for the decay period; waste, startup and decay heat route exactly once into the sink and the fuel ledger closes over fuel = electrical + waste. Within a tick, generators produce first, then power allocates, then coolant loops and chillers run, then thermal integrates, then transfers, then conversions. Observation interval is a provisional display/event setting, not a separate simulation clock.");
+	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply, rechargeable batteries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, and chillers supplying class-matched cold services. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Thermal reservoirs integrate temperature from their effective capacity under absorbed and routed equipment heat; radiators reject heat by the Stefan-Boltzmann law at the emitting temperature against the authored sink, emissivity and view factor. A load's emitted heat is booked exactly once: routed into its class-compatible reservoir or exported directly, never both. Declared temperature limits are reported, never clamped. Coolant loops hold a finite, loop-specific coolant inventory segregated by hazard class (coolant is never potable or nutrient water); the pump circulates only the coolant the loop actually holds, so an underfilled loop flows less and a dry loop flows nothing, and the freeze-protection heater thermostats the loop up to its setpoint within its capacity. Pump work and heater heat enter the loop exactly once and reach the reservoir only through the circulation-gated heat-only exchanger; the loop draw rides the same electrical pool as external loads. Chillers supply a cold service of their declared class through a class-matched coolant-loop evaporator and reservoir condenser: the delivered duty is capped by the loop's actual circulation, gated at the chilled setpoint, and refused while the sink is at or above the maximum condensing temperature; work at the configured COP plus auxiliaries rides the same electrical pool, and condenser heat equals extracted heat plus the work and auxiliaries actually supplied, booked once. Fuelled generators convert a finite energy-unit fuel inventory into bus electrical output at the declared efficiency: output is bounded by the installed rating and the ramp limit, starting only completes once the startup energy has actually been drawn from the shared pool while the class-matched sink is below its maximum sink temperature, and after output stops the configured shutdown heat and its cooling requirement persist for the decay period; waste, startup and decay heat route exactly once into the sink and the fuel ledger closes over fuel = electrical + waste. Within a tick, generators produce first, then power allocates, then coolant loops and chillers run, then compartment atmospheres cycle and exchange, then thermal integrates, then transfers, then conversions. Compartment atmospheres model an ideal-gas mixture in a fixed volume: absolute and partial pressures derive from the gas inventory and temperature, humidity caps at Magnus saturation with the excess condensing and releasing its latent heat into the compartment, occupancy is an authored load assignment whose oxygen draw is capped by the inventory (CO2 and metabolic heat scale with what was actually consumed), leakage is a constant total-mass rate capped by the inventory, and scheduled airlock cycles remove authored mass with an explicit recovered-versus-lost split; every gram leaving a compartment is booked as leaked, recovered or lost, compartments never mix automatically, and declared pressure and gas-quality limits are reported, never clamped. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s)",
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s) and %zu airlock cycle(s)",
 		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
 		authored.stores.size(), authored.transfers.size(), authored.conversions.size(),
 		authored.solarArrays.size(), authored.equipmentLoads.size(), authored.batteries.size(),
 		authored.deliveries.size(), authored.thermalReservoirs.size(), authored.radiators.size(),
-		authored.coolantLoops.size(), authored.chillers.size(), authored.generators.size());
+		authored.coolantLoops.size(), authored.chillers.size(), authored.generators.size(),
+		authored.atmospheres.size(), authored.airlockCycles.size());
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
@@ -883,6 +884,150 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		}
 		mDraft.generators.push_back(std::move(generator));
 	}
+	ImGui::SeparatorText("Draft atmospheres (m3/kg/C/kPa; ideal-gas partial pressures; occupancy is an authored load assignment; vapour caps at saturation and condenses with latent heat; leak is a constant total-mass rate; limits are reported, never clamped)");
+	for (size_t index = 0; index < mDraft.atmospheres.size(); )
+	{
+		auto& atmosphere = mDraft.atmospheres[index];
+		auto const row = std::to_string(index);
+		bool removeAtmosphere = false;
+		ImGui::PushItemWidth(220);
+		char atmosphereIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(atmosphereIdBuffer, atmosphere.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Atmosphere " + row + " id").c_str(),
+			atmosphereIdBuffer, sizeof(atmosphereIdBuffer)))
+			atmosphere.id = atmosphereIdBuffer;
+		char hazardBuffer[16]{};
+		std::strncpy(hazardBuffer, atmosphere.hazardClass.c_str(), sizeof(hazardBuffer) - 1);
+		if (ImGui::InputText(("Atmosphere " + row + " hazard class").c_str(),
+			hazardBuffer, sizeof(hazardBuffer)))
+			atmosphere.hazardClass = hazardBuffer;
+		ImGui::InputDouble(("Atmosphere " + row + " volume m3").c_str(),
+			&atmosphere.volumeM3, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Atmosphere " + row + " starting oxygen kg").c_str(),
+			&atmosphere.startingOxygenKg, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Atmosphere " + row + " starting nitrogen kg").c_str(),
+			&atmosphere.startingNitrogenKg, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Atmosphere " + row + " starting CO2 kg").c_str(),
+			&atmosphere.startingCarbonDioxideKg, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Atmosphere " + row + " starting water vapour kg").c_str(),
+			&atmosphere.startingWaterVapourKg, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Atmosphere " + row + " starting temperature C").c_str(),
+			&atmosphere.startingTemperatureC, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Atmosphere " + row + " thermal capacity kJ/K").c_str(),
+			&atmosphere.thermalCapacityKJPerK, 0.0, 0.0, "%.3f");
+		char atmosphereReservoirBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(atmosphereReservoirBuffer, atmosphere.reservoirId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Atmosphere " + row + " reservoir (empty = adiabatic)").c_str(),
+			atmosphereReservoirBuffer, sizeof(atmosphereReservoirBuffer)))
+			atmosphere.reservoirId = atmosphereReservoirBuffer;
+		ImGui::InputDouble(("Atmosphere " + row + " exchanger conductance kW/K").c_str(),
+			&atmosphere.exchangerConductanceKWPerK, 0.0, 0.0, "%.4f");
+		ImGui::InputInt(("Atmosphere " + row + " occupants").c_str(),
+			&atmosphere.occupants, 1, 0);
+		ImGui::InputDouble(("Atmosphere " + row + " O2 use per occupant kg/s").c_str(),
+			&atmosphere.oxygenUsePerOccupantKgPerS, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Atmosphere " + row + " CO2 produced per occupant kg/s").c_str(),
+			&atmosphere.co2ProductionPerOccupantKgPerS, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Atmosphere " + row + " sensible heat per occupant kW").c_str(),
+			&atmosphere.sensibleHeatPerOccupantKW, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Atmosphere " + row + " moisture added per occupant kg/s").c_str(),
+			&atmosphere.moistureAdditionPerOccupantKgPerS, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Atmosphere " + row + " leak rate kg/s").c_str(),
+			&atmosphere.leakRateKgPerS, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Atmosphere " + row + " min pressure kPa").c_str(),
+			&atmosphere.minPressureKPa, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Atmosphere " + row + " max pressure kPa").c_str(),
+			&atmosphere.maxPressureKPa, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Atmosphere " + row + " min O2 partial pressure kPa").c_str(),
+			&atmosphere.minOxygenPartialPressureKPa, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Atmosphere " + row + " max CO2 partial pressure kPa").c_str(),
+			&atmosphere.maxCarbonDioxidePartialPressureKPa, 0.0, 0.0, "%.3f");
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove atmosphere " + row).c_str()))
+			removeAtmosphere = true;
+		ImGui::PopItemWidth();
+		if (removeAtmosphere)
+			mDraft.atmospheres.erase(mDraft.atmospheres.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
+	if (mDraft.atmospheres.size() < core::MaxStationAtmospheres && ImGui::Button("Add atmosphere"))
+	{
+		core::AtmosphereSettings atmosphere;
+		atmosphere.hazardClass = "normal";
+		atmosphere.volumeM3 = 100.0;
+		atmosphere.startingOxygenKg = 20.0;
+		atmosphere.startingNitrogenKg = 80.0;
+		atmosphere.startingTemperatureC = 20.0;
+		atmosphere.thermalCapacityKJPerK = 100.0;
+		atmosphere.minPressureKPa = 80.0;
+		atmosphere.maxPressureKPa = 120.0;
+		// Prefer coupling to the last drafted reservoir so a freshly
+		// drafted atmosphere is thermally live by default.
+		if (!mDraft.thermalReservoirs.empty())
+			atmosphere.reservoirId = mDraft.thermalReservoirs.back().id;
+		for (size_t candidate = mDraft.atmospheres.size() + 1;; ++candidate)
+		{
+			atmosphere.id = "compartment" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.atmospheres.begin(), mDraft.atmospheres.end(),
+				[&](core::AtmosphereSettings const& existing) { return existing.id == atmosphere.id; });
+			if (!taken) break;
+		}
+		mDraft.atmospheres.push_back(std::move(atmosphere));
+	}
+	ImGui::SeparatorText("Draft airlock cycles (kg/seconds; scheduled removals on the shared scenario schedule order; the recovered fraction is retained in the receiver, the remainder is lost through the outer hatch)");
+	for (size_t index = 0; index < mDraft.airlockCycles.size(); )
+	{
+		auto& cycle = mDraft.airlockCycles[index];
+		auto const row = std::to_string(index);
+		bool removeCycle = false;
+		ImGui::PushItemWidth(220);
+		char cycleIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(cycleIdBuffer, cycle.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Airlock cycle " + row + " id").c_str(),
+			cycleIdBuffer, sizeof(cycleIdBuffer)))
+			cycle.id = cycleIdBuffer;
+		char cycleAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(cycleAtmosphereBuffer, cycle.atmosphereId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Airlock cycle " + row + " atmosphere").c_str(),
+			cycleAtmosphereBuffer, sizeof(cycleAtmosphereBuffer)))
+			cycle.atmosphereId = cycleAtmosphereBuffer;
+		ImGui::InputDouble(("Airlock cycle " + row + " gas mass kg").c_str(),
+			&cycle.gasMassKg, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Airlock cycle " + row + " first occurrence s").c_str(),
+			&cycle.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Airlock cycle " + row + " recurrence s (0 = one-off)").c_str(),
+			&cycle.recurrenceSeconds, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Airlock cycle " + row + " recovered fraction").c_str(),
+			&cycle.recoveredFraction, 0.0, 0.0, "%.3f");
+		ImGui::InputInt(("Airlock cycle " + row + " priority").c_str(),
+			&cycle.priority, 1, 0);
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove airlock cycle " + row).c_str()))
+			removeCycle = true;
+		ImGui::PopItemWidth();
+		if (removeCycle)
+			mDraft.airlockCycles.erase(mDraft.airlockCycles.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
+	if (mDraft.airlockCycles.size() < core::MaxStationAirlockCycles && ImGui::Button("Add airlock cycle"))
+	{
+		core::AirlockCycleSettings cycle;
+		cycle.gasMassKg = 1.0;
+		cycle.recurrenceSeconds = 60.0;
+		cycle.recoveredFraction = 0.95;
+		if (!mDraft.atmospheres.empty())
+			cycle.atmosphereId = mDraft.atmospheres.back().id;
+		for (size_t candidate = mDraft.airlockCycles.size() + 1;; ++candidate)
+		{
+			cycle.id = "airlockCycle" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.airlockCycles.begin(), mDraft.airlockCycles.end(),
+				[&](core::AirlockCycleSettings const& existing) { return existing.id == cycle.id; });
+			if (!taken) break;
+		}
+		mDraft.airlockCycles.push_back(std::move(cycle));
+	}
 	bool const draftChanged = mDraft != authored;
 	ImGui::TextUnformatted(draftChanged
 		? "Draft differs from the authored start conditions."
@@ -1227,6 +1372,88 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			ImGui::Text("  cooling REQUIRED but not qualified: shutdown heat persists without a qualified sink");
 		if (!generator.blockReason.empty())
 			ImGui::Text("  blocked: %s", generator.blockReason.c_str());
+	}
+	ImGui::SeparatorText("Atmospheres (live; ideal-gas absolute and partial pressures, humidity capped by saturation, occupancy draw capped by inventory, leakage and airlock losses booked by mass; limits reported, never clamped)");
+	if (snapshot.atmospheres.empty()) ImGui::TextDisabled("No atmosphere compartments authored.");
+	for (auto const& atmosphere : snapshot.atmospheres)
+	{
+		char const* status = "idle";
+		switch (atmosphere.status)
+		{
+		case core::StationTransferStatus::Full: status = "life support met"; break;
+		case core::StationTransferStatus::Partial: status = "O2 limited"; break;
+		case core::StationTransferStatus::Rejected: status = "O2 unavailable"; break;
+		case core::StationTransferStatus::Idle: break;
+		}
+		ImGui::Text("%s [%s] -> %s: %s | pressure %.3f kPa (start %.3f) | O2 %.3f, N2 %.3f, CO2 %.3f, H2O %.3f kg (start %.3f/%.3f/%.3f/%.3f) | temp %.3f C (start %.3f C)",
+			atmosphere.id.c_str(), atmosphere.hazardClass.c_str(),
+			atmosphere.thermallyCoupled ? atmosphere.reservoirId.c_str() : "adiabatic",
+			status, atmosphere.pressureKPa, atmosphere.startingPressureKPa,
+			atmosphere.oxygenKg, atmosphere.nitrogenKg, atmosphere.carbonDioxideKg,
+			atmosphere.waterVapourKg, atmosphere.startingOxygenKg,
+			atmosphere.startingNitrogenKg, atmosphere.startingCarbonDioxideKg,
+			atmosphere.startingWaterVapourKg, atmosphere.temperatureC,
+			atmosphere.startingTemperatureC);
+		ImGui::Text("  partial pressures (kPa): O2 %.3f, N2 %.3f, CO2 %.3f, H2O %.3f | saturation %.3f kPa, RH %.1f%% | volume %.3f m3, capacity %.3f kJ/K",
+			atmosphere.oxygenPartialPressureKPa, atmosphere.nitrogenPartialPressureKPa,
+			atmosphere.carbonDioxidePartialPressureKPa, atmosphere.waterVapourPartialPressureKPa,
+			atmosphere.saturationVapourPressureKPa, atmosphere.relativeHumidity * 100.0,
+			atmosphere.volumeM3, atmosphere.thermalCapacityKJPerK);
+		ImGui::Text("  last tick: O2 consumed %.6f of %.6f kg (unmet %.6f) | CO2 produced %.6f kg | vapour added %.6f, condensed %.6f kg | leaked %.6f kg | airlock removed %.6f (recovered %.6f, lost %.6f) kg",
+			atmosphere.lastOxygenConsumedKg, atmosphere.lastOxygenDemandKg,
+			atmosphere.lastOxygenUnmetKg, atmosphere.lastCo2ProducedKg,
+			atmosphere.lastVapourAddedKg, atmosphere.lastVapourCondensedKg,
+			atmosphere.lastLeakedKg, atmosphere.lastCycleRemovedKg,
+			atmosphere.lastCycleRecoveredKg, atmosphere.lastCycleLostKg);
+		ImGui::Text("  heat: occupants %.4f kW, latent %.4f kW, reservoir exchange %+.4f kW | ledger (kJ): starting %.3f, current %.3f, occupant %.3f, latent %.3f, exchanged %.3f, residual %.9f (tolerance %.1e)",
+			atmosphere.lastOccupantHeatKW, atmosphere.lastLatentHeatKW,
+			atmosphere.lastExchangeIntoCompartmentKW, atmosphere.startingEnergyKJ,
+			atmosphere.currentEnergyKJ, atmosphere.occupantHeatEnergyKJ,
+			atmosphere.latentHeatEnergyKJ, atmosphere.exchangedEnergyKJ,
+			atmosphere.residualKJ, snapshot.balanceTolerance);
+		ImGui::Text("  cumulative (kg): consumed %.4f, CO2 %.4f, vapour added %.4f, condensed %.4f, leaked %.4f, recovered %.4f, lost %.4f",
+			atmosphere.oxygenConsumedKg, atmosphere.co2ProducedKg,
+			atmosphere.vapourAddedKg, atmosphere.condensedKg,
+			atmosphere.leakedKg, atmosphere.recoveredKg, atmosphere.lostKg);
+		if (atmosphere.abovePressureLimit)
+			ImGui::Text("  ABOVE the declared maximum pressure limit: %.3f kPa", atmosphere.maxPressureKPa);
+		if (atmosphere.belowPressureLimit)
+			ImGui::Text("  BELOW the declared minimum pressure limit: %.3f kPa", atmosphere.minPressureKPa);
+		if (atmosphere.lowOxygen)
+			ImGui::Text("  LOW OXYGEN: partial pressure below the life-support minimum %.3f kPa",
+				atmosphere.minOxygenPartialPressureKPa);
+		if (atmosphere.highCarbonDioxide)
+			ImGui::Text("  HIGH CO2: partial pressure above the air-quality maximum %.3f kPa",
+				atmosphere.maxCarbonDioxidePartialPressureKPa);
+		if (atmosphere.condensing)
+			ImGui::Text("  CONDENSING: vapour at saturation, %.6f kg condensed this tick releasing latent heat",
+				atmosphere.lastVapourCondensedKg);
+	}
+	ImGui::SeparatorText("Airlock cycles (live; scheduled removals with the recovered-versus-lost split; refusals still count as occurrences)");
+	if (snapshot.airlockCycles.empty()) ImGui::TextDisabled("No scheduled airlock cycles authored.");
+	for (auto const& cycle : snapshot.airlockCycles)
+	{
+		char const* status = "idle";
+		switch (cycle.status)
+		{
+		case core::StationTransferStatus::Full: status = "cycled"; break;
+		case core::StationTransferStatus::Partial: status = "partially-cycled"; break;
+		case core::StationTransferStatus::Rejected: status = "refused (no gas)"; break;
+		case core::StationTransferStatus::Idle: break;
+		}
+		ImGui::Text("%s -> %s: %s | last at %.3f s: removed %.4f kg (recovered %.4f, lost %.4f) | total removed %.4f (recovered %.4f, lost %.4f) | %llu occurrence(s) | priority %d",
+			cycle.id.c_str(), cycle.atmosphereId.c_str(), status,
+			cycle.lastOccurrenceSeconds, cycle.lastRemovedKg,
+			cycle.lastRecoveredKg, cycle.lastLostKg,
+			cycle.removedTotal, cycle.recoveredTotal, cycle.lostTotal,
+			static_cast<unsigned long long>(cycle.occurrencesCompleted), cycle.priority);
+		if (cycle.exhausted)
+			ImGui::Text("  one-off schedule spent: no further cycles");
+		else
+			ImGui::Text("  next cycle at %.3f s (%s)", cycle.nextOccurrenceSeconds,
+				cycle.recurrenceSeconds > 0.0
+					? ("recurring every " + std::to_string(cycle.recurrenceSeconds) + " s").c_str()
+					: "one-off");
 	}
 	for (auto const& diagnostic : world->getStationSystemsDiagnostics())
 	{

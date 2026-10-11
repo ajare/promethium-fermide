@@ -750,7 +750,17 @@ namespace core
 		// refused rather than silently dropped. Phase, output, fuel draws
 		// and the generator ledgers stay runtime-only, so load and Reset
 		// reconstruct them from the authored starting conditions.
-		serializer.writeUint32("version", 75);
+		// Version 76 adds authored compartment atmospheres and scheduled
+		// airlock cycles (#400): fixed-volume normal/hazardous gas
+		// inventories with occupancy/load assignment, leakage and the
+		// heat-only reservoir coupling, and the per-occurrence
+		// recovered-versus-lost airlock split; a pre-76 document
+		// carrying `atmospheres` or `airlockCycles` is refused rather
+		// than silently dropped. Current gas inventories, derived
+		// pressures, humidity and the containment ledgers stay runtime-
+		// only, so load and Reset reconstruct them from the authored
+		// starting conditions.
+		serializer.writeUint32("version", 76);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -1019,6 +1029,61 @@ namespace core
 					serializer.writeDouble("shutdownHeatKW", generator.shutdownHeatKW);
 					serializer.writeDouble("shutdownSeconds", generator.shutdownSeconds);
 					serializer.writeDouble("maxSinkTemperatureC", generator.maxSinkTemperatureC);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.atmospheres.empty())
+			{
+				// Authored compartment contracts only; current gas
+				// inventories, derived pressures, humidity and the
+				// containment ledgers are runtime state reconstructed on
+				// load (#400).
+				serializer.beginArray("atmospheres");
+				for (auto const& atmosphere : mStationSystemsSettings.atmospheres)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", atmosphere.id);
+					serializer.writeString("hazardClass", atmosphere.hazardClass);
+					serializer.writeDouble("volumeM3", atmosphere.volumeM3);
+					serializer.writeDouble("startingOxygenKg", atmosphere.startingOxygenKg);
+					serializer.writeDouble("startingNitrogenKg", atmosphere.startingNitrogenKg);
+					serializer.writeDouble("startingCarbonDioxideKg", atmosphere.startingCarbonDioxideKg);
+					serializer.writeDouble("startingWaterVapourKg", atmosphere.startingWaterVapourKg);
+					serializer.writeDouble("startingTemperatureC", atmosphere.startingTemperatureC);
+					serializer.writeDouble("thermalCapacityKJPerK", atmosphere.thermalCapacityKJPerK);
+					serializer.writeString("reservoirId", atmosphere.reservoirId);
+					serializer.writeDouble("exchangerConductanceKWPerK", atmosphere.exchangerConductanceKWPerK);
+					serializer.writeInt32("occupants", atmosphere.occupants);
+					serializer.writeDouble("oxygenUsePerOccupantKgPerS", atmosphere.oxygenUsePerOccupantKgPerS);
+					serializer.writeDouble("co2ProductionPerOccupantKgPerS", atmosphere.co2ProductionPerOccupantKgPerS);
+					serializer.writeDouble("sensibleHeatPerOccupantKW", atmosphere.sensibleHeatPerOccupantKW);
+					serializer.writeDouble("moistureAdditionPerOccupantKgPerS", atmosphere.moistureAdditionPerOccupantKgPerS);
+					serializer.writeDouble("leakRateKgPerS", atmosphere.leakRateKgPerS);
+					serializer.writeDouble("minPressureKPa", atmosphere.minPressureKPa);
+					serializer.writeDouble("maxPressureKPa", atmosphere.maxPressureKPa);
+					serializer.writeDouble("minOxygenPartialPressureKPa", atmosphere.minOxygenPartialPressureKPa);
+					serializer.writeDouble("maxCarbonDioxidePartialPressureKPa", atmosphere.maxCarbonDioxidePartialPressureKPa);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.airlockCycles.empty())
+			{
+				// Authored airlock cycle contracts only; fired occurrences
+				// and the removed/recovered/lost amounts are runtime state
+				// reconstructed on load (#400).
+				serializer.beginArray("airlockCycles");
+				for (auto const& cycle : mStationSystemsSettings.airlockCycles)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", cycle.id);
+					serializer.writeString("atmosphereId", cycle.atmosphereId);
+					serializer.writeDouble("gasMassKg", cycle.gasMassKg);
+					serializer.writeDouble("firstOccurrenceSeconds", cycle.firstOccurrenceSeconds);
+					serializer.writeDouble("recurrenceSeconds", cycle.recurrenceSeconds);
+					serializer.writeDouble("recoveredFraction", cycle.recoveredFraction);
+					serializer.writeInt32("priority", cycle.priority);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -1947,7 +2012,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 75)
+		if (version < 1 || version > 76)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2259,6 +2324,62 @@ namespace core
 					generator.shutdownSeconds = serializer.readDouble("shutdownSeconds");
 					generator.maxSinkTemperatureC = serializer.readDouble("maxSinkTemperatureC");
 					stationSettings.generators.push_back(std::move(generator));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("atmospheres"))
+			{
+				if (version < 76) throw SerializationException(
+					"Station atmospheres require World schema 76");
+				serializer.beginArray("atmospheres");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					AtmosphereSettings atmosphere;
+					atmosphere.id = serializer.readString("id");
+					atmosphere.hazardClass = serializer.readString("hazardClass");
+					atmosphere.volumeM3 = serializer.readDouble("volumeM3");
+					atmosphere.startingOxygenKg = serializer.readDouble("startingOxygenKg");
+					atmosphere.startingNitrogenKg = serializer.readDouble("startingNitrogenKg");
+					atmosphere.startingCarbonDioxideKg = serializer.readDouble("startingCarbonDioxideKg");
+					atmosphere.startingWaterVapourKg = serializer.readDouble("startingWaterVapourKg");
+					atmosphere.startingTemperatureC = serializer.readDouble("startingTemperatureC");
+					atmosphere.thermalCapacityKJPerK = serializer.readDouble("thermalCapacityKJPerK");
+					atmosphere.reservoirId = serializer.readString("reservoirId");
+					atmosphere.exchangerConductanceKWPerK = serializer.readDouble("exchangerConductanceKWPerK");
+					atmosphere.occupants = serializer.readInt32("occupants");
+					atmosphere.oxygenUsePerOccupantKgPerS = serializer.readDouble("oxygenUsePerOccupantKgPerS");
+					atmosphere.co2ProductionPerOccupantKgPerS = serializer.readDouble("co2ProductionPerOccupantKgPerS");
+					atmosphere.sensibleHeatPerOccupantKW = serializer.readDouble("sensibleHeatPerOccupantKW");
+					atmosphere.moistureAdditionPerOccupantKgPerS = serializer.readDouble("moistureAdditionPerOccupantKgPerS");
+					atmosphere.leakRateKgPerS = serializer.readDouble("leakRateKgPerS");
+					atmosphere.minPressureKPa = serializer.readDouble("minPressureKPa");
+					atmosphere.maxPressureKPa = serializer.readDouble("maxPressureKPa");
+					atmosphere.minOxygenPartialPressureKPa = serializer.readDouble("minOxygenPartialPressureKPa");
+					atmosphere.maxCarbonDioxidePartialPressureKPa = serializer.readDouble("maxCarbonDioxidePartialPressureKPa");
+					stationSettings.atmospheres.push_back(std::move(atmosphere));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("airlockCycles"))
+			{
+				if (version < 76) throw SerializationException(
+					"Station airlock cycles require World schema 76");
+				serializer.beginArray("airlockCycles");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					AirlockCycleSettings cycle;
+					cycle.id = serializer.readString("id");
+					cycle.atmosphereId = serializer.readString("atmosphereId");
+					cycle.gasMassKg = serializer.readDouble("gasMassKg");
+					cycle.firstOccurrenceSeconds = serializer.readDouble("firstOccurrenceSeconds");
+					cycle.recurrenceSeconds = serializer.readDouble("recurrenceSeconds");
+					cycle.recoveredFraction = serializer.readDouble("recoveredFraction");
+					cycle.priority = serializer.readInt32("priority");
+					stationSettings.airlockCycles.push_back(std::move(cycle));
 					serializer.endMap();
 				}
 				serializer.endArray();

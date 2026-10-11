@@ -144,7 +144,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 75"), 11, "version: 65");
+		text.replace(text.find("version: 76"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -2265,8 +2265,8 @@ namespace
 		auto const bundled = core::bundledStationSystemsSource();
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -2325,8 +2325,8 @@ namespace
 		// model's own audits hold.
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -4022,13 +4022,13 @@ namespace
 			auto const bundled = core::bundledStationSystemsSource();
 			core::setStationSystemsSourceLoader([bundled] {
 				return "local factory = (function()\n" + bundled + "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
 					"assert(#reservoirs == 1 and reservoirs[1].id == 'cabin'\n"
 					"\tand reservoirs[1].heatCapacityKJPerK == 100 and reservoirs[1].absorbedHeatKW == 0)\n"
 					"assert(#radiators == 1 and radiators[1].reservoir == 'cabin'\n"
 					"\tand radiators[1].areaM2 == 5000)\n"
 					"assert(#loads == 1 and loads[1].heatSinkId == 'cabin')\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
 					"assert(model.reservoirs[1].temperature == 20)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
@@ -4520,7 +4520,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
 					"assert(type(coolantLoops) == 'table' and #coolantLoops == 1, 'coolant loop descriptor crossing lost')\n"
 					"assert(coolantLoops[1].coolantCapacityKg > 0, 'corrupt coolant capacity crossing')\n"
 					"error('corrupt coolant descriptor crossing')\n"
@@ -5012,7 +5012,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
 					"assert(type(chillers) == 'table' and #chillers == 1, 'chiller descriptor crossing lost')\n"
 					"assert(chillers[1].cop > 0, 'corrupt chiller COP crossing')\n"
 					"error('corrupt chiller descriptor crossing')\n"
@@ -5498,7 +5498,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
 					"assert(type(generators) == 'table' and #generators == 1, 'generator descriptor crossing lost')\n"
 					"assert(generators[1].efficiency > 0, 'corrupt generator efficiency crossing')\n"
 					"error('corrupt generator descriptor crossing')\n"
@@ -5519,6 +5519,491 @@ namespace
 		}
 	}
 
+	// #400: compartment atmospheres - analytic ideal-gas mixtures,
+	// leakage, zero/low inventory, vapour constraints, compartment
+	// isolation, deterministic scheduled airlock losses with the
+	// recovered-versus-lost split, and heat-only thermal-reservoir
+	// coupling. All checks run through the World tick/snapshot/event/
+	// diagnostic seam and observable behaviour only.
+	void atmospheres(smoke::Context const&)
+	{
+		auto const dt = static_cast<double>(core::World::getFixedTimestep());
+		auto const approx = [](double actual, double expected, double tolerance = 1e-6)
+		{ return std::abs(actual - expected) <= tolerance; };
+		auto sawEvent = [](core::World& world, std::string const& needle)
+		{
+			for (auto const& event : world.getStationSystemsEvents())
+				if (event.message.find(needle) != std::string::npos) return true;
+			return false;
+		};
+		auto atmosphere = [](std::string const& id, std::string const& hazard,
+			double volumeM3, double oxygenKg, double nitrogenKg,
+			double carbonDioxideKg, double vapourKg, double temperatureC)
+		{
+			core::AtmosphereSettings settings;
+			settings.id = id;
+			settings.hazardClass = hazard;
+			settings.volumeM3 = volumeM3;
+			settings.startingOxygenKg = oxygenKg;
+			settings.startingNitrogenKg = nitrogenKg;
+			settings.startingCarbonDioxideKg = carbonDioxideKg;
+			settings.startingWaterVapourKg = vapourKg;
+			settings.startingTemperatureC = temperatureC;
+			settings.thermalCapacityKJPerK = 10000.0;
+			settings.minPressureKPa = 1.0;
+			settings.maxPressureKPa = 200.0;
+			settings.minOxygenPartialPressureKPa = 16.0;
+			settings.maxCarbonDioxidePartialPressureKPa = 5.0;
+			return settings;
+		};
+		auto reservoir = [](std::string const& id, double capacityKJPerK, double startingC)
+		{
+			core::ThermalReservoirSettings settings;
+			settings.id = id;
+			settings.thermalClass = "moderate";
+			settings.heatCapacityKJPerK = capacityKJPerK;
+			settings.startingTemperatureC = startingC;
+			settings.minTemperatureC = -50.0;
+			settings.maxTemperatureC = 200.0;
+			return settings;
+		};
+		auto airlockCycle = [](std::string const& id, std::string const& atmosphereId,
+			double gasMassKg, double firstSeconds, double recurrenceSeconds,
+			double recoveredFraction, int priority = 0)
+		{
+			core::AirlockCycleSettings settings;
+			settings.id = id;
+			settings.atmosphereId = atmosphereId;
+			settings.gasMassKg = gasMassKg;
+			settings.firstOccurrenceSeconds = firstSeconds;
+			settings.recurrenceSeconds = recurrenceSeconds;
+			settings.recoveredFraction = recoveredFraction;
+			settings.priority = priority;
+			return settings;
+		};
+		auto atmosConfigure = [](core::World& world,
+			std::vector<core::AtmosphereSettings> compartments,
+			std::vector<core::AirlockCycleSettings> cycles = {},
+			std::vector<core::ThermalReservoirSettings> reservoirs = {})
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.atmospheres = std::move(compartments);
+			settings.airlockCycles = std::move(cycles);
+			settings.thermalReservoirs = std::move(reservoirs);
+			auto const ok = world.configureStationSystems(settings, false, &diagnostic);
+			return std::make_pair(ok, diagnostic);
+		};
+		// Refused configurations: every malformed compartment or cycle
+		// contract is rejected before anything runs, and none of the
+		// refusals mutates the World.
+		{
+			core::World bad("AtmosphereBad", 2, 2);
+			bad.pauseSimulation(); bad.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			std::string diagnostic;
+			auto compartment = atmosphere("c", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			compartment.reservoirId = "ghost";
+			settings.atmospheres = { compartment };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("unknown thermal reservoir") != std::string::npos,
+				"compartment coupled to an unknown reservoir was accepted");
+			compartment = atmosphere("c", "toxic", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			settings.atmospheres = { compartment };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("hazard class") != std::string::npos,
+				"unknown atmosphere hazard class was accepted");
+			compartment = atmosphere("c", "normal", 0.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			settings.atmospheres = { compartment };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("volume must be finite and positive") != std::string::npos,
+				"zero compartment volume was accepted");
+			compartment = atmosphere("c", "normal", 100.0, -1.0, 80.0, 0.0, 0.0, 20.0);
+			settings.atmospheres = { compartment };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("starting gas masses") != std::string::npos,
+				"negative starting gas mass was accepted");
+			compartment = atmosphere("c", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, -300.0);
+			settings.atmospheres = { compartment };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("above absolute zero") != std::string::npos,
+				"a sub-absolute-zero compartment temperature was accepted");
+			compartment = atmosphere("c", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			compartment.thermalCapacityKJPerK = 0.0;
+			settings.atmospheres = { compartment };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("thermal capacity must be finite and positive") != std::string::npos,
+				"zero effective thermal capacity was accepted");
+			compartment = atmosphere("c", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			compartment.minPressureKPa = 150.0;
+			compartment.maxPressureKPa = 100.0;
+			settings.atmospheres = { compartment };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("min below max") != std::string::npos,
+				"inverted pressure limits were accepted");
+			compartment = atmosphere("c", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			compartment.occupants = -1;
+			settings.atmospheres = { compartment };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("occupant count") != std::string::npos,
+				"a negative occupant count was accepted");
+			compartment = atmosphere("c", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			compartment.leakRateKgPerS = -0.1;
+			settings.atmospheres = { compartment };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("leak rate") != std::string::npos,
+				"a negative leak rate was accepted");
+			settings.atmospheres = { atmosphere("c", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0) };
+			settings.airlockCycles = { airlockCycle("x", "ghost", 1.0, 0.0, 60.0, 0.5) };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("unknown atmosphere compartment") != std::string::npos,
+				"an airlock cycle on an unknown compartment was accepted");
+			settings.airlockCycles = { airlockCycle("x", "c", 0.0, 0.0, 60.0, 0.5) };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("cycled gas mass must be finite and positive") != std::string::npos,
+				"a zero cycled gas mass was accepted");
+			settings.airlockCycles = { airlockCycle("x", "c", 1.0, 0.0, 60.0, 1.5) };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("recovered fraction") != std::string::npos,
+				"a recovered fraction above one was accepted");
+			settings.airlockCycles = { airlockCycle("x", "c", 1.0, 0.0, dt * 0.5, 0.5) };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("at least one World fixed tick") != std::string::npos,
+				"an airlock recurrence faster than one fixed tick was accepted");
+			std::vector<core::AtmosphereSettings> tooMany;
+			for (size_t index = 0; index <= core::MaxStationAtmospheres; ++index)
+				tooMany.push_back(atmosphere("c" + std::to_string(index), "normal",
+					100.0, 20.0, 80.0, 0.0, 0.0, 20.0));
+			settings.airlockCycles = {};
+			settings.atmospheres = tooMany;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("limited to") != std::string::npos,
+				"more than the declared compartment budget was accepted");
+			require(!bad.getStationSystemsSnapshot().enabled && bad.getSimulationTick() == 0,
+				"a refused atmosphere configuration mutated the World");
+		}
+		// Analytic mixture: absolute pressure is the sum of the ideal-gas
+		// partial pressures, each derived from the declared mass, molar
+		// mass, volume and temperature. With no flows configured the
+		// starting derived pressure is also the current pressure.
+		{
+			core::World world("AtmosphereAnalytic", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(atmosConfigure(world, { atmosphere("lab", "normal",
+				100.0, 23.2, 79.0, 1.0, 0.5, 20.0) }).first, "analytic atmosphere refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(1), "analytic run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.atmospheres.size() == 1, "compartment missing from snapshot");
+			auto const& lab = snap.atmospheres[0];
+			auto const expectedOxygen = 23.2 / 0.0319988 * 8.314462618 * 293.15 / 100.0 / 1000.0;
+			auto const expectedNitrogen = 79.0 / 0.0280134 * 8.314462618 * 293.15 / 100.0 / 1000.0;
+			auto const expectedCo2 = 1.0 / 0.0440095 * 8.314462618 * 293.15 / 100.0 / 1000.0;
+			auto const expectedVapour = 0.5 / 0.0180153 * 8.314462618 * 293.15 / 100.0 / 1000.0;
+			require(approx(lab.oxygenPartialPressureKPa, expectedOxygen, 1e-9),
+				"oxygen partial pressure does not match the ideal-gas law");
+			require(approx(lab.nitrogenPartialPressureKPa, expectedNitrogen, 1e-9),
+				"nitrogen partial pressure does not match the ideal-gas law");
+			require(approx(lab.carbonDioxidePartialPressureKPa, expectedCo2, 1e-9),
+				"carbon dioxide partial pressure does not match the ideal-gas law");
+			require(approx(lab.waterVapourPartialPressureKPa, expectedVapour, 1e-9),
+				"water vapour partial pressure does not match the ideal-gas law");
+			require(approx(lab.pressureKPa,
+				expectedOxygen + expectedNitrogen + expectedCo2 + expectedVapour, 1e-9),
+				"absolute pressure is not the sum of the partial pressures");
+			require(approx(lab.startingPressureKPa, lab.pressureKPa, 1e-9),
+				"starting pressure differs from current with no flows configured");
+			require(approx(lab.relativeHumidity,
+				expectedVapour / lab.saturationVapourPressureKPa, 1e-9),
+				"relative humidity does not match the vapour/saturation ratio");
+			require(lab.relativeHumidity <= 1.0 + 1e-9, "relative humidity above saturation");
+			require(std::abs(lab.residualKJ) < 1e-6, "compartment thermal ledger not closed at start");
+		}
+		// Leakage: a constant total-mass rate, composition-proportional,
+		// capped by the inventory, booked as explicit leaked mass with
+		// the per-component ledger closing.
+		{
+			core::World world("AtmosphereLeak", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto compartment = atmosphere("hold", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			compartment.leakRateKgPerS = 0.06;
+			require(atmosConfigure(world, { compartment }).first, "leaky atmosphere refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(600), "leak run failed");
+			auto const& hold = world.getStationSystemsSnapshot().atmospheres[0];
+			auto const leakedExpected = 0.06 * 600.0 * dt;
+			require(approx(hold.leakedKg, leakedExpected, 1e-9),
+				"leaked mass does not match the authored rate times elapsed time");
+			require(approx(hold.oxygenKg + hold.nitrogenKg, 100.0 - leakedExpected, 1e-9),
+				"remaining gas mass does not close over the leak");
+			// Composition-proportional: the oxygen fraction is unchanged.
+			auto const fraction = hold.oxygenKg / (hold.oxygenKg + hold.nitrogenKg);
+			require(approx(fraction, 0.2, 1e-9),
+				"leak did not preserve the gas composition proportionally");
+			require(hold.pressureKPa < hold.startingPressureKPa,
+				"pressure did not fall as the compartment leaked");
+		}
+		// A leak larger than the inventory drains the compartment to
+		// empty and never below: the leak is capped by what is there.
+		{
+			core::World world("AtmosphereDrain", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto compartment = atmosphere("tiny", "normal", 10.0, 0.3, 0.2, 0.0, 0.0, 20.0);
+			compartment.leakRateKgPerS = 1.0;
+			require(atmosConfigure(world, { compartment }).first, "draining atmosphere refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(600), "drain run failed");
+			auto const& tiny = world.getStationSystemsSnapshot().atmospheres[0];
+			require(std::abs(tiny.oxygenKg) < 1e-9 && std::abs(tiny.nitrogenKg) < 1e-9,
+				"the leak did not drain the compartment to empty");
+			require(approx(tiny.leakedKg, 0.5, 1e-9),
+				"leaked mass does not equal the whole starting inventory");
+			require(approx(tiny.pressureKPa, 0.0, 1e-9),
+				"an empty compartment still reports pressure");
+		}
+		// Zero/low inventory: the occupancy oxygen draw is capped by the
+		// oxygen actually present, the shortfall stays visible as unmet
+		// demand, and CO2 production scales with what was consumed.
+		{
+			core::World world("AtmosphereStarved", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto compartment = atmosphere("small", "normal", 100.0, 0.01, 80.0, 0.0, 0.0, 20.0);
+			compartment.occupants = 10;
+			compartment.oxygenUsePerOccupantKgPerS = 0.001;
+			compartment.co2ProductionPerOccupantKgPerS = 0.001;
+			compartment.sensibleHeatPerOccupantKW = 0.1;
+			require(atmosConfigure(world, { compartment }).first, "starved atmosphere refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(120), "starved run failed");
+			auto const& small = world.getStationSystemsSnapshot().atmospheres[0];
+			require(std::abs(small.oxygenKg) < 1e-9, "oxygen draw went below zero inventory");
+			require(small.lastOxygenUnmetKg > 0.0,
+				"the oxygen shortfall is not visible as unmet demand");
+			// CO2 produced must never exceed the oxygen consumed: a
+			// starved compartment cannot breathe out more than it breathed in.
+			require(small.co2ProducedKg <= small.oxygenConsumedKg + 1e-9,
+				"CO2 production exceeded oxygen consumption under starvation");
+			require(small.status == core::StationTransferStatus::Rejected
+				|| small.status == core::StationTransferStatus::Partial,
+				"a starved compartment does not report its life-support shortfall");
+			require(sawEvent(world, "life-support minimum"),
+				"the low-oxygen condition was never announced");
+		}
+		// Vapour constraint: vapour above saturation condenses down to
+		// the saturation mass, the latent heat warms the compartment, and
+		// the condensate is reported rather than destroyed.
+		{
+			core::World world("AtmosphereVapour", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			// 3 kg of vapour in 100 m3 at 20 C is far above the ~1.7 kg
+			// saturation mass.
+			require(atmosConfigure(world, { atmosphere("steam", "normal",
+				100.0, 20.0, 80.0, 0.0, 3.0, 20.0) }).first, "vapour compartment refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(1), "vapour run failed");
+			auto const& steam = world.getStationSystemsSnapshot().atmospheres[0];
+			auto const saturationKPa = core::stationSaturationVapourPressureKPa(20.0);
+			auto const saturatedMass = core::stationSaturatedVapourMassKg(saturationKPa, 100.0, 20.0);
+			require(steam.condensedKg > 0.0, "supersaturated vapour did not condense");
+			require(steam.waterVapourKg <= saturatedMass + 1e-9,
+				"vapour stayed above the saturation mass");
+			require(steam.temperatureC > 20.0,
+				"condensation latent heat did not warm the compartment");
+			require(steam.condensing, "condensation condition not exposed");
+			require(sawEvent(world, "condensing"), "condensation onset not announced");
+			require(steam.relativeHumidity <= 1.0 + 1e-9,
+				"relative humidity above saturation after condensation");
+			// The vapour ledger closes: starting = current + condensed.
+			require(approx(3.0, steam.waterVapourKg + steam.condensedKg, 1e-9),
+				"the vapour ledger does not close over condensation");
+		}
+		// Compartment isolation: a leaking, cycled compartment never
+		// moves a gram into its neighbour - normal and hazardous
+		// atmospheres are segregated by construction.
+		{
+			core::World world("AtmosphereIsolation", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto leaking = atmosphere("normalSide", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			leaking.leakRateKgPerS = 0.06;
+			auto const neighbour = atmosphere("hazardSide", "hazardous", 100.0, 15.0, 85.0, 0.0, 0.0, 20.0);
+			require(atmosConfigure(world, { leaking, neighbour },
+				{ airlockCycle("vent", "normalSide", 1.0, 1.0, 0.0, 0.5) }).first,
+				"isolation pair refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(600), "isolation run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.atmospheres.size() == 2, "isolation pair lost a compartment");
+			auto const& hazard = snap.atmospheres[1];
+			require(approx(hazard.oxygenKg, 15.0, 1e-12)
+				&& approx(hazard.nitrogenKg, 85.0, 1e-12)
+				&& approx(hazard.leakedKg, 0.0, 1e-12)
+				&& approx(hazard.recoveredKg, 0.0, 1e-12)
+				&& approx(hazard.lostKg, 0.0, 1e-12),
+				"the neighbouring compartment was touched by the other's leak or cycle");
+			require(approx(hazard.pressureKPa, hazard.startingPressureKPa, 1e-12),
+				"the neighbouring compartment pressure moved without any process");
+		}
+		// Deterministic scheduled airlock losses: occurrences fire on
+	// schedule with the recovered-versus-lost split, a partial cycle
+		// when the compartment cannot supply the full mass, a refusal
+		// when it holds nothing, and a reset replays the whole scenario
+		// identically.
+		{
+			core::World world("AtmosphereAirlock", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(atmosConfigure(world,
+				{ atmosphere("dock", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0),
+				  atmosphere("stub", "hazardous", 10.0, 0.4, 0.1, 0.0, 0.0, 20.0) },
+				{ airlockCycle("crew", "dock", 1.0, 10.0, 5.0, 0.9),
+				  airlockCycle("last", "stub", 10.0, 5.0, 0.0, 0.5) }).first,
+				"airlock scenario refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(1800), "airlock scenario run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.airlockCycles.size() == 2, "airlock cycles missing from snapshot");
+			auto const& crew = snap.airlockCycles[0];
+			// Occurrences every 5 s from 10 s: at 10, 15, 20, 25 and 30 s
+			// inside the 30-second (1800-tick) run.
+			require(crew.occurrencesCompleted == 5,
+				"the recurring airlock cycle did not fire the expected occurrences");
+			require(approx(crew.removedTotal, 5.0, 1e-9),
+				"the recurring cycle did not remove the scheduled mass");
+			require(approx(crew.recoveredTotal, 4.5, 1e-9),
+				"the recovered total does not match the authored fraction");
+			require(approx(crew.lostTotal, 0.5, 1e-9),
+				"the lost total does not match the removal minus recovery");
+			auto const& last = snap.airlockCycles[1];
+			require(last.occurrencesCompleted == 1 && last.exhausted,
+				"the one-off airlock cycle did not complete and exhaust");
+			// The stub holds 0.5 kg; the 10 kg cycle removes what is
+			// there and reports the partial.
+			require(approx(last.lastRemovedKg, 0.5, 1e-9),
+				"the one-off cycle did not remove the capped partial mass");
+			require(last.status == core::StationTransferStatus::Partial,
+				"a capped cycle does not report a partial status");
+			require(approx(snap.atmospheres[1].oxygenKg, 0.0, 1e-9)
+				&& approx(snap.atmospheres[1].nitrogenKg, 0.0, 1e-9),
+				"the capped cycle left mass behind that it said it removed");
+			require(approx(snap.atmospheres[0].recoveredKg, 4.5, 1e-9)
+				&& approx(snap.atmospheres[0].lostKg, 0.5, 1e-9),
+				"the compartment recovered/lost ledger does not match the cycle history");
+			require(sawEvent(world, "Airlock cycle 'crew'")
+				&& sawEvent(world, "recovered"),
+				"airlock cycle occurrences were not announced with their split");
+			// Reset and replay: identical snapshots and events.
+			auto const expected = snap;
+			auto const expectedEvents = world.getStationSystemsEvents();
+			world.pauseSimulation();
+			world.resetSimulation();
+			require(world.getStationSystemsSnapshot().atmospheres.empty()
+				|| world.getStationSystemsSnapshot().atmospheres[0].leakedKg == 0.0,
+				"reset did not reconstruct the compartment starting state");
+			world.resumeSimulation();
+			require(world.advanceTicks(1800), "airlock replay run failed");
+			require(world.getStationSystemsSnapshot() == expected,
+				"the airlock scenario is not deterministic across reset replay");
+			require(world.getStationSystemsEvents() == expectedEvents,
+				"the airlock event history is not deterministic across reset replay");
+		}
+		// Thermal coupling: a compartment coupled to a warmer reservoir
+		// gains exactly what the reservoir loses through the heat-only
+		// exchanger; an uncoupled compartment exchanges nothing.
+		{
+			core::World world("AtmosphereThermal", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto warm = atmosphere("warmSide", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			warm.reservoirId = "bus";
+			warm.exchangerConductanceKWPerK = 2.0;
+			auto const adiabatic = atmosphere("sealed", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			require(atmosConfigure(world, { warm, adiabatic }, {},
+				{ reservoir("bus", 50000.0, 40.0) }).first, "thermal coupling refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "thermal coupling run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& warmSide = snap.atmospheres[0];
+			auto const& sealed = snap.atmospheres[1];
+			auto const& bus = snap.thermal.reservoirs[0];
+			require(warmSide.thermallyCoupled && !sealed.thermallyCoupled,
+				"coupling flags wrong on the compartment snapshots");
+			require(warmSide.temperatureC > 20.0,
+				"the coupled compartment did not warm from the warmer reservoir");
+			require(bus.temperatureC < 40.0,
+				"the reservoir did not cool by giving heat to the compartment");
+			require(approx(bus.lastAtmosphereHeatKW, -warmSide.lastExchangeIntoCompartmentKW, 1e-9),
+				"the reservoir did not book the exact negation of the compartment exchange");
+			require(std::abs(warmSide.residualKJ) < 1e-6
+				&& std::abs(bus.residualKJ) < 1e-6,
+				"the compartment or reservoir energy ledger did not close");
+			require(approx(sealed.temperatureC, 20.0, 1e-12)
+				&& approx(sealed.lastExchangeIntoCompartmentKW, 0.0, 1e-12),
+				"the adiabatic compartment exchanged heat it should not have");
+			require(approx(bus.atmosphereEnergyKJ, -warmSide.exchangedEnergyKJ, 1e-6),
+				"the cumulative atmosphere exchange terms are not exact negations");
+		}
+		// The compartment's occupancy heat and the reservoir coupling
+		// both land in the same integrated thermal state, and the
+		// initial-versus-current exposure makes the drift visible.
+		{
+			core::World world("AtmosphereOccupancyHeat", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto compartment = atmosphere("crew", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0);
+			compartment.occupants = 4;
+			compartment.sensibleHeatPerOccupantKW = 0.1;
+			require(atmosConfigure(world, { compartment }).first, "occupancy heat refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(600), "occupancy heat run failed");
+			auto const& crew = world.getStationSystemsSnapshot().atmospheres[0];
+			// 4 x 0.1 kW for 10 s into 10000 kJ/K: +0.004 C.
+			require(approx(crew.temperatureC, 20.0 + 0.4 * 10.0 / 10000.0, 1e-9),
+				"occupant sensible heat did not integrate as authored");
+			require(crew.temperatureC > crew.startingTemperatureC,
+				"initial versus current temperature does not show the drift");
+			require(std::abs(crew.residualKJ) < 1e-6, "occupancy heat ledger not closed");
+		}
+		// The Lua sandbox mirror: a corrupt atmosphere descriptor crossing
+		// is contained at construction through the integrated error path.
+		{
+			core::setStationSystemsSourceLoader([] {
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+					"assert(type(atmospheres) == 'table' and #atmospheres == 1, 'atmosphere descriptor crossing lost')\n"
+					"assert(atmospheres[1].volumeM3 > 0, 'corrupt atmosphere volume crossing')\n"
+					"error('corrupt atmosphere descriptor crossing')\n"
+					"end";
+			});
+			core::World corrupt("AtmosphereCorrupt", 2, 2);
+			corrupt.pauseSimulation(); corrupt.finishBuild();
+			auto const result = atmosConfigure(corrupt,
+				{ atmosphere("c", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0) });
+			require(!result.first && result.second.find("corrupt atmosphere descriptor crossing")
+				!= std::string::npos
+				&& !corrupt.getStationSystemsSnapshot().enabled,
+				"corrupt atmosphere sandbox crossing not contained at construction");
+			core::setStationSystemsSourceLoader({});
+		}
+		// A corrupt airlock cycle crossing is contained the same way.
+		{
+			core::setStationSystemsSourceLoader([] {
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+					"assert(type(airlockCycles) == 'table' and #airlockCycles == 1, 'airlock cycle descriptor crossing lost')\n"
+					"error('corrupt airlock cycle descriptor crossing')\n"
+					"end";
+			});
+			core::World corrupt("AirlockCorrupt", 2, 2);
+			corrupt.pauseSimulation(); corrupt.finishBuild();
+			auto const result = atmosConfigure(corrupt,
+				{ atmosphere("c", "normal", 100.0, 20.0, 80.0, 0.0, 0.0, 20.0) },
+				{ airlockCycle("x", "c", 1.0, 0.0, 60.0, 0.5) });
+			require(!result.first && result.second.find("corrupt airlock cycle descriptor crossing")
+				!= std::string::npos
+				&& !corrupt.getStationSystemsSnapshot().enabled,
+				"corrupt airlock cycle sandbox crossing not contained at construction");
+			core::setStationSystemsSourceLoader({});
+		}
+	}
+
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power},
@@ -5531,7 +6016,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"failures", failures}};
+		{"deliveries", deliveries}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

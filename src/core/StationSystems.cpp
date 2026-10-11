@@ -70,6 +70,8 @@ namespace core
 			std::vector<CoolantLoopSettings> const* coolantLoops;
 			std::vector<ChillerSettings> const* chillers;
 			std::vector<GeneratorSettings> const* generators;
+			std::vector<AtmosphereSettings> const* atmospheres;
+			std::vector<AirlockCycleSettings> const* airlockCycles;
 			static void pushProfile(lua_State* state, ProfileSettings const& profile)
 			{
 				lua_createtable(state, 0, 3);
@@ -341,7 +343,58 @@ namespace core
 					lua_pushnumber(state, generator.maxSinkTemperatureC); lua_setfield(state, -2, "maxSinkTemperatureC");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 13, 1);
+				// Authored compartment atmosphere descriptors cross the same
+				// boundary as plain immutable values (#400); each sandbox
+				// mirrors the occupancy draw, vapour constraint, leakage,
+				// airlock cycling and thermal integration, and audits its
+				// own per-component and thermal conservation.
+				lua_createtable(state, static_cast<int>(atmospheres->size()), 0);
+				for (size_t index = 0; index < atmospheres->size(); ++index)
+				{
+					auto const& atmosphere = (*atmospheres)[index];
+					lua_createtable(state, 0, 20);
+					lua_pushstring(state, atmosphere.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, atmosphere.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
+					lua_pushnumber(state, atmosphere.volumeM3); lua_setfield(state, -2, "volumeM3");
+					lua_pushnumber(state, atmosphere.startingOxygenKg); lua_setfield(state, -2, "startingOxygenKg");
+					lua_pushnumber(state, atmosphere.startingNitrogenKg); lua_setfield(state, -2, "startingNitrogenKg");
+					lua_pushnumber(state, atmosphere.startingCarbonDioxideKg); lua_setfield(state, -2, "startingCarbonDioxideKg");
+					lua_pushnumber(state, atmosphere.startingWaterVapourKg); lua_setfield(state, -2, "startingWaterVapourKg");
+					lua_pushnumber(state, atmosphere.startingTemperatureC); lua_setfield(state, -2, "startingTemperatureC");
+					lua_pushnumber(state, atmosphere.thermalCapacityKJPerK); lua_setfield(state, -2, "thermalCapacityKJPerK");
+					lua_pushstring(state, atmosphere.reservoirId.c_str()); lua_setfield(state, -2, "reservoir");
+					lua_pushnumber(state, atmosphere.exchangerConductanceKWPerK); lua_setfield(state, -2, "exchangerConductanceKWPerK");
+					lua_pushinteger(state, atmosphere.occupants); lua_setfield(state, -2, "occupants");
+					lua_pushnumber(state, atmosphere.oxygenUsePerOccupantKgPerS); lua_setfield(state, -2, "oxygenUsePerOccupantKgPerS");
+					lua_pushnumber(state, atmosphere.co2ProductionPerOccupantKgPerS); lua_setfield(state, -2, "co2ProductionPerOccupantKgPerS");
+					lua_pushnumber(state, atmosphere.sensibleHeatPerOccupantKW); lua_setfield(state, -2, "sensibleHeatPerOccupantKW");
+					lua_pushnumber(state, atmosphere.moistureAdditionPerOccupantKgPerS); lua_setfield(state, -2, "moistureAdditionPerOccupantKgPerS");
+					lua_pushnumber(state, atmosphere.leakRateKgPerS); lua_setfield(state, -2, "leakRateKgPerS");
+					lua_pushnumber(state, atmosphere.minPressureKPa); lua_setfield(state, -2, "minPressureKPa");
+					lua_pushnumber(state, atmosphere.maxPressureKPa); lua_setfield(state, -2, "maxPressureKPa");
+					lua_pushnumber(state, atmosphere.minOxygenPartialPressureKPa); lua_setfield(state, -2, "minOxygenPartialPressureKPa");
+					lua_pushnumber(state, atmosphere.maxCarbonDioxidePartialPressureKPa); lua_setfield(state, -2, "maxCarbonDioxidePartialPressureKPa");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				// Authored airlock cycle descriptors cross the same boundary
+				// as plain immutable values (#400); each sandbox mirrors the
+				// schedule and the recovered/lost split and audits its own
+				// accounting.
+				lua_createtable(state, static_cast<int>(airlockCycles->size()), 0);
+				for (size_t index = 0; index < airlockCycles->size(); ++index)
+				{
+					auto const& cycle = (*airlockCycles)[index];
+					lua_createtable(state, 0, 7);
+					lua_pushstring(state, cycle.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, cycle.atmosphereId.c_str()); lua_setfield(state, -2, "atmosphere");
+					lua_pushnumber(state, cycle.gasMassKg); lua_setfield(state, -2, "gasMassKg");
+					lua_pushnumber(state, cycle.firstOccurrenceSeconds); lua_setfield(state, -2, "firstSeconds");
+					lua_pushnumber(state, cycle.recurrenceSeconds); lua_setfield(state, -2, "recurrenceSeconds");
+					lua_pushnumber(state, cycle.recoveredFraction); lua_setfield(state, -2, "recoveredFraction");
+					lua_pushinteger(state, cycle.priority); lua_setfield(state, -2, "priority");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 15, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -470,6 +523,31 @@ namespace core
 			level = segment.level;
 		}
 		return level;
+	}
+	double stationAtmospherePartialPressureKPa(double massKg,
+		double molarMassKgPerMol, double volumeM3, double temperatureC)
+	{
+		// p = (m / M) x R x T / V, converted from Pa to kPa. The ideal
+		// gas assumption is the documented model: every compartment
+		// pressure derives from this one formula, so an analytic mixture
+		// check can verify it directly.
+		return massKg / molarMassKgPerMol * StationUniversalGasConstantJPerMolK
+			* (temperatureC + StationCelsiusOffset) / volumeM3 / 1000.0;
+	}
+	double stationSaturationVapourPressureKPa(double temperatureC)
+	{
+		// Magnus form over liquid water: the documented vapour-capacity
+		// assumption for compartment humidity.
+		return 0.61094 * std::exp(17.625 * temperatureC / (temperatureC + 243.04));
+	}
+	double stationSaturatedVapourMassKg(double saturationKPa,
+		double volumeM3, double temperatureC)
+	{
+		// The inverse of the ideal-gas partial pressure at saturation:
+		// the water vapour mass a compartment of this volume holds at
+		// this temperature before the air cannot hold more.
+		return saturationKPa * 1000.0 * volumeM3 * StationMolarMassWaterKgPerMol
+			/ (StationUniversalGasConstantJPerMolK * (temperatureC + StationCelsiusOffset));
 	}
 	uint64_t stationScheduleOccurrencesDue(double firstOccurrenceSeconds,
 		double recurrenceSeconds, double elapsedSeconds)
@@ -1056,6 +1134,106 @@ namespace core
 				return refuse(where + " recurrence must be zero or at least one World fixed tick ("
 					+ std::to_string(World::getFixedTimestep()) + " seconds)");
 		}
+		// Compartment atmosphere contracts (#400): a fixed volume with a
+		// finite owned gas inventory, an authored effective thermal
+		// capacity, an optional heat-only reservoir coupling and an
+		// authored occupancy/load assignment. Compartments are isolated
+		// by construction - no process moves gas between them - so the
+		// hazard class is a segregation label and every pathway that can
+		// remove gas (leak, airlock cycle) must book its mass.
+		if (settings.atmospheres.size() > MaxStationAtmospheres)
+			return refuse("Station atmospheres are limited to "
+				+ std::to_string(MaxStationAtmospheres) + " entries");
+		std::set<std::string> atmosphereIds;
+		for (auto const& atmosphere : settings.atmospheres)
+		{
+			auto const where = "Station atmosphere '" + atmosphere.id + "'";
+			if (atmosphere.id.empty()) return refuse("Station atmosphere id must not be empty");
+			if (atmosphere.id.size() > MaxStationStoreIdLength)
+				return refuse("Station atmosphere id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!atmosphereIds.insert(atmosphere.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationAtmosphereHazardClasses.begin(),
+				StationAtmosphereHazardClasses.end(),
+				atmosphere.hazardClass) == StationAtmosphereHazardClasses.end())
+				return refuse(where + " has unknown atmosphere hazard class '" + atmosphere.hazardClass
+					+ "'; declared classes are: normal, hazardous");
+			if (!std::isfinite(atmosphere.volumeM3) || atmosphere.volumeM3 <= 0.0)
+				return refuse(where + " volume must be finite and positive");
+			auto const masses = {atmosphere.startingOxygenKg, atmosphere.startingNitrogenKg,
+				atmosphere.startingCarbonDioxideKg, atmosphere.startingWaterVapourKg};
+			for (auto const mass : masses)
+				if (!std::isfinite(mass) || mass < 0.0)
+					return refuse(where + " starting gas masses must all be finite and non-negative");
+			if (!std::isfinite(atmosphere.startingTemperatureC)
+				|| atmosphere.startingTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " starting temperature must be finite and above absolute zero (-273.15 C)");
+			if (!std::isfinite(atmosphere.thermalCapacityKJPerK) || atmosphere.thermalCapacityKJPerK <= 0.0)
+				return refuse(where + " effective thermal capacity must be finite and positive");
+			if (!atmosphere.reservoirId.empty())
+			{
+				auto const host = std::find_if(settings.thermalReservoirs.begin(),
+					settings.thermalReservoirs.end(),
+					[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == atmosphere.reservoirId; });
+				if (host == settings.thermalReservoirs.end())
+					return refuse(where + " is coupled to unknown thermal reservoir '" + atmosphere.reservoirId + "'");
+			}
+			if (!std::isfinite(atmosphere.exchangerConductanceKWPerK) || atmosphere.exchangerConductanceKWPerK < 0.0)
+				return refuse(where + " exchanger conductance must be finite and non-negative");
+			if (atmosphere.occupants < 0)
+				return refuse(where + " occupant count must not be negative");
+			auto const rates = {atmosphere.oxygenUsePerOccupantKgPerS,
+				atmosphere.co2ProductionPerOccupantKgPerS, atmosphere.sensibleHeatPerOccupantKW,
+				atmosphere.moistureAdditionPerOccupantKgPerS};
+			for (auto const rate : rates)
+				if (!std::isfinite(rate) || rate < 0.0)
+					return refuse(where + " per-occupant load rates must all be finite and non-negative");
+			if (!std::isfinite(atmosphere.leakRateKgPerS) || atmosphere.leakRateKgPerS < 0.0)
+				return refuse(where + " leak rate must be finite and non-negative");
+			if (!std::isfinite(atmosphere.minPressureKPa) || !std::isfinite(atmosphere.maxPressureKPa)
+				|| atmosphere.minPressureKPa <= 0.0 || atmosphere.minPressureKPa >= atmosphere.maxPressureKPa)
+				return refuse(where + " pressure limits must be finite and positive with min below max");
+			if (!std::isfinite(atmosphere.minOxygenPartialPressureKPa) || atmosphere.minOxygenPartialPressureKPa < 0.0)
+				return refuse(where + " minimum oxygen partial pressure must be finite and non-negative");
+			if (!std::isfinite(atmosphere.maxCarbonDioxidePartialPressureKPa)
+				|| atmosphere.maxCarbonDioxidePartialPressureKPa < 0.0)
+				return refuse(where + " maximum carbon dioxide partial pressure must be finite and non-negative");
+		}
+		// Scheduled airlock cycle contracts (#400): each cycle draws from
+		// one declared compartment on the shared scenario schedule rule
+		// and splits its removal into recovered and lost by the authored
+		// recovery fraction.
+		if (settings.airlockCycles.size() > MaxStationAirlockCycles)
+			return refuse("Station airlock cycles are limited to "
+				+ std::to_string(MaxStationAirlockCycles) + " entries");
+		std::set<std::string> airlockCycleIds;
+		for (auto const& cycle : settings.airlockCycles)
+		{
+			auto const where = "Station airlock cycle '" + cycle.id + "'";
+			if (cycle.id.empty()) return refuse("Station airlock cycle id must not be empty");
+			if (cycle.id.size() > MaxStationStoreIdLength)
+				return refuse("Station airlock cycle id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!airlockCycleIds.insert(cycle.id).second) return refuse(where + " id is duplicated");
+			auto const it = std::find_if(settings.atmospheres.begin(), settings.atmospheres.end(),
+				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == cycle.atmosphereId; });
+			if (it == settings.atmospheres.end())
+				return refuse(where + " draws from unknown atmosphere compartment '" + cycle.atmosphereId + "'");
+			if (!std::isfinite(cycle.gasMassKg) || cycle.gasMassKg <= 0.0)
+				return refuse(where + " cycled gas mass must be finite and positive");
+			if (!std::isfinite(cycle.firstOccurrenceSeconds) || cycle.firstOccurrenceSeconds < 0.0)
+				return refuse(where + " first occurrence must be finite and non-negative");
+			if (!std::isfinite(cycle.recurrenceSeconds) || cycle.recurrenceSeconds < 0.0)
+				return refuse(where + " recurrence must be finite and non-negative (0 is a one-off)");
+			if (cycle.recurrenceSeconds > 0.0
+				&& cycle.recurrenceSeconds + StationScheduleTolerance
+					< static_cast<double>(World::getFixedTimestep()))
+				return refuse(where + " recurrence must be zero or at least one World fixed tick ("
+					+ std::to_string(World::getFixedTimestep()) + " seconds)");
+			if (!std::isfinite(cycle.recoveredFraction) || cycle.recoveredFraction < 0.0
+				|| cycle.recoveredFraction > 1.0)
+				return refuse(where + " recovered fraction must be finite and from 0 to 1");
+		}
 		diagnostic.clear(); return true;
 	}
 	void setStationSystemsSourceLoader(StationSystemsSourceLoader loader) { sourceLoader = std::move(loader); }
@@ -1254,6 +1432,7 @@ namespace core
 			double lastLoopHeatKW{0.0};
 			double lastCondenserHeatKW{0.0};
 			double lastGeneratorHeatKW{0.0};
+			double lastAtmosphereHeatKW{0.0}; // reservoir side of the compartment exchanger this tick
 			double lastHeatInKW{0.0};
 			double lastRejectedKW{0.0};
 			double lastNetKW{0.0};
@@ -1262,6 +1441,7 @@ namespace core
 			double loopKJ{0.0};
 			double condenserKJ{0.0};
 			double generatorKJ{0.0};
+			double atmosphereKJ{0.0}; // cumulative net compartment exchange into the reservoir
 			double rejectedKJ{0.0};
 			bool lastAboveLimit{false};
 			bool lastBelowLimit{false};
@@ -1367,6 +1547,98 @@ namespace core
 			double decayHeatKJ{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
+		// The authoritative ledger of one authored compartment atmosphere
+		// (#400). The compartment owns a finite gas inventory in a fixed
+		// volume; occupancy draws oxygen capped by what is actually there
+		// and scales CO2 production and metabolic heat with the fraction
+		// consumed; water vapour is capped by saturation at the current
+		// temperature, the excess condensing and releasing its latent
+		// heat into the compartment; leakage is a constant total-mass
+		// rate capped by the inventory and split composition-
+		// proportionally. Every removal pathway books its per-component
+		// amounts so the per-component ledger closes exactly: starting +
+		// added - removed = current within the declared tolerance, and
+		// the thermal ledger closes over occupant heat, latent heat and
+		// the reservoir exchange against capacity x temperature. The
+		// compartment integrates explicitly on the fixed World tick, so
+		// the same tick sequence always integrates the same state.
+		struct AtmosphereState
+		{
+			AtmosphereSettings authored;
+			size_t reservoirIndex{SIZE_MAX}; // SIZE_MAX: adiabatic, no coupling
+			double oxygenKg{0.0};
+			double nitrogenKg{0.0};
+			double carbonDioxideKg{0.0};
+			double waterVapourKg{0.0};
+			double temperatureC{0.0};
+			double startingPressureKPa{0.0};
+			// Cumulative per-component removals by pathway, the closure
+			// terms of the per-component conservation audit.
+			double leakOxygenKg{0.0};
+			double leakNitrogenKg{0.0};
+			double leakCarbonDioxideKg{0.0};
+			double leakWaterVapourKg{0.0};
+			double cycleOxygenKg{0.0};
+			double cycleNitrogenKg{0.0};
+			double cycleCarbonDioxideKg{0.0};
+			double cycleWaterVapourKg{0.0};
+			// Cumulative pathway totals.
+			double oxygenConsumedKg{0.0};
+			double co2ProducedKg{0.0};
+			double vapourAddedKg{0.0};
+			double condensedKg{0.0};
+			double leakedKg{0.0};
+			double recoveredKg{0.0};
+			double lostKg{0.0};
+			// Thermal ledger terms.
+			double occupantHeatKJ{0.0};
+			double latentHeatKJ{0.0};
+			double exchangedKJ{0.0};
+			// Last-tick observables.
+			double lastOxygenDemandKg{0.0};
+			double lastOxygenConsumedKg{0.0};
+			double lastCo2ProducedKg{0.0};
+			double lastVapourAddedKg{0.0};
+			double lastVapourCondensedKg{0.0};
+			double lastLeakedKg{0.0};
+			double lastCycleRemovedKg{0.0};
+			double lastCycleRecoveredKg{0.0};
+			double lastCycleLostKg{0.0};
+			double lastOccupantHeatKW{0.0};
+			double lastLatentHeatKW{0.0};
+			double lastExchangeIntoCompartmentKW{0.0};
+			bool lastAbovePressure{false};
+			bool lastBelowPressure{false};
+			bool lastLowOxygen{false};
+			bool lastHighCo2{false};
+			bool lastCondensing{false};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
+		// The authoritative ledger of one scheduled airlock cycle (#400).
+		// Like a resupply delivery it is a scenario event, not a station
+		// process: occurrences are derived from the authored schedule and
+		// fire in the shared deterministic order. Each occurrence removes
+		// the authored mass capped by what the compartment holds, and
+		// splits it into recovered and lost by the authored fraction. A
+		// cycle that finds no gas is refused whole and still counts as an
+		// occurrence, so a schedule never silently disappears.
+		struct AirlockCycleState
+		{
+			AirlockCycleSettings authored;
+			size_t atmosphereIndex{0};
+			size_t declarationIndex{0};
+			uint64_t occurrencesFired{0};
+			uint64_t lastFiredTick{0};
+			double lastOccurrenceSeconds{0.0};
+			double lastRemovedKg{0.0};
+			double lastRecoveredKg{0.0};
+			double lastLostKg{0.0};
+			double removedTotal{0.0};
+			double recoveredTotal{0.0};
+			double lostTotal{0.0};
+			bool exhausted{false};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
 		std::vector<TransferState> transfers;
@@ -1380,6 +1652,8 @@ namespace core
 		std::vector<LoopState> coolantLoops;
 		std::vector<ChillerState> chillers;
 		std::vector<GeneratorState> generators;
+		std::vector<AtmosphereState> atmospheres;
+		std::vector<AirlockCycleState> airlockCycles;
 		// Competing transfers are allocated in priority order (higher first),
 		// ties resolved by declaration order: a declared deterministic order.
 		std::vector<size_t> transferOrder;
@@ -1446,6 +1720,8 @@ namespace core
 			auto const committedCoolantLoops = coolantLoops;
 			auto const committedChillers = chillers;
 			auto const committedGenerators = generators;
+			auto const committedAtmospheres = atmospheres;
+			auto const committedAirlockCycles = airlockCycles;
 			auto const committedAvailableGenerationKW = lastAvailableGenerationKW;
 			auto const committedBatteryShortfallKW = lastBatteryShortfallKW;
 			if (runLedger(tick, seconds, system, violation)) return true;
@@ -1460,6 +1736,8 @@ namespace core
 			coolantLoops = committedCoolantLoops;
 			chillers = committedChillers;
 			generators = committedGenerators;
+			atmospheres = committedAtmospheres;
+			airlockCycles = committedAirlockCycles;
 			lastAvailableGenerationKW = committedAvailableGenerationKW;
 			lastBatteryShortfallKW = committedBatteryShortfallKW;
 			return false;
@@ -1526,6 +1804,21 @@ namespace core
 			std::vector<StationGeneratorPhase> previousGeneratorPhase;
 			previousGeneratorPhase.reserve(generators.size());
 			for (auto const& generator : generators) previousGeneratorPhase.push_back(generator.phase);
+			std::vector<bool> previousAbovePressure;
+			previousAbovePressure.reserve(atmospheres.size());
+			for (auto const& atmosphere : atmospheres) previousAbovePressure.push_back(atmosphere.lastAbovePressure);
+			std::vector<bool> previousBelowPressure;
+			previousBelowPressure.reserve(atmospheres.size());
+			for (auto const& atmosphere : atmospheres) previousBelowPressure.push_back(atmosphere.lastBelowPressure);
+			std::vector<bool> previousLowOxygen;
+			previousLowOxygen.reserve(atmospheres.size());
+			for (auto const& atmosphere : atmospheres) previousLowOxygen.push_back(atmosphere.lastLowOxygen);
+			std::vector<bool> previousHighCo2;
+			previousHighCo2.reserve(atmospheres.size());
+			for (auto const& atmosphere : atmospheres) previousHighCo2.push_back(atmosphere.lastHighCo2);
+			std::vector<bool> previousCondensing;
+			previousCondensing.reserve(atmospheres.size());
+			for (auto const& atmosphere : atmospheres) previousCondensing.push_back(atmosphere.lastCondensing);
 			std::vector<double> qualified, unqualified;
 			qualified.reserve(stores.size());
 			unqualified.reserve(stores.size());
@@ -2483,6 +2776,227 @@ namespace core
 			// discharge fields the load passes used and their generation use
 			// came out of the same availableGeneration pool, so the
 			// single-pool audit downstream sees every watt.
+			// Compartment atmospheres run after the coolant loops and
+			// chillers and before thermal integration (#400): the
+			// compartment's exchange with its coupled reservoir must land
+			// inside this tick's reservoir integration, and the compartment
+			// integrates against the reservoir temperature as it stands -
+			// the same explicit-Euler discipline as the loops. Scheduled
+			// airlock cycles run first against the tick-start inventory,
+			// in the shared scenario schedule order (occurrence time, then
+			// priority descending, then declaration order), so coincident
+			// cycles from different schedules never depend on an iteration
+			// accident and each occurrence fires exactly once however many
+			// ticks an accelerated update batches together.
+			std::vector<double> atmosphereHeatByReservoir(reservoirs.size(), 0.0);
+			struct DueAirlockCycle
+			{
+				StationScenarioEventKey key;
+				uint64_t occurrence{0};
+			};
+			std::vector<DueAirlockCycle> airlockDue;
+			for (size_t index = 0; index < airlockCycles.size(); ++index)
+			{
+				auto const& cycle = airlockCycles[index];
+				if (cycle.exhausted) continue;
+				auto const due = stationScheduleOccurrencesDue(
+					cycle.authored.firstOccurrenceSeconds,
+					cycle.authored.recurrenceSeconds, elapsed);
+				for (uint64_t occurrence = cycle.occurrencesFired; occurrence < due; ++occurrence)
+				{
+					auto const when = cycle.authored.recurrenceSeconds > 0.0
+						? cycle.authored.firstOccurrenceSeconds
+							+ static_cast<double>(occurrence) * cycle.authored.recurrenceSeconds
+						: cycle.authored.firstOccurrenceSeconds;
+					airlockDue.push_back({{when, cycle.authored.priority, index}, occurrence});
+				}
+			}
+			std::sort(airlockDue.begin(), airlockDue.end(),
+				[](DueAirlockCycle const& left, DueAirlockCycle const& right)
+				{ return left.key < right.key; });
+			for (auto const& due : airlockDue)
+			{
+				auto& cycle = airlockCycles[due.key.declarationIndex];
+				auto& compartment = atmospheres[cycle.atmosphereIndex];
+				auto const totalMassKg = compartment.oxygenKg + compartment.nitrogenKg
+					+ compartment.carbonDioxideKg + compartment.waterVapourKg;
+				// The cycle can only remove the gas the compartment
+				// actually holds: the removal is capped by the current
+				// total mass and split composition-proportionally, so a
+				// cycle never invents mass and never picks a favourite
+				// species. What it removes is booked whole: the recovered
+				// fraction into the recovery receiver, the remainder as
+				// lost through the outer hatch.
+				auto const removedKg = std::min(cycle.authored.gasMassKg, totalMassKg);
+				auto const removedOxygenKg = totalMassKg > 0.0
+					? removedKg * compartment.oxygenKg / totalMassKg : 0.0;
+				auto const removedNitrogenKg = totalMassKg > 0.0
+					? removedKg * compartment.nitrogenKg / totalMassKg : 0.0;
+				auto const removedCarbonDioxideKg = totalMassKg > 0.0
+					? removedKg * compartment.carbonDioxideKg / totalMassKg : 0.0;
+				auto const removedWaterVapourKg = totalMassKg > 0.0
+					? removedKg * compartment.waterVapourKg / totalMassKg : 0.0;
+				auto const recoveredKg = removedKg * cycle.authored.recoveredFraction;
+				auto const lostKg = removedKg - recoveredKg;
+				compartment.oxygenKg -= removedOxygenKg;
+				compartment.nitrogenKg -= removedNitrogenKg;
+				compartment.carbonDioxideKg -= removedCarbonDioxideKg;
+				compartment.waterVapourKg -= removedWaterVapourKg;
+				compartment.cycleOxygenKg += removedOxygenKg;
+				compartment.cycleNitrogenKg += removedNitrogenKg;
+				compartment.cycleCarbonDioxideKg += removedCarbonDioxideKg;
+				compartment.cycleWaterVapourKg += removedWaterVapourKg;
+				compartment.recoveredKg += recoveredKg;
+				compartment.lostKg += lostKg;
+				compartment.lastCycleRemovedKg += removedKg;
+				compartment.lastCycleRecoveredKg += recoveredKg;
+				compartment.lastCycleLostKg += lostKg;
+				cycle.occurrencesFired = due.occurrence + 1;
+				cycle.lastFiredTick = tick;
+				cycle.lastOccurrenceSeconds = due.key.occurrenceSeconds;
+				cycle.lastRemovedKg = removedKg;
+				cycle.lastRecoveredKg = recoveredKg;
+				cycle.lastLostKg = lostKg;
+				cycle.removedTotal += removedKg;
+				cycle.recoveredTotal += recoveredKg;
+				cycle.lostTotal += lostKg;
+				cycle.status = removedKg <= 0.0 ? StationTransferStatus::Rejected
+					: (removedKg + StationBalanceTolerance >= cycle.authored.gasMassKg
+						? StationTransferStatus::Full : StationTransferStatus::Partial);
+				if (cycle.authored.recurrenceSeconds <= 0.0) cycle.exhausted = true;
+			}
+			// Then each compartment: occupancy draw, vapour constraint,
+			// leakage, thermal integration and derived pressures, in that
+			// documented order.
+			for (auto& compartment : atmospheres)
+			{
+				auto const dt = static_cast<double>(seconds);
+				auto const occupants = static_cast<double>(compartment.authored.occupants);
+				// Occupancy is an authored load assignment, never derived
+				// from World entities in this feature. The oxygen draw is
+				// capped by the oxygen actually present, and CO2 production
+				// plus metabolic heat scale with the fraction of the demand
+				// actually consumed - a starved compartment cannot breathe
+				// out more than it breathed in.
+				auto const oxygenDemandKg = occupants
+					* compartment.authored.oxygenUsePerOccupantKgPerS * dt;
+				auto const oxygenConsumedKg = std::min(oxygenDemandKg, compartment.oxygenKg);
+				auto const metabolicFraction = oxygenDemandKg > 0.0
+					? oxygenConsumedKg / oxygenDemandKg : 1.0;
+				auto const co2ProducedKg = occupants
+					* compartment.authored.co2ProductionPerOccupantKgPerS * dt * metabolicFraction;
+				auto const vapourAddedKg = occupants
+					* compartment.authored.moistureAdditionPerOccupantKgPerS * dt;
+				compartment.oxygenKg -= oxygenConsumedKg;
+				compartment.oxygenConsumedKg += oxygenConsumedKg;
+				compartment.carbonDioxideKg += co2ProducedKg;
+				compartment.co2ProducedKg += co2ProducedKg;
+				compartment.waterVapourKg += vapourAddedKg;
+				compartment.vapourAddedKg += vapourAddedKg;
+				// Vapour constraint at the current temperature: the air
+				// holds no more than saturation; the excess condenses now
+				// and its latent heat is released into the compartment
+				// this tick. The condensate leaves the gas phase and is
+				// reported, never destroyed; it does not re-evaporate in
+				// this slice.
+				auto const saturationKPa = stationSaturationVapourPressureKPa(compartment.temperatureC);
+				auto const saturatedMassKg = stationSaturatedVapourMassKg(
+					saturationKPa, compartment.authored.volumeM3, compartment.temperatureC);
+				auto condensedKg = 0.0;
+				if (compartment.waterVapourKg > saturatedMassKg)
+				{
+					condensedKg = compartment.waterVapourKg - saturatedMassKg;
+					compartment.waterVapourKg = saturatedMassKg;
+					compartment.condensedKg += condensedKg;
+				}
+				// Leakage: a constant authored total-mass rate capped by
+				// what the compartment holds, split composition-
+				// proportionally. The leaked mass leaves the station's
+				// account as explicit leaked material - it is never routed
+				// into another compartment, and it is never unexplained.
+				auto const totalMassKg = compartment.oxygenKg + compartment.nitrogenKg
+					+ compartment.carbonDioxideKg + compartment.waterVapourKg;
+				auto const leakedKg = std::min(compartment.authored.leakRateKgPerS * dt, totalMassKg);
+				if (leakedKg > 0.0 && totalMassKg > 0.0)
+				{
+					auto const leakedOxygenKg = leakedKg * compartment.oxygenKg / totalMassKg;
+					auto const leakedNitrogenKg = leakedKg * compartment.nitrogenKg / totalMassKg;
+					auto const leakedCarbonDioxideKg = leakedKg * compartment.carbonDioxideKg / totalMassKg;
+					auto const leakedWaterVapourKg = leakedKg * compartment.waterVapourKg / totalMassKg;
+					compartment.oxygenKg -= leakedOxygenKg;
+					compartment.nitrogenKg -= leakedNitrogenKg;
+					compartment.carbonDioxideKg -= leakedCarbonDioxideKg;
+					compartment.waterVapourKg -= leakedWaterVapourKg;
+					compartment.leakOxygenKg += leakedOxygenKg;
+					compartment.leakNitrogenKg += leakedNitrogenKg;
+					compartment.leakCarbonDioxideKg += leakedCarbonDioxideKg;
+					compartment.leakWaterVapourKg += leakedWaterVapourKg;
+				}
+				compartment.leakedKg += leakedKg;
+				// Thermal integration: occupant sensible heat, the
+				// condensation latent heat and the heat-only reservoir
+				// exchange. The exchange is booked once on each side: the
+				// reservoir gains the exact negation below, so the
+				// crossing is one exchange accounted on both sides.
+				auto const occupantHeatKW = occupants
+					* compartment.authored.sensibleHeatPerOccupantKW * metabolicFraction;
+				auto const latentHeatKW = condensedKg
+					* StationLatentHeatVaporizationKJPerKg / dt;
+				auto exchangeKW = 0.0;
+				if (compartment.reservoirIndex != SIZE_MAX)
+					exchangeKW = compartment.authored.exchangerConductanceKWPerK
+						* (reservoirs[compartment.reservoirIndex].temperatureC
+							- compartment.temperatureC);
+				if (compartment.reservoirIndex != SIZE_MAX)
+					atmosphereHeatByReservoir[compartment.reservoirIndex] -= exchangeKW;
+				compartment.temperatureC += (occupantHeatKW + latentHeatKW + exchangeKW) * dt
+					/ compartment.authored.thermalCapacityKJPerK;
+				compartment.occupantHeatKJ += occupantHeatKW * dt;
+				compartment.latentHeatKJ += latentHeatKW * dt;
+				compartment.exchangedKJ += exchangeKW * dt;
+				// Publish last-tick observables.
+				compartment.lastOxygenDemandKg = oxygenDemandKg;
+				compartment.lastOxygenConsumedKg = oxygenConsumedKg;
+				compartment.lastCo2ProducedKg = co2ProducedKg;
+				compartment.lastVapourAddedKg = vapourAddedKg;
+				compartment.lastVapourCondensedKg = condensedKg;
+				compartment.lastLeakedKg = leakedKg;
+				compartment.lastOccupantHeatKW = occupantHeatKW;
+				compartment.lastLatentHeatKW = latentHeatKW;
+				compartment.lastExchangeIntoCompartmentKW = exchangeKW;
+				// Conditions are reported, never clamped: a pressure
+				// setpoint alone never proves containment - the closing
+				// ledgers and these exposed crossings do.
+				auto const oxygenKPa = stationAtmospherePartialPressureKPa(compartment.oxygenKg,
+					StationMolarMassOxygenKgPerMol, compartment.authored.volumeM3,
+					compartment.temperatureC);
+				auto const co2KPa = stationAtmospherePartialPressureKPa(compartment.carbonDioxideKg,
+					StationMolarMassCarbonDioxideKgPerMol, compartment.authored.volumeM3,
+					compartment.temperatureC);
+				auto const vapourKPa = stationAtmospherePartialPressureKPa(compartment.waterVapourKg,
+					StationMolarMassWaterKgPerMol, compartment.authored.volumeM3,
+					compartment.temperatureC);
+				auto const totalKPa = oxygenKPa
+					+ stationAtmospherePartialPressureKPa(compartment.nitrogenKg,
+						StationMolarMassNitrogenKgPerMol, compartment.authored.volumeM3,
+						compartment.temperatureC)
+					+ co2KPa + vapourKPa;
+				compartment.lastAbovePressure = totalKPa
+					> compartment.authored.maxPressureKPa + 1e-9;
+				compartment.lastBelowPressure = totalKPa
+					< compartment.authored.minPressureKPa - 1e-9;
+				compartment.lastLowOxygen = compartment.authored.minOxygenPartialPressureKPa > 0.0
+					&& oxygenKPa < compartment.authored.minOxygenPartialPressureKPa - 1e-9;
+				compartment.lastHighCo2 = compartment.authored.maxCarbonDioxidePartialPressureKPa > 0.0
+					&& co2KPa > compartment.authored.maxCarbonDioxidePartialPressureKPa + 1e-9;
+				compartment.lastCondensing = condensedKg > 1e-12;
+				if (oxygenDemandKg > 0.0)
+					compartment.status = oxygenConsumedKg + 1e-12 >= oxygenDemandKg
+						? StationTransferStatus::Full
+						: (oxygenConsumedKg <= 1e-12
+							? StationTransferStatus::Rejected : StationTransferStatus::Partial);
+				else compartment.status = StationTransferStatus::Idle;
+			}
 			// Thermal reservoirs accumulate the heat the station actually
 			// produced this tick (#395): each reservoir's authored
 			// environmental absorption plus the equipment heat routed into
@@ -2505,8 +3019,13 @@ namespace core
 					// decay heat routed into the sink exactly once, at the
 					// same boundary the reservoir integrates.
 					auto const generatorHeatKW = generatorHeatBySink[index];
+					// Compartment exchange (#400): the reservoir side of the
+					// compartment's heat-only exchanger, the exact negation
+					// of what the compartment gained or gave up this tick.
+					auto const atmosphereHeatKW = atmosphereHeatByReservoir[index];
 					auto const heatInKW = reservoir.authored.absorbedHeatKW + routedIn[index]
-						+ loopHeatIntoReservoir[index] + condenserHeatBySink[index] + generatorHeatKW;
+						+ loopHeatIntoReservoir[index] + condenserHeatBySink[index]
+						+ generatorHeatKW + atmosphereHeatKW;
 					// Net radiative rejection at the current emitting
 					// temperature: emissivity x view factor x area x sigma
 					// x (T^4 - T_sink^4). The environmental back-radiation
@@ -2561,6 +3080,7 @@ namespace core
 					reservoir.lastLoopHeatKW = loopHeatIntoReservoir[index];
 					reservoir.lastCondenserHeatKW = condenserHeatBySink[index];
 					reservoir.lastGeneratorHeatKW = generatorHeatKW;
+					reservoir.lastAtmosphereHeatKW = atmosphereHeatKW;
 					reservoir.lastHeatInKW = heatInKW;
 					reservoir.lastRejectedKW = rejectedKW;
 					reservoir.lastNetKW = netKW;
@@ -2569,6 +3089,7 @@ namespace core
 					reservoir.loopKJ += loopHeatIntoReservoir[index] * dt;
 					reservoir.condenserKJ += condenserHeatBySink[index] * dt;
 					reservoir.generatorKJ += generatorHeatKW * dt;
+					reservoir.atmosphereKJ += atmosphereHeatKW * dt;
 					reservoir.rejectedKJ += rejectedKW * dt;
 					reservoir.temperatureC = newTemperatureC;
 					// Declared service limits are reported as crossings,
@@ -2951,6 +3472,7 @@ namespace core
 				if (!requireFinite(reservoir.lastLoopHeatKW, where + "coolant loop heat")) return false;
 				if (!requireFinite(reservoir.lastCondenserHeatKW, where + "condenser heat")) return false;
 				if (!requireFinite(reservoir.lastGeneratorHeatKW, where + "generator heat")) return false;
+				if (!requireFinite(reservoir.lastAtmosphereHeatKW, where + "atmosphere exchange")) return false;
 				if (!requireFinite(reservoir.lastHeatInKW, where + "total heat inflow")) return false;
 				if (!requireFinite(reservoir.lastRejectedKW, where + "radiator rejection")) return false;
 				if (!requireFinite(reservoir.lastNetKW, where + "net heat balance")) return false;
@@ -2959,6 +3481,7 @@ namespace core
 				if (!requireFinite(reservoir.loopKJ, where + "cumulative loop exchange energy")) return false;
 				if (!requireFinite(reservoir.condenserKJ, where + "cumulative condenser energy")) return false;
 				if (!requireFinite(reservoir.generatorKJ, where + "cumulative generator heat energy")) return false;
+				if (!requireFinite(reservoir.atmosphereKJ, where + "cumulative atmosphere exchange energy")) return false;
 				if (!requireFinite(reservoir.rejectedKJ, where + "cumulative rejected energy")) return false;
 			}
 			for (auto const& radiator : radiators)
@@ -3072,6 +3595,119 @@ namespace core
 				if (generator.phase == StationGeneratorPhase::Running
 					&& generator.lastFuelDrawKWh <= 0.0 && generator.outputKW > 1e-12)
 					return violation = where + "delivered electrical output without burning fuel", false;
+			}
+			// Atmosphere containment ledger (#400): every component of
+			// every compartment closes over its own pathways - starting +
+			// added - consumed/condensed/leaked/cycled must equal the
+			// current inventory within the declared tolerance, and the
+			// recovered-plus-lost split must equal exactly what the
+			// airlock cycles removed. A residual beyond tolerance means
+			// gas vanished or appeared without a booked pathway - an
+			// unexplained disposal, a conservation violation that fails
+			// the whole tick, never a silent rounding. The thermal ledger
+			// closes over occupant heat, latent heat and the reservoir
+			// exchange against capacity x temperature, and no derived
+			// magnitude may be non-finite.
+			system = "Atmosphere containment";
+			for (auto const& compartment : atmospheres)
+			{
+				auto const where = "atmosphere '" + compartment.authored.id + "' ";
+				if (!requireFinite(compartment.oxygenKg, where + "oxygen inventory")) return false;
+				if (!requireFinite(compartment.nitrogenKg, where + "nitrogen inventory")) return false;
+				if (!requireFinite(compartment.carbonDioxideKg, where + "carbon dioxide inventory")) return false;
+				if (!requireFinite(compartment.waterVapourKg, where + "water vapour inventory")) return false;
+				if (!requireFinite(compartment.temperatureC, where + "integrated temperature")) return false;
+				if (!requireFinite(compartment.lastOxygenDemandKg, where + "oxygen demand")) return false;
+				if (!requireFinite(compartment.lastOxygenConsumedKg, where + "oxygen consumed")) return false;
+				if (!requireFinite(compartment.lastCo2ProducedKg, where + "carbon dioxide produced")) return false;
+				if (!requireFinite(compartment.lastVapourAddedKg, where + "vapour added")) return false;
+				if (!requireFinite(compartment.lastVapourCondensedKg, where + "vapour condensed")) return false;
+				if (!requireFinite(compartment.lastLeakedKg, where + "leaked mass")) return false;
+				if (!requireFinite(compartment.lastCycleRemovedKg, where + "airlock removed mass")) return false;
+				if (!requireFinite(compartment.lastOccupantHeatKW, where + "occupant heat")) return false;
+				if (!requireFinite(compartment.lastLatentHeatKW, where + "latent heat")) return false;
+				if (!requireFinite(compartment.lastExchangeIntoCompartmentKW, where + "reservoir exchange")) return false;
+				if (!requireFinite(compartment.leakedKg, where + "cumulative leaked mass")) return false;
+				if (!requireFinite(compartment.recoveredKg, where + "cumulative recovered mass")) return false;
+				if (!requireFinite(compartment.lostKg, where + "cumulative lost mass")) return false;
+				if (!requireFinite(compartment.condensedKg, where + "cumulative condensed mass")) return false;
+				auto const startingTotalKg = compartment.authored.startingOxygenKg
+					+ compartment.authored.startingNitrogenKg
+					+ compartment.authored.startingCarbonDioxideKg
+					+ compartment.authored.startingWaterVapourKg;
+				auto const bound = StationBalanceTolerance * std::max(1.0, startingTotalKg);
+				if (compartment.oxygenKg < -bound || compartment.nitrogenKg < -bound
+					|| compartment.carbonDioxideKg < -bound || compartment.waterVapourKg < -bound)
+					return violation = where + "a gas inventory went negative", false;
+				struct ComponentClosure
+				{
+					char const* name;
+					double starting;
+					double added;
+					double removed;
+					double current;
+				};
+				std::array<ComponentClosure, 4> const closures{{
+					{"oxygen", compartment.authored.startingOxygenKg, 0.0,
+						compartment.oxygenConsumedKg + compartment.leakOxygenKg
+							+ compartment.cycleOxygenKg, compartment.oxygenKg},
+					{"nitrogen", compartment.authored.startingNitrogenKg, 0.0,
+						compartment.leakNitrogenKg + compartment.cycleNitrogenKg,
+						compartment.nitrogenKg},
+					{"carbonDioxide", compartment.authored.startingCarbonDioxideKg,
+						compartment.co2ProducedKg,
+						compartment.leakCarbonDioxideKg + compartment.cycleCarbonDioxideKg,
+						compartment.carbonDioxideKg},
+					{"waterVapour", compartment.authored.startingWaterVapourKg,
+						compartment.vapourAddedKg,
+						compartment.condensedKg + compartment.leakWaterVapourKg
+							+ compartment.cycleWaterVapourKg, compartment.waterVapourKg}}};
+				for (auto const& closure : closures)
+				{
+					auto const residual = closure.starting + closure.added
+						- closure.removed - closure.current;
+					if (!std::isfinite(residual) || std::abs(residual) > bound)
+						return violation = where + std::string(closure.name)
+							+ " conservation residual " + std::to_string(residual)
+							+ " exceeds tolerance " + std::to_string(StationBalanceTolerance), false;
+				}
+				// The airlock split closes over the removal: recovered and
+				// lost together are exactly the mass the cycles took out of
+				// the compartment - no unexplained disposal.
+				auto const cycledTotalKg = compartment.cycleOxygenKg + compartment.cycleNitrogenKg
+					+ compartment.cycleCarbonDioxideKg + compartment.cycleWaterVapourKg;
+				auto const splitResidual = compartment.recoveredKg + compartment.lostKg - cycledTotalKg;
+				if (!std::isfinite(splitResidual) || std::abs(splitResidual) > bound)
+					return violation = where + "airlock recovered/lost split residual "
+						+ std::to_string(splitResidual) + " exceeds tolerance "
+						+ std::to_string(StationBalanceTolerance), false;
+				// Thermal closure: starting + occupant heat + latent heat +
+				// exchanged from the reservoir must equal the compartment's
+				// current capacity x temperature within the declared
+				// tolerance.
+				auto const startingEnergyKJ = compartment.authored.thermalCapacityKJPerK
+					* compartment.authored.startingTemperatureC;
+				auto const thermalBound = StationBalanceTolerance
+					* std::max(1.0, std::abs(startingEnergyKJ));
+				auto const thermalResidual = startingEnergyKJ + compartment.occupantHeatKJ
+					+ compartment.latentHeatKJ + compartment.exchangedKJ
+					- compartment.authored.thermalCapacityKJPerK * compartment.temperatureC;
+				if (!std::isfinite(thermalResidual) || std::abs(thermalResidual) > thermalBound)
+					return violation = where + "thermal energy ledger residual "
+						+ std::to_string(thermalResidual) + " exceeds tolerance "
+						+ std::to_string(StationBalanceTolerance), false;
+			}
+			for (auto const& cycle : airlockCycles)
+			{
+				auto const where = "airlock cycle '" + cycle.authored.id + "' ";
+				if (!requireFinite(cycle.lastRemovedKg, where + "last removed mass")) return false;
+				if (!requireFinite(cycle.removedTotal, where + "cumulative removed mass")) return false;
+				if (!requireFinite(cycle.recoveredTotal, where + "cumulative recovered mass")) return false;
+				if (!requireFinite(cycle.lostTotal, where + "cumulative lost mass")) return false;
+				auto const bound = StationBalanceTolerance
+					* std::max(1.0, std::abs(cycle.removedTotal));
+				if (std::abs(cycle.recoveredTotal + cycle.lostTotal - cycle.removedTotal) > bound)
+					return violation = where + "recovered/lost totals do not close over the removed mass", false;
 			}
 			system = "Power allocation";
 			for (auto const& array : solarArrays)
@@ -3395,6 +4031,78 @@ namespace core
 					break;
 				}
 			}
+			// Compartment atmosphere transitions are announced so the event
+			// log records pressure excursions, life-support shortfall,
+			// air-quality exceedance and condensation onset without
+			// flooding every tick (#400). The conditions are exposed, not
+			// enforced: the compartment keeps integrating and the ledger
+			// keeps closing while the crossing stands.
+			for (size_t index = 0; index < atmospheres.size(); ++index)
+			{
+				auto const& compartment = atmospheres[index];
+				if (compartment.lastAbovePressure != previousAbovePressure[index])
+					appendBoundedEvent(events, tick, "Atmosphere '" + compartment.authored.id
+						+ " above its declared maximum pressure: "
+						+ std::to_string(compartment.authored.maxPressureKPa) + " kPa limit");
+				if (compartment.lastBelowPressure != previousBelowPressure[index])
+					appendBoundedEvent(events, tick, compartment.lastBelowPressure
+						? "Atmosphere '" + compartment.authored.id
+							+ " below its declared minimum pressure: "
+							+ std::to_string(compartment.authored.minPressureKPa) + " kPa limit"
+						: std::string("Atmosphere '") + compartment.authored.id
+							+ " back above its minimum pressure limit");
+				if (compartment.lastLowOxygen != previousLowOxygen[index])
+					appendBoundedEvent(events, tick, compartment.lastLowOxygen
+						? "Atmosphere '" + compartment.authored.id
+							+ " oxygen partial pressure below its life-support minimum: "
+							+ std::to_string(compartment.authored.minOxygenPartialPressureKPa)
+							+ " kPa limit"
+						: std::string("Atmosphere '") + compartment.authored.id
+							+ " oxygen back above its life-support minimum");
+				if (compartment.lastHighCo2 != previousHighCo2[index])
+					appendBoundedEvent(events, tick, compartment.lastHighCo2
+						? "Atmosphere '" + compartment.authored.id
+							+ " carbon dioxide partial pressure above its air-quality maximum: "
+							+ std::to_string(compartment.authored.maxCarbonDioxidePartialPressureKPa)
+							+ " kPa limit"
+						: std::string("Atmosphere '") + compartment.authored.id
+							+ " carbon dioxide back below its air-quality maximum");
+				if (compartment.lastCondensing != previousCondensing[index])
+					appendBoundedEvent(events, tick, compartment.lastCondensing
+						? "Atmosphere '" + compartment.authored.id
+							+ " at saturation: excess vapour condensing, "
+							+ std::to_string(compartment.lastVapourCondensedKg)
+							+ " kg this tick releasing latent heat"
+						: std::string("Atmosphere '") + compartment.authored.id
+							+ " no longer condensing");
+			}
+			// Airlock cycle occurrences are discrete scenario events, so
+			// every cycle is announced with its recovered-versus-lost
+			// split: the vent is an accounted exchange, never an
+			// unexplained disposal (#400).
+			for (auto const& cycle : airlockCycles)
+			{
+				if (cycle.lastFiredTick != tick) continue;
+				auto const label = "Airlock cycle '" + cycle.authored.id + "' at "
+					+ std::to_string(cycle.lastOccurrenceSeconds) + " s: ";
+				if (cycle.status == StationTransferStatus::Rejected)
+					appendBoundedEvent(events, tick, label + "refused: compartment '"
+						+ cycle.authored.atmosphereId + "' holds no gas to cycle");
+				else if (cycle.status == StationTransferStatus::Partial)
+					appendBoundedEvent(events, tick, label + "partially cycled "
+						+ std::to_string(cycle.lastRemovedKg) + " of "
+						+ std::to_string(cycle.authored.gasMassKg) + " kg from '"
+						+ cycle.authored.atmosphereId + "' (recovered "
+						+ std::to_string(cycle.lastRecoveredKg) + " kg, lost "
+						+ std::to_string(cycle.lastLostKg) + " kg); compartment "
+						"inventory could not supply the full cycle");
+				else
+					appendBoundedEvent(events, tick, label + "cycled "
+						+ std::to_string(cycle.lastRemovedKg) + " kg from '"
+						+ cycle.authored.atmosphereId + "' (recovered "
+						+ std::to_string(cycle.lastRecoveredKg) + " kg, lost "
+						+ std::to_string(cycle.lastLostKg) + " kg)");
+			}
 			// Delivery arrivals are discrete scenario events rather than a
 			// continuous per-tick service, so every arrival is announced with
 			// its own quantities: the refused remainder is the account for
@@ -3522,6 +4230,51 @@ namespace core
 			state.sinkIndex = reservoirIndex[generator.heatSinkId];
 			mImpl->generators.push_back(std::move(state));
 		}
+		// Compartments start with their authored gas inventory at their
+		// authored temperature; the starting absolute pressure is derived
+		// from the starting conditions so the snapshot can expose initial
+		// versus current state side by side (#400). The inventory is
+		// runtime state initialised from the authored values and never
+		// written back; load and Reset reconstruct it.
+		std::map<std::string, size_t> atmosphereIndex;
+		for (auto const& atmosphere : settings.atmospheres)
+		{
+			Impl::AtmosphereState state;
+			state.authored = atmosphere;
+			state.oxygenKg = atmosphere.startingOxygenKg;
+			state.nitrogenKg = atmosphere.startingNitrogenKg;
+			state.carbonDioxideKg = atmosphere.startingCarbonDioxideKg;
+			state.waterVapourKg = atmosphere.startingWaterVapourKg;
+			state.temperatureC = atmosphere.startingTemperatureC;
+			state.startingPressureKPa = stationAtmospherePartialPressureKPa(
+				atmosphere.startingOxygenKg, StationMolarMassOxygenKgPerMol,
+				atmosphere.volumeM3, atmosphere.startingTemperatureC)
+				+ stationAtmospherePartialPressureKPa(atmosphere.startingNitrogenKg,
+					StationMolarMassNitrogenKgPerMol, atmosphere.volumeM3,
+					atmosphere.startingTemperatureC)
+				+ stationAtmospherePartialPressureKPa(atmosphere.startingCarbonDioxideKg,
+					StationMolarMassCarbonDioxideKgPerMol, atmosphere.volumeM3,
+					atmosphere.startingTemperatureC)
+				+ stationAtmospherePartialPressureKPa(atmosphere.startingWaterVapourKg,
+					StationMolarMassWaterKgPerMol, atmosphere.volumeM3,
+					atmosphere.startingTemperatureC);
+			if (!atmosphere.reservoirId.empty())
+				state.reservoirIndex = reservoirIndex[atmosphere.reservoirId];
+			atmosphereIndex[atmosphere.id] = mImpl->atmospheres.size();
+			mImpl->atmospheres.push_back(std::move(state));
+		}
+		// Airlock cycle schedules start unfired: the authored first
+		// occurrence is the next cycle, and nothing is drawn before its
+		// time. Reset and load reconstruct this state, so a replay
+		// restarts every schedule from its authored beginning (#400).
+		for (auto const& cycle : settings.airlockCycles)
+		{
+			Impl::AirlockCycleState state;
+			state.authored = cycle;
+			state.atmosphereIndex = atmosphereIndex[cycle.atmosphereId];
+			state.declarationIndex = mImpl->airlockCycles.size();
+			mImpl->airlockCycles.push_back(std::move(state));
+		}
 		for (auto const& load : settings.equipmentLoads)
 		{
 			Impl::LoadState state;
@@ -3598,7 +4351,8 @@ namespace core
 				&settings.stores, &settings.transfers, &settings.conversions,
 				&settings.solarArrays, &settings.equipmentLoads, &settings.batteries,
 				&settings.deliveries, &settings.thermalReservoirs, &settings.radiators,
-				&settings.coolantLoops, &settings.chillers, &settings.generators};
+				&settings.coolantLoops, &settings.chillers, &settings.generators,
+				&settings.atmospheres, &settings.airlockCycles};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -3623,7 +4377,9 @@ namespace core
 			+ std::to_string(settings.radiators.size()) + " radiator(s), "
 			+ std::to_string(settings.coolantLoops.size()) + " coolant loop(s), "
 			+ std::to_string(settings.chillers.size()) + " chiller(s) and "
-			+ std::to_string(settings.generators.size()) + " fuelled generator(s)");
+			+ std::to_string(settings.generators.size()) + " fuelled generator(s), "
+			+ std::to_string(settings.atmospheres.size()) + " atmosphere compartment(s) and "
+			+ std::to_string(settings.airlockCycles.size()) + " scheduled airlock cycle(s)");
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
 	bool StationSystemsRuntime::advance(uint64_t tick, float seconds)
@@ -3676,7 +4432,8 @@ namespace core
 			|| !mImpl->loads.empty() || !mImpl->solarArrays.empty() || !mImpl->batteries.empty()
 			|| !mImpl->deliveries.empty() || !mImpl->reservoirs.empty()
 			|| !mImpl->coolantLoops.empty() || !mImpl->chillers.empty()
-			|| !mImpl->generators.empty())
+			|| !mImpl->generators.empty() || !mImpl->atmospheres.empty()
+			|| !mImpl->airlockCycles.empty())
 		{
 			std::string violationSystem, violation;
 			if (!mImpl->applyLedger(tick, seconds, violationSystem, violation))
@@ -3944,6 +4701,7 @@ namespace core
 			reservoirResult.lastLoopHeatKW = reservoir.lastLoopHeatKW;
 			reservoirResult.lastCondenserHeatKW = reservoir.lastCondenserHeatKW;
 			reservoirResult.lastGeneratorHeatKW = reservoir.lastGeneratorHeatKW;
+			reservoirResult.lastAtmosphereHeatKW = reservoir.lastAtmosphereHeatKW;
 			reservoirResult.lastHeatInKW = reservoir.lastHeatInKW;
 			reservoirResult.lastRejectedKW = reservoir.lastRejectedKW;
 			reservoirResult.lastNetKW = reservoir.lastNetKW;
@@ -3958,10 +4716,11 @@ namespace core
 			reservoirResult.loopEnergyKJ = reservoir.loopKJ;
 			reservoirResult.condenserEnergyKJ = reservoir.condenserKJ;
 			reservoirResult.generatorEnergyKJ = reservoir.generatorKJ;
+			reservoirResult.atmosphereEnergyKJ = reservoir.atmosphereKJ;
 			reservoirResult.rejectedEnergyKJ = reservoir.rejectedKJ;
 			reservoirResult.residualKJ = reservoirResult.startingEnergyKJ
 				+ reservoir.absorbedKJ + reservoir.routedKJ + reservoir.loopKJ
-				+ reservoir.condenserKJ + reservoir.generatorKJ
+				+ reservoir.condenserKJ + reservoir.generatorKJ + reservoir.atmosphereKJ
 				- reservoir.rejectedKJ - reservoirResult.currentEnergyKJ;
 			result.thermal.totalAbsorbedKW += reservoir.authored.absorbedHeatKW;
 			result.thermal.totalRoutedKW += reservoir.lastHeatRoutedKW;
@@ -4084,6 +4843,137 @@ namespace core
 					classResult.condenserKW += chiller.lastCondenserKW;
 				}
 			result.thermal.coolingByClass.push_back(std::move(classResult));
+		}
+		// The atmosphere snapshot reports the authored contract beside the
+		// initial versus current gas inventory, the derived absolute and
+		// partial pressures at the current state, the humidity, the last
+		// tick's pathway flows and the closing per-component and thermal
+		// ledgers (#400). Containment is proven by the closing ledger and
+		// the exposed crossings, never by a pressure setpoint.
+		for (auto const& compartment : mImpl->atmospheres)
+		{
+			StationAtmosphereSnapshot atmosphereResult;
+			auto const& authored = compartment.authored;
+			atmosphereResult.id = authored.id;
+			atmosphereResult.hazardClass = authored.hazardClass;
+			atmosphereResult.reservoirId = authored.reservoirId;
+			atmosphereResult.volumeM3 = authored.volumeM3;
+			atmosphereResult.thermalCapacityKJPerK = authored.thermalCapacityKJPerK;
+			atmosphereResult.exchangerConductanceKWPerK = authored.exchangerConductanceKWPerK;
+			atmosphereResult.occupants = authored.occupants;
+			atmosphereResult.oxygenUsePerOccupantKgPerS = authored.oxygenUsePerOccupantKgPerS;
+			atmosphereResult.co2ProductionPerOccupantKgPerS = authored.co2ProductionPerOccupantKgPerS;
+			atmosphereResult.sensibleHeatPerOccupantKW = authored.sensibleHeatPerOccupantKW;
+			atmosphereResult.moistureAdditionPerOccupantKgPerS = authored.moistureAdditionPerOccupantKgPerS;
+			atmosphereResult.leakRateKgPerS = authored.leakRateKgPerS;
+			atmosphereResult.minPressureKPa = authored.minPressureKPa;
+			atmosphereResult.maxPressureKPa = authored.maxPressureKPa;
+			atmosphereResult.minOxygenPartialPressureKPa = authored.minOxygenPartialPressureKPa;
+			atmosphereResult.maxCarbonDioxidePartialPressureKPa = authored.maxCarbonDioxidePartialPressureKPa;
+			atmosphereResult.startingOxygenKg = authored.startingOxygenKg;
+			atmosphereResult.startingNitrogenKg = authored.startingNitrogenKg;
+			atmosphereResult.startingCarbonDioxideKg = authored.startingCarbonDioxideKg;
+			atmosphereResult.startingWaterVapourKg = authored.startingWaterVapourKg;
+			atmosphereResult.startingTemperatureC = authored.startingTemperatureC;
+			atmosphereResult.startingPressureKPa = compartment.startingPressureKPa;
+			atmosphereResult.oxygenKg = compartment.oxygenKg;
+			atmosphereResult.nitrogenKg = compartment.nitrogenKg;
+			atmosphereResult.carbonDioxideKg = compartment.carbonDioxideKg;
+			atmosphereResult.waterVapourKg = compartment.waterVapourKg;
+			atmosphereResult.temperatureC = compartment.temperatureC;
+			atmosphereResult.oxygenPartialPressureKPa = stationAtmospherePartialPressureKPa(
+				compartment.oxygenKg, StationMolarMassOxygenKgPerMol,
+				authored.volumeM3, compartment.temperatureC);
+			atmosphereResult.nitrogenPartialPressureKPa = stationAtmospherePartialPressureKPa(
+				compartment.nitrogenKg, StationMolarMassNitrogenKgPerMol,
+				authored.volumeM3, compartment.temperatureC);
+			atmosphereResult.carbonDioxidePartialPressureKPa = stationAtmospherePartialPressureKPa(
+				compartment.carbonDioxideKg, StationMolarMassCarbonDioxideKgPerMol,
+				authored.volumeM3, compartment.temperatureC);
+			atmosphereResult.waterVapourPartialPressureKPa = stationAtmospherePartialPressureKPa(
+				compartment.waterVapourKg, StationMolarMassWaterKgPerMol,
+				authored.volumeM3, compartment.temperatureC);
+			atmosphereResult.pressureKPa = atmosphereResult.oxygenPartialPressureKPa
+				+ atmosphereResult.nitrogenPartialPressureKPa
+				+ atmosphereResult.carbonDioxidePartialPressureKPa
+				+ atmosphereResult.waterVapourPartialPressureKPa;
+			atmosphereResult.saturationVapourPressureKPa = stationSaturationVapourPressureKPa(
+				compartment.temperatureC);
+			atmosphereResult.relativeHumidity = atmosphereResult.saturationVapourPressureKPa > 0.0
+				? std::min(1.0, atmosphereResult.waterVapourPartialPressureKPa
+					/ atmosphereResult.saturationVapourPressureKPa) : 0.0;
+			atmosphereResult.lastOxygenDemandKg = compartment.lastOxygenDemandKg;
+			atmosphereResult.lastOxygenConsumedKg = compartment.lastOxygenConsumedKg;
+			atmosphereResult.lastOxygenUnmetKg = compartment.lastOxygenDemandKg
+				- compartment.lastOxygenConsumedKg;
+			atmosphereResult.lastCo2ProducedKg = compartment.lastCo2ProducedKg;
+			atmosphereResult.lastVapourAddedKg = compartment.lastVapourAddedKg;
+			atmosphereResult.lastVapourCondensedKg = compartment.lastVapourCondensedKg;
+			atmosphereResult.lastLeakedKg = compartment.lastLeakedKg;
+			atmosphereResult.lastCycleRemovedKg = compartment.lastCycleRemovedKg;
+			atmosphereResult.lastCycleRecoveredKg = compartment.lastCycleRecoveredKg;
+			atmosphereResult.lastCycleLostKg = compartment.lastCycleLostKg;
+			atmosphereResult.lastOccupantHeatKW = compartment.lastOccupantHeatKW;
+			atmosphereResult.lastLatentHeatKW = compartment.lastLatentHeatKW;
+			atmosphereResult.lastExchangeIntoCompartmentKW = compartment.lastExchangeIntoCompartmentKW;
+			atmosphereResult.abovePressureLimit = compartment.lastAbovePressure;
+			atmosphereResult.belowPressureLimit = compartment.lastBelowPressure;
+			atmosphereResult.lowOxygen = compartment.lastLowOxygen;
+			atmosphereResult.highCarbonDioxide = compartment.lastHighCo2;
+			atmosphereResult.condensing = compartment.lastCondensing;
+			atmosphereResult.thermallyCoupled = compartment.reservoirIndex != SIZE_MAX;
+			atmosphereResult.oxygenConsumedKg = compartment.oxygenConsumedKg;
+			atmosphereResult.co2ProducedKg = compartment.co2ProducedKg;
+			atmosphereResult.vapourAddedKg = compartment.vapourAddedKg;
+			atmosphereResult.condensedKg = compartment.condensedKg;
+			atmosphereResult.leakedKg = compartment.leakedKg;
+			atmosphereResult.recoveredKg = compartment.recoveredKg;
+			atmosphereResult.lostKg = compartment.lostKg;
+			atmosphereResult.startingEnergyKJ = authored.thermalCapacityKJPerK
+				* authored.startingTemperatureC;
+			atmosphereResult.currentEnergyKJ = authored.thermalCapacityKJPerK
+				* compartment.temperatureC;
+			atmosphereResult.occupantHeatEnergyKJ = compartment.occupantHeatKJ;
+			atmosphereResult.latentHeatEnergyKJ = compartment.latentHeatKJ;
+			atmosphereResult.exchangedEnergyKJ = compartment.exchangedKJ;
+			atmosphereResult.residualKJ = atmosphereResult.startingEnergyKJ
+				+ compartment.occupantHeatKJ + compartment.latentHeatKJ
+				+ compartment.exchangedKJ - atmosphereResult.currentEnergyKJ;
+			atmosphereResult.status = compartment.status;
+			result.atmospheres.push_back(std::move(atmosphereResult));
+		}
+		// The airlock cycle snapshot reports the authored schedule beside
+		// the runtime's cycle history: what each occurrence removed and
+		// how the recovered-versus-lost split landed (#400).
+		for (auto const& cycle : mImpl->airlockCycles)
+		{
+			StationAirlockCycleSnapshot cycleResult;
+			cycleResult.id = cycle.authored.id;
+			cycleResult.atmosphereId = cycle.authored.atmosphereId;
+			cycleResult.gasMassKg = cycle.authored.gasMassKg;
+			cycleResult.firstOccurrenceSeconds = cycle.authored.firstOccurrenceSeconds;
+			cycleResult.recurrenceSeconds = cycle.authored.recurrenceSeconds;
+			cycleResult.recoveredFraction = cycle.authored.recoveredFraction;
+			cycleResult.priority = cycle.authored.priority;
+			cycleResult.occurrencesCompleted = cycle.occurrencesFired;
+			cycleResult.lastOccurrenceSeconds = cycle.lastOccurrenceSeconds;
+			cycleResult.lastRemovedKg = cycle.lastRemovedKg;
+			cycleResult.lastRecoveredKg = cycle.lastRecoveredKg;
+			cycleResult.lastLostKg = cycle.lastLostKg;
+			cycleResult.removedTotal = cycle.removedTotal;
+			cycleResult.recoveredTotal = cycle.recoveredTotal;
+			cycleResult.lostTotal = cycle.lostTotal;
+			cycleResult.exhausted = cycle.exhausted;
+			cycleResult.status = cycle.status;
+			if (!cycle.exhausted)
+			{
+				cycleResult.hasNextOccurrence = true;
+				cycleResult.nextOccurrenceSeconds = cycle.authored.recurrenceSeconds > 0.0
+					? cycle.authored.firstOccurrenceSeconds
+						+ static_cast<double>(cycle.occurrencesFired) * cycle.authored.recurrenceSeconds
+					: cycle.authored.firstOccurrenceSeconds;
+			}
+			result.airlockCycles.push_back(std::move(cycleResult));
 		}
 		// The delivery snapshot reports the authored schedule beside the
 		// runtime's arrival history: what each occurrence brought in, what

@@ -214,7 +214,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 75", "version: 64");
+		replaceAll(legacy, "version: 76", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -231,14 +231,14 @@ namespace
 			"authored store fields missing or live inventory leaked");
 		bool refused = false;
 		auto staleStores = withField;
-		replaceAll(staleStores, "version: 75", "version: 65");
+		replaceAll(staleStores, "version: 76", "version: 65");
 		auto const staleStoresPath = directory / "stale-stores.world.yaml";
 		writeFile(staleStoresPath, staleStores);
 		try { (void)core::loadWorldDocument(staleStoresPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-66 document carrying resource stores was silently accepted");
 		auto staleTransfers = withField;
-		replaceAll(staleTransfers, "version: 75", "version: 66");
+		replaceAll(staleTransfers, "version: 76", "version: 66");
 		auto const staleTransfersPath = directory / "stale-transfers.world.yaml";
 		writeFile(staleTransfersPath, staleTransfers);
 		refused = false;
@@ -246,7 +246,7 @@ namespace
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-67 document carrying resource transfers was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 75", "version: 64");
+		replaceAll(stale, "version: 76", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
 		refused = false;
@@ -384,7 +384,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 75", "version: 67");
+			replaceAll(stale, "version: 76", "version: 67");
 			auto const stalePath = directory / "stale-compounds.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -493,7 +493,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 75", "version: 69");
+			replaceAll(stale, "version: 76", "version: 69");
 			auto const stalePath = directory / "stale-batteries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -615,7 +615,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 75", "version: 68");
+			replaceAll(stale, "version: 76", "version: 68");
 			auto const stalePath = directory / "stale-power.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -742,7 +742,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 75", "version: 70");
+			replaceAll(stale, "version: 76", "version: 70");
 			auto const stalePath = directory / "stale-deliveries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -870,7 +870,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 75", "version: 71");
+			replaceAll(stale, "version: 76", "version: 71");
 			auto const stalePath = directory / "stale-thermal.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1031,7 +1031,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 75", "version: 72");
+			replaceAll(stale, "version: 76", "version: 72");
 			auto const stalePath = directory / "stale-coolant.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1194,7 +1194,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 75", "version: 73");
+			replaceAll(stale, "version: 76", "version: 73");
 			auto const stalePath = directory / "stale-chillers.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1342,7 +1342,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 75", "version: 74");
+			replaceAll(stale, "version: 76", "version: 74");
 			auto const stalePath = directory / "stale-generators.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1392,6 +1392,167 @@ namespace
 			require(refused, "a zero ramp limit was accepted from a file");
 		}
 	}
+
+	// #400: compartment atmospheres and scheduled airlock cycles persist
+	// through the document seam - YAML and binary roundtrips, the reopened
+	// World reproducing the closed scenario from the authored starting
+	// state, pre-76 documents carrying the fields refused, and malformed
+	// compartment or cycle values rejected at load.
+	void atmosphereFiles(smoke::Context const& context)
+	{
+		namespace filesystem = std::filesystem;
+		auto const directory = context.temporaryRoot() / "station-atmospheres";
+		filesystem::create_directories(directory);
+		core::ThermalReservoirSettings bus;
+		bus.id = "bus";
+		bus.thermalClass = "moderate";
+		bus.heatCapacityKJPerK = 50000.0;
+		bus.startingTemperatureC = 40.0;
+		bus.minTemperatureC = -50.0;
+		bus.maxTemperatureC = 200.0;
+		core::AtmosphereSettings dock;
+		dock.id = "dock";
+		dock.hazardClass = "normal";
+		dock.volumeM3 = 100.0;
+		dock.startingOxygenKg = 20.0;
+		dock.startingNitrogenKg = 80.0;
+		dock.startingTemperatureC = 20.0;
+		dock.thermalCapacityKJPerK = 10000.0;
+		dock.reservoirId = "bus";
+		dock.exchangerConductanceKWPerK = 2.0;
+		dock.occupants = 2;
+		dock.leakRateKgPerS = 0.01;
+		dock.minPressureKPa = 1.0;
+		dock.maxPressureKPa = 200.0;
+		core::AtmosphereSettings plant;
+		plant.id = "plant";
+		plant.hazardClass = "hazardous";
+		plant.volumeM3 = 50.0;
+		plant.startingOxygenKg = 5.0;
+		plant.startingNitrogenKg = 45.0;
+		plant.startingCarbonDioxideKg = 2.0;
+		plant.startingWaterVapourKg = 0.4;
+		plant.startingTemperatureC = 25.0;
+		plant.thermalCapacityKJPerK = 5000.0;
+		plant.minPressureKPa = 1.0;
+		plant.maxPressureKPa = 200.0;
+		core::AirlockCycleSettings crew;
+		crew.id = "crew";
+		crew.atmosphereId = "dock";
+		crew.gasMassKg = 1.0;
+		crew.firstOccurrenceSeconds = 10.0;
+		crew.recurrenceSeconds = 5.0;
+		crew.recoveredFraction = 0.9;
+		core::AirlockCycleSettings purge;
+		purge.id = "purge";
+		purge.atmosphereId = "plant";
+		purge.gasMassKg = 2.0;
+		purge.firstOccurrenceSeconds = 20.0;
+		purge.recoveredFraction = 0.5;
+		core::World original("Atmosphere Round Trip", 2, 2);
+		original.pauseSimulation();
+		original.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 2.0f;
+		settings.thermalReservoirs.push_back(bus);
+		settings.atmospheres.push_back(dock);
+		settings.atmospheres.push_back(plant);
+		settings.airlockCycles.push_back(crew);
+		settings.airlockCycles.push_back(purge);
+		std::string diagnostic;
+		require(original.configureStationSystems(settings, false, &diagnostic),
+			"Atmosphere settings edit failed: " + diagnostic);
+		original.resumeSimulation();
+		require(original.advanceTicks(1800), "Atmosphere original run failed");
+		auto const expected = original.getStationSystemsSnapshot();
+		require(expected.atmospheres.size() == 2 && expected.airlockCycles.size() == 2,
+			"Atmosphere scenario did not produce the expected snapshot shape");
+		require(expected.atmospheres[0].leakedKg > 0.0
+			&& expected.airlockCycles[0].occurrencesCompleted == 5,
+			"Atmosphere scenario did not exercise leak and cycles before saving");
+		auto const path = directory / "atmospheres.world.yaml";
+		original.saveTo(path.string());
+		require(readFile(path).find("atmospheres:") != std::string::npos,
+			"saved document lacks atmospheres");
+		require(readFile(path).find("airlockCycles:") != std::string::npos,
+			"saved document lacks airlockCycles");
+		auto const reopened = core::loadWorldDocument(path);
+		reopened->pauseSimulation();
+		require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+			"authored atmosphere settings did not survive the file round trip");
+		require(reopened->getStationSystemsSnapshot().atmospheres[0].leakedKg == 0.0
+			&& reopened->getStationSystemsSnapshot().atmospheres[0].temperatureC == 20.0
+			&& reopened->getStationSystemsSnapshot().airlockCycles[0].occurrencesCompleted == 0,
+			"reopened World did not reconstruct the authored atmosphere starting state");
+		reopened->resumeSimulation();
+		require(reopened->advanceTicks(1800), "Atmosphere reopened run failed");
+		require(reopened->getStationSystemsSnapshot() == expected,
+			"Atmosphere scenario is not reproducible from the document");
+		require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
+			"Atmosphere event history is not reproducible from the document");
+		auto const binaryPath = directory / "atmospheres.world";
+		original.saveTo(binaryPath.string());
+		auto const reopenedBinary = core::loadWorldDocument(binaryPath);
+		reopenedBinary->pauseSimulation();
+		require(reopenedBinary->getStationSystemsSnapshot().atmospheres.size() == 2
+			&& reopenedBinary->getStationSystemsSnapshot().airlockCycles.size() == 2
+			&& reopenedBinary->getStationSystemsSnapshot().atmospheres[0].leakedKg == 0.0,
+			"reopened binary Atmosphere document did not reconstruct the starting state");
+		// A pre-76 document carrying the new fields is refused.
+		auto const withField = serializeYaml(original);
+		{
+			auto stale = withField;
+			replaceAll(stale, "version: 76", "version: 75");
+			auto const stalePath = directory / "stale-atmospheres.world.yaml";
+			writeFile(stalePath, stale);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(stalePath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a pre-76 document carrying atmospheres was silently accepted");
+		}
+		// Malformed atmosphere values in a file are rejected.
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "volumeM3: 100", "volumeM3: 0");
+			auto const malformedPath = directory / "malformed-atmosphere-volume.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a zero compartment volume was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "hazardClass: hazardous", "hazardClass: plasma");
+			auto const malformedPath = directory / "malformed-atmosphere-hazard.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "an unknown hazard class was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "atmosphereId: dock", "atmosphereId: ghost");
+			auto const malformedPath = directory / "malformed-airlock-atmosphere.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "an airlock cycle on an unknown compartment was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "recoveredFraction: 0.9", "recoveredFraction: 1.5");
+			auto const malformedPath = directory / "malformed-airlock-recovery.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a recovered fraction above one was accepted from a file");
+		}
+	}
 }
 
 void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
@@ -1408,4 +1569,5 @@ void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"coolantFiles", coolantFiles});
 	checks.push_back({"chillerFiles", chillerFiles});
 	checks.push_back({"generatorFiles", generatorFiles});
+	checks.push_back({"atmosphereFiles", atmosphereFiles});
 }

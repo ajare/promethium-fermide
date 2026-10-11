@@ -789,6 +789,108 @@ there is no criticality, no decay-heat curve derived from fuel
 history, and no isotope inventory — the shutdown heat is an authored
 constant for an authored period, nothing more.
 
+### Compartment atmospheres and airlock cycles (#400)
+
+A compartment atmosphere is an authored fixed-volume gas inventory:
+a volume in m³, starting masses of oxygen, nitrogen, carbon dioxide
+and water vapour in kg, a starting temperature in °C, an effective
+thermal capacity in kJ/K covering the air plus the bonded structure,
+and an optional heat-only coupling to a thermal reservoir through an
+authored exchanger conductance in kW/K. Hazard class is `normal` or
+`hazardous`; it is a declared label for authoring intent and
+reporting, not an enforcement mechanism — nothing in this slice
+opens, seals or interlocks a compartment on it.
+
+Pressure is derived, never simulated as a control target: each
+gas's partial pressure follows the ideal-gas law, p = (m / M) · R · T /
+V in kPa, with molar masses oxygen 0.0319988, nitrogen 0.0280134,
+carbon dioxide 0.0440095 and water vapour 0.0180153 kg/mol, and
+R = 8.314462618 J/(mol·K). Absolute pressure is the sum of the
+partial pressures (Dalton). Humidity follows the Magnus saturation
+curve, p_sat = 0.61094 · exp(17.625·t / (t + 243.04)) kPa; vapour
+above saturation condenses within the tick, the condensate leaves
+the vapour inventory (reported as condensed mass, not destroyed)
+and releases 2257 kJ/kg of latent heat into the compartment, so a
+compartment cannot sit above saturation and relative humidity never
+exceeds 100 %.
+
+Occupancy is an authored load assignment — a count plus per-
+occupant rates for oxygen use, carbon dioxide production, sensible
+heat in kW and moisture addition, all in kg/s. The oxygen draw is
+capped by the oxygen actually present: a starved compartment
+reports the unmet demand, and carbon dioxide production and
+metabolic heat scale only with the oxygen actually consumed, so a
+compartment cannot breathe out more than it breathed in. Leakage is
+a constant authored total-mass rate in kg/s, capped by the
+inventory and removed proportionally to the current composition.
+Scheduled airlock cycles reuse the delivery-style schedule (first
+occurrence, optional recurrence, priority) and remove an authored
+gas mass per occurrence from one compartment, split by an authored
+recovered fraction: the recovered share is retained in the
+receiver, the remainder is lost through the outer hatch. Every gram
+leaving a compartment is booked as leaked, recovered or lost —
+there is no unexplained disposal, and no process moves gas between
+compartments automatically: normal and hazardous atmospheres are
+segregated by construction.
+
+Thermal state integrates the compartment's own heat sources —
+occupant sensible heat, condensation latent heat and the heat-only
+exchange with the coupled reservoir — into the authored effective
+capacity with explicit Euler integration on the fixed tick. The
+reservoir books the exact negation of the exchange as its own
+atmosphere term, so both ledgers close against each other. Declared
+limits (minimum and maximum absolute pressure, minimum oxygen
+partial pressure, maximum carbon dioxide partial pressure) are
+reported as conditions, never clamped: the compartment keeps
+integrating and the ledger keeps closing while an excursion stands.
+
+World schema 76 persists the authored compartment and airlock-cycle
+contracts (units: m³, kg, °C, kJ/K, kW/K, kg/s, seconds); a
+pre-76 document carrying `atmospheres` or `airlockCycles` is
+refused rather than silently dropped. Current gas inventories,
+derived pressures, humidity and the containment ledgers stay
+runtime-only: Load and Reset reconstruct them from the authored
+starting conditions. The separate Station Systems window drafts
+compartments (volume, starting gas masses, temperature, thermal
+capacity, reservoir coupling, occupancy loads, leak rate and
+declared limits) and airlock cycles (target compartment, gas mass,
+schedule and recovered fraction) with full validation reporting,
+and shows the live pressures, composition, humidity, heat flows,
+closing ledgers and condition flags beside the existing views.
+
+This models the authored gas and heat contract of a sealed volume.
+It claims no life-support qualification: the occupancy rates are
+authored constants, not physiology, and the derived conditions are
+observations, not alarms or interlocks. Completed tick counts are
+observability, not endurance estimates.
+
+Atmosphere acceptance coverage: refused configurations (unknown
+reservoir coupling, unknown hazard class, zero volume, negative
+starting mass, sub-absolute-zero temperature, zero thermal
+capacity, inverted pressure limits, negative occupant count or
+leak rate, airlock cycles on unknown compartments with zero gas
+mass, recovered fraction outside [0, 1] or recurrence faster than
+one fixed tick, over-budget compartment count); analytic mixtures
+where every partial pressure matches the ideal-gas law and the
+absolute pressure equals the sum of the partials; leakage at the
+authored rate with composition preserved proportionally and the
+per-component ledger closing; a leak larger than the inventory
+draining the compartment to empty and never below; zero/low
+inventory with the oxygen draw capped, the shortfall visible as
+unmet demand and CO2 production never exceeding oxygen consumed;
+the vapour constraint holding at saturation with excess condensing
+and its latent heat warming the compartment; compartment isolation
+(a neighbour untouched by another's leak or cycle); deterministic
+scheduled airlock losses with the recovered-versus-lost split, a
+capped partial cycle, a refusal on an empty compartment, and
+identical reset replay of snapshots and events; heat-only reservoir
+coupling where the reservoir books the exact negation of the
+compartment exchange and an uncoupled compartment exchanges
+nothing; save/load roundtrip reproduction through YAML and binary
+documents with pre-76 documents and malformed compartment or cycle
+values refused at load; and intact Lua atmosphere and airlock-cycle
+descriptor crossings with contained construction refusal.
+
 ## Explicit scope limit
 
 This slice implements lifecycle, authored finite store configuration,
@@ -799,17 +901,25 @@ authored scheduled resupply with refused-quantity accounting,
 thermal reservoirs with environment-dependent radiator rejection and
 exactly-once equipment heat routing, coolant loops with finite
 loop-specific inventories, inventory- and power-capped circulation and
-freeze-protection heating, and fuelled generators with finite
+freeze-protection heating, fuelled generators with finite
 energy-unit fuel inventories, ramp-limited dispatchable output,
-startup-energy gating and persistent shutdown decay heat.
+startup-energy gating and persistent shutdown decay heat, and
+fixed-volume compartment atmospheres with ideal-gas pressure
+derivation, occupancy and leak accounting, the vapour saturation
+constraint with latent-heat release, scheduled airlock losses with
+the recovered-versus-lost split, and heat-only reservoir coupling.
 It still adds no crew demand, treatment/clearance
 workflows or ejection, no dynamic coolant leak, replenishment or
 loop-to-loop transfer (a loop's charge is its authored inventory and
 nothing in this slice changes it), no powered or passive thermal-buffer
 access beyond the authored reservoirs themselves, and no chilled
 service distribution beyond the class-matched rollup (no per-consumer
-cold-side metering, no cascade or multi-stage refrigeration, and no
-humidity or latent-load modelling). Completed tick counts are
+cold-side metering and no cascade or multi-stage refrigeration).
+Compartment atmospheres are closed authored volumes: this slice adds
+no gas generation or processing (no O₂ generation, CO₂ scrubbing or
+combustion), no flow or pressure-driven transfer between
+compartments, and no door, hatch or airlock physics tied to
+atmosphere state. Completed tick counts are
 observability, not oxygen, heat or endurance estimates. It
 invents no process coefficients beyond the authored demand, capacity
 and profile values. ECLSS models, crew inputs, alarms,
