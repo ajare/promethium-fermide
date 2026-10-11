@@ -446,6 +446,49 @@ namespace core
 	};
 	inline constexpr size_t MaxStationChillers{8};
 
+	// A fuelled electrical generator (#399). It converts stored fuel energy
+	// into bus electrical output at a declared conversion efficiency; the
+	// difference is generator waste heat, routed exactly once into the
+	// generator's declared heat-sink reservoir. Fuel is an energy-unit
+	// Resource store (kJ, MJ, Wh or kWh): the generator draws qualified fuel
+	// energy above the store's protected reserve, so fuel is finite, can be
+	// resupplied by authored deliveries, and its consumption closes through
+	// the store's own boundary ledger. Output is dispatchable within the
+	// installed rating: the commanded output is capped by the rated capacity
+	// and can only move at the declared ramp limit, so no tick can command
+	// an instantaneous full-power step the machine cannot physically make.
+	// Starting is a real operation with a cost: the generator cranks at the
+	// declared startup power for the declared startup duration and only
+	// reaches Running once it has actually received that startup energy from
+	// the shared generation-and-battery pool while its cooling interface is
+	// qualified. The cranking energy dissipates into the same sink. A
+	// generator with zero installed (rated) capacity is disabled and can
+	// never produce. After electrical output stops - commanded off, fuel
+	// depletion or a cooling trip - the configured shutdown heat keeps
+	// flowing into the sink for the configured decay period, and the cooling
+	// requirement stays exposed with it: a stopped generator is not
+	// instantly a cold generator. This models the authored heat and energy
+	// contract of a fuelled source; it claims no reactor physics and no
+	// nuclear qualification of any kind.
+	struct GeneratorSettings
+	{
+		std::string id;
+		std::string fuelStoreId;      // energy-unit Resource store: the fuel inventory
+		std::string thermalClass;     // service class of the generator's waste heat
+		std::string heatSinkId;       // reservoir accepting waste, startup and decay heat
+		double ratedOutputKW{0.0};  // installed electrical capacity, >= 0; 0 disables
+		double efficiency{0.35};    // electrical out per fuel energy in, (0, 1]
+		double maxRampKWPerSecond{0.0}; // output slew limit, > 0
+		double commandedOutputKW{0.0};  // dispatch setpoint, [0, rated]
+		double startupPowerKW{0.0};     // cranking draw while starting, >= 0
+		double startupSeconds{0.0};     // cranking duration, >= 0; energy = power x time
+		double shutdownHeatKW{0.0};     // decay heat after output stops, >= 0
+		double shutdownSeconds{0.0};    // decay heat duration, >= 0
+		double maxSinkTemperatureC{90.0}; // cooling qualified while sink is below this
+		bool operator==(GeneratorSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationGenerators{8};
+
 	struct BatterySettings
 	{
 		std::string id;
@@ -475,6 +518,7 @@ namespace core
 		std::vector<RadiatorSettings> radiators;
 		std::vector<CoolantLoopSettings> coolantLoops;
 		std::vector<ChillerSettings> chillers;
+		std::vector<GeneratorSettings> generators;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// Profile shape validation and deterministic evaluation: the level of
@@ -714,6 +758,65 @@ namespace core
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationBatterySnapshot const&) const = default;
 	};
+	// The observable state machine of a fuelled generator (#399). Stopped
+	// produces nothing and draws nothing; Starting is cranking toward the
+	// startup energy the running state requires; Running is producing
+	// electrical output and burning fuel with its waste heat routed to the
+	// sink; Shutdown is the post-output decay period where electrical
+	// output has stopped but the configured shutdown heat and its cooling
+	// requirement persist.
+	enum class StationGeneratorPhase : std::uint8_t
+	{
+		Stopped,
+		Starting,
+		Running,
+		Shutdown,
+	};
+	// One generator as of the most recent tick: the authored contract
+	// beside the phase, the electrical output actually produced, the fuel
+	// actually drawn, the heat actually routed, the startup progress, the
+	// cooling qualification, and the closing fuel ledger. The generator's
+	// energy ledger closes over fuel = electrical + waste within the
+	// declared tolerance: fuel energy is never silently destroyed, and
+	// electrical output never appears without the fuel that produced it.
+	struct StationGeneratorSnapshot
+	{
+		std::string id;
+		std::string fuelStoreId;
+		std::string thermalClass;
+		std::string heatSinkId;
+		double ratedOutputKW{0.0};
+		double efficiency{1.0};
+		double maxRampKWPerSecond{0.0};
+		double commandedOutputKW{0.0};
+		double startupPowerKW{0.0};
+		double startupSeconds{0.0};
+		double shutdownHeatKW{0.0};
+		double shutdownSeconds{0.0};
+		double maxSinkTemperatureC{0.0};
+		StationGeneratorPhase phase{StationGeneratorPhase::Stopped};
+		double outputKW{0.0};              // electrical output delivered this tick
+		double fuelDrawKWh{0.0};           // fuel energy drawn this tick
+		double wasteHeatKW{0.0};           // waste heat routed this tick
+		double startupDrawKW{0.0};         // cranking power actually taken this tick
+		double startupUnmetKW{0.0};        // cranking power requested but not taken
+		double startupReceivedKJ{0.0};     // cranking energy received this attempt
+		double startupRequiredKJ{0.0};     // configured startup energy (power x seconds)
+		double decayHeatKW{0.0};           // decay heat routed this tick
+		double sinkTemperatureC{0.0};
+		bool coolingAvailable{false};      // sink below the maximum sink temperature
+		bool coolingRequired{false};       // running or in the decay period
+		bool disabled{false};              // zero installed capacity
+		std::string blockReason;           // why a commanded start is not proceeding
+		double fuelEnergyKJ{0.0};          // cumulative fuel energy consumed
+		double electricalKJ{0.0};          // cumulative electrical delivered
+		double wasteHeatKJ{0.0};           // cumulative waste heat routed
+		double startupHeatKJ{0.0};         // cumulative cranking energy dissipated
+		double decayHeatKJ{0.0};           // cumulative decay heat routed
+		double residualKJ{0.0};            // fuel - electrical - waste
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationGeneratorSnapshot const&) const = default;
+	};
 	// The station-wide electrical picture: generation actually available
 	// this tick against total requested service, what was supplied and
 	// left unmet, unmet critical floors, untaken surplus and exported
@@ -742,9 +845,18 @@ namespace core
 		// plus running auxiliaries drawn from the same allocation pool —
 		// never a second budget.
 		double chillerPowerKW{0.0};
+		// Fuelled generator service this tick (#399): electrical output
+		// added to the same allocation pool as solar, the startup draws
+		// the cranking machines took ahead of load allocation, and the
+		// waste and decay heat those generators routed to their sinks.
+		double generatorOutputKW{0.0};
+		double generatorStartupDrawKW{0.0};
+		double generatorWasteHeatKW{0.0};
+		double generatorDecayHeatKW{0.0};
 		std::vector<StationSolarSourceSnapshot> sources;
 		std::vector<StationEquipmentLoadSnapshot> loads;
 		std::vector<StationBatterySnapshot> batteries;
+		std::vector<StationGeneratorSnapshot> generators;
 		bool operator==(StationPowerSnapshot const&) const = default;
 	};
 	// One radiator as of the most recent tick: the authored rejection
@@ -788,7 +900,12 @@ namespace core
 		// side of the chiller booking, so the reservoir ledger closes
 		// over exactly the terms that moved.
 		double lastCondenserHeatKW{0.0};
-		double lastHeatInKW{0.0};       // absorbed + routed + loop + condenser this tick
+		// Generator heat this tick routed into this reservoir by the
+		// generators that use it as their heat sink (#399): waste heat
+		// from electrical production, startup cranking dissipation and
+		// post-shutdown decay heat, booked once at the sink boundary.
+		double lastGeneratorHeatKW{0.0};
+		double lastHeatInKW{0.0};       // absorbed + routed + loop + condenser + generator this tick
 		double lastRejectedKW{0.0};     // radiator net rejection this tick
 		double lastNetKW{0.0};          // heat in minus rejected this tick
 		bool aboveLimit{false};
@@ -799,8 +916,9 @@ namespace core
 		double routedEnergyKJ{0.0};
 		double loopEnergyKJ{0.0}; // cumulative net loop exchange into the reservoir
 		double condenserEnergyKJ{0.0}; // cumulative condenser heat rejected into the reservoir
+		double generatorEnergyKJ{0.0}; // cumulative generator waste/startup/decay heat into the reservoir
 		double rejectedEnergyKJ{0.0};
-		double residualKJ{0.0}; // starting + absorbed + routed + loop + condenser - rejected - current
+		double residualKJ{0.0}; // starting + absorbed + routed + loop + condenser + generator - rejected - current
 		bool operator==(StationThermalReservoirSnapshot const&) const = default;
 	};
 	// One coolant loop as of the most recent tick (#396): the authored

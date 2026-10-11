@@ -742,7 +742,15 @@ namespace core
 		// dropped. Cold-side duty, work, condenser heat and the chiller
 		// ledgers stay runtime-only, so load and Reset reconstruct them
 		// from the authored starting conditions.
-		serializer.writeUint32("version", 74);
+		// Version 75 adds authored fuelled generators (#399): a finite
+		// energy-unit fuel inventory, conversion efficiency, installed
+		// capacity with a ramp limit, a startup power/duration profile and
+		// the post-shutdown decay heat term, coupled to a class-matched
+		// heat-sink reservoir; a pre-75 document carrying `generators` is
+		// refused rather than silently dropped. Phase, output, fuel draws
+		// and the generator ledgers stay runtime-only, so load and Reset
+		// reconstruct them from the authored starting conditions.
+		serializer.writeUint32("version", 75);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -985,6 +993,32 @@ namespace core
 					serializer.writeDouble("auxiliaryPowerKW", chiller.auxiliaryPowerKW);
 					serializer.writeDouble("chilledSetpointC", chiller.chilledSetpointC);
 					serializer.writeDouble("maxCondensingTemperatureC", chiller.maxCondensingTemperatureC);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.generators.empty())
+			{
+				// Authored generator contracts only; phase, output, fuel
+				// draws and the fuel/heat ledgers are runtime state
+				// reconstructed on load (#399).
+				serializer.beginArray("generators");
+				for (auto const& generator : mStationSystemsSettings.generators)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", generator.id);
+					serializer.writeString("fuelStoreId", generator.fuelStoreId);
+					serializer.writeString("thermalClass", generator.thermalClass);
+					serializer.writeString("heatSinkId", generator.heatSinkId);
+					serializer.writeDouble("ratedOutputKW", generator.ratedOutputKW);
+					serializer.writeDouble("efficiency", generator.efficiency);
+					serializer.writeDouble("maxRampKWPerSecond", generator.maxRampKWPerSecond);
+					serializer.writeDouble("commandedOutputKW", generator.commandedOutputKW);
+					serializer.writeDouble("startupPowerKW", generator.startupPowerKW);
+					serializer.writeDouble("startupSeconds", generator.startupSeconds);
+					serializer.writeDouble("shutdownHeatKW", generator.shutdownHeatKW);
+					serializer.writeDouble("shutdownSeconds", generator.shutdownSeconds);
+					serializer.writeDouble("maxSinkTemperatureC", generator.maxSinkTemperatureC);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -1913,7 +1947,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 74)
+		if (version < 1 || version > 75)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2198,6 +2232,33 @@ namespace core
 					chiller.chilledSetpointC = serializer.readDouble("chilledSetpointC");
 					chiller.maxCondensingTemperatureC = serializer.readDouble("maxCondensingTemperatureC");
 					stationSettings.chillers.push_back(std::move(chiller));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("generators"))
+			{
+				if (version < 75) throw SerializationException(
+					"Station generators require World schema 75");
+				serializer.beginArray("generators");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					GeneratorSettings generator;
+					generator.id = serializer.readString("id");
+					generator.fuelStoreId = serializer.readString("fuelStoreId");
+					generator.thermalClass = serializer.readString("thermalClass");
+					generator.heatSinkId = serializer.readString("heatSinkId");
+					generator.ratedOutputKW = serializer.readDouble("ratedOutputKW");
+					generator.efficiency = serializer.readDouble("efficiency");
+					generator.maxRampKWPerSecond = serializer.readDouble("maxRampKWPerSecond");
+					generator.commandedOutputKW = serializer.readDouble("commandedOutputKW");
+					generator.startupPowerKW = serializer.readDouble("startupPowerKW");
+					generator.startupSeconds = serializer.readDouble("startupSeconds");
+					generator.shutdownHeatKW = serializer.readDouble("shutdownHeatKW");
+					generator.shutdownSeconds = serializer.readDouble("shutdownSeconds");
+					generator.maxSinkTemperatureC = serializer.readDouble("maxSinkTemperatureC");
+					stationSettings.generators.push_back(std::move(generator));
 					serializer.endMap();
 				}
 				serializer.endArray();

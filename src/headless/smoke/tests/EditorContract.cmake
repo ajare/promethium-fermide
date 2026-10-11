@@ -271,6 +271,7 @@ set(editor_names
     station/thermalWorkflow
     station/coolantWorkflow
     station/chillerWorkflow
+    station/generatorWorkflow
 )
 
 if(DEFINED LANE)

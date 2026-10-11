@@ -2,19 +2,22 @@
 -- bounded authored transfers, compound-resource conversions, solar
 -- generation, External equipment load supply, rechargeable battery banks,
 -- scheduled resupply deliveries, thermal reservoirs with radiator
--- rejection, coolant loops with freeze-protection heating, and chillers
--- supplying class-matched cold services. Every system executes this
--- factory in its own budgeted private sandbox.
+-- rejection, coolant loops with freeze-protection heating, chillers
+-- supplying class-matched cold services, and fuelled generators with
+-- startup, ramp, fuel-depletion and shutdown-heat behaviour. Every
+-- system executes this factory in its own budgeted private sandbox.
 -- Stores, transfer rules, conversion rules, solar arrays, equipment
 -- load contracts, battery descriptors, delivery schedules, thermal
--- reservoir contracts and radiator contracts arrive as plain immutable
--- descriptor values; each object initialises its own copy and re-checks
--- the finite-capacity, per-unit conservation, per-constituent compound
--- conservation, power-allocation, battery energy-conservation,
--- delivery-schedule and thermal energy-conservation invariants every
--- tick. The host applies the authoritative ledger; this mirror audits
--- the same rules inside the sandbox so a corrupt crossing or model drift
--- fails contained through the integrated error path.
+-- reservoir contracts, radiator contracts, chiller contracts and
+-- generator contracts arrive as plain immutable descriptor values;
+-- each object initialises its own copy and re-checks the finite-capacity,
+-- per-unit conservation, per-constituent compound conservation,
+-- power-allocation, battery energy-conservation, delivery-schedule,
+-- thermal energy-conservation, chiller and generator fuel-ledger
+-- invariants every tick. The host applies the authoritative ledger;
+-- this mirror audits the same rules inside the sandbox so a corrupt
+-- crossing or model drift fails contained through the integrated error
+-- path.
 local BALANCE_TOLERANCE = 1e-9
 -- Stefan-Boltzmann constant in kW/(m^2 K^4) and the Celsius offset,
 -- mirroring core::StationStefanBoltzmannKWPerM2K4 and
@@ -65,8 +68,19 @@ local function toKg(unit, mass)
     return mass
 end
 
+-- Fuel energy is authored in the store's energy unit; the generator's
+-- physics runs in kWh. One factor converts store units to kWh and its
+-- reciprocal converts the required fuel energy back, so host and sandbox
+-- agree on every draw. Mirrors the host's energyUnitsToKWh.
+local function energyUnitsToKWh(unit)
+    if unit == 'kJ' then return 1 / 3600 end
+    if unit == 'MJ' then return 1000 / 3600 end
+    if unit == 'Wh' then return 1 / 1000 end
+    return 1
+end
+
 return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries,
-    reservoirs, radiators, coolantLoops, chillers)
+    reservoirs, radiators, coolantLoops, chillers, generators)
     assert(type(name) == "string")
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
@@ -79,6 +93,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     assert(type(radiators) == "table", "radiator descriptors missing")
     assert(type(coolantLoops) == "table", "coolant loop descriptors missing")
     assert(type(chillers) == "table", "chiller descriptors missing")
+    assert(type(generators) == "table", "generator descriptors missing")
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
@@ -87,7 +102,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         constituent_delivered = {},
         solar = {}, loads = {}, load_order = {}, batteries = {},
         deliveries = {}, reservoirs = {}, radiators = {}, coolant_loops = {},
-        chillers = {},
+        chillers = {}, generators = {},
     }
     local by_id = {}
     for index = 1, #stores do
@@ -559,6 +574,107 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             extractedKJ = 0,
             workKJ = 0,
             condenserKJ = 0,
+        }
+    end
+    -- Generators (#399): a fuelled electrical source that converts finite
+    -- stored fuel energy into bus electrical output at the declared
+    -- efficiency. The fuel inventory is an energy-unit Resource store: the
+    -- generator draws qualified fuel above the store's protected reserve,
+    -- so fuel is finite, resupplyable and closes through the store's own
+    -- boundary ledger. Output is dispatchable within the installed rating
+    -- and can only move at the declared ramp limit. Starting cranks at the
+    -- startup power for the startup duration and only completes once that
+    -- energy has actually been received from the shared pool while cooling
+    -- is qualified - a generator never self-starts on output it has not
+    -- yet made. After output stops, the configured shutdown heat keeps
+    -- flowing into the sink for the configured decay period and the
+    -- cooling requirement stays exposed with it. Waste, startup and decay
+    -- heat route exactly once into the class-matched sink reservoir. This
+    -- models the authored heat and energy contract of a fuelled source;
+    -- it claims no reactor physics and no nuclear qualification.
+    for index = 1, #generators do
+        local generator = generators[index]
+        assert(type(generator) == 'table', 'generator descriptor must be a table')
+        assert(type(generator.id) == 'string' and #generator.id > 0, 'generator needs an id')
+        assert(generator.thermalClass == 'low' or generator.thermalClass == 'moderate'
+            or generator.thermalClass == 'warm' or generator.thermalClass == 'generation',
+            'generator needs a declared thermal service class')
+        local fuelStore = by_id[generator.fuelStore]
+        assert(fuelStore ~= nil, 'generator fuel Resource store is unknown')
+        assert(fuelStore.unit == 'kJ' or fuelStore.unit == 'MJ'
+            or fuelStore.unit == 'Wh' or fuelStore.unit == 'kWh',
+            'generator fuel store must be denominated in an energy unit')
+        local heatSink = reservoir_by_id[generator.heatSink]
+        assert(heatSink ~= nil, 'generator heat sink reservoir is unknown')
+        assert(heatSink.thermalClass == generator.thermalClass,
+            'generator heat sink must share the generator thermal service class')
+        assert(type(generator.ratedKW) == 'number' and generator.ratedKW == generator.ratedKW
+            and generator.ratedKW >= 0 and generator.ratedKW < math.huge,
+            'generator installed capacity must be finite and non-negative')
+        assert(type(generator.efficiency) == 'number' and generator.efficiency == generator.efficiency
+            and generator.efficiency > 0 and generator.efficiency <= 1,
+            'generator efficiency must be greater than 0 and at most 1')
+        assert(type(generator.rampKWPerSecond) == 'number'
+            and generator.rampKWPerSecond == generator.rampKWPerSecond
+            and generator.rampKWPerSecond > 0 and generator.rampKWPerSecond < math.huge,
+            'generator ramp limit must be finite and positive')
+        assert(type(generator.commandedKW) == 'number'
+            and generator.commandedKW == generator.commandedKW
+            and generator.commandedKW >= 0 and generator.commandedKW < math.huge
+            and generator.commandedKW <= generator.ratedKW,
+            'generator commanded output must be finite and within the installed capacity')
+        assert(type(generator.startupPowerKW) == 'number'
+            and generator.startupPowerKW == generator.startupPowerKW
+            and generator.startupPowerKW >= 0 and generator.startupPowerKW < math.huge,
+            'generator startup power must be finite and non-negative')
+        assert(type(generator.startupSeconds) == 'number'
+            and generator.startupSeconds == generator.startupSeconds
+            and generator.startupSeconds >= 0 and generator.startupSeconds < math.huge,
+            'generator startup duration must be finite and non-negative')
+        assert(type(generator.shutdownHeatKW) == 'number'
+            and generator.shutdownHeatKW == generator.shutdownHeatKW
+            and generator.shutdownHeatKW >= 0 and generator.shutdownHeatKW < math.huge,
+            'generator shutdown heat must be finite and non-negative')
+        assert(type(generator.shutdownSeconds) == 'number'
+            and generator.shutdownSeconds == generator.shutdownSeconds
+            and generator.shutdownSeconds >= 0 and generator.shutdownSeconds < math.huge,
+            'generator shutdown heat duration must be finite and non-negative')
+        assert(type(generator.maxSinkTemperatureC) == 'number'
+            and generator.maxSinkTemperatureC == generator.maxSinkTemperatureC
+            and generator.maxSinkTemperatureC < math.huge
+            and generator.maxSinkTemperatureC > -KELVIN_OFFSET,
+            'generator maximum sink temperature must be finite and above absolute zero')
+        object.generators[index] = {
+            id = generator.id,
+            fuelStore = fuelStore,
+            thermalClass = generator.thermalClass,
+            heatSink = heatSink,
+            ratedKW = generator.ratedKW,
+            efficiency = generator.efficiency,
+            rampKWPerSecond = generator.rampKWPerSecond,
+            commandedKW = generator.commandedKW,
+            startupPowerKW = generator.startupPowerKW,
+            startupSeconds = generator.startupSeconds,
+            shutdownHeatKW = generator.shutdownHeatKW,
+            shutdownSeconds = generator.shutdownSeconds,
+            maxSinkTemperatureC = generator.maxSinkTemperatureC,
+            phase = 'stopped',
+            outputKW = 0,
+            lastFuelDrawKWh = 0,
+            lastWasteHeatKW = 0,
+            lastStartupDrawKW = 0,
+            lastStartupUnmetKW = 0,
+            lastDecayHeatKW = 0,
+            startupReceivedKJ = 0,
+            shutdownElapsed = 0,
+            lastCoolingAvailable = false,
+            lastCoolingRequired = false,
+            blockReason = '',
+            fuelEnergyKJ = 0,
+            electricalKJ = 0,
+            wasteHeatKJ = 0,
+            startupHeatKJ = 0,
+            decayHeatKJ = 0,
         }
     end
     for index = 1, #loads do
@@ -1135,12 +1251,198 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             assert(isFinite(generation),
                 'solar generation sum overflows to a non-finite magnitude')
         end
-        local availableGeneration = generation
         for _, battery in ipairs(self.batteries) do
             battery.last_charge = 0
             battery.last_discharge = 0
         end
         local batterySupplied = 0
+        -- Fuelled generators run ahead of the load allocation (#399):
+        -- their electrical output joins the shared generation pool for
+        -- this tick's loads, their startup cranking draws ride the same
+        -- pool ahead of discretionary demand, and their waste, startup
+        -- and decay heat land in the thermal integration below - each
+        -- booked exactly once at the sink boundary. Output is bounded by
+        -- the installed rating, the ramp limit and the fuel actually
+        -- drawable, and the machine only runs once the startup energy
+        -- has been received while cooling is qualified. Mirrors the host
+        -- ledger exactly.
+        for _, gen in ipairs(self.generators) do
+            local disabled = gen.ratedKW <= 0
+            local commanded = disabled and 0 or gen.commandedKW
+            local sinkTemperature = gen.heatSink.temperature
+            -- Cooling is qualified while the sink is below the maximum
+            -- sink temperature: at or above it the interface cannot
+            -- accept the generator's heat, so the generator cannot run.
+            local coolingAvailable = not disabled
+                and sinkTemperature + 1e-9 < gen.maxSinkTemperatureC
+            local kwhPerUnit = energyUnitsToKWh(gen.fuelStore.unit)
+            local drawableKWh = math.max(0, gen.fuelStore.qualified
+                - gen.fuelStore.protected_reserve) * kwhPerUnit
+            local startupRequiredKJ = gen.startupPowerKW * gen.startupSeconds
+            gen.lastFuelDrawKWh = 0
+            gen.lastWasteHeatKW = 0
+            gen.lastStartupDrawKW = 0
+            gen.lastStartupUnmetKW = 0
+            gen.lastDecayHeatKW = 0
+            gen.lastCoolingAvailable = coolingAvailable
+            gen.blockReason = ''
+            if gen.phase == 'stopped' then
+                gen.outputKW = 0
+                if commanded > 0 then
+                    -- A commanded start proceeds only when every
+                    -- precondition holds this tick: qualified cooling,
+                    -- drawable fuel above the protected reserve, and a
+                    -- pool that can actually supply the cranking draw.
+                    -- A start is never self-funded: a stopped generator
+                    -- produces nothing, so its own output can never
+                    -- appear in the pool that starts it.
+                    if not coolingAvailable then
+                        gen.blockReason = 'cooling is not qualified: sink at or above the maximum sink temperature'
+                    elseif drawableKWh <= 0 then
+                        gen.blockReason = 'no fuel is drawable above the protected reserve'
+                    elseif startupRequiredKJ > 0
+                        and generation + batteryDeliverableKW(self, fixed_hours) + 1e-9
+                            < gen.startupPowerKW then
+                        gen.blockReason = 'the pool cannot supply the startup energy draw'
+                    else
+                        gen.startupReceivedKJ = 0
+                        if startupRequiredKJ > 0 then
+                            gen.phase = 'starting'
+                        else
+                            gen.phase = 'running'
+                        end
+                    end
+                end
+            elseif gen.phase == 'starting' then
+                gen.outputKW = 0
+                if not coolingAvailable then
+                    -- Cooling lost mid-crank: the start fails. The
+                    -- cranking energy already spent is accounted as
+                    -- heat in the sink; the attempt restarts from zero.
+                    gen.phase = 'stopped'
+                    gen.startupReceivedKJ = 0
+                    gen.blockReason = 'cooling lost during startup'
+                elseif drawableKWh <= 0 then
+                    gen.phase = 'stopped'
+                    gen.startupReceivedKJ = 0
+                    gen.blockReason = 'fuel depleted during startup'
+                else
+                    local requestKW = gen.startupPowerKW
+                    local poolKW = generation + batteryDeliverableKW(self, fixed_hours)
+                    if poolKW + 1e-9 < requestKW then
+                        -- The startup energy support that qualified the
+                        -- start has gone away mid-crank: the start fails
+                        -- whole rather than cranking on a trickle.
+                        gen.phase = 'stopped'
+                        gen.startupReceivedKJ = 0
+                        gen.blockReason = 'startup energy support lost mid-crank'
+                    else
+                        local fromGeneration = math.min(requestKW, generation)
+                        generation = generation - fromGeneration
+                        local ask = requestKW - fromGeneration
+                        local fromBattery = drawBatteries(self, ask, fixed_hours)
+                        batterySupplied = batterySupplied + fromBattery
+                        local suppliedKW = fromGeneration + fromBattery
+                        gen.lastStartupDrawKW = suppliedKW
+                        -- Cranking energy dissipates into the same sink
+                        -- the running machine will use: booked once here.
+                        gen.heatSink.generatorHeat = (gen.heatSink.generatorHeat or 0) + suppliedKW
+                        gen.startupHeatKJ = gen.startupHeatKJ + suppliedKW * fixed_seconds
+                        gen.startupReceivedKJ = gen.startupReceivedKJ + suppliedKW * fixed_seconds
+                        if gen.startupReceivedKJ + 1e-9 >= startupRequiredKJ then
+                            gen.phase = 'running'
+                        end
+                    end
+                end
+            elseif gen.phase == 'running' then
+                if not coolingAvailable then
+                    -- Cooling lost while running: the generator trips to
+                    -- shutdown. Electrical output and fuel burn stop
+                    -- immediately; the configured decay heat carries on
+                    -- below.
+                    gen.phase = 'shutdown'
+                    gen.shutdownElapsed = 0
+                    gen.outputKW = 0
+                    gen.blockReason = 'cooling lost: generator tripped to shutdown'
+                elseif commanded <= 0 then
+                    gen.phase = 'shutdown'
+                    gen.shutdownElapsed = 0
+                    gen.outputKW = 0
+                else
+                    -- Ramp toward the commanded output: the output may
+                    -- move at most ramp x dt this tick, up or down, so
+                    -- no tick commands an instantaneous step the machine
+                    -- cannot physically make.
+                    local maxStepKW = gen.rampKWPerSecond * fixed_seconds
+                    local targetKW = math.min(commanded, gen.ratedKW)
+                    gen.outputKW = gen.outputKW
+                        + math.max(-maxStepKW, math.min(maxStepKW, targetKW - gen.outputKW))
+                    -- Fuel feasibility: the fuel drawable above the
+                    -- protected reserve caps the output this tick. A
+                    -- generator with no fuel left cannot run at all.
+                    local neededFuelKWh = gen.outputKW * fixed_hours / gen.efficiency
+                    if neededFuelKWh > drawableKWh then
+                        if drawableKWh <= 1e-15 then
+                            -- Fuel depletion stops electrical output
+                            -- immediately; the decay period follows.
+                            gen.phase = 'shutdown'
+                            gen.shutdownElapsed = 0
+                            gen.outputKW = 0
+                            gen.blockReason = 'fuel depleted: generator shut down'
+                        else
+                            gen.outputKW = drawableKWh * gen.efficiency / fixed_hours
+                        end
+                    end
+                    if gen.phase == 'running' then
+                        local drawnKWh = gen.outputKW * fixed_hours / gen.efficiency
+                        local drawnUnits = drawnKWh / kwhPerUnit
+                        gen.fuelStore.qualified = gen.fuelStore.qualified - drawnUnits
+                        self.unit_loss[gen.fuelStore.unit] =
+                            (self.unit_loss[gen.fuelStore.unit] or 0) + drawnUnits
+                        gen.lastFuelDrawKWh = drawnKWh
+                        local fuelKJ = drawnKWh * 3600
+                        local electricalKJ = gen.outputKW * fixed_seconds
+                        -- Waste heat is the fuel energy the conversion
+                        -- did not deliver as electricity: booked once
+                        -- into the sink, never also exported elsewhere.
+                        local wasteKJ = fuelKJ - electricalKJ
+                        gen.fuelEnergyKJ = gen.fuelEnergyKJ + fuelKJ
+                        gen.electricalKJ = gen.electricalKJ + electricalKJ
+                        gen.wasteHeatKJ = gen.wasteHeatKJ + wasteKJ
+                        local wasteKW = wasteKJ / fixed_seconds
+                        gen.lastWasteHeatKW = wasteKW
+                        gen.heatSink.generatorHeat = (gen.heatSink.generatorHeat or 0) + wasteKW
+                        -- The generator's output joins the shared pool
+                        -- the loads allocate against this tick -
+                        -- generation earned with fuel, not sunshine.
+                        generation = generation + gen.outputKW
+                    end
+                end
+            else
+                -- Shutdown: electrical output has stopped, but the
+                -- configured shutdown heat keeps flowing into the sink
+                -- for the configured decay period and the cooling
+                -- requirement stays exposed with it. The decay heat
+                -- cannot be refused - it happens whether or not cooling
+                -- is available - so it books regardless. A zero decay
+                -- period books nothing.
+                gen.outputKW = 0
+                if gen.shutdownElapsed + 1e-9 >= gen.shutdownSeconds then
+                    gen.phase = 'stopped'
+                else
+                    gen.lastDecayHeatKW = gen.shutdownHeatKW
+                    gen.heatSink.generatorHeat =
+                        (gen.heatSink.generatorHeat or 0) + gen.shutdownHeatKW
+                    gen.decayHeatKJ = gen.decayHeatKJ + gen.shutdownHeatKW * fixed_seconds
+                    gen.shutdownElapsed = gen.shutdownElapsed + fixed_seconds
+                    if gen.shutdownElapsed + 1e-9 >= gen.shutdownSeconds then
+                        gen.phase = 'stopped'
+                    end
+                end
+            end
+            gen.lastCoolingRequired = gen.phase == 'running' or gen.phase == 'shutdown'
+        end
+        local availableGeneration = generation
         local supplied = {}
         for _, index in ipairs(self.load_order) do
             local load = self.loads[index]
@@ -1514,6 +1816,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         for _, chiller in ipairs(self.chillers) do
             totalSupplied = totalSupplied + chiller.lastPowerSupplied
         end
+        -- Generator startup cranking draws ride the same pool as every
+        -- other service (#399); generator output is generation inside
+        -- it. Neither side is ever a second budget.
+        for _, gen in ipairs(self.generators) do
+            totalSupplied = totalSupplied + gen.lastStartupDrawKW
+        end
         local generationBound = BALANCE_TOLERANCE
             * math.max(1.0, math.abs(availableGeneration) + batterySupplied)
         assert(totalSupplied <= availableGeneration + batterySupplied + generationBound,
@@ -1626,13 +1934,19 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             condenserByReservoir[chiller.condenser] =
                 (condenserByReservoir[chiller.condenser] or 0) + chiller.lastCondenserKW
         end
+        -- Generator heat enters the sink reservoir exactly once (#399):
+        -- the generator booked waste, startup dissipation and decay heat
+        -- here in applyPower, and the reservoir integrates it as its own
+        -- ledger term.
         for _, reservoir in ipairs(self.reservoirs) do
             local capacity = reservoir.capacity
             local temperatureK = reservoir.temperature + KELVIN_OFFSET
             local routed = routedByReservoir[reservoir] or 0
             local loopHeat = loopHeatByReservoir[reservoir] or 0
             local condenser = condenserByReservoir[reservoir] or 0
-            local heatIn = reservoir.absorbedKW + routed + loopHeat + condenser
+            local generatorHeat = reservoir.generatorHeat or 0
+            reservoir.generatorHeat = 0
+            local heatIn = reservoir.absorbedKW + routed + loopHeat + condenser + generatorHeat
             local rejected = 0
             local minSink = reservoir.temperature
             local maxSink = reservoir.temperature
@@ -1676,6 +1990,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             reservoir.routedKJ = reservoir.routedKJ + routed * fixed_seconds
             reservoir.loopKJ = (reservoir.loopKJ or 0) + loopHeat * fixed_seconds
             reservoir.condenserKJ = (reservoir.condenserKJ or 0) + condenser * fixed_seconds
+            reservoir.generatorKJ = (reservoir.generatorKJ or 0) + generatorHeat * fixed_seconds
             reservoir.rejectedKJ = reservoir.rejectedKJ + rejected * fixed_seconds
             reservoir.temperature = newTemperature
             -- Declared service limits are reported as crossings, never
@@ -1696,7 +2011,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local startingEnergy = reservoir.capacity * reservoir.startingTemperature
             local bound = BALANCE_TOLERANCE * math.max(1, math.abs(startingEnergy))
             local residual = startingEnergy + reservoir.absorbedKJ + reservoir.routedKJ
-                + (reservoir.loopKJ or 0) + (reservoir.condenserKJ or 0) - reservoir.rejectedKJ
+                + (reservoir.loopKJ or 0) + (reservoir.condenserKJ or 0) + (reservoir.generatorKJ or 0)
+                - reservoir.rejectedKJ
                 - reservoir.capacity * reservoir.temperature
             assert(residual == residual and math.abs(residual) <= bound,
                 "thermal energy ledger residual for reservoir '"
@@ -1755,6 +2071,33 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 "chiller '" .. chiller.id .. "' extracted more than its circulation could deliver")
             assert(chiller.lastPowerSupplied <= chiller.lastPowerDemand + BALANCE_TOLERANCE,
                 "chiller '" .. chiller.id .. "' was supplied more power than it demanded")
+        end
+        -- Generator fuel ledger (#399): every joule of fuel energy the
+        -- generator consumed must appear as delivered electrical energy
+        -- or as waste heat routed to the sink, cumulatively and within
+        -- the declared tolerance. A residual beyond it means fuel energy
+        -- vanished or electrical energy appeared from nowhere - a
+        -- conservation violation, never a silent rounding. Output never
+        -- exceeds the installed rating, and the machine never runs while
+        -- its cooling interface is unqualified.
+        for _, gen in ipairs(self.generators) do
+            local genBound = BALANCE_TOLERANCE * math.max(1,
+                math.max(math.abs(gen.fuelEnergyKJ), math.abs(gen.electricalKJ)))
+            local residual = gen.fuelEnergyKJ - gen.electricalKJ - gen.wasteHeatKJ
+            assert(residual == residual and math.abs(residual) <= genBound,
+                "generator '" .. gen.id .. "' fuel ledger residual exceeds tolerance")
+            local values = { gen.outputKW, gen.lastFuelDrawKWh, gen.lastWasteHeatKW,
+                gen.lastStartupDrawKW, gen.lastDecayHeatKW, gen.startupReceivedKJ,
+                gen.fuelEnergyKJ, gen.electricalKJ, gen.wasteHeatKJ,
+                gen.startupHeatKJ, gen.decayHeatKJ }
+            for _, value in ipairs(values) do
+                assert(isFinite(value),
+                    "generator '" .. gen.id .. "' value is not finite")
+            end
+            assert(gen.outputKW <= gen.ratedKW + BALANCE_TOLERANCE,
+                "generator '" .. gen.id .. "' delivered above its installed capacity")
+            assert(gen.phase ~= 'running' or gen.lastCoolingAvailable,
+                "generator '" .. gen.id .. "' ran while its cooling interface was unqualified")
         end
     end
     function object:advance(world_tick, fixed_seconds)

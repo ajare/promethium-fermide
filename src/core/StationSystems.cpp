@@ -69,6 +69,7 @@ namespace core
 			std::vector<RadiatorSettings> const* radiators;
 			std::vector<CoolantLoopSettings> const* coolantLoops;
 			std::vector<ChillerSettings> const* chillers;
+			std::vector<GeneratorSettings> const* generators;
 			static void pushProfile(lua_State* state, ProfileSettings const& profile)
 			{
 				lua_createtable(state, 0, 3);
@@ -316,7 +317,31 @@ namespace core
 					lua_pushnumber(state, chiller.maxCondensingTemperatureC); lua_setfield(state, -2, "maxCondensingTemperatureC");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 12, 1);
+				// Authored generator descriptors cross the same boundary as
+				// plain immutable values (#399); each sandbox mirrors the
+				// startup/running/shutdown state machine, the fuel draw and
+				// the heat routing, and audits the fuel ledger itself.
+				lua_createtable(state, static_cast<int>(generators->size()), 0);
+				for (size_t index = 0; index < generators->size(); ++index)
+				{
+					auto const& generator = (*generators)[index];
+					lua_createtable(state, 0, 13);
+					lua_pushstring(state, generator.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, generator.fuelStoreId.c_str()); lua_setfield(state, -2, "fuelStore");
+					lua_pushstring(state, generator.thermalClass.c_str()); lua_setfield(state, -2, "thermalClass");
+					lua_pushstring(state, generator.heatSinkId.c_str()); lua_setfield(state, -2, "heatSink");
+					lua_pushnumber(state, generator.ratedOutputKW); lua_setfield(state, -2, "ratedKW");
+					lua_pushnumber(state, generator.efficiency); lua_setfield(state, -2, "efficiency");
+					lua_pushnumber(state, generator.maxRampKWPerSecond); lua_setfield(state, -2, "rampKWPerSecond");
+					lua_pushnumber(state, generator.commandedOutputKW); lua_setfield(state, -2, "commandedKW");
+					lua_pushnumber(state, generator.startupPowerKW); lua_setfield(state, -2, "startupPowerKW");
+					lua_pushnumber(state, generator.startupSeconds); lua_setfield(state, -2, "startupSeconds");
+					lua_pushnumber(state, generator.shutdownHeatKW); lua_setfield(state, -2, "shutdownHeatKW");
+					lua_pushnumber(state, generator.shutdownSeconds); lua_setfield(state, -2, "shutdownSeconds");
+					lua_pushnumber(state, generator.maxSinkTemperatureC); lua_setfield(state, -2, "maxSinkTemperatureC");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 13, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -923,6 +948,75 @@ namespace core
 			if (chiller.chilledSetpointC >= chiller.maxCondensingTemperatureC)
 				return refuse(where + " chilled setpoint must be below the maximum condensing temperature");
 		}
+		// Generator contracts (#399): the fuel inventory is an energy-unit
+		// Resource store, the waste-heat sink a declared thermal reservoir
+		// of the generator's own service class - spare capacity in another
+		// class is never usable - and the conversion, ramp, startup and
+		// shutdown-heat terms are all finite and physically ordered.
+		if (settings.generators.size() > MaxStationGenerators)
+			return refuse("Station generators are limited to "
+				+ std::to_string(MaxStationGenerators) + " entries");
+		std::set<std::string> generatorIds;
+		for (auto const& generator : settings.generators)
+		{
+			auto const where = "Station generator '" + generator.id + "'";
+			if (generator.id.empty()) return refuse("Station generator id must not be empty");
+			if (generator.id.size() > MaxStationStoreIdLength)
+				return refuse("Station generator id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!generatorIds.insert(generator.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				generator.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + generator.thermalClass
+					+ "'; declared classes are: low, moderate, warm, generation");
+			// Fuel is energy the generator can burn: the store must be
+			// denominated in an energy unit so the fuel ledger closes in
+			// the same energy terms as the electrical output.
+			auto const fuel = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == generator.fuelStoreId; });
+			if (fuel == settings.stores.end())
+				return refuse(where + " fuel inventory references unknown Resource store '"
+					+ generator.fuelStoreId + "'");
+			if (fuel->unit != "kJ" && fuel->unit != "MJ" && fuel->unit != "Wh" && fuel->unit != "kWh")
+				return refuse(where + " fuel store unit '" + fuel->unit
+					+ "' is not an energy unit; fuelled generators burn kJ, MJ, Wh or kWh");
+			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(),
+				[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == generator.heatSinkId; });
+			if (sink == settings.thermalReservoirs.end())
+				return refuse(where + " heat sink references unknown thermal reservoir '"
+					+ generator.heatSinkId + "'");
+			if (sink->thermalClass != generator.thermalClass)
+				return refuse(where + " thermal class '" + generator.thermalClass
+					+ "' is incompatible with heat sink reservoir '" + sink->id
+					+ "' of class '" + sink->thermalClass + "'; heat routes only to the same service class");
+			// Zero installed capacity is legal and disables the generator;
+			// it is never mistaken for a source that can carry a load.
+			if (!std::isfinite(generator.ratedOutputKW) || generator.ratedOutputKW < 0.0)
+				return refuse(where + " installed capacity must be finite and non-negative (0 disables the generator)");
+			if (!std::isfinite(generator.efficiency)
+				|| generator.efficiency <= 0.0 || generator.efficiency > 1.0)
+				return refuse(where + " conversion efficiency must be finite and greater than 0 up to 1");
+			// A generator that cannot change its output at all could never
+			// reach any commanded level, so the ramp limit must be positive.
+			if (!std::isfinite(generator.maxRampKWPerSecond) || generator.maxRampKWPerSecond <= 0.0)
+				return refuse(where + " ramp limit must be finite and positive");
+			if (!std::isfinite(generator.commandedOutputKW) || generator.commandedOutputKW < 0.0)
+				return refuse(where + " commanded output must be finite and non-negative");
+			if (generator.commandedOutputKW > generator.ratedOutputKW)
+				return refuse(where + " commanded output exceeds the installed capacity");
+			if (!std::isfinite(generator.startupPowerKW) || generator.startupPowerKW < 0.0)
+				return refuse(where + " startup power must be finite and non-negative");
+			if (!std::isfinite(generator.startupSeconds) || generator.startupSeconds < 0.0)
+				return refuse(where + " startup duration must be finite and non-negative");
+			if (!std::isfinite(generator.shutdownHeatKW) || generator.shutdownHeatKW < 0.0)
+				return refuse(where + " shutdown heat must be finite and non-negative");
+			if (!std::isfinite(generator.shutdownSeconds) || generator.shutdownSeconds < 0.0)
+				return refuse(where + " shutdown heat duration must be finite and non-negative");
+			if (!std::isfinite(generator.maxSinkTemperatureC)
+				|| generator.maxSinkTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum sink temperature must be finite and above absolute zero (-273.15 C)");
+		}
 		if (settings.deliveries.size() > MaxStationResourceDeliveries)
 			return refuse("Station resupply deliveries are limited to "
 				+ std::to_string(MaxStationResourceDeliveries) + " entries");
@@ -1159,6 +1253,7 @@ namespace core
 			double lastHeatRoutedKW{0.0};
 			double lastLoopHeatKW{0.0};
 			double lastCondenserHeatKW{0.0};
+			double lastGeneratorHeatKW{0.0};
 			double lastHeatInKW{0.0};
 			double lastRejectedKW{0.0};
 			double lastNetKW{0.0};
@@ -1166,6 +1261,7 @@ namespace core
 			double routedKJ{0.0};
 			double loopKJ{0.0};
 			double condenserKJ{0.0};
+			double generatorKJ{0.0};
 			double rejectedKJ{0.0};
 			bool lastAboveLimit{false};
 			bool lastBelowLimit{false};
@@ -1236,6 +1332,41 @@ namespace core
 			double condenserKJ{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
+		// The authoritative ledger of one authored generator (#399). The
+		// generator converts finite stored fuel energy into bus electrical
+		// output at the declared efficiency; the difference is waste heat
+		// routed exactly once into the sink reservoir, alongside the
+		// cranking dissipation while starting and the configured decay
+		// heat after output stops. The fuel ledger closes over
+		// fuel = electrical + waste within the declared tolerance: fuel
+		// never vanishes without becoming output or heat. Startup only
+		// completes on energy actually received from the shared pool while
+		// cooling is qualified, so a generator never self-starts on output
+		// it has not yet made.
+		struct GeneratorState
+		{
+			GeneratorSettings authored;
+			size_t fuelStoreIndex{0};
+			size_t sinkIndex{0};
+			StationGeneratorPhase phase{StationGeneratorPhase::Stopped};
+			double outputKW{0.0};
+			double lastFuelDrawKWh{0.0};
+			double lastWasteHeatKW{0.0};
+			double lastStartupDrawKW{0.0};
+			double lastStartupUnmetKW{0.0};
+			double lastDecayHeatKW{0.0};
+			double startupReceivedKJ{0.0};
+			double shutdownElapsedSeconds{0.0};
+			bool lastCoolingAvailable{false};
+			bool lastCoolingRequired{false};
+			std::string lastBlockReason;
+			double fuelEnergyKJ{0.0};
+			double electricalKJ{0.0};
+			double wasteHeatKJ{0.0};
+			double startupHeatKJ{0.0};
+			double decayHeatKJ{0.0};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
 		std::vector<TransferState> transfers;
@@ -1248,6 +1379,7 @@ namespace core
 		std::vector<RadiatorState> radiators;
 		std::vector<LoopState> coolantLoops;
 		std::vector<ChillerState> chillers;
+		std::vector<GeneratorState> generators;
 		// Competing transfers are allocated in priority order (higher first),
 		// ties resolved by declaration order: a declared deterministic order.
 		std::vector<size_t> transferOrder;
@@ -1313,6 +1445,7 @@ namespace core
 			auto const committedRadiators = radiators;
 			auto const committedCoolantLoops = coolantLoops;
 			auto const committedChillers = chillers;
+			auto const committedGenerators = generators;
 			auto const committedAvailableGenerationKW = lastAvailableGenerationKW;
 			auto const committedBatteryShortfallKW = lastBatteryShortfallKW;
 			if (runLedger(tick, seconds, system, violation)) return true;
@@ -1326,6 +1459,7 @@ namespace core
 			radiators = committedRadiators;
 			coolantLoops = committedCoolantLoops;
 			chillers = committedChillers;
+			generators = committedGenerators;
 			lastAvailableGenerationKW = committedAvailableGenerationKW;
 			lastBatteryShortfallKW = committedBatteryShortfallKW;
 			return false;
@@ -1389,6 +1523,9 @@ namespace core
 			std::vector<bool> previousChillerSinkOver;
 			previousChillerSinkOver.reserve(chillers.size());
 			for (auto const& chiller : chillers) previousChillerSinkOver.push_back(chiller.lastSinkOver);
+			std::vector<StationGeneratorPhase> previousGeneratorPhase;
+			previousGeneratorPhase.reserve(generators.size());
+			for (auto const& generator : generators) previousGeneratorPhase.push_back(generator.phase);
 			std::vector<double> qualified, unqualified;
 			qualified.reserve(stores.size());
 			unqualified.reserve(stores.size());
@@ -1576,6 +1713,241 @@ namespace core
 			};
 			double batterySuppliedKW{0.0};
 			double batteryShortfallKW{0.0};
+			// Fuelled generators run ahead of the load allocation (#399):
+			// their electrical output joins the shared generation pool for
+			// this tick's loads, their startup cranking draws ride the same
+			// pool ahead of discretionary demand, and their waste, startup
+			// and decay heat land in the thermal integration below - each
+			// booked exactly once at the sink boundary. A generator is a
+			// dispatchable source, not an unlimited power setting: output
+			// is bounded by the installed rating, the ramp limit and the
+			// fuel actually drawable, and it only runs once the startup
+			// energy has been received while cooling is qualified.
+			std::vector<double> generatorHeatBySink(reservoirs.size(), 0.0);
+			double totalGeneratorOutputKW{0.0}, totalGeneratorStartupKW{0.0};
+			double totalGeneratorWasteKW{0.0}, totalGeneratorDecayKW{0.0};
+			// Fuel energy is authored in the store's unit; the generator's
+			// physics runs in kWh. One factor converts store units to kWh
+			// and its reciprocal converts the required fuel energy back, so
+			// host and sandbox agree on every draw.
+			auto const energyUnitsToKWh = [](std::string const& unit) -> double
+			{
+				if (unit == "kJ") return 1.0 / 3600.0;
+				if (unit == "MJ") return 1000.0 / 3600.0;
+				if (unit == "Wh") return 1.0 / 1000.0;
+				return 1.0;
+			};
+			for (auto& generator : generators)
+			{
+				auto const disabled = generator.authored.ratedOutputKW <= 0.0;
+				auto const commanded = disabled ? 0.0 : generator.authored.commandedOutputKW;
+				auto const dtSeconds = static_cast<double>(seconds);
+				auto const sinkTemperatureC = reservoirs[generator.sinkIndex].temperatureC;
+				// Cooling is qualified while the sink is below the maximum
+				// sink temperature: at or above it the interface cannot
+				// accept the generator's heat, so the generator cannot run.
+				auto const coolingAvailable = !disabled
+					&& sinkTemperatureC + 1e-9 < generator.authored.maxSinkTemperatureC;
+				auto const kwhPerUnit = energyUnitsToKWh(stores[generator.fuelStoreIndex].authored.unit);
+				auto const drawableKWh = std::max(0.0,
+					qualified[generator.fuelStoreIndex] - stores[generator.fuelStoreIndex].authored.protectedReserve)
+					* kwhPerUnit;
+				auto const startupRequiredKJ = generator.authored.startupPowerKW * generator.authored.startupSeconds;
+				generator.lastFuelDrawKWh = 0.0;
+				generator.lastWasteHeatKW = 0.0;
+				generator.lastStartupDrawKW = 0.0;
+				generator.lastStartupUnmetKW = 0.0;
+				generator.lastDecayHeatKW = 0.0;
+				generator.lastCoolingAvailable = coolingAvailable;
+				generator.lastBlockReason.clear();
+				switch (generator.phase)
+				{
+				case StationGeneratorPhase::Stopped:
+					generator.outputKW = 0.0;
+					if (commanded > 0.0)
+					{
+						// A commanded start proceeds only when every
+						// precondition holds this tick: qualified cooling,
+						// drawable fuel above the protected reserve, and a
+						// pool that can actually supply the cranking draw.
+						// A start is never self-funded: a stopped
+						// generator produces nothing, so its own output
+						// can never appear in the pool that starts it.
+						if (!coolingAvailable)
+							generator.lastBlockReason = "cooling is not qualified: sink at or above the maximum sink temperature";
+						else if (drawableKWh <= 0.0)
+							generator.lastBlockReason = "no fuel is drawable above the protected reserve";
+						else if (startupRequiredKJ > 0.0
+							&& availableGeneration + batteryDeliverableKW() + 1e-9
+								< generator.authored.startupPowerKW)
+							generator.lastBlockReason = "the pool cannot supply the startup energy draw";
+						else
+						{
+							generator.startupReceivedKJ = 0.0;
+							generator.phase = startupRequiredKJ > 0.0
+								? StationGeneratorPhase::Starting : StationGeneratorPhase::Running;
+						}
+					}
+					break;
+				case StationGeneratorPhase::Starting:
+					generator.outputKW = 0.0;
+					if (!coolingAvailable)
+					{
+						// Cooling lost mid-crank: the start fails. The
+						// cranking energy already spent is accounted as
+						// heat in the sink; the attempt restarts from zero.
+						generator.phase = StationGeneratorPhase::Stopped;
+						generator.startupReceivedKJ = 0.0;
+						generator.lastBlockReason = "cooling lost during startup";
+					}
+					else if (drawableKWh <= 0.0)
+					{
+						generator.phase = StationGeneratorPhase::Stopped;
+						generator.startupReceivedKJ = 0.0;
+						generator.lastBlockReason = "fuel depleted during startup";
+					}
+					else
+					{
+						auto const requestKW = generator.authored.startupPowerKW;
+						auto const poolKW = availableGeneration + batteryDeliverableKW();
+						if (poolKW + 1e-9 < requestKW)
+						{
+							// The startup energy support that qualified the
+							// start has gone away mid-crank: the start
+							// fails whole rather than cranking on a trickle.
+							generator.phase = StationGeneratorPhase::Stopped;
+							generator.startupReceivedKJ = 0.0;
+							generator.lastBlockReason = "startup energy support lost mid-crank";
+							break;
+						}
+						auto const fromGeneration = std::min(requestKW, availableGeneration);
+						availableGeneration -= fromGeneration;
+						auto const ask = requestKW - fromGeneration;
+						auto const fromBattery = drawBatteries(ask);
+						batterySuppliedKW += fromBattery;
+						batteryShortfallKW += ask - fromBattery;
+						auto const suppliedKW = fromGeneration + fromBattery;
+						generator.lastStartupDrawKW = suppliedKW;
+						// Cranking energy dissipates into the same sink
+						// the running machine will use: booked once here.
+						generatorHeatBySink[generator.sinkIndex] += suppliedKW;
+						generator.startupHeatKJ += suppliedKW * dtSeconds;
+						generator.startupReceivedKJ += suppliedKW * dtSeconds;
+						if (generator.startupReceivedKJ + 1e-9 >= startupRequiredKJ)
+							generator.phase = StationGeneratorPhase::Running;
+					}
+					break;
+				case StationGeneratorPhase::Running:
+					if (!coolingAvailable)
+					{
+						// Cooling lost while running: the generator trips to
+						// shutdown. Electrical output and fuel burn stop
+						// immediately; the configured decay heat carries
+						// on below.
+						generator.phase = StationGeneratorPhase::Shutdown;
+						generator.shutdownElapsedSeconds = 0.0;
+						generator.outputKW = 0.0;
+						generator.lastBlockReason = "cooling lost: generator tripped to shutdown";
+					}
+					else if (commanded <= 0.0)
+					{
+						generator.phase = StationGeneratorPhase::Shutdown;
+						generator.shutdownElapsedSeconds = 0.0;
+						generator.outputKW = 0.0;
+					}
+					else
+					{
+						// Ramp toward the commanded output: the output may
+						// move at most ramp x dt this tick, up or down, so
+						// no tick commands an instantaneous step the
+						// machine cannot physically make.
+						auto const maxStepKW = generator.authored.maxRampKWPerSecond * dtSeconds;
+						auto const targetKW = std::min(commanded, generator.authored.ratedOutputKW);
+						generator.outputKW += std::max(-maxStepKW,
+							std::min(maxStepKW, targetKW - generator.outputKW));
+						// Fuel feasibility: the fuel drawable above the
+						// protected reserve caps the output this tick. A
+						// generator with no fuel left cannot run at all.
+						auto const neededFuelKWh = generator.outputKW * hours / generator.authored.efficiency;
+						if (neededFuelKWh > drawableKWh)
+						{
+							if (drawableKWh <= 1e-15)
+							{
+								// Fuel depletion stops electrical output
+								// immediately; the decay period follows.
+								generator.phase = StationGeneratorPhase::Shutdown;
+								generator.shutdownElapsedSeconds = 0.0;
+								generator.outputKW = 0.0;
+								generator.lastBlockReason = "fuel depleted: generator shut down";
+								break;
+							}
+							generator.outputKW = drawableKWh * generator.authored.efficiency / hours;
+						}
+						auto const drawnKWh = generator.outputKW * hours / generator.authored.efficiency;
+						auto const drawnUnits = drawnKWh / kwhPerUnit;
+						qualified[generator.fuelStoreIndex] -= drawnUnits;
+						flowOut[generator.fuelStoreIndex] += drawnUnits;
+						stagedUnitLoss[stores[generator.fuelStoreIndex].authored.unit] += drawnUnits;
+						generator.lastFuelDrawKWh = drawnKWh;
+						auto const fuelKJ = drawnKWh * 3600.0;
+						auto const electricalKJ = generator.outputKW * dtSeconds;
+						// Waste heat is the fuel energy the conversion did
+						// not deliver as electricity: booked once into the
+						// sink, never also exported elsewhere.
+						auto const wasteKJ = fuelKJ - electricalKJ;
+						generator.fuelEnergyKJ += fuelKJ;
+						generator.electricalKJ += electricalKJ;
+						generator.wasteHeatKJ += wasteKJ;
+						auto const wasteKW = wasteKJ / dtSeconds;
+						generator.lastWasteHeatKW = wasteKW;
+						generatorHeatBySink[generator.sinkIndex] += wasteKW;
+						// The generator's output joins the shared pool the
+						// loads allocate against this tick - generation
+						// earned with fuel, not sunshine.
+						availableGeneration += generator.outputKW;
+						totalGeneratorOutputKW += generator.outputKW;
+						totalGeneratorWasteKW += wasteKW;
+					}
+					break;
+				case StationGeneratorPhase::Shutdown:
+					// Electrical output has stopped, but the configured
+					// shutdown heat keeps flowing into the sink for the
+					// configured decay period and the cooling requirement
+					// stays exposed with it: a stopped generator is not
+					// instantly a cold generator. The decay heat cannot be
+					// refused - it happens whether or not cooling is
+					// available - so it books regardless, and the sink
+					// warms under it. A zero decay period books nothing.
+					generator.outputKW = 0.0;
+					if (generator.shutdownElapsedSeconds + 1e-9 >= generator.authored.shutdownSeconds)
+						generator.phase = StationGeneratorPhase::Stopped;
+					else
+					{
+						generator.lastDecayHeatKW = generator.authored.shutdownHeatKW;
+						generatorHeatBySink[generator.sinkIndex] += generator.authored.shutdownHeatKW;
+						generator.decayHeatKJ += generator.authored.shutdownHeatKW * dtSeconds;
+						totalGeneratorDecayKW += generator.authored.shutdownHeatKW;
+						generator.shutdownElapsedSeconds += dtSeconds;
+						if (generator.shutdownElapsedSeconds + 1e-9 >= generator.authored.shutdownSeconds)
+							generator.phase = StationGeneratorPhase::Stopped;
+					}
+					break;
+				}
+				generator.lastCoolingRequired = generator.phase == StationGeneratorPhase::Running
+					|| generator.phase == StationGeneratorPhase::Shutdown;
+				totalGeneratorStartupKW += generator.lastStartupDrawKW;
+				// Publish the per-generator service status against the
+				// commanded output: full at command, partial under ramp
+				// or fuel limits, rejected when commanded with nothing
+				// produced, idle when not commanded.
+				if (disabled || commanded <= 0.0)
+					generator.status = StationTransferStatus::Idle;
+				else if (generator.outputKW + 1e-12 >= commanded)
+					generator.status = StationTransferStatus::Full;
+				else if (generator.outputKW > 1e-12)
+					generator.status = StationTransferStatus::Partial;
+				else generator.status = StationTransferStatus::Rejected;
+			}
 			// #554: declared material exchanges are operation dependencies.
 			// The material-feasible operating fraction is the largest fraction
 			// of the load's full-operation (profile-scaled) exchanges that its
@@ -2129,8 +2501,12 @@ namespace core
 					auto& reservoir = reservoirs[index];
 					auto const capacity = reservoir.authored.heatCapacityKJPerK;
 					auto const temperatureK = reservoir.temperatureC + StationCelsiusOffset;
+					// Generator heat (#399): waste, startup dissipation and
+					// decay heat routed into the sink exactly once, at the
+					// same boundary the reservoir integrates.
+					auto const generatorHeatKW = generatorHeatBySink[index];
 					auto const heatInKW = reservoir.authored.absorbedHeatKW + routedIn[index]
-						+ loopHeatIntoReservoir[index] + condenserHeatBySink[index];
+						+ loopHeatIntoReservoir[index] + condenserHeatBySink[index] + generatorHeatKW;
 					// Net radiative rejection at the current emitting
 					// temperature: emissivity x view factor x area x sigma
 					// x (T^4 - T_sink^4). The environmental back-radiation
@@ -2184,6 +2560,7 @@ namespace core
 					reservoir.lastHeatRoutedKW = routedIn[index];
 					reservoir.lastLoopHeatKW = loopHeatIntoReservoir[index];
 					reservoir.lastCondenserHeatKW = condenserHeatBySink[index];
+					reservoir.lastGeneratorHeatKW = generatorHeatKW;
 					reservoir.lastHeatInKW = heatInKW;
 					reservoir.lastRejectedKW = rejectedKW;
 					reservoir.lastNetKW = netKW;
@@ -2191,6 +2568,7 @@ namespace core
 					reservoir.routedKJ += routedIn[index] * dt;
 					reservoir.loopKJ += loopHeatIntoReservoir[index] * dt;
 					reservoir.condenserKJ += condenserHeatBySink[index] * dt;
+					reservoir.generatorKJ += generatorHeatKW * dt;
 					reservoir.rejectedKJ += rejectedKW * dt;
 					reservoir.temperatureC = newTemperatureC;
 					// Declared service limits are reported as crossings,
@@ -2478,7 +2856,12 @@ namespace core
 				for (auto const& loop : coolantLoops)
 					totalSupplied += loop.lastPumpSuppliedKW + loop.lastHeaterSuppliedKW;
 				for (auto const& chiller : chillers) totalSupplied += chiller.lastPowerSuppliedKW;
+				// Generator startup cranking draws ride the same pool as
+				// every other service (#399); generator output is
+				// generation inside it. Neither side is ever a second budget.
+				for (auto const& generator : generators) totalSupplied += generator.lastStartupDrawKW;
 				for (auto const& array : solarArrays) totalGeneration += array.lastAvailableKW;
+				for (auto const& generator : generators) totalGeneration += generator.outputKW;
 				for (auto const& battery : batteries) totalDischarged += battery.lastDischargeKW;
 				auto const bound = StationBalanceTolerance * std::max(1.0, totalGeneration + totalDischarged);
 				if (totalSupplied > totalGeneration + totalDischarged + bound)
@@ -2567,6 +2950,7 @@ namespace core
 				if (!requireFinite(reservoir.lastHeatRoutedKW, where + "routed heat power")) return false;
 				if (!requireFinite(reservoir.lastLoopHeatKW, where + "coolant loop heat")) return false;
 				if (!requireFinite(reservoir.lastCondenserHeatKW, where + "condenser heat")) return false;
+				if (!requireFinite(reservoir.lastGeneratorHeatKW, where + "generator heat")) return false;
 				if (!requireFinite(reservoir.lastHeatInKW, where + "total heat inflow")) return false;
 				if (!requireFinite(reservoir.lastRejectedKW, where + "radiator rejection")) return false;
 				if (!requireFinite(reservoir.lastNetKW, where + "net heat balance")) return false;
@@ -2574,6 +2958,7 @@ namespace core
 				if (!requireFinite(reservoir.routedKJ, where + "cumulative routed energy")) return false;
 				if (!requireFinite(reservoir.loopKJ, where + "cumulative loop exchange energy")) return false;
 				if (!requireFinite(reservoir.condenserKJ, where + "cumulative condenser energy")) return false;
+				if (!requireFinite(reservoir.generatorKJ, where + "cumulative generator heat energy")) return false;
 				if (!requireFinite(reservoir.rejectedKJ, where + "cumulative rejected energy")) return false;
 			}
 			for (auto const& radiator : radiators)
@@ -2649,6 +3034,45 @@ namespace core
 						+ std::to_string(residual) + " exceeds tolerance "
 						+ std::to_string(StationBalanceTolerance), false;
 			}
+			// Generator fuel ledger (#399): every joule of fuel energy the
+			// generator consumed must appear as delivered electrical energy
+			// or as waste heat routed to the sink, cumulatively and within
+			// the declared tolerance. A residual beyond it means fuel
+			// energy vanished or electrical energy appeared from nowhere -
+			// a conservation violation that fails the whole tick, never a
+			// silent rounding. Output never exceeds the installed rating,
+			// never moves faster than the ramp limit, and never runs while
+			// its cooling interface is unqualified.
+			system = "Generator fuel service";
+			for (auto const& generator : generators)
+			{
+				auto const where = "generator '" + generator.authored.id + "' ";
+				if (!requireFinite(generator.outputKW, where + "electrical output")) return false;
+				if (!requireFinite(generator.lastFuelDrawKWh, where + "fuel draw")) return false;
+				if (!requireFinite(generator.lastWasteHeatKW, where + "waste heat")) return false;
+				if (!requireFinite(generator.lastStartupDrawKW, where + "startup draw")) return false;
+				if (!requireFinite(generator.lastDecayHeatKW, where + "decay heat")) return false;
+				if (!requireFinite(generator.startupReceivedKJ, where + "startup energy received")) return false;
+				if (!requireFinite(generator.fuelEnergyKJ, where + "cumulative fuel energy")) return false;
+				if (!requireFinite(generator.electricalKJ, where + "cumulative electrical energy")) return false;
+				if (!requireFinite(generator.wasteHeatKJ, where + "cumulative waste heat")) return false;
+				if (!requireFinite(generator.startupHeatKJ, where + "cumulative startup heat")) return false;
+				if (!requireFinite(generator.decayHeatKJ, where + "cumulative decay heat")) return false;
+				auto const bound = StationBalanceTolerance
+					* std::max(1.0, std::max(std::abs(generator.fuelEnergyKJ), std::abs(generator.electricalKJ)));
+				auto const residual = generator.fuelEnergyKJ - generator.electricalKJ - generator.wasteHeatKJ;
+				if (!std::isfinite(residual) || std::abs(residual) > bound)
+					return violation = where + "fuel ledger residual "
+						+ std::to_string(residual) + " exceeds tolerance "
+						+ std::to_string(StationBalanceTolerance), false;
+				if (generator.outputKW > generator.authored.ratedOutputKW + StationBalanceTolerance)
+					return violation = where + "delivered above its installed capacity", false;
+				if (generator.phase == StationGeneratorPhase::Running && !generator.lastCoolingAvailable)
+					return violation = where + "ran while its cooling interface was unqualified", false;
+				if (generator.phase == StationGeneratorPhase::Running
+					&& generator.lastFuelDrawKWh <= 0.0 && generator.outputKW > 1e-12)
+					return violation = where + "delivered electrical output without burning fuel", false;
+			}
 			system = "Power allocation";
 			for (auto const& array : solarArrays)
 			{
@@ -2720,6 +3144,10 @@ namespace core
 				if (!requireFinite(totalCoolantPumpKW, "total coolant pump power")) return false;
 				if (!requireFinite(totalCoolantHeaterKW, "total freeze-protection heating power")) return false;
 				if (!requireFinite(totalChillerPowerKW, "total chiller power")) return false;
+				if (!requireFinite(totalGeneratorOutputKW, "total generator output power")) return false;
+				if (!requireFinite(totalGeneratorStartupKW, "total generator startup draw")) return false;
+				if (!requireFinite(totalGeneratorWasteKW, "total generator waste heat")) return false;
+				if (!requireFinite(totalGeneratorDecayKW, "total generator decay heat")) return false;
 			}
 			for (size_t index = 0; index < stores.size(); ++index)
 			{
@@ -2927,6 +3355,46 @@ namespace core
 						: std::string("Chiller '") + chiller.authored.id
 							+ "' condenser sink back below its maximum condensing temperature");
 			}
+			// Generator phase transitions are announced so the event log
+			// records starts, failed starts, trips, fuel depletion and the
+			// end of the decay period without flooding every tick (#399).
+			for (size_t index = 0; index < generators.size(); ++index)
+			{
+				auto const& generator = generators[index];
+				auto const previous = previousGeneratorPhase[index];
+				if (generator.phase == previous) continue;
+				switch (generator.phase)
+				{
+				case StationGeneratorPhase::Stopped:
+					if (previous == StationGeneratorPhase::Starting)
+						appendBoundedEvent(events, tick, "Generator '" + generator.authored.id
+							+ " startup failed: " + (generator.lastBlockReason.empty()
+								? std::string("the start could not be completed")
+								: generator.lastBlockReason));
+					else if (previous == StationGeneratorPhase::Shutdown)
+						appendBoundedEvent(events, tick, "Generator '" + generator.authored.id
+							+ " shutdown complete: decay heat dissipated after "
+							+ std::to_string(generator.authored.shutdownSeconds) + " s");
+					break;
+				case StationGeneratorPhase::Starting:
+					appendBoundedEvent(events, tick, "Generator '" + generator.authored.id
+						+ " starting: cranking at " + std::to_string(generator.authored.startupPowerKW)
+						+ " kW for " + std::to_string(generator.authored.startupSeconds) + " s");
+					break;
+				case StationGeneratorPhase::Running:
+					appendBoundedEvent(events, tick, "Generator '" + generator.authored.id
+						+ " startup complete: running, commanded "
+						+ std::to_string(generator.authored.commandedOutputKW) + " kW");
+					break;
+				case StationGeneratorPhase::Shutdown:
+					appendBoundedEvent(events, tick, "Generator '" + generator.authored.id
+						+ " shutting down: " + (generator.lastBlockReason.empty()
+							? std::string("commanded off") : generator.lastBlockReason)
+						+ "; shutdown heat " + std::to_string(generator.authored.shutdownHeatKW)
+						+ " kW for " + std::to_string(generator.authored.shutdownSeconds) + " s");
+					break;
+				}
+			}
 			// Delivery arrivals are discrete scenario events rather than a
 			// continuous per-tick service, so every arrival is announced with
 			// its own quantities: the refused remainder is the account for
@@ -3042,6 +3510,18 @@ namespace core
 			state.sinkIndex = reservoirIndex[chiller.condenserReservoirId];
 			mImpl->chillers.push_back(std::move(state));
 		}
+		// Generators start stopped with their contracts resolved to the
+		// fuel store and heat-sink reservoir they couple to; every phase,
+		// draw and ledger is runtime state reconstructed from the authored
+		// values on load and Reset (#399).
+		for (auto const& generator : settings.generators)
+		{
+			Impl::GeneratorState state;
+			state.authored = generator;
+			state.fuelStoreIndex = storeIndex[generator.fuelStoreId];
+			state.sinkIndex = reservoirIndex[generator.heatSinkId];
+			mImpl->generators.push_back(std::move(state));
+		}
 		for (auto const& load : settings.equipmentLoads)
 		{
 			Impl::LoadState state;
@@ -3118,7 +3598,7 @@ namespace core
 				&settings.stores, &settings.transfers, &settings.conversions,
 				&settings.solarArrays, &settings.equipmentLoads, &settings.batteries,
 				&settings.deliveries, &settings.thermalReservoirs, &settings.radiators,
-				&settings.coolantLoops, &settings.chillers};
+				&settings.coolantLoops, &settings.chillers, &settings.generators};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -3141,8 +3621,9 @@ namespace core
 			+ std::to_string(settings.deliveries.size()) + " resupply delivery(ies), "
 				+ std::to_string(settings.thermalReservoirs.size()) + " thermal reservoir(s), "
 			+ std::to_string(settings.radiators.size()) + " radiator(s), "
-			+ std::to_string(settings.coolantLoops.size()) + " coolant loop(s) and "
-			+ std::to_string(settings.chillers.size()) + " chiller(s)");
+			+ std::to_string(settings.coolantLoops.size()) + " coolant loop(s), "
+			+ std::to_string(settings.chillers.size()) + " chiller(s) and "
+			+ std::to_string(settings.generators.size()) + " fuelled generator(s)");
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
 	bool StationSystemsRuntime::advance(uint64_t tick, float seconds)
@@ -3194,7 +3675,8 @@ namespace core
 		if (!mImpl->transferOrder.empty() || !mImpl->conversionOrder.empty()
 			|| !mImpl->loads.empty() || !mImpl->solarArrays.empty() || !mImpl->batteries.empty()
 			|| !mImpl->deliveries.empty() || !mImpl->reservoirs.empty()
-			|| !mImpl->coolantLoops.empty() || !mImpl->chillers.empty())
+			|| !mImpl->coolantLoops.empty() || !mImpl->chillers.empty()
+			|| !mImpl->generators.empty())
 		{
 			std::string violationSystem, violation;
 			if (!mImpl->applyLedger(tick, seconds, violationSystem, violation))
@@ -3387,6 +3869,63 @@ namespace core
 		double totalChillerPower = 0.0;
 		for (auto const& chiller : mImpl->chillers) totalChillerPower += chiller.lastPowerSuppliedKW;
 		result.power.chillerPowerKW = totalChillerPower;
+		// The generator snapshot reports the authored contract beside the
+		// phase, the electrical output actually delivered, the fuel
+		// actually drawn, the heat actually routed, the startup progress
+		// and cooling qualification, and the closing fuel ledger (#399).
+		// Generator output rode the same pool as solar; the totals make
+		// the fuelled share explicit beside the solar share.
+		double totalGeneratorOutput = 0.0, totalGeneratorStartup = 0.0;
+		double totalGeneratorWaste = 0.0, totalGeneratorDecay = 0.0;
+		for (auto const& generator : mImpl->generators)
+		{
+			StationGeneratorSnapshot generatorResult;
+			generatorResult.id = generator.authored.id;
+			generatorResult.fuelStoreId = generator.authored.fuelStoreId;
+			generatorResult.thermalClass = generator.authored.thermalClass;
+			generatorResult.heatSinkId = generator.authored.heatSinkId;
+			generatorResult.ratedOutputKW = generator.authored.ratedOutputKW;
+			generatorResult.efficiency = generator.authored.efficiency;
+			generatorResult.maxRampKWPerSecond = generator.authored.maxRampKWPerSecond;
+			generatorResult.commandedOutputKW = generator.authored.commandedOutputKW;
+			generatorResult.startupPowerKW = generator.authored.startupPowerKW;
+			generatorResult.startupSeconds = generator.authored.startupSeconds;
+			generatorResult.shutdownHeatKW = generator.authored.shutdownHeatKW;
+			generatorResult.shutdownSeconds = generator.authored.shutdownSeconds;
+			generatorResult.maxSinkTemperatureC = generator.authored.maxSinkTemperatureC;
+			generatorResult.phase = generator.phase;
+			generatorResult.outputKW = generator.outputKW;
+			generatorResult.fuelDrawKWh = generator.lastFuelDrawKWh;
+			generatorResult.wasteHeatKW = generator.lastWasteHeatKW;
+			generatorResult.startupDrawKW = generator.lastStartupDrawKW;
+			generatorResult.startupUnmetKW = generator.lastStartupUnmetKW;
+			generatorResult.startupReceivedKJ = generator.startupReceivedKJ;
+			generatorResult.startupRequiredKJ = generator.authored.startupPowerKW
+				* generator.authored.startupSeconds;
+			generatorResult.decayHeatKW = generator.lastDecayHeatKW;
+			generatorResult.sinkTemperatureC = mImpl->reservoirs[generator.sinkIndex].temperatureC;
+			generatorResult.coolingAvailable = generator.lastCoolingAvailable;
+			generatorResult.coolingRequired = generator.lastCoolingRequired;
+			generatorResult.disabled = generator.authored.ratedOutputKW <= 0.0;
+			generatorResult.blockReason = generator.lastBlockReason;
+			generatorResult.fuelEnergyKJ = generator.fuelEnergyKJ;
+			generatorResult.electricalKJ = generator.electricalKJ;
+			generatorResult.wasteHeatKJ = generator.wasteHeatKJ;
+			generatorResult.startupHeatKJ = generator.startupHeatKJ;
+			generatorResult.decayHeatKJ = generator.decayHeatKJ;
+			generatorResult.residualKJ = generator.fuelEnergyKJ
+				- generator.electricalKJ - generator.wasteHeatKJ;
+			generatorResult.status = generator.status;
+			totalGeneratorOutput += generator.outputKW;
+			totalGeneratorStartup += generator.lastStartupDrawKW;
+			totalGeneratorWaste += generator.lastWasteHeatKW;
+			totalGeneratorDecay += generator.lastDecayHeatKW;
+			result.power.generators.push_back(std::move(generatorResult));
+		}
+		result.power.generatorOutputKW = totalGeneratorOutput;
+		result.power.generatorStartupDrawKW = totalGeneratorStartup;
+		result.power.generatorWasteHeatKW = totalGeneratorWaste;
+		result.power.generatorDecayHeatKW = totalGeneratorDecay;
 		// The thermal snapshot reports the authored capacity and declared
 		// limits beside the integrated temperature, the last tick's heat
 		// flows and the cumulative energy ledger (#395).
@@ -3404,6 +3943,7 @@ namespace core
 			reservoirResult.lastHeatRoutedKW = reservoir.lastHeatRoutedKW;
 			reservoirResult.lastLoopHeatKW = reservoir.lastLoopHeatKW;
 			reservoirResult.lastCondenserHeatKW = reservoir.lastCondenserHeatKW;
+			reservoirResult.lastGeneratorHeatKW = reservoir.lastGeneratorHeatKW;
 			reservoirResult.lastHeatInKW = reservoir.lastHeatInKW;
 			reservoirResult.lastRejectedKW = reservoir.lastRejectedKW;
 			reservoirResult.lastNetKW = reservoir.lastNetKW;
@@ -3417,10 +3957,12 @@ namespace core
 			reservoirResult.routedEnergyKJ = reservoir.routedKJ;
 			reservoirResult.loopEnergyKJ = reservoir.loopKJ;
 			reservoirResult.condenserEnergyKJ = reservoir.condenserKJ;
+			reservoirResult.generatorEnergyKJ = reservoir.generatorKJ;
 			reservoirResult.rejectedEnergyKJ = reservoir.rejectedKJ;
 			reservoirResult.residualKJ = reservoirResult.startingEnergyKJ
 				+ reservoir.absorbedKJ + reservoir.routedKJ + reservoir.loopKJ
-				+ reservoir.condenserKJ - reservoir.rejectedKJ - reservoirResult.currentEnergyKJ;
+				+ reservoir.condenserKJ + reservoir.generatorKJ
+				- reservoir.rejectedKJ - reservoirResult.currentEnergyKJ;
 			result.thermal.totalAbsorbedKW += reservoir.authored.absorbedHeatKW;
 			result.thermal.totalRoutedKW += reservoir.lastHeatRoutedKW;
 			result.thermal.totalRejectedKW += reservoir.lastRejectedKW;

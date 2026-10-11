@@ -144,7 +144,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 74"), 11, "version: 65");
+		text.replace(text.find("version: 75"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -2265,8 +2265,8 @@ namespace
 		auto const bundled = core::bundledStationSystemsSource();
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -2325,8 +2325,8 @@ namespace
 		// model's own audits hold.
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -4022,13 +4022,13 @@ namespace
 			auto const bundled = core::bundledStationSystemsSource();
 			core::setStationSystemsSourceLoader([bundled] {
 				return "local factory = (function()\n" + bundled + "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators)\n"
 					"assert(#reservoirs == 1 and reservoirs[1].id == 'cabin'\n"
 					"\tand reservoirs[1].heatCapacityKJPerK == 100 and reservoirs[1].absorbedHeatKW == 0)\n"
 					"assert(#radiators == 1 and radiators[1].reservoir == 'cabin'\n"
 					"\tand radiators[1].areaM2 == 5000)\n"
 					"assert(#loads == 1 and loads[1].heatSinkId == 'cabin')\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators)\n"
 					"assert(model.reservoirs[1].temperature == 20)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
@@ -4520,7 +4520,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators)\n"
 					"assert(type(coolantLoops) == 'table' and #coolantLoops == 1, 'coolant loop descriptor crossing lost')\n"
 					"assert(coolantLoops[1].coolantCapacityKg > 0, 'corrupt coolant capacity crossing')\n"
 					"error('corrupt coolant descriptor crossing')\n"
@@ -5012,7 +5012,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators)\n"
 					"assert(type(chillers) == 'table' and #chillers == 1, 'chiller descriptor crossing lost')\n"
 					"assert(chillers[1].cop > 0, 'corrupt chiller COP crossing')\n"
 					"error('corrupt chiller descriptor crossing')\n"
@@ -5031,6 +5031,494 @@ namespace
 			core::setStationSystemsSourceLoader({});
 		}
 	}
+
+	void generators(smoke::Context const&)
+	{
+		// #399: a fuelled generator converts a finite energy-unit fuel
+		// inventory into bus electrical output at the declared efficiency.
+		// Output is bounded by the installed rating and the ramp limit;
+		// starting only completes once the startup energy has actually been
+		// drawn from the shared pool while the class-matched sink is below
+		// its maximum sink temperature; after output stops the configured
+		// shutdown heat and its cooling requirement persist for the decay
+		// period. Waste, startup and decay heat route exactly once into the
+		// sink and the fuel ledger closes over fuel = electrical + waste.
+		// This models the authored heat and energy contract of a fuelled
+		// source; it claims no reactor physics and no nuclear qualification.
+		auto const approx = [](double actual, double expected, double tolerance = 1e-6)
+		{ return std::abs(actual - expected) <= tolerance; };
+		auto sawEvent = [](core::World& world, std::string const& needle)
+		{
+			for (auto const& event : world.getStationSystemsEvents())
+				if (event.message.find(needle) != std::string::npos) return true;
+			return false;
+		};
+		auto sinkReservoir = [](double capacityKJPerK, double startingC)
+		{
+			core::ThermalReservoirSettings settings;
+			settings.id = "hot";
+			settings.thermalClass = "generation";
+			settings.heatCapacityKJPerK = capacityKJPerK;
+			settings.startingTemperatureC = startingC;
+			settings.minTemperatureC = -50.0;
+			settings.maxTemperatureC = 200.0;
+			return settings;
+		};
+		auto generatorSettings = []
+		{
+			core::GeneratorSettings settings;
+			settings.id = "gen";
+			settings.fuelStoreId = "diesel";
+			settings.thermalClass = "generation";
+			settings.heatSinkId = "hot";
+			settings.ratedOutputKW = 10.0;
+			settings.efficiency = 0.5;
+			settings.maxRampKWPerSecond = 5.0;
+			settings.commandedOutputKW = 10.0;
+			settings.startupPowerKW = 1.0;
+			settings.startupSeconds = 6.0;
+			settings.shutdownHeatKW = 1.0;
+			settings.shutdownSeconds = 10.0;
+			settings.maxSinkTemperatureC = 90.0;
+			return settings;
+		};
+		auto fuelStore = [](double capacity, double starting, double reserve)
+		{
+			core::ResourceStoreSettings settings;
+			settings.id = "diesel";
+			settings.unit = "kWh";
+			settings.capacity = capacity;
+			settings.startingQualified = starting;
+			settings.protectedReserve = reserve;
+			return settings;
+		};
+		auto configure = [](core::World& world,
+			std::vector<core::ResourceStoreSettings> stores,
+			std::vector<core::ThermalReservoirSettings> reservoirs,
+			std::vector<core::GeneratorSettings> generators,
+			std::vector<core::SolarArraySettings> solar = {},
+			std::vector<core::BatterySettings> batteries = {})
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = std::move(stores);
+			settings.thermalReservoirs = std::move(reservoirs);
+			settings.generators = std::move(generators);
+			settings.solarArrays = std::move(solar);
+			settings.batteries = std::move(batteries);
+			auto const ok = world.configureStationSystems(settings, false, &diagnostic);
+			return std::make_pair(ok, diagnostic);
+		};
+		// Refused configurations: the generator contract is validated at
+		// the crossing, not discovered mid-tick.
+		for (auto mutation : {"unknown-fuel", "non-energy-fuel", "unknown-sink",
+			"sink-class-mismatch", "negative-rated", "zero-efficiency",
+			"over-efficiency", "zero-ramp", "commanded-over-rated",
+			"negative-startup-power", "sub-zero-sink", "over-budget"})
+		{
+			std::vector<core::ResourceStoreSettings> stores = {
+				fuelStore(100.0, 100.0, 0.0),
+				{"water", "kg", 1000.0, 500.0, 0.0}};
+			std::vector<core::ThermalReservoirSettings> reservoirs = {sinkReservoir(10000.0, 20.0)};
+			std::vector<core::GeneratorSettings> generators = {generatorSettings()};
+			if (std::string_view(mutation) == "unknown-fuel")
+				generators[0].fuelStoreId = "missing";
+			else if (std::string_view(mutation) == "non-energy-fuel")
+				generators[0].fuelStoreId = "water";
+			else if (std::string_view(mutation) == "unknown-sink")
+				generators[0].heatSinkId = "missing";
+			else if (std::string_view(mutation) == "sink-class-mismatch")
+				reservoirs[0].thermalClass = "warm";
+			else if (std::string_view(mutation) == "negative-rated")
+				generators[0].ratedOutputKW = -1.0;
+			else if (std::string_view(mutation) == "zero-efficiency")
+				generators[0].efficiency = 0.0;
+			else if (std::string_view(mutation) == "over-efficiency")
+				generators[0].efficiency = 1.5;
+			else if (std::string_view(mutation) == "zero-ramp")
+				generators[0].maxRampKWPerSecond = 0.0;
+			else if (std::string_view(mutation) == "commanded-over-rated")
+				generators[0].commandedOutputKW = 11.0;
+			else if (std::string_view(mutation) == "negative-startup-power")
+				generators[0].startupPowerKW = -1.0;
+			else if (std::string_view(mutation) == "sub-zero-sink")
+				generators[0].maxSinkTemperatureC = -300.0;
+			else if (std::string_view(mutation) == "over-budget")
+			{
+				generators.clear();
+				for (size_t index = 0; index <= core::MaxStationGenerators; ++index)
+				{
+					auto copy = generatorSettings();
+					copy.id = "gen" + std::to_string(index);
+					generators.push_back(copy);
+				}
+			}
+			core::World world("GeneratorValidation", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto const [ok, diagnostic] = configure(world, stores, reservoirs, generators);
+			require(!ok && !diagnostic.empty(),
+				(std::string("invalid generator configuration was accepted: ") + mutation).c_str());
+		}
+		// Nominal full service: startup completes on energy actually
+		// received from the shared pool while cooling is qualified; output
+		// ramps to the commanded point; fuel, electrical, waste and the
+		// sink all close.
+		{
+			core::World world("GeneratorNominal", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::ProfileSettings sun;
+			sun.constantLevel = 1.0;
+			auto const [ok, diagnostic] = configure(world,
+				{ fuelStore(1000.0, 1000.0, 0.0) },
+				{ sinkReservoir(10000.0, 20.0) },
+				{ generatorSettings() },
+				{ core::SolarArraySettings{"field", 20.0, sun} });
+			require(ok, ("nominal generator scenario was rejected: " + diagnostic).c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(1200), "nominal generator run failed");
+			auto const snapshot = world.getStationSystemsSnapshot();
+			require(snapshot.power.generators.size() == 1, "generator snapshot missing");
+			auto const& live = snapshot.power.generators[0];
+			require(live.phase == core::StationGeneratorPhase::Running
+				&& live.status == core::StationTransferStatus::Full,
+				"the generator did not reach the commanded output");
+			require(approx(live.outputKW, 10.0, 1e-6) && live.outputKW <= live.ratedOutputKW + 1e-9,
+				"generator output escaped the installed rating");
+			// Startup energy: exactly the profile was received, and it all
+			// dissipated into the sink as booked heat.
+			require(approx(live.startupRequiredKJ, 6.0, 1e-6)
+				&& approx(live.startupReceivedKJ, 6.0, 1e-6),
+				"startup energy did not complete as configured");
+			require(approx(live.startupHeatKJ, 6.0, 1e-6),
+				"startup dissipation was not booked to the sink");
+			// The fuel ledger closes: fuel energy = electrical + waste, and
+			// the fuel store's own boundary ledger agrees unit-for-unit.
+			require(approx(live.residualKJ, 0.0, 1e-6),
+				"the generator fuel ledger did not close");
+			require(live.fuelEnergyKJ > 0.0 && live.electricalKJ > 0.0
+				&& approx(live.fuelEnergyKJ, live.electricalKJ / 0.5, 1e-3),
+				"fuel energy does not match electrical output over efficiency");
+			require(approx(live.wasteHeatKJ, live.fuelEnergyKJ - live.electricalKJ, 1e-3),
+				"waste heat is not the fuel energy the conversion did not deliver");
+			// The sink integrated exactly the startup dissipation plus the
+			// waste heat - booked once, through the reservoir's own ledger.
+			require(snapshot.thermal.reservoirs.size() == 1, "sink snapshot missing");
+			auto const& sinkLive = snapshot.thermal.reservoirs[0];
+			require(approx(sinkLive.generatorEnergyKJ,
+				live.startupHeatKJ + live.wasteHeatKJ, 1e-3),
+				"the sink did not integrate the generator heat exactly once");
+			require(sinkLive.temperatureC > 20.0, "the sink did not warm");
+			// The fuel store boundary closes: every kWh drawn is accounted.
+			require(approx(1000.0 - snapshot.stores[0].currentQualified,
+				live.fuelEnergyKJ / 3600.0, 1e-6),
+				"the fuel drawn does not match the generator's fuel ledger");
+			// The generator's output joined the shared pool, not a second one.
+			require(approx(snapshot.power.generatorOutputKW, 10.0, 1e-6),
+				"generator output totals are wrong");
+			require(approx(snapshot.power.generatorWasteHeatKW, live.wasteHeatKW, 1e-9),
+				"generator waste heat totals are wrong");
+			require(snapshot.power.generatorStartupDrawKW <= 1e-9,
+				"startup draw persisted after the generator reached Running");
+			require(live.coolingAvailable && live.coolingRequired,
+				"a running generator requires cooling and must report it qualified and available");
+			require(sawEvent(world, "startup complete: running"),
+				"the completed startup was not reported");
+			require(sawEvent(world, "starting: cranking"),
+				"the cranking start was not reported");
+		}
+		// Zero installed capacity disables the source entirely: nothing
+		// runs, nothing burns, nothing heats.
+		{
+			core::World world("GeneratorDisabled", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto generator = generatorSettings();
+			generator.ratedOutputKW = 0.0;
+			generator.commandedOutputKW = 0.0;
+			auto const [ok, diagnostic] = configure(world,
+				{ fuelStore(100.0, 100.0, 0.0) },
+				{ sinkReservoir(10000.0, 20.0) },
+				{ generator });
+			require(ok, ("zero-capacity generator was rejected: " + diagnostic).c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(120), "disabled generator run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& live = snap.power.generators[0];
+			require(live.phase == core::StationGeneratorPhase::Stopped && live.disabled
+				&& live.status == core::StationTransferStatus::Idle
+				&& live.outputKW == 0.0 && live.fuelEnergyKJ == 0.0
+				&& live.startupHeatKJ == 0.0 && live.decayHeatKJ == 0.0,
+				"a zero-capacity generator did something it should not");
+		}
+		// A commanded start with no pool support never begins: the
+		// generator cannot self-fund its own cranking, so with no solar
+		// and no battery the start stays blocked and no fuel is burned.
+		{
+			core::World world("GeneratorNoPool", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto const [ok, diagnostic] = configure(world,
+				{ fuelStore(100.0, 100.0, 0.0) },
+				{ sinkReservoir(10000.0, 20.0) },
+				{ generatorSettings() });
+			require(ok, ("no-pool generator scenario was rejected: " + diagnostic).c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(120), "no-pool generator run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& live = snap.power.generators[0];
+			require(live.phase == core::StationGeneratorPhase::Stopped
+				&& live.outputKW == 0.0 && live.fuelEnergyKJ == 0.0,
+				"an unsupported start proceeded anyway");
+			require(live.blockReason.find("pool cannot supply the startup energy") != std::string::npos,
+				"the blocked start did not say why");
+		}
+		// A sink at or above the maximum sink temperature cannot accept
+		// the generator's heat: a commanded start stays blocked and
+		// nothing burns.
+		{
+			core::World world("GeneratorHotSink", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::ProfileSettings sun; sun.constantLevel = 1.0;
+			auto const [ok, diagnostic] = configure(world,
+				{ fuelStore(100.0, 100.0, 0.0) },
+				{ sinkReservoir(10000.0, 90.0) },
+				{ generatorSettings() },
+				{ core::SolarArraySettings{"field", 20.0, sun} });
+			require(ok, ("hot-sink generator scenario was rejected: " + diagnostic).c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(120), "hot-sink generator run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& live = snap.power.generators[0];
+			require(live.phase == core::StationGeneratorPhase::Stopped
+				&& live.outputKW == 0.0 && live.fuelEnergyKJ == 0.0
+				&& !live.coolingAvailable,
+				"the generator started against an unqualified cooling sink");
+			require(live.blockReason.find("cooling is not qualified") != std::string::npos,
+				"the blocked start did not name the cooling gate");
+		}
+		// Cooling lost mid-crank: the small sink warms past the maximum
+		// under the startup dissipation itself, the start fails whole,
+		// and the energy already spent is accounted as heat.
+		{
+			core::World world("GeneratorCrankFail", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::ProfileSettings sun; sun.constantLevel = 1.0;
+			auto const [ok, diagnostic] = configure(world,
+				{ fuelStore(100.0, 100.0, 0.0) },
+				{ sinkReservoir(0.5, 89.5) },
+				{ generatorSettings() },
+				{ core::SolarArraySettings{"field", 20.0, sun} });
+			require(ok, ("crank-fail generator scenario was rejected: " + diagnostic).c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(120), "crank-fail generator run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& live = snap.power.generators[0];
+			require(live.phase == core::StationGeneratorPhase::Stopped
+				&& live.startupReceivedKJ == 0.0,
+				"the failed crank did not reset its received energy");
+			require(live.startupHeatKJ > 0.0,
+				"the cranking energy spent before the failure was not booked");
+			require(sawEvent(world, "startup failed: cooling lost during startup"),
+				"the failed crank was not reported");
+			// The sink integrated the crank heat exactly once.
+			auto const& sinkLive = snap.thermal.reservoirs[0];
+			require(approx(sinkLive.generatorEnergyKJ, live.startupHeatKJ, 1e-6),
+				"the crank heat did not reach the sink exactly once");
+		}
+		// Cooling lost while running: the generator trips to shutdown,
+		// output stops immediately, and the configured decay heat keeps
+		// flowing with its cooling requirement exposed for the full
+		// decay period even though no cooling is available.
+		{
+			core::World world("GeneratorTrip", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::ProfileSettings sun; sun.constantLevel = 1.0;
+			auto generator = generatorSettings();
+			generator.maxRampKWPerSecond = 100.0;
+			generator.startupPowerKW = 0.0;
+			generator.startupSeconds = 0.0;
+			generator.shutdownHeatKW = 2.0;
+			generator.shutdownSeconds = 5.0;
+			generator.maxSinkTemperatureC = 30.0;
+			auto const [ok, diagnostic] = configure(world,
+				{ fuelStore(1000.0, 1000.0, 0.0) },
+				{ sinkReservoir(10.0, 20.0) },
+				{ generator },
+				{ core::SolarArraySettings{"field", 20.0, sun} });
+			require(ok, ("trip generator scenario was rejected: " + diagnostic).c_str());
+			world.resumeSimulation();
+			// The 10 kW waste into a 10 kJ/K sink warms it ~1 K/s: the
+			// trip lands near t = 10 s. At t = 12 s the machine is in
+			// the decay period; at t = 16 s the decay has dissipated.
+			require(world.advanceTicks(720), "trip generator run to decay failed");
+			auto const mid = world.getStationSystemsSnapshot();
+			auto const& tripped = mid.power.generators[0];
+			require(tripped.phase == core::StationGeneratorPhase::Shutdown,
+				"the generator did not trip to shutdown when cooling was lost");
+			require(tripped.outputKW == 0.0
+				&& approx(tripped.decayHeatKW, 2.0, 1e-9),
+				"output or decay heat is wrong during the trip");
+			require(tripped.coolingRequired && !tripped.coolingAvailable,
+				"the decay period did not keep the cooling requirement exposed without cooling");
+			require(sawEvent(world, "shutting down:"), "the trip was not reported");
+			require(sawEvent(world, "tripped to shutdown"),
+				"the trip did not say why");
+			require(world.advanceTicks(240), "trip generator run past decay failed");
+			auto const late = world.getStationSystemsSnapshot();
+			auto const& done = late.power.generators[0];
+			require(done.phase == core::StationGeneratorPhase::Stopped
+				&& done.decayHeatKW == 0.0,
+				"the decay period did not end as configured");
+			require(approx(done.decayHeatKJ, 10.0, 1e-3),
+				"the decay heat booked does not match the configured profile");
+			require(sawEvent(world, "shutdown complete: decay heat dissipated"),
+				"the end of the decay period was not reported");
+			// Still commanded, still blocked: it cannot restart without
+			// qualified cooling.
+			require(done.blockReason.find("cooling is not qualified") != std::string::npos,
+				"the blocked restart did not name the cooling gate");
+			// The sink integrated startup + waste + decay exactly once.
+			auto const& sinkLive = late.thermal.reservoirs[0];
+			require(approx(sinkLive.generatorEnergyKJ,
+				done.startupHeatKJ + done.wasteHeatKJ + done.decayHeatKJ, 1e-3),
+				"the sink did not integrate all generator heat exactly once");
+		}
+		// Fuel depletion: the finite inventory above the protected
+		// reserve runs out, output stops immediately, the decay period
+		// follows, and the protected reserve is never touched.
+		{
+			core::World world("GeneratorDepletion", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::ProfileSettings sun; sun.constantLevel = 1.0;
+			auto generator = generatorSettings();
+			generator.maxRampKWPerSecond = 100.0;
+			generator.startupPowerKW = 0.0;
+			generator.startupSeconds = 0.0;
+			generator.shutdownHeatKW = 0.5;
+			generator.shutdownSeconds = 2.0;
+			// 0.04 kWh drawable at 20 kW thermal burn = 7.2 s of service.
+			auto const [ok, diagnostic] = configure(world,
+				{ fuelStore(100.0, 0.05, 0.01) },
+				{ sinkReservoir(10000.0, 20.0) },
+				{ generator },
+				{ core::SolarArraySettings{"field", 20.0, sun} });
+			require(ok, ("depletion generator scenario was rejected: " + diagnostic).c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(600), "depletion generator run failed");
+			auto const snapshot = world.getStationSystemsSnapshot();
+			auto const& live = snapshot.power.generators[0];
+			require(live.phase == core::StationGeneratorPhase::Stopped,
+				"the generator did not shut down on fuel depletion");
+			require(live.blockReason.find("no fuel is drawable") != std::string::npos,
+				"the depletion stop did not say why");
+			require(sawEvent(world, "fuel depleted: generator shut down"),
+				"the fuel depletion stop was not reported");
+			// Every drawable kWh became fuel energy; the protected
+			// reserve is untouched; the ledger closed unit-for-unit.
+			auto const& fuel = snapshot.stores[0];
+			require(approx(fuel.currentQualified, 0.01, 1e-9),
+				"the protected fuel reserve was consumed");
+			require(approx(live.fuelEnergyKJ, 144.0, 1e-3),
+				"the fuel energy burned does not match the drawable inventory");
+			require(approx(live.electricalKJ, 72.0, 1e-3),
+				"the electrical energy delivered does not match the fuel at efficiency");
+			require(approx(live.residualKJ, 0.0, 1e-6),
+				"the depletion fuel ledger did not close");
+			require(approx(live.decayHeatKJ, 1.0, 1e-3),
+				"the post-depletion decay heat does not match the configured profile");
+		}
+		// Ramp limit: output can only move at the installed slew rate,
+		// never an instantaneous jump to the commanded point.
+		{
+			core::World world("GeneratorRamp", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::ProfileSettings sun; sun.constantLevel = 1.0;
+			auto generator = generatorSettings();
+			generator.maxRampKWPerSecond = 1.0;
+			generator.startupPowerKW = 0.0;
+			generator.startupSeconds = 0.0;
+			auto const [ok, diagnostic] = configure(world,
+				{ fuelStore(1000.0, 1000.0, 0.0) },
+				{ sinkReservoir(100000.0, 20.0) },
+				{ generator },
+				{ core::SolarArraySettings{"field", 20.0, sun} });
+			require(ok, ("ramp generator scenario was rejected: " + diagnostic).c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(120), "ramp generator run to 2 s failed");
+			auto const atTwo = world.getStationSystemsSnapshot().power.generators[0];
+			// One tick of slack: the machine enters Running on the first
+			// tick and starts slewing on the next, so the checkpoint holds
+			// the slew rate, not an exact tick count.
+			require(approx(atTwo.outputKW, 2.0, 0.02) && atTwo.status == core::StationTransferStatus::Partial,
+				"the ramp did not hold output to 1 kW per second at t = 2 s");
+			require(world.advanceTicks(180), "ramp generator run to 5 s failed");
+			auto const atFive = world.getStationSystemsSnapshot().power.generators[0];
+			require(approx(atFive.outputKW, 5.0, 0.02),
+				"the ramp did not hold output to 1 kW per second at t = 5 s");
+			require(world.advanceTicks(360), "ramp generator run to 11 s failed");
+			auto const atTen = world.getStationSystemsSnapshot().power.generators[0];
+			require(approx(atTen.outputKW, 10.0, 1e-6) && atTen.status == core::StationTransferStatus::Full,
+				"the generator did not reach the commanded point after ramping");
+		}
+		// Deterministic replay: the same authored generator scenario
+		// ticked twice from Reset produces identical snapshots and events.
+		{
+			core::World world("GeneratorReplay", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::ProfileSettings sun;
+			sun.periodSeconds = 10.0;
+			sun.segments = {{0.0, 1.0}, {5.0, 0.0}};
+			auto generator = generatorSettings();
+			generator.startupSeconds = 3.0;
+			auto const [ok, diagnostic] = configure(world,
+				{ fuelStore(1000.0, 1000.0, 0.0) },
+				{ sinkReservoir(10000.0, 20.0) },
+				{ generator },
+				{ core::SolarArraySettings{"field", 20.0, sun} });
+			require(ok, ("replay generator scenario was rejected: " + diagnostic).c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(1200), "replay generator original run failed");
+			auto const expected = world.getStationSystemsSnapshot();
+			auto const expectedEvents = world.getStationSystemsEvents();
+			require(expected.power.generators.size() == 1
+				&& expected.power.generators[0].outputKW > 0.0,
+				"replay scenario produced no generator service");
+			world.pauseSimulation(); world.resetSimulation();
+			require(world.getStationSystemsSnapshot().elapsedSeconds == 0.0,
+				"reset did not clear the generator runtime");
+			world.resumeSimulation();
+			require(world.advanceTicks(1200), "replay generator replay run failed");
+			require(world.getStationSystemsSnapshot() == expected,
+				"generator scenario is not deterministic across Reset");
+			require(world.getStationSystemsEvents() == expectedEvents,
+				"generator event history is not deterministic across Reset");
+		}
+		// The bundled Lua sandbox receives the generator descriptors and
+		// mirrors the model: a corrupt crossing fails contained at
+		// construction through the integrated error path.
+		{
+			core::setStationSystemsSourceLoader([] {
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators)\n"
+					"assert(type(generators) == 'table' and #generators == 1, 'generator descriptor crossing lost')\n"
+					"assert(generators[1].efficiency > 0, 'corrupt generator efficiency crossing')\n"
+					"error('corrupt generator descriptor crossing')\n"
+					"end";
+			});
+			core::World corrupt("GeneratorCorrupt", 2, 2);
+			corrupt.pauseSimulation(); corrupt.finishBuild();
+			core::ProfileSettings sun; sun.constantLevel = 1.0;
+			auto const [ok, diagnostic] = configure(corrupt,
+				{ fuelStore(100.0, 100.0, 0.0) },
+				{ sinkReservoir(10000.0, 20.0) },
+				{ generatorSettings() },
+				{ core::SolarArraySettings{"field", 20.0, sun} });
+			require(!ok && diagnostic.find("corrupt generator descriptor crossing") != std::string::npos
+				&& !corrupt.getStationSystemsSnapshot().enabled,
+				"Corrupt generator sandbox crossing not contained at construction");
+			core::setStationSystemsSourceLoader({});
+		}
+	}
+
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power},
@@ -5043,7 +5531,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"failures", failures}};
+		{"deliveries", deliveries}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

@@ -25,14 +25,14 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		world->getSimulationTick() * static_cast<double>(core::World::getFixedTimestep()),
 		static_cast<unsigned long long>(world->getSimulationTick()));
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
-	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply, rechargeable batteries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, and chillers supplying class-matched cold services. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Thermal reservoirs integrate temperature from their effective capacity under absorbed and routed equipment heat; radiators reject heat by the Stefan-Boltzmann law at the emitting temperature against the authored sink, emissivity and view factor. A load's emitted heat is booked exactly once: routed into its class-compatible reservoir or exported directly, never both. Declared temperature limits are reported, never clamped. Coolant loops hold a finite, loop-specific coolant inventory segregated by hazard class (coolant is never potable or nutrient water); the pump circulates only the coolant the loop actually holds, so an underfilled loop flows less and a dry loop flows nothing, and the freeze-protection heater thermostats the loop up to its setpoint within its capacity. Pump work and heater heat enter the loop exactly once and reach the reservoir only through the circulation-gated heat-only exchanger; the loop draw rides the same electrical pool as external loads. Chillers supply a cold service of their declared class through a class-matched coolant-loop evaporator and reservoir condenser: the delivered duty is capped by the loop's actual circulation, gated at the chilled setpoint, and refused while the sink is at or above the maximum condensing temperature; work at the configured COP plus auxiliaries rides the same electrical pool, and condenser heat equals extracted heat plus the work and auxiliaries actually supplied, booked once. Within a tick, power allocates first, then coolant loops and chillers run, then thermal integrates, then transfers, then conversions. Observation interval is a provisional display/event setting, not a separate simulation clock.");
+	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply, rechargeable batteries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, and chillers supplying class-matched cold services. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Thermal reservoirs integrate temperature from their effective capacity under absorbed and routed equipment heat; radiators reject heat by the Stefan-Boltzmann law at the emitting temperature against the authored sink, emissivity and view factor. A load's emitted heat is booked exactly once: routed into its class-compatible reservoir or exported directly, never both. Declared temperature limits are reported, never clamped. Coolant loops hold a finite, loop-specific coolant inventory segregated by hazard class (coolant is never potable or nutrient water); the pump circulates only the coolant the loop actually holds, so an underfilled loop flows less and a dry loop flows nothing, and the freeze-protection heater thermostats the loop up to its setpoint within its capacity. Pump work and heater heat enter the loop exactly once and reach the reservoir only through the circulation-gated heat-only exchanger; the loop draw rides the same electrical pool as external loads. Chillers supply a cold service of their declared class through a class-matched coolant-loop evaporator and reservoir condenser: the delivered duty is capped by the loop's actual circulation, gated at the chilled setpoint, and refused while the sink is at or above the maximum condensing temperature; work at the configured COP plus auxiliaries rides the same electrical pool, and condenser heat equals extracted heat plus the work and auxiliaries actually supplied, booked once. Fuelled generators convert a finite energy-unit fuel inventory into bus electrical output at the declared efficiency: output is bounded by the installed rating and the ramp limit, starting only completes once the startup energy has actually been drawn from the shared pool while the class-matched sink is below its maximum sink temperature, and after output stops the configured shutdown heat and its cooling requirement persist for the decay period; waste, startup and decay heat route exactly once into the sink and the fuel ledger closes over fuel = electrical + waste. Within a tick, generators produce first, then power allocates, then coolant loops and chillers run, then thermal integrates, then transfers, then conversions. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s)",
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s)",
 		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
 		authored.stores.size(), authored.transfers.size(), authored.conversions.size(),
 		authored.solarArrays.size(), authored.equipmentLoads.size(), authored.batteries.size(),
 		authored.deliveries.size(), authored.thermalReservoirs.size(), authored.radiators.size(),
-		authored.coolantLoops.size(), authored.chillers.size());
+		authored.coolantLoops.size(), authored.chillers.size(), authored.generators.size());
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
@@ -792,6 +792,97 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		}
 		mDraft.chillers.push_back(std::move(chiller));
 	}
+	ImGui::SeparatorText("Draft generators (kW/kWh; fuel is an energy-unit Resource store; startup energy and a qualified cooling sink gate the start; zero installed capacity disables the source)");
+	for (size_t index = 0; index < mDraft.generators.size(); )
+	{
+		auto& generator = mDraft.generators[index];
+		auto const row = std::to_string(index);
+		bool removeGenerator = false;
+		ImGui::PushItemWidth(220);
+		char generatorIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(generatorIdBuffer, generator.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Generator " + row + " id").c_str(),
+			generatorIdBuffer, sizeof(generatorIdBuffer)))
+			generator.id = generatorIdBuffer;
+		char fuelStoreBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(fuelStoreBuffer, generator.fuelStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Generator " + row + " fuel store").c_str(),
+			fuelStoreBuffer, sizeof(fuelStoreBuffer)))
+			generator.fuelStoreId = fuelStoreBuffer;
+		char generatorClassBuffer[16]{};
+		std::strncpy(generatorClassBuffer, generator.thermalClass.c_str(), sizeof(generatorClassBuffer) - 1);
+		if (ImGui::InputText(("Generator " + row + " thermal class").c_str(),
+			generatorClassBuffer, sizeof(generatorClassBuffer)))
+			generator.thermalClass = generatorClassBuffer;
+		char generatorSinkBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(generatorSinkBuffer, generator.heatSinkId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Generator " + row + " heat sink").c_str(),
+			generatorSinkBuffer, sizeof(generatorSinkBuffer)))
+			generator.heatSinkId = generatorSinkBuffer;
+		ImGui::InputDouble(("Generator " + row + " rated output kW").c_str(),
+			&generator.ratedOutputKW, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Generator " + row + " efficiency").c_str(),
+			&generator.efficiency, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Generator " + row + " ramp kW per second").c_str(),
+			&generator.maxRampKWPerSecond, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Generator " + row + " commanded output kW").c_str(),
+			&generator.commandedOutputKW, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Generator " + row + " startup power kW").c_str(),
+			&generator.startupPowerKW, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Generator " + row + " startup seconds").c_str(),
+			&generator.startupSeconds, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Generator " + row + " shutdown heat kW").c_str(),
+			&generator.shutdownHeatKW, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Generator " + row + " shutdown seconds").c_str(),
+			&generator.shutdownSeconds, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Generator " + row + " max sink temperature C").c_str(),
+			&generator.maxSinkTemperatureC, 0.0, 0.0, "%.3f");
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove generator " + row).c_str()))
+			removeGenerator = true;
+		ImGui::PopItemWidth();
+		if (removeGenerator)
+			mDraft.generators.erase(mDraft.generators.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
+	if (mDraft.generators.size() < core::MaxStationGenerators && ImGui::Button("Add generator"))
+	{
+		core::GeneratorSettings generator;
+		generator.thermalClass = "generation";
+		generator.ratedOutputKW = 10.0;
+		generator.efficiency = 0.4;
+		generator.maxRampKWPerSecond = 2.0;
+		generator.commandedOutputKW = 10.0;
+		generator.startupPowerKW = 1.0;
+		generator.startupSeconds = 5.0;
+		generator.shutdownHeatKW = 0.5;
+		generator.shutdownSeconds = 10.0;
+		generator.maxSinkTemperatureC = 90.0;
+		// Prefer an energy-unit store as the default fuel so a freshly
+		// drafted generator is valid against the declared fuel vocabulary.
+		for (auto const& store : mDraft.stores)
+			if (store.unit == "kJ" || store.unit == "MJ"
+				|| store.unit == "Wh" || store.unit == "kWh")
+			{ generator.fuelStoreId = store.id; break; }
+		// Prefer a generation-class sink when one exists; otherwise the
+		// first reservoir (validation will surface a class mismatch).
+		if (!mDraft.thermalReservoirs.empty())
+		{
+			generator.heatSinkId = mDraft.thermalReservoirs.back().id;
+			for (auto const& reservoir : mDraft.thermalReservoirs)
+				if (reservoir.thermalClass == generator.thermalClass)
+				{ generator.heatSinkId = reservoir.id; break; }
+		}
+		for (size_t candidate = mDraft.generators.size() + 1;; ++candidate)
+		{
+			generator.id = "generator" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.generators.begin(), mDraft.generators.end(),
+				[&](core::GeneratorSettings const& existing) { return existing.id == generator.id; });
+			if (!taken) break;
+		}
+		mDraft.generators.push_back(std::move(generator));
+	}
 	bool const draftChanged = mDraft != authored;
 	ImGui::TextUnformatted(draftChanged
 		? "Draft differs from the authored start conditions."
@@ -931,13 +1022,15 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 				flow.storeId.c_str(), flow.unit.c_str(), flow.requested, flow.completed,
 				flow.unmet);
 	}
-	ImGui::Text("Power totals: generation %.3f kW, requested %.3f, supplied %.3f, unmet %.3f, unmet critical %.3f, surplus %.3f, exported heat %.3f kW, battery discharge %.3f kW, battery charge %.3f kW, battery shortfall %.3f kW, coolant pump %.3f kW, freeze heating %.3f kW, chiller power %.3f kW",
+	ImGui::Text("Power totals: generation %.3f kW, requested %.3f, supplied %.3f, unmet %.3f, unmet critical %.3f, surplus %.3f, exported heat %.3f kW, battery discharge %.3f kW, battery charge %.3f kW, battery shortfall %.3f kW, coolant pump %.3f kW, freeze heating %.3f kW, chiller power %.3f kW, generator output %.3f kW, generator startup %.3f kW, generator waste %.3f kW, generator decay %.3f kW",
 		snapshot.power.availableGenerationKW, snapshot.power.totalRequestedKW,
 		snapshot.power.totalSuppliedKW, snapshot.power.totalUnmetKW,
 		snapshot.power.unmetCriticalKW, snapshot.power.surplusKW, snapshot.power.exportedHeatKW,
 		snapshot.power.batteryDischargeKW, snapshot.power.batteryChargeKW,
 		snapshot.power.batteryShortfallKW, snapshot.power.coolantPumpKW,
-		snapshot.power.coolantHeaterKW, snapshot.power.chillerPowerKW);
+		snapshot.power.coolantHeaterKW, snapshot.power.chillerPowerKW,
+		snapshot.power.generatorOutputKW, snapshot.power.generatorStartupDrawKW,
+		snapshot.power.generatorWasteHeatKW, snapshot.power.generatorDecayHeatKW);
 	ImGui::SeparatorText("Batteries (live; reserve = nameplate - usable is never dischargeable; discharge covers deficits on the same pool, charging takes only surplus)");
 	if (snapshot.power.batteries.empty()) ImGui::TextDisabled("No batteries authored.");
 	for (auto const& battery : snapshot.power.batteries)
@@ -1093,6 +1186,48 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		ImGui::Text("  %s: capacity %.3f kW, provided %.3f, unmet %.3f, work %.3f, condenser %.3f kW",
 			cooling.thermalClass.c_str(), cooling.capacityKW, cooling.providedKW,
 			cooling.unmetKW, cooling.workKW, cooling.condenserKW);
+	ImGui::SeparatorText("Generators (live; fuelled output gated by startup energy, cooling qualification, ramp limits and the finite fuel inventory; shutdown heat persists after output stops)");
+	if (snapshot.power.generators.empty()) ImGui::TextDisabled("No generators authored.");
+	for (auto const& generator : snapshot.power.generators)
+	{
+		char const* phase = "stopped";
+		switch (generator.phase)
+		{
+		case core::StationGeneratorPhase::Starting: phase = "starting"; break;
+		case core::StationGeneratorPhase::Running: phase = "running"; break;
+		case core::StationGeneratorPhase::Shutdown: phase = "shutdown"; break;
+		case core::StationGeneratorPhase::Stopped: break;
+		}
+		char const* status = "idle";
+		switch (generator.status)
+		{
+		case core::StationTransferStatus::Full: status = "full"; break;
+		case core::StationTransferStatus::Partial: status = "partial"; break;
+		case core::StationTransferStatus::Rejected: status = "rejected"; break;
+		case core::StationTransferStatus::Idle: break;
+		}
+		ImGui::Text("%s (%s) fuel %s -> sink %s: %s / %s | output %.3f of commanded %.3f kW (rated %.3f, ramp %.3f kW/s, eff %.2f) | fuel %.4f kWh, waste %.3f kW | startup %.3f of %.3f kW (%.1f of %.1f kJ) | decay %.3f kW",
+			generator.id.c_str(), generator.thermalClass.c_str(), generator.fuelStoreId.c_str(),
+			generator.heatSinkId.c_str(), phase, status,
+			generator.outputKW, generator.commandedOutputKW, generator.ratedOutputKW,
+			generator.maxRampKWPerSecond, generator.efficiency,
+			generator.fuelDrawKWh, generator.wasteHeatKW,
+			generator.startupDrawKW, generator.startupPowerKW,
+			generator.startupReceivedKJ, generator.startupRequiredKJ,
+			generator.decayHeatKW);
+		ImGui::Text("  sink %.3f C (max %.3f C, cooling %s) | fuel ledger (kJ): fuel %.3f, electrical %.3f, waste %.3f, startup %.3f, decay %.3f, residual %.9f (tolerance %.1e)",
+			generator.sinkTemperatureC, generator.maxSinkTemperatureC,
+			generator.coolingAvailable ? "qualified" : "NOT qualified",
+			generator.fuelEnergyKJ, generator.electricalKJ, generator.wasteHeatKJ,
+			generator.startupHeatKJ, generator.decayHeatKJ,
+			generator.residualKJ, snapshot.balanceTolerance);
+		if (generator.disabled)
+			ImGui::Text("  DISABLED: zero installed capacity supplies no electrical source");
+		if (generator.coolingRequired && !generator.coolingAvailable)
+			ImGui::Text("  cooling REQUIRED but not qualified: shutdown heat persists without a qualified sink");
+		if (!generator.blockReason.empty())
+			ImGui::Text("  blocked: %s", generator.blockReason.c_str());
+	}
 	for (auto const& diagnostic : world->getStationSystemsDiagnostics())
 	{
 		char const* kind = "Lua error";

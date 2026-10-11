@@ -214,7 +214,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 74", "version: 64");
+		replaceAll(legacy, "version: 75", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -231,14 +231,14 @@ namespace
 			"authored store fields missing or live inventory leaked");
 		bool refused = false;
 		auto staleStores = withField;
-		replaceAll(staleStores, "version: 74", "version: 65");
+		replaceAll(staleStores, "version: 75", "version: 65");
 		auto const staleStoresPath = directory / "stale-stores.world.yaml";
 		writeFile(staleStoresPath, staleStores);
 		try { (void)core::loadWorldDocument(staleStoresPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-66 document carrying resource stores was silently accepted");
 		auto staleTransfers = withField;
-		replaceAll(staleTransfers, "version: 74", "version: 66");
+		replaceAll(staleTransfers, "version: 75", "version: 66");
 		auto const staleTransfersPath = directory / "stale-transfers.world.yaml";
 		writeFile(staleTransfersPath, staleTransfers);
 		refused = false;
@@ -246,7 +246,7 @@ namespace
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-67 document carrying resource transfers was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 74", "version: 64");
+		replaceAll(stale, "version: 75", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
 		refused = false;
@@ -384,7 +384,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 74", "version: 67");
+			replaceAll(stale, "version: 75", "version: 67");
 			auto const stalePath = directory / "stale-compounds.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -493,7 +493,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 74", "version: 69");
+			replaceAll(stale, "version: 75", "version: 69");
 			auto const stalePath = directory / "stale-batteries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -615,7 +615,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 74", "version: 68");
+			replaceAll(stale, "version: 75", "version: 68");
 			auto const stalePath = directory / "stale-power.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -742,7 +742,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 74", "version: 70");
+			replaceAll(stale, "version: 75", "version: 70");
 			auto const stalePath = directory / "stale-deliveries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -870,7 +870,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 74", "version: 71");
+			replaceAll(stale, "version: 75", "version: 71");
 			auto const stalePath = directory / "stale-thermal.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1031,7 +1031,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 74", "version: 72");
+			replaceAll(stale, "version: 75", "version: 72");
 			auto const stalePath = directory / "stale-coolant.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1194,7 +1194,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 74", "version: 73");
+			replaceAll(stale, "version: 75", "version: 73");
 			auto const stalePath = directory / "stale-chillers.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1244,6 +1244,154 @@ namespace
 			require(refused, "a chilled setpoint above the maximum condensing temperature was accepted from a file");
 		}
 	}
+	void generatorFiles(smoke::Context const& context)
+	{
+		namespace filesystem = std::filesystem;
+		auto const directory = context.temporaryRoot() / "station-generators";
+		filesystem::create_directories(directory);
+		core::ResourceStoreSettings diesel;
+		diesel.id = "diesel";
+		diesel.unit = "kWh";
+		diesel.capacity = 1000.0;
+		diesel.startingQualified = 1000.0;
+		diesel.protectedReserve = 0.0;
+		core::ThermalReservoirSettings sink;
+		sink.id = "hot";
+		sink.thermalClass = "generation";
+		sink.heatCapacityKJPerK = 10000.0;
+		sink.startingTemperatureC = 20.0;
+		sink.minTemperatureC = -50.0;
+		sink.maxTemperatureC = 200.0;
+		core::GeneratorSettings generator;
+		generator.id = "gen";
+		generator.fuelStoreId = "diesel";
+		generator.thermalClass = "generation";
+		generator.heatSinkId = "hot";
+		generator.ratedOutputKW = 10.0;
+		generator.efficiency = 0.5;
+		generator.maxRampKWPerSecond = 5.0;
+		generator.commandedOutputKW = 10.0;
+		generator.startupPowerKW = 1.0;
+		generator.startupSeconds = 6.0;
+		generator.shutdownHeatKW = 1.0;
+		generator.shutdownSeconds = 10.0;
+		generator.maxSinkTemperatureC = 90.0;
+		core::SolarArraySettings field;
+		field.id = "field";
+		field.capacityKW = 20.0;
+		core::World original("Generator Round Trip", 2, 2);
+		original.pauseSimulation();
+		original.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 2.0f;
+		settings.stores.push_back(diesel);
+		settings.thermalReservoirs.push_back(sink);
+		settings.generators.push_back(generator);
+		settings.solarArrays.push_back(field);
+		std::string diagnostic;
+		require(original.configureStationSystems(settings, false, &diagnostic),
+			"Generator settings edit failed: " + diagnostic);
+		original.resumeSimulation();
+		require(original.advanceTicks(3600), "Generator original run failed");
+		auto const expected = original.getStationSystemsSnapshot();
+		require(expected.power.generators.size() == 1
+			&& expected.power.generators[0].outputKW > 0.0
+			&& std::abs(expected.power.generators[0].residualKJ) < 1e-4
+			&& std::abs(expected.thermal.reservoirs[0].residualKJ) < 1e-4,
+			"Generator scenario produced the wrong observable state");
+		for (auto const* suffix : {".world.yaml", ".world"})
+		{
+			auto const path = directory / (std::string("generators") + suffix);
+			original.saveTo(path.string());
+			auto const document = readFile(path);
+			require(document.find("generators") != std::string::npos
+				&& document.find("fuelStoreId") != std::string::npos
+				&& document.find("heatSinkId") != std::string::npos
+				&& document.find("ratedOutputKW") != std::string::npos
+				&& document.find("efficiency") != std::string::npos
+				&& document.find("maxRampKWPerSecond") != std::string::npos
+				&& document.find("commandedOutputKW") != std::string::npos
+				&& document.find("startupPowerKW") != std::string::npos
+				&& document.find("startupSeconds") != std::string::npos
+				&& document.find("shutdownHeatKW") != std::string::npos
+				&& document.find("shutdownSeconds") != std::string::npos
+				&& document.find("maxSinkTemperatureC") != std::string::npos,
+				"authored generator fields missing from the document");
+			for (auto const* liveState : {"outputKW", "startupReceivedKJ",
+				"fuelEnergyKJ", "electricalKJ", "wasteHeatKJ", "decayHeatKJ",
+				"blockReason", "coolingAvailable", "residualKJ", "phase"})
+				require(document.find(liveState) == std::string::npos,
+					std::string("live generator state leaked into the document: ") + liveState);
+			auto const reopened = core::loadWorldDocument(path);
+			require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+				"generator settings did not survive the file round trip");
+			require(reopened->getStationSystemsSnapshot().power.generators.size() == 1
+				&& reopened->getStationSystemsSnapshot().power.generators[0].outputKW == 0.0
+				&& reopened->getStationSystemsSnapshot().power.generators[0].fuelEnergyKJ == 0.0
+				&& reopened->getStationSystemsSnapshot().thermal.reservoirs[0].generatorEnergyKJ == 0.0,
+				"reopened World did not reconstruct the authored generator starting state");
+			reopened->resumeSimulation();
+			require(reopened->advanceTicks(3600), "Generator reopened run failed");
+			require(reopened->getStationSystemsSnapshot() == expected,
+				"generator scenario is not reproducible from the document");
+			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
+				"generator event history is not reproducible from the document");
+		}
+		// A pre-75 document carrying the new fields is refused.
+		auto const withField = serializeYaml(original);
+		{
+			auto stale = withField;
+			replaceAll(stale, "version: 75", "version: 74");
+			auto const stalePath = directory / "stale-generators.world.yaml";
+			writeFile(stalePath, stale);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(stalePath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a pre-75 document carrying generators was silently accepted");
+		}
+		// Malformed generator values in a file are rejected.
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "efficiency: 0.5", "efficiency: 0");
+			auto const malformedPath = directory / "malformed-generator-efficiency.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a zero generator efficiency was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "fuelStoreId: diesel", "fuelStoreId: ghost");
+			auto const malformedPath = directory / "malformed-generator-fuel.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a generator on an unknown fuel store was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "commandedOutputKW: 10", "commandedOutputKW: 11");
+			auto const malformedPath = directory / "malformed-generator-command.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a commanded output above the installed rating was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "maxRampKWPerSecond: 5", "maxRampKWPerSecond: 0");
+			auto const malformedPath = directory / "malformed-generator-ramp.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a zero ramp limit was accepted from a file");
+		}
+	}
 }
 
 void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
@@ -1259,4 +1407,5 @@ void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"thermalFiles", thermalFiles});
 	checks.push_back({"coolantFiles", coolantFiles});
 	checks.push_back({"chillerFiles", chillerFiles});
+	checks.push_back({"generatorFiles", generatorFiles});
 }

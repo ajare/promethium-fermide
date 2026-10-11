@@ -710,6 +710,85 @@ temperature) with full validation reporting, and shows the live
 duties, power draws, condenser heat, per-class totals and closing
 ledgers beside the existing views.
 
+### Fuelled generators (#399)
+
+Authors configure generators per World. A generator converts a finite
+fuel inventory into dispatchable electrical output at a declared
+efficiency. The fuel is an energy-unit Resource store (`kJ`, `MJ`,
+`Wh` or `kWh`): the generator draws qualified fuel above the store's
+protected reserve, so fuel is finite, resupplyable through the store's
+own boundary, and closes in the same energy terms as the electrical
+output. Each generator declares its fuel store, a thermal service class
+for its waste heat, a class-matched heat-sink reservoir, an installed
+capacity (kW), a conversion efficiency in (0, 1], a ramp limit
+(kW per second), a commanded output within the installed capacity, a
+startup power and duration, and a shutdown heat term (kW and seconds).
+Zero installed capacity disables the source.
+
+The machine is a contract, not a power setting. Output is bounded by
+the installed rating, the ramp limit and the fuel actually drawable:
+no tick commands a step the installed slew rate cannot make, and a
+generator with no fuel left cannot run at all. Starting requires
+every precondition at once — qualified cooling (the sink below the
+maximum sink temperature), drawable fuel, and a shared pool that can
+actually supply the cranking draw. A start is never self-funded: a
+stopped generator produces nothing, so its own output can never
+appear in the pool that starts it. Startup completes only once the
+startup energy (power x duration) has actually been received from
+the shared pool while cooling stays qualified; cooling lost mid-crank
+fails the start whole, with the cranking energy already spent booked
+as heat in the sink. While running, waste heat is exactly the fuel
+energy the conversion did not deliver as electricity —
+`waste = fuel - electrical` — and the generator's electrical output
+joins the same shared generation pool the loads allocate against,
+never a second budget.
+
+After output stops — commanded off, cooling lost, or fuel depleted —
+the configured shutdown heat keeps flowing into the sink for the
+configured decay period and the cooling requirement stays exposed
+with it: a stopped generator is not instantly a cold generator. The
+decay heat cannot be refused; it books whether or not cooling is
+available, and the sink warms under it. A zero decay period books
+nothing. The generator's ledger — `fuel = electrical + waste` —
+closes within the declared tolerance every tick, in host and sandbox
+alike, and startup dissipation and decay heat route exactly once
+into the sink reservoir's own energy ledger.
+
+Generators run ahead of the load allocation: their output is in the
+pool the loads divide this tick, and their startup draw rides the
+same pool ahead of discretionary demand. Within a tick, generators
+produce first, then power allocates, then coolant loops and chillers
+run, then thermal integrates, then transfers, then conversions.
+
+The snapshot publishes per-generator phase (stopped/starting/running/
+shutdown), status (full/partial/rejected/idle), output against the
+commanded point and the installed rating, the fuel draw (kWh) and
+waste heat rate, the startup draw against the startup profile with
+received-versus-required energy, the decay heat rate, the sink
+temperature against the maximum with the cooling qualified/
+required flags, the block reason while a commanded start is held off,
+and the closing fuel/electrical/waste/startup/decay ledger. The
+power totals make the fuelled share explicit beside the solar share.
+Phase transitions — starts, failed starts, trips, fuel depletion and
+the end of the decay period — are announced as transition events.
+
+World schema 75 persists the authored generator contracts (units:
+kW, kWh, °C, seconds); a pre-75 document carrying `generators` is
+refused rather than silently dropped. Phase, output, fuel draws and
+the generator ledgers stay runtime-only: Load and Reset reconstruct
+them from the authored starting conditions. The separate Station
+Systems window drafts generators (fuel store, class, heat sink,
+rated output, efficiency, ramp, commanded output, startup profile,
+shutdown heat and maximum sink temperature) with full validation
+reporting, and shows the live phases, outputs, fuel and heat flows
+and closing ledgers beside the existing views.
+
+This models the authored heat and energy contract of a fuelled
+source. It claims no reactor physics and no nuclear qualification:
+there is no criticality, no decay-heat curve derived from fuel
+history, and no isotope inventory — the shutdown heat is an authored
+constant for an authored period, nothing more.
+
 ## Explicit scope limit
 
 This slice implements lifecycle, authored finite store configuration,
@@ -718,9 +797,11 @@ conversion accounting, solar-supplied external equipment load
 allocation, finite battery storage with charge/discharge losses,
 authored scheduled resupply with refused-quantity accounting,
 thermal reservoirs with environment-dependent radiator rejection and
-exactly-once equipment heat routing, and coolant loops with finite
+exactly-once equipment heat routing, coolant loops with finite
 loop-specific inventories, inventory- and power-capped circulation and
-freeze-protection heating.
+freeze-protection heating, and fuelled generators with finite
+energy-unit fuel inventories, ramp-limited dispatchable output,
+startup-energy gating and persistent shutdown decay heat.
 It still adds no crew demand, treatment/clearance
 workflows or ejection, no dynamic coolant leak, replenishment or
 loop-to-loop transfer (a loop's charge is its authored inventory and
@@ -850,3 +931,28 @@ demand unmet; transient supply loss through an eclipse cycle with the
 unmet demand visible during the outage, recovery announced and ledgers
 closed across the transitions; deterministic Reset replay; and intact
 Lua chiller descriptor crossing with contained construction refusal.
+
+Generator acceptance coverage: refused generator configurations
+(unknown or non-energy fuel store, unknown or cross-class heat sink,
+negative rated capacity, zero or over-one efficiency, zero ramp
+limit, commanded output above the installed rating, negative startup
+power, sub-absolute-zero maximum sink temperature, over-budget
+generator count); nominal full service with completed startup on
+energy actually received from the shared pool, ramp-limited output
+to the commanded point, waste heat equal to fuel minus electrical
+booked exactly once into the sink (the sink's gain equals the
+generator's startup dissipation plus waste), the fuel store's own
+boundary ledger closing unit-for-unit, and the fuelled share visible
+in the power totals; zero-capacity disablement; a commanded start
+with no pool support held off with the no-startup-energy reason and
+nothing burned; a start blocked by an unqualified (at or above
+maximum) sink; cooling lost mid-crank failing the start whole with
+the spent cranking energy booked as sink heat; cooling lost while
+running tripping to shutdown with output stopped immediately and the
+decay heat persisting with its cooling requirement exposed without
+cooling, ending on schedule; fuel depletion stopping output
+immediately at the protected reserve with the reserve untouched and
+the ledger closed; the ramp limit holding output to the installed
+slew rate partway to the commanded point; deterministic Reset
+replay; and intact Lua generator descriptor crossing with contained
+construction refusal.

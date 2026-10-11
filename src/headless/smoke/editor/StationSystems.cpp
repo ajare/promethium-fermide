@@ -1304,6 +1304,141 @@ namespace
 		#undef REQ
 		require(driver.passed(), "Chiller workflow failed on the Test Engine");
 	}
+
+	void generatorWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO();
+		io.DisplaySize = {1200, 1700};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Generator editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		core::StationSystemsSettings initial;
+		initial.enabled = true;
+		initial.observationIntervalSeconds = 2.0f;
+		core::ResourceStoreSettings diesel;
+		diesel.id = "diesel";
+		diesel.unit = "kWh";
+		diesel.capacity = 1000.0;
+		diesel.startingQualified = 1000.0;
+		core::ThermalReservoirSettings hot;
+		hot.id = "hot";
+		hot.thermalClass = "generation";
+		hot.heatCapacityKJPerK = 10000.0;
+		hot.startingTemperatureC = 20.0;
+		hot.minTemperatureC = -50.0;
+		hot.maxTemperatureC = 200.0;
+		core::GeneratorSettings gen;
+		gen.id = "gen";
+		gen.fuelStoreId = "diesel";
+		gen.thermalClass = "generation";
+		gen.heatSinkId = "hot";
+		gen.ratedOutputKW = 10.0;
+		gen.efficiency = 0.5;
+		gen.maxRampKWPerSecond = 5.0;
+		gen.commandedOutputKW = 10.0;
+		gen.startupPowerKW = 1.0;
+		gen.startupSeconds = 6.0;
+		gen.shutdownHeatKW = 1.0;
+		gen.shutdownSeconds = 10.0;
+		gen.maxSinkTemperatureC = 90.0;
+		core::SolarArraySettings field;
+		field.id = "field";
+		field.capacityKW = 20.0;
+		initial.stores.push_back(diesel);
+		initial.thermalReservoirs.push_back(hot);
+		initial.generators.push_back(gen);
+		initial.solarArrays.push_back(field);
+		require(world->configureStationSystems(initial, false, &diagnostic), diagnostic.c_str());
+		headless::TestEngineDriver driver([&]
+		{
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 1650});
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+
+		driver.run("station", "generatorWorkflow", [&](ImGuiTestContext* ctx)
+		{
+			ctx->SetRef("Station Systems");
+			REQ(driver.contains("1 generator(s)"),
+				"Authored generator count missing from the window");
+			// Run: the live view shows the generator at full output with
+			// its fuel draw, waste heat, completed startup and the closing
+			// fuel ledger, and ticking never dirties the authored document.
+			world->markSaved();
+			world->resumeSimulation(); REQ(world->advanceTicks(600), "Generator editor run failed");
+			world->pauseSimulation(); ctx->Sleep(1);
+			REQ(driver.contains("gen (generation) fuel diesel -> sink hot: running / full")
+				&& driver.contains("output 10.000 of commanded 10.000 kW")
+				&& driver.contains("waste 10.000 kW")
+				&& driver.contains("startup 0.000 of 1.000 kW (6.0 of 6.0 kJ)"),
+				"Live generator output, waste heat or completed startup not displayed");
+			REQ(driver.contains("fuel ledger (kJ)") && driver.contains("residual"),
+				"Generator fuel ledger not displayed");
+			REQ(!driver.contains("DISABLED") && !driver.contains("cooling REQUIRED"),
+				"Generator condition flags wrong for a nominal run");
+			REQ(!world->isModified(), "Generator ticking dirtied the authored document");
+			// An invalid drafted generator is refused with a visible
+			// diagnostic and never reaches the authored settings.
+			driver.click(ctx, "Add generator");
+			driver.typeValue(ctx, "Generator 1 efficiency", "0");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(driver.contains("efficiency must be finite and greater than 0"),
+				"Zero-efficiency drafted generator diagnostic not shown");
+			REQ(world->getStationSystemsSettings().generators.size() == 1
+				&& history.undoCount() == 0 && world->getSimulationTick() == 600,
+				"Invalid generator draft mutated the authored settings");
+			// A fuel store that is not an energy inventory is refused.
+			driver.typeValue(ctx, "Generator 1 efficiency", "0.5");
+			driver.typeValue(ctx, "Generator 1 fuel store", "ghost");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(driver.contains("fuel inventory references unknown Resource store 'ghost'"),
+				"Unknown fuel-store coupling diagnostic not shown");
+			// Commanding above the installed rating is refused.
+			driver.typeValue(ctx, "Generator 1 fuel store", "diesel");
+			driver.typeValue(ctx, "Generator 1 commanded output kW", "11");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(driver.contains("commanded output exceeds the installed capacity"),
+				"Commanded-above-rating diagnostic not shown");
+			// A generator whose waste-heat class does not match its sink
+			// reservoir is refused: heat routes only to the same class.
+			driver.typeValue(ctx, "Generator 1 commanded output kW", "10");
+			driver.typeValue(ctx, "Generator 1 thermal class", "warm");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(driver.contains("incompatible with heat sink reservoir 'hot'"),
+				"Cross-class heat-sink coupling diagnostic not shown");
+			// Repair the drafted limits; the confirmed reset applies the
+			// contract and the live view restarts from authored state.
+			driver.typeValue(ctx, "Generator 1 thermal class", "generation");
+			driver.click(ctx, "Confirm World reset");
+			REQ(world->getStationSystemsSettings().generators.size() == 2
+				&& world->getStationSystemsSettings().generators[1].efficiency == 0.5
+				&& world->getStationSystemsSettings().generators[1].fuelStoreId == "diesel"
+				&& world->getStationSystemsSettings().generators[1].heatSinkId == "hot"
+				&& history.undoCount() == 1 && world->getSimulationTick() == 0,
+				"Repaired generator draft did not apply through the reset-confirmed flow");
+			ctx->Sleep(1);
+			REQ(driver.contains("2 generator(s)")
+				&& driver.contains("generator2 (generation) fuel diesel -> sink hot"),
+				"Applied generator not reflected in the window");
+			driver.click(ctx, "Add generator");
+			driver.click(ctx, "Cancel edits");
+			REQ(world->getStationSystemsSettings().generators.size() == 2,
+				"Cancelled generator edit did not restore the authored contracts");
+		});
+		#undef REQ
+		require(driver.passed(), "Generator workflow failed on the Test Engine");
+	}
 }
 void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
@@ -1318,4 +1453,5 @@ void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 	checks.push_back({"station/thermalWorkflow", thermalWorkflow});
 	checks.push_back({"station/coolantWorkflow", coolantWorkflow});
 	checks.push_back({"station/chillerWorkflow", chillerWorkflow});
+	checks.push_back({"station/generatorWorkflow", generatorWorkflow});
 }
