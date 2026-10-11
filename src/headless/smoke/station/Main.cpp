@@ -52,6 +52,66 @@ namespace
 		a.advanceTicks(60 * 400);
 		require(a.getStationSystemsEvents().size() == 256, "Station history unbounded");
 	}
+	void eventBound(smoke::Context const&)
+	{
+		// #551: ledger transition events share the same bounded 256-entry
+		// public history as observation events. A 1 kW array whose illumination
+		// profile repeats every two fixed timesteps announces an eclipse
+		// transition on nearly every tick; with the observation cadence set
+		// beyond the run, transitions alone must still keep exactly the newest
+		// 256 entries in non-decreasing tick order.
+		auto const dt = static_cast<double>(core::World::getFixedTimestep());
+		auto flicker = [dt](double firstLevel)
+		{
+			core::ProfileSettings profile;
+			profile.periodSeconds = 2.0 * dt;
+			profile.segments = {{0.0, firstLevel}, {dt, 1.0 - firstLevel}};
+			return profile;
+		};
+		core::World world("audit", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		std::string diagnostic;
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 60.0f; // 3600 ticks: silent for this run
+		settings.solarArrays = {{"solar", 1.0, flicker(0.0)}};
+		require(world.configureStationSystems(settings, true, &diagnostic), diagnostic.c_str());
+		world.resumeSimulation();
+		require(world.advanceTicks(1000), "Transition-only event run failed");
+		auto const& events = world.getStationSystemsEvents();
+		require(events.size() == 256, "Transition events bypassed the 256-entry history bound");
+		require(events.back().worldTick == 1000, "Event history lost the newest transition");
+		for (size_t index = 1; index < events.size(); ++index)
+			require(events[index].worldTick >= events[index - 1].worldTick,
+				"Eviction broke retained tick ordering");
+		// Interleaved producers: with the 1 s observation cadence active and
+		// two out-of-phase arrays announcing two transitions on most ticks,
+		// the bound still holds and both producers remain present in the
+		// retained window in non-decreasing tick order.
+		core::World mixed("mixed", 2, 2);
+		mixed.pauseSimulation(); mixed.finishBuild();
+		core::StationSystemsSettings mixedSettings;
+		mixedSettings.enabled = true;
+		mixedSettings.observationIntervalSeconds = 1.0f;
+		mixedSettings.solarArrays = {{"a", 1.0, flicker(0.0)}, {"b", 1.0, flicker(1.0)}};
+		require(mixed.configureStationSystems(mixedSettings, true, &diagnostic), diagnostic.c_str());
+		mixed.resumeSimulation();
+		require(mixed.advanceTicks(1000), "Interleaved transition/observation run failed");
+		auto const& window = mixed.getStationSystemsEvents();
+		require(window.size() == 256, "Interleaved producers bypassed the 256-entry history bound");
+		require(window.back().worldTick == 1000, "Interleaved history lost the newest tick");
+		for (size_t index = 1; index < window.size(); ++index)
+			require(window[index].worldTick >= window[index - 1].worldTick,
+				"Interleaved eviction broke retained tick ordering");
+		bool sawObservation = false, sawTransition = false;
+		for (auto const& event : window)
+		{
+			if (event.message.find("completed the World tick") != std::string::npos) sawObservation = true;
+			if (event.message.find("Solar array") != std::string::npos) sawTransition = true;
+		}
+		require(sawObservation && sawTransition,
+			"Bounded window lost one of the interleaved event producers");
+	}
 	std::string yaml(core::World const& world)
 	{
 		auto serializer = core::YamlSerializer::toString(); core::SerializationWorkData data;
@@ -2946,7 +3006,7 @@ namespace
 }
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power}, {"batteries", batteries}, {"failures", failures}};
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power}, {"batteries", batteries}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

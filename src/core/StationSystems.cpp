@@ -16,6 +16,18 @@ namespace core
 		StationSystemsSourceLoader sourceLoader;
 		constexpr size_t EventLimit = 256;
 		constexpr size_t DiagnosticByteLimit = 2048;
+		// Every public event producer appends through this one bounded
+		// helper (#551): the history never retains more than the newest
+		// EventLimit entries, evicting oldest-first, so a tick that
+		// announces several transitions at once cannot push the history
+		// past the bound, and later appends keep evicting no matter how
+		// the vector grew. Declaration order within a tick is preserved.
+		void appendBoundedEvent(std::vector<StationSystemsEvent>& events,
+			uint64_t tick, std::string message)
+		{
+			while (events.size() >= EventLimit) events.erase(events.begin());
+			events.push_back({tick, std::move(message)});
+		}
 		// Borrow the Lua error only long enough to copy a bounded string. Never
 		// coerce arbitrary error objects outside a protected allocation boundary.
 		std::string errorMessage(lua_State* state, char const* fallback)
@@ -1542,14 +1554,14 @@ namespace core
 				if (transfer.status == previousStatus[index]) continue;
 				if (transfer.status == StationTransferStatus::Full)
 				{
-					events.push_back({tick, "Transfer '" + transfer.authored.id + "' supplying fully"});
+					appendBoundedEvent(events, tick, "Transfer '" + transfer.authored.id + "' supplying fully");
 					continue;
 				}
 				auto const& reason = stallReason[index];
 				auto const message = transfer.status == StationTransferStatus::Rejected
 					? std::string("Transfer '") + transfer.authored.id + "' rejected: " + reason
 					: std::string("Transfer '") + transfer.authored.id + "' partial: " + reason;
-				events.push_back({tick, message});
+				appendBoundedEvent(events, tick, message);
 			}
 			for (auto const index : conversionOrder)
 			{
@@ -1557,14 +1569,14 @@ namespace core
 				if (conversion.status == previousConversionStatus[index]) continue;
 				if (conversion.status == StationTransferStatus::Full)
 				{
-					events.push_back({tick, "Conversion '" + conversion.authored.id
-						+ "' running at full throughput"});
+					appendBoundedEvent(events, tick, "Conversion '" + conversion.authored.id
+						+ "' running at full throughput");
 					continue;
 				}
 				auto const message = conversion.status == StationTransferStatus::Rejected
 					? std::string("Conversion '") + conversion.authored.id + "' rejected: " + conversion.stallReason
 					: std::string("Conversion '") + conversion.authored.id + "' partial: " + conversion.stallReason;
-				events.push_back({tick, message});
+				appendBoundedEvent(events, tick, message);
 			}
 			// Solar and external load transitions are announced so the event
 			// log records eclipse changes, curtailment and unmet critical
@@ -1575,31 +1587,31 @@ namespace core
 				if (load.status != previousLoadStatus[index])
 				{
 					if (load.status == StationTransferStatus::Full)
-						events.push_back({tick, "Load '" + load.authored.id + "' supplying fully"});
+						appendBoundedEvent(events, tick, "Load '" + load.authored.id + "' supplying fully");
 					else if (load.status == StationTransferStatus::Rejected)
-						events.push_back({tick, "Load '" + load.authored.id + "' rejected: "
+						appendBoundedEvent(events, tick, "Load '" + load.authored.id + "' rejected: "
 							+ (!load.lastAdmitted ? load.lastBlockReason
 								: (load.lastShortfallReason.empty()
 									? std::string("electrical supply is unavailable")
-									: load.lastShortfallReason))});
+									: load.lastShortfallReason)));
 					else
-						events.push_back({tick, "Load '" + load.authored.id + "' curtailed: supplied "
+						appendBoundedEvent(events, tick, "Load '" + load.authored.id + "' curtailed: supplied "
 							+ std::to_string(load.lastSuppliedKW) + " of "
-							+ std::to_string(load.lastRequestedKW) + " kW"});
+							+ std::to_string(load.lastRequestedKW) + " kW");
 				}
 				if (load.lastCriticalUnmet != previousCriticalUnmet[index])
-					events.push_back({tick, load.lastCriticalUnmet
+					appendBoundedEvent(events, tick, load.lastCriticalUnmet
 						? "Load '" + load.authored.id + "' critical floor unmet: short "
 							+ std::to_string(load.lastUnmetCriticalKW) + " kW"
-						: std::string("Load '") + load.authored.id + "' critical floor restored"});
+						: std::string("Load '") + load.authored.id + "' critical floor restored");
 			}
 			for (size_t index = 0; index < solarArrays.size(); ++index)
 			{
 				auto const& array = solarArrays[index];
 				if (array.lastEclipse == previousEclipse[index] || array.lastDisabled) continue;
-				events.push_back({tick, array.lastEclipse
+				appendBoundedEvent(events, tick, array.lastEclipse
 					? "Solar array '" + array.authored.id + "' entered eclipse"
-					: "Solar array '" + array.authored.id + "' returned to sunlight"});
+					: "Solar array '" + array.authored.id + "' returned to sunlight");
 			}
 			// Battery transitions are announced so the event log records
 			// exhaustion, saturation and discharge limitation without
@@ -1611,28 +1623,28 @@ namespace core
 				if (battery.status != previousBatteryStatus[index])
 				{
 					if (battery.status == StationTransferStatus::Full)
-						events.push_back({tick, "Battery '" + battery.authored.id
-							+ "' discharging to cover the deficit"});
+						appendBoundedEvent(events, tick, "Battery '" + battery.authored.id
+							+ "' discharging to cover the deficit");
 					else if (battery.status == StationTransferStatus::Partial)
-						events.push_back({tick, "Battery '" + battery.authored.id
+						appendBoundedEvent(events, tick, "Battery '" + battery.authored.id
 							+ "' discharge limited: supplied " + std::to_string(battery.lastDischargeKW)
-							+ " of " + std::to_string(battery.lastDischargeRequestedKW) + " kW"});
+							+ " of " + std::to_string(battery.lastDischargeRequestedKW) + " kW");
 					else if (battery.status == StationTransferStatus::Rejected)
-						events.push_back({tick, "Battery '" + battery.authored.id
+						appendBoundedEvent(events, tick, "Battery '" + battery.authored.id
 							+ "' cannot discharge: " + (battery.lastAtReserve
 								? std::string("usable energy is at the reserve floor")
-								: std::string("no discharge power capability is available"))});
+								: std::string("no discharge power capability is available")));
 				}
 				if (battery.lastAtReserve != previousBatteryReserve[index])
-					events.push_back({tick, battery.lastAtReserve
+					appendBoundedEvent(events, tick, battery.lastAtReserve
 						? "Battery '" + battery.authored.id
 							+ "' exhausted: usable energy depleted to the reserve floor"
-						: "Battery '" + battery.authored.id + "' recovered above the reserve floor"});
+						: "Battery '" + battery.authored.id + "' recovered above the reserve floor");
 				if (battery.lastSaturated != previousBatterySaturated[index])
-					events.push_back({tick, battery.lastSaturated
+					appendBoundedEvent(events, tick, battery.lastSaturated
 						? "Battery '" + battery.authored.id
 							+ "' fully charged: stored energy reached nameplate capacity"
-						: "Battery '" + battery.authored.id + "' left full charge"});
+						: "Battery '" + battery.authored.id + "' left full charge");
 			}
 			return true;
 		}
@@ -1732,13 +1744,13 @@ namespace core
 			lua_settop(object->state.get(), 0);
 			mImpl->objects[i] = std::move(object);
 		}
-		mImpl->events.push_back({0, "Station systems initialized with "
+		appendBoundedEvent(mImpl->events, 0, "Station systems initialized with "
 			+ std::to_string(settings.stores.size()) + " resource store(s), "
 			+ std::to_string(settings.transfers.size()) + " transfer(s), "
 			+ std::to_string(settings.conversions.size()) + " conversion(s), "
 			+ std::to_string(settings.solarArrays.size()) + " solar array(s), "
 			+ std::to_string(settings.equipmentLoads.size()) + " external equipment load(s) and "
-			+ std::to_string(settings.batteries.size()) + " battery(ies)"});
+			+ std::to_string(settings.batteries.size()) + " battery(ies)");
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
 	bool StationSystemsRuntime::advance(uint64_t tick, float seconds)
@@ -1806,8 +1818,7 @@ namespace core
 		auto interval = static_cast<uint64_t>(std::ceil(mImpl->settings.observationIntervalSeconds / World::getFixedTimestep()));
 		if (tick % interval == 0)
 		{
-			if (mImpl->events.size() == EventLimit) mImpl->events.erase(mImpl->events.begin());
-			mImpl->events.push_back({tick, "All four Station systems completed the World tick"});
+			appendBoundedEvent(mImpl->events, tick, "All four Station systems completed the World tick");
 		}
 		return true;
 	}

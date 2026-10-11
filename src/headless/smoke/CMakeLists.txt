@@ -70,7 +70,7 @@ pf_add_smoke_module(pf-smoke-station
     LABELS "core;station"
     TIMEOUT 600
 )
-foreach(check lifecycle batching persistence stores transfers compounds power batteries failures fileRoundTrip writeFailure legacyFiles structuralReplay compoundFiles powerFiles batteryFiles)
+foreach(check lifecycle batching eventBound persistence stores transfers compounds power batteries failures fileRoundTrip writeFailure legacyFiles structuralReplay compoundFiles powerFiles batteryFiles)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()
