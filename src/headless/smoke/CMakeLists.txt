@@ -579,7 +579,7 @@ pf_add_smoke_module(pf-smoke-editor
         editor/BrokenShuttles.cpp
         editor/Palette.cpp
         editor/History.cpp
-    LIBRARIES pf-agent-editing pf-agent-resources pf-headless-render-support
+    LIBRARIES pf-agent-editing pf-agent-resources pf-headless-render-support pf-test-engine-support
     LABELS editor
     # The #392 resupply-delivery check adds a scroll-scan pass over the
     # draft's delivery section; the measured full inventory needs ~230s,

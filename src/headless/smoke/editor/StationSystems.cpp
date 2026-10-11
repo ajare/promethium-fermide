@@ -1,4 +1,5 @@
 #include "Checks.h"
+#include "TestEngine.h"
 #include "State.h"
 #include "StationSystemsWindow.h"
 #include "DocumentEdit.h"
@@ -900,8 +901,6 @@ namespace
 		auto& io = ImGui::GetIO();
 		io.DisplaySize = {1200, 1700};
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
-		std::string text; io.ClipboardUserData = &text;
-		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
 		DocumentHistory history;
 		StationSystemsWindow window;
 		auto world = std::make_shared<core::World>("Delivery editor", 2, 2);
@@ -925,100 +924,84 @@ namespace
 		pulse.recurrenceSeconds = 2.0;
 		initial.deliveries.push_back(pulse);
 		require(world->configureStationSystems(initial, false, &diagnostic), diagnostic.c_str());
-		auto frame = [&]
+		window.visible = true;
+		// The Test Engine drives the interaction; the driver renders the real
+		// Station window each frame and captures its text through the buffer
+		// rather than the clipboard, which the engine owns during a run.
+		headless::TestEngineDriver driver([&]
 		{
-			ImGui::NewFrame(); text.clear(); ImGui::LogToClipboard();
 			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 1650});
-			window.render(world, history); ImGui::LogFinish(); ImGui::Render();
-		};
-		auto clickPoint = [&](ImVec2 point)
+			window.render(world, history);
+		});
+		driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+
+		driver.run("station", "deliveryWorkflow", [&](ImGuiTestContext* ctx)
 		{
-			io.AddMousePosEvent(point.x, point.y); frame();
-			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
-		};
-		auto point = [&](char const* label)
-		{
-			io.AddMousePosEvent(400.0f, 400.0f);
-			io.AddMouseWheelEvent(0.0f, 1000.0f); frame();
-			for (int pass = 0; pass < 16; ++pass)
-			{
-				auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
-				for (float y = 45; y < 1640; y += 5)
-					for (float x = 18; x < 940; x += 15)
-					{
-						io.AddMousePosEvent(x, y); frame(); frame();
-						if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
-					}
-				io.AddMousePosEvent(400.0f, 400.0f);
-				io.AddMouseWheelEvent(0.0f, -10.0f); frame();
-			}
-			throw std::runtime_error(std::string("Missing Station control: ") + label);
-		};
-		auto typeValue = [&](char const* label, char const* value)
-		{
-			clickPoint(point(label));
-			io.AddKeyEvent(ImGuiMod_Ctrl, true); io.AddKeyEvent(ImGuiKey_A, true); frame();
-			io.AddKeyEvent(ImGuiKey_A, false); io.AddKeyEvent(ImGuiMod_Ctrl, false);
-			io.AddInputCharactersUTF8(value); frame();
-			io.AddKeyEvent(ImGuiKey_Enter, true); frame(); io.AddKeyEvent(ImGuiKey_Enter, false); frame();
-		};
-		window.visible = true; frame(); frame();
-		require(text.find("1 resupply delivery(ies)") != std::string::npos,
-			"Authored delivery count missing from the window");
-		require(text.find("pulse -> tank (kg)") != std::string::npos
-			&& text.find("next arrival at 1.000 s") != std::string::npos,
-			"Authored next-arrival schedule not displayed");
-		// Run into the scenario: the 30 kg store starts with 10 kg and each
-		// arrival brings 12, so it fills at the second occurrence and the
-		// third is refused whole. The live view shows both, and ticking
-		// never dirties the authored document.
-		world->markSaved();
-		world->resumeSimulation(); require(world->advanceTicks(300), "Delivery editor run failed");
-		world->pauseSimulation(); frame();
-		require(text.find("pulse -> tank (kg): refused | last at 5.000 s: 0.000 of 12.000 accepted, 12.000 rejected | total accepted 20.000, rejected 16.000 | 3 occurrence(s)")
-			!= std::string::npos,
-			"Live delivery accepted/refused accounting not displayed");
-		require(text.find("tank (kg): usable 30.000, held 0.000 of capacity 30.000")
-			!= std::string::npos,
-			"Live destination saturation not displayed");
-		require(text.find("next arrival at 7.000 s") != std::string::npos,
-			"Next arrival not advanced past the fired occurrences");
-		require(!world->isModified(), "Delivery ticking dirtied the authored document");
-		// An invalid drafted delivery is refused with a visible diagnostic
-		// and never reaches the authored settings or the history.
-		typeValue("Delivery 0 quantity", "0");
-		clickPoint(point("Apply settings"));
-		clickPoint(point("Confirm World reset")); frame();
-		require(text.find("quantity must be finite and positive") != std::string::npos,
-			"Invalid delivery quantity diagnostic not shown");
-		require(world->getStationSystemsSettings().deliveries[0].quantity == 12.0
-			&& history.undoCount() == 0 && world->getSimulationTick() == 300,
-			"Invalid delivery draft mutated the authored settings");
-		// Repair the draft; the confirmed reset applies it and the live
-		// view restarts the schedule from the authored beginning.
-		typeValue("Delivery 0 quantity", "5");
-		clickPoint(point("Apply settings")); frame();
-		require(text.find("Confirm?") != std::string::npos,
-			"Delivery edit bypassed the World reset confirmation");
-		clickPoint(point("Confirm World reset"));
-		require(world->getStationSystemsSettings().deliveries[0].quantity == 5.0
-			&& history.undoCount() == 1 && world->getSimulationTick() == 0,
-			"Repaired delivery draft did not apply through the reset-confirmed flow");
-		frame();
-		require(text.find("0 occurrence(s)") != std::string::npos
-			&& text.find("next arrival at 1.000 s") != std::string::npos,
-			"Applied delivery did not restart from authored state");
-		// A drafted sub-tick recurrence is refused: the schedule can never
-		// ask one tick to absorb an unbounded catch-up burst.
-		typeValue("Delivery 0 recurrence seconds", "0.005");
-		clickPoint(point("Apply settings")); frame();
-		require(text.find("at least one World fixed tick") != std::string::npos,
-			"Sub-tick delivery recurrence was accepted");
-		clickPoint(point("Cancel edits")); frame();
-		require(world->getStationSystemsSettings().deliveries[0].recurrenceSeconds == 2.0,
-			"Cancelled recurrence edit did not restore the authored schedule");
+			ctx->SetRef("Station Systems");
+			REQ(driver.contains("1 resupply delivery(ies)"),
+				"Authored delivery count missing from the window");
+			REQ(driver.contains("pulse -> tank (kg)")
+				&& driver.contains("next arrival at 1.000 s"),
+				"Authored next-arrival schedule not displayed");
+			// Run into the scenario: the 30 kg store starts with 10 kg and each
+			// arrival brings 12, so it fills at the second occurrence and the
+			// third is refused whole. The live view shows both, and ticking
+			// never dirties the authored document.
+			world->markSaved();
+			world->resumeSimulation();
+			if (!world->advanceTicks(300))
+			{ REQ(false, "Delivery editor run failed"); }
+			world->pauseSimulation();
+			ctx->Sleep(1);
+			REQ(driver.contains("pulse -> tank (kg): refused | last at 5.000 s: 0.000 of 12.000 accepted, 12.000 rejected | total accepted 20.000, rejected 16.000 | 3 occurrence(s)"),
+				"Live delivery accepted/refused accounting not displayed");
+			REQ(driver.contains("tank (kg): usable 30.000, held 0.000 of capacity 30.000"),
+				"Live destination saturation not displayed");
+			REQ(driver.contains("next arrival at 7.000 s"),
+				"Next arrival not advanced past the fired occurrences");
+			REQ(!world->isModified(), "Delivery ticking dirtied the authored document");
+			// An invalid drafted delivery is refused with a visible diagnostic
+			// and never reaches the authored settings or the history.
+			ctx->ItemInputValue("Delivery 0 quantity", "0");
+			ctx->ItemClick("Apply settings");
+			ctx->ItemClick("Confirm World reset");
+			ctx->Sleep(1);
+			REQ(driver.contains("quantity must be finite and positive"),
+				"Invalid delivery quantity diagnostic not shown");
+			REQ(world->getStationSystemsSettings().deliveries[0].quantity == 12.0
+				&& history.undoCount() == 0 && world->getSimulationTick() == 300,
+				"Invalid delivery draft mutated the authored settings");
+			// Repair the draft; the confirmed reset applies it and the live
+			// view restarts the schedule from the authored beginning.
+			ctx->ItemInputValue("Delivery 0 quantity", "5");
+			ctx->ItemClick("Apply settings");
+			ctx->Sleep(1);
+			REQ(driver.contains("Confirm?"),
+				"Delivery edit bypassed the World reset confirmation");
+			ctx->ItemClick("Confirm World reset");
+			REQ(world->getStationSystemsSettings().deliveries[0].quantity == 5.0
+				&& history.undoCount() == 1 && world->getSimulationTick() == 0,
+				"Repaired delivery draft did not apply through the reset-confirmed flow");
+			ctx->Sleep(1);
+			REQ(driver.contains("0 occurrence(s)") && driver.contains("next arrival at 1.000 s"),
+				"Applied delivery did not restart from authored state");
+			// A drafted sub-tick recurrence is refused: the schedule can never
+			// ask one tick to absorb an unbounded catch-up burst.
+			ctx->ItemInputValue("Delivery 0 recurrence seconds", "0.005");
+			ctx->ItemClick("Apply settings");
+			ctx->Sleep(1);
+			REQ(driver.contains("at least one World fixed tick"),
+				"Sub-tick delivery recurrence was accepted");
+			ctx->ItemClick("Cancel edits");
+			REQ(world->getStationSystemsSettings().deliveries[0].recurrenceSeconds == 2.0,
+				"Cancelled recurrence edit did not restore the authored schedule");
+		});
+		#undef REQ
+		require(driver.passed(), "Delivery workflow failed on the Test Engine");
 	}
 }
+
 void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"station/windowWorkflow", workflow});

@@ -402,6 +402,47 @@ add_library(pf-imgui-cpu STATIC
 target_include_directories(pf-imgui-cpu PUBLIC "${PF_INCLUDE_DIR}" "${PF_INCLUDE_DIR}/imgui")
 target_compile_features(pf-imgui-cpu PUBLIC cxx_std_20)
 
+# SPIKE(#test-engine): Dear ImGui Test Engine, vendored at v1.89.5 to match
+# the vendored ImGui. The hooks it needs are already present in imgui.cpp /
+# imgui_widgets.cpp behind IMGUI_ENABLE_TEST_ENGINE.
+#
+# The engine and ImGui are mutually dependent: ImGui calls the engine's hook
+# functions (ImGuiTestEngineHook_ItemAdd/ItemInfo) and the engine calls
+# ImGui. Kept as two static libs that would form a link cycle and force the
+# engine onto every ImGui consumer, so they are built as one library. The
+# engine is third-party: compiled without the project's warning policy.
+# Capture and ImPlot are switched off: this spike runs headless.
+target_compile_definitions(pf-imgui-cpu PUBLIC
+    IMGUI_ENABLE_TEST_ENGINE
+    IMGUI_TEST_ENGINE_ENABLE_CAPTURE=0
+    IMGUI_TEST_ENGINE_ENABLE_IMPLOT=0
+    IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1
+    IMGUI_TEST_ENGINE_ENABLE_STD_FUNCTION=1)
+target_sources(pf-imgui-cpu PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui_test_engine/imgui_te_engine.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui_test_engine/imgui_te_context.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui_test_engine/imgui_te_coroutine.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui_test_engine/imgui_te_utils.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui_test_engine/imgui_te_ui.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui_test_engine/imgui_te_exporters.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui_test_engine/imgui_capture_tool.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui_test_engine/imgui_te_perftool.cpp")
+target_include_directories(pf-imgui-cpu PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui_test_engine"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ext")
+if(NOT MSVC)
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui_test_engine/imgui_te_engine.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui_test_engine/imgui_te_context.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui_test_engine/imgui_te_coroutine.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui_test_engine/imgui_te_utils.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui_test_engine/imgui_te_ui.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui_test_engine/imgui_te_exporters.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui_test_engine/imgui_capture_tool.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ext/imgui_test_engine/imgui_te_perftool.cpp"
+        PROPERTIES COMPILE_OPTIONS "-w")
+endif()
+
 add_library(pf-render STATIC
     src/WorldViewportZoom.cpp
     src/Render.cpp
@@ -516,6 +557,20 @@ else()
     target_compile_options(pf-routing-population-support PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 pf_apply_high_analysis(pf-routing-population-support)
+
+# Shared Dear ImGui Test Engine driver for headless UI checks. Wraps the engine
+# context, frame pumping, buffer-based text capture and the disabled-control
+# click pattern, so migrated checks do not each re-implement them.
+add_library(pf-test-engine-support STATIC src/headless/support/TestEngine.cpp)
+target_include_directories(pf-test-engine-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
+target_link_libraries(pf-test-engine-support PUBLIC promethium-fermide-core pf-imgui-cpu)
+if(MSVC)
+    target_compile_options(pf-test-engine-support PRIVATE
+        "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
+else()
+    target_compile_options(pf-test-engine-support PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+pf_apply_high_analysis(pf-test-engine-support)
 
 add_library(pf-restoration-support STATIC src/headless/support/Restoration.cpp)
 target_include_directories(pf-restoration-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
