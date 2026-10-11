@@ -610,6 +610,16 @@ if(PF_BUILD_GUI)
 endif()
 
 include(CTest)
+
+# Shared application framework and graphical launcher use Willpower's existing
+# dependency targets rather than a separate dependency build.
+include("${CMAKE_CURRENT_SOURCE_DIR}/ext/willpower/cmake/Helpers.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/ext/willpower/cmake/ResourceSchemas.cmake")
+add_subdirectory(src/AppLib)
+if(PF_BUILD_GUI)
+    add_subdirectory(src/Launcher)
+endif()
+
 # Compatibility remains runnable with BUILD_TESTING=OFF. Direct module targets
 # never depend on the compatibility target, other modules, or standalone tools.
 if(BUILD_TESTING)

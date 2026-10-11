@@ -1,0 +1,11 @@
+Resources:
+  Resource:
+    type: EmbossingCatalog
+    name: Invalid
+    DependentResources:
+      DependentResource:
+        id: Wrong
+        ref: Source
+    Definitions:
+      Definition:
+        Resource: Yaml

@@ -1,0 +1,133 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ajare.github.io/boolean-world/schemas/resource-manifest/v1/proto-entity.schema.json",
+  "title": "ProtoEntity Resource",
+  "$ref": "#/definitions/resource",
+  "definitions": {
+    "size": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "value"],
+      "properties": {
+        "type": { "enum": ["AABB"] },
+        "value": {
+          "type": "string",
+          "pattern": "^[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?[, ]+[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?$"
+        }
+      }
+    },
+    "physical": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "Collision": {
+          "$ref": "https://schemas.willpower.dev/resource-manifest/common.schema.json#/definitions/boolean"
+        },
+        "Size": { "$ref": "#/definitions/size" }
+      }
+    },
+    "animation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "value"],
+      "properties": {
+        "key": {
+          "$ref": "https://schemas.willpower.dev/resource-manifest/common.schema.json#/definitions/nonEmptyString"
+        },
+        "value": {
+          "$ref": "https://schemas.willpower.dev/resource-manifest/common.schema.json#/definitions/nonEmptyString"
+        }
+      }
+    },
+    "animationCollection": {
+      "oneOf": [
+        { "$ref": "#/definitions/animation" },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/animation" }
+        }
+      ]
+    },
+    "visual": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "Animation": { "$ref": "#/definitions/animationCollection" }
+      }
+    },
+    "properties": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "Physical": { "$ref": "#/definitions/physical" },
+        "Visual": { "$ref": "#/definitions/visual" },
+        "Stats": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      }
+    },
+    "definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["Properties"],
+      "properties": {
+        "Properties": { "$ref": "#/definitions/properties" }
+      }
+    },
+    "definitions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["Definition"],
+      "properties": {
+        "Definition": { "$ref": "#/definitions/definition" }
+      }
+    },
+    "animationsDependency": {
+      "allOf": [
+        { "$ref": "https://schemas.willpower.dev/resource-manifest/resource.schema.json#/definitions/dependentResource" },
+        {
+          "required": ["id", "ref"],
+          "properties": {
+            "id": { "enum": ["Animations"] },
+            "ref": {
+              "$ref": "https://schemas.willpower.dev/resource-manifest/common.schema.json#/definitions/nonEmptyString",
+              "x-willpower-editor-version": "1.0",
+              "x-willpower-widget": "resource-reference",
+              "x-willpower-allowed-resource-types": ["AnimationSet"],
+              "x-willpower-reference-scope": "manifest"
+            }
+          }
+        }
+      ]
+    },
+    "dependentResources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["DependentResource"],
+      "properties": {
+        "DependentResource": { "$ref": "#/definitions/animationsDependency" }
+      }
+    },
+    "resource": {
+      "allOf": [
+        { "$ref": "https://schemas.willpower.dev/resource-manifest/resource.schema.json#/definitions/resource" },
+        {
+          "required": ["name", "Definitions"],
+          "properties": {
+            "type": { "enum": ["ProtoEntity"] },
+            "DependentResources": { "$ref": "#/definitions/dependentResources" },
+            "Definitions": { "$ref": "#/definitions/definitions" }
+          },
+          "not": {
+            "anyOf": [
+              { "required": ["location"] },
+              { "required": ["Option"] }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
