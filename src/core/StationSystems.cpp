@@ -781,15 +781,45 @@ namespace core
 		std::vector<StationSystemsEvent> events;
 		std::vector<StationSystemsDiagnostic> diagnostics;
 
+		// Run the ledger for one tick and roll it back whole unless every
+		// audit passed (#555). The ledger mutates the live transfer,
+		// conversion, load, solar and battery state while it runs, so a
+		// failed audit restores every one of those objects, and the
+		// allocation scalars derived from them, to the last committed
+		// state. Store inventory and the loss ledgers are staged and only
+		// published on success, and events are only appended after the
+		// audits pass; this rollback closes the remaining in-place mutation
+		// so a failed tick can never expose a partial allocation, energy
+		// draw or flow result through the public snapshot.
+		bool applyLedger(uint64_t tick, float seconds, std::string& violation)
+		{
+			auto const committedTransfers = transfers;
+			auto const committedConversions = conversions;
+			auto const committedLoads = loads;
+			auto const committedSolarArrays = solarArrays;
+			auto const committedBatteries = batteries;
+			auto const committedAvailableGenerationKW = lastAvailableGenerationKW;
+			auto const committedBatteryShortfallKW = lastBatteryShortfallKW;
+			if (runLedger(tick, seconds, violation)) return true;
+			transfers = committedTransfers;
+			conversions = committedConversions;
+			loads = committedLoads;
+			solarArrays = committedSolarArrays;
+			batteries = committedBatteries;
+			lastAvailableGenerationKW = committedAvailableGenerationKW;
+			lastBatteryShortfallKW = committedBatteryShortfallKW;
+			return false;
+		}
 		// Apply every authored transfer and conversion to a staged copy of
-		// the inventory in the declared deterministic order â transfers
+		// the inventory in the declared deterministic order, transfers
 		// first, then conversions, each by priority descending and
-		// declaration order â audit the staged result against finite
+		// declaration order; audit the staged result against finite
 		// limits, the per-unit conservation boundary and the per-constituent
 		// compound boundary, and only then commit. A violation never clamps
 		// material into existence or out of it: it fails the whole tick
-		// through the integrated error path.
-		bool applyLedger(uint64_t tick, float seconds, std::string& violation)
+		// through the integrated error path, and the applyLedger wrapper
+		// restores the live ledger state this pass mutated in place (#555).
+		bool runLedger(uint64_t tick, float seconds, std::string& violation)
 		{
 			std::vector<StationTransferStatus> previousStatus;
 			previousStatus.reserve(transfers.size());

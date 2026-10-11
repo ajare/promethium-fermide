@@ -2711,7 +2711,104 @@ namespace
 		core::World handled("Handled", 2, 2); enable(handled); handled.resumeSimulation();
 		require(handled.advanceTicks(120) && handled.getStationSystemsDiagnostics().empty()
 			&& handled.getStationSystemsSnapshot().healthy, "Caught application error triggered software pause");
+		// Host-ledger failure containment (#555): every sandbox step
+		// succeeds with valid completed counts, but the host's own
+		// accounting audit fails because the sandbox never mirrored the
+		// host ledger. No partial mutation may become visible: the entire
+		// public snapshot, the event log and the World clock must be
+		// exactly what they were before the failed tick, apart from the
+		// failure status and its diagnostic.
+		core::setStationSystemsSourceLoader([] {
+			return "return function() local n = 0 "
+				"return {advance=function() n = n + 1; return n end} end";
+		});
+		core::World hostFailure("HostLedger", 2, 2);
+		hostFailure.pauseSimulation(); hostFailure.finishBuild();
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			core::ResourceStoreSettings source;
+			source.id = "a"; source.unit = "kg"; source.capacity = 100.0;
+			source.startingQualified = 100.0;
+			source.composition = core::ResourceCompositionSettings{};
+			core::ResourceStoreSettings destination;
+			destination.id = "b"; destination.unit = "kg"; destination.capacity = 100.0;
+			destination.composition = core::ResourceCompositionSettings{};
+			// Close enough to pass the composition-closeness admission yet
+			// far enough that moving dry mass into it creates measurable
+			// water: the host's constituent audit must fail the tick.
+			destination.composition->moisture = 5e-10;
+			settings.stores = {source, destination};
+			settings.transfers = {{"a-to-b", "a", "b", "kg", 3000.0, 0}};
+			core::EquipmentLoadSettings lamp;
+			lamp.id = "lamp"; lamp.electricalDemandKW = 1.0;
+			lamp.thermalClass = "low";
+			settings.equipmentLoads = {lamp};
+			settings.batteries = {{"battery", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}};
+			std::string diagnostic;
+			require(hostFailure.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+		}
+		hostFailure.resumeSimulation();
+		auto const before = hostFailure.getStationSystemsSnapshot();
+		auto const beforeEvents = hostFailure.getStationSystemsEvents();
+		require(before.healthy && before.worldTick == 0, "Host-ledger fixture did not start healthy");
+		require(!hostFailure.advanceTick(), "Host ledger violation accepted");
+		auto const after = hostFailure.getStationSystemsSnapshot();
+		require(!after.healthy && hostFailure.getSimulationTick() == 0
+			&& hostFailure.isSimulationPaused(),
+			"Host ledger failure not fail-visible and synchronized");
+		auto expected = before;
+		expected.healthy = false;
+		require(after == expected, "Failed host tick published partially mutated ledger state");
+		// Explicit spot checks beyond whole-snapshot equality: the failed
+		// allocation, flow results and energy draw must not be visible.
+		require(after.stores[0].currentQualified == 100.0
+			&& after.stores[1].currentQualified == 0.0
+			&& after.stores[0].lastTickOut == 0.0 && after.stores[1].lastTickIn == 0.0,
+			"Failed transfer left committed inventory mutated");
+		require(after.transfers[0].lastRequested == 0.0 && after.transfers[0].lastCompleted == 0.0
+			&& after.transfers[0].lastUnmet == 0.0
+			&& after.transfers[0].status == core::StationTransferStatus::Idle,
+			"Failed transfer results escaped into the snapshot");
+		require(after.power.batteries[0].storedKWh == 1.0
+			&& after.power.batteries[0].lastDischargeKW == 0.0
+			&& after.power.batteries[0].dischargedKWh == 0.0
+			&& after.power.loads[0].suppliedKW == 0.0
+			&& after.power.totalSuppliedKW == 0.0 && after.power.surplusKW == 0.0,
+			"Failed energy draw escaped into the snapshot");
+		require(hostFailure.getStationSystemsEvents() == beforeEvents,
+			"Failed host tick published events");
+		auto const hostDiagnostics = hostFailure.getStationSystemsDiagnostics();
+		require(hostDiagnostics.size() == 1 && hostDiagnostics[0].system == "Resource transfer"
+			&& hostDiagnostics[0].failure == Failure::ConversionError
+			&& hostDiagnostics[0].worldTick == 1
+			&& hostDiagnostics[0].message.find("constituent") != std::string::npos,
+			"Host ledger failure diagnostic missing or wrong");
+		// Terminal retry refusal: the failed runtime never runs again and
+		// never mutates further.
+		require(!hostFailure.advanceTicks(10), "Failed host ledger retried after failure");
+		require(hostFailure.getStationSystemsSnapshot() == after
+			&& hostFailure.getStationSystemsEvents() == beforeEvents
+			&& hostFailure.getStationSystemsDiagnostics().size() == 1,
+			"Retry changed failed host-ledger state or duplicated the diagnostic");
+		// Reset recovery: the failure clears, and the same fixture fails
+		// again identically without leaking partial state.
+		hostFailure.resetSimulation();
+		require(hostFailure.getSimulationTick() == 0
+			&& hostFailure.getStationSystemsSnapshot().healthy
+			&& hostFailure.getStationSystemsDiagnostics().empty(),
+			"Reset did not clear the host ledger failure");
+		hostFailure.resumeSimulation();
+		require(!hostFailure.advanceTick(), "Reset host ledger failure not reproduced");
+		require(hostFailure.getStationSystemsSnapshot() == after
+			&& hostFailure.getStationSystemsEvents() == beforeEvents,
+			"Failed host-ledger replay was not identical");
+		// Resetting the source loader afterwards cannot undo leaked host
+		// state because none was left behind.
 		core::setStationSystemsSourceLoader({});
+		require(hostFailure.getStationSystemsSnapshot() == after,
+			"Resetting the source loader changed the failed World's snapshot");
 		unaffected.resumeSimulation(); require(unaffected.advanceTick() && unaffected.getStationSystemsSnapshot().healthy, "Failure leaked between Worlds");
 	}
 }
