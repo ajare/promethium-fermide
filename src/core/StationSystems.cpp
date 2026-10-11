@@ -1402,6 +1402,11 @@ namespace core
 						- stores[flow.storeIndex].authored.protectedReserve);
 					auto const completed = std::min(requested * scale, drawable);
 					qualified[flow.storeIndex] -= completed;
+					// Conversion draws and deliveries are store outflow/inflow
+					// just like transfers and equipment exchanges: the public
+					// per-store last-tick fields describe every flow the tick
+					// moved through the store, not transfers only (#552).
+					flowOut[flow.storeIndex] += completed;
 					flow.lastRequested = requested;
 					flow.lastCompleted = completed;
 					addComposition(netChange, *stores[flow.storeIndex].authored.composition,
@@ -1414,6 +1419,7 @@ namespace core
 						- (qualified[flow.storeIndex] + unqualified[flow.storeIndex]);
 					auto const completed = std::min(requested * scale, headroom);
 					qualified[flow.storeIndex] += completed;
+					flowIn[flow.storeIndex] += completed;
 					flow.lastRequested = requested;
 					flow.lastCompleted = completed;
 					addComposition(netChange, *stores[flow.storeIndex].authored.composition,

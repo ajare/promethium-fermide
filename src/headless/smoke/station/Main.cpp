@@ -569,6 +569,29 @@ namespace
 				if (entry.constituent == constituent) return entry;
 			return core::StationConstituentBalanceSnapshot{};
 		};
+		// #552: flow amounts can be well below the 1e-3 scenario approx,
+		// so per-store last-tick fields are checked at a tighter bound.
+		auto const flowApprox = [](double actual, double expected)
+		{ return std::abs(actual - expected) < 1e-6; };
+		// The published per-store last-tick flows must account for exactly
+		// the inventory change of the tick they describe: for every store,
+		// currentQualified(t) - currentQualified(t-1) equals lastTickIn -
+		// lastTickOut of tick t, whatever mechanisms produced the flow.
+		auto const flowsMatchInventories = [](core::World& world, std::string const& where)
+		{
+			auto const before = world.getStationSystemsSnapshot();
+			require(world.advanceTick(), (where + ": flow-matching tick failed").c_str());
+			auto const after = world.getStationSystemsSnapshot();
+			for (size_t index = 0; index < after.stores.size(); ++index)
+			{
+				auto const delta = after.stores[index].currentQualified
+					- before.stores[index].currentQualified;
+				auto const net = after.stores[index].lastTickIn - after.stores[index].lastTickOut;
+				require(std::abs(delta - net) <= core::StationBalanceTolerance
+					* std::max(1.0, std::abs(after.stores[index].currentQualified)),
+					(where + ": last-tick flows do not match the inventory change").c_str());
+			}
+		};
 		// Impossible or malformed configuration is refused before anything runs.
 		core::World refused("Refused", 2, 2); refused.pauseSimulation(); refused.finishBuild(); refused.markSaved();
 		std::vector<std::vector<core::ResourceStoreSettings>> badStores;
@@ -702,6 +725,30 @@ namespace
 				if (event.message.find("Conversion 'harvest' running at full throughput")
 					!= std::string::npos) sawFull = true;
 			require(sawFull, "Conversion full-throughput transition missing from the event log");
+			// #552: the per-store last-tick fields report every flow the
+			// tick moved through the store, conversions included: the
+			// harvest draw leaves the input store as outflow and the
+			// products enter the output stores as inflow.
+			require(flowApprox(snap.stores[0].lastTickOut, 1.0 / 60.0)
+				&& snap.stores[0].lastTickIn == 0.0
+				&& flowApprox(snap.stores[1].lastTickIn, 0.08 / 60.0)
+				&& snap.stores[1].lastTickOut == 0.0
+				&& flowApprox(snap.stores[2].lastTickIn, 0.4 / 60.0)
+				&& snap.stores[2].lastTickOut == 0.0,
+				"Conversion flows missing from the per-store last-tick fields");
+			// Reset reproduces the whole compound outcome exactly; capture
+			// the expected state at this 30-tick point before the extra
+			// flow-matching tick advances the run further.
+			growth.pauseSimulation();
+			auto const expected = growth.getStationSystemsSnapshot();
+			auto const expectedEvents = growth.getStationSystemsEvents();
+			growth.resetSimulation();
+			growth.resumeSimulation();
+			require(growth.advanceTicks(30), "Compound replay failed");
+			require(growth.getStationSystemsSnapshot() == expected
+				&& growth.getStationSystemsEvents() == expectedEvents,
+				"Compound conversion outcome not reproducible after reset");
+			flowsMatchInventories(growth, "Balanced harvest");
 		}
 		// Partial throughput under a protected reserve: the conversion
 		// scales down, constituents remain conserved.
@@ -726,6 +773,24 @@ namespace
 			for (auto const& entry : snap.constituentBalances)
 				require(std::abs(entry.residual) <= snap.balanceTolerance * std::max(1.0, std::abs(entry.starting)),
 					"Partial conversion broke constituent conservation");
+			// #552: the scaled-down conversion books its partial draw and
+			// delivery into the per-store last-tick flows, and on this
+			// single-tick run the flows account exactly for the change of
+			// each store's inventory from its starting amount.
+			require(flowApprox(snap.stores[0].lastTickOut, 0.6 / 60.0)
+				&& snap.stores[0].lastTickIn == 0.0
+				&& flowApprox(snap.stores[1].lastTickIn, 0.6 * 0.08 / 60.0)
+				&& snap.stores[1].lastTickOut == 0.0
+				&& flowApprox(snap.stores[2].lastTickIn, 0.6 * 0.4 / 60.0)
+				&& snap.stores[2].lastTickOut == 0.0,
+				"Partial conversion flows missing from the per-store last-tick fields");
+			require(std::abs((0.02 - snap.stores[0].currentQualified)
+				- snap.stores[0].lastTickOut) < 1e-9
+				&& std::abs((snap.stores[1].currentQualified - 1.0)
+					- snap.stores[1].lastTickIn) < 1e-9
+				&& std::abs(snap.stores[2].currentQualified
+					- snap.stores[2].lastTickIn) < 1e-9,
+				"Partial conversion last-tick flows do not match the inventory changes");
 		}
 		// A full output store refuses the whole conversion; nothing moves.
 		core::World blocked("Blocked", 2, 2);
@@ -745,6 +810,11 @@ namespace
 				"Full output store did not refuse the conversion");
 			require(approx(snap.stores[0].currentQualified, 50.0),
 				"Refused conversion still consumed input material");
+			// #552: a refused conversion moves nothing, so it must not
+			// appear in the per-store last-tick flows either.
+			require(snap.stores[0].lastTickIn == 0.0 && snap.stores[0].lastTickOut == 0.0
+				&& snap.stores[1].lastTickIn == 0.0 && snap.stores[1].lastTickOut == 0.0,
+				"Refused conversion reported last-tick flows it did not move");
 			bool sawBlocked = false;
 			for (auto const& event : blocked.getStationSystemsEvents())
 				if (event.message.find("Conversion 'harvest' rejected: output store 'waste' headroom limits throughput")
@@ -775,6 +845,16 @@ namespace
 			for (auto const& entry : snap.constituentBalances)
 				require(std::abs(entry.residual) <= snap.balanceTolerance * std::max(1.0, std::abs(entry.starting)),
 					"Competing conversions broke constituent conservation");
+			// #552: both conversions draw the shared input store, so its
+			// last-tick outflow is the sum of both completed draws, and
+			// each product store's inflow is its own conversion's output.
+			require(flowApprox(snap.stores[0].lastTickOut, 1.8 / 60.0)
+				&& snap.stores[0].lastTickIn == 0.0
+				&& flowApprox(snap.stores[1].lastTickIn, 0.1 / 60.0)
+				&& snap.stores[1].lastTickOut == 0.0
+				&& flowApprox(snap.stores[2].lastTickIn, 0.5 * 0.8 / 60.0)
+				&& snap.stores[2].lastTickOut == 0.0,
+				"Competing conversion flows not summed in the per-store last-tick fields");
 		}
 		// #556: an ordinary resource-limited partial conversion must not
 		// pause the Station when the binding limit is hit at a floating-
@@ -947,17 +1027,64 @@ namespace
 				&& approx(balance(snap, "energy").starting, 0.2 * 17000.0),
 				"Gram-denominated constituents not normalized to kg/kJ");
 		}
-		// Reset reproduces the whole compound outcome exactly.
+		// #552: with equipment material exchanges, a transfer and a
+		// conversion all moving material through the same stores in one
+		// tick, the per-store last-tick fields must sum every mechanism
+		// that touched the store and match the inventory change exactly.
+		core::World combined("Combined", 2, 2);
+		combined.pauseSimulation(); combined.finishBuild();
 		{
-			growth.pauseSimulation();
-			auto const expected = growth.getStationSystemsSnapshot();
-			auto const expectedEvents = growth.getStationSystemsEvents();
-			growth.resetSimulation();
-			growth.resumeSimulation();
-			require(growth.advanceTicks(30), "Compound replay failed");
-			require(growth.getStationSystemsSnapshot() == expected
-				&& growth.getStationSystemsEvents() == expectedEvents,
-				"Compound conversion outcome not reproducible after reset");
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = {store("feed", "kg", 100, 50, 0, 0, food),
+				store("mid", "kg", 100, 0, 0, 0, food),
+				store("biomass", "kg", 100, 1, 0, 0, biomass),
+				store("waste", "kg", 100, 0, 0, 0, waste)};
+			settings.transfers = {transfer("pump", "feed", "mid", "kg", 6.0, 0)};
+			settings.conversions = {conversion("harvest", {consume("mid", 1.0)},
+				{produce("biomass", 0.08), produce("waste", 0.4)}, 0)};
+			core::EquipmentLoadSettings reactor;
+			reactor.id = "reactor";
+			reactor.electricalDemandKW = 10.0;
+			reactor.heatOutputKW = 2.0;
+			reactor.thermalClass = "warm";
+			reactor.coolingDisposition = core::StationCoolingDisposition::Exported;
+			reactor.materialExchanges = {{"feed", 6.0, true}, {"biomass", 3.0, false}};
+			settings.equipmentLoads = {reactor};
+			core::SolarArraySettings solar;
+			solar.id = "field";
+			solar.capacityKW = 10.0;
+			settings.solarArrays = {solar};
+			std::string diagnostic;
+			require(combined.configureStationSystems(settings, true, &diagnostic),
+				diagnostic.c_str());
+		}
+		combined.resumeSimulation();
+		require(combined.advanceTicks(10), "Combined mechanisms run failed");
+		{
+			auto const snap = combined.getStationSystemsSnapshot();
+			require(snap.healthy, "Combined mechanisms run left the Station unhealthy");
+			// Per tick at the fixed timestep: the reactor draws 0.1 kg from
+			// feed and delivers 0.05 kg into biomass, the pump moves
+			// 0.1 kg feed -> mid, and the harvest conversion takes 1/60 kg
+			// from mid, delivering 0.08/60 kg to biomass and 0.4/60 kg to
+			// waste. Every store's last-tick fields show the sum of the
+			// mechanisms that touched it.
+			require(flowApprox(snap.stores[0].lastTickOut, 0.2)
+				&& snap.stores[0].lastTickIn == 0.0,
+				"Equipment draw and transfer out of the shared feed store not summed");
+			require(flowApprox(snap.stores[1].lastTickIn, 0.1)
+				&& flowApprox(snap.stores[1].lastTickOut, 1.0 / 60.0),
+				"Transfer-in and conversion-out of the intermediate store not published");
+			require(flowApprox(snap.stores[2].lastTickIn, 0.05 + 0.08 / 60.0)
+				&& snap.stores[2].lastTickOut == 0.0,
+				"Equipment delivery and conversion production into biomass not summed");
+			require(flowApprox(snap.stores[3].lastTickIn, 0.4 / 60.0)
+				&& snap.stores[3].lastTickOut == 0.0,
+				"Conversion production into waste not published as store inflow");
+			flowsMatchInventories(combined, "Combined mechanisms");
+			closedBalances(snap, "Combined mechanisms");
 		}
 		// The bundled Lua model receives compositions and conversion rules
 		// intact and re-audits them every tick.
