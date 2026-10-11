@@ -2368,71 +2368,77 @@ namespace
 		}
 		core::setStationSystemsSourceLoader({});
 	}
-	void batteries(smoke::Context const&)
+	// Shared fixtures for the battery smoke scenarios below. Hoisted out of
+	// the former monolithic `batteries` check so each scenario can be its own
+	// test without duplicating them.
+	auto const approx = [](double actual, double expected)
+	{ return std::abs(actual - expected) < 1e-3; };
+	auto sawEvent = [](core::World& world, std::string const& needle)
 	{
-		// #394: authored batteries separate nameplate and usable energy,
-		// keep the reserve floor undischargeable, book charge/discharge
-		// losses, ride deficits through the same load allocation pool as
-		// generation, and recharge only from surplus.
-		auto const approx = [](double actual, double expected)
-		{ return std::abs(actual - expected) < 1e-3; };
-		auto sawEvent = [](core::World& world, std::string const& needle)
-		{
-			for (auto const& event : world.getStationSystemsEvents())
-				if (event.message.find(needle) != std::string::npos) return true;
-			return false;
-		};
-		auto constantProfile = [](double level)
-		{
-			core::ProfileSettings profile;
-			profile.constantLevel = level;
-			return profile;
-		};
-		auto array = [](std::string const& id, double capacityKW, core::ProfileSettings illumination)
-		{
-			return core::SolarArraySettings{id, capacityKW, std::move(illumination)};
-		};
-		auto load = [](std::string const& id, double demandKW, int priority, double maxCurtailment = 1.0)
-		{
-			core::EquipmentLoadSettings settings;
-			settings.id = id;
-			settings.electricalDemandKW = demandKW;
-			settings.thermalClass = "moderate";
-			settings.coolingDisposition = core::StationCoolingDisposition::Exported;
-			settings.priority = priority;
-			settings.maxCurtailment = maxCurtailment;
-			return settings;
-		};
-		auto battery = [](std::string const& id, double nameplateKWh, double usableKWh,
-			double startingStoredKWh, double maxChargeKW, double maxDischargeKW,
-			double chargeEfficiency = 1.0, double dischargeEfficiency = 1.0)
-		{
-			core::BatterySettings settings;
-			settings.id = id;
-			settings.nameplateKWh = nameplateKWh;
-			settings.usableKWh = usableKWh;
-			settings.startingStoredKWh = startingStoredKWh;
-			settings.maxChargeKW = maxChargeKW;
-			settings.maxDischargeKW = maxDischargeKW;
-			settings.chargeEfficiency = chargeEfficiency;
-			settings.dischargeEfficiency = dischargeEfficiency;
-			return settings;
-		};
-		auto configure = [](core::World& world,
-			std::vector<core::SolarArraySettings> solar,
-			std::vector<core::EquipmentLoadSettings> loads,
-			std::vector<core::BatterySettings> batteries)
-		{
-			std::string diagnostic;
-			core::StationSystemsSettings settings;
-			settings.enabled = true;
-			settings.observationIntervalSeconds = 1.0f;
-			settings.solarArrays = std::move(solar);
-			settings.equipmentLoads = std::move(loads);
-			settings.batteries = std::move(batteries);
-			return std::pair(world.configureStationSystems(settings, true, &diagnostic), diagnostic);
-		};
-		// Invalid battery configuration is refused before anything runs.
+		for (auto const& event : world.getStationSystemsEvents())
+			if (event.message.find(needle) != std::string::npos) return true;
+		return false;
+	};
+	auto constantProfile = [](double level)
+	{
+		core::ProfileSettings profile;
+		profile.constantLevel = level;
+		return profile;
+	};
+	auto array = [](std::string const& id, double capacityKW, core::ProfileSettings illumination)
+	{
+		return core::SolarArraySettings{id, capacityKW, std::move(illumination)};
+	};
+	auto load = [](std::string const& id, double demandKW, int priority, double maxCurtailment = 1.0)
+	{
+		core::EquipmentLoadSettings settings;
+		settings.id = id;
+		settings.electricalDemandKW = demandKW;
+		settings.thermalClass = "moderate";
+		settings.coolingDisposition = core::StationCoolingDisposition::Exported;
+		settings.priority = priority;
+		settings.maxCurtailment = maxCurtailment;
+		return settings;
+	};
+	auto battery = [](std::string const& id, double nameplateKWh, double usableKWh,
+		double startingStoredKWh, double maxChargeKW, double maxDischargeKW,
+		double chargeEfficiency = 1.0, double dischargeEfficiency = 1.0)
+	{
+		core::BatterySettings settings;
+		settings.id = id;
+		settings.nameplateKWh = nameplateKWh;
+		settings.usableKWh = usableKWh;
+		settings.startingStoredKWh = startingStoredKWh;
+		settings.maxChargeKW = maxChargeKW;
+		settings.maxDischargeKW = maxDischargeKW;
+		settings.chargeEfficiency = chargeEfficiency;
+		settings.dischargeEfficiency = dischargeEfficiency;
+		return settings;
+	};
+	auto configure = [](core::World& world,
+		std::vector<core::SolarArraySettings> solar,
+		std::vector<core::EquipmentLoadSettings> loads,
+		std::vector<core::BatterySettings> batteries)
+	{
+		std::string diagnostic;
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 1.0f;
+		settings.solarArrays = std::move(solar);
+		settings.equipmentLoads = std::move(loads);
+		settings.batteries = std::move(batteries);
+		return std::pair(world.configureStationSystems(settings, true, &diagnostic), diagnostic);
+	};
+	auto const tight = [](double actual, double expected)
+	{ return std::abs(actual - expected) < 1e-9; };
+	auto const hourTight = [](double actual, double expected)
+	{ return std::abs(actual - expected) < 1e-6; };
+	auto const kWs = 1.0 / 3600.0; // kWh moved by 1 kW in one second
+	auto const hourTicks = 216000ULL; // one simulated hour at 60 Hz
+
+	// Invalid battery configuration is refused before anything runs.
+	void batteriesConfig(smoke::Context const&)
+	{
 		core::World refused("Refused", 2, 2);
 		refused.pauseSimulation(); refused.finishBuild(); refused.markSaved();
 		for (auto const& bad : {
@@ -2466,35 +2472,11 @@ namespace
 		// #547: analytical kW <-> kWh crossings, computed from first
 		// principles rather than from the runtime: 1 kW over one second
 		// moves 1/3600 kWh, over one hour exactly 1 kWh. Both directions,
-		// with efficiencies, reserve exhaustion and charge saturation.
-		auto const tight = [](double actual, double expected)
-		{ return std::abs(actual - expected) < 1e-9; };
-		auto const hourTight = [](double actual, double expected)
-		{ return std::abs(actual - expected) < 1e-6; };
-		auto const kWs = 1.0 / 3600.0; // kWh moved by 1 kW in one second
-		auto const hourTicks = 216000ULL; // one simulated hour at 60 Hz
-		// Discharge: 1 kW for one second drains exactly 1/3600 kWh.
-		core::World oneSecond("SecondDischarge", 2, 2);
-		oneSecond.pauseSimulation(); oneSecond.finishBuild();
-		require(configure(oneSecond, {},
-			{load("lamp", 1.0, 0)},
-			{battery("b", 1.0, 1.0, 1.0, 1.0, 1.0)}).first,
-			"One-second discharge scenario refused");
-		oneSecond.resumeSimulation();
-		require(oneSecond.advanceTicks(60), "One-second discharge run failed");
-		{
-			auto const snap = oneSecond.getStationSystemsSnapshot();
-			auto const& b = snap.power.batteries[0];
-			require(tight(b.storedKWh, 1.0 - kWs)
-				&& tight(b.dischargedKWh, kWs)
-				&& tight(b.deliveredKWh, kWs)
-				&& tight(b.residualKWh, 0.0)
-				&& tight(b.lossesKWh, 0.0)
-				&& tight(snap.power.batteryDischargeKW, 1.0),
-				"1 kW over one second did not move 1/3600 kWh");
-		}
-		// Discharge: 1 kW for one hour drains exactly 1 kWh to the
-		// reserve floor; the settled tick after shows the full shortfall.
+	}
+
+	// Split out of `batteries` so this world runs as its own ctest test rather than in one serial chain.
+	void batteriesHourDischarge(smoke::Context const&)
+	{
 		core::World oneHour("HourDischarge", 2, 2);
 		oneHour.pauseSimulation(); oneHour.finishBuild();
 		require(configure(oneHour, {},
@@ -2515,30 +2497,11 @@ namespace
 				&& approx(snap.power.batteryShortfallKW, 1.0),
 				"1 kW over one hour did not move exactly 1 kWh");
 		}
-		// Charge: 1 kW of surplus for one second stores exactly 1/3600 kWh.
-		core::World oneSecondCharge("SecondCharge", 2, 2);
-		oneSecondCharge.pauseSimulation(); oneSecondCharge.finishBuild();
-		require(configure(oneSecondCharge,
-			{array("field", 1.0, constantProfile(1.0))},
-			{},
-			{battery("b", 2.0, 2.0, 0.0, 1.0, 1.0)}).first,
-			"One-second charge scenario refused");
-		oneSecondCharge.resumeSimulation();
-		require(oneSecondCharge.advanceTicks(60), "One-second charge run failed");
-		{
-			auto const snap = oneSecondCharge.getStationSystemsSnapshot();
-			auto const& b = snap.power.batteries[0];
-			require(tight(b.storedKWh, kWs)
-				&& tight(b.chargedKWh, kWs)
-				&& tight(b.chargeInputKWh, kWs)
-				&& tight(b.residualKWh, 0.0)
-				&& tight(b.lossesKWh, 0.0)
-				&& tight(snap.power.batteryChargeKW, 1.0)
-				&& tight(snap.power.surplusKW, 0.0),
-				"1 kW of surplus over one second did not store 1/3600 kWh");
-		}
-		// Charge: 1 kW for one hour fills the 1 kWh nameplate exactly;
-		// the settled tick after takes nothing and the surplus returns whole.
+	}
+
+	// Split out of `batteries` so this world runs as its own ctest test rather than in one serial chain.
+	void batteriesHourCharge(smoke::Context const&)
+	{
 		core::World oneHourCharge("HourCharge", 2, 2);
 		oneHourCharge.pauseSimulation(); oneHourCharge.finishBuild();
 		require(configure(oneHourCharge,
@@ -2560,9 +2523,11 @@ namespace
 				&& approx(snap.power.surplusKW, 1.0),
 				"1 kW over one hour did not store exactly 1 kWh or saturation not reached");
 		}
-		// Efficiency: a 0.5 charge efficiency stores half of what the bus
-		// supplies over the same crossing; a 0.5 discharge efficiency
-		// draws twice what the bus receives.
+	}
+
+	// Split out of `batteries` so this world runs as its own ctest test rather than in one serial chain.
+	void batteriesHourChargeLoss(smoke::Context const&)
+	{
 		core::World hourChargeLoss("HourChargeLoss", 2, 2);
 		hourChargeLoss.pauseSimulation(); hourChargeLoss.finishBuild();
 		require(configure(hourChargeLoss,
@@ -2581,6 +2546,11 @@ namespace
 				&& hourTight(b.residualKWh, 0.0),
 				"0.5 charge efficiency over one hour booked the wrong amounts");
 		}
+	}
+
+	// Split out of `batteries` so this world runs as its own ctest test rather than in one serial chain.
+	void batteriesHourDischargeLoss(smoke::Context const&)
+	{
 		core::World hourDischargeLoss("HourDischargeLoss", 2, 2);
 		hourDischargeLoss.pauseSimulation(); hourDischargeLoss.finishBuild();
 		require(configure(hourDischargeLoss, {},
@@ -2598,10 +2568,11 @@ namespace
 				&& hourTight(b.residualKWh, 0.0),
 				"0.5 discharge efficiency over one hour booked the wrong amounts");
 		}
-		// Surplus charging and saturation: the battery takes only the
-		// generation no load took, fills to nameplate, and the surplus
-		// returns once there is no headroom left. One hour at 2 kW moves
-		// 2 kWh; three more hours move the remaining 6 kWh.
+	}
+
+	// Split out of `batteries` so this world runs as its own ctest test rather than in one serial chain.
+	void batteriesCharging(smoke::Context const&)
+	{
 		core::World charging("Charging", 2, 2);
 		charging.pauseSimulation(); charging.finishBuild();
 		require(configure(charging,
@@ -2641,10 +2612,11 @@ namespace
 			require(sawEvent(charging, "Battery 'bank' fully charged: stored energy reached nameplate capacity"),
 				"Saturation transition missing from the event log");
 		}
-		// Eclipse ride-through, exhaustion and recovery across two full
-		// cycles, replayed identically after reset. The cycle is two
-		// hours: sun for the first hour, eclipse for the second, so the
-		// energy legs are whole kWh (#547: 1 kW x 1 h = 1 kWh).
+	}
+
+	// Split out of `batteries` so this world runs as its own ctest test rather than in one serial chain.
+	void batteriesEclipse(smoke::Context const&)
+	{
 		core::World eclipse("Eclipse", 2, 2);
 		eclipse.pauseSimulation(); eclipse.finishBuild();
 		{
@@ -2758,9 +2730,11 @@ namespace
 				&& eclipse.getStationSystemsEvents() == expectedEvents,
 				"Repeated eclipse battery cycles not deterministic after reset");
 		}
-		// Power-limited ride-through with no generation at all: the
-		// discharge power cap bounds the support and the remainder stays
-		// explicit unmet demand.
+	}
+
+	// Split out of `batteries` so this world runs as its own ctest test rather than in one serial chain.
+	void batteriesLimited(smoke::Context const&)
+	{
 		core::World limited("Limited", 2, 2);
 		limited.pauseSimulation(); limited.finishBuild();
 		require(configure(limited, {},
@@ -2780,9 +2754,11 @@ namespace
 				&& approx(snap.power.batteries[0].dischargedKWh, 1.0),
 				"Lossless discharge ledger wrong");
 		}
-		// Efficiency losses are accounted on both sides: charging stores
-		// less than the bus supplied, discharge delivers less than the
-		// stored energy drawn, and the ledger closes over the losses.
+	}
+
+	// Split out of `batteries` so this world runs as its own ctest test rather than in one serial chain.
+	void batteriesLosses(smoke::Context const&)
+	{
 		core::World losses("Losses", 2, 2);
 		losses.pauseSimulation(); losses.finishBuild();
 		require(configure(losses,
@@ -2803,6 +2779,11 @@ namespace
 			require(approx(snap.power.surplusKW, 2.0),
 				"Surplus not reduced by the full bus power the battery consumed");
 		}
+	}
+
+	// Split out of `batteries` so this world runs as its own ctest test rather than in one serial chain.
+	void batteriesDischarging(smoke::Context const&)
+	{
 		core::World discharging("Discharging", 2, 2);
 		discharging.pauseSimulation(); discharging.finishBuild();
 		require(configure(discharging, {},
@@ -2823,8 +2804,51 @@ namespace
 				<= snap.power.batteries[0].dischargedKWh + 1e-9,
 				"Battery delivered more energy than it drew (free energy)");
 		}
-		// Zero usable capacity disables the battery: it stores nothing,
-		// delivers nothing, and the load behaves as if absent.
+	}
+
+	// The sub-second battery scenarios, grouped: each is a handful of ticks, so they share one test rather than adding eight more.
+	void batteriesQuick(smoke::Context const&)
+	{
+		core::World oneSecond("SecondDischarge", 2, 2);
+		oneSecond.pauseSimulation(); oneSecond.finishBuild();
+		require(configure(oneSecond, {},
+			{load("lamp", 1.0, 0)},
+			{battery("b", 1.0, 1.0, 1.0, 1.0, 1.0)}).first,
+			"One-second discharge scenario refused");
+		oneSecond.resumeSimulation();
+		require(oneSecond.advanceTicks(60), "One-second discharge run failed");
+		{
+			auto const snap = oneSecond.getStationSystemsSnapshot();
+			auto const& b = snap.power.batteries[0];
+			require(tight(b.storedKWh, 1.0 - kWs)
+				&& tight(b.dischargedKWh, kWs)
+				&& tight(b.deliveredKWh, kWs)
+				&& tight(b.residualKWh, 0.0)
+				&& tight(b.lossesKWh, 0.0)
+				&& tight(snap.power.batteryDischargeKW, 1.0),
+				"1 kW over one second did not move 1/3600 kWh");
+		}
+		core::World oneSecondCharge("SecondCharge", 2, 2);
+		oneSecondCharge.pauseSimulation(); oneSecondCharge.finishBuild();
+		require(configure(oneSecondCharge,
+			{array("field", 1.0, constantProfile(1.0))},
+			{},
+			{battery("b", 2.0, 2.0, 0.0, 1.0, 1.0)}).first,
+			"One-second charge scenario refused");
+		oneSecondCharge.resumeSimulation();
+		require(oneSecondCharge.advanceTicks(60), "One-second charge run failed");
+		{
+			auto const snap = oneSecondCharge.getStationSystemsSnapshot();
+			auto const& b = snap.power.batteries[0];
+			require(tight(b.storedKWh, kWs)
+				&& tight(b.chargedKWh, kWs)
+				&& tight(b.chargeInputKWh, kWs)
+				&& tight(b.residualKWh, 0.0)
+				&& tight(b.lossesKWh, 0.0)
+				&& tight(snap.power.batteryChargeKW, 1.0)
+				&& tight(snap.power.surplusKW, 0.0),
+				"1 kW of surplus over one second did not store 1/3600 kWh");
+		}
 		core::World zeroed("Zeroed", 2, 2);
 		zeroed.pauseSimulation(); zeroed.finishBuild();
 		require(configure(zeroed, {},
@@ -2843,9 +2867,6 @@ namespace
 				&& approx(snap.power.loads[0].unmetKW, 1.0),
 				"Disabled battery changed the load outcome");
 		}
-		// Critical floors are protected through the battery too: during
-		// eclipse the critical load's floor is served from stored energy
-		// ahead of discretionary demand.
 		core::World critical("Critical", 2, 2);
 		critical.pauseSimulation(); critical.finishBuild();
 		{
@@ -2880,8 +2901,6 @@ namespace
 					"Battery discharge ledger wrong under critical protection");
 			}
 		}
-		// A load that cannot reach its minimum operable level even with
-		// battery energy takes nothing, and the stored energy stays put.
 		core::World rigid("Rigid", 2, 2);
 		rigid.pauseSimulation(); rigid.finishBuild();
 		require(configure(rigid, {},
@@ -2900,8 +2919,6 @@ namespace
 			require(sawEvent(rigid, "Load 'kiln' rejected: below the minimum operable supply level"),
 				"Rigid-load refusal reason missing from the event log");
 		}
-		// The reserve floor is never drawn: discharge stops exactly at
-		// nameplate minus usable, never below.
 		core::World reserve("Reserve", 2, 2);
 		reserve.pauseSimulation(); reserve.finishBuild();
 		require(configure(reserve, {},
@@ -2957,6 +2974,7 @@ namespace
 			"Lua battery assertion failure not contained at construction");
 		core::setStationSystemsSourceLoader({});
 	}
+
 	void deliveries(smoke::Context const&)
 	{
 		// #392: authored resupply deliveries bring a declared quantity into
@@ -3625,7 +3643,17 @@ namespace
 }
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power}, {"batteries", batteries}, {"deliveries", deliveries}, {"failures", failures}};
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power},
+		// Split out of the former `batteries` check: the hour-scale legs are
+		// independent worlds, so each is its own test and they run in parallel
+		// instead of as one ~182s serial chain.
+		{"batteriesConfig", batteriesConfig}, {"batteriesHourDischarge", batteriesHourDischarge},
+		{"batteriesHourCharge", batteriesHourCharge}, {"batteriesHourChargeLoss", batteriesHourChargeLoss},
+		{"batteriesHourDischargeLoss", batteriesHourDischargeLoss}, {"batteriesCharging", batteriesCharging},
+		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
+		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
+		{"batteriesQuick", batteriesQuick},
+		{"deliveries", deliveries}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

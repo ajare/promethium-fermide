@@ -23,7 +23,7 @@ function(pf_add_smoke_contract)
 endfunction()
 
 function(pf_add_smoke_module target)
-    cmake_parse_arguments(MODULE "" "NAME;TIMEOUT" "SOURCES;LIBRARIES;LABELS" ${ARGN})
+    cmake_parse_arguments(MODULE "" "NAME;TIMEOUT;DEFAULT_CHECK" "SOURCES;LIBRARIES;LABELS" ${ARGN})
     if(MODULE_UNPARSED_ARGUMENTS OR NOT MODULE_NAME OR NOT MODULE_SOURCES OR NOT MODULE_TIMEOUT)
         message(FATAL_ERROR "${target}: expected NAME, TIMEOUT and explicit SOURCES")
     endif()
@@ -58,7 +58,17 @@ function(pf_add_smoke_module target)
     add_executable(${target} ${MODULE_SOURCES})
     target_link_libraries(${target} PRIVATE pf-smoke-support ${MODULE_LIBRARIES})
     pf_smoke_target_policy(${target})
-    add_test(NAME smoke-${MODULE_NAME} COMMAND ${target})
+    # MODULE_DEFAULT_CHECK makes the module-level test drive one cheap check
+    # instead of the whole binary. Without it the module-level test re-runs
+    # every check that the per-check tests already run, doubling the cost of
+    # any expensive check. The per-check tests carry the coverage; the
+    # module-level test then verifies the binary starts, dispatches and
+    # reports a summary.
+    if(DEFINED MODULE_DEFAULT_CHECK)
+        add_test(NAME smoke-${MODULE_NAME} COMMAND ${target} --check ${MODULE_DEFAULT_CHECK})
+    else()
+        add_test(NAME smoke-${MODULE_NAME} COMMAND ${target})
+    endif()
     set_tests_properties(smoke-${MODULE_NAME} PROPERTIES
         LABELS "smoke;functional;validation-fast;${MODULE_LABELS}" TIMEOUT ${MODULE_TIMEOUT})
 endfunction()
@@ -69,13 +79,24 @@ pf_add_smoke_module(pf-smoke-station
     LIBRARIES promethium-fermide-core
     LABELS "core;station"
     TIMEOUT 600
+    DEFAULT_CHECK lifecycle
 )
-foreach(check lifecycle batching eventBound persistence stores transfers compounds power batteries deliveries failures fileRoundTrip writeFailure legacyFiles structuralReplay compoundFiles powerFiles batteryFiles deliveryFiles)
+foreach(check lifecycle batching eventBound persistence stores transfers compounds power
+        batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
+        batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
+        batteriesLosses batteriesDischarging batteriesQuick
+        deliveries failures fileRoundTrip writeFailure legacyFiles structuralReplay
+        compoundFiles powerFiles batteryFiles deliveryFiles)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()
 # The #547 analytical hour-scale crossings run multi-hour simulated runs.
-set_tests_properties(station-batteries PROPERTIES TIMEOUT 240)
+set_tests_properties(station-batteriesEclipse PROPERTIES TIMEOUT 180)
+set_tests_properties(station-batteriesCharging PROPERTIES TIMEOUT 120)
+foreach(hourScale batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
+        batteriesHourDischargeLoss batteriesLimited batteriesLosses batteriesDischarging)
+    set_tests_properties(station-${hourScale} PROPERTIES TIMEOUT 90)
+endforeach()
 
 pf_add_smoke_module(pf-smoke-simulation
     NAME simulation
