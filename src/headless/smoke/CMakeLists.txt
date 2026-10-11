@@ -85,8 +85,8 @@ foreach(check lifecycle batching eventBound persistence stores transfers compoun
         batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
-        deliveries thermal failures fileRoundTrip writeFailure legacyFiles structuralReplay
-        compoundFiles powerFiles batteryFiles deliveryFiles thermalFiles)
+        deliveries thermal coolant failures fileRoundTrip writeFailure legacyFiles structuralReplay
+        compoundFiles powerFiles batteryFiles deliveryFiles thermalFiles coolantFiles)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()
@@ -626,6 +626,8 @@ add_test(NAME station-editor-deliveries COMMAND pf-smoke-editor --check station/
 set_tests_properties(station-editor-deliveries PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-thermal COMMAND pf-smoke-editor --check station/thermalWorkflow)
 set_tests_properties(station-editor-thermal PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+add_test(NAME station-editor-coolant COMMAND pf-smoke-editor --check station/coolantWorkflow)
+set_tests_properties(station-editor-coolant PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 
 pf_add_smoke_contract(NAME smoke-editor-contract COMMAND ${CMAKE_COMMAND}
     "-DEDITOR=$<TARGET_FILE:pf-smoke-editor>"

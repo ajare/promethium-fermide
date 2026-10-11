@@ -269,6 +269,7 @@ set(editor_names
     station/batteryWorkflow
     station/deliveryWorkflow
     station/thermalWorkflow
+    station/coolantWorkflow
 )
 
 if(DEFINED LANE)

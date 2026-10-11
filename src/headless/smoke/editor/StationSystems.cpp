@@ -996,6 +996,131 @@ namespace
 		#undef REQ
 		require(driver.passed(), "Thermal workflow failed on the Test Engine");
 	}
+	// #396: coolant loops are drafted, validated and applied through the
+	// real Station Systems window controls, and the live view reports the
+	// finite inventory, circulation, freeze-protection service and the
+	// closing loop energy ledger.
+	void coolantWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO();
+		io.DisplaySize = {1200, 1700};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Coolant editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		core::StationSystemsSettings initial;
+		initial.enabled = true;
+		initial.observationIntervalSeconds = 2.0f;
+		core::ThermalReservoirSettings bus;
+		bus.id = "bus";
+		bus.thermalClass = "moderate";
+		bus.heatCapacityKJPerK = 1000.0;
+		bus.startingTemperatureC = 20.0;
+		bus.minTemperatureC = -50.0;
+		bus.maxTemperatureC = 100.0;
+		initial.thermalReservoirs.push_back(bus);
+		core::CoolantLoopSettings itcs;
+		itcs.id = "itcs";
+		itcs.hazardClass = "normal";
+		itcs.reservoirId = "bus";
+		itcs.coolantCapacityKg = 100.0;
+		itcs.startingCoolantKg = 100.0;
+		itcs.specificHeatKJPerKgK = 4.0;
+		itcs.startingTemperatureC = 20.0;
+		itcs.freezeProtectionSetpointC = 5.0;
+		itcs.pumpPowerKW = 1.2;
+		itcs.ratedFlowKgPerS = 3.0;
+		itcs.exchangerConductanceKWPerK = 6.0;
+		itcs.heaterCapacityKW = 2.0;
+		initial.coolantLoops.push_back(itcs);
+		core::SolarArraySettings field;
+		field.id = "field";
+		field.capacityKW = 10.0;
+		initial.solarArrays.push_back(field);
+		require(world->configureStationSystems(initial, false, &diagnostic), diagnostic.c_str());
+		headless::TestEngineDriver driver([&]
+		{
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 1650});
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+
+		driver.run("station", "coolantWorkflow", [&](ImGuiTestContext* ctx)
+		{
+			ctx->SetRef("Station Systems");
+			REQ(driver.contains("1 coolant loop(s)"),
+				"Authored coolant loop count missing from the window");
+			// Run: the live view shows the circulating loop at full rated
+			// flow, the closing loop ledger and the station coolant totals,
+			// and ticking never dirties the authored document.
+			world->markSaved();
+			world->resumeSimulation(); REQ(world->advanceTicks(600), "Coolant editor run failed");
+			world->pauseSimulation(); ctx->Sleep(1);
+			REQ(driver.contains("itcs [normal] -> bus: full service")
+				&& driver.contains("flow 3.000 of 3.000 kg/s (circulation 100.0%)")
+				&& driver.contains("pump 1.200 of 1.200 kW"),
+				"Live coolant circulation service not displayed");
+			REQ(driver.contains("energy ledger (kJ)") && driver.contains("pump work"),
+				"Coolant loop energy ledger not displayed");
+			REQ(driver.contains("circulation 3.000 kg/s"),
+				"Station coolant circulation total not displayed");
+			REQ(!driver.contains("BELOW the freeze-protection setpoint")
+				&& !driver.contains("DISABLED"),
+				"Freeze or disabled flags wrong for a nominal run");
+			REQ(!world->isModified(), "Coolant ticking dirtied the authored document");
+			// An invalid drafted loop is refused with a visible diagnostic
+			// and never reaches the authored settings.
+			driver.click(ctx, "Add coolant loop");
+			driver.typeValue(ctx, "Coolant loop 1 starting coolant kg", "150");
+			driver.click(ctx, "Apply settings");
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(driver.contains("exceeds the loop capacity"),
+				"Over-filled drafted coolant diagnostic not shown");
+			REQ(world->getStationSystemsSettings().coolantLoops.size() == 1
+				&& history.undoCount() == 0 && world->getSimulationTick() == 600,
+				"Invalid coolant draft mutated the authored settings");
+			// Repair the drafted charge and give the new loop the hazardous
+			// class; the confirmed reset applies the contract and the live
+			// view restarts from authored state.
+			driver.typeValue(ctx, "Coolant loop 1 starting coolant kg", "50");
+			driver.typeValue(ctx, "Coolant loop 1 hazard class", "hazardous");
+			driver.click(ctx, "Confirm World reset");
+			REQ(world->getStationSystemsSettings().coolantLoops.size() == 2
+				&& world->getStationSystemsSettings().coolantLoops[1].startingCoolantKg == 50.0
+				&& world->getStationSystemsSettings().coolantLoops[1].hazardClass == "hazardous"
+				&& history.undoCount() == 1 && world->getSimulationTick() == 0,
+				"Repaired coolant draft did not apply through the reset-confirmed flow");
+			ctx->Sleep(1);
+			REQ(driver.contains("2 coolant loop(s)")
+				&& driver.contains("coolantLoop2 [hazardous] -> bus"),
+				"Applied coolant loop not reflected in the window");
+			// An unknown hazard class is refused.
+			driver.typeValue(ctx, "Coolant loop 1 hazard class", "toxic");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			REQ(driver.contains("unknown coolant hazard class 'toxic'"),
+				"Unknown hazard class diagnostic not shown");
+			REQ(world->getStationSystemsSettings().coolantLoops[1].hazardClass == "hazardous"
+				&& history.undoCount() == 1,
+				"Invalid hazard class draft mutated the authored settings");
+			// A loop coupled to an unknown reservoir is refused.
+			driver.typeValue(ctx, "Coolant loop 1 hazard class", "hazardous");
+			driver.typeValue(ctx, "Coolant loop 1 reservoir", "ghost");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			REQ(driver.contains("coupled to unknown thermal reservoir 'ghost'"),
+				"Unknown loop host diagnostic not shown");
+			driver.click(ctx, "Cancel edits");
+			REQ(world->getStationSystemsSettings().coolantLoops[1].reservoirId == "bus",
+				"Cancelled loop edit did not restore the authored coupling");
+		});
+		#undef REQ
+		require(driver.passed(), "Coolant workflow failed on the Test Engine");
+	}
 }
 
 void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
@@ -1009,4 +1134,5 @@ void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 	checks.push_back({"station/batteryWorkflow", batteryWorkflow});
 	checks.push_back({"station/deliveryWorkflow", deliveryWorkflow});
 	checks.push_back({"station/thermalWorkflow", thermalWorkflow});
+	checks.push_back({"station/coolantWorkflow", coolantWorkflow});
 }

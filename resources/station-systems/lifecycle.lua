@@ -65,7 +65,7 @@ local function toKg(unit, mass)
 end
 
 return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries,
-    reservoirs, radiators)
+    reservoirs, radiators, coolantLoops)
     assert(type(name) == "string")
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
@@ -76,6 +76,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     assert(type(deliveries) == "table", "resupply delivery descriptors missing")
     assert(type(reservoirs) == "table", "thermal reservoir descriptors missing")
     assert(type(radiators) == "table", "radiator descriptors missing")
+    assert(type(coolantLoops) == "table", "coolant loop descriptors missing")
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
@@ -83,7 +84,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         starting_constituents = {}, constituent_loss = {},
         constituent_delivered = {},
         solar = {}, loads = {}, load_order = {}, batteries = {},
-        deliveries = {}, reservoirs = {}, radiators = {},
+        deliveries = {}, reservoirs = {}, radiators = {}, coolant_loops = {},
     }
     local by_id = {}
     for index = 1, #stores do
@@ -346,11 +347,13 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             temperature = reservoir.startingTemperatureC,
             radiators = {},
             lastRouted = 0,
+            lastLoopHeat = 0,
             lastHeatIn = 0,
             lastRejected = 0,
             lastNet = 0,
             absorbedKJ = 0,
             routedKJ = 0,
+            loopKJ = 0,
             rejectedKJ = 0,
             aboveLimit = false,
             belowLimit = false,
@@ -390,6 +393,86 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             lastRejected = 0,
         }
         host.radiators[#host.radiators + 1] = object.radiators[index]
+    end
+    -- Coolant loops (#396): a finite, loop-specific closed coolant circuit
+    -- pumped through one thermal reservoir. Normal and hazardous coolant
+    -- are segregated classes and no process pools them: each loop owns its
+    -- own inventory and the only crossing with station thermal state is
+    -- heat through the circulation-gated exchanger. Coolant is not
+    -- potable or nutrient water and never touches a Resource store. Zero
+    -- starting coolant disables the loop: no flow, no pump draw, no
+    -- heat — circulation is never invented from an empty inventory.
+    for index = 1, #coolantLoops do
+        local loop = coolantLoops[index]
+        assert(type(loop) == 'table', 'coolant loop descriptor must be a table')
+        assert(type(loop.id) == 'string' and #loop.id > 0, 'coolant loop needs an id')
+        assert(loop.hazardClass == 'normal' or loop.hazardClass == 'hazardous',
+            'coolant loop needs a declared hazard class (normal or hazardous)')
+        local host = reservoir_by_id[loop.reservoir]
+        assert(host ~= nil, 'coolant loop host thermal reservoir is unknown')
+        assert(type(loop.coolantCapacityKg) == 'number'
+            and loop.coolantCapacityKg == loop.coolantCapacityKg
+            and loop.coolantCapacityKg > 0 and loop.coolantCapacityKg < math.huge,
+            'coolant capacity must be finite and positive')
+        assert(type(loop.startingCoolantKg) == 'number'
+            and loop.startingCoolantKg == loop.startingCoolantKg
+            and loop.startingCoolantKg >= 0 and loop.startingCoolantKg < math.huge
+            and loop.startingCoolantKg <= loop.coolantCapacityKg,
+            'starting coolant must be finite and within the loop capacity')
+        assert(type(loop.specificHeatKJPerKgK) == 'number'
+            and loop.specificHeatKJPerKgK == loop.specificHeatKJPerKgK
+            and loop.specificHeatKJPerKgK > 0 and loop.specificHeatKJPerKgK < math.huge,
+            'coolant specific heat must be finite and positive')
+        local function checkLoopTemp(field, value)
+            assert(type(value) == 'number' and value == value and value < math.huge
+                and value > -KELVIN_OFFSET,
+                'coolant loop ' .. field .. ' must be finite and above absolute zero')
+        end
+        checkLoopTemp('starting temperature', loop.startingTemperatureC)
+        checkLoopTemp('freeze-protection setpoint', loop.freezeProtectionSetpointC)
+        assert(type(loop.pumpPowerKW) == 'number' and loop.pumpPowerKW == loop.pumpPowerKW
+            and loop.pumpPowerKW >= 0 and loop.pumpPowerKW < math.huge,
+            'pump power must be finite and non-negative')
+        assert(type(loop.ratedFlowKgPerS) == 'number'
+            and loop.ratedFlowKgPerS == loop.ratedFlowKgPerS
+            and loop.ratedFlowKgPerS >= 0 and loop.ratedFlowKgPerS < math.huge,
+            'rated flow must be finite and non-negative')
+        assert(type(loop.exchangerConductanceKWPerK) == 'number'
+            and loop.exchangerConductanceKWPerK == loop.exchangerConductanceKWPerK
+            and loop.exchangerConductanceKWPerK >= 0 and loop.exchangerConductanceKWPerK < math.huge,
+            'exchanger conductance must be finite and non-negative')
+        assert(type(loop.heaterCapacityKW) == 'number'
+            and loop.heaterCapacityKW == loop.heaterCapacityKW
+            and loop.heaterCapacityKW >= 0 and loop.heaterCapacityKW < math.huge,
+            'heater capacity must be finite and non-negative')
+        object.coolant_loops[index] = {
+            id = loop.id,
+            hazardClass = loop.hazardClass,
+            reservoir = host,
+            capacity = loop.coolantCapacityKg,
+            coolant = loop.startingCoolantKg,
+            startingCoolant = loop.startingCoolantKg,
+            cp = loop.specificHeatKJPerKgK,
+            startingTemperature = loop.startingTemperatureC,
+            setpoint = loop.freezeProtectionSetpointC,
+            pumpKW = loop.pumpPowerKW,
+            ratedFlow = loop.ratedFlowKgPerS,
+            conductance = loop.exchangerConductanceKWPerK,
+            heaterKW = loop.heaterCapacityKW,
+            temperature = loop.startingTemperatureC,
+            pumpWorkKJ = 0,
+            heaterKJ = 0,
+            exchangedKJ = 0,
+            lastPumpDemand = 0,
+            lastPumpSupplied = 0,
+            lastHeaterDemand = 0,
+            lastHeaterSupplied = 0,
+            lastCirculation = 0,
+            lastFlow = 0,
+            lastExchange = 0,
+            belowFreeze = false,
+            circulating = false,
+        }
     end
     for index = 1, #loads do
         local load = loads[index]
@@ -1087,6 +1170,80 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 end
             end
         end
+        -- Coolant loops run after the external load allocation and
+        -- before battery charging (#396): the pump and freeze heater
+        -- draw from the same generation-and-battery pool as external
+        -- loads — never a second budget — and their heat must be in the
+        -- loop before the reservoir integrates this tick's flows. Each
+        -- loop circulates only the coolant it actually holds: the fill
+        -- fraction caps the pump demand, so a dry loop draws nothing
+        -- and flows nothing, and an underfilled loop is capped
+        -- proportionally. Pump work and heater heat enter the loop
+        -- exactly once and reach the reservoir only through the
+        -- circulation-gated exchanger. Loops run in declaration order.
+        for _, loop in ipairs(self.coolant_loops) do
+            local disabled = loop.coolant <= 0
+            local fill = disabled and 0 or math.min(1, loop.coolant / loop.capacity)
+            -- A dry loop cannot run a pump: no fluid means no draw and
+            -- no flow, never an invented one.
+            local pumpDemand = disabled and 0 or loop.pumpKW * fill
+            local pumpSupplied = 0
+            local pumpFromGeneration = math.min(pumpDemand, generation)
+            pumpSupplied = pumpSupplied + pumpFromGeneration
+            generation = generation - pumpFromGeneration
+            local pumpFromBattery = drawBatteries(self, pumpDemand - pumpFromGeneration, fixed_hours)
+            pumpSupplied = pumpSupplied + pumpFromBattery
+            batterySupplied = batterySupplied + pumpFromBattery
+            -- Freeze-protection thermostat: demand up to capacity while
+            -- the loop is below its setpoint. A dry loop heats nothing.
+            local heaterDemand = 0
+            if not disabled and loop.temperature < loop.setpoint then
+                heaterDemand = loop.heaterKW
+            end
+            local heaterSupplied = 0
+            local heaterFromGeneration = math.min(heaterDemand, generation)
+            heaterSupplied = heaterSupplied + heaterFromGeneration
+            generation = generation - heaterFromGeneration
+            local heaterFromBattery = drawBatteries(self, heaterDemand - heaterFromGeneration, fixed_hours)
+            heaterSupplied = heaterSupplied + heaterFromBattery
+            batterySupplied = batterySupplied + heaterFromBattery
+            -- Circulation is capped by both the fluid present and the
+            -- electricity supplied: the fraction of rated flow that is
+            -- actually moving.
+            local pumpElectrical = pumpDemand > 0 and pumpSupplied / pumpDemand or 0
+            local circulation = disabled and 0 or fill * pumpElectrical
+            -- Heat-only exchange through the circulation-gated
+            -- exchanger: no circulation, no exchange. The reservoir
+            -- books the exact negation in applyThermal, so the crossing
+            -- is one exchange accounted on both sides.
+            local exchange = circulation * loop.conductance
+                * (loop.reservoir.temperature - loop.temperature)
+            if not disabled then
+                local heatIntoLoop = pumpSupplied + heaterSupplied
+                local loopCapacityKJ = loop.coolant * loop.cp
+                loop.temperature = loop.temperature
+                    + (heatIntoLoop + exchange) * fixed_seconds / loopCapacityKJ
+                loop.pumpWorkKJ = loop.pumpWorkKJ + pumpSupplied * fixed_seconds
+                loop.heaterKJ = loop.heaterKJ + heaterSupplied * fixed_seconds
+                loop.exchangedKJ = loop.exchangedKJ + exchange * fixed_seconds
+            end
+            loop.lastPumpDemand = pumpDemand
+            loop.lastPumpSupplied = pumpSupplied
+            loop.lastHeaterDemand = heaterDemand
+            loop.lastHeaterSupplied = heaterSupplied
+            loop.lastCirculation = circulation
+            loop.lastFlow = loop.ratedFlow * circulation
+            loop.lastExchange = exchange
+            -- The freeze condition is exposed, never clamped: the loop
+            -- stays integrated and the shortfall stays visible.
+            loop.belowFreeze = not disabled
+                and loop.temperature < loop.setpoint - 1e-9
+            loop.circulating = loop.lastFlow > 1e-12
+            assert(isFinite(loop.temperature) and isFinite(loop.lastFlow)
+                and isFinite(loop.lastExchange) and isFinite(circulation)
+                and isFinite(pumpSupplied) and isFinite(heaterSupplied),
+                "coolant loop '" .. loop.id .. "' result is not finite")
+        end
         -- Charge from the surplus left after every allocation: batteries
         -- take only generation no load took, within the charge power
         -- limit, the headroom below nameplate and the charge efficiency.
@@ -1172,10 +1329,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         end
         -- Allocation audit: allocated power never exceeds generation plus
         -- actual battery output and no load receives more than it
-        -- requested. Shortages are valid; an over-allocation is a
-        -- software failure and fails contained.
+        -- requested. Coolant pump and heater draws ride the same pool
+        -- as external loads (#396), so they are inside this audit too —
+        -- the loop is never a second power budget. Shortages are valid;
+        -- an over-allocation is a software failure and fails contained.
         local totalSupplied = 0
         for index = 1, #self.loads do totalSupplied = totalSupplied + (supplied[index] or 0) end
+        for _, loop in ipairs(self.coolant_loops) do
+            totalSupplied = totalSupplied + loop.lastPumpSupplied + loop.lastHeaterSupplied
+        end
         local generationBound = BALANCE_TOLERANCE
             * math.max(1.0, math.abs(availableGeneration) + batterySupplied)
         assert(totalSupplied <= availableGeneration + batterySupplied + generationBound,
@@ -1271,11 +1433,21 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     (routedByReservoir[load.heatSink] or 0) + load.heatRouted
             end
         end
+        -- Coolant loops exchange heat with their host reservoir through
+        -- the circulation-gated exchanger (#396): the loop side was
+        -- computed in applyPower, and the reservoir books the exact
+        -- negation here — one exchange, booked once on each side.
+        local loopHeatByReservoir = {}
+        for _, loop in ipairs(self.coolant_loops) do
+            loopHeatByReservoir[loop.reservoir] =
+                (loopHeatByReservoir[loop.reservoir] or 0) - loop.lastExchange
+        end
         for _, reservoir in ipairs(self.reservoirs) do
             local capacity = reservoir.capacity
             local temperatureK = reservoir.temperature + KELVIN_OFFSET
             local routed = routedByReservoir[reservoir] or 0
-            local heatIn = reservoir.absorbedKW + routed
+            local loopHeat = loopHeatByReservoir[reservoir] or 0
+            local heatIn = reservoir.absorbedKW + routed + loopHeat
             local rejected = 0
             local minSink = reservoir.temperature
             local maxSink = reservoir.temperature
@@ -1311,11 +1483,13 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local net = heatIn - rejected
             local newTemperature = reservoir.temperature + net * fixed_seconds / capacity
             reservoir.lastRouted = routed
+            reservoir.lastLoopHeat = loopHeat
             reservoir.lastHeatIn = heatIn
             reservoir.lastRejected = rejected
             reservoir.lastNet = net
             reservoir.absorbedKJ = reservoir.absorbedKJ + reservoir.absorbedKW * fixed_seconds
             reservoir.routedKJ = reservoir.routedKJ + routed * fixed_seconds
+            reservoir.loopKJ = (reservoir.loopKJ or 0) + loopHeat * fixed_seconds
             reservoir.rejectedKJ = reservoir.rejectedKJ + rejected * fixed_seconds
             reservoir.temperature = newTemperature
             -- Declared service limits are reported as crossings, never
@@ -1324,22 +1498,28 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             reservoir.belowLimit = newTemperature < reservoir.minTemperature - 1e-9
         end
     end
-    -- Thermal energy boundary: starting + absorbed + routed - rejected
-    -- must equal capacity x temperature within the declared tolerance;
-    -- a residual beyond it is a conservation violation, never silent
-    -- creation or deletion of heat (#395).
+    -- Thermal energy boundary: starting + absorbed + routed + loop -
+    -- rejected must equal capacity x temperature within the declared
+    -- tolerance; a residual beyond it is a conservation violation,
+    -- never silent creation or deletion of heat (#395). Coolant loops
+    -- carry the same discipline: starting + pump work + heater +
+    -- exchanged must equal the loop's current capacity x temperature,
+    -- and the loop's finite coolant inventory never grows (#396).
     local function checkThermal(self)
         for _, reservoir in ipairs(self.reservoirs) do
             local startingEnergy = reservoir.capacity * reservoir.startingTemperature
             local bound = BALANCE_TOLERANCE * math.max(1, math.abs(startingEnergy))
             local residual = startingEnergy + reservoir.absorbedKJ + reservoir.routedKJ
-                - reservoir.rejectedKJ - reservoir.capacity * reservoir.temperature
+                + (reservoir.loopKJ or 0) - reservoir.rejectedKJ
+                - reservoir.capacity * reservoir.temperature
             assert(residual == residual and math.abs(residual) <= bound,
                 "thermal energy ledger residual for reservoir '"
                 .. reservoir.id .. "' exceeds tolerance")
             local values = { reservoir.temperature, reservoir.lastRouted,
-                reservoir.lastHeatIn, reservoir.lastRejected, reservoir.lastNet,
-                reservoir.absorbedKJ, reservoir.routedKJ, reservoir.rejectedKJ }
+                reservoir.lastLoopHeat, reservoir.lastHeatIn, reservoir.lastRejected,
+                reservoir.lastNet,
+                reservoir.absorbedKJ, reservoir.routedKJ, reservoir.loopKJ,
+                reservoir.rejectedKJ }
             for _, value in ipairs(values) do
                 assert(isFinite(value),
                     "thermal reservoir '" .. reservoir.id .. "' value is not finite")
@@ -1348,6 +1528,19 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         for _, radiator in ipairs(self.radiators) do
             assert(isFinite(radiator.lastRejected),
                 "radiator '" .. radiator.id .. "' rejected power is not finite")
+        end
+        for _, loop in ipairs(self.coolant_loops) do
+            assert(loop.coolant >= 0 and loop.coolant == loop.coolant
+                and loop.coolant <= loop.capacity + BALANCE_TOLERANCE
+                    * math.max(1, loop.capacity),
+                "coolant loop '" .. loop.id .. "' inventory left its finite bounds")
+            local startingEnergy = loop.startingCoolant * loop.cp * loop.startingTemperature
+            local bound = BALANCE_TOLERANCE * math.max(1, math.abs(startingEnergy))
+            local residual = startingEnergy + loop.pumpWorkKJ + loop.heaterKJ
+                + loop.exchangedKJ - loop.coolant * loop.cp * loop.temperature
+            assert(residual == residual and math.abs(residual) <= bound,
+                "coolant loop '" .. loop.id .. "' thermal energy ledger residual "
+                .. 'exceeds tolerance')
         end
     end
     function object:advance(world_tick, fixed_seconds)

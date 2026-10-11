@@ -214,7 +214,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 72", "version: 64");
+		replaceAll(legacy, "version: 73", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -231,14 +231,14 @@ namespace
 			"authored store fields missing or live inventory leaked");
 		bool refused = false;
 		auto staleStores = withField;
-		replaceAll(staleStores, "version: 72", "version: 65");
+		replaceAll(staleStores, "version: 73", "version: 65");
 		auto const staleStoresPath = directory / "stale-stores.world.yaml";
 		writeFile(staleStoresPath, staleStores);
 		try { (void)core::loadWorldDocument(staleStoresPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-66 document carrying resource stores was silently accepted");
 		auto staleTransfers = withField;
-		replaceAll(staleTransfers, "version: 72", "version: 66");
+		replaceAll(staleTransfers, "version: 73", "version: 66");
 		auto const staleTransfersPath = directory / "stale-transfers.world.yaml";
 		writeFile(staleTransfersPath, staleTransfers);
 		refused = false;
@@ -246,7 +246,7 @@ namespace
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-67 document carrying resource transfers was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 72", "version: 64");
+		replaceAll(stale, "version: 73", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
 		refused = false;
@@ -384,7 +384,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 72", "version: 67");
+			replaceAll(stale, "version: 73", "version: 67");
 			auto const stalePath = directory / "stale-compounds.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -493,7 +493,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 72", "version: 69");
+			replaceAll(stale, "version: 73", "version: 69");
 			auto const stalePath = directory / "stale-batteries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -615,7 +615,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 72", "version: 68");
+			replaceAll(stale, "version: 73", "version: 68");
 			auto const stalePath = directory / "stale-power.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -742,7 +742,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 72", "version: 70");
+			replaceAll(stale, "version: 73", "version: 70");
 			auto const stalePath = directory / "stale-deliveries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -870,7 +870,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 72", "version: 71");
+			replaceAll(stale, "version: 73", "version: 71");
 			auto const stalePath = directory / "stale-thermal.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -920,6 +920,167 @@ namespace
 			require(refused, "a load heat sink targeting an unknown reservoir was accepted from a file");
 		}
 	}
+	// #396: authored coolant loops travel through the real file seams as
+	// authored contracts only; a reopened World replays the coolant
+	// scenario identically, and pre-73 documents carrying `coolantLoops`
+	// are refused rather than silently dropped. Coolant inventory,
+	// circulation and the loop energy ledger stay runtime-only.
+	void coolantFiles(smoke::Context const& context)
+	{
+		namespace filesystem = std::filesystem;
+		auto const directory = context.temporaryRoot() / "station-coolant";
+		filesystem::create_directories(directory);
+		core::ThermalReservoirSettings bus;
+		bus.id = "bus";
+		bus.thermalClass = "moderate";
+		bus.heatCapacityKJPerK = 1000.0;
+		bus.startingTemperatureC = 20.0;
+		bus.minTemperatureC = -50.0;
+		bus.maxTemperatureC = 100.0;
+		core::CoolantLoopSettings normalLoop;
+		normalLoop.id = "itcs";
+		normalLoop.hazardClass = "normal";
+		normalLoop.reservoirId = "bus";
+		normalLoop.coolantCapacityKg = 100.0;
+		normalLoop.startingCoolantKg = 100.0;
+		normalLoop.specificHeatKJPerKgK = 4.0;
+		normalLoop.startingTemperatureC = 20.0;
+		normalLoop.freezeProtectionSetpointC = 5.0;
+		normalLoop.pumpPowerKW = 1.2;
+		normalLoop.ratedFlowKgPerS = 3.0;
+		normalLoop.exchangerConductanceKWPerK = 6.0;
+		normalLoop.heaterCapacityKW = 2.0;
+		core::CoolantLoopSettings hazLoop;
+		hazLoop.id = "htcs";
+		hazLoop.hazardClass = "hazardous";
+		hazLoop.reservoirId = "bus";
+		hazLoop.coolantCapacityKg = 50.0;
+		hazLoop.startingCoolantKg = 25.0;
+		hazLoop.specificHeatKJPerKgK = 2.5;
+		hazLoop.startingTemperatureC = 10.0;
+		hazLoop.freezeProtectionSetpointC = 2.0;
+		hazLoop.pumpPowerKW = 0.8;
+		hazLoop.ratedFlowKgPerS = 1.5;
+		hazLoop.exchangerConductanceKWPerK = 3.0;
+		hazLoop.heaterCapacityKW = 1.0;
+		core::SolarArraySettings field;
+		field.id = "field";
+		field.capacityKW = 10.0;
+		core::World original("Coolant Round Trip", 2, 2);
+		original.pauseSimulation();
+		original.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 2.0f;
+		settings.thermalReservoirs.push_back(bus);
+		settings.coolantLoops.push_back(normalLoop);
+		settings.coolantLoops.push_back(hazLoop);
+		settings.solarArrays.push_back(field);
+		std::string diagnostic;
+		require(original.configureStationSystems(settings, false, &diagnostic),
+			"Coolant settings edit failed: " + diagnostic);
+		original.resumeSimulation();
+		require(original.advanceTicks(3600), "Coolant original run failed");
+		auto const expected = original.getStationSystemsSnapshot();
+		require(expected.coolantLoops.size() == 2
+			&& expected.coolantLoops[0].hazardClass == "normal"
+			&& expected.coolantLoops[1].hazardClass == "hazardous"
+			&& expected.coolantLoops[0].flowKgPerS > 0.0
+			&& std::abs(expected.coolantLoops[0].residualKJ) < 1e-5
+			&& std::abs(expected.coolantLoops[1].residualKJ) < 1e-5
+			&& std::abs(expected.thermal.reservoirs[0].residualKJ) < 1e-5,
+			"Coolant scenario produced the wrong observable state");
+		for (auto const* suffix : {".world.yaml", ".world"})
+		{
+			auto const path = directory / (std::string("coolant") + suffix);
+			original.saveTo(path.string());
+			auto const document = readFile(path);
+			require(document.find("coolantLoops") != std::string::npos
+				&& document.find("hazardClass") != std::string::npos
+				&& document.find("reservoirId") != std::string::npos
+				&& document.find("coolantCapacityKg") != std::string::npos
+				&& document.find("startingCoolantKg") != std::string::npos
+				&& document.find("specificHeatKJPerKgK") != std::string::npos
+				&& document.find("freezeProtectionSetpointC") != std::string::npos
+				&& document.find("pumpPowerKW") != std::string::npos
+				&& document.find("ratedFlowKgPerS") != std::string::npos
+				&& document.find("exchangerConductanceKWPerK") != std::string::npos
+				&& document.find("heaterCapacityKW") != std::string::npos,
+				"authored coolant fields missing from the document");
+			for (auto const* liveState : {"circulationFraction", "belowFreezeSetpoint",
+				"pumpSuppliedKW", "heaterSuppliedKW", "exchangedEnergyKJ",
+				"pumpWorkEnergyKJ", "loopTemperatureC", "fillFraction"})
+				require(document.find(liveState) == std::string::npos,
+					std::string("live coolant state leaked into the document: ") + liveState);
+			auto const reopened = core::loadWorldDocument(path);
+			require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+				"coolant settings did not survive the file round trip");
+			require(reopened->getStationSystemsSnapshot().coolantLoops.size() == 2
+				&& reopened->getStationSystemsSnapshot().coolantLoops[0].loopTemperatureC == 20.0
+				&& reopened->getStationSystemsSnapshot().coolantLoops[0].exchangedEnergyKJ == 0.0
+				&& reopened->getStationSystemsSnapshot().coolantLoops[1].loopTemperatureC == 10.0,
+				"reopened World did not reconstruct the authored coolant starting state");
+			reopened->resumeSimulation();
+			require(reopened->advanceTicks(3600), "Coolant reopened run failed");
+			require(reopened->getStationSystemsSnapshot() == expected,
+				"coolant scenario is not reproducible from the document");
+			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
+				"coolant event history is not reproducible from the document");
+		}
+		// A pre-73 document carrying the new fields is refused.
+		auto const withField = serializeYaml(original);
+		{
+			auto stale = withField;
+			replaceAll(stale, "version: 73", "version: 72");
+			auto const stalePath = directory / "stale-coolant.world.yaml";
+			writeFile(stalePath, stale);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(stalePath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a pre-73 document carrying coolant loops was silently accepted");
+		}
+		// Malformed coolant values in a file are rejected.
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "coolantCapacityKg: 100", "coolantCapacityKg: 0");
+			auto const malformedPath = directory / "malformed-coolant-capacity.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a zero coolant capacity was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "hazardClass: normal", "hazardClass: toxic");
+			auto const malformedPath = directory / "malformed-hazard.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "an unknown coolant hazard class was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "reservoirId: bus", "reservoirId: ghost");
+			auto const malformedPath = directory / "malformed-loop-host.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a coolant loop coupled to an unknown reservoir was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "startingCoolantKg: 100", "startingCoolantKg: 150");
+			auto const malformedPath = directory / "malformed-overfill.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "starting coolant above the loop capacity was accepted from a file");
+		}
+	}
 }
 
 void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
@@ -933,4 +1094,5 @@ void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"batteryFiles", batteryFiles});
 	checks.push_back({"deliveryFiles", deliveryFiles});
 	checks.push_back({"thermalFiles", thermalFiles});
+	checks.push_back({"coolantFiles", coolantFiles});
 }

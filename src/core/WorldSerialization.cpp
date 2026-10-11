@@ -727,7 +727,14 @@ namespace core
 		// `heatSinkId` is refused rather than silently dropped. Integrated
 		// temperatures and heat ledgers stay runtime-only, so load and
 		// Reset reconstruct them from the authored starting conditions.
-		serializer.writeUint32("version", 72);
+		// Version 73 adds authored coolant loops (#396): finite loop-
+		// specific coolant inventories with normal/hazardous segregation,
+		// pump and freeze-heater contracts and the heat-only reservoir
+		// coupling; a pre-73 document carrying `coolantLoops` is refused
+		// rather than silently dropped. Coolant inventory, circulation and
+		// thermal ledgers stay runtime-only, so load and Reset reconstruct
+		// them from the authored starting conditions.
+		serializer.writeUint32("version", 73);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -923,6 +930,31 @@ namespace core
 					serializer.writeDouble("emissivity", radiator.emissivity);
 					serializer.writeDouble("viewFactor", radiator.viewFactor);
 					serializer.writeDouble("sinkTemperatureC", radiator.sinkTemperatureC);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.coolantLoops.empty())
+			{
+				// Authored loop contracts only; coolant inventory,
+				// circulation, freeze exposure and the loop energy ledger
+				// are runtime state reconstructed on load (#396).
+				serializer.beginArray("coolantLoops");
+				for (auto const& loop : mStationSystemsSettings.coolantLoops)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", loop.id);
+					serializer.writeString("hazardClass", loop.hazardClass);
+					serializer.writeString("reservoirId", loop.reservoirId);
+					serializer.writeDouble("coolantCapacityKg", loop.coolantCapacityKg);
+					serializer.writeDouble("startingCoolantKg", loop.startingCoolantKg);
+					serializer.writeDouble("specificHeatKJPerKgK", loop.specificHeatKJPerKgK);
+					serializer.writeDouble("startingTemperatureC", loop.startingTemperatureC);
+					serializer.writeDouble("freezeProtectionSetpointC", loop.freezeProtectionSetpointC);
+					serializer.writeDouble("pumpPowerKW", loop.pumpPowerKW);
+					serializer.writeDouble("ratedFlowKgPerS", loop.ratedFlowKgPerS);
+					serializer.writeDouble("exchangerConductanceKWPerK", loop.exchangerConductanceKWPerK);
+					serializer.writeDouble("heaterCapacityKW", loop.heaterCapacityKW);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -1851,7 +1883,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 72)
+		if (version < 1 || version > 73)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2087,6 +2119,32 @@ namespace core
 					radiator.viewFactor = serializer.readDouble("viewFactor");
 					radiator.sinkTemperatureC = serializer.readDouble("sinkTemperatureC");
 					stationSettings.radiators.push_back(std::move(radiator));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("coolantLoops"))
+			{
+				if (version < 73) throw SerializationException(
+					"Station coolant loops require World schema 73");
+				serializer.beginArray("coolantLoops");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					CoolantLoopSettings loop;
+					loop.id = serializer.readString("id");
+					loop.hazardClass = serializer.readString("hazardClass");
+					loop.reservoirId = serializer.readString("reservoirId");
+					loop.coolantCapacityKg = serializer.readDouble("coolantCapacityKg");
+					loop.startingCoolantKg = serializer.readDouble("startingCoolantKg");
+					loop.specificHeatKJPerKgK = serializer.readDouble("specificHeatKJPerKgK");
+					loop.startingTemperatureC = serializer.readDouble("startingTemperatureC");
+					loop.freezeProtectionSetpointC = serializer.readDouble("freezeProtectionSetpointC");
+					loop.pumpPowerKW = serializer.readDouble("pumpPowerKW");
+					loop.ratedFlowKgPerS = serializer.readDouble("ratedFlowKgPerS");
+					loop.exchangerConductanceKWPerK = serializer.readDouble("exchangerConductanceKWPerK");
+					loop.heaterCapacityKW = serializer.readDouble("heaterCapacityKW");
+					stationSettings.coolantLoops.push_back(std::move(loop));
 					serializer.endMap();
 				}
 				serializer.endArray();

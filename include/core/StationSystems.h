@@ -371,6 +371,45 @@ namespace core
 	};
 	inline constexpr size_t MaxStationRadiators{8};
 
+	// Declared coolant hazard classes (#396). Normal and hazardous coolant
+	// are physically segregated services: each loop owns its own finite
+	// inventory and no process in this design pools the two classes or
+	// moves coolant between loops. Coolant is a thermal service fluid —
+	// it is never potable water or nutrient solution, and a loop's
+	// inventory never touches a Resource store: the only exchange a loop
+	// has with station thermal state is heat through its exchanger.
+	inline constexpr std::array<char const*, 2> StationCoolantHazardClasses{
+		"normal", "hazardous"};
+	// A coolant loop (#396): a finite, loop-specific closed coolant
+	// circuit pumped through one thermal reservoir. The loop holds its own
+	// coolant inventory (kg) — finite, loop-specific and segregated by
+	// hazard class — and exchanges heat only with its coupled reservoir
+	// through a circulation-gated exchanger: no coolant crosses into the
+	// reservoir, a Resource store, or any other loop. The pump circulates
+	// the coolant it actually holds; the freeze-protection heater is a
+	// bang-bang thermostat that demands up to its capacity whenever the
+	// loop's coolant temperature is below the authored setpoint. Zero
+	// starting coolant disables the loop entirely: a dry loop pumps no
+	// flow, draws no pump power and heats nothing — circulation is never
+	// invented from an empty inventory.
+	struct CoolantLoopSettings
+	{
+		std::string id;
+		std::string hazardClass;      // "normal" or "hazardous"
+		std::string reservoirId;     // heat-only coupled thermal reservoir
+		double coolantCapacityKg{0.0};        // loop inventory capacity, > 0
+		double startingCoolantKg{0.0};        // initial charge, [0, capacity]; 0 disables
+		double specificHeatKJPerKgK{0.0};    // coolant cp, > 0
+		double startingTemperatureC{20.0};    // initial loop temperature
+		double freezeProtectionSetpointC{5.0}; // heater thermostat setpoint
+		double pumpPowerKW{0.0};             // pump draw at full circulation, >= 0
+		double ratedFlowKgPerS{0.0};         // rated circulation flow, >= 0
+		double exchangerConductanceKWPerK{0.0}; // full-circulation conductance, >= 0
+		double heaterCapacityKW{0.0};        // freeze-heater capacity, >= 0
+		bool operator==(CoolantLoopSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationCoolantLoops{8};
+
 	struct BatterySettings
 	{
 		std::string id;
@@ -398,6 +437,7 @@ namespace core
 		std::vector<ResourceDeliverySettings> deliveries;
 		std::vector<ThermalReservoirSettings> thermalReservoirs;
 		std::vector<RadiatorSettings> radiators;
+		std::vector<CoolantLoopSettings> coolantLoops;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// Profile shape validation and deterministic evaluation: the level of
@@ -656,6 +696,11 @@ namespace core
 		double batteryDischargeKW{0.0};   // power delivered from batteries this tick
 		double batteryChargeKW{0.0};      // bus power taken by charging this tick
 		double batteryShortfallKW{0.0};   // routed to batteries but not delivered
+		// Coolant loop electrical service this tick (#396): pump and
+		// freeze-heater power actually drawn from the same allocation
+		// pool as external loads — never a second budget.
+		double coolantPumpKW{0.0};
+		double coolantHeaterKW{0.0};
 		std::vector<StationSolarSourceSnapshot> sources;
 		std::vector<StationEquipmentLoadSnapshot> loads;
 		std::vector<StationBatterySnapshot> batteries;
@@ -693,7 +738,11 @@ namespace core
 		double maxTemperatureC{0.0};
 		double absorbedHeatKW{0.0};
 		double lastHeatRoutedKW{0.0};   // equipment heat routed in this tick
-		double lastHeatInKW{0.0};       // absorbed + routed this tick
+		// Net heat this tick from coolant loops coupled to this reservoir
+		// (#396): the loop side of the heat-only exchanger exchange, so
+		// the reservoir ledger closes over exactly the terms that moved.
+		double lastLoopHeatKW{0.0};
+		double lastHeatInKW{0.0};       // absorbed + routed + loop this tick
 		double lastRejectedKW{0.0};     // radiator net rejection this tick
 		double lastNetKW{0.0};          // heat in minus rejected this tick
 		bool aboveLimit{false};
@@ -702,9 +751,60 @@ namespace core
 		double currentEnergyKJ{0.0};
 		double absorbedEnergyKJ{0.0};
 		double routedEnergyKJ{0.0};
+		double loopEnergyKJ{0.0}; // cumulative net loop exchange into the reservoir
 		double rejectedEnergyKJ{0.0};
-		double residualKJ{0.0}; // starting + absorbed + routed - rejected - current
+		double residualKJ{0.0}; // starting + absorbed + routed + loop - rejected - current
 		bool operator==(StationThermalReservoirSnapshot const&) const = default;
+	};
+	// One coolant loop as of the most recent tick (#396): the authored
+	// contract beside the runtime's finite coolant inventory, the pump
+	// and heater service results, and the loop's own thermal ledger. The
+	// loop's energy is tracked against the same 0 degrees C reference as
+	// the reservoirs: starting + pump work + heater + exchanged from the
+	// reservoir must equal capacity x temperature within the declared
+	// tolerance. Pump work and heater heat enter the loop exactly once
+	// and reach the reservoir only through the circulation-gated
+	// exchanger — never a second booking. belowFreezeSetpoint exposes
+	// the freeze condition; it never clamps the integrated state.
+	struct StationCoolantLoopSnapshot
+	{
+		std::string id;
+		std::string hazardClass;
+		std::string reservoirId;
+		double coolantCapacityKg{0.0};
+		double coolantKg{0.0};
+		double fillFraction{0.0};           // coolant / capacity
+		double pumpPowerKW{0.0};
+		double ratedFlowKgPerS{0.0};
+		double pumpDemandKW{0.0};          // inventory-sustainable pump draw
+		double pumpSuppliedKW{0.0};
+		double pumpUnmetKW{0.0};
+		double circulationFraction{0.0};   // fraction of rated flow actually circulating
+		double flowKgPerS{0.0};
+		double unmetFlowKgPerS{0.0};
+		double heaterCapacityKW{0.0};
+		double heaterDemandKW{0.0};        // thermostat demand this tick
+		double heaterSuppliedKW{0.0};
+		double heaterUnmetKW{0.0};
+		double loopTemperatureC{0.0};
+		double startingTemperatureC{0.0};
+		double freezeProtectionSetpointC{0.0};
+		double exchangerConductanceKWPerK{0.0};
+		// Signed heat this tick: positive is the loop absorbing from the
+		// reservoir through the exchanger, negative is the loop dumping
+		// into it. The reservoir books the exact negation — one exchange,
+		// booked once on each side.
+		double exchangeIntoLoopKW{0.0};
+		bool belowFreezeSetpoint{false};
+		bool disabled{false};              // zero coolant: no fluid, no service
+		double startingEnergyKJ{0.0};
+		double currentEnergyKJ{0.0};
+		double pumpWorkEnergyKJ{0.0};
+		double heaterEnergyKJ{0.0};
+		double exchangedEnergyKJ{0.0};
+		double residualKJ{0.0}; // starting + pump + heater + exchanged - current
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationCoolantLoopSnapshot const&) const = default;
 	};
 	struct StationThermalSnapshot
 	{
@@ -713,6 +813,10 @@ namespace core
 		double totalAbsorbedKW{0.0};
 		double totalRoutedKW{0.0};
 		double totalRejectedKW{0.0};
+		// Coolant service totals (#396): actual circulation and actual
+		// freeze-protection heating delivered this tick.
+		double totalCirculationKgPerS{0.0};
+		double totalFreezeHeatingKW{0.0};
 		bool operator==(StationThermalSnapshot const&) const = default;
 	};
 
@@ -736,6 +840,10 @@ namespace core
 		// energy against capacity x temperature within the declared
 		// tolerance; a residual beyond it is a conservation violation.
 		StationThermalSnapshot thermal;
+		// The coolant picture (#396): per-loop finite inventories,
+		// circulation and freeze-protection service, and each loop's
+		// closing thermal energy ledger.
+		std::vector<StationCoolantLoopSnapshot> coolantLoops;
 		// Soonest authored arrival still pending across every delivery, for
 		// the overview's "next delivery" readout (#392).
 		bool hasNextDelivery{false};

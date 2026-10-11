@@ -67,6 +67,7 @@ namespace core
 			std::vector<ResourceDeliverySettings> const* deliveries;
 			std::vector<ThermalReservoirSettings> const* reservoirs;
 			std::vector<RadiatorSettings> const* radiators;
+			std::vector<CoolantLoopSettings> const* coolantLoops;
 			static void pushProfile(lua_State* state, ProfileSettings const& profile)
 			{
 				lua_createtable(state, 0, 3);
@@ -271,7 +272,30 @@ namespace core
 					lua_pushnumber(state, radiator.sinkTemperatureC); lua_setfield(state, -2, "sinkTemperatureC");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 10, 1);
+				// Authored coolant loop descriptors cross the same boundary as
+				// plain immutable values (#396); each sandbox mirrors the
+				// circulation, freeze-heating and loop energy ledger and
+				// audits its own conservation.
+				lua_createtable(state, static_cast<int>(coolantLoops->size()), 0);
+				for (size_t index = 0; index < coolantLoops->size(); ++index)
+				{
+					auto const& loop = (*coolantLoops)[index];
+					lua_createtable(state, 0, 12);
+					lua_pushstring(state, loop.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, loop.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
+					lua_pushstring(state, loop.reservoirId.c_str()); lua_setfield(state, -2, "reservoir");
+					lua_pushnumber(state, loop.coolantCapacityKg); lua_setfield(state, -2, "coolantCapacityKg");
+					lua_pushnumber(state, loop.startingCoolantKg); lua_setfield(state, -2, "startingCoolantKg");
+					lua_pushnumber(state, loop.specificHeatKJPerKgK); lua_setfield(state, -2, "specificHeatKJPerKgK");
+					lua_pushnumber(state, loop.startingTemperatureC); lua_setfield(state, -2, "startingTemperatureC");
+					lua_pushnumber(state, loop.freezeProtectionSetpointC); lua_setfield(state, -2, "freezeProtectionSetpointC");
+					lua_pushnumber(state, loop.pumpPowerKW); lua_setfield(state, -2, "pumpPowerKW");
+					lua_pushnumber(state, loop.ratedFlowKgPerS); lua_setfield(state, -2, "ratedFlowKgPerS");
+					lua_pushnumber(state, loop.exchangerConductanceKWPerK); lua_setfield(state, -2, "exchangerConductanceKWPerK");
+					lua_pushnumber(state, loop.heaterCapacityKW); lua_setfield(state, -2, "heaterCapacityKW");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 11, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -759,6 +783,53 @@ namespace core
 				|| radiator.sinkTemperatureC <= -StationCelsiusOffset)
 				return refuse(where + " sink temperature must be finite and above absolute zero (-273.15 C)");
 		}
+		if (settings.coolantLoops.size() > MaxStationCoolantLoops)
+			return refuse("Station coolant loops are limited to "
+				+ std::to_string(MaxStationCoolantLoops) + " entries");
+		std::set<std::string> loopIds;
+		for (auto const& loop : settings.coolantLoops)
+		{
+			auto const where = "Station coolant loop '" + loop.id + "'";
+			if (loop.id.empty()) return refuse("Station coolant loop id must not be empty");
+			if (loop.id.size() > MaxStationStoreIdLength)
+				return refuse("Station coolant loop id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!loopIds.insert(loop.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationCoolantHazardClasses.begin(), StationCoolantHazardClasses.end(),
+				loop.hazardClass) == StationCoolantHazardClasses.end())
+				return refuse(where + " has unknown coolant hazard class '" + loop.hazardClass
+					+ "'; declared classes are: normal, hazardous");
+			// A loop couples heat-only to one declared thermal reservoir.
+			// Coolant never touches a Resource store: it is not potable or
+			// nutrient water, and the loop's inventory is its own.
+			auto const host = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(),
+				[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == loop.reservoirId; });
+			if (host == settings.thermalReservoirs.end())
+				return refuse(where + " is coupled to unknown thermal reservoir '" + loop.reservoirId + "'");
+			if (!std::isfinite(loop.coolantCapacityKg) || loop.coolantCapacityKg <= 0.0)
+				return refuse(where + " coolant capacity must be finite and positive");
+			if (!std::isfinite(loop.startingCoolantKg) || loop.startingCoolantKg < 0.0)
+				return refuse(where + " starting coolant must be finite and non-negative");
+			if (loop.startingCoolantKg > loop.coolantCapacityKg)
+				return refuse(where + " starting coolant exceeds the loop capacity");
+			if (!std::isfinite(loop.specificHeatKJPerKgK) || loop.specificHeatKJPerKgK <= 0.0)
+				return refuse(where + " specific heat must be finite and positive");
+			if (!std::isfinite(loop.startingTemperatureC)
+				|| loop.startingTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " starting temperature must be finite and above absolute zero (-273.15 C)");
+			if (!std::isfinite(loop.freezeProtectionSetpointC)
+				|| loop.freezeProtectionSetpointC <= -StationCelsiusOffset)
+				return refuse(where + " freeze-protection setpoint must be finite and above absolute zero (-273.15 C)");
+			if (!std::isfinite(loop.pumpPowerKW) || loop.pumpPowerKW < 0.0)
+				return refuse(where + " pump power must be finite and non-negative");
+			if (!std::isfinite(loop.ratedFlowKgPerS) || loop.ratedFlowKgPerS < 0.0)
+				return refuse(where + " rated flow must be finite and non-negative");
+			if (!std::isfinite(loop.exchangerConductanceKWPerK) || loop.exchangerConductanceKWPerK < 0.0)
+				return refuse(where + " exchanger conductance must be finite and non-negative");
+			if (!std::isfinite(loop.heaterCapacityKW) || loop.heaterCapacityKW < 0.0)
+				return refuse(where + " heater capacity must be finite and non-negative");
+		}
 		if (settings.deliveries.size() > MaxStationResourceDeliveries)
 			return refuse("Station resupply deliveries are limited to "
 				+ std::to_string(MaxStationResourceDeliveries) + " entries");
@@ -993,14 +1064,48 @@ namespace core
 			std::vector<size_t> radiatorIndices;
 			double temperatureC{0.0};
 			double lastHeatRoutedKW{0.0};
+			double lastLoopHeatKW{0.0};
 			double lastHeatInKW{0.0};
 			double lastRejectedKW{0.0};
 			double lastNetKW{0.0};
 			double absorbedKJ{0.0};
 			double routedKJ{0.0};
+			double loopKJ{0.0};
 			double rejectedKJ{0.0};
 			bool lastAboveLimit{false};
 			bool lastBelowLimit{false};
+		};
+		// The authoritative ledger of one authored coolant loop (#396).
+		// The loop owns a finite, loop-specific coolant inventory; the
+		// pump circulates only the coolant it actually holds, so an
+		// underfilled loop circulates proportionally less and an empty
+		// loop circulates nothing — flow is never invented. The freeze-
+		// protection heater is a bang-bang thermostat: it demands up to
+		// its capacity whenever the loop temperature is below the setpoint.
+		// Pump work and heater heat enter the loop exactly once and reach
+		// the reservoir only through the circulation-gated exchanger, so
+		// the electrical-to-thermal booking never duplicates. The loop's
+		// energy ledger closes against capacity x temperature on the same
+		// 0 degrees C reference as the reservoirs.
+		struct LoopState
+		{
+			CoolantLoopSettings authored;
+			size_t reservoirIndex{0};
+			double coolantKg{0.0};
+			double temperatureC{0.0};
+			double lastPumpDemandKW{0.0};
+			double lastPumpSuppliedKW{0.0};
+			double lastHeaterDemandKW{0.0};
+			double lastHeaterSuppliedKW{0.0};
+			double lastCirculationFraction{0.0};
+			double lastFlowKgPerS{0.0};
+			double lastExchangeIntoLoopKW{0.0};
+			double pumpWorkKJ{0.0};
+			double heaterKJ{0.0};
+			double exchangedKJ{0.0};
+			bool lastBelowFreeze{false};
+			bool lastCirculating{false};
+			StationTransferStatus status{StationTransferStatus::Idle};
 		};
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
@@ -1012,6 +1117,7 @@ namespace core
 		std::vector<DeliveryState> deliveries;
 		std::vector<ReservoirState> reservoirs;
 		std::vector<RadiatorState> radiators;
+		std::vector<LoopState> coolantLoops;
 		// Competing transfers are allocated in priority order (higher first),
 		// ties resolved by declaration order: a declared deterministic order.
 		std::vector<size_t> transferOrder;
@@ -1075,6 +1181,7 @@ namespace core
 			auto const committedDeliveries = deliveries;
 			auto const committedReservoirs = reservoirs;
 			auto const committedRadiators = radiators;
+			auto const committedCoolantLoops = coolantLoops;
 			auto const committedAvailableGenerationKW = lastAvailableGenerationKW;
 			auto const committedBatteryShortfallKW = lastBatteryShortfallKW;
 			if (runLedger(tick, seconds, system, violation)) return true;
@@ -1086,6 +1193,7 @@ namespace core
 			deliveries = committedDeliveries;
 			reservoirs = committedReservoirs;
 			radiators = committedRadiators;
+			coolantLoops = committedCoolantLoops;
 			lastAvailableGenerationKW = committedAvailableGenerationKW;
 			lastBatteryShortfallKW = committedBatteryShortfallKW;
 			return false;
@@ -1131,6 +1239,15 @@ namespace core
 			std::vector<bool> previousBelowLimit;
 			previousBelowLimit.reserve(reservoirs.size());
 			for (auto const& reservoir : reservoirs) previousBelowLimit.push_back(reservoir.lastBelowLimit);
+			std::vector<StationTransferStatus> previousLoopStatus;
+			previousLoopStatus.reserve(coolantLoops.size());
+			for (auto const& loop : coolantLoops) previousLoopStatus.push_back(loop.status);
+			std::vector<bool> previousBelowFreeze;
+			previousBelowFreeze.reserve(coolantLoops.size());
+			for (auto const& loop : coolantLoops) previousBelowFreeze.push_back(loop.lastBelowFreeze);
+			std::vector<bool> previousCirculating;
+			previousCirculating.reserve(coolantLoops.size());
+			for (auto const& loop : coolantLoops) previousCirculating.push_back(loop.lastCirculating);
 			std::vector<double> qualified, unqualified;
 			qualified.reserve(stores.size());
 			unqualified.reserve(stores.size());
@@ -1623,6 +1740,113 @@ namespace core
 					}
 				}
 			}
+			// Coolant loops run after the external load allocation and
+			// before thermal integration and battery charging (#396): the
+			// pump and freeze heater draw from the same generation-and-
+			// battery pool as external loads — never a second budget — and
+			// their heat must be in the loop before the reservoir
+			// integrates this tick's flows. Each loop circulates only the
+			// coolant it actually holds: the inventory fraction caps the
+			// pump demand, so a dry loop draws nothing and flows nothing,
+			// and an underfilled loop is capped proportionally. Pump work
+			// and heater heat enter the loop exactly once and reach the
+			// reservoir only through the circulation-gated exchanger.
+			// Loops run in declaration order; there is no priority because
+			// every loop's demand is its own service, not a competing
+			// claim class.
+			std::vector<double> loopHeatIntoReservoir(reservoirs.size(), 0.0);
+			double totalCoolantPumpKW{0.0}, totalCoolantHeaterKW{0.0};
+			for (auto& loop : coolantLoops)
+			{
+				auto const disabled = loop.coolantKg <= 0.0;
+				auto const fillFraction = disabled
+					? 0.0 : std::min(1.0, loop.coolantKg / loop.authored.coolantCapacityKg);
+				// A dry loop cannot run a pump: no fluid means no draw and
+				// no flow, never an invented one.
+				auto const pumpDemandKW = disabled
+					? 0.0 : loop.authored.pumpPowerKW * fillFraction;
+				double pumpSuppliedKW = 0.0;
+				{
+					auto const fromGeneration = std::min(pumpDemandKW, availableGeneration);
+					pumpSuppliedKW += fromGeneration;
+					availableGeneration -= fromGeneration;
+					auto const ask = pumpDemandKW - fromGeneration;
+					auto const fromBattery = drawBatteries(ask);
+					pumpSuppliedKW += fromBattery;
+					batterySuppliedKW += fromBattery;
+					batteryShortfallKW += ask - fromBattery;
+				}
+				double heaterDemandKW = 0.0;
+				if (!disabled && loop.temperatureC < loop.authored.freezeProtectionSetpointC)
+					heaterDemandKW = loop.authored.heaterCapacityKW;
+				double heaterSuppliedKW = 0.0;
+				{
+					auto const fromGeneration = std::min(heaterDemandKW, availableGeneration);
+					heaterSuppliedKW += fromGeneration;
+					availableGeneration -= fromGeneration;
+					auto const ask = heaterDemandKW - fromGeneration;
+					auto const fromBattery = drawBatteries(ask);
+					heaterSuppliedKW += fromBattery;
+					batterySuppliedKW += fromBattery;
+					batteryShortfallKW += ask - fromBattery;
+				}
+				// Circulation is capped by both the fluid present and the
+				// electricity supplied: the fraction of rated flow that is
+				// actually moving.
+				auto const pumpElectricalFraction = pumpDemandKW > 0.0
+					? pumpSuppliedKW / pumpDemandKW : 0.0;
+				auto const circulationFraction = disabled
+					? 0.0 : fillFraction * pumpElectricalFraction;
+				loop.lastCirculationFraction = circulationFraction;
+				loop.lastFlowKgPerS = loop.authored.ratedFlowKgPerS * circulationFraction;
+				// Every watt the pump actually draws ends up as work
+				// dissipated into the coolant it actually moves — booked
+				// once, here, into the loop ledger.
+				loop.lastPumpDemandKW = pumpDemandKW;
+				loop.lastPumpSuppliedKW = pumpSuppliedKW;
+				loop.lastHeaterDemandKW = heaterDemandKW;
+				loop.lastHeaterSuppliedKW = heaterSuppliedKW;
+				// Heat-only exchange through the circulation-gated
+				// exchanger: no circulation, no exchange. The reservoir
+				// books the exact negation below, so the crossing is one
+				// exchange accounted on both sides.
+				auto const reservoirTemperatureC = reservoirs[loop.reservoirIndex].temperatureC;
+				auto const exchangeIntoLoopKW = circulationFraction
+					* loop.authored.exchangerConductanceKWPerK
+					* (reservoirTemperatureC - loop.temperatureC);
+				loop.lastExchangeIntoLoopKW = exchangeIntoLoopKW;
+				loopHeatIntoReservoir[loop.reservoirIndex] -= exchangeIntoLoopKW;
+				auto const loopCapacityKJ = loop.coolantKg * loop.authored.specificHeatKJPerKgK;
+				if (!disabled)
+				{
+					auto const heatIntoLoopKW = pumpSuppliedKW + heaterSuppliedKW;
+					loop.temperatureC += (heatIntoLoopKW + exchangeIntoLoopKW)
+						* static_cast<double>(seconds) / loopCapacityKJ;
+					loop.pumpWorkKJ += pumpSuppliedKW * static_cast<double>(seconds);
+					loop.heaterKJ += heaterSuppliedKW * static_cast<double>(seconds);
+					loop.exchangedKJ += exchangeIntoLoopKW * static_cast<double>(seconds);
+				}
+				// The freeze condition is exposed, never clamped: the loop
+				// stays integrated and the shortfall stays visible.
+				loop.lastBelowFreeze = !disabled
+					&& loop.temperatureC < loop.authored.freezeProtectionSetpointC - 1e-9;
+				loop.lastCirculating = loop.lastFlowKgPerS > 1e-12;
+				totalCoolantPumpKW += pumpSuppliedKW;
+				totalCoolantHeaterKW += heaterSuppliedKW;
+				if (disabled || (pumpDemandKW <= 0.0 && heaterDemandKW <= 0.0))
+					loop.status = StationTransferStatus::Idle;
+				else if (pumpSuppliedKW + heaterSuppliedKW <= 1e-12)
+					loop.status = StationTransferStatus::Rejected;
+				else if (pumpSuppliedKW + 1e-12 >= pumpDemandKW
+					&& heaterSuppliedKW + 1e-12 >= heaterDemandKW)
+					loop.status = StationTransferStatus::Full;
+				else loop.status = StationTransferStatus::Partial;
+			}
+			// The loop pump and heater draws rode the shared generation-and-
+			// battery pool: their battery usage landed in the same per-battery
+			// discharge fields the load passes used and their generation use
+			// came out of the same availableGeneration pool, so the
+			// single-pool audit downstream sees every watt.
 			// Thermal reservoirs accumulate the heat the station actually
 			// produced this tick (#395): each reservoir's authored
 			// environmental absorption plus the equipment heat routed into
@@ -1641,7 +1865,8 @@ namespace core
 					auto& reservoir = reservoirs[index];
 					auto const capacity = reservoir.authored.heatCapacityKJPerK;
 					auto const temperatureK = reservoir.temperatureC + StationCelsiusOffset;
-					auto const heatInKW = reservoir.authored.absorbedHeatKW + routedIn[index];
+					auto const heatInKW = reservoir.authored.absorbedHeatKW + routedIn[index]
+						+ loopHeatIntoReservoir[index];
 					// Net radiative rejection at the current emitting
 					// temperature: emissivity x view factor x area x sigma
 					// x (T^4 - T_sink^4). The environmental back-radiation
@@ -1693,11 +1918,13 @@ namespace core
 					auto const netKW = heatInKW - rejectedKW;
 					auto const newTemperatureC = reservoir.temperatureC + netKW * dt / capacity;
 					reservoir.lastHeatRoutedKW = routedIn[index];
+					reservoir.lastLoopHeatKW = loopHeatIntoReservoir[index];
 					reservoir.lastHeatInKW = heatInKW;
 					reservoir.lastRejectedKW = rejectedKW;
 					reservoir.lastNetKW = netKW;
 					reservoir.absorbedKJ += reservoir.authored.absorbedHeatKW * dt;
 					reservoir.routedKJ += routedIn[index] * dt;
+					reservoir.loopKJ += loopHeatIntoReservoir[index] * dt;
 					reservoir.rejectedKJ += rejectedKW * dt;
 					reservoir.temperatureC = newTemperatureC;
 					// Declared service limits are reported as crossings,
@@ -1975,10 +2202,15 @@ namespace core
 					return violation = "battery " + where + " stored more energy than the bus supplied to it", false;
 			}
 			// The single-pool audit: total supplied service never exceeds
-			// generation plus what the batteries actually delivered.
+			// generation plus what the batteries actually delivered. Coolant
+			// pump and heater draws ride the same pool as external loads
+			// (#396), so they are inside this audit too — the loop is never
+			// a second power budget.
 			{
 				double totalSupplied = 0.0, totalGeneration = 0.0, totalDischarged = 0.0;
 				for (auto const& load : loads) totalSupplied += load.lastSuppliedKW;
+				for (auto const& loop : coolantLoops)
+					totalSupplied += loop.lastPumpSuppliedKW + loop.lastHeaterSuppliedKW;
 				for (auto const& array : solarArrays) totalGeneration += array.lastAvailableKW;
 				for (auto const& battery : batteries) totalDischarged += battery.lastDischargeKW;
 				auto const bound = StationBalanceTolerance * std::max(1.0, totalGeneration + totalDischarged);
@@ -2076,6 +2308,41 @@ namespace core
 			for (auto const& radiator : radiators)
 				if (!requireFinite(radiator.lastRejectedKW,
 					"radiator '" + radiator.authored.id + "' rejected power")) return false;
+			// Coolant loop ledger (#396): starting + pump work + heater +
+			// exchanged from the reservoir must equal the loop's current
+			// capacity x temperature within the declared tolerance. The
+			// loop's coolant inventory is finite and never grows: a dry
+			// loop stays dry, and its ledger stays closed at zero service.
+			system = "Coolant circulation";
+			for (auto const& loop : coolantLoops)
+			{
+				auto const where = "coolant loop '" + loop.authored.id + "' ";
+				if (!requireFinite(loop.coolantKg, where + "coolant inventory")) return false;
+				if (!requireFinite(loop.temperatureC, where + "integrated temperature")) return false;
+				if (!requireFinite(loop.lastPumpSuppliedKW, where + "pump supplied power")) return false;
+				if (!requireFinite(loop.lastHeaterSuppliedKW, where + "heater supplied power")) return false;
+				if (!requireFinite(loop.lastCirculationFraction, where + "circulation fraction")) return false;
+				if (!requireFinite(loop.lastFlowKgPerS, where + "circulation flow")) return false;
+				if (!requireFinite(loop.lastExchangeIntoLoopKW, where + "exchanger exchange")) return false;
+				if (!requireFinite(loop.pumpWorkKJ, where + "cumulative pump work energy")) return false;
+				if (!requireFinite(loop.heaterKJ, where + "cumulative heater energy")) return false;
+				if (!requireFinite(loop.exchangedKJ, where + "cumulative exchanged energy")) return false;
+				if (loop.coolantKg < 0.0)
+					return violation = where + "coolant inventory went negative", false;
+				if (loop.coolantKg > loop.authored.coolantCapacityKg + StationBalanceTolerance
+					* std::max(1.0, loop.authored.coolantCapacityKg))
+					return violation = where + "coolant inventory exceeds the loop capacity", false;
+				auto const startingEnergyKJ = loop.authored.startingCoolantKg
+					* loop.authored.specificHeatKJPerKgK * loop.authored.startingTemperatureC;
+				auto const bound = StationBalanceTolerance * std::max(1.0, std::abs(startingEnergyKJ));
+				auto const residual = startingEnergyKJ + loop.pumpWorkKJ + loop.heaterKJ
+					+ loop.exchangedKJ - loop.coolantKg * loop.authored.specificHeatKJPerKgK
+					* loop.temperatureC;
+				if (!std::isfinite(residual) || std::abs(residual) > bound)
+					return violation = where + "thermal energy ledger residual "
+						+ std::to_string(residual) + " exceeds tolerance "
+						+ std::to_string(StationBalanceTolerance), false;
+			}
 			system = "Power allocation";
 			for (auto const& array : solarArrays)
 			{
@@ -2144,6 +2411,8 @@ namespace core
 				if (!requireFinite(totalGeneration, "total available generation")) return false;
 				if (!requireFinite(totalDischarge, "total battery discharge power")) return false;
 				if (!requireFinite(totalCharge, "total battery charge power")) return false;
+				if (!requireFinite(totalCoolantPumpKW, "total coolant pump power")) return false;
+				if (!requireFinite(totalCoolantHeaterKW, "total freeze-protection heating power")) return false;
 			}
 			for (size_t index = 0; index < stores.size(); ++index)
 			{
@@ -2278,6 +2547,40 @@ namespace core
 						: std::string("Thermal reservoir '") + reservoir.authored.id
 							+ "' back above its minimum limit");
 			}
+			// Coolant loop transitions are announced so the event log
+			// records circulation loss and freeze exposure without flooding
+			// every tick (#396): a loop that stops circulating, a loop that
+			// falls below its freeze-protection setpoint with heating it
+			// cannot get, and recovery from both.
+			for (size_t index = 0; index < coolantLoops.size(); ++index)
+			{
+				auto const& loop = coolantLoops[index];
+				if (loop.status != previousLoopStatus[index])
+				{
+					if (loop.status == StationTransferStatus::Rejected)
+						appendBoundedEvent(events, tick, "Coolant loop '" + loop.authored.id
+							+ "' service refused: no electrical supply is available for its pump or heater");
+					else if (loop.status == StationTransferStatus::Full
+						&& previousLoopStatus[index] == StationTransferStatus::Rejected)
+						appendBoundedEvent(events, tick, "Coolant loop '" + loop.authored.id
+							+ "' service restored: pump and freeze heater fully supplied");
+				}
+				if (loop.lastCirculating != previousCirculating[index])
+					appendBoundedEvent(events, tick, loop.lastCirculating
+						? "Coolant loop '" + loop.authored.id + "' circulating: "
+							+ std::to_string(loop.lastFlowKgPerS) + " kg/s of coolant flowing"
+						: "Coolant loop '" + loop.authored.id
+							+ "' circulation lost: no coolant flow is being delivered");
+				if (loop.lastBelowFreeze != previousBelowFreeze[index])
+					appendBoundedEvent(events, tick, loop.lastBelowFreeze
+						? "Coolant loop '" + loop.authored.id + "' below its freeze-protection setpoint: "
+							+ std::to_string(loop.temperatureC) + " < "
+							+ std::to_string(loop.authored.freezeProtectionSetpointC)
+							+ " C (heater supplied " + std::to_string(loop.lastHeaterSuppliedKW)
+							+ " of " + std::to_string(loop.lastHeaterDemandKW) + " kW)"
+						: std::string("Coolant loop '") + loop.authored.id
+							+ "' back above its freeze-protection setpoint");
+			}
 			// Delivery arrivals are discrete scenario events rather than a
 			// continuous per-tick service, so every arrival is announced with
 			// its own quantities: the refused remainder is the account for
@@ -2363,6 +2666,21 @@ namespace core
 			mImpl->reservoirs[state.reservoirIndex].radiatorIndices.push_back(
 				mImpl->radiators.size() - 1);
 		}
+		// Coolant loops start charged with their authored coolant at their
+		// authored temperature; the inventory is runtime state initialised
+		// from the authored values and never written back (#396). A loop
+		// with zero starting coolant is disabled: it pumps no flow and
+		// heats nothing until it somehow has fluid, which nothing in this
+		// slice provides.
+		for (auto const& loop : settings.coolantLoops)
+		{
+			Impl::LoopState state;
+			state.authored = loop;
+			state.reservoirIndex = reservoirIndex[loop.reservoirId];
+			state.coolantKg = loop.startingCoolantKg;
+			state.temperatureC = loop.startingTemperatureC;
+			mImpl->coolantLoops.push_back(std::move(state));
+		}
 		for (auto const& load : settings.equipmentLoads)
 		{
 			Impl::LoadState state;
@@ -2438,7 +2756,8 @@ namespace core
 			Construction construction{object.get(), &source, StationSystemNames[i],
 				&settings.stores, &settings.transfers, &settings.conversions,
 				&settings.solarArrays, &settings.equipmentLoads, &settings.batteries,
-				&settings.deliveries, &settings.thermalReservoirs, &settings.radiators};
+				&settings.deliveries, &settings.thermalReservoirs, &settings.radiators,
+				&settings.coolantLoops};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -2459,8 +2778,9 @@ namespace core
 			+ std::to_string(settings.equipmentLoads.size()) + " external equipment load(s), "
 			+ std::to_string(settings.batteries.size()) + " battery(ies), "
 			+ std::to_string(settings.deliveries.size()) + " resupply delivery(ies), "
-			+ std::to_string(settings.thermalReservoirs.size()) + " thermal reservoir(s) and "
-			+ std::to_string(settings.radiators.size()) + " radiator(s)");
+				+ std::to_string(settings.thermalReservoirs.size()) + " thermal reservoir(s), "
+			+ std::to_string(settings.radiators.size()) + " radiator(s) and "
+			+ std::to_string(settings.coolantLoops.size()) + " coolant loop(s)");
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
 	bool StationSystemsRuntime::advance(uint64_t tick, float seconds)
@@ -2511,7 +2831,7 @@ namespace core
 		// integrated error path instead.
 		if (!mImpl->transferOrder.empty() || !mImpl->conversionOrder.empty()
 			|| !mImpl->loads.empty() || !mImpl->solarArrays.empty() || !mImpl->batteries.empty()
-			|| !mImpl->deliveries.empty() || !mImpl->reservoirs.empty())
+			|| !mImpl->deliveries.empty() || !mImpl->reservoirs.empty() || !mImpl->coolantLoops.empty())
 		{
 			std::string violationSystem, violation;
 			if (!mImpl->applyLedger(tick, seconds, violationSystem, violation))
@@ -2687,6 +3007,17 @@ namespace core
 		result.power.batteryDischargeKW = totalBatteryDischarge;
 		result.power.batteryChargeKW = totalBatteryCharge;
 		result.power.batteryShortfallKW = mImpl->lastBatteryShortfallKW;
+		// Coolant loop electrical service rode the same pool as external
+		// loads; publish the totals so the window can show the loop draw
+		// beside the load draw (#396).
+		double totalCoolantPump = 0.0, totalCoolantHeater = 0.0;
+		for (auto const& loop : mImpl->coolantLoops)
+		{
+			totalCoolantPump += loop.lastPumpSuppliedKW;
+			totalCoolantHeater += loop.lastHeaterSuppliedKW;
+		}
+		result.power.coolantPumpKW = totalCoolantPump;
+		result.power.coolantHeaterKW = totalCoolantHeater;
 		// The thermal snapshot reports the authored capacity and declared
 		// limits beside the integrated temperature, the last tick's heat
 		// flows and the cumulative energy ledger (#395).
@@ -2702,6 +3033,7 @@ namespace core
 			reservoirResult.maxTemperatureC = reservoir.authored.maxTemperatureC;
 			reservoirResult.absorbedHeatKW = reservoir.authored.absorbedHeatKW;
 			reservoirResult.lastHeatRoutedKW = reservoir.lastHeatRoutedKW;
+			reservoirResult.lastLoopHeatKW = reservoir.lastLoopHeatKW;
 			reservoirResult.lastHeatInKW = reservoir.lastHeatInKW;
 			reservoirResult.lastRejectedKW = reservoir.lastRejectedKW;
 			reservoirResult.lastNetKW = reservoir.lastNetKW;
@@ -2713,10 +3045,11 @@ namespace core
 				* reservoir.temperatureC;
 			reservoirResult.absorbedEnergyKJ = reservoir.absorbedKJ;
 			reservoirResult.routedEnergyKJ = reservoir.routedKJ;
+			reservoirResult.loopEnergyKJ = reservoir.loopKJ;
 			reservoirResult.rejectedEnergyKJ = reservoir.rejectedKJ;
 			reservoirResult.residualKJ = reservoirResult.startingEnergyKJ
-				+ reservoir.absorbedKJ + reservoir.routedKJ - reservoir.rejectedKJ
-				- reservoirResult.currentEnergyKJ;
+				+ reservoir.absorbedKJ + reservoir.routedKJ + reservoir.loopKJ
+				- reservoir.rejectedKJ - reservoirResult.currentEnergyKJ;
 			result.thermal.totalAbsorbedKW += reservoir.authored.absorbedHeatKW;
 			result.thermal.totalRoutedKW += reservoir.lastHeatRoutedKW;
 			result.thermal.totalRejectedKW += reservoir.lastRejectedKW;
@@ -2727,6 +3060,53 @@ namespace core
 				radiator.authored.reservoirId, radiator.authored.areaM2,
 					radiator.authored.emissivity, radiator.authored.viewFactor,
 					radiator.authored.sinkTemperatureC, radiator.lastRejectedKW});
+		// The coolant loop snapshot reports the authored contract beside the
+		// runtime's finite inventory, the pump and freeze-heater service
+		// results, the exposed freeze condition and the closing loop energy
+		// ledger (#396).
+		for (auto const& loop : mImpl->coolantLoops)
+		{
+			StationCoolantLoopSnapshot loopResult;
+			loopResult.id = loop.authored.id;
+			loopResult.hazardClass = loop.authored.hazardClass;
+			loopResult.reservoirId = loop.authored.reservoirId;
+			loopResult.coolantCapacityKg = loop.authored.coolantCapacityKg;
+			loopResult.coolantKg = loop.coolantKg;
+			loopResult.fillFraction = loop.authored.coolantCapacityKg > 0.0
+				? loop.coolantKg / loop.authored.coolantCapacityKg : 0.0;
+			loopResult.pumpPowerKW = loop.authored.pumpPowerKW;
+			loopResult.ratedFlowKgPerS = loop.authored.ratedFlowKgPerS;
+			loopResult.pumpDemandKW = loop.lastPumpDemandKW;
+			loopResult.pumpSuppliedKW = loop.lastPumpSuppliedKW;
+			loopResult.pumpUnmetKW = loop.lastPumpDemandKW - loop.lastPumpSuppliedKW;
+			loopResult.circulationFraction = loop.lastCirculationFraction;
+			loopResult.flowKgPerS = loop.lastFlowKgPerS;
+			loopResult.unmetFlowKgPerS = loop.authored.ratedFlowKgPerS - loop.lastFlowKgPerS;
+			loopResult.heaterCapacityKW = loop.authored.heaterCapacityKW;
+			loopResult.heaterDemandKW = loop.lastHeaterDemandKW;
+			loopResult.heaterSuppliedKW = loop.lastHeaterSuppliedKW;
+			loopResult.heaterUnmetKW = loop.lastHeaterDemandKW - loop.lastHeaterSuppliedKW;
+			loopResult.loopTemperatureC = loop.temperatureC;
+			loopResult.startingTemperatureC = loop.authored.startingTemperatureC;
+			loopResult.freezeProtectionSetpointC = loop.authored.freezeProtectionSetpointC;
+			loopResult.exchangerConductanceKWPerK = loop.authored.exchangerConductanceKWPerK;
+			loopResult.exchangeIntoLoopKW = loop.lastExchangeIntoLoopKW;
+			loopResult.belowFreezeSetpoint = loop.lastBelowFreeze;
+			loopResult.disabled = loop.coolantKg <= 0.0;
+			loopResult.startingEnergyKJ = loop.authored.startingCoolantKg
+				* loop.authored.specificHeatKJPerKgK * loop.authored.startingTemperatureC;
+			loopResult.currentEnergyKJ = loop.coolantKg
+				* loop.authored.specificHeatKJPerKgK * loop.temperatureC;
+			loopResult.pumpWorkEnergyKJ = loop.pumpWorkKJ;
+			loopResult.heaterEnergyKJ = loop.heaterKJ;
+			loopResult.exchangedEnergyKJ = loop.exchangedKJ;
+			loopResult.residualKJ = loopResult.startingEnergyKJ + loop.pumpWorkKJ
+				+ loop.heaterKJ + loop.exchangedKJ - loopResult.currentEnergyKJ;
+			loopResult.status = loop.status;
+			result.thermal.totalCirculationKgPerS += loop.lastFlowKgPerS;
+			result.thermal.totalFreezeHeatingKW += loop.lastHeaterSuppliedKW;
+			result.coolantLoops.push_back(std::move(loopResult));
+		}
 		// The delivery snapshot reports the authored schedule beside the
 		// runtime's arrival history: what each occurrence brought in, what
 		// the destination refused, and when the next arrival is due (#392).

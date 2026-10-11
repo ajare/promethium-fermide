@@ -1,4 +1,4 @@
-# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries and thermal reservoirs with radiator rejection (#386–#391, #393–#395)
+# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, thermal reservoirs with radiator rejection and coolant loops with freeze-protection heating (#386–#391, #393–#396)
 
 Station systems are opt-in per World and disabled in existing documents. Open
 **View > Station Systems** or use the
@@ -575,19 +575,85 @@ validation reporting, and shows the live temperatures, heat flows,
 limit crossings and the closing energy ledger beside the existing
 views.
 
+### Coolant circulation and freeze-protection heating (#396)
+
+Authors configure coolant loops per World. A loop owns a finite,
+loop-specific coolant inventory (kg) with a declared hazard class
+(`normal` or `hazardous`) and is coupled heat-only to exactly one
+thermal reservoir: the loop's coolant never crosses into the reservoir,
+never touches a Resource store, and is never potable or nutrient water.
+Normal and hazardous coolant are segregated classes — no process pools
+them or moves coolant between loops, so segregation is structural.
+Each loop declares its coolant capacity and starting charge, coolant
+specific heat, starting temperature, a freeze-protection setpoint, a
+pump power draw at full circulation with a rated flow, a
+full-circulation exchanger conductance, and a freeze-heater capacity.
+Zero starting coolant disables the loop entirely.
+
+The pump circulates only the coolant the loop actually holds: the fill
+fraction (inventory / capacity) caps the pump demand, so an
+underfilled loop is capped proportionally and a dry loop draws nothing
+and flows nothing — circulation is never invented from an empty
+inventory. The freeze-protection heater is a bang-bang thermostat: it
+demands up to its capacity whenever the loop's coolant temperature is
+below the setpoint, and demands nothing at or above it. Both demands
+are drawn from the same generation-and-battery pool as external loads,
+after the external load allocation and before battery charging — the
+loop is never a second power budget, and the heater consumes surplus
+generation before it can be stored.
+
+Pump work and heater heat enter the loop exactly once (all pump work
+dissipates into the coolant it actually moves) and reach the reservoir
+only through the circulation-gated heat-only exchanger:
+`exchange = circulationFraction x conductance x (T_reservoir - T_loop)`.
+No circulation means no exchange — a blackout cannot push the loop's
+heat into the station or pull the station's heat into the loop for
+free. The reservoir books the exact negation of the loop's exchange as
+its own ledger term, so the crossing is one exchange accounted once on
+each side, and the loop's energy ledger — starting + pump work +
+heater + exchanged = capacity x temperature — closes within the
+declared tolerance every tick, in host and sandbox alike.
+
+Insufficient coolant or electricity reduces the actual service and
+the shortfall stays visible: per-loop inventory and fill fraction,
+pump demand/supplied/unmet, circulation fraction against rated flow
+with unmet flow, heater demand/supplied/unmet, the loop temperature
+and an exposed below-setpoint freeze condition (reported, never
+clamped), and the closing loop ledger. Circulation loss and recovery,
+freeze exposure onset and clearance, and whole-service refusal are
+announced as transition events. The station snapshot publishes coolant
+pump and freeze-heater power beside the other power totals and total
+circulation and freeze heating beside the thermal totals.
+
+World schema 73 persists the authored loop contracts (units: kg,
+kJ/kg·K, °C, kW, kg/s, kW/K); a pre-73 document carrying
+`coolantLoops` is refused rather than silently dropped. Coolant
+inventory, circulation, freeze exposure and the loop energy ledger
+stay runtime-only: Load and Reset reconstruct them from the authored
+starting conditions. The separate Station Systems window drafts loops
+(hazard class, host reservoir, coolant capacity and charge, specific
+heat, temperatures, pump, rated flow, conductance and heater) with
+full validation reporting, and shows the live inventories,
+circulation, freeze service and closing ledgers beside the existing
+views.
+
 ## Explicit scope limit
 
 This slice implements lifecycle, authored finite store configuration,
 bounded transfers between stores, compound-resource composition and
 conversion accounting, solar-supplied external equipment load
 allocation, finite battery storage with charge/discharge losses,
-authored scheduled resupply with refused-quantity accounting, and
+authored scheduled resupply with refused-quantity accounting,
 thermal reservoirs with environment-dependent radiator rejection and
-exactly-once equipment heat routing.
+exactly-once equipment heat routing, and coolant loops with finite
+loop-specific inventories, inventory- and power-capped circulation and
+freeze-protection heating.
 It still adds no crew demand, treatment/clearance
 workflows or ejection, no cooling capacity in any thermal
 service class (cooling-service loads are refused, not cooled), no
-chillers or cold services, and no powered or passive thermal-buffer
+chillers or cold services, no dynamic coolant leak, replenishment or
+loop-to-loop transfer (a loop's charge is its authored inventory and
+nothing in this slice changes it), and no powered or passive thermal-buffer
 access beyond the authored reservoirs themselves. Completed tick counts are
 observability, not oxygen, heat or endurance estimates. It
 invents no process coefficients beyond the authored demand, capacity
@@ -658,7 +724,27 @@ its energy and is never also exported, while sinkless loads keep direct
 export), hot versus cold operating profiles, tick-by-tick and batched
 updates integrating identically, overheat and overcool limit crossings
 reported without clamping, and intact Lua thermal descriptor crossing
-with contained construction refusal), real file
+with contained construction refusal; and coolant fixtures: refused
+loop configurations (unknown host reservoir, unknown hazard class,
+non-positive capacity or specific heat, over-filled charge,
+sub-absolute-zero setpoint, over-budget loop count), full-service
+circulation with pump-work warming and exactly-once exchange whose
+combined loop-plus-reservoir gain equals the pump work energy, the
+single-pool audit covering loop draws, power-limited circulation with
+the unmet flow visible, blackout with zero invented flow and the whole
+freeze-heating demand visible as unmet alongside the exposed
+below-setpoint condition, coolant-loss fixtures (a dry loop disabled
+and inert under ample power, a half-filled loop capped by its
+inventory fraction), heater-capacity warming matching the closed form
+with the thermostat dropping demand at the setpoint and no heat
+crossing without circulation, isolated normal/hazardous inventories
+with no cross-subsidy and the reservoir loop term equal to only the
+circulating loop's negated exchange, battery ride-through freeze
+heating with both ledgers closed, loop-draw-before-charging ordering
+with the battery taking exactly the leftover surplus, eclipse
+circulation-loss and recovery announcements, deterministic Reset
+replay, and intact Lua coolant descriptor crossing with contained
+construction refusal), real file
 save/reopen round trips in
 YAML and binary including the solar/load, battery and thermal scenario
 reproduction and pre-69/pre-70/pre-71/pre-72/malformed refusals, failed-write and
