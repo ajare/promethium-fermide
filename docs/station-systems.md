@@ -470,14 +470,60 @@ live stored energy, visible reserve floor, state of charge, charge and
 discharge power, cumulative losses and the battery totals beside the
 existing views.
 
+### Scheduled resource deliveries (#392)
+
+Deliveries are authored external supply: each contract names one
+existing Resource store, the same unit as that store, a positive
+quantity, a first arrival time, and an optional recurrence interval.
+A recurrence of zero is a one-off arrival; any other value must be at
+least one World fixed tick, so occurrences can never fall inside a
+tick and disagree with the host about how many have come due. Arrivals
+are derived from elapsed scenario time rather than stored, so the
+schedule is a pure function of the authored contract and the tick
+count.
+
+Every occurrence is a whole arrival that either lands or is refused:
+the store takes as much as its remaining capacity allows and the rest
+is refused whole rather than queued, split, or silently dropped.
+Refused material never enters the station, so it cannot later be
+cooled, converted or transferred; it is accounted per delivery and
+cumulatively as explicit loss beside the store's own. A delivery into
+a store that is already full is refused in full and still counts as an
+occurrence, so a schedule never silently disappears.
+
+Deliveries run first in each tick, before power settlement, transfers
+and conversions, so arriving mass is available to the rest of the
+station in the same tick rather than a tick late. When several
+deliveries share an arrival time and compete for the same store, the
+order is fixed and documented: arrival time, then higher priority
+first, then declaration order. That total order is shared with the
+sandbox, so two runs of the same scenario fill the same stores in the
+same sequence.
+
+The per-unit and per-constituent balance ledgers gain a `delivered`
+term alongside `lost`, so residual stays zero for a closed system:
+material that arrived and was refused is visible as delivered-out, not
+missing. World schema 71 persists the authored delivery contracts
+(units: kg, L, gallons, seconds); a pre-71 document carrying
+`deliveries` is refused rather than silently dropped. Accepted and
+refused amounts, occurrence counts and next arrival times are
+runtime-only: Load and Reset reconstruct them from the authored
+schedule, and repeated cycles replay identically. The separate Station
+Systems window drafts deliveries (store, unit, quantity, first
+arrival, recurrence, priority, arrival state) with full validation
+reporting, and shows the live accepted/refused amounts, occurrence
+counts and the next arrival time for every contract beside the
+existing views.
+
 ## Explicit scope limit
 
 This slice implements lifecycle, authored finite store configuration,
 bounded transfers between stores, compound-resource composition and
 conversion accounting, solar-supplied external equipment load
-allocation, and finite battery storage with charge/discharge losses.
+allocation, finite battery storage with charge/discharge losses, and
+authored scheduled resupply with refused-quantity accounting.
 It still adds no crew demand, treatment/clearance
-workflows, deliveries or ejection, no cooling capacity in any thermal
+workflows or ejection, no cooling capacity in any thermal
 service class (cooling-service loads are refused, not cooled), and no
 termal reservoir temperature
 dynamics. Completed tick counts are

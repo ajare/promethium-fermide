@@ -64,6 +64,7 @@ namespace core
 			std::vector<SolarArraySettings> const* solar;
 			std::vector<EquipmentLoadSettings> const* loads;
 			std::vector<BatterySettings> const* batteries;
+			std::vector<ResourceDeliverySettings> const* deliveries;
 			static void pushProfile(lua_State* state, ProfileSettings const& profile)
 			{
 				lua_createtable(state, 0, 3);
@@ -218,7 +219,25 @@ namespace core
 					lua_pushnumber(state, battery.dischargeEfficiency); lua_setfield(state, -2, "dischargeEfficiency");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 7, 1);
+				// Authored resupply delivery descriptors cross the same
+				// boundary as plain immutable values (#392); each sandbox
+				// mirrors the schedule and audits its own arrivals.
+				lua_createtable(state, static_cast<int>(deliveries->size()), 0);
+				for (size_t index = 0; index < deliveries->size(); ++index)
+				{
+					auto const& delivery = (*deliveries)[index];
+					lua_createtable(state, 0, 8);
+					lua_pushstring(state, delivery.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, delivery.storeId.c_str()); lua_setfield(state, -2, "store");
+					lua_pushstring(state, delivery.unit.c_str()); lua_setfield(state, -2, "unit");
+					lua_pushnumber(state, delivery.quantity); lua_setfield(state, -2, "quantity");
+					lua_pushnumber(state, delivery.firstOccurrenceSeconds); lua_setfield(state, -2, "firstSeconds");
+					lua_pushnumber(state, delivery.recurrenceSeconds); lua_setfield(state, -2, "recurrenceSeconds");
+					lua_pushboolean(state, delivery.arrivesQualified ? 1 : 0); lua_setfield(state, -2, "qualified");
+					lua_pushinteger(state, delivery.priority); lua_setfield(state, -2, "priority");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 8, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -347,6 +366,21 @@ namespace core
 			level = segment.level;
 		}
 		return level;
+	}
+	uint64_t stationScheduleOccurrencesDue(double firstOccurrenceSeconds,
+		double recurrenceSeconds, double elapsedSeconds)
+	{
+		// Nothing is due before the first arrival. The tolerance covers the
+		// rounding between an authored second and the fixed-tick grid it is
+		// measured against, so an occurrence scheduled exactly on a tick
+		// boundary is never missed.
+		if (elapsedSeconds + StationScheduleTolerance < firstOccurrenceSeconds) return 0;
+		// A zero recurrence is a one-off: exactly one occurrence, ever.
+		if (recurrenceSeconds <= 0.0) return 1;
+		auto const steps = std::floor((elapsedSeconds + StationScheduleTolerance
+			- firstOccurrenceSeconds) / recurrenceSeconds);
+		if (!(steps > 0.0)) return 1;
+		return static_cast<uint64_t>(steps) + 1;
 	}
 	bool validateStationSystemsSettings(StationSystemsSettings const& settings, std::string& diagnostic)
 	{
@@ -610,6 +644,45 @@ namespace core
 				|| battery.dischargeEfficiency <= 0.0 || battery.dischargeEfficiency > 1.0)
 				return refuse(where + " discharge efficiency must be finite and greater than 0 up to 1");
 		}
+		if (settings.deliveries.size() > MaxStationResourceDeliveries)
+			return refuse("Station resupply deliveries are limited to "
+				+ std::to_string(MaxStationResourceDeliveries) + " entries");
+		std::set<std::string> deliveryIds;
+		for (auto const& delivery : settings.deliveries)
+		{
+			auto const where = "Station resupply delivery '" + delivery.id + "'";
+			if (delivery.id.empty()) return refuse("Station resupply delivery id must not be empty");
+			if (delivery.id.size() > MaxStationStoreIdLength)
+				return refuse("Station resupply delivery id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!deliveryIds.insert(delivery.id).second) return refuse(where + " id is duplicated");
+			auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == delivery.storeId; });
+			if (it == settings.stores.end())
+				return refuse(where + " targets unknown Resource store '" + delivery.storeId + "'");
+			// A delivery brings a store's own material in; it never converts
+			// units on the way through the boundary.
+			if (delivery.unit != it->unit)
+				return refuse(where + " unit '" + delivery.unit
+					+ "' does not match destination store unit '" + it->unit + "'");
+			// A delivery that brings nothing specifies nothing; refusing it
+			// keeps every fired occurrence a real inflow.
+			if (!std::isfinite(delivery.quantity) || delivery.quantity <= 0.0)
+				return refuse(where + " quantity must be finite and positive");
+			if (!std::isfinite(delivery.firstOccurrenceSeconds)
+				|| delivery.firstOccurrenceSeconds < 0.0)
+				return refuse(where + " first occurrence must be finite and non-negative");
+			// Zero is a one-off; a recurring schedule must not repeat faster
+			// than one World fixed tick, so no tick is ever asked to absorb an
+			// unbounded burst of catch-up arrivals.
+			if (!std::isfinite(delivery.recurrenceSeconds) || delivery.recurrenceSeconds < 0.0)
+				return refuse(where + " recurrence must be finite and non-negative (0 is a one-off)");
+			if (delivery.recurrenceSeconds > 0.0
+				&& delivery.recurrenceSeconds + StationScheduleTolerance
+					< static_cast<double>(World::getFixedTimestep()))
+				return refuse(where + " recurrence must be zero or at least one World fixed tick ("
+					+ std::to_string(World::getFixedTimestep()) + " seconds)");
+		}
 		diagnostic.clear(); return true;
 	}
 	void setStationSystemsSourceLoader(StationSystemsSourceLoader loader) { sourceLoader = std::move(loader); }
@@ -753,6 +826,28 @@ namespace core
 			bool lastSaturated{false};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
+		// The authoritative ledger of one authored resupply delivery (#392).
+		// A delivery is an external arrival, not a station process: what the
+		// destination can accept enters the station's delivered ledger, and
+		// what it cannot is refused at the boundary and stays accounted as
+		// rejected material. Nothing a delivery brings is ever silently
+		// overflowed, absorbed or dropped.
+		struct DeliveryState
+		{
+			ResourceDeliverySettings authored;
+			size_t storeIndex{0};
+			size_t declarationIndex{0};
+			uint64_t occurrencesFired{0};
+			uint64_t lastFiredTick{0};
+			double lastOccurrenceSeconds{0.0};
+			double lastScheduled{0.0};
+			double lastAccepted{0.0};
+			double lastRejected{0.0};
+			double acceptedTotal{0.0};
+			double rejectedTotal{0.0};
+			bool exhausted{false};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
 		std::vector<TransferState> transfers;
@@ -760,6 +855,7 @@ namespace core
 		std::vector<SolarState> solarArrays;
 		std::vector<LoadState> loads;
 		std::vector<BatteryState> batteries;
+		std::vector<DeliveryState> deliveries;
 		// Competing transfers are allocated in priority order (higher first),
 		// ties resolved by declaration order: a declared deterministic order.
 		std::vector<size_t> transferOrder;
@@ -776,11 +872,18 @@ namespace core
 		// and produced amounts, even across mixed g/kg conversions.
 		std::map<std::string, double> startingTotals;
 		std::map<std::string, double> unitLoss;
+		// Cumulative mass of each unit admitted from outside the station by
+		// accepted deliveries (#392). The per-unit boundary closes over it:
+		// current + lost - delivered must equal starting.
+		std::map<std::string, double> unitDelivered;
 		// Per-constituent totals at run start and the cumulative declared
 		// conversion losses, the compound conservation boundary (#391):
 		// current + lost must equal starting within tolerance.
 		ConstituentLedger startingConstituents;
 		ConstituentLedger constituentLoss;
+		// Cumulative constituent admitted by accepted deliveries (#392),
+		// the compound side of the same external boundary.
+		ConstituentLedger constituentDelivered;
 		// Generation left untaken after this tick's allocation and battery
 		// charging, for the power snapshot's surplus reporting.
 		double lastAvailableGenerationKW{0.0};
@@ -813,6 +916,7 @@ namespace core
 			auto const committedLoads = loads;
 			auto const committedSolarArrays = solarArrays;
 			auto const committedBatteries = batteries;
+			auto const committedDeliveries = deliveries;
 			auto const committedAvailableGenerationKW = lastAvailableGenerationKW;
 			auto const committedBatteryShortfallKW = lastBatteryShortfallKW;
 			if (runLedger(tick, seconds, system, violation)) return true;
@@ -821,6 +925,7 @@ namespace core
 			loads = committedLoads;
 			solarArrays = committedSolarArrays;
 			batteries = committedBatteries;
+			deliveries = committedDeliveries;
 			lastAvailableGenerationKW = committedAvailableGenerationKW;
 			lastBatteryShortfallKW = committedBatteryShortfallKW;
 			return false;
@@ -874,11 +979,82 @@ namespace core
 			// never books losses, exchanges or allocations it did not commit.
 			ConstituentLedger stagedLoss = constituentLoss;
 			std::map<std::string, double> stagedUnitLoss = unitLoss;
+			// Cumulative external inflow staged alongside the losses, so a
+			// failed tick never books deliveries it did not commit (#392).
+			ConstituentLedger stagedConstituentDelivered = constituentDelivered;
+			std::map<std::string, double> stagedUnitDelivered = unitDelivered;
 			// Solar supply and external equipment allocation run before the
 			// resource ledger: the electrical service a load receives bounds
 			// its heat and material exchanges, and allocated power can never
 			// exceed the generation actually available this tick.
 			auto const elapsed = static_cast<double>(tick) * World::getFixedTimestep();
+			// Resupply deliveries run ahead of everything else in the tick:
+			// material that lands this tick is available to this tick's
+			// equipment, transfers and conversions. Every occurrence due
+			// since the last committed tick is collected into one scenario
+			// event list and applied in the declared deterministic order —
+			// occurrence time ascending, then service priority descending,
+			// then declaration order — so coincident arrivals from different
+			// schedules never depend on an iteration accident, and each
+			// occurrence fires exactly once however many ticks an
+			// accelerated update batches together (#392).
+			struct DueArrival
+			{
+				StationScenarioEventKey key;
+				uint64_t occurrence{0};
+			};
+			std::vector<DueArrival> arrivals;
+			for (size_t index = 0; index < deliveries.size(); ++index)
+			{
+				auto const& delivery = deliveries[index];
+				if (delivery.exhausted) continue;
+				auto const due = stationScheduleOccurrencesDue(
+					delivery.authored.firstOccurrenceSeconds,
+					delivery.authored.recurrenceSeconds, elapsed);
+				for (uint64_t occurrence = delivery.occurrencesFired; occurrence < due; ++occurrence)
+				{
+					auto const when = delivery.authored.recurrenceSeconds > 0.0
+						? delivery.authored.firstOccurrenceSeconds
+							+ static_cast<double>(occurrence) * delivery.authored.recurrenceSeconds
+						: delivery.authored.firstOccurrenceSeconds;
+					arrivals.push_back({{when, delivery.authored.priority, index}, occurrence});
+				}
+			}
+			std::sort(arrivals.begin(), arrivals.end(),
+				[](DueArrival const& left, DueArrival const& right)
+				{ return left.key < right.key; });
+			for (auto const& arrival : arrivals)
+			{
+				auto& delivery = deliveries[arrival.key.declarationIndex];
+				auto const& store = stores[delivery.storeIndex].authored;
+				// The destination accepts only what fits inside its total
+				// capacity; the remainder is refused at the boundary and
+				// stays accounted as rejected material.
+				auto const headroom = std::max(0.0, store.capacity
+					- (qualified[delivery.storeIndex] + unqualified[delivery.storeIndex]));
+				auto const accepted = std::min(delivery.authored.quantity, headroom);
+				auto const rejected = delivery.authored.quantity - accepted;
+				if (delivery.authored.arrivesQualified)
+					qualified[delivery.storeIndex] += accepted;
+				else
+					unqualified[delivery.storeIndex] += accepted;
+				flowIn[delivery.storeIndex] += accepted;
+				stagedUnitDelivered[store.unit] += accepted;
+				if (store.composition)
+					addComposition(stagedConstituentDelivered, *store.composition,
+						massToKg(store.unit, accepted), 1.0);
+				delivery.occurrencesFired = arrival.occurrence + 1;
+				delivery.lastFiredTick = tick;
+				delivery.lastOccurrenceSeconds = arrival.key.occurrenceSeconds;
+				delivery.lastScheduled = delivery.authored.quantity;
+				delivery.lastAccepted = accepted;
+				delivery.lastRejected = rejected;
+				delivery.acceptedTotal += accepted;
+				delivery.rejectedTotal += rejected;
+				delivery.status = accepted <= 0.0 ? StationTransferStatus::Rejected
+					: (rejected <= 0.0 ? StationTransferStatus::Full : StationTransferStatus::Partial);
+				if (delivery.authored.recurrenceSeconds <= 0.0) delivery.exhausted = true;
+			}
 			// Power is kW and stored energy is kWh: every crossing between
 			// them is power x elapsed hours. A fixed tick is a fraction of a
 			// second, so its duration must be converted to hours before it
@@ -1474,7 +1650,12 @@ namespace core
 			}
 			for (auto const& [unit, starting] : startingTotals)
 			{
-				auto const residual = currentTotals[unit] + stagedUnitLoss[unit] - starting;
+				// The boundary now has an inflow side: accepted deliveries
+				// bring material in from outside the station, so the ledger
+				// closes over current + lost - delivered, never over current
+				// alone (#392).
+				auto const residual = currentTotals[unit] + stagedUnitLoss[unit]
+					- stagedUnitDelivered[unit] - starting;
 				if (!std::isfinite(residual)
 					|| std::abs(residual) > StationBalanceTolerance * std::max(1.0, std::abs(starting)))
 					return violation = "conservation residual " + std::to_string(residual)
@@ -1495,7 +1676,7 @@ namespace core
 			{
 				auto const residual = (currentConstituents.count(constituent)
 						? currentConstituents.at(constituent) : 0.0)
-					+ stagedLoss[constituent] - starting;
+					+ stagedLoss[constituent] - stagedConstituentDelivered[constituent] - starting;
 				if (!std::isfinite(residual)
 					|| std::abs(residual) > StationBalanceTolerance * std::max(1.0, std::abs(starting)))
 					return violation = "constituent conservation residual " + std::to_string(residual)
@@ -1584,6 +1765,18 @@ namespace core
 				if (!requireFinite(loss, "cumulative loss of unit '" + unit + "'")) return false;
 			for (auto const& [constituent, loss] : stagedLoss)
 				if (!requireFinite(loss, "cumulative loss of constituent '" + constituent + "'")) return false;
+			for (auto const& [unit, delivered] : stagedUnitDelivered)
+				if (!requireFinite(delivered, "cumulative delivered amount of unit '" + unit + "'")) return false;
+			for (auto const& [constituent, delivered] : stagedConstituentDelivered)
+				if (!requireFinite(delivered, "cumulative delivered constituent '" + constituent + "'")) return false;
+			for (auto const& delivery : deliveries)
+			{
+				auto const where = "delivery '" + delivery.authored.id + "' ";
+				if (!requireFinite(delivery.lastAccepted, where + "accepted amount")) return false;
+				if (!requireFinite(delivery.lastRejected, where + "rejected amount")) return false;
+				if (!requireFinite(delivery.acceptedTotal, where + "cumulative accepted amount")) return false;
+				if (!requireFinite(delivery.rejectedTotal, where + "cumulative rejected amount")) return false;
+			}
 			for (auto const& transfer : transfers)
 			{
 				auto const where = "transfer '" + transfer.authored.id + "' ";
@@ -1684,6 +1877,8 @@ namespace core
 			}
 			constituentLoss = stagedLoss;
 			unitLoss = stagedUnitLoss;
+			unitDelivered = stagedUnitDelivered;
+			constituentDelivered = stagedConstituentDelivered;
 			// Rejections and partial completions are visible: announce each
 			// status transition (after the commit) so the event log records
 			// where material stalled without flooding every tick.
@@ -1785,6 +1980,30 @@ namespace core
 							+ "' fully charged: stored energy reached nameplate capacity"
 						: "Battery '" + battery.authored.id + "' left full charge");
 			}
+			// Delivery arrivals are discrete scenario events rather than a
+			// continuous per-tick service, so every arrival is announced with
+			// its own quantities: the refused remainder is the account for
+			// material that never entered the station (#392).
+			for (auto const& delivery : deliveries)
+			{
+				if (delivery.lastFiredTick != tick) continue;
+				auto const label = "Delivery '" + delivery.authored.id + "' at "
+					+ std::to_string(delivery.lastOccurrenceSeconds) + " s: ";
+				if (delivery.status == StationTransferStatus::Full)
+					appendBoundedEvent(events, tick, label + "accepted "
+						+ std::to_string(delivery.lastAccepted) + " " + delivery.authored.unit
+						+ " into '" + delivery.authored.storeId + "'");
+				else if (delivery.status == StationTransferStatus::Partial)
+					appendBoundedEvent(events, tick, label + "partially accepted "
+						+ std::to_string(delivery.lastAccepted) + " of "
+						+ std::to_string(delivery.lastScheduled) + " " + delivery.authored.unit
+						+ "; " + std::to_string(delivery.lastRejected)
+						+ " refused, destination '" + delivery.authored.storeId + "' is at capacity");
+				else
+					appendBoundedEvent(events, tick, label + "refused "
+						+ std::to_string(delivery.lastRejected) + " " + delivery.authored.unit
+						+ ": destination '" + delivery.authored.storeId + "' is at capacity");
+			}
 			return true;
 		}
 	};
@@ -1855,6 +2074,19 @@ namespace core
 			}
 			mImpl->batteries.push_back(std::move(state));
 		}
+		// Delivery schedules start unfired: the authored first occurrence is
+		// the next arrival, and nothing is brought in before its time. Reset
+		// and load reconstruct this state, so a replay restarts every
+		// schedule from the authored beginning rather than resuming a
+		// partially delivered one (#392).
+		for (auto const& delivery : settings.deliveries)
+		{
+			Impl::DeliveryState state;
+			state.authored = delivery;
+			state.storeIndex = storeIndex[delivery.storeId];
+			state.declarationIndex = mImpl->deliveries.size();
+			mImpl->deliveries.push_back(std::move(state));
+		}
 		// The compound conservation boundary is fixed at run start from the
 		// authored starting inventory of every compound store (#391).
 		for (auto const& store : mImpl->stores)
@@ -1864,13 +2096,21 @@ namespace core
 						store.authored.startingQualified + store.authored.startingUnqualified), 1.0);
 		if (!settings.enabled) return;
 		auto const source = sourceLoader ? sourceLoader() : bundledStationSystemsSource();
-		if (source.empty() || source.size() > 64 * 1024) throw SerializationException("Invalid Station systems source size");
+		// The source-size cap is a sanity bound on what may cross into the
+		// sandbox, not the real protection: the per-object allocation and
+		// instruction budgets do that. The bundled lifecycle model carries
+		// the mirrored invariants for every ledger slice, and test fixtures
+		// wrap that same source with their own assertions, so the cap sits
+		// well above the bundled size while still refusing anything absurd.
+		if (source.empty() || source.size() > 128 * 1024)
+			throw SerializationException("Invalid Station systems source size");
 		for (size_t i = 0; i < mImpl->objects.size(); ++i)
 		{
 			auto object = std::make_unique<ScriptObject>();
 			Construction construction{object.get(), &source, StationSystemNames[i],
 				&settings.stores, &settings.transfers, &settings.conversions,
-				&settings.solarArrays, &settings.equipmentLoads, &settings.batteries};
+				&settings.solarArrays, &settings.equipmentLoads, &settings.batteries,
+				&settings.deliveries};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -1888,8 +2128,9 @@ namespace core
 			+ std::to_string(settings.transfers.size()) + " transfer(s), "
 			+ std::to_string(settings.conversions.size()) + " conversion(s), "
 			+ std::to_string(settings.solarArrays.size()) + " solar array(s), "
-			+ std::to_string(settings.equipmentLoads.size()) + " external equipment load(s) and "
-			+ std::to_string(settings.batteries.size()) + " battery(ies)");
+			+ std::to_string(settings.equipmentLoads.size()) + " external equipment load(s), "
+			+ std::to_string(settings.batteries.size()) + " battery(ies) and "
+			+ std::to_string(settings.deliveries.size()) + " resupply delivery(ies)");
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
 	bool StationSystemsRuntime::advance(uint64_t tick, float seconds)
@@ -1939,7 +2180,8 @@ namespace core
 		// and never clamps material. It fails the whole tick through the
 		// integrated error path instead.
 		if (!mImpl->transferOrder.empty() || !mImpl->conversionOrder.empty()
-			|| !mImpl->loads.empty() || !mImpl->solarArrays.empty() || !mImpl->batteries.empty())
+			|| !mImpl->loads.empty() || !mImpl->solarArrays.empty() || !mImpl->batteries.empty()
+			|| !mImpl->deliveries.empty())
 		{
 			std::string violationSystem, violation;
 			if (!mImpl->applyLedger(tick, seconds, violationSystem, violation))
@@ -2008,8 +2250,10 @@ namespace core
 		for (auto const& [unit, starting] : mImpl->startingTotals)
 		{
 			auto const lost = mImpl->unitLoss.count(unit) ? mImpl->unitLoss.at(unit) : 0.0;
-			result.balances.push_back({unit, starting, currentTotals[unit], lost,
-				currentTotals[unit] + lost - starting});
+			auto const delivered = mImpl->unitDelivered.count(unit)
+				? mImpl->unitDelivered.at(unit) : 0.0;
+			result.balances.push_back({unit, starting, currentTotals[unit], lost, delivered,
+				currentTotals[unit] + lost - delivered - starting});
 		}
 		for (auto const& [constituent, starting] : mImpl->startingConstituents)
 		{
@@ -2017,9 +2261,11 @@ namespace core
 				? currentConstituents.at(constituent) : 0.0;
 			auto const lost = mImpl->constituentLoss.count(constituent)
 				? mImpl->constituentLoss.at(constituent) : 0.0;
+			auto const delivered = mImpl->constituentDelivered.count(constituent)
+				? mImpl->constituentDelivered.at(constituent) : 0.0;
 			result.constituentBalances.push_back({constituent,
 				std::string(constituent == StationEnergyConstituent ? "kJ" : "kg"),
-				starting, current, lost, current + lost - starting});
+				starting, current, lost, delivered, current + lost - delivered - starting});
 		}
 		result.balanceTolerance = StationBalanceTolerance;
 		// The power snapshot reports the most recent tick's solar supply
@@ -2110,6 +2356,46 @@ namespace core
 		result.power.batteryDischargeKW = totalBatteryDischarge;
 		result.power.batteryChargeKW = totalBatteryCharge;
 		result.power.batteryShortfallKW = mImpl->lastBatteryShortfallKW;
+		// The delivery snapshot reports the authored schedule beside the
+		// runtime's arrival history: what each occurrence brought in, what
+		// the destination refused, and when the next arrival is due (#392).
+		// The station-wide next-delivery readout is the soonest pending
+		// occurrence across every schedule.
+		for (auto const& delivery : mImpl->deliveries)
+		{
+			StationDeliverySnapshot deliveryResult;
+			deliveryResult.id = delivery.authored.id;
+			deliveryResult.storeId = delivery.authored.storeId;
+			deliveryResult.unit = delivery.authored.unit;
+			deliveryResult.quantity = delivery.authored.quantity;
+			deliveryResult.firstOccurrenceSeconds = delivery.authored.firstOccurrenceSeconds;
+			deliveryResult.recurrenceSeconds = delivery.authored.recurrenceSeconds;
+			deliveryResult.arrivesQualified = delivery.authored.arrivesQualified;
+			deliveryResult.priority = delivery.authored.priority;
+			deliveryResult.occurrencesCompleted = delivery.occurrencesFired;
+			deliveryResult.lastOccurrenceSeconds = delivery.lastOccurrenceSeconds;
+			deliveryResult.lastScheduled = delivery.lastScheduled;
+			deliveryResult.lastAccepted = delivery.lastAccepted;
+			deliveryResult.lastRejected = delivery.lastRejected;
+			deliveryResult.acceptedTotal = delivery.acceptedTotal;
+			deliveryResult.rejectedTotal = delivery.rejectedTotal;
+			deliveryResult.exhausted = delivery.exhausted;
+			deliveryResult.status = delivery.status;
+			if (!delivery.exhausted)
+			{
+				deliveryResult.hasNextOccurrence = true;
+				deliveryResult.nextOccurrenceSeconds = delivery.authored.recurrenceSeconds > 0.0
+					? delivery.authored.firstOccurrenceSeconds
+						+ static_cast<double>(delivery.occurrencesFired) * delivery.authored.recurrenceSeconds
+					: delivery.authored.firstOccurrenceSeconds;
+				if (!result.hasNextDelivery || deliveryResult.nextOccurrenceSeconds < result.nextDeliverySeconds)
+				{
+					result.hasNextDelivery = true;
+					result.nextDeliverySeconds = deliveryResult.nextOccurrenceSeconds;
+				}
+			}
+			result.deliveries.push_back(std::move(deliveryResult));
+		}
 		return result;
 	}
 	std::vector<StationSystemsEvent> const& StationSystemsRuntime::events() const { return mImpl->events; }

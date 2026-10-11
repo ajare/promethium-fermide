@@ -1,18 +1,23 @@
 -- Station systems slice 5: lifecycle, authored finite Resource stores,
 -- bounded authored transfers, compound-resource conversions, solar
--- generation, External equipment load supply and rechargeable battery
--- banks. Every system executes this factory in its own budgeted private
--- sandbox.
+-- generation, External equipment load supply, rechargeable battery banks
+-- and scheduled resupply deliveries. Every system executes this factory
+-- in its own budgeted private sandbox.
 -- Stores, transfer rules, conversion rules, solar arrays, equipment
--- load contracts and battery descriptors arrive as plain immutable
--- descriptor values; each object initialises its own copy and re-checks
--- the finite-capacity, per-unit conservation, per-constituent compound
--- conservation, power-allocation and battery energy-conservation
--- invariants every tick. The host applies the authoritative ledger;
--- this mirror audits the same rules inside the sandbox so a corrupt
--- crossing or model drift fails contained through the integrated error
--- path.
+-- load contracts, battery descriptors and delivery schedules arrive as
+-- plain immutable descriptor values; each object initialises its own
+-- copy and re-checks the finite-capacity, per-unit conservation,
+-- per-constituent compound conservation, power-allocation, battery
+-- energy-conservation and delivery-schedule invariants every tick. The
+-- host applies the authoritative ledger; this mirror audits the same
+-- rules inside the sandbox so a corrupt crossing or model drift fails
+-- contained through the integrated error path.
 local BALANCE_TOLERANCE = 1e-9
+-- Schedule boundary tolerance: an occurrence scheduled exactly on the
+-- fixed-tick grid can land a few ulps either side of it, so due-ness is
+-- judged with the same tolerance the host uses. Mirrors
+-- core::StationScheduleTolerance.
+local SCHEDULE_TOLERANCE = 1e-9
 
 -- #553: a derived magnitude is publishable only when it is finite.
 -- Individual authored values are validated finite, but sums and
@@ -52,7 +57,7 @@ local function toKg(unit, mass)
     return mass
 end
 
-return function(name, stores, transfers, conversions, solar, loads, batteries)
+return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries)
     assert(type(name) == "string")
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
@@ -60,12 +65,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
     assert(type(solar) == "table", "solar array descriptors missing")
     assert(type(loads) == "table", "equipment load descriptors missing")
     assert(type(batteries) == "table", "battery descriptors missing")
+    assert(type(deliveries) == "table", "resupply delivery descriptors missing")
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
-        starting_totals = {}, unit_loss = {},
+        starting_totals = {}, unit_loss = {}, unit_delivered = {},
         starting_constituents = {}, constituent_loss = {},
+        constituent_delivered = {},
         solar = {}, loads = {}, load_order = {}, batteries = {},
+        deliveries = {},
     }
     local by_id = {}
     for index = 1, #stores do
@@ -413,6 +421,52 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
             last_discharge = 0,
         }
     end
+    -- Resupply delivery schedules: an authored external arrival of a
+    -- declared quantity into one store, once or recurring. The mirror
+    -- keeps its own fired count and next-arrival time so it can audit the
+    -- same schedule the host runs; accepted material is booked as external
+    -- inflow and refused material stays accounted as rejected.
+    for index = 1, #deliveries do
+        local delivery = deliveries[index]
+        assert(type(delivery) == 'table', 'resupply delivery descriptor must be a table')
+        assert(type(delivery.id) == 'string' and #delivery.id > 0, 'resupply delivery needs an id')
+        local destination = by_id[delivery.store]
+        assert(destination ~= nil, 'resupply delivery destination store is unknown')
+        assert(delivery.unit == destination.unit,
+            'resupply delivery unit must match its destination store unit')
+        assert(type(delivery.quantity) == 'number'
+            and delivery.quantity == delivery.quantity and delivery.quantity > 0
+            and delivery.quantity < math.huge,
+            'resupply delivery quantity must be finite and positive')
+        assert(type(delivery.firstSeconds) == 'number'
+            and delivery.firstSeconds == delivery.firstSeconds
+            and delivery.firstSeconds >= 0 and delivery.firstSeconds < math.huge,
+            'resupply delivery first occurrence must be finite and non-negative')
+        assert(type(delivery.recurrenceSeconds) == 'number'
+            and delivery.recurrenceSeconds == delivery.recurrenceSeconds
+            and delivery.recurrenceSeconds >= 0 and delivery.recurrenceSeconds < math.huge,
+            'resupply delivery recurrence must be finite and non-negative')
+        assert(type(delivery.priority) == 'number'
+            and delivery.priority == delivery.priority
+            and delivery.priority == math.tointeger(delivery.priority),
+            'resupply delivery priority must be a finite integer')
+        object.deliveries[index] = {
+            id = delivery.id,
+            store = destination,
+            unit = delivery.unit,
+            quantity = delivery.quantity,
+            firstSeconds = delivery.firstSeconds,
+            recurrenceSeconds = delivery.recurrenceSeconds,
+            qualified = delivery.qualified and true or false,
+            priority = delivery.priority,
+            fired = 0,
+            lastAccepted = 0,
+            lastRejected = 0,
+            acceptedTotal = 0,
+            rejectedTotal = 0,
+            exhausted = false,
+        }
+    end
     -- Declared deterministic order: priority descending, declaration index
     -- ascending. Including the index makes the comparator a total order, so
     -- the result cannot depend on sort stability.
@@ -466,8 +520,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
             totals[store.unit] = (totals[store.unit] or 0) + store.qualified + store.unqualified
         end
         for unit, starting in pairs(self.starting_totals) do
+            -- Accepted deliveries are external inflow on the same boundary
+            -- as the declared losses: current + lost - delivered must equal
+            -- starting, so arriving material is accounted, never implicit.
             local residual = (totals[unit] or 0)
-                + (self.unit_loss[unit] or 0) - starting
+                + (self.unit_loss[unit] or 0)
+                - (self.unit_delivered[unit] or 0) - starting
             local bound = BALANCE_TOLERANCE * math.max(1.0, math.abs(starting))
             assert(residual == residual and math.abs(residual) <= bound,
                 "conservation residual for unit '" .. unit .. "' exceeds tolerance")
@@ -484,10 +542,84 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
         end
         for constituent, starting in pairs(self.starting_constituents) do
             local residual = (totals[constituent] or 0)
-                + (self.constituent_loss[constituent] or 0) - starting
+                + (self.constituent_loss[constituent] or 0)
+                - (self.constituent_delivered[constituent] or 0) - starting
             local bound = BALANCE_TOLERANCE * math.max(1.0, math.abs(starting))
             assert(residual == residual and math.abs(residual) <= bound,
                 "constituent conservation residual for '" .. constituent .. "' exceeds tolerance")
+        end
+    end
+    -- Occurrences of a schedule due at or before `elapsed`. Monotonic in
+    -- elapsed time, so firing `due - fired` each tick runs every
+    -- occurrence exactly once however many ticks an accelerated update
+    -- batches together. Mirrors core::stationScheduleOccurrencesDue.
+    local function occurrencesDue(firstSeconds, recurrenceSeconds, elapsed)
+        if elapsed + SCHEDULE_TOLERANCE < firstSeconds then return 0 end
+        if recurrenceSeconds <= 0 then return 1 end
+        local steps = math.floor((elapsed + SCHEDULE_TOLERANCE - firstSeconds)
+            / recurrenceSeconds)
+        if not (steps > 0) then return 1 end
+        return steps + 1
+    end
+    -- Mirror of the host delivery ledger: every occurrence due since the
+    -- last tick is collected and applied in the declared scenario order
+    -- (occurrence time ascending, priority descending, declaration order),
+    -- so coincident arrivals never depend on iteration order. The
+    -- destination accepts only what fits its total capacity; the refused
+    -- remainder stays accounted as rejected material and never enters the
+    -- station's own inventory (#392).
+    local function applyDeliveries(self, elapsed)
+        local arrivals = {}
+        for index = 1, #self.deliveries do
+            local delivery = self.deliveries[index]
+            if not delivery.exhausted then
+                local due = occurrencesDue(delivery.firstSeconds,
+                    delivery.recurrenceSeconds, elapsed)
+                for occurrence = delivery.fired + 1, due do
+                    local when = delivery.recurrenceSeconds > 0
+                        and delivery.firstSeconds + (occurrence - 1) * delivery.recurrenceSeconds
+                        or delivery.firstSeconds
+                    arrivals[#arrivals + 1] = {
+                        when = when,
+                        priority = delivery.priority,
+                        declaration = index,
+                        occurrence = occurrence,
+                    }
+                end
+            end
+        end
+        table.sort(arrivals, function(left, right)
+            if left.when ~= right.when then return left.when < right.when end
+            if left.priority ~= right.priority then return left.priority > right.priority end
+            return left.declaration < right.declaration
+        end)
+        for _, arrival in ipairs(arrivals) do
+            local delivery = self.deliveries[arrival.declaration]
+            local store = delivery.store
+            local headroom = math.max(0.0,
+                store.capacity - (store.qualified + store.unqualified))
+            local accepted = math.min(delivery.quantity, headroom)
+            local rejected = delivery.quantity - accepted
+            assert(accepted >= 0 and rejected >= 0
+                and accepted == accepted and rejected == rejected,
+                "delivery accepted/rejected amounts are not finite and non-negative")
+            if delivery.qualified then
+                store.qualified = store.qualified + accepted
+            else
+                store.unqualified = store.unqualified + accepted
+            end
+            self.unit_delivered[store.unit] =
+                (self.unit_delivered[store.unit] or 0) + accepted
+            if store.composition then
+                addConstituents(self.constituent_delivered, store.composition,
+                    toKg(store.unit, accepted), 1)
+            end
+            delivery.fired = arrival.occurrence
+            delivery.lastAccepted = accepted
+            delivery.lastRejected = rejected
+            delivery.acceptedTotal = delivery.acceptedTotal + accepted
+            delivery.rejectedTotal = delivery.rejectedTotal + rejected
+            if delivery.recurrenceSeconds <= 0 then delivery.exhausted = true end
         end
     end
     -- Mirror of the host ledger: same deterministic order, same limits.
@@ -1005,7 +1137,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
     function object:advance(world_tick, fixed_seconds)
         assert(world_tick > 0 and fixed_seconds > 0)
         checkFiniteLimits(self)
-        applyPower(self, world_tick * fixed_seconds, fixed_seconds)
+        local elapsed = world_tick * fixed_seconds
+        -- Deliveries land first: what arrives this tick is available to
+        -- this tick's equipment, transfers and conversions, matching the
+        -- host ledger order.
+        applyDeliveries(self, elapsed)
+        applyPower(self, elapsed, fixed_seconds)
         applyTransfers(self, fixed_seconds)
         applyConversions(self, fixed_seconds)
         checkFiniteLimits(self)

@@ -116,6 +116,64 @@ namespace core
 	};
 	inline constexpr size_t MaxStationResourceConversions{16};
 	inline constexpr size_t MaxStationConversionFlows{4};
+	// A scheduled external addition of a declared quantity to one Resource
+	// store (#392). A delivery is a scenario event, not a station process:
+	// it brings material in from outside the station boundary at declared
+	// simulation times, and only that store's own unit. What the destination
+	// cannot accept is rejected at the boundary and accounted explicitly —
+	// deliveries never overflow a store and never make material disappear.
+	// A recurrence of zero is a one-off delivery; a positive recurrence
+	// repeats the same quantity every recurrenceSeconds. Arriving material
+	// may be declared usable (qualified) or held awaiting the treatment or
+	// clearance a later slice provides; both occupy store capacity.
+	struct ResourceDeliverySettings
+	{
+		std::string id;
+		std::string storeId;
+		std::string unit;                 // must match the destination store's unit
+		double quantity{0.0};           // store units per occurrence, > 0
+		double firstOccurrenceSeconds{0.0}; // first arrival, >= 0
+		double recurrenceSeconds{0.0};  // 0 = one-off, else >= one fixed tick
+		bool arrivesQualified{true};    // false: arrives held awaiting clearance
+		int priority{0};                // higher allocates first among coincidents
+		bool operator==(ResourceDeliverySettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationResourceDeliveries{16};
+	// Schedule boundary tolerance (#392). Authored times meet the fixed-tick
+	// grid in binary floating point and 1/60 is not exactly representable,
+	// so an occurrence scheduled exactly on a tick boundary can land a few
+	// ulps either side of it. This tolerance is far smaller than one fixed
+	// tick and far larger than the accumulated rounding, so an occurrence
+	// that is due is never missed and never counted twice.
+	inline constexpr double StationScheduleTolerance{1e-9};
+	// Occurrences of an authored schedule that have come due at or before
+	// the given simulation time (#392). The count is monotonic in elapsed
+	// time, so a caller that fires `due - alreadyFired` occurrences each
+	// tick executes every occurrence exactly once however many ticks an
+	// accelerated update batches together. A zero recurrence is a one-off:
+	// at most one occurrence, at firstOccurrenceSeconds.
+	uint64_t stationScheduleOccurrencesDue(double firstOccurrenceSeconds,
+		double recurrenceSeconds, double elapsedSeconds);
+	// Declared deterministic ordering for scheduled scenario events
+	// (#392): occurrences run in simulation-time order first, then by
+	// service priority (higher first), then by declaration order. Two
+	// deliveries due at the same simulation second are therefore ordered by
+	// priority and declaration, never by an iteration accident. Later
+	// scenario slices — outages, maintenance and scheduled ejection — reuse
+	// this same rule, so one ordering governs every authored station event.
+	struct StationScenarioEventKey
+	{
+		double occurrenceSeconds{0.0};
+		int priority{0};
+		size_t declarationIndex{0};
+		bool operator<(StationScenarioEventKey const& other) const
+		{
+			if (occurrenceSeconds != other.occurrenceSeconds)
+				return occurrenceSeconds < other.occurrenceSeconds;
+			if (priority != other.priority) return priority > other.priority;
+			return declarationIndex < other.declarationIndex;
+		}
+	};
 	// Explicit numerical tolerance for boundary balance residuals: a per-unit
 	// residual may not exceed tolerance * max(1, |total starting|). Residuals
 	// beyond this are conservation violations, never silent clamping.
@@ -280,6 +338,7 @@ namespace core
 		std::vector<SolarArraySettings> solarArrays;
 		std::vector<EquipmentLoadSettings> equipmentLoads;
 		std::vector<BatterySettings> batteries;
+		std::vector<ResourceDeliverySettings> deliveries;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// Profile shape validation and deterministic evaluation: the level of
@@ -341,6 +400,11 @@ namespace core
 		// losses (#391). The residual closes over it: current + lost must
 		// equal starting within tolerance.
 		double lost{0.0};
+		// Cumulative mass of this unit admitted from outside the station by
+		// accepted deliveries (#392). It is the inflow side of the same
+		// boundary: current + lost - delivered must equal starting within
+		// tolerance, so delivered material is accounted, never implicit.
+		double delivered{0.0};
 		double residual{0.0};
 		bool operator==(StationBalanceSnapshot const&) const = default;
 	};
@@ -384,8 +448,38 @@ namespace core
 		double starting{0.0};
 		double current{0.0};
 		double lost{0.0};
+		// Cumulative constituent admitted by accepted deliveries (#392).
+		double delivered{0.0};
 		double residual{0.0};
 		bool operator==(StationConstituentBalanceSnapshot const&) const = default;
+	};
+	// One authored resupply delivery as of the most recent tick: what its
+	// schedule says, what the last occurrence brought in, what the
+	// destination refused, and when the next arrival is due (#392).
+	// Rejected material never entered the station, so it is reported here
+	// rather than in the station's own ledgers — the refusal is the account.
+	struct StationDeliverySnapshot
+	{
+		std::string id;
+		std::string storeId;
+		std::string unit;
+		double quantity{0.0};
+		double firstOccurrenceSeconds{0.0};
+		double recurrenceSeconds{0.0}; // 0 = one-off
+		bool arrivesQualified{true};
+		int priority{0};
+		uint64_t occurrencesCompleted{0};
+		double lastOccurrenceSeconds{0.0};
+		double lastScheduled{0.0};
+		double lastAccepted{0.0};
+		double lastRejected{0.0};
+		double acceptedTotal{0.0};
+		double rejectedTotal{0.0};
+		bool exhausted{false};            // one-off already delivered
+		bool hasNextOccurrence{false};
+		double nextOccurrenceSeconds{0.0};
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationDeliverySnapshot const&) const = default;
 	};
 
 	// One solar array as of the most recent tick: installed capacity, the
@@ -514,7 +608,12 @@ namespace core
 		std::vector<StationConversionSnapshot> conversions;
 		std::vector<StationBalanceSnapshot> balances;
 		std::vector<StationConstituentBalanceSnapshot> constituentBalances;
+		std::vector<StationDeliverySnapshot> deliveries;
 		StationPowerSnapshot power;
+		// Soonest authored arrival still pending across every delivery, for
+		// the overview's "next delivery" readout (#392).
+		bool hasNextDelivery{false};
+		double nextDeliverySeconds{0.0};
 		double balanceTolerance{StationBalanceTolerance};
 		bool operator==(StationSystemsSnapshot const&) const = default;
 	};

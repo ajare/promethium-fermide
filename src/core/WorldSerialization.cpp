@@ -717,7 +717,11 @@ namespace core
 		// Version 70 adds authored rechargeable battery banks (#394); a
 		// pre-70 document carrying `batteries` is refused rather than
 		// silently dropped.
-		serializer.writeUint32("version", 70);
+		// Version 71 adds authored resupply delivery schedules (#392); a
+		// pre-71 document carrying `deliveries` is refused rather than
+		// silently dropped. Arrival outcomes stay runtime-only, so load and
+		// Reset restart every schedule from its authored beginning.
+		serializer.writeUint32("version", 71);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -892,6 +896,26 @@ namespace core
 					serializer.writeDouble("maxDischargeKW", battery.maxDischargeKW);
 					serializer.writeDouble("chargeEfficiency", battery.chargeEfficiency);
 					serializer.writeDouble("dischargeEfficiency", battery.dischargeEfficiency);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.deliveries.empty())
+			{
+				// Authored schedules only; fired occurrences, accepted and
+				// rejected quantities are runtime state reconstructed on load.
+				serializer.beginArray("deliveries");
+				for (auto const& delivery : mStationSystemsSettings.deliveries)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", delivery.id);
+					serializer.writeString("storeId", delivery.storeId);
+					serializer.writeString("unit", delivery.unit);
+					serializer.writeDouble("quantity", delivery.quantity);
+					serializer.writeDouble("firstOccurrenceSeconds", delivery.firstOccurrenceSeconds);
+					serializer.writeDouble("recurrenceSeconds", delivery.recurrenceSeconds);
+					serializer.writeBool("arrivesQualified", delivery.arrivesQualified);
+					serializer.writeInt32("priority", delivery.priority);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -1780,7 +1804,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 70)
+		if (version < 1 || version > 71)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1991,6 +2015,28 @@ namespace core
 					battery.chargeEfficiency = serializer.readDouble("chargeEfficiency");
 					battery.dischargeEfficiency = serializer.readDouble("dischargeEfficiency");
 					stationSettings.batteries.push_back(std::move(battery));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("deliveries"))
+			{
+				if (version < 71) throw SerializationException(
+					"Station resupply deliveries require World schema 71");
+				serializer.beginArray("deliveries");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					ResourceDeliverySettings delivery;
+					delivery.id = serializer.readString("id");
+					delivery.storeId = serializer.readString("storeId");
+					delivery.unit = serializer.readString("unit");
+					delivery.quantity = serializer.readDouble("quantity");
+					delivery.firstOccurrenceSeconds = serializer.readDouble("firstOccurrenceSeconds");
+					delivery.recurrenceSeconds = serializer.readDouble("recurrenceSeconds");
+					delivery.arrivesQualified = serializer.readBool("arrivesQualified");
+					delivery.priority = serializer.readInt32("priority");
+					stationSettings.deliveries.push_back(std::move(delivery));
 					serializer.endMap();
 				}
 				serializer.endArray();

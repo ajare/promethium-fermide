@@ -148,7 +148,9 @@ namespace
 		auto point = [&](char const* label)
 		{
 			auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
-			for (float y = 45; y < 650; y += 7)
+			// The draft grows a section per authored scenario kind, so the
+			// scan covers the window's full visible height.
+			for (float y = 45; y < 845; y += 7)
 				for (float x = 18; x < 600; x += 20)
 				{
 					io.AddMousePosEvent(x, y); frame(); frame();
@@ -284,7 +286,7 @@ namespace
 		world->pauseSimulation(); frame();
 		require(text.find("pump: src -> dst (kg) rejected | requested 1.000, completed 0.000, unmet 1.000 (rate 60.000/s, priority 0)")
 			!= std::string::npos, "Blocked transfer rejection not observable in the window");
-		require(text.find("Balance kg: starting 100.000, current 100.000, lost 0.000, residual 0.000000000")
+		require(text.find("Balance kg: starting 100.000, current 100.000, lost 0.000, delivered 0.000, residual 0.000000000")
 			!= std::string::npos, "Boundary balance not observable in the window");
 		require(!world->isModified(), "Transfer ticking dirtied the authored document");
 		// Draft a second transfer through the real controls; an unknown
@@ -888,6 +890,134 @@ namespace
 			&& text.find("Draft matches the authored start conditions") != std::string::npos,
 			"Applied removal not reflected in the window");
 	}
+	// #392: resupply delivery schedules are drafted, validated and applied
+	// through the real Station Systems window controls, and the live view
+	// reports the next arrival together with accepted and refused amounts.
+	void deliveryWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO();
+		io.DisplaySize = {1200, 1700};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		std::string text; io.ClipboardUserData = &text;
+		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Delivery editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		core::StationSystemsSettings initial;
+		initial.enabled = true;
+		initial.observationIntervalSeconds = 2.0f;
+		core::ResourceStoreSettings tank;
+		tank.id = "tank";
+		tank.unit = "kg";
+		tank.capacity = 30.0;
+		tank.startingQualified = 10.0;
+		initial.stores.push_back(tank);
+		core::ResourceDeliverySettings pulse;
+		pulse.id = "pulse";
+		pulse.storeId = "tank";
+		pulse.unit = "kg";
+		pulse.quantity = 12.0;
+		pulse.firstOccurrenceSeconds = 1.0;
+		pulse.recurrenceSeconds = 2.0;
+		initial.deliveries.push_back(pulse);
+		require(world->configureStationSystems(initial, false, &diagnostic), diagnostic.c_str());
+		auto frame = [&]
+		{
+			ImGui::NewFrame(); text.clear(); ImGui::LogToClipboard();
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 1650});
+			window.render(world, history); ImGui::LogFinish(); ImGui::Render();
+		};
+		auto clickPoint = [&](ImVec2 point)
+		{
+			io.AddMousePosEvent(point.x, point.y); frame();
+			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
+		};
+		auto point = [&](char const* label)
+		{
+			io.AddMousePosEvent(400.0f, 400.0f);
+			io.AddMouseWheelEvent(0.0f, 1000.0f); frame();
+			for (int pass = 0; pass < 16; ++pass)
+			{
+				auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
+				for (float y = 45; y < 1640; y += 5)
+					for (float x = 18; x < 940; x += 15)
+					{
+						io.AddMousePosEvent(x, y); frame(); frame();
+						if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
+					}
+				io.AddMousePosEvent(400.0f, 400.0f);
+				io.AddMouseWheelEvent(0.0f, -10.0f); frame();
+			}
+			throw std::runtime_error(std::string("Missing Station control: ") + label);
+		};
+		auto typeValue = [&](char const* label, char const* value)
+		{
+			clickPoint(point(label));
+			io.AddKeyEvent(ImGuiMod_Ctrl, true); io.AddKeyEvent(ImGuiKey_A, true); frame();
+			io.AddKeyEvent(ImGuiKey_A, false); io.AddKeyEvent(ImGuiMod_Ctrl, false);
+			io.AddInputCharactersUTF8(value); frame();
+			io.AddKeyEvent(ImGuiKey_Enter, true); frame(); io.AddKeyEvent(ImGuiKey_Enter, false); frame();
+		};
+		window.visible = true; frame(); frame();
+		require(text.find("1 resupply delivery(ies)") != std::string::npos,
+			"Authored delivery count missing from the window");
+		require(text.find("pulse -> tank (kg)") != std::string::npos
+			&& text.find("next arrival at 1.000 s") != std::string::npos,
+			"Authored next-arrival schedule not displayed");
+		// Run into the scenario: the 30 kg store starts with 10 kg and each
+		// arrival brings 12, so it fills at the second occurrence and the
+		// third is refused whole. The live view shows both, and ticking
+		// never dirties the authored document.
+		world->markSaved();
+		world->resumeSimulation(); require(world->advanceTicks(300), "Delivery editor run failed");
+		world->pauseSimulation(); frame();
+		require(text.find("pulse -> tank (kg): refused | last at 5.000 s: 0.000 of 12.000 accepted, 12.000 rejected | total accepted 20.000, rejected 16.000 | 3 occurrence(s)")
+			!= std::string::npos,
+			"Live delivery accepted/refused accounting not displayed");
+		require(text.find("tank (kg): usable 30.000, held 0.000 of capacity 30.000")
+			!= std::string::npos,
+			"Live destination saturation not displayed");
+		require(text.find("next arrival at 7.000 s") != std::string::npos,
+			"Next arrival not advanced past the fired occurrences");
+		require(!world->isModified(), "Delivery ticking dirtied the authored document");
+		// An invalid drafted delivery is refused with a visible diagnostic
+		// and never reaches the authored settings or the history.
+		typeValue("Delivery 0 quantity", "0");
+		clickPoint(point("Apply settings"));
+		clickPoint(point("Confirm World reset")); frame();
+		require(text.find("quantity must be finite and positive") != std::string::npos,
+			"Invalid delivery quantity diagnostic not shown");
+		require(world->getStationSystemsSettings().deliveries[0].quantity == 12.0
+			&& history.undoCount() == 0 && world->getSimulationTick() == 300,
+			"Invalid delivery draft mutated the authored settings");
+		// Repair the draft; the confirmed reset applies it and the live
+		// view restarts the schedule from the authored beginning.
+		typeValue("Delivery 0 quantity", "5");
+		clickPoint(point("Apply settings")); frame();
+		require(text.find("Confirm?") != std::string::npos,
+			"Delivery edit bypassed the World reset confirmation");
+		clickPoint(point("Confirm World reset"));
+		require(world->getStationSystemsSettings().deliveries[0].quantity == 5.0
+			&& history.undoCount() == 1 && world->getSimulationTick() == 0,
+			"Repaired delivery draft did not apply through the reset-confirmed flow");
+		frame();
+		require(text.find("0 occurrence(s)") != std::string::npos
+			&& text.find("next arrival at 1.000 s") != std::string::npos,
+			"Applied delivery did not restart from authored state");
+		// A drafted sub-tick recurrence is refused: the schedule can never
+		// ask one tick to absorb an unbounded catch-up burst.
+		typeValue("Delivery 0 recurrence seconds", "0.005");
+		clickPoint(point("Apply settings")); frame();
+		require(text.find("at least one World fixed tick") != std::string::npos,
+			"Sub-tick delivery recurrence was accepted");
+		clickPoint(point("Cancel edits")); frame();
+		require(world->getStationSystemsSettings().deliveries[0].recurrenceSeconds == 2.0,
+			"Cancelled recurrence edit did not restore the authored schedule");
+	}
 }
 void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
@@ -898,4 +1028,5 @@ void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 	checks.push_back({"station/compoundWorkflow", compoundWorkflow});
 	checks.push_back({"station/powerWorkflow", powerWorkflow});
 	checks.push_back({"station/batteryWorkflow", batteryWorkflow});
+	checks.push_back({"station/deliveryWorkflow", deliveryWorkflow});
 }

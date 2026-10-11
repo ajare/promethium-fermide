@@ -70,7 +70,7 @@ pf_add_smoke_module(pf-smoke-station
     LABELS "core;station"
     TIMEOUT 600
 )
-foreach(check lifecycle batching eventBound persistence stores transfers compounds power batteries failures fileRoundTrip writeFailure legacyFiles structuralReplay compoundFiles powerFiles batteryFiles)
+foreach(check lifecycle batching eventBound persistence stores transfers compounds power batteries deliveries failures fileRoundTrip writeFailure legacyFiles structuralReplay compoundFiles powerFiles batteryFiles deliveryFiles)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()
@@ -581,7 +581,10 @@ pf_add_smoke_module(pf-smoke-editor
         editor/History.cpp
     LIBRARIES pf-agent-editing pf-agent-resources pf-headless-render-support
     LABELS editor
-    TIMEOUT 240
+    # The #392 resupply-delivery check adds a scroll-scan pass over the
+    # draft's delivery section; the measured full inventory needs ~230s,
+    # so the budget carries headroom above that rather than sitting on it.
+    TIMEOUT 300
 )
 
 add_test(NAME station-editor-window COMMAND pf-smoke-editor --check station/windowWorkflow)
@@ -598,6 +601,8 @@ add_test(NAME station-editor-power COMMAND pf-smoke-editor --check station/power
 set_tests_properties(station-editor-power PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-batteries COMMAND pf-smoke-editor --check station/batteryWorkflow)
 set_tests_properties(station-editor-batteries PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+add_test(NAME station-editor-deliveries COMMAND pf-smoke-editor --check station/deliveryWorkflow)
+set_tests_properties(station-editor-deliveries PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 
 pf_add_smoke_contract(NAME smoke-editor-contract COMMAND ${CMAKE_COMMAND}
     "-DEDITOR=$<TARGET_FILE:pf-smoke-editor>"

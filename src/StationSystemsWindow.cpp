@@ -27,10 +27,11 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
 	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply and rechargeable batteries. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Within a tick, power allocates first, then transfers, then conversions. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies)",
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies)",
 		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
 		authored.stores.size(), authored.transfers.size(), authored.conversions.size(),
-		authored.solarArrays.size(), authored.equipmentLoads.size(), authored.batteries.size());
+		authored.solarArrays.size(), authored.equipmentLoads.size(), authored.batteries.size(),
+		authored.deliveries.size());
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
@@ -474,6 +475,61 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		}
 		mDraft.batteries.push_back(std::move(battery));
 	}
+	ImGui::SeparatorText("Draft resupply deliveries (store units at simulation seconds; recurrence 0 is a one-off)");
+	for (size_t index = 0; index < mDraft.deliveries.size(); )
+	{
+		auto& delivery = mDraft.deliveries[index];
+		auto const row = std::to_string(index);
+		bool removeDelivery = false;
+		ImGui::PushItemWidth(220);
+		char deliveryIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(deliveryIdBuffer, delivery.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Delivery " + row + " id").c_str(), deliveryIdBuffer, sizeof(deliveryIdBuffer)))
+			delivery.id = deliveryIdBuffer;
+		char deliveryStoreBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(deliveryStoreBuffer, delivery.storeId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Delivery " + row + " store").c_str(),
+			deliveryStoreBuffer, sizeof(deliveryStoreBuffer)))
+			delivery.storeId = deliveryStoreBuffer;
+		char deliveryUnitBuffer[8]{};
+		std::strncpy(deliveryUnitBuffer, delivery.unit.c_str(), sizeof(deliveryUnitBuffer) - 1);
+		if (ImGui::InputText(("Delivery " + row + " unit").c_str(), deliveryUnitBuffer, sizeof(deliveryUnitBuffer)))
+			delivery.unit = deliveryUnitBuffer;
+		ImGui::InputDouble(("Delivery " + row + " quantity").c_str(), &delivery.quantity, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Delivery " + row + " first occurrence seconds").c_str(),
+			&delivery.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Delivery " + row + " recurrence seconds").c_str(),
+			&delivery.recurrenceSeconds, 0.0, 0.0, "%.3f");
+		ImGui::Checkbox(("Delivery " + row + " arrives usable").c_str(), &delivery.arrivesQualified);
+		ImGui::SameLine();
+		ImGui::InputInt(("Delivery " + row + " priority").c_str(), &delivery.priority);
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove delivery " + row).c_str()))
+			removeDelivery = true;
+		ImGui::PopItemWidth();
+		if (removeDelivery)
+			mDraft.deliveries.erase(mDraft.deliveries.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
+	if (mDraft.deliveries.size() < core::MaxStationResourceDeliveries && ImGui::Button("Add delivery"))
+	{
+		core::ResourceDeliverySettings delivery;
+		delivery.quantity = 10.0;
+		if (!mDraft.stores.empty())
+		{
+			delivery.storeId = mDraft.stores.front().id;
+			delivery.unit = mDraft.stores.front().unit;
+		}
+		for (size_t candidate = mDraft.deliveries.size() + 1;; ++candidate)
+		{
+			delivery.id = "delivery" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.deliveries.begin(), mDraft.deliveries.end(),
+				[&](core::ResourceDeliverySettings const& existing) { return existing.id == delivery.id; });
+			if (!taken) break;
+		}
+		mDraft.deliveries.push_back(std::move(delivery));
+	}
 	bool const draftChanged = mDraft != authored;
 	ImGui::TextUnformatted(draftChanged
 		? "Draft differs from the authored start conditions."
@@ -569,18 +625,18 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			ImGui::Text("  produces %s (%s): requested %.3f, completed %.3f",
 				flow.storeId.c_str(), flow.unit.c_str(), flow.requested, flow.completed);
 	}
-	ImGui::SeparatorText("Constituent balances (current + lost must equal starting within tolerance; dry-mass basis)");
+	ImGui::SeparatorText("Constituent balances (current + lost - delivered must equal starting within tolerance; dry-mass basis)");
 	if (snapshot.constituentBalances.empty()) ImGui::TextDisabled("No compound Resource stores authored.");
 	for (auto const& balance : snapshot.constituentBalances)
-		ImGui::Text("Constituent %s (%s): starting %.6f, current %.6f, lost %.6f, residual %.9f (tolerance %.1e)",
+		ImGui::Text("Constituent %s (%s): starting %.6f, current %.6f, lost %.6f, delivered %.6f, residual %.9f (tolerance %.1e)",
 			balance.constituent.c_str(), balance.unit.c_str(), balance.starting,
-			balance.current, balance.lost, balance.residual, snapshot.balanceTolerance);
-	ImGui::SeparatorText("Boundary balances (residual must stay within tolerance)");
+			balance.current, balance.lost, balance.delivered, balance.residual, snapshot.balanceTolerance);
+	ImGui::SeparatorText("Boundary balances (current + lost - delivered must stay within tolerance)");
 	if (snapshot.balances.empty()) ImGui::TextDisabled("No Resource stores authored.");
 	for (auto const& balance : snapshot.balances)
-		ImGui::Text("Balance %s: starting %.3f, current %.3f, lost %.3f, residual %.9f (tolerance %.1e)",
+		ImGui::Text("Balance %s: starting %.3f, current %.3f, lost %.3f, delivered %.3f, residual %.9f (tolerance %.1e)",
 			balance.unit.c_str(), balance.totalStarting, balance.totalCurrent,
-			balance.lost, balance.residual, snapshot.balanceTolerance);
+			balance.lost, balance.delivered, balance.residual, snapshot.balanceTolerance);
 	ImGui::SeparatorText("Solar generation (live; output = installed capacity x illumination)");
 	if (snapshot.power.sources.empty()) ImGui::TextDisabled("No solar arrays authored.");
 	for (auto const& source : snapshot.power.sources)
@@ -640,6 +696,34 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			ImGui::Text("  at reserve floor: no usable energy remains above the reserve");
 		else if (battery.saturated)
 			ImGui::Text("  saturated: stored energy is at nameplate capacity");
+	}
+	ImGui::SeparatorText("Resupply deliveries (live; arrivals land first each tick, the destination accepts only what fits, refusals stay accounted)");
+	if (snapshot.deliveries.empty()) ImGui::TextDisabled("No resupply deliveries authored.");
+	else
+		ImGui::Text("Next delivery due at %.3f s", snapshot.nextDeliverySeconds);
+	for (auto const& delivery : snapshot.deliveries)
+	{
+		char const* status = "idle";
+		switch (delivery.status)
+		{
+		case core::StationTransferStatus::Full: status = "accepted"; break;
+		case core::StationTransferStatus::Partial: status = "partially-accepted"; break;
+		case core::StationTransferStatus::Rejected: status = "refused"; break;
+		case core::StationTransferStatus::Idle: break;
+		}
+		ImGui::Text("%s -> %s (%s): %s | last at %.3f s: %.3f of %.3f accepted, %.3f rejected | total accepted %.3f, rejected %.3f | %llu occurrence(s) | priority %d | %s",
+			delivery.id.c_str(), delivery.storeId.c_str(), delivery.unit.c_str(), status,
+			delivery.lastOccurrenceSeconds, delivery.lastAccepted, delivery.lastScheduled,
+			delivery.lastRejected, delivery.acceptedTotal, delivery.rejectedTotal,
+			static_cast<unsigned long long>(delivery.occurrencesCompleted), delivery.priority,
+			delivery.arrivesQualified ? "arrives usable" : "arrives held awaiting clearance");
+		if (delivery.exhausted)
+			ImGui::Text("  one-off schedule spent: no further arrivals");
+		else
+			ImGui::Text("  next arrival at %.3f s (%s)", delivery.nextOccurrenceSeconds,
+				delivery.recurrenceSeconds > 0.0
+					? ("recurring every " + std::to_string(delivery.recurrenceSeconds) + " s").c_str()
+					: "one-off");
 	}
 	if (snapshot.enabled && !snapshot.healthy)
 		ImGui::TextWrapped("Station software failure: the World is paused. The failed tick was not committed. Reset the World to reconstruct Station systems; resume cannot retry failed scripts.");

@@ -214,7 +214,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 70", "version: 64");
+		replaceAll(legacy, "version: 71", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -231,14 +231,14 @@ namespace
 			"authored store fields missing or live inventory leaked");
 		bool refused = false;
 		auto staleStores = withField;
-		replaceAll(staleStores, "version: 70", "version: 65");
+		replaceAll(staleStores, "version: 71", "version: 65");
 		auto const staleStoresPath = directory / "stale-stores.world.yaml";
 		writeFile(staleStoresPath, staleStores);
 		try { (void)core::loadWorldDocument(staleStoresPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-66 document carrying resource stores was silently accepted");
 		auto staleTransfers = withField;
-		replaceAll(staleTransfers, "version: 70", "version: 66");
+		replaceAll(staleTransfers, "version: 71", "version: 66");
 		auto const staleTransfersPath = directory / "stale-transfers.world.yaml";
 		writeFile(staleTransfersPath, staleTransfers);
 		refused = false;
@@ -246,7 +246,7 @@ namespace
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-67 document carrying resource transfers was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 70", "version: 64");
+		replaceAll(stale, "version: 71", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
 		refused = false;
@@ -384,7 +384,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 70", "version: 67");
+			replaceAll(stale, "version: 71", "version: 67");
 			auto const stalePath = directory / "stale-compounds.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -493,7 +493,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 70", "version: 69");
+			replaceAll(stale, "version: 71", "version: 69");
 			auto const stalePath = directory / "stale-batteries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -615,7 +615,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 70", "version: 68");
+			replaceAll(stale, "version: 71", "version: 68");
 			auto const stalePath = directory / "stale-power.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -655,6 +655,123 @@ namespace
 			require(refused, "a critical floor above the declared demand was accepted from a file");
 		}
 	}
+	// #392: authored resupply delivery schedules travel through the real
+	// file seams as authored settings only; fired occurrences, accepted and
+	// rejected quantities are runtime state reconstructed on load, a
+	// reopened World replays the delivery scenario identically, and
+	// pre-71 documents carrying the new fields are refused rather than
+	// silently dropped.
+	void deliveryFiles(smoke::Context const& context)
+	{
+		namespace filesystem = std::filesystem;
+		auto const directory = context.temporaryRoot() / "station-deliveries";
+		filesystem::create_directories(directory);
+		core::ResourceStoreSettings tank;
+		tank.id = "tank";
+		tank.unit = "kg";
+		tank.capacity = 60.0;
+		tank.startingQualified = 10.0;
+		core::ResourceDeliverySettings pulse;
+		pulse.id = "pulse";
+		pulse.storeId = "tank";
+		pulse.unit = "kg";
+		pulse.quantity = 12.0;
+		pulse.firstOccurrenceSeconds = 1.0;
+		pulse.recurrenceSeconds = 2.0;
+		pulse.arrivesQualified = true;
+		pulse.priority = 3;
+		core::World original("Delivery Round Trip", 2, 2);
+		original.pauseSimulation();
+		original.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 2.0f;
+		settings.stores.push_back(tank);
+		settings.deliveries.push_back(pulse);
+		std::string diagnostic;
+		require(original.configureStationSystems(settings, false, &diagnostic),
+			"Delivery settings edit failed: " + diagnostic);
+		original.resumeSimulation();
+		// Ten simulated seconds: occurrences at 1, 3, 5, 7 and 9 seconds.
+		// The 60 kg destination fills partway, so later arrivals are
+		// refused and the refusal is what the reopened World must reproduce.
+		require(original.advanceTicks(600), "Delivery original run failed");
+		auto const expected = original.getStationSystemsSnapshot();
+		// Occurrences at 1, 3, 5, 7 and 9 seconds bring 12 kg each into a
+		// 60 kg store that started with 10: the fourth fills it and the
+		// fifth is refused whole, so both outcomes are on the record.
+		require(expected.deliveries.size() == 1
+			&& expected.deliveries[0].occurrencesCompleted == 5
+			&& std::abs(expected.deliveries[0].acceptedTotal - 50.0) < 1e-6
+			&& std::abs(expected.deliveries[0].rejectedTotal - 10.0) < 1e-6
+			&& expected.stores[0].currentQualified == 60.0,
+			"Delivery scenario produced the wrong observable state");
+		for (auto const* suffix : {".world.yaml", ".world"})
+		{
+			auto const path = directory / (std::string("deliveries") + suffix);
+			original.saveTo(path.string());
+			auto const document = readFile(path);
+			require(document.find("deliveries") != std::string::npos
+				&& document.find("firstOccurrenceSeconds") != std::string::npos
+				&& document.find("recurrenceSeconds") != std::string::npos
+				&& document.find("arrivesQualified") != std::string::npos
+				&& document.find("quantity") != std::string::npos,
+				"authored delivery fields missing from the document");
+			for (auto const* liveState : {"occurrencesCompleted", "acceptedTotal",
+				"rejectedTotal", "lastAccepted", "lastRejected", "nextOccurrenceSeconds",
+				"exhausted"})
+				require(document.find(liveState) == std::string::npos,
+					std::string("live delivery state leaked into the document: ") + liveState);
+			auto const reopened = core::loadWorldDocument(path);
+			require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+				"delivery settings did not survive the file round trip");
+			auto const fresh = reopened->getStationSystemsSnapshot();
+			require(fresh.deliveries.size() == 1
+				&& fresh.deliveries[0].occurrencesCompleted == 0
+				&& fresh.stores[0].currentQualified == 10.0
+				&& !fresh.deliveries[0].exhausted,
+				"reopened World did not restart the authored delivery schedule");
+			reopened->resumeSimulation();
+			require(reopened->advanceTicks(600), "Delivery reopened run failed");
+			require(reopened->getStationSystemsSnapshot() == expected,
+				"delivery scenario is not reproducible from the document");
+			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
+				"delivery event history is not reproducible from the document");
+		}
+		// A pre-71 document carrying the new fields is refused.
+		auto const withField = serializeYaml(original);
+		{
+			auto stale = withField;
+			replaceAll(stale, "version: 71", "version: 70");
+			auto const stalePath = directory / "stale-deliveries.world.yaml";
+			writeFile(stalePath, stale);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(stalePath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a pre-71 document carrying deliveries was silently accepted");
+		}
+		// Malformed delivery values in a file are rejected.
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "quantity: 12", "quantity: 0");
+			auto const malformedPath = directory / "malformed-quantity.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a zero delivery quantity was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "storeId: tank", "storeId: nowhere");
+			auto const malformedPath = directory / "unknown-delivery-target.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a delivery targeting an unknown store was accepted from a file");
+		}
+	}
 }
 
 void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
@@ -666,4 +783,5 @@ void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"compoundFiles", compoundFiles});
 	checks.push_back({"powerFiles", powerFiles});
 	checks.push_back({"batteryFiles", batteryFiles});
+	checks.push_back({"deliveryFiles", deliveryFiles});
 }

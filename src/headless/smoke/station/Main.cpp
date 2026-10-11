@@ -144,7 +144,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 70"), 11, "version: 65");
+		text.replace(text.find("version: 71"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -2265,8 +2265,8 @@ namespace
 		auto const bundled = core::bundledStationSystemsSource();
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -2325,8 +2325,8 @@ namespace
 		// model's own audits hold.
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -2957,6 +2957,404 @@ namespace
 			"Lua battery assertion failure not contained at construction");
 		core::setStationSystemsSourceLoader({});
 	}
+	void deliveries(smoke::Context const&)
+	{
+		// #392: authored resupply deliveries bring a declared quantity into
+		// one store at declared simulation times, once or recurring. They
+		// accept only what the destination's total capacity allows, refuse
+		// the remainder explicitly, land ahead of every other ledger pass,
+		// and close the station's per-unit and per-constituent boundary
+		// over a delivered term.
+		auto const dt = static_cast<double>(core::World::getFixedTimestep());
+		auto const approx = [](double actual, double expected)
+		{ return std::abs(actual - expected) < 1e-6; };
+		auto sawEvent = [](core::World& world, std::string const& needle)
+		{
+			for (auto const& event : world.getStationSystemsEvents())
+				if (event.message.find(needle) != std::string::npos) return true;
+			return false;
+		};
+		auto waterStore = [](std::string const& id, double capacity, double qualified,
+			double unqualified = 0.0)
+		{
+			core::ResourceStoreSettings store;
+			store.id = id;
+			store.unit = "kg";
+			store.capacity = capacity;
+			store.startingQualified = qualified;
+			store.startingUnqualified = unqualified;
+			return store;
+		};
+		auto delivery = [](std::string const& id, std::string const& storeId, double quantity,
+			double firstSeconds, double recurrenceSeconds = 0.0, int priority = 0,
+			bool arrivesQualified = true)
+		{
+			core::ResourceDeliverySettings settings;
+			settings.id = id;
+			settings.storeId = storeId;
+			settings.unit = "kg";
+			settings.quantity = quantity;
+			settings.firstOccurrenceSeconds = firstSeconds;
+			settings.recurrenceSeconds = recurrenceSeconds;
+			settings.priority = priority;
+			settings.arrivesQualified = arrivesQualified;
+			return settings;
+		};
+		auto configure = [](core::World& world, core::StationSystemsSettings const& settings)
+		{
+			world.pauseSimulation(); world.finishBuild();
+			std::string diagnostic;
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+		};
+		// Refused configurations: nothing reaches a runtime or a document.
+		{
+			core::World world("DeliveryRefusals", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {waterStore("tank", 100.0, 10.0)};
+			settings.deliveries = {delivery("d", "missing", 5.0, 1.0)};
+			require(!world.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("unknown Resource store") != std::string::npos,
+				"a delivery targeting an unknown store was accepted");
+			settings.deliveries = {delivery("d", "tank", 5.0, 1.0)};
+			settings.deliveries[0].unit = "L";
+			require(!world.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("does not match destination store unit") != std::string::npos,
+				"a cross-unit delivery was accepted");
+			settings.deliveries[0].unit = "kg";
+			settings.deliveries[0].quantity = 0.0;
+			require(!world.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("quantity must be finite and positive") != std::string::npos,
+				"a zero-quantity delivery was accepted");
+			settings.deliveries[0].quantity = -3.0;
+			require(!world.configureStationSystems(settings, false, &diagnostic),
+				"a negative-quantity delivery was accepted");
+			settings.deliveries[0].quantity = 5.0;
+			settings.deliveries[0].firstOccurrenceSeconds = -1.0;
+			require(!world.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("first occurrence must be finite and non-negative")
+					!= std::string::npos,
+				"a delivery scheduled before the start of time was accepted");
+			settings.deliveries[0].firstOccurrenceSeconds = 1.0;
+			settings.deliveries[0].recurrenceSeconds = dt * 0.5;
+			require(!world.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("at least one World fixed tick") != std::string::npos,
+				"a sub-tick recurring delivery was accepted");
+			settings.deliveries[0].recurrenceSeconds = 0.0;
+			settings.deliveries = {delivery("a", "tank", 1.0, 1.0), delivery("a", "tank", 2.0, 2.0)};
+			require(!world.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("id is duplicated") != std::string::npos,
+				"duplicate delivery ids were accepted");
+			settings.deliveries = {delivery("", "tank", 1.0, 1.0)};
+			require(!world.configureStationSystems(settings, false, &diagnostic),
+				"an empty delivery id was accepted");
+			settings.deliveries.clear();
+			for (size_t index = 0; index <= core::MaxStationResourceDeliveries; ++index)
+				settings.deliveries.push_back(
+					delivery("d" + std::to_string(index), "tank", 1.0, 1.0));
+			require(!world.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("limited to") != std::string::npos,
+				"more deliveries than the declared cap were accepted");
+			require(world.getStationSystemsSettings().deliveries.empty()
+				&& !world.getStationSystemsSnapshot().enabled,
+				"a refused delivery configuration mutated the authored settings");
+		}
+		// A one-off delivery: nothing before its time, one arrival at it,
+		// then the schedule is spent and never fires again.
+		{
+			core::World world("OneOff", 2, 2);
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 60.0f;
+			settings.stores = {waterStore("tank", 100.0, 0.0)};
+			settings.deliveries = {delivery("drop", "tank", 25.0, 10.0)};
+			configure(world, settings);
+			world.resumeSimulation();
+			require(world.advanceTicks(599), "pre-arrival run failed");
+			auto const before = world.getStationSystemsSnapshot();
+			require(before.deliveries.size() == 1 && before.deliveries[0].lastAccepted == 0.0
+				&& before.deliveries[0].occurrencesCompleted == 0
+				&& before.stores[0].currentQualified == 0.0,
+				"a delivery arrived before its scheduled time");
+			require(before.deliveries[0].hasNextOccurrence
+				&& approx(before.deliveries[0].nextOccurrenceSeconds, 10.0),
+				"the next arrival was not exposed before it fired");
+			require(before.hasNextDelivery && approx(before.nextDeliverySeconds, 10.0),
+				"the station-wide next delivery readout was wrong");
+			require(world.advanceTicks(1), "arrival tick failed");
+			auto const landed = world.getStationSystemsSnapshot();
+			require(landed.deliveries[0].occurrencesCompleted == 1
+				&& approx(landed.deliveries[0].lastAccepted, 25.0)
+				&& landed.deliveries[0].lastRejected == 0.0
+				&& landed.deliveries[0].status == core::StationTransferStatus::Full
+				&& approx(landed.stores[0].currentQualified, 25.0),
+				"the one-off arrival was not accepted in full at its scheduled tick");
+			require(landed.deliveries[0].exhausted && !landed.deliveries[0].hasNextOccurrence
+				&& !landed.hasNextDelivery,
+				"a spent one-off schedule still advertised a next arrival");
+			require(sawEvent(world, "Delivery 'drop' at 10.000000 s: accepted 25.000000 kg into 'tank'"),
+				"the accepted arrival was not announced in the event log");
+			// The boundary closes over the delivered term, not current alone.
+			auto const balance = landed.balances[0];
+			require(approx(balance.delivered, 25.0) && approx(balance.totalCurrent, 25.0)
+				&& balance.totalStarting == 0.0 && std::abs(balance.residual) < 1e-6,
+				"the per-unit boundary did not close over the delivered inflow");
+			require(world.advanceTicks(600), "post-arrival run failed");
+			auto const later = world.getStationSystemsSnapshot();
+			require(later.deliveries[0].occurrencesCompleted == 1
+				&& approx(later.stores[0].currentQualified, 25.0),
+				"a spent one-off delivery fired again");
+		}
+		// Full and partial destinations: the refusal is explicit and the
+		// store never overflows.
+		{
+			core::World world("FullDestination", 2, 2);
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 60.0f;
+			settings.stores = {waterStore("full", 10.0, 10.0), waterStore("tight", 10.0, 6.0)};
+			settings.deliveries = {delivery("to-full", "full", 5.0, 1.0),
+				delivery("to-tight", "tight", 5.0, 1.0)};
+			configure(world, settings);
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "capacity run failed");
+			auto const snapshot = world.getStationSystemsSnapshot();
+			require(approx(snapshot.stores[0].currentQualified, 10.0)
+				&& approx(snapshot.deliveries[0].lastAccepted, 0.0)
+				&& approx(snapshot.deliveries[0].lastRejected, 5.0)
+				&& snapshot.deliveries[0].status == core::StationTransferStatus::Rejected,
+				"a full destination did not refuse the whole delivery explicitly");
+			require(approx(snapshot.stores[1].currentQualified, 10.0)
+				&& approx(snapshot.deliveries[1].lastAccepted, 4.0)
+				&& approx(snapshot.deliveries[1].lastRejected, 1.0)
+				&& snapshot.deliveries[1].status == core::StationTransferStatus::Partial,
+				"a nearly full destination did not accept exactly its headroom");
+			require(approx(snapshot.balances[0].delivered, 4.0)
+				&& std::abs(snapshot.balances[0].residual) < 1e-6,
+				"refused material leaked into the station boundary");
+			require(sawEvent(world, "refused 5.000000 kg: destination 'full' is at capacity"),
+				"the refused delivery was not announced with its reason");
+			require(sawEvent(world, "partially accepted 4.000000 of 5.000000 kg"),
+				"the partial acceptance was not announced with its quantities");
+			require(snapshot.healthy, "a refused delivery was treated as a software failure");
+		}
+		// Recurrence boundaries: every occurrence fires exactly once, on
+		// its own tick, and never twice.
+		{
+			core::World world("Recurring", 2, 2);
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 60.0f;
+			settings.stores = {waterStore("tank", 1000.0, 0.0)};
+			settings.deliveries = {delivery("pulse", "tank", 1.0, 1.0, 1.0)};
+			configure(world, settings);
+			world.resumeSimulation();
+			for (uint64_t second = 1; second <= 10; ++second)
+			{
+				// The first arrival sits one whole period in; every later one
+				// is exactly one period (60 ticks) after the last.
+				require(world.advanceTicks(second == 1 ? 60 : 1), "recurrence tick failed");
+				auto const snapshot = world.getStationSystemsSnapshot();
+				require(snapshot.deliveries[0].occurrencesCompleted == second
+					&& approx(snapshot.stores[0].currentQualified, static_cast<double>(second)),
+					"a recurring delivery did not fire exactly once per period");
+				require(approx(snapshot.deliveries[0].nextOccurrenceSeconds,
+						static_cast<double>(second) + 1.0),
+					"the next recurrence was not exposed");
+				// Nothing fires between the occurrences.
+				require(world.advanceTicks(59), "between-tick run failed");
+				auto const between = world.getStationSystemsSnapshot();
+				require(between.deliveries[0].occurrencesCompleted == second
+					&& approx(between.stores[0].currentQualified, static_cast<double>(second)),
+					"a recurring delivery fired between its periods");
+			}
+		}
+		// Coincident deliveries: the declared scenario order decides who is
+		// accepted when the destination cannot take both.
+		{
+			core::World world("Coincident", 2, 2);
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 60.0f;
+			settings.stores = {waterStore("tank", 10.0, 6.0)};
+			// Declared low-priority first so declaration order alone cannot
+			// explain the outcome: priority must win, and the loser is
+			// refused whole because the headroom is already gone.
+			settings.deliveries = {delivery("low", "tank", 3.0, 1.0, 0.0, 1),
+				delivery("high", "tank", 4.0, 1.0, 0.0, 9)};
+			configure(world, settings);
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "coincident run failed");
+			auto const snapshot = world.getStationSystemsSnapshot();
+			require(approx(snapshot.stores[0].currentQualified, 10.0), "the store overflowed");
+			// Results are published in declaration order; read them by id.
+			auto const& high = snapshot.deliveries[1];
+			auto const& low = snapshot.deliveries[0];
+			require(high.id == "high" && approx(high.lastAccepted, 4.0)
+				&& high.lastRejected == 0.0,
+				"the higher-priority coincident delivery was not accepted first");
+			require(low.id == "low" && low.lastAccepted == 0.0
+				&& approx(low.lastRejected, 3.0),
+				"the losing coincident delivery was not refused explicitly");
+			// Equal priority falls back to declaration order.
+			core::World tie("CoincidentTie", 2, 2);
+			core::StationSystemsSettings tieSettings;
+			tieSettings.enabled = true;
+			tieSettings.observationIntervalSeconds = 60.0f;
+			tieSettings.stores = {waterStore("tank", 10.0, 8.0)};
+			tieSettings.deliveries = {delivery("first", "tank", 2.0, 1.0), delivery("second", "tank", 2.0, 1.0)};
+			configure(tie, tieSettings);
+			tie.resumeSimulation();
+			require(tie.advanceTicks(60), "tie-break run failed");
+			auto const tied = tie.getStationSystemsSnapshot();
+			require(approx(tied.deliveries[0].lastAccepted, 2.0)
+				&& tied.deliveries[1].lastAccepted == 0.0
+				&& approx(tied.deliveries[1].lastRejected, 2.0),
+				"equal-priority coincident deliveries did not follow declaration order");
+		}
+		// Held arrivals: material that arrives awaiting clearance occupies
+		// capacity but is never usable.
+		{
+			core::World world("HeldArrival", 2, 2);
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 60.0f;
+			settings.stores = {waterStore("tank", 10.0, 0.0)};
+			settings.deliveries = {delivery("held", "tank", 4.0, 1.0, 0.0, 0, false)};
+			configure(world, settings);
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "held arrival run failed");
+			auto const snapshot = world.getStationSystemsSnapshot();
+			require(snapshot.stores[0].currentQualified == 0.0
+				&& approx(snapshot.stores[0].currentUnqualified, 4.0),
+				"a held delivery landed as usable material");
+			require(approx(snapshot.balances[0].delivered, 4.0),
+				"a held arrival was not booked as delivered");
+		}
+		// Arrivals are usable in the same tick they land: the delivery runs
+		// ahead of the transfer ledger, so a store that was empty can move
+		// material immediately.
+		{
+			core::World world("SameTick", 2, 2);
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 60.0f;
+			settings.stores = {waterStore("in", 100.0, 0.0), waterStore("out", 100.0, 0.0)};
+			core::ResourceTransferSettings onward;
+			onward.id = "onward";
+			onward.sourceId = "in";
+			onward.destinationId = "out";
+			onward.unit = "kg";
+			onward.ratePerSecond = 100.0;
+			settings.transfers = {onward};
+			settings.deliveries = {delivery("feed", "in", 10.0, 1.0)};
+			configure(world, settings);
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "same-tick run failed");
+			auto const snapshot = world.getStationSystemsSnapshot();
+			require(snapshot.stores[1].currentQualified > 0.0,
+				"material delivered this tick was not available to this tick's transfer");
+			require(approx(snapshot.balances[0].delivered, 10.0)
+				&& std::abs(snapshot.balances[0].residual) < 1e-6,
+				"the boundary did not close with a same-tick delivery and transfer");
+		}
+		// Compound arrivals: the constituent ledger closes over the
+		// delivered constituents exactly as the unit ledger does.
+		{
+			core::World world("CompoundArrival", 2, 2);
+			auto const food = core::ResourceCompositionSettings{0.8, 0.05, 0.0, 0.01, 0.02, 0.02, 17000.0};
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 60.0f;
+			core::ResourceStoreSettings pantry;
+			pantry.id = "pantry";
+			pantry.unit = "kg";
+			pantry.capacity = 100.0;
+			pantry.startingQualified = 10.0;
+			pantry.composition = food;
+			settings.stores = {pantry};
+			settings.deliveries = {delivery("rations", "pantry", 20.0, 1.0)};
+			configure(world, settings);
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "compound arrival run failed");
+			auto const snapshot = world.getStationSystemsSnapshot();
+			require(approx(snapshot.stores[0].currentQualified, 30.0),
+				"the compound delivery did not land in the store");
+			for (auto const& balance : snapshot.constituentBalances)
+				require(std::abs(balance.residual) < 1e-6,
+					"the constituent boundary did not close over the delivered constituents");
+			auto const water = std::find_if(snapshot.constituentBalances.begin(),
+				snapshot.constituentBalances.end(),
+				[](core::StationConstituentBalanceSnapshot const& balance)
+				{ return balance.constituent == "water"; });
+			require(water != snapshot.constituentBalances.end()
+				&& approx(water->delivered, 20.0 * 0.8),
+				"the delivered water constituent was not accounted");
+		}
+		// Accelerated update batching and time scale never duplicate or skip
+		// an occurrence: the same tick sequence produces the same results.
+		{
+			core::World batched("Batched", 2, 2), stepped("Stepped", 2, 2);
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = {waterStore("tank", 1000.0, 0.0)};
+			settings.deliveries = {delivery("pulse", "tank", 3.0, 1.0, 2.0)};
+			configure(batched, settings); configure(stepped, settings);
+			batched.resumeSimulation();
+			batched.setSimulationTimeScale(4.0f);
+			// 2.5 wall seconds at 4x is 10 simulated seconds: the same 600
+			// fixed ticks the stepped reference runs one at a time, and
+			// inside the coordinator's per-update tick budget.
+			batched.update(2.5f);
+			stepped.resumeSimulation();
+			require(stepped.advanceTicks(600), "stepped reference run failed");
+			require(batched.getSimulationTick() == stepped.getSimulationTick(),
+				"batched and stepped runs advanced different tick counts");
+			require(batched.getStationSystemsSnapshot() == stepped.getStationSystemsSnapshot()
+				&& batched.getStationSystemsEvents() == stepped.getStationSystemsEvents(),
+				"delivery outcomes depended on update batching");
+			require(stepped.getStationSystemsSnapshot().deliveries[0].occurrencesCompleted == 5,
+				"the recurring delivery did not fire once per period over the run");
+		}
+		// Pause/resume preserves the schedule; reset restarts it. Ordinary
+		// pause/resume must never re-deliver what already arrived.
+		{
+			core::World world("PauseReset", 2, 2);
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 60.0f;
+			settings.stores = {waterStore("tank", 1000.0, 0.0)};
+			settings.deliveries = {delivery("pulse", "tank", 2.0, 1.0, 2.0)};
+			configure(world, settings);
+			world.resumeSimulation();
+			require(world.advanceTicks(180), "first leg failed");			auto const firstLeg = world.getStationSystemsSnapshot();
+			world.pauseSimulation();
+			require(!world.advanceTick(), "a paused World ticked");
+			world.update(5.0f);
+			require(world.getStationSystemsSnapshot() == firstLeg,
+				"pause changed the delivery state");
+			world.resumeSimulation();
+			require(world.advanceTicks(180), "second leg failed");
+			auto const twoLegs = world.getStationSystemsSnapshot();
+			auto const twoLegsEvents = world.getStationSystemsEvents();
+			require(twoLegs.deliveries[0].occurrencesCompleted == 3
+				&& approx(twoLegs.stores[0].currentQualified, 6.0),
+				"pause/resume duplicated or dropped a recurring delivery");
+			world.pauseSimulation(); world.resetSimulation();
+			auto const fresh = world.getStationSystemsSnapshot();
+			require(fresh.deliveries[0].occurrencesCompleted == 0
+				&& fresh.stores[0].currentQualified == 0.0 && !fresh.deliveries[0].exhausted,
+				"reset did not restart the authored delivery schedule");
+			world.resumeSimulation();
+			require(world.advanceTicks(360), "replay failed");
+			require(world.getStationSystemsSnapshot() == twoLegs
+				&& world.getStationSystemsEvents() == twoLegsEvents,
+				"reset replay was not deterministic");
+		}
+	}
 	void failures(smoke::Context const&)
 	{
 		SourceScope scope;
@@ -3227,7 +3625,7 @@ namespace
 }
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power}, {"batteries", batteries}, {"failures", failures}};
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power}, {"batteries", batteries}, {"deliveries", deliveries}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

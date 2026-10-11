@@ -267,6 +267,7 @@ set(editor_names
     station/compoundWorkflow
     station/powerWorkflow
     station/batteryWorkflow
+    station/deliveryWorkflow
 )
 
 if(DEFINED LANE)
@@ -311,9 +312,12 @@ foreach(tier IN ITEMS editor)
     endif()
     list(LENGTH ${tier}_names count)
     foreach(index RANGE 1 8)
+        # The #392 delivery check lengthened a full Editor inventory; eight
+        # concurrent full runs measure ~245s here, so the per-invocation
+        # budget sits above that rather than just under it.
         file(APPEND "${project}/CTestTestfile.cmake"
             "add_test(${module}-${index} \"${binary}\")\n"
-            "set_tests_properties(${module}-${index} PROPERTIES TIMEOUT 240 WORKING_DIRECTORY \"${work}\" PASS_REGULAR_EXPRESSION \"SUMMARY ${module} pass=${count} fail=0 skip=0\" FAIL_REGULAR_EXPRESSION \"FAIL ${module}\")\n")
+            "set_tests_properties(${module}-${index} PROPERTIES TIMEOUT 330 WORKING_DIRECTORY \"${work}\" PASS_REGULAR_EXPRESSION \"SUMMARY ${module} pass=${count} fail=0 skip=0\" FAIL_REGULAR_EXPRESSION \"FAIL ${module}\")\n")
     endforeach()
 endforeach()
 find_program(ctest NAMES ctest REQUIRED)
