@@ -1907,11 +1907,17 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local heaterFromBattery = drawBatteries(self, heaterDemand - heaterFromGeneration, fixed_hours)
             heaterSupplied = heaterSupplied + heaterFromBattery
             batterySupplied = batterySupplied + heaterFromBattery
-            -- Circulation is capped by both the fluid present and the
-            -- electricity supplied: the fraction of rated flow that is
-            -- actually moving.
+            -- Circulation is capped by the fluid present, the
+            -- electricity supplied and the pump's rated flow: the
+            -- fraction of rated flow that is actually moving. A zero
+            -- rated flow is a zero-flow machine - fill and a powered
+            -- pump notwithstanding, no coolant moves, so every
+            -- circulation-gated exchange and evaporator admission is
+            -- zero rather than a fraction of a flow that does not
+            -- exist (#558).
             local pumpElectrical = pumpDemand > 0 and pumpSupplied / pumpDemand or 0
-            local circulation = disabled and 0 or fill * pumpElectrical
+            local circulation = (disabled or loop.ratedFlow <= 0) and 0
+                or fill * pumpElectrical
             -- Heat-only exchange through the circulation-gated
             -- exchanger: no circulation, no exchange. The reservoir
             -- books the exact negation in applyThermal, so the crossing

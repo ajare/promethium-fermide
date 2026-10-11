@@ -4337,6 +4337,45 @@ namespace
 				&& dry.residualKJ == 0.0,
 				"dry loop booked a heat crossing it could not make");
 		}
+		// Zero rated flow (#558): a filled, powered loop whose pump is
+		// rated at zero flow moves no coolant, so the circulation-gated
+		// exchanger transfers no heat. The equipment limit binds the
+		// exchange, not just the reported flow: the pump still draws its
+		// power and dissipates it into the loop, but the reservoir sees
+		// nothing across the exchanger and both ledgers still close.
+		{
+			core::World world("CoolantZeroFlow", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
+			auto const [ok, diagnostic] = coolantConfigure(world,
+				{ reservoir("bus", 1000.0, 30.0) },
+				{ loop("loop", "normal", "bus", 1.0, 1.0, 4.0, 20.0, 5.0, 1.0, 0.0, 1.0, 0.0) },
+				{ field });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "zero-rated-flow coolant run failed");
+			auto const& snapshot = world.getStationSystemsSnapshot();
+			auto const& loopSnap = snapshot.coolantLoops[0];
+			require(approx(loopSnap.fillFraction, 1.0) && !loopSnap.disabled
+				&& approx(loopSnap.pumpSuppliedKW, 1.0),
+				"zero-rated-flow loop was not filled and powered as authored");
+			require(loopSnap.flowKgPerS == 0.0 && approx(loopSnap.unmetFlowKgPerS, 0.0)
+				&& approx(snapshot.thermal.totalCirculationKgPerS, 0.0),
+				"a zero rated-flow pump reported flow it cannot move");
+			require(loopSnap.exchangeIntoLoopKW == 0.0 && loopSnap.exchangedEnergyKJ == 0.0,
+				"zero flow carried exchanger heat with no coolant moving");
+			// The loop warms only by the pump work actually dissipated
+			// into it (1 kW x 1 s over 4 kJ/K = +0.25 K); the reservoir
+			// keeps its starting temperature because nothing crossed.
+			require(approx(loopSnap.loopTemperatureC, 20.25, 1e-3),
+				"zero-flow loop temperature did not follow pump work alone");
+			require(snapshot.thermal.reservoirs[0].temperatureC == 30.0
+				&& snapshot.thermal.reservoirs[0].loopEnergyKJ == 0.0,
+				"zero-flow exchange leaked into the reservoir");
+			require(std::abs(loopSnap.residualKJ) < 1e-4
+				&& std::abs(snapshot.thermal.reservoirs[0].residualKJ) < 1e-6,
+				"zero-flow loop or reservoir ledger did not close");
+		}
 		// Heater capacity and the thermostat: the heater runs at exactly
 		// its capacity while the loop is below the setpoint, warms the
 		// loop analytically, drops its demand to zero once the setpoint is
@@ -4922,6 +4961,48 @@ namespace
 				"dry-loop chiller drew power with no circulation");
 			require(sawEvent(world, "no coolant circulation at the cold-side interface"),
 				"dry-loop refusal reason not announced");
+		}
+		// Zero rated flow (#558): a filled, powered cold loop whose pump
+		// is rated at zero flow delivers no circulation, so the
+		// evaporator has no heat to extract — the chiller is refused
+		// with the circulation reason and its whole demand stays unmet,
+		// exactly as with a dry loop. The equipment limit binds the
+		// duty, not just the reported flow.
+		{
+			core::World world("ChillerZeroFlowLoop", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
+			auto const [ok, diagnostic] = chillerConfigure(world,
+				{ reservoir("cold", "moderate", 1000.0, 30.0),
+				  reservoir("sink", "moderate", 1000.0, 20.0) },
+				{ loop("noflow", "cold", 1.0, 20.0, 1.0, 0.0, 1.0) },
+				{ chiller("chiller", "moderate", "noflow", "sink", 10.0, 2.0, 0.0, 5.0, 45.0) },
+				{ field });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "zero-flow chiller run failed");
+			auto const& snapshot = world.getStationSystemsSnapshot();
+			auto const& loopSnap = snapshot.coolantLoops[0];
+			require(loopSnap.flowKgPerS == 0.0 && loopSnap.exchangeIntoLoopKW == 0.0
+				&& loopSnap.chillerExtractionKW == 0.0,
+				"zero rated flow carried evaporator duty or exchanger heat");
+			auto const& chillerSnap = snapshot.chillers[0];
+			require(chillerSnap.status == core::StationTransferStatus::Rejected
+				&& chillerSnap.admitted && !chillerSnap.sinkOverMaxCondensing,
+				"zero-flow chiller refusal state wrong");
+			require(approx(chillerSnap.deliverableKW, 0.0)
+				&& approx(chillerSnap.coolingDemandKW, 10.0)
+				&& chillerSnap.coolingKW == 0.0
+				&& approx(chillerSnap.coolingUnmetKW, 10.0),
+				"zero-flow cold service not fully unmet");
+			require(chillerSnap.powerSuppliedKW == 0.0
+				&& chillerSnap.condenserHeatKW == 0.0,
+				"zero-flow chiller drew power or booked condenser heat");
+			require(snapshot.thermal.reservoirs[1].temperatureC == 20.0
+				&& snapshot.thermal.reservoirs[1].condenserEnergyKJ == 0.0,
+				"zero-flow chiller heated its sink");
+			require(sawEvent(world, "no coolant circulation at the cold-side interface"),
+				"zero-flow refusal reason not announced");
 		}
 		// Transient supply loss: full service under the sun, total loss
 		// through the eclipse, recovery when the sun returns — with the

@@ -2603,12 +2603,18 @@ namespace core
 					batterySuppliedKW += fromBattery;
 					batteryShortfallKW += ask - fromBattery;
 				}
-				// Circulation is capped by both the fluid present and the
-				// electricity supplied: the fraction of rated flow that is
-				// actually moving.
+				// Circulation is capped by the fluid present, the
+				// electricity supplied and the pump's rated flow: the
+				// fraction of rated flow that is actually moving. A zero
+				// rated flow is a zero-flow machine — fill and a powered
+				// pump notwithstanding, no coolant moves, so every
+				// circulation-gated exchange and evaporator admission is
+				// zero rather than a fraction of a flow that does not
+				// exist (#558).
 				auto const pumpElectricalFraction = pumpDemandKW > 0.0
 					? pumpSuppliedKW / pumpDemandKW : 0.0;
 				auto const circulationFraction = disabled
+						|| loop.authored.ratedFlowKgPerS <= 0.0
 					? 0.0 : fillFraction * pumpElectricalFraction;
 				loop.lastCirculationFraction = circulationFraction;
 				loop.lastFlowKgPerS = loop.authored.ratedFlowKgPerS * circulationFraction;
