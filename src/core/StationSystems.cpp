@@ -65,6 +65,8 @@ namespace core
 			std::vector<EquipmentLoadSettings> const* loads;
 			std::vector<BatterySettings> const* batteries;
 			std::vector<ResourceDeliverySettings> const* deliveries;
+			std::vector<ThermalReservoirSettings> const* reservoirs;
+			std::vector<RadiatorSettings> const* radiators;
 			static void pushProfile(lua_State* state, ProfileSettings const& profile)
 			{
 				lua_createtable(state, 0, 3);
@@ -188,6 +190,7 @@ namespace core
 					lua_pushnumber(state, load.criticalFloorKW); lua_setfield(state, -2, "criticalFloorKW");
 					lua_pushinteger(state, load.priority); lua_setfield(state, -2, "priority");
 					lua_pushnumber(state, load.maxCurtailment); lua_setfield(state, -2, "maxCurtailment");
+					lua_pushstring(state, load.heatSinkId.c_str()); lua_setfield(state, -2, "heatSinkId");
 					lua_createtable(state, static_cast<int>(load.materialExchanges.size()), 0);
 					for (size_t flow = 0; flow < load.materialExchanges.size(); ++flow)
 					{
@@ -237,7 +240,38 @@ namespace core
 					lua_pushinteger(state, delivery.priority); lua_setfield(state, -2, "priority");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 8, 1);
+				// Authored thermal reservoir and radiator descriptors cross
+				// the same boundary as plain immutable values (#395); each
+				// sandbox mirrors the integration and audits its own thermal
+				// energy conservation.
+				lua_createtable(state, static_cast<int>(reservoirs->size()), 0);
+				for (size_t index = 0; index < reservoirs->size(); ++index)
+				{
+					auto const& reservoir = (*reservoirs)[index];
+					lua_createtable(state, 0, 7);
+					lua_pushstring(state, reservoir.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, reservoir.thermalClass.c_str()); lua_setfield(state, -2, "thermalClass");
+					lua_pushnumber(state, reservoir.heatCapacityKJPerK); lua_setfield(state, -2, "heatCapacityKJPerK");
+					lua_pushnumber(state, reservoir.startingTemperatureC); lua_setfield(state, -2, "startingTemperatureC");
+					lua_pushnumber(state, reservoir.minTemperatureC); lua_setfield(state, -2, "minTemperatureC");
+					lua_pushnumber(state, reservoir.maxTemperatureC); lua_setfield(state, -2, "maxTemperatureC");
+					lua_pushnumber(state, reservoir.absorbedHeatKW); lua_setfield(state, -2, "absorbedHeatKW");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_createtable(state, static_cast<int>(radiators->size()), 0);
+				for (size_t index = 0; index < radiators->size(); ++index)
+				{
+					auto const& radiator = (*radiators)[index];
+					lua_createtable(state, 0, 6);
+					lua_pushstring(state, radiator.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, radiator.reservoirId.c_str()); lua_setfield(state, -2, "reservoir");
+					lua_pushnumber(state, radiator.areaM2); lua_setfield(state, -2, "areaM2");
+					lua_pushnumber(state, radiator.emissivity); lua_setfield(state, -2, "emissivity");
+					lua_pushnumber(state, radiator.viewFactor); lua_setfield(state, -2, "viewFactor");
+					lua_pushnumber(state, radiator.sinkTemperatureC); lua_setfield(state, -2, "sinkTemperatureC");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 10, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -607,6 +641,25 @@ namespace core
 					return refuse(where + " material exchange rate for store '" + exchange.storeId
 						+ "' must be finite and positive");
 			}
+			// Heat sink routing (#395): emitted heat goes to exactly one
+			// declared reservoir, of the same thermal service class. Spare
+			// capacity in another class is never usable, and a
+			// cooling-service load needs a cooling service rather than a
+			// passive sink.
+			if (!load.heatSinkId.empty())
+			{
+				if (load.coolingDisposition != StationCoolingDisposition::Exported)
+					return refuse(where + " declares a heat sink but requires a cooling service; a cooling-service load needs a cooling service of its class, not a heat sink");
+				auto const sink = std::find_if(settings.thermalReservoirs.begin(),
+					settings.thermalReservoirs.end(),
+					[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == load.heatSinkId; });
+				if (sink == settings.thermalReservoirs.end())
+					return refuse(where + " heat sink references unknown thermal reservoir '" + load.heatSinkId + "'");
+				if (sink->thermalClass != load.thermalClass)
+					return refuse(where + " thermal class '" + load.thermalClass
+						+ "' is incompatible with heat sink reservoir '" + sink->id + "' of class '"
+						+ sink->thermalClass + "'; heat routes only to the same service class");
+			}
 		}
 		if (settings.batteries.size() > MaxStationBatteries)
 			return refuse("Station batteries are limited to "
@@ -643,6 +696,68 @@ namespace core
 			if (!std::isfinite(battery.dischargeEfficiency)
 				|| battery.dischargeEfficiency <= 0.0 || battery.dischargeEfficiency > 1.0)
 				return refuse(where + " discharge efficiency must be finite and greater than 0 up to 1");
+		}
+		if (settings.thermalReservoirs.size() > MaxStationThermalReservoirs)
+			return refuse("Station thermal reservoirs are limited to "
+				+ std::to_string(MaxStationThermalReservoirs) + " entries");
+		std::set<std::string> reservoirIds;
+		for (auto const& reservoir : settings.thermalReservoirs)
+		{
+			auto const where = "Station thermal reservoir '" + reservoir.id + "'";
+			if (reservoir.id.empty()) return refuse("Station thermal reservoir id must not be empty");
+			if (reservoir.id.size() > MaxStationStoreIdLength)
+				return refuse("Station thermal reservoir id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!reservoirIds.insert(reservoir.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				reservoir.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + reservoir.thermalClass
+					+ "'; declared classes are: low, moderate, warm, generation");
+			if (!std::isfinite(reservoir.heatCapacityKJPerK) || reservoir.heatCapacityKJPerK <= 0.0)
+				return refuse(where + " effective thermal capacity must be finite and positive");
+			if (!std::isfinite(reservoir.minTemperatureC) || !std::isfinite(reservoir.maxTemperatureC)
+				|| reservoir.minTemperatureC >= reservoir.maxTemperatureC)
+				return refuse(where + " temperature limits must be finite with min below max");
+			if (!std::isfinite(reservoir.startingTemperatureC))
+				return refuse(where + " starting temperature must be finite");
+			// Temperatures below absolute zero describe no material; refuse
+			// them rather than let the integration wander into nonsense.
+			if (reservoir.minTemperatureC <= -StationCelsiusOffset
+				|| reservoir.maxTemperatureC <= -StationCelsiusOffset
+				|| reservoir.startingTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " temperatures must be above absolute zero (-273.15 C)");
+			if (reservoir.startingTemperatureC < reservoir.minTemperatureC
+				|| reservoir.startingTemperatureC > reservoir.maxTemperatureC)
+				return refuse(where + " starting temperature is outside its declared limits");
+			if (!std::isfinite(reservoir.absorbedHeatKW) || reservoir.absorbedHeatKW < 0.0)
+				return refuse(where + " absorbed heat must be finite and non-negative");
+		}
+		if (settings.radiators.size() > MaxStationRadiators)
+			return refuse("Station radiators are limited to "
+				+ std::to_string(MaxStationRadiators) + " entries");
+		std::set<std::string> radiatorIds;
+		for (auto const& radiator : settings.radiators)
+		{
+			auto const where = "Station radiator '" + radiator.id + "'";
+			if (radiator.id.empty()) return refuse("Station radiator id must not be empty");
+			if (radiator.id.size() > MaxStationStoreIdLength)
+				return refuse("Station radiator id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!radiatorIds.insert(radiator.id).second) return refuse(where + " id is duplicated");
+			auto const host = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(),
+				[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == radiator.reservoirId; });
+			if (host == settings.thermalReservoirs.end())
+				return refuse(where + " is attached to unknown thermal reservoir '" + radiator.reservoirId + "'");
+			if (!std::isfinite(radiator.areaM2) || radiator.areaM2 <= 0.0)
+				return refuse(where + " area must be finite and positive");
+			if (!std::isfinite(radiator.emissivity) || radiator.emissivity <= 0.0 || radiator.emissivity > 1.0)
+				return refuse(where + " emissivity must be finite and greater than 0 up to 1");
+			if (!std::isfinite(radiator.viewFactor) || radiator.viewFactor <= 0.0 || radiator.viewFactor > 1.0)
+				return refuse(where + " view factor must be finite and greater than 0 up to 1");
+			if (!std::isfinite(radiator.sinkTemperatureC)
+				|| radiator.sinkTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " sink temperature must be finite and above absolute zero (-273.15 C)");
 		}
 		if (settings.deliveries.size() > MaxStationResourceDeliveries)
 			return refuse("Station resupply deliveries are limited to "
@@ -781,6 +896,12 @@ namespace core
 		{
 			EquipmentLoadSettings authored;
 			std::vector<LoadExchangeState> exchanges;
+			// #395: the reservoir this load's emitted heat routes into.
+			// A routed load's heat is booked into the reservoir exactly
+			// once and never also as direct export.
+			bool hasHeatSink{false};
+			size_t heatSinkIndex{0};
+			double lastHeatRoutedKW{0.0};
 			double lastProfileLevel{0.0};
 			double lastRequestedKW{0.0};
 			double lastSuppliedKW{0.0};
@@ -848,6 +969,39 @@ namespace core
 			bool exhausted{false};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
+		// The authoritative ledger of one authored radiator (#395).
+		// Rejection is recomputed every tick from the host reservoir's
+		// emitting temperature; the booked value is the net radiative
+		// exchange after the reservoir's sink clamp.
+		struct RadiatorState
+		{
+			RadiatorSettings authored;
+			size_t reservoirIndex{0};
+			double lastRejectedKW{0.0};
+		};
+		// The authoritative ledger of one thermal reservoir (#395).
+		// Temperature is integrated explicitly on the fixed World tick,
+		// so the same tick sequence always integrates the same
+		// temperature, and the energy ledger closes against capacity x
+		// temperature: starting + absorbed + routed - rejected must
+		// equal the current energy within the declared tolerance. The
+		// declared min/max service limits are reported as crossings,
+		// never enforced by clamping the integrated state.
+		struct ReservoirState
+		{
+			ThermalReservoirSettings authored;
+			std::vector<size_t> radiatorIndices;
+			double temperatureC{0.0};
+			double lastHeatRoutedKW{0.0};
+			double lastHeatInKW{0.0};
+			double lastRejectedKW{0.0};
+			double lastNetKW{0.0};
+			double absorbedKJ{0.0};
+			double routedKJ{0.0};
+			double rejectedKJ{0.0};
+			bool lastAboveLimit{false};
+			bool lastBelowLimit{false};
+		};
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
 		std::vector<TransferState> transfers;
@@ -856,6 +1010,8 @@ namespace core
 		std::vector<LoadState> loads;
 		std::vector<BatteryState> batteries;
 		std::vector<DeliveryState> deliveries;
+		std::vector<ReservoirState> reservoirs;
+		std::vector<RadiatorState> radiators;
 		// Competing transfers are allocated in priority order (higher first),
 		// ties resolved by declaration order: a declared deterministic order.
 		std::vector<size_t> transferOrder;
@@ -917,6 +1073,8 @@ namespace core
 			auto const committedSolarArrays = solarArrays;
 			auto const committedBatteries = batteries;
 			auto const committedDeliveries = deliveries;
+			auto const committedReservoirs = reservoirs;
+			auto const committedRadiators = radiators;
 			auto const committedAvailableGenerationKW = lastAvailableGenerationKW;
 			auto const committedBatteryShortfallKW = lastBatteryShortfallKW;
 			if (runLedger(tick, seconds, system, violation)) return true;
@@ -926,6 +1084,8 @@ namespace core
 			solarArrays = committedSolarArrays;
 			batteries = committedBatteries;
 			deliveries = committedDeliveries;
+			reservoirs = committedReservoirs;
+			radiators = committedRadiators;
 			lastAvailableGenerationKW = committedAvailableGenerationKW;
 			lastBatteryShortfallKW = committedBatteryShortfallKW;
 			return false;
@@ -965,6 +1125,12 @@ namespace core
 			std::vector<bool> previousBatterySaturated;
 			previousBatterySaturated.reserve(batteries.size());
 			for (auto const& battery : batteries) previousBatterySaturated.push_back(battery.lastSaturated);
+			std::vector<bool> previousAboveLimit;
+			previousAboveLimit.reserve(reservoirs.size());
+			for (auto const& reservoir : reservoirs) previousAboveLimit.push_back(reservoir.lastAboveLimit);
+			std::vector<bool> previousBelowLimit;
+			previousBelowLimit.reserve(reservoirs.size());
+			for (auto const& reservoir : reservoirs) previousBelowLimit.push_back(reservoir.lastBelowLimit);
 			std::vector<double> qualified, unqualified;
 			qualified.reserve(stores.size());
 			unqualified.reserve(stores.size());
@@ -1386,9 +1552,19 @@ namespace core
 				// infeasible load never runs, so it produces no station heat;
 				// its cooling need is reported as unmet cooling instead of
 				// being absorbed (#548).
-				load.lastHeatExportedKW = load.lastAdmitted
+				// Emitted heat is booked exactly once (#395): a load with a
+				// declared heat sink routes its produced heat into the
+				// reservoir and exports nothing directly; without a sink the
+				// heat leaves through the declared export boundary as
+				// before. Electrical input is never converted into duplicate
+				// local heat - the authored heat output is the emitted heat,
+				// and energy stored in batteries or bound into material is
+				// not heat at all.
+				auto const producedHeatKW = load.lastAdmitted
 					? load.authored.heatOutputKW * load.lastProfileLevel
 					* load.lastDeliveredFraction : 0.0;
+				load.lastHeatRoutedKW = load.hasHeatSink ? producedHeatKW : 0.0;
+				load.lastHeatExportedKW = load.hasHeatSink ? 0.0 : producedHeatKW;
 				load.lastUnmetCoolingKW = load.lastAdmitted
 					? 0.0 : load.authored.heatOutputKW * load.lastProfileLevel;
 				load.lastCriticalUnmet = load.lastUnmetCriticalKW > 1e-12;
@@ -1445,6 +1621,91 @@ namespace core
 						for (auto const& [constituent, change] : delta)
 							stagedLoss[constituent] -= change;
 					}
+				}
+			}
+			// Thermal reservoirs accumulate the heat the station actually
+			// produced this tick (#395): each reservoir's authored
+			// environmental absorption plus the equipment heat routed into
+			// it, against radiator rejection that follows the emitting
+			// temperature and the authored sink. Explicit Euler on the
+			// fixed World tick: the same tick sequence always integrates
+			// the same state, and the energy ledger closes over exactly
+			// the terms that moved.
+			{
+				auto const dt = static_cast<double>(seconds);
+				std::vector<double> routedIn(reservoirs.size(), 0.0);
+				for (auto const& load : loads)
+					if (load.hasHeatSink) routedIn[load.heatSinkIndex] += load.lastHeatRoutedKW;
+				for (size_t index = 0; index < reservoirs.size(); ++index)
+				{
+					auto& reservoir = reservoirs[index];
+					auto const capacity = reservoir.authored.heatCapacityKJPerK;
+					auto const temperatureK = reservoir.temperatureC + StationCelsiusOffset;
+					auto const heatInKW = reservoir.authored.absorbedHeatKW + routedIn[index];
+					// Net radiative rejection at the current emitting
+					// temperature: emissivity x view factor x area x sigma
+					// x (T^4 - T_sink^4). The environmental back-radiation
+					// term is explicit, so a warmer sink rejects less, and
+					// the radiator/view assumption is the declared
+					// emissivity-times-view-factor product. No distribution
+					// modelling is promised beyond these declared factors.
+					std::vector<double> rawRejections;
+					rawRejections.reserve(reservoir.radiatorIndices.size());
+					double rejectedKW = 0.0;
+					double minSinkC = reservoir.temperatureC;
+					double maxSinkC = reservoir.temperatureC;
+					for (auto const radiatorIndex : reservoir.radiatorIndices)
+					{
+						auto const& radiator = radiators[radiatorIndex];
+						auto const sinkK = radiator.authored.sinkTemperatureC + StationCelsiusOffset;
+						auto const rejection = radiator.authored.emissivity
+							* radiator.authored.viewFactor * radiator.authored.areaM2
+							* StationStefanBoltzmannKWPerM2K4
+							* (temperatureK * temperatureK * temperatureK * temperatureK
+								- sinkK * sinkK * sinkK * sinkK);
+						rawRejections.push_back(rejection);
+						rejectedKW += rejection;
+						minSinkC = std::min(minSinkC, radiator.authored.sinkTemperatureC);
+						maxSinkC = std::max(maxSinkC, radiator.authored.sinkTemperatureC);
+					}
+					// Finite physical floor: a body cannot radiatively cool
+					// below its coldest sink nor warm above its warmest one.
+					// The clamp is booked, not hidden: the ledger records
+					// the rejection that actually moved, scaled across the
+					// radiators that produced it.
+					double scale = 1.0;
+					if (!reservoir.radiatorIndices.empty())
+					{
+						if (rejectedKW > 0.0)
+						{
+							auto const cap = (reservoir.temperatureC - minSinkC) * capacity / dt;
+							if (rejectedKW > cap) scale = cap / rejectedKW;
+						}
+						else if (rejectedKW < 0.0)
+						{
+							auto const floor = (reservoir.temperatureC - maxSinkC) * capacity / dt;
+							if (rejectedKW < floor) scale = floor / rejectedKW;
+						}
+					}
+					for (size_t r = 0; r < reservoir.radiatorIndices.size(); ++r)
+						radiators[reservoir.radiatorIndices[r]].lastRejectedKW = rawRejections[r] * scale;
+					rejectedKW *= scale;
+					auto const netKW = heatInKW - rejectedKW;
+					auto const newTemperatureC = reservoir.temperatureC + netKW * dt / capacity;
+					reservoir.lastHeatRoutedKW = routedIn[index];
+					reservoir.lastHeatInKW = heatInKW;
+					reservoir.lastRejectedKW = rejectedKW;
+					reservoir.lastNetKW = netKW;
+					reservoir.absorbedKJ += reservoir.authored.absorbedHeatKW * dt;
+					reservoir.routedKJ += routedIn[index] * dt;
+					reservoir.rejectedKJ += rejectedKW * dt;
+					reservoir.temperatureC = newTemperatureC;
+					// Declared service limits are reported as crossings,
+					// never enforced by clamping the integrated state.
+					reservoir.lastAboveLimit = newTemperatureC
+						> reservoir.authored.maxTemperatureC + 1e-9;
+					reservoir.lastBelowLimit = newTemperatureC
+						< reservoir.authored.minTemperatureC - 1e-9;
 				}
 			}
 			// Charge from the surplus left after every allocation: batteries
@@ -1799,6 +2060,22 @@ namespace core
 					if (!requireFinite(flow.lastCompleted, where + "output completed amount")) return false;
 				}
 			}
+			system = "Thermal control";
+			for (auto const& reservoir : reservoirs)
+			{
+				auto const where = "thermal reservoir '" + reservoir.authored.id + "' ";
+				if (!requireFinite(reservoir.temperatureC, where +"integrated temperature")) return false;
+				if (!requireFinite(reservoir.lastHeatRoutedKW, where + "routed heat power")) return false;
+				if (!requireFinite(reservoir.lastHeatInKW, where + "total heat inflow")) return false;
+				if (!requireFinite(reservoir.lastRejectedKW, where + "radiator rejection")) return false;
+				if (!requireFinite(reservoir.lastNetKW, where + "net heat balance")) return false;
+				if (!requireFinite(reservoir.absorbedKJ, where + "cumulative absorbed energy")) return false;
+				if (!requireFinite(reservoir.routedKJ, where + "cumulative routed energy")) return false;
+				if (!requireFinite(reservoir.rejectedKJ, where + "cumulative rejected energy")) return false;
+			}
+			for (auto const& radiator : radiators)
+				if (!requireFinite(radiator.lastRejectedKW,
+					"radiator '" + radiator.authored.id + "' rejected power")) return false;
 			system = "Power allocation";
 			for (auto const& array : solarArrays)
 			{
@@ -1980,6 +2257,27 @@ namespace core
 							+ "' fully charged: stored energy reached nameplate capacity"
 						: "Battery '" + battery.authored.id + "' left full charge");
 			}
+			// Thermal limit crossings are announced so the event log
+			// records overheats and overcools without flooding every tick
+			// (#395).
+			for (size_t index = 0; index < reservoirs.size(); ++index)
+			{
+				auto const& reservoir = reservoirs[index];
+				if (reservoir.lastAboveLimit != previousAboveLimit[index])
+					appendBoundedEvent(events, tick, reservoir.lastAboveLimit
+						? "Thermal reservoir '" + reservoir.authored.id
+							+ "' above its declared maximum: " + std::to_string(reservoir.temperatureC)
+							+ " > " + std::to_string(reservoir.authored.maxTemperatureC) + " C"
+						: std::string("Thermal reservoir '") + reservoir.authored.id
+							+ "' back within its maximum limit");
+				if (reservoir.lastBelowLimit != previousBelowLimit[index])
+					appendBoundedEvent(events, tick, reservoir.lastBelowLimit
+						? "Thermal reservoir '" + reservoir.authored.id
+							+ "' below its declared minimum: " + std::to_string(reservoir.temperatureC)
+							+ " < " + std::to_string(reservoir.authored.minTemperatureC) + " C"
+						: std::string("Thermal reservoir '") + reservoir.authored.id
+							+ "' back above its minimum limit");
+			}
 			// Delivery arrivals are discrete scenario events rather than a
 			// continuous per-tick service, so every arrival is announced with
 			// its own quantities: the refused remainder is the account for
@@ -2044,6 +2342,27 @@ namespace core
 			{ return mImpl->conversions[left].authored.priority > mImpl->conversions[right].authored.priority; });
 		for (auto const& array : settings.solarArrays)
 			mImpl->solarArrays.push_back({array});
+		// Thermal reservoirs start at their authored starting temperature;
+		// the limit flags start consistent with it so the first tick
+		// reports transitions, not the initial condition (#395).
+		std::map<std::string, size_t> reservoirIndex;
+		for (auto const& reservoir : settings.thermalReservoirs)
+		{
+			Impl::ReservoirState state;
+			state.authored = reservoir;
+			state.temperatureC = reservoir.startingTemperatureC;
+			reservoirIndex[reservoir.id] = mImpl->reservoirs.size();
+			mImpl->reservoirs.push_back(std::move(state));
+		}
+		for (auto const& radiator : settings.radiators)
+		{
+			Impl::RadiatorState state;
+			state.authored = radiator;
+			state.reservoirIndex = reservoirIndex[radiator.reservoirId];
+			mImpl->radiators.push_back(std::move(state));
+			mImpl->reservoirs[state.reservoirIndex].radiatorIndices.push_back(
+				mImpl->radiators.size() - 1);
+		}
 		for (auto const& load : settings.equipmentLoads)
 		{
 			Impl::LoadState state;
@@ -2051,6 +2370,13 @@ namespace core
 			for (auto const& exchange : load.materialExchanges)
 				state.exchanges.push_back({storeIndex[exchange.storeId], exchange.ratePerSecond,
 					exchange.consumes});
+			// A declared heat sink routes this load's emitted heat into the
+			// reservoir exactly once instead of direct export (#395).
+			if (!load.heatSinkId.empty())
+			{
+				state.hasHeatSink = true;
+				state.heatSinkIndex = reservoirIndex[load.heatSinkId];
+			}
 			mImpl->loads.push_back(std::move(state));
 		}
 		mImpl->loadOrder.resize(mImpl->loads.size());
@@ -2112,7 +2438,7 @@ namespace core
 			Construction construction{object.get(), &source, StationSystemNames[i],
 				&settings.stores, &settings.transfers, &settings.conversions,
 				&settings.solarArrays, &settings.equipmentLoads, &settings.batteries,
-				&settings.deliveries};
+				&settings.deliveries, &settings.thermalReservoirs, &settings.radiators};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -2131,8 +2457,10 @@ namespace core
 			+ std::to_string(settings.conversions.size()) + " conversion(s), "
 			+ std::to_string(settings.solarArrays.size()) + " solar array(s), "
 			+ std::to_string(settings.equipmentLoads.size()) + " external equipment load(s), "
-			+ std::to_string(settings.batteries.size()) + " battery(ies) and "
-			+ std::to_string(settings.deliveries.size()) + " resupply delivery(ies)");
+			+ std::to_string(settings.batteries.size()) + " battery(ies), "
+			+ std::to_string(settings.deliveries.size()) + " resupply delivery(ies), "
+			+ std::to_string(settings.thermalReservoirs.size()) + " thermal reservoir(s) and "
+			+ std::to_string(settings.radiators.size()) + " radiator(s)");
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
 	bool StationSystemsRuntime::advance(uint64_t tick, float seconds)
@@ -2183,7 +2511,7 @@ namespace core
 		// integrated error path instead.
 		if (!mImpl->transferOrder.empty() || !mImpl->conversionOrder.empty()
 			|| !mImpl->loads.empty() || !mImpl->solarArrays.empty() || !mImpl->batteries.empty()
-			|| !mImpl->deliveries.empty())
+			|| !mImpl->deliveries.empty() || !mImpl->reservoirs.empty())
 		{
 			std::string violationSystem, violation;
 			if (!mImpl->applyLedger(tick, seconds, violationSystem, violation))
@@ -2294,6 +2622,7 @@ namespace core
 			loadResult.deliveredFraction = load.lastDeliveredFraction;
 			loadResult.materialFeasibleFraction = load.lastMaterialFraction;
 			loadResult.heatExportedKW = load.lastHeatExportedKW;
+			loadResult.heatRoutedKW = load.lastHeatRoutedKW;
 			loadResult.unmetCoolingKW = load.lastUnmetCoolingKW;
 			loadResult.admitted = load.lastAdmitted;
 			loadResult.blockReason = load.lastBlockReason;
@@ -2358,6 +2687,46 @@ namespace core
 		result.power.batteryDischargeKW = totalBatteryDischarge;
 		result.power.batteryChargeKW = totalBatteryCharge;
 		result.power.batteryShortfallKW = mImpl->lastBatteryShortfallKW;
+		// The thermal snapshot reports the authored capacity and declared
+		// limits beside the integrated temperature, the last tick's heat
+		// flows and the cumulative energy ledger (#395).
+		for (auto const& reservoir : mImpl->reservoirs)
+		{
+			StationThermalReservoirSnapshot reservoirResult;
+			reservoirResult.id = reservoir.authored.id;
+			reservoirResult.thermalClass = reservoir.authored.thermalClass;
+			reservoirResult.heatCapacityKJPerK = reservoir.authored.heatCapacityKJPerK;
+			reservoirResult.startingTemperatureC = reservoir.authored.startingTemperatureC;
+			reservoirResult.temperatureC = reservoir.temperatureC;
+			reservoirResult.minTemperatureC = reservoir.authored.minTemperatureC;
+			reservoirResult.maxTemperatureC = reservoir.authored.maxTemperatureC;
+			reservoirResult.absorbedHeatKW = reservoir.authored.absorbedHeatKW;
+			reservoirResult.lastHeatRoutedKW = reservoir.lastHeatRoutedKW;
+			reservoirResult.lastHeatInKW = reservoir.lastHeatInKW;
+			reservoirResult.lastRejectedKW = reservoir.lastRejectedKW;
+			reservoirResult.lastNetKW = reservoir.lastNetKW;
+			reservoirResult.aboveLimit = reservoir.lastAboveLimit;
+			reservoirResult.belowLimit = reservoir.lastBelowLimit;
+			reservoirResult.startingEnergyKJ = reservoir.authored.heatCapacityKJPerK
+				* reservoir.authored.startingTemperatureC;
+			reservoirResult.currentEnergyKJ = reservoir.authored.heatCapacityKJPerK
+				* reservoir.temperatureC;
+			reservoirResult.absorbedEnergyKJ = reservoir.absorbedKJ;
+			reservoirResult.routedEnergyKJ = reservoir.routedKJ;
+			reservoirResult.rejectedEnergyKJ = reservoir.rejectedKJ;
+			reservoirResult.residualKJ = reservoirResult.startingEnergyKJ
+				+ reservoir.absorbedKJ + reservoir.routedKJ - reservoir.rejectedKJ
+				- reservoirResult.currentEnergyKJ;
+			result.thermal.totalAbsorbedKW += reservoir.authored.absorbedHeatKW;
+			result.thermal.totalRoutedKW += reservoir.lastHeatRoutedKW;
+			result.thermal.totalRejectedKW += reservoir.lastRejectedKW;
+			result.thermal.reservoirs.push_back(std::move(reservoirResult));
+		}
+		for (auto const& radiator : mImpl->radiators)
+			result.thermal.radiators.push_back({radiator.authored.id,
+				radiator.authored.reservoirId, radiator.authored.areaM2,
+					radiator.authored.emissivity, radiator.authored.viewFactor,
+					radiator.authored.sinkTemperatureC, radiator.lastRejectedKW});
 		// The delivery snapshot reports the authored schedule beside the
 		// runtime's arrival history: what each occurrence brought in, what
 		// the destination refused, and when the next arrival is due (#392).

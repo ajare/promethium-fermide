@@ -297,6 +297,17 @@ namespace core
 		int priority{0};                // higher allocates first
 		double maxCurtailment{1.0};     // allowed curtailment fraction, [0, 1]
 		std::vector<EquipmentMaterialExchangeSettings> materialExchanges;
+		// The thermal reservoir that receives this load's emitted heat
+		// (#395). Empty keeps the pre-#395 behaviour: the heat leaves the
+		// station directly through the declared export boundary. When set,
+		// the emitted heat is routed into the reservoir exactly once - it
+		// is not also booked as direct export - and the reservoir's
+		// radiators become the export path. The reservoir must declare the
+		// same thermal service class: spare capacity in one class is never
+		// usable by another. Only exported-disposition loads may declare a
+		// sink; a cooling-service load needs a cooling service, not a
+		// passive heat sink, and stays refused until such a service exists.
+		std::string heatSinkId;
 		bool operator==(EquipmentLoadSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationEquipmentLoads{16};
@@ -314,6 +325,52 @@ namespace core
 	// discharging delivers stored kWh drawn * dischargeEfficiency, so the
 	// difference is an accounted loss — never free energy in either
 	// direction. Zero usable energy disables the battery entirely.
+	// Stefan-Boltzmann constant in kW/(m^2 K^4): the declared radiation
+	// law behind radiator rejection (#395). Radiator rejection is
+	// emissivity x view factor x area x sigma x (T^4 - T_sink^4); the
+	// emitting temperature and the environmental back-radiation are
+	// explicit, and the radiator/view assumption is the authored
+	// emissivity x view factor product. No distribution modelling is
+	// promised beyond these declared factors.
+	inline constexpr double StationStefanBoltzmannKWPerM2K4{5.670374419e-14};
+	inline constexpr double StationCelsiusOffset{273.15};
+	// A thermal reservoir (CONTEXT.md): a body or aggregate of material
+	// whose stored thermal energy and effective thermal capacity determine
+	// its temperature over time. The declared min/max temperatures are the
+	// limits of the services it supports: crossing them is an observable
+	// condition reported in the snapshot and event log, never a silent
+	// clamp of the integrated state. Thermal energy is tracked relative to
+	// 0 degrees C: E = capacity x T, so the ledger closes over absorbed,
+	// routed and rejected heat within the declared tolerance.
+	struct ThermalReservoirSettings
+	{
+		std::string id;
+		std::string thermalClass;          // service class of heat it collects
+		double heatCapacityKJPerK{0.0};  // effective thermal capacity, > 0
+		double startingTemperatureC{20.0};
+		double minTemperatureC{0.0};     // declared lower service limit
+		double maxTemperatureC{40.0};    // declared upper service limit
+		double absorbedHeatKW{0.0};      // constant environmental absorbed heat, >= 0
+		bool operator==(ThermalReservoirSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationThermalReservoirs{8};
+	// An authored radiator that rejects a reservoir's heat to space by
+	// radiation. Rejection follows the Stefan-Boltzmann law with the
+	// declared emissivity and view factor against an authored effective
+	// sink temperature, so environment-dependent rejection (back-radiation
+	// included) is explicit rather than an infinite cold sink.
+	struct RadiatorSettings
+	{
+		std::string id;
+		std::string reservoirId;
+		double areaM2{0.0};       // radiator area, > 0
+		double emissivity{0.9};   // (0, 1]
+		double viewFactor{1.0};   // (0, 1] radiator/view assumption
+		double sinkTemperatureC{-270.0}; // effective radiative sink temperature
+		bool operator==(RadiatorSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationRadiators{8};
+
 	struct BatterySettings
 	{
 		std::string id;
@@ -339,6 +396,8 @@ namespace core
 		std::vector<EquipmentLoadSettings> equipmentLoads;
 		std::vector<BatterySettings> batteries;
 		std::vector<ResourceDeliverySettings> deliveries;
+		std::vector<ThermalReservoirSettings> thermalReservoirs;
+		std::vector<RadiatorSettings> radiators;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// Profile shape validation and deterministic evaluation: the level of
@@ -527,6 +586,13 @@ namespace core
 		double deliveredFraction{0.0};
 		double materialFeasibleFraction{1.0}; // feed/destination-sustainable operation fraction (#554)
 		double heatExportedKW{0.0};   // heat leaving via the declared export boundary
+		// Emitted heat routed into the load's declared thermal reservoir
+		// instead of direct export (#395). A load's produced heat is
+		// booked exactly once: either exported directly or routed into the
+		// reservoir, never both. Electrical input is never converted to
+		// duplicate local heat - the authored heat output is the emitted
+		// heat, and energy stored in batteries or material is not heat.
+		double heatRoutedKW{0.0};
 		double unmetCoolingKW{0.0};   // cooling need with no feasible service
 		bool admitted{false};
 		std::string blockReason;
@@ -595,6 +661,60 @@ namespace core
 		std::vector<StationBatterySnapshot> batteries;
 		bool operator==(StationPowerSnapshot const&) const = default;
 	};
+	// One radiator as of the most recent tick: the authored rejection
+	// contract beside the heat it actually rejected at the reservoir's
+	// emitting temperature (#395).
+	struct StationRadiatorSnapshot
+	{
+		std::string id;
+		std::string reservoirId;
+		double areaM2{0.0};
+		double emissivity{0.9};
+		double viewFactor{1.0};
+		double sinkTemperatureC{0.0};
+		double lastRejectedKW{0.0}; // signed net radiative exchange this tick
+		bool operator==(StationRadiatorSnapshot const&) const = default;
+	};
+	// One thermal reservoir as of the most recent tick: the authored
+	// capacity and limits beside the integrated temperature, the heat
+	// flows and the cumulative energy ledger. Energy is tracked against
+	// a 0 degrees C reference: current energy is capacity x temperature,
+	// and starting + absorbed + routed - rejected must equal it within
+	// the declared tolerance. Above/below-limit flags report crossings of
+	// the declared service limits; they never clamp the state.
+	struct StationThermalReservoirSnapshot
+	{
+		std::string id;
+		std::string thermalClass;
+		double heatCapacityKJPerK{0.0};
+		double startingTemperatureC{0.0};
+		double temperatureC{0.0};
+		double minTemperatureC{0.0};
+		double maxTemperatureC{0.0};
+		double absorbedHeatKW{0.0};
+		double lastHeatRoutedKW{0.0};   // equipment heat routed in this tick
+		double lastHeatInKW{0.0};       // absorbed + routed this tick
+		double lastRejectedKW{0.0};     // radiator net rejection this tick
+		double lastNetKW{0.0};          // heat in minus rejected this tick
+		bool aboveLimit{false};
+		bool belowLimit{false};
+		double startingEnergyKJ{0.0};
+		double currentEnergyKJ{0.0};
+		double absorbedEnergyKJ{0.0};
+		double routedEnergyKJ{0.0};
+		double rejectedEnergyKJ{0.0};
+		double residualKJ{0.0}; // starting + absorbed + routed - rejected - current
+		bool operator==(StationThermalReservoirSnapshot const&) const = default;
+	};
+	struct StationThermalSnapshot
+	{
+		std::vector<StationThermalReservoirSnapshot> reservoirs;
+		std::vector<StationRadiatorSnapshot> radiators;
+		double totalAbsorbedKW{0.0};
+		double totalRoutedKW{0.0};
+		double totalRejectedKW{0.0};
+		bool operator==(StationThermalSnapshot const&) const = default;
+	};
 
 	struct StationSystemsSnapshot
 	{
@@ -610,6 +730,12 @@ namespace core
 		std::vector<StationConstituentBalanceSnapshot> constituentBalances;
 		std::vector<StationDeliverySnapshot> deliveries;
 		StationPowerSnapshot power;
+		// The thermal picture (#395): reservoir temperatures, heat flows
+		// and limits, radiator rejection and the per-reservoir energy
+		// ledger. The ledger closes over absorbed, routed and rejected
+		// energy against capacity x temperature within the declared
+		// tolerance; a residual beyond it is a conservation violation.
+		StationThermalSnapshot thermal;
 		// Soonest authored arrival still pending across every delivery, for
 		// the overview's "next delivery" readout (#392).
 		bool hasNextDelivery{false};

@@ -25,13 +25,13 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		world->getSimulationTick() * static_cast<double>(core::World::getFixedTimestep()),
 		static_cast<unsigned long long>(world->getSimulationTick()));
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
-	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply and rechargeable batteries. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Within a tick, power allocates first, then transfers, then conversions. Observation interval is a provisional display/event setting, not a separate simulation clock.");
+	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply, rechargeable batteries, and thermal reservoirs with radiator rejection. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Thermal reservoirs integrate temperature from their effective capacity under absorbed and routed equipment heat; radiators reject heat by the Stefan-Boltzmann law at the emitting temperature against the authored sink, emissivity and view factor. A load's emitted heat is booked exactly once: routed into its class-compatible reservoir or exported directly, never both. Declared temperature limits are reported, never clamped. Within a tick, power allocates first, then thermal integrates, then transfers, then conversions. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies)",
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s)",
 		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
 		authored.stores.size(), authored.transfers.size(), authored.conversions.size(),
 		authored.solarArrays.size(), authored.equipmentLoads.size(), authored.batteries.size(),
-		authored.deliveries.size());
+		authored.deliveries.size(), authored.thermalReservoirs.size(), authored.radiators.size());
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
@@ -377,6 +377,11 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		ImGui::InputInt(("Load " + row + " priority").c_str(), &load.priority);
 		ImGui::InputDouble(("Load " + row + " max curtailment").c_str(),
 			&load.maxCurtailment, 0.0, 0.0, "%.3f");
+		char heatSinkBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(heatSinkBuffer, load.heatSinkId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Load " + row + " heat sink").c_str(),
+			heatSinkBuffer, sizeof(heatSinkBuffer)))
+			load.heatSinkId = heatSinkBuffer;
 		for (size_t exchange = 0; exchange < load.materialExchanges.size(); )
 		{
 			auto& flow = load.materialExchanges[exchange];
@@ -530,6 +535,111 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		}
 		mDraft.deliveries.push_back(std::move(delivery));
 	}
+	ImGui::SeparatorText("Draft thermal reservoirs (kJ/K, degrees C; limits are declared service limits, absorbed heat is environmental)");
+	for (size_t index = 0; index < mDraft.thermalReservoirs.size(); )
+	{
+		auto& thermalReservoir = mDraft.thermalReservoirs[index];
+		auto const row = std::to_string(index);
+		bool removeReservoir = false;
+		ImGui::PushItemWidth(220);
+		char reservoirIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(reservoirIdBuffer, thermalReservoir.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Reservoir " + row + " id").c_str(),
+			reservoirIdBuffer, sizeof(reservoirIdBuffer)))
+			thermalReservoir.id = reservoirIdBuffer;
+		char reservoirClassBuffer[16]{};
+		std::strncpy(reservoirClassBuffer, thermalReservoir.thermalClass.c_str(), sizeof(reservoirClassBuffer) - 1);
+		if (ImGui::InputText(("Reservoir " + row + " thermal class").c_str(),
+			reservoirClassBuffer, sizeof(reservoirClassBuffer)))
+			thermalReservoir.thermalClass = reservoirClassBuffer;
+		ImGui::InputDouble(("Reservoir " + row + " heat capacity kJ/K").c_str(),
+			&thermalReservoir.heatCapacityKJPerK, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Reservoir " + row + " starting temperature C").c_str(),
+			&thermalReservoir.startingTemperatureC, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Reservoir " + row + " min temperature C").c_str(),
+			&thermalReservoir.minTemperatureC, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Reservoir " + row + " max temperature C").c_str(),
+			&thermalReservoir.maxTemperatureC, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Reservoir " + row + " absorbed heat kW").c_str(),
+			&thermalReservoir.absorbedHeatKW, 0.0, 0.0, "%.3f");
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove reservoir " + row).c_str()))
+			removeReservoir = true;
+		ImGui::PopItemWidth();
+		if (removeReservoir)
+			mDraft.thermalReservoirs.erase(mDraft.thermalReservoirs.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
+	if (mDraft.thermalReservoirs.size() < core::MaxStationThermalReservoirs && ImGui::Button("Add thermal reservoir"))
+	{
+		core::ThermalReservoirSettings thermalReservoir;
+		thermalReservoir.thermalClass = "moderate";
+		thermalReservoir.heatCapacityKJPerK = 100.0;
+		thermalReservoir.startingTemperatureC = 20.0;
+		thermalReservoir.minTemperatureC = 0.0;
+		thermalReservoir.maxTemperatureC = 40.0;
+		for (size_t candidate = mDraft.thermalReservoirs.size() + 1;; ++candidate)
+		{
+			thermalReservoir.id = "reservoir" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.thermalReservoirs.begin(), mDraft.thermalReservoirs.end(),
+				[&](core::ThermalReservoirSettings const& existing) { return existing.id == thermalReservoir.id; });
+			if (!taken) break;
+		}
+		mDraft.thermalReservoirs.push_back(std::move(thermalReservoir));
+	}
+	ImGui::SeparatorText("Draft radiators (m2; rejection = emissivity x view factor x area x sigma x (T^4 - T_sink^4))");
+	for (size_t index = 0; index < mDraft.radiators.size(); )
+	{
+		auto& radiator = mDraft.radiators[index];
+		auto const row = std::to_string(index);
+		bool removeRadiator = false;
+		ImGui::PushItemWidth(220);
+		char radiatorIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(radiatorIdBuffer, radiator.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Radiator " + row + " id").c_str(),
+			radiatorIdBuffer, sizeof(radiatorIdBuffer)))
+			radiator.id = radiatorIdBuffer;
+		char radiatorHostBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(radiatorHostBuffer, radiator.reservoirId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Radiator " + row + " reservoir").c_str(),
+			radiatorHostBuffer, sizeof(radiatorHostBuffer)))
+			radiator.reservoirId = radiatorHostBuffer;
+		ImGui::InputDouble(("Radiator " + row + " area m2").c_str(),
+			&radiator.areaM2, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Radiator " + row + " emissivity").c_str(),
+			&radiator.emissivity, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Radiator " + row + " view factor").c_str(),
+			&radiator.viewFactor, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Radiator " + row + " sink temperature C").c_str(),
+			&radiator.sinkTemperatureC, 0.0, 0.0, "%.3f");
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove radiator " + row).c_str()))
+			removeRadiator = true;
+		ImGui::PopItemWidth();
+		if (removeRadiator)
+			mDraft.radiators.erase(mDraft.radiators.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
+	if (mDraft.radiators.size() < core::MaxStationRadiators && ImGui::Button("Add radiator"))
+	{
+		core::RadiatorSettings radiator;
+		radiator.areaM2 = 100.0;
+		radiator.emissivity = 0.9;
+		radiator.viewFactor = 1.0;
+		radiator.sinkTemperatureC = -270.0;
+		if (!mDraft.thermalReservoirs.empty())
+			radiator.reservoirId = mDraft.thermalReservoirs.front().id;
+		for (size_t candidate = mDraft.radiators.size() + 1;; ++candidate)
+		{
+			radiator.id = "radiator" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.radiators.begin(), mDraft.radiators.end(),
+				[&](core::RadiatorSettings const& existing) { return existing.id == radiator.id; });
+			if (!taken) break;
+		}
+		mDraft.radiators.push_back(std::move(radiator));
+	}
 	bool const draftChanged = mDraft != authored;
 	ImGui::TextUnformatted(draftChanged
 		? "Draft differs from the authored start conditions."
@@ -662,6 +772,8 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		if (!load.admitted)
 			ImGui::Text("  not admitted: %s (unmet cooling %.3f kW)",
 				load.blockReason.c_str(), load.unmetCoolingKW);
+		if (load.heatRoutedKW > 0.0)
+			ImGui::Text("  heat routed to reservoir: %.3f kW (not also exported)", load.heatRoutedKW);
 		for (auto const& flow : load.materialExchanges)
 			ImGui::Text("  exchange %s (%s): requested %.3f, completed %.3f, unmet %.3f",
 				flow.storeId.c_str(), flow.unit.c_str(), flow.requested, flow.completed,
@@ -727,6 +839,36 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	}
 	if (snapshot.enabled && !snapshot.healthy)
 		ImGui::TextWrapped("Station software failure: the World is paused. The failed tick was not committed. Reset the World to reconstruct Station systems; resume cannot retry failed scripts.");
+	ImGui::SeparatorText("Thermal reservoirs (live; temperature integrates heat in minus radiator rejection; limits are reported, never clamped)");
+	if (snapshot.thermal.reservoirs.empty()) ImGui::TextDisabled("No thermal reservoirs authored.");
+	for (auto const& thermalReservoir : snapshot.thermal.reservoirs)
+	{
+		ImGui::Text("%s (%s): %.3f C | limits %.3f..%.3f C | capacity %.3f kJ/K | heat in %.3f kW (routed %.3f, absorbed %.3f), rejected %.3f kW, net %.3f kW",
+			thermalReservoir.id.c_str(), thermalReservoir.thermalClass.c_str(),
+			thermalReservoir.temperatureC, thermalReservoir.minTemperatureC,
+			thermalReservoir.maxTemperatureC, thermalReservoir.heatCapacityKJPerK,
+			thermalReservoir.lastHeatInKW, thermalReservoir.lastHeatRoutedKW,
+			thermalReservoir.absorbedHeatKW, thermalReservoir.lastRejectedKW,
+			thermalReservoir.lastNetKW);
+		ImGui::Text("  energy ledger (kJ): starting %.3f, current %.3f, absorbed %.3f, routed %.3f, rejected %.3f, residual %.9f (tolerance %.1e)",
+			thermalReservoir.startingEnergyKJ, thermalReservoir.currentEnergyKJ,
+			thermalReservoir.absorbedEnergyKJ, thermalReservoir.routedEnergyKJ,
+			thermalReservoir.rejectedEnergyKJ, thermalReservoir.residualKJ, snapshot.balanceTolerance);
+		if (thermalReservoir.aboveLimit)
+			ImGui::Text("  ABOVE the declared maximum service temperature");
+		if (thermalReservoir.belowLimit)
+			ImGui::Text("  BELOW the declared minimum service temperature");
+	}
+	ImGui::SeparatorText("Radiators (live; rejection follows the emitting temperature and the authored sink)");
+	if (snapshot.thermal.radiators.empty()) ImGui::TextDisabled("No radiators authored.");
+	for (auto const& radiator : snapshot.thermal.radiators)
+		ImGui::Text("%s -> %s: area %.3f m2, emissivity %.3f, view %.3f, sink %.3f C | rejected %.3f kW",
+			radiator.id.c_str(), radiator.reservoirId.c_str(), radiator.areaM2,
+			radiator.emissivity, radiator.viewFactor, radiator.sinkTemperatureC,
+			radiator.lastRejectedKW);
+	ImGui::Text("Thermal totals: absorbed %.3f kW, routed %.3f kW, rejected %.3f kW",
+		snapshot.thermal.totalAbsorbedKW, snapshot.thermal.totalRoutedKW,
+		snapshot.thermal.totalRejectedKW);
 	for (auto const& diagnostic : world->getStationSystemsDiagnostics())
 	{
 		char const* kind = "Lua error";

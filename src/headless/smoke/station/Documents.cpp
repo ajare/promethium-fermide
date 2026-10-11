@@ -214,7 +214,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 71", "version: 64");
+		replaceAll(legacy, "version: 72", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -231,14 +231,14 @@ namespace
 			"authored store fields missing or live inventory leaked");
 		bool refused = false;
 		auto staleStores = withField;
-		replaceAll(staleStores, "version: 71", "version: 65");
+		replaceAll(staleStores, "version: 72", "version: 65");
 		auto const staleStoresPath = directory / "stale-stores.world.yaml";
 		writeFile(staleStoresPath, staleStores);
 		try { (void)core::loadWorldDocument(staleStoresPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-66 document carrying resource stores was silently accepted");
 		auto staleTransfers = withField;
-		replaceAll(staleTransfers, "version: 71", "version: 66");
+		replaceAll(staleTransfers, "version: 72", "version: 66");
 		auto const staleTransfersPath = directory / "stale-transfers.world.yaml";
 		writeFile(staleTransfersPath, staleTransfers);
 		refused = false;
@@ -246,7 +246,7 @@ namespace
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-67 document carrying resource transfers was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 71", "version: 64");
+		replaceAll(stale, "version: 72", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
 		refused = false;
@@ -384,7 +384,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 71", "version: 67");
+			replaceAll(stale, "version: 72", "version: 67");
 			auto const stalePath = directory / "stale-compounds.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -493,7 +493,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 71", "version: 69");
+			replaceAll(stale, "version: 72", "version: 69");
 			auto const stalePath = directory / "stale-batteries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -615,7 +615,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 71", "version: 68");
+			replaceAll(stale, "version: 72", "version: 68");
 			auto const stalePath = directory / "stale-power.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -742,7 +742,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 71", "version: 70");
+			replaceAll(stale, "version: 72", "version: 70");
 			auto const stalePath = directory / "stale-deliveries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -772,6 +772,154 @@ namespace
 			require(refused, "a delivery targeting an unknown store was accepted from a file");
 		}
 	}
+	// #395: authored thermal reservoirs, radiators and load heat-sink
+	// routing travel through the real file seams as authored settings
+	// only; a reopened World replays the thermal scenario identically,
+	// and pre-72 documents carrying the new fields are refused rather
+	// than silently dropped.
+	void thermalFiles(smoke::Context const& context)
+	{
+		namespace filesystem = std::filesystem;
+		auto const directory = context.temporaryRoot() / "station-thermal";
+		filesystem::create_directories(directory);
+		core::ThermalReservoirSettings cabin;
+		cabin.id = "cabin";
+		cabin.thermalClass = "moderate";
+		cabin.heatCapacityKJPerK = 100.0;
+		cabin.startingTemperatureC = 20.0;
+		cabin.minTemperatureC = 10.0;
+		cabin.maxTemperatureC = 60.0;
+		cabin.absorbedHeatKW = 0.5;
+		core::RadiatorSettings panel;
+		panel.id = "panel";
+		panel.reservoirId = "cabin";
+		panel.areaM2 = 5000.0;
+		panel.emissivity = 0.9;
+		panel.viewFactor = 1.0;
+		panel.sinkTemperatureC = -270.0;
+		core::SolarArraySettings field;
+		field.id = "field";
+		field.capacityKW = 10.0;
+		core::EquipmentLoadSettings shop;
+		shop.id = "shop";
+		shop.electricalDemandKW = 5.0;
+		shop.thermalClass = "moderate";
+		shop.heatOutputKW = 2.0;
+		shop.heatSinkId = "cabin";
+		core::World original("Thermal Round Trip", 2, 2);
+		original.pauseSimulation();
+		original.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 2.0f;
+		settings.thermalReservoirs.push_back(cabin);
+		settings.radiators.push_back(panel);
+		settings.solarArrays.push_back(field);
+		settings.equipmentLoads.push_back(shop);
+		std::string diagnostic;
+		require(original.configureStationSystems(settings, false, &diagnostic),
+			"Thermal settings edit failed: " + diagnostic);
+		original.resumeSimulation();
+		require(original.advanceTicks(3600), "Thermal original run failed");
+		auto const expected = original.getStationSystemsSnapshot();
+		require(expected.thermal.reservoirs.size() == 1
+			&& expected.thermal.reservoirs[0].temperatureC > 20.0
+			&& !expected.thermal.reservoirs[0].aboveLimit
+			&& std::abs(expected.thermal.reservoirs[0].residualKJ) < 1e-6
+			&& expected.thermal.radiators[0].lastRejectedKW > 0.0
+			&& std::abs(expected.thermal.reservoirs[0].temperatureC - 20.0) < 40.0,
+			"Thermal scenario produced the wrong observable state");
+		for (auto const* suffix : {".world.yaml", ".world"})
+		{
+			auto const path = directory / (std::string("thermal") + suffix);
+			original.saveTo(path.string());
+			auto const document = readFile(path);
+			require(document.find("thermalReservoirs") != std::string::npos
+				&& document.find("heatCapacityKJPerK") != std::string::npos
+				&& document.find("startingTemperatureC") != std::string::npos
+				&& document.find("minTemperatureC") != std::string::npos
+				&& document.find("maxTemperatureC") != std::string::npos
+				&& document.find("absorbedHeatKW") != std::string::npos
+				&& document.find("radiators") != std::string::npos
+				&& document.find("areaM2") != std::string::npos
+				&& document.find("emissivity") != std::string::npos
+				&& document.find("viewFactor") != std::string::npos
+				&& document.find("sinkTemperatureC") != std::string::npos
+				&& document.find("heatSinkId") != std::string::npos,
+				"authored thermal fields missing from the document");
+			for (auto const* liveState : {"temperatureC", "aboveLimit", "belowLimit",
+				"residualKJ", "rejectedEnergyKJ", "routedEnergyKJ", "absorbedEnergyKJ",
+				"lastRejectedKW", "currentEnergyKJ"})
+				require(document.find(liveState) == std::string::npos,
+					std::string("live thermal state leaked into the document: ") + liveState);
+			auto const reopened = core::loadWorldDocument(path);
+			require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+				"thermal settings did not survive the file round trip");
+			require(reopened->getStationSystemsSnapshot().thermal.reservoirs.size() == 1
+				&& reopened->getStationSystemsSnapshot().thermal.reservoirs[0].temperatureC == 20.0
+				&& reopened->getStationSystemsSnapshot().thermal.reservoirs[0].absorbedEnergyKJ == 0.0,
+				"reopened World did not reconstruct the authored thermal starting state");
+			reopened->resumeSimulation();
+			require(reopened->advanceTicks(3600), "Thermal reopened run failed");
+			require(reopened->getStationSystemsSnapshot() == expected,
+				"thermal scenario is not reproducible from the document");
+			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
+				"thermal event history is not reproducible from the document");
+		}
+		// A pre-72 document carrying the new fields is refused.
+		auto const withField = serializeYaml(original);
+		{
+			auto stale = withField;
+			replaceAll(stale, "version: 72", "version: 71");
+			auto const stalePath = directory / "stale-thermal.world.yaml";
+			writeFile(stalePath, stale);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(stalePath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a pre-72 document carrying thermal reservoirs was silently accepted");
+		}
+		// Malformed thermal values in a file are rejected.
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "heatCapacityKJPerK: 100", "heatCapacityKJPerK: 0");
+			auto const malformedPath = directory / "malformed-capacity.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a zero thermal capacity was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "emissivity: 0.9", "emissivity: 1.5");
+			auto const malformedPath = directory / "malformed-emissivity.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "an emissivity above one was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "sinkTemperatureC: -270", "sinkTemperatureC: -300");
+			auto const malformedPath = directory / "malformed-sink.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a sub-absolute-zero sink temperature was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "heatSinkId: cabin", "heatSinkId: ghost");
+			auto const malformedPath = directory / "malformed-heatsink.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a load heat sink targeting an unknown reservoir was accepted from a file");
+		}
+	}
 }
 
 void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
@@ -784,4 +932,5 @@ void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"powerFiles", powerFiles});
 	checks.push_back({"batteryFiles", batteryFiles});
 	checks.push_back({"deliveryFiles", deliveryFiles});
+	checks.push_back({"thermalFiles", thermalFiles});
 }

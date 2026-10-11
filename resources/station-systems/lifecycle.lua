@@ -1,18 +1,25 @@
 -- Station systems slice 5: lifecycle, authored finite Resource stores,
 -- bounded authored transfers, compound-resource conversions, solar
--- generation, External equipment load supply, rechargeable battery banks
--- and scheduled resupply deliveries. Every system executes this factory
--- in its own budgeted private sandbox.
+-- generation, External equipment load supply, rechargeable battery banks,
+-- scheduled resupply deliveries, and thermal reservoirs with radiator
+-- rejection. Every system executes this factory in its own budgeted
+-- private sandbox.
 -- Stores, transfer rules, conversion rules, solar arrays, equipment
--- load contracts, battery descriptors and delivery schedules arrive as
--- plain immutable descriptor values; each object initialises its own
--- copy and re-checks the finite-capacity, per-unit conservation,
--- per-constituent compound conservation, power-allocation, battery
--- energy-conservation and delivery-schedule invariants every tick. The
--- host applies the authoritative ledger; this mirror audits the same
--- rules inside the sandbox so a corrupt crossing or model drift fails
--- contained through the integrated error path.
+-- load contracts, battery descriptors, delivery schedules, thermal
+-- reservoir contracts and radiator contracts arrive as plain immutable
+-- descriptor values; each object initialises its own copy and re-checks
+-- the finite-capacity, per-unit conservation, per-constituent compound
+-- conservation, power-allocation, battery energy-conservation,
+-- delivery-schedule and thermal energy-conservation invariants every
+-- tick. The host applies the authoritative ledger; this mirror audits
+-- the same rules inside the sandbox so a corrupt crossing or model drift
+-- fails contained through the integrated error path.
 local BALANCE_TOLERANCE = 1e-9
+-- Stefan-Boltzmann constant in kW/(m^2 K^4) and the Celsius offset,
+-- mirroring core::StationStefanBoltzmannKWPerM2K4 and
+-- core::StationCelsiusOffset for the radiator rejection law.
+local STEFAN_BOLTZMANN = 5.670374419e-14
+local KELVIN_OFFSET = 273.15
 -- Schedule boundary tolerance: an occurrence scheduled exactly on the
 -- fixed-tick grid can land a few ulps either side of it, so due-ness is
 -- judged with the same tolerance the host uses. Mirrors
@@ -57,7 +64,8 @@ local function toKg(unit, mass)
     return mass
 end
 
-return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries)
+return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries,
+    reservoirs, radiators)
     assert(type(name) == "string")
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
@@ -66,6 +74,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     assert(type(loads) == "table", "equipment load descriptors missing")
     assert(type(batteries) == "table", "battery descriptors missing")
     assert(type(deliveries) == "table", "resupply delivery descriptors missing")
+    assert(type(reservoirs) == "table", "thermal reservoir descriptors missing")
+    assert(type(radiators) == "table", "radiator descriptors missing")
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
@@ -73,7 +83,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         starting_constituents = {}, constituent_loss = {},
         constituent_delivered = {},
         solar = {}, loads = {}, load_order = {}, batteries = {},
-        deliveries = {},
+        deliveries = {}, reservoirs = {}, radiators = {},
     }
     local by_id = {}
     for index = 1, #stores do
@@ -292,6 +302,95 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             lastAvailable = 0,
         }
     end
+    -- Thermal reservoirs (#395): stored thermal energy and effective
+    -- capacity determine temperature over time. The declared min/max are
+    -- the service limits; crossing them is reported, never clamped.
+    -- Energy is tracked against a 0 degrees C reference: E = C x T.
+    local reservoir_by_id = {}
+    for index = 1, #reservoirs do
+        local reservoir = reservoirs[index]
+        assert(type(reservoir) == 'table', 'thermal reservoir descriptor must be a table')
+        assert(type(reservoir.id) == 'string' and #reservoir.id > 0, 'thermal reservoir needs an id')
+        assert(reservoir.thermalClass == 'low' or reservoir.thermalClass == 'moderate'
+            or reservoir.thermalClass == 'warm' or reservoir.thermalClass == 'generation',
+            'thermal reservoir needs a declared thermal service class')
+        assert(type(reservoir.heatCapacityKJPerK) == 'number'
+            and reservoir.heatCapacityKJPerK == reservoir.heatCapacityKJPerK
+            and reservoir.heatCapacityKJPerK > 0 and reservoir.heatCapacityKJPerK < math.huge,
+            'thermal capacity must be finite and positive')
+        local function checkTemp(field, value)
+            assert(type(value) == 'number' and value == value and value < math.huge
+                and value > -KELVIN_OFFSET,
+                'thermal reservoir ' .. field .. ' must be finite and above absolute zero')
+        end
+        checkTemp('starting temperature', reservoir.startingTemperatureC)
+        checkTemp('minimum temperature', reservoir.minTemperatureC)
+        checkTemp('maximum temperature', reservoir.maxTemperatureC)
+        assert(reservoir.minTemperatureC < reservoir.maxTemperatureC,
+            'thermal temperature limits need min below max')
+        assert(reservoir.startingTemperatureC >= reservoir.minTemperatureC
+            and reservoir.startingTemperatureC <= reservoir.maxTemperatureC,
+            'thermal starting temperature must be within its declared limits')
+        assert(type(reservoir.absorbedHeatKW) == 'number'
+            and reservoir.absorbedHeatKW == reservoir.absorbedHeatKW
+            and reservoir.absorbedHeatKW >= 0 and reservoir.absorbedHeatKW < math.huge,
+            'absorbed heat must be finite and non-negative')
+        object.reservoirs[index] = {
+            id = reservoir.id,
+            thermalClass = reservoir.thermalClass,
+            capacity = reservoir.heatCapacityKJPerK,
+            startingTemperature = reservoir.startingTemperatureC,
+            minTemperature = reservoir.minTemperatureC,
+            maxTemperature = reservoir.maxTemperatureC,
+            absorbedKW = reservoir.absorbedHeatKW,
+            temperature = reservoir.startingTemperatureC,
+            radiators = {},
+            lastRouted = 0,
+            lastHeatIn = 0,
+            lastRejected = 0,
+            lastNet = 0,
+            absorbedKJ = 0,
+            routedKJ = 0,
+            rejectedKJ = 0,
+            aboveLimit = false,
+            belowLimit = false,
+        }
+        reservoir_by_id[reservoir.id] = object.reservoirs[index]
+    end
+    -- Radiators reject a reservoir's heat by radiation: emissivity x view
+    -- factor x area x sigma x (T^4 - T_sink^4), with the environmental
+    -- back-radiation term explicit.
+    for index = 1, #radiators do
+        local radiator = radiators[index]
+        assert(type(radiator) == 'table', 'radiator descriptor must be a table')
+        assert(type(radiator.id) == 'string' and #radiator.id > 0, 'radiator needs an id')
+        local host = reservoir_by_id[radiator.reservoir]
+        assert(host ~= nil, 'radiator host thermal reservoir is unknown')
+        assert(type(radiator.areaM2) == 'number' and radiator.areaM2 == radiator.areaM2
+            and radiator.areaM2 > 0 and radiator.areaM2 < math.huge,
+            'radiator area must be finite and positive')
+        assert(type(radiator.emissivity) == 'number' and radiator.emissivity == radiator.emissivity
+            and radiator.emissivity > 0 and radiator.emissivity <= 1,
+            'radiator emissivity must be greater than 0 and at most 1')
+        assert(type(radiator.viewFactor) == 'number' and radiator.viewFactor == radiator.viewFactor
+            and radiator.viewFactor > 0 and radiator.viewFactor <= 1,
+            'radiator view factor must be greater than 0 and at most 1')
+        assert(type(radiator.sinkTemperatureC) == 'number'
+            and radiator.sinkTemperatureC == radiator.sinkTemperatureC
+            and radiator.sinkTemperatureC < math.huge
+            and radiator.sinkTemperatureC > -KELVIN_OFFSET,
+            'radiator sink temperature must be finite and above absolute zero')
+        object.radiators[index] = {
+            id = radiator.id,
+            reservoir = host,
+            areaM2 = radiator.areaM2,
+            emissivity = radiator.emissivity,
+            viewFactor = radiator.viewFactor,
+            sinkTemperatureC = radiator.sinkTemperatureC,
+            lastRejected = 0,
+        }
+        host.radiators[#host.radiators + 1] = object.radiators[index]
+    end
     for index = 1, #loads do
         local load = loads[index]
         assert(type(load) == 'table', 'equipment load descriptor must be a table')
@@ -337,6 +436,20 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 lastUnmet = 0,
             }
         end
+        -- Heat sink routing (#395): emitted heat goes to exactly one
+        -- declared reservoir of the same thermal service class; spare
+        -- capacity in another class is never usable, and a
+        -- cooling-service load needs a cooling service rather than a
+        -- passive sink.
+        local heatSink
+        if load.heatSinkId ~= nil and load.heatSinkId ~= '' then
+            heatSink = reservoir_by_id[load.heatSinkId]
+            assert(heatSink ~= nil, 'equipment load heat sink reservoir is unknown')
+            assert(heatSink.thermalClass == load.thermalClass,
+                'equipment load heat sink must share the load thermal service class')
+            assert(load.cooling == 'exported',
+                'a cooling-service load needs a cooling service, not a heat sink')
+        end
         object.loads[index] = {
             id = load.id,
             demandKW = load.demandKW,
@@ -348,6 +461,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             priority = load.priority,
             maxCurtailment = load.maxCurtailment,
             exchanges = exchanges,
+            heatSink = heatSink,
             lastLevel = 0,
             requested = 0,
             supplied = 0,
@@ -1007,8 +1121,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             -- Authored heat is a full-operation rate: export scales by the
             -- operating-profile level times the delivered fraction of the
             -- profile-scaled request (#548).
-            load.heatExported = load.admitted and load.heatKW * load.lastLevel
+            -- Emitted heat is booked exactly once (#395): a load with a
+            -- declared heat sink routes its produced heat into the
+            -- reservoir and exports nothing directly; without a sink the
+            -- heat leaves through the declared export boundary as
+            -- before. Electrical input is never duplicate local heat.
+            local producedHeat = load.admitted and load.heatKW * load.lastLevel
                 * load.deliveredFraction or 0
+            load.heatRouted = load.heatSink and producedHeat or 0
+            load.heatExported = load.heatSink and 0 or producedHeat
             load.unmetCooling = load.admitted and 0 or load.heatKW * load.lastLevel
             -- Declared material exchanges are full-operation rates and scale
             -- by the full-operation delivered fraction (profile level times
@@ -1110,7 +1231,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local load = self.loads[index]
             local results = { load.requested, load.supplied, load.deliveredFraction,
                 load.materialFraction, load.cappedRequest, load.unmetCritical,
-                load.heatExported, load.unmetCooling }
+                load.heatExported, load.heatRouted, load.unmetCooling }
             for _, value in ipairs(results) do
                 assert(isFinite(value),
                     "equipment load '" .. load.id .. "' result is not finite")
@@ -1134,6 +1255,101 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         assert(isFinite(totalSupplied), 'total supplied power is not finite')
         assert(isFinite(batterySupplied), 'total battery supplied power is not finite')
     end
+    -- Mirror of the host thermal ledger (#395): explicit Euler on the
+    -- fixed World tick. Each reservoir accumulates its authored absorbed
+    -- heat plus the equipment heat routed into it, against radiator
+    -- rejection following the Stefan-Boltzmann law at the current
+    -- emitting temperature with explicit environmental back-radiation.
+    -- A body cannot radiatively cool below its coldest sink nor warm
+    -- above its warmest one; the clamp is booked, not hidden. The energy
+    -- ledger closes over exactly the terms that moved.
+    local function applyThermal(self, fixed_seconds)
+        local routedByReservoir = {}
+        for _, load in ipairs(self.loads) do
+            if load.heatSink then
+                routedByReservoir[load.heatSink] =
+                    (routedByReservoir[load.heatSink] or 0) + load.heatRouted
+            end
+        end
+        for _, reservoir in ipairs(self.reservoirs) do
+            local capacity = reservoir.capacity
+            local temperatureK = reservoir.temperature + KELVIN_OFFSET
+            local routed = routedByReservoir[reservoir] or 0
+            local heatIn = reservoir.absorbedKW + routed
+            local rejected = 0
+            local minSink = reservoir.temperature
+            local maxSink = reservoir.temperature
+            local raw = {}
+            for r = 1, #reservoir.radiators do
+                local radiator = reservoir.radiators[r]
+                local sinkK = radiator.sinkTemperatureC + KELVIN_OFFSET
+                -- Multiplication, not x^4: mirrors the host's exact
+                -- product so host and sandbox integrate identically.
+                local value = radiator.emissivity * radiator.viewFactor * radiator.areaM2
+                    * STEFAN_BOLTZMANN
+                    * (temperatureK * temperatureK * temperatureK * temperatureK
+                        - sinkK * sinkK * sinkK * sinkK)
+                raw[r] = value
+                rejected = rejected + value
+                if radiator.sinkTemperatureC < minSink then minSink = radiator.sinkTemperatureC end
+                if radiator.sinkTemperatureC > maxSink then maxSink = radiator.sinkTemperatureC end
+            end
+            local scale = 1
+            if #reservoir.radiators > 0 then
+                if rejected > 0 then
+                    local cap = (reservoir.temperature - minSink) * capacity / fixed_seconds
+                    if rejected > cap then scale = cap / rejected end
+                elseif rejected < 0 then
+                    local floor = (reservoir.temperature - maxSink) * capacity / fixed_seconds
+                    if rejected < floor then scale = floor / rejected end
+                end
+            end
+            for r = 1, #reservoir.radiators do
+                reservoir.radiators[r].lastRejected = raw[r] * scale
+            end
+            rejected = rejected * scale
+            local net = heatIn - rejected
+            local newTemperature = reservoir.temperature + net * fixed_seconds / capacity
+            reservoir.lastRouted = routed
+            reservoir.lastHeatIn = heatIn
+            reservoir.lastRejected = rejected
+            reservoir.lastNet = net
+            reservoir.absorbedKJ = reservoir.absorbedKJ + reservoir.absorbedKW * fixed_seconds
+            reservoir.routedKJ = reservoir.routedKJ + routed * fixed_seconds
+            reservoir.rejectedKJ = reservoir.rejectedKJ + rejected * fixed_seconds
+            reservoir.temperature = newTemperature
+            -- Declared service limits are reported as crossings, never
+            -- enforced by clamping the integrated state.
+            reservoir.aboveLimit = newTemperature > reservoir.maxTemperature + 1e-9
+            reservoir.belowLimit = newTemperature < reservoir.minTemperature - 1e-9
+        end
+    end
+    -- Thermal energy boundary: starting + absorbed + routed - rejected
+    -- must equal capacity x temperature within the declared tolerance;
+    -- a residual beyond it is a conservation violation, never silent
+    -- creation or deletion of heat (#395).
+    local function checkThermal(self)
+        for _, reservoir in ipairs(self.reservoirs) do
+            local startingEnergy = reservoir.capacity * reservoir.startingTemperature
+            local bound = BALANCE_TOLERANCE * math.max(1, math.abs(startingEnergy))
+            local residual = startingEnergy + reservoir.absorbedKJ + reservoir.routedKJ
+                - reservoir.rejectedKJ - reservoir.capacity * reservoir.temperature
+            assert(residual == residual and math.abs(residual) <= bound,
+                "thermal energy ledger residual for reservoir '"
+                .. reservoir.id .. "' exceeds tolerance")
+            local values = { reservoir.temperature, reservoir.lastRouted,
+                reservoir.lastHeatIn, reservoir.lastRejected, reservoir.lastNet,
+                reservoir.absorbedKJ, reservoir.routedKJ, reservoir.rejectedKJ }
+            for _, value in ipairs(values) do
+                assert(isFinite(value),
+                    "thermal reservoir '" .. reservoir.id .. "' value is not finite")
+            end
+        end
+        for _, radiator in ipairs(self.radiators) do
+            assert(isFinite(radiator.lastRejected),
+                "radiator '" .. radiator.id .. "' rejected power is not finite")
+        end
+    end
     function object:advance(world_tick, fixed_seconds)
         assert(world_tick > 0 and fixed_seconds > 0)
         checkFiniteLimits(self)
@@ -1143,16 +1359,19 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- host ledger order.
         applyDeliveries(self, elapsed)
         applyPower(self, elapsed, fixed_seconds)
+        applyThermal(self, fixed_seconds)
         applyTransfers(self, fixed_seconds)
         applyConversions(self, fixed_seconds)
         checkFiniteLimits(self)
         checkConservation(self)
         checkConstituentConservation(self)
+        checkThermal(self)
         self.ticks = self.ticks + 1
         return self.ticks
     end
     checkFiniteLimits(object)
     checkConservation(object)
     checkConstituentConservation(object)
+    checkThermal(object)
     return object
 end

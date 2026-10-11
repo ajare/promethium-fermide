@@ -1,4 +1,4 @@
-# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources and solar-supplied external loads (#386–#391, #393)
+# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries and thermal reservoirs with radiator rejection (#386–#391, #393–#395)
 
 Station systems are opt-in per World and disabled in existing documents. Open
 **View > Station Systems** or use the
@@ -515,21 +515,83 @@ reporting, and shows the live accepted/refused amounts, occurrence
 counts and the next arrival time for every contract beside the
 existing views.
 
+### Thermal reservoirs and radiator rejection (#395)
+
+Authors configure thermal reservoirs and radiators per World. A reservoir
+(CONTEXT.md) carries an effective thermal capacity in kJ/K, a starting
+temperature and declared min/max service-limit temperatures, all above
+absolute zero, plus a constant environmental absorbed heat in kW.
+Temperature is integrated explicitly on the fixed World tick from the
+heat actually moved this tick: `T += (heatIn - rejected) x dt /
+capacity`. Thermal energy is tracked against a 0 °C reference
+(`E = capacity x T`), and the per-reservoir ledger — starting +
+absorbed + routed − rejected − current — must stay within the declared
+`StationBalanceTolerance`; a residual beyond it is a conservation
+violation that fails the whole tick through the integrated error path,
+never silent creation or deletion of heat. Declared temperature limits
+are reported as above/below-limit crossings with transition events; they
+never clamp the integrated state.
+
+A radiator rejects its host reservoir's heat by the Stefan-Boltzmann
+law: `emissivity x view factor x area x sigma x (T^4 - T_sink^4)`, at
+the reservoir's current emitting temperature against an authored
+effective sink temperature. Environmental back-radiation is explicit —
+a warmer sink rejects less — and the radiator/view assumption is the
+declared emissivity-times-view-factor product; no physical distribution
+modelling is promised beyond these declared factors. A body cannot
+radiatively cool below its coldest sink nor warm above its warmest one:
+the clamp is booked into the ledger, not hidden, and scaled across the
+radiators that produced the rejection.
+
+Emitted equipment heat is routed exactly once. An External equipment
+load may declare a heat-sink reservoir; its admitted heat (the authored
+heat output at the full-operation delivered fraction) then enters that
+reservoir and is not also booked as direct export — the reservoir's
+radiators become its export path. Validation refuses an unknown sink,
+a sink whose declared thermal service class differs from the load's
+(spare capacity in one class is never usable by another), and a sink
+on a cooling-service load, which needs a cooling service rather than a
+passive sink. Electrical input is never converted into duplicate local
+heat: the authored heat output is the emitted heat, and energy stored
+in batteries or bound into material is not heat at all. Loads without
+a sink keep the pre-#395 direct-export behaviour untouched.
+
+The snapshot publishes per-reservoir temperature, limits, capacity,
+absorbed/routed/in/rejected/net heat, the full energy ledger with its
+residual and the above/below-limit flags; per-radiator authored
+contract and last-tick rejection; and station thermal totals. The
+bundled Lua lifecycle model receives the descriptors as plain
+immutable values, mirrors the identical integration and sink clamp
+inside each private sandbox, and re-audits the ledger and finiteness
+every tick. World schema 72 persists the authored reservoirs,
+radiators and load `heatSinkId` (units: kJ/K, °C, m², fractions); a
+pre-72 document carrying them is refused rather than silently
+dropped. Integrated temperatures and heat ledgers remain runtime-only:
+Load and Reset reconstruct them from the authored starting
+conditions. The separate Station Systems window drafts reservoirs
+(class, capacity, starting temperature, limits, absorbed heat) and
+radiators (reservoir, area, emissivity, view factor, sink) with full
+validation reporting, and shows the live temperatures, heat flows,
+limit crossings and the closing energy ledger beside the existing
+views.
+
 ## Explicit scope limit
 
 This slice implements lifecycle, authored finite store configuration,
 bounded transfers between stores, compound-resource composition and
 conversion accounting, solar-supplied external equipment load
-allocation, finite battery storage with charge/discharge losses, and
-authored scheduled resupply with refused-quantity accounting.
+allocation, finite battery storage with charge/discharge losses,
+authored scheduled resupply with refused-quantity accounting, and
+thermal reservoirs with environment-dependent radiator rejection and
+exactly-once equipment heat routing.
 It still adds no crew demand, treatment/clearance
 workflows or ejection, no cooling capacity in any thermal
-service class (cooling-service loads are refused, not cooled), and no
-termal reservoir temperature
-dynamics. Completed tick counts are
+service class (cooling-service loads are refused, not cooled), no
+chillers or cold services, and no powered or passive thermal-buffer
+access beyond the authored reservoirs themselves. Completed tick counts are
 observability, not oxygen, heat or endurance estimates. It
 invents no process coefficients beyond the authored demand, capacity
-and profile values. ECLSS/thermal models, crew inputs, alarms,
+and profile values. ECLSS models, crew inputs, alarms,
 trends and broader supervisory allocation belong to the subsequent #385
 slices. Agent behaviour, movement, physiology and random streams are
 unchanged.
@@ -582,10 +644,24 @@ zero-usable-capacity disablement, critical-floor protection from stored
 energy ahead of discretionary demand, minimum-operable refusal leaving
 stored energy untouched, reserve-never-drawn, deterministic repeated
 eclipse cycles with identical reset replay, and intact Lua battery
-descriptor crossing with contained construction refusal), real file
+descriptor crossing with contained construction refusal; and thermal
+fixtures: refused reservoir/radiator/heat-sink configurations
+(non-positive capacity, inverted or sub-absolute-zero temperatures,
+starting temperature outside limits, unknown classes, unknown host or
+sink reservoir, out-of-range emissivity/view factor, cross-class
+routing and a sink on a cooling-service load), analytic linear heating
+matching the closed form, exact single-tick Stefan-Boltzmann rejection
+at the emitting temperature, monotonic cooling toward the sink that
+never crosses it with rejection falling as the reservoir cools,
+exactly-once heat routing (routed heat warms the reservoir by exactly
+its energy and is never also exported, while sinkless loads keep direct
+export), hot versus cold operating profiles, tick-by-tick and batched
+updates integrating identically, overheat and overcool limit crossings
+reported without clamping, and intact Lua thermal descriptor crossing
+with contained construction refusal), real file
 save/reopen round trips in
-YAML and binary including the solar/load and battery scenario
-reproduction and pre-69/pre-70/malformed refusals, failed-write and
+YAML and binary including the solar/load, battery and thermal scenario
+reproduction and pre-69/pre-70/pre-71/pre-72/malformed refusals, failed-write and
 legacy/malformed-file
 handling, paused structural rebuild preservation,
 and the existing CPU ImGui and document-history seams. Run `ctest -R

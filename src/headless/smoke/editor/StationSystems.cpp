@@ -854,6 +854,148 @@ namespace
 		#undef REQ
 		require(driver.passed(), "Delivery workflow failed on the Test Engine");
 	}
+
+	// #395: thermal reservoirs and radiators are drafted, validated and
+	// applied through the real Station Systems window controls, and the
+	// live view reports temperatures, heat flows, limits and the closing
+	// energy ledger.
+	void thermalWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO();
+		io.DisplaySize = {1200, 1700};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Thermal editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		core::StationSystemsSettings initial;
+		initial.enabled = true;
+		initial.observationIntervalSeconds = 2.0f;
+		core::ThermalReservoirSettings cabin;
+		cabin.id = "cabin";
+		cabin.thermalClass = "moderate";
+		cabin.heatCapacityKJPerK = 100.0;
+		cabin.startingTemperatureC = 20.0;
+		cabin.minTemperatureC = 10.0;
+		cabin.maxTemperatureC = 60.0;
+		cabin.absorbedHeatKW = 0.5;
+		initial.thermalReservoirs.push_back(cabin);
+		core::RadiatorSettings panel;
+		panel.id = "panel";
+		panel.reservoirId = "cabin";
+		panel.areaM2 = 5000.0;
+		panel.emissivity = 0.9;
+		panel.viewFactor = 1.0;
+		panel.sinkTemperatureC = -270.0;
+		initial.radiators.push_back(panel);
+		core::SolarArraySettings field;
+		field.id = "field";
+		field.capacityKW = 10.0;
+		initial.solarArrays.push_back(field);
+		core::EquipmentLoadSettings shop;
+		shop.id = "shop";
+		shop.electricalDemandKW = 5.0;
+		shop.thermalClass = "moderate";
+		shop.heatOutputKW = 2.0;
+		shop.heatSinkId = "cabin";
+		initial.equipmentLoads.push_back(shop);
+		require(world->configureStationSystems(initial, false, &diagnostic), diagnostic.c_str());
+		headless::TestEngineDriver driver([&]
+		{
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 1650});
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+
+		driver.run("station", "thermalWorkflow", [&](ImGuiTestContext* ctx)
+		{
+			ctx->SetRef("Station Systems");
+			REQ(driver.contains("1 thermal reservoir(s), 1 radiator(s)"),
+				"Authored thermal counts missing from the window");
+			REQ(driver.contains("cabin (moderate): 20.000 C | limits 10.000..60.000 C | capacity 100.000 kJ/K"),
+				"Authored reservoir display missing temperature, limits or capacity");
+			REQ(driver.contains("panel -> cabin: area 5000.000 m2, emissivity 0.900, view 1.000, sink -270.000 C"),
+				"Authored radiator display missing");
+			// Run: the live view shows the warming reservoir, the routed
+			// heat on the load, the radiator rejection and the closing
+			// ledger, and ticking never dirties the authored document.
+			world->markSaved();
+			world->resumeSimulation(); REQ(world->advanceTicks(600), "Thermal editor run failed");
+			world->pauseSimulation(); ctx->Sleep(1);
+			REQ(driver.contains("heat routed to reservoir: 2.000 kW (not also exported)"),
+				"Routed load heat not displayed");
+			REQ(!driver.contains("ABOVE the declared maximum")
+				&& !driver.contains("BELOW the declared minimum"),
+				"Reservoir limit flags wrong for a nominal run");
+			REQ(driver.contains("energy ledger (kJ)") && driver.contains("residual"),
+				"Thermal energy ledger not displayed");
+			REQ(driver.contains("Thermal totals: absorbed"),
+				"Thermal totals not displayed");
+			REQ(!world->isModified(), "Thermal ticking dirtied the authored document");
+			// An invalid drafted reservoir is refused with a visible
+			// diagnostic and never reaches the authored settings.
+			driver.click(ctx, "Add thermal reservoir");
+			driver.typeValue(ctx, "Reservoir 1 min temperature C", "50");
+			driver.typeValue(ctx, "Reservoir 1 max temperature C", "40");
+			driver.click(ctx, "Apply settings");
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(driver.contains("min below max"),
+				"Inverted drafted temperature limits diagnostic not shown");
+			REQ(world->getStationSystemsSettings().thermalReservoirs.size() == 1
+				&& history.undoCount() == 0 && world->getSimulationTick() == 600,
+				"Invalid reservoir draft mutated the authored settings");
+			// Repair the drafted limits and give the new reservoir a warm
+			// service class; the confirmed reset applies the contract and
+			// the live view restarts from authored state.
+			driver.typeValue(ctx, "Reservoir 1 min temperature C", "0");
+			driver.typeValue(ctx, "Reservoir 1 thermal class", "warm");
+			driver.click(ctx, "Confirm World reset");
+			REQ(world->getStationSystemsSettings().thermalReservoirs.size() == 2
+				&& world->getStationSystemsSettings().thermalReservoirs[1].minTemperatureC == 0.0
+				&& world->getStationSystemsSettings().thermalReservoirs[1].thermalClass == "warm"
+				&& history.undoCount() == 1 && world->getSimulationTick() == 0,
+				"Repaired reservoir draft did not apply through the reset-confirmed flow");
+			ctx->Sleep(1);
+			REQ(driver.contains("2 thermal reservoir(s)")
+				&& driver.contains("reservoir2 (warm): 20.000 C"),
+				"Applied reservoir not reflected in the window");
+			// A radiator with an emissivity above one is refused.
+			// The World is back at tick 0 after the confirmed reset, so
+			// these applies need no reset confirmation.
+			driver.click(ctx, "Add radiator");
+			driver.typeValue(ctx, "Radiator 1 emissivity", "2");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			REQ(driver.contains("emissivity must be finite and greater than 0 up to 1"),
+				"Invalid radiator emissivity diagnostic not shown");
+			REQ(world->getStationSystemsSettings().radiators.size() == 1
+				&& history.undoCount() == 1,
+				"Invalid radiator draft mutated the authored settings");
+			driver.typeValue(ctx, "Radiator 1 emissivity", "0.8");
+			driver.click(ctx, "Apply settings");
+			REQ(world->getStationSystemsSettings().radiators.size() == 2
+				&& history.undoCount() == 2 && world->getSimulationTick() == 0,
+				"Repaired radiator draft did not apply");
+			// A load heat sink of an incompatible class is refused with
+			// both classes named; the authored routing stays untouched.
+			driver.typeValue(ctx, "Load 0 heat sink", "reservoir2");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			REQ(driver.contains("incompatible with heat sink reservoir 'reservoir2' of class 'warm'"),
+				"Cross-class heat sink routing diagnostic not shown");
+			REQ(world->getStationSystemsSettings().equipmentLoads[0].heatSinkId == "cabin"
+				&& history.undoCount() == 2 && world->getSimulationTick() == 0,
+				"Invalid heat sink draft mutated the authored routing");
+			driver.click(ctx, "Cancel edits");
+			REQ(world->getStationSystemsSettings().equipmentLoads[0].heatSinkId == "cabin",
+				"Cancelled heat sink edit did not restore the authored routing");
+		});
+		#undef REQ
+		require(driver.passed(), "Thermal workflow failed on the Test Engine");
+	}
 }
 
 void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
@@ -866,4 +1008,5 @@ void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 	checks.push_back({"station/powerWorkflow", powerWorkflow});
 	checks.push_back({"station/batteryWorkflow", batteryWorkflow});
 	checks.push_back({"station/deliveryWorkflow", deliveryWorkflow});
+	checks.push_back({"station/thermalWorkflow", thermalWorkflow});
 }

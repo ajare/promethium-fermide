@@ -721,7 +721,13 @@ namespace core
 		// pre-71 document carrying `deliveries` is refused rather than
 		// silently dropped. Arrival outcomes stay runtime-only, so load and
 		// Reset restart every schedule from its authored beginning.
-		serializer.writeUint32("version", 71);
+		// Version 72 adds authored thermal reservoirs, radiators and the
+		// equipment load heat-sink routing (#395); a pre-72 document
+		// carrying `thermalReservoirs`, `radiators` or a load
+		// `heatSinkId` is refused rather than silently dropped. Integrated
+		// temperatures and heat ledgers stay runtime-only, so load and
+		// Reset reconstruct them from the authored starting conditions.
+		serializer.writeUint32("version", 72);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -876,6 +882,47 @@ namespace core
 						serializer.endMap();
 					}
 					serializer.endArray();
+					// Authored heat-sink routing (#395): which reservoir
+					// receives this load's emitted heat. Routed temperatures
+					// and ledgers are runtime state.
+					serializer.writeString("heatSinkId", load.heatSinkId);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.thermalReservoirs.empty())
+			{
+				// Authored reservoir contracts only; integrated temperature
+				// and the energy ledger are runtime state (#395).
+				serializer.beginArray("thermalReservoirs");
+				for (auto const& reservoir : mStationSystemsSettings.thermalReservoirs)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", reservoir.id);
+					serializer.writeString("thermalClass", reservoir.thermalClass);
+					serializer.writeDouble("heatCapacityKJPerK", reservoir.heatCapacityKJPerK);
+					serializer.writeDouble("startingTemperatureC", reservoir.startingTemperatureC);
+					serializer.writeDouble("minTemperatureC", reservoir.minTemperatureC);
+					serializer.writeDouble("maxTemperatureC", reservoir.maxTemperatureC);
+					serializer.writeDouble("absorbedHeatKW", reservoir.absorbedHeatKW);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.radiators.empty())
+			{
+				// Authored radiator contracts only; per-tick rejection is
+				// runtime state (#395).
+				serializer.beginArray("radiators");
+				for (auto const& radiator : mStationSystemsSettings.radiators)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", radiator.id);
+					serializer.writeString("reservoirId", radiator.reservoirId);
+					serializer.writeDouble("areaM2", radiator.areaM2);
+					serializer.writeDouble("emissivity", radiator.emissivity);
+					serializer.writeDouble("viewFactor", radiator.viewFactor);
+					serializer.writeDouble("sinkTemperatureC", radiator.sinkTemperatureC);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -1804,7 +1851,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 71)
+		if (version < 1 || version > 72)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1992,7 +2039,54 @@ namespace core
 						serializer.endMap();
 					}
 					serializer.endArray();
+					if (serializer.hasField("heatSinkId"))
+					{
+						if (version < 72) throw SerializationException(
+							"Station load heat sinks require World schema 72");
+						load.heatSinkId = serializer.readString("heatSinkId");
+					}
 					stationSettings.equipmentLoads.push_back(std::move(load));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("thermalReservoirs"))
+			{
+				if (version < 72) throw SerializationException(
+					"Station thermal reservoirs require World schema 72");
+				serializer.beginArray("thermalReservoirs");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					ThermalReservoirSettings reservoir;
+					reservoir.id = serializer.readString("id");
+					reservoir.thermalClass = serializer.readString("thermalClass");
+					reservoir.heatCapacityKJPerK = serializer.readDouble("heatCapacityKJPerK");
+					reservoir.startingTemperatureC = serializer.readDouble("startingTemperatureC");
+					reservoir.minTemperatureC = serializer.readDouble("minTemperatureC");
+					reservoir.maxTemperatureC = serializer.readDouble("maxTemperatureC");
+					reservoir.absorbedHeatKW = serializer.readDouble("absorbedHeatKW");
+					stationSettings.thermalReservoirs.push_back(std::move(reservoir));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("radiators"))
+			{
+				if (version < 72) throw SerializationException(
+					"Station radiators require World schema 72");
+				serializer.beginArray("radiators");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					RadiatorSettings radiator;
+					radiator.id = serializer.readString("id");
+					radiator.reservoirId = serializer.readString("reservoirId");
+					radiator.areaM2 = serializer.readDouble("areaM2");
+					radiator.emissivity = serializer.readDouble("emissivity");
+					radiator.viewFactor = serializer.readDouble("viewFactor");
+					radiator.sinkTemperatureC = serializer.readDouble("sinkTemperatureC");
+					stationSettings.radiators.push_back(std::move(radiator));
 					serializer.endMap();
 				}
 				serializer.endArray();

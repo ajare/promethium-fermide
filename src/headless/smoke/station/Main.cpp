@@ -144,7 +144,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 71"), 11, "version: 65");
+		text.replace(text.find("version: 72"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -2265,8 +2265,8 @@ namespace
 		auto const bundled = core::bundledStationSystemsSource();
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -2325,8 +2325,8 @@ namespace
 		// model's own audits hold.
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -3641,6 +3641,449 @@ namespace
 			"Non-finite containment leaked between Worlds");
 	}
 }
+	// #395: thermal reservoirs accumulate heat and radiators reject it.
+	// Temperature is integrated on the fixed World tick from the authored
+	// capacity, starting temperature and absorbed heat; radiator rejection
+	// follows the Stefan-Boltzmann law at the emitting temperature with
+	// the authored sink, emissivity and view factor. Equipment heat routes
+	// exactly once into a class-compatible reservoir or exports directly,
+	// never both. Limits are reported, never clamped; the energy ledger
+	// closes within the declared tolerance in host and sandbox alike.
+	void thermal(smoke::Context const&)
+	{
+		auto const dt = static_cast<double>(core::World::getFixedTimestep());
+		auto const approx = [](double actual, double expected, double tolerance = 1e-6)
+		{ return std::abs(actual - expected) <= tolerance; };
+		auto sawEvent = [](core::World& world, std::string const& needle)
+		{
+			for (auto const& event : world.getStationSystemsEvents())
+				if (event.message.find(needle) != std::string::npos) return true;
+			return false;
+		};
+		auto reservoir = [](std::string const& id, std::string const& thermalClass,
+			double capacityKJPerK, double startingC, double minC, double maxC, double absorbedKW)
+		{
+			core::ThermalReservoirSettings settings;
+			settings.id = id;
+			settings.thermalClass = thermalClass;
+			settings.heatCapacityKJPerK = capacityKJPerK;
+			settings.startingTemperatureC = startingC;
+			settings.minTemperatureC = minC;
+			settings.maxTemperatureC = maxC;
+			settings.absorbedHeatKW = absorbedKW;
+			return settings;
+		};
+		auto radiator = [](std::string const& id, std::string const& reservoirId,
+			double areaM2, double emissivity, double viewFactor, double sinkC)
+		{
+			core::RadiatorSettings settings;
+			settings.id = id;
+			settings.reservoirId = reservoirId;
+			settings.areaM2 = areaM2;
+			settings.emissivity = emissivity;
+			settings.viewFactor = viewFactor;
+			settings.sinkTemperatureC = sinkC;
+			return settings;
+		};
+		auto constantProfile = [](double level)
+		{
+			core::ProfileSettings profile;
+			profile.constantLevel = level;
+			return profile;
+		};
+		auto thermalConfigure = [](core::World& world,
+			std::vector<core::ThermalReservoirSettings> reservoirs,
+			std::vector<core::RadiatorSettings> radiators,
+			std::vector<core::SolarArraySettings> solar = {},
+			std::vector<core::EquipmentLoadSettings> loads = {})
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.thermalReservoirs = std::move(reservoirs);
+			settings.radiators = std::move(radiators);
+			settings.solarArrays = std::move(solar);
+			settings.equipmentLoads = std::move(loads);
+			auto const ok = world.configureStationSystems(settings, false, &diagnostic);
+			return std::make_pair(ok, diagnostic);
+		};
+		// Refused configurations: every malformed reservoir, radiator or
+		// heat-sink contract is rejected before anything runs.
+		{
+			core::World bad("ThermalBad", 2, 2);
+			bad.pauseSimulation(); bad.finishBuild();
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.thermalReservoirs = { reservoir("cabin", "moderate", 0.0, 20.0, 10.0, 30.0, 0.0) };
+			require(!bad.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("capacity must be finite and positive") != std::string::npos,
+				"Zero thermal capacity accepted");
+			settings.thermalReservoirs = { reservoir("cabin", "moderate", 100.0, 20.0, 30.0, 30.0, 0.0) };
+			require(!bad.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("min below max") != std::string::npos,
+				"Inverted temperature limits accepted");
+			settings.thermalReservoirs = { reservoir("cabin", "moderate", 100.0, 45.0, 10.0, 30.0, 0.0) };
+			require(!bad.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("outside its declared limits") != std::string::npos,
+				"Starting temperature outside limits accepted");
+			settings.thermalReservoirs = { reservoir("cabin", "cryogenic", 100.0, 20.0, 10.0, 30.0, 0.0) };
+			require(!bad.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("unknown thermal service class") != std::string::npos,
+				"Unknown reservoir thermal class accepted");
+			settings.thermalReservoirs = { reservoir("cabin", "moderate", 100.0, -300.0, -310.0, 30.0, 0.0) };
+			require(!bad.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("above absolute zero") != std::string::npos,
+				"Sub-absolute-zero temperature accepted");
+			settings.thermalReservoirs = { reservoir("cabin", "moderate", 100.0, 20.0, 10.0, 30.0, -1.0) };
+			require(!bad.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("absorbed heat must be finite and non-negative") != std::string::npos,
+				"Negative absorbed heat accepted");
+			settings.thermalReservoirs = { reservoir("cabin", "moderate", 100.0, 20.0, 10.0, 30.0, 0.0) };
+			settings.radiators = { radiator("panel", "ghost", 100.0, 0.9, 1.0, -270.0) };
+			require(!bad.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("unknown thermal reservoir 'ghost'") != std::string::npos,
+				"Radiator on unknown reservoir accepted");
+			settings.radiators = { radiator("panel", "cabin", 0.0, 0.9, 1.0, -270.0) };
+			require(!bad.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("area must be finite and positive") != std::string::npos,
+				"Zero radiator area accepted");
+			settings.radiators = { radiator("panel", "cabin", 100.0, 0.0, 1.0, -270.0) };
+			require(!bad.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("emissivity") != std::string::npos,
+				"Zero emissivity accepted");
+			settings.radiators = { radiator("panel", "cabin", 100.0, 0.9, 1.5, -270.0) };
+			require(!bad.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("view factor") != std::string::npos,
+				"View factor above one accepted");
+			settings.radiators = { radiator("panel", "cabin", 100.0, 0.9, 1.0, -273.15) };
+			require(!bad.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("above absolute zero") != std::string::npos,
+				"Sink at absolute zero accepted");
+			// Heat-sink contracts on loads: unknown sink, incompatible class
+			// and a sink on a cooling-service load are all refused.
+			core::EquipmentLoadSettings sinkless;
+			sinkless.id = "shop";
+			sinkless.electricalDemandKW = 5.0;
+			sinkless.thermalClass = "moderate";
+			sinkless.heatOutputKW = 2.0;
+			sinkless.heatSinkId = "nowhere";
+			settings.radiators = {};
+			settings.equipmentLoads = { sinkless };
+			require(!bad.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("unknown thermal reservoir 'nowhere'") != std::string::npos,
+				"Load heat sink referencing unknown reservoir accepted");
+			sinkless.heatSinkId = "cabin";
+			sinkless.thermalClass = "warm";
+			settings.equipmentLoads = { sinkless };
+			require(!bad.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("incompatible") != std::string::npos,
+				"Cross-class heat routing accepted");
+			sinkless.thermalClass = "moderate";
+			sinkless.coolingDisposition = core::StationCoolingDisposition::CoolingService;
+			settings.equipmentLoads = { sinkless };
+			require(!bad.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("not a heat sink") != std::string::npos,
+				"Heat sink on a cooling-service load accepted");
+			require(!bad.getStationSystemsSnapshot().enabled,
+				"Refused thermal configuration constructed a runtime");
+		}
+		// Analytic heating: with no radiator and a constant absorbed heat,
+		// temperature rises exactly linearly in World time, and the energy
+		// ledger closes over the absorbed term.
+		{
+			core::World world("ThermalHeat", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto const [ok, diagnostic] = thermalConfigure(world,
+				{ reservoir("cabin", "moderate", 100.0, 20.0, 0.0, 100.0, 2.0) }, {});
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(3600), "Analytic heating run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+
+			require(snap.thermal.reservoirs.size() == 1
+				&& approx(snap.thermal.reservoirs[0].temperatureC, 21.2, 1e-6)
+				&& approx(snap.thermal.reservoirs[0].lastRejectedKW, 0.0)
+				&& approx(snap.thermal.reservoirs[0].absorbedEnergyKJ, 120.0, 1e-4)
+				&& approx(snap.thermal.reservoirs[0].residualKJ, 0.0, 1e-6),
+				"Analytic linear heating or ledger closure failed");
+			// Reset reconstructs the authored starting temperature.
+			world.pauseSimulation(); world.resetSimulation();
+			require(world.getStationSystemsSnapshot().thermal.reservoirs[0].temperatureC == 20.0
+				&& world.getStationSystemsSnapshot().thermal.reservoirs[0].absorbedEnergyKJ == 0.0,
+				"Reset did not reconstruct the authored thermal state");
+		}
+		// Analytic single-tick radiator rejection: the rejection law is
+		// evaluated at the emitting temperature with the authored sink,
+		// emissivity and view factor, and one tick of integration matches
+		// the closed-form step exactly.
+		{
+			core::World world("ThermalTick", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto const [ok, diagnostic] = thermalConfigure(world,
+				{ reservoir("panel-host", "warm", 50.0, 20.0, -50.0, 200.0, 0.0) },
+				{ radiator("panel", "panel-host", 1000.0, 0.9, 0.8, -270.0) });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(world.advanceTick(), "Single-tick thermal run failed");
+			auto const temperatureK = 20.0 + core::StationCelsiusOffset;
+			auto const sinkK = -270.0 + core::StationCelsiusOffset;
+			auto const expectedRejection = 0.9 * 0.8 * 1000.0
+				* core::StationStefanBoltzmannKWPerM2K4
+				* (temperatureK * temperatureK * temperatureK * temperatureK
+					- sinkK * sinkK * sinkK * sinkK);
+			auto const expectedTemperature = 20.0 - expectedRejection * dt / 50.0;
+			auto const snap = world.getStationSystemsSnapshot();
+			require(approx(snap.thermal.radiators[0].lastRejectedKW, expectedRejection, 1e-12)
+				&& approx(snap.thermal.reservoirs[0].temperatureC, expectedTemperature, 1e-9)
+				&& approx(snap.thermal.reservoirs[0].residualKJ, 0.0, 1e-6),
+				"Radiator rejection law or one-tick integration mismatch");
+		}
+		// Cooling toward the sink: an unpowered reservoir with a radiator
+		// cools monotonically, never crosses its coldest sink, and the
+		// rejection shrinks as the emitting temperature falls.
+		{
+			core::World world("ThermalCool", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto const [ok, diagnostic] = thermalConfigure(world,
+				{ reservoir("hot", "warm", 100.0, 27.0, -50.0, 100.0, 0.0) },
+				{ radiator("big", "hot", 20000.0, 1.0, 1.0, -270.0) });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			double previousTemperature = 27.0;
+			double previousRejection = std::numeric_limits<double>::max();
+			for (int chunk = 0; chunk < 12; ++chunk)
+			{
+				require(world.advanceTicks(300), "Cooling run failed");
+				auto const snap = world.getStationSystemsSnapshot();
+				auto const temperature = snap.thermal.reservoirs[0].temperatureC;
+				auto const rejection = snap.thermal.reservoirs[0].lastRejectedKW;
+				require(temperature < previousTemperature,
+					"Reservoir did not cool toward its sink");
+				require(temperature > -270.0,
+					"Reservoir crossed below its sink temperature");
+				require(rejection < previousRejection,
+					"Rejection did not fall with the emitting temperature");
+				require(approx(snap.thermal.reservoirs[0].residualKJ, 0.0, 1e-6),
+					"Cooling ledger failed to close");
+				previousTemperature = temperature;
+				previousRejection = rejection;
+			}
+		}
+		// Heat routing: an admitted load with a declared heat sink sends
+		// its emitted heat into the reservoir exactly once - nothing is
+		// also booked as direct export - and the reservoir warms by
+		// exactly the routed energy. A load without a sink keeps the
+		// direct-export behaviour untouched.
+		{
+			core::World world("ThermalRoute", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::EquipmentLoadSettings routed;
+			routed.id = "shop";
+			routed.electricalDemandKW = 5.0;
+			routed.thermalClass = "moderate";
+			routed.heatOutputKW = 2.0;
+			routed.heatSinkId = "cabin";
+			core::EquipmentLoadSettings direct;
+			direct.id = "beacon";
+			direct.electricalDemandKW = 1.0;
+			direct.thermalClass = "low";
+			direct.heatOutputKW = 1.0;
+			core::SolarArraySettings field;
+			field.id = "field";
+			field.capacityKW = 10.0;
+			field.illumination = constantProfile(1.0);
+			auto const [ok, diagnostic] = thermalConfigure(world,
+				{ reservoir("cabin", "moderate", 100.0, 20.0, 0.0, 100.0, 0.0) }, {},
+				{ field }, { routed, direct });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(3600), "Routing run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(approx(snap.power.loads[0].heatRoutedKW, 2.0)
+				&& approx(snap.power.loads[0].heatExportedKW, 0.0)
+				&& approx(snap.power.loads[1].heatExportedKW, 1.0)
+				&& approx(snap.power.loads[1].heatRoutedKW, 0.0),
+				"Emitted heat was not routed exactly once");
+			require(approx(snap.power.exportedHeatKW, 1.0),
+				"Station direct-export total double-counted routed heat");
+			require(approx(snap.thermal.totalRoutedKW, 2.0)
+				&& approx(snap.thermal.reservoirs[0].temperatureC, 21.2, 1e-6)
+				&& approx(snap.thermal.reservoirs[0].routedEnergyKJ, 120.0, 1e-4)
+				&& approx(snap.thermal.reservoirs[0].residualKJ, 0.0, 1e-6),
+				"Routed heat did not warm the reservoir by exactly its energy");
+		}
+		// Hot and cold operating profiles: the same reservoir under a
+		// full-duty load warms; under a zero-duty load it stays flat.
+		{
+			core::World hot("ThermalHot", 2, 2), cold("ThermalCold", 2, 2);
+			hot.pauseSimulation(); hot.finishBuild();
+			cold.pauseSimulation(); cold.finishBuild();
+			core::SolarArraySettings field;
+			field.id = "field";
+			field.capacityKW = 10.0;
+			field.illumination = constantProfile(1.0);
+			for (bool isHot : { true, false })
+			{
+				auto& world = isHot ? hot : cold;
+				core::EquipmentLoadSettings shop;
+				shop.id = "shop";
+				shop.electricalDemandKW = 5.0;
+				shop.thermalClass = "moderate";
+				shop.heatOutputKW = 3.0;
+				shop.heatSinkId = "cabin";
+				shop.operatingProfile = constantProfile(isHot ? 1.0 : 0.0);
+				auto const [ok, diagnostic] = thermalConfigure(world,
+					{ reservoir("cabin", "moderate", 100.0, 20.0, 0.0, 100.0, 0.0) }, {},
+					{ field }, { shop });
+				require(ok, diagnostic.c_str());
+			}
+			hot.resumeSimulation(); cold.resumeSimulation();
+			require(hot.advanceTicks(1800) && cold.advanceTicks(1800), "Profile run failed");
+			require(approx(hot.getStationSystemsSnapshot().thermal.reservoirs[0].temperatureC, 20.9, 1e-6),
+				"Hot profile did not warm the reservoir as declared");
+			require(cold.getStationSystemsSnapshot().thermal.reservoirs[0].temperatureC == 20.0
+				&& cold.getStationSystemsSnapshot().thermal.reservoirs[0].lastHeatInKW == 0.0,
+				"Cold profile produced heat it should not have");
+		}
+		// Equivalent update batching: the same thermal scenario integrated
+		// tick-by-tick and through accelerated updates is identical - the
+		// integration is World-time based, never wall-clock based.
+		{
+			core::World steady("ThermalSteady", 2, 2), batched("ThermalBatched", 2, 2);
+			steady.pauseSimulation(); steady.finishBuild();
+			batched.pauseSimulation(); batched.finishBuild();
+			core::SolarArraySettings field;
+			field.id = "field";
+			field.capacityKW = 10.0;
+			field.illumination = constantProfile(1.0);
+			for (auto* world : { &steady, &batched })
+			{
+				core::EquipmentLoadSettings shop;
+				shop.id = "shop";
+				shop.electricalDemandKW = 5.0;
+				shop.thermalClass = "moderate";
+				shop.heatOutputKW = 2.0;
+				shop.heatSinkId = "cabin";
+				auto const [ok, diagnostic] = thermalConfigure(*world,
+					{ reservoir("cabin", "moderate", 100.0, 20.0, 0.0, 100.0, 1.0) },
+					{ radiator("panel", "cabin", 5000.0, 0.9, 1.0, -270.0) },
+					{ field }, { shop });
+				require(ok, diagnostic.c_str());
+			}
+			steady.resumeSimulation();
+			require(steady.advanceTicks(600), "Steady thermal run failed");
+			batched.resumeSimulation();
+			batched.setSimulationTimeScale(2.0f);
+			batched.update(5.0f);
+			require(batched.getSimulationTick() == 600, "Batched update tick mismatch");
+			require(steady.getStationSystemsSnapshot() == batched.getStationSystemsSnapshot(),
+				"Thermal integration differs between tick-by-tick and batched updates");
+		}
+		// Declared limits are observable: an overheat and an overcool are
+		// announced on their transitions and reported in the snapshot,
+		// while the integrated state is never clamped.
+		{
+			core::World hot("LimitHot", 2, 2);
+			hot.pauseSimulation(); hot.finishBuild();
+			auto const [ok, diagnostic] = thermalConfigure(hot,
+				{ reservoir("cabin", "moderate", 100.0, 20.0, 10.0, 21.0, 1.0) }, {});
+			require(ok, diagnostic.c_str());
+			hot.resumeSimulation();
+			require(hot.advanceTicks(9000), "Overheat run failed");
+			auto const snap = hot.getStationSystemsSnapshot();
+			require(snap.thermal.reservoirs[0].aboveLimit
+				&& !snap.thermal.reservoirs[0].belowLimit
+				&& approx(snap.thermal.reservoirs[0].temperatureC, 21.5, 1e-6),
+				"Overheat not reported or wrongly clamped to the limit");
+			require(sawEvent(hot, "Thermal reservoir 'cabin' above its declared maximum"),
+				"Overheat transition missing from the event log");
+			core::World cold("LimitCold", 2, 2);
+			cold.pauseSimulation(); cold.finishBuild();
+			auto const [coldOk, coldDiagnostic] = thermalConfigure(cold,
+				{ reservoir("cabin", "moderate", 100.0, 20.0, 19.0, 30.0, 0.0) },
+				{ radiator("big", "cabin", 20000.0, 1.0, 1.0, -270.0) });
+			require(coldOk, coldDiagnostic.c_str());
+			cold.resumeSimulation();
+			require(cold.advanceTicks(6000), "Overcool run failed");
+			auto const coldSnap = cold.getStationSystemsSnapshot();
+			require(coldSnap.thermal.reservoirs[0].belowLimit
+				&& !coldSnap.thermal.reservoirs[0].aboveLimit,
+				"Overcool not reported in the snapshot");
+			require(sawEvent(cold, "Thermal reservoir 'cabin' below its declared minimum"),
+				"Overcool transition missing from the event log");
+		}
+		// The bundled Lua model receives the reservoir, radiator and
+		// heat-sink descriptors intact and mirrors the routing inside the
+		// sandbox; its own conservation audit passes on every tick.
+		{
+			auto const bundled = core::bundledStationSystemsSource();
+			core::setStationSystemsSourceLoader([bundled] {
+				return "local factory = (function()\n" + bundled + "\nend)()\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators)\n"
+					"assert(#reservoirs == 1 and reservoirs[1].id == 'cabin'\n"
+					"\tand reservoirs[1].heatCapacityKJPerK == 100 and reservoirs[1].absorbedHeatKW == 0)\n"
+					"assert(#radiators == 1 and radiators[1].reservoir == 'cabin'\n"
+					"\tand radiators[1].areaM2 == 5000)\n"
+					"assert(#loads == 1 and loads[1].heatSinkId == 'cabin')\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators)\n"
+					"assert(model.reservoirs[1].temperature == 20)\n"
+					"local original = model.advance\n"
+					"function model.advance(self, tick, seconds)\n"
+					"local result = original(self, tick, seconds)\n"
+					"assert(math.abs(self.reservoirs[1].lastRouted - 2.0) < 1e-9, 'sandbox routed heat mismatch')\n"
+					"assert(math.abs(self.loads[1].heatRouted - 2.0) < 1e-9 and self.loads[1].heatExported == 0,\n"
+					"\t'sandbox heat was not routed exactly once')\n"
+					"return result\n"
+					"end\n"
+					"return model\n"
+					"end";
+			});
+			core::World sandbox("ThermalSandbox", 2, 2);
+			sandbox.pauseSimulation(); sandbox.finishBuild();
+			core::EquipmentLoadSettings shop;
+			shop.id = "shop";
+			shop.electricalDemandKW = 5.0;
+			shop.thermalClass = "moderate";
+			shop.heatOutputKW = 2.0;
+			shop.heatSinkId = "cabin";
+			core::SolarArraySettings field;
+			field.id = "field";
+			field.capacityKW = 10.0;
+			field.illumination = constantProfile(1.0);
+			auto const [ok, diagnostic] = thermalConfigure(sandbox,
+				{ reservoir("cabin", "moderate", 100.0, 20.0, 0.0, 100.0, 0.0) },
+				{ radiator("panel", "cabin", 5000.0, 0.9, 1.0, -270.0) },
+				{ field }, { shop });
+			require(ok, diagnostic.c_str());
+			sandbox.resumeSimulation();
+			require(sandbox.advanceTicks(120),
+				"Bundled Lua thermal mirror failed its in-sandbox assertions");
+			core::setStationSystemsSourceLoader({});
+		}
+		// A corrupt descriptor crossing fails contained: a sandbox that
+		// cannot trust its thermal inputs stops the tick through the
+		// integrated error path rather than publishing anything.
+		{
+			core::setStationSystemsSourceLoader([] {
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators)\n"
+					"assert(type(reservoirs) == 'table' and #reservoirs == 1)\n"
+					"assert(reservoirs[1].heatCapacityKJPerK > 0, 'corrupt thermal capacity crossing')\n"
+					"error('corrupt thermal descriptor crossing')\n"
+					"end";
+			});
+			core::World corrupt("ThermalCorrupt", 2, 2);
+			corrupt.pauseSimulation(); corrupt.finishBuild();
+			auto const [ok, diagnostic] = thermalConfigure(corrupt,
+				{ reservoir("cabin", "moderate", 100.0, 20.0, 0.0, 100.0, 0.0) }, {});
+			require(!ok && diagnostic.find("corrupt thermal descriptor crossing") != std::string::npos
+				&& !corrupt.getStationSystemsSnapshot().enabled,
+				"Corrupt thermal sandbox crossing not contained at construction");
+			core::setStationSystemsSourceLoader({});
+		}
+	}
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power},
@@ -3653,7 +4096,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"failures", failures}};
+		{"deliveries", deliveries}, {"thermal", thermal}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }
