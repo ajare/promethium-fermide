@@ -2096,14 +2096,16 @@ namespace core
 						store.authored.startingQualified + store.authored.startingUnqualified), 1.0);
 		if (!settings.enabled) return;
 		auto const source = sourceLoader ? sourceLoader() : bundledStationSystemsSource();
-		// The source-size cap is a sanity bound on what may cross into the
-		// sandbox, not the real protection: the per-object allocation and
-		// instruction budgets do that. The bundled lifecycle model carries
-		// the mirrored invariants for every ledger slice, and test fixtures
-		// wrap that same source with their own assertions, so the cap sits
-		// well above the bundled size while still refusing anything absurd.
-		if (source.empty() || source.size() > 128 * 1024)
-			throw SerializationException("Invalid Station systems source size");
+		// No upper bound on source size. The compiled footprint is trivial —
+		// the bundled model loads to ~74 KiB per sandbox against a 512 KiB
+		// budget — and a cap on the length of the text guards nothing the
+		// ScratchBudget's allocation and instruction limits do not already
+		// cover properly: compile time is not VM instructions, and per-tick
+		// cost follows the configured scenario rather than the script length.
+		// A cap here only ever produced a confusing construction refusal
+		// whenever the lifecycle model legitimately grew.
+		if (source.empty())
+			throw SerializationException("Station systems source is empty");
 		for (size_t i = 0; i < mImpl->objects.size(); ++i)
 		{
 			auto object = std::make_unique<ScriptObject>();
