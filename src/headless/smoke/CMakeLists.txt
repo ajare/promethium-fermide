@@ -590,6 +590,8 @@ add_test(NAME station-editor-stores COMMAND pf-smoke-editor --check station/stor
 set_tests_properties(station-editor-stores PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
 add_test(NAME station-editor-transfers COMMAND pf-smoke-editor --check station/transferWorkflow)
 set_tests_properties(station-editor-transfers PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
+add_test(NAME station-editor-removals COMMAND pf-smoke-editor --check station/removalWorkflow)
+set_tests_properties(station-editor-removals PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-compounds COMMAND pf-smoke-editor --check station/compoundWorkflow)
 set_tests_properties(station-editor-compounds PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-power COMMAND pf-smoke-editor --check station/powerWorkflow)
@@ -600,7 +602,9 @@ set_tests_properties(station-editor-batteries PROPERTIES LABELS "smoke;functiona
 pf_add_smoke_contract(NAME smoke-editor-contract COMMAND ${CMAKE_COMMAND}
     "-DEDITOR=$<TARGET_FILE:pf-smoke-editor>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/EditorContract.cmake")
-set_tests_properties(smoke-editor-contract PROPERTIES LABELS "harness;editor" TIMEOUT 480)
+# The #557 removal-workflow check adds two more full scroll-scan passes to the
+# contract's sequential inventory; the measured pass needs ~640s here.
+set_tests_properties(smoke-editor-contract PROPERTIES LABELS "harness;editor" TIMEOUT 780)
 
 # The historical *-contract entries retain EVERY exhaustive assertion and remain
 # in unfiltered CTest. Lightweight lanes reuse their inventories and time budgets.

@@ -753,10 +753,146 @@ namespace
 				!= std::string::npos,
 			"Applied battery not reflected in the window");
 	}
+	// #557: removing draft rows must never touch the erased element or its
+	// nested flows after the erase. Exercise first/middle/last conversion
+	// removal over populated flows and compound stores, with cancellation
+	// and applied removal, under the real window controls.
+	void removalWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		std::string text; io.ClipboardUserData = &text;
+		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Removal editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		auto const food = core::ResourceCompositionSettings{0.8, 0.05, 0.0, 0.01, 0.02, 0.02, 17000.0};
+		auto const spare = core::ResourceCompositionSettings{0.5, 0.1, 0.0, 0.02, 0.04, 0.04, 15000.0};
+		auto const biomass = core::ResourceCompositionSettings{0.0, 0.04, 0.0, 0.005, 0.01, 0.005, 18000.0};
+		auto const waste = core::ResourceCompositionSettings{0.8, 0.08, 0.0, 0.02, 0.04, 0.04, 8000.0};
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 1.0f;
+		settings.stores = {
+			{"food", "kg", 100.0, 50.0, 0.0, 0.0, food},
+			{"spare", "kg", 100.0, 50.0, 0.0, 0.0, spare},
+			{"biomass", "kg", 100.0, 1.0, 0.0, 0.0, biomass},
+			{"waste", "kg", 100.0, 0.0, 0.0, 0.0, waste}};
+		for (size_t variant = 0; variant < 3; ++variant)
+		{
+			core::ResourceConversionSettings conversion;
+			conversion.id = "c" + std::to_string(variant);
+			conversion.inputs.push_back({"food", 60.0});
+			conversion.outputs.push_back({"biomass", 4.8});
+			conversion.outputs.push_back({"waste", 24.0});
+			settings.conversions.push_back(std::move(conversion));
+		}
+		std::string diagnostic;
+		require(world->configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+		auto frame = [&]
+		{
+			ImGui::NewFrame(); text.clear(); ImGui::LogToClipboard();
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 980});
+			window.render(world, history); ImGui::LogFinish(); ImGui::Render();
+		};
+		auto clickPoint = [&](ImVec2 point)
+		{
+			io.AddMousePosEvent(point.x, point.y); frame();
+			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
+		};
+		// The compound draft is taller than one viewport: reset the scroll
+		// and wheel down until the control comes into view.
+		auto point = [&](char const* label)
+		{
+			io.AddMousePosEvent(400.0f, 400.0f);
+			io.AddMouseWheelEvent(0.0f, 1000.0f); frame();
+			for (int pass = 0; pass < 16; ++pass)
+			{
+				auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
+				for (float y = 45; y < 975; y += 5)
+					for (float x = 18; x < 940; x += 15)
+					{
+						io.AddMousePosEvent(x, y); frame(); frame();
+						if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
+					}
+				io.AddMousePosEvent(400.0f, 400.0f);
+				io.AddMouseWheelEvent(0.0f, -10.0f); frame();
+			}
+			throw std::runtime_error(std::string("Missing Station control: ") + label);
+		};
+		window.visible = true; frame(); frame();
+		require(text.find("4 resource store(s)") != std::string::npos
+			&& text.find("3 conversion(s)") != std::string::npos,
+			"Removal fixture stores or conversions not shown in the window");
+		// A removal cancelled before Apply never reaches the document.
+		clickPoint(point("Remove conversion 1"));
+		require(text.find("Draft differs from the authored start conditions") != std::string::npos,
+			"Cancelled conversion removal draft not reported");
+		clickPoint(point("Cancel edits")); frame();
+		require(world->getStationSystemsSettings().conversions.size() == 3
+			&& history.undoCount() == 0
+			&& text.find("Draft matches the authored start conditions") != std::string::npos,
+			"Cancel edits did not restore the authored conversion set");
+		// Middle conversion removal applies with the neighbours intact.
+		clickPoint(point("Remove conversion 1"));
+		clickPoint(point("Apply settings"));
+		require(world->getStationSystemsSettings().conversions.size() == 2
+			&& world->getStationSystemsSettings().conversions[0].id == "c0"
+			&& world->getStationSystemsSettings().conversions[1].id == "c2"
+			&& history.undoCount() == 1, "Middle conversion removal did not apply");
+		// First conversion removal shifts the survivor to index 0.
+		clickPoint(point("Remove conversion 0"));
+		clickPoint(point("Apply settings"));
+		require(world->getStationSystemsSettings().conversions.size() == 1
+			&& world->getStationSystemsSettings().conversions[0].id == "c2"
+			&& history.undoCount() == 2, "First conversion removal did not apply");
+		// Nested flow removal: dropping the first output of the survivor
+		// keeps the remaining flow and its declared yield.
+		clickPoint(point("Remove Conversion 0 output 0"));
+		clickPoint(point("Apply settings"));
+		require(world->getStationSystemsSettings().conversions[0].outputs.size() == 1
+			&& world->getStationSystemsSettings().conversions[0].outputs[0].storeId == "waste"
+			&& world->getStationSystemsSettings().conversions[0].outputs[0].yieldPerSecond == 24.0
+			&& history.undoCount() == 3, "Nested output flow removal did not apply");
+		// Compound store removal: the mid-list store with a declared
+		// composition disappears without disturbing its neighbours.
+		clickPoint(point("Remove store 1"));
+		clickPoint(point("Apply settings"));
+		require(world->getStationSystemsSettings().stores.size() == 3
+			&& world->getStationSystemsSettings().stores[0].id == "food"
+			&& world->getStationSystemsSettings().stores[1].id == "biomass"
+			&& world->getStationSystemsSettings().stores[2].id == "waste"
+			&& history.undoCount() == 4, "Compound store removal did not apply");
+		// Last conversion removal on a running World needs the reset
+		// confirmation; cancelling it mutates nothing.
+		world->markSaved();
+		world->resumeSimulation(); require(world->advanceTicks(30), "Removal editor run failed");
+		world->pauseSimulation(); frame();
+		clickPoint(point("Remove conversion 0"));
+		clickPoint(point("Apply settings")); frame();
+		require(text.find("Confirm?") != std::string::npos,
+			"Last conversion removal bypassed the World reset confirmation");
+		clickPoint(point("Cancel reset"));
+		require(world->getStationSystemsSettings().conversions.size() == 1
+			&& world->getSimulationTick() == 30 && history.undoCount() == 4,
+			"Reset cancellation for the last conversion mutated state");
+		clickPoint(point("Apply settings")); clickPoint(point("Confirm World reset"));
+		require(world->getStationSystemsSettings().conversions.empty()
+			&& world->getSimulationTick() == 0 && history.undoCount() == 5,
+			"Confirmed last conversion removal did not apply");
+		frame();
+		require(text.find("0 conversion(s)") != std::string::npos
+			&& text.find("Draft matches the authored start conditions") != std::string::npos,
+			"Applied removal not reflected in the window");
+	}
 }
 void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"station/windowWorkflow", workflow});
+	checks.push_back({"station/removalWorkflow", removalWorkflow});
 	checks.push_back({"station/storeWorkflow", storeWorkflow});
 	checks.push_back({"station/transferWorkflow", transferWorkflow});
 	checks.push_back({"station/compoundWorkflow", compoundWorkflow});

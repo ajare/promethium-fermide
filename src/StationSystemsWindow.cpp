@@ -35,10 +35,15 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
 	ImGui::InputFloat("Observation interval (seconds)", &mDraft.observationIntervalSeconds, 0.1f, 1.0f, "%.2f");
-	for (size_t index = 0; index < mDraft.stores.size(); ++index)
+	// Removal is deferred until the whole row has rendered: erasing the element
+	// mid-row would destroy the bound reference (and, for a compound store, its
+	// nested composition) while the rest of the row still reads it (#557).
+	// The index only advances on kept rows so a shifted row is never skipped.
+	for (size_t index = 0; index < mDraft.stores.size(); )
 	{
 		auto& store = mDraft.stores[index];
 		auto const row = std::to_string(index);
+		bool removeStore = false;
 		ImGui::PushItemWidth(220);
 		char idBuffer[core::MaxStationStoreIdLength + 1]{};
 		std::strncpy(idBuffer, store.id.c_str(), core::MaxStationStoreIdLength);
@@ -54,7 +59,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		ImGui::InputDouble(("Store " + row + " protected reserve").c_str(), &store.protectedReserve, 0.0, 0.0, "%.3f");
 		ImGui::SameLine();
 		if (ImGui::Button(("Remove store " + row).c_str()))
-			mDraft.stores.erase(mDraft.stores.begin() + static_cast<std::ptrdiff_t>(index));
+			removeStore = true;
 		bool compound = store.composition.has_value();
 		if (ImGui::Checkbox(("Store " + row + " declared composition").c_str(), &compound))
 		{
@@ -73,6 +78,10 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			ImGui::InputDouble(("Store " + row + " energy kJ per kg dry").c_str(), &composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
 		}
 		ImGui::PopItemWidth();
+		if (removeStore)
+			mDraft.stores.erase(mDraft.stores.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
 	}
 	if (ImGui::Button("Add store"))
 	{
@@ -90,10 +99,11 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		mDraft.stores.push_back(std::move(store));
 	}
 	ImGui::SeparatorText("Draft transfers (qualified material, same-unit stores)");
-	for (size_t index = 0; index < mDraft.transfers.size(); ++index)
+	for (size_t index = 0; index < mDraft.transfers.size(); )
 	{
 		auto& transfer = mDraft.transfers[index];
 		auto const row = std::to_string(index);
+		bool removeTransfer = false;
 		ImGui::PushItemWidth(220);
 		char transferIdBuffer[core::MaxStationStoreIdLength + 1]{};
 		std::strncpy(transferIdBuffer, transfer.id.c_str(), core::MaxStationStoreIdLength);
@@ -115,8 +125,12 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		ImGui::InputInt(("Transfer " + row + " priority").c_str(), &transfer.priority);
 		ImGui::SameLine();
 		if (ImGui::Button(("Remove transfer " + row).c_str()))
-			mDraft.transfers.erase(mDraft.transfers.begin() + static_cast<std::ptrdiff_t>(index));
+			removeTransfer = true;
 		ImGui::PopItemWidth();
+		if (removeTransfer)
+			mDraft.transfers.erase(mDraft.transfers.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
 	}
 	if (ImGui::Button("Add transfer"))
 	{
@@ -141,10 +155,11 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		mDraft.transfers.push_back(std::move(transfer));
 	}
 	ImGui::SeparatorText("Draft conversions (compound material; declared yields may lose but never create constituents)");
-	for (size_t index = 0; index < mDraft.conversions.size(); ++index)
+	for (size_t index = 0; index < mDraft.conversions.size(); )
 	{
 		auto& conversion = mDraft.conversions[index];
 		auto const row = std::to_string(index);
+		bool removeConversion = false;
 		ImGui::PushItemWidth(220);
 		char conversionIdBuffer[core::MaxStationStoreIdLength + 1]{};
 		std::strncpy(conversionIdBuffer, conversion.id.c_str(), core::MaxStationStoreIdLength);
@@ -153,8 +168,8 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		ImGui::InputInt(("Conversion " + row + " priority").c_str(), &conversion.priority);
 		ImGui::SameLine();
 		if (ImGui::Button(("Remove conversion " + row).c_str()))
-			mDraft.conversions.erase(mDraft.conversions.begin() + static_cast<std::ptrdiff_t>(index));
-		for (size_t flow = 0; flow < conversion.inputs.size(); ++flow)
+			removeConversion = true;
+		for (size_t flow = 0; flow < conversion.inputs.size(); )
 		{
 			auto& input = conversion.inputs[flow];
 			auto const flowRow = "Conversion " + row + " input " + std::to_string(flow);
@@ -165,13 +180,16 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			ImGui::SameLine();
 			ImGui::InputDouble((flowRow + " rate").c_str(), &input.ratePerSecond, 0.0, 0.0, "%.3f");
 			ImGui::SameLine();
-			if (ImGui::Button(("Remove " + flowRow).c_str()))
+			bool const removeInput = ImGui::Button(("Remove " + flowRow).c_str());
+			if (removeInput)
 				conversion.inputs.erase(conversion.inputs.begin() + static_cast<std::ptrdiff_t>(flow));
+			else
+				++flow;
 		}
 		if (conversion.inputs.size() < core::MaxStationConversionFlows
 			&& ImGui::Button(("Add input to conversion " + row).c_str()))
 			conversion.inputs.push_back({});
-		for (size_t flow = 0; flow < conversion.outputs.size(); ++flow)
+		for (size_t flow = 0; flow < conversion.outputs.size(); )
 		{
 			auto& output = conversion.outputs[flow];
 			auto const flowRow = "Conversion " + row + " output " + std::to_string(flow);
@@ -182,13 +200,20 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			ImGui::SameLine();
 			ImGui::InputDouble((flowRow + " yield").c_str(), &output.yieldPerSecond, 0.0, 0.0, "%.3f");
 			ImGui::SameLine();
-			if (ImGui::Button(("Remove " + flowRow).c_str()))
+			bool const removeOutput = ImGui::Button(("Remove " + flowRow).c_str());
+			if (removeOutput)
 				conversion.outputs.erase(conversion.outputs.begin() + static_cast<std::ptrdiff_t>(flow));
+			else
+				++flow;
 		}
 		if (conversion.outputs.size() < core::MaxStationConversionFlows
 			&& ImGui::Button(("Add output to conversion " + row).c_str()))
 			conversion.outputs.push_back({});
 		ImGui::PopItemWidth();
+		if (removeConversion)
+			mDraft.conversions.erase(mDraft.conversions.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
 	}
 	if (mDraft.conversions.size() < core::MaxStationResourceConversions)
 	{
@@ -208,10 +233,11 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		}
 	}
 	ImGui::SeparatorText("Draft solar arrays (kW; illumination is a fraction of full sun, 0..1)");
-	for (size_t index = 0; index < mDraft.solarArrays.size(); ++index)
+	for (size_t index = 0; index < mDraft.solarArrays.size(); )
 	{
 		auto& array = mDraft.solarArrays[index];
 		auto const row = std::to_string(index);
+		bool removeArray = false;
 		ImGui::PushItemWidth(220);
 		char solarIdBuffer[core::MaxStationStoreIdLength + 1]{};
 		std::strncpy(solarIdBuffer, array.id.c_str(), core::MaxStationStoreIdLength);
@@ -240,7 +266,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		{
 			ImGui::InputDouble(("Solar " + row + " period seconds").c_str(),
 				&array.illumination.periodSeconds, 0.0, 0.0, "%.1f");
-			for (size_t segment = 0; segment < array.illumination.segments.size(); ++segment)
+			for (size_t segment = 0; segment < array.illumination.segments.size(); )
 			{
 				auto& stretch = array.illumination.segments[segment];
 				auto const segmentRow = "Solar " + row + " segment " + std::to_string(segment);
@@ -248,9 +274,12 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 				ImGui::SameLine();
 				ImGui::InputDouble((segmentRow + " level").c_str(), &stretch.level, 0.0, 0.0, "%.3f");
 				ImGui::SameLine();
-				if (ImGui::Button(("Remove " + segmentRow).c_str()))
+				bool const removeSegment = ImGui::Button(("Remove " + segmentRow).c_str());
+				if (removeSegment)
 					array.illumination.segments.erase(
 						array.illumination.segments.begin() + static_cast<std::ptrdiff_t>(segment));
+				else
+					++segment;
 				}
 			if (array.illumination.segments.size() < core::MaxStationProfileSegments
 				&& ImGui::Button(("Add segment to solar " + row).c_str()))
@@ -259,8 +288,12 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			}
 		ImGui::SameLine();
 		if (ImGui::Button(("Remove solar array " + row).c_str()))
-			mDraft.solarArrays.erase(mDraft.solarArrays.begin() + static_cast<std::ptrdiff_t>(index));
+			removeArray = true;
 		ImGui::PopItemWidth();
+		if (removeArray)
+			mDraft.solarArrays.erase(mDraft.solarArrays.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
 	}
 	if (mDraft.solarArrays.size() < core::MaxStationSolarArrays && ImGui::Button("Add solar array"))
 	{
@@ -276,10 +309,11 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		mDraft.solarArrays.push_back(std::move(array));
 	}
 	ImGui::SeparatorText("Draft external equipment loads (kW; heat and material exchanges scale with delivered power)");
-	for (size_t index = 0; index < mDraft.equipmentLoads.size(); ++index)
+	for (size_t index = 0; index < mDraft.equipmentLoads.size(); )
 	{
 		auto& load = mDraft.equipmentLoads[index];
 		auto const row = std::to_string(index);
+		bool removeLoad = false;
 		ImGui::PushItemWidth(220);
 		char loadIdBuffer[core::MaxStationStoreIdLength + 1]{};
 		std::strncpy(loadIdBuffer, load.id.c_str(), core::MaxStationStoreIdLength);
@@ -342,7 +376,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		ImGui::InputInt(("Load " + row + " priority").c_str(), &load.priority);
 		ImGui::InputDouble(("Load " + row + " max curtailment").c_str(),
 			&load.maxCurtailment, 0.0, 0.0, "%.3f");
-		for (size_t exchange = 0; exchange < load.materialExchanges.size(); ++exchange)
+		for (size_t exchange = 0; exchange < load.materialExchanges.size(); )
 		{
 			auto& flow = load.materialExchanges[exchange];
 			auto const exchangeRow = "Load " + row + " exchange " + std::to_string(exchange);
@@ -356,17 +390,24 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			ImGui::SameLine();
 			ImGui::Checkbox((exchangeRow + " consumes").c_str(), &flow.consumes);
 			ImGui::SameLine();
-			if (ImGui::Button(("Remove " + exchangeRow).c_str()))
+			bool const removeExchange = ImGui::Button(("Remove " + exchangeRow).c_str());
+			if (removeExchange)
 				load.materialExchanges.erase(
 					load.materialExchanges.begin() + static_cast<std::ptrdiff_t>(exchange));
+			else
+				++exchange;
 		}
 		if (load.materialExchanges.size() < core::MaxStationLoadMaterialExchanges
 			&& ImGui::Button(("Add exchange to load " + row).c_str()))
 			load.materialExchanges.push_back({});
 		ImGui::SameLine();
 		if (ImGui::Button(("Remove load " + row).c_str()))
-			mDraft.equipmentLoads.erase(mDraft.equipmentLoads.begin() + static_cast<std::ptrdiff_t>(index));
+			removeLoad = true;
 		ImGui::PopItemWidth();
+		if (removeLoad)
+			mDraft.equipmentLoads.erase(mDraft.equipmentLoads.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
 	}
 	if (mDraft.equipmentLoads.size() < core::MaxStationEquipmentLoads && ImGui::Button("Add load"))
 	{
@@ -383,10 +424,11 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		mDraft.equipmentLoads.push_back(std::move(load));
 	}
 	ImGui::SeparatorText("Draft batteries (kWh; usable energy is the cyclable slice above the reserve floor = nameplate - usable)");
-	for (size_t index = 0; index < mDraft.batteries.size(); ++index)
+	for (size_t index = 0; index < mDraft.batteries.size(); )
 	{
 		auto& battery = mDraft.batteries[index];
 		auto const row = std::to_string(index);
+		bool removeBattery = false;
 		ImGui::PushItemWidth(220);
 		char batteryIdBuffer[core::MaxStationStoreIdLength + 1]{};
 		std::strncpy(batteryIdBuffer, battery.id.c_str(), core::MaxStationStoreIdLength);
@@ -408,8 +450,12 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			&battery.dischargeEfficiency, 0.0, 0.0, "%.3f");
 		ImGui::SameLine();
 		if (ImGui::Button(("Remove battery " + row).c_str()))
-			mDraft.batteries.erase(mDraft.batteries.begin() + static_cast<std::ptrdiff_t>(index));
+			removeBattery = true;
 		ImGui::PopItemWidth();
+		if (removeBattery)
+			mDraft.batteries.erase(mDraft.batteries.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
 	}
 	if (mDraft.batteries.size() < core::MaxStationBatteries && ImGui::Button("Add battery"))
 	{
