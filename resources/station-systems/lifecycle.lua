@@ -312,7 +312,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
                 store = store,
                 rate = exchange.rate,
                 consumes = exchange.consumes and true or false,
+                lastRequested = 0,
                 lastCompleted = 0,
+                lastReserved = 0,
+                lastUnmet = 0,
             }
         end
         object.loads[index] = {
@@ -332,6 +335,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
             shortfall = '',
             unmetCritical = 0,
             deliveredFraction = 0,
+            materialFraction = 1,
+            cappedRequest = 0,
+            materialComputed = false,
+            materialRefused = false,
+            materialReserved = false,
             heatExported = 0,
             unmetCooling = 0,
             admitted = false,
@@ -597,6 +605,74 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
         end
         return needKW - remaining
     end
+    -- #554: declared material exchanges are operation dependencies.
+    -- The material-feasible operating fraction is the largest fraction of
+    -- the load's full-operation (profile-scaled) exchanges that its
+    -- declared feed (qualified above the protected reserve) and
+    -- destination headroom can sustain this tick; the second return value
+    -- names the binding limiter. The electrical request is capped to that
+    -- fraction before allocation, so a starved or backed-up load never
+    -- draws power it cannot run on, and the shortfall stays explicit as
+    -- unmet service and per-exchange unmet material.
+    local function materialFeasible(load, fixed_seconds)
+        local fraction = 1.0
+        local limiter = ''
+        for _, exchange in ipairs(load.exchanges) do
+            local store = exchange.store
+            local full = exchange.rate * fixed_seconds * load.lastLevel
+            if full > 0 then
+                if exchange.consumes then
+                    local drawable = math.max(0, store.qualified - store.protected_reserve)
+                    if drawable / full < fraction then
+                        fraction = drawable / full
+                        if drawable <= 1e-12 then
+                            if store.protected_reserve > 0 then
+                                limiter = "feed store '" .. store.id
+                                    .. "' is at its protected reserve"
+                            elseif store.unqualified > 1e-12 then
+                                limiter = "feed store '" .. store.id
+                                    .. "' holds only unqualified material"
+                            else
+                                limiter = "feed store '" .. store.id .. "' is empty"
+                            end
+                        else
+                            limiter = "feed store '" .. store.id
+                                .. "' supply limits the operating level"
+                        end
+                    end
+                else
+                    local headroom = math.max(0,
+                        store.capacity - (store.qualified + store.unqualified))
+                    if headroom / full < fraction then
+                        fraction = headroom / full
+                        if headroom <= 1e-12 then
+                            limiter = "destination store '" .. store.id .. "' is full"
+                        else
+                            limiter = "destination store '" .. store.id
+                                .. "' headroom limits the operating level"
+                        end
+                    end
+                end
+            end
+        end
+        return math.max(0.0, math.min(1.0, fraction)), limiter
+    end
+    -- Reserve the capped level's material against the live inventory when
+    -- a grant is made: a feed draw and a destination claim that later
+    -- loads in the allocation order must see, so competing loads never
+    -- double-book the same kilograms (#554).
+    local function reserveMaterial(load, fraction, fixed_seconds)
+        for _, exchange in ipairs(load.exchanges) do
+            local reserved = exchange.rate * fixed_seconds * load.lastLevel * fraction
+            if exchange.consumes then
+                exchange.store.qualified = exchange.store.qualified - reserved
+            else
+                exchange.store.qualified = exchange.store.qualified + reserved
+            end
+            exchange.lastReserved = reserved
+        end
+        load.materialReserved = true
+    end
     local function applyPower(self, elapsed, fixed_seconds)
         -- Energy crossings use hours: a fixed tick is a fraction of a
         -- second, so its duration must be divided by 3600 before it
@@ -624,6 +700,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
             load.admitted = load.cooling == 'exported'
             load.unmetCritical = 0
             load.shortfall = ''
+            load.materialFraction = 1
+            load.cappedRequest = load.requested
+            load.materialComputed = false
+            load.materialRefused = false
+            load.materialReserved = false
+            for _, exchange in ipairs(load.exchanges) do exchange.lastReserved = 0 end
             supplied[index] = 0
             if not load.admitted and load.requested > 0 then
                 -- A cooling-blocked load receives no electrical service,
@@ -634,52 +716,94 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
                 local floor = math.min(load.criticalFloorKW, load.requested)
                 if floor > 0 then
                     local minOperating = load.requested * (1 - load.maxCurtailment)
-                    local claim = math.max(floor, minOperating)
-                    local reachable = math.min(claim,
-                        generation + batteryDeliverableKW(self, fixed_hours))
-                    if reachable + 1e-12 < minOperating then
-                        -- The pools cannot run this load at all: it is
-                        -- refused whole, spends no scarce energy, and
-                        -- every watt of its protected floor stays unmet
-                        -- rather than just the slice the pool happened to
-                        -- fall short of.
+                    -- #554: the request is capped to the fraction of the
+                    -- full-operation exchanges the declared feed and
+                    -- destination limits sustain; a load whose capped
+                    -- request cannot reach its minimum operable level is
+                    -- refused whole and spends no power or material.
+                    local material, limiter = materialFeasible(load, fixed_seconds)
+                    load.materialFraction = material
+                    load.cappedRequest = load.requested * material
+                    load.materialComputed = true
+                    if load.cappedRequest <= 1e-12
+                        or load.cappedRequest + 1e-12 < minOperating then
                         load.unmetCritical = floor
-                        load.shortfall =
-                            'critical floor cannot reach the minimum operable supply level'
+                        load.shortfall = limiter
+                        load.materialRefused = true
                     else
-                        local fromGeneration = math.min(reachable, generation)
-                        generation = generation - fromGeneration
-                        local stillNeeded = reachable - fromGeneration
-                        local fromBattery = drawBatteries(self, stillNeeded, fixed_hours)
-                        supplied[index] = fromGeneration + fromBattery
-                        batterySupplied = batterySupplied + fromBattery
-                        load.unmetCritical = math.max(0, floor - supplied[index])
+                        -- The protected claim never exceeds what the
+                        -- material can feed: a floor above the capped
+                        -- request stays partly unmet rather than buying
+                        -- power the equipment cannot use.
+                        local claim = math.min(math.max(floor, minOperating),
+                            load.cappedRequest)
+                        local reachable = math.min(claim,
+                            generation + batteryDeliverableKW(self, fixed_hours))
+                        if reachable + 1e-12 < minOperating then
+                            -- The pools cannot run this load at all: it is
+                            -- refused whole, spends no scarce energy, and
+                            -- every watt of its protected floor stays unmet
+                            -- rather than just the slice the pool happened
+                            -- to fall short of.
+                            load.unmetCritical = floor
+                            load.shortfall =
+                                'critical floor cannot reach the minimum operable supply level'
+                        else
+                            local fromGeneration = math.min(reachable, generation)
+                            generation = generation - fromGeneration
+                            local stillNeeded = reachable - fromGeneration
+                            local fromBattery = drawBatteries(self, stillNeeded, fixed_hours)
+                            supplied[index] = fromGeneration + fromBattery
+                            batterySupplied = batterySupplied + fromBattery
+                            reserveMaterial(load, material, fixed_seconds)
+                            load.unmetCritical = math.max(0, floor - supplied[index])
+                        end
                     end
                 end
             end
         end
         for _, index in ipairs(self.load_order) do
             local load = self.loads[index]
-            if load.admitted and load.requested > 0 then
-                local remaining = load.requested - supplied[index]
-                if remaining > 0 then
-                    local fromGeneration = math.min(remaining, generation)
-                    local afterGeneration = remaining - fromGeneration
-                    local batteryAsk = math.min(afterGeneration,
-                        batteryDeliverableKW(self, fixed_hours))
-                    local minOperating = load.requested * (1 - load.maxCurtailment)
-                    if supplied[index] + fromGeneration + batteryAsk + 1e-12 >= minOperating then
-                        supplied[index] = supplied[index] + fromGeneration
-                        generation = generation - fromGeneration
-                        -- Route the full remaining need, not just the
-                        -- capped ask, so each battery's recorded request
-                        -- and shortfall show the limitation the
-                        -- allocation actually ran into.
-                        local drawn = drawBatteries(self, afterGeneration, fixed_hours)
-                        supplied[index] = supplied[index] + drawn
-                        batterySupplied = batterySupplied + drawn
-                    elseif load.shortfall == '' then
-                        load.shortfall = 'below the minimum operable supply level'
+            if load.admitted and load.requested > 0 and not load.materialRefused then
+                local minOperating = load.requested * (1 - load.maxCurtailment)
+                -- Loads with no protected floor were not evaluated in
+                -- pass 1: their material feasibility is read against the
+                -- inventory as it stands after the protected grants
+                -- ahead of them (#554).
+                if not load.materialComputed then
+                    local material, limiter = materialFeasible(load, fixed_seconds)
+                    load.materialFraction = material
+                    load.cappedRequest = load.requested * material
+                    load.materialComputed = true
+                    if load.cappedRequest <= 1e-12
+                        or load.cappedRequest + 1e-12 < minOperating then
+                        load.shortfall = limiter
+                        load.materialRefused = true
+                    end
+                end
+                if not load.materialRefused then
+                    local remaining = load.cappedRequest - supplied[index]
+                    if remaining > 0 then
+                        local fromGeneration = math.min(remaining, generation)
+                        local afterGeneration = remaining - fromGeneration
+                        local batteryAsk = math.min(afterGeneration,
+                            batteryDeliverableKW(self, fixed_hours))
+                        if supplied[index] + fromGeneration + batteryAsk + 1e-12 >= minOperating then
+                            supplied[index] = supplied[index] + fromGeneration
+                            generation = generation - fromGeneration
+                            -- Route the full remaining need, not just the
+                            -- capped ask, so each battery's recorded request
+                            -- and shortfall show the limitation the
+                            -- allocation actually ran into.
+                            local drawn = drawBatteries(self, afterGeneration, fixed_hours)
+                            supplied[index] = supplied[index] + drawn
+                            batterySupplied = batterySupplied + drawn
+                            if not load.materialReserved then
+                                reserveMaterial(load, load.materialFraction, fixed_seconds)
+                            end
+                        elseif load.shortfall == '' then
+                            load.shortfall = 'below the minimum operable supply level'
+                        end
                     end
                 end
             end
@@ -723,34 +847,41 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
             load.unmetCooling = load.admitted and 0 or load.heatKW * load.lastLevel
             -- Declared material exchanges are full-operation rates and scale
             -- by the full-operation delivered fraction (profile level times
-            -- the delivered fraction), booking at the external boundary:
-            -- draws are losses, deliveries are negative losses, so the
-            -- station ledgers stay closed (#548).
+            -- the delivered fraction) (#548). The exchange's requested
+            -- amount is the full-operation profile need and what completes
+            -- is that need at the delivered fraction, bounded by the
+            -- amount reserved against the declared feed and destination
+            -- limits when the grant ran (#554); a refused load never
+            -- reserved, so it completes nothing and the whole need stands
+            -- as unmet material. The unused reservation returns to the
+            -- live inventory before transfers and conversions run.
+            -- Completed amounts book at the external boundary: draws are
+            -- losses, deliveries are negative losses, so the station
+            -- ledgers stay closed.
             for _, exchange in ipairs(load.exchanges) do
                 local store = exchange.store
                 local requested = exchange.rate * fixed_seconds * load.lastLevel
-                    * load.deliveredFraction
-                local completed = 0
+                local completed = math.min(requested * load.deliveredFraction,
+                    exchange.lastReserved)
                 if exchange.consumes then
-                    local drawable = math.max(0, store.qualified - store.protected_reserve)
-                    completed = math.min(requested, drawable)
-                    store.qualified = store.qualified - completed
+                    store.qualified = store.qualified + exchange.lastReserved - completed
                     self.unit_loss[store.unit] = (self.unit_loss[store.unit] or 0) + completed
                     if store.composition then
                         addConstituents(self.constituent_loss, store.composition,
                             toKg(store.unit, completed), 1)
                     end
                 else
-                    local headroom = store.capacity - (store.qualified + store.unqualified)
-                    completed = math.min(requested, headroom)
-                    store.qualified = store.qualified + completed
+                    store.qualified = store.qualified - (exchange.lastReserved - completed)
                     self.unit_loss[store.unit] = (self.unit_loss[store.unit] or 0) - completed
                     if store.composition then
                         addConstituents(self.constituent_loss, store.composition,
                             toKg(store.unit, completed), -1)
                     end
                 end
+                exchange.lastRequested = requested
                 exchange.lastCompleted = completed
+                exchange.lastUnmet = requested - completed
+                exchange.lastReserved = 0
             end
         end
         -- Allocation audit: allocated power never exceeds generation plus

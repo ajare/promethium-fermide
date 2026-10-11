@@ -189,10 +189,18 @@ namespace core
 
 	// One declared material exchange of an External equipment load group
 	// with a station Resource store, at the load's full-operation rate.
-	// Consuming draws qualified material above the store's protected
-	// reserve; producing delivers into the store's remaining capacity.
-	// Both scale with the load's delivered power fraction: equipment that
-	// is curtailed exchanges less, and never exchanges what it cannot.
+	// Every declared exchange is an operation dependency (#554), not an
+	// optional side effect: a consuming exchange is feed the load must
+	// have (drawn from qualified material above the store's protected
+	// reserve) and a producing exchange must land inside the store's
+	// remaining capacity. The load's admitted operating fraction is
+	// capped by the fraction of its full-operation exchanges the
+	// declared inputs and destination limits can actually sustain, so
+	// starvation or backpressure constrains power, heat and outputs
+	// together instead of silently running the equipment on material
+	// that does not exist. An exchange that should not constrain
+	// operation is not expressible implicitly: it must not be declared
+	// as a load exchange at all.
 	struct EquipmentMaterialExchangeSettings
 	{
 		std::string storeId;
@@ -346,6 +354,9 @@ namespace core
 		std::string unit;
 		double requested{0.0};
 		double completed{0.0};
+		// The remainder that did not move (#554 for equipment material
+		// exchanges): explicit unmet material, never deleted.
+		double unmet{0.0};
 		bool operator==(StationConversionFlowSnapshot const&) const = default;
 	};
 	// Per-conversion observable outcome. The completed scale is the fraction
@@ -398,8 +409,15 @@ namespace core
 	// is the fraction of that profile-scaled request actually supplied,
 	// and the full-operation heat and material exchange rates scale by the
 	// full-operation delivered fraction (profileLevel * deliveredFraction).
-	// A cooling-infeasible load is not admitted: it draws no power and its
-	// cooling need stays visible as unmet cooling.
+	// Material feasibility is explicit on top (#554): materialFeasibleFraction
+	// is the fraction of the full-operation exchanges the declared feed and
+	// destination limits sustained this tick, and allocation ran against
+	// requestedKW * materialFeasibleFraction — so a starved or backed-up
+	// load shows a reduced delivered fraction, reduced heat and reduced
+	// outputs, with the shortfall reported as unmet service and
+	// per-exchange unmet material. A cooling-infeasible load is not
+	// admitted: it draws no power and its cooling need stays visible as
+	// unmet cooling.
 	struct StationEquipmentLoadSnapshot
 	{
 		std::string id;
@@ -413,6 +431,7 @@ namespace core
 		double criticalFloorKW{0.0};
 		double unmetCriticalKW{0.0};
 		double deliveredFraction{0.0};
+		double materialFeasibleFraction{1.0}; // feed/destination-sustainable operation fraction (#554)
 		double heatExportedKW{0.0};   // heat leaving via the declared export boundary
 		double unmetCoolingKW{0.0};   // cooling need with no feasible service
 		bool admitted{false};

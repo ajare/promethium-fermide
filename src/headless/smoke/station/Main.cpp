@@ -1395,7 +1395,11 @@ namespace
 				&& approx(snap.power.loads[0].materialExchanges[0].completed, 0.025),
 				"Duty load heat/exchanges did not scale with profile and delivery");
 			// Curtailed under a fractional profile: level 0.5, delivered 0.5
-			// -> heat 8*0.5*0.5 = 2.0, consumption 3*(1/60)*0.5*0.5 = 0.0125 kg.
+			// -> heat 8*0.5*0.5 = 2.0. The exchange's requested amount is
+			// the full-operation profile need 3*(1/60)*0.5 = 0.025 kg and
+			// what completed is that need at the delivered fraction,
+			// 0.0125 kg; the remainder stands as explicit unmet material
+			// (#554).
 			require(snap.power.loads[1].id == "curtailed"
 				&& approx(snap.power.loads[1].profileLevel, 0.5)
 				&& approx(snap.power.loads[1].requestedKW, 5.0)
@@ -1403,8 +1407,9 @@ namespace
 				&& approx(snap.power.loads[1].deliveredFraction, 0.5)
 				&& snap.power.loads[1].status == core::StationTransferStatus::Partial
 				&& approx(snap.power.loads[1].heatExportedKW, 2.0)
-				&& approx(snap.power.loads[1].materialExchanges[0].requested, 0.0125)
-				&& approx(snap.power.loads[1].materialExchanges[0].completed, 0.0125),
+				&& approx(snap.power.loads[1].materialExchanges[0].requested, 0.025)
+				&& approx(snap.power.loads[1].materialExchanges[0].completed, 0.0125)
+				&& approx(snap.power.loads[1].materialExchanges[0].unmet, 0.0125),
 				"Curtailed fractional-profile heat/exchanges did not scale by level and delivery");
 			// Zero profile: nothing requested, nothing supplied, no heat,
 			// no material movement.
@@ -1421,8 +1426,11 @@ namespace
 				&& std::abs(snap.balances[0].residual) < 1e-9,
 				"Mixed duty/curtailment totals or boundary ledger wrong");
 		}
-		// A protected reserve is never drawn by an equipment exchange and a
-		// full destination store clamps delivery without overflow.
+		// #554: a full destination store backpressures the load — the
+		// declared exchange is an operation dependency, so the load is
+		// refused rather than running on material it cannot deliver.
+		// The protected reserve is never drawn, and the shortfall stays
+		// explicit as unmet material on the exchange flows.
 		core::World bounded("Bounded", 2, 2);
 		bounded.pauseSimulation(); bounded.finishBuild();
 		require(configure(bounded,
@@ -1432,24 +1440,251 @@ namespace
 			{
 				auto reactor = load("reactor", 10.0, "warm",
 					core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
+				reactor.heatOutputKW = 2.0;
 				reactor.materialExchanges.push_back({"water", 6.0, true});
 				reactor.materialExchanges.push_back({"brine", 3.0, false});
 				return std::vector<core::EquipmentLoadSettings>{reactor};
 			}()).first, "Bounded exchange scenario refused");
 		bounded.resumeSimulation();
-		require(bounded.advanceTicks(60), "Bounded exchange run failed");
+		// Seven ticks at ~0.05 kg/s leave headroom in the 0.4 kg brine
+		// store while the feed above the reserve is ample: the load runs
+		// full the whole time.
+		require(bounded.advanceTicks(7), "Bounded exchange run failed");
 		{
 			auto const snap = bounded.getStationSystemsSnapshot();
-			// One second at 6 kg/s against 1 kg drawable above the reserve:
-			// only 1 kg leaves the water store.
-			require(approx(snap.stores[0].currentQualified, 10.0),
-				"Equipment exchange drew into the protected reserve");
-			// The brine store fills at 0.4 kg; delivery clamps at capacity.
-			require(approx(snap.stores[1].currentQualified, 0.4)
+			require(snap.power.loads[0].status == core::StationTransferStatus::Full
+				&& approx(snap.power.loads[0].materialFeasibleFraction, 1.0)
+				&& approx(snap.stores[0].currentQualified, 11.0 - 7 * 0.1)
+				&& approx(snap.stores[1].currentQualified, 7 * 0.05),
+				"Load did not run full while destination headroom lasted");
+		}
+		// Once the destination is full the load is refused whole: it draws
+		// no feed, exports no heat, and the whole declared need stands as
+		// unmet material.
+		require(bounded.advanceTicks(53), "Bounded backpressure run failed");
+		{
+			auto const snap = bounded.getStationSystemsSnapshot();
+			require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
+				&& approx(snap.power.loads[0].suppliedKW, 0.0)
+				&& approx(snap.power.loads[0].materialFeasibleFraction, 0.0)
+				&& approx(snap.power.loads[0].heatExportedKW, 0.0)
+				&& approx(snap.power.loads[0].unmetKW, 10.0),
+				"Full destination did not constrain the load's operation");
+			require(approx(snap.power.loads[0].materialExchanges[0].requested, 0.1)
+				&& approx(snap.power.loads[0].materialExchanges[0].completed, 0.0)
+				&& approx(snap.power.loads[0].materialExchanges[0].unmet, 0.1)
+				&& approx(snap.power.loads[0].materialExchanges[1].requested, 0.05)
+				&& approx(snap.power.loads[0].materialExchanges[1].completed, 0.0)
+				&& approx(snap.power.loads[0].materialExchanges[1].unmet, 0.05),
+				"Backpressured exchange shortfall not explicit as unmet material");
+			// The protected reserve is untouched and nothing overflowed.
+			require(approx(snap.stores[0].currentQualified, 10.2)
+				&& snap.stores[0].currentQualified >= 10.0 - 1e-9
+				&& approx(snap.stores[1].currentQualified, 0.4)
 				&& snap.stores[1].currentQualified <= 0.4 + 1e-9,
-				"Equipment delivery overflowed the destination store");
+				"Backpressured run drew the reserve or overflowed the destination");
+			require(sawEvent(bounded, "Load 'reactor' rejected: destination store 'brine' is full"),
+				"Destination-full refusal reason missing from the event log");
 			require(std::abs(snap.balances[0].residual) < 1e-9,
 				"Bounded exchanges broke the boundary ledger");
+		}
+		// #554 ticket reproduction: an empty declared feed does not
+		// silently become optional. The load is refused whole — no power,
+		// no heat, no outputs — with the whole need explicit as unmet
+		// material and unmet service.
+		core::World starved("Starved", 2, 2);
+		starved.pauseSimulation(); starved.finishBuild();
+		{
+			auto rig = load("rig", 10.0, "low",
+				core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
+			rig.heatOutputKW = 4.0;
+			rig.materialExchanges.push_back({"feed", 1.0, true});
+			rig.materialExchanges.push_back({"product", 1.0, false});
+			require(configure(starved,
+				{{"feed", "kg", 10.0, 0.0, 0.0}, {"product", "kg", 10.0, 0.0, 0.0}},
+				{array("field", 10.0, constantProfile(1.0))}, {rig}).first,
+				"Empty-feed reproduction scenario refused");
+			starved.resumeSimulation();
+			require(starved.advanceTick(), "Empty-feed reproduction tick failed");
+			auto const snap = starved.getStationSystemsSnapshot();
+			require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
+				&& approx(snap.power.loads[0].suppliedKW, 0.0)
+				&& approx(snap.power.loads[0].deliveredFraction, 0.0)
+				&& approx(snap.power.loads[0].materialFeasibleFraction, 0.0)
+				&& approx(snap.power.loads[0].heatExportedKW, 0.0)
+				&& approx(snap.power.loads[0].unmetKW, 10.0),
+				"Empty feed did not constrain admitted operation: power or heat still full");
+			require(approx(snap.stores[0].currentQualified, 0.0)
+				&& approx(snap.stores[1].currentQualified, 0.0),
+				"Empty feed produced phantom output");
+			require(approx(snap.power.loads[0].materialExchanges[0].requested, 1.0 / 60.0)
+				&& approx(snap.power.loads[0].materialExchanges[0].completed, 0.0)
+				&& approx(snap.power.loads[0].materialExchanges[0].unmet, 1.0 / 60.0)
+				&& approx(snap.power.loads[0].materialExchanges[1].requested, 1.0 / 60.0)
+				&& approx(snap.power.loads[0].materialExchanges[1].completed, 0.0)
+				&& approx(snap.power.loads[0].materialExchanges[1].unmet, 1.0 / 60.0),
+				"Starved need not explicit as unmet material");
+			require(sawEvent(starved, "Load 'rig' rejected: feed store 'feed' is empty"),
+				"Empty-feed refusal reason missing from the event log");
+			require(std::abs(snap.balances[0].residual) < 1e-9,
+				"Empty-feed run broke the boundary ledger");
+		}
+		// Held-only (unqualified) and protected-reserve feeds refuse the
+		// load with the precise reason: neither is usable feed material.
+		core::World held("Held", 2, 2);
+		held.pauseSimulation(); held.finishBuild();
+		{
+			auto rig = load("rig", 10.0, "low",
+				core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
+			rig.materialExchanges.push_back({"feed", 1.0, true});
+			require(configure(held,
+				{{"feed", "kg", 10.0, 0.0, 5.0, 0.0}, {"product", "kg", 10.0, 0.0, 0.0}},
+				{array("field", 10.0, constantProfile(1.0))}, {rig}).first,
+				"Held-only feed scenario refused");
+			held.resumeSimulation();
+			require(held.advanceTick(), "Held-only feed tick failed");
+			auto const snap = held.getStationSystemsSnapshot();
+			require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
+				&& approx(snap.power.loads[0].suppliedKW, 0.0)
+				&& approx(snap.stores[0].currentUnqualified, 5.0),
+				"Held-only feed was treated as usable");
+			require(sawEvent(held, "Load 'rig' rejected: feed store 'feed' holds only unqualified material"),
+				"Held-only feed refusal reason missing from the event log");
+			held.pauseSimulation();
+			require(configure(held,
+				{{"feed", "kg", 10.0, 2.0, 0.0, 2.0}, {"product", "kg", 10.0, 0.0, 0.0}},
+				{array("field", 10.0, constantProfile(1.0))}, {rig}).first,
+				"Protected-reserve feed scenario refused");
+			held.resumeSimulation();
+			require(held.advanceTick(), "Protected-reserve feed tick failed");
+			auto const reserveSnap = held.getStationSystemsSnapshot();
+			require(reserveSnap.power.loads[0].status == core::StationTransferStatus::Rejected
+				&& approx(reserveSnap.power.loads[0].suppliedKW, 0.0)
+				&& approx(reserveSnap.stores[0].currentQualified, 2.0),
+				"Protected-reserve feed was drawn into");
+			require(sawEvent(held, "Load 'rig' rejected: feed store 'feed' is at its protected reserve"),
+				"Protected-reserve feed refusal reason missing from the event log");
+		}
+		// Partial feed caps the operating fraction: the load runs at the
+		// fraction of its full-operation need the feed can sustain, and
+		// power, heat, inputs, outputs and unmet all agree at that
+		// fraction. When the feed runs out the load stops the next tick.
+		core::World partial("Partial", 2, 2);
+		partial.pauseSimulation(); partial.finishBuild();
+		{
+			auto rig = load("rig", 10.0, "low",
+				core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
+			rig.heatOutputKW = 4.0;
+			rig.materialExchanges.push_back({"feed", 1.0, true});
+			rig.materialExchanges.push_back({"product", 1.0, false});
+			// 0.01 kg of feed against a 1 kg/s full-operation need of
+			// 1/60 kg per tick: the feed sustains 0.6 of full operation.
+			require(configure(partial,
+				{{"feed", "kg", 10.0, 0.01, 0.0}, {"product", "kg", 10.0, 0.0, 0.0}},
+				{array("field", 10.0, constantProfile(1.0))}, {rig}).first,
+				"Partial feed scenario refused");
+			partial.resumeSimulation();
+			require(partial.advanceTick(), "Partial feed tick failed");
+			auto const snap = partial.getStationSystemsSnapshot();
+			require(snap.power.loads[0].status == core::StationTransferStatus::Partial
+				&& approx(snap.power.loads[0].materialFeasibleFraction, 0.6)
+				&& approx(snap.power.loads[0].suppliedKW, 6.0)
+				&& approx(snap.power.loads[0].deliveredFraction, 0.6)
+				&& approx(snap.power.loads[0].heatExportedKW, 2.4)
+				&& approx(snap.power.loads[0].unmetKW, 4.0),
+				"Partial feed did not cap the operating fraction consistently");
+			// Actual input, output and unmet all agree at the capped fraction.
+			require(approx(snap.stores[0].currentQualified, 0.0)
+				&& approx(snap.stores[1].currentQualified, 0.01)
+				&& approx(snap.power.loads[0].materialExchanges[0].completed, 0.01)
+				&& approx(snap.power.loads[0].materialExchanges[0].unmet, 1.0 / 60.0 - 0.01)
+				&& approx(snap.power.loads[0].materialExchanges[1].completed, 0.01)
+				&& approx(snap.power.loads[0].materialExchanges[1].unmet, 1.0 / 60.0 - 0.01),
+				"Capped feed/input/output/unmet amounts disagree");
+			require(std::abs(snap.balances[0].residual) < 1e-9,
+				"Partial feed run broke the boundary ledger");
+			// The feed is gone: the load stops rather than running un-fed.
+			require(partial.advanceTick(), "Post-exhaustion tick failed");
+			auto const next = partial.getStationSystemsSnapshot();
+			require(next.power.loads[0].status == core::StationTransferStatus::Rejected
+				&& approx(next.power.loads[0].suppliedKW, 0.0)
+				&& approx(next.power.loads[0].heatExportedKW, 0.0)
+				&& approx(next.stores[1].currentQualified, 0.01),
+				"Load kept operating after its feed was exhausted");
+		}
+		// Competing loads sharing one feed: the higher-priority load's
+		// grant reserves its feed ahead of the lower-priority load, which
+		// then sees the depletion and is refused — the same kilograms are
+		// never double-booked.
+		core::World sharing("Sharing", 2, 2);
+		sharing.pauseSimulation(); sharing.finishBuild();
+		{
+			auto first = load("first", 10.0, "low",
+				core::StationCoolingDisposition::Exported, 0.0, 5, 1.0);
+			first.materialExchanges.push_back({"feed", 1.0, true});
+			auto second = load("second", 10.0, "low",
+				core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
+			second.materialExchanges.push_back({"feed", 1.0, true});
+			// 0.01 kg shared feed: sustains 0.6 of one load's full
+			// operation, nothing left for the other.
+			require(configure(sharing,
+				{{"feed", "kg", 10.0, 0.01, 0.0}},
+				{array("field", 20.0, constantProfile(1.0))}, {first, second}).first,
+				"Shared-feed scenario refused");
+			sharing.resumeSimulation();
+			require(sharing.advanceTick(), "Shared-feed tick failed");
+			auto const snap = sharing.getStationSystemsSnapshot();
+			require(snap.power.loads[0].id == "first"
+				&& snap.power.loads[0].status == core::StationTransferStatus::Partial
+				&& approx(snap.power.loads[0].materialFeasibleFraction, 0.6)
+				&& approx(snap.power.loads[0].suppliedKW, 6.0),
+				"Higher-priority shared-feed load not capped and run");
+			require(snap.power.loads[1].id == "second"
+				&& snap.power.loads[1].status == core::StationTransferStatus::Rejected
+				&& approx(snap.power.loads[1].suppliedKW, 0.0)
+				&& approx(snap.power.loads[1].materialFeasibleFraction, 0.0),
+				"Lower-priority load drew feed the higher grant had reserved");
+			require(approx(snap.stores[0].currentQualified, 0.0),
+				"Shared feed was double-booked");
+			require(sawEvent(sharing, "Load 'second' rejected: feed store 'feed' is empty"),
+				"Shared-feed depletion refusal reason missing from the event log");
+		}
+		// Material below the minimum operable level refuses the load whole:
+		// it spends no power, its protected floor stays unmet, and the
+		// pool stays available for a load that can use it (#549 read
+		// together with #554).
+		core::World rigidStarved("RigidStarved", 2, 2);
+		rigidStarved.pauseSimulation(); rigidStarved.finishBuild();
+		{
+			auto rigid = load("rigid", 10.0, "low",
+				core::StationCoolingDisposition::Exported, 2.0, 5, 0.5);
+			rigid.heatOutputKW = 4.0;
+			rigid.materialExchanges.push_back({"feed", 1.0, true});
+			// 0.004 kg feed sustains 0.24 of full operation, below the
+			// rigid load's 0.5 minimum operable level: refused whole.
+			require(configure(rigidStarved,
+				{{"feed", "kg", 10.0, 0.004, 0.0}},
+				{array("field", 10.0, constantProfile(1.0))},
+				{rigid, load("flexible", 10.0, "moderate",
+					core::StationCoolingDisposition::Exported, 0.0, 0, 1.0)}).first,
+				"Starved-rigid scenario refused");
+			rigidStarved.resumeSimulation();
+			require(rigidStarved.advanceTick(), "Starved-rigid tick failed");
+			auto const snap = rigidStarved.getStationSystemsSnapshot();
+			require(snap.power.loads[0].id == "rigid"
+				&& snap.power.loads[0].status == core::StationTransferStatus::Rejected
+				&& approx(snap.power.loads[0].suppliedKW, 0.0)
+				&& approx(snap.power.loads[0].heatExportedKW, 0.0)
+				&& approx(snap.power.loads[0].unmetCriticalKW, 2.0)
+				&& approx(snap.power.unmetCriticalKW, 2.0),
+				"Feed below the minimum operable level did not refuse the load whole");
+			require(snap.power.loads[1].id == "flexible"
+				&& approx(snap.power.loads[1].suppliedKW, 10.0),
+				"Refused starved load spent pool the flexible load could use");
+			require(sawEvent(rigidStarved, "Load 'rigid' rejected: feed store 'feed' supply limits the operating level"),
+				"Starved-rigid refusal reason missing from the event log");
+			require(approx(snap.stores[0].currentQualified, 0.004),
+				"Refused load drew feed material");
 		}
 		// #549: a critical floor is a protected slice of the load's own
 		// service, never an independently operable sub-service. Protecting
@@ -1522,8 +1757,9 @@ namespace
 				require(approx(snap.power.loads[0].heatExportedKW, 0.0)
 					&& approx(snap.power.exportedHeatKW, 0.0),
 					"Infeasible load emitted operating heat");
-				require(approx(snap.power.loads[0].materialExchanges[0].requested, 0.0)
+				require(approx(snap.power.loads[0].materialExchanges[0].requested, 0.1)
 					&& approx(snap.power.loads[0].materialExchanges[0].completed, 0.0)
+					&& approx(snap.power.loads[0].materialExchanges[0].unmet, 0.1)
 					&& approx(snap.stores[0].currentQualified, 50.0),
 					"Infeasible load moved material it never ran to move");
 				require(approx(snap.power.loads[1].suppliedKW, 2.0)
@@ -1763,6 +1999,53 @@ namespace
 				&& approx(snap.power.loads[1].materialExchanges[0].completed, 0.0125)
 				&& approx(snap.power.loads[2].materialExchanges[0].completed, 0.0),
 				"Host and sandbox profile scaling disagree for the same scenario");
+		}
+		// #554 in the sandbox: the bundled Lua model applies the same
+		// material-dependency cap — an empty feed refuses the load with
+		// zero completion and the whole need as unmet material, and the
+		// model's own audits hold.
+		core::setStationSystemsSourceLoader([bundled] {
+			return "local factory = (function()\n" + bundled + "\nend)()\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries)\n"
+				"local original = model.advance\n"
+				"function model.advance(self, tick, seconds)\n"
+				"local result = original(self, tick, seconds)\n"
+				"local rig = self.loads[1]\n"
+				"assert(math.abs(rig.materialFraction) < 1e-12, 'sandbox material fraction not zero on empty feed')\n"
+				"assert(math.abs(rig.deliveredFraction) < 1e-12, 'sandbox delivered fraction not zero on empty feed')\n"
+				"assert(math.abs(rig.heatExported) < 1e-12, 'sandbox exported heat without feed')\n"
+				"assert(math.abs(rig.exchanges[1].lastCompleted) < 1e-12, 'sandbox drew on an empty feed')\n"
+				"assert(math.abs(rig.exchanges[1].lastUnmet - (1/60)) < 1e-9, 'sandbox unmet feed wrong')\n"
+				"assert(math.abs(rig.exchanges[2].lastCompleted) < 1e-12, 'sandbox produced output on an empty feed')\n"
+				"assert(math.abs(rig.exchanges[2].lastUnmet - (1/60)) < 1e-9, 'sandbox unmet output wrong')\n"
+				"return result\n"
+				"end\n"
+				"return model\n"
+				"end";
+		});
+		core::World sandboxStarved("SandboxStarved", 2, 2);
+		sandboxStarved.pauseSimulation(); sandboxStarved.finishBuild();
+		{
+			auto rig = load("rig", 10.0, "low",
+				core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
+			rig.heatOutputKW = 4.0;
+			rig.materialExchanges.push_back({"feed", 1.0, true});
+			rig.materialExchanges.push_back({"product", 1.0, false});
+			require(configure(sandboxStarved,
+				{{"feed", "kg", 10.0, 0.0, 0.0}, {"product", "kg", 10.0, 0.0, 0.0}},
+				{array("field", 10.0, constantProfile(1.0))}, {rig}).first,
+				"Sandbox starved scenario refused");
+			sandboxStarved.resumeSimulation();
+			require(sandboxStarved.advanceTicks(5),
+				"Bundled Lua material-dependency failed its in-sandbox assertions");
+			auto const snap = sandboxStarved.getStationSystemsSnapshot();
+			require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
+				&& approx(snap.power.loads[0].suppliedKW, 0.0)
+				&& approx(snap.power.loads[0].materialFeasibleFraction, 0.0)
+				&& approx(snap.power.loads[0].heatExportedKW, 0.0)
+				&& approx(snap.stores[1].currentQualified, 0.0),
+				"Host and sandbox material-dependency cap disagree");
 		}
 		core::setStationSystemsSourceLoader({});
 	}

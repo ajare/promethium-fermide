@@ -561,8 +561,9 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			ImGui::Text("  not admitted: %s (unmet cooling %.3f kW)",
 				load.blockReason.c_str(), load.unmetCoolingKW);
 		for (auto const& flow : load.materialExchanges)
-			ImGui::Text("  exchange %s (%s): requested %.3f, completed %.3f",
-				flow.storeId.c_str(), flow.unit.c_str(), flow.requested, flow.completed);
+			ImGui::Text("  exchange %s (%s): requested %.3f, completed %.3f, unmet %.3f",
+				flow.storeId.c_str(), flow.unit.c_str(), flow.requested, flow.completed,
+				flow.unmet);
 	}
 	ImGui::Text("Power totals: generation %.3f kW, requested %.3f, supplied %.3f, unmet %.3f, unmet critical %.3f, surplus %.3f, exported heat %.3f kW, battery discharge %.3f kW, battery charge %.3f kW, battery shortfall %.3f kW",
 		snapshot.power.availableGenerationKW, snapshot.power.totalRequestedKW,

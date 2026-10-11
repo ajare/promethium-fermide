@@ -686,6 +686,11 @@ namespace core
 			bool consumes{true};
 			double lastRequested{0.0};
 			double lastCompleted{0.0};
+			// The amount held back against the staged inventory at the load's
+			// capped operating level when a grant was made (#554); the
+			// unused remainder is returned at booking.
+			double lastReserved{0.0};
+			double lastUnmet{0.0};
 		};
 		struct LoadState
 		{
@@ -697,6 +702,15 @@ namespace core
 			double lastUnmetKW{0.0};
 			double lastUnmetCriticalKW{0.0};
 			double lastDeliveredFraction{0.0};
+			// #554: the fraction of the load's full-operation material
+			// exchanges its declared feed and destination limits sustained
+			// this tick; electrical allocation ran against
+			// lastRequestedKW * lastMaterialFraction.
+			double lastMaterialFraction{1.0};
+			double lastCappedRequestKW{0.0};
+			bool lastMaterialComputed{false};
+			bool lastMaterialRefused{false};
+			bool lastMaterialReserved{false};
 			double lastHeatExportedKW{0.0};
 			double lastUnmetCoolingKW{0.0};
 			bool lastAdmitted{false};
@@ -905,6 +919,81 @@ namespace core
 			};
 			double batterySuppliedKW{0.0};
 			double batteryShortfallKW{0.0};
+			// #554: declared material exchanges are operation dependencies.
+			// The material-feasible operating fraction is the largest fraction
+			// of the load's full-operation (profile-scaled) exchanges that its
+			// declared feed (qualified material above the protected reserve)
+			// and destination headroom can sustain this tick. The electrical
+			// request is capped to that fraction before allocation, so a
+			// starved or backed-up load never draws power it cannot run on,
+			// never exports heat it would only make while running, and never
+			// books outputs there is no room to deliver. The shortfall stays
+			// explicit as unmet service and per-exchange unmet material.
+			auto const exchangeFullAmount = [&](LoadExchangeState const& exchange,
+				double profileLevel)
+			{
+				return exchange.ratePerSecond * static_cast<double>(seconds) * profileLevel;
+			};
+			auto const materialFeasible = [&](LoadState const& load, std::string& limiter)
+			{
+				double fraction = 1.0;
+				for (auto const& exchange : load.exchanges)
+				{
+					auto const& store = stores[exchange.storeIndex].authored;
+					auto const full = exchangeFullAmount(exchange, load.lastProfileLevel);
+					if (full <= 0.0) continue;
+					if (exchange.consumes)
+					{
+						auto const drawable = std::max(0.0,
+							qualified[exchange.storeIndex] - store.protectedReserve);
+						if (drawable / full < fraction)
+						{
+							fraction = drawable / full;
+							limiter = drawable <= 1e-12
+								? (store.protectedReserve > 0.0
+									? "feed store '" + store.id + "' is at its protected reserve"
+									: (unqualified[exchange.storeIndex] > 1e-12
+										? "feed store '" + store.id
+											+ "' holds only unqualified material"
+										: "feed store '" + store.id + "' is empty"))
+								: "feed store '" + store.id + "' supply limits the operating level";
+						}
+					}
+					else
+					{
+						auto const headroom = std::max(0.0, store.capacity
+							- (qualified[exchange.storeIndex]
+								+ unqualified[exchange.storeIndex]));
+						if (headroom / full < fraction)
+						{
+							fraction = headroom / full;
+							limiter = headroom <= 1e-12
+								? "destination store '" + store.id + "' is full"
+								: "destination store '" + store.id
+									+ "' headroom limits the operating level";
+						}
+					}
+				}
+				return std::max(0.0, std::min(1.0, fraction));
+			};
+			// Reserve the capped level's material against the staged inventory
+			// when a grant is made: a feed draw and a destination claim that
+			// later loads in the allocation order must see, so competing loads
+			// never double-book the same kilograms (#554).
+			auto const reserveMaterial = [&](LoadState& load, double fraction)
+			{
+				for (auto& exchange : load.exchanges)
+				{
+					auto const reserved = exchangeFullAmount(exchange, load.lastProfileLevel)
+						* fraction;
+					if (exchange.consumes)
+						qualified[exchange.storeIndex] -= reserved;
+					else
+						qualified[exchange.storeIndex] += reserved;
+					exchange.lastReserved = reserved;
+				}
+				load.lastMaterialReserved = true;
+			};
 			// Pass 1: protected critical floors allocate ahead of every
 			// discretionary request, in the declared priority order. A
 			// floor that generation cannot meet is offered to the batteries
@@ -925,6 +1014,12 @@ namespace core
 				load.lastBlockReason = load.lastAdmitted ? std::string{}
 					: "no cooling service of class '" + load.authored.thermalClass + "' is available";
 				load.lastUnmetCriticalKW = 0.0;
+				load.lastMaterialFraction = 1.0;
+				load.lastCappedRequestKW = load.lastRequestedKW;
+				load.lastMaterialComputed = false;
+				load.lastMaterialRefused = false;
+				load.lastMaterialReserved = false;
+				for (auto& exchange : load.exchanges) exchange.lastReserved = 0.0;
 				if (load.lastRequestedKW <= 0.0) continue;
 				auto const floor = std::min(load.authored.criticalFloorKW, load.lastRequestedKW);
 				// A cooling-blocked load is refused admission and receives no
@@ -939,7 +1034,30 @@ namespace core
 				}
 				if (floor <= 0.0) continue;
 				auto const minOperating = load.lastRequestedKW * (1.0 - load.authored.maxCurtailment);
-				auto const claim = std::max(floor, minOperating);
+				std::string materialLimiter;
+				auto const material = materialFeasible(load, materialLimiter);
+				load.lastMaterialFraction = material;
+				load.lastCappedRequestKW = load.lastRequestedKW * material;
+				load.lastMaterialComputed = true;
+				if (load.lastCappedRequestKW <= 1e-12
+					|| load.lastCappedRequestKW + 1e-12 < minOperating)
+				{
+					// The declared feed or destination limits cannot sustain
+					// even the minimum operable level: the load is refused
+					// whole, spends no power and no material, and its whole
+					// protected floor stays explicit unmet demand while the
+					// starvation itself stays visible as unmet material on
+					// the exchange flows (#554).
+					load.lastUnmetCriticalKW = floor;
+					load.lastShortfallReason = materialLimiter;
+					load.lastMaterialRefused = true;
+					continue;
+				}
+				// The protected claim never exceeds what the material can
+				// feed: a floor above the capped request stays partly unmet
+				// rather than buying power the equipment cannot use.
+				auto const claim = std::min(std::max(floor, minOperating),
+					load.lastCappedRequestKW);
 				auto const reachable = std::min(claim, availableGeneration + batteryDeliverableKW());
 				if (reachable + 1e-12 < minOperating)
 				{
@@ -960,6 +1078,7 @@ namespace core
 				supplied[index] += fromBattery;
 				batterySuppliedKW += fromBattery;
 				batteryShortfallKW += stillNeeded - fromBattery;
+				reserveMaterial(load, material);
 				load.lastUnmetCriticalKW = std::max(0.0, floor - supplied[index]);
 			}
 			// Pass 2: discretionary demand in the same declared order. A
@@ -972,13 +1091,32 @@ namespace core
 			for (auto const index : loadOrder)
 			{
 				auto& load = loads[index];
-				if (!load.lastAdmitted || load.lastRequestedKW <= 0.0) continue;
-				auto const remaining = load.lastRequestedKW - supplied[index];
+				if (!load.lastAdmitted || load.lastRequestedKW <= 0.0
+					|| load.lastMaterialRefused) continue;
+				auto const minOperating = load.lastRequestedKW * (1.0 - load.authored.maxCurtailment);
+				// Loads with no protected floor were not evaluated in pass 1:
+				// their material feasibility is read against the inventory as
+				// it stands after the protected grants ahead of them (#554).
+				if (!load.lastMaterialComputed)
+				{
+					std::string materialLimiter;
+					auto const material = materialFeasible(load, materialLimiter);
+					load.lastMaterialFraction = material;
+					load.lastCappedRequestKW = load.lastRequestedKW * material;
+					load.lastMaterialComputed = true;
+					if (load.lastCappedRequestKW <= 1e-12
+					|| load.lastCappedRequestKW + 1e-12 < minOperating)
+					{
+						load.lastShortfallReason = materialLimiter;
+						load.lastMaterialRefused = true;
+						continue;
+					}
+				}
+				auto const remaining = load.lastCappedRequestKW - supplied[index];
 				if (remaining <= 0.0) continue;
 				auto const fromGeneration = std::min(remaining, availableGeneration);
 				auto const afterGeneration = remaining - fromGeneration;
 				auto const batteryAsk = std::min(afterGeneration, batteryDeliverableKW());
-				auto const minOperating = load.lastRequestedKW * (1.0 - load.authored.maxCurtailment);
 				if (supplied[index] + fromGeneration + batteryAsk + 1e-12 >= minOperating)
 				{
 					supplied[index] += fromGeneration;
@@ -994,6 +1132,8 @@ namespace core
 					// that the battery bank could not deliver, not merely what
 					// was asked of it after capping by capability.
 					batteryShortfallKW += afterGeneration - drawn;
+					if (!load.lastMaterialReserved)
+						reserveMaterial(load, load.lastMaterialFraction);
 				}
 				else if (load.lastShortfallReason.empty())
 					load.lastShortfallReason = "below the minimum operable supply level";
@@ -1029,35 +1169,39 @@ namespace core
 				// scale by the full-operation delivered fraction — the
 				// operating-profile level times the delivered fraction of the
 				// profile-scaled request: a duty-cycled or curtailed load
-				// consumes and delivers less, never draws into a protected
-				// reserve and never overfills a destination. Completed amounts
+				// consumes and delivers less (#548). The exchange's requested
+				// amount is the full-operation profile need (rate * dt *
+				// profileLevel) and what completes is that need at the
+				// delivered fraction, bounded by the amount reserved against
+				// the declared feed and destination limits when the grant ran
+				// (#554). A refused load never reserved, so it completes
+				// nothing and the whole need stands as unmet material — never
+				// drawn from a protected reserve, never forced into a full
+				// destination, and never replaced by hidden external makeup.
+				// The unused reservation returns to the staged inventory
+				// before transfers and conversions run. Completed amounts
 				// book at the external boundary — draws are losses, deliveries
-				// are negative losses — so the station ledgers stay closed
-				// (#548).
+				// are negative losses — so the station ledgers stay closed.
 				for (auto& exchange : load.exchanges)
 				{
 					auto const& exchangeStore = stores[exchange.storeIndex].authored;
-					auto const requested = exchange.ratePerSecond * static_cast<double>(seconds)
-						* load.lastProfileLevel * load.lastDeliveredFraction;
-					double completed = 0.0;
+					auto const requested = exchangeFullAmount(exchange, load.lastProfileLevel);
+					auto const completed = std::min(requested * load.lastDeliveredFraction,
+						exchange.lastReserved);
 					if (exchange.consumes)
 					{
-						auto const drawable = std::max(0.0,
-							qualified[exchange.storeIndex] - exchangeStore.protectedReserve);
-						completed = std::min(requested, drawable);
-						qualified[exchange.storeIndex] -= completed;
+						qualified[exchange.storeIndex] += exchange.lastReserved - completed;
 						flowOut[exchange.storeIndex] += completed;
 					}
 					else
 					{
-						auto const headroom = exchangeStore.capacity
-							- (qualified[exchange.storeIndex] + unqualified[exchange.storeIndex]);
-						completed = std::min(requested, headroom);
-						qualified[exchange.storeIndex] += completed;
+						qualified[exchange.storeIndex] -= exchange.lastReserved - completed;
 						flowIn[exchange.storeIndex] += completed;
 					}
 					exchange.lastRequested = requested;
 					exchange.lastCompleted = completed;
+					exchange.lastUnmet = requested - completed;
+					exchange.lastReserved = 0.0;
 					stagedUnitLoss[exchangeStore.unit] += exchange.consumes ? completed : -completed;
 					if (exchangeStore.composition)
 					{
@@ -1700,6 +1844,7 @@ namespace core
 			loadResult.criticalFloorKW = load.authored.criticalFloorKW;
 			loadResult.unmetCriticalKW = load.lastUnmetCriticalKW;
 			loadResult.deliveredFraction = load.lastDeliveredFraction;
+			loadResult.materialFeasibleFraction = load.lastMaterialFraction;
 			loadResult.heatExportedKW = load.lastHeatExportedKW;
 			loadResult.unmetCoolingKW = load.lastUnmetCoolingKW;
 			loadResult.admitted = load.lastAdmitted;
@@ -1708,7 +1853,7 @@ namespace core
 			for (auto const& exchange : load.exchanges)
 				loadResult.materialExchanges.push_back({mImpl->stores[exchange.storeIndex].authored.id,
 					mImpl->stores[exchange.storeIndex].authored.unit,
-					exchange.lastRequested, exchange.lastCompleted});
+					exchange.lastRequested, exchange.lastCompleted, exchange.lastUnmet});
 			totalRequested += load.lastRequestedKW;
 			totalSupplied += load.lastSuppliedKW;
 			totalUnmetCritical += load.lastUnmetCriticalKW;

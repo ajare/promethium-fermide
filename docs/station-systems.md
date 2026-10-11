@@ -309,20 +309,42 @@ infinite sink.
 
 Declared material exchanges are full-operation rates and scale by the
 same full-operation delivered fraction: duty-cycled or curtailed
-equipment consumes and delivers less. Draws take only
-qualified material above the store's protected reserve; deliveries are
-clamped at the destination's remaining capacity. Completed amounts book
-at the external boundary — draws are losses, deliveries are negative
-losses — so the per-unit and per-constituent ledgers stay closed and
-the conservation audit is unchanged.
+equipment consumes and delivers less (#548). Every declared exchange is
+also an **operation dependency** (#554), never a silently optional side
+effect: before any electrical allocation, each load's declared feed
+(qualified material above the store's protected reserve) and
+destination headroom are evaluated against the live inventory to
+compute a **material-feasible operating fraction** — the largest
+fraction of the load's full-operation exchanges those limits can
+sustain this tick. The electrical request is capped to that fraction,
+so a starved or backed-up load never draws power it cannot run on,
+never exports heat it would only make while running, and never books
+outputs there is no room to deliver. Draws take only qualified material
+above the protected reserve and deliveries only land inside the
+destination's remaining capacity — never hidden external makeup. When
+the capped request cannot reach the load's minimum operable level the
+load is refused whole: it spends no power and no material and its
+entire protected floor stays explicit unmet critical demand. A grant
+reserves its capped feed draw and destination claim against the
+inventory ahead of later loads in the allocation order, so competing
+loads never double-book the same kilograms. The shortfall stays
+explicit: per-exchange requested/completed/unmet amounts record the
+need that did not move, the refusal or curtailment reason names the
+binding limiter (empty feed, held-only feed, protected reserve,
+destination full), and unmet service, unmet material, power and heat
+all agree at the capped fraction. Completed amounts book at the
+external boundary — draws are losses, deliveries are negative losses —
+so the per-unit and per-constituent ledgers stay closed and the
+conservation audit is unchanged.
 
 The snapshot publishes actual versus requested service: per-source
 capacity, evaluated illumination, available kW and the disabled flag;
 per-load requested/supplied/unmet kW, critical floor and unmet
 critical, delivered fraction, exported heat and unmet cooling,
-admission state with the block reason, and per-exchange
-requested/completed amounts; plus station totals for generation,
-requested, supplied, unmet, unmet critical, surplus and exported heat.
+admission state with the block reason, the material-feasible operating
+fraction (#554), and per-exchange requested/completed/unmet amounts;
+plus station totals for generation, requested, supplied, unmet, unmet
+critical, surplus and exported heat.
 The bundled Lua lifecycle model receives the descriptors as plain
 immutable values, mirrors the same two-pass allocation inside each
 private sandbox and audits every tick that allocated power never exceeds
@@ -461,10 +483,16 @@ curtailment-floor refusal leaving the pool for flexible loads, cooling-infeasibl
 admitted with unmet cooling visible, material exchanges scaled by the
 full-operation delivered fraction (profile level times delivered
 fraction, covering fractional profiles, added curtailment and zero
-profile in host results and sandbox execution) under protected-reserve
-and capacity clamps with
-closed boundary ledgers, and intact Lua descriptor crossing with
-contained construction refusal; and battery fixtures: refused battery
+profile in host results and sandbox execution) and treated as operation
+dependencies (#554: empty, held-only and protected-reserve feeds refuse
+the load with the precise reason; partial feed caps the operating
+fraction with power, heat, inputs, outputs and unmet material all
+agreeing; a full destination backpressures the load to refusal; a feed
+below the minimum operable level refuses the load whole and leaves the
+pool for flexible loads; competing loads never double-book shared feed;
+host and sandbox agree) with closed boundary ledgers, and intact Lua
+descriptor crossing with contained construction refusal; and battery
+fixtures: refused battery
 configurations, surplus charging with the untaken generation exactly
 consumed, saturation at nameplate with surplus restored, eclipse
 ride-through with the deficit carried through the shared pool and the
