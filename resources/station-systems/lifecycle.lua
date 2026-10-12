@@ -36,6 +36,18 @@ local MOLAR_MASS_OXYGEN = 0.0319988
 local MOLAR_MASS_NITROGEN = 0.0280134
 local MOLAR_MASS_CARBON_DIOXIDE = 0.0440095
 local MOLAR_MASS_WATER = 0.0180153
+-- Stoichiometric oxygen mass per kilogram of split water: M_O2 / (2 x
+-- M_H2O). Hydrogen is the declared mass-balance remainder, so the
+-- electrolysis split closes exactly under the declared molar masses.
+-- Mirrors the host's StationElectrolysisOxygenMassPerWaterKg (#404).
+local ELECTROLYSIS_O2_KG_PER_WATER_KG = MOLAR_MASS_OXYGEN / (2.0 * MOLAR_MASS_WATER)
+-- Lower heating value of hydrogen in kJ/kg: the declared chemical energy
+-- retained per kilogram of produced H2. Mirrors the host's
+-- StationElectrolysisChemicalEnergyHydrogenKJPerKg (#404).
+local ELECTROLYSIS_H2_CHEMICAL_KJ_PER_KG = 119960.0
+-- Chemical energy retained per kilogram of split water, in kJ.
+local ELECTROLYSIS_CHEMICAL_KJ_PER_WATER_KG =
+    (1.0 - ELECTROLYSIS_O2_KG_PER_WATER_KG) * ELECTROLYSIS_H2_CHEMICAL_KJ_PER_KG
 local GAS_CONSTANT = 8.314462618
 local LATENT_HEAT_VAPORIZATION = 2257.0
 -- Schedule boundary tolerance: an occurrence scheduled exactly on the
@@ -169,7 +181,7 @@ end
 
 return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries,
     reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews,
-    waterCollectors, waterTreatments)
+    waterCollectors, waterTreatments, electrolyzers, co2Captures)
     assert(type(name) == "string")
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
@@ -188,6 +200,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     assert(type(crews) == "table", "crew descriptors missing")
     assert(type(waterCollectors) == "table", "water collector descriptors missing")
     assert(type(waterTreatments) == "table", "water treatment descriptors missing")
+    assert(type(electrolyzers) == "table", "electrolyzer descriptors missing")
+    assert(type(co2Captures) == "table", "CO2 capture descriptors missing")
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
@@ -200,6 +214,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         chillers = {}, generators = {}, atmospheres = {}, airlock_cycles = {},
         crews = {},
         water_collectors = {}, water_treatments = {}, water_treatment_order = {},
+        electrolyzers = {}, electrolyzer_order = {},
+        co2_captures = {}, co2_capture_order = {},
     }
     local by_id = {}
     for index = 1, #stores do
@@ -1384,6 +1400,162 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     for index = 1, #object.water_treatments do object.water_treatment_order[index] = index end
     table.sort(object.water_treatment_order, function(left, right)
         local a, b = object.water_treatments[left], object.water_treatments[right]
+        if a.priority ~= b.priority then return a.priority > b.priority end
+        return left < right
+    end)
+    -- The oxygen production and CO2 capture contracts (#404). The
+    -- sandbox mirrors the host's refusals: a cell whose electrical dose
+    -- would not cover the chemical energy its products retain, a cell
+    -- without exactly one oxygen destination, a compound gas store, a
+    -- hazard-class mismatch anywhere in the chain, or a capture machine
+    -- that declares a consumable it cannot hold are all refused at
+    -- construction like any other bad descriptor.
+    assert(#electrolyzers <= 8, 'station electrolyzers are limited to 8 entries')
+    assert(#co2Captures <= 8, 'station CO2 capture machines are limited to 8 entries')
+    local gasStoreClass = {}
+    local function declareGasStore(storeId, role, hazardClass, allowCompound)
+        local store = by_id[storeId]
+        assert(store ~= nil, 'gas ' .. role .. " store '" .. tostring(storeId) .. "' is unknown")
+        assert(store.unit == 'g' or store.unit == 'kg',
+            'gas ' .. role .. " store '" .. store.id
+                .. "' must be a mass unit; gas handling is mass-denominated")
+        assert(allowCompound or store.composition == nil,
+            'gas ' .. role .. " store '" .. store.id
+                .. "' must be a plain mass store: handled gas streams carry no dry constituents")
+        local existing = gasStoreClass[store.id]
+        if existing == nil then
+            gasStoreClass[store.id] = hazardClass
+        else
+            assert(existing == hazardClass,
+                'gas ' .. role .. " store '" .. store.id .. "' is shared between "
+                    .. existing .. '-class and ' .. hazardClass
+                    .. '-class gas processes: hazardous and normal gas streams may not share a store')
+        end
+        return store
+    end
+    for index = 1, #electrolyzers do
+        local cell = electrolyzers[index]
+        assert(type(cell) == 'table', 'electrolyzer descriptor must be a table')
+        assert(type(cell.id) == 'string' and #cell.id > 0, 'electrolyzer needs an id')
+        assert(cell.hazardClass == 'normal' or cell.hazardClass == 'hazardous',
+            'electrolyzer needs a declared hazard class (normal or hazardous)')
+        assert(type(cell.thermalClass) == 'string'
+            and (cell.thermalClass == 'low' or cell.thermalClass == 'moderate'
+                or cell.thermalClass == 'warm' or cell.thermalClass == 'generation'),
+            'electrolyzer needs a declared thermal service class')
+        assert(type(cell.rateKgPerS) == 'number'
+            and cell.rateKgPerS == cell.rateKgPerS
+            and cell.rateKgPerS >= 0 and cell.rateKgPerS < math.huge,
+            'electrolyzer rated split must be finite and non-negative')
+        assert(type(cell.specificEnergyKWhPerKgWater) == 'number'
+            and cell.specificEnergyKWhPerKgWater == cell.specificEnergyKWhPerKgWater
+            and cell.specificEnergyKWhPerKgWater * 3600.0
+                >= ELECTROLYSIS_CHEMICAL_KJ_PER_WATER_KG - 1e-9,
+            'electrolyzer specific energy is below the chemical energy the produced hydrogen retains')
+        assert(type(cell.maxSinkTemperatureC) == 'number'
+            and cell.maxSinkTemperatureC == cell.maxSinkTemperatureC
+            and cell.maxSinkTemperatureC > -273.15,
+            'electrolyzer maximum sink temperature must be finite and above absolute zero')
+        assert((cell.oxygenStore == nil or #cell.oxygenStore == 0)
+            ~= (cell.atmosphere == nil or #cell.atmosphere == 0),
+            'electrolyzer must configure exactly one oxygen destination: a gas store or a compartment')
+        local feed = declareWaterStore(cell.waterStore, 'feed water', cell.hazardClass, false)
+        local oxygen = nil
+        if cell.oxygenStore ~= nil and #cell.oxygenStore > 0 then
+            oxygen = declareGasStore(cell.oxygenStore, 'oxygen', cell.hazardClass, false)
+        end
+        local hydrogen = declareGasStore(cell.hydrogenStore, 'hydrogen', cell.hazardClass, false)
+        local compartment = nil
+        if cell.atmosphere ~= nil and #cell.atmosphere > 0 then
+            compartment = atmosphere_by_id[cell.atmosphere]
+            assert(compartment ~= nil, 'electrolyzer oxygen delivery compartment is unknown')
+            assert(compartment.hazardClass == cell.hazardClass,
+                'electrolyzer hazard class must match the delivery compartment: oxygen may only be delivered to a compartment of the cell\'s own class')
+        end
+        local sink = reservoir_by_id[cell.heatSink]
+        assert(sink ~= nil, 'electrolyzer heat sink reservoir is unknown')
+        assert(sink.thermalClass == cell.thermalClass,
+            'electrolyzer thermal class must match its heat sink reservoir class')
+        object.electrolyzers[index] = {
+            id = cell.id,
+            hazardClass = cell.hazardClass,
+            feed = feed, oxygen = oxygen, hydrogen = hydrogen,
+            compartment = compartment, sink = sink,
+            rateKgPerS = cell.rateKgPerS,
+            specificEnergyKWhPerKgWater = cell.specificEnergyKWhPerKgWater,
+            maxSinkTemperatureC = cell.maxSinkTemperatureC,
+            priority = cell.priority,
+            lastScale = 0, lastLimiter = '',
+            lastRequested = 0, lastSplit = 0, lastOxygen = 0, lastHydrogen = 0,
+            lastPowerDemand = 0, lastPowerSupplied = 0, lastUnmetProduction = 0,
+            coolingAvailable = false, lastBlockReason = '',
+            splitTotal = 0, oxygenTotal = 0, hydrogenTotal = 0,
+            energySuppliedKJ = 0, chemicalEnergyKJ = 0, heatRoutedKJ = 0,
+        }
+    end
+    for index = 1, #co2Captures do
+        local capture = co2Captures[index]
+        assert(type(capture) == 'table', 'CO2 capture descriptor must be a table')
+        assert(type(capture.id) == 'string' and #capture.id > 0, 'CO2 capture needs an id')
+        assert(capture.hazardClass == 'normal' or capture.hazardClass == 'hazardous',
+            'CO2 capture needs a declared hazard class (normal or hazardous)')
+        assert(type(capture.maxRateKgPerS) == 'number'
+            and capture.maxRateKgPerS == capture.maxRateKgPerS
+            and capture.maxRateKgPerS >= 0 and capture.maxRateKgPerS < math.huge,
+            'CO2 capture capacity must be finite and non-negative')
+        assert(type(capture.specificEnergyKWhPerKg) == 'number'
+            and capture.specificEnergyKWhPerKg == capture.specificEnergyKWhPerKg
+            and capture.specificEnergyKWhPerKg >= 0 and capture.specificEnergyKWhPerKg < math.huge,
+            'CO2 capture specific energy must be finite and non-negative')
+        assert(type(capture.consumablePerKg) == 'number'
+            and capture.consumablePerKg == capture.consumablePerKg
+            and capture.consumablePerKg >= 0 and capture.consumablePerKg < math.huge,
+            'CO2 capture consumable per kg must be finite and non-negative')
+        assert(capture.consumablePerKg <= 0
+            or (capture.consumableStore ~= nil and #capture.consumableStore > 0),
+            'CO2 capture declares a consumable demand but names no consumable store')
+        assert(type(capture.priority) == 'number'
+            and capture.priority == math.tointeger(capture.priority),
+            'CO2 capture priority must be a finite integer')
+        local compartment = atmosphere_by_id[capture.atmosphere]
+        assert(compartment ~= nil, 'CO2 capture atmosphere compartment is unknown')
+        assert(compartment.hazardClass == capture.hazardClass,
+            'CO2 capture hazard class must match the compartment it scrubs')
+        local destination = declareGasStore(capture.captureStore, 'capture',
+            capture.hazardClass, false)
+        local consumable = nil
+        if capture.consumableStore ~= nil and #capture.consumableStore > 0 then
+            consumable = declareGasStore(capture.consumableStore, 'consumable',
+                capture.hazardClass, true)
+        end
+        object.co2_captures[index] = {
+            id = capture.id,
+            hazardClass = capture.hazardClass,
+            compartment = compartment, destination = destination, consumable = consumable,
+            maxRateKgPerS = capture.maxRateKgPerS,
+            specificEnergyKWhPerKg = capture.specificEnergyKWhPerKg,
+            consumablePerKg = capture.consumablePerKg,
+            priority = capture.priority,
+            lastScale = 0, lastLimiter = '',
+            lastRequested = 0, lastCaptured = 0,
+            lastPowerDemand = 0, lastPowerSupplied = 0,
+            lastConsumableRequested = 0, lastConsumableUsed = 0,
+            lastBlockReason = '',
+            capturedTotal = 0, energySuppliedKJ = 0, consumablesUsedTotal = 0,
+        }
+    end
+    -- Cells and capture machines compete for the same power pool and the
+    -- same stores, so each runs in the declared deterministic order:
+    -- priority descending, declaration index ascending.
+    for index = 1, #object.electrolyzers do object.electrolyzer_order[index] = index end
+    table.sort(object.electrolyzer_order, function(left, right)
+        local a, b = object.electrolyzers[left], object.electrolyzers[right]
+        if a.priority ~= b.priority then return a.priority > b.priority end
+        return left < right
+    end)
+    for index = 1, #object.co2_captures do object.co2_capture_order[index] = index end
+    table.sort(object.co2_capture_order, function(left, right)
+        local a, b = object.co2_captures[left], object.co2_captures[right]
         if a.priority ~= b.priority then return a.priority > b.priority end
         return left < right
     end)
@@ -2899,6 +3071,306 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 and isFinite(collector.collectedTotal) and isFinite(collector.latentHeatKJ),
                 "water collector '" .. collector.id .. "' result is not finite")
         end
+        -- Electrolysis (#404) runs after the water collectors and before
+        -- the loop's second pass: it competes for the same generation-and-
+        -- battery pool, and its process heat must land in the sink before
+        -- the reservoir integrates. The cell is paid for before a
+        -- kilogram splits, and it only splits water the actually supplied
+        -- energy can make: the electrical dose either ends up bound in
+        -- the produced hydrogen or routed into the class-matched sink as
+        -- process heat, booked exactly once. A tick that demands power
+        -- and receives none is refused whole, and a sink at or above the
+        -- maximum sink temperature refuses the cell whole.
+        for _, order in ipairs(self.electrolyzer_order) do
+            local cell = self.electrolyzers[order]
+            local water = cell.feed
+            local hydrogen = cell.hydrogen
+            cell.lastScale = 0
+            cell.lastLimiter = ''
+            cell.lastRequested = 0
+            cell.lastSplit = 0
+            cell.lastOxygen = 0
+            cell.lastHydrogen = 0
+            cell.lastPowerDemand = 0
+            cell.lastPowerSupplied = 0
+            cell.lastUnmetProduction = 0
+            cell.coolingAvailable = false
+            cell.lastBlockReason = ''
+            if cell.rateKgPerS > 0 then
+                local fullKg = cell.rateKgPerS * fixed_seconds
+                -- Cooling is qualified while the sink sits below the
+                -- maximum sink temperature: at or above it the interface
+                -- cannot accept the cell's process heat.
+                cell.coolingAvailable = cell.sink.temperature + 1e-9
+                    < cell.maxSinkTemperatureC
+                if not cell.coolingAvailable then
+                    cell.lastBlockReason =
+                        'cooling is not qualified: sink at or above the maximum sink temperature'
+                else
+                    local drawableWater = math.max(0,
+                        water.qualified - water.protected_reserve)
+                    local hydrogenHeadroom = math.max(0,
+                        hydrogen.capacity - (hydrogen.qualified + hydrogen.unqualified))
+                    local oxygenHeadroom = 0
+                    if cell.oxygen ~= nil then
+                        oxygenHeadroom = math.max(0, cell.oxygen.capacity
+                            - (cell.oxygen.qualified + cell.oxygen.unqualified))
+                    end
+                    local scale = 1.0
+                    local limiter = ''
+                    local function constrain(available, required, reason)
+                        if required <= 0 then return end
+                        local fraction = available / required
+                        if fraction < scale then
+                            scale = fraction
+                            limiter = reason
+                        end
+                    end
+                    constrain(drawableWater, fromKg(water.unit, fullKg),
+                        "feed water store '" .. water.id
+                            .. "' has nothing drawable above its protected reserve")
+                    if cell.oxygen ~= nil then
+                        constrain(oxygenHeadroom,
+                            fromKg(cell.oxygen.unit,
+                                fullKg * ELECTROLYSIS_O2_KG_PER_WATER_KG),
+                            "oxygen store '" .. cell.oxygen.id
+                                .. "' is full: the product has nowhere to go")
+                    end
+                    constrain(hydrogenHeadroom,
+                        fromKg(hydrogen.unit,
+                            fullKg * (1 - ELECTROLYSIS_O2_KG_PER_WATER_KG)),
+                        "hydrogen store '" .. hydrogen.id
+                            .. "' is full: the product has nowhere to go")
+                    if scale < 0 then scale = 0 end
+                    if scale > 1 then scale = 1 end
+                    cell.lastScale = scale
+                    cell.lastLimiter = limiter
+                    cell.lastRequested = fullKg
+                    if scale > 0 then
+                        -- The dose is authored in kWh per kilogram of
+                        -- split water, the same physical unit as the
+                        -- declared chemical energy, so the power the
+                        -- cell draws is the dose times the split rate
+                        -- converted to the pool's kW (kWh/s x 3600).
+                        -- Mirrors the host (#404).
+                        local powerDemand = scale * cell.rateKgPerS
+                            * cell.specificEnergyKWhPerKgWater * 3600.0
+                        cell.lastPowerDemand = powerDemand
+                        local fromGeneration = math.min(powerDemand, generation)
+                        generation = generation - fromGeneration
+                        local fromBattery = drawBatteries(self,
+                            powerDemand - fromGeneration, fixed_hours)
+                        local supplied = fromGeneration + fromBattery
+                        batterySupplied = batterySupplied + fromBattery
+                        cell.lastPowerSupplied = supplied
+                        if powerDemand > 1e-12 and supplied <= 1e-12 then
+                            -- Nothing was paid: the tick is refused whole.
+                            -- No water splits and no product appears.
+                            cell.lastBlockReason =
+                                'no electrical supply: the electrolyzer cannot run'
+                        else
+                            -- Energy feasibility: the cell only splits
+                            -- water the supplied energy can actually make.
+                            local energySuppliedKJ = supplied * fixed_seconds
+                            local energyFeasibleKg = energySuppliedKJ
+                                / ELECTROLYSIS_CHEMICAL_KJ_PER_WATER_KG
+                            local feasibleSplitKg = math.min(fullKg * scale, energyFeasibleKg)
+                            -- Move the water. Each flow is clamped to its
+                            -- own drawable or headroom so a one-ulp
+                            -- roundoff can never overshoot (#556).
+                            local waterUnits = math.min(
+                                fromKg(water.unit, feasibleSplitKg), drawableWater)
+                            local splitKg = toKg(water.unit, waterUnits)
+                            local oxygenKg = splitKg * ELECTROLYSIS_O2_KG_PER_WATER_KG
+                            local oxygenActualKg = oxygenKg
+                            if cell.oxygen ~= nil then
+                                local oxygenUnits = math.min(
+                                    fromKg(cell.oxygen.unit, oxygenKg), oxygenHeadroom)
+                                oxygenActualKg = toKg(cell.oxygen.unit, oxygenUnits)
+                                cell.oxygen.qualified = cell.oxygen.qualified + oxygenUnits
+                                self.unit_loss[cell.oxygen.unit] =
+                                    (self.unit_loss[cell.oxygen.unit] or 0) - oxygenUnits
+                            else
+                                -- Delivered straight into the
+                                -- compartment: booked as an addition
+                                -- pathway of the compartment's own
+                                -- closure, so every gram the cell made
+                                -- is visible in the air it was produced
+                                -- for.
+                                cell.compartment.oxygen = cell.compartment.oxygen + oxygenKg
+                                cell.compartment.electrolysisOxygen =
+                                    (cell.compartment.electrolysisOxygen or 0) + oxygenKg
+                            end
+                            local hydrogenKg = splitKg - oxygenActualKg
+                            local hydrogenUnits = math.min(
+                                fromKg(hydrogen.unit, hydrogenKg), hydrogenHeadroom)
+                            local hydrogenActualKg = toKg(hydrogen.unit, hydrogenUnits)
+                            water.qualified = water.qualified - waterUnits
+                            hydrogen.qualified = hydrogen.qualified + hydrogenUnits
+                            self.unit_loss[water.unit] =
+                                (self.unit_loss[water.unit] or 0) + waterUnits
+                            self.unit_loss[hydrogen.unit] =
+                                (self.unit_loss[hydrogen.unit] or 0) - hydrogenUnits
+                            -- Energy: the dose either stays bound in the
+                            -- produced hydrogen or leaves as process heat
+                            -- routed into the sink, once.
+                            local chemicalKJ = hydrogenActualKg
+                                * ELECTROLYSIS_H2_CHEMICAL_KJ_PER_KG
+                            local heatKJ = math.max(0, energySuppliedKJ - chemicalKJ)
+                            cell.sink.electrolysisHeat =
+                                (cell.sink.electrolysisHeat or 0) + heatKJ / fixed_seconds
+                            cell.lastSplit = splitKg
+                            cell.lastOxygen = oxygenActualKg
+                            cell.lastHydrogen = hydrogenActualKg
+                            cell.lastUnmetProduction = math.max(0, fullKg * scale - splitKg)
+                            cell.splitTotal = cell.splitTotal + splitKg
+                            cell.oxygenTotal = cell.oxygenTotal + oxygenActualKg
+                            cell.hydrogenTotal = cell.hydrogenTotal + hydrogenActualKg
+                            cell.energySuppliedKJ = cell.energySuppliedKJ + energySuppliedKJ
+                            cell.chemicalEnergyKJ = cell.chemicalEnergyKJ + chemicalKJ
+                            cell.heatRoutedKJ = cell.heatRoutedKJ + heatKJ
+                        end
+                    end
+                end
+            end
+            assert(isFinite(cell.lastScale) and isFinite(cell.lastRequested)
+                and isFinite(cell.lastSplit) and isFinite(cell.lastOxygen)
+                and isFinite(cell.lastHydrogen) and isFinite(cell.lastPowerDemand)
+                and isFinite(cell.lastPowerSupplied) and isFinite(cell.lastUnmetProduction)
+                and isFinite(cell.splitTotal) and isFinite(cell.oxygenTotal)
+                and isFinite(cell.hydrogenTotal) and isFinite(cell.energySuppliedKJ)
+                and isFinite(cell.chemicalEnergyKJ) and isFinite(cell.heatRoutedKJ),
+                "electrolyzer '" .. cell.id .. "' result is not finite")
+        end
+        -- CO2 removal (#404) runs in the same phase: captured gas is
+        -- inventory, not vanished carbon. The machine can only scrub the
+        -- CO2 the compartment actually holds, into the capture store's
+        -- remaining headroom, on the consumable it can actually draw and
+        -- the power the pool can actually supply. Every axis of
+        -- finiteness is a scale cap, and the unmet atmospheric service is
+        -- the explicit remainder. A tick that demands power and receives
+        -- none is refused whole: no CO2 is scrubbed and no consumable is
+        -- drawn.
+        for _, order in ipairs(self.co2_capture_order) do
+            local capture = self.co2_captures[order]
+            local compartment = capture.compartment
+            local destination = capture.destination
+            capture.lastScale = 0
+            capture.lastLimiter = ''
+            capture.lastRequested = 0
+            capture.lastCaptured = 0
+            capture.lastPowerDemand = 0
+            capture.lastPowerSupplied = 0
+            capture.lastConsumableRequested = 0
+            capture.lastConsumableUsed = 0
+            capture.lastBlockReason = ''
+            if capture.maxRateKgPerS > 0 then
+                local fullKg = capture.maxRateKgPerS * fixed_seconds
+                local co2Available = math.max(0, compartment.carbonDioxide)
+                local captureHeadroom = math.max(0, destination.capacity
+                    - (destination.qualified + destination.unqualified))
+                local drawableConsumable = 0
+                if capture.consumable ~= nil then
+                    drawableConsumable = math.max(0, capture.consumable.qualified
+                        - capture.consumable.protected_reserve)
+                end
+                local scale = 1.0
+                local limiter = ''
+                local function constrain(available, required, reason)
+                    if required <= 0 then return end
+                    local fraction = available / required
+                    if fraction < scale then
+                        scale = fraction
+                        limiter = reason
+                    end
+                end
+                constrain(co2Available, fullKg,
+                    "compartment '" .. compartment.id
+                        .. "' holds no carbon dioxide to capture")
+                constrain(captureHeadroom, fromKg(destination.unit, fullKg),
+                    "capture store '" .. destination.id
+                        .. "' is full: the captured gas has nowhere to go")
+                if capture.consumable ~= nil then
+                    constrain(drawableConsumable, capture.consumablePerKg * fullKg,
+                        "capture consumable store '"
+                            .. capture.consumable.id .. "' is exhausted")
+                end
+                if scale < 0 then scale = 0 end
+                if scale > 1 then scale = 1 end
+                capture.lastScale = scale
+                capture.lastLimiter = limiter
+                capture.lastRequested = fullKg
+                if scale > 0 then
+                    local powerDemand = scale * capture.maxRateKgPerS
+                        * capture.specificEnergyKWhPerKg
+                    capture.lastPowerDemand = powerDemand
+                    local fromGeneration = math.min(powerDemand, generation)
+                    generation = generation - fromGeneration
+                    local fromBattery = drawBatteries(self,
+                        powerDemand - fromGeneration, fixed_hours)
+                    local supplied = fromGeneration + fromBattery
+                    batterySupplied = batterySupplied + fromBattery
+                    capture.lastPowerSupplied = supplied
+                    if powerDemand > 1e-12 and supplied <= 1e-12 then
+                        capture.lastBlockReason =
+                            'no electrical supply: the capture machine cannot run'
+                    else
+                        -- Capture only what the compartment holds and the
+                        -- store can take, clamped per flow so roundoff
+                        -- never overshoots.
+                        local wantedKg = math.min(fullKg * scale, co2Available)
+                        local capturedUnits = math.min(
+                            fromKg(destination.unit, wantedKg), captureHeadroom)
+                        local capturedKg = toKg(destination.unit, capturedUnits)
+                        compartment.carbonDioxide = compartment.carbonDioxide - capturedKg
+                        compartment.capturedCarbonDioxide =
+                            (compartment.capturedCarbonDioxide or 0) + capturedKg
+                        destination.qualified = destination.qualified + capturedUnits
+                        -- The captured gas enters the store network from
+                        -- outside it, exactly like collector condensate:
+                        -- the boundary closes as current + lost -
+                        -- delivered - collected, so the carbon is
+                        -- accounted inflow, never implicit creation.
+                        self.unit_collected[destination.unit] =
+                            (self.unit_collected[destination.unit] or 0) + capturedUnits
+                        if capture.consumable ~= nil then
+                            capture.lastConsumableRequested =
+                                capture.consumablePerKg * capturedKg
+                            local consumableUsed = math.min(capture.lastConsumableRequested,
+                                drawableConsumable)
+                            capture.consumable.qualified = capture.consumable.qualified
+                                - consumableUsed
+                            capture.lastConsumableUsed = consumableUsed
+                            self.unit_loss[capture.consumable.unit] =
+                                (self.unit_loss[capture.consumable.unit] or 0) + consumableUsed
+                            if capture.consumable.composition then
+                                local net = {}
+                                addConstituents(net, capture.consumable.composition,
+                                    toKg(capture.consumable.unit, consumableUsed), -1)
+                                for constituent, change in pairs(net) do
+                                    self.constituent_loss[constituent] =
+                                        (self.constituent_loss[constituent] or 0) - change
+                                end
+                            end
+                            capture.consumablesUsedTotal = capture.consumablesUsedTotal
+                                + consumableUsed
+                        end
+                        capture.lastCaptured = capturedKg
+                        capture.capturedTotal = capture.capturedTotal + capturedKg
+                        capture.energySuppliedKJ = capture.energySuppliedKJ
+                            + supplied * fixed_seconds
+                    end
+                end
+            end
+            assert(isFinite(capture.lastScale) and isFinite(capture.lastRequested)
+                and isFinite(capture.lastCaptured) and isFinite(capture.lastPowerDemand)
+                and isFinite(capture.lastPowerSupplied)
+                and isFinite(capture.lastConsumableRequested)
+                and isFinite(capture.lastConsumableUsed)
+                and isFinite(capture.capturedTotal) and isFinite(capture.energySuppliedKJ)
+                and isFinite(capture.consumablesUsedTotal),
+                "CO2 capture machine '" .. capture.id .. "' result is not finite")
+        end
         -- Second loop pass: integrate the loop's temperature from the
         -- pump work, heater heat, exchanger exchange and the chiller
         -- extraction that actually moved this tick, and expose the
@@ -3040,6 +3512,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         for _, treatment in ipairs(self.water_treatments) do
             totalSupplied = totalSupplied + treatment.lastPowerSupplied
         end
+        -- Electrolysis and CO2 capture work ride the same pool (#404):
+        -- oxygen production and carbon removal are services, not a
+        -- second budget beside the loads and the thermal plant.
+        for _, cell in ipairs(self.electrolyzers) do
+            totalSupplied = totalSupplied + cell.lastPowerSupplied
+        end
+        for _, capture in ipairs(self.co2_captures) do
+            totalSupplied = totalSupplied + capture.lastPowerSupplied
+        end
         local generationBound = BALANCE_TOLERANCE
             * math.max(1.0, math.abs(availableGeneration) + batterySupplied)
         assert(totalSupplied <= availableGeneration + batterySupplied + generationBound,
@@ -3168,10 +3649,17 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local condenser = condenserByReservoir[reservoir] or 0
             local generatorHeat = reservoir.generatorHeat or 0
             reservoir.generatorHeat = 0
+            -- Electrolysis process heat enters the sink reservoir exactly
+            -- once (#404): the cell booked the part of its electrical dose
+            -- the split did not retain as chemical energy here in
+            -- applyPower, and the reservoir integrates it as its own
+            -- ledger term.
+            local electrolysisHeat = reservoir.electrolysisHeat or 0
+            reservoir.electrolysisHeat = 0
             local atmosphereHeat = reservoir.atmosphereHeat or 0
             reservoir.atmosphereHeat = 0
             local heatIn = reservoir.absorbedKW + routed + loopHeat + condenser
-                + generatorHeat + atmosphereHeat
+                + generatorHeat + atmosphereHeat + electrolysisHeat
             local rejected = 0
             local minSink = reservoir.temperature
             local maxSink = reservoir.temperature
@@ -3216,6 +3704,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             reservoir.loopKJ = (reservoir.loopKJ or 0) + loopHeat * fixed_seconds
             reservoir.condenserKJ = (reservoir.condenserKJ or 0) + condenser * fixed_seconds
             reservoir.generatorKJ = (reservoir.generatorKJ or 0) + generatorHeat * fixed_seconds
+            reservoir.electrolysisKJ = (reservoir.electrolysisKJ or 0) + electrolysisHeat * fixed_seconds
             reservoir.atmosphereKJ = (reservoir.atmosphereKJ or 0) + atmosphereHeat * fixed_seconds
             reservoir.rejectedKJ = reservoir.rejectedKJ + rejected * fixed_seconds
             reservoir.temperature = newTemperature
@@ -3238,6 +3727,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local bound = BALANCE_TOLERANCE * math.max(1, math.abs(startingEnergy))
             local residual = startingEnergy + reservoir.absorbedKJ + reservoir.routedKJ
                 + (reservoir.loopKJ or 0) + (reservoir.condenserKJ or 0) + (reservoir.generatorKJ or 0)
+                + (reservoir.electrolysisKJ or 0)
                 + (reservoir.atmosphereKJ or 0)
                 - reservoir.rejectedKJ
                 - reservoir.capacity * reservoir.temperature
@@ -3399,7 +3889,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 and compartment.carbonDioxide >= -bound and compartment.waterVapour >= -bound,
                 "atmosphere '" .. compartment.id .. "' gas inventory went negative")
             local closures = {
-                { 'oxygen', compartment.startingOxygen, 0,
+                { 'oxygen', compartment.startingOxygen,
+                    compartment.electrolysisOxygen or 0,
                     compartment.oxygenConsumed + compartment.leakOxygen
                         + compartment.cycleOxygen,
                     compartment.oxygen },
@@ -3407,7 +3898,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     compartment.leakNitrogen + compartment.cycleNitrogen,
                     compartment.nitrogen },
                 { 'carbonDioxide', compartment.startingCarbonDioxide, compartment.co2Produced,
-                    compartment.leakCarbonDioxide + compartment.cycleCarbonDioxide,
+                    compartment.leakCarbonDioxide + compartment.cycleCarbonDioxide
+                        + (compartment.capturedCarbonDioxide or 0),
                     compartment.carbonDioxide },
                 { 'waterVapour', compartment.startingWaterVapour, compartment.vapourAdded,
                     compartment.condensed + compartment.leakWaterVapour

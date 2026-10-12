@@ -779,7 +779,18 @@ namespace core
 		// concentrate totals, the energy and consumables drawn and the
 		// quality holds stay runtime-only, so load and Reset reconstruct
 		// them from the authored starting conditions.
-		serializer.writeUint32("version", 78);
+		// Version 79 adds authored oxygen production and CO2 capture
+		// contracts (#404): electrolyzers that split qualified water into
+		// oxygen and hydrogen with a stoichiometric mass balance, a
+		// declared electrical dose and a class-matched process-heat sink,
+		// and CO2 capture machines that scrub a compartment into a finite
+		// capture store on declared electricity and consumables; a pre-79
+		// document carrying `electrolyzers` or `co2Captures` is refused
+		// rather than silently dropped. The split, products, energy and
+		// heat ledgers, the captured mass, the unmet service and the
+		// consumables drawn stay runtime-only, so load and Reset
+		// reconstruct them from the authored starting conditions.
+		serializer.writeUint32("version", 79);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -1190,6 +1201,56 @@ namespace core
 					serializer.writeDouble("specificEnergyKWhPerKg", treatment.specificEnergyKWhPerKg);
 					serializer.writeDouble("consumablePerKg", treatment.consumablePerKg);
 					serializer.writeInt32("priority", treatment.priority);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.electrolyzers.empty())
+			{
+				// Authored electrolyzer contracts only; the water split,
+				// the products made, the energy supplied and the process
+				// heat routed are runtime state reconstructed on load
+				// (#404).
+				serializer.beginArray("electrolyzers");
+				for (auto const& electrolyzer : mStationSystemsSettings.electrolyzers)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", electrolyzer.id);
+					serializer.writeString("hazardClass", electrolyzer.hazardClass);
+					serializer.writeString("waterStoreId", electrolyzer.waterStoreId);
+					serializer.writeString("oxygenStoreId", electrolyzer.oxygenStoreId);
+					serializer.writeString("hydrogenStoreId", electrolyzer.hydrogenStoreId);
+					serializer.writeString("atmosphereId", electrolyzer.atmosphereId);
+					serializer.writeString("thermalClass", electrolyzer.thermalClass);
+					serializer.writeString("heatSinkId", electrolyzer.heatSinkId);
+					serializer.writeDouble("rateKgPerS", electrolyzer.rateKgPerS);
+					serializer.writeDouble("specificEnergyKWhPerKgWater",
+						electrolyzer.specificEnergyKWhPerKgWater);
+					serializer.writeDouble("maxSinkTemperatureC", electrolyzer.maxSinkTemperatureC);
+					serializer.writeInt32("priority", electrolyzer.priority);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.co2Captures.empty())
+			{
+				// Authored CO2 capture contracts only; the captured mass,
+				// the unmet atmospheric service and the electricity and
+				// consumables drawn are runtime state reconstructed on
+				// load (#404).
+				serializer.beginArray("co2Captures");
+				for (auto const& capture : mStationSystemsSettings.co2Captures)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", capture.id);
+					serializer.writeString("hazardClass", capture.hazardClass);
+					serializer.writeString("atmosphereId", capture.atmosphereId);
+					serializer.writeString("captureStoreId", capture.captureStoreId);
+					serializer.writeString("consumableStoreId", capture.consumableStoreId);
+					serializer.writeDouble("maxRateKgPerS", capture.maxRateKgPerS);
+					serializer.writeDouble("specificEnergyKWhPerKg", capture.specificEnergyKWhPerKg);
+					serializer.writeDouble("consumablePerKg", capture.consumablePerKg);
+					serializer.writeInt32("priority", capture.priority);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -2118,7 +2179,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 78)
+		if (version < 1 || version > 79)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2577,6 +2638,56 @@ namespace core
 					treatment.consumablePerKg = serializer.readDouble("consumablePerKg");
 					treatment.priority = serializer.readInt32("priority");
 					stationSettings.waterTreatments.push_back(std::move(treatment));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("electrolyzers"))
+			{
+				if (version < 79) throw SerializationException(
+					"Station electrolyzers require World schema 79");
+				serializer.beginArray("electrolyzers");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					ElectrolyzerSettings electrolyzer;
+					electrolyzer.id = serializer.readString("id");
+					electrolyzer.hazardClass = serializer.readString("hazardClass");
+					electrolyzer.waterStoreId = serializer.readString("waterStoreId");
+					electrolyzer.oxygenStoreId = serializer.readString("oxygenStoreId");
+					electrolyzer.hydrogenStoreId = serializer.readString("hydrogenStoreId");
+					electrolyzer.atmosphereId = serializer.readString("atmosphereId");
+					electrolyzer.thermalClass = serializer.readString("thermalClass");
+					electrolyzer.heatSinkId = serializer.readString("heatSinkId");
+					electrolyzer.rateKgPerS = serializer.readDouble("rateKgPerS");
+					electrolyzer.specificEnergyKWhPerKgWater =
+						serializer.readDouble("specificEnergyKWhPerKgWater");
+					electrolyzer.maxSinkTemperatureC = serializer.readDouble("maxSinkTemperatureC");
+					electrolyzer.priority = serializer.readInt32("priority");
+					stationSettings.electrolyzers.push_back(std::move(electrolyzer));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("co2Captures"))
+			{
+				if (version < 79) throw SerializationException(
+					"Station CO2 capture machines require World schema 79");
+				serializer.beginArray("co2Captures");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					Co2CaptureSettings capture;
+					capture.id = serializer.readString("id");
+					capture.hazardClass = serializer.readString("hazardClass");
+					capture.atmosphereId = serializer.readString("atmosphereId");
+					capture.captureStoreId = serializer.readString("captureStoreId");
+					capture.consumableStoreId = serializer.readString("consumableStoreId");
+					capture.maxRateKgPerS = serializer.readDouble("maxRateKgPerS");
+					capture.specificEnergyKWhPerKg = serializer.readDouble("specificEnergyKWhPerKg");
+					capture.consumablePerKg = serializer.readDouble("consumablePerKg");
+					capture.priority = serializer.readInt32("priority");
+					stationSettings.co2Captures.push_back(std::move(capture));
 					serializer.endMap();
 				}
 				serializer.endArray();

@@ -75,6 +75,8 @@ namespace core
 			std::vector<CrewSettings> const* crews;
 			std::vector<WaterCollectorSettings> const* waterCollectors;
 			std::vector<WaterTreatmentSettings> const* waterTreatments;
+			std::vector<ElectrolyzerSettings> const* electrolyzers;
+			std::vector<Co2CaptureSettings> const* co2Captures;
 			static void pushProfile(lua_State* state, ProfileSettings const& profile)
 			{
 				lua_createtable(state, 0, 3);
@@ -461,7 +463,47 @@ namespace core
 					lua_pushinteger(state, treatment.priority); lua_setfield(state, -2, "priority");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 18, 1);
+				// Authored oxygen production and CO2 capture contracts cross
+				// the same boundary as plain immutable descriptors (#404); the
+				// sandbox mirrors the stoichiometric split, the energy and heat
+				// booking and the finite capture rule, and re-audits its own
+				// accounting.
+				lua_createtable(state, static_cast<int>(electrolyzers->size()), 0);
+				for (size_t index = 0; index < electrolyzers->size(); ++index)
+				{
+					auto const& electrolyzer = (*electrolyzers)[index];
+					lua_createtable(state, 0, 12);
+					lua_pushstring(state, electrolyzer.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, electrolyzer.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
+					lua_pushstring(state, electrolyzer.waterStoreId.c_str()); lua_setfield(state, -2, "waterStore");
+					lua_pushstring(state, electrolyzer.oxygenStoreId.c_str()); lua_setfield(state, -2, "oxygenStore");
+					lua_pushstring(state, electrolyzer.hydrogenStoreId.c_str()); lua_setfield(state, -2, "hydrogenStore");
+					lua_pushstring(state, electrolyzer.atmosphereId.c_str()); lua_setfield(state, -2, "atmosphere");
+					lua_pushstring(state, electrolyzer.thermalClass.c_str()); lua_setfield(state, -2, "thermalClass");
+					lua_pushstring(state, electrolyzer.heatSinkId.c_str()); lua_setfield(state, -2, "heatSink");
+					lua_pushnumber(state, electrolyzer.rateKgPerS); lua_setfield(state, -2, "rateKgPerS");
+					lua_pushnumber(state, electrolyzer.specificEnergyKWhPerKgWater); lua_setfield(state, -2, "specificEnergyKWhPerKgWater");
+					lua_pushnumber(state, electrolyzer.maxSinkTemperatureC); lua_setfield(state, -2, "maxSinkTemperatureC");
+					lua_pushinteger(state, electrolyzer.priority); lua_setfield(state, -2, "priority");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_createtable(state, static_cast<int>(co2Captures->size()), 0);
+				for (size_t index = 0; index < co2Captures->size(); ++index)
+				{
+					auto const& capture = (*co2Captures)[index];
+					lua_createtable(state, 0, 9);
+					lua_pushstring(state, capture.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, capture.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
+					lua_pushstring(state, capture.atmosphereId.c_str()); lua_setfield(state, -2, "atmosphere");
+					lua_pushstring(state, capture.captureStoreId.c_str()); lua_setfield(state, -2, "captureStore");
+					lua_pushstring(state, capture.consumableStoreId.c_str()); lua_setfield(state, -2, "consumableStore");
+					lua_pushnumber(state, capture.maxRateKgPerS); lua_setfield(state, -2, "maxRateKgPerS");
+					lua_pushnumber(state, capture.specificEnergyKWhPerKg); lua_setfield(state, -2, "specificEnergyKWhPerKg");
+					lua_pushnumber(state, capture.consumablePerKg); lua_setfield(state, -2, "consumablePerKg");
+					lua_pushinteger(state, capture.priority); lua_setfield(state, -2, "priority");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 20, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -1717,6 +1759,154 @@ namespace core
 				treatment.hazardClass, true))
 				return false;
 		}
+		// Oxygen production and CO2 capture contracts (#404). An
+		// electrolyzer splits qualified water into oxygen and hydrogen: the
+		// split is stoichiometric, so the authored electrical dose must at
+		// least cover the chemical energy the produced hydrogen retains -
+		// a dose below it would create energy-rich products out of less
+		// energy than they carry, which no machine can do. Exactly one
+		// oxygen destination must be configured: a qualified gas store or
+		// one compartment atmosphere, never both and never neither. All gas
+		// and water stores in the chain are plain mass stores: a compound
+		// store would create dry constituents out of pure water or pure
+		// gas. Hazard class segregates the whole chain - the feed store,
+		// both product stores and the delivery compartment must carry the
+		// cell's own class - and the heat sink must share the cell's
+		// thermal service class, because spare capacity in one class is
+		// never usable by another. A CO2 capture machine scrubs one
+		// compartment of its own hazard class into a finite capture store;
+		// if it declares a consumable demand it must name a consumable
+		// store, because a process cannot spend media it has no way to
+		// hold.
+		if (settings.electrolyzers.size() > MaxStationElectrolyzers)
+			return refuse("Station electrolyzers are limited to "
+				+ std::to_string(MaxStationElectrolyzers) + " entries");
+		if (settings.co2Captures.size() > MaxStationCo2Captures)
+			return refuse("Station CO2 capture machines are limited to "
+				+ std::to_string(MaxStationCo2Captures) + " entries");
+		std::map<std::string, std::string> gasStoreClass;
+		auto declareGasStore = [&](std::string const& storeId, char const* role,
+			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+		{
+			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
+			if (found == settings.stores.end())
+				return refuse(where + " " + role + " store '" + storeId + "' does not exist");
+			if (!isMassUnit(found->unit))
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' must be a mass unit; gas handling is mass-denominated (g or kg)");
+			if (found->composition && !allowCompound)
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' declares a composition; handled gas streams are plain mass stores, so no dry constituent can be created from pure gas");
+			auto const existing = gasStoreClass.find(storeId);
+			if (existing == gasStoreClass.end())
+				gasStoreClass.emplace(storeId, hazardClass);
+			else if (existing->second != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
+					+ existing->second + "-class gas process; hazardous and normal gas streams may not share a store");
+			return true;
+		};
+		std::set<std::string> gasIds;
+		for (auto const& electrolyzer : settings.electrolyzers)
+		{
+			auto const where = "Station electrolyzer '" + electrolyzer.id + "'";
+			if (electrolyzer.id.empty()) return refuse("Station electrolyzer id must not be empty");
+			if (electrolyzer.id.size() > MaxStationStoreIdLength)
+				return refuse("Station electrolyzer id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!gasIds.insert(electrolyzer.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
+				electrolyzer.hazardClass) == StationWaterHazardClasses.end())
+				return refuse(where + " has unknown hazard class '" + electrolyzer.hazardClass
+					+ "'; declared classes are: normal, hazardous");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				electrolyzer.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + electrolyzer.thermalClass
+					+ "'; declared classes are: " + declaredThermalClasses());
+			if (!std::isfinite(electrolyzer.rateKgPerS) || electrolyzer.rateKgPerS < 0.0)
+				return refuse(where + " rated water split must be finite and non-negative");
+			if (!std::isfinite(electrolyzer.specificEnergyKWhPerKgWater)
+				|| electrolyzer.specificEnergyKWhPerKgWater * 3600.0
+					< StationElectrolysisChemicalEnergyKJPerKgWater
+					- StationBalanceTolerance * std::max(1.0,
+						StationElectrolysisChemicalEnergyKJPerKgWater))
+				return refuse(where + " specific energy is below the chemical energy the produced hydrogen retains: the electrical dose may not fund less than the products carry");
+			if (!std::isfinite(electrolyzer.maxSinkTemperatureC)
+				|| electrolyzer.maxSinkTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum sink temperature must be finite and above absolute zero");
+			if (electrolyzer.oxygenStoreId.empty() == electrolyzer.atmosphereId.empty())
+				return refuse(where + " must configure exactly one oxygen destination: a qualified gas store or one compartment atmosphere");
+			if (!declareWaterStore(electrolyzer.waterStoreId, "feed water", where,
+				electrolyzer.hazardClass, false))
+				return false;
+			if (!electrolyzer.oxygenStoreId.empty()
+				&& !declareGasStore(electrolyzer.oxygenStoreId, "oxygen", where,
+					electrolyzer.hazardClass, false))
+				return false;
+			if (!declareGasStore(electrolyzer.hydrogenStoreId, "hydrogen", where,
+				electrolyzer.hazardClass, false))
+				return false;
+			if (!electrolyzer.atmosphereId.empty())
+			{
+				auto const compartment = std::find_if(settings.atmospheres.begin(),
+					settings.atmospheres.end(), [&](AtmosphereSettings const& atmosphere)
+					{ return atmosphere.id == electrolyzer.atmosphereId; });
+				if (compartment == settings.atmospheres.end())
+					return refuse(where + " delivers oxygen to unknown atmosphere compartment '" + electrolyzer.atmosphereId + "'");
+				if (compartment->hazardClass != electrolyzer.hazardClass)
+					return refuse(where + " hazard class '" + electrolyzer.hazardClass
+						+ "' does not match compartment '" + compartment->id
+						+ "' hazard class '" + compartment->hazardClass
+						+ "'; oxygen may only be delivered to a compartment of the cell's own class");
+			}
+			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
+				{ return reservoir.id == electrolyzer.heatSinkId; });
+			if (sink == settings.thermalReservoirs.end())
+				return refuse(where + " heat sink is unknown thermal reservoir '" + electrolyzer.heatSinkId + "'");
+			if (sink->thermalClass != electrolyzer.thermalClass)
+				return refuse(where + " thermal class '" + electrolyzer.thermalClass
+					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
+					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
+		}
+		for (auto const& capture : settings.co2Captures)
+		{
+			auto const where = "Station CO2 capture machine '" + capture.id + "'";
+			if (capture.id.empty()) return refuse("Station CO2 capture machine id must not be empty");
+			if (capture.id.size() > MaxStationStoreIdLength)
+				return refuse("Station CO2 capture machine id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!gasIds.insert(capture.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
+				capture.hazardClass) == StationWaterHazardClasses.end())
+				return refuse(where + " has unknown hazard class '" + capture.hazardClass
+					+ "'; declared classes are: normal, hazardous");
+			if (!std::isfinite(capture.maxRateKgPerS) || capture.maxRateKgPerS < 0.0)
+				return refuse(where + " capture capacity must be finite and non-negative");
+			if (!std::isfinite(capture.specificEnergyKWhPerKg) || capture.specificEnergyKWhPerKg < 0.0)
+				return refuse(where + " specific energy must be finite and non-negative");
+			if (!std::isfinite(capture.consumablePerKg) || capture.consumablePerKg < 0.0)
+				return refuse(where + " consumable per kg must be finite and non-negative");
+			if (capture.consumablePerKg > 0.0 && capture.consumableStoreId.empty())
+				return refuse(where + " declares a consumable demand but names no consumable store: a process cannot spend media it has no way to hold");
+			auto const compartment = std::find_if(settings.atmospheres.begin(),
+				settings.atmospheres.end(), [&](AtmosphereSettings const& atmosphere)
+				{ return atmosphere.id == capture.atmosphereId; });
+			if (compartment == settings.atmospheres.end())
+				return refuse(where + " scrubs unknown atmosphere compartment '" + capture.atmosphereId + "'");
+			if (compartment->hazardClass != capture.hazardClass)
+				return refuse(where + " hazard class '" + capture.hazardClass
+					+ "' does not match compartment '" + compartment->id
+					+ "' hazard class '" + compartment->hazardClass
+					+ "'; a hazardous atmosphere's carbon stays on the hazardous side of the capture chain");
+			if (!declareGasStore(capture.captureStoreId, "capture", where,
+				capture.hazardClass, false))
+				return false;
+			if (!capture.consumableStoreId.empty()
+				&& !declareGasStore(capture.consumableStoreId, "consumable", where,
+					capture.hazardClass, true))
+				return false;
+		}
 		diagnostic.clear(); return true;
 	}
 	void setStationSystemsSourceLoader(StationSystemsSourceLoader loader) { sourceLoader = std::move(loader); }
@@ -1915,6 +2105,7 @@ namespace core
 			double lastLoopHeatKW{0.0};
 			double lastCondenserHeatKW{0.0};
 			double lastGeneratorHeatKW{0.0};
+			double lastElectrolysisHeatKW{0.0}; // cell process heat routed here this tick (#404)
 			double lastAtmosphereHeatKW{0.0}; // reservoir side of the compartment exchanger this tick
 			double lastHeatInKW{0.0};
 			double lastRejectedKW{0.0};
@@ -1924,6 +2115,7 @@ namespace core
 			double loopKJ{0.0};
 			double condenserKJ{0.0};
 			double generatorKJ{0.0};
+			double electrolysisKJ{0.0}; // cumulative electrolysis process heat into the reservoir
 			double atmosphereKJ{0.0}; // cumulative net compartment exchange into the reservoir
 			double rejectedKJ{0.0};
 			bool lastAboveLimit{false};
@@ -2082,6 +2274,15 @@ namespace core
 			// pathway of its own, so the condensate never reads as vanished.
 			double collectedKg{0.0};
 			double lastCollectedKg{0.0};
+			// Oxygen added by an electrolyzer delivering into this
+			// compartment (#404): a booked addition pathway, so the O2 the
+			// cell produced is visible in the compartment's oxygen closure.
+			double electrolysisOxygenKg{0.0};
+			double lastElectrolysisOxygenKg{0.0};
+			// CO2 removed by a capture machine (#404): a booked removal
+			// pathway into the capture store, so no carbon vanishes.
+			double capturedCarbonDioxideKg{0.0};
+			double lastCo2CapturedKg{0.0};
 			double recoveredKg{0.0};
 			double lostKg{0.0};
 			// Thermal ledger terms.
@@ -2254,6 +2455,76 @@ namespace core
 			bool lastCurtailed{false};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
+		// The authoritative ledger of one authored electrolysis cell (#404).
+		// The cell splits qualified water above the feed store's protected
+		// reserve into oxygen and hydrogen at the declared stoichiometry;
+		// the electrical dose must cover the chemical energy the produced
+		// hydrogen retains, and the difference is process heat routed
+		// exactly once into the class-matched sink. The cell only splits
+		// what the actually supplied energy can make, so curtailed power
+		// reduces production instead of gifting products for free, and a
+		// full product store caps production instead of venting. Cooling
+		// is gated on the sink temperature: at or above the maximum the
+		// cell is refused whole and spends nothing. Oxygen lands either in
+		// the qualified gas store or in the delivery compartment, where
+		// the compartment's own oxygen closure accounts for every gram.
+		struct ElectrolyzerState
+		{
+			ElectrolyzerSettings authored;
+			size_t waterStoreIndex{0};
+			size_t oxygenStoreIndex{SIZE_MAX}; // SIZE_MAX: delivering to the compartment
+			size_t hydrogenStoreIndex{0};
+			size_t atmosphereIndex{SIZE_MAX}; // SIZE_MAX: delivering to the store
+			size_t sinkIndex{0};
+			size_t declarationIndex{0};
+			double lastScale{0.0};
+			std::string lastLimiter;
+			double lastRequestedKg{0.0};
+			double lastSplitKg{0.0};
+			double lastOxygenKg{0.0};
+			double lastHydrogenKg{0.0};
+			double lastPowerDemandKW{0.0};
+			double lastPowerSuppliedKW{0.0};
+			double lastUnmetProductionKg{0.0};
+			bool lastCoolingAvailable{false};
+			std::string lastBlockReason;
+			double waterSplitKg{0.0};
+			double oxygenProducedKg{0.0};
+			double hydrogenProducedKg{0.0};
+			double energySuppliedKJ{0.0};
+			double chemicalEnergyKJ{0.0};
+			double heatRoutedKJ{0.0};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
+		// The authoritative ledger of one authored CO2 capture machine
+		// (#404). Capture is finite on every axis - rated rate, the CO2
+		// actually present, the capture store's headroom and the drawable
+		// consumable - and the unmet atmospheric service is the explicit
+		// remainder. Captured mass leaves the compartment through a booked
+		// removal pathway and occupies the capture store as inventory; a
+		// tick that demands power and receives none is refused whole,
+		// drawing no CO2 and no consumable.
+		struct Co2CaptureState
+		{
+			Co2CaptureSettings authored;
+			size_t atmosphereIndex{0};
+			size_t captureStoreIndex{0};
+			size_t consumableStoreIndex{SIZE_MAX}; // SIZE_MAX: the process uses no consumable
+			size_t declarationIndex{0};
+			double lastScale{0.0};
+			std::string lastLimiter;
+			double lastRequestedKg{0.0};
+			double lastCapturedKg{0.0};
+			double lastPowerDemandKW{0.0};
+			double lastPowerSuppliedKW{0.0};
+			double lastConsumableRequested{0.0};
+			double lastConsumableUsed{0.0};
+			std::string lastBlockReason;
+			double capturedTotalKg{0.0};
+			double energySuppliedKJ{0.0};
+			double consumablesUsedTotal{0.0};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
 		std::vector<TransferState> transfers;
@@ -2272,6 +2543,13 @@ namespace core
 		std::vector<CrewState> crews;
 		std::vector<WaterCollectorState> waterCollectors;
 		std::vector<WaterTreatmentState> waterTreatments;
+		std::vector<ElectrolyzerState> electrolyzers;
+		std::vector<Co2CaptureState> co2Captures;
+		// Electrolyzers and capture machines compete for the same power pool
+		// and the same stores, so each runs in the declared deterministic
+		// order: priority descending, declaration order ascending.
+		std::vector<size_t> electrolyzerOrder;
+		std::vector<size_t> co2CaptureOrder;
 		// Treatments compete for the same power pool and the same stores, so
 		// they run in the declared deterministic order: priority descending,
 		// declaration order ascending.
@@ -2353,6 +2631,8 @@ namespace core
 			auto const committedCrews = crews;
 			auto const committedWaterCollectors = waterCollectors;
 			auto const committedWaterTreatments = waterTreatments;
+			auto const committedElectrolyzers = electrolyzers;
+			auto const committedCo2Captures = co2Captures;
 			auto const committedAvailableGenerationKW = lastAvailableGenerationKW;
 			auto const committedBatteryShortfallKW = lastBatteryShortfallKW;
 			if (runLedger(tick, seconds, system, violation)) return true;
@@ -2372,6 +2652,8 @@ namespace core
 			crews = committedCrews;
 			waterCollectors = committedWaterCollectors;
 			waterTreatments = committedWaterTreatments;
+			electrolyzers = committedElectrolyzers;
+			co2Captures = committedCo2Captures;
 			lastAvailableGenerationKW = committedAvailableGenerationKW;
 			lastBatteryShortfallKW = committedBatteryShortfallKW;
 			return false;
@@ -2456,6 +2738,12 @@ namespace core
 			std::vector<bool> previousCrewUnmet;
 			previousCrewUnmet.reserve(crews.size());
 			for (auto const& crew : crews) previousCrewUnmet.push_back(crew.lastUnmet);
+			std::vector<StationTransferStatus> previousElectrolyzerStatus;
+			previousElectrolyzerStatus.reserve(electrolyzers.size());
+			for (auto const& cell : electrolyzers) previousElectrolyzerStatus.push_back(cell.status);
+			std::vector<StationTransferStatus> previousCo2CaptureStatus;
+			previousCo2CaptureStatus.reserve(co2Captures.size());
+			for (auto const& capture : co2Captures) previousCo2CaptureStatus.push_back(capture.status);
 			std::vector<double> qualified, unqualified;
 			qualified.reserve(stores.size());
 			unqualified.reserve(stores.size());
@@ -3787,6 +4075,327 @@ namespace core
 				if (collectedKg + 1e-12 >= requestedKg) collector.status = StationTransferStatus::Full;
 				else collector.status = StationTransferStatus::Partial;
 			}
+			// Electrolysis (#404) runs after the water collectors and
+			// before the loop's second pass: it competes for the same
+			// generation-and-battery pool, and its process heat must land
+			// in the sink before the reservoir integrates. One uniform
+			// scale per cell per tick: the smallest fraction of the rated
+			// split the drawable feed water and the product stores'
+			// headroom can sustain. The cell is paid for before a kilogram
+			// splits, and it only splits water the actually supplied
+			// energy can make: the electrical dose either ends up bound in
+			// the produced hydrogen or routed into the class-matched sink
+			// as process heat, booked exactly once. A tick that demands
+			// power and receives none is refused whole, and a sink at or
+			// above the maximum sink temperature refuses the cell whole:
+			// heat with nowhere to go is heat that cannot be made.
+			std::vector<double> electrolysisHeatByReservoir(reservoirs.size(), 0.0);
+			double totalElectrolyzerPowerKW{0.0};
+			for (size_t orderIndex : electrolyzerOrder)
+			{
+				auto& cell = electrolyzers[orderIndex];
+				auto& water = stores[cell.waterStoreIndex];
+				auto& hydrogen = stores[cell.hydrogenStoreIndex];
+				cell.lastScale = 0.0;
+				cell.lastLimiter.clear();
+				cell.lastRequestedKg = 0.0;
+				cell.lastSplitKg = 0.0;
+				cell.lastOxygenKg = 0.0;
+				cell.lastHydrogenKg = 0.0;
+				cell.lastPowerDemandKW = 0.0;
+				cell.lastPowerSuppliedKW = 0.0;
+				cell.lastUnmetProductionKg = 0.0;
+				cell.lastCoolingAvailable = false;
+				cell.lastBlockReason.clear();
+				if (cell.authored.rateKgPerS <= 0.0)
+				{
+					cell.status = StationTransferStatus::Idle;
+					continue;
+				}
+				auto const tickSeconds = static_cast<double>(seconds);
+				auto const fullKg = cell.authored.rateKgPerS * tickSeconds;
+				// Cooling is qualified while the sink sits below the maximum
+				// sink temperature: at or above it the interface cannot
+				// accept the cell's process heat, so the cell cannot run.
+				auto const& sink = reservoirs[cell.sinkIndex];
+				cell.lastCoolingAvailable = sink.temperatureC + 1e-9
+					< cell.authored.maxSinkTemperatureC;
+				if (!cell.lastCoolingAvailable)
+				{
+					cell.lastBlockReason = "cooling is not qualified: sink at or above the maximum sink temperature";
+					cell.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				auto const drawableWaterUnits = std::max(0.0,
+					qualified[cell.waterStoreIndex] - water.authored.protectedReserve);
+				auto const hydrogenHeadroomUnits = std::max(0.0, hydrogen.authored.capacity
+					- (qualified[cell.hydrogenStoreIndex] + unqualified[cell.hydrogenStoreIndex]));
+				double oxygenHeadroomUnits{0.0};
+				if (cell.oxygenStoreIndex != SIZE_MAX)
+					oxygenHeadroomUnits = std::max(0.0, stores[cell.oxygenStoreIndex].authored.capacity
+						- (qualified[cell.oxygenStoreIndex] + unqualified[cell.oxygenStoreIndex]));
+				double scale = 1.0;
+				std::string limiter;
+				auto const constrain = [&](double available, double required,
+					std::string const& reason)
+				{
+					if (required <= 0.0) return;
+					auto const fraction = available / required;
+					if (fraction < scale) { scale = fraction; limiter = reason; }
+				};
+				constrain(drawableWaterUnits, kgToMass(water.authored.unit, fullKg),
+					"feed water store '" + water.authored.id
+					+ "' has nothing drawable above its protected reserve");
+				if (cell.oxygenStoreIndex != SIZE_MAX)
+					constrain(oxygenHeadroomUnits,
+						kgToMass(stores[cell.oxygenStoreIndex].authored.unit,
+							fullKg * StationElectrolysisOxygenMassPerWaterKg),
+						"oxygen store '" + stores[cell.oxygenStoreIndex].authored.id
+						+ "' is full: the product has nowhere to go");
+				constrain(hydrogenHeadroomUnits,
+					kgToMass(hydrogen.authored.unit,
+						fullKg * (1.0 - StationElectrolysisOxygenMassPerWaterKg)),
+					"hydrogen store '" + hydrogen.authored.id
+					+ "' is full: the product has nowhere to go");
+				scale = std::max(0.0, std::min(1.0, scale));
+				cell.lastScale = scale;
+				cell.lastLimiter = limiter;
+				cell.lastRequestedKg = fullKg;
+				if (scale <= 0.0)
+				{
+					cell.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				// The dose is authored in kWh per kilogram of split water,
+				// the same physical unit as the declared chemical energy, so
+				// the power the cell draws is the dose times the split rate
+				// converted to the pool's kW (kWh/s x 3600). The ledger's
+				// energy is kJ = kW x s, so at full power the supplied
+				// energy always covers the chemical energy the validation
+				// floor guarantees (#404).
+				cell.lastPowerDemandKW = scale * cell.authored.rateKgPerS
+					* cell.authored.specificEnergyKWhPerKgWater * 3600.0;
+				auto const fromGeneration = std::min(cell.lastPowerDemandKW, availableGeneration);
+				availableGeneration -= fromGeneration;
+				auto const ask = cell.lastPowerDemandKW - fromGeneration;
+				auto const fromBattery = drawBatteries(ask);
+				auto const suppliedKW = fromGeneration + fromBattery;
+				batterySuppliedKW += fromBattery;
+				batteryShortfallKW += ask - fromBattery;
+				cell.lastPowerSuppliedKW = suppliedKW;
+				if (cell.lastPowerDemandKW > 1e-12 && suppliedKW <= 1e-12)
+				{
+					// Nothing was paid: the tick is refused whole. No water
+					// splits and no product appears - a cell with no power
+					// is not a cell running for free.
+					cell.lastBlockReason = "no electrical supply: the electrolyzer cannot run";
+					cell.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				auto const energySuppliedKJ = suppliedKW * tickSeconds;
+				// Energy feasibility: the cell only splits water the
+				// supplied energy can actually make. The dose may exceed
+				// the chemical energy the products retain - the difference
+				// is process heat - but never fall below it, so the split
+				// never books more chemical energy than was paid for.
+				auto const energyFeasibleKg = energySuppliedKJ
+					/ StationElectrolysisChemicalEnergyKJPerKgWater;
+				auto const feasibleSplitKg = std::min(scale * fullKg, energyFeasibleKg);
+				// Move the water. Each flow is clamped to its own drawable
+				// or headroom so a one-ulp roundoff at the limit can never
+				// overshoot (#556), and the ledger is recomputed from what
+				// actually moved.
+				auto const waterUnits = std::min(
+					kgToMass(water.authored.unit, feasibleSplitKg), drawableWaterUnits);
+				auto const splitKg = massToKg(water.authored.unit, waterUnits);
+				auto const oxygenKg = splitKg * StationElectrolysisOxygenMassPerWaterKg;
+				double oxygenActualKg{oxygenKg};
+				if (cell.oxygenStoreIndex != SIZE_MAX)
+				{
+					auto const& oxygen = stores[cell.oxygenStoreIndex];
+					auto const oxygenUnits = std::min(
+						kgToMass(oxygen.authored.unit, oxygenKg), oxygenHeadroomUnits);
+					oxygenActualKg = massToKg(oxygen.authored.unit, oxygenUnits);
+					qualified[cell.oxygenStoreIndex] += oxygenUnits;
+					flowIn[cell.oxygenStoreIndex] += oxygenUnits;
+					stagedUnitLoss[oxygen.authored.unit] -= oxygenUnits;
+				}
+				else
+				{
+					// Delivered straight into the compartment: the oxygen is
+					// booked as an addition pathway of the compartment's own
+					// closure, so every gram the cell made is visible in the
+					// air it was produced for. The feed-side store loss
+					// already nets the delivered mass out of the store
+					// boundary; nothing vanishes.
+					auto& compartment = atmospheres[cell.atmosphereIndex];
+					compartment.oxygenKg += oxygenKg;
+					compartment.electrolysisOxygenKg += oxygenKg;
+					compartment.lastElectrolysisOxygenKg = oxygenKg;
+				}
+				auto const hydrogenKg = splitKg - oxygenActualKg;
+				auto const hydrogenUnits = std::min(
+					kgToMass(hydrogen.authored.unit, hydrogenKg), hydrogenHeadroomUnits);
+				auto const hydrogenActualKg = massToKg(hydrogen.authored.unit, hydrogenUnits);
+				qualified[cell.waterStoreIndex] -= waterUnits;
+				flowOut[cell.waterStoreIndex] += waterUnits;
+				qualified[cell.hydrogenStoreIndex] += hydrogenUnits;
+				flowIn[cell.hydrogenStoreIndex] += hydrogenUnits;
+				stagedUnitLoss[water.authored.unit] += waterUnits;
+				stagedUnitLoss[hydrogen.authored.unit] -= hydrogenUnits;
+				// Energy: the dose either stays bound in the produced
+				// hydrogen or leaves as process heat routed into the sink,
+				// once and nowhere else.
+				auto const chemicalKJ = hydrogenActualKg
+					* StationElectrolysisChemicalEnergyHydrogenKJPerKg;
+				auto const heatKJ = std::max(0.0, energySuppliedKJ - chemicalKJ);
+				electrolysisHeatByReservoir[cell.sinkIndex] += heatKJ / tickSeconds;
+				cell.lastSplitKg = splitKg;
+				cell.lastOxygenKg = oxygenActualKg;
+				cell.lastHydrogenKg = hydrogenActualKg;
+				cell.lastUnmetProductionKg = std::max(0.0, scale * fullKg - splitKg);
+				cell.waterSplitKg += splitKg;
+				cell.oxygenProducedKg += oxygenActualKg;
+				cell.hydrogenProducedKg += hydrogenActualKg;
+				cell.energySuppliedKJ += energySuppliedKJ;
+				cell.chemicalEnergyKJ += chemicalKJ;
+				cell.heatRoutedKJ += heatKJ;
+				totalElectrolyzerPowerKW += suppliedKW;
+				if (splitKg + 1e-12 >= fullKg
+					&& suppliedKW + 1e-12 >= cell.lastPowerDemandKW)
+					cell.status = StationTransferStatus::Full;
+				else cell.status = StationTransferStatus::Partial;
+			}
+			// CO2 removal (#404) runs in the same phase: captured gas is
+			// inventory, not vanished carbon. The machine can only scrub
+			// the CO2 the compartment actually holds, into the capture
+			// store's remaining headroom, on the consumable it can
+			// actually draw and the power the pool can actually supply.
+			// Every axis of finiteness is a scale cap, and the unmet
+			// atmospheric service is the explicit remainder of the rated
+			// request against them. A tick that demands power and receives
+			// none is refused whole: no CO2 is scrubbed and no consumable
+			// is drawn.
+			double totalCo2CapturePowerKW{0.0};
+			for (size_t orderIndex : co2CaptureOrder)
+			{
+				auto& capture = co2Captures[orderIndex];
+				auto& compartment = atmospheres[capture.atmosphereIndex];
+				auto& destination = stores[capture.captureStoreIndex];
+				capture.lastScale = 0.0;
+				capture.lastLimiter.clear();
+				capture.lastRequestedKg = 0.0;
+				capture.lastCapturedKg = 0.0;
+				capture.lastPowerDemandKW = 0.0;
+				capture.lastPowerSuppliedKW = 0.0;
+				capture.lastConsumableRequested = 0.0;
+				capture.lastConsumableUsed = 0.0;
+				capture.lastBlockReason.clear();
+				if (capture.authored.maxRateKgPerS <= 0.0)
+				{
+					capture.status = StationTransferStatus::Idle;
+					continue;
+				}
+				auto const tickSeconds = static_cast<double>(seconds);
+				auto const fullKg = capture.authored.maxRateKgPerS * tickSeconds;
+				auto const co2AvailableKg = std::max(0.0, compartment.carbonDioxideKg);
+				auto const captureHeadroomUnits = std::max(0.0, destination.authored.capacity
+					- (qualified[capture.captureStoreIndex]
+						+ unqualified[capture.captureStoreIndex]));
+				double drawableConsumableUnits{0.0};
+				if (capture.consumableStoreIndex != SIZE_MAX)
+					drawableConsumableUnits = std::max(0.0, qualified[capture.consumableStoreIndex]
+						- stores[capture.consumableStoreIndex].authored.protectedReserve);
+				double scale = 1.0;
+				std::string limiter;
+				auto const constrain = [&](double available, double required,
+					std::string const& reason)
+				{
+					if (required <= 0.0) return;
+					auto const fraction = available / required;
+					if (fraction < scale) { scale = fraction; limiter = reason; }
+				};
+				constrain(co2AvailableKg, fullKg,
+					"compartment '" + compartment.authored.id
+					+ "' holds no carbon dioxide to capture");
+				constrain(captureHeadroomUnits, kgToMass(destination.authored.unit, fullKg),
+					"capture store '" + destination.authored.id
+					+ "' is full: the captured gas has nowhere to go");
+				if (capture.consumableStoreIndex != SIZE_MAX)
+					constrain(drawableConsumableUnits,
+						capture.authored.consumablePerKg * fullKg,
+						"capture consumable store '"
+						+ stores[capture.consumableStoreIndex].authored.id
+						+ "' is exhausted");
+				scale = std::max(0.0, std::min(1.0, scale));
+				capture.lastScale = scale;
+				capture.lastLimiter = limiter;
+				capture.lastRequestedKg = fullKg;
+				if (scale <= 0.0)
+				{
+					capture.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				capture.lastPowerDemandKW = scale * capture.authored.maxRateKgPerS
+					* capture.authored.specificEnergyKWhPerKg;
+				auto const fromGeneration = std::min(capture.lastPowerDemandKW, availableGeneration);
+				availableGeneration -= fromGeneration;
+				auto const ask = capture.lastPowerDemandKW - fromGeneration;
+				auto const fromBattery = drawBatteries(ask);
+				auto const suppliedKW = fromGeneration + fromBattery;
+				batterySuppliedKW += fromBattery;
+				batteryShortfallKW += ask - fromBattery;
+				capture.lastPowerSuppliedKW = suppliedKW;
+				if (capture.lastPowerDemandKW > 1e-12 && suppliedKW <= 1e-12)
+				{
+					capture.lastBlockReason = "no electrical supply: the capture machine cannot run";
+					capture.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				// Capture only what the compartment holds and the store can
+				// take, clamped per flow so roundoff never overshoots.
+				auto const wantedKg = std::min(fullKg * scale, co2AvailableKg);
+				auto const capturedUnits = std::min(
+					kgToMass(destination.authored.unit, wantedKg), captureHeadroomUnits);
+				auto const capturedKg = massToKg(destination.authored.unit, capturedUnits);
+				compartment.carbonDioxideKg -= capturedKg;
+				compartment.capturedCarbonDioxideKg += capturedKg;
+				compartment.lastCo2CapturedKg = capturedKg;
+				qualified[capture.captureStoreIndex] += capturedUnits;
+				flowIn[capture.captureStoreIndex] += capturedUnits;
+				// The captured gas enters the store network from outside it,
+				// exactly like collector condensate: the boundary closes as
+				// current + lost - delivered - collected, so the carbon is
+				// accounted inflow, never implicit creation.
+				stagedUnitCollected[destination.authored.unit] += capturedUnits;
+				if (capture.consumableStoreIndex != SIZE_MAX)
+				{
+					auto& consumable = stores[capture.consumableStoreIndex];
+					capture.lastConsumableRequested = capture.authored.consumablePerKg * capturedKg;
+					auto const consumableUsed = std::min(capture.lastConsumableRequested,
+						drawableConsumableUnits);
+					qualified[capture.consumableStoreIndex] -= consumableUsed;
+					flowOut[capture.consumableStoreIndex] += consumableUsed;
+					capture.lastConsumableUsed = consumableUsed;
+					stagedUnitLoss[consumable.authored.unit] += consumableUsed;
+					if (consumable.authored.composition)
+					{
+						ConstituentLedger netChange;
+						addComposition(netChange, *consumable.authored.composition,
+							massToKg(consumable.authored.unit, consumableUsed), -1.0);
+						for (auto const& entry : netChange)
+							stagedLoss[entry.first] -= entry.second;
+					}
+					capture.consumablesUsedTotal += consumableUsed;
+				}
+				capture.lastCapturedKg = capturedKg;
+				capture.capturedTotalKg += capturedKg;
+				capture.energySuppliedKJ += suppliedKW * tickSeconds;
+				totalCo2CapturePowerKW += suppliedKW;
+				if (capturedKg + 1e-12 >= fullKg) capture.status = StationTransferStatus::Full;
+				else if (capturedKg > 1e-12) capture.status = StationTransferStatus::Partial;
+				else capture.status = StationTransferStatus::Rejected;
+			}
 			// Second loop pass: integrate the loop's temperature from the
 			// pump work, heater heat, exchanger exchange and the chiller
 			// extraction that actually moved this tick, and book the loop
@@ -4280,7 +4889,8 @@ namespace core
 					auto const atmosphereHeatKW = atmosphereHeatByReservoir[index];
 					auto const heatInKW = reservoir.authored.absorbedHeatKW + routedIn[index]
 						+ loopHeatIntoReservoir[index] + condenserHeatBySink[index]
-						+ generatorHeatKW + atmosphereHeatKW;
+						+ generatorHeatKW + atmosphereHeatKW
+						+ electrolysisHeatByReservoir[index];
 					// Net radiative rejection at the current emitting
 					// temperature: emissivity x view factor x area x sigma
 					// x (T^4 - T_sink^4). The environmental back-radiation
@@ -4335,6 +4945,7 @@ namespace core
 					reservoir.lastLoopHeatKW = loopHeatIntoReservoir[index];
 					reservoir.lastCondenserHeatKW = condenserHeatBySink[index];
 					reservoir.lastGeneratorHeatKW = generatorHeatKW;
+					reservoir.lastElectrolysisHeatKW = electrolysisHeatByReservoir[index];
 					reservoir.lastAtmosphereHeatKW = atmosphereHeatKW;
 					reservoir.lastHeatInKW = heatInKW;
 					reservoir.lastRejectedKW = rejectedKW;
@@ -4344,6 +4955,7 @@ namespace core
 					reservoir.loopKJ += loopHeatIntoReservoir[index] * dt;
 					reservoir.condenserKJ += condenserHeatBySink[index] * dt;
 					reservoir.generatorKJ += generatorHeatKW * dt;
+					reservoir.electrolysisKJ += electrolysisHeatByReservoir[index] * dt;
 					reservoir.atmosphereKJ += atmosphereHeatKW * dt;
 					reservoir.rejectedKJ += rejectedKW * dt;
 					reservoir.temperatureC = newTemperatureC;
@@ -4644,6 +5256,13 @@ namespace core
 				// never a third budget beside the loads and the thermal plant.
 				for (auto const& treatment : waterTreatments)
 					totalSupplied += treatment.lastPowerSuppliedKW;
+				// Electrolysis and CO2 capture work ride the same pool (#404):
+				// oxygen production and carbon removal are services, not a
+				// second budget beside the loads and the thermal plant.
+				for (auto const& cell : electrolyzers)
+					totalSupplied += cell.lastPowerSuppliedKW;
+				for (auto const& capture : co2Captures)
+					totalSupplied += capture.lastPowerSuppliedKW;
 				for (auto const& array : solarArrays) totalGeneration += array.lastAvailableKW;
 				for (auto const& generator : generators) totalGeneration += generator.outputKW;
 				for (auto const& battery : batteries) totalDischarged += battery.lastDischargeKW;
@@ -4739,6 +5358,7 @@ namespace core
 				if (!requireFinite(reservoir.lastCondenserHeatKW, where + "condenser heat")) return false;
 				if (!requireFinite(reservoir.lastGeneratorHeatKW, where + "generator heat")) return false;
 				if (!requireFinite(reservoir.lastAtmosphereHeatKW, where + "atmosphere exchange")) return false;
+				if (!requireFinite(reservoir.lastElectrolysisHeatKW, where + "electrolysis process heat")) return false;
 				if (!requireFinite(reservoir.lastHeatInKW, where + "total heat inflow")) return false;
 				if (!requireFinite(reservoir.lastRejectedKW, where + "radiator rejection")) return false;
 				if (!requireFinite(reservoir.lastNetKW, where + "net heat balance")) return false;
@@ -4747,6 +5367,7 @@ namespace core
 				if (!requireFinite(reservoir.loopKJ, where + "cumulative loop exchange energy")) return false;
 				if (!requireFinite(reservoir.condenserKJ, where + "cumulative condenser energy")) return false;
 				if (!requireFinite(reservoir.generatorKJ, where + "cumulative generator heat energy")) return false;
+				if (!requireFinite(reservoir.electrolysisKJ, where + "cumulative electrolysis process heat energy")) return false;
 				if (!requireFinite(reservoir.atmosphereKJ, where + "cumulative atmosphere exchange energy")) return false;
 				if (!requireFinite(reservoir.rejectedKJ, where + "cumulative rejected energy")) return false;
 				totalAbsorbedKW += reservoir.authored.absorbedHeatKW;
@@ -4963,6 +5584,9 @@ namespace core
 				if (!requireFinite(compartment.lastVapourCondensedKg, where + "vapour condensed")) return false;
 				if (!requireFinite(compartment.lastLeakedKg, where + "leaked mass")) return false;
 				if (!requireFinite(compartment.lastCycleRemovedKg, where + "airlock removed mass")) return false;
+				if (!requireFinite(compartment.lastCollectedKg, where + "water recovered mass")) return false;
+				if (!requireFinite(compartment.lastElectrolysisOxygenKg, where + "electrolysis oxygen added")) return false;
+				if (!requireFinite(compartment.lastCo2CapturedKg, where + "CO2 captured mass")) return false;
 				if (!requireFinite(compartment.lastOccupantHeatKW, where + "occupant heat")) return false;
 				if (!requireFinite(compartment.lastLatentHeatKW, where + "latent heat")) return false;
 				if (!requireFinite(compartment.lastExchangeIntoCompartmentKW, where + "reservoir exchange")) return false;
@@ -4970,6 +5594,9 @@ namespace core
 				if (!requireFinite(compartment.recoveredKg, where + "cumulative recovered mass")) return false;
 				if (!requireFinite(compartment.lostKg, where + "cumulative lost mass")) return false;
 				if (!requireFinite(compartment.condensedKg, where + "cumulative condensed mass")) return false;
+				if (!requireFinite(compartment.collectedKg, where + "cumulative water recovered mass")) return false;
+				if (!requireFinite(compartment.electrolysisOxygenKg, where + "cumulative electrolysis oxygen")) return false;
+				if (!requireFinite(compartment.capturedCarbonDioxideKg, where + "cumulative CO2 captured mass")) return false;
 				// #565: the snapshot publishes the derived partial
 				// pressures, absolute pressure and saturation vapour
 				// capacity computed from this compartment state. A finite
@@ -5015,7 +5642,8 @@ namespace core
 					double current;
 				};
 				std::array<ComponentClosure, 4> const closures{{
-					{"oxygen", compartment.authored.startingOxygenKg, 0.0,
+					{"oxygen", compartment.authored.startingOxygenKg,
+						compartment.electrolysisOxygenKg,
 						compartment.oxygenConsumedKg + compartment.leakOxygenKg
 							+ compartment.cycleOxygenKg, compartment.oxygenKg},
 					{"nitrogen", compartment.authored.startingNitrogenKg, 0.0,
@@ -5023,7 +5651,8 @@ namespace core
 						compartment.nitrogenKg},
 					{"carbonDioxide", compartment.authored.startingCarbonDioxideKg,
 						compartment.co2ProducedKg,
-						compartment.leakCarbonDioxideKg + compartment.cycleCarbonDioxideKg,
+						compartment.leakCarbonDioxideKg + compartment.cycleCarbonDioxideKg
+							+ compartment.capturedCarbonDioxideKg,
 						compartment.carbonDioxideKg},
 					{"waterVapour", compartment.authored.startingWaterVapourKg,
 						compartment.vapourAddedKg,
@@ -5199,6 +5828,81 @@ namespace core
 				if (!treatment.lastQualityAccepted && treatment.lastProcessedKg > 0.0
 					&& treatment.lastHoldReason.empty())
 					return violation = where + "held treated output without a stated hold reason", false;
+			}
+			// The oxygen-production audit (#404): the split closes on mass -
+			// every kilogram split is oxygen plus hydrogen, never a third
+			// destination - and on energy: the electrical dose either ended
+			// up bound in the produced hydrogen or routed into the sink as
+			// process heat. A cell is never supplied less chemical energy
+			// than it booked, and never splits more than the energy it was
+			// paid for can make.
+			system = "Electrolysis";
+			for (auto const& cell : electrolyzers)
+			{
+				auto const where = "electrolyzer '" + cell.authored.id + "' ";
+				if (!requireFinite(cell.lastScale, where + "split scale")) return false;
+				if (!requireFinite(cell.lastRequestedKg, where + "last requested split")) return false;
+				if (!requireFinite(cell.lastSplitKg, where + "last split mass")) return false;
+				if (!requireFinite(cell.lastOxygenKg, where + "last oxygen mass")) return false;
+				if (!requireFinite(cell.lastHydrogenKg, where + "last hydrogen mass")) return false;
+				if (!requireFinite(cell.lastPowerDemandKW, where + "last power demand")) return false;
+				if (!requireFinite(cell.lastPowerSuppliedKW, where + "last power supplied")) return false;
+				if (!requireFinite(cell.lastUnmetProductionKg, where + "last unmet production")) return false;
+				if (!requireFinite(cell.waterSplitKg, where + "cumulative water split")) return false;
+				if (!requireFinite(cell.oxygenProducedKg, where + "cumulative oxygen produced")) return false;
+				if (!requireFinite(cell.hydrogenProducedKg, where + "cumulative hydrogen produced")) return false;
+				if (!requireFinite(cell.energySuppliedKJ, where + "cumulative energy supplied")) return false;
+				if (!requireFinite(cell.chemicalEnergyKJ, where + "cumulative chemical energy")) return false;
+				if (!requireFinite(cell.heatRoutedKJ, where + "cumulative heat routed")) return false;
+				if (!(cell.lastScale >= 0.0 && cell.lastScale <= 1.0 + 1e-12))
+					return violation = where + "split scale left the declared [0, 1] range", false;
+				auto const massBound = StationBalanceTolerance * std::max(1.0, cell.waterSplitKg);
+				auto const massResidual = cell.waterSplitKg
+					- cell.oxygenProducedKg - cell.hydrogenProducedKg;
+				if (!std::isfinite(massResidual) || std::abs(massResidual) > massBound)
+					return violation = where
+						+ "water/oxygen/hydrogen split does not close within tolerance", false;
+				auto const energyResidual = cell.energySuppliedKJ
+					- cell.chemicalEnergyKJ - cell.heatRoutedKJ;
+				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > massBound)
+					return violation = where
+						+ "supplied/chemical/heat energy ledger does not close within tolerance", false;
+				if (cell.chemicalEnergyKJ > cell.energySuppliedKJ + massBound)
+					return violation = where
+						+ "booked more chemical energy than the electrical dose supplied", false;
+				if (cell.lastSplitKg > cell.lastRequestedKg + massBound)
+					return violation = where + "split more than the rated capacity allows", false;
+			}
+			// The CO2-capture audit (#404): captured mass never exceeds what
+			// the compartment held, the store could take, the consumable
+			// could sustain or the rated rate allows, and the consumable is
+			// never drawn beyond what the captured mass calls for. A tick
+			// with no electrical supply captures nothing.
+			system = "CO2 capture";
+			for (auto const& capture : co2Captures)
+			{
+				auto const where = "CO2 capture machine '" + capture.authored.id + "' ";
+				if (!requireFinite(capture.lastScale, where + "capture scale")) return false;
+				if (!requireFinite(capture.lastRequestedKg, where + "last requested capture")) return false;
+				if (!requireFinite(capture.lastCapturedKg, where + "last captured mass")) return false;
+				if (!requireFinite(capture.lastPowerDemandKW, where + "last power demand")) return false;
+				if (!requireFinite(capture.lastPowerSuppliedKW, where + "last power supplied")) return false;
+				if (!requireFinite(capture.lastConsumableRequested, where + "last consumable requested")) return false;
+				if (!requireFinite(capture.lastConsumableUsed, where + "last consumable used")) return false;
+				if (!requireFinite(capture.capturedTotalKg, where + "cumulative captured mass")) return false;
+				if (!requireFinite(capture.energySuppliedKJ, where + "cumulative energy supplied")) return false;
+				if (!requireFinite(capture.consumablesUsedTotal, where + "cumulative consumables used")) return false;
+				if (!(capture.lastScale >= 0.0 && capture.lastScale <= 1.0 + 1e-12))
+					return violation = where + "capture scale left the declared [0, 1] range", false;
+				auto const bound = StationBalanceTolerance * std::max(1.0, capture.lastRequestedKg);
+				if (capture.lastCapturedKg > capture.lastRequestedKg + bound)
+					return violation = where + "captured more than the rated capacity allows", false;
+				auto const consumableBound = StationBalanceTolerance
+					* std::max(1.0, capture.lastConsumableRequested);
+				if (capture.lastConsumableUsed > capture.lastConsumableRequested + consumableBound)
+					return violation = where + "used more consumable than the captured mass calls for", false;
+				if (capture.lastPowerSuppliedKW <= 1e-12 && capture.lastCapturedKg > bound)
+					return violation = where + "captured without any electrical supply", false;
 			}
 			system = "Power allocation";
 			for (auto const& array : solarArrays)
@@ -5611,6 +6315,42 @@ namespace core
 					: std::string("Crew '") + crew.authored.id
 						+ "' metabolic demand fully supplied again");
 			}
+			// Oxygen production and CO2 capture transitions are announced so
+			// the event log records when a cell stops producing and why -
+			// cooling, feed, product headroom or power - and when it recovers
+			// (#404). The transition is reported once per change, not every
+			// tick the condition stands.
+			for (size_t index = 0; index < electrolyzers.size(); ++index)
+			{
+				auto const& cell = electrolyzers[index];
+				if (cell.status == previousElectrolyzerStatus[index]) continue;
+				if (cell.status == StationTransferStatus::Full)
+				{
+					appendBoundedEvent(events, tick, "Electrolyzer '" + cell.authored.id
+						+ "' splitting at full rate");
+					continue;
+				}
+				auto const reason = !cell.lastBlockReason.empty() ? cell.lastBlockReason : cell.lastLimiter;
+				appendBoundedEvent(events, tick, cell.status == StationTransferStatus::Rejected
+					? "Electrolyzer '" + cell.authored.id + "' rejected: " + reason
+					: "Electrolyzer '" + cell.authored.id + "' partial: " + reason);
+			}
+			for (size_t index = 0; index < co2Captures.size(); ++index)
+			{
+				auto const& capture = co2Captures[index];
+				if (capture.status == previousCo2CaptureStatus[index]) continue;
+				if (capture.status == StationTransferStatus::Full)
+				{
+					appendBoundedEvent(events, tick, "CO2 capture '" + capture.authored.id
+						+ "' capturing at full rate");
+					continue;
+				}
+				auto const reason = !capture.lastBlockReason.empty()
+					? capture.lastBlockReason : capture.lastLimiter;
+				appendBoundedEvent(events, tick, capture.status == StationTransferStatus::Rejected
+					? "CO2 capture '" + capture.authored.id + "' rejected: " + reason
+					: "CO2 capture '" + capture.authored.id + "' partial: " + reason);
+			}
 			// Delivery arrivals are discrete scenario events rather than a
 			// continuous per-tick service, so every arrival is announced with
 			// its own quantities: the refused remainder is the account for
@@ -5831,6 +6571,51 @@ namespace core
 			[&](size_t left, size_t right)
 			{ return mImpl->waterTreatments[left].authored.priority
 				> mImpl->waterTreatments[right].authored.priority; });
+		// Oxygen production and CO2 capture ledgers start empty (#404): the
+		// authored contracts are resolved to store, compartment and sink
+		// indices at construction so the tick ledger never re-looks-up
+		// references, and every production and capture total reconstructs
+		// from zero on Reset and load. Cells and capture machines compete
+		// for the same power pool and the same stores, so each runs in the
+		// declared deterministic order: priority descending, declaration
+		// order ascending.
+		for (auto const& electrolyzer : settings.electrolyzers)
+		{
+			Impl::ElectrolyzerState state;
+			state.authored = electrolyzer;
+			state.waterStoreIndex = storeIndex[electrolyzer.waterStoreId];
+			if (!electrolyzer.oxygenStoreId.empty())
+				state.oxygenStoreIndex = storeIndex[electrolyzer.oxygenStoreId];
+			state.hydrogenStoreIndex = storeIndex[electrolyzer.hydrogenStoreId];
+			if (!electrolyzer.atmosphereId.empty())
+				state.atmosphereIndex = atmosphereIndex[electrolyzer.atmosphereId];
+			state.sinkIndex = reservoirIndex[electrolyzer.heatSinkId];
+			state.declarationIndex = mImpl->electrolyzers.size();
+			mImpl->electrolyzers.push_back(std::move(state));
+		}
+		mImpl->electrolyzerOrder.resize(mImpl->electrolyzers.size());
+		std::iota(mImpl->electrolyzerOrder.begin(), mImpl->electrolyzerOrder.end(), size_t{0});
+		std::stable_sort(mImpl->electrolyzerOrder.begin(), mImpl->electrolyzerOrder.end(),
+			[&](size_t left, size_t right)
+			{ return mImpl->electrolyzers[left].authored.priority
+				> mImpl->electrolyzers[right].authored.priority; });
+		for (auto const& capture : settings.co2Captures)
+		{
+			Impl::Co2CaptureState state;
+			state.authored = capture;
+			state.atmosphereIndex = atmosphereIndex[capture.atmosphereId];
+			state.captureStoreIndex = storeIndex[capture.captureStoreId];
+			if (!capture.consumableStoreId.empty())
+				state.consumableStoreIndex = storeIndex[capture.consumableStoreId];
+			state.declarationIndex = mImpl->co2Captures.size();
+			mImpl->co2Captures.push_back(std::move(state));
+		}
+		mImpl->co2CaptureOrder.resize(mImpl->co2Captures.size());
+		std::iota(mImpl->co2CaptureOrder.begin(), mImpl->co2CaptureOrder.end(), size_t{0});
+		std::stable_sort(mImpl->co2CaptureOrder.begin(), mImpl->co2CaptureOrder.end(),
+			[&](size_t left, size_t right)
+			{ return mImpl->co2Captures[left].authored.priority
+				> mImpl->co2Captures[right].authored.priority; });
 		for (auto const& load : settings.equipmentLoads)
 		{
 			Impl::LoadState state;
@@ -5909,7 +6694,8 @@ namespace core
 				&settings.deliveries, &settings.thermalReservoirs, &settings.radiators,
 				&settings.coolantLoops, &settings.chillers, &settings.generators,
 				&settings.atmospheres, &settings.airlockCycles, &settings.crews,
-				&settings.waterCollectors, &settings.waterTreatments};
+				&settings.waterCollectors, &settings.waterTreatments,
+				&settings.electrolyzers, &settings.co2Captures};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -5941,7 +6727,11 @@ namespace core
 			+ (settings.waterCollectors.empty() ? std::string()
 				: ", " + std::to_string(settings.waterCollectors.size()) + " water collector(s)")
 			+ (settings.waterTreatments.empty() ? std::string()
-				: ", " + std::to_string(settings.waterTreatments.size()) + " water treatment(s)"));
+				: ", " + std::to_string(settings.waterTreatments.size()) + " water treatment(s)")
+			+ (settings.electrolyzers.empty() ? std::string()
+				: ", " + std::to_string(settings.electrolyzers.size()) + " electrolyzer(s)")
+			+ (settings.co2Captures.empty() ? std::string()
+				: ", " + std::to_string(settings.co2Captures.size()) + " CO2 capture machine(s)"));
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
 	bool StationSystemsRuntime::advance(uint64_t tick, float seconds)
@@ -5996,7 +6786,8 @@ namespace core
 			|| !mImpl->coolantLoops.empty() || !mImpl->chillers.empty()
 			|| !mImpl->generators.empty() || !mImpl->atmospheres.empty()
 			|| !mImpl->airlockCycles.empty() || !mImpl->crews.empty()
-			|| !mImpl->waterCollectors.empty() || !mImpl->waterTreatments.empty())
+			|| !mImpl->waterCollectors.empty() || !mImpl->waterTreatments.empty()
+			|| !mImpl->electrolyzers.empty() || !mImpl->co2Captures.empty())
 		{
 			std::string violationSystem, violation;
 			if (!mImpl->applyLedger(tick, seconds, violationSystem, violation))
@@ -6266,6 +7057,8 @@ namespace core
 			reservoirResult.lastLoopHeatKW = reservoir.lastLoopHeatKW;
 			reservoirResult.lastCondenserHeatKW = reservoir.lastCondenserHeatKW;
 			reservoirResult.lastGeneratorHeatKW = reservoir.lastGeneratorHeatKW;
+			reservoirResult.lastElectrolysisHeatKW = reservoir.lastElectrolysisHeatKW;
+			reservoirResult.electrolysisEnergyKJ = reservoir.electrolysisKJ;
 			reservoirResult.lastAtmosphereHeatKW = reservoir.lastAtmosphereHeatKW;
 			reservoirResult.lastHeatInKW = reservoir.lastHeatInKW;
 			reservoirResult.lastRejectedKW = reservoir.lastRejectedKW;
@@ -6285,7 +7078,8 @@ namespace core
 			reservoirResult.rejectedEnergyKJ = reservoir.rejectedKJ;
 			reservoirResult.residualKJ = reservoirResult.startingEnergyKJ
 				+ reservoir.absorbedKJ + reservoir.routedKJ + reservoir.loopKJ
-				+ reservoir.condenserKJ + reservoir.generatorKJ + reservoir.atmosphereKJ
+				+ reservoir.condenserKJ + reservoir.generatorKJ + reservoir.electrolysisKJ
+				+ reservoir.atmosphereKJ
 				- reservoir.rejectedKJ - reservoirResult.currentEnergyKJ;
 			result.thermal.totalAbsorbedKW += reservoir.authored.absorbedHeatKW;
 			result.thermal.totalRoutedKW += reservoir.lastHeatRoutedKW;
@@ -6480,6 +7274,10 @@ namespace core
 			atmosphereResult.lastLeakedKg = compartment.lastLeakedKg;
 			atmosphereResult.lastCollectedKg = compartment.lastCollectedKg;
 			atmosphereResult.collectedKg = compartment.collectedKg;
+			atmosphereResult.lastElectrolysisOxygenKg = compartment.lastElectrolysisOxygenKg;
+			atmosphereResult.electrolysisOxygenKg = compartment.electrolysisOxygenKg;
+			atmosphereResult.lastCo2CapturedKg = compartment.lastCo2CapturedKg;
+			atmosphereResult.co2CapturedKg = compartment.capturedCarbonDioxideKg;
 			atmosphereResult.lastCycleRemovedKg = compartment.lastCycleRemovedKg;
 			atmosphereResult.lastCycleRecoveredKg = compartment.lastCycleRecoveredKg;
 			atmosphereResult.lastCycleLostKg = compartment.lastCycleLostKg;
@@ -6671,6 +7469,94 @@ namespace core
 			result.waterTreatments.push_back(std::move(treatmentResult));
 		}
 		result.power.waterTreatmentPowerKW = totalWaterTreatmentPower;
+		// The oxygen-production snapshot reports the authored cell contract
+		// beside the water actually split, the products actually made, the
+		// energy actually supplied and the closing mass and energy ledgers:
+		// the split and the energy each close over their own terms, so a
+		// reader can see where every kilogram and kilojoule went (#404).
+		double totalElectrolyzerPower = 0.0;
+		for (auto const& cell : mImpl->electrolyzers)
+		{
+			StationElectrolyzerSnapshot cellResult;
+			cellResult.id = cell.authored.id;
+			cellResult.hazardClass = cell.authored.hazardClass;
+			cellResult.waterStoreId = cell.authored.waterStoreId;
+			cellResult.oxygenStoreId = cell.authored.oxygenStoreId;
+			cellResult.hydrogenStoreId = cell.authored.hydrogenStoreId;
+			cellResult.atmosphereId = cell.authored.atmosphereId;
+			cellResult.thermalClass = cell.authored.thermalClass;
+			cellResult.heatSinkId = cell.authored.heatSinkId;
+			cellResult.rateKgPerS = cell.authored.rateKgPerS;
+			cellResult.specificEnergyKWhPerKgWater = cell.authored.specificEnergyKWhPerKgWater;
+			cellResult.maxSinkTemperatureC = cell.authored.maxSinkTemperatureC;
+			cellResult.priority = cell.authored.priority;
+			cellResult.scale = cell.lastScale;
+			cellResult.limiter = cell.lastLimiter;
+			cellResult.lastRequestedKg = cell.lastRequestedKg;
+			cellResult.lastSplitKg = cell.lastSplitKg;
+			cellResult.lastOxygenKg = cell.lastOxygenKg;
+			cellResult.lastHydrogenKg = cell.lastHydrogenKg;
+			cellResult.lastPowerDemandKW = cell.lastPowerDemandKW;
+			cellResult.lastPowerSuppliedKW = cell.lastPowerSuppliedKW;
+			cellResult.lastPowerUnmetKW = cell.lastPowerDemandKW - cell.lastPowerSuppliedKW;
+			cellResult.lastUnmetProductionKg = cell.lastUnmetProductionKg;
+			cellResult.coolingAvailable = cell.lastCoolingAvailable;
+			cellResult.blockReason = cell.lastBlockReason;
+			cellResult.disabled = cell.authored.rateKgPerS <= 0.0;
+			cellResult.waterSplitKg = cell.waterSplitKg;
+			cellResult.oxygenProducedKg = cell.oxygenProducedKg;
+			cellResult.hydrogenProducedKg = cell.hydrogenProducedKg;
+			cellResult.energySuppliedKJ = cell.energySuppliedKJ;
+			cellResult.chemicalEnergyKJ = cell.chemicalEnergyKJ;
+			cellResult.heatRoutedKJ = cell.heatRoutedKJ;
+			cellResult.residualKg = cell.waterSplitKg
+				- cell.oxygenProducedKg - cell.hydrogenProducedKg;
+			cellResult.residualKJ = cell.energySuppliedKJ
+				- cell.chemicalEnergyKJ - cell.heatRoutedKJ;
+			cellResult.status = cell.status;
+			totalElectrolyzerPower += cell.lastPowerSuppliedKW;
+			result.electrolyzers.push_back(std::move(cellResult));
+		}
+		result.power.electrolyzerPowerKW = totalElectrolyzerPower;
+		// The CO2-capture snapshot reports the authored machine beside the
+		// captured mass, the unmet atmospheric service and the electricity
+		// and consumable actually drawn: the captured carbon is visible as
+		// inventory, never as a vanishing act (#404).
+		double totalCo2CapturePower = 0.0;
+		for (auto const& capture : mImpl->co2Captures)
+		{
+			StationCo2CaptureSnapshot captureResult;
+			captureResult.id = capture.authored.id;
+			captureResult.hazardClass = capture.authored.hazardClass;
+			captureResult.atmosphereId = capture.authored.atmosphereId;
+			captureResult.captureStoreId = capture.authored.captureStoreId;
+			captureResult.consumableStoreId = capture.authored.consumableStoreId;
+			captureResult.maxRateKgPerS = capture.authored.maxRateKgPerS;
+			captureResult.specificEnergyKWhPerKg = capture.authored.specificEnergyKWhPerKg;
+			captureResult.consumablePerKg = capture.authored.consumablePerKg;
+			captureResult.priority = capture.authored.priority;
+			captureResult.scale = capture.lastScale;
+			captureResult.limiter = capture.lastLimiter;
+			captureResult.lastRequestedKg = capture.lastRequestedKg;
+			captureResult.lastCapturedKg = capture.lastCapturedKg;
+			captureResult.lastUnmetServiceKg = capture.lastRequestedKg - capture.lastCapturedKg;
+			captureResult.lastPowerDemandKW = capture.lastPowerDemandKW;
+			captureResult.lastPowerSuppliedKW = capture.lastPowerSuppliedKW;
+			captureResult.lastPowerUnmetKW = capture.lastPowerDemandKW - capture.lastPowerSuppliedKW;
+			captureResult.lastConsumableRequested = capture.lastConsumableRequested;
+			captureResult.lastConsumableUsed = capture.lastConsumableUsed;
+			captureResult.lastConsumableUnmet = capture.lastConsumableRequested
+				- capture.lastConsumableUsed;
+			captureResult.blockReason = capture.lastBlockReason;
+			captureResult.disabled = capture.authored.maxRateKgPerS <= 0.0;
+			captureResult.capturedKg = capture.capturedTotalKg;
+			captureResult.energySuppliedKJ = capture.energySuppliedKJ;
+			captureResult.consumablesUsed = capture.consumablesUsedTotal;
+			captureResult.status = capture.status;
+			totalCo2CapturePower += capture.lastPowerSuppliedKW;
+			result.co2Captures.push_back(std::move(captureResult));
+		}
+		result.power.co2CapturePowerKW = totalCo2CapturePower;
 		// The delivery snapshot reports the authored schedule beside the
 		// runtime's arrival history: what each occurrence brought in, what
 		// the destination refused, and when the next arrival is due (#392).

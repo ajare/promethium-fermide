@@ -745,6 +745,94 @@ namespace core
 	};
 	inline constexpr size_t MaxStationWaterTreatments{8};
 
+	// Stoichiometric oxygen mass per kilogram of split water: M_O2 / (2 x
+	// M_H2O). Hydrogen is the declared mass-balance remainder (one minus
+	// this ratio) so the electrolysis split closes exactly under the
+	// declared molar masses rather than rounding a second ratio against
+	// them.
+	inline constexpr double StationElectrolysisOxygenMassPerWaterKg{
+		StationMolarMassOxygenKgPerMol / (2.0 * StationMolarMassWaterKgPerMol)};
+	// Lower heating value of hydrogen in kJ/kg: the declared chemical
+	// energy retained per kilogram of produced H2. Documented constant of
+	// the product fuel, not an authored process coefficient: the electrical
+	// dose must at least cover the chemical energy the products carry away,
+	// and the difference is process heat.
+	inline constexpr double StationElectrolysisChemicalEnergyHydrogenKJPerKg{119960.0};
+	// Chemical energy retained per kilogram of split water, in kJ: the
+	// hydrogen share of the products at the declared stoichiometry.
+	inline constexpr double StationElectrolysisChemicalEnergyKJPerKgWater{
+		(1.0 - StationElectrolysisOxygenMassPerWaterKg)
+		* StationElectrolysisChemicalEnergyHydrogenKJPerKg};
+	// An electrolysis cell (#404): splits qualified water into oxygen and
+	// hydrogen at a declared electrical dose per kilogram split. The split
+	// is stoichiometric - oxygen at the declared mass ratio, hydrogen as
+	// the mass-balance remainder - so one kilogram of water leaves the
+	// cell as exactly one kilogram of products. The electrical dose must
+	// cover the chemical energy the products retain; the difference is
+	// process heat, routed exactly once into the declared class-matched
+	// heat-sink reservoir. Cooling is qualified only while the sink sits
+	// below the maximum sink temperature; at or above it the cell is
+	// refused whole and splits nothing. The cell only splits water the
+	// actually supplied energy can make: curtailed power reduces
+	// production rather than gifting energy-rich products for free, and
+	// the shortfall stays visible as unmet production. Oxygen is
+	// delivered to a qualified gas store or directly to one compartment
+	// atmosphere (exactly one destination is configured); a full product
+	// store caps production rather than venting or deleting the excess.
+	// Feed water is drawn only above its store's protected reserve, so a
+	// life-support water reserve is never electrolysed away. Hazard class
+	// segregates the whole chain: the feed store, both product stores and
+	// the delivery compartment must all carry the cell's own class.
+	struct ElectrolyzerSettings
+	{
+		std::string id;
+		std::string hazardClass;      // normal or hazardous; products inherit the feed's class
+		std::string waterStoreId;    // qualified water above the protected reserve
+		std::string oxygenStoreId;   // O2 destination store; empty when delivering to a compartment
+		std::string hydrogenStoreId; // H2 destination store
+		std::string atmosphereId;    // O2 delivered here instead of the store; empty when storing
+		std::string thermalClass;    // service class of the cell's heat sink
+		std::string heatSinkId;      // reservoir receiving the process heat
+		double rateKgPerS{0.0};    // rated water split, 0 disables
+		double specificEnergyKWhPerKgWater{4.5}; // electrical dose per kg split
+		double maxSinkTemperatureC{60.0}; // cooling qualified while the sink is below this
+		int priority{0};
+		bool operator==(ElectrolyzerSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationElectrolyzers{8};
+	// A CO2 removal machine (#404): scrubs carbon dioxide out of one
+	// compartment atmosphere into a finite capture store. The captured gas
+	// is inventory, not vanished carbon: it leaves the compartment through
+	// a booked removal pathway and occupies the capture store until a
+	// later disposal or reuse capability moves it. Capture capacity is
+	// finite on every axis - the rated rate, the CO2 actually present, the
+	// capture store's remaining headroom and the drawable regeneration
+	// consumable - and the unmet atmospheric service is the explicit
+	// remainder of the rated request against them. Each captured kilogram
+	// costs its declared electrical energy and, when a consumable is
+	// configured, its declared share of the consumable, drawn from the
+	// shared power pool and the consumable store's qualified inventory
+	// above its protected reserve. A tick that demands power and receives
+	// none is refused whole: no CO2 is scrubbed and no consumable is
+	// drawn. The machine can only scrub what the compartment holds, so it
+	// never drives the CO2 inventory negative. Hazard class matches the
+	// compartment it serves: a hazardous atmosphere's carbon stays on the
+	// hazardous side of the capture chain.
+	struct Co2CaptureSettings
+	{
+		std::string id;
+		std::string hazardClass;         // must match the compartment it scrubs
+		std::string atmosphereId;        // compartment whose CO2 is removed
+		std::string captureStoreId;      // captured CO2 lands here as inventory
+		std::string consumableStoreId;   // regeneration consumable; empty when the process uses none
+		double maxRateKgPerS{0.0};    // finite capture capacity, 0 disables
+		double specificEnergyKWhPerKg{0.5}; // electricity per kg captured
+		double consumablePerKg{0.0};   // consumable units per kg captured
+		int priority{0};
+		bool operator==(Co2CaptureSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationCo2Captures{8};
+
 	struct StationSystemsSettings
 	{
 		bool enabled{false};
@@ -766,6 +854,8 @@ namespace core
 		std::vector<CrewSettings> crews;
 		std::vector<WaterCollectorSettings> waterCollectors;
 		std::vector<WaterTreatmentSettings> waterTreatments;
+		std::vector<ElectrolyzerSettings> electrolyzers;
+		std::vector<Co2CaptureSettings> co2Captures;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// Profile shape validation and deterministic evaluation: the level of
@@ -833,10 +923,11 @@ namespace core
 		// tolerance, so delivered material is accounted, never implicit.
 		double delivered{0.0};
 		// Cumulative mass of this unit recovered out of a compartment
-		// atmosphere by a water collector (#402). It is inflow from
-		// outside the store boundary just like a delivery, so the residual
-		// closes as current + lost - delivered - collected against
-		// starting: the condensate is accounted, never implicit.
+		// atmosphere by a water collector (#402) or a CO2 capture machine
+		// (#404). It is inflow from outside the store boundary just like a
+		// delivery, so the residual closes as current + lost - delivered -
+		// collected against starting: the condensate and the captured gas
+		// are accounted, never implicit.
 		double collected{0.0};
 		double residual{0.0};
 		bool operator==(StationBalanceSnapshot const&) const = default;
@@ -1105,6 +1196,8 @@ namespace core
 		double generatorOutputKW{0.0};
 		double generatorStartupDrawKW{0.0};
 		double waterTreatmentPowerKW{0.0}; // treatment work drawn this tick (#402)
+		double electrolyzerPowerKW{0.0};   // electrolysis work drawn this tick (#404)
+		double co2CapturePowerKW{0.0};     // CO2 capture work drawn this tick (#404)
 		double generatorWasteHeatKW{0.0};
 		double generatorDecayHeatKW{0.0};
 		std::vector<StationSolarSourceSnapshot> sources;
@@ -1166,7 +1259,12 @@ namespace core
 		// from electrical production, startup cranking dissipation and
 		// post-shutdown decay heat, booked once at the sink boundary.
 		double lastGeneratorHeatKW{0.0};
-		double lastHeatInKW{0.0};       // absorbed + routed + loop + condenser + generator this tick
+		// Electrolysis process heat this tick routed into this reservoir
+		// by the cells that use it as their heat sink (#404): the part of
+		// the electrical dose the split did not retain as chemical energy
+		// in the products, booked once at the sink boundary.
+		double lastElectrolysisHeatKW{0.0};
+		double lastHeatInKW{0.0};       // absorbed + routed + loop + condenser + generator + electrolysis this tick
 		double lastRejectedKW{0.0};     // radiator net rejection this tick
 		double lastNetKW{0.0};          // heat in minus rejected this tick
 		bool aboveLimit{false};
@@ -1178,9 +1276,10 @@ namespace core
 		double loopEnergyKJ{0.0}; // cumulative net loop exchange into the reservoir
 		double condenserEnergyKJ{0.0}; // cumulative condenser heat rejected into the reservoir
 		double generatorEnergyKJ{0.0}; // cumulative generator waste/startup/decay heat into the reservoir
+		double electrolysisEnergyKJ{0.0}; // cumulative electrolysis process heat into the reservoir
 		double atmosphereEnergyKJ{0.0}; // cumulative net compartment exchange into the reservoir
 		double rejectedEnergyKJ{0.0};
-		double residualKJ{0.0}; // starting + absorbed + routed + loop + condenser + generator + atmosphere - rejected - current
+		double residualKJ{0.0}; // starting + absorbed + routed + loop + condenser + generator + electrolysis + atmosphere - rejected - current
 		bool operator==(StationThermalReservoirSnapshot const&) const = default;
 	};
 	// One coolant loop as of the most recent tick (#396): the authored
@@ -1391,6 +1490,8 @@ namespace core
 		double lastVapourCondensedKg{0.0};
 		double lastLeakedKg{0.0};
 		double lastCollectedKg{0.0}; // vapour removed by water recovery this tick
+		double lastElectrolysisOxygenKg{0.0}; // O2 delivered into this compartment this tick (#404)
+		double lastCo2CapturedKg{0.0}; // CO2 removed by capture this tick (#404)
 		double lastCycleRemovedKg{0.0};
 		double lastCycleRecoveredKg{0.0};
 		double lastCycleLostKg{0.0};
@@ -1417,6 +1518,8 @@ namespace core
 		double condensedKg{0.0};
 		double leakedKg{0.0};
 		double collectedKg{0.0}; // cumulative vapour removed by water recovery
+		double electrolysisOxygenKg{0.0}; // cumulative O2 added by electrolysis (#404)
+		double co2CapturedKg{0.0}; // cumulative CO2 removed by capture (#404)
 		double recoveredKg{0.0};
 		double lostKg{0.0};
 		double startingEnergyKJ{0.0};
@@ -1591,6 +1694,89 @@ namespace core
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationWaterTreatmentSnapshot const&) const = default;
 	};
+	// One electrolysis cell as of the most recent tick (#404): the authored
+	// contract beside the water actually split, the oxygen and hydrogen
+	// actually produced, the electrical dose actually supplied, the heat
+	// actually routed to the sink, and the closing mass and energy ledgers.
+	// The cell's mass ledger closes over the split: water = oxygen +
+	// hydrogen within the declared tolerance, and its energy ledger closes
+	// over supplied = chemical + heat: the electrical dose either ended up
+	// bound in the products or routed into the sink as process heat -
+	// never a third destination and never vanished.
+	struct StationElectrolyzerSnapshot
+	{
+		std::string id;
+		std::string hazardClass;
+		std::string waterStoreId;
+		std::string oxygenStoreId;
+		std::string hydrogenStoreId;
+		std::string atmosphereId;
+		std::string thermalClass;
+		std::string heatSinkId;
+		double rateKgPerS{0.0};
+		double specificEnergyKWhPerKgWater{0.0};
+		double maxSinkTemperatureC{0.0};
+		int priority{0};
+		double scale{0.0}; // fraction of rated split the feed and headroom sustained, [0, 1]
+		std::string limiter; // what bound the scale this tick (empty: none)
+		double lastRequestedKg{0.0};   // rated split demanded this tick
+		double lastSplitKg{0.0};       // water actually split this tick
+		double lastOxygenKg{0.0};      // oxygen actually produced this tick
+		double lastHydrogenKg{0.0};    // hydrogen actually produced this tick
+		double lastPowerDemandKW{0.0};
+		double lastPowerSuppliedKW{0.0};
+		double lastPowerUnmetKW{0.0};
+		double lastUnmetProductionKg{0.0}; // split the supplied energy could not make
+		bool coolingAvailable{false};
+		std::string blockReason;       // why nothing ran this tick (empty: none)
+		bool disabled{false};          // zero rated split: no production
+		double waterSplitKg{0.0};
+		double oxygenProducedKg{0.0};
+		double hydrogenProducedKg{0.0};
+		double energySuppliedKJ{0.0};
+		double chemicalEnergyKJ{0.0};  // energy retained in the produced hydrogen
+		double heatRoutedKJ{0.0};      // process heat routed into the sink
+		double residualKg{0.0};        // split - oxygen - hydrogen
+		double residualKJ{0.0};        // supplied - chemical - heat
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationElectrolyzerSnapshot const&) const = default;
+	};
+	// One CO2 capture machine as of the most recent tick (#404): the
+	// authored contract beside the CO2 actually captured, the unmet
+	// atmospheric service, the electricity and consumable actually drawn,
+	// and the closing capture ledger. Captured mass leaves the compartment
+	// through a booked pathway and occupies the capture store: the ledger
+	// shows where every kilogram went, so no carbon vanishes.
+	struct StationCo2CaptureSnapshot
+	{
+		std::string id;
+		std::string hazardClass;
+		std::string atmosphereId;
+		std::string captureStoreId;
+		std::string consumableStoreId;
+		double maxRateKgPerS{0.0};
+		double specificEnergyKWhPerKg{0.0};
+		double consumablePerKg{0.0};
+		int priority{0};
+		double scale{0.0}; // fraction of rated capture the service limits sustained, [0, 1]
+		std::string limiter; // what bound the scale this tick (empty: none)
+		double lastRequestedKg{0.0};   // rated capture demanded this tick
+		double lastCapturedKg{0.0};    // CO2 actually captured this tick
+		double lastUnmetServiceKg{0.0}; // removal the compartment/store/consumable could not supply
+		double lastPowerDemandKW{0.0};
+		double lastPowerSuppliedKW{0.0};
+		double lastPowerUnmetKW{0.0};
+		double lastConsumableRequested{0.0};
+		double lastConsumableUsed{0.0};
+		double lastConsumableUnmet{0.0};
+		std::string blockReason;       // why nothing was captured this tick (empty: none)
+		bool disabled{false};          // zero rated rate: no capture
+		double capturedKg{0.0};        // cumulative CO2 captured into inventory
+		double energySuppliedKJ{0.0};  // cumulative electricity drawn
+		double consumablesUsed{0.0};   // cumulative consumable drawn
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationCo2CaptureSnapshot const&) const = default;
+	};
 	struct StationSystemsSnapshot
 	{
 		bool enabled{false};
@@ -1639,6 +1825,12 @@ namespace core
 		// electricity and consumables drawn and the quality hold state.
 		std::vector<StationWaterCollectorSnapshot> waterCollectors;
 		std::vector<StationWaterTreatmentSnapshot> waterTreatments;
+		// The oxygen production and CO2 capture picture (#404): per-cell
+		// water split, products, energy and heat ledgers, and per-capture
+		// captured mass, unmet atmospheric service, electricity and
+		// consumable draw.
+		std::vector<StationElectrolyzerSnapshot> electrolyzers;
+		std::vector<StationCo2CaptureSnapshot> co2Captures;
 		// Soonest authored arrival still pending across every delivery, for
 		// the overview's "next delivery" readout (#392).
 		bool hasNextDelivery{false};

@@ -214,7 +214,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 78", "version: 64");
+		replaceAll(legacy, "version: 79", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -231,14 +231,14 @@ namespace
 			"authored store fields missing or live inventory leaked");
 		bool refused = false;
 		auto staleStores = withField;
-		replaceAll(staleStores, "version: 78", "version: 65");
+		replaceAll(staleStores, "version: 79", "version: 65");
 		auto const staleStoresPath = directory / "stale-stores.world.yaml";
 		writeFile(staleStoresPath, staleStores);
 		try { (void)core::loadWorldDocument(staleStoresPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-66 document carrying resource stores was silently accepted");
 		auto staleTransfers = withField;
-		replaceAll(staleTransfers, "version: 78", "version: 66");
+		replaceAll(staleTransfers, "version: 79", "version: 66");
 		auto const staleTransfersPath = directory / "stale-transfers.world.yaml";
 		writeFile(staleTransfersPath, staleTransfers);
 		refused = false;
@@ -246,7 +246,7 @@ namespace
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-67 document carrying resource transfers was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 78", "version: 64");
+		replaceAll(stale, "version: 79", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
 		refused = false;
@@ -384,7 +384,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 78", "version: 67");
+			replaceAll(stale, "version: 79", "version: 67");
 			auto const stalePath = directory / "stale-compounds.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -493,7 +493,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 78", "version: 69");
+			replaceAll(stale, "version: 79", "version: 69");
 			auto const stalePath = directory / "stale-batteries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -615,7 +615,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 78", "version: 68");
+			replaceAll(stale, "version: 79", "version: 68");
 			auto const stalePath = directory / "stale-power.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -742,7 +742,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 78", "version: 70");
+			replaceAll(stale, "version: 79", "version: 70");
 			auto const stalePath = directory / "stale-deliveries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -870,7 +870,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 78", "version: 71");
+			replaceAll(stale, "version: 79", "version: 71");
 			auto const stalePath = directory / "stale-thermal.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1031,7 +1031,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 78", "version: 72");
+			replaceAll(stale, "version: 79", "version: 72");
 			auto const stalePath = directory / "stale-coolant.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1194,7 +1194,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 78", "version: 73");
+			replaceAll(stale, "version: 79", "version: 73");
 			auto const stalePath = directory / "stale-chillers.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1342,7 +1342,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 78", "version: 74");
+			replaceAll(stale, "version: 79", "version: 74");
 			auto const stalePath = directory / "stale-generators.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1503,7 +1503,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 78", "version: 75");
+			replaceAll(stale, "version: 79", "version: 75");
 			auto const stalePath = directory / "stale-atmospheres.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1674,7 +1674,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 78", "version: 76");
+			replaceAll(stale, "version: 79", "version: 76");
 			auto const stalePath = directory / "stale-crews.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1864,7 +1864,7 @@ void waterFiles(smoke::Context const& context)
 	// A pre-78 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 78", "version: 77");
+		replaceAll(stale, "version: 79", "version: 77");
 		auto const stalePath = directory / "stale-water.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -1915,6 +1915,191 @@ void waterFiles(smoke::Context const& context)
 	}
 }
 
+void gasFiles(smoke::Context const& context)
+{
+	namespace filesystem = std::filesystem;
+	auto const directory = context.temporaryRoot() / "station-gas";
+	filesystem::create_directories(directory);
+	auto plainStore = [](std::string const& id, double capacity, double starting,
+		double protectedReserve = 0.0)
+	{
+		core::ResourceStoreSettings settings;
+		settings.id = id;
+		settings.unit = "kg";
+		settings.capacity = capacity;
+		settings.startingQualified = starting;
+		settings.protectedReserve = protectedReserve;
+		return settings;
+	};
+	core::AtmosphereSettings habitat;
+	habitat.id = "habitat";
+	habitat.hazardClass = "normal";
+	habitat.volumeM3 = 100.0;
+	habitat.startingOxygenKg = 20.0;
+	habitat.startingNitrogenKg = 80.0;
+	habitat.startingCarbonDioxideKg = 1.0;
+	habitat.startingTemperatureC = 25.0;
+	habitat.thermalCapacityKJPerK = 10000.0;
+	habitat.minPressureKPa = 1.0;
+	habitat.maxPressureKPa = 200.0;
+	core::ThermalReservoirSettings sink;
+	sink.id = "sink";
+	sink.thermalClass = "low";
+	sink.heatCapacityKJPerK = 10000.0;
+	sink.startingTemperatureC = 10.0;
+	sink.minTemperatureC = -50.0;
+	sink.maxTemperatureC = 200.0;
+	core::SolarArraySettings field;
+	field.id = "field";
+	field.capacityKW = 100.0;
+	core::ElectrolyzerSettings cell;
+	cell.id = "cell";
+	cell.hazardClass = "normal";
+	cell.waterStoreId = "water";
+	cell.oxygenStoreId = "o2";
+	cell.hydrogenStoreId = "h2";
+	cell.thermalClass = "low";
+	cell.heatSinkId = "sink";
+	cell.rateKgPerS = 0.001;
+	cell.specificEnergyKWhPerKgWater = 4.5;
+	cell.maxSinkTemperatureC = 60.0;
+	cell.priority = 2;
+	core::Co2CaptureSettings capture;
+	capture.id = "scrub";
+	capture.hazardClass = "normal";
+	capture.atmosphereId = "habitat";
+	capture.captureStoreId = "captured";
+	capture.consumableStoreId = "scrubberMedia";
+	capture.maxRateKgPerS = 0.001;
+	capture.specificEnergyKWhPerKg = 0.5;
+	capture.consumablePerKg = 0.01;
+	capture.priority = 1;
+	core::World original("Gas Round Trip", 2, 2);
+	original.pauseSimulation();
+	original.finishBuild();
+	core::StationSystemsSettings settings;
+	settings.enabled = true;
+	settings.observationIntervalSeconds = 2.0f;
+	settings.stores.push_back(plainStore("water", 100.0, 50.0, 10.0));
+	settings.stores.push_back(plainStore("o2", 100.0, 0.0));
+	settings.stores.push_back(plainStore("h2", 100.0, 0.0));
+	settings.stores.push_back(plainStore("captured", 100.0, 0.0));
+	settings.stores.push_back(plainStore("scrubberMedia", 100.0, 10.0));
+	settings.atmospheres.push_back(habitat);
+	settings.thermalReservoirs.push_back(sink);
+	settings.solarArrays.push_back(field);
+	settings.electrolyzers.push_back(cell);
+	settings.co2Captures.push_back(capture);
+	std::string diagnostic;
+	require(original.configureStationSystems(settings, false, &diagnostic),
+		"Gas production settings edit failed: " + diagnostic);
+	original.resumeSimulation();
+	require(original.advanceTicks(1800), "Gas original run failed");
+	auto const expected = original.getStationSystemsSnapshot();
+	require(expected.electrolyzers.size() == 1 && expected.co2Captures.size() == 1
+		&& expected.electrolyzers[0].waterSplitKg > 0.0
+		&& expected.electrolyzers[0].oxygenProducedKg > 0.0
+		&& expected.electrolyzers[0].hydrogenProducedKg > 0.0
+		&& expected.electrolyzers[0].heatRoutedKJ > 0.0
+		&& expected.co2Captures[0].capturedKg > 0.0
+		&& expected.co2Captures[0].consumablesUsed > 0.0,
+		"Gas scenario did not exercise electrolysis and capture before saving");
+	auto const path = directory / "gas.world.yaml";
+	original.saveTo(path.string());
+	require(readFile(path).find("electrolyzers:") != std::string::npos,
+		"saved document lacks electrolyzers");
+	require(readFile(path).find("co2Captures:") != std::string::npos,
+		"saved document lacks co2Captures");
+	require(readFile(path).find("specificEnergyKWhPerKgWater") != std::string::npos
+		&& readFile(path).find("maxSinkTemperatureC") != std::string::npos,
+		"saved document lacks the gas production contract");
+	auto const reopened = core::loadWorldDocument(path);
+	reopened->pauseSimulation();
+	require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+		"authored gas production settings did not survive the file round trip");
+	require(reopened->getStationSystemsSnapshot().electrolyzers[0].waterSplitKg == 0.0
+		&& reopened->getStationSystemsSnapshot().co2Captures[0].capturedKg == 0.0
+		&& reopened->getStationSystemsSnapshot().stores[1].currentQualified == 0.0,
+		"reopened World did not reconstruct the gas production starting state");
+	reopened->resumeSimulation();
+	require(reopened->advanceTicks(1800), "Gas reopened run failed");
+	require(reopened->getStationSystemsSnapshot() == expected,
+		"Gas scenario is not reproducible from the document");
+	require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
+		"Gas event history is not reproducible from the document");
+	auto const binaryPath = directory / "gas.world";
+	original.saveTo(binaryPath.string());
+	auto const reopenedBinary = core::loadWorldDocument(binaryPath);
+	reopenedBinary->pauseSimulation();
+	require(reopenedBinary->getStationSystemsSnapshot().electrolyzers.size() == 1
+		&& reopenedBinary->getStationSystemsSnapshot().co2Captures[0].capturedKg == 0.0,
+		"reopened binary gas document did not reconstruct the starting state");
+	auto const withField = serializeYaml(original);
+	// A pre-79 document carrying the new fields is refused.
+	{
+		auto stale = withField;
+		replaceAll(stale, "version: 79", "version: 78");
+		auto const stalePath = directory / "stale-gas.world.yaml";
+		writeFile(stalePath, stale);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(stalePath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a pre-79 document carrying gas production was silently accepted");
+	}
+	// Malformed gas values in a file are rejected.
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "specificEnergyKWhPerKgWater: 4.5",
+			"specificEnergyKWhPerKgWater: 1.0");
+		auto const malformedPath = directory / "malformed-dose.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a dose below the retained chemical energy was accepted from a file");
+	}
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "maxSinkTemperatureC: 60", "maxSinkTemperatureC: -300");
+		auto const malformedPath = directory / "malformed-sink-temp.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a sink temperature below absolute zero was accepted from a file");
+	}
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "heatSinkId: sink", "heatSinkId: ghost");
+		auto const malformedPath = directory / "malformed-heat-sink.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "an electrolyzer on an unknown heat sink was accepted from a file");
+	}
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "captureStoreId: captured", "captureStoreId: ghost");
+		auto const malformedPath = directory / "malformed-capture-store.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a capture machine with an unknown capture store was accepted from a file");
+	}
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "hazardClass: normal", "hazardClass: plasma");
+		auto const malformedPath = directory / "malformed-gas-hazard.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "an undeclared gas hazard class was accepted from a file");
+	}
+}
+
 void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"fileRoundTrip", fileRoundTrip});
@@ -1932,4 +2117,5 @@ void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"atmosphereFiles", atmosphereFiles});
 	checks.push_back({"crewFiles", crewFiles});
 	checks.push_back({"waterFiles", waterFiles});
+	checks.push_back({"gasFiles", gasFiles});
 }

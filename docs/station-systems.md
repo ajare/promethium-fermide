@@ -1,4 +1,4 @@
-# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, chilled thermal services, fuelled generators, compartment atmospheres with airlock cycles, crew metabolic returns and water recovery with qualification (#386–#391, #393–#397, #399–#402)
+# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, chilled thermal services, fuelled generators, compartment atmospheres with airlock cycles, crew metabolic returns, water recovery with qualification, and oxygen production with finite CO2 capture (#386–#391, #393–#397, #399–#402, #404)
 
 Station systems are opt-in per World and disabled in existing documents. Open
 **View > Station Systems** or use the
@@ -1162,6 +1162,128 @@ themselves as the limiter; deterministic Reset replay; and intact water
 descriptor crossings with contained construction refusal for both
 contracts.
 
+### Oxygen production and CO2 capture (#404)
+
+Oxygen production and carbon-dioxide removal are two authored contracts
+that ride the same tick, the same power pool and the same store machinery
+as the rest of the station slice: an **electrolyzer** that splits
+qualified water into oxygen and hydrogen, and a **CO2 capture machine**
+that scrubs a compartment's carbon dioxide into a finite capture store.
+Both are hazard-classified, and the class keeps a breathable product
+stream from sharing equipment with a contaminated one.
+
+The electrolysis split is **stoichiometric**: from one kilogram of split
+water, `StationElectrolysisOxygenMassPerWaterKg` (the molar-mass ratio
+M_O2 / 2·M_H2O) leaves as oxygen and the remainder is hydrogen, so the
+mass ledger closes exactly under the declared molar masses rather than
+rounding a second ratio against them. The cell's electrical dose is
+authored in kWh per kilogram of split water — the same physical unit as
+the declared chemical energy — and the dose must cover at least the
+chemical energy the produced hydrogen retains (its lower heating value,
+a documented constant of the product fuel, not an authored coefficient).
+A dose below that floor is refused at configuration: no machine can create
+energy-rich products out of less energy than the products carry. The
+difference between the dose and the retained chemical energy is **process
+heat**, routed exactly once into the declared class-matched heat-sink
+reservoir and booked as its own ledger term there, alongside generator
+waste heat and compartment exchange.
+
+The cell is paid for before a kilogram splits, and it only splits water
+the **actually supplied energy** can make: curtailed power reduces
+production rather than gifting energy-rich products for free, and the
+shortfall stays visible as unmet production. A tick that demands power
+and receives none is refused whole — nothing splits and nothing appears.
+**Cooling is gated on the sink temperature:** while the sink sits below
+the cell's maximum sink temperature the cell may run; at or above it the
+interface cannot accept the process heat, so the cell is refused whole
+and spends nothing, with the reason named. The cell draws feed water only
+above its store's protected reserve, so a life-support water reserve is
+never electrolysed away. Oxygen is delivered to a qualified gas store or
+directly into one compartment atmosphere — exactly one destination is
+configured, never both and never neither — and a full product store **caps
+production rather than venting or deleting the excess**. When oxygen is
+delivered into a compartment it is booked as an addition pathway of that
+compartment's own oxygen closure, so every gram the cell made is visible
+in the air it was produced for; the feed-side store loss already nets the
+delivered mass out of the store boundary, so nothing vanishes.
+
+CO2 capture is **finite on every axis**: the rated rate, the CO2 the
+compartment actually holds, the capture store's remaining headroom, and
+the drawable regeneration consumable. Each axis is a scale cap, and the
+**unmet atmospheric service is the explicit remainder** of the rated
+request against them. Captured gas is **inventory, not vanished carbon**:
+it leaves the compartment through a booked removal pathway and occupies
+the capture store until a later disposal or reuse capability moves it.
+Each captured kilogram costs its declared electrical energy and, when a
+consumable is configured, its declared share of the consumable, drawn
+from the shared power pool and the consumable store above its protected
+reserve. A tick that demands power and receives none is refused whole:
+no CO2 is scrubbed and no consumable is drawn. The machine can only
+scrub what the compartment holds, so it never drives the CO2 inventory
+negative.
+
+Gas stores in both chains are **plain mass stores**: a compound store
+would create dry constituents out of pure gas. The capture machine's
+consumable store is the one exception, being a supplied consumable rather
+than a gas stream, and its draw books both the unit and constituent loss.
+Hazard class segregates the whole chain — the feed store, both product
+stores and the delivery compartment must all carry the cell's own class,
+and a capture machine must match the compartment it scrubs, so a
+hazardous atmosphere's carbon stays on the hazardous side — and stores
+shared across classes are refused at configuration.
+
+Within the tick, electrolyzers and capture machines run after the water
+collectors and before the coolant loop's second pass: they compete for
+the same generation-and-battery pool, and the electrolysis process heat
+lands in the sink before the reservoir integrates. Each runs in the
+declared deterministic order (priority descending, declaration order
+ascending), and the single-pool audit carries their supplied service
+alongside every other load — oxygen production and carbon removal are
+services, never a second budget beside the loads and the thermal plant.
+
+World schema 79 persists both contracts — the electrolyzer's hazard
+class, feed water store, oxygen store or delivery compartment, hydrogen
+store, thermal service class, heat-sink reservoir, rated split, specific
+energy, maximum sink temperature and priority, and the capture machine's
+hazard class, compartment, capture store, consumable store, maximum rate,
+specific energy, consumable rate and priority. A pre-79 document
+carrying `electrolyzers` or `co2Captures` is refused rather than
+silently dropped. The split, products, energy and heat ledgers, the
+captured mass, the unmet service and the consumables drawn stay
+runtime-only: Load and Reset reconstruct them from the authored starting
+conditions. The Station Systems window drafts both contracts with full
+validation reporting and shows the live split and its stoichiometric
+products, the cooling gate, the power demanded versus supplied and the
+energy-feasibility cap, the product-headroom limiter, the captured mass
+and unmet atmospheric service, and the closing mass and energy ledgers.
+
+Gas acceptance coverage: refused configurations (unknown feed, product,
+capture or consumable store; both or neither oxygen destination; a dose
+below the retained chemical energy; a sink-temperature bound below
+absolute zero; a hazard class that does not match the delivery
+compartment or the scrubbed compartment; a thermal class that mismatches
+the heat-sink reservoir; a consumable demand with no consumable store; a
+gas store shared between normal and hazardous processes; over-budget
+contract counts) with no World mutation; nominal electrolysis where the
+split follows the declared stoichiometry, the supplied/chemical/heat
+energy ledger closes, the protected reserve is untouched, the process
+heat lands in the sink and the per-unit boundary closes; the cooling gate
+(a hot sink refuses the cell whole with the reason named and announced);
+zero power (the tick is refused whole, nothing splits); the energy-
+feasibility cap (curtailed power bounds the split at what the supplied
+energy can make, with unmet production the explicit remainder and the
+chemical energy never exceeding the dose); a full hydrogen store capping
+production instead of venting and naming itself as the limiter; oxygen
+delivered straight into a compartment with the compartment's oxygen
+closure accounting for every gram; nominal capture where the
+compartment's carbon falls by exactly what the store gains, the
+consumable and electricity are drawn with it, and the captured mass is
+carried as collected inflow on the store boundary; finite service (the
+machine stops at the CO2 the compartment holds and is refused with a
+stated reason); consumable exhaustion capping the total captured at what
+the media can regenerate; deterministic Reset replay; and intact
+electrolyzer descriptor crossings with contained construction refusal.
+
 ## Explicit scope limit
 
 This slice implements lifecycle, authored finite store configuration,
@@ -1184,7 +1306,11 @@ CO2, moisture, urine, organic waste and metabolic heat under
 authored mass-, constituent- and energy-closing coefficients, and water
 recovery with collector-side condensation onto a coolant-loop cold surface
 and treatment-side recovery into treated water plus retained concentrate
-under a full-power qualification rule.
+under a full-power qualification rule, and oxygen production by
+stoichiometric electrolysis with a chemical-energy-floored electrical dose
+and a temperature-gated process-heat sink, plus finite CO2 capture that
+removes a compartment's carbon into a capture-store inventory with the
+unmet atmospheric service left explicit.
 It adds no treatment or clearance
 workflows or ejection, no dynamic coolant leak, replenishment or
 loop-to-loop transfer (a loop's charge is its authored inventory and
