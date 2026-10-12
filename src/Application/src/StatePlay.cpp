@@ -18,8 +18,8 @@ void StatePlay::injectKeyInputImpl(wp::application::KeyEvent event,
                                    wp::application::KeyModifiers) {
   if (event == wp::application::KeyEvent::Pressed &&
       key == wp::application::Key::Escape) {
-    // Returning from the sole state makes Launcher exit normally.
-    throw wp::application::ReturnFromStateException();
+    // Controller resumes with Play's identity and runs the unload sequence.
+    throw wp::application::ReturnFromStateException(&mTransitionData);
   }
 }
 

@@ -1,5 +1,7 @@
 add_library(PromethiumFermide SHARED
     src/DLL.cpp
+    src/StateController.cpp
+    src/StateLifecycle.cpp
     src/StatePlay.cpp)
 target_include_directories(PromethiumFermide PUBLIC include)
 target_compile_definitions(PromethiumFermide PRIVATE PF_APPLICATION_EXPORT)
