@@ -1633,6 +1633,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             battery.last_discharge = 0
         end
         local batterySupplied = 0
+        -- #561: the cranking slice taken out of the generation pool is
+        -- tracked here so the audit baseline below is the pool as it was
+        -- originally available - solar plus generator output - rather
+        -- than the pool already eaten into by the very crank it audits.
+        local startupFromGeneration = 0
         -- Fuelled generators run ahead of the load allocation (#399):
         -- their electrical output joins the shared generation pool for
         -- this tick's loads, their startup cranking draws ride the same
@@ -1716,6 +1721,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     else
                         local fromGeneration = math.min(requestKW, generation)
                         generation = generation - fromGeneration
+                        startupFromGeneration = startupFromGeneration + fromGeneration
                         local ask = requestKW - fromGeneration
                         local fromBattery = drawBatteries(self, ask, fixed_hours)
                         batterySupplied = batterySupplied + fromBattery
@@ -1819,7 +1825,13 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             end
             gen.lastCoolingRequired = gen.phase == 'running' or gen.phase == 'shutdown'
         end
-        local availableGeneration = generation
+        -- The audit baseline is the source pool as it was originally
+        -- available this tick - solar plus generator output - before the
+        -- cranking draws took their slice. The crank is counted exactly
+        -- once, on the demand side in totalSupplied; leaving it subtracted
+        -- from the baseline too would book it twice and make a
+        -- source-funded startup fail its own audit (#561).
+        local availableGeneration = generation + startupFromGeneration
         local supplied = {}
         for _, index in ipairs(self.load_order) do
             local load = self.loads[index]

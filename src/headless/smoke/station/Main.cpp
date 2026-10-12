@@ -6010,6 +6010,241 @@ namespace
 			require(world.getStationSystemsEvents() == expectedEvents,
 				"generator event history is not deterministic across Reset");
 		}
+		// #561: the allocation audit must count a generator startup draw
+		// exactly once, against the source pool as it was originally
+		// available (solar plus generator output) plus actual battery
+		// delivery. A crank funded exactly by the pool it draws from is
+		// not an over-allocation, and the audit must not fail the tick.
+		auto const dt = static_cast<double>(core::World::getFixedTimestep());
+		auto auditGenerator = [](char const* id, double startupPowerKW,
+			double startupSeconds, double ratedKW)
+		{
+			core::GeneratorSettings settings;
+			settings.id = id;
+			settings.fuelStoreId = "fuel";
+			settings.thermalClass = "moderate";
+			settings.heatSinkId = "hot";
+			settings.ratedOutputKW = ratedKW;
+			settings.efficiency = 0.5;
+			settings.maxRampKWPerSecond = 100.0;
+			settings.commandedOutputKW = ratedKW;
+			settings.startupPowerKW = startupPowerKW;
+			settings.startupSeconds = startupSeconds;
+			settings.shutdownHeatKW = 0.0;
+			settings.shutdownSeconds = 0.0;
+			settings.maxSinkTemperatureC = 90.0;
+			return settings;
+		};
+		auto auditFuel = [](double capacityKJ)
+		{
+			core::ResourceStoreSettings settings;
+			settings.id = "fuel";
+			settings.unit = "kJ";
+			settings.capacity = capacityKJ;
+			settings.startingQualified = capacityKJ;
+			settings.protectedReserve = 0.0;
+			return settings;
+		};
+		auto auditSink = [](double capacityKJPerK)
+		{
+			core::ThermalReservoirSettings settings;
+			settings.id = "hot";
+			settings.thermalClass = "moderate";
+			settings.heatCapacityKJPerK = capacityKJPerK;
+			settings.startingTemperatureC = 20.0;
+			settings.minTemperatureC = -100.0;
+			settings.maxTemperatureC = 200.0;
+			return settings;
+		};
+		auto auditLoad = [](char const* id, double demandKW)
+		{
+			core::EquipmentLoadSettings settings;
+			settings.id = id;
+			settings.electricalDemandKW = demandKW;
+			settings.operatingProfile.constantLevel = 1.0;
+			settings.thermalClass = "low";
+			settings.coolingDisposition = core::StationCoolingDisposition::Exported;
+			return settings;
+		};
+		auto auditConfigure = [](core::World& world,
+			std::vector<core::ResourceStoreSettings> stores,
+			std::vector<core::ThermalReservoirSettings> reservoirs,
+			std::vector<core::GeneratorSettings> generators,
+			std::vector<core::SolarArraySettings> solar = {},
+			std::vector<core::BatterySettings> batteries = {},
+			std::vector<core::EquipmentLoadSettings> loads = {})
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = std::move(stores);
+			settings.thermalReservoirs = std::move(reservoirs);
+			settings.generators = std::move(generators);
+			settings.solarArrays = std::move(solar);
+			settings.batteries = std::move(batteries);
+			settings.equipmentLoads = std::move(loads);
+			auto const ok = world.configureStationSystems(settings, false, &diagnostic);
+			return std::make_pair(ok, diagnostic);
+		};
+		// Solar-only exact funding (the #561 reproduction): 1 kW of sun
+		// funds exactly the 1 kW crank. The second tick must not fail the
+		// audit; the generator stays Starting with one tick of received
+		// energy and the World keeps running.
+		{
+			core::World world("StartupAuditSolarOnly", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::ProfileSettings sun; sun.constantLevel = 1.0;
+			auto const [ok, diagnostic] = auditConfigure(world,
+				{ auditFuel(100.0) }, { auditSink(1000.0) },
+				{ auditGenerator("gen", 1.0, 1.0, 1.0) },
+				{ core::SolarArraySettings{"field", 1.0, sun} });
+			require(ok, ("solar-only startup audit scenario rejected: " + diagnostic).c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(2),
+				"a source-exact startup draw failed the allocation audit");
+			require(!world.isSimulationPaused() && world.getStationSystemsSnapshot().healthy,
+				"the source-exact startup tick was not healthy");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& live = snap.power.generators[0];
+			require(live.phase == core::StationGeneratorPhase::Starting
+				&& approx(live.startupRequiredKJ, 1.0, 1e-9),
+				"the source-funded crank did not stay in Starting");
+			require(approx(live.startupReceivedKJ, dt, 1e-9)
+				&& approx(live.startupDrawKW, 1.0, 1e-9),
+				"the crank did not receive exactly one tick of source-funded energy");
+			require(approx(snap.power.availableGenerationKW, 1.0, 1e-9)
+				&& approx(snap.power.generatorStartupDrawKW, 1.0, 1e-9),
+				"the published pool and startup totals do not match the funded crank");
+		}
+		// Exhausted surplus with ordinary loads: the crank takes its share
+		// and the remaining sun funds the load exactly - the whole pool is
+		// consumed and nothing is double-booked.
+		{
+			core::World world("StartupAuditSurplusLoad", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::ProfileSettings sun; sun.constantLevel = 1.0;
+			auto const [ok, diagnostic] = auditConfigure(world,
+				{ auditFuel(100.0) }, { auditSink(1000.0) },
+				{ auditGenerator("gen", 1.0, 1.0, 1.0) },
+				{ core::SolarArraySettings{"field", 2.0, sun} },
+				{}, { auditLoad("rig", 1.0) });
+			require(ok, ("surplus-load startup audit scenario rejected: " + diagnostic).c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(2),
+				"crank-plus-load demand that exactly matches the pool failed the audit");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.power.loads[0].status == core::StationTransferStatus::Full
+				&& approx(snap.power.loads[0].suppliedKW, 1.0, 1e-9),
+				"the ordinary load did not receive the surplus the crank left");
+			auto const& live = snap.power.generators[0];
+			require(live.phase == core::StationGeneratorPhase::Starting
+				&& approx(live.startupReceivedKJ, dt, 1e-9),
+				"the crank sharing the pool with a load did not progress");
+		}
+		// Mixed solar/battery startup: the crank draws part from the sun
+		// and part from the bank; the audit baseline is the original solar
+		// pool plus the battery's actual delivery, so the startup is
+		// funded exactly once.
+		{
+			core::World world("StartupAuditMixedPool", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::ProfileSettings sun; sun.constantLevel = 1.0;
+			auto const [ok, diagnostic] = auditConfigure(world,
+				{ auditFuel(100.0) }, { auditSink(1000.0) },
+				{ auditGenerator("gen", 1.0, 1.0, 1.0) },
+				{ core::SolarArraySettings{"field", 0.5, sun} },
+				{ core::BatterySettings{"cell", 10.0, 10.0, 10.0, 5.0, 5.0} });
+			require(ok, ("mixed-pool startup audit scenario rejected: " + diagnostic).c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(2),
+				"a solar-plus-battery funded crank failed the allocation audit");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& live = snap.power.generators[0];
+			require(live.phase == core::StationGeneratorPhase::Starting
+				&& approx(live.startupDrawKW, 1.0, 1e-9)
+				&& approx(live.startupReceivedKJ, dt, 1e-9),
+				"the mixed-pool crank did not receive its full draw");
+			require(approx(snap.power.batteryDischargeKW, 0.5, 1e-9),
+				"the battery did not deliver exactly the slice the sun left short");
+		}
+		// A running generator funds another machine: genA's output is
+		// the pool genB cranks against and the load draws from; the audit
+		// baseline is genA's output, and the crank is counted once.
+		{
+			core::World world("StartupAuditGenFunded", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto genA = auditGenerator("genA", 0.0, 0.0, 2.0);
+			auto genB = auditGenerator("genB", 1.0, 1.0, 1.0);
+			auto const [ok, diagnostic] = auditConfigure(world,
+				{ auditFuel(1000.0) }, { auditSink(10000.0) },
+				{ genA, genB }, {}, {}, { auditLoad("rig", 1.0) });
+			require(ok, ("generator-funded startup audit scenario rejected: " + diagnostic).c_str());
+			world.resumeSimulation();
+			// genA enters Running on tick 1 and starts slewing on tick 2;
+			// genB sees genA's output and starts on tick 2; the crank and
+			// the load together consume genA's full 2 kW on tick 3.
+			require(world.advanceTicks(3),
+				"a running-generator-funded crank sharing the pool with a load failed the audit");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.power.generators[0].phase == core::StationGeneratorPhase::Running
+				&& approx(snap.power.generators[0].outputKW, 2.0, 1e-9),
+				"the funding generator did not reach its rated output");
+			require(snap.power.generators[1].phase == core::StationGeneratorPhase::Starting
+				&& approx(snap.power.generators[1].startupDrawKW, 1.0, 1e-9)
+				&& approx(snap.power.generators[1].startupReceivedKJ, dt, 1e-9),
+				"the generator-funded crank did not progress on the shared pool");
+			require(snap.power.loads[0].status == core::StationTransferStatus::Full
+				&& approx(snap.power.loads[0].suppliedKW, 1.0, 1e-9),
+				"the load sharing the generator-funded pool was not served");
+		}
+		// Genuine over-allocation is still caught: a sandbox that reports
+		// a startup draw larger than the pool actually funded must fail
+		// the tick contained - the #561 baseline fix did not gut the
+		// audit. The probe wraps the bundled model and inflates only the
+		// reported startup draw past what the pool was charged.
+		{
+			auto bundled = core::bundledStationSystemsSource();
+			auto const needle = std::string("gen.lastStartupDrawKW = suppliedKW");
+			size_t occurrences = 0;
+			for (size_t pos = bundled.find(needle); pos != std::string::npos;
+				pos = bundled.find(needle, pos + 1))
+				++occurrences;
+			require(occurrences == 1,
+				"the over-allocation probe anchor is not unique in the bundled source");
+			auto const pos = bundled.find(needle);
+			bundled = bundled.substr(0, pos) + needle + " + 10.0"
+				+ bundled.substr(pos + needle.size());
+			core::setStationSystemsSourceLoader([bundled] {
+				return std::string("local factory = (function()\n") + bundled
+					+ "\nend)()\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+					"return factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+					"end";
+			});
+			core::World probe("StartupAuditOverAllocationProbe", 2, 2);
+			probe.pauseSimulation(); probe.finishBuild();
+			core::ProfileSettings sun; sun.constantLevel = 1.0;
+			auto const [ok, diagnostic] = auditConfigure(probe,
+				{ auditFuel(100.0) }, { auditSink(1000.0) },
+				{ auditGenerator("gen", 1.0, 1.0, 1.0) },
+				{ core::SolarArraySettings{"field", 1.0, sun} });
+			require(ok, ("over-allocation probe scenario rejected: " + diagnostic).c_str());
+			probe.resumeSimulation();
+			require(probe.advanceTick(),
+				"the probe failed before the crank tick it exists to test");
+			require(!probe.advanceTick(),
+				"a startup draw above the funded pool passed the allocation audit");
+			require(probe.isSimulationPaused() && !probe.getStationSystemsSnapshot().healthy,
+				"the over-allocation failure was not fail-visible and contained");
+			auto const diagnostics = probe.getStationSystemsDiagnostics();
+			require(diagnostics.size() == 1
+				&& diagnostics[0].message.find(
+					"power allocation exceeded generation plus battery output")
+					!= std::string::npos,
+				"the over-allocation audit did not name the failure");
+			core::setStationSystemsSourceLoader({});
+		}
 		// The bundled Lua sandbox receives the generator descriptors and
 		// mirrors the model: a corrupt crossing fails contained at
 		// construction through the integrated error path.
