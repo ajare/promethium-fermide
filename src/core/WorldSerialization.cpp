@@ -790,7 +790,16 @@ namespace core
 		// heat ledgers, the captured mass, the unmet service and the
 		// consumables drawn stay runtime-only, so load and Reset
 		// reconstruct them from the authored starting conditions.
-		serializer.writeUint32("version", 79);
+		// Version 80 adds the authored fuel-cell backup contract (#406):
+		// cells that generate dispatchable electrical power from two
+		// dedicated, finite reactant stores with a declared efficiency,
+		// installed rating and class-matched waste-heat sink, delivering
+		// product water to a declared treatment destination; a pre-80
+		// document carrying `fuelCells` is refused rather than silently
+		// dropped. The consumed reactants, delivered water and power,
+		// routed heat and endurance stay runtime-only, so load and Reset
+		// reconstruct them from the authored starting conditions.
+		serializer.writeUint32("version", 80);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -1251,6 +1260,31 @@ namespace core
 					serializer.writeDouble("specificEnergyKWhPerKg", capture.specificEnergyKWhPerKg);
 					serializer.writeDouble("consumablePerKg", capture.consumablePerKg);
 					serializer.writeInt32("priority", capture.priority);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.fuelCells.empty())
+			{
+				// Authored fuel-cell backup contracts only; the consumed
+				// reactants, delivered water and power, routed heat and
+				// the endurance clock are runtime state reconstructed on
+				// load (#406).
+				serializer.beginArray("fuelCells");
+				for (auto const& cell : mStationSystemsSettings.fuelCells)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", cell.id);
+					serializer.writeString("hazardClass", cell.hazardClass);
+					serializer.writeString("hydrogenStoreId", cell.hydrogenStoreId);
+					serializer.writeString("oxygenStoreId", cell.oxygenStoreId);
+					serializer.writeString("waterStoreId", cell.waterStoreId);
+					serializer.writeString("thermalClass", cell.thermalClass);
+					serializer.writeString("heatSinkId", cell.heatSinkId);
+					serializer.writeDouble("ratedOutputKW", cell.ratedOutputKW);
+					serializer.writeDouble("efficiency", cell.efficiency);
+					serializer.writeDouble("commandedOutputKW", cell.commandedOutputKW);
+					serializer.writeDouble("maxSinkTemperatureC", cell.maxSinkTemperatureC);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -2179,7 +2213,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 79)
+		if (version < 1 || version > 80)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2688,6 +2722,31 @@ namespace core
 					capture.consumablePerKg = serializer.readDouble("consumablePerKg");
 					capture.priority = serializer.readInt32("priority");
 					stationSettings.co2Captures.push_back(std::move(capture));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("fuelCells"))
+			{
+				if (version < 80) throw SerializationException(
+					"Station fuel cells require World schema 80");
+				serializer.beginArray("fuelCells");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					FuelCellSettings cell;
+					cell.id = serializer.readString("id");
+					cell.hazardClass = serializer.readString("hazardClass");
+					cell.hydrogenStoreId = serializer.readString("hydrogenStoreId");
+					cell.oxygenStoreId = serializer.readString("oxygenStoreId");
+					cell.waterStoreId = serializer.readString("waterStoreId");
+					cell.thermalClass = serializer.readString("thermalClass");
+					cell.heatSinkId = serializer.readString("heatSinkId");
+					cell.ratedOutputKW = serializer.readDouble("ratedOutputKW");
+					cell.efficiency = serializer.readDouble("efficiency");
+					cell.commandedOutputKW = serializer.readDouble("commandedOutputKW");
+					cell.maxSinkTemperatureC = serializer.readDouble("maxSinkTemperatureC");
+					stationSettings.fuelCells.push_back(std::move(cell));
 					serializer.endMap();
 				}
 				serializer.endArray();

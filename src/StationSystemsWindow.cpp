@@ -25,9 +25,9 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		world->getSimulationTick() * static_cast<double>(core::World::getFixedTimestep()),
 		static_cast<unsigned long long>(world->getSimulationTick()));
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
-	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply, rechargeable batteries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, and chillers supplying class-matched cold services. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Thermal reservoirs integrate temperature from their effective capacity under absorbed and routed equipment heat; radiators reject heat by the Stefan-Boltzmann law at the emitting temperature against the authored sink, emissivity and view factor. A load's emitted heat is booked exactly once: routed into its class-compatible reservoir or exported directly, never both. Declared temperature limits are reported, never clamped. Coolant loops hold a finite, loop-specific coolant inventory segregated by hazard class (coolant is never potable or nutrient water); the pump circulates only the coolant the loop actually holds, so an underfilled loop flows less and a dry loop flows nothing, and the freeze-protection heater thermostats the loop up to its setpoint within its capacity. Pump work and heater heat enter the loop exactly once and reach the reservoir only through the circulation-gated heat-only exchanger; the loop draw rides the same electrical pool as external loads. Chillers supply a cold service of their declared class through a class-matched coolant-loop evaporator and reservoir condenser: the delivered duty is capped by the loop's actual circulation, gated at the chilled setpoint, and refused while the sink is at or above the maximum condensing temperature; work at the configured COP plus auxiliaries rides the same electrical pool, and condenser heat equals extracted heat plus the work and auxiliaries actually supplied, booked once. Fuelled generators convert a finite energy-unit fuel inventory into bus electrical output at the declared efficiency: output is bounded by the installed rating and the ramp limit, starting only completes once the startup energy has actually been drawn from the shared pool while the class-matched sink is below its maximum sink temperature, and after output stops the configured shutdown heat and its cooling requirement persist for the decay period; waste, startup and decay heat route exactly once into the sink and the fuel ledger closes over fuel = electrical + waste. Within a tick, generators produce first, then power allocates, then coolant loops and chillers run, then compartment atmospheres cycle, crews metabolise and compartments exchange, then thermal integrates, then transfers, then conversions. Compartment atmospheres model an ideal-gas mixture in a fixed volume: absolute and partial pressures derive from the gas inventory and temperature, humidity caps at Magnus saturation with the excess condensing and releasing its latent heat into the compartment, occupancy is an authored load assignment whose oxygen draw is capped by the inventory (CO2 and metabolic heat scale with what was actually consumed), leakage is a constant total-mass rate capped by the inventory, and scheduled airlock cycles remove authored mass with an explicit recovered-versus-lost split; every gram leaving a compartment is booked as leaked, recovered or lost, compartments never mix automatically, and declared pressure and gas-quality limits are reported, never clamped. Crews are an authored population with an activity profile, never derived from World Agents: metabolism draws food and water from compound stores and oxygen from the compartment, and returns CO2, moisture and metabolic heat to the compartment and urine and organic waste to their own finite compound stores. One uniform metabolic scale per tick - the scarcest supply or tightest waste headroom - throttles every pathway together, so absent material never generates nominal waste; requested versus actual is explicit per pathway, the authored coefficients must close over mass, constituents and energy, and the consumed mass the returns do not carry away is reported as explicit retained body mass. Observation interval is a provisional display/event setting, not a separate simulation clock.");
+	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply, rechargeable batteries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, and chillers supplying class-matched cold services. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Thermal reservoirs integrate temperature from their effective capacity under absorbed and routed equipment heat; radiators reject heat by the Stefan-Boltzmann law at the emitting temperature against the authored sink, emissivity and view factor. A load's emitted heat is booked exactly once: routed into its class-compatible reservoir or exported directly, never both. Declared temperature limits are reported, never clamped. Coolant loops hold a finite, loop-specific coolant inventory segregated by hazard class (coolant is never potable or nutrient water); the pump circulates only the coolant the loop actually holds, so an underfilled loop flows less and a dry loop flows nothing, and the freeze-protection heater thermostats the loop up to its setpoint within its capacity. Pump work and heater heat enter the loop exactly once and reach the reservoir only through the circulation-gated heat-only exchanger; the loop draw rides the same electrical pool as external loads. Chillers supply a cold service of their declared class through a class-matched coolant-loop evaporator and reservoir condenser: the delivered duty is capped by the loop's actual circulation, gated at the chilled setpoint, and refused while the sink is at or above the maximum condensing temperature; work at the configured COP plus auxiliaries rides the same electrical pool, and condenser heat equals extracted heat plus the work and auxiliaries actually supplied, booked once. Fuelled generators convert a finite energy-unit fuel inventory into bus electrical output at the declared efficiency: output is bounded by the installed rating and the ramp limit, starting only completes once the startup energy has actually been drawn from the shared pool while the class-matched sink is below its maximum sink temperature, and after output stops the configured shutdown heat and its cooling requirement persist for the decay period; waste, startup and decay heat route exactly once into the sink and the fuel ledger closes over fuel = electrical + waste. Within a tick, generators and fuel-cell backup units produce first, then power allocates, then coolant loops and chillers run, then compartment atmospheres cycle, crews metabolise and compartments exchange, then thermal integrates, then transfers, then conversions. Compartment atmospheres model an ideal-gas mixture in a fixed volume: absolute and partial pressures derive from the gas inventory and temperature, humidity caps at Magnus saturation with the excess condensing and releasing its latent heat into the compartment, occupancy is an authored load assignment whose oxygen draw is capped by the inventory (CO2 and metabolic heat scale with what was actually consumed), leakage is a constant total-mass rate capped by the inventory, and scheduled airlock cycles remove authored mass with an explicit recovered-versus-lost split; every gram leaving a compartment is booked as leaked, recovered or lost, compartments never mix automatically, and declared pressure and gas-quality limits are reported, never clamped. Crews are an authored population with an activity profile, never derived from World Agents: metabolism draws food and water from compound stores and oxygen from the compartment, and returns CO2, moisture and metabolic heat to the compartment and urine and organic waste to their own finite compound stores. One uniform metabolic scale per tick - the scarcest supply or tightest waste headroom - throttles every pathway together, so absent material never generates nominal waste; requested versus actual is explicit per pathway, the authored coefficients must close over mass, constituents and energy, and the consumed mass the returns do not carry away is reported as explicit retained body mass. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s), %zu airlock cycle(s), %zu crew(s), %zu water collector(s), %zu water treatment(s), %zu electrolyzer(s) and %zu CO2 capture machine(s)",
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s), %zu airlock cycle(s), %zu crew(s), %zu water collector(s), %zu water treatment(s), %zu electrolyzer(s), %zu CO2 capture machine(s) and %zu fuel-cell backup unit(s)",
 		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
 		authored.stores.size(), authored.transfers.size(), authored.conversions.size(),
 		authored.solarArrays.size(), authored.equipmentLoads.size(), authored.batteries.size(),
@@ -35,7 +35,8 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		authored.coolantLoops.size(), authored.chillers.size(), authored.generators.size(),
 		authored.atmospheres.size(), authored.airlockCycles.size(), authored.crews.size(),
 		authored.waterCollectors.size(), authored.waterTreatments.size(),
-		authored.electrolyzers.size(), authored.co2Captures.size());
+		authored.electrolyzers.size(), authored.co2Captures.size(),
+		authored.fuelCells.size());
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
@@ -1471,6 +1472,89 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		}
 		mDraft.co2Captures.push_back(std::move(capture));
 	}
+	ImGui::SeparatorText("Draft fuel-cell backup units (#406; dispatchable power from two dedicated, finite reactant stores; output is bounded by the installed rating, the setpoint, the reactants drawable above their protected reserves and the product water store's headroom; waste heat needs a class-matched qualified sink; product water lands in the treatment destination, never drinking water directly)");
+	for (size_t index = 0; index < mDraft.fuelCells.size(); )
+	{
+		auto& cell = mDraft.fuelCells[index];
+		auto const row = std::to_string(index);
+		bool removeCell = false;
+		char cellIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(cellIdBuffer, cell.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Fuel cell " + row + " id").c_str(),
+			cellIdBuffer, sizeof(cellIdBuffer)))
+			cell.id = cellIdBuffer;
+		char cellHazardBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(cellHazardBuffer, cell.hazardClass.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Fuel cell " + row + " hazard class").c_str(),
+			cellHazardBuffer, sizeof(cellHazardBuffer)))
+			cell.hazardClass = cellHazardBuffer;
+		char cellHydrogenBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(cellHydrogenBuffer, cell.hydrogenStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Fuel cell " + row + " hydrogen reactant store").c_str(),
+			cellHydrogenBuffer, sizeof(cellHydrogenBuffer)))
+			cell.hydrogenStoreId = cellHydrogenBuffer;
+		char cellOxygenBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(cellOxygenBuffer, cell.oxygenStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Fuel cell " + row + " oxygen reactant store").c_str(),
+			cellOxygenBuffer, sizeof(cellOxygenBuffer)))
+			cell.oxygenStoreId = cellOxygenBuffer;
+		char cellWaterBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(cellWaterBuffer, cell.waterStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Fuel cell " + row + " product water store").c_str(),
+			cellWaterBuffer, sizeof(cellWaterBuffer)))
+			cell.waterStoreId = cellWaterBuffer;
+		char cellThermalBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(cellThermalBuffer, cell.thermalClass.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Fuel cell " + row + " heat sink thermal class").c_str(),
+			cellThermalBuffer, sizeof(cellThermalBuffer)))
+			cell.thermalClass = cellThermalBuffer;
+		char cellSinkBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(cellSinkBuffer, cell.heatSinkId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Fuel cell " + row + " heat sink reservoir").c_str(),
+			cellSinkBuffer, sizeof(cellSinkBuffer)))
+			cell.heatSinkId = cellSinkBuffer;
+		ImGui::InputDouble(("Fuel cell " + row + " rated output kW").c_str(),
+			&cell.ratedOutputKW, 0.0, 10.0, "%.3f");
+		ImGui::InputDouble(("Fuel cell " + row + " efficiency (0..1]").c_str(),
+			&cell.efficiency, 0.0, 0.05, "%.3f");
+		ImGui::InputDouble(("Fuel cell " + row + " commanded output kW").c_str(),
+			&cell.commandedOutputKW, 0.0, 1.0, "%.3f");
+		ImGui::InputDouble(("Fuel cell " + row + " max sink temperature C").c_str(),
+			&cell.maxSinkTemperatureC, 0.0, 5.0, "%.1f");
+		if (ImGui::Button(("Remove fuel cell " + row).c_str()))
+			removeCell = true;
+		if (removeCell)
+		{
+			mDraft.fuelCells.erase(mDraft.fuelCells.begin() + static_cast<std::ptrdiff_t>(index));
+			continue;
+		}
+		++index;
+	}
+	if (mDraft.fuelCells.size() < core::MaxStationFuelCells && ImGui::Button("Add fuel cell"))
+	{
+		core::FuelCellSettings cell;
+		cell.hazardClass = "normal";
+		cell.thermalClass = "low";
+		cell.ratedOutputKW = 10.0;
+		cell.efficiency = 0.6;
+		cell.maxSinkTemperatureC = 80.0;
+		if (!mDraft.stores.empty())
+		{
+			cell.hydrogenStoreId = mDraft.stores.front().id;
+			cell.oxygenStoreId = mDraft.stores.front().id;
+			cell.waterStoreId = mDraft.stores.front().id;
+		}
+		if (!mDraft.thermalReservoirs.empty())
+			cell.heatSinkId = mDraft.thermalReservoirs.front().id;
+		for (size_t candidate = mDraft.fuelCells.size() + 1;; ++candidate)
+		{
+			cell.id = "fuelcell" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.fuelCells.begin(), mDraft.fuelCells.end(),
+				[&](core::FuelCellSettings const& existing) { return existing.id == cell.id; });
+			if (!taken) break;
+		}
+		mDraft.fuelCells.push_back(std::move(cell));
+	}
 	bool const draftChanged = mDraft != authored;
 	ImGui::TextUnformatted(draftChanged
 		? "Draft differs from the authored start conditions."
@@ -2047,6 +2131,35 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			capture.capturedKg, capture.energySuppliedKJ, capture.consumablesUsed);
 		if (capture.disabled)
 			ImGui::Text("  zero capture capacity: no removal");
+	}
+	ImGui::SeparatorText("Fuel-cell backup (live; the reaction closes on mass - hydrogen + oxygen = water - and on energy - chemical = electrical + waste; output is capped by the rating, the drawable reactants and the water destination headroom; the endurance clock counts only reactants usable above the protected reserves)");
+	for (auto const& cell : snapshot.fuelCells)
+	{
+		char const* status = "idle";
+		switch (cell.status)
+		{
+		case core::StationTransferStatus::Full: status = "delivering at commanded output"; break;
+		case core::StationTransferStatus::Partial: status = "delivering below command (reactants or headroom limit)"; break;
+		case core::StationTransferStatus::Rejected: status = "refused (nothing delivered)"; break;
+		case core::StationTransferStatus::Idle: break;
+		}
+		ImGui::Text("%s [%s] (%s + %s -> %s): %s | commanded %.3f kW%s%s",
+			cell.id.c_str(), cell.hazardClass.c_str(),
+			cell.hydrogenStoreId.c_str(), cell.oxygenStoreId.c_str(),
+			cell.waterStoreId.c_str(), status, cell.commandedOutputKW,
+			cell.limiter.empty() ? "" : " | limited by: ",
+			cell.limiter.empty() ? "" : cell.limiter.c_str());
+		ImGui::Text("  last tick: output %.4f kW | H2 %.6f kg + O2 %.6f kg -> water %.6f kg | waste heat %.4f kW | unmet %.4f kW | cooling %s%s",
+			cell.lastOutputKW, cell.lastHydrogenKg, cell.lastOxygenKg, cell.lastWaterKg,
+			cell.lastWasteHeatKW, cell.lastUnmetOutputKW,
+			cell.coolingAvailable ? "qualified" : "NOT qualified",
+			cell.blockReason.empty() ? "" : (std::string(" - ") + cell.blockReason).c_str());
+		ImGui::Text("  cumulative: H2 %.4f kg | O2 %.4f kg | water %.4f kg | energy %.2f kJ (electrical %.2f + waste %.2f) | residual mass %.2e kg / energy %.2e kJ | endurance %.1f s",
+			cell.hydrogenConsumedKg, cell.oxygenConsumedKg, cell.waterProducedKg,
+			cell.chemicalEnergyKJ, cell.electricalKJ, cell.wasteHeatKJ,
+			cell.residualKg, cell.residualKJ, cell.enduranceSeconds);
+		if (cell.disabled)
+			ImGui::Text("  zero rated output: no backup service");
 	}
 	for (auto const& diagnostic : world->getStationSystemsDiagnostics())
 	{

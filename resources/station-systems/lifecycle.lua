@@ -36,6 +36,9 @@ local MOLAR_MASS_OXYGEN = 0.0319988
 local MOLAR_MASS_NITROGEN = 0.0280134
 local MOLAR_MASS_CARBON_DIOXIDE = 0.0440095
 local MOLAR_MASS_WATER = 0.0180153
+-- Molar mass of diatomic hydrogen gas in kg/mol (#406): a constant of
+-- the declared species, mirroring the host's StationMolarMassHydrogenKgPerMol.
+local MOLAR_MASS_HYDROGEN = 0.00201588
 -- Stoichiometric oxygen mass per kilogram of split water: M_O2 / (2 x
 -- M_H2O). Hydrogen is the declared mass-balance remainder, so the
 -- electrolysis split closes exactly under the declared molar masses.
@@ -48,6 +51,12 @@ local ELECTROLYSIS_H2_CHEMICAL_KJ_PER_KG = 119960.0
 -- Chemical energy retained per kilogram of split water, in kJ.
 local ELECTROLYSIS_CHEMICAL_KJ_PER_WATER_KG =
     (1.0 - ELECTROLYSIS_O2_KG_PER_WATER_KG) * ELECTROLYSIS_H2_CHEMICAL_KJ_PER_KG
+-- Stoichiometric oxygen mass consumed per kilogram of hydrogen burnt:
+-- M_O2 / (2 x M_H2). Product water is booked as the sum of the
+-- reactants actually consumed, so the fuel-cell mass ledger closes
+-- exactly under the declared molar masses. Mirrors the host's
+-- StationFuelCellOxygenMassPerHydrogenKg (#406).
+local FUEL_CELL_O2_KG_PER_H2_KG = MOLAR_MASS_OXYGEN / (2.0 * MOLAR_MASS_HYDROGEN)
 local GAS_CONSTANT = 8.314462618
 local LATENT_HEAT_VAPORIZATION = 2257.0
 -- Schedule boundary tolerance: an occurrence scheduled exactly on the
@@ -181,7 +190,7 @@ end
 
 return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries,
     reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews,
-    waterCollectors, waterTreatments, electrolyzers, co2Captures)
+    waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)
     assert(type(name) == "string")
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
@@ -202,6 +211,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     assert(type(waterTreatments) == "table", "water treatment descriptors missing")
     assert(type(electrolyzers) == "table", "electrolyzer descriptors missing")
     assert(type(co2Captures) == "table", "CO2 capture descriptors missing")
+    assert(type(fuelCells) == "table", "fuel cell descriptors missing")
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
@@ -216,6 +226,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         water_collectors = {}, water_treatments = {}, water_treatment_order = {},
         electrolyzers = {}, electrolyzer_order = {},
         co2_captures = {}, co2_capture_order = {},
+        fuel_cells = {},
     }
     local by_id = {}
     for index = 1, #stores do
@@ -1544,6 +1555,64 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             capturedTotal = 0, energySuppliedKJ = 0, consumablesUsedTotal = 0,
         }
     end
+    -- Fuel-cell backup contracts (#406). The cell burns its two dedicated
+    -- reactant stores for dispatchable electrical power; every axis of
+    -- finiteness is enforced at runtime, and the whole chain - both
+    -- reactant stores and the product water store - carries the cell's
+    -- own hazard class.
+    for index = 1, #fuelCells do
+        local cell = fuelCells[index]
+        assert(type(cell) == 'table', 'fuel cell descriptor must be a table')
+        assert(type(cell.id) == 'string' and #cell.id > 0, 'fuel cell needs an id')
+        assert(cell.hazardClass == 'normal' or cell.hazardClass == 'hazardous',
+            'fuel cell needs a declared hazard class (normal or hazardous)')
+        assert(type(cell.thermalClass) == 'string'
+            and (cell.thermalClass == 'low' or cell.thermalClass == 'moderate'
+                or cell.thermalClass == 'warm' or cell.thermalClass == 'generation'),
+            'fuel cell needs a declared thermal service class')
+        assert(type(cell.ratedOutputKW) == 'number'
+            and cell.ratedOutputKW == cell.ratedOutputKW
+            and cell.ratedOutputKW >= 0 and cell.ratedOutputKW < math.huge,
+            'fuel cell rated output must be finite and non-negative')
+        assert(type(cell.efficiency) == 'number'
+            and cell.efficiency == cell.efficiency
+            and cell.efficiency > 0 and cell.efficiency <= 1,
+            'fuel cell efficiency must be greater than 0 and at most 1: a cell cannot deliver more electrical energy than the reactants chemical energy')
+        assert(type(cell.commandedOutputKW) == 'number'
+            and cell.commandedOutputKW == cell.commandedOutputKW
+            and cell.commandedOutputKW >= 0 and cell.commandedOutputKW < math.huge
+            and cell.commandedOutputKW <= cell.ratedOutputKW,
+            'fuel cell commanded output must be finite and within the installed rating')
+        assert(type(cell.maxSinkTemperatureC) == 'number'
+            and cell.maxSinkTemperatureC == cell.maxSinkTemperatureC
+            and cell.maxSinkTemperatureC > -KELVIN_OFFSET,
+            'fuel cell maximum sink temperature must be finite and above absolute zero')
+        local hydrogen = declareGasStore(cell.hydrogenStore, 'hydrogen reactant',
+            cell.hazardClass, false)
+        local oxygen = declareGasStore(cell.oxygenStore, 'oxygen reactant',
+            cell.hazardClass, false)
+        local water = declareWaterStore(cell.waterStore, 'product water',
+            cell.hazardClass, false)
+        local sink = reservoir_by_id[cell.heatSink]
+        assert(sink ~= nil, 'fuel cell heat sink reservoir is unknown')
+        assert(sink.thermalClass == cell.thermalClass,
+            'fuel cell thermal class must match its heat sink reservoir class')
+        object.fuel_cells[index] = {
+            id = cell.id,
+            hazardClass = cell.hazardClass,
+            hydrogen = hydrogen, oxygen = oxygen, water = water, sink = sink,
+            ratedOutputKW = cell.ratedOutputKW,
+            efficiency = cell.efficiency,
+            commandedOutputKW = cell.commandedOutputKW,
+            maxSinkTemperatureC = cell.maxSinkTemperatureC,
+            lastOutputKW = 0, lastHydrogenKg = 0, lastOxygenKg = 0,
+            lastWaterKg = 0, lastWasteHeatKW = 0, lastUnmetOutputKW = 0,
+            coolingAvailable = false, lastLimiter = '', lastBlockReason = '',
+            hydrogenConsumedKg = 0, oxygenConsumedKg = 0, waterProducedKg = 0,
+            chemicalEnergyKJ = 0, electricalKJ = 0, wasteHeatKJ = 0,
+            enduranceSeconds = 0,
+        }
+    end
     -- Cells and capture machines compete for the same power pool and the
     -- same stores, so each runs in the declared deterministic order:
     -- priority descending, declaration index ascending.
@@ -2489,6 +2558,171 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             -- which the last of it is booked, whatever phase that tick
             -- ends in - and while the machine is running (#563).
             gen.lastCoolingRequired = gen.phase == 'running' or decayedThisTick
+        end
+        -- Fuel-cell backup (#406) runs on the supply side alongside the
+        -- generators: its electrical output joins the shared generation
+        -- pool the loads allocate against, its waste heat lands in the
+        -- class-matched sink booked exactly once, and its reactants are
+        -- drawn only from its own dedicated stores above their protected
+        -- reserves - the cell can never reach protected breathing
+        -- oxygen because it can only ever see its own oxygen store,
+        -- which is refilled only through controlled surplus transfers
+        -- that themselves preserve the supplying reserve. Output is
+        -- bounded by the installed rating, the dispatch setpoint, the
+        -- hydrogen and oxygen actually drawable, and the product water
+        -- store's remaining headroom. Cooling is required: a sink at or
+        -- above the maximum sink temperature refuses the cell whole.
+        -- Mirrors the host ledger exactly.
+        for _, cell in ipairs(self.fuel_cells) do
+            local disabled = cell.ratedOutputKW <= 0
+            local commanded = disabled and 0 or cell.commandedOutputKW
+            local o2_per_h2 = FUEL_CELL_O2_KG_PER_H2_KG
+            local elec_kj_per_kg_h2 = cell.efficiency * ELECTROLYSIS_H2_CHEMICAL_KJ_PER_KG
+            local hydrogen = cell.hydrogen
+            local oxygen = cell.oxygen
+            local water = cell.water
+            cell.lastOutputKW = 0
+            cell.lastHydrogenKg = 0
+            cell.lastOxygenKg = 0
+            cell.lastWaterKg = 0
+            cell.lastWasteHeatKW = 0
+            cell.lastUnmetOutputKW = 0
+            cell.lastLimiter = ''
+            cell.lastBlockReason = ''
+            -- The backup clock: usable reactants are the qualified
+            -- contents drawable above each store's own protected
+            -- reserve, balanced stoichiometrically, converted to the
+            -- electrical energy this cell's efficiency can extract and
+            -- divided by the reference output - the cell's actual
+            -- output this tick, or its installed rating when the cell
+            -- is not running. Protected oxygen never counts toward it.
+            local function publishEndurance()
+                local remainingH2Kg = math.max(0, toKg(hydrogen.unit,
+                    hydrogen.qualified - hydrogen.protected_reserve))
+                local remainingO2Kg = math.max(0, toKg(oxygen.unit,
+                    oxygen.qualified - oxygen.protected_reserve))
+                local usableH2Kg = math.min(remainingH2Kg, remainingO2Kg / o2_per_h2)
+                local referenceKW = cell.lastOutputKW > 0 and cell.lastOutputKW
+                    or cell.ratedOutputKW
+                cell.enduranceSeconds = referenceKW > 0
+                    and usableH2Kg * elec_kj_per_kg_h2 / referenceKW or 0
+            end
+            cell.coolingAvailable = not disabled
+                and cell.sink.temperature + 1e-9 < cell.maxSinkTemperatureC
+            if disabled then
+                publishEndurance()
+            elseif not cell.coolingAvailable then
+                cell.lastBlockReason =
+                    'cooling is not qualified: sink at or above the maximum sink temperature'
+                cell.lastUnmetOutputKW = commanded
+                publishEndurance()
+            elseif commanded <= 0 then
+                publishEndurance()
+            else
+                local h2_drawable_kg = math.max(0, toKg(hydrogen.unit,
+                    hydrogen.qualified - hydrogen.protected_reserve))
+                local o2_drawable_kg = math.max(0, toKg(oxygen.unit,
+                    oxygen.qualified - oxygen.protected_reserve))
+                local water_headroom_kg = math.max(0, toKg(water.unit,
+                    water.capacity - (water.qualified + water.unqualified)))
+                local by_h2_kw = h2_drawable_kg * elec_kj_per_kg_h2 / fixed_seconds
+                local by_o2_kw = (o2_drawable_kg / o2_per_h2)
+                    * elec_kj_per_kg_h2 / fixed_seconds
+                local by_water_kw = (water_headroom_kg / (1.0 + o2_per_h2))
+                    * elec_kj_per_kg_h2 / fixed_seconds
+                local scale = 1.0
+                local limiter = ''
+                local function constrain(capKW, reason)
+                    if capKW >= scale * commanded then return end
+                    scale = capKW / commanded
+                    limiter = reason
+                end
+                constrain(by_h2_kw, "hydrogen store '" .. hydrogen.id
+                    .. "' has nothing drawable above its protected reserve")
+                constrain(by_o2_kw, "oxygen store '" .. oxygen.id
+                    .. "' has nothing drawable above its protected reserve")
+                constrain(by_water_kw, "product water store '" .. water.id
+                    .. "' is full: the water has nowhere to go")
+                if scale < 0 then scale = 0 end
+                if scale > 1 then scale = 1 end
+                cell.lastLimiter = limiter
+                local outputKW = commanded * scale
+                if outputKW <= 1e-15 then
+                    -- Nothing can burn this tick: the cell is refused
+                    -- whole, consumes nothing and delivers nothing, and
+                    -- the whole commanded output stays visible as unmet
+                    -- service.
+                    cell.lastUnmetOutputKW = commanded
+                    cell.lastBlockReason = limiter
+                    publishEndurance()
+                else
+                    -- Derive the reaction from the capped output: the
+                    -- reaction stoichiometry fixes the oxygen against
+                    -- the hydrogen, product water is the sum of the
+                    -- reactants actually consumed, and the delivered
+                    -- output is recomputed from the hydrogen that
+                    -- actually moved - the pool never receives more
+                    -- than the reactants paid for. Each flow is
+                    -- clamped to its own drawable or headroom so a
+                    -- one-ulp roundoff can never overshoot (#556).
+                    local h2Kg = math.min(outputKW * fixed_seconds
+                        / elec_kj_per_kg_h2, h2_drawable_kg)
+                    local o2Kg = math.min(h2Kg * o2_per_h2, o2_drawable_kg)
+                    h2Kg = math.min(h2Kg, o2Kg / o2_per_h2)
+                    local waterKg = h2Kg + o2Kg
+                    local chemicalKJ = h2Kg * ELECTROLYSIS_H2_CHEMICAL_KJ_PER_KG
+                    outputKW = cell.efficiency * chemicalKJ / fixed_seconds
+                    local electricalKJ = outputKW * fixed_seconds
+                    local wasteKJ = chemicalKJ - electricalKJ
+                    local h2Units = math.min(fromKg(hydrogen.unit, h2Kg),
+                        math.max(0, hydrogen.qualified - hydrogen.protected_reserve))
+                    local h2ActualKg = toKg(hydrogen.unit, h2Units)
+                    local o2Units = math.min(fromKg(oxygen.unit, o2Kg),
+                        math.max(0, oxygen.qualified - oxygen.protected_reserve))
+                    local o2ActualKg = toKg(oxygen.unit, o2Units)
+                    local waterUnits = math.min(fromKg(water.unit, waterKg),
+                        math.max(0, water.capacity
+                            - (water.qualified + water.unqualified)))
+                    local waterActualKg = toKg(water.unit, waterUnits)
+                    hydrogen.qualified = hydrogen.qualified - h2Units
+                    self.unit_loss[hydrogen.unit] =
+                        (self.unit_loss[hydrogen.unit] or 0) + h2Units
+                    oxygen.qualified = oxygen.qualified - o2Units
+                    self.unit_loss[oxygen.unit] =
+                        (self.unit_loss[oxygen.unit] or 0) + o2Units
+                    water.qualified = water.qualified + waterUnits
+                    self.unit_loss[water.unit] =
+                        (self.unit_loss[water.unit] or 0) - waterUnits
+                    -- Energy: the reactants' chemical energy left as
+                    -- electricity into the shared pool or as waste heat
+                    -- into the sink - booked once, never a third
+                    -- destination.
+                    cell.sink.fuelCellHeat = (cell.sink.fuelCellHeat or 0)
+                        + wasteKJ / fixed_seconds
+                    generation = generation + outputKW
+                    cell.lastOutputKW = outputKW
+                    cell.lastHydrogenKg = h2ActualKg
+                    cell.lastOxygenKg = o2ActualKg
+                    cell.lastWaterKg = waterActualKg
+                    cell.lastWasteHeatKW = wasteKJ / fixed_seconds
+                    cell.lastUnmetOutputKW = math.max(0, commanded - outputKW)
+                    cell.hydrogenConsumedKg = cell.hydrogenConsumedKg + h2ActualKg
+                    cell.oxygenConsumedKg = cell.oxygenConsumedKg + o2ActualKg
+                    cell.waterProducedKg = cell.waterProducedKg + waterActualKg
+                    cell.chemicalEnergyKJ = cell.chemicalEnergyKJ + chemicalKJ
+                    cell.electricalKJ = cell.electricalKJ + electricalKJ
+                    cell.wasteHeatKJ = cell.wasteHeatKJ + wasteKJ
+                    publishEndurance()
+                end
+            end
+            assert(isFinite(cell.lastOutputKW) and isFinite(cell.lastHydrogenKg)
+                and isFinite(cell.lastOxygenKg) and isFinite(cell.lastWaterKg)
+                and isFinite(cell.lastWasteHeatKW) and isFinite(cell.lastUnmetOutputKW)
+                and isFinite(cell.hydrogenConsumedKg) and isFinite(cell.oxygenConsumedKg)
+                and isFinite(cell.waterProducedKg) and isFinite(cell.chemicalEnergyKJ)
+                and isFinite(cell.electricalKJ) and isFinite(cell.wasteHeatKJ)
+                and isFinite(cell.enduranceSeconds),
+                "fuel cell '" .. cell.id .. "' result is not finite")
         end
         -- The audit baseline is the source pool as it was originally
         -- available this tick - solar plus generator output - before the
@@ -3656,10 +3890,16 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             -- ledger term.
             local electrolysisHeat = reservoir.electrolysisHeat or 0
             reservoir.electrolysisHeat = 0
+            -- Fuel-cell waste heat enters the sink reservoir exactly once
+            -- (#406): the cell booked the chemical energy it did not
+            -- deliver as electricity here in applyPower, and the
+            -- reservoir integrates it as its own ledger term.
+            local fuelCellHeat = reservoir.fuelCellHeat or 0
+            reservoir.fuelCellHeat = 0
             local atmosphereHeat = reservoir.atmosphereHeat or 0
             reservoir.atmosphereHeat = 0
             local heatIn = reservoir.absorbedKW + routed + loopHeat + condenser
-                + generatorHeat + atmosphereHeat + electrolysisHeat
+                + generatorHeat + atmosphereHeat + electrolysisHeat + fuelCellHeat
             local rejected = 0
             local minSink = reservoir.temperature
             local maxSink = reservoir.temperature
@@ -3705,6 +3945,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             reservoir.condenserKJ = (reservoir.condenserKJ or 0) + condenser * fixed_seconds
             reservoir.generatorKJ = (reservoir.generatorKJ or 0) + generatorHeat * fixed_seconds
             reservoir.electrolysisKJ = (reservoir.electrolysisKJ or 0) + electrolysisHeat * fixed_seconds
+            reservoir.fuelCellKJ = (reservoir.fuelCellKJ or 0) + fuelCellHeat * fixed_seconds
             reservoir.atmosphereKJ = (reservoir.atmosphereKJ or 0) + atmosphereHeat * fixed_seconds
             reservoir.rejectedKJ = reservoir.rejectedKJ + rejected * fixed_seconds
             reservoir.temperature = newTemperature
@@ -3727,7 +3968,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local bound = BALANCE_TOLERANCE * math.max(1, math.abs(startingEnergy))
             local residual = startingEnergy + reservoir.absorbedKJ + reservoir.routedKJ
                 + (reservoir.loopKJ or 0) + (reservoir.condenserKJ or 0) + (reservoir.generatorKJ or 0)
-                + (reservoir.electrolysisKJ or 0)
+                + (reservoir.electrolysisKJ or 0) + (reservoir.fuelCellKJ or 0)
                 + (reservoir.atmosphereKJ or 0)
                 - reservoir.rejectedKJ
                 - reservoir.capacity * reservoir.temperature
@@ -4053,6 +4294,43 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     .. "' was supplied more energy than the process owed")
         end
     end
+    -- Fuel-cell backup ledger audit (#406): the reaction closes on mass -
+    -- hydrogen + oxygen = water - and on energy - chemical = electrical +
+    -- waste. A cell never delivers electrical energy it has not burned
+    -- reactants for, never delivers above its installed rating, and the
+    -- endurance clock never counts a negative remaining supply.
+    local function checkFuelCells(self)
+        for _, cell in ipairs(self.fuel_cells) do
+            assert(isFinite(cell.lastOutputKW) and isFinite(cell.lastHydrogenKg)
+                and isFinite(cell.lastOxygenKg) and isFinite(cell.lastWaterKg)
+                and isFinite(cell.lastWasteHeatKW) and isFinite(cell.lastUnmetOutputKW)
+                and isFinite(cell.hydrogenConsumedKg) and isFinite(cell.oxygenConsumedKg)
+                and isFinite(cell.waterProducedKg) and isFinite(cell.chemicalEnergyKJ)
+                and isFinite(cell.electricalKJ) and isFinite(cell.wasteHeatKJ)
+                and isFinite(cell.enduranceSeconds),
+                "fuel cell '" .. cell.id .. "' ledger is not finite")
+            local bound = BALANCE_TOLERANCE * math.max(1, cell.waterProducedKg)
+            local massResidual = cell.hydrogenConsumedKg + cell.oxygenConsumedKg
+                - cell.waterProducedKg
+            assert(math.abs(massResidual) <= bound,
+                "fuel cell '" .. cell.id
+                    .. "' hydrogen/oxygen/water reaction ledger does not close")
+            local energyResidual = cell.chemicalEnergyKJ - cell.electricalKJ
+                - cell.wasteHeatKJ
+            assert(math.abs(energyResidual) <= bound,
+                "fuel cell '" .. cell.id
+                    .. "' chemical/electrical/waste energy ledger does not close")
+            assert(cell.electricalKJ <= cell.chemicalEnergyKJ + bound,
+                "fuel cell '" .. cell.id
+                    .. "' delivered more electrical energy than the reactants' chemical energy")
+            assert(cell.lastOutputKW <= cell.ratedOutputKW + BALANCE_TOLERANCE,
+                "fuel cell '" .. cell.id .. "' delivered above the installed rating")
+            assert(not (cell.lastOutputKW > 1e-9 and cell.lastHydrogenKg <= 1e-12),
+                "fuel cell '" .. cell.id .. "' delivered power without consuming any hydrogen")
+            assert(cell.enduranceSeconds >= 0,
+                "fuel cell '" .. cell.id .. "' endurance clock is negative")
+        end
+    end
     function object:advance(world_tick, fixed_seconds)
         assert(world_tick > 0 and fixed_seconds > 0)
         checkFiniteLimits(self)
@@ -4076,6 +4354,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         checkAtmospheres(self)
         checkCrews(self)
         checkWater(self)
+        checkFuelCells(self)
         self.ticks = self.ticks + 1
         return self.ticks
     end
@@ -4086,5 +4365,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     checkAtmospheres(object)
     checkCrews(object)
     checkWater(object)
+    checkFuelCells(object)
     return object
 end

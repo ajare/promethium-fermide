@@ -1284,6 +1284,100 @@ stated reason); consumable exhaustion capping the total captured at what
 the media can regenerate; deterministic Reset replay; and intact
 electrolyzer descriptor crossings with contained construction refusal.
 
+### Fuel-cell backup from dedicated reactant stores (#406)
+
+A **fuel cell** generates backup electricity by recombining hydrogen
+and oxygen into water, drawing both reactants from **dedicated stores**
+so a life-support oxygen reserve is never consumed implicitly. The
+contract is authored as a hazard class, the hydrogen store, the oxygen
+store, the product-water store, a thermal service class with its
+heat-sink reservoir, a rated electrical output, a conversion
+efficiency, a commanded output and a maximum sink temperature.
+
+The reactant draw is **stoichiometric on the mass ledger**: one
+kilogram of hydrogen consumes `FuelCellSettings::oxygenMassKgPerHydrogenKg()`
+— the molar-mass ratio (2·M_O2 / 2·M_H2) ≈ 7.9367 kg of oxygen — and
+the produced water is exactly the sum of the two, so mass closes
+exactly under the declared molar masses. The electrical energy is the
+declared **efficiency** times the hydrogen's lower heating value
+(`StationMolarMassHydrogenKgPerMol`-derived, a documented constant of
+the product fuel); the remainder is **waste heat**, routed exactly once
+into the class-matched sink and booked as its own ledger term there,
+alongside generator waste heat and compartment exchange. An efficiency
+outside (0, 1] is refused at configuration: no machine may return more
+energy than the fuel carries.
+
+The cell is **bounded on every axis at once**: the commanded output,
+the rated output, the hydrogen drawable above its store's protected
+reserve, the oxygen drawable above its store's protected reserve, and
+the product-water store's remaining headroom. The smallest cap wins,
+the cell scales down rather than overshooting any of them, and the
+limiting axis names itself. Because the draw is capped by what is
+**drawable above the reserves**, a protected ECLSS oxygen reserve is
+never touched: a cell commanded against a store that sits at its
+reserve simply refuses and says so. Refilling the dedicated stores is
+the job of a **controlled surplus transfer** from the ECLSS — the
+transfer moves only oxygen above the protected reserve, and the cell
+runs on what arrived; the cell itself never reaches into a protected
+store. Product water that cannot fit **caps output rather than venting
+or deleting the excess**, and the blocked destination names itself as
+the limiter.
+
+**Cooling is gated on the sink temperature** the same way the
+electrolyzer gates: while the sink sits below the cell's maximum sink
+temperature the cell may run; at or above it the interface cannot
+accept the waste heat, so the cell is refused whole and consumes
+nothing, with the reason named. Endurance is reported as the seconds of
+rated output the current drawable reactants can sustain, so an operator
+sees how long the backup will last before committing to it.
+
+Within the tick, fuel cells run on the **supply side after the
+generators and before load allocation**: their output joins the same
+generation pool the loads draw from, and their waste heat lands in the
+sink before the reservoir integrates. They are generation, not a load —
+the single-pool audit carries their supplied service alongside every
+other source and sink, and the cell never competes with itself for its
+own electricity. The electrical output is bounded by the cell's own
+electrical rating and by the reactants actually drawn, so the pool
+never books energy the stores cannot pay for.
+
+World schema 80 persists the contract — the hazard class, the three
+store ids, the thermal service class, the heat-sink reservoir, the
+rated output, the efficiency, the commanded output and the maximum
+sink temperature. A pre-80 document carrying `fuelCells` is refused
+rather than silently dropped, and malformed values (an efficiency above
+one, a commanded output above the rating, an unknown heat sink, an
+undeclared hazard class) are refused from a file exactly as they are
+refused through the live editor. The consumed reactants, produced
+water, generated energy, waste heat, endurance and limiter state stay
+runtime-only: Load and Reset reconstruct them from the authored
+starting conditions.
+
+Fuel-cell acceptance coverage: refused configurations (an unknown
+hydrogen, oxygen, water or heat-sink store; an efficiency outside
+(0, 1]; a commanded output above the installed rating; a thermal
+class that mismatches the heat-sink reservoir; a gas store shared
+between normal and hazardous processes; an over-budget cell count)
+with no World mutation; nominal backup where the load is served from
+the cell's own output, the reactant mass ledger closes against the
+declared stoichiometry, the energy ledger closes against the LHV and
+efficiency, the waste heat lands in the sink exactly once, and
+endurance reads against the drawable reactants; reactant exhaustion
+where the cell stops at the drawable hydrogen and names the limiter;
+reserve-transfer refusal where a cell commanded against oxygen sitting
+at its protected reserve refuses whole and the ECLSS reserve is
+untouched; surplus fill where a controlled transfer above the reserve
+lets the cell run on the oxygen that arrived; a blocked water
+destination capping output rather than venting and naming itself; a
+cooling refusal where a hot sink stops the cell whole with the reason
+named and the reactants unconsumed; a protected reactant reserve that
+the cell may not draw below; the electrolysis/fuel-cell round trip
+where the mass ledger closes across both machines while the round-trip
+efficiency is the product of the two efficiencies (about 50 % for the
+tested pair) — the cycle loses energy exactly as declared and creates
+none; deterministic Reset replay; and intact Lua fuel-cell descriptor
+crossings with contained construction refusal.
+
 ## Explicit scope limit
 
 This slice implements lifecycle, authored finite store configuration,
@@ -1310,7 +1404,11 @@ under a full-power qualification rule, and oxygen production by
 stoichiometric electrolysis with a chemical-energy-floored electrical dose
 and a temperature-gated process-heat sink, plus finite CO2 capture that
 removes a compartment's carbon into a capture-store inventory with the
-unmet atmospheric service left explicit.
+unmet atmospheric service left explicit, plus fuel-cell backup
+generation from dedicated hydrogen and oxygen stores with a
+declared-efficiency energy split, a temperature-gated waste-heat sink,
+reserve-protected reactant draws and a headroom-capped product-water
+destination.
 It adds no treatment or clearance
 workflows or ejection, no dynamic coolant leak, replenishment or
 loop-to-loop transfer (a loop's charge is its authored inventory and

@@ -521,6 +521,10 @@ namespace core
 	inline constexpr double StationMolarMassNitrogenKgPerMol{0.0280134};
 	inline constexpr double StationMolarMassCarbonDioxideKgPerMol{0.0440095};
 	inline constexpr double StationMolarMassWaterKgPerMol{0.0180153};
+	// Molar mass of diatomic hydrogen gas in kg/mol (#406): a constant of
+	// the declared species, used for the fuel cell's stoichiometric
+	// oxygen demand against the hydrogen it consumes.
+	inline constexpr double StationMolarMassHydrogenKgPerMol{0.00201588};
 	// Universal gas constant in J/(mol K): the documented ideal-gas
 	// assumption behind every compartment pressure. The model treats the
 	// compartment gas as an ideal mixture at uniform temperature; no
@@ -832,6 +836,53 @@ namespace core
 		bool operator==(Co2CaptureSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationCo2Captures{8};
+	// Stoichiometric oxygen mass consumed per kilogram of hydrogen burnt:
+	// M_O2 / (2 x M_H2). Product water is booked as the sum of the
+	// reactants actually consumed, so the fuel-cell mass ledger closes
+	// exactly under the declared molar masses rather than rounding a
+	// second ratio against them (#406).
+	inline constexpr double StationFuelCellOxygenMassPerHydrogenKg{
+		StationMolarMassOxygenKgPerMol / (2.0 * StationMolarMassHydrogenKgPerMol)};
+	// A fuel-cell backup unit (#406): generates electrical power from two
+	// dedicated, finite reactant stores - hydrogen and oxygen - while the
+	// life-support inventories stay untouched. The cell is a dispatchable
+	// source like a fuelled generator: its output joins the shared
+	// generation-and-battery pool, bounded by the installed electrical
+	// rating, the dispatch setpoint, the reactants actually drawable
+	// above each store's protected reserve, and the product water store's
+	// remaining headroom - a backed-up water destination caps production
+	// rather than vanishing product mass. Electrical output is the declared
+	// efficiency times the chemical energy of the hydrogen consumed (the
+	// documented lower heating value reused from the electrolysis
+	// contract); the difference is waste heat, routed exactly once into
+	// the declared class-matched sink. Cooling is qualified only while the
+	// sink sits below the maximum sink temperature: at or above it the
+	// interface cannot accept the waste heat and the cell is refused
+	// whole. The oxygen store is refilled only through controlled surplus
+	// transfers that themselves preserve the supplying service's
+	// protected reserve: the cell never draws protected breathing oxygen
+	// implicitly, because it can only ever see its own dedicated store.
+	// Product water lands in the declared destination - the raw-water
+	// store a water treatment (#402) qualifies - so the backup's water
+	// goes through treatment rather than into drinking water directly.
+	// Hazard class segregates the whole chain: both reactant stores and
+	// the product water store must carry the cell's own class.
+	struct FuelCellSettings
+	{
+		std::string id;
+		std::string hazardClass;      // normal or hazardous; the whole chain carries it
+		std::string hydrogenStoreId;  // dedicated H2 reactant store
+		std::string oxygenStoreId;    // dedicated O2 reactant store, never the life-support reserve
+		std::string waterStoreId;     // product water destination (raw store for treatment)
+		std::string thermalClass;     // service class of the cell's heat sink
+		std::string heatSinkId;       // reservoir receiving the waste heat
+		double ratedOutputKW{0.0};   // installed electrical rating, >= 0; 0 disables
+		double efficiency{0.6};      // electrical out per chemical energy in, (0, 1]
+		double commandedOutputKW{0.0}; // dispatch setpoint, [0, rated]
+		double maxSinkTemperatureC{80.0}; // cooling qualified while the sink is below this
+		bool operator==(FuelCellSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationFuelCells{8};
 
 	struct StationSystemsSettings
 	{
@@ -856,6 +907,7 @@ namespace core
 		std::vector<WaterTreatmentSettings> waterTreatments;
 		std::vector<ElectrolyzerSettings> electrolyzers;
 		std::vector<Co2CaptureSettings> co2Captures;
+		std::vector<FuelCellSettings> fuelCells;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// Profile shape validation and deterministic evaluation: the level of
@@ -1198,6 +1250,11 @@ namespace core
 		double waterTreatmentPowerKW{0.0}; // treatment work drawn this tick (#402)
 		double electrolyzerPowerKW{0.0};   // electrolysis work drawn this tick (#404)
 		double co2CapturePowerKW{0.0};     // CO2 capture work drawn this tick (#404)
+		// Fuel-cell backup service this tick (#406): electrical output
+		// added to the same allocation pool as solar and the generators,
+		// and the waste heat those cells routed to their sinks.
+		double fuelCellOutputKW{0.0};
+		double fuelCellWasteHeatKW{0.0};
 		double generatorWasteHeatKW{0.0};
 		double generatorDecayHeatKW{0.0};
 		std::vector<StationSolarSourceSnapshot> sources;
@@ -1264,7 +1321,12 @@ namespace core
 		// the electrical dose the split did not retain as chemical energy
 		// in the products, booked once at the sink boundary.
 		double lastElectrolysisHeatKW{0.0};
-		double lastHeatInKW{0.0};       // absorbed + routed + loop + condenser + generator + electrolysis this tick
+		// Fuel-cell waste heat this tick routed into this reservoir by the
+		// backup cells that use it as their heat sink (#406): the chemical
+		// energy the conversion did not deliver as electricity, booked
+		// once at the sink boundary.
+		double lastFuelCellHeatKW{0.0};
+		double lastHeatInKW{0.0};       // absorbed + routed + loop + condenser + generator + electrolysis + fuel cell this tick
 		double lastRejectedKW{0.0};     // radiator net rejection this tick
 		double lastNetKW{0.0};          // heat in minus rejected this tick
 		bool aboveLimit{false};
@@ -1277,9 +1339,10 @@ namespace core
 		double condenserEnergyKJ{0.0}; // cumulative condenser heat rejected into the reservoir
 		double generatorEnergyKJ{0.0}; // cumulative generator waste/startup/decay heat into the reservoir
 		double electrolysisEnergyKJ{0.0}; // cumulative electrolysis process heat into the reservoir
+		double fuelCellEnergyKJ{0.0}; // cumulative fuel-cell waste heat into the reservoir
 		double atmosphereEnergyKJ{0.0}; // cumulative net compartment exchange into the reservoir
 		double rejectedEnergyKJ{0.0};
-		double residualKJ{0.0}; // starting + absorbed + routed + loop + condenser + generator + electrolysis + atmosphere - rejected - current
+		double residualKJ{0.0}; // starting + absorbed + routed + loop + condenser + generator + electrolysis + fuel cell + atmosphere - rejected - current
 		bool operator==(StationThermalReservoirSnapshot const&) const = default;
 	};
 	// One coolant loop as of the most recent tick (#396): the authored
@@ -1777,6 +1840,56 @@ namespace core
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationCo2CaptureSnapshot const&) const = default;
 	};
+	// One fuel-cell backup unit as of the most recent tick (#406): the
+	// authored contract beside the electrical output actually delivered,
+	// the reactants actually consumed, the product water actually
+	// delivered, the waste heat actually routed, and the closing mass and
+	// energy ledgers. The cell's mass ledger closes over the reaction:
+	// hydrogen + oxygen = water within the declared tolerance, and its
+	// energy ledger closes over chemical = electrical + waste: the
+	// reactants' chemical energy either left as electricity into the
+	// shared pool or as waste heat into the sink - never a third
+	// destination and never vanished. enduranceSeconds reports how long
+	// the usable reactants (drawable above each store's protected
+	// reserve, in stoichiometric balance) last at the reference output:
+	// the cell's actual output this tick, or its rated output when the
+	// cell is not running.
+	struct StationFuelCellSnapshot
+	{
+		std::string id;
+		std::string hazardClass;
+		std::string hydrogenStoreId;
+		std::string oxygenStoreId;
+		std::string waterStoreId;
+		std::string thermalClass;
+		std::string heatSinkId;
+		double ratedOutputKW{0.0};
+		double efficiency{0.0};
+		double commandedOutputKW{0.0};
+		double maxSinkTemperatureC{0.0};
+		double lastOutputKW{0.0};        // electrical output delivered to the pool this tick
+		double lastHydrogenKg{0.0};     // H2 consumed this tick
+		double lastOxygenKg{0.0};       // O2 consumed this tick
+		double lastWaterKg{0.0};        // product water delivered this tick
+		double lastWasteHeatKW{0.0};    // waste heat routed into the sink this tick
+		double lastUnmetOutputKW{0.0};  // commanded output the limits could not sustain
+		double sinkTemperatureC{0.0};
+		bool coolingAvailable{false};
+		std::string limiter; // what bound the output this tick (empty: none)
+		std::string blockReason; // why nothing ran this tick (empty: none)
+		bool disabled{false};  // zero rated output: no backup service
+		double hydrogenConsumedKg{0.0};
+		double oxygenConsumedKg{0.0};
+		double waterProducedKg{0.0};
+		double chemicalEnergyKJ{0.0}; // reactant chemical energy consumed
+		double electricalKJ{0.0};     // electrical energy delivered to the pool
+		double wasteHeatKJ{0.0};      // waste heat routed into the sink
+		double residualKg{0.0};       // hydrogen + oxygen - water
+		double residualKJ{0.0};       // chemical - electrical - waste
+		double enduranceSeconds{0.0}; // usable reactants at the reference output
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationFuelCellSnapshot const&) const = default;
+	};
 	struct StationSystemsSnapshot
 	{
 		bool enabled{false};
@@ -1831,6 +1944,10 @@ namespace core
 		// consumable draw.
 		std::vector<StationElectrolyzerSnapshot> electrolyzers;
 		std::vector<StationCo2CaptureSnapshot> co2Captures;
+		// The fuel-cell backup picture (#406): per-cell output, reactant
+	// consumption, product water, waste heat, closing ledgers and the
+		// endurance the usable reactants still buy.
+		std::vector<StationFuelCellSnapshot> fuelCells;
 		// Soonest authored arrival still pending across every delivery, for
 		// the overview's "next delivery" readout (#392).
 		bool hasNextDelivery{false};

@@ -77,6 +77,7 @@ namespace core
 			std::vector<WaterTreatmentSettings> const* waterTreatments;
 			std::vector<ElectrolyzerSettings> const* electrolyzers;
 			std::vector<Co2CaptureSettings> const* co2Captures;
+			std::vector<FuelCellSettings> const* fuelCells;
 			static void pushProfile(lua_State* state, ProfileSettings const& profile)
 			{
 				lua_createtable(state, 0, 3);
@@ -503,7 +504,28 @@ namespace core
 					lua_pushinteger(state, capture.priority); lua_setfield(state, -2, "priority");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 20, 1);
+				// Authored fuel-cell backup descriptors cross the same boundary
+				// as plain immutable values (#406); each sandbox mirrors the
+				// reactant ledger and audits its own mass and energy closure.
+				lua_createtable(state, static_cast<int>(fuelCells->size()), 0);
+				for (size_t index = 0; index < fuelCells->size(); ++index)
+				{
+					auto const& cell = (*fuelCells)[index];
+					lua_createtable(state, 0, 10);
+					lua_pushstring(state, cell.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, cell.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
+					lua_pushstring(state, cell.hydrogenStoreId.c_str()); lua_setfield(state, -2, "hydrogenStore");
+					lua_pushstring(state, cell.oxygenStoreId.c_str()); lua_setfield(state, -2, "oxygenStore");
+					lua_pushstring(state, cell.waterStoreId.c_str()); lua_setfield(state, -2, "waterStore");
+					lua_pushstring(state, cell.thermalClass.c_str()); lua_setfield(state, -2, "thermalClass");
+					lua_pushstring(state, cell.heatSinkId.c_str()); lua_setfield(state, -2, "heatSink");
+					lua_pushnumber(state, cell.ratedOutputKW); lua_setfield(state, -2, "ratedOutputKW");
+					lua_pushnumber(state, cell.efficiency); lua_setfield(state, -2, "efficiency");
+					lua_pushnumber(state, cell.commandedOutputKW); lua_setfield(state, -2, "commandedOutputKW");
+					lua_pushnumber(state, cell.maxSinkTemperatureC); lua_setfield(state, -2, "maxSinkTemperatureC");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 21, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -1784,6 +1806,9 @@ namespace core
 		if (settings.co2Captures.size() > MaxStationCo2Captures)
 			return refuse("Station CO2 capture machines are limited to "
 				+ std::to_string(MaxStationCo2Captures) + " entries");
+		if (settings.fuelCells.size() > MaxStationFuelCells)
+			return refuse("Station fuel cells are limited to "
+				+ std::to_string(MaxStationFuelCells) + " entries");
 		std::map<std::string, std::string> gasStoreClass;
 		auto declareGasStore = [&](std::string const& storeId, char const* role,
 			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
@@ -1906,6 +1931,63 @@ namespace core
 				&& !declareGasStore(capture.consumableStoreId, "consumable", where,
 					capture.hazardClass, true))
 				return false;
+		}
+		// Fuel-cell backup contracts (#406). A cell generates electrical
+		// power from two dedicated reactant stores and can only ever see
+		// its own stores, so protected breathing oxygen is never drawn
+		// implicitly: refilling the oxygen store is a controlled surplus
+		// transfer that itself preserves the supplying service's protected
+		// reserve. Efficiency is electrical out per chemical energy in and
+		// must sit above zero and at most one - a cell delivering more
+		// electrical energy than the reactants' chemical energy is a
+		// perpetual-motion claim, not a machine. The dispatch setpoint may
+		// not exceed the installed rating. All three stores in the chain
+		// are plain mass stores carrying the cell's own hazard class, and
+		// the heat sink must share the cell's thermal service class.
+		for (auto const& cell : settings.fuelCells)
+		{
+			auto const where = "Station fuel cell '" + cell.id + "'";
+			if (cell.id.empty()) return refuse("Station fuel cell id must not be empty");
+			if (cell.id.size() > MaxStationStoreIdLength)
+				return refuse("Station fuel cell id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!gasIds.insert(cell.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
+				cell.hazardClass) == StationWaterHazardClasses.end())
+				return refuse(where + " has unknown hazard class '" + cell.hazardClass
+					+ "'; declared classes are: normal, hazardous");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				cell.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + cell.thermalClass
+					+ "'; declared classes are: " + declaredThermalClasses());
+			if (!std::isfinite(cell.ratedOutputKW) || cell.ratedOutputKW < 0.0)
+				return refuse(where + " rated electrical output must be finite and non-negative");
+			if (!std::isfinite(cell.efficiency) || cell.efficiency <= 0.0 || cell.efficiency > 1.0)
+				return refuse(where + " efficiency must be greater than 0 and at most 1: a cell cannot deliver more electrical energy than the reactants' chemical energy");
+			if (!std::isfinite(cell.commandedOutputKW) || cell.commandedOutputKW < 0.0
+				|| cell.commandedOutputKW > cell.ratedOutputKW)
+				return refuse(where + " commanded output must be finite and within the installed rating");
+			if (!std::isfinite(cell.maxSinkTemperatureC)
+				|| cell.maxSinkTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum sink temperature must be finite and above absolute zero");
+			if (!declareGasStore(cell.hydrogenStoreId, "hydrogen reactant", where,
+				cell.hazardClass, false))
+				return false;
+			if (!declareGasStore(cell.oxygenStoreId, "oxygen reactant", where,
+				cell.hazardClass, false))
+				return false;
+			if (!declareWaterStore(cell.waterStoreId, "product water", where,
+				cell.hazardClass, false))
+				return false;
+			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
+				{ return reservoir.id == cell.heatSinkId; });
+			if (sink == settings.thermalReservoirs.end())
+				return refuse(where + " heat sink is unknown thermal reservoir '" + cell.heatSinkId + "'");
+			if (sink->thermalClass != cell.thermalClass)
+				return refuse(where + " thermal class '" + cell.thermalClass
+					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
+					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
 		}
 		diagnostic.clear(); return true;
 	}
@@ -2106,6 +2188,7 @@ namespace core
 			double lastCondenserHeatKW{0.0};
 			double lastGeneratorHeatKW{0.0};
 			double lastElectrolysisHeatKW{0.0}; // cell process heat routed here this tick (#404)
+			double lastFuelCellHeatKW{0.0}; // fuel-cell waste heat routed here this tick (#406)
 			double lastAtmosphereHeatKW{0.0}; // reservoir side of the compartment exchanger this tick
 			double lastHeatInKW{0.0};
 			double lastRejectedKW{0.0};
@@ -2116,6 +2199,7 @@ namespace core
 			double condenserKJ{0.0};
 			double generatorKJ{0.0};
 			double electrolysisKJ{0.0}; // cumulative electrolysis process heat into the reservoir
+			double fuelCellKJ{0.0}; // cumulative fuel-cell waste heat into the reservoir (#406)
 			double atmosphereKJ{0.0}; // cumulative net compartment exchange into the reservoir
 			double rejectedKJ{0.0};
 			bool lastAboveLimit{false};
@@ -2525,6 +2609,36 @@ namespace core
 			double consumablesUsedTotal{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
+		// A fuel-cell backup unit's authoritative ledger (#406): the cell
+		// runs on the supply side in declaration order, its output joining
+		// the shared generation pool, its reactants drawn only from its own
+		// dedicated stores above their protected reserves.
+		struct FuelCellState
+		{
+			FuelCellSettings authored;
+			size_t hydrogenStoreIndex{0};
+			size_t oxygenStoreIndex{0};
+			size_t waterStoreIndex{0};
+			size_t sinkIndex{0};
+			size_t declarationIndex{0};
+			double lastOutputKW{0.0};
+			double lastHydrogenKg{0.0};
+			double lastOxygenKg{0.0};
+			double lastWaterKg{0.0};
+			double lastWasteHeatKW{0.0};
+			double lastUnmetOutputKW{0.0};
+			bool lastCoolingAvailable{false};
+			std::string lastLimiter;
+			std::string lastBlockReason;
+			double hydrogenConsumedKg{0.0};
+			double oxygenConsumedKg{0.0};
+			double waterProducedKg{0.0};
+			double chemicalEnergyKJ{0.0};
+			double electricalKJ{0.0};
+			double wasteHeatKJ{0.0};
+			double enduranceSeconds{0.0};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
 		std::vector<TransferState> transfers;
@@ -2545,6 +2659,7 @@ namespace core
 		std::vector<WaterTreatmentState> waterTreatments;
 		std::vector<ElectrolyzerState> electrolyzers;
 		std::vector<Co2CaptureState> co2Captures;
+		std::vector<FuelCellState> fuelCells;
 		// Electrolyzers and capture machines compete for the same power pool
 		// and the same stores, so each runs in the declared deterministic
 		// order: priority descending, declaration order ascending.
@@ -2633,6 +2748,7 @@ namespace core
 			auto const committedWaterTreatments = waterTreatments;
 			auto const committedElectrolyzers = electrolyzers;
 			auto const committedCo2Captures = co2Captures;
+			auto const committedFuelCells = fuelCells;
 			auto const committedAvailableGenerationKW = lastAvailableGenerationKW;
 			auto const committedBatteryShortfallKW = lastBatteryShortfallKW;
 			if (runLedger(tick, seconds, system, violation)) return true;
@@ -2654,6 +2770,7 @@ namespace core
 			waterTreatments = committedWaterTreatments;
 			electrolyzers = committedElectrolyzers;
 			co2Captures = committedCo2Captures;
+			fuelCells = committedFuelCells;
 			lastAvailableGenerationKW = committedAvailableGenerationKW;
 			lastBatteryShortfallKW = committedBatteryShortfallKW;
 			return false;
@@ -2744,6 +2861,9 @@ namespace core
 			std::vector<StationTransferStatus> previousCo2CaptureStatus;
 			previousCo2CaptureStatus.reserve(co2Captures.size());
 			for (auto const& capture : co2Captures) previousCo2CaptureStatus.push_back(capture.status);
+			std::vector<StationTransferStatus> previousFuelCellStatus;
+			previousFuelCellStatus.reserve(fuelCells.size());
+			for (auto const& cell : fuelCells) previousFuelCellStatus.push_back(cell.status);
 			std::vector<double> qualified, unqualified;
 			qualified.reserve(stores.size());
 			unqualified.reserve(stores.size());
@@ -3216,6 +3336,188 @@ namespace core
 				else if (generator.outputKW > 1e-12)
 					generator.status = StationTransferStatus::Partial;
 				else generator.status = StationTransferStatus::Rejected;
+			}
+			// Fuel-cell backup (#406) runs on the supply side alongside the
+			// generators: its electrical output joins the shared generation
+			// pool the loads allocate against, its waste heat lands in the
+			// class-matched sink booked exactly once, and its reactants are
+			// drawn only from its own dedicated stores above their protected
+			// reserves - the cell can never reach protected breathing oxygen
+			// because it can only ever see its own oxygen store, which is
+			// refilled only through controlled surplus transfers that
+			// themselves preserve the supplying reserve. Output is bounded
+			// by the installed rating, the dispatch setpoint, the hydrogen
+			// and oxygen actually drawable, and the product water store's
+			// remaining headroom: a backed-up water destination caps
+			// production rather than vanishing product mass. Cooling is
+			// required: a sink at or above the maximum sink temperature
+			// refuses the cell whole - heat with nowhere to go is heat that
+			// cannot be made. Cells run in declaration order.
+			std::vector<double> fuelCellHeatByReservoir(reservoirs.size(), 0.0);
+			double totalFuelCellOutputKW{0.0}, totalFuelCellWasteKW{0.0};
+			for (auto& cell : fuelCells)
+			{
+				auto const disabled = cell.authored.ratedOutputKW <= 0.0;
+				auto const commanded = disabled ? 0.0 : cell.authored.commandedOutputKW;
+				auto const dtSeconds = static_cast<double>(seconds);
+				auto const o2PerH2 = StationFuelCellOxygenMassPerHydrogenKg;
+				auto const elecKJPerKgH2 = cell.authored.efficiency
+					* StationElectrolysisChemicalEnergyHydrogenKJPerKg;
+				auto const& hydrogen = stores[cell.hydrogenStoreIndex].authored;
+				auto const& oxygen = stores[cell.oxygenStoreIndex].authored;
+				auto const& water = stores[cell.waterStoreIndex].authored;
+				cell.lastOutputKW = 0.0;
+				cell.lastHydrogenKg = 0.0;
+				cell.lastOxygenKg = 0.0;
+				cell.lastWaterKg = 0.0;
+				cell.lastWasteHeatKW = 0.0;
+				cell.lastUnmetOutputKW = 0.0;
+				cell.lastLimiter.clear();
+				cell.lastBlockReason.clear();
+				// The backup clock: usable reactants are the qualified
+				// contents drawable above each store's own protected
+				// reserve, balanced stoichiometrically, converted to the
+				// electrical energy this cell's efficiency can extract and
+				// divided by the reference output - the cell's actual
+				// output this tick, or its installed rating when the cell
+				// is not running. Protected oxygen never counts toward it.
+				auto const publishEndurance = [&]()
+				{
+					auto const remainingH2Kg = std::max(0.0, massToKg(hydrogen.unit,
+						qualified[cell.hydrogenStoreIndex] - hydrogen.protectedReserve));
+					auto const remainingO2Kg = std::max(0.0, massToKg(oxygen.unit,
+						qualified[cell.oxygenStoreIndex] - oxygen.protectedReserve));
+					auto const usableH2Kg = std::min(remainingH2Kg, remainingO2Kg / o2PerH2);
+					auto const referenceKW = cell.lastOutputKW > 0.0
+						? cell.lastOutputKW : cell.authored.ratedOutputKW;
+					cell.enduranceSeconds = referenceKW > 0.0
+						? usableH2Kg * elecKJPerKgH2 / referenceKW : 0.0;
+				};
+				auto const& sink = reservoirs[cell.sinkIndex];
+				cell.lastCoolingAvailable = !disabled
+					&& sink.temperatureC + 1e-9 < cell.authored.maxSinkTemperatureC;
+				if (disabled)
+				{
+					publishEndurance();
+					cell.status = StationTransferStatus::Idle;
+					continue;
+				}
+				if (!cell.lastCoolingAvailable)
+				{
+					cell.lastBlockReason = "cooling is not qualified: sink at or above the maximum sink temperature";
+					cell.lastUnmetOutputKW = commanded;
+					publishEndurance();
+					cell.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				if (commanded <= 0.0)
+				{
+					publishEndurance();
+					cell.status = StationTransferStatus::Idle;
+					continue;
+				}
+				// Every finite axis caps the output the same way: the
+				// largest output the axis can sustain this tick. The
+				// binding one names itself; nothing is silently clamped.
+				auto const h2DrawableKg = std::max(0.0, massToKg(hydrogen.unit,
+					qualified[cell.hydrogenStoreIndex] - hydrogen.protectedReserve));
+				auto const o2DrawableKg = std::max(0.0, massToKg(oxygen.unit,
+					qualified[cell.oxygenStoreIndex] - oxygen.protectedReserve));
+				auto const waterHeadroomKg = std::max(0.0, massToKg(water.unit,
+					water.capacity - (qualified[cell.waterStoreIndex]
+						+ unqualified[cell.waterStoreIndex])));
+				auto const byH2KW = h2DrawableKg * elecKJPerKgH2 / dtSeconds;
+				auto const byO2KW = (o2DrawableKg / o2PerH2) * elecKJPerKgH2 / dtSeconds;
+				auto const byWaterKW = (waterHeadroomKg / (1.0 + o2PerH2))
+					* elecKJPerKgH2 / dtSeconds;
+				double scale = 1.0;
+				std::string limiter;
+				auto const constrain = [&](double capKW, std::string const& reason)
+				{
+					if (capKW >= scale * commanded) return;
+					scale = capKW / commanded;
+					limiter = reason;
+				};
+				constrain(byH2KW, "hydrogen store '" + hydrogen.id
+					+ "' has nothing drawable above its protected reserve");
+				constrain(byO2KW, "oxygen store '" + oxygen.id
+					+ "' has nothing drawable above its protected reserve");
+				constrain(byWaterKW, "product water store '" + water.id
+					+ "' is full: the water has nowhere to go");
+				scale = std::max(0.0, std::min(1.0, scale));
+				cell.lastLimiter = limiter;
+				auto outputKW = commanded * scale;
+				if (outputKW <= 1e-15)
+				{
+					// Nothing can burn this tick: the cell is refused whole,
+					// consumes nothing and delivers nothing, and the whole
+					// commanded output stays visible as unmet service.
+					cell.lastUnmetOutputKW = commanded;
+					cell.lastBlockReason = limiter;
+					publishEndurance();
+					cell.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				// Derive the reaction from the capped output: hydrogen is
+				// the energy-carrying reactant, oxygen rides the declared
+				// stoichiometric ratio, and product water is the sum of
+				// the reactants actually consumed, so the mass ledger
+				// closes by construction. Each flow is clamped to its own
+				// drawable or headroom so a one-ulp roundoff can never
+				// overshoot (#556), and the delivered output is recomputed
+				// from the hydrogen that actually moved - the pool never
+				// receives more than the reactants paid for.
+				auto h2Kg = std::min(outputKW * dtSeconds / elecKJPerKgH2, h2DrawableKg);
+				auto o2Kg = std::min(h2Kg * o2PerH2, o2DrawableKg);
+				h2Kg = std::min(h2Kg, o2Kg / o2PerH2);
+				auto const waterKg = h2Kg + o2Kg;
+				auto const chemicalKJ = h2Kg
+					* StationElectrolysisChemicalEnergyHydrogenKJPerKg;
+				outputKW = cell.authored.efficiency * chemicalKJ / dtSeconds;
+				auto const electricalKJ = outputKW * dtSeconds;
+				auto const wasteKJ = chemicalKJ - electricalKJ;
+				auto const h2Units = std::min(kgToMass(hydrogen.unit, h2Kg),
+					std::max(0.0, qualified[cell.hydrogenStoreIndex] - hydrogen.protectedReserve));
+				auto const h2ActualKg = massToKg(hydrogen.unit, h2Units);
+				auto const o2Units = std::min(kgToMass(oxygen.unit, o2Kg),
+					std::max(0.0, qualified[cell.oxygenStoreIndex] - oxygen.protectedReserve));
+				auto const o2ActualKg = massToKg(oxygen.unit, o2Units);
+				auto const waterUnits = std::min(kgToMass(water.unit, waterKg),
+					std::max(0.0, water.capacity
+						- (qualified[cell.waterStoreIndex] + unqualified[cell.waterStoreIndex])));
+				auto const waterActualKg = massToKg(water.unit, waterUnits);
+				qualified[cell.hydrogenStoreIndex] -= h2Units;
+				flowOut[cell.hydrogenStoreIndex] += h2Units;
+				stagedUnitLoss[hydrogen.unit] += h2Units;
+				qualified[cell.oxygenStoreIndex] -= o2Units;
+				flowOut[cell.oxygenStoreIndex] += o2Units;
+				stagedUnitLoss[oxygen.unit] += o2Units;
+				qualified[cell.waterStoreIndex] += waterUnits;
+				flowIn[cell.waterStoreIndex] += waterUnits;
+				stagedUnitLoss[water.unit] -= waterUnits;
+				// Energy: the reactants' chemical energy left as
+				// electricity into the shared pool or as waste heat into
+				// the sink - booked once, never a third destination.
+				fuelCellHeatByReservoir[cell.sinkIndex] += wasteKJ / dtSeconds;
+				availableGeneration += outputKW;
+				cell.lastOutputKW = outputKW;
+				cell.lastHydrogenKg = h2ActualKg;
+				cell.lastOxygenKg = o2ActualKg;
+				cell.lastWaterKg = waterActualKg;
+				cell.lastWasteHeatKW = wasteKJ / dtSeconds;
+				cell.lastUnmetOutputKW = std::max(0.0, commanded - outputKW);
+				cell.hydrogenConsumedKg += h2ActualKg;
+				cell.oxygenConsumedKg += o2ActualKg;
+				cell.waterProducedKg += waterActualKg;
+				cell.chemicalEnergyKJ += chemicalKJ;
+				cell.electricalKJ += electricalKJ;
+				cell.wasteHeatKJ += wasteKJ;
+				totalFuelCellOutputKW += outputKW;
+				totalFuelCellWasteKW += wasteKJ / dtSeconds;
+				publishEndurance();
+				if (outputKW + 1e-12 >= commanded)
+					cell.status = StationTransferStatus::Full;
+				else cell.status = StationTransferStatus::Partial;
 			}
 			// #554: declared material exchanges are operation dependencies.
 			// The material-feasible operating fraction is the largest fraction
@@ -4890,7 +5192,8 @@ namespace core
 					auto const heatInKW = reservoir.authored.absorbedHeatKW + routedIn[index]
 						+ loopHeatIntoReservoir[index] + condenserHeatBySink[index]
 						+ generatorHeatKW + atmosphereHeatKW
-						+ electrolysisHeatByReservoir[index];
+						+ electrolysisHeatByReservoir[index]
+						+ fuelCellHeatByReservoir[index];
 					// Net radiative rejection at the current emitting
 					// temperature: emissivity x view factor x area x sigma
 					// x (T^4 - T_sink^4). The environmental back-radiation
@@ -4946,6 +5249,7 @@ namespace core
 					reservoir.lastCondenserHeatKW = condenserHeatBySink[index];
 					reservoir.lastGeneratorHeatKW = generatorHeatKW;
 					reservoir.lastElectrolysisHeatKW = electrolysisHeatByReservoir[index];
+					reservoir.lastFuelCellHeatKW = fuelCellHeatByReservoir[index];
 					reservoir.lastAtmosphereHeatKW = atmosphereHeatKW;
 					reservoir.lastHeatInKW = heatInKW;
 					reservoir.lastRejectedKW = rejectedKW;
@@ -4956,6 +5260,7 @@ namespace core
 					reservoir.condenserKJ += condenserHeatBySink[index] * dt;
 					reservoir.generatorKJ += generatorHeatKW * dt;
 					reservoir.electrolysisKJ += electrolysisHeatByReservoir[index] * dt;
+					reservoir.fuelCellKJ += fuelCellHeatByReservoir[index] * dt;
 					reservoir.atmosphereKJ += atmosphereHeatKW * dt;
 					reservoir.rejectedKJ += rejectedKW * dt;
 					reservoir.temperatureC = newTemperatureC;
@@ -5265,6 +5570,9 @@ namespace core
 					totalSupplied += capture.lastPowerSuppliedKW;
 				for (auto const& array : solarArrays) totalGeneration += array.lastAvailableKW;
 				for (auto const& generator : generators) totalGeneration += generator.outputKW;
+				// Fuel-cell backup output is generation inside the single pool
+				// (#406): earned with reactants, never a second budget.
+				for (auto const& cell : fuelCells) totalGeneration += cell.lastOutputKW;
 				for (auto const& battery : batteries) totalDischarged += battery.lastDischargeKW;
 				auto const bound = StationBalanceTolerance * std::max(1.0, totalGeneration + totalDischarged);
 				if (totalSupplied > totalGeneration + totalDischarged + bound)
@@ -5359,6 +5667,7 @@ namespace core
 				if (!requireFinite(reservoir.lastGeneratorHeatKW, where + "generator heat")) return false;
 				if (!requireFinite(reservoir.lastAtmosphereHeatKW, where + "atmosphere exchange")) return false;
 				if (!requireFinite(reservoir.lastElectrolysisHeatKW, where + "electrolysis process heat")) return false;
+				if (!requireFinite(reservoir.lastFuelCellHeatKW, where + "fuel-cell waste heat")) return false;
 				if (!requireFinite(reservoir.lastHeatInKW, where + "total heat inflow")) return false;
 				if (!requireFinite(reservoir.lastRejectedKW, where + "radiator rejection")) return false;
 				if (!requireFinite(reservoir.lastNetKW, where + "net heat balance")) return false;
@@ -5368,6 +5677,7 @@ namespace core
 				if (!requireFinite(reservoir.condenserKJ, where + "cumulative condenser energy")) return false;
 				if (!requireFinite(reservoir.generatorKJ, where + "cumulative generator heat energy")) return false;
 				if (!requireFinite(reservoir.electrolysisKJ, where + "cumulative electrolysis process heat energy")) return false;
+				if (!requireFinite(reservoir.fuelCellKJ, where + "cumulative fuel-cell waste heat energy")) return false;
 				if (!requireFinite(reservoir.atmosphereKJ, where + "cumulative atmosphere exchange energy")) return false;
 				if (!requireFinite(reservoir.rejectedKJ, where + "cumulative rejected energy")) return false;
 				totalAbsorbedKW += reservoir.authored.absorbedHeatKW;
@@ -5904,6 +6214,48 @@ namespace core
 				if (capture.lastPowerSuppliedKW <= 1e-12 && capture.lastCapturedKg > bound)
 					return violation = where + "captured without any electrical supply", false;
 			}
+			// The fuel-cell backup audit (#406): the reaction closes on mass
+			// - hydrogen + oxygen = water - and on energy - chemical =
+			// electrical + waste. A cell never delivers electrical energy
+			// it has not burned reactants for, never delivers more than
+			// its installed rating, and never consumes reactants that
+			// vanish: every gram lands in the product water store.
+			system = "Fuel-cell backup";
+			for (auto const& cell : fuelCells)
+			{
+				auto const where = "fuel cell '" + cell.authored.id + "' ";
+				if (!requireFinite(cell.lastOutputKW, where + "last output power")) return false;
+				if (!requireFinite(cell.lastHydrogenKg, where + "last hydrogen consumed")) return false;
+				if (!requireFinite(cell.lastOxygenKg, where + "last oxygen consumed")) return false;
+				if (!requireFinite(cell.lastWaterKg, where + "last water produced")) return false;
+				if (!requireFinite(cell.lastWasteHeatKW, where + "last waste heat")) return false;
+				if (!requireFinite(cell.lastUnmetOutputKW, where + "last unmet output")) return false;
+				if (!requireFinite(cell.hydrogenConsumedKg, where + "cumulative hydrogen consumed")) return false;
+				if (!requireFinite(cell.oxygenConsumedKg, where + "cumulative oxygen consumed")) return false;
+				if (!requireFinite(cell.waterProducedKg, where + "cumulative water produced")) return false;
+				if (!requireFinite(cell.chemicalEnergyKJ, where + "cumulative chemical energy")) return false;
+				if (!requireFinite(cell.electricalKJ, where + "cumulative electrical energy")) return false;
+				if (!requireFinite(cell.wasteHeatKJ, where + "cumulative waste heat")) return false;
+				if (!requireFinite(cell.enduranceSeconds, where + "backup endurance")) return false;
+				auto const massBound = StationBalanceTolerance * std::max(1.0, cell.waterProducedKg);
+				auto const massResidual = cell.hydrogenConsumedKg + cell.oxygenConsumedKg
+					- cell.waterProducedKg;
+				if (!std::isfinite(massResidual) || std::abs(massResidual) > massBound)
+					return violation = where
+						+ "hydrogen/oxygen/water reaction ledger does not close within tolerance", false;
+				auto const energyResidual = cell.chemicalEnergyKJ
+					- cell.electricalKJ - cell.wasteHeatKJ;
+				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > massBound)
+					return violation = where
+						+ "chemical/electrical/waste energy ledger does not close within tolerance", false;
+				if (cell.electricalKJ > cell.chemicalEnergyKJ + massBound)
+					return violation = where
+						+ "delivered more electrical energy than the reactants' chemical energy", false;
+				if (cell.lastOutputKW > cell.authored.ratedOutputKW + StationBalanceTolerance)
+					return violation = where + "delivered above the installed electrical rating", false;
+				if (cell.lastOutputKW > 1e-9 && cell.lastHydrogenKg <= 1e-12)
+					return violation = where + "delivered power without consuming any hydrogen", false;
+			}
 			system = "Power allocation";
 			for (auto const& array : solarArrays)
 			{
@@ -5980,6 +6332,8 @@ namespace core
 				if (!requireFinite(totalGeneratorStartupKW, "total generator startup draw")) return false;
 				if (!requireFinite(totalGeneratorWasteKW, "total generator waste heat")) return false;
 				if (!requireFinite(totalGeneratorDecayKW, "total generator decay heat")) return false;
+				if (!requireFinite(totalFuelCellOutputKW, "total fuel-cell backup output")) return false;
+				if (!requireFinite(totalFuelCellWasteKW, "total fuel-cell backup waste heat")) return false;
 			}
 			for (size_t index = 0; index < stores.size(); ++index)
 			{
@@ -6351,6 +6705,22 @@ namespace core
 					? "CO2 capture '" + capture.authored.id + "' rejected: " + reason
 					: "CO2 capture '" + capture.authored.id + "' partial: " + reason);
 			}
+			for (size_t index = 0; index < fuelCells.size(); ++index)
+			{
+				auto const& cell = fuelCells[index];
+				if (cell.status == previousFuelCellStatus[index]) continue;
+				if (cell.status == StationTransferStatus::Full)
+				{
+					appendBoundedEvent(events, tick, "Fuel cell '" + cell.authored.id
+						+ "' delivering at commanded output");
+					continue;
+				}
+				auto const reason = !cell.lastBlockReason.empty()
+					? cell.lastBlockReason : cell.lastLimiter;
+				appendBoundedEvent(events, tick, cell.status == StationTransferStatus::Rejected
+					? "Fuel cell '" + cell.authored.id + "' rejected: " + reason
+					: "Fuel cell '" + cell.authored.id + "' partial: " + reason);
+			}
 			// Delivery arrivals are discrete scenario events rather than a
 			// continuous per-tick service, so every arrival is announced with
 			// its own quantities: the refused remainder is the account for
@@ -6616,6 +6986,20 @@ namespace core
 			[&](size_t left, size_t right)
 			{ return mImpl->co2Captures[left].authored.priority
 				> mImpl->co2Captures[right].authored.priority; });
+		// Fuel-cell backup units run on the supply side in declaration
+		// order (#406); their reactant and product stores are resolved to
+		// the same store indices the ledger mutates.
+		for (auto const& cell : settings.fuelCells)
+		{
+			Impl::FuelCellState state;
+			state.authored = cell;
+			state.hydrogenStoreIndex = storeIndex[cell.hydrogenStoreId];
+			state.oxygenStoreIndex = storeIndex[cell.oxygenStoreId];
+			state.waterStoreIndex = storeIndex[cell.waterStoreId];
+			state.sinkIndex = reservoirIndex[cell.heatSinkId];
+			state.declarationIndex = mImpl->fuelCells.size();
+			mImpl->fuelCells.push_back(std::move(state));
+		}
 		for (auto const& load : settings.equipmentLoads)
 		{
 			Impl::LoadState state;
@@ -6695,7 +7079,7 @@ namespace core
 				&settings.coolantLoops, &settings.chillers, &settings.generators,
 				&settings.atmospheres, &settings.airlockCycles, &settings.crews,
 				&settings.waterCollectors, &settings.waterTreatments,
-				&settings.electrolyzers, &settings.co2Captures};
+				&settings.electrolyzers, &settings.co2Captures, &settings.fuelCells};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -6731,7 +7115,9 @@ namespace core
 			+ (settings.electrolyzers.empty() ? std::string()
 				: ", " + std::to_string(settings.electrolyzers.size()) + " electrolyzer(s)")
 			+ (settings.co2Captures.empty() ? std::string()
-				: ", " + std::to_string(settings.co2Captures.size()) + " CO2 capture machine(s)"));
+				: ", " + std::to_string(settings.co2Captures.size()) + " CO2 capture machine(s)")
+			+ (settings.fuelCells.empty() ? std::string()
+				: ", " + std::to_string(settings.fuelCells.size()) + " fuel-cell backup unit(s)"));
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
 	bool StationSystemsRuntime::advance(uint64_t tick, float seconds)
@@ -6787,7 +7173,8 @@ namespace core
 			|| !mImpl->generators.empty() || !mImpl->atmospheres.empty()
 			|| !mImpl->airlockCycles.empty() || !mImpl->crews.empty()
 			|| !mImpl->waterCollectors.empty() || !mImpl->waterTreatments.empty()
-			|| !mImpl->electrolyzers.empty() || !mImpl->co2Captures.empty())
+			|| !mImpl->electrolyzers.empty() || !mImpl->co2Captures.empty()
+			|| !mImpl->fuelCells.empty())
 		{
 			std::string violationSystem, violation;
 			if (!mImpl->applyLedger(tick, seconds, violationSystem, violation))
@@ -7059,6 +7446,8 @@ namespace core
 			reservoirResult.lastGeneratorHeatKW = reservoir.lastGeneratorHeatKW;
 			reservoirResult.lastElectrolysisHeatKW = reservoir.lastElectrolysisHeatKW;
 			reservoirResult.electrolysisEnergyKJ = reservoir.electrolysisKJ;
+			reservoirResult.lastFuelCellHeatKW = reservoir.lastFuelCellHeatKW;
+			reservoirResult.fuelCellEnergyKJ = reservoir.fuelCellKJ;
 			reservoirResult.lastAtmosphereHeatKW = reservoir.lastAtmosphereHeatKW;
 			reservoirResult.lastHeatInKW = reservoir.lastHeatInKW;
 			reservoirResult.lastRejectedKW = reservoir.lastRejectedKW;
@@ -7079,7 +7468,7 @@ namespace core
 			reservoirResult.residualKJ = reservoirResult.startingEnergyKJ
 				+ reservoir.absorbedKJ + reservoir.routedKJ + reservoir.loopKJ
 				+ reservoir.condenserKJ + reservoir.generatorKJ + reservoir.electrolysisKJ
-				+ reservoir.atmosphereKJ
+				+ reservoir.fuelCellKJ + reservoir.atmosphereKJ
 				- reservoir.rejectedKJ - reservoirResult.currentEnergyKJ;
 			result.thermal.totalAbsorbedKW += reservoir.authored.absorbedHeatKW;
 			result.thermal.totalRoutedKW += reservoir.lastHeatRoutedKW;
@@ -7557,6 +7946,55 @@ namespace core
 			result.co2Captures.push_back(std::move(captureResult));
 		}
 		result.power.co2CapturePowerKW = totalCo2CapturePower;
+		// The fuel-cell backup snapshot reports the authored contract beside
+		// the output actually delivered, the reactants actually burned, the
+		// product water actually delivered, the waste heat actually routed
+		// and the endurance the remaining usable reactants still buy:
+		// the backup is a finite service with a visible clock, never an
+		// open-ended power setting (#406).
+		double totalFuelCellOutput = 0.0, totalFuelCellWasteHeat = 0.0;
+		for (auto const& cell : mImpl->fuelCells)
+		{
+			StationFuelCellSnapshot cellResult;
+			cellResult.id = cell.authored.id;
+			cellResult.hazardClass = cell.authored.hazardClass;
+			cellResult.hydrogenStoreId = cell.authored.hydrogenStoreId;
+			cellResult.oxygenStoreId = cell.authored.oxygenStoreId;
+			cellResult.waterStoreId = cell.authored.waterStoreId;
+			cellResult.thermalClass = cell.authored.thermalClass;
+			cellResult.heatSinkId = cell.authored.heatSinkId;
+			cellResult.ratedOutputKW = cell.authored.ratedOutputKW;
+			cellResult.efficiency = cell.authored.efficiency;
+			cellResult.commandedOutputKW = cell.authored.commandedOutputKW;
+			cellResult.maxSinkTemperatureC = cell.authored.maxSinkTemperatureC;
+			cellResult.lastOutputKW = cell.lastOutputKW;
+			cellResult.lastHydrogenKg = cell.lastHydrogenKg;
+			cellResult.lastOxygenKg = cell.lastOxygenKg;
+			cellResult.lastWaterKg = cell.lastWaterKg;
+			cellResult.lastWasteHeatKW = cell.lastWasteHeatKW;
+			cellResult.lastUnmetOutputKW = cell.lastUnmetOutputKW;
+			cellResult.sinkTemperatureC = mImpl->reservoirs[cell.sinkIndex].temperatureC;
+			cellResult.coolingAvailable = cell.lastCoolingAvailable;
+			cellResult.limiter = cell.lastLimiter;
+			cellResult.blockReason = cell.lastBlockReason;
+			cellResult.disabled = cell.authored.ratedOutputKW <= 0.0;
+			cellResult.hydrogenConsumedKg = cell.hydrogenConsumedKg;
+			cellResult.oxygenConsumedKg = cell.oxygenConsumedKg;
+			cellResult.waterProducedKg = cell.waterProducedKg;
+			cellResult.chemicalEnergyKJ = cell.chemicalEnergyKJ;
+			cellResult.electricalKJ = cell.electricalKJ;
+			cellResult.wasteHeatKJ = cell.wasteHeatKJ;
+			cellResult.residualKg = cell.hydrogenConsumedKg + cell.oxygenConsumedKg
+				- cell.waterProducedKg;
+			cellResult.residualKJ = cell.chemicalEnergyKJ - cell.electricalKJ - cell.wasteHeatKJ;
+			cellResult.enduranceSeconds = cell.enduranceSeconds;
+			cellResult.status = cell.status;
+			totalFuelCellOutput += cell.lastOutputKW;
+			totalFuelCellWasteHeat += cell.lastWasteHeatKW;
+			result.fuelCells.push_back(std::move(cellResult));
+		}
+		result.power.fuelCellOutputKW = totalFuelCellOutput;
+		result.power.fuelCellWasteHeatKW = totalFuelCellWasteHeat;
 		// The delivery snapshot reports the authored schedule beside the
 		// runtime's arrival history: what each occurrence brought in, what
 		// the destination refused, and when the next arrival is due (#392).
