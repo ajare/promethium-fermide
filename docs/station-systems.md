@@ -1,4 +1,4 @@
-# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, chilled thermal services, fuelled generators, compartment atmospheres with airlock cycles, crew metabolic returns, water recovery with qualification, and oxygen production with finite CO2 capture (#386–#391, #393–#397, #399–#402, #404)
+# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, chilled thermal services, fuelled generators, compartment atmospheres with airlock cycles, crew metabolic returns, water recovery with qualification, oxygen production with finite CO2 capture, and finite thermal buffers that ride through cooling deficits (#386–#391, #393–#402, #404)
 
 Station systems are opt-in per World and disabled in existing documents. Open
 **View > Station Systems** or use the
@@ -776,6 +776,73 @@ capacity, COP, auxiliaries, chilled setpoint and maximum condensing
 temperature) with full validation reporting, and shows the live
 duties, power draws, condenser heat, per-class totals and closing
 ledgers beside the existing views.
+
+### Finite thermal buffers (#398)
+
+Authors configure thermal buffers per World. A thermal buffer is a
+finite store of thermal energy — a phase-change mass, in effect — that
+rides a host reservoir through a cooling deficit: it absorbs the heat
+the rejection path cannot take, reaches its limit, and gives the energy
+back when rejection becomes available again. The buffer's state is
+stored energy, never temperature: its temperature is *derived* from the
+stored fraction across a declared usable band, so a partly-full store
+sits at an intermediate temperature and the direction of heat flow is
+set by comparing that derived temperature to the host's.
+
+Each buffer declares a host reservoir (whose deficit it absorbs), an
+access mode, a finite capacity (kJ) with a starting energy (kJ) within
+it, a usable temperature band (min/max °C), separate maximum charge and
+discharge rates (kW), and — for a passive buffer — a transfer
+conductance (kW/K). Validation refuses an unknown host reservoir, an
+undeclared access mode, a circulation buffer with no declared loop or a
+loop coupled to a different reservoir, a non-positive capacity, a
+starting energy outside `[0, capacity]`, an inverted band, a buffer that
+can neither charge nor discharge, and a passive buffer without a
+positive transfer conductance.
+
+Charging and discharge are thermally honest and ride the *running*
+imbalance left after rejection. When the host has a deficit
+(`heat_in − rejected > 0`) and is hotter than the buffer, heat flows
+into the store, capped by the remaining deficit, the configured charge
+rate, the store's headroom, and — for a passive buffer — the conductance
+across the temperature difference. When the host has a rejection surplus
+(`heat_in − rejected < 0`) and the buffer is hotter, stored heat returns
+into the host, capped by the remaining surplus, the discharge rate, the
+stored energy and the conductance. Because discharge is bounded by the
+surplus, recovery consumes real rejection capacity: the store can only
+reset as fast as the rejection path can carry the heat away, never
+instantly. Buffers on one host run in declaration order and the running
+balance carries through them, so two buffers never absorb the same
+deficit twice. A `circulation` buffer is a powered-only store reachable
+only while its gating coolant loop is actually circulating, so a blackout
+cannot absorb through it for free; a `passive` buffer is reachable at any
+time through its declared conductance. The store is clamped to
+`[0, capacity]` so roundoff never accumulates past the finite bounds.
+
+The snapshot publishes per-buffer stored energy, available capacity and
+fill fraction, the derived buffer temperature against its band, the
+configured rate limits, whether access was open this tick, the last
+charge and discharge powers, the full (no headroom left to absorb) and
+depleted (nothing left to return) flags, the limiter that capped or
+blocked the exchange, and the closing storage ledger
+`starting + charged − discharged − stored ≈ 0`. The host reservoir
+reports the heat its buffers absorbed and returned, and the station
+thermal rollup carries the buffer totals. The ledger is audited every
+tick: a residual beyond tolerance, a negative or over-capacity store, or
+a charge/discharge above the configured rate is a containment violation
+that rolls the tick back.
+
+World schema 81 persists the authored buffer contracts (units: kJ, °C,
+kW, kW/K); a pre-81 document carrying `thermalBuffers` is refused
+rather than silently dropped. Stored energy, fill, derived temperature and
+the charge/discharge ledger stay runtime-only: Load and Reset reconstruct
+them from the authored starting conditions. The separate Station Systems
+window drafts buffers (host reservoir, access mode, circulation loop,
+capacity, starting energy, usable band, charge/discharge rates and
+transfer conductance) with full validation reporting, and shows the live
+stored energy, derived temperature, charge/discharge, access state,
+full/depleted flags, limiter and closing ledger beside the existing
+views.
 
 ### Fuelled generators (#399)
 

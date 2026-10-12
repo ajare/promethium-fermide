@@ -85,8 +85,8 @@ foreach(check lifecycle batching eventBound persistence stores transfers compoun
         batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
-        deliveries thermal coolant chillers generators atmospheres crews water gas failures fileRoundTrip writeFailure legacyFiles structuralReplay
-        compoundFiles powerFiles batteryFiles deliveryFiles thermalFiles coolantFiles chillerFiles generatorFiles atmosphereFiles crewFiles waterFiles gasFiles)
+        deliveries thermal coolant chillers generators buffers atmospheres crews water gas failures fileRoundTrip writeFailure legacyFiles structuralReplay
+        compoundFiles powerFiles batteryFiles deliveryFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles atmosphereFiles crewFiles waterFiles gasFiles)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()

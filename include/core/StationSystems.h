@@ -884,6 +884,51 @@ namespace core
 	};
 	inline constexpr size_t MaxStationFuelCells{8};
 
+	// A finite thermal buffer (#398): a bounded store of thermal energy
+	// that absorbs the cooling deficit its host reservoir cannot reject,
+	// rides through the outage, and returns the stored heat only when
+	// real rejection capacity becomes available. The buffer's state is
+	// stored energy, never temperature: capacity is the total energy
+	// storable across the declared usable temperature band, and the
+	// buffer's temperature is derived from the stored fraction across
+	// that band (a sensible-storage model; a narrow band with a large
+	// capacity approximates an isothermal phase-change material).
+	// Stored energy is distinct from the host reservoir's instantaneous
+	// temperature: filling the buffer never means the reservoir got
+	// hotter, and the reservoir's reading says nothing about the store.
+	// Access is configured, never free: a "circulation" buffer is a
+	// powered-only store reachable only while its declared coolant loop
+	// (coupled to the same host reservoir) is actually circulating, so
+	// a blackout cannot absorb through it for free; a "passive" buffer
+	// is reachable at any time through its declared transfer
+	// conductance, rate-limited by the temperature difference across
+	// the interface. Charging is capped by the host's instantaneous
+	// cooling deficit, so the buffer absorbs what the rejection path
+	// cannot take and never overcools the reservoir; discharge is
+	// capped by the rejection surplus, so recovery consumes real
+	// rejection capacity and cannot reset storage instantly. Both
+	// directions are thermally honest: heat only moves from the hotter
+	// side to the colder one, and the buffer's stored energy never
+	// leaves its finite bounds.
+	struct ThermalBufferSettings
+	{
+		std::string id;
+		std::string reservoirId;             // host reservoir whose deficit it absorbs
+		std::string accessMode;             // "circulation" (powered-only) or "passive"
+		std::string circulationLoopId;      // loop gating access in circulation mode
+		double capacityKJ{0.0};           // storable energy across the usable band, > 0
+		double startingEnergyKJ{0.0};     // initial stored energy, [0, capacity]
+		double minUsableTemperatureC{0.0}; // lower end of the usable band
+		double maxUsableTemperatureC{0.0}; // upper end of the usable band
+		double maxChargeKW{0.0};          // charge rate limit, >= 0
+		double maxDischargeKW{0.0};       // discharge rate limit, >= 0
+		double transferConductanceKWPerK{0.0}; // passive transfer limit, > 0 in passive mode
+		bool operator==(ThermalBufferSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationThermalBuffers{8};
+	inline constexpr std::array<char const*, 2> StationThermalBufferAccessModes{
+		"circulation", "passive"};
+
 	struct StationSystemsSettings
 	{
 		bool enabled{false};
@@ -908,6 +953,7 @@ namespace core
 		std::vector<ElectrolyzerSettings> electrolyzers;
 		std::vector<Co2CaptureSettings> co2Captures;
 		std::vector<FuelCellSettings> fuelCells;
+		std::vector<ThermalBufferSettings> thermalBuffers;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// Profile shape validation and deterministic evaluation: the level of
@@ -1326,6 +1372,15 @@ namespace core
 		// energy the conversion did not deliver as electricity, booked
 		// once at the sink boundary.
 		double lastFuelCellHeatKW{0.0};
+		// Buffer exchange this tick (#398): heat the thermal buffers
+		// hosted on this reservoir absorbed out of it (charge) and
+		// returned to it (discharge). Both are booked once at the
+		// reservoir boundary so the ledger closes over exactly the
+		// terms that moved: the charge leaves the reservoir into the
+		// buffer's finite store, the discharge re-enters it and must
+		// be carried by the rejection path.
+		double lastBufferChargeKW{0.0};
+		double lastBufferDischargeKW{0.0};
 		double lastHeatInKW{0.0};       // absorbed + routed + loop + condenser + generator + electrolysis + fuel cell this tick
 		double lastRejectedKW{0.0};     // radiator net rejection this tick
 		double lastNetKW{0.0};          // heat in minus rejected this tick
@@ -1340,9 +1395,11 @@ namespace core
 		double generatorEnergyKJ{0.0}; // cumulative generator waste/startup/decay heat into the reservoir
 		double electrolysisEnergyKJ{0.0}; // cumulative electrolysis process heat into the reservoir
 		double fuelCellEnergyKJ{0.0}; // cumulative fuel-cell waste heat into the reservoir
+		double bufferChargeEnergyKJ{0.0}; // cumulative heat absorbed out of the reservoir by buffers
+		double bufferDischargeEnergyKJ{0.0}; // cumulative heat returned into the reservoir by buffers
 		double atmosphereEnergyKJ{0.0}; // cumulative net compartment exchange into the reservoir
 		double rejectedEnergyKJ{0.0};
-		double residualKJ{0.0}; // starting + absorbed + routed + loop + condenser + generator + electrolysis + fuel cell + atmosphere - rejected - current
+		double residualKJ{0.0}; // starting + absorbed + routed + loop + condenser + generator + electrolysis + fuel cell + atmosphere + buffer discharge - buffer charge - rejected - current
 		bool operator==(StationThermalReservoirSnapshot const&) const = default;
 	};
 	// One coolant loop as of the most recent tick (#396): the authored
@@ -1454,6 +1511,46 @@ namespace core
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationChillerSnapshot const&) const = default;
 	};
+	// One thermal buffer as of the most recent tick (#398): the authored
+	// contract beside the finite stored energy, the derived buffer
+	// temperature across the usable band, the access gate state, the
+	// charge/discharge actually moved this tick, the exhaustion flags
+	// and the closing storage ledger. The buffer's ledger closes over
+	// starting + charged - discharged = stored within the declared
+	// tolerance: energy enters or leaves the store only through the
+	// booked exchange, never a silent reset. The available capacity is
+	// the headroom the store can still take; full means the store has
+	// no headroom left to absorb (exhausted for ride-through),
+	// depleted means it has nothing left to return.
+	struct StationThermalBufferSnapshot
+	{
+		std::string id;
+		std::string reservoirId;
+		std::string accessMode;
+		std::string circulationLoopId;
+		double capacityKJ{0.0};
+		double storedEnergyKJ{0.0};
+		double availableCapacityKJ{0.0};   // capacity - stored
+		double fillFraction{0.0};          // stored / capacity
+		double minUsableTemperatureC{0.0};
+		double maxUsableTemperatureC{0.0};
+		double bufferTemperatureC{0.0};    // derived from stored energy across the band
+		double maxChargeKW{0.0};
+		double maxDischargeKW{0.0};
+		double transferConductanceKWPerK{0.0};
+		bool accessible{false};            // access gate open this tick
+		double lastChargeKW{0.0};          // heat absorbed out of the host this tick
+		double lastDischargeKW{0.0};       // heat returned into the host this tick
+		bool full{false};                  // no headroom left to absorb
+		bool depleted{false};              // nothing left to return
+		std::string lastLimiter;           // what capped or blocked the exchange
+		double startingEnergyKJ{0.0};
+		double chargedEnergyKJ{0.0};
+		double dischargedEnergyKJ{0.0};
+		double residualKJ{0.0};            // starting + charged - discharged - stored
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationThermalBufferSnapshot const&) const = default;
+	};
 	// The cold-service rollup for one thermal service class (#397):
 	// what the chillers of this class were asked to provide, what they
 	// delivered, the work and auxiliaries they drew, the condenser heat
@@ -1490,6 +1587,14 @@ namespace core
 		double totalCoolingProvidedKW{0.0};
 		double totalCoolingUnmetKW{0.0};
 		double totalCondenserHeatKW{0.0};
+		// Thermal buffer totals (#398): the finite stored energy and
+		// available capacity across every buffer, and the charge and
+		// discharge actually moved this tick. The per-buffer detail
+		// lives in the snapshot's thermalBuffers.
+		double totalBufferStoredKJ{0.0};
+		double totalBufferAvailableCapacityKJ{0.0};
+		double totalBufferChargeKW{0.0};
+		double totalBufferDischargeKW{0.0};
 		bool operator==(StationThermalSnapshot const&) const = default;
 	};
 
@@ -1919,6 +2024,12 @@ namespace core
 		// energy ledger, with the per-class rollup in the thermal
 		// snapshot's coolingByClass.
 		std::vector<StationChillerSnapshot> chillers;
+		// The thermal buffer picture (#398): per-buffer finite stored
+		// energy distinct from temperature, configured access gating,
+		// deficit-driven charging and surplus-driven discharge, with
+		// the closing storage ledger and the totals rolled up in the
+		// thermal snapshot.
+		std::vector<StationThermalBufferSnapshot> thermalBuffers;
 		// The atmosphere picture (#400): per-compartment initial versus
 		// current gas inventory, absolute and partial pressures, humidity,
 		// the last tick's occupancy/leak/airlock flows and the closing

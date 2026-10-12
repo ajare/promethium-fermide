@@ -3,7 +3,8 @@
 -- generation, External equipment load supply, rechargeable battery banks,
 -- scheduled resupply deliveries, thermal reservoirs with radiator
 -- rejection, coolant loops with freeze-protection heating, chillers
--- supplying class-matched cold services, fuelled generators with
+-- supplying class-matched cold services, finite thermal buffers that
+-- ride through cooling deficits, fuelled generators with
 -- startup, ramp, fuel-depletion and shutdown-heat behaviour, compartment
 -- atmospheres with occupancy draw, vapour constraints, leakage and
 -- scheduled airlock losses, and scheduled airlock cycles. Every
@@ -190,7 +191,7 @@ end
 
 return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries,
     reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews,
-    waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)
+    waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)
     assert(type(name) == "string")
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
@@ -212,6 +213,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     assert(type(electrolyzers) == "table", "electrolyzer descriptors missing")
     assert(type(co2Captures) == "table", "CO2 capture descriptors missing")
     assert(type(fuelCells) == "table", "fuel cell descriptors missing")
+    assert(type(thermalBuffers) == "table", "thermal buffer descriptors missing")
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
@@ -226,7 +228,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         water_collectors = {}, water_treatments = {}, water_treatment_order = {},
         electrolyzers = {}, electrolyzer_order = {},
         co2_captures = {}, co2_capture_order = {},
-        fuel_cells = {},
+        fuel_cells = {}, thermal_buffers = {},
     }
     local by_id = {}
     for index = 1, #stores do
@@ -488,6 +490,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             absorbedKW = reservoir.absorbedHeatKW,
             temperature = reservoir.startingTemperatureC,
             radiators = {},
+            buffers = {},
             lastRouted = 0,
             lastLoopHeat = 0,
             lastHeatIn = 0,
@@ -701,6 +704,103 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             workKJ = 0,
             condenserKJ = 0,
         }
+    end
+    -- Thermal buffers (#398): a finite store of thermal energy that
+    -- absorbs the cooling deficit its host reservoir cannot reject and
+    -- returns the stored heat only when real rejection capacity becomes
+    -- available. The buffer's state is stored energy, never temperature:
+    -- capacity is the energy storable across the declared usable band,
+    -- and the buffer's temperature is derived from the stored fraction
+    -- across that band (a sensible-storage model; a narrow band with a
+    -- large capacity approximates an isothermal phase-change material).
+    -- Stored energy is distinct from the host's instantaneous
+    -- temperature. Access is configured, never free: a 'circulation'
+    -- buffer is a powered-only store reachable only while its declared
+    -- coolant loop - coupled to the same host reservoir - is actually
+    -- circulating, so a blackout cannot absorb through it for free; a
+    -- 'passive' buffer is reachable at any time through its declared
+    -- transfer conductance, rate-limited by the temperature difference
+    -- across the interface. Charging is capped by the host's
+    -- instantaneous cooling deficit so the buffer absorbs what the
+    -- rejection path cannot take and never overcools the reservoir;
+    -- discharge is capped by the rejection surplus so recovery consumes
+    -- real rejection capacity and cannot reset the store instantly.
+    -- Both directions are thermally honest: heat only moves from the
+    -- hotter side to the colder one.
+    for index = 1, #thermalBuffers do
+        local buffer = thermalBuffers[index]
+        assert(type(buffer) == 'table', 'thermal buffer descriptor must be a table')
+        assert(type(buffer.id) == 'string' and #buffer.id > 0, 'thermal buffer needs an id')
+        local host = reservoir_by_id[buffer.reservoir]
+        assert(host ~= nil, 'thermal buffer host reservoir is unknown')
+        assert(buffer.accessMode == 'circulation' or buffer.accessMode == 'passive',
+            'thermal buffer needs a declared access mode (circulation or passive)')
+        local gateLoop = nil
+        if buffer.accessMode == 'circulation' then
+            gateLoop = coolant_loop_by_id[buffer.circulationLoop]
+            assert(gateLoop ~= nil,
+                'circulation-access thermal buffer needs a declared circulation loop')
+            assert(gateLoop.reservoir == host,
+                'thermal buffer circulation loop must be coupled to the same host reservoir')
+        else
+            assert(type(buffer.transferConductanceKWPerK) == 'number'
+                and buffer.transferConductanceKWPerK == buffer.transferConductanceKWPerK
+                and buffer.transferConductanceKWPerK > 0
+                and buffer.transferConductanceKWPerK < math.huge,
+                'passive thermal buffer transfer conductance must be finite and positive')
+        end
+        assert(type(buffer.capacityKJ) == 'number' and buffer.capacityKJ == buffer.capacityKJ
+            and buffer.capacityKJ > 0 and buffer.capacityKJ < math.huge,
+            'thermal buffer capacity must be finite and positive')
+        assert(type(buffer.startingEnergyKJ) == 'number'
+            and buffer.startingEnergyKJ == buffer.startingEnergyKJ
+            and buffer.startingEnergyKJ >= 0
+            and buffer.startingEnergyKJ <= buffer.capacityKJ,
+            'thermal buffer starting energy must be finite and within capacity')
+        assert(type(buffer.minUsableTemperatureC) == 'number'
+            and buffer.minUsableTemperatureC == buffer.minUsableTemperatureC
+            and buffer.minUsableTemperatureC < math.huge
+            and buffer.minUsableTemperatureC > -KELVIN_OFFSET,
+            'thermal buffer minimum usable temperature must be finite and above absolute zero')
+        assert(type(buffer.maxUsableTemperatureC) == 'number'
+            and buffer.maxUsableTemperatureC == buffer.maxUsableTemperatureC
+            and buffer.maxUsableTemperatureC < math.huge
+            and buffer.maxUsableTemperatureC > -KELVIN_OFFSET,
+            'thermal buffer maximum usable temperature must be finite and above absolute zero')
+        assert(buffer.minUsableTemperatureC < buffer.maxUsableTemperatureC,
+            'thermal buffer usable temperature band needs the minimum below the maximum')
+        assert(type(buffer.maxChargeKW) == 'number' and buffer.maxChargeKW == buffer.maxChargeKW
+            and buffer.maxChargeKW >= 0 and buffer.maxChargeKW < math.huge,
+            'thermal buffer charge rate must be finite and non-negative')
+        assert(type(buffer.maxDischargeKW) == 'number'
+            and buffer.maxDischargeKW == buffer.maxDischargeKW
+            and buffer.maxDischargeKW >= 0 and buffer.maxDischargeKW < math.huge,
+            'thermal buffer discharge rate must be finite and non-negative')
+        assert(buffer.maxChargeKW > 0 or buffer.maxDischargeKW > 0,
+            'a thermal buffer that can neither charge nor discharge is not a buffer')
+        object.thermal_buffers[index] = {
+            id = buffer.id,
+            reservoir = host,
+            accessMode = buffer.accessMode,
+            gateLoop = gateLoop,
+            capacity = buffer.capacityKJ,
+            stored = buffer.startingEnergyKJ,
+            startingEnergy = buffer.startingEnergyKJ,
+            minUsable = buffer.minUsableTemperatureC,
+            maxUsable = buffer.maxUsableTemperatureC,
+            maxCharge = buffer.maxChargeKW,
+            maxDischarge = buffer.maxDischargeKW,
+            conductance = buffer.transferConductanceKWPerK or 0,
+            accessible = false,
+            lastCharge = 0,
+            lastDischarge = 0,
+            full = buffer.startingEnergyKJ >= buffer.capacityKJ,
+            depleted = buffer.startingEnergyKJ <= 0,
+            lastLimiter = '',
+            chargedKJ = 0,
+            dischargedKJ = 0,
+        }
+        host.buffers[#host.buffers + 1] = object.thermal_buffers[index]
     end
     -- Generators (#399): a fuelled electrical source that converts finite
     -- stored fuel energy into bus electrical output at the declared
@@ -3932,9 +4032,105 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 reservoir.radiators[r].lastRejected = raw[r] * scale
             end
             rejected = rejected * scale
-            local net = heatIn - rejected
+            -- Phase-change buffers ride through the deficit (#398): the
+            -- running imbalance after rejection is what the buffers
+            -- hosted on this reservoir see. A charge moves heat from the
+            -- reservoir into the buffer's finite store, capped by the
+            -- remaining deficit, the configured rate limit, the store's
+            -- headroom and the thermodynamic direction (the reservoir
+            -- must be hotter than the buffer). A discharge returns
+            -- stored heat into the reservoir, capped by the remaining
+            -- rejection surplus, the rate limit, the stored energy and
+            -- the direction (the buffer must be hotter). Recovery thus
+            -- consumes real rejection capacity: the store can only
+            -- reset as fast as the rejection path can carry the heat
+            -- away, never instantly. A circulation-access buffer is
+            -- unreachable while its gating loop is not circulating, so
+            -- a blackout cannot absorb through a powered-only store for
+            -- free. Buffers run in declaration order and the running
+            -- balance carries through them, so two buffers on one host
+            -- never absorb the same deficit twice.
+            local remaining = heatIn - rejected
+            local bufferCharge = 0
+            local bufferDischarge = 0
+            for b = 1, #reservoir.buffers do
+                local buffer = reservoir.buffers[b]
+                local band = buffer.maxUsable - buffer.minUsable
+                local bufferTemperature = buffer.minUsable
+                    + buffer.stored * band / buffer.capacity
+                local charge = 0
+                local discharge = 0
+                local limiter = ''
+                local accessible = buffer.accessMode ~= 'circulation'
+                    or (buffer.gateLoop ~= nil and buffer.gateLoop.circulating)
+                if not accessible then
+                    limiter = 'circulation lost: the powered buffer is unreachable'
+                elseif remaining > 0 then
+                    if reservoir.temperature > bufferTemperature then
+                        local limit = buffer.maxCharge
+                        if buffer.accessMode == 'passive' then
+                            limit = math.min(limit, buffer.conductance
+                                * (reservoir.temperature - bufferTemperature))
+                        end
+                        local headroom = (buffer.capacity - buffer.stored) / fixed_seconds
+                        charge = math.min(limit, remaining, headroom)
+                        if charge <= 0 then
+                            limiter = 'buffer is full: no headroom left to absorb'
+                        elseif charge < remaining then
+                            if headroom <= charge + 1e-12 then
+                                limiter = 'buffer headroom: the store is filling up'
+                            else
+                                limiter = 'buffer charge rate limit'
+                            end
+                        end
+                    else
+                        limiter = 'buffer is not colder than the reservoir: no charge direction'
+                    end
+                elseif remaining < 0 then
+                    if bufferTemperature > reservoir.temperature then
+                        local limit = buffer.maxDischarge
+                        if buffer.accessMode == 'passive' then
+                            limit = math.min(limit, buffer.conductance
+                                * (bufferTemperature - reservoir.temperature))
+                        end
+                        local drawable = buffer.stored / fixed_seconds
+                        discharge = math.min(limit, -remaining, drawable)
+                        if discharge <= 0 then
+                            limiter = 'buffer is depleted: nothing left to return'
+                        elseif discharge < -remaining then
+                            if drawable <= discharge + 1e-12 then
+                                limiter = 'buffer store: nearly nothing left to return'
+                            else
+                                limiter = 'buffer discharge rate limit'
+                            end
+                        end
+                    else
+                        limiter = 'buffer is not hotter than the reservoir: no discharge direction'
+                    end
+                end
+                buffer.stored = buffer.stored + (charge - discharge) * fixed_seconds
+                -- Roundoff never leaves the finite bounds: the store is
+                -- clamped to [0, capacity] so a one-ulp overshoot
+                -- cannot accumulate (#556 discipline).
+                if buffer.stored < 0 then buffer.stored = 0 end
+                if buffer.stored > buffer.capacity then buffer.stored = buffer.capacity end
+                buffer.chargedKJ = buffer.chargedKJ + charge * fixed_seconds
+                buffer.dischargedKJ = buffer.dischargedKJ + discharge * fixed_seconds
+                buffer.accessible = accessible
+                buffer.lastCharge = charge
+                buffer.lastDischarge = discharge
+                buffer.lastLimiter = limiter
+                buffer.full = buffer.stored >= buffer.capacity - 1e-9
+                buffer.depleted = buffer.stored <= 1e-9
+                remaining = remaining - charge + discharge
+                bufferCharge = bufferCharge + charge
+                bufferDischarge = bufferDischarge + discharge
+            end
+            local net = remaining
             local newTemperature = reservoir.temperature + net * fixed_seconds / capacity
             reservoir.lastRouted = routed
+            reservoir.lastBufferCharge = bufferCharge
+            reservoir.lastBufferDischarge = bufferDischarge
             reservoir.lastLoopHeat = loopHeat
             reservoir.lastHeatIn = heatIn
             reservoir.lastRejected = rejected
@@ -3947,6 +4143,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             reservoir.electrolysisKJ = (reservoir.electrolysisKJ or 0) + electrolysisHeat * fixed_seconds
             reservoir.fuelCellKJ = (reservoir.fuelCellKJ or 0) + fuelCellHeat * fixed_seconds
             reservoir.atmosphereKJ = (reservoir.atmosphereKJ or 0) + atmosphereHeat * fixed_seconds
+            reservoir.bufferChargeKJ = (reservoir.bufferChargeKJ or 0)
+                + bufferCharge * fixed_seconds
+            reservoir.bufferDischargeKJ = (reservoir.bufferDischargeKJ or 0)
+                + bufferDischarge * fixed_seconds
             reservoir.rejectedKJ = reservoir.rejectedKJ + rejected * fixed_seconds
             reservoir.temperature = newTemperature
             -- Declared service limits are reported as crossings, never
@@ -3970,6 +4170,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 + (reservoir.loopKJ or 0) + (reservoir.condenserKJ or 0) + (reservoir.generatorKJ or 0)
                 + (reservoir.electrolysisKJ or 0) + (reservoir.fuelCellKJ or 0)
                 + (reservoir.atmosphereKJ or 0)
+                + (reservoir.bufferDischargeKJ or 0) - (reservoir.bufferChargeKJ or 0)
                 - reservoir.rejectedKJ
                 - reservoir.capacity * reservoir.temperature
             assert(residual == residual and math.abs(residual) <= bound,
@@ -3988,6 +4189,36 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         for _, radiator in ipairs(self.radiators) do
             assert(isFinite(radiator.lastRejected),
                 "radiator '" .. radiator.id .. "' rejected power is not finite")
+        end
+        -- Thermal buffer storage ledger (#398): the store's starting
+        -- energy plus what it charged minus what it discharged must
+        -- equal the stored energy within the declared tolerance: energy
+        -- enters or leaves the store only through the booked exchange,
+        -- never a silent reset or an unexplained drain. The store never
+        -- leaves its finite bounds, and a charge or discharge beyond
+        -- the configured limits is a conservation violation, never a
+        -- silent rounding.
+        for _, buffer in ipairs(self.thermal_buffers) do
+            local bufferBound = BALANCE_TOLERANCE * math.max(1,
+                math.max(math.abs(buffer.startingEnergy),
+                    math.max(math.abs(buffer.chargedKJ), math.abs(buffer.dischargedKJ))))
+            local residual = buffer.startingEnergy + buffer.chargedKJ
+                - buffer.dischargedKJ - buffer.stored
+            assert(residual == residual and math.abs(residual) <= bufferBound,
+                "thermal buffer '" .. buffer.id .. "' storage ledger residual "
+                .. 'exceeds tolerance')
+            assert(buffer.stored >= -BALANCE_TOLERANCE
+                and buffer.stored <= buffer.capacity + BALANCE_TOLERANCE,
+                "thermal buffer '" .. buffer.id .. "' stored energy left its finite bounds")
+            assert(buffer.chargedKJ >= -BALANCE_TOLERANCE
+                and buffer.dischargedKJ >= -BALANCE_TOLERANCE,
+                "thermal buffer '" .. buffer.id .. "' exchange ledger went negative")
+            local values = { buffer.stored, buffer.lastCharge, buffer.lastDischarge,
+                buffer.chargedKJ, buffer.dischargedKJ }
+            for _, value in ipairs(values) do
+                assert(isFinite(value),
+                    "thermal buffer '" .. buffer.id .. "' value is not finite")
+            end
         end
         for _, loop in ipairs(self.coolant_loops) do
             assert(loop.coolant >= 0 and loop.coolant == loop.coolant
@@ -4095,6 +4326,14 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         end
         local generatorOutputTotal, generatorStartupTotal = 0, 0
         local generatorWasteTotal, generatorDecayTotal = 0, 0
+        local bufferStoredTotal, bufferAvailableTotal = 0, 0
+        local bufferChargeTotal, bufferDischargeTotal = 0, 0
+        for _, buffer in ipairs(self.thermal_buffers) do
+            bufferStoredTotal = bufferStoredTotal + buffer.stored
+            bufferAvailableTotal = bufferAvailableTotal + (buffer.capacity - buffer.stored)
+            bufferChargeTotal = bufferChargeTotal + buffer.lastCharge
+            bufferDischargeTotal = bufferDischargeTotal + buffer.lastDischarge
+        end
         for _, gen in ipairs(self.generators) do
             generatorOutputTotal = generatorOutputTotal + gen.outputKW
             generatorStartupTotal = generatorStartupTotal + gen.lastStartupDrawKW
@@ -4105,7 +4344,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             circulationTotal, freezeHeatingTotal, pumpPowerTotal,
             coolingProvidedTotal, coolingUnmetTotal, condenserHeatTotal,
             chillerPowerTotal, generatorOutputTotal, generatorStartupTotal,
-            generatorWasteTotal, generatorDecayTotal }
+            generatorWasteTotal, generatorDecayTotal,
+            bufferStoredTotal, bufferAvailableTotal,
+            bufferChargeTotal, bufferDischargeTotal }
         for _, value in ipairs(aggregates) do
             assert(isFinite(value), 'station thermal rollup aggregate is not finite')
         end

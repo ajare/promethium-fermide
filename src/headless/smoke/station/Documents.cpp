@@ -214,7 +214,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 80", "version: 64");
+		replaceAll(legacy, "version: 81", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -231,14 +231,14 @@ namespace
 			"authored store fields missing or live inventory leaked");
 		bool refused = false;
 		auto staleStores = withField;
-		replaceAll(staleStores, "version: 80", "version: 65");
+		replaceAll(staleStores, "version: 81", "version: 65");
 		auto const staleStoresPath = directory / "stale-stores.world.yaml";
 		writeFile(staleStoresPath, staleStores);
 		try { (void)core::loadWorldDocument(staleStoresPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-66 document carrying resource stores was silently accepted");
 		auto staleTransfers = withField;
-		replaceAll(staleTransfers, "version: 80", "version: 66");
+		replaceAll(staleTransfers, "version: 81", "version: 66");
 		auto const staleTransfersPath = directory / "stale-transfers.world.yaml";
 		writeFile(staleTransfersPath, staleTransfers);
 		refused = false;
@@ -246,7 +246,7 @@ namespace
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-67 document carrying resource transfers was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 80", "version: 64");
+		replaceAll(stale, "version: 81", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
 		refused = false;
@@ -384,7 +384,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 80", "version: 67");
+			replaceAll(stale, "version: 81", "version: 67");
 			auto const stalePath = directory / "stale-compounds.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -493,7 +493,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 80", "version: 69");
+			replaceAll(stale, "version: 81", "version: 69");
 			auto const stalePath = directory / "stale-batteries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -615,7 +615,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 80", "version: 68");
+			replaceAll(stale, "version: 81", "version: 68");
 			auto const stalePath = directory / "stale-power.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -742,7 +742,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 80", "version: 70");
+			replaceAll(stale, "version: 81", "version: 70");
 			auto const stalePath = directory / "stale-deliveries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -870,7 +870,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 80", "version: 71");
+			replaceAll(stale, "version: 81", "version: 71");
 			auto const stalePath = directory / "stale-thermal.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -918,6 +918,124 @@ namespace
 			try { (void)core::loadWorldDocument(malformedPath); }
 			catch (std::exception const&) { refused = true; }
 			require(refused, "a load heat sink targeting an unknown reservoir was accepted from a file");
+		}
+	}
+	// #398: authored thermal buffers travel through the real file seams as
+	// authored contracts only; a reopened World replays the buffer scenario
+	// identically, and pre-81 documents carrying `thermalBuffers` are refused
+	// rather than silently dropped. Stored energy, fill, buffer temperature and
+	// the charge/discharge ledger stay runtime-only.
+	void bufferFiles(smoke::Context const& context)
+	{
+		namespace filesystem = std::filesystem;
+		auto const directory = context.temporaryRoot() / "station-buffer";
+		filesystem::create_directories(directory);
+		core::ThermalReservoirSettings host;
+		host.id = "host";
+		host.thermalClass = "moderate";
+		host.heatCapacityKJPerK = 100.0;
+		host.startingTemperatureC = 50.0;
+		host.minTemperatureC = 0.0;
+		host.maxTemperatureC = 200.0;
+		host.absorbedHeatKW = 10.0;
+		core::ThermalBufferSettings buf;
+		buf.id = "buf";
+		buf.reservoirId = "host";
+		buf.accessMode = "passive";
+		buf.capacityKJ = 1000.0;
+		buf.startingEnergyKJ = 100.0;
+		buf.minUsableTemperatureC = 0.0;
+		buf.maxUsableTemperatureC = 40.0;
+		buf.maxChargeKW = 20.0;
+		buf.maxDischargeKW = 20.0;
+		buf.transferConductanceKWPerK = 1e6;
+		core::World original("Buffer Round Trip", 2, 2);
+		original.pauseSimulation();
+		original.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 2.0f;
+		settings.thermalReservoirs.push_back(host);
+		settings.thermalBuffers.push_back(buf);
+		std::string diagnostic;
+		require(original.configureStationSystems(settings, false, &diagnostic),
+			"Buffer settings edit failed: " + diagnostic);
+		original.resumeSimulation();
+		require(original.advanceTicks(3600), "Buffer original run failed");
+		auto const expected = original.getStationSystemsSnapshot();
+		require(expected.thermalBuffers.size() == 1
+			&& expected.thermalBuffers[0].chargedEnergyKJ > 0.0
+			&& expected.thermalBuffers[0].storedEnergyKJ > 100.0
+			&& std::abs(expected.thermalBuffers[0].residualKJ) < 1e-6,
+			"Buffer scenario produced the wrong observable state");
+		for (auto const* suffix : {".world.yaml", ".world"})
+		{
+			auto const path = directory / (std::string("buffer") + suffix);
+			original.saveTo(path.string());
+			auto const document = readFile(path);
+			require(document.find("thermalBuffers") != std::string::npos
+				&& document.find("capacityKJ") != std::string::npos
+				&& document.find("startingEnergyKJ") != std::string::npos
+				&& document.find("minUsableTemperatureC") != std::string::npos
+				&& document.find("maxUsableTemperatureC") != std::string::npos
+				&& document.find("maxChargeKW") != std::string::npos
+				&& document.find("maxDischargeKW") != std::string::npos
+				&& document.find("transferConductanceKWPerK") != std::string::npos
+				&& document.find("accessMode") != std::string::npos,
+				"authored thermal buffer fields missing from the document");
+			for (auto const* liveState : {"storedEnergyKJ", "availableCapacityKJ",
+				"fillFraction", "bufferTemperatureC", "lastChargeKW", "lastDischargeKW",
+				"chargedEnergyKJ", "dischargedEnergyKJ", "residualKJ", "accessible",
+				"lastLimiter"})
+				require(document.find(liveState) == std::string::npos,
+					std::string("live thermal buffer state leaked into the document: ") + liveState);
+			auto const reopened = core::loadWorldDocument(path);
+			require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+				"thermal buffer settings did not survive the file round trip");
+			require(reopened->getStationSystemsSnapshot().thermalBuffers.size() == 1
+				&& reopened->getStationSystemsSnapshot().thermalBuffers[0].storedEnergyKJ == 100.0
+				&& reopened->getStationSystemsSnapshot().thermalBuffers[0].chargedEnergyKJ == 0.0
+				&& reopened->getStationSystemsSnapshot().thermalBuffers[0].dischargedEnergyKJ == 0.0,
+				"reopened World did not reconstruct the authored buffer starting energy");
+			reopened->resumeSimulation();
+			require(reopened->advanceTicks(3600), "Buffer reopened run failed");
+			require(reopened->getStationSystemsSnapshot() == expected,
+				"thermal buffer scenario is not reproducible from the document");
+			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
+				"thermal buffer event history is not reproducible from the document");
+		}
+		// A pre-81 document carrying the new fields is refused.
+		auto const withField = serializeYaml(original);
+		{
+			auto stale = withField;
+			replaceAll(stale, "version: 81", "version: 80");
+			auto const stalePath = directory / "stale-buffer.world.yaml";
+			writeFile(stalePath, stale);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(stalePath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a pre-81 document carrying thermal buffers was silently accepted");
+		}
+		// Malformed buffer values in a file are rejected.
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "capacityKJ: 1000", "capacityKJ: 0");
+			auto const malformedPath = directory / "malformed-buffer-capacity.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a zero thermal buffer capacity was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "startingEnergyKJ: 100", "startingEnergyKJ: 5000");
+			auto const malformedPath = directory / "malformed-buffer-starting.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a thermal buffer starting energy above capacity was accepted from a file");
 		}
 	}
 	// #396: authored coolant loops travel through the real file seams as
@@ -1031,7 +1149,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 80", "version: 72");
+			replaceAll(stale, "version: 81", "version: 72");
 			auto const stalePath = directory / "stale-coolant.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1194,7 +1312,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 80", "version: 73");
+			replaceAll(stale, "version: 81", "version: 73");
 			auto const stalePath = directory / "stale-chillers.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1342,7 +1460,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 80", "version: 74");
+			replaceAll(stale, "version: 81", "version: 74");
 			auto const stalePath = directory / "stale-generators.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1503,7 +1621,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 80", "version: 75");
+			replaceAll(stale, "version: 81", "version: 75");
 			auto const stalePath = directory / "stale-atmospheres.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1674,7 +1792,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 80", "version: 76");
+			replaceAll(stale, "version: 81", "version: 76");
 			auto const stalePath = directory / "stale-crews.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1864,7 +1982,7 @@ void waterFiles(smoke::Context const& context)
 	// A pre-78 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 80", "version: 77");
+		replaceAll(stale, "version: 81", "version: 77");
 		auto const stalePath = directory / "stale-water.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -2038,7 +2156,7 @@ void gasFiles(smoke::Context const& context)
 	// A pre-79 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 80", "version: 78");
+		replaceAll(stale, "version: 81", "version: 78");
 		auto const stalePath = directory / "stale-gas.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -2194,7 +2312,7 @@ void fuelCellFiles(smoke::Context const& context)
 	// A pre-80 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 80", "version: 79");
+		replaceAll(stale, "version: 81", "version: 79");
 		auto const stalePath = directory / "stale-fuelcells.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -2256,6 +2374,7 @@ void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"batteryFiles", batteryFiles});
 	checks.push_back({"deliveryFiles", deliveryFiles});
 	checks.push_back({"thermalFiles", thermalFiles});
+	checks.push_back({"bufferFiles", bufferFiles});
 	checks.push_back({"coolantFiles", coolantFiles});
 	checks.push_back({"chillerFiles", chillerFiles});
 	checks.push_back({"generatorFiles", generatorFiles});

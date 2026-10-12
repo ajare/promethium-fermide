@@ -144,7 +144,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 80"), 11, "version: 65");
+		text.replace(text.find("version: 81"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -2265,8 +2265,8 @@ namespace
 		auto const bundled = core::bundledStationSystemsSource();
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -2325,8 +2325,8 @@ namespace
 		// model's own audits hold.
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -4278,13 +4278,13 @@ namespace
 			auto const bundled = core::bundledStationSystemsSource();
 			core::setStationSystemsSourceLoader([bundled] {
 				return "local factory = (function()\n" + bundled + "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 					"assert(#reservoirs == 1 and reservoirs[1].id == 'cabin'\n"
 					"\tand reservoirs[1].heatCapacityKJPerK == 100 and reservoirs[1].absorbedHeatKW == 0)\n"
 					"assert(#radiators == 1 and radiators[1].reservoir == 'cabin'\n"
 					"\tand radiators[1].areaM2 == 5000)\n"
 					"assert(#loads == 1 and loads[1].heatSinkId == 'cabin')\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 					"assert(model.reservoirs[1].temperature == 20)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
@@ -4912,8 +4912,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled, expectedLiteral] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -4984,7 +4984,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 					"assert(type(coolantLoops) == 'table' and #coolantLoops == 1, 'coolant loop descriptor crossing lost')\n"
 					"assert(coolantLoops[1].coolantCapacityKg > 0, 'corrupt coolant capacity crossing')\n"
 					"error('corrupt coolant descriptor crossing')\n"
@@ -5659,8 +5659,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled, expectedLiteral] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -5785,7 +5785,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 					"assert(type(chillers) == 'table' and #chillers == 1, 'chiller descriptor crossing lost')\n"
 					"assert(chillers[1].cop > 0, 'corrupt chiller COP crossing')\n"
 					"error('corrupt chiller descriptor crossing')\n"
@@ -6474,8 +6474,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
-					"return factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
+					"return factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 					"end";
 			});
 			core::World probe("StartupAuditOverAllocationProbe", 2, 2);
@@ -6813,7 +6813,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 					"assert(type(generators) == 'table' and #generators == 1, 'generator descriptor crossing lost')\n"
 					"assert(generators[1].efficiency > 0, 'corrupt generator efficiency crossing')\n"
 					"error('corrupt generator descriptor crossing')\n"
@@ -7281,7 +7281,7 @@ namespace
 		// contained at construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 					"assert(type(crews) == 'table' and #crews == 1, 'crew descriptor crossing lost')\n"
 					"assert(crews[1].foodRate > 0, 'corrupt crew rate crossing')\n"
 					"error('corrupt crew descriptor crossing')\n"
@@ -7306,8 +7306,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -8083,8 +8083,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled, expectedLiteral] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -8143,7 +8143,7 @@ namespace
 		// is contained at construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 					"assert(type(atmospheres) == 'table' and #atmospheres == 1, 'atmosphere descriptor crossing lost')\n"
 					"assert(atmospheres[1].volumeM3 > 0, 'corrupt atmosphere volume crossing')\n"
 					"error('corrupt atmosphere descriptor crossing')\n"
@@ -8162,7 +8162,7 @@ namespace
 		// A corrupt airlock cycle crossing is contained the same way.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 					"assert(type(airlockCycles) == 'table' and #airlockCycles == 1, 'airlock cycle descriptor crossing lost')\n"
 					"error('corrupt airlock cycle descriptor crossing')\n"
 					"end";
@@ -8680,7 +8680,7 @@ namespace
 		// contained at construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 					"assert(type(waterCollectors) == 'table' and #waterCollectors == 1, 'water collector descriptor crossing lost')\n"
 					"assert(waterCollectors[1].maxRateKgPerS > 0, 'corrupt collector rate crossing')\n"
 					"error('corrupt water collector descriptor crossing')\n"
@@ -8702,7 +8702,7 @@ namespace
 		// contained the same way.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 					"assert(type(waterTreatments) == 'table' and #waterTreatments == 1, 'water treatment descriptor crossing lost')\n"
 					"assert(waterTreatments[1].recoveryRatio > 0 and waterTreatments[1].recoveryRatio <= 1, 'corrupt recovery ratio crossing')\n"
 					"error('corrupt water treatment descriptor crossing')\n"
@@ -9207,7 +9207,7 @@ namespace
 		// no partial result escapes.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 					"assert(type(electrolyzers) == 'table' and #electrolyzers == 1, 'electrolyzer descriptor crossing lost')\n"
 					"assert(electrolyzers[1].rateKgPerS > 0, 'corrupt electrolyzer rate crossing')\n"
 					"error('corrupt electrolyzer descriptor crossing')\n"
@@ -9743,7 +9743,7 @@ namespace
 		// disabled and no partial result escapes.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)\n"
 					"assert(type(fuelCells) == 'table' and #fuelCells == 1, 'fuel cell descriptor crossing lost')\n"
 					"assert(fuelCells[1].ratedOutputKW > 0, 'corrupt fuel cell rate crossing')\n"
 					"error('corrupt fuel cell descriptor crossing')\n"
@@ -9765,6 +9765,297 @@ namespace
 		}
 	}
 
+// #398: finite phase-change thermal buffers that ride through a cooling
+// deficit. The host ledger is authoritative; these exercise the World
+// tick / snapshot / event seams for charge, full/exhaustion, discharge
+// recovery, depletion, access gating and the closing storage ledger.
+void buffers(smoke::Context const&)
+{
+	auto const dt = static_cast<double>(core::World::getFixedTimestep());
+	auto const approx = [](double actual, double expected, double tolerance = 1e-6)
+	{ return std::abs(actual - expected) <= tolerance; };
+	auto reservoir = [](std::string const& id, std::string const& thermalClass,
+		double capacityKJPerK, double startingC, double absorbedKW)
+	{
+		core::ThermalReservoirSettings settings;
+		settings.id = id;
+		settings.thermalClass = thermalClass;
+		settings.heatCapacityKJPerK = capacityKJPerK;
+		settings.startingTemperatureC = startingC;
+		settings.minTemperatureC = -200.0;
+		settings.maxTemperatureC = 400.0;
+		settings.absorbedHeatKW = absorbedKW;
+		return settings;
+	};
+	auto radiator = [](std::string const& id, std::string const& reservoirId,
+		double areaM2, double sinkC)
+	{
+		core::RadiatorSettings settings;
+		settings.id = id;
+		settings.reservoirId = reservoirId;
+		settings.areaM2 = areaM2;
+		settings.emissivity = 1.0;
+		settings.viewFactor = 1.0;
+		settings.sinkTemperatureC = sinkC;
+		return settings;
+	};
+	auto loop = [](std::string const& id, std::string const& reservoirId, double startingKg)
+	{
+		core::CoolantLoopSettings settings;
+		settings.id = id;
+		settings.hazardClass = "normal";
+		settings.reservoirId = reservoirId;
+		settings.coolantCapacityKg = 100.0;
+		settings.startingCoolantKg = startingKg;
+		settings.specificHeatKJPerKgK = 4.0;
+		settings.startingTemperatureC = 20.0;
+		settings.freezeProtectionSetpointC = 0.0;
+		settings.pumpPowerKW = 0.5;
+		settings.ratedFlowKgPerS = 2.0;
+		settings.exchangerConductanceKWPerK = 5.0;
+		settings.heaterCapacityKW = 0.0;
+		return settings;
+	};
+	auto buffer = [](std::string const& id, std::string const& reservoirId,
+		std::string const& accessMode, std::string const& circulationLoopId,
+		double capacityKJ, double startingKJ, double minC, double maxC,
+		double maxChargeKW, double maxDischargeKW, double conductanceKWPerK)
+	{
+		core::ThermalBufferSettings settings;
+		settings.id = id;
+		settings.reservoirId = reservoirId;
+		settings.accessMode = accessMode;
+		settings.circulationLoopId = circulationLoopId;
+		settings.capacityKJ = capacityKJ;
+		settings.startingEnergyKJ = startingKJ;
+		settings.minUsableTemperatureC = minC;
+		settings.maxUsableTemperatureC = maxC;
+		settings.maxChargeKW = maxChargeKW;
+		settings.maxDischargeKW = maxDischargeKW;
+		settings.transferConductanceKWPerK = conductanceKWPerK;
+		return settings;
+	};
+	auto configure = [](core::World& world,
+		std::vector<core::ThermalReservoirSettings> reservoirs,
+		std::vector<core::ThermalBufferSettings> buffers,
+		std::vector<core::RadiatorSettings> radiators = {},
+		std::vector<core::CoolantLoopSettings> loops = {})
+	{
+		std::string diagnostic;
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 1.0f;
+		settings.thermalReservoirs = std::move(reservoirs);
+		settings.thermalBuffers = std::move(buffers);
+		settings.radiators = std::move(radiators);
+		settings.coolantLoops = std::move(loops);
+		auto const ok = world.configureStationSystems(settings, false, &diagnostic);
+		return std::make_pair(ok, diagnostic);
+	};
+	// Refused configurations: every malformed buffer contract is rejected
+	// before anything runs, and none leaves the World changed.
+	{
+		core::World bad("BufferBad", 2, 2);
+		bad.pauseSimulation(); bad.finishBuild();
+		std::string diagnostic;
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.thermalReservoirs = { reservoir("host", "moderate", 100.0, 50.0, 0.0) };
+		settings.thermalBuffers = { buffer("b", "ghost", "passive", "", 1000, 0, 0, 100, 10, 10, 1) };
+		require(!core::validateStationSystemsSettings(settings, diagnostic)
+			&& diagnostic.find("unknown host thermal reservoir") != std::string::npos,
+			"buffer on an unknown host reservoir was accepted");
+		settings.thermalBuffers = { buffer("b", "host", "magic", "", 1000, 0, 0, 100, 10, 10, 1) };
+		require(!core::validateStationSystemsSettings(settings, diagnostic)
+			&& diagnostic.find("access mode") != std::string::npos,
+			"buffer with an undeclared access mode was accepted");
+		settings.thermalBuffers = { buffer("b", "host", "circulation", "", 1000, 0, 0, 100, 10, 10, 1) };
+		require(!core::validateStationSystemsSettings(settings, diagnostic)
+			&& diagnostic.find("circulation") != std::string::npos,
+			"circulation-access buffer with no declared loop was accepted");
+		settings.thermalBuffers = { buffer("b", "host", "passive", "", 0, 0, 0, 100, 10, 10, 1) };
+		require(!core::validateStationSystemsSettings(settings, diagnostic)
+			&& diagnostic.find("capacity") != std::string::npos,
+			"zero-capacity buffer was accepted");
+		settings.thermalBuffers = { buffer("b", "host", "passive", "", 1000, 2000, 0, 100, 10, 10, 1) };
+		require(!core::validateStationSystemsSettings(settings, diagnostic)
+			&& diagnostic.find("starting") != std::string::npos,
+			"buffer starting energy above capacity was accepted");
+		settings.thermalBuffers = { buffer("b", "host", "passive", "", 1000, 0, 100, 0, 10, 10, 1) };
+		require(!core::validateStationSystemsSettings(settings, diagnostic)
+			&& diagnostic.find("band") != std::string::npos,
+			"inverted usable temperature band was accepted");
+		settings.thermalBuffers = { buffer("b", "host", "passive", "", 1000, 0, 0, 100, 0, 0, 1) };
+		require(!core::validateStationSystemsSettings(settings, diagnostic)
+			&& diagnostic.find("neither charge nor discharge") != std::string::npos,
+			"a buffer that can neither charge nor discharge was accepted");
+		settings.thermalBuffers = { buffer("b", "host", "passive", "", 1000, 0, 0, 100, 10, 10, 0) };
+		require(!core::validateStationSystemsSettings(settings, diagnostic)
+			&& diagnostic.find("conductance") != std::string::npos,
+			"passive buffer with zero transfer conductance was accepted");
+		require(bad.getStationSystemsSnapshot().thermalBuffers.empty(),
+			"a refused buffer configuration left state in the World");
+	}
+	// Charge / ride-through: a deficit the rejection path cannot take is
+	// absorbed into the buffer, holding the reservoir flat; the storage
+	// ledger closes and the reservoir ledger accounts the absorbed heat.
+	{
+		core::World world("BufferCharge", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		auto const [ok, diagnostic] = configure(world,
+			{ reservoir("host", "moderate", 100.0, 50.0, 10.0) },
+			{ buffer("buf", "host", "passive", "", 1000.0, 0.0, 0.0, 100.0, 20.0, 20.0, 1e9) });
+		require(ok, diagnostic.c_str());
+		world.resumeSimulation();
+		require(world.advanceTick(), "buffer charge run failed");
+		auto const snap = world.getStationSystemsSnapshot();
+		require(snap.thermalBuffers.size() == 1, "buffer snapshot missing");
+		auto const& buf = snap.thermalBuffers[0];
+		require(buf.accessible && approx(buf.lastChargeKW, 10.0, 1e-9)
+			&& approx(buf.lastDischargeKW, 0.0),
+			"buffer did not absorb the full cooling deficit");
+		require(approx(buf.storedEnergyKJ, 10.0 * dt, 1e-9),
+			"buffer stored energy did not grow by the absorbed deficit");
+		require(buf.status == core::StationTransferStatus::Full,
+			"full-deficit absorption not reported as full service");
+		require(approx(snap.thermal.reservoirs[0].temperatureC, 50.0, 1e-9),
+			"reservoir did not stay flat while the buffer rode its whole deficit");
+		require(approx(buf.residualKJ, 0.0, 1e-6), "buffer storage ledger failed to close");
+		require(approx(snap.thermal.reservoirs[0].lastBufferChargeKW, 10.0, 1e-9),
+			"reservoir did not report the heat absorbed by its buffer");
+	}
+	// Full / exhausted: a small store fills, then refuses further charge
+	// and the deficit it can no longer take heats the reservoir again.
+	{
+		core::World world("BufferFull", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		auto const [ok, diagnostic] = configure(world,
+			{ reservoir("host", "moderate", 100.0, 50.0, 10.0) },
+			{ buffer("buf", "host", "passive", "", 10.0, 0.0, 0.0, 40.0, 20.0, 20.0, 1e9) });
+		require(ok, diagnostic.c_str());
+		world.resumeSimulation();
+		require(world.advanceTicks(120), "buffer fill run failed");
+		auto const snap = world.getStationSystemsSnapshot();
+		auto const& buf = snap.thermalBuffers[0];
+		require(buf.full && approx(buf.storedEnergyKJ, 10.0, 1e-6)
+			&& approx(buf.availableCapacityKJ, 0.0, 1e-6),
+			"buffer did not fill to capacity and report exhausted headroom");
+		require(approx(buf.lastChargeKW, 0.0, 1e-9)
+			&& buf.lastLimiter.find("full") != std::string::npos,
+			"a full buffer kept charging or did not name the full limiter");
+		require(snap.thermal.reservoirs[0].temperatureC > 50.0,
+			"reservoir did not resume heating once the buffer was full");
+		require(approx(buf.residualKJ, 0.0, 1e-6), "full-buffer storage ledger failed to close");
+	}
+	// Discharge / recovery: a rejection surplus (radiator outpacing input)
+	// with a hotter buffer returns stored heat into the reservoir, capped
+	// by the surplus and the rate limit; recovery consumes real rejection.
+	{
+		core::World world("BufferRecover", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		auto const [ok, diagnostic] = configure(world,
+			{ reservoir("host", "warm", 100.0, 20.0, 0.0) },
+			{ buffer("buf", "host", "passive", "", 1000.0, 800.0, 0.0, 100.0, 20.0, 20.0, 1e9) },
+			{ radiator("big", "host", 50000.0, -270.0) });
+		require(ok, diagnostic.c_str());
+		world.resumeSimulation();
+		require(world.advanceTick(), "buffer recovery run failed");
+		auto const snap = world.getStationSystemsSnapshot();
+		auto const& buf = snap.thermalBuffers[0];
+		auto const rejected = snap.thermal.reservoirs[0].lastRejectedKW;
+		auto const expectedDischarge = std::min(20.0, rejected);
+		require(expectedDischarge > 0.0, "radiator produced no rejection surplus to recover into");
+		require(buf.accessible && approx(buf.lastDischargeKW, expectedDischarge, 1e-9)
+			&& approx(buf.lastChargeKW, 0.0),
+			"buffer did not discharge into the rejection surplus at the capped rate");
+		require(buf.lastDischargeKW <= rejected + 1e-9,
+			"buffer returned more heat than the rejection path could carry away");
+		require(buf.storedEnergyKJ < 800.0, "buffer did not give back stored energy");
+		require(approx(buf.residualKJ, 0.0, 1e-6), "recovery storage ledger failed to close");
+	}
+	// Depleted: a near-empty buffer on a colder reservoir drains to zero
+	// and reports nothing left to return.
+	{
+		core::World world("BufferDeplete", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		auto const [ok, diagnostic] = configure(world,
+			{ reservoir("host", "warm", 100.0, -10.0, 0.0) },
+			{ buffer("buf", "host", "passive", "", 1000.0, 1.0, 0.0, 100.0, 20.0, 20.0, 1e9) },
+			{ radiator("big", "host", 50000.0, -270.0) });
+		require(ok, diagnostic.c_str());
+		world.resumeSimulation();
+		require(world.advanceTicks(30), "buffer depletion run failed");
+		auto const snap = world.getStationSystemsSnapshot();
+		auto const& buf = snap.thermalBuffers[0];
+		require(buf.depleted && approx(buf.storedEnergyKJ, 0.0, 1e-6),
+			"buffer did not deplete to empty");
+		require(approx(buf.lastDischargeKW, 0.0, 1e-9)
+			&& buf.lastLimiter.find("depleted") != std::string::npos,
+			"a depleted buffer kept discharging or did not name the depleted limiter");
+		require(approx(buf.residualKJ, 0.0, 1e-6), "depleted storage ledger failed to close");
+	}
+	// Circulation gating: a powered-only buffer whose gating loop is not
+	// circulating is unreachable; a deficit cannot be absorbed through it.
+	{
+		core::World world("BufferGate", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		auto const [ok, diagnostic] = configure(world,
+			{ reservoir("host", "moderate", 100.0, 50.0, 10.0) },
+			{ buffer("buf", "host", "circulation", "loop", 1000.0, 0.0, 0.0, 100.0, 20.0, 20.0, 1e9) },
+			{}, { loop("loop", "host", 0.0) });
+		require(ok, diagnostic.c_str());
+		world.resumeSimulation();
+		require(world.advanceTick(), "buffer gating run failed");
+		auto const snap = world.getStationSystemsSnapshot();
+		auto const& buf = snap.thermalBuffers[0];
+		require(!buf.accessible && approx(buf.lastChargeKW, 0.0) && approx(buf.lastDischargeKW, 0.0),
+			"a circulation buffer was reachable with its gating loop not circulating");
+		require(buf.lastLimiter.find("circulation lost") != std::string::npos,
+			"gated buffer did not name the circulation-lost limiter");
+		require(buf.status == core::StationTransferStatus::Rejected,
+			"a gated buffer with a live deficit was not reported as refused");
+		require(approx(buf.storedEnergyKJ, 0.0, 1e-9),
+			"a gated buffer absorbed energy it should not have reached");
+	}
+	// Passive conductance cap: a passive store's charge is throttled by
+	// conductance x delta-T below its nominal rate limit.
+	{
+		core::World world("BufferPassive", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		auto const [ok, diagnostic] = configure(world,
+			{ reservoir("host", "moderate", 100.0, 50.0, 10.0) },
+			{ buffer("buf", "host", "passive", "", 1000.0, 0.0, 0.0, 100.0, 20.0, 20.0, 0.1) });
+		require(ok, diagnostic.c_str());
+		world.resumeSimulation();
+		require(world.advanceTick(), "buffer passive-cap run failed");
+		auto const snap = world.getStationSystemsSnapshot();
+		auto const& buf = snap.thermalBuffers[0];
+		require(approx(buf.lastChargeKW, 5.0, 1e-9),
+			"passive charge was not capped by conductance x delta-T (0.1 x 50 = 5 kW)");
+		require(buf.lastChargeKW < 10.0 && buf.lastLimiter.find("rate limit") != std::string::npos,
+			"conductance-capped charge did not name the rate-limit limiter");
+		require(approx(buf.residualKJ, 0.0, 1e-6), "passive-cap storage ledger failed to close");
+	}
+	// Reset reconstructs the authored starting energy, not the run state.
+	{
+		core::World world("BufferReset", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		auto const [ok, diagnostic] = configure(world,
+			{ reservoir("host", "moderate", 100.0, 50.0, 10.0) },
+			{ buffer("buf", "host", "passive", "", 1000.0, 250.0, 0.0, 100.0, 20.0, 20.0, 1e9) });
+		require(ok, diagnostic.c_str());
+		world.resumeSimulation();
+		require(world.advanceTicks(60), "buffer reset warm-up run failed");
+		require(world.getStationSystemsSnapshot().thermalBuffers[0].chargedEnergyKJ > 0.0,
+			"warm-up produced no charge to reset away");
+		world.pauseSimulation(); world.resetSimulation();
+		auto const& buf = world.getStationSystemsSnapshot().thermalBuffers[0];
+		require(approx(buf.storedEnergyKJ, 250.0, 1e-9) && buf.chargedEnergyKJ == 0.0
+			&& buf.dischargedEnergyKJ == 0.0,
+			"reset did not reconstruct the authored buffer starting energy");
+	}
+}
+
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power},
@@ -9777,7 +10068,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"gas", gas}, {"fuelCells", fuelCells}, {"failures", failures}};
+		{"deliveries", deliveries}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

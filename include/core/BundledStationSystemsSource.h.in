@@ -1,3 +1,9 @@
 #pragma once
-#include <string_view>
-namespace core { inline constexpr std::string_view kStationSystemsLua = R"PF_STATION(@PF_STATION_SYSTEMS_LUA@)PF_STATION"; }
+
+// Generated from the authored lifecycle.lua resource, never a second definition.
+// Embedded as a char array (like BundledHumanSource) rather than a constexpr
+// std::string_view: a string_view from a literal forces a compile-time
+// char_traits::length() loop that trips GCC's -fconstexpr-loop-limit once the
+// model grows past ~256 KiB, whereas a char[] takes its size from the literal
+// token directly with no such loop.
+namespace core { inline constexpr char kStationSystemsLua[] = R"PF_STATION(@PF_STATION_SYSTEMS_LUA@)PF_STATION"; }

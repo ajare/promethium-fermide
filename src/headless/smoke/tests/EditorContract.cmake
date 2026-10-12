@@ -272,6 +272,7 @@ set(editor_names
     station/coolantWorkflow
     station/chillerWorkflow
     station/generatorWorkflow
+    station/bufferWorkflow
 )
 
 if(DEFINED LANE)

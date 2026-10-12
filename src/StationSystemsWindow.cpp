@@ -27,7 +27,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
 	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply, rechargeable batteries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, and chillers supplying class-matched cold services. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Thermal reservoirs integrate temperature from their effective capacity under absorbed and routed equipment heat; radiators reject heat by the Stefan-Boltzmann law at the emitting temperature against the authored sink, emissivity and view factor. A load's emitted heat is booked exactly once: routed into its class-compatible reservoir or exported directly, never both. Declared temperature limits are reported, never clamped. Coolant loops hold a finite, loop-specific coolant inventory segregated by hazard class (coolant is never potable or nutrient water); the pump circulates only the coolant the loop actually holds, so an underfilled loop flows less and a dry loop flows nothing, and the freeze-protection heater thermostats the loop up to its setpoint within its capacity. Pump work and heater heat enter the loop exactly once and reach the reservoir only through the circulation-gated heat-only exchanger; the loop draw rides the same electrical pool as external loads. Chillers supply a cold service of their declared class through a class-matched coolant-loop evaporator and reservoir condenser: the delivered duty is capped by the loop's actual circulation, gated at the chilled setpoint, and refused while the sink is at or above the maximum condensing temperature; work at the configured COP plus auxiliaries rides the same electrical pool, and condenser heat equals extracted heat plus the work and auxiliaries actually supplied, booked once. Fuelled generators convert a finite energy-unit fuel inventory into bus electrical output at the declared efficiency: output is bounded by the installed rating and the ramp limit, starting only completes once the startup energy has actually been drawn from the shared pool while the class-matched sink is below its maximum sink temperature, and after output stops the configured shutdown heat and its cooling requirement persist for the decay period; waste, startup and decay heat route exactly once into the sink and the fuel ledger closes over fuel = electrical + waste. Within a tick, generators and fuel-cell backup units produce first, then power allocates, then coolant loops and chillers run, then compartment atmospheres cycle, crews metabolise and compartments exchange, then thermal integrates, then transfers, then conversions. Compartment atmospheres model an ideal-gas mixture in a fixed volume: absolute and partial pressures derive from the gas inventory and temperature, humidity caps at Magnus saturation with the excess condensing and releasing its latent heat into the compartment, occupancy is an authored load assignment whose oxygen draw is capped by the inventory (CO2 and metabolic heat scale with what was actually consumed), leakage is a constant total-mass rate capped by the inventory, and scheduled airlock cycles remove authored mass with an explicit recovered-versus-lost split; every gram leaving a compartment is booked as leaked, recovered or lost, compartments never mix automatically, and declared pressure and gas-quality limits are reported, never clamped. Crews are an authored population with an activity profile, never derived from World Agents: metabolism draws food and water from compound stores and oxygen from the compartment, and returns CO2, moisture and metabolic heat to the compartment and urine and organic waste to their own finite compound stores. One uniform metabolic scale per tick - the scarcest supply or tightest waste headroom - throttles every pathway together, so absent material never generates nominal waste; requested versus actual is explicit per pathway, the authored coefficients must close over mass, constituents and energy, and the consumed mass the returns do not carry away is reported as explicit retained body mass. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s), %zu airlock cycle(s), %zu crew(s), %zu water collector(s), %zu water treatment(s), %zu electrolyzer(s), %zu CO2 capture machine(s) and %zu fuel-cell backup unit(s)",
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s), %zu airlock cycle(s), %zu crew(s), %zu water collector(s), %zu water treatment(s), %zu electrolyzer(s), %zu CO2 capture machine(s), %zu fuel-cell backup unit(s) and %zu thermal buffer(s)",
 		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
 		authored.stores.size(), authored.transfers.size(), authored.conversions.size(),
 		authored.solarArrays.size(), authored.equipmentLoads.size(), authored.batteries.size(),
@@ -36,7 +36,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		authored.atmospheres.size(), authored.airlockCycles.size(), authored.crews.size(),
 		authored.waterCollectors.size(), authored.waterTreatments.size(),
 		authored.electrolyzers.size(), authored.co2Captures.size(),
-		authored.fuelCells.size());
+		authored.fuelCells.size(), authored.thermalBuffers.size());
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
@@ -1555,6 +1555,80 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		}
 		mDraft.fuelCells.push_back(std::move(cell));
 	}
+	ImGui::SeparatorText("Draft thermal buffers (kJ; finite phase-change store that rides through a cooling deficit: charge is capped by the host reservoir's deficit, discharge by its rejection surplus; access is circulation-gated or passive; the usable band maps stored energy to buffer temperature)");
+	for (size_t index = 0; index < mDraft.thermalBuffers.size(); )
+	{
+		auto& buffer = mDraft.thermalBuffers[index];
+		auto const row = std::to_string(index);
+		bool removeBuffer = false;
+		ImGui::PushItemWidth(220);
+		char bufferIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(bufferIdBuffer, buffer.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Buffer " + row + " id").c_str(),
+			bufferIdBuffer, sizeof(bufferIdBuffer)))
+			buffer.id = bufferIdBuffer;
+		char bufferReservoirBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(bufferReservoirBuffer, buffer.reservoirId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Buffer " + row + " host reservoir id").c_str(),
+			bufferReservoirBuffer, sizeof(bufferReservoirBuffer)))
+			buffer.reservoirId = bufferReservoirBuffer;
+		char bufferAccessBuffer[16]{};
+		std::strncpy(bufferAccessBuffer, buffer.accessMode.c_str(), sizeof(bufferAccessBuffer) - 1);
+		if (ImGui::InputText(("Buffer " + row + " access mode (circulation|passive)").c_str(),
+			bufferAccessBuffer, sizeof(bufferAccessBuffer)))
+			buffer.accessMode = bufferAccessBuffer;
+		char bufferLoopBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(bufferLoopBuffer, buffer.circulationLoopId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Buffer " + row + " circulation loop id").c_str(),
+			bufferLoopBuffer, sizeof(bufferLoopBuffer)))
+			buffer.circulationLoopId = bufferLoopBuffer;
+		ImGui::InputDouble(("Buffer " + row + " capacity kJ").c_str(),
+			&buffer.capacityKJ, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Buffer " + row + " starting energy kJ").c_str(),
+			&buffer.startingEnergyKJ, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Buffer " + row + " min usable temperature C").c_str(),
+			&buffer.minUsableTemperatureC, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Buffer " + row + " max usable temperature C").c_str(),
+			&buffer.maxUsableTemperatureC, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Buffer " + row + " max charge kW").c_str(),
+			&buffer.maxChargeKW, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Buffer " + row + " max discharge kW").c_str(),
+			&buffer.maxDischargeKW, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Buffer " + row + " transfer conductance kW/K").c_str(),
+			&buffer.transferConductanceKWPerK, 0.0, 0.0, "%.3f");
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove buffer " + row).c_str()))
+			removeBuffer = true;
+		ImGui::PopItemWidth();
+		if (removeBuffer)
+			mDraft.thermalBuffers.erase(mDraft.thermalBuffers.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
+	if (mDraft.thermalBuffers.size() < core::MaxStationThermalBuffers && ImGui::Button("Add thermal buffer"))
+	{
+		core::ThermalBufferSettings buffer;
+		buffer.accessMode = "circulation";
+		buffer.capacityKJ = 1000.0;
+		buffer.startingEnergyKJ = 0.0;
+		buffer.minUsableTemperatureC = 0.0;
+		buffer.maxUsableTemperatureC = 100.0;
+		buffer.maxChargeKW = 10.0;
+		buffer.maxDischargeKW = 10.0;
+		buffer.transferConductanceKWPerK = 1.0;
+		if (!mDraft.thermalReservoirs.empty())
+			buffer.reservoirId = mDraft.thermalReservoirs.front().id;
+		if (!mDraft.coolantLoops.empty())
+			buffer.circulationLoopId = mDraft.coolantLoops.front().id;
+		for (size_t candidate = mDraft.thermalBuffers.size() + 1;; ++candidate)
+		{
+			buffer.id = "buffer" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.thermalBuffers.begin(), mDraft.thermalBuffers.end(),
+				[&](core::ThermalBufferSettings const& existing) { return existing.id == buffer.id; });
+			if (!taken) break;
+		}
+		mDraft.thermalBuffers.push_back(std::move(buffer));
+	}
 	bool const draftChanged = mDraft != authored;
 	ImGui::TextUnformatted(draftChanged
 		? "Draft differs from the authored start conditions."
@@ -1785,11 +1859,38 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			radiator.id.c_str(), radiator.reservoirId.c_str(), radiator.areaM2,
 			radiator.emissivity, radiator.viewFactor, radiator.sinkTemperatureC,
 			radiator.lastRejectedKW);
-	ImGui::Text("Thermal totals: absorbed %.3f kW, routed %.3f kW, rejected %.3f kW, circulation %.3f kg/s, freeze heating %.3f kW, cold provided %.3f kW, cold unmet %.3f kW, condenser heat %.3f kW",
+	ImGui::Text("Thermal totals: absorbed %.3f kW, routed %.3f kW, rejected %.3f kW, circulation %.3f kg/s, freeze heating %.3f kW, cold provided %.3f kW, cold unmet %.3f kW, condenser heat %.3f kW | buffers stored %.3f kJ, available %.3f kJ, charging %.3f kW, discharging %.3f kW",
 		snapshot.thermal.totalAbsorbedKW, snapshot.thermal.totalRoutedKW,
 		snapshot.thermal.totalRejectedKW, snapshot.thermal.totalCirculationKgPerS,
 		snapshot.thermal.totalFreezeHeatingKW, snapshot.thermal.totalCoolingProvidedKW,
-		snapshot.thermal.totalCoolingUnmetKW, snapshot.thermal.totalCondenserHeatKW);
+		snapshot.thermal.totalCoolingUnmetKW, snapshot.thermal.totalCondenserHeatKW,
+		snapshot.thermal.totalBufferStoredKJ, snapshot.thermal.totalBufferAvailableCapacityKJ,
+		snapshot.thermal.totalBufferChargeKW, snapshot.thermal.totalBufferDischargeKW);
+	ImGui::SeparatorText("Thermal buffers (live; finite phase-change store riding through the host reservoir's cooling deficit; charge capped by the deficit, discharge by the rejection surplus; access circulation-gated or passive; full = no headroom left to absorb, depleted = nothing left to return)");
+	if (snapshot.thermalBuffers.empty()) ImGui::TextDisabled("No thermal buffers authored.");
+	for (auto const& buffer : snapshot.thermalBuffers)
+	{
+		char const* status = "idle";
+		switch (buffer.status)
+		{
+		case core::StationTransferStatus::Full: status = "full"; break;
+		case core::StationTransferStatus::Partial: status = "partial"; break;
+		case core::StationTransferStatus::Rejected: status = "blocked"; break;
+		case core::StationTransferStatus::Idle: break;
+		}
+		ImGui::Text("%s -> %s [%s]: %s | stored %.3f of %.3f kJ (%.0f%% full) | buffer %.3f C (band %.3f..%.3f C) | charge %.3f of %.3f kW, discharge %.3f of %.3f kW | access %s%s%s",
+			buffer.id.c_str(), buffer.reservoirId.c_str(), buffer.accessMode.c_str(), status,
+			buffer.storedEnergyKJ, buffer.capacityKJ, buffer.fillFraction * 100.0,
+			buffer.bufferTemperatureC, buffer.minUsableTemperatureC, buffer.maxUsableTemperatureC,
+			buffer.lastChargeKW, buffer.maxChargeKW, buffer.lastDischargeKW, buffer.maxDischargeKW,
+			buffer.accessible ? "open" : "gated",
+			buffer.full ? " | EXHAUSTED (no headroom)" : "",
+			buffer.depleted ? " | DEPLETED (nothing to return)" : "");
+		ImGui::Text("  energy ledger (kJ): starting %.3f, charged %.3f, discharged %.3f, current %.3f, residual %.9f (tolerance %.1e) | limiter: %s",
+			buffer.startingEnergyKJ, buffer.chargedEnergyKJ, buffer.dischargedEnergyKJ,
+			buffer.storedEnergyKJ, buffer.residualKJ, snapshot.balanceTolerance,
+			buffer.lastLimiter.empty() ? "-" : buffer.lastLimiter.c_str());
+	}
 	ImGui::SeparatorText("Coolant loops (live; finite loop-specific coolant, circulation capped by inventory and power, freeze exposure reported never clamped)");
 	if (snapshot.coolantLoops.empty()) ImGui::TextDisabled("No coolant loops authored.");
 	for (auto const& loop : snapshot.coolantLoops)

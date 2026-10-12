@@ -78,6 +78,7 @@ namespace core
 			std::vector<ElectrolyzerSettings> const* electrolyzers;
 			std::vector<Co2CaptureSettings> const* co2Captures;
 			std::vector<FuelCellSettings> const* fuelCells;
+			std::vector<ThermalBufferSettings> const* thermalBuffers;
 			static void pushProfile(lua_State* state, ProfileSettings const& profile)
 			{
 				lua_createtable(state, 0, 3);
@@ -525,7 +526,29 @@ namespace core
 					lua_pushnumber(state, cell.maxSinkTemperatureC); lua_setfield(state, -2, "maxSinkTemperatureC");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 21, 1);
+				// Authored thermal buffer descriptors cross the same boundary
+				// as plain immutable values (#398); each sandbox mirrors the
+				// finite store, the access gating and audits its own storage
+				// ledger.
+				lua_createtable(state, static_cast<int>(thermalBuffers->size()), 0);
+				for (size_t index = 0; index < thermalBuffers->size(); ++index)
+				{
+					auto const& buffer = (*thermalBuffers)[index];
+					lua_createtable(state, 0, 11);
+					lua_pushstring(state, buffer.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, buffer.reservoirId.c_str()); lua_setfield(state, -2, "reservoir");
+					lua_pushstring(state, buffer.accessMode.c_str()); lua_setfield(state, -2, "accessMode");
+					lua_pushstring(state, buffer.circulationLoopId.c_str()); lua_setfield(state, -2, "circulationLoop");
+					lua_pushnumber(state, buffer.capacityKJ); lua_setfield(state, -2, "capacityKJ");
+					lua_pushnumber(state, buffer.startingEnergyKJ); lua_setfield(state, -2, "startingEnergyKJ");
+					lua_pushnumber(state, buffer.minUsableTemperatureC); lua_setfield(state, -2, "minUsableTemperatureC");
+					lua_pushnumber(state, buffer.maxUsableTemperatureC); lua_setfield(state, -2, "maxUsableTemperatureC");
+					lua_pushnumber(state, buffer.maxChargeKW); lua_setfield(state, -2, "maxChargeKW");
+					lua_pushnumber(state, buffer.maxDischargeKW); lua_setfield(state, -2, "maxDischargeKW");
+					lua_pushnumber(state, buffer.transferConductanceKWPerK); lua_setfield(state, -2, "transferConductanceKWPerK");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 22, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -1320,6 +1343,77 @@ namespace core
 				return refuse(where + " maximum condensing temperature must be finite and above absolute zero (-273.15 C)");
 			if (chiller.chilledSetpointC >= chiller.maxCondensingTemperatureC)
 				return refuse(where + " chilled setpoint must be below the maximum condensing temperature");
+		}
+		// Thermal buffer contracts (#398): the buffer couples to a declared
+		// host reservoir; a circulation-access buffer additionally names a
+		// coolant loop coupled to that same host, because the buffer's
+		// transfer path runs through the loop's circulation and a gate on
+		// a different reservoir would let a blackout on one side absorb
+		// through the other. The store is finite and its starting energy
+		// sits inside its capacity; the usable temperature band is finite,
+		// above absolute zero and properly ordered; the rate limits are
+		// finite and non-negative with at least one direction alive; a
+		// passive buffer must declare a positive transfer conductance.
+		if (settings.thermalBuffers.size() > MaxStationThermalBuffers)
+			return refuse("Station thermal buffers are limited to "
+				+ std::to_string(MaxStationThermalBuffers) + " entries");
+		std::set<std::string> thermalBufferIds;
+		for (auto const& buffer : settings.thermalBuffers)
+		{
+			auto const where = "Station thermal buffer '" + buffer.id + "'";
+			if (buffer.id.empty()) return refuse("Station thermal buffer id must not be empty");
+			if (buffer.id.size() > MaxStationStoreIdLength)
+				return refuse("Station thermal buffer id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!thermalBufferIds.insert(buffer.id).second) return refuse(where + " id is duplicated");
+			auto const host = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(),
+				[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == buffer.reservoirId; });
+			if (host == settings.thermalReservoirs.end())
+				return refuse(where + " references unknown host thermal reservoir '" + buffer.reservoirId + "'");
+			if (std::find(StationThermalBufferAccessModes.begin(),
+				StationThermalBufferAccessModes.end(), buffer.accessMode)
+				== StationThermalBufferAccessModes.end())
+				return refuse(where + " has unknown access mode '" + buffer.accessMode
+					+ "'; declared modes are: circulation, passive");
+			if (buffer.accessMode == "circulation")
+			{
+				auto const gate = std::find_if(settings.coolantLoops.begin(),
+					settings.coolantLoops.end(),
+					[&](CoolantLoopSettings const& loop) { return loop.id == buffer.circulationLoopId; });
+				if (gate == settings.coolantLoops.end())
+					return refuse(where + " circulation access references unknown coolant loop '"
+						+ buffer.circulationLoopId + "'");
+				if (gate->reservoirId != buffer.reservoirId)
+					return refuse(where + " circulation loop '" + gate->id
+						+ "' is coupled to reservoir '" + gate->reservoirId
+						+ "', not the buffer's host reservoir '" + buffer.reservoirId + "'");
+			}
+			else
+			{
+				if (!std::isfinite(buffer.transferConductanceKWPerK)
+					|| buffer.transferConductanceKWPerK <= 0.0)
+					return refuse(where + " passive transfer conductance must be finite and positive");
+			}
+			if (!std::isfinite(buffer.capacityKJ) || buffer.capacityKJ <= 0.0)
+				return refuse(where + " capacity must be finite and positive");
+			if (!std::isfinite(buffer.startingEnergyKJ) || buffer.startingEnergyKJ < 0.0
+				|| buffer.startingEnergyKJ > buffer.capacityKJ)
+				return refuse(where + " starting energy must be finite and within capacity");
+			if (!std::isfinite(buffer.minUsableTemperatureC)
+				|| buffer.minUsableTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " minimum usable temperature must be finite and above absolute zero (-273.15 C)");
+			if (!std::isfinite(buffer.maxUsableTemperatureC)
+				|| buffer.maxUsableTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum usable temperature must be finite and above absolute zero (-273.15 C)");
+			if (buffer.minUsableTemperatureC >= buffer.maxUsableTemperatureC)
+				return refuse(where + " usable temperature band needs the minimum below the maximum");
+			if (!std::isfinite(buffer.maxChargeKW) || buffer.maxChargeKW < 0.0)
+				return refuse(where + " charge rate must be finite and non-negative");
+			if (!std::isfinite(buffer.maxDischargeKW) || buffer.maxDischargeKW < 0.0)
+				return refuse(where + " discharge rate must be finite and non-negative");
+			if (buffer.maxChargeKW <= 0.0 && buffer.maxDischargeKW <= 0.0)
+				return refuse(where + " that can neither charge nor discharge is not a buffer");
 		}
 		// Generator contracts (#399): the fuel inventory is an energy-unit
 		// Resource store, the waste-heat sink a declared thermal reservoir
@@ -2182,6 +2276,7 @@ namespace core
 		{
 			ThermalReservoirSettings authored;
 			std::vector<size_t> radiatorIndices;
+			std::vector<size_t> bufferIndices;
 			double temperatureC{0.0};
 			double lastHeatRoutedKW{0.0};
 			double lastLoopHeatKW{0.0};
@@ -2190,6 +2285,8 @@ namespace core
 			double lastElectrolysisHeatKW{0.0}; // cell process heat routed here this tick (#404)
 			double lastFuelCellHeatKW{0.0}; // fuel-cell waste heat routed here this tick (#406)
 			double lastAtmosphereHeatKW{0.0}; // reservoir side of the compartment exchanger this tick
+			double lastBufferChargeKW{0.0}; // heat absorbed out of the reservoir by buffers this tick (#398)
+			double lastBufferDischargeKW{0.0}; // heat returned into the reservoir by buffers this tick (#398)
 			double lastHeatInKW{0.0};
 			double lastRejectedKW{0.0};
 			double lastNetKW{0.0};
@@ -2201,6 +2298,8 @@ namespace core
 			double electrolysisKJ{0.0}; // cumulative electrolysis process heat into the reservoir
 			double fuelCellKJ{0.0}; // cumulative fuel-cell waste heat into the reservoir (#406)
 			double atmosphereKJ{0.0}; // cumulative net compartment exchange into the reservoir
+			double bufferChargeKJ{0.0}; // cumulative heat absorbed out of the reservoir by buffers (#398)
+			double bufferDischargeKJ{0.0}; // cumulative heat returned into the reservoir by buffers (#398)
 			double rejectedKJ{0.0};
 			bool lastAboveLimit{false};
 			bool lastBelowLimit{false};
@@ -2274,6 +2373,38 @@ namespace core
 			double extractedKJ{0.0};
 			double workKJ{0.0};
 			double condenserKJ{0.0};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
+		// The authoritative ledger of one authored thermal buffer (#398).
+		// The store holds a finite amount of thermal energy, distinct from
+		// any temperature: its temperature is derived from the stored
+		// fraction across the authored usable band. A charge moves heat
+		// from the host reservoir into the store, capped by the host's
+		// remaining cooling deficit, the configured rate limit, the
+		// store's headroom and the thermodynamic direction; a discharge
+		// returns stored heat into the host, capped by the remaining
+		// rejection surplus, the rate limit, the stored energy and the
+		// direction. A circulation-access buffer is reachable only while
+		// its gating coolant loop circulates, so a blackout cannot absorb
+		// through a powered-only store for free; a passive buffer is
+		// always reachable but conductance-limited. The storage ledger
+		// closes over starting + charged - discharged = stored within the
+		// declared tolerance: the store never resets silently and never
+		// leaves its finite bounds.
+		struct BufferState
+		{
+			ThermalBufferSettings authored;
+			size_t reservoirIndex{0};
+			size_t gateLoopIndex{0}; // only meaningful in circulation mode
+			double storedKJ{0.0};
+			bool lastAccessible{false};
+			double lastChargeKW{0.0};
+			double lastDischargeKW{0.0};
+			bool lastFull{false};
+			bool lastDepleted{false};
+			std::string lastLimiter;
+			double chargedKJ{0.0};
+			double dischargedKJ{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
 		// The authoritative ledger of one authored generator (#399). The
@@ -2651,6 +2782,7 @@ namespace core
 		std::vector<RadiatorState> radiators;
 		std::vector<LoopState> coolantLoops;
 		std::vector<ChillerState> chillers;
+		std::vector<BufferState> thermalBuffers;
 		std::vector<GeneratorState> generators;
 		std::vector<AtmosphereState> atmospheres;
 		std::vector<AirlockCycleState> airlockCycles;
@@ -2740,6 +2872,7 @@ namespace core
 			auto const committedRadiators = radiators;
 			auto const committedCoolantLoops = coolantLoops;
 			auto const committedChillers = chillers;
+			auto const committedThermalBuffers = thermalBuffers;
 			auto const committedGenerators = generators;
 			auto const committedAtmospheres = atmospheres;
 			auto const committedAirlockCycles = airlockCycles;
@@ -2762,6 +2895,7 @@ namespace core
 			radiators = committedRadiators;
 			coolantLoops = committedCoolantLoops;
 			chillers = committedChillers;
+			thermalBuffers = committedThermalBuffers;
 			generators = committedGenerators;
 			atmospheres = committedAtmospheres;
 			airlockCycles = committedAirlockCycles;
@@ -5242,9 +5376,115 @@ namespace core
 					for (size_t r = 0; r < reservoir.radiatorIndices.size(); ++r)
 						radiators[reservoir.radiatorIndices[r]].lastRejectedKW = rawRejections[r] * scale;
 					rejectedKW *= scale;
-					auto const netKW = heatInKW - rejectedKW;
+					// Phase-change buffers ride through the deficit (#398):
+					// the running imbalance after rejection is what the
+					// buffers hosted on this reservoir see. A charge moves
+					// heat from the reservoir into the buffer's finite store,
+					// capped by the remaining deficit, the configured rate
+					// limit, the store's headroom and the thermodynamic
+					// direction (the reservoir must be hotter than the
+					// buffer). A discharge returns stored heat into the
+					// reservoir, capped by the remaining rejection surplus,
+					// the rate limit, the stored energy and the direction.
+					// Recovery therefore consumes real rejection capacity:
+					// the store resets only as fast as the rejection path can
+					// carry the heat away, never instantly. A circulation-
+					// access buffer is unreachable while its gating loop is
+					// not circulating, so a blackout cannot absorb through a
+					// powered-only store for free. Buffers run in declaration
+					// order and the running balance carries through them, so
+					// two buffers on one host never absorb the same deficit
+					// twice. The arithmetic mirrors the sandbox expression
+					// for expression so host and Lua integrate identically.
+					auto remainingKW = heatInKW - rejectedKW;
+					auto bufferChargeKW = 0.0;
+					auto bufferDischargeKW = 0.0;
+					for (auto const bufferIndex : reservoir.bufferIndices)
+					{
+						auto& buffer = thermalBuffers[bufferIndex];
+						auto const band = buffer.authored.maxUsableTemperatureC
+							- buffer.authored.minUsableTemperatureC;
+						auto const bufferTemperatureC = buffer.authored.minUsableTemperatureC
+							+ buffer.storedKJ * band / buffer.authored.capacityKJ;
+						auto const imbalanceKW = remainingKW > 0.0 ? remainingKW : -remainingKW;
+						auto chargeKW = 0.0;
+						auto dischargeKW = 0.0;
+						std::string limiter;
+						auto const accessible = buffer.authored.accessMode != "circulation"
+							|| coolantLoops[buffer.gateLoopIndex].lastCirculating;
+						if (!accessible)
+							limiter = "circulation lost: the powered buffer is unreachable";
+						else if (remainingKW > 0.0)
+						{
+							if (reservoir.temperatureC > bufferTemperatureC)
+							{
+								auto limitKW = buffer.authored.maxChargeKW;
+								if (buffer.authored.accessMode == "passive")
+									limitKW = std::min(limitKW,
+										buffer.authored.transferConductanceKWPerK
+											* (reservoir.temperatureC - bufferTemperatureC));
+								auto const headroomKW = (buffer.authored.capacityKJ - buffer.storedKJ) / dt;
+								chargeKW = std::min({limitKW, remainingKW, headroomKW});
+								if (chargeKW <= 0.0)
+									limiter = "buffer is full: no headroom left to absorb";
+								else if (chargeKW < remainingKW)
+									limiter = headroomKW <= chargeKW + 1e-12
+										? "buffer headroom: the store is filling up"
+										: "buffer charge rate limit";
+							}
+							else
+								limiter = "buffer is not colder than the reservoir: no charge direction";
+						}
+						else if (remainingKW < 0.0)
+						{
+							if (bufferTemperatureC > reservoir.temperatureC)
+							{
+								auto limitKW = buffer.authored.maxDischargeKW;
+								if (buffer.authored.accessMode == "passive")
+									limitKW = std::min(limitKW,
+										buffer.authored.transferConductanceKWPerK
+											* (bufferTemperatureC - reservoir.temperatureC));
+								auto const drawableKW = buffer.storedKJ / dt;
+								dischargeKW = std::min({limitKW, -remainingKW, drawableKW});
+								if (dischargeKW <= 0.0)
+									limiter = "buffer is depleted: nothing left to return";
+								else if (dischargeKW < -remainingKW)
+									limiter = drawableKW <= dischargeKW + 1e-12
+										? "buffer store: nearly nothing left to return"
+										: "buffer discharge rate limit";
+							}
+							else
+								limiter = "buffer is not hotter than the reservoir: no discharge direction";
+						}
+						buffer.storedKJ += (chargeKW - dischargeKW) * dt;
+						// Roundoff never leaves the finite bounds: the store is
+						// clamped to [0, capacity] so a one-ulp overshoot
+						// cannot accumulate (#556 discipline).
+						if (buffer.storedKJ < 0.0) buffer.storedKJ = 0.0;
+						if (buffer.storedKJ > buffer.authored.capacityKJ)
+							buffer.storedKJ = buffer.authored.capacityKJ;
+						buffer.chargedKJ += chargeKW * dt;
+						buffer.dischargedKJ += dischargeKW * dt;
+						buffer.lastAccessible = accessible;
+						buffer.lastChargeKW = chargeKW;
+						buffer.lastDischargeKW = dischargeKW;
+						buffer.lastFull = buffer.storedKJ >= buffer.authored.capacityKJ - 1e-9;
+						buffer.lastDepleted = buffer.storedKJ <= 1e-9;
+						buffer.lastLimiter = limiter;
+						auto const movedKW = chargeKW + dischargeKW;
+						if (imbalanceKW <= 0.0) buffer.status = StationTransferStatus::Idle;
+						else if (!accessible) buffer.status = StationTransferStatus::Rejected;
+						else if (movedKW + 1e-12 >= imbalanceKW) buffer.status = StationTransferStatus::Full;
+						else buffer.status = StationTransferStatus::Partial;
+						remainingKW = remainingKW - chargeKW + dischargeKW;
+						bufferChargeKW += chargeKW;
+						bufferDischargeKW += dischargeKW;
+					}
+					auto const netKW = remainingKW;
 					auto const newTemperatureC = reservoir.temperatureC + netKW * dt / capacity;
 					reservoir.lastHeatRoutedKW = routedIn[index];
+					reservoir.lastBufferChargeKW = bufferChargeKW;
+					reservoir.lastBufferDischargeKW = bufferDischargeKW;
 					reservoir.lastLoopHeatKW = loopHeatIntoReservoir[index];
 					reservoir.lastCondenserHeatKW = condenserHeatBySink[index];
 					reservoir.lastGeneratorHeatKW = generatorHeatKW;
@@ -5262,6 +5502,8 @@ namespace core
 					reservoir.electrolysisKJ += electrolysisHeatByReservoir[index] * dt;
 					reservoir.fuelCellKJ += fuelCellHeatByReservoir[index] * dt;
 					reservoir.atmosphereKJ += atmosphereHeatKW * dt;
+					reservoir.bufferChargeKJ += bufferChargeKW * dt;
+					reservoir.bufferDischargeKJ += bufferDischargeKW * dt;
 					reservoir.rejectedKJ += rejectedKW * dt;
 					reservoir.temperatureC = newTemperatureC;
 					// Declared service limits are reported as crossings,
@@ -5680,6 +5922,10 @@ namespace core
 				if (!requireFinite(reservoir.fuelCellKJ, where + "cumulative fuel-cell waste heat energy")) return false;
 				if (!requireFinite(reservoir.atmosphereKJ, where + "cumulative atmosphere exchange energy")) return false;
 				if (!requireFinite(reservoir.rejectedKJ, where + "cumulative rejected energy")) return false;
+				if (!requireFinite(reservoir.lastBufferChargeKW, where + "buffer charge power")) return false;
+				if (!requireFinite(reservoir.lastBufferDischargeKW, where + "buffer discharge power")) return false;
+				if (!requireFinite(reservoir.bufferChargeKJ, where + "cumulative buffer charge energy")) return false;
+				if (!requireFinite(reservoir.bufferDischargeKJ, where + "cumulative buffer discharge energy")) return false;
 				totalAbsorbedKW += reservoir.authored.absorbedHeatKW;
 				totalRoutedKW += reservoir.lastHeatRoutedKW;
 				totalRejectedKW += reservoir.lastRejectedKW;
@@ -5687,6 +5933,41 @@ namespace core
 			for (auto const& radiator : radiators)
 				if (!requireFinite(radiator.lastRejectedKW,
 					"radiator '" + radiator.authored.id + "' rejected power")) return false;
+			// Thermal buffer storage ledger (#398): the store's starting
+			// energy plus what it charged minus what it discharged must equal
+			// the stored energy within the declared tolerance: energy enters
+			// or leaves the store only through the booked exchange, never a
+			// silent reset or an unexplained drain. The store never leaves
+			// its finite bounds, and neither direction may exceed its
+			// configured rate limit: a violation is a conservation failure,
+			// never a silent rounding.
+			for (auto const& buffer : thermalBuffers)
+			{
+				auto const where = "thermal buffer '" + buffer.authored.id + "' ";
+				if (!requireFinite(buffer.storedKJ, where + "stored energy")) return false;
+				if (!requireFinite(buffer.lastChargeKW, where + "charge power")) return false;
+				if (!requireFinite(buffer.lastDischargeKW, where + "discharge power")) return false;
+				if (!requireFinite(buffer.chargedKJ, where + "cumulative charged energy")) return false;
+				if (!requireFinite(buffer.dischargedKJ, where + "cumulative discharged energy")) return false;
+				auto const bound = StationBalanceTolerance * std::max(1.0,
+					std::max(std::abs(buffer.authored.startingEnergyKJ),
+						std::max(std::abs(buffer.chargedKJ), std::abs(buffer.dischargedKJ))));
+				auto const residual = buffer.authored.startingEnergyKJ + buffer.chargedKJ
+					- buffer.dischargedKJ - buffer.storedKJ;
+				if (!std::isfinite(residual) || std::abs(residual) > bound)
+					return violation = where + "storage ledger residual "
+						+ std::to_string(residual) + " exceeds tolerance "
+						+ std::to_string(StationBalanceTolerance), false;
+				if (buffer.storedKJ < -StationBalanceTolerance)
+					return violation = where + "stored energy went negative", false;
+				if (buffer.storedKJ > buffer.authored.capacityKJ + StationBalanceTolerance
+					* std::max(1.0, buffer.authored.capacityKJ))
+					return violation = where + "stored energy exceeds the buffer capacity", false;
+				if (buffer.lastChargeKW > buffer.authored.maxChargeKW + StationBalanceTolerance)
+					return violation = where + "charged above its configured rate limit", false;
+				if (buffer.lastDischargeKW > buffer.authored.maxDischargeKW + StationBalanceTolerance)
+					return violation = where + "discharged above its configured rate limit", false;
+			}
 			// #565: the station-wide thermal rollups the snapshot publishes
 			// are sums of individually finite terms; the aggregate must
 			// itself be finite before the tick that produced it can be
@@ -6836,6 +7117,23 @@ namespace core
 			state.sinkIndex = reservoirIndex[chiller.condenserReservoirId];
 			mImpl->chillers.push_back(std::move(state));
 		}
+		// Thermal buffers start holding their authored starting energy with
+		// their contracts resolved to the host reservoir and, in circulation
+		// mode, the gating coolant loop; the store, ledgers and exposure are
+		// runtime state reconstructed from the authored values on load and
+		// Reset (#398).
+		for (auto const& buffer : settings.thermalBuffers)
+		{
+			Impl::BufferState state;
+			state.authored = buffer;
+			state.reservoirIndex = reservoirIndex[buffer.reservoirId];
+			if (buffer.accessMode == "circulation")
+				state.gateLoopIndex = loopIndex[buffer.circulationLoopId];
+			state.storedKJ = buffer.startingEnergyKJ;
+			mImpl->thermalBuffers.push_back(std::move(state));
+			mImpl->reservoirs[state.reservoirIndex].bufferIndices.push_back(
+				mImpl->thermalBuffers.size() - 1);
+		}
 		// Generators start stopped with their contracts resolved to the
 		// fuel store and heat-sink reservoir they couple to; every phase,
 		// draw and ledger is runtime state reconstructed from the authored
@@ -7079,7 +7377,8 @@ namespace core
 				&settings.coolantLoops, &settings.chillers, &settings.generators,
 				&settings.atmospheres, &settings.airlockCycles, &settings.crews,
 				&settings.waterCollectors, &settings.waterTreatments,
-				&settings.electrolyzers, &settings.co2Captures, &settings.fuelCells};
+				&settings.electrolyzers, &settings.co2Captures, &settings.fuelCells,
+				&settings.thermalBuffers};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -7117,7 +7416,9 @@ namespace core
 			+ (settings.co2Captures.empty() ? std::string()
 				: ", " + std::to_string(settings.co2Captures.size()) + " CO2 capture machine(s)")
 			+ (settings.fuelCells.empty() ? std::string()
-				: ", " + std::to_string(settings.fuelCells.size()) + " fuel-cell backup unit(s)"));
+				: ", " + std::to_string(settings.fuelCells.size()) + " fuel-cell backup unit(s)")
+			+ (settings.thermalBuffers.empty() ? std::string()
+				: ", " + std::to_string(settings.thermalBuffers.size()) + " thermal buffer(s)"));
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
 	bool StationSystemsRuntime::advance(uint64_t tick, float seconds)
@@ -7174,7 +7475,7 @@ namespace core
 			|| !mImpl->airlockCycles.empty() || !mImpl->crews.empty()
 			|| !mImpl->waterCollectors.empty() || !mImpl->waterTreatments.empty()
 			|| !mImpl->electrolyzers.empty() || !mImpl->co2Captures.empty()
-			|| !mImpl->fuelCells.empty())
+			|| !mImpl->fuelCells.empty() || !mImpl->thermalBuffers.empty())
 		{
 			std::string violationSystem, violation;
 			if (!mImpl->applyLedger(tick, seconds, violationSystem, violation))
@@ -7449,6 +7750,8 @@ namespace core
 			reservoirResult.lastFuelCellHeatKW = reservoir.lastFuelCellHeatKW;
 			reservoirResult.fuelCellEnergyKJ = reservoir.fuelCellKJ;
 			reservoirResult.lastAtmosphereHeatKW = reservoir.lastAtmosphereHeatKW;
+			reservoirResult.lastBufferChargeKW = reservoir.lastBufferChargeKW;
+			reservoirResult.lastBufferDischargeKW = reservoir.lastBufferDischargeKW;
 			reservoirResult.lastHeatInKW = reservoir.lastHeatInKW;
 			reservoirResult.lastRejectedKW = reservoir.lastRejectedKW;
 			reservoirResult.lastNetKW = reservoir.lastNetKW;
@@ -7464,11 +7767,14 @@ namespace core
 			reservoirResult.condenserEnergyKJ = reservoir.condenserKJ;
 			reservoirResult.generatorEnergyKJ = reservoir.generatorKJ;
 			reservoirResult.atmosphereEnergyKJ = reservoir.atmosphereKJ;
+			reservoirResult.bufferChargeEnergyKJ = reservoir.bufferChargeKJ;
+			reservoirResult.bufferDischargeEnergyKJ = reservoir.bufferDischargeKJ;
 			reservoirResult.rejectedEnergyKJ = reservoir.rejectedKJ;
 			reservoirResult.residualKJ = reservoirResult.startingEnergyKJ
 				+ reservoir.absorbedKJ + reservoir.routedKJ + reservoir.loopKJ
 				+ reservoir.condenserKJ + reservoir.generatorKJ + reservoir.electrolysisKJ
 				+ reservoir.fuelCellKJ + reservoir.atmosphereKJ
+				+ reservoir.bufferDischargeKJ - reservoir.bufferChargeKJ
 				- reservoir.rejectedKJ - reservoirResult.currentEnergyKJ;
 			result.thermal.totalAbsorbedKW += reservoir.authored.absorbedHeatKW;
 			result.thermal.totalRoutedKW += reservoir.lastHeatRoutedKW;
@@ -7579,6 +7885,55 @@ namespace core
 			result.thermal.totalCoolingUnmetKW += chillerResult.coolingUnmetKW;
 			result.thermal.totalCondenserHeatKW += chiller.lastCondenserKW;
 			result.chillers.push_back(std::move(chillerResult));
+		}
+		for (auto const& buffer : mImpl->thermalBuffers)
+		{
+			result.thermal.totalBufferStoredKJ += buffer.storedKJ;
+			result.thermal.totalBufferAvailableCapacityKJ +=
+				buffer.authored.capacityKJ - buffer.storedKJ;
+			result.thermal.totalBufferChargeKW += buffer.lastChargeKW;
+			result.thermal.totalBufferDischargeKW += buffer.lastDischargeKW;
+		}
+		// The thermal buffer snapshot reports the authored contract beside
+		// the finite stored energy, the derived buffer temperature across
+		// the usable band, the access gate state, the charge and discharge
+		// actually moved this tick, the exhaustion flags and the closing
+		// storage ledger (#398). Stored energy is distinct from any
+		// instantaneous temperature reading: the store's own derived
+		// temperature says how full it is, not how hot the host is.
+		for (auto const& buffer : mImpl->thermalBuffers)
+		{
+			StationThermalBufferSnapshot bufferResult;
+			auto const& authored = buffer.authored;
+			bufferResult.id = authored.id;
+			bufferResult.reservoirId = authored.reservoirId;
+			bufferResult.accessMode = authored.accessMode;
+			bufferResult.circulationLoopId = authored.circulationLoopId;
+			bufferResult.capacityKJ = authored.capacityKJ;
+			bufferResult.storedEnergyKJ = buffer.storedKJ;
+			bufferResult.availableCapacityKJ = authored.capacityKJ - buffer.storedKJ;
+			auto const band = authored.maxUsableTemperatureC - authored.minUsableTemperatureC;
+			bufferResult.bufferTemperatureC = authored.minUsableTemperatureC
+				+ buffer.storedKJ * band / authored.capacityKJ;
+			bufferResult.fillFraction = buffer.storedKJ / authored.capacityKJ;
+			bufferResult.minUsableTemperatureC = authored.minUsableTemperatureC;
+			bufferResult.maxUsableTemperatureC = authored.maxUsableTemperatureC;
+			bufferResult.maxChargeKW = authored.maxChargeKW;
+			bufferResult.maxDischargeKW = authored.maxDischargeKW;
+			bufferResult.transferConductanceKWPerK = authored.transferConductanceKWPerK;
+			bufferResult.accessible = buffer.lastAccessible;
+			bufferResult.lastChargeKW = buffer.lastChargeKW;
+			bufferResult.lastDischargeKW = buffer.lastDischargeKW;
+			bufferResult.full = buffer.lastFull;
+			bufferResult.depleted = buffer.lastDepleted;
+			bufferResult.lastLimiter = buffer.lastLimiter;
+			bufferResult.startingEnergyKJ = authored.startingEnergyKJ;
+			bufferResult.chargedEnergyKJ = buffer.chargedKJ;
+			bufferResult.dischargedEnergyKJ = buffer.dischargedKJ;
+			bufferResult.residualKJ = authored.startingEnergyKJ + buffer.chargedKJ
+				- buffer.dischargedKJ - buffer.storedKJ;
+			bufferResult.status = buffer.status;
+			result.thermalBuffers.push_back(std::move(bufferResult));
 		}
 		for (auto const* thermalClass : StationThermalServiceClasses)
 		{

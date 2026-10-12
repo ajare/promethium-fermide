@@ -799,7 +799,16 @@ namespace core
 		// dropped. The consumed reactants, delivered water and power,
 		// routed heat and endurance stay runtime-only, so load and Reset
 		// reconstruct them from the authored starting conditions.
-		serializer.writeUint32("version", 80);
+		// Version 81 adds authored finite thermal buffers (#398): phase-
+		// change-style stores coupled to a declared host reservoir with a
+		// configured access mode (circulation-gated or passive-conductance),
+		// a finite capacity and starting energy across a declared usable
+		// temperature band, and charge/discharge rate limits; a pre-81
+		// document carrying `thermalBuffers` is refused rather than silently
+		// dropped. The stored energy, charge/discharge results and the
+		// storage ledgers stay runtime-only, so load and Reset reconstruct
+		// them from the authored starting conditions.
+		serializer.writeUint32("version", 81);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -1285,6 +1294,30 @@ namespace core
 					serializer.writeDouble("efficiency", cell.efficiency);
 					serializer.writeDouble("commandedOutputKW", cell.commandedOutputKW);
 					serializer.writeDouble("maxSinkTemperatureC", cell.maxSinkTemperatureC);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.thermalBuffers.empty())
+			{
+				// Authored thermal buffer contracts only; the stored energy,
+				// the charge and discharge actually moved and the storage
+				// ledgers are runtime state reconstructed on load (#398).
+				serializer.beginArray("thermalBuffers");
+				for (auto const& buffer : mStationSystemsSettings.thermalBuffers)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", buffer.id);
+					serializer.writeString("reservoirId", buffer.reservoirId);
+					serializer.writeString("accessMode", buffer.accessMode);
+					serializer.writeString("circulationLoopId", buffer.circulationLoopId);
+					serializer.writeDouble("capacityKJ", buffer.capacityKJ);
+					serializer.writeDouble("startingEnergyKJ", buffer.startingEnergyKJ);
+					serializer.writeDouble("minUsableTemperatureC", buffer.minUsableTemperatureC);
+					serializer.writeDouble("maxUsableTemperatureC", buffer.maxUsableTemperatureC);
+					serializer.writeDouble("maxChargeKW", buffer.maxChargeKW);
+					serializer.writeDouble("maxDischargeKW", buffer.maxDischargeKW);
+					serializer.writeDouble("transferConductanceKWPerK", buffer.transferConductanceKWPerK);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -2213,7 +2246,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 80)
+		if (version < 1 || version > 81)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2747,6 +2780,31 @@ namespace core
 					cell.commandedOutputKW = serializer.readDouble("commandedOutputKW");
 					cell.maxSinkTemperatureC = serializer.readDouble("maxSinkTemperatureC");
 					stationSettings.fuelCells.push_back(std::move(cell));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("thermalBuffers"))
+			{
+				if (version < 81) throw SerializationException(
+					"Station thermal buffers require World schema 81");
+				serializer.beginArray("thermalBuffers");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					ThermalBufferSettings buffer;
+					buffer.id = serializer.readString("id");
+					buffer.reservoirId = serializer.readString("reservoirId");
+					buffer.accessMode = serializer.readString("accessMode");
+					buffer.circulationLoopId = serializer.readString("circulationLoopId");
+					buffer.capacityKJ = serializer.readDouble("capacityKJ");
+					buffer.startingEnergyKJ = serializer.readDouble("startingEnergyKJ");
+					buffer.minUsableTemperatureC = serializer.readDouble("minUsableTemperatureC");
+					buffer.maxUsableTemperatureC = serializer.readDouble("maxUsableTemperatureC");
+					buffer.maxChargeKW = serializer.readDouble("maxChargeKW");
+					buffer.maxDischargeKW = serializer.readDouble("maxDischargeKW");
+					buffer.transferConductanceKWPerK = serializer.readDouble("transferConductanceKWPerK");
+					stationSettings.thermalBuffers.push_back(std::move(buffer));
 					serializer.endMap();
 				}
 				serializer.endArray();

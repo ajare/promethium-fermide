@@ -1440,6 +1440,109 @@ namespace
 		require(driver.passed(), "Generator workflow failed on the Test Engine");
 	}
 }
+void bufferWorkflow(smoke::Context const&)
+{
+	using smoke::require;
+	headless::ScopedImGuiContext context;
+	auto& io = ImGui::GetIO();
+	io.DisplaySize = {1200, 1700};
+	io.Fonts->AddFontDefault(); io.Fonts->Build();
+	DocumentHistory history;
+	StationSystemsWindow window;
+	auto world = std::make_shared<core::World>("Buffer editor", 2, 2);
+	world->pauseSimulation(); world->finishBuild();
+	std::string diagnostic;
+	core::StationSystemsSettings initial;
+	initial.enabled = true;
+	initial.observationIntervalSeconds = 2.0f;
+	core::ThermalReservoirSettings host;
+	host.id = "host";
+	host.thermalClass = "moderate";
+	host.heatCapacityKJPerK = 100.0;
+	host.startingTemperatureC = 50.0;
+	host.minTemperatureC = 0.0;
+	host.maxTemperatureC = 200.0;
+	host.absorbedHeatKW = 10.0;
+	core::ThermalBufferSettings buf;
+	buf.id = "buf";
+	buf.reservoirId = "host";
+	buf.accessMode = "passive";
+	buf.capacityKJ = 1000.0;
+	buf.startingEnergyKJ = 0.0;
+	buf.minUsableTemperatureC = 0.0;
+	buf.maxUsableTemperatureC = 40.0;
+	buf.maxChargeKW = 20.0;
+	buf.maxDischargeKW = 20.0;
+	buf.transferConductanceKWPerK = 1e6;
+	initial.thermalReservoirs.push_back(host);
+	initial.thermalBuffers.push_back(buf);
+	require(world->configureStationSystems(initial, false, &diagnostic), diagnostic.c_str());
+	headless::TestEngineDriver driver([&]
+	{
+		ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 1650});
+		window.render(world, history);
+	});
+	window.visible = true;
+	driver.frame(); driver.frame();
+	#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+
+	driver.run("station", "bufferWorkflow", [&](ImGuiTestContext* ctx)
+	{
+		ctx->SetRef("Station Systems");
+		REQ(driver.contains("1 thermal buffer(s)"),
+			"Authored thermal buffer count missing from the window");
+		// Run: the live view shows the buffer absorbing the host's cooling
+		// deficit, its stored energy growing, and the closing storage ledger;
+		// ticking never dirties the authored document.
+		world->markSaved();
+		world->resumeSimulation(); REQ(world->advanceTicks(600), "Buffer editor run failed");
+		world->pauseSimulation(); ctx->Sleep(1);
+		REQ(driver.contains("buf -> host [passive]")
+			&& driver.contains("stored") && driver.contains("kJ")
+			&& driver.contains("energy ledger (kJ)") && driver.contains("residual"),
+			"Live buffer charge state or storage ledger not displayed");
+		REQ(!world->isModified(), "Buffer ticking dirtied the authored document");
+		// An invalid drafted buffer is refused with a visible diagnostic and
+		// never reaches the authored settings: a circulation buffer with no
+		// declared loop cannot be applied.
+		driver.click(ctx, "Add thermal buffer");
+		driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+		driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+		REQ(driver.contains("circulation access references unknown coolant loop"),
+			"Circulation buffer with no loop diagnostic not shown");
+		REQ(world->getStationSystemsSettings().thermalBuffers.size() == 1
+			&& history.undoCount() == 0 && world->getSimulationTick() == 600,
+			"Invalid buffer draft mutated the authored settings");
+		// Repair the drafted buffer to a valid passive store; the confirmed
+		// reset applies the contract and the live view restarts from authored state.
+		driver.typeValue(ctx, "Buffer 1 access mode (circulation|passive)", "passive");
+		driver.click(ctx, "Confirm World reset");
+		REQ(world->getStationSystemsSettings().thermalBuffers.size() == 2
+			&& world->getStationSystemsSettings().thermalBuffers[1].accessMode == "passive"
+			&& world->getStationSystemsSettings().thermalBuffers[1].reservoirId == "host"
+			&& history.undoCount() == 1 && world->getSimulationTick() == 0,
+			"Repaired buffer draft did not apply through the reset-confirmed flow");
+		ctx->Sleep(1);
+		REQ(driver.contains("2 thermal buffer(s)")
+			&& driver.contains("buffer2 -> host [passive]"),
+			"Applied buffer not reflected in the window");
+		// A starting energy above capacity is refused. The tick is back at
+		// zero after the applied reset, so Apply runs directly without the
+		// World-reset confirmation.
+		driver.click(ctx, "Add thermal buffer");
+		driver.typeValue(ctx, "Buffer 2 access mode (circulation|passive)", "passive");
+		driver.typeValue(ctx, "Buffer 2 starting energy kJ", "5000");
+		driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+		REQ(driver.contains("starting energy must be finite and within capacity"),
+			"Buffer starting-above-capacity diagnostic not shown");
+		// Cancelling a further edit restores the authored contracts.
+		driver.click(ctx, "Cancel edits");
+		REQ(world->getStationSystemsSettings().thermalBuffers.size() == 2,
+			"Cancelled buffer edit did not restore the authored contracts");
+	});
+	#undef REQ
+	require(driver.passed(), "Buffer workflow failed on the Test Engine");
+}
 void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"station/windowWorkflow", workflow});
@@ -1454,4 +1557,5 @@ void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 	checks.push_back({"station/coolantWorkflow", coolantWorkflow});
 	checks.push_back({"station/chillerWorkflow", chillerWorkflow});
 	checks.push_back({"station/generatorWorkflow", generatorWorkflow});
+	checks.push_back({"station/bufferWorkflow", bufferWorkflow});
 }
