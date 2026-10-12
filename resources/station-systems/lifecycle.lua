@@ -160,7 +160,7 @@ local function energyUnitsToKWh(unit)
 end
 
 return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries,
-    reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)
+    reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)
     assert(type(name) == "string")
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
@@ -176,6 +176,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     assert(type(generators) == "table", "generator descriptors missing")
     assert(type(atmospheres) == "table", "atmosphere descriptors missing")
     assert(type(airlockCycles) == "table", "airlock cycle descriptors missing")
+    assert(type(crews) == "table", "crew descriptors missing")
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
@@ -185,6 +186,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         solar = {}, loads = {}, load_order = {}, batteries = {},
         deliveries = {}, reservoirs = {}, radiators = {}, coolant_loops = {},
         chillers = {}, generators = {}, atmospheres = {}, airlock_cycles = {},
+        crews = {},
     }
     local by_id = {}
     for index = 1, #stores do
@@ -1082,6 +1084,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             vapourAdded = 0, condensed = 0,
             leaked = 0, recovered = 0, lost = 0,
             occupantHeatKJ = 0, latentHeatKJ = 0, exchangedKJ = 0,
+            crewHeatKJ = 0,
         }
         atmosphere_by_id[atmosphere.id] = object.atmospheres[index]
     end
@@ -1127,6 +1130,105 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             recoveredTotal = 0,
             lostTotal = 0,
             exhausted = false,
+        }
+    end
+    -- Crew contracts (#401): an authored population with an activity
+    -- profile whose metabolism draws food and water from compound mass
+    -- stores and oxygen from one compartment atmosphere, returning CO2,
+    -- moisture and metabolic heat to that compartment and urine and
+    -- organic waste to their own finite compound stores. The crew is a
+    -- configured population, never derived from World Agents. The
+    -- sandbox mirrors the host's uniform-scale metabolism and re-audits
+    -- the authored closures: emitted mass may not exceed consumed mass,
+    -- every returned constituent (urine, organic waste and respired
+    -- moisture) must be funded by the consumed food and water, and the
+    -- declared metabolic heat may not exceed the consumed food energy
+    -- minus the energy still bound in the waste streams. A crew that
+    -- would create mass, constituents or energy out of nothing is
+    -- refused at construction, contained like any other bad descriptor.
+    assert(#crews <= 8, 'station crews are limited to 8 entries')
+    for index = 1, #crews do
+        local crew = crews[index]
+        assert(type(crew) == 'table', 'crew descriptor must be a table')
+        assert(type(crew.id) == 'string' and #crew.id > 0, 'crew needs an id')
+        local compartment = atmosphere_by_id[crew.atmosphere]
+        assert(compartment ~= nil, 'crew atmosphere compartment is unknown')
+        assert(type(crew.crewCount) == 'number'
+            and crew.crewCount == math.tointeger(crew.crewCount)
+            and crew.crewCount >= 0, 'crew count must be a non-negative integer')
+        local activity = crew.activity
+            or { constantLevel = 1, periodSeconds = 0, segments = {} }
+        checkProfile(activity, 'crew ' .. crew.id .. ' activity profile')
+        local rateFields = {
+            { crew.foodRate, 'food rate' }, { crew.waterRate, 'water rate' },
+            { crew.oxygenRateKgPerS, 'oxygen rate' }, { crew.co2RateKgPerS, 'CO2 rate' },
+            { crew.moistureRateKgPerS, 'moisture rate' }, { crew.urineRate, 'urine rate' },
+            { crew.organicWasteRate, 'organic waste rate' },
+            { crew.metabolicHeatKW, 'metabolic heat' },
+        }
+        for _, entry in ipairs(rateFields) do
+            assert(type(entry[1]) == 'number' and entry[1] == entry[1]
+                and entry[1] >= 0 and entry[1] < math.huge,
+                'crew ' .. entry[2] .. ' must be finite and non-negative')
+        end
+        local streamRoles = { 'food', 'water', 'urine', 'organic waste' }
+        local streamIds = { crew.foodStore, crew.waterStore, crew.urineStore,
+            crew.organicWasteStore }
+        local streams = {}
+        for stream = 1, 4 do
+            local store = by_id[streamIds[stream]]
+            assert(store ~= nil, 'crew ' .. streamRoles[stream] .. ' store is unknown')
+            assert(store.composition ~= nil,
+                'crew ' .. streamRoles[stream] .. ' store must declare a composition')
+            streams[stream] = store
+        end
+        local food, water, urine, waste = streams[1], streams[2], streams[3], streams[4]
+        local foodKg = toKg(food.unit, crew.foodRate)
+        local waterKg = toKg(water.unit, crew.waterRate)
+        local urineKg = toKg(urine.unit, crew.urineRate)
+        local wasteKg = toKg(waste.unit, crew.organicWasteRate)
+        local consumedKg = foodKg + waterKg + crew.oxygenRateKgPerS
+        local emittedKg = urineKg + wasteKg + crew.moistureRateKgPerS + crew.co2RateKgPerS
+        assert(emittedKg <= consumedKg + BALANCE_TOLERANCE * math.max(1, consumedKg),
+            'crew ' .. crew.id
+                .. ' declared returns exceed declared consumption: metabolism may not create mass')
+        local funded = {}
+        addConstituents(funded, food.composition, foodKg, 1)
+        addConstituents(funded, water.composition, waterKg, 1)
+        local returned = {}
+        addConstituents(returned, urine.composition, urineKg, 1)
+        addConstituents(returned, waste.composition, wasteKg, 1)
+        returned.water = (returned.water or 0) + crew.moistureRateKgPerS
+        for constituent, amount in pairs(returned) do
+            local available = funded[constituent] or 0
+            assert(amount <= available + BALANCE_TOLERANCE * math.max(1, math.abs(available)),
+                'crew ' .. crew.id .. " returns more '" .. constituent
+                    .. "' than the consumed food and water carry: the element balance may not be created")
+        end
+        local function streamEnergy(composition, wetKg)
+            return wetKg * (1 - composition.moisture) * composition.energyKJPerKgDry
+        end
+        local releasedKJPerS = streamEnergy(food.composition, foodKg)
+            - streamEnergy(urine.composition, urineKg)
+            - streamEnergy(waste.composition, wasteKg)
+        assert(crew.metabolicHeatKW <= releasedKJPerS
+            + BALANCE_TOLERANCE * math.max(1, math.abs(releasedKJPerS)),
+            'crew ' .. crew.id .. ' metabolic heat exceeds the consumed food energy minus the energy still bound in the waste streams')
+        object.crews[index] = {
+            id = crew.id,
+            compartment = compartment,
+            crewCount = crew.crewCount,
+            activity = readProfile(activity),
+            food = food, water = water, urine = urine, organicWaste = waste,
+            foodRate = crew.foodRate, waterRate = crew.waterRate,
+            oxygenRate = crew.oxygenRateKgPerS, co2Rate = crew.co2RateKgPerS,
+            moistureRate = crew.moistureRateKgPerS, urineRate = crew.urineRate,
+            organicWasteRate = crew.organicWasteRate, heatRate = crew.metabolicHeatKW,
+            lastActivity = 0, lastScale = 0, lastLimiter = '',
+            foodConsumed = 0, waterConsumed = 0, oxygenConsumed = 0,
+            co2Produced = 0, moistureProduced = 0, urineProduced = 0,
+            organicWasteProduced = 0, heatKJ = 0, retainedKg = 0,
+            lastUnmet = false,
         }
     end
     -- Declared deterministic order: priority descending, declaration index
@@ -1299,6 +1401,136 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     -- exchange accounted once on each side.
     -- the ideal-gas partial pressure and Magnus saturation formulas
     -- moved above the constructor so the authoring audit can use them.
+    -- Crew metabolism (#401): one uniform metabolic scale per crew per
+    -- tick - the smallest of the input-supply fractions (food and water
+    -- drawable above the protected reserve, the compartment's oxygen
+    -- actually present) and the output-headroom fractions (the urine
+    -- and organic-waste stores' remaining capacity). Every pathway -
+    -- consumption and return alike - scales by that one number
+    -- together, so absent material never generates nominal waste and a
+    -- backed-up waste tank throttles consumption with its returns.
+    -- The requested-versus-actual remainder is explicit per pathway.
+    -- The crew reads only the authored stores and compartment; no Agent
+    -- state is touched. Runs after the scheduled airlock cycles and
+    -- before the compartment integrates, mirroring the host order.
+    local function applyCrews(self, elapsed, fixed_seconds)
+        for _, crew in ipairs(self.crews) do
+            local compartment = crew.compartment
+            local activity = evaluateProfile(crew.activity, elapsed)
+            local crewSeconds = crew.crewCount * activity * fixed_seconds
+            local foodRequested = crew.foodRate * crewSeconds
+            local waterRequested = crew.waterRate * crewSeconds
+            local oxygenRequested = crew.oxygenRate * crewSeconds
+            local co2Requested = crew.co2Rate * crewSeconds
+            local moistureRequested = crew.moistureRate * crewSeconds
+            local urineRequested = crew.urineRate * crewSeconds
+            local wasteRequested = crew.organicWasteRate * crewSeconds
+            local heatFull = crew.heatRate * crew.crewCount * activity
+            local scale = 1
+            local limiter = ''
+            local function capSupply(store, requested, label)
+                if requested <= 0 then return end
+                local drawable = math.max(0, store.qualified - store.protected_reserve)
+                local fraction = drawable / requested
+                if fraction < scale then
+                    scale = fraction
+                    limiter = label .. " store '" .. store.id
+                        .. (store.protected_reserve > 0
+                            and "' usable inventory is at its protected reserve"
+                            or "' usable inventory is empty")
+                end
+            end
+            local function capHeadroom(store, produced, label)
+                if produced <= 0 then return end
+                local headroom = store.capacity - (store.qualified + store.unqualified)
+                local fraction = headroom / produced
+                if fraction < scale then
+                    scale = fraction
+                    limiter = label .. " store '" .. store.id .. "' is at capacity"
+                end
+            end
+            capSupply(crew.food, foodRequested, 'food')
+            capSupply(crew.water, waterRequested, 'water')
+            if oxygenRequested > 0 then
+                local fraction = math.max(0, compartment.oxygen) / oxygenRequested
+                if fraction < scale then
+                    scale = fraction
+                    limiter = "compartment '" .. compartment.id
+                        .. "' oxygen inventory cannot supply the draw"
+                end
+            end
+            capHeadroom(crew.urine, urineRequested, 'urine')
+            capHeadroom(crew.organicWaste, wasteRequested, 'organic waste')
+            if not (scale > 0) then scale = 0 end
+            if scale > 1 then scale = 1 end
+            local function drawCapped(store, requested)
+                local drawable = math.max(0, store.qualified - store.protected_reserve)
+                local completed = math.min(requested * scale, drawable)
+                store.qualified = store.qualified - completed
+                return completed
+            end
+            local function deliverCapped(store, requested)
+                local headroom = store.capacity - (store.qualified + store.unqualified)
+                local completed = math.min(requested * scale, headroom)
+                store.qualified = store.qualified + completed
+                return completed
+            end
+            local foodActual = drawCapped(crew.food, foodRequested)
+            local waterActual = drawCapped(crew.water, waterRequested)
+            local oxygenActual = math.min(oxygenRequested * scale,
+                math.max(0, compartment.oxygen))
+            compartment.oxygen = compartment.oxygen - oxygenActual
+            compartment.oxygenConsumed = compartment.oxygenConsumed + oxygenActual
+            -- The returns scale with the metabolism that actually ran,
+            -- never with the nominal demand.
+            local co2Actual = co2Requested * scale
+            compartment.carbonDioxide = compartment.carbonDioxide + co2Actual
+            compartment.co2Produced = compartment.co2Produced + co2Actual
+            local moistureActual = moistureRequested * scale
+            compartment.waterVapour = compartment.waterVapour + moistureActual
+            compartment.vapourAdded = compartment.vapourAdded + moistureActual
+            local urineActual = deliverCapped(crew.urine, urineRequested)
+            local wasteActual = deliverCapped(crew.organicWaste, wasteRequested)
+            local heatKW = heatFull * scale
+            compartment.crewHeat = (compartment.crewHeat or 0) + heatKW
+            -- Boundary ledgers: consumption is a loss and the waste
+            -- returns are negative loss, exactly like conversion flows,
+            -- so the unit and constituent boundaries stay closed.
+            self.unit_loss[crew.food.unit] = (self.unit_loss[crew.food.unit] or 0) + foodActual
+            self.unit_loss[crew.water.unit] = (self.unit_loss[crew.water.unit] or 0) + waterActual
+            self.unit_loss[crew.urine.unit] = (self.unit_loss[crew.urine.unit] or 0) - urineActual
+            self.unit_loss[crew.organicWaste.unit] =
+                (self.unit_loss[crew.organicWaste.unit] or 0) - wasteActual
+            local net = {}
+            addConstituents(net, crew.food.composition, toKg(crew.food.unit, foodActual), -1)
+            addConstituents(net, crew.water.composition, toKg(crew.water.unit, waterActual), -1)
+            addConstituents(net, crew.urine.composition, toKg(crew.urine.unit, urineActual), 1)
+            addConstituents(net, crew.organicWaste.composition,
+                toKg(crew.organicWaste.unit, wasteActual), 1)
+            for constituent, change in pairs(net) do
+                self.constituent_loss[constituent] =
+                    (self.constituent_loss[constituent] or 0) - change
+            end
+            local retained = toKg(crew.food.unit, foodActual)
+                + toKg(crew.water.unit, waterActual) + oxygenActual
+                - co2Actual - moistureActual
+                - toKg(crew.urine.unit, urineActual)
+                - toKg(crew.organicWaste.unit, wasteActual)
+            crew.lastActivity = activity
+            crew.lastScale = scale
+            crew.lastLimiter = scale >= 1 - 1e-12 and '' or limiter
+            crew.foodConsumed = crew.foodConsumed + foodActual
+            crew.waterConsumed = crew.waterConsumed + waterActual
+            crew.oxygenConsumed = crew.oxygenConsumed + oxygenActual
+            crew.co2Produced = crew.co2Produced + co2Actual
+            crew.moistureProduced = crew.moistureProduced + moistureActual
+            crew.urineProduced = crew.urineProduced + urineActual
+            crew.organicWasteProduced = crew.organicWasteProduced + wasteActual
+            crew.heatKJ = crew.heatKJ + heatKW * fixed_seconds
+            crew.retainedKg = crew.retainedKg + retained
+            crew.lastUnmet = scale < 1 - 1e-12
+        end
+    end
     local function applyAtmospheres(self, elapsed, fixed_seconds)
         local cycles = {}
         for index = 1, #self.airlock_cycles do
@@ -1362,6 +1594,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             cycle.lostTotal = cycle.lostTotal + lost
             if cycle.recurrenceSeconds <= 0 then cycle.exhausted = true end
         end
+        -- Crews metabolise after the scheduled cycles and before the
+        -- compartments integrate (#401): the oxygen draw sees the
+        -- post-cycle inventory and the returns enter the coupled
+        -- vapour/thermal solve.
+        applyCrews(self, elapsed, fixed_seconds)
         for _, compartment in ipairs(self.atmospheres) do
             local occupants = compartment.occupants
             -- Occupancy is an authored load assignment: the oxygen draw
@@ -1418,13 +1655,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             -- condensate leaves the gas phase and is reported, never
             -- destroyed; it does not re-evaporate in this slice.
             local occupantHeat = occupants * compartment.sensibleHeat * metabolicFraction
+            local crewHeat = compartment.crewHeat or 0
+            compartment.crewHeat = 0
             local exchange = compartment.pendingExchangeKW or 0
             if compartment.reservoir then
                 compartment.reservoir.atmosphereHeat =
                     (compartment.reservoir.atmosphereHeat or 0) - exchange
             end
             local freeTemperature = compartment.temperature
-                + (occupantHeat + exchange) * fixed_seconds / compartment.capacity
+                + (occupantHeat + crewHeat + exchange) * fixed_seconds / compartment.capacity
             local condensed = 0
             if compartment.waterVapour > saturatedVapourMassKg(
                 saturationVapourPressureKPa(freeTemperature),
@@ -1452,6 +1691,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             compartment.temperature = freeTemperature
                 + LATENT_HEAT_VAPORIZATION * condensed / compartment.capacity
             compartment.occupantHeatKJ = compartment.occupantHeatKJ + occupantHeat * fixed_seconds
+            compartment.crewHeatKJ = compartment.crewHeatKJ + crewHeat * fixed_seconds
             compartment.latentHeatKJ = compartment.latentHeatKJ + latentHeat * fixed_seconds
             compartment.exchangedKJ = compartment.exchangedKJ + exchange * fixed_seconds
         end
@@ -2791,12 +3031,14 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             assert(splitResidual == splitResidual and math.abs(splitResidual) <= bound,
                 "atmosphere '" .. compartment.id
                     .. "' airlock recovered/lost split residual exceeds tolerance")
-            -- Thermal closure: starting + occupant heat + latent heat +
-            -- exchanged from the reservoir must equal the compartment's
-            -- current capacity x temperature within the tolerance.
+            -- Thermal closure: starting + occupant heat + crew heat
+            -- (#401) + latent heat + exchanged from the reservoir must
+            -- equal the compartment's current capacity x temperature
+            -- within the tolerance.
             local startingEnergy = compartment.capacity * compartment.startingTemperature
             local thermalBound = BALANCE_TOLERANCE * math.max(1, math.abs(startingEnergy))
             local thermalResidual = startingEnergy + compartment.occupantHeatKJ
+                + compartment.crewHeatKJ
                 + compartment.latentHeatKJ + compartment.exchangedKJ
                 - compartment.capacity * compartment.temperature
             assert(thermalResidual == thermalResidual and math.abs(thermalResidual) <= thermalBound,
@@ -2807,6 +3049,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 compartment.leaked, compartment.recovered, compartment.lost,
                 compartment.condensed, compartment.oxygenConsumed, compartment.co2Produced,
                 compartment.vapourAdded, compartment.occupantHeatKJ,
+                compartment.crewHeatKJ,
                 compartment.latentHeatKJ, compartment.exchangedKJ }
             for _, value in ipairs(values) do
                 assert(isFinite(value),
@@ -2842,6 +3085,38 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     .. "' recovered/lost totals do not close over the removed mass")
         end
     end
+    -- Crew ledger audit (#401): the crew's own account closes over its
+    -- pathways - consumed (food + water + oxygen) equals returned (CO2
+    -- + moisture + urine + organic waste) plus retained body mass
+    -- within the declared tolerance - the retained mass is never
+    -- negative (the crew cannot emit more than it consumed), and the
+    -- metabolic scale stays within [0, 1]. Store- and constituent-level
+    -- closure of the crew's draws and returns is enforced by the shared
+    -- unit and constituent boundary audits; this closes the crew's own
+    -- consumption/return/retained account.
+    local function checkCrews(self)
+        for _, crew in ipairs(self.crews) do
+            assert(isFinite(crew.foodConsumed) and isFinite(crew.waterConsumed)
+                and isFinite(crew.oxygenConsumed) and isFinite(crew.co2Produced)
+                and isFinite(crew.moistureProduced) and isFinite(crew.urineProduced)
+                and isFinite(crew.organicWasteProduced) and isFinite(crew.heatKJ)
+                and isFinite(crew.retainedKg) and isFinite(crew.lastScale)
+                and isFinite(crew.lastActivity),
+                "crew '" .. crew.id .. "' ledger is not finite")
+            assert(crew.lastScale >= 0 and crew.lastScale <= 1 + 1e-12,
+                "crew '" .. crew.id .. "' metabolic scale left the declared range")
+            local consumed = toKg(crew.food.unit, crew.foodConsumed)
+                + toKg(crew.water.unit, crew.waterConsumed) + crew.oxygenConsumed
+            local returned = toKg(crew.urine.unit, crew.urineProduced)
+                + toKg(crew.organicWaste.unit, crew.organicWasteProduced)
+                + crew.co2Produced + crew.moistureProduced
+            local bound = BALANCE_TOLERANCE * math.max(1, consumed)
+            assert(crew.retainedKg >= -bound,
+                "crew '" .. crew.id .. "' retained body mass is negative")
+            assert(math.abs(crew.retainedKg - (consumed - returned)) <= bound,
+                "crew '" .. crew.id .. "' consumed/returned/retained ledger does not close")
+        end
+    end
     function object:advance(world_tick, fixed_seconds)
         assert(world_tick > 0 and fixed_seconds > 0)
         checkFiniteLimits(self)
@@ -2863,6 +3138,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         checkConstituentConservation(self)
         checkThermal(self)
         checkAtmospheres(self)
+        checkCrews(self)
         self.ticks = self.ticks + 1
         return self.ticks
     end
@@ -2871,5 +3147,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     checkConstituentConservation(object)
     checkThermal(object)
     checkAtmospheres(object)
+    checkCrews(object)
     return object
 end

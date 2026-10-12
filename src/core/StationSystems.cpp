@@ -72,6 +72,7 @@ namespace core
 			std::vector<GeneratorSettings> const* generators;
 			std::vector<AtmosphereSettings> const* atmospheres;
 			std::vector<AirlockCycleSettings> const* airlockCycles;
+			std::vector<CrewSettings> const* crews;
 			static void pushProfile(lua_State* state, ProfileSettings const& profile)
 			{
 				lua_createtable(state, 0, 3);
@@ -394,7 +395,34 @@ namespace core
 					lua_pushinteger(state, cycle.priority); lua_setfield(state, -2, "priority");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 15, 1);
+				// Authored crew contracts cross the same boundary as plain
+				// immutable descriptors (#401); each sandbox mirrors the
+				// uniform-scale metabolism and audits its own closure.
+				lua_createtable(state, static_cast<int>(crews->size()), 0);
+				for (size_t index = 0; index < crews->size(); ++index)
+				{
+					auto const& crew = (*crews)[index];
+					lua_createtable(state, 0, 14);
+					lua_pushstring(state, crew.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, crew.atmosphereId.c_str()); lua_setfield(state, -2, "atmosphere");
+					lua_pushinteger(state, crew.crewCount); lua_setfield(state, -2, "crewCount");
+					pushProfile(state, crew.activityProfile);
+					lua_setfield(state, -2, "activity");
+					lua_pushstring(state, crew.foodStoreId.c_str()); lua_setfield(state, -2, "foodStore");
+					lua_pushstring(state, crew.waterStoreId.c_str()); lua_setfield(state, -2, "waterStore");
+					lua_pushstring(state, crew.urineStoreId.c_str()); lua_setfield(state, -2, "urineStore");
+					lua_pushstring(state, crew.organicWasteStoreId.c_str()); lua_setfield(state, -2, "organicWasteStore");
+					lua_pushnumber(state, crew.foodPerCrewPerS); lua_setfield(state, -2, "foodRate");
+					lua_pushnumber(state, crew.waterPerCrewPerS); lua_setfield(state, -2, "waterRate");
+					lua_pushnumber(state, crew.oxygenPerCrewKgPerS); lua_setfield(state, -2, "oxygenRateKgPerS");
+					lua_pushnumber(state, crew.co2PerCrewKgPerS); lua_setfield(state, -2, "co2RateKgPerS");
+					lua_pushnumber(state, crew.moisturePerCrewKgPerS); lua_setfield(state, -2, "moistureRateKgPerS");
+					lua_pushnumber(state, crew.urinePerCrewPerS); lua_setfield(state, -2, "urineRate");
+					lua_pushnumber(state, crew.organicWastePerCrewPerS); lua_setfield(state, -2, "organicWasteRate");
+					lua_pushnumber(state, crew.metabolicHeatPerCrewKW); lua_setfield(state, -2, "metabolicHeatKW");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 16, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -1407,6 +1435,104 @@ namespace core
 				|| cycle.recoveredFraction > 1.0)
 				return refuse(where + " recovered fraction must be finite and from 0 to 1");
 		}
+		// Crew contracts (#401): the crew is an authored population and
+		// activity assignment, never derived from World Agents. All four
+		// matter stores must be compound mass stores so the declared
+		// compositions can carry the nutrient/element closure: at full
+		// activity the emitted mass (CO2 + moisture + urine + organic
+		// waste) may not exceed the consumed mass (food + water +
+		// oxygen); every tracked constituent returned in the urine and
+		// organic-waste streams (plus respired moisture) must be funded
+		// by the consumed food and water; and the declared metabolic
+		// heat may not exceed the declared food energy minus the energy
+		// still bound in the waste streams. A crew that would create
+		// mass, constituents or energy out of nothing is refused before
+		// anything runs; a crew whose returns fall short of its
+		// consumption retains the difference as explicit body mass,
+		// reported in the ledger rather than discarded.
+		if (settings.crews.size() > MaxStationCrews)
+			return refuse("Station crews are limited to "
+				+ std::to_string(MaxStationCrews) + " entries");
+		std::set<std::string> crewIds;
+		for (auto const& crew : settings.crews)
+		{
+			auto const where = "Station crew '" + crew.id + "'";
+			if (crew.id.empty()) return refuse("Station crew id must not be empty");
+			if (crew.id.size() > MaxStationStoreIdLength)
+				return refuse("Station crew id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!crewIds.insert(crew.id).second) return refuse(where + " id is duplicated");
+			if (std::find_if(settings.atmospheres.begin(), settings.atmospheres.end(),
+				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == crew.atmosphereId; })
+				== settings.atmospheres.end())
+				return refuse(where + " breathes in unknown atmosphere compartment '" + crew.atmosphereId + "'");
+			if (crew.crewCount < 0) return refuse(where + " crew count must not be negative");
+			if (!validateStationProfile(crew.activityProfile, where + " activity profile", diagnostic))
+				return false;
+			auto const rates = {crew.foodPerCrewPerS, crew.waterPerCrewPerS,
+				crew.oxygenPerCrewKgPerS, crew.co2PerCrewKgPerS, crew.moisturePerCrewKgPerS,
+				crew.urinePerCrewPerS, crew.organicWastePerCrewPerS, crew.metabolicHeatPerCrewKW};
+			for (auto const rate : rates)
+				if (!std::isfinite(rate) || rate < 0.0)
+					return refuse(where + " metabolic rates must be finite and non-negative");
+			ResourceStoreSettings const* streamStores[4]{nullptr, nullptr, nullptr, nullptr};
+			char const* streamRoles[4]{"food", "water", "urine", "organic waste"};
+			std::string const streamIds[4]{crew.foodStoreId, crew.waterStoreId,
+				crew.urineStoreId, crew.organicWasteStoreId};
+			for (size_t stream = 0; stream < 4; ++stream)
+			{
+				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+					[&](ResourceStoreSettings const& store) { return store.id == streamIds[stream]; });
+				if (found == settings.stores.end())
+					return refuse(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
+						+ "' does not exist");
+				if (!isMassUnit(found->unit))
+					return refuse(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
+						+ "' must be a mass unit; crew metabolism is mass-denominated (g or kg)");
+				if (!found->composition)
+					return refuse(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
+						+ "' has no declared composition; crew streams require compound stores to close the element balance");
+				streamStores[stream] = &*found;
+			}
+			auto const* food = streamStores[0];
+			auto const* water = streamStores[1];
+			auto const* urine = streamStores[2];
+			auto const* waste = streamStores[3];
+			auto const foodKg = massToKg(food->unit, crew.foodPerCrewPerS);
+			auto const waterKg = massToKg(water->unit, crew.waterPerCrewPerS);
+			auto const urineKg = massToKg(urine->unit, crew.urinePerCrewPerS);
+			auto const wasteKg = massToKg(waste->unit, crew.organicWastePerCrewPerS);
+			auto const consumedKg = foodKg + waterKg + crew.oxygenPerCrewKgPerS;
+			auto const emittedKg = urineKg + wasteKg
+				+ crew.moisturePerCrewKgPerS + crew.co2PerCrewKgPerS;
+			if (emittedKg > consumedKg + StationBalanceTolerance * std::max(1.0, consumedKg))
+				return refuse(where + " declared returns exceed declared consumption: metabolism may not create mass");
+			ConstituentLedger funded;
+			addComposition(funded, *food->composition, foodKg, 1.0);
+			addComposition(funded, *water->composition, waterKg, 1.0);
+			ConstituentLedger returned;
+			addComposition(returned, *urine->composition, urineKg, 1.0);
+			addComposition(returned, *waste->composition, wasteKg, 1.0);
+			returned["water"] += crew.moisturePerCrewKgPerS;
+			for (auto const& entry : returned)
+			{
+				auto const available = funded.count(entry.first) ? funded.at(entry.first) : 0.0;
+				if (entry.second > available + StationBalanceTolerance
+					* std::max(1.0, std::abs(available)))
+					return refuse(where + " returns more '" + entry.first
+						+ "' than the consumed food and water carry: the element balance may not be created");
+			}
+			auto const streamEnergy = [](ResourceCompositionSettings const& composition, double wetKg)
+			{
+				return wetKg * (1.0 - composition.moisture) * composition.energyKJPerKgDry;
+			};
+			auto const releasedKJPerS = streamEnergy(*food->composition, foodKg)
+				- streamEnergy(*urine->composition, urineKg)
+				- streamEnergy(*waste->composition, wasteKg);
+			if (crew.metabolicHeatPerCrewKW > releasedKJPerS
+				+ StationBalanceTolerance * std::max(1.0, std::abs(releasedKJPerS)))
+				return refuse(where + " metabolic heat exceeds the consumed food energy minus the energy still bound in the waste streams: heat may not be created from nothing");
+		}
 		diagnostic.clear(); return true;
 	}
 	void setStationSystemsSourceLoader(StationSystemsSourceLoader loader) { sourceLoader = std::move(loader); }
@@ -1769,6 +1895,12 @@ namespace core
 			double occupantHeatKJ{0.0};
 			double latentHeatKJ{0.0};
 			double exchangedKJ{0.0};
+			// Metabolic heat routed into this compartment by authored crews
+			// (#401): booked as its own thermal term, never folded into the
+			// compartment's own occupancy heat, and the thermal ledger
+			// closes over it.
+			double crewHeatKJ{0.0};
+			double lastCrewHeatKW{0.0};
 			// Last-tick observables.
 			double lastOxygenDemandKg{0.0};
 			double lastOxygenConsumedKg{0.0};
@@ -1814,6 +1946,56 @@ namespace core
 			bool exhausted{false};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
+		// The authoritative ledger of one authored crew (#401). The crew
+		// is an authored population with an activity profile, never
+		// derived from World Agents. Its metabolism runs at one uniform
+		// metabolic scale per tick: the smallest of the fractions of
+		// each input the declared sources can actually supply (food and
+		// water above their protected reserves, the compartment's oxygen
+		// actually present) and each output the destination stores can
+		// actually accept (urine and organic-waste headroom). Every
+		// pathway - consumption and return alike - scales by that one
+		// number, so absent material never generates nominal waste and
+		// a backed-up waste tank never lets consumption run away from
+		// its returns. Requested and actual are recorded per pathway;
+		// the cumulative ledger closes over consumed = returned +
+		// retained body mass, with the retained term explicit.
+		struct CrewState
+		{
+			CrewSettings authored;
+			size_t foodStoreIndex{0};
+			size_t waterStoreIndex{0};
+			size_t urineStoreIndex{0};
+			size_t organicWasteStoreIndex{0};
+			size_t atmosphereIndex{0};
+			double lastActivityLevel{0.0};
+			double lastScale{0.0};
+			std::string lastLimiter;
+			double lastFoodRequested{0.0};
+			double lastFoodActual{0.0};
+			double lastWaterRequested{0.0};
+			double lastWaterActual{0.0};
+			double lastOxygenRequestedKg{0.0};
+			double lastOxygenActualKg{0.0};
+			double lastCo2ProducedKg{0.0};
+			double lastMoistureProducedKg{0.0};
+			double lastUrineRequested{0.0};
+			double lastUrineActual{0.0};
+			double lastOrganicWasteRequested{0.0};
+			double lastOrganicWasteActual{0.0};
+			double lastHeatKW{0.0};
+			double foodConsumed{0.0};
+			double waterConsumed{0.0};
+			double oxygenConsumedKg{0.0};
+			double co2ProducedKg{0.0};
+			double moistureProducedKg{0.0};
+			double urineProduced{0.0};
+			double organicWasteProduced{0.0};
+			double heatKJ{0.0};
+			double retainedKg{0.0};
+			bool lastUnmet{false};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
 		std::vector<TransferState> transfers;
@@ -1829,6 +2011,7 @@ namespace core
 		std::vector<GeneratorState> generators;
 		std::vector<AtmosphereState> atmospheres;
 		std::vector<AirlockCycleState> airlockCycles;
+		std::vector<CrewState> crews;
 		// Competing transfers are allocated in priority order (higher first),
 		// ties resolved by declaration order: a declared deterministic order.
 		std::vector<size_t> transferOrder;
@@ -1897,6 +2080,7 @@ namespace core
 			auto const committedGenerators = generators;
 			auto const committedAtmospheres = atmospheres;
 			auto const committedAirlockCycles = airlockCycles;
+			auto const committedCrews = crews;
 			auto const committedAvailableGenerationKW = lastAvailableGenerationKW;
 			auto const committedBatteryShortfallKW = lastBatteryShortfallKW;
 			if (runLedger(tick, seconds, system, violation)) return true;
@@ -1913,6 +2097,7 @@ namespace core
 			generators = committedGenerators;
 			atmospheres = committedAtmospheres;
 			airlockCycles = committedAirlockCycles;
+			crews = committedCrews;
 			lastAvailableGenerationKW = committedAvailableGenerationKW;
 			lastBatteryShortfallKW = committedBatteryShortfallKW;
 			return false;
@@ -1994,6 +2179,9 @@ namespace core
 			std::vector<bool> previousCondensing;
 			previousCondensing.reserve(atmospheres.size());
 			for (auto const& atmosphere : atmospheres) previousCondensing.push_back(atmosphere.lastCondensing);
+			std::vector<bool> previousCrewUnmet;
+			previousCrewUnmet.reserve(crews.size());
+			for (auto const& crew : crews) previousCrewUnmet.push_back(crew.lastUnmet);
 			std::vector<double> qualified, unqualified;
 			qualified.reserve(stores.size());
 			unqualified.reserve(stores.size());
@@ -3200,6 +3388,206 @@ namespace core
 						? StationTransferStatus::Full : StationTransferStatus::Partial);
 				if (cycle.authored.recurrenceSeconds <= 0.0) cycle.exhausted = true;
 			}
+			// Crew metabolism (#401) runs after the scheduled airlock
+			// cycles and before the compartments integrate: the crew draws
+			// its oxygen from the compartment inventory as it stands after
+			// the cycles, and its carbon dioxide, moisture and metabolic
+			// heat land before the compartment's coupled vapour/thermal
+			// solve, so the crew's returns are subject to the same
+			// saturation and thermal integration as every other term in
+			// the volume. One uniform metabolic scale per crew per tick:
+			// the smallest of the input-supply fractions (food and water
+			// drawable above the protected reserve, the oxygen actually
+			// present) and the output-headroom fractions (urine and
+			// organic-waste store capacity). Every pathway - consumption
+			// and return alike - scales by that one number, so a crew
+			// with absent material consumes nothing and returns nothing:
+			// no nominal waste from material that is not there, and a
+			// backed-up waste tank throttles consumption together with
+			// its returns instead of letting material run away from a
+			// destination that cannot hold it. The requested-versus-actual
+			// remainder is explicit per pathway; unmet demand is a
+			// reported result, never a silent clamp. Crew inputs are the
+			// authored stores and the authored compartment only: no World
+			// Agent is read, mutated, spawned or moved by this process.
+			std::vector<double> crewHeatByAtmosphere(atmospheres.size(), 0.0);
+			{
+				auto const dt = static_cast<double>(seconds);
+				for (auto& crew : crews)
+				{
+					auto& compartment = atmospheres[crew.atmosphereIndex];
+					auto const activity = evaluateStationProfile(crew.authored.activityProfile, elapsed);
+					auto const crewSeconds = static_cast<double>(crew.authored.crewCount) * activity * dt;
+					auto const foodRequested = crew.authored.foodPerCrewPerS * crewSeconds;
+					auto const waterRequested = crew.authored.waterPerCrewPerS * crewSeconds;
+					auto const oxygenRequestedKg = crew.authored.oxygenPerCrewKgPerS * crewSeconds;
+					auto const co2RequestedKg = crew.authored.co2PerCrewKgPerS * crewSeconds;
+					auto const moistureRequestedKg = crew.authored.moisturePerCrewKgPerS * crewSeconds;
+					auto const urineRequested = crew.authored.urinePerCrewPerS * crewSeconds;
+					auto const wasteRequested = crew.authored.organicWastePerCrewPerS * crewSeconds;
+					auto const heatFullKW = crew.authored.metabolicHeatPerCrewKW
+						* static_cast<double>(crew.authored.crewCount) * activity;
+					// #553: finite authored values multiplied by a long
+					// crew-second can still overflow; refuse the tick rather
+					// than publish an infinite demand.
+					if (!std::isfinite(crewSeconds) || !std::isfinite(foodRequested)
+						|| !std::isfinite(waterRequested) || !std::isfinite(oxygenRequestedKg)
+						|| !std::isfinite(co2RequestedKg) || !std::isfinite(moistureRequestedKg)
+						|| !std::isfinite(urineRequested) || !std::isfinite(wasteRequested)
+						|| !std::isfinite(heatFullKW))
+					{
+						system = "Crew metabolism";
+						return violation = "crew '" + crew.authored.id
+							+ "' demand overflows to a non-finite magnitude", false;
+					}
+					double scale = 1.0;
+					std::string limiter;
+					auto const capSupply = [&](size_t storeIndex, double requested, char const* label)
+					{
+						if (requested <= 0.0) return;
+						auto const drawable = std::max(0.0, qualified[storeIndex]
+							- stores[storeIndex].authored.protectedReserve);
+						auto const fraction = drawable / requested;
+						if (fraction < scale)
+						{
+							scale = fraction;
+							limiter = std::string(label) + " store '" + stores[storeIndex].authored.id
+								+ (stores[storeIndex].authored.protectedReserve > 0.0
+									? "' usable inventory is at its protected reserve"
+									: "' usable inventory is empty");
+						}
+					};
+					auto const capHeadroom = [&](size_t storeIndex, double produced, char const* label)
+					{
+						if (produced <= 0.0) return;
+						auto const headroom = stores[storeIndex].authored.capacity
+							- (qualified[storeIndex] + unqualified[storeIndex]);
+						auto const fraction = headroom / produced;
+						if (fraction < scale)
+						{
+							scale = fraction;
+							limiter = std::string(label) + " store '" + stores[storeIndex].authored.id
+								+ "' is at capacity";
+						}
+					};
+					capSupply(crew.foodStoreIndex, foodRequested, "food");
+					capSupply(crew.waterStoreIndex, waterRequested, "water");
+					if (oxygenRequestedKg > 0.0)
+					{
+						auto const fraction = std::max(0.0, compartment.oxygenKg) / oxygenRequestedKg;
+						if (fraction < scale)
+						{
+							scale = fraction;
+							limiter = "compartment '" + compartment.authored.id
+								+ "' oxygen inventory cannot supply the draw";
+						}
+					}
+					capHeadroom(crew.urineStoreIndex, urineRequested, "urine");
+					capHeadroom(crew.organicWasteStoreIndex, wasteRequested, "organic waste");
+					if (!(scale > 0.0)) scale = 0.0;
+					if (scale > 1.0) scale = 1.0;
+					// #556: apply the binding scale per pathway with a min
+					// against that pathway's own drawable or headroom, so
+					// roundoff never draws below zero or pushes over capacity.
+					auto const drawCapped = [&](size_t storeIndex, double requested)
+					{
+						auto const drawable = std::max(0.0, qualified[storeIndex]
+							- stores[storeIndex].authored.protectedReserve);
+						auto const completed = std::min(requested * scale, drawable);
+						qualified[storeIndex] -= completed;
+						flowOut[storeIndex] += completed;
+						return completed;
+					};
+					auto const deliverCapped = [&](size_t storeIndex, double requested)
+					{
+						auto const headroom = stores[storeIndex].authored.capacity
+							- (qualified[storeIndex] + unqualified[storeIndex]);
+						auto const completed = std::min(requested * scale, headroom);
+						qualified[storeIndex] += completed;
+						flowIn[storeIndex] += completed;
+						return completed;
+					};
+					auto const foodActual = drawCapped(crew.foodStoreIndex, foodRequested);
+					auto const waterActual = drawCapped(crew.waterStoreIndex, waterRequested);
+					auto const oxygenActualKg = std::min(oxygenRequestedKg * scale,
+						std::max(0.0, compartment.oxygenKg));
+					compartment.oxygenKg -= oxygenActualKg;
+					compartment.oxygenConsumedKg += oxygenActualKg;
+					// The returns scale with the metabolism that actually
+					// ran, never with the nominal demand: CO2, moisture
+					// and heat all carry the same scale the inputs funded.
+					auto const co2ActualKg = co2RequestedKg * scale;
+					compartment.carbonDioxideKg += co2ActualKg;
+					compartment.co2ProducedKg += co2ActualKg;
+					auto const moistureActualKg = moistureRequestedKg * scale;
+					compartment.waterVapourKg += moistureActualKg;
+					compartment.vapourAddedKg += moistureActualKg;
+					auto const urineActual = deliverCapped(crew.urineStoreIndex, urineRequested);
+					auto const wasteActual = deliverCapped(crew.organicWasteStoreIndex, wasteRequested);
+					auto const heatKW = heatFullKW * scale;
+					crewHeatByAtmosphere[crew.atmosphereIndex] += heatKW;
+					// Store-boundary ledgers: consumption is a loss and the
+					// waste returns are negative loss, exactly like
+					// conversion flows, so the per-unit boundary closes;
+					// the constituent difference is what the returns did
+					// not carry away and stays accounted, never silently
+					// dropped.
+					stagedUnitLoss[stores[crew.foodStoreIndex].authored.unit] += foodActual;
+					stagedUnitLoss[stores[crew.waterStoreIndex].authored.unit] += waterActual;
+					stagedUnitLoss[stores[crew.urineStoreIndex].authored.unit] -= urineActual;
+					stagedUnitLoss[stores[crew.organicWasteStoreIndex].authored.unit] -= wasteActual;
+					ConstituentLedger netChange;
+					addComposition(netChange, *stores[crew.foodStoreIndex].authored.composition,
+						massToKg(stores[crew.foodStoreIndex].authored.unit, foodActual), -1.0);
+					addComposition(netChange, *stores[crew.waterStoreIndex].authored.composition,
+						massToKg(stores[crew.waterStoreIndex].authored.unit, waterActual), -1.0);
+					addComposition(netChange, *stores[crew.urineStoreIndex].authored.composition,
+						massToKg(stores[crew.urineStoreIndex].authored.unit, urineActual), 1.0);
+					addComposition(netChange, *stores[crew.organicWasteStoreIndex].authored.composition,
+						massToKg(stores[crew.organicWasteStoreIndex].authored.unit, wasteActual), 1.0);
+					for (auto const& entry : netChange)
+						stagedLoss[entry.first] -= entry.second;
+					// Cumulative pathway ledger and the explicit retained
+					// body mass: consumed minus returned, reported rather
+					// than discarded.
+					auto const retainedTickKg = massToKg(stores[crew.foodStoreIndex].authored.unit, foodActual)
+						+ massToKg(stores[crew.waterStoreIndex].authored.unit, waterActual)
+						+ oxygenActualKg - co2ActualKg - moistureActualKg
+						- massToKg(stores[crew.urineStoreIndex].authored.unit, urineActual)
+						- massToKg(stores[crew.organicWasteStoreIndex].authored.unit, wasteActual);
+					crew.lastActivityLevel = activity;
+					crew.lastScale = scale;
+					crew.lastLimiter = scale >= 1.0 - 1e-12 ? std::string() : limiter;
+					crew.lastFoodRequested = foodRequested;
+					crew.lastFoodActual = foodActual;
+					crew.lastWaterRequested = waterRequested;
+					crew.lastWaterActual = waterActual;
+					crew.lastOxygenRequestedKg = oxygenRequestedKg;
+					crew.lastOxygenActualKg = oxygenActualKg;
+					crew.lastCo2ProducedKg = co2ActualKg;
+					crew.lastMoistureProducedKg = moistureActualKg;
+					crew.lastUrineRequested = urineRequested;
+					crew.lastUrineActual = urineActual;
+					crew.lastOrganicWasteRequested = wasteRequested;
+					crew.lastOrganicWasteActual = wasteActual;
+					crew.lastHeatKW = heatKW;
+					crew.foodConsumed += foodActual;
+					crew.waterConsumed += waterActual;
+					crew.oxygenConsumedKg += oxygenActualKg;
+					crew.co2ProducedKg += co2ActualKg;
+					crew.moistureProducedKg += moistureActualKg;
+					crew.urineProduced += urineActual;
+					crew.organicWasteProduced += wasteActual;
+					crew.heatKJ += heatKW * dt;
+					crew.retainedKg += retainedTickKg;
+					crew.lastUnmet = scale < 1.0 - 1e-12;
+					if (crew.authored.crewCount <= 0)
+						crew.status = StationTransferStatus::Idle;
+					else if (scale >= 1.0 - 1e-12) crew.status = StationTransferStatus::Full;
+					else if (scale <= 1e-12) crew.status = StationTransferStatus::Rejected;
+					else crew.status = StationTransferStatus::Partial;
+				}
+			}
 			// Then each compartment: occupancy draw, leakage, the
 			// coupled vapour-phase/thermal integration and the derived
 			// pressures, in that documented order.
@@ -3266,10 +3654,15 @@ namespace core
 				// re-evaporate in this slice.
 				auto const occupantHeatKW = occupants
 					* compartment.authored.sensibleHeatPerOccupantKW * metabolicFraction;
+				// Crew metabolic heat (#401): routed into this compartment
+				// by the crews assigned to it, booked as its own thermal
+				// term beside the compartment's own occupancy heat and
+				// entering the same coupled vapour/thermal solve.
+				auto const crewHeatKW = crewHeatByAtmosphere[atmosphereIndex];
 				auto const exchangeKW = atmosphereExchangeKJ[atmosphereIndex] / dt;
 				auto const coupled = solveVapourThermalCoupling(
 					compartment.authored.thermalCapacityKJPerK, compartment.temperatureC,
-					occupantHeatKW + exchangeKW, compartment.waterVapourKg,
+					occupantHeatKW + crewHeatKW + exchangeKW, compartment.waterVapourKg,
 					compartment.authored.volumeM3, dt);
 				auto const condensedKg = coupled.condensedKg;
 				auto const latentHeatKW = condensedKg
@@ -3278,6 +3671,8 @@ namespace core
 				compartment.condensedKg += condensedKg;
 				compartment.temperatureC = coupled.temperatureC;
 				compartment.occupantHeatKJ += occupantHeatKW * dt;
+				compartment.crewHeatKJ += crewHeatKW * dt;
+				compartment.lastCrewHeatKW = crewHeatKW;
 				compartment.latentHeatKJ += latentHeatKW * dt;
 				compartment.exchangedKJ += exchangeKW * dt;
 				// Publish last-tick observables.
@@ -4107,15 +4502,16 @@ namespace core
 					return violation = where + "airlock recovered/lost split residual "
 						+ std::to_string(splitResidual) + " exceeds tolerance "
 						+ std::to_string(StationBalanceTolerance), false;
-				// Thermal closure: starting + occupant heat + latent heat +
-				// exchanged from the reservoir must equal the compartment's
-				// current capacity x temperature within the declared
-				// tolerance.
+				// Thermal closure: starting + occupant heat + crew heat
+				// (#401) + latent heat + exchanged from the reservoir must
+				// equal the compartment's current capacity x temperature
+				// within the declared tolerance.
 				auto const startingEnergyKJ = compartment.authored.thermalCapacityKJPerK
 					* compartment.authored.startingTemperatureC;
 				auto const thermalBound = StationBalanceTolerance
 					* std::max(1.0, std::abs(startingEnergyKJ));
 				auto const thermalResidual = startingEnergyKJ + compartment.occupantHeatKJ
+					+ compartment.crewHeatKJ
 					+ compartment.latentHeatKJ + compartment.exchangedKJ
 					- compartment.authored.thermalCapacityKJPerK * compartment.temperatureC;
 				if (!std::isfinite(thermalResidual) || std::abs(thermalResidual) > thermalBound)
@@ -4134,6 +4530,61 @@ namespace core
 					* std::max(1.0, std::abs(cycle.removedTotal));
 				if (std::abs(cycle.recoveredTotal + cycle.lostTotal - cycle.removedTotal) > bound)
 					return violation = where + "recovered/lost totals do not close over the removed mass", false;
+			}
+			// Crew metabolism ledger (#401): the crew's own account must
+			// close over its pathways - consumed (food + water + oxygen)
+			// equals returned (CO2 + moisture + urine + organic waste)
+			// plus retained body mass within the declared tolerance - and
+			// the retained mass may never be negative: the crew cannot
+			// emit more mass than it actually consumed. The metabolic
+			// scale stays within [0, 1] and every published magnitude
+			// stays finite. Store- and constituent-level closure of the
+			// crew's draws and returns is enforced by the unit and
+			// constituent boundary audits the crew books into; this
+			// closes the crew's own consumption/return/retained account
+			// so no metabolic mass is unexplained.
+			system = "Crew metabolism";
+			for (auto const& crew : crews)
+			{
+				auto const where = "crew '" + crew.authored.id + "' ";
+				if (!requireFinite(crew.lastActivityLevel, where + "activity level")) return false;
+				if (!requireFinite(crew.lastScale, where + "metabolic scale")) return false;
+				if (!requireFinite(crew.lastFoodRequested, where + "last food requested")) return false;
+				if (!requireFinite(crew.lastFoodActual, where + "last food consumed")) return false;
+				if (!requireFinite(crew.lastWaterRequested, where + "last water requested")) return false;
+				if (!requireFinite(crew.lastWaterActual, where + "last water consumed")) return false;
+				if (!requireFinite(crew.lastOxygenRequestedKg, where + "last oxygen requested")) return false;
+				if (!requireFinite(crew.lastOxygenActualKg, where + "last oxygen consumed")) return false;
+				if (!requireFinite(crew.lastCo2ProducedKg, where + "last CO2 produced")) return false;
+				if (!requireFinite(crew.lastMoistureProducedKg, where + "last moisture produced")) return false;
+				if (!requireFinite(crew.lastUrineRequested, where + "last urine requested")) return false;
+				if (!requireFinite(crew.lastUrineActual, where + "last urine returned")) return false;
+				if (!requireFinite(crew.lastOrganicWasteRequested, where + "last organic waste requested")) return false;
+				if (!requireFinite(crew.lastOrganicWasteActual, where + "last organic waste returned")) return false;
+				if (!requireFinite(crew.lastHeatKW, where + "last metabolic heat")) return false;
+				if (!requireFinite(crew.foodConsumed, where + "cumulative food consumed")) return false;
+				if (!requireFinite(crew.waterConsumed, where + "cumulative water consumed")) return false;
+				if (!requireFinite(crew.oxygenConsumedKg, where + "cumulative oxygen consumed")) return false;
+				if (!requireFinite(crew.co2ProducedKg, where + "cumulative CO2 produced")) return false;
+				if (!requireFinite(crew.moistureProducedKg, where + "cumulative moisture produced")) return false;
+				if (!requireFinite(crew.urineProduced, where + "cumulative urine returned")) return false;
+				if (!requireFinite(crew.organicWasteProduced, where + "cumulative organic waste returned")) return false;
+				if (!requireFinite(crew.heatKJ, where + "cumulative metabolic heat")) return false;
+				if (!requireFinite(crew.retainedKg, where + "cumulative retained body mass")) return false;
+				if (!(crew.lastScale >= 0.0 && crew.lastScale <= 1.0 + 1e-12))
+					return violation = where + "metabolic scale left the declared [0, 1] range", false;
+				auto const consumedKg = massToKg(stores[crew.foodStoreIndex].authored.unit, crew.foodConsumed)
+					+ massToKg(stores[crew.waterStoreIndex].authored.unit, crew.waterConsumed)
+					+ crew.oxygenConsumedKg;
+				auto const returnedKg = massToKg(stores[crew.urineStoreIndex].authored.unit, crew.urineProduced)
+					+ massToKg(stores[crew.organicWasteStoreIndex].authored.unit, crew.organicWasteProduced)
+					+ crew.co2ProducedKg + crew.moistureProducedKg;
+				auto const bound = StationBalanceTolerance * std::max(1.0, consumedKg);
+				if (crew.retainedKg < -bound)
+					return violation = where + "retained body mass is negative: the crew emitted more mass than it consumed", false;
+				auto const closure = crew.retainedKg - (consumedKg - returnedKg);
+				if (!std::isfinite(closure) || std::abs(closure) > bound)
+					return violation = where + "consumed/returned/retained ledger does not close within tolerance", false;
 			}
 			system = "Power allocation";
 			for (auto const& array : solarArrays)
@@ -4529,6 +4980,21 @@ namespace core
 						+ std::to_string(cycle.lastRecoveredKg) + " kg, lost "
 						+ std::to_string(cycle.lastLostKg) + " kg)");
 			}
+			// Crew supply transitions are announced so the event log
+			// records when a crew's demand stops being fully met and
+			// when it recovers, naming what limited the metabolism
+			// (#401). The transition is reported once per change, not
+			// every tick the condition stands.
+			for (size_t index = 0; index < crews.size(); ++index)
+			{
+				auto const& crew = crews[index];
+				if (crew.lastUnmet == previousCrewUnmet[index]) continue;
+				appendBoundedEvent(events, tick, crew.lastUnmet
+					? "Crew '" + crew.authored.id + "' metabolic demand unmet: "
+						+ crew.lastLimiter
+					: std::string("Crew '") + crew.authored.id
+						+ "' metabolic demand fully supplied again");
+			}
 			// Delivery arrivals are discrete scenario events rather than a
 			// continuous per-tick service, so every arrival is announced with
 			// its own quantities: the refused remainder is the account for
@@ -4701,6 +5167,21 @@ namespace core
 			state.declarationIndex = mImpl->airlockCycles.size();
 			mImpl->airlockCycles.push_back(std::move(state));
 		}
+		// Crew ledgers start empty of consumption: the authored population,
+		// stores and compartment are resolved to indices at construction so
+		// the tick ledger never re-looks-up references, and every pathway
+		// total reconstructs from zero on Reset and load (#401).
+		for (auto const& crew : settings.crews)
+		{
+			Impl::CrewState state;
+			state.authored = crew;
+			state.foodStoreIndex = storeIndex[crew.foodStoreId];
+			state.waterStoreIndex = storeIndex[crew.waterStoreId];
+			state.urineStoreIndex = storeIndex[crew.urineStoreId];
+			state.organicWasteStoreIndex = storeIndex[crew.organicWasteStoreId];
+			state.atmosphereIndex = atmosphereIndex[crew.atmosphereId];
+			mImpl->crews.push_back(std::move(state));
+		}
 		for (auto const& load : settings.equipmentLoads)
 		{
 			Impl::LoadState state;
@@ -4778,7 +5259,7 @@ namespace core
 				&settings.solarArrays, &settings.equipmentLoads, &settings.batteries,
 				&settings.deliveries, &settings.thermalReservoirs, &settings.radiators,
 				&settings.coolantLoops, &settings.chillers, &settings.generators,
-				&settings.atmospheres, &settings.airlockCycles};
+				&settings.atmospheres, &settings.airlockCycles, &settings.crews};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -4805,7 +5286,8 @@ namespace core
 			+ std::to_string(settings.chillers.size()) + " chiller(s) and "
 			+ std::to_string(settings.generators.size()) + " fuelled generator(s), "
 			+ std::to_string(settings.atmospheres.size()) + " atmosphere compartment(s) and "
-			+ std::to_string(settings.airlockCycles.size()) + " scheduled airlock cycle(s)");
+			+ std::to_string(settings.airlockCycles.size()) + " scheduled airlock cycle(s) and "
+			+ std::to_string(settings.crews.size()) + " crew(s)");
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
 	bool StationSystemsRuntime::advance(uint64_t tick, float seconds)
@@ -4859,7 +5341,7 @@ namespace core
 			|| !mImpl->deliveries.empty() || !mImpl->reservoirs.empty()
 			|| !mImpl->coolantLoops.empty() || !mImpl->chillers.empty()
 			|| !mImpl->generators.empty() || !mImpl->atmospheres.empty()
-			|| !mImpl->airlockCycles.empty())
+			|| !mImpl->airlockCycles.empty() || !mImpl->crews.empty())
 		{
 			std::string violationSystem, violation;
 			if (!mImpl->applyLedger(tick, seconds, violationSystem, violation))
@@ -5340,6 +5822,7 @@ namespace core
 			atmosphereResult.lastCycleRecoveredKg = compartment.lastCycleRecoveredKg;
 			atmosphereResult.lastCycleLostKg = compartment.lastCycleLostKg;
 			atmosphereResult.lastOccupantHeatKW = compartment.lastOccupantHeatKW;
+			atmosphereResult.lastCrewHeatKW = compartment.lastCrewHeatKW;
 			atmosphereResult.lastLatentHeatKW = compartment.lastLatentHeatKW;
 			atmosphereResult.lastExchangeIntoCompartmentKW = compartment.lastExchangeIntoCompartmentKW;
 			atmosphereResult.abovePressureLimit = compartment.lastAbovePressure;
@@ -5360,11 +5843,13 @@ namespace core
 			atmosphereResult.currentEnergyKJ = authored.thermalCapacityKJPerK
 				* compartment.temperatureC;
 			atmosphereResult.occupantHeatEnergyKJ = compartment.occupantHeatKJ;
+			atmosphereResult.crewHeatEnergyKJ = compartment.crewHeatKJ;
 			atmosphereResult.latentHeatEnergyKJ = compartment.latentHeatKJ;
 			atmosphereResult.exchangedEnergyKJ = compartment.exchangedKJ;
 			atmosphereResult.residualKJ = atmosphereResult.startingEnergyKJ
-				+ compartment.occupantHeatKJ + compartment.latentHeatKJ
-				+ compartment.exchangedKJ - atmosphereResult.currentEnergyKJ;
+				+ compartment.occupantHeatKJ + compartment.crewHeatKJ
+				+ compartment.latentHeatKJ + compartment.exchangedKJ
+				- atmosphereResult.currentEnergyKJ;
 			atmosphereResult.status = compartment.status;
 			result.atmospheres.push_back(std::move(atmosphereResult));
 		}
@@ -5400,6 +5885,54 @@ namespace core
 					: cycle.authored.firstOccurrenceSeconds;
 			}
 			result.airlockCycles.push_back(std::move(cycleResult));
+		}
+		// The crew snapshot reports the authored contract beside the last
+		// tick's requested-versus-actual exchange on every metabolic
+		// pathway, the uniform scale and its limiter, and the closing
+		// consumption/return/retained ledger (#401).
+		for (auto const& crew : mImpl->crews)
+		{
+			StationCrewSnapshot crewResult;
+			crewResult.id = crew.authored.id;
+			crewResult.atmosphereId = crew.authored.atmosphereId;
+			crewResult.crewCount = crew.authored.crewCount;
+			crewResult.foodStoreId = crew.authored.foodStoreId;
+			crewResult.waterStoreId = crew.authored.waterStoreId;
+			crewResult.urineStoreId = crew.authored.urineStoreId;
+			crewResult.organicWasteStoreId = crew.authored.organicWasteStoreId;
+			crewResult.activityLevel = crew.lastActivityLevel;
+			crewResult.metabolicScale = crew.lastScale;
+			crewResult.limiter = crew.lastLimiter;
+			crewResult.lastFoodRequested = crew.lastFoodRequested;
+			crewResult.lastFoodActual = crew.lastFoodActual;
+			crewResult.lastFoodUnmet = crew.lastFoodRequested - crew.lastFoodActual;
+			crewResult.lastWaterRequested = crew.lastWaterRequested;
+			crewResult.lastWaterActual = crew.lastWaterActual;
+			crewResult.lastWaterUnmet = crew.lastWaterRequested - crew.lastWaterActual;
+			crewResult.lastOxygenRequestedKg = crew.lastOxygenRequestedKg;
+			crewResult.lastOxygenActualKg = crew.lastOxygenActualKg;
+			crewResult.lastOxygenUnmetKg = crew.lastOxygenRequestedKg - crew.lastOxygenActualKg;
+			crewResult.lastCo2ProducedKg = crew.lastCo2ProducedKg;
+			crewResult.lastMoistureProducedKg = crew.lastMoistureProducedKg;
+			crewResult.lastUrineRequested = crew.lastUrineRequested;
+			crewResult.lastUrineActual = crew.lastUrineActual;
+			crewResult.lastUrineUnmet = crew.lastUrineRequested - crew.lastUrineActual;
+			crewResult.lastOrganicWasteRequested = crew.lastOrganicWasteRequested;
+			crewResult.lastOrganicWasteActual = crew.lastOrganicWasteActual;
+			crewResult.lastOrganicWasteUnmet = crew.lastOrganicWasteRequested - crew.lastOrganicWasteActual;
+			crewResult.lastHeatKW = crew.lastHeatKW;
+			crewResult.foodConsumed = crew.foodConsumed;
+			crewResult.waterConsumed = crew.waterConsumed;
+			crewResult.oxygenConsumedKg = crew.oxygenConsumedKg;
+			crewResult.co2ProducedKg = crew.co2ProducedKg;
+			crewResult.moistureProducedKg = crew.moistureProducedKg;
+			crewResult.urineProduced = crew.urineProduced;
+			crewResult.organicWasteProduced = crew.organicWasteProduced;
+			crewResult.heatKJ = crew.heatKJ;
+			crewResult.retainedKg = crew.retainedKg;
+			crewResult.disabled = crew.authored.crewCount <= 0;
+			crewResult.status = crew.status;
+			result.crews.push_back(std::move(crewResult));
 		}
 		// The delivery snapshot reports the authored schedule beside the
 		// runtime's arrival history: what each occurrence brought in, what

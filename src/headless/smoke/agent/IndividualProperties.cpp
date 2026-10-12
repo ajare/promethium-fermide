@@ -310,7 +310,7 @@ void individualPropertiesOverrideTagPropertiesAndPersist()
 		&& diagnostic.find("invalid Mobility use") != std::string::npos,
 		"An invalid individual Mobility use was accepted");
 	auto const yaml = serialize(*world);
-	require(yaml.find("version: 76") != std::string::npos
+	require(yaml.find("version: 77") != std::string::npos
 		&& yaml.find("individualProperties") != std::string::npos
 		&& yaml.find("stairSpeedModifier") != std::string::npos
 		&& yaml.find("ladderSpeedModifier") != std::string::npos

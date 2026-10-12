@@ -214,7 +214,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 76", "version: 64");
+		replaceAll(legacy, "version: 77", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -231,14 +231,14 @@ namespace
 			"authored store fields missing or live inventory leaked");
 		bool refused = false;
 		auto staleStores = withField;
-		replaceAll(staleStores, "version: 76", "version: 65");
+		replaceAll(staleStores, "version: 77", "version: 65");
 		auto const staleStoresPath = directory / "stale-stores.world.yaml";
 		writeFile(staleStoresPath, staleStores);
 		try { (void)core::loadWorldDocument(staleStoresPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-66 document carrying resource stores was silently accepted");
 		auto staleTransfers = withField;
-		replaceAll(staleTransfers, "version: 76", "version: 66");
+		replaceAll(staleTransfers, "version: 77", "version: 66");
 		auto const staleTransfersPath = directory / "stale-transfers.world.yaml";
 		writeFile(staleTransfersPath, staleTransfers);
 		refused = false;
@@ -246,7 +246,7 @@ namespace
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-67 document carrying resource transfers was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 76", "version: 64");
+		replaceAll(stale, "version: 77", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
 		refused = false;
@@ -384,7 +384,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 76", "version: 67");
+			replaceAll(stale, "version: 77", "version: 67");
 			auto const stalePath = directory / "stale-compounds.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -493,7 +493,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 76", "version: 69");
+			replaceAll(stale, "version: 77", "version: 69");
 			auto const stalePath = directory / "stale-batteries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -615,7 +615,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 76", "version: 68");
+			replaceAll(stale, "version: 77", "version: 68");
 			auto const stalePath = directory / "stale-power.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -742,7 +742,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 76", "version: 70");
+			replaceAll(stale, "version: 77", "version: 70");
 			auto const stalePath = directory / "stale-deliveries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -870,7 +870,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 76", "version: 71");
+			replaceAll(stale, "version: 77", "version: 71");
 			auto const stalePath = directory / "stale-thermal.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1031,7 +1031,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 76", "version: 72");
+			replaceAll(stale, "version: 77", "version: 72");
 			auto const stalePath = directory / "stale-coolant.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1194,7 +1194,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 76", "version: 73");
+			replaceAll(stale, "version: 77", "version: 73");
 			auto const stalePath = directory / "stale-chillers.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1342,7 +1342,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 76", "version: 74");
+			replaceAll(stale, "version: 77", "version: 74");
 			auto const stalePath = directory / "stale-generators.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1503,7 +1503,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 76", "version: 75");
+			replaceAll(stale, "version: 77", "version: 75");
 			auto const stalePath = directory / "stale-atmospheres.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1553,6 +1553,177 @@ namespace
 			require(refused, "a recovered fraction above one was accepted from a file");
 		}
 	}
+	// #401: the authored crew contract travels through the real document
+	// seams; consumption, returns and the retained ledger are runtime
+	// state reconstructed from the authored starting conditions.
+	void crewFiles(smoke::Context const& context)
+	{
+		namespace filesystem = std::filesystem;
+		auto const directory = context.temporaryRoot() / "station-crews";
+		filesystem::create_directories(directory);
+		core::ResourceCompositionSettings foodComposition;
+		foodComposition.moisture = 0.8;
+		foodComposition.nutrientNitrogen = 0.05;
+		foodComposition.phosphorus = 0.01;
+		foodComposition.potassium = 0.02;
+		foodComposition.otherMinerals = 0.02;
+		foodComposition.energyKJPerKgDry = 17000.0;
+		core::ResourceCompositionSettings waterComposition;
+		waterComposition.moisture = 0.999;
+		waterComposition.otherMinerals = 0.001;
+		core::ResourceCompositionSettings urineComposition;
+		urineComposition.moisture = 0.95;
+		urineComposition.nutrientNitrogen = 0.1;
+		urineComposition.phosphorus = 0.02;
+		urineComposition.potassium = 0.05;
+		urineComposition.otherMinerals = 0.05;
+		urineComposition.energyKJPerKgDry = 500.0;
+		core::ResourceCompositionSettings wasteComposition;
+		wasteComposition.moisture = 0.5;
+		wasteComposition.energyKJPerKgDry = 10000.0;
+		auto store = [](std::string const& id, double capacity, double starting,
+			core::ResourceCompositionSettings composition)
+		{
+			core::ResourceStoreSettings settings;
+			settings.id = id;
+			settings.unit = "kg";
+			settings.capacity = capacity;
+			settings.startingQualified = starting;
+			settings.composition = composition;
+			return settings;
+		};
+		core::AtmosphereSettings habitat;
+		habitat.id = "habitat";
+		habitat.hazardClass = "normal";
+		habitat.volumeM3 = 100.0;
+		habitat.startingOxygenKg = 20.0;
+		habitat.startingNitrogenKg = 80.0;
+		habitat.startingTemperatureC = 20.0;
+		habitat.thermalCapacityKJPerK = 10000.0;
+		habitat.minPressureKPa = 1.0;
+		habitat.maxPressureKPa = 200.0;
+		core::CrewSettings crew;
+		crew.id = "crew";
+		crew.atmosphereId = "habitat";
+		crew.crewCount = 2;
+		crew.activityProfile.periodSeconds = 120.0;
+		crew.activityProfile.segments = { {0.0, 1.0}, {60.0, 0.4} };
+		crew.foodStoreId = "food";
+		crew.waterStoreId = "water";
+		crew.urineStoreId = "urine";
+		crew.organicWasteStoreId = "organicWaste";
+		crew.foodPerCrewPerS = 0.001;
+		crew.waterPerCrewPerS = 0.002;
+		crew.oxygenPerCrewKgPerS = 0.001;
+		crew.co2PerCrewKgPerS = 0.0011;
+		crew.moisturePerCrewKgPerS = 0.0005;
+		crew.urinePerCrewPerS = 0.0015;
+		crew.organicWastePerCrewPerS = 0.0002;
+		crew.metabolicHeatPerCrewKW = 0.1;
+		core::World original("Crew Round Trip", 2, 2);
+		original.pauseSimulation();
+		original.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 2.0f;
+		settings.stores.push_back(store("food", 100.0, 50.0, foodComposition));
+		settings.stores.push_back(store("water", 100.0, 50.0, waterComposition));
+		settings.stores.push_back(store("urine", 100.0, 0.0, urineComposition));
+		settings.stores.push_back(store("organicWaste", 100.0, 0.0, wasteComposition));
+		settings.atmospheres.push_back(habitat);
+		settings.crews.push_back(crew);
+		std::string diagnostic;
+		require(original.configureStationSystems(settings, false, &diagnostic),
+			"Crew settings edit failed: " + diagnostic);
+		original.resumeSimulation();
+		require(original.advanceTicks(1800), "Crew original run failed");
+		auto const expected = original.getStationSystemsSnapshot();
+		require(expected.crews.size() == 1
+			&& expected.crews[0].foodConsumed > 0.0
+			&& expected.crews[0].retainedKg > 0.0
+			&& expected.crews[0].urineProduced > 0.0,
+			"Crew scenario did not exercise consumption and returns before saving");
+		auto const path = directory / "crews.world.yaml";
+		original.saveTo(path.string());
+		require(readFile(path).find("crews:") != std::string::npos,
+			"saved document lacks crews");
+		require(readFile(path).find("metabolicHeatPerCrewKW") != std::string::npos,
+			"saved document lacks the crew metabolic contract");
+		auto const reopened = core::loadWorldDocument(path);
+		reopened->pauseSimulation();
+		require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+			"authored crew settings did not survive the file round trip");
+		require(reopened->getStationSystemsSnapshot().crews[0].foodConsumed == 0.0
+			&& reopened->getStationSystemsSnapshot().crews[0].retainedKg == 0.0
+			&& reopened->getStationSystemsSnapshot().stores[2].currentQualified == 0.0,
+			"reopened World did not reconstruct the crew starting state");
+		reopened->resumeSimulation();
+		require(reopened->advanceTicks(1800), "Crew reopened run failed");
+		require(reopened->getStationSystemsSnapshot() == expected,
+			"Crew scenario is not reproducible from the document");
+		require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
+			"Crew event history is not reproducible from the document");
+		auto const binaryPath = directory / "crews.world";
+		original.saveTo(binaryPath.string());
+		auto const reopenedBinary = core::loadWorldDocument(binaryPath);
+		reopenedBinary->pauseSimulation();
+		require(reopenedBinary->getStationSystemsSnapshot().crews.size() == 1
+			&& reopenedBinary->getStationSystemsSnapshot().crews[0].foodConsumed == 0.0,
+			"reopened binary crew document did not reconstruct the starting state");
+		// A pre-77 document carrying the new fields is refused.
+		auto const withField = serializeYaml(original);
+		{
+			auto stale = withField;
+			replaceAll(stale, "version: 77", "version: 76");
+			auto const stalePath = directory / "stale-crews.world.yaml";
+			writeFile(stalePath, stale);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(stalePath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a pre-77 document carrying crews was silently accepted");
+		}
+		// Malformed crew values in a file are rejected.
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "crewCount: 2", "crewCount: -1");
+			auto const malformedPath = directory / "malformed-crew-count.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a negative crew count was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "atmosphereId: habitat", "atmosphereId: ghost");
+			auto const malformedPath = directory / "malformed-crew-atmosphere.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a crew breathing in an unknown compartment was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "foodStoreId: food", "foodStoreId: pantry");
+			auto const malformedPath = directory / "malformed-crew-food-store.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a crew fed from an unknown store was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "metabolicHeatPerCrewKW: 0.1", "metabolicHeatPerCrewKW: 5.0");
+			auto const malformedPath = directory / "malformed-crew-heat.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "metabolic heat beyond the funded food energy was accepted from a file");
+		}
+	}
 }
 
 void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
@@ -1570,4 +1741,5 @@ void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"chillerFiles", chillerFiles});
 	checks.push_back({"generatorFiles", generatorFiles});
 	checks.push_back({"atmosphereFiles", atmosphereFiles});
+	checks.push_back({"crewFiles", crewFiles});
 }

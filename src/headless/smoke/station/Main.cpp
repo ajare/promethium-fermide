@@ -144,7 +144,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 76"), 11, "version: 65");
+		text.replace(text.find("version: 77"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -2265,8 +2265,8 @@ namespace
 		auto const bundled = core::bundledStationSystemsSource();
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -2325,8 +2325,8 @@ namespace
 		// model's own audits hold.
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -4278,13 +4278,13 @@ namespace
 			auto const bundled = core::bundledStationSystemsSource();
 			core::setStationSystemsSourceLoader([bundled] {
 				return "local factory = (function()\n" + bundled + "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
 					"assert(#reservoirs == 1 and reservoirs[1].id == 'cabin'\n"
 					"\tand reservoirs[1].heatCapacityKJPerK == 100 and reservoirs[1].absorbedHeatKW == 0)\n"
 					"assert(#radiators == 1 and radiators[1].reservoir == 'cabin'\n"
 					"\tand radiators[1].areaM2 == 5000)\n"
 					"assert(#loads == 1 and loads[1].heatSinkId == 'cabin')\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
 					"assert(model.reservoirs[1].temperature == 20)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
@@ -4912,8 +4912,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled, expectedLiteral] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -4984,7 +4984,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
 					"assert(type(coolantLoops) == 'table' and #coolantLoops == 1, 'coolant loop descriptor crossing lost')\n"
 					"assert(coolantLoops[1].coolantCapacityKg > 0, 'corrupt coolant capacity crossing')\n"
 					"error('corrupt coolant descriptor crossing')\n"
@@ -5659,8 +5659,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled, expectedLiteral] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -5785,7 +5785,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
 					"assert(type(chillers) == 'table' and #chillers == 1, 'chiller descriptor crossing lost')\n"
 					"assert(chillers[1].cop > 0, 'corrupt chiller COP crossing')\n"
 					"error('corrupt chiller descriptor crossing')\n"
@@ -6474,8 +6474,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
-					"return factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
+					"return factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
 					"end";
 			});
 			core::World probe("StartupAuditOverAllocationProbe", 2, 2);
@@ -6813,7 +6813,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
 					"assert(type(generators) == 'table' and #generators == 1, 'generator descriptor crossing lost')\n"
 					"assert(generators[1].efficiency > 0, 'corrupt generator efficiency crossing')\n"
 					"error('corrupt generator descriptor crossing')\n"
@@ -6840,6 +6840,498 @@ namespace
 	// recovered-versus-lost split, and heat-only thermal-reservoir
 	// coupling. All checks run through the World tick/snapshot/event/
 	// diagnostic seam and observable behaviour only.
+	// #401: crew supplies turn into balanced metabolic returns.	
+	void crews(smoke::Context const&)
+	{
+		auto const dt = static_cast<double>(core::World::getFixedTimestep());
+		auto const approx = [](double actual, double expected, double tolerance = 1e-9)
+		{ return std::abs(actual - expected) <= tolerance; };
+		auto sawEvent = [](core::World& world, std::string const& needle)
+		{
+			for (auto const& event : world.getStationSystemsEvents())
+				if (event.message.find(needle) != std::string::npos) return true;
+			return false;
+		};
+		// Authored compositions (dry-mass basis, #391) chosen so the
+		// declared crew coefficients close: consumed mass (food + water
+		// + O2) exceeds emitted mass (CO2 + moisture + urine + organic
+		// waste) with an explicit retained remainder; every returned
+		// constituent is funded by the consumed food and water; and the
+		// declared metabolic heat sits below the food energy minus the
+		// energy still bound in the waste streams.
+		core::ResourceCompositionSettings foodComposition;
+		foodComposition.moisture = 0.8;
+		foodComposition.nutrientNitrogen = 0.05;
+		foodComposition.phosphorus = 0.01;
+		foodComposition.potassium = 0.02;
+		foodComposition.otherMinerals = 0.02;
+		foodComposition.energyKJPerKgDry = 17000.0;
+		core::ResourceCompositionSettings waterComposition;
+		waterComposition.moisture = 0.999;
+		waterComposition.otherMinerals = 0.001;
+		core::ResourceCompositionSettings urineComposition;
+		urineComposition.moisture = 0.95;
+		urineComposition.nutrientNitrogen = 0.1;
+		urineComposition.phosphorus = 0.02;
+		urineComposition.potassium = 0.05;
+		urineComposition.otherMinerals = 0.05;
+		urineComposition.energyKJPerKgDry = 500.0;
+		core::ResourceCompositionSettings wasteComposition;
+		wasteComposition.moisture = 0.5;
+		wasteComposition.energyKJPerKgDry = 10000.0;
+		auto store = [](std::string const& id, std::string const& unit,
+			double capacity, double starting,
+			std::optional<core::ResourceCompositionSettings> composition)
+		{
+			core::ResourceStoreSettings settings;
+			settings.id = id;
+			settings.unit = unit;
+			settings.capacity = capacity;
+			settings.startingQualified = starting;
+			settings.composition = std::move(composition);
+			return settings;
+		};
+		auto compartment = []()
+		{
+			core::AtmosphereSettings settings;
+			settings.id = "habitat";
+			settings.hazardClass = "normal";
+			settings.volumeM3 = 100.0;
+			settings.startingOxygenKg = 20.0;
+			settings.startingNitrogenKg = 80.0;
+			settings.startingTemperatureC = 20.0;
+			settings.thermalCapacityKJPerK = 10000.0;
+			settings.minPressureKPa = 1.0;
+			settings.maxPressureKPa = 200.0;
+			return settings;
+		};
+		// Per-crew full-activity rates: consumed 0.004 kg/s, emitted
+		// 0.0033 kg/s, retained 0.0007 kg/s; released food energy
+		// 2.3625 kJ/s against 0.1 kW declared metabolic heat.
+		auto crew = [](int count, double activityLevel)
+		{
+			core::CrewSettings settings;
+			settings.id = "crew";
+			settings.atmosphereId = "habitat";
+			settings.crewCount = count;
+			settings.activityProfile.constantLevel = activityLevel;
+			settings.foodStoreId = "food";
+			settings.waterStoreId = "water";
+			settings.urineStoreId = "urine";
+			settings.organicWasteStoreId = "organicWaste";
+			settings.foodPerCrewPerS = 0.001;
+			settings.waterPerCrewPerS = 0.002;
+			settings.oxygenPerCrewKgPerS = 0.001;
+			settings.co2PerCrewKgPerS = 0.0011;
+			settings.moisturePerCrewKgPerS = 0.0005;
+			settings.urinePerCrewPerS = 0.0015;
+			settings.organicWastePerCrewPerS = 0.0002;
+			settings.metabolicHeatPerCrewKW = 0.1;
+			return settings;
+		};
+		auto fullStores = [&]()
+		{
+			std::vector<core::ResourceStoreSettings> stores;
+			stores.push_back(store("food", "kg", 100.0, 50.0, foodComposition));
+			stores.push_back(store("water", "kg", 100.0, 50.0, waterComposition));
+			stores.push_back(store("urine", "kg", 100.0, 0.0, urineComposition));
+			stores.push_back(store("organicWaste", "kg", 100.0, 0.0, wasteComposition));
+			return stores;
+		};
+		auto crewConfigure = [](core::World& world,
+			std::vector<core::ResourceStoreSettings> stores,
+			core::AtmosphereSettings habitat,
+			std::vector<core::CrewSettings> crewSettings)
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = std::move(stores);
+			settings.atmospheres = { habitat };
+			settings.crews = std::move(crewSettings);
+			auto const ok = world.configureStationSystems(settings, false, &diagnostic);
+			return std::make_pair(ok, diagnostic);
+		};
+		// Refused configurations: every malformed crew contract is
+		// rejected before anything runs, and none of the refusals
+		// mutates the World.
+		{
+			core::World bad("CrewBad", 2, 2);
+			bad.pauseSimulation(); bad.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = fullStores();
+			settings.atmospheres = { compartment() };
+			std::string diagnostic;
+			settings.crews = { crew(2, 1.0) };
+			settings.crews[0].atmosphereId = "ghost";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("unknown atmosphere compartment") != std::string::npos,
+				"a crew breathing in an unknown compartment was accepted");
+			settings.crews = { crew(2, 1.0) };
+			settings.crews[0].foodStoreId = "pantry";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("food store 'pantry' does not exist") != std::string::npos,
+				"a crew fed from an unknown store was accepted");
+			settings.crews = { crew(2, 1.0) };
+			settings.stores = fullStores();
+			settings.stores[1].unit = "L";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("mass-denominated") != std::string::npos,
+				"a crew stream in a non-mass unit was accepted");
+			settings.crews = { crew(2, 1.0) };
+			settings.stores = fullStores();
+			settings.stores[2].composition.reset();
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("no declared composition") != std::string::npos,
+				"a crew returning to a plain (non-compound) store was accepted");
+			settings.crews = { crew(-1, 1.0) };
+			settings.stores = fullStores();
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("crew count must not be negative") != std::string::npos,
+				"a negative crew count was accepted");
+			// Mass creation: CO2 out pushes emitted mass above consumed.
+			settings.crews = { crew(2, 1.0) };
+			settings.crews[0].co2PerCrewKgPerS = 0.002;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("may not create mass") != std::string::npos,
+				"returns exceeding consumption were accepted");
+			// Element creation: urine carries more nitrogen than the food
+			// can fund.
+			settings.crews = { crew(2, 1.0) };
+			settings.stores = fullStores();
+			settings.stores[2].composition->nutrientNitrogen = 0.5;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("nutrientNitrogen") != std::string::npos
+				&& diagnostic.find("element balance may not be created") != std::string::npos,
+				"a urine nitrogen load the food cannot fund was accepted");
+			// Energy creation: declared heat above the released food energy.
+			settings.crews = { crew(2, 1.0) };
+			settings.stores = fullStores();
+			settings.crews[0].metabolicHeatPerCrewKW = 5.0;
+			auto const heatOk = core::validateStationSystemsSettings(settings, diagnostic);
+			require(!heatOk
+				&& diagnostic.find("heat may not be created from nothing") != std::string::npos,
+				("metabolic heat beyond the funded food energy was accepted (ok="
+				+ std::to_string(heatOk) + ", diag=" + diagnostic + ")").c_str());
+			settings.crews = { crew(2, 1.5) };
+			require(!core::validateStationSystemsSettings(settings, diagnostic),
+				"an activity level above one was accepted");
+			std::vector<core::CrewSettings> tooMany;
+			for (size_t index = 0; index <= core::MaxStationCrews; ++index)
+				tooMany.push_back(crew(1, 1.0));
+			settings.crews = tooMany;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("limited to") != std::string::npos,
+				"more than the declared crew budget was accepted");
+			require(!bad.getStationSystemsSnapshot().enabled && bad.getSimulationTick() == 0,
+				"a refused crew configuration mutated the World");
+		}
+		// Nominal metabolism: every pathway runs at the authored rate,
+		// the compartment gains the crew's CO2, moisture and heat, the
+		// waste stores receive the returns, and the crew ledger closes
+		// over consumed = returned + retained with the element balances
+		// intact.
+		{
+			core::World world("CrewNominal", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(crewConfigure(world, fullStores(), compartment(), { crew(2, 1.0) }).first,
+				"nominal crew refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(120), "nominal crew run failed");
+			auto const elapsed = 120.0 * dt;
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.crews.size() == 1, "crew missing from snapshot");
+			auto const& live = snap.crews[0];
+			require(live.status == core::StationTransferStatus::Full
+				&& approx(live.metabolicScale, 1.0), "nominal crew is not fully supplied");
+			require(approx(live.foodConsumed, 0.001 * 2.0 * elapsed), "food consumption mismatch");
+			require(approx(live.waterConsumed, 0.002 * 2.0 * elapsed), "water consumption mismatch");
+			require(approx(live.oxygenConsumedKg, 0.001 * 2.0 * elapsed), "oxygen consumption mismatch");
+			require(approx(live.co2ProducedKg, 0.0011 * 2.0 * elapsed), "CO2 return mismatch");
+			require(approx(live.moistureProducedKg, 0.0005 * 2.0 * elapsed), "moisture return mismatch");
+			require(approx(live.urineProduced, 0.0015 * 2.0 * elapsed), "urine return mismatch");
+			require(approx(live.organicWasteProduced, 0.0002 * 2.0 * elapsed), "organic waste return mismatch");
+			require(approx(live.heatKJ, 0.1 * 2.0 * elapsed), "metabolic heat mismatch");
+			require(approx(live.retainedKg, (0.004 - 0.0033) * 2.0 * elapsed),
+				"retained body mass does not close over consumed minus returned");
+			// The compartment books the crew's gas, moisture and heat.
+			auto const& habitat = snap.atmospheres[0];
+			require(approx(habitat.oxygenKg, 20.0 - 0.001 * 2.0 * elapsed),
+				"the compartment did not supply the crew's oxygen");
+			require(approx(habitat.co2ProducedKg, 0.0011 * 2.0 * elapsed),
+				"the crew's CO2 is missing from the compartment ledger");
+			require(approx(habitat.vapourAddedKg, 0.0005 * 2.0 * elapsed),
+				"the crew's moisture is missing from the compartment ledger");
+			require(approx(habitat.crewHeatEnergyKJ, 0.1 * 2.0 * elapsed),
+				"the crew's metabolic heat is missing from the compartment ledger");
+			require(habitat.temperatureC > 20.0, "crew heat did not warm the compartment");
+			require(std::abs(habitat.residualKJ) < 1e-6, "compartment thermal ledger not closed");
+			// The waste stores received the returns; the food and water
+			// stores gave up exactly the consumption.
+			auto const& urineStore = snap.stores[2];
+			auto const& wasteStore = snap.stores[3];
+			require(approx(urineStore.currentQualified, 0.0015 * 2.0 * elapsed),
+				"the urine store did not receive the returns");
+			require(approx(wasteStore.currentQualified, 0.0002 * 2.0 * elapsed),
+				"the organic waste store did not receive the returns");
+			require(approx(snap.stores[0].currentQualified, 50.0 - 0.001 * 2.0 * elapsed),
+				"the food store gave up more or less than the crew consumed");
+			// Element conservation: every constituent ledger closes with
+			// no residual beyond tolerance.
+			for (auto const& balance : snap.constituentBalances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("constituent '" + balance.constituent + "' ledger not closed").c_str());
+			// The crew's own closure: consumed = returned + retained.
+			require(live.retainedKg > 0.0, "nominal metabolism retained nothing");
+		}
+		// Missing food: the uniform scale collapses to zero, so nothing
+		// else is consumed and nothing is returned - no nominal waste
+		// from material that is not there - and the shortfall is
+		// explicit on every pathway.
+		{
+			core::World world("CrewNoFood", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto stores = fullStores();
+			stores[0].startingQualified = 0.0;
+			require(crewConfigure(world, stores, compartment(), { crew(2, 1.0) }).first,
+				"zero-food crew refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "zero-food run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& live = snap.crews[0];
+			require(live.status == core::StationTransferStatus::Rejected
+				&& approx(live.metabolicScale, 0.0), "a crew with no food is not starved");
+			require(live.lastFoodUnmet > 0.0 && live.lastFoodActual == 0.0,
+				"the food shortfall is not visible as unmet demand");
+			require(live.waterConsumed == 0.0 && live.oxygenConsumedKg == 0.0,
+				"a starved crew still consumed water or oxygen");
+			require(live.urineProduced == 0.0 && live.organicWasteProduced == 0.0
+				&& live.co2ProducedKg == 0.0 && live.moistureProducedKg == 0.0
+				&& live.heatKJ == 0.0,
+				"absent food generated nominal waste or heat");
+			require(sawEvent(world, "metabolic demand unmet: food store"),
+				"the crew starvation transition was never announced");
+		}
+		// Partial supply: the scale lands on the scarcest input and
+		// every pathway - consumption and return - throttles together
+		// with it; requested stays visible above actual.
+		{
+			core::World world("CrewPartialWater", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto stores = fullStores();
+			// One tick of water demand for 2 crew is 0.004*dt; hold half.
+			stores[1].startingQualified = 0.002 * dt;
+			require(crewConfigure(world, stores, compartment(), { crew(2, 1.0) }).first,
+				"partial-water crew refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(1), "partial-water tick failed");
+			auto const first = world.getStationSystemsSnapshot();
+			auto const& live = first.crews[0];
+			require(approx(live.metabolicScale, 0.5, 1e-9),
+				"the metabolic scale did not land on the half-full water store");
+			require(approx(live.foodConsumed, 0.5 * 0.001 * 2.0 * dt),
+				"food did not throttle with the water-limited scale");
+			require(approx(live.oxygenConsumedKg, 0.5 * 0.001 * 2.0 * dt),
+				"oxygen did not throttle with the water-limited scale");
+			require(approx(live.urineProduced, 0.5 * 0.0015 * 2.0 * dt),
+				"urine did not throttle with the water-limited scale");
+			require(approx(live.heatKJ, 0.5 * 0.1 * 2.0 * dt),
+				"heat did not throttle with the water-limited scale");
+			require(live.lastWaterUnmet > 0.0 && live.lastFoodUnmet > 0.0,
+				"partial supply left no visible unmet remainder");
+			require(live.status == core::StationTransferStatus::Partial,
+				"partial metabolism does not report a partial status");
+			// The water is gone: the next tick runs at zero scale.
+			world.advanceTicks(1);
+			require(world.getStationSystemsSnapshot().crews[0].status
+				== core::StationTransferStatus::Rejected,
+				"an emptied water store did not starve the crew");
+		}
+		// Missing oxygen: the compartment cannot breathe for the crew, so
+		// nothing runs - no food draw, no CO2, no heat - and the
+		// compartment's own inventory is untouched by the refusal.
+		{
+			core::World world("CrewNoOxygen", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto habitat = compartment();
+			habitat.startingOxygenKg = 0.0;
+			require(crewConfigure(world, fullStores(), habitat, { crew(2, 1.0) }).first,
+				"zero-oxygen crew refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "zero-oxygen run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& live = snap.crews[0];
+			require(live.status == core::StationTransferStatus::Rejected,
+				"a crew with no oxygen is not starved");
+			require(live.lastOxygenUnmetKg > 0.0, "the oxygen shortfall is not visible");
+			require(live.foodConsumed == 0.0 && live.waterConsumed == 0.0,
+				"a crew with no oxygen still consumed food or water");
+			require(live.co2ProducedKg == 0.0 && live.heatKJ == 0.0,
+				"a crew with no oxygen produced CO2 or heat from nothing");
+			require(sawEvent(world, "oxygen inventory cannot supply the draw"),
+				"the oxygen starvation limiter was never announced");
+		}
+		// A full waste tank throttles the metabolism: consumption cannot
+		// run ahead of a destination that cannot hold the returns.
+		{
+			core::World world("CrewFullUrine", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto stores = fullStores();
+			stores[2].startingQualified = 100.0; // at capacity
+			require(crewConfigure(world, stores, compartment(), { crew(2, 1.0) }).first,
+				"full-urine-tank crew refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "full-urine-tank run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& live = snap.crews[0];
+			require(live.status == core::StationTransferStatus::Rejected,
+				"a full waste tank did not throttle the crew");
+			require(live.foodConsumed == 0.0 && live.urineProduced == 0.0,
+				"consumption ran with nowhere for the returns to go");
+			require(sawEvent(world, "urine store 'urine' is at capacity"),
+				"the waste-headroom limiter was never announced");
+		}
+		// Activity scales every pathway: a half-activity crew eats,
+		// breathes, works and excretes at half the nominal rates.
+		{
+			core::World world("CrewHalfActivity", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(crewConfigure(world, fullStores(), compartment(), { crew(2, 0.5) }).first,
+				"half-activity crew refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(120), "half-activity run failed");
+			auto const elapsed = 120.0 * dt;
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& live = snap.crews[0];
+			require(approx(live.activityLevel, 0.5), "activity level not reported");
+			require(approx(live.foodConsumed, 0.5 * 0.001 * 2.0 * elapsed),
+				"half activity did not halve the food rate");
+			require(approx(live.co2ProducedKg, 0.5 * 0.0011 * 2.0 * elapsed),
+				"half activity did not halve the CO2 return");
+			require(approx(live.retainedKg, 0.5 * (0.004 - 0.0033) * 2.0 * elapsed),
+				"half activity did not halve the retained mass");
+			require(live.status == core::StationTransferStatus::Full,
+				"a half-activity crew with full stores is not fully supplied");
+		}
+		// Crew inputs and outputs never touch Agents: with crews running
+		// against stores and a compartment, Agents behave exactly as in
+		// the identical crew-free World.
+		{
+			core::World withCrew("CrewAgentsA", 8, 2);
+			core::World withoutCrew("CrewAgentsB", 8, 2);
+			withCrew.pauseSimulation();
+			withoutCrew.pauseSimulation();
+			auto const crewRoom = withCrew.addRoom("Bunk", 0, 0, 0, 7, 1);
+			auto const controlRoom = withoutCrew.addRoom("Bunk", 0, 0, 0, 7, 1);
+			withCrew.finishBuild();
+			withoutCrew.finishBuild();
+			withCrew.pauseSimulation();
+			withoutCrew.pauseSimulation();
+			require(crewConfigure(withCrew, fullStores(), compartment(), { crew(2, 1.0) }).first,
+				"crew setup for the Agent isolation run refused");
+			std::string diagnostic;
+			core::StationSystemsSettings idle;
+			idle.enabled = true;
+			idle.observationIntervalSeconds = 1.0f;
+			require(withoutCrew.configureStationSystems(idle, false, &diagnostic), diagnostic.c_str());
+			withCrew.createAgent("Sleeper", crewRoom, 0u, 3.5f);
+			withoutCrew.createAgent("Sleeper", controlRoom, 0u, 3.5f);
+			withCrew.resumeSimulation();
+			withoutCrew.resumeSimulation();
+			require(withCrew.advanceTicks(120) && withoutCrew.advanceTicks(120),
+				"Agent isolation run failed");
+			auto const& a = withCrew.getSimulationSnapshot().agents;
+			auto const& b = withoutCrew.getSimulationSnapshot().agents;
+			require(a.size() == 1 && b.size() == 1,
+				"the crew run did not preserve the authored Agent count");
+			require(a[0].id == b[0].id && a[0].sectorId == b[0].sectorId
+				&& a[0].localPosition.x == b[0].localPosition.x
+				&& a[0].localPosition.y == b[0].localPosition.y
+				&& a[0].state == b[0].state && a[0].pose == b[0].pose
+				&& a[0].active == b[0].active && a[0].hasPath == b[0].hasPath,
+				"crew metabolism mutated Agent state");
+			require(withCrew.getStationSystemsSnapshot().crews[0].foodConsumed > 0.0,
+				"the crew did not actually run alongside the Agent");
+		}
+		// Deterministic reset: the same authored scenario replays to the
+		// same crew ledger and the same event history.
+		{
+			core::World world("CrewReset", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(crewConfigure(world, fullStores(), compartment(), { crew(2, 1.0) }).first,
+				"reset-scenario crew refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(120), "reset scenario run failed");
+			auto const saved = world.getStationSystemsSnapshot();
+			auto const events = world.getStationSystemsEvents();
+			world.pauseSimulation();
+			world.resetSimulation();
+			require(world.getStationSystemsSnapshot().crews[0].foodConsumed == 0.0
+				&& world.getStationSystemsSnapshot().crews[0].retainedKg == 0.0,
+				"reset did not reconstruct the crew ledger from the authored start");
+			world.resumeSimulation();
+			require(world.advanceTicks(120), "reset replay failed");
+			require(world.getStationSystemsSnapshot() == saved
+				&& world.getStationSystemsEvents() == events,
+				"crew scenario is not deterministic under reset");
+		}
+		// The Lua sandbox mirror: a corrupt crew descriptor crossing is
+		// contained at construction through the integrated error path.
+		{
+			core::setStationSystemsSourceLoader([] {
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
+					"assert(type(crews) == 'table' and #crews == 1, 'crew descriptor crossing lost')\n"
+					"assert(crews[1].foodRate > 0, 'corrupt crew rate crossing')\n"
+					"error('corrupt crew descriptor crossing')\n"
+					"end";
+			});
+			core::World corrupt("CrewCorrupt", 2, 2);
+			corrupt.pauseSimulation(); corrupt.finishBuild();
+			auto const result = crewConfigure(corrupt, fullStores(), compartment(), { crew(2, 1.0) });
+			require(!result.first && result.second.find("corrupt crew descriptor crossing")
+				!= std::string::npos
+				&& !corrupt.getStationSystemsSnapshot().enabled,
+				"corrupt crew sandbox crossing not contained at construction");
+			core::setStationSystemsSourceLoader({});
+		}
+		// The sandbox's own crew closure audits run every tick: a model
+		// that drifts from its ledger fails contained. The nominal run
+		// above already exercised the mirror; here the sandbox asserts
+		// the crew's uniform scale directly against the host-visible
+		// compartment heat on the first tick.
+		{
+			auto const bundled = core::bundledStationSystemsSource();
+			core::setStationSystemsSourceLoader([bundled] {
+				return std::string("local factory = (function()\n") + bundled
+					+ "\nend)()\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
+					"local original = model.advance\n"
+					"function model.advance(self, tick, seconds)\n"
+					"local result = original(self, tick, seconds)\n"
+					"local crew, habitat = self.crews[1], self.atmospheres[1]\n"
+					"assert(crew.lastScale >= 0 and crew.lastScale <= 1, 'sandbox crew scale out of range')\n"
+					"assert(math.abs(crew.retainedKg - ((crew.foodConsumed + crew.waterConsumed + crew.oxygenConsumed)\n"
+					"- (crew.co2Produced + crew.moistureProduced + crew.urineProduced + crew.organicWasteProduced))) < 1e-9,\n"
+					"  'sandbox crew retained ledger does not close')\n"
+					"assert(habitat.crewHeatKJ > 0.0, 'sandbox crew heat not booked into the compartment')\n"
+					"return result\n"
+					"end\n"
+					"return model\n"
+					"end";
+			});
+			core::World sandbox("SandboxCrew", 2, 2);
+			sandbox.pauseSimulation(); sandbox.finishBuild();
+			require(crewConfigure(sandbox, fullStores(), compartment(), { crew(2, 1.0) }).first,
+				"sandbox crew scenario refused");
+			sandbox.resumeSimulation();
+			require(sandbox.advanceTicks(60),
+				"bundled Lua crew mirror failed its in-sandbox assertions");
+			core::setStationSystemsSourceLoader({});
+		}
+	}
 	void atmospheres(smoke::Context const&)
 	{
 		auto const dt = static_cast<double>(core::World::getFixedTimestep());
@@ -7591,8 +8083,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled, expectedLiteral] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -7651,7 +8143,7 @@ namespace
 		// is contained at construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
 					"assert(type(atmospheres) == 'table' and #atmospheres == 1, 'atmosphere descriptor crossing lost')\n"
 					"assert(atmospheres[1].volumeM3 > 0, 'corrupt atmosphere volume crossing')\n"
 					"error('corrupt atmosphere descriptor crossing')\n"
@@ -7670,7 +8162,7 @@ namespace
 		// A corrupt airlock cycle crossing is contained the same way.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)\n"
 					"assert(type(airlockCycles) == 'table' and #airlockCycles == 1, 'airlock cycle descriptor crossing lost')\n"
 					"error('corrupt airlock cycle descriptor crossing')\n"
 					"end";
@@ -7700,7 +8192,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"failures", failures}};
+		{"deliveries", deliveries}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

@@ -1,4 +1,4 @@
-# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, thermal reservoirs with radiator rejection and coolant loops with freeze-protection heating and chilled thermal services (#386–#391, #393–#397)
+# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, chilled thermal services, fuelled generators, compartment atmospheres with airlock cycles and crew metabolic returns (#386–#391, #393–#397, #399, #400, #401)
 
 Station systems are opt-in per World and disabled in existing documents. Open
 **View > Station Systems** or use the
@@ -966,6 +966,94 @@ documents with pre-76 documents and malformed compartment or cycle
 values refused at load; and intact Lua atmosphere and airlock-cycle
 descriptor crossings with contained construction refusal.
 
+### Crew consumption and metabolic returns (#401)
+
+A crew is an authored population — a count, an activity profile and
+a table of per-crew-per-second metabolic rates — that consumes food
+and water from finite compound stores and oxygen from one compartment
+atmosphere, and returns carbon dioxide, moisture and metabolic heat
+to that compartment and urine and organic waste to their own finite
+compound stores. The population is never derived from the World's
+Agents: it is a number the author writes, and nothing in the crew
+model reads, mutates or synchronises Agent state.
+
+Every pathway is scaled by one uniform metabolic scale per tick:
+the minimum of the supply fractions (food, water, oxygen — what the
+inventories can actually give against what is requested) and the
+output-headroom fractions (urine, organic waste and the compartment's
+capacity to receive — where the returns can actually go). A starved
+or back-pressured crew therefore throttles every pathway together
+rather than eating without breathing or breathing without excreting:
+absent material never generates nominal waste. Requested and actual
+are tracked separately per pathway, so the unmet remainder of each
+stream stays visible — partial supply is an explicit condition, not
+a silently-adjusted nominal.
+
+The authored coefficients must close before anything runs. At full
+activity the emitted mass (CO2 + moisture + urine + organic waste)
+may not exceed the consumed mass (food + water + oxygen): metabolism
+may not create mass. Every tracked constituent returned in the
+urine, organic-waste and respired-moisture streams must be funded by
+the constituents in the consumed food and water — nitrogen,
+phosphorus, potassium, minerals and organics cannot come from
+nothing. And the declared metabolic heat may not exceed the consumed
+food energy minus the energy still bound in the waste streams: heat
+may not be created from nothing. A crew whose returns fall short of
+its consumption retains the difference as explicit retained body
+mass, reported in the ledger rather than discarded. The four matter
+streams must reference compound mass stores (g or kg with declared
+compositions) so the element closure is checkable at authoring time.
+
+Crew run after the airlock cycles and before the compartment's
+thermal integration, so metabolic heat enters the same coupled
+vapour/thermal solve as every other heat source: the crew's heat
+warms the air, can drive vapour to saturation and condensation, and
+is booked in the compartment's thermal ledger with the rest. The
+compartment's oxygen draw, CO2 and moisture additions flow through
+its own composition and containment ledgers, which keep closing
+against the crew's returns.
+
+World schema 77 persists the authored crew contract (count, activity
+profile, store references and the eight per-crew rates); a pre-77
+document carrying `crews` is refused rather than silently dropped.
+Consumption, returns, the metabolic scale, retained mass and the
+heat ledger stay runtime-only: Load and Reset reconstruct them from
+the authored starting conditions. The separate Station Systems
+window drafts crews (population, activity profile, the four store
+references and every rate) with full validation reporting, and
+shows the live per-pathway requested-versus-actual figures, the
+current metabolic scale and its limiter, the cumulative consumed /
+returned / retained ledger and the compartment's booked crew heat
+beside the existing views.
+
+Crew acceptance coverage: refused configurations (unknown breathing
+compartment, unknown, non-mass or non-compound stream stores,
+negative crew count, malformed activity profile, returns exceeding
+consumption, a returned constituent the food and water cannot fund,
+metabolic heat above the released food energy, over-budget crew
+count) with no World mutation; nominal metabolism where every
+pathway runs at the authored rate, the compartment books the crew's
+oxygen draw, CO2, moisture and heat, the waste stores receive the
+returns, the consumed-minus-returned difference lands in the
+retained ledger and every constituent ledger closes; starvation (an
+empty food store collapses the scale to zero — nothing else is
+consumed, nothing is returned, the shortfall is visible as unmet
+demand and no absent material generates waste or heat); partial
+supply (a half-full water store puts the scale at one half and
+every pathway — consumption and returns alike — throttles with it,
+with requested staying visible above actual, and the emptied store
+starves the next tick); zero-oxygen refusal (no food or water draw,
+no CO2, no heat, the compartment's limiter named); a full waste
+tank back-pressuring the whole metabolism to refusal with nowhere
+for the returns to go; activity scaling (a half-activity crew eats,
+breathes, works and excretes at half the rates); Agent isolation
+(with crews running, Agents match a crew-free twin World field for
+field — count, sector, position, state, pose); deterministic Reset
+replay of snapshots and events; and intact Lua crew descriptor
+crossings with contained construction refusal, plus an in-sandbox
+assertion that the mirror's own retained ledger closes and its
+metabolic scale stays within [0, 1] every tick.
+
 ## Explicit scope limit
 
 This slice implements lifecycle, authored finite store configuration,
@@ -982,8 +1070,11 @@ startup-energy gating and persistent shutdown decay heat, and
 fixed-volume compartment atmospheres with ideal-gas pressure
 derivation, occupancy and leak accounting, the vapour saturation
 constraint with latent-heat release, scheduled airlock losses with
-the recovered-versus-lost split, and heat-only reservoir coupling.
-It still adds no crew demand, treatment/clearance
+the recovered-versus-lost split, and heat-only reservoir coupling,
+and crew populations that consume food, water and oxygen and return
+CO2, moisture, urine, organic waste and metabolic heat under
+authored mass-, constituent- and energy-closing coefficients.
+It adds no treatment or clearance
 workflows or ejection, no dynamic coolant leak, replenishment or
 loop-to-loop transfer (a loop's charge is its authored inventory and
 nothing in this slice changes it), no powered or passive thermal-buffer
@@ -997,10 +1088,14 @@ compartments, and no door, hatch or airlock physics tied to
 atmosphere state. Completed tick counts are
 observability, not oxygen, heat or endurance estimates. It
 invents no process coefficients beyond the authored demand, capacity
-and profile values. ECLSS models, crew inputs, alarms,
+and profile values. Crew metabolism here is the authored return
+contract over the stores and the compartment, not physiology: there
+is no health model, no starvation progression and no Agent-linked
+population. ECLSS models, alarms,
 trends and broader supervisory allocation belong to the subsequent #385
 slices. Agent behaviour, movement, physiology and random streams are
-unchanged.
+unchanged: the crew population is an authored count and never
+derived from, coupled to, or synchronised with the World's Agents.
 
 Acceptance coverage uses World ticking/snapshots/events/diagnostics (including
 real script failure fixtures, store boundary fixtures: zero/empty/full

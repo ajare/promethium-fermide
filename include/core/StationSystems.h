@@ -636,6 +636,59 @@ namespace core
 		bool operator==(AirlockCycleSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationAirlockCycles{16};
+	// A crew contract (#401): an authored population with an activity
+	// profile whose metabolism draws food and water from compound Resource
+	// stores and oxygen from one compartment atmosphere, and returns carbon
+	// dioxide, moisture and metabolic heat to that compartment and urine
+	// and organic waste to their own finite compound stores. Crew are a
+	// configured population, never derived from World Agents: nothing in
+	// this feature reads Agent counts, movement, health, death or
+	// behaviour, and nothing here changes them. The activity profile is a
+	// [0, 1] level scaling every metabolic rate together, so a resting
+	// crew consumes and excretes less without any separate physiology.
+	// All rates are per crew member per simulated second at full
+	// activity; food, water, urine and organic-waste rates are in the
+	// referenced store's unit, gases are kg/s and heat is kW.
+	// Metabolism runs at one uniform metabolic scale per tick: the
+	// smallest of the fractions of each input the declared sources can
+	// actually supply and each output the destination stores can
+	// actually accept. Under partial supply every pathway - consumption
+	// and return alike - throttles to that scale together, so absent
+	// material never generates nominal waste: a crew with no food
+	// produces no urine, no organic waste and no metabolic heat, and a
+	// crew with no oxygen draws nothing and breathes out nothing. The
+	// requested-versus-actual remainder is reported per pathway; unmet
+	// demand is an explicit result, never a silent clamp.
+	// The authored coefficients must close: total emitted mass (CO2 +
+	// moisture + urine + organic waste) may not exceed total consumed
+	// mass (food + water + oxygen), every tracked constituent of the
+	// urine and organic-waste streams must be funded by the consumed
+	// food and water, and the declared metabolic heat may not exceed the
+	// declared food energy minus the energy still bound in the waste
+	// streams. The consumed mass the waste streams do not carry away is
+	// reported as explicit retained body mass - accounted, never
+	// discarded - and this slice models no further body composition.
+	struct CrewSettings
+	{
+		std::string id;
+		std::string atmosphereId;     // compartment receiving the gas and heat exchange
+		int crewCount{0};             // authored population, >= 0; 0 disables the crew
+		ProfileSettings activityProfile; // [0, 1] activity level scaling all rates
+		std::string foodStoreId;      // compound mass-unit input store
+		std::string waterStoreId;     // compound mass-unit input store
+		std::string urineStoreId;     // compound mass-unit output store
+		std::string organicWasteStoreId; // compound mass-unit output store
+		double foodPerCrewPerS{0.0};       // food store units per crew per second
+		double waterPerCrewPerS{0.0};      // water store units per crew per second
+		double oxygenPerCrewKgPerS{0.0};   // oxygen drawn from the compartment
+		double co2PerCrewKgPerS{0.0};      // carbon dioxide returned to it
+		double moisturePerCrewKgPerS{0.0}; // water vapour returned to it
+		double urinePerCrewPerS{0.0};      // urine store units per crew per second
+		double organicWastePerCrewPerS{0.0}; // waste store units per crew per second
+		double metabolicHeatPerCrewKW{0.0};  // sensible heat into the compartment
+		bool operator==(CrewSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationCrews{8};
 
 	struct StationSystemsSettings
 	{
@@ -655,6 +708,7 @@ namespace core
 		std::vector<GeneratorSettings> generators;
 		std::vector<AtmosphereSettings> atmospheres;
 		std::vector<AirlockCycleSettings> airlockCycles;
+		std::vector<CrewSettings> crews;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// Profile shape validation and deterministic evaluation: the level of
@@ -1279,6 +1333,12 @@ namespace core
 		bool highCarbonDioxide{false};
 		bool condensing{false};
 		bool thermallyCoupled{false};
+		// Metabolic heat delivered into this compartment by authored crews
+		// this tick and cumulatively (#401). Crew heat is booked as its
+		// own thermal term - never folded into the compartment's own
+		// occupancy heat - and the thermal ledger closes over it.
+		double lastCrewHeatKW{0.0};
+		double crewHeatEnergyKJ{0.0};
 		// Cumulative pathway ledger: every gram that moved, by pathway.
 		double oxygenConsumedKg{0.0};
 		double co2ProducedKg{0.0};
@@ -1326,6 +1386,61 @@ namespace core
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationAirlockCycleSnapshot const&) const = default;
 	};
+	// One crew as of the most recent tick (#401): the authored contract
+	// beside the last tick's requested-versus-actual exchange on every
+	// metabolic pathway, the uniform metabolic scale the supplies and
+	// destination headroom sustained, the limiter that bound it, and the
+	// closing cumulative ledger. The crew mass ledger closes over the
+	// pathways: consumed (food + water + oxygen) = returned (CO2 +
+	// moisture + urine + organic waste) + retained body mass within the
+	// declared tolerance - the retained term is explicit, never an
+	// unexplained disposal. Store-denominated amounts are in the
+	// referenced store's unit; gases, moisture and heat are kg and kW.
+	struct StationCrewSnapshot
+	{
+		std::string id;
+		std::string atmosphereId;
+		int crewCount{0};
+		std::string foodStoreId;
+		std::string waterStoreId;
+		std::string urineStoreId;
+		std::string organicWasteStoreId;
+		double activityLevel{0.0};   // evaluated activity profile level, [0, 1]
+		double metabolicScale{0.0};  // supply/headroom-sustained fraction, [0, 1]
+		std::string limiter;         // what bound the scale this tick (empty: none)
+		// Last-tick requested / actual / unmet per pathway.
+		double lastFoodRequested{0.0};
+		double lastFoodActual{0.0};
+		double lastFoodUnmet{0.0};
+		double lastWaterRequested{0.0};
+		double lastWaterActual{0.0};
+		double lastWaterUnmet{0.0};
+		double lastOxygenRequestedKg{0.0};
+		double lastOxygenActualKg{0.0};
+		double lastOxygenUnmetKg{0.0};
+		double lastCo2ProducedKg{0.0};
+		double lastMoistureProducedKg{0.0};
+		double lastUrineRequested{0.0};
+		double lastUrineActual{0.0};
+		double lastUrineUnmet{0.0};
+		double lastOrganicWasteRequested{0.0};
+		double lastOrganicWasteActual{0.0};
+		double lastOrganicWasteUnmet{0.0};
+		double lastHeatKW{0.0};
+		// Cumulative pathway ledger.
+		double foodConsumed{0.0};
+		double waterConsumed{0.0};
+		double oxygenConsumedKg{0.0};
+		double co2ProducedKg{0.0};
+		double moistureProducedKg{0.0};
+		double urineProduced{0.0};
+		double organicWasteProduced{0.0};
+		double heatKJ{0.0};
+		double retainedKg{0.0};      // consumed mass the returns did not carry away
+		bool disabled{false};        // zero crew count: no demand, no returns
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationCrewSnapshot const&) const = default;
+	};
 	struct StationSystemsSnapshot
 	{
 		bool enabled{false};
@@ -1362,6 +1477,12 @@ namespace core
 		// cycle history with the recovered-versus-lost split.
 		std::vector<StationAtmosphereSnapshot> atmospheres;
 		std::vector<StationAirlockCycleSnapshot> airlockCycles;
+		// The crew picture (#401): per-crew requested-versus-actual
+		// exchange on every metabolic pathway, the uniform metabolic
+		// scale the supplies and destination limits sustained, the
+		// limiter that bound it, and the closing consumption/return/
+		// retained ledger.
+		std::vector<StationCrewSnapshot> crews;
 		// Soonest authored arrival still pending across every delivery, for
 		// the overview's "next delivery" readout (#392).
 		bool hasNextDelivery{false};

@@ -25,9 +25,9 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		world->getSimulationTick() * static_cast<double>(core::World::getFixedTimestep()),
 		static_cast<unsigned long long>(world->getSimulationTick()));
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
-	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply, rechargeable batteries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, and chillers supplying class-matched cold services. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Thermal reservoirs integrate temperature from their effective capacity under absorbed and routed equipment heat; radiators reject heat by the Stefan-Boltzmann law at the emitting temperature against the authored sink, emissivity and view factor. A load's emitted heat is booked exactly once: routed into its class-compatible reservoir or exported directly, never both. Declared temperature limits are reported, never clamped. Coolant loops hold a finite, loop-specific coolant inventory segregated by hazard class (coolant is never potable or nutrient water); the pump circulates only the coolant the loop actually holds, so an underfilled loop flows less and a dry loop flows nothing, and the freeze-protection heater thermostats the loop up to its setpoint within its capacity. Pump work and heater heat enter the loop exactly once and reach the reservoir only through the circulation-gated heat-only exchanger; the loop draw rides the same electrical pool as external loads. Chillers supply a cold service of their declared class through a class-matched coolant-loop evaporator and reservoir condenser: the delivered duty is capped by the loop's actual circulation, gated at the chilled setpoint, and refused while the sink is at or above the maximum condensing temperature; work at the configured COP plus auxiliaries rides the same electrical pool, and condenser heat equals extracted heat plus the work and auxiliaries actually supplied, booked once. Fuelled generators convert a finite energy-unit fuel inventory into bus electrical output at the declared efficiency: output is bounded by the installed rating and the ramp limit, starting only completes once the startup energy has actually been drawn from the shared pool while the class-matched sink is below its maximum sink temperature, and after output stops the configured shutdown heat and its cooling requirement persist for the decay period; waste, startup and decay heat route exactly once into the sink and the fuel ledger closes over fuel = electrical + waste. Within a tick, generators produce first, then power allocates, then coolant loops and chillers run, then compartment atmospheres cycle and exchange, then thermal integrates, then transfers, then conversions. Compartment atmospheres model an ideal-gas mixture in a fixed volume: absolute and partial pressures derive from the gas inventory and temperature, humidity caps at Magnus saturation with the excess condensing and releasing its latent heat into the compartment, occupancy is an authored load assignment whose oxygen draw is capped by the inventory (CO2 and metabolic heat scale with what was actually consumed), leakage is a constant total-mass rate capped by the inventory, and scheduled airlock cycles remove authored mass with an explicit recovered-versus-lost split; every gram leaving a compartment is booked as leaked, recovered or lost, compartments never mix automatically, and declared pressure and gas-quality limits are reported, never clamped. Observation interval is a provisional display/event setting, not a separate simulation clock.");
+	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply, rechargeable batteries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, and chillers supplying class-matched cold services. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Thermal reservoirs integrate temperature from their effective capacity under absorbed and routed equipment heat; radiators reject heat by the Stefan-Boltzmann law at the emitting temperature against the authored sink, emissivity and view factor. A load's emitted heat is booked exactly once: routed into its class-compatible reservoir or exported directly, never both. Declared temperature limits are reported, never clamped. Coolant loops hold a finite, loop-specific coolant inventory segregated by hazard class (coolant is never potable or nutrient water); the pump circulates only the coolant the loop actually holds, so an underfilled loop flows less and a dry loop flows nothing, and the freeze-protection heater thermostats the loop up to its setpoint within its capacity. Pump work and heater heat enter the loop exactly once and reach the reservoir only through the circulation-gated heat-only exchanger; the loop draw rides the same electrical pool as external loads. Chillers supply a cold service of their declared class through a class-matched coolant-loop evaporator and reservoir condenser: the delivered duty is capped by the loop's actual circulation, gated at the chilled setpoint, and refused while the sink is at or above the maximum condensing temperature; work at the configured COP plus auxiliaries rides the same electrical pool, and condenser heat equals extracted heat plus the work and auxiliaries actually supplied, booked once. Fuelled generators convert a finite energy-unit fuel inventory into bus electrical output at the declared efficiency: output is bounded by the installed rating and the ramp limit, starting only completes once the startup energy has actually been drawn from the shared pool while the class-matched sink is below its maximum sink temperature, and after output stops the configured shutdown heat and its cooling requirement persist for the decay period; waste, startup and decay heat route exactly once into the sink and the fuel ledger closes over fuel = electrical + waste. Within a tick, generators produce first, then power allocates, then coolant loops and chillers run, then compartment atmospheres cycle, crews metabolise and compartments exchange, then thermal integrates, then transfers, then conversions. Compartment atmospheres model an ideal-gas mixture in a fixed volume: absolute and partial pressures derive from the gas inventory and temperature, humidity caps at Magnus saturation with the excess condensing and releasing its latent heat into the compartment, occupancy is an authored load assignment whose oxygen draw is capped by the inventory (CO2 and metabolic heat scale with what was actually consumed), leakage is a constant total-mass rate capped by the inventory, and scheduled airlock cycles remove authored mass with an explicit recovered-versus-lost split; every gram leaving a compartment is booked as leaked, recovered or lost, compartments never mix automatically, and declared pressure and gas-quality limits are reported, never clamped. Crews are an authored population with an activity profile, never derived from World Agents: metabolism draws food and water from compound stores and oxygen from the compartment, and returns CO2, moisture and metabolic heat to the compartment and urine and organic waste to their own finite compound stores. One uniform metabolic scale per tick - the scarcest supply or tightest waste headroom - throttles every pathway together, so absent material never generates nominal waste; requested versus actual is explicit per pathway, the authored coefficients must close over mass, constituents and energy, and the consumed mass the returns do not carry away is reported as explicit retained body mass. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s) and %zu airlock cycle(s)",
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s), %zu airlock cycle(s) and %zu crew(s)",
 		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
 		authored.stores.size(), authored.transfers.size(), authored.conversions.size(),
 		authored.solarArrays.size(), authored.equipmentLoads.size(), authored.batteries.size(),
@@ -1028,6 +1028,137 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		}
 		mDraft.airlockCycles.push_back(std::move(cycle));
 	}
+	ImGui::SeparatorText("Draft crews (authored population; per-crew metabolic rates per second at full activity; food/water/urine/waste are the referenced compound store's units, gases kg/s, heat kW; crew are never derived from World Agents)");
+	for (size_t index = 0; index < mDraft.crews.size(); )
+	{
+		auto& crew = mDraft.crews[index];
+		auto const row = std::to_string(index);
+		bool removeCrew = false;
+		ImGui::PushItemWidth(220);
+		char crewIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(crewIdBuffer, crew.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Crew " + row + " id").c_str(), crewIdBuffer, sizeof(crewIdBuffer)))
+			crew.id = crewIdBuffer;
+		char crewAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(crewAtmosphereBuffer, crew.atmosphereId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Crew " + row + " atmosphere").c_str(),
+			crewAtmosphereBuffer, sizeof(crewAtmosphereBuffer)))
+			crew.atmosphereId = crewAtmosphereBuffer;
+		ImGui::InputInt(("Crew " + row + " count").c_str(), &crew.crewCount, 1, 0);
+		bool crewPeriodic = crew.activityProfile.periodSeconds > 0.0;
+		if (ImGui::Checkbox(("Crew " + row + " periodic activity").c_str(), &crewPeriodic))
+		{
+			if (crewPeriodic)
+			{
+				if (crew.activityProfile.periodSeconds <= 0.0) crew.activityProfile.periodSeconds = 120.0;
+				if (crew.activityProfile.segments.empty())
+					crew.activityProfile.segments.push_back({0.0, 1.0});
+			}
+			else
+			{
+				crew.activityProfile.periodSeconds = 0.0;
+				crew.activityProfile.segments.clear();
+			}
+		}
+		if (!crewPeriodic)
+			ImGui::InputDouble(("Crew " + row + " constant activity level").c_str(),
+				&crew.activityProfile.constantLevel, 0.0, 0.0, "%.3f");
+		else
+		{
+			ImGui::InputDouble(("Crew " + row + " activity period seconds").c_str(),
+				&crew.activityProfile.periodSeconds, 0.0, 0.0, "%.1f");
+			for (size_t segment = 0; segment < crew.activityProfile.segments.size(); ++segment)
+			{
+				auto& stretch = crew.activityProfile.segments[segment];
+				auto const segmentRow = "Crew " + row + " activity segment " + std::to_string(segment);
+				ImGui::InputDouble((segmentRow + " start").c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+				ImGui::SameLine();
+				ImGui::InputDouble((segmentRow + " level").c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+				ImGui::SameLine();
+				if (ImGui::Button(("Remove " + segmentRow).c_str()))
+					crew.activityProfile.segments.erase(
+						crew.activityProfile.segments.begin() + static_cast<std::ptrdiff_t>(segment));
+				}
+			if (crew.activityProfile.segments.size() < core::MaxStationProfileSegments
+				&& ImGui::Button(("Add activity segment to crew " + row).c_str()))
+				crew.activityProfile.segments.push_back(
+					{crew.activityProfile.periodSeconds * 0.5, 0.0});
+		}
+		char crewFoodBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(crewFoodBuffer, crew.foodStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Crew " + row + " food store").c_str(),
+			crewFoodBuffer, sizeof(crewFoodBuffer)))
+			crew.foodStoreId = crewFoodBuffer;
+		char crewWaterBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(crewWaterBuffer, crew.waterStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Crew " + row + " water store").c_str(),
+			crewWaterBuffer, sizeof(crewWaterBuffer)))
+			crew.waterStoreId = crewWaterBuffer;
+		char crewUrineBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(crewUrineBuffer, crew.urineStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Crew " + row + " urine store").c_str(),
+			crewUrineBuffer, sizeof(crewUrineBuffer)))
+			crew.urineStoreId = crewUrineBuffer;
+		char crewWasteBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(crewWasteBuffer, crew.organicWasteStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Crew " + row + " organic waste store").c_str(),
+			crewWasteBuffer, sizeof(crewWasteBuffer)))
+			crew.organicWasteStoreId = crewWasteBuffer;
+		ImGui::InputDouble(("Crew " + row + " food per crew per s").c_str(),
+			&crew.foodPerCrewPerS, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Crew " + row + " water per crew per s").c_str(),
+			&crew.waterPerCrewPerS, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Crew " + row + " O2 per crew kg/s").c_str(),
+			&crew.oxygenPerCrewKgPerS, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Crew " + row + " CO2 per crew kg/s").c_str(),
+			&crew.co2PerCrewKgPerS, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Crew " + row + " moisture per crew kg/s").c_str(),
+			&crew.moisturePerCrewKgPerS, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Crew " + row + " urine per crew per s").c_str(),
+			&crew.urinePerCrewPerS, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Crew " + row + " organic waste per crew per s").c_str(),
+			&crew.organicWastePerCrewPerS, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Crew " + row + " metabolic heat per crew kW").c_str(),
+			&crew.metabolicHeatPerCrewKW, 0.0, 0.0, "%.4f");
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove crew " + row).c_str()))
+			removeCrew = true;
+		ImGui::PopItemWidth();
+		if (removeCrew)
+			mDraft.crews.erase(mDraft.crews.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
+	if (mDraft.crews.size() < core::MaxStationCrews && ImGui::Button("Add crew"))
+	{
+		core::CrewSettings crew;
+		crew.crewCount = 4;
+		crew.foodPerCrewPerS = 0.00006;
+		crew.waterPerCrewPerS = 0.00008;
+		crew.oxygenPerCrewKgPerS = 0.00009;
+		crew.co2PerCrewKgPerS = 0.00011;
+		crew.moisturePerCrewKgPerS = 0.00004;
+		crew.urinePerCrewPerS = 0.00004;
+		crew.organicWastePerCrewPerS = 0.00001;
+		crew.metabolicHeatPerCrewKW = 0.1;
+		if (!mDraft.atmospheres.empty())
+			crew.atmosphereId = mDraft.atmospheres.back().id;
+		if (!mDraft.stores.empty())
+		{
+			crew.foodStoreId = mDraft.stores.front().id;
+			crew.waterStoreId = mDraft.stores.front().id;
+			crew.urineStoreId = mDraft.stores.front().id;
+			crew.organicWasteStoreId = mDraft.stores.front().id;
+		}
+		for (size_t candidate = mDraft.crews.size() + 1;; ++candidate)
+		{
+			crew.id = "crew" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.crews.begin(), mDraft.crews.end(),
+				[&](core::CrewSettings const& existing) { return existing.id == crew.id; });
+			if (!taken) break;
+		}
+		mDraft.crews.push_back(std::move(crew));
+	}
 	bool const draftChanged = mDraft != authored;
 	ImGui::TextUnformatted(draftChanged
 		? "Draft differs from the authored start conditions."
@@ -1454,6 +1585,39 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 				cycle.recurrenceSeconds > 0.0
 					? ("recurring every " + std::to_string(cycle.recurrenceSeconds) + " s").c_str()
 					: "one-off");
+	}
+	ImGui::SeparatorText("Crews (live; one uniform metabolic scale per tick - every pathway throttles together with the scarcest supply or the tightest waste headroom; requested vs actual is explicit, never nominal waste from absent material)");
+	if (snapshot.crews.empty()) ImGui::TextDisabled("No crews authored.");
+	for (auto const& crew : snapshot.crews)
+	{
+		char const* status = "idle";
+		switch (crew.status)
+		{
+		case core::StationTransferStatus::Full: status = "fully supplied"; break;
+		case core::StationTransferStatus::Partial: status = "partially supplied"; break;
+		case core::StationTransferStatus::Rejected: status = "starved (nothing supplied)"; break;
+		case core::StationTransferStatus::Idle: break;
+		}
+		ImGui::Text("%s (%d crew in '%s'): %s | activity %.3f, metabolic scale %.3f%s%s",
+			crew.id.c_str(), crew.crewCount, crew.atmosphereId.c_str(), status,
+			crew.activityLevel, crew.metabolicScale,
+			crew.limiter.empty() ? "" : " | limited by: ",
+			crew.limiter.empty() ? "" : crew.limiter.c_str());
+		ImGui::Text("  last tick: food %.6f/%.6f, water %.6f/%.6f, O2 %.6f/%.6f kg | CO2 %.6f kg, moisture %.6f kg | urine %.6f/%.6f, organic waste %.6f/%.6f | heat %.4f kW (actual/requested)",
+			crew.lastFoodActual, crew.lastFoodRequested,
+			crew.lastWaterActual, crew.lastWaterRequested,
+			crew.lastOxygenActualKg, crew.lastOxygenRequestedKg,
+			crew.lastCo2ProducedKg, crew.lastMoistureProducedKg,
+			crew.lastUrineActual, crew.lastUrineRequested,
+			crew.lastOrganicWasteActual, crew.lastOrganicWasteRequested,
+			crew.lastHeatKW);
+		ImGui::Text("  cumulative: consumed food %.4f, water %.4f, O2 %.4f kg | returned CO2 %.4f, moisture %.4f, urine %.4f, organic waste %.4f kg | heat %.2f kJ | retained body mass %.4f kg",
+			crew.foodConsumed, crew.waterConsumed, crew.oxygenConsumedKg,
+			crew.co2ProducedKg, crew.moistureProducedKg,
+			crew.urineProduced, crew.organicWasteProduced,
+			crew.heatKJ, crew.retainedKg);
+		if (crew.disabled)
+			ImGui::Text("  zero crew count: no demand, no returns");
 	}
 	for (auto const& diagnostic : world->getStationSystemsDiagnostics())
 	{

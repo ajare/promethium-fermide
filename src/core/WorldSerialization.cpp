@@ -760,7 +760,16 @@ namespace core
 		// pressures, humidity and the containment ledgers stay runtime-
 		// only, so load and Reset reconstruct them from the authored
 		// starting conditions.
-		serializer.writeUint32("version", 76);
+		// Version 77 adds authored crew contracts (#401): a configured
+		// population with an activity profile drawing food and water
+		// from compound stores and oxygen from one compartment, with
+		// urine and organic waste returned to their own finite compound
+		// stores and metabolic heat routed into the compartment; a
+		// pre-77 document carrying `crews` is refused rather than
+		// silently dropped. Consumption, returns, the metabolic scale
+		// and the retained-mass ledger stay runtime-only, so load and
+		// Reset reconstruct them from the authored starting conditions.
+		serializer.writeUint32("version", 77);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -1084,6 +1093,47 @@ namespace core
 					serializer.writeDouble("recurrenceSeconds", cycle.recurrenceSeconds);
 					serializer.writeDouble("recoveredFraction", cycle.recoveredFraction);
 					serializer.writeInt32("priority", cycle.priority);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.crews.empty())
+			{
+				// Authored crew contracts only; consumption, returns,
+				// the metabolic scale and the retained-mass ledger are
+				// runtime state reconstructed on load (#401).
+				serializer.beginArray("crews");
+				for (auto const& crew : mStationSystemsSettings.crews)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", crew.id);
+					serializer.writeString("atmosphereId", crew.atmosphereId);
+					serializer.writeInt32("crewCount", crew.crewCount);
+					serializer.beginMap("activity");
+					serializer.writeDouble("constantLevel", crew.activityProfile.constantLevel);
+					serializer.writeDouble("periodSeconds", crew.activityProfile.periodSeconds);
+					serializer.beginArray("segments");
+					for (auto const& segment : crew.activityProfile.segments)
+					{
+						serializer.beginMap("");
+						serializer.writeDouble("startSeconds", segment.startSeconds);
+						serializer.writeDouble("level", segment.level);
+						serializer.endMap();
+					}
+					serializer.endArray();
+					serializer.endMap();
+					serializer.writeString("foodStoreId", crew.foodStoreId);
+					serializer.writeString("waterStoreId", crew.waterStoreId);
+					serializer.writeString("urineStoreId", crew.urineStoreId);
+					serializer.writeString("organicWasteStoreId", crew.organicWasteStoreId);
+					serializer.writeDouble("foodPerCrewPerS", crew.foodPerCrewPerS);
+					serializer.writeDouble("waterPerCrewPerS", crew.waterPerCrewPerS);
+					serializer.writeDouble("oxygenPerCrewKgPerS", crew.oxygenPerCrewKgPerS);
+					serializer.writeDouble("co2PerCrewKgPerS", crew.co2PerCrewKgPerS);
+					serializer.writeDouble("moisturePerCrewKgPerS", crew.moisturePerCrewKgPerS);
+					serializer.writeDouble("urinePerCrewPerS", crew.urinePerCrewPerS);
+					serializer.writeDouble("organicWastePerCrewPerS", crew.organicWastePerCrewPerS);
+					serializer.writeDouble("metabolicHeatPerCrewKW", crew.metabolicHeatPerCrewKW);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -2012,7 +2062,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 76)
+		if (version < 1 || version > 77)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2380,6 +2430,50 @@ namespace core
 					cycle.recoveredFraction = serializer.readDouble("recoveredFraction");
 					cycle.priority = serializer.readInt32("priority");
 					stationSettings.airlockCycles.push_back(std::move(cycle));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("crews"))
+			{
+				if (version < 77) throw SerializationException(
+					"Station crews require World schema 77");
+				serializer.beginArray("crews");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					CrewSettings crew;
+					crew.id = serializer.readString("id");
+					crew.atmosphereId = serializer.readString("atmosphereId");
+					crew.crewCount = serializer.readInt32("crewCount");
+					serializer.beginMap("activity");
+					crew.activityProfile.constantLevel = serializer.readDouble("constantLevel");
+					crew.activityProfile.periodSeconds = serializer.readDouble("periodSeconds");
+					serializer.beginArray("segments");
+					while (serializer.nextArrayItem())
+					{
+						serializer.beginMap("");
+						ProfileSegmentSettings segment;
+						segment.startSeconds = serializer.readDouble("startSeconds");
+						segment.level = serializer.readDouble("level");
+						serializer.endMap();
+						crew.activityProfile.segments.push_back(segment);
+					}
+					serializer.endArray();
+					serializer.endMap();
+					crew.foodStoreId = serializer.readString("foodStoreId");
+					crew.waterStoreId = serializer.readString("waterStoreId");
+					crew.urineStoreId = serializer.readString("urineStoreId");
+					crew.organicWasteStoreId = serializer.readString("organicWasteStoreId");
+					crew.foodPerCrewPerS = serializer.readDouble("foodPerCrewPerS");
+					crew.waterPerCrewPerS = serializer.readDouble("waterPerCrewPerS");
+					crew.oxygenPerCrewKgPerS = serializer.readDouble("oxygenPerCrewKgPerS");
+					crew.co2PerCrewKgPerS = serializer.readDouble("co2PerCrewKgPerS");
+					crew.moisturePerCrewKgPerS = serializer.readDouble("moisturePerCrewKgPerS");
+					crew.urinePerCrewPerS = serializer.readDouble("urinePerCrewPerS");
+					crew.organicWastePerCrewPerS = serializer.readDouble("organicWastePerCrewPerS");
+					crew.metabolicHeatPerCrewKW = serializer.readDouble("metabolicHeatPerCrewKW");
+					stationSettings.crews.push_back(std::move(crew));
 					serializer.endMap();
 				}
 				serializer.endArray();
