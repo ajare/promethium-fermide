@@ -34,35 +34,6 @@ class ApplicationDLL {
 
   typedef int (*DllSetArgumentFunction)(char const*, char const*);
 
-  // Keep configuration exports to plain scalars rather than making a C++
-  // struct layout part of the DLL ABI.
-  typedef int (*DllSetInputOptionsFunction)(float);
-
-  typedef void (*DllResetAudioSimulationOptionsFunction)();
-  typedef int (*DllAddAudioQualityPresetFunction)(
-      char const*, std::uint32_t, std::uint32_t, float, std::uint32_t,
-      std::uint32_t, float);
-  typedef int (*DllSetAudioSimulationOptionsFunction)(
-      char const*, int, int, int, int, int);
-
-  typedef int (*DllCpuUpdateTimingCaptureEnabledFunction)();
-
-  typedef void (*DllRecordCpuUpdateTimingsFunction)(
-      std::uint64_t, std::uint64_t);
-
-  typedef void (*DllResetFrameRateHistoryFunction)();
-  typedef void (*DllRecordFrameRateFunction)(double, double);
-
-  typedef void (*DllCaptureScreenshotIfRequestedFunction)(mpp::RenderSystem*);
-
-  typedef int (*DllSetWorldDataGenerationOptionsFunction)(int, float, int, int);
-
-  // Video enums cross as stable integer codes and Torch values as ordered
-  // scalars, keeping the ABI plain and independent of C++ struct layout.
-  typedef int (*DllSetVideoOptionsFunction)(
-      int, int, int, int, int, int, int, float, float,
-      int, std::uint64_t, float, float, float, float, int, float, float);
-
 private:
 #if APP_PLATFORM == APP_PLATFORM_WINDOWS
   HINSTANCE mGetProcIDDLL;
@@ -81,17 +52,6 @@ private:
 
   DllSetArgumentFunction mSetArgumentFunction;
 
-  DllSetInputOptionsFunction mSetInputOptionsFunction;
-
-  DllResetAudioSimulationOptionsFunction mResetAudioSimulationOptionsFunction;
-  DllAddAudioQualityPresetFunction mAddAudioQualityPresetFunction;
-  DllSetAudioSimulationOptionsFunction mSetAudioSimulationOptionsFunction;
-
-  DllSetWorldDataGenerationOptionsFunction
-      mSetWorldDataGenerationOptionsFunction;
-
-  DllSetVideoOptionsFunction mSetVideoOptionsFunction;
-
   static std::string msGetNameFunction;
 
   static std::string msCreateApplicationFunctionName, msDestroyApplicationFunctionName;
@@ -102,44 +62,14 @@ private:
 
   static std::string msSetArgumentFunctionName;
 
-  static std::string msSetInputOptionsFunctionName;
-
-  static std::string msResetAudioSimulationOptionsFunctionName;
-  static std::string msAddAudioQualityPresetFunctionName;
-  static std::string msSetAudioSimulationOptionsFunctionName;
-
-  static std::string msSetWorldDataGenerationOptionsFunctionName;
-
-  static std::string msSetVideoOptionsFunctionName;
-
   // Optional DLL functions
   DllOnEntryFunction mOnEntryFunction;
 
   DllOnExitFunction mOnExitFunction;
 
-  DllCpuUpdateTimingCaptureEnabledFunction
-      mCpuUpdateTimingCaptureEnabledFunction;
-
-  DllRecordCpuUpdateTimingsFunction mRecordCpuUpdateTimingsFunction;
-
-  DllResetFrameRateHistoryFunction mResetFrameRateHistoryFunction;
-  DllRecordFrameRateFunction mRecordFrameRateFunction;
-
-  DllCaptureScreenshotIfRequestedFunction
-      mCaptureScreenshotIfRequestedFunction;
-
   bool mEntryStarted;
 
   static std::string msOnEntryFunctionName, msOnExitFunctionName;
-
-  static std::string msCpuUpdateTimingCaptureEnabledFunctionName;
-
-  static std::string msRecordCpuUpdateTimingsFunctionName;
-
-  static std::string msResetFrameRateHistoryFunctionName;
-  static std::string msRecordFrameRateFunctionName;
-
-  static std::string msCaptureScreenshotIfRequestedFunctionName;
 
 private:
   void registerRequiredFunctions();
@@ -161,17 +91,6 @@ public:
   void unload();
 
   std::string getApplicationName() const;
-
-  bool cpuUpdateTimingCaptureEnabled() const;
-
-  void recordCpuUpdateTimings(std::uint64_t gameNs,
-                              std::uint64_t audioNs) const;
-
-  void resetFrameRateHistory() const;
-  void recordFrameRate(double timestampSeconds,
-                       double framesPerSecond) const;
-
-  void captureScreenshotIfRequested(mpp::RenderSystem* renderSystem) const;
 
   void registerStateFactories(StateManager* stateMgr);
 };
