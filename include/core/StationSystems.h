@@ -935,7 +935,7 @@ namespace core
 		double decayHeatKW{0.0};           // decay heat routed this tick
 		double sinkTemperatureC{0.0};
 		bool coolingAvailable{false};      // sink below the maximum sink temperature
-		bool coolingRequired{false};       // running or in the decay period
+		bool coolingRequired{false};       // running, or decay heat booked this tick
 		bool disabled{false};              // zero installed capacity
 		std::string blockReason;           // why a commanded start is not proceeding
 		double fuelEnergyKJ{0.0};          // cumulative fuel energy consumed

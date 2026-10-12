@@ -2118,6 +2118,11 @@ namespace core
 				generator.lastDecayHeatKW = 0.0;
 				generator.lastCoolingAvailable = coolingAvailable;
 				generator.lastBlockReason.clear();
+				// The phase as it stood before this tick's transitions, so
+				// the decay bookkeeping below can tell a generator that has
+				// been in Shutdown since last tick from one that just
+				// entered it (#563).
+				auto const phaseBeforeSwitch = generator.phase;
 				switch (generator.phase)
 				{
 				case StationGeneratorPhase::Stopped:
@@ -2268,31 +2273,56 @@ namespace core
 					}
 					break;
 				case StationGeneratorPhase::Shutdown:
-					// Electrical output has stopped, but the configured
-					// shutdown heat keeps flowing into the sink for the
-					// configured decay period and the cooling requirement
-					// stays exposed with it: a stopped generator is not
-					// instantly a cold generator. The decay heat cannot be
-					// refused - it happens whether or not cooling is
-					// available - so it books regardless, and the sink
-					// warms under it. A zero decay period books nothing.
 					generator.outputKW = 0.0;
-					if (generator.shutdownElapsedSeconds + 1e-9 >= generator.authored.shutdownSeconds)
-						generator.phase = StationGeneratorPhase::Stopped;
-					else
-					{
-						generator.lastDecayHeatKW = generator.authored.shutdownHeatKW;
-						generatorHeatBySink[generator.sinkIndex] += generator.authored.shutdownHeatKW;
-						generator.decayHeatKJ += generator.authored.shutdownHeatKW * dtSeconds;
-						totalGeneratorDecayKW += generator.authored.shutdownHeatKW;
-						generator.shutdownElapsedSeconds += dtSeconds;
-						if (generator.shutdownElapsedSeconds + 1e-9 >= generator.authored.shutdownSeconds)
-							generator.phase = StationGeneratorPhase::Stopped;
-					}
 					break;
 				}
+				// #563: decay heat books from the very tick the electrical
+				// output stopped - no transition-tick gap - and the final
+				// decay interval is prorated to the remaining configured
+				// time, so the sink receives exactly
+				// shutdownHeatKW * shutdownSeconds, never a rounded-up
+				// tick. The decay heat cannot be refused - it happens
+				// whether or not cooling is available - so it books
+				// regardless, and the sink warms under it. A zero decay
+				// period books nothing. The Shutdown phase persists until
+				// the tick after the last decay interval so the phase
+				// transition events still bracket the decay period.
+				bool decayedThisTick = false;
+				if (generator.phase == StationGeneratorPhase::Shutdown)
+				{
+					auto const remainingSeconds = generator.authored.shutdownSeconds
+						- generator.shutdownElapsedSeconds;
+					if (remainingSeconds <= 1e-9)
+					{
+						// Nothing left to decay. A generator that entered
+						// Shutdown only this tick keeps the phase for it, so
+						// the transition events still bracket even an empty
+						// decay period; one already in Shutdown stops.
+						if (phaseBeforeSwitch == StationGeneratorPhase::Shutdown)
+							generator.phase = StationGeneratorPhase::Stopped;
+					}
+					else
+					{
+						auto const intervalSeconds = std::min(dtSeconds, remainingSeconds);
+						auto const bookedKJ = generator.authored.shutdownHeatKW * intervalSeconds;
+						// The published rate is the booked energy spread over
+						// the fixed tick, so rate x dt equals the energy the
+						// sink actually received this tick even on the
+						// prorated final interval.
+						generator.lastDecayHeatKW = bookedKJ / dtSeconds;
+						generatorHeatBySink[generator.sinkIndex] += generator.lastDecayHeatKW;
+						generator.decayHeatKJ += bookedKJ;
+						totalGeneratorDecayKW += generator.lastDecayHeatKW;
+						generator.shutdownElapsedSeconds += intervalSeconds;
+						decayedThisTick = bookedKJ > 0.0;
+					}
+				}
+				// The cooling obligation is exposed on every interval that
+				// actually produces decay heat - including the tick on
+				// which the last of it is booked, whatever phase that tick
+				// ends in - and while the machine is running (#563).
 				generator.lastCoolingRequired = generator.phase == StationGeneratorPhase::Running
-					|| generator.phase == StationGeneratorPhase::Shutdown;
+					|| decayedThisTick;
 				totalGeneratorStartupKW += generator.lastStartupDrawKW;
 				// Publish the per-generator service status against the
 				// commanded output: full at command, partial under ramp

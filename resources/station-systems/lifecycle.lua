@@ -1668,6 +1668,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             gen.lastDecayHeatKW = 0
             gen.lastCoolingAvailable = coolingAvailable
             gen.blockReason = ''
+            -- The phase as it stood before this tick's transitions, so
+            -- the decay bookkeeping below can tell a generator that has
+            -- been in Shutdown since last tick from one that just
+            -- entered it (#563).
+            local phaseBefore = gen.phase
             if gen.phase == 'stopped' then
                 gen.outputKW = 0
                 if commanded > 0 then
@@ -1802,28 +1807,50 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     end
                 end
             else
-                -- Shutdown: electrical output has stopped, but the
-                -- configured shutdown heat keeps flowing into the sink
-                -- for the configured decay period and the cooling
-                -- requirement stays exposed with it. The decay heat
-                -- cannot be refused - it happens whether or not cooling
-                -- is available - so it books regardless. A zero decay
-                -- period books nothing.
                 gen.outputKW = 0
-                if gen.shutdownElapsed + 1e-9 >= gen.shutdownSeconds then
-                    gen.phase = 'stopped'
-                else
-                    gen.lastDecayHeatKW = gen.shutdownHeatKW
-                    gen.heatSink.generatorHeat =
-                        (gen.heatSink.generatorHeat or 0) + gen.shutdownHeatKW
-                    gen.decayHeatKJ = gen.decayHeatKJ + gen.shutdownHeatKW * fixed_seconds
-                    gen.shutdownElapsed = gen.shutdownElapsed + fixed_seconds
-                    if gen.shutdownElapsed + 1e-9 >= gen.shutdownSeconds then
+            end
+            -- #563 mirror: decay heat books from the very tick the
+            -- electrical output stopped - no transition-tick gap - and
+            -- the final decay interval is prorated to the remaining
+            -- configured time, so the sink receives exactly
+            -- shutdownHeatKW * shutdownSeconds, never a rounded-up
+            -- tick. The decay heat cannot be refused - it happens
+            -- whether or not cooling is available - so it books
+            -- regardless. A zero decay period books nothing. The
+            -- Shutdown phase persists until the tick after the last
+            -- decay interval so the phase transitions still bracket
+            -- the decay period.
+            local decayedThisTick = false
+            if gen.phase == 'shutdown' then
+                local remainingSeconds = gen.shutdownSeconds - gen.shutdownElapsed
+                if remainingSeconds <= 1e-9 then
+                    -- Nothing left to decay. A generator that entered
+                    -- Shutdown only this tick keeps the phase for it so
+                    -- the transition events still bracket even an
+                    -- empty decay period; one already in Shutdown stops.
+                    if phaseBefore == 'shutdown' then
                         gen.phase = 'stopped'
                     end
+                else
+                    local intervalSeconds = math.min(fixed_seconds, remainingSeconds)
+                    local bookedKJ = gen.shutdownHeatKW * intervalSeconds
+                    -- The published rate is the booked energy spread
+                    -- over the fixed tick, so rate x dt equals the
+                    -- energy the sink actually received this tick even
+                    -- on the prorated final interval.
+                    gen.lastDecayHeatKW = bookedKJ / fixed_seconds
+                    gen.heatSink.generatorHeat =
+                        (gen.heatSink.generatorHeat or 0) + gen.lastDecayHeatKW
+                    gen.decayHeatKJ = gen.decayHeatKJ + bookedKJ
+                    gen.shutdownElapsed = gen.shutdownElapsed + intervalSeconds
+                    decayedThisTick = bookedKJ > 0
                 end
             end
-            gen.lastCoolingRequired = gen.phase == 'running' or gen.phase == 'shutdown'
+            -- The cooling obligation is exposed on every interval that
+            -- actually produces decay heat - including the tick on
+            -- which the last of it is booked, whatever phase that tick
+            -- ends in - and while the machine is running (#563).
+            gen.lastCoolingRequired = gen.phase == 'running' or decayedThisTick
         end
         -- The audit baseline is the source pool as it was originally
         -- available this tick - solar plus generator output - before the

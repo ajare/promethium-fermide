@@ -6245,6 +6245,153 @@ namespace
 				"the over-allocation audit did not name the failure");
 			core::setStationSystemsSourceLoader({});
 		}
+		// #563: shutdown heat books from the very tick the electrical
+		// output stops - no transition-tick gap - and the final decay
+		// interval is prorated to the remaining configured time, so the
+		// sink receives exactly shutdownHeatKW * shutdownSeconds, never
+		// a rounded-up tick. The cooling obligation stays exposed on
+		// every decay-producing interval.
+		{
+			auto shutdownGenerator = [](double shutdownSeconds)
+			{
+				core::GeneratorSettings settings;
+				settings.id = "gen";
+				settings.fuelStoreId = "fuel";
+				settings.thermalClass = "moderate";
+				settings.heatSinkId = "hot";
+				settings.ratedOutputKW = 1.0;
+				settings.efficiency = 0.5;
+				settings.maxRampKWPerSecond = 100.0;
+				settings.commandedOutputKW = 1.0;
+				settings.startupPowerKW = 0.0;
+				settings.startupSeconds = 0.0;
+				settings.shutdownHeatKW = 1.0;
+				settings.shutdownSeconds = shutdownSeconds;
+				settings.maxSinkTemperatureC = 90.0;
+				return settings;
+			};
+			// The ticket reproduction: 2 x dt kJ of fuel buys exactly one
+			// tick of 1 kW service, then a dt/2 decay period. The tick
+			// that depletes the fuel must book the whole prorated decay,
+			// and the next tick must stop with the contracted total - not
+			// one tick late and not twice the heat.
+			core::World world("ShutdownFractional", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto fuel = auditFuel(100.0);
+			fuel.startingQualified = 2.0 * dt;
+			auto const [ok, diagnostic] = auditConfigure(world,
+				{ fuel }, { auditSink(1000.0) },
+				{ shutdownGenerator(dt / 2.0) });
+			require(ok, ("fractional-shutdown scenario rejected: " + diagnostic).c_str());
+			world.resumeSimulation();
+			require(world.advanceTick(), "fractional-shutdown tick 1 failed");
+			require(world.getStationSystemsSnapshot().power.generators[0].phase
+				== core::StationGeneratorPhase::Running,
+				"the generator did not start running on tick 1");
+			require(world.advanceTick(), "fractional-shutdown tick 2 failed");
+			{
+				auto const snap = world.getStationSystemsSnapshot();
+				auto const& live = snap.power.generators[0];
+				require(live.phase == core::StationGeneratorPhase::Running
+					&& approx(live.outputKW, 1.0, 1e-9),
+					"the generator did not deliver 1 kW on tick 2");
+			}
+			require(world.advanceTick(), "fractional-shutdown tick 3 failed");
+			{
+				auto const trip = world.getStationSystemsSnapshot().power.generators[0];
+				require(trip.phase == core::StationGeneratorPhase::Shutdown
+					&& trip.outputKW == 0.0,
+					"fuel depletion did not transition the generator to Shutdown on tick 3");
+				require(approx(trip.decayHeatKJ, 0.5 * dt, 1e-12)
+					&& approx(trip.decayHeatKW, 0.5, 1e-9),
+					"the transition tick omitted the prorated decay heat");
+				require(trip.coolingRequired,
+					"the decay-producing transition tick hid the cooling obligation");
+			}
+			require(world.advanceTick(), "fractional-shutdown tick 4 failed");
+			{
+				auto const done = world.getStationSystemsSnapshot().power.generators[0];
+				require(done.phase == core::StationGeneratorPhase::Stopped
+					&& done.decayHeatKW == 0.0 && !done.coolingRequired,
+					"the decay period did not end cleanly after the prorated interval");
+				require(approx(done.decayHeatKJ, 0.5 * dt, 1e-12),
+					"the decay heat booked is not the contracted shutdownHeatKW * shutdownSeconds");
+			}
+			require(sawEvent(world, "fuel depleted: generator shut down"),
+				"the depletion transition was not reported");
+			require(sawEvent(world, "shutdown complete: decay heat dissipated"),
+				"the end of the sub-tick decay period was not reported");
+			// The sink integrated the decay exactly once: the generator's
+			// total heat is the tick-2 waste plus the prorated decay.
+			{
+				auto const snap = world.getStationSystemsSnapshot();
+				auto const& live = snap.power.generators[0];
+				auto const& sinkLive = snap.thermal.reservoirs[0];
+				require(approx(sinkLive.generatorEnergyKJ, live.wasteHeatKJ + 0.5 * dt, 1e-9),
+					"the sink did not integrate the prorated decay exactly once");
+			}
+			// Reset replay: the same four ticks reproduce the same
+			// snapshot and event history.
+			auto const expected = world.getStationSystemsSnapshot();
+			auto const expectedEvents = world.getStationSystemsEvents();
+			world.pauseSimulation(); world.resetSimulation(); world.resumeSimulation();
+			require(world.advanceTicks(4), "fractional-shutdown replay failed");
+			require(world.getStationSystemsSnapshot() == expected,
+				"the fractional-shutdown scenario is not deterministic across Reset");
+			require(world.getStationSystemsEvents() == expectedEvents,
+				"the fractional-shutdown event history is not deterministic across Reset");
+			// Exact and multi-tick fractional durations: the decay period
+			// books exactly shutdownHeatKW * shutdownSeconds across whole
+			// ticks plus a prorated final tick, with the cooling obligation
+			// exposed on every booked interval and the stop landing on the
+			// tick after the last one.
+			{
+				auto runShutdownProfile = [&](double shutdownSeconds,
+				std::vector<double> const& expectedBookings)
+			{
+				core::World world("ShutdownProfile", 2, 2);
+				world.pauseSimulation(); world.finishBuild();
+				auto fuel = auditFuel(100.0);
+				fuel.startingQualified = 2.0 * dt;
+				auto const [ok, diagnostic] = auditConfigure(world,
+					{ fuel }, { auditSink(1000.0) },
+					{ shutdownGenerator(shutdownSeconds) });
+				require(ok, ("shutdown-profile scenario rejected: " + diagnostic).c_str());
+				world.resumeSimulation();
+				// Tick 1 starts, tick 2 burns the 2 x dt kJ at 1 kW,
+				// tick 3 is the depletion transition where decay begins.
+				require(world.advanceTicks(2), "shutdown-profile run-up failed");
+				double bookedTotal = 0.0;
+				for (size_t index = 0; index < expectedBookings.size(); ++index)
+				{
+					require(world.advanceTick(), "shutdown-profile decay tick failed");
+					auto const snap = world.getStationSystemsSnapshot();
+					auto const& live = snap.power.generators[0];
+					bookedTotal += expectedBookings[index];
+					require(live.phase == core::StationGeneratorPhase::Shutdown
+						&& approx(live.decayHeatKJ, bookedTotal, 1e-12),
+						"the decay booking schedule is wrong");
+					require(approx(live.decayHeatKW, expectedBookings[index] / dt, 1e-9)
+						&& live.coolingRequired,
+						"a decay-producing interval misreported its rate or hid the cooling need");
+				}
+				// The tick after the last booked interval stops with the
+				// exact contracted total and no further heat.
+				require(world.advanceTick(), "shutdown-profile stop tick failed");
+				auto const snap = world.getStationSystemsSnapshot();
+				auto const& done = snap.power.generators[0];
+				require(done.phase == core::StationGeneratorPhase::Stopped
+					&& done.decayHeatKW == 0.0 && !done.coolingRequired,
+					"the decay period did not stop after its last booked interval");
+				require(approx(done.decayHeatKJ, shutdownSeconds, 1e-12),
+					"the decay total is not exactly shutdownHeatKW * shutdownSeconds");
+			};
+			// Exactly two whole decay ticks, no proration.
+			runShutdownProfile(2.0 * dt, { dt, dt });
+			// Two whole decay ticks plus a prorated half tick.
+			runShutdownProfile(2.5 * dt, { dt, dt, 0.5 * dt });
+			}
+		}
 		// The bundled Lua sandbox receives the generator descriptors and
 		// mirrors the model: a corrupt crossing fails contained at
 		// construction through the integrated error path.
