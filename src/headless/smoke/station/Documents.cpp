@@ -214,7 +214,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 82", "version: 64");
+		replaceAll(legacy, "version: 83", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -231,14 +231,14 @@ namespace
 			"authored store fields missing or live inventory leaked");
 		bool refused = false;
 		auto staleStores = withField;
-		replaceAll(staleStores, "version: 82", "version: 65");
+		replaceAll(staleStores, "version: 83", "version: 65");
 		auto const staleStoresPath = directory / "stale-stores.world.yaml";
 		writeFile(staleStoresPath, staleStores);
 		try { (void)core::loadWorldDocument(staleStoresPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-66 document carrying resource stores was silently accepted");
 		auto staleTransfers = withField;
-		replaceAll(staleTransfers, "version: 82", "version: 66");
+		replaceAll(staleTransfers, "version: 83", "version: 66");
 		auto const staleTransfersPath = directory / "stale-transfers.world.yaml";
 		writeFile(staleTransfersPath, staleTransfers);
 		refused = false;
@@ -246,7 +246,7 @@ namespace
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-67 document carrying resource transfers was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 82", "version: 64");
+		replaceAll(stale, "version: 83", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
 		refused = false;
@@ -384,7 +384,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 82", "version: 67");
+			replaceAll(stale, "version: 83", "version: 67");
 			auto const stalePath = directory / "stale-compounds.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -493,7 +493,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 82", "version: 69");
+			replaceAll(stale, "version: 83", "version: 69");
 			auto const stalePath = directory / "stale-batteries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -615,7 +615,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 82", "version: 68");
+			replaceAll(stale, "version: 83", "version: 68");
 			auto const stalePath = directory / "stale-power.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -742,7 +742,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 82", "version: 70");
+			replaceAll(stale, "version: 83", "version: 70");
 			auto const stalePath = directory / "stale-deliveries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -858,7 +858,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 82", "version: 81");
+			replaceAll(stale, "version: 83", "version: 81");
 			auto const stalePath = directory / "stale-waste-ejections.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -986,7 +986,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 82", "version: 71");
+			replaceAll(stale, "version: 83", "version: 71");
 			auto const stalePath = directory / "stale-thermal.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1124,7 +1124,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 82", "version: 80");
+			replaceAll(stale, "version: 83", "version: 80");
 			auto const stalePath = directory / "stale-buffer.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1265,7 +1265,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 82", "version: 72");
+			replaceAll(stale, "version: 83", "version: 72");
 			auto const stalePath = directory / "stale-coolant.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1428,7 +1428,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 82", "version: 73");
+			replaceAll(stale, "version: 83", "version: 73");
 			auto const stalePath = directory / "stale-chillers.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1576,7 +1576,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 82", "version: 74");
+			replaceAll(stale, "version: 83", "version: 74");
 			auto const stalePath = directory / "stale-generators.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1737,7 +1737,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 82", "version: 75");
+			replaceAll(stale, "version: 83", "version: 75");
 			auto const stalePath = directory / "stale-atmospheres.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1908,7 +1908,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 82", "version: 76");
+			replaceAll(stale, "version: 83", "version: 76");
 			auto const stalePath = directory / "stale-crews.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -2098,7 +2098,7 @@ void waterFiles(smoke::Context const& context)
 	// A pre-78 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 82", "version: 77");
+		replaceAll(stale, "version: 83", "version: 77");
 		auto const stalePath = directory / "stale-water.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -2272,7 +2272,7 @@ void gasFiles(smoke::Context const& context)
 	// A pre-79 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 82", "version: 78");
+		replaceAll(stale, "version: 83", "version: 78");
 		auto const stalePath = directory / "stale-gas.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -2428,7 +2428,7 @@ void fuelCellFiles(smoke::Context const& context)
 	// A pre-80 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 82", "version: 79");
+		replaceAll(stale, "version: 83", "version: 79");
 		auto const stalePath = directory / "stale-fuelcells.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -2479,6 +2479,186 @@ void fuelCellFiles(smoke::Context const& context)
 	}
 }
 
+void carbonRecoveryFiles(smoke::Context const& context)
+{
+	namespace filesystem = std::filesystem;
+	auto const directory = context.temporaryRoot() / "station-carbon";
+	filesystem::create_directories(directory);
+	auto plainStore = [](std::string const& id, double capacity, double starting,
+		double protectedReserve = 0.0)
+	{
+		core::ResourceStoreSettings settings;
+		settings.id = id;
+		settings.unit = "kg";
+		settings.capacity = capacity;
+		settings.startingQualified = starting;
+		settings.protectedReserve = protectedReserve;
+		return settings;
+	};
+	core::ThermalReservoirSettings sink;
+	sink.id = "sink";
+	sink.thermalClass = "low";
+	sink.heatCapacityKJPerK = 10000.0;
+	sink.startingTemperatureC = 10.0;
+	sink.minTemperatureC = -50.0;
+	sink.maxTemperatureC = 200.0;
+	core::SolarArraySettings field;
+	field.id = "field";
+	field.capacityKW = 100.0;
+	core::SabatierReactorSettings reactor;
+	reactor.id = "sabatier";
+	reactor.hazardClass = "normal";
+	reactor.co2StoreId = "co2";
+	reactor.hydrogenStoreId = "h2";
+	reactor.methaneStoreId = "methane";
+	reactor.waterStoreId = "rawWater";
+	reactor.thermalClass = "low";
+	reactor.heatSinkId = "sink";
+	reactor.rateKgPerS = 0.001;
+	reactor.specificEnergyKWhPerKgCO2 = 1.0;
+	reactor.maxSinkTemperatureC = 60.0;
+	reactor.priority = 2;
+	core::MethaneProcessorSettings processor;
+	processor.id = "pyrolysis";
+	processor.hazardClass = "normal";
+	processor.methaneStoreId = "methane";
+	processor.hydrogenStoreId = "h2";
+	processor.carbonStoreId = "carbon";
+	processor.thermalClass = "low";
+	processor.heatSinkId = "sink";
+	processor.rateKgPerS = 0.0003;
+	processor.specificEnergyKWhPerKgCH4 = 2.0;
+	processor.maxSinkTemperatureC = 60.0;
+	processor.priority = 1;
+	core::World original("Carbon Round Trip", 2, 2);
+	original.pauseSimulation();
+	original.finishBuild();
+	core::StationSystemsSettings settings;
+	settings.enabled = true;
+	settings.observationIntervalSeconds = 2.0f;
+	settings.stores.push_back(plainStore("co2", 100.0, 10.0));
+	settings.stores.push_back(plainStore("h2", 100.0, 10.0));
+	settings.stores.push_back(plainStore("methane", 100.0, 0.0));
+	settings.stores.push_back(plainStore("rawWater", 100.0, 0.0));
+	settings.stores.push_back(plainStore("carbon", 100.0, 0.0));
+	settings.thermalReservoirs.push_back(sink);
+	settings.solarArrays.push_back(field);
+	settings.sabatierReactors.push_back(reactor);
+	settings.methaneProcessors.push_back(processor);
+	std::string diagnostic;
+	require(original.configureStationSystems(settings, false, &diagnostic),
+		"Carbon recovery settings edit failed: " + diagnostic);
+	original.resumeSimulation();
+	require(original.advanceTicks(1800), "Carbon original run failed");
+	auto const expected = original.getStationSystemsSnapshot();
+	require(expected.sabatierReactors.size() == 1 && expected.methaneProcessors.size() == 1
+		&& expected.sabatierReactors[0].co2ConsumedKg > 0.0
+		&& expected.sabatierReactors[0].methaneProducedKg > 0.0
+		&& expected.sabatierReactors[0].waterProducedKg > 0.0
+		&& expected.sabatierReactors[0].heatRoutedKJ > 0.0
+		&& expected.methaneProcessors[0].methaneConsumedKg > 0.0
+		&& expected.methaneProcessors[0].hydrogenReturnedKg > 0.0
+		&& expected.methaneProcessors[0].carbonProducedKg > 0.0,
+		"Carbon scenario did not exercise both stages before saving");
+	auto const path = directory / "carbon.world.yaml";
+	original.saveTo(path.string());
+	require(readFile(path).find("sabatierReactors:") != std::string::npos,
+		"saved document lacks sabatierReactors");
+	require(readFile(path).find("methaneProcessors:") != std::string::npos,
+		"saved document lacks methaneProcessors");
+	require(readFile(path).find("specificEnergyKWhPerKgCO2") != std::string::npos
+		&& readFile(path).find("specificEnergyKWhPerKgCH4") != std::string::npos
+		&& readFile(path).find("co2StoreId") != std::string::npos
+		&& readFile(path).find("carbonStoreId") != std::string::npos,
+		"saved document lacks the carbon-recovery contract");
+	auto const reopened = core::loadWorldDocument(path);
+	reopened->pauseSimulation();
+	require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+		"authored carbon-recovery settings did not survive the file round trip");
+	require(reopened->getStationSystemsSnapshot().sabatierReactors[0].co2ConsumedKg == 0.0
+		&& reopened->getStationSystemsSnapshot().methaneProcessors[0].methaneConsumedKg == 0.0
+		&& reopened->getStationSystemsSnapshot().stores[2].currentQualified == 0.0,
+		"reopened World did not reconstruct the carbon-recovery starting state");
+	reopened->resumeSimulation();
+	require(reopened->advanceTicks(1800), "Carbon reopened run failed");
+	require(reopened->getStationSystemsSnapshot() == expected,
+		"Carbon scenario is not reproducible from the document");
+	require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
+		"Carbon event history is not reproducible from the document");
+	auto const binaryPath = directory / "carbon.world";
+	original.saveTo(binaryPath.string());
+	auto const reopenedBinary = core::loadWorldDocument(binaryPath);
+	reopenedBinary->pauseSimulation();
+	require(reopenedBinary->getStationSystemsSnapshot().sabatierReactors.size() == 1
+		&& reopenedBinary->getStationSystemsSnapshot().methaneProcessors.size() == 1
+		&& reopenedBinary->getStationSystemsSnapshot().sabatierReactors[0].co2ConsumedKg == 0.0,
+		"reopened binary carbon document did not reconstruct the starting state");
+	auto const withField = serializeYaml(original);
+	// A pre-83 document carrying the new fields is refused.
+	{
+		auto stale = withField;
+		replaceAll(stale, "version: 83", "version: 82");
+		auto const stalePath = directory / "stale-carbon.world.yaml";
+		writeFile(stalePath, stale);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(stalePath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a pre-83 document carrying carbon recovery was silently accepted");
+	}
+	// A methane dose below the declared endothermic reaction heat is
+	// refused from a file.
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "specificEnergyKWhPerKgCH4: 2", "specificEnergyKWhPerKgCH4: 1");
+		auto const malformedPath = directory / "malformed-carbon-dose.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a methane dose below the reaction demand was accepted from a file");
+	}
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "co2StoreId: co2", "co2StoreId: ghost");
+		auto const malformedPath = directory / "malformed-co2-store.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a reactor with an unknown CO2 store was accepted from a file");
+	}
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "carbonStoreId: carbon", "carbonStoreId: ghost");
+		auto const malformedPath = directory / "malformed-carbon-store.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a processor with an unknown carbon store was accepted from a file");
+	}
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "maxSinkTemperatureC: 60", "maxSinkTemperatureC: -300");
+		auto const malformedPath = directory / "malformed-carbon-sink-temp.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a carbon-recovery sink temperature below absolute zero was accepted from a file");
+	}
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "hazardClass: normal", "hazardClass: plasma");
+		auto const malformedPath = directory / "malformed-carbon-hazard.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "an undeclared carbon-recovery hazard class was accepted from a file");
+	}
+}
+
 void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"fileRoundTrip", fileRoundTrip});
@@ -2500,4 +2680,5 @@ void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"waterFiles", waterFiles});
 	checks.push_back({"gasFiles", gasFiles});
 	checks.push_back({"fuelCellFiles", fuelCellFiles});
+	checks.push_back({"carbonRecoveryFiles", carbonRecoveryFiles});
 }

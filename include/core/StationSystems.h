@@ -910,6 +910,141 @@ namespace core
 		bool operator==(FuelCellSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationFuelCells{8};
+	// Molar mass of solid carbon in kg/mol (#405): a constant of the
+	// declared species. Methane's declared molar mass is exactly the
+	// carbon plus two hydrogen molecules, so the methane-processing
+	// mass balance closes under the declared molar masses.
+	inline constexpr double StationMolarMassCarbonKgPerMol{0.0120107};
+	inline constexpr double StationMolarMassMethaneKgPerMol{
+		StationMolarMassCarbonKgPerMol + 2.0 * StationMolarMassHydrogenKgPerMol};
+	// Lower heating value of methane in kJ/kg: the declared chemical
+	// energy retained per kilogram of CH4. Documented constant of the
+	// declared fuel, not an authored process coefficient: it is what
+	// makes the Sabatier reaction's exothermic heat release derivable
+	// from the declared heating values rather than invented per reactor.
+	inline constexpr double StationMethaneLowerHeatingValueKJPerKg{50004.0};
+	// Stoichiometric masses of the Sabatier reaction CO2 + 4 H2 ->
+	// CH4 + 2 H2O declared against the declared molar masses, per
+	// kilogram of CO2 converted (#405): hydrogen is consumed at the
+	// declared molar ratio, methane is produced at the declared molar
+	// ratio, and water is the declared mass-balance remainder, so the
+	// stage closes exactly under the declared masses rather than by
+	// rounding a second ratio against them.
+	inline constexpr double StationSabatierHydrogenMassPerCarbonDioxideKg{
+		4.0 * StationMolarMassHydrogenKgPerMol / StationMolarMassCarbonDioxideKgPerMol};
+	inline constexpr double StationSabatierMethaneMassPerCarbonDioxideKg{
+		StationMolarMassMethaneKgPerMol / StationMolarMassCarbonDioxideKgPerMol};
+	inline constexpr double StationSabatierWaterMassPerCarbonDioxideKg{
+		1.0 + StationSabatierHydrogenMassPerCarbonDioxideKg
+		- StationSabatierMethaneMassPerCarbonDioxideKg};
+	// Exothermic heat released per kilogram of CO2 converted by the
+	// Sabatier reaction, in kJ (#405): the chemical energy the
+	// hydrogen reactant carried that the methane product does not
+	// retain, derived from the declared heating values and the declared
+	// stoichiometry - a documented constant of the declared reaction,
+	// not an authored coefficient. The reactor routes this heat into
+	// its class-matched sink alongside the electrical dose it drew, so
+	// the energy ledger closes over reactants + electricity = products
+	// + heat, and the exothermy is visible instead of vanishing.
+	inline constexpr double StationSabatierReactionHeatKJPerKgCarbonDioxide{
+		StationSabatierHydrogenMassPerCarbonDioxideKg
+		* StationElectrolysisChemicalEnergyHydrogenKJPerKg
+		- StationSabatierMethaneMassPerCarbonDioxideKg
+		* StationMethaneLowerHeatingValueKJPerKg};
+	// Stoichiometric masses of methane processing CH4 -> C + 2 H2
+	// declared against the declared molar masses, per kilogram of CH4
+	// processed (#405): hydrogen is returned at the declared molar
+	// ratio and solid carbon is the declared mass-balance remainder.
+	inline constexpr double StationMethaneProcessingHydrogenMassPerMethaneKg{
+		2.0 * StationMolarMassHydrogenKgPerMol / StationMolarMassMethaneKgPerMol};
+	inline constexpr double StationMethaneProcessingCarbonMassPerMethaneKg{
+		1.0 - StationMethaneProcessingHydrogenMassPerMethaneKg};
+	// Endothermic reaction heat absorbed per kilogram of methane
+	// processed, in kJ (#405): the thermal demand of pyrolysis, the
+	// standard reaction enthalpy of +74.8 kJ/mol CH4 divided by the
+	// declared molar mass. Documented constant of the declared
+	// reaction: the authored electrical dose must at least cover the
+	// reaction's heat demand - a dose below it would drive a reaction
+	// that needs more heat than the machine supplies - and the
+	// difference between the dose and the demand is process heat
+	// routed to the sink.
+	inline constexpr double StationMethaneProcessingReactionHeatKJPerKgMethane{
+		74.8 / StationMolarMassMethaneKgPerMol};
+	// A Sabatier reactor (#405): converts captured carbon dioxide and
+	// hydrogen into methane and water, CO2 + 4 H2 -> CH4 + 2 H2O. The
+	// conversion is stoichiometric under the declared molar masses -
+	// hydrogen consumed, methane produced and water as the mass-balance
+	// remainder - so every kilogram that enters leaves as product and
+	// nothing vanishes. The reaction is exothermic: the heat the
+	// reactants do not retain in the products rides into the declared
+	// class-matched heat sink together with the electrical dose the
+	// reactor drew, booked exactly once. The reactor only converts the
+	// CO2 the actually supplied energy can pay for at the declared
+	// dose: curtailed power reduces conversion rather than gifting
+	// products for free, and a tick that demands power and receives
+	// none is refused whole. Both feeds are drawn only from qualified
+	// material above each store's protected reserve, and a full product
+	// store caps conversion rather than venting the excess: the water
+	// destination is the raw-water store a water treatment (#402)
+	// qualifies, and the methane destination is the processing stage's
+	// feed store. Hazard class segregates the whole chain: both feed
+	// stores and both product stores must carry the reactor's own
+	// class, and the heat sink must share the reactor's thermal service
+	// class, because spare capacity in one class is never usable by
+	// another.
+	struct SabatierReactorSettings
+	{
+		std::string id;
+		std::string hazardClass;      // normal or hazardous; the whole chain carries it
+		std::string co2StoreId;     // captured CO2 feed inventory (#404)
+		std::string hydrogenStoreId;  // H2 feed above the protected reserve
+		std::string methaneStoreId;   // CH4 product destination
+		std::string waterStoreId;     // H2O product destination: raw water for treatment
+		std::string thermalClass;     // service class of the reactor's heat sink
+		std::string heatSinkId;       // reservoir receiving reaction and process heat
+		double rateKgPerS{0.0};     // rated CO2 conversion, 0 disables
+		double specificEnergyKWhPerKgCO2{1.0}; // electrical dose per kg CO2 converted
+		double maxSinkTemperatureC{60.0}; // cooling qualified while the sink is below this
+		int priority{0};
+		bool operator==(SabatierReactorSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationSabatierReactors{8};
+	// A methane processor (#405): splits methane into solid carbon and
+	// hydrogen, CH4 -> C + 2 H2. The split is stoichiometric under the
+	// declared molar masses - hydrogen returned at the declared ratio,
+	// solid carbon as the mass-balance remainder - so one kilogram of
+	// methane leaves as exactly one kilogram of products. The recovered
+	// hydrogen returns to the declared hydrogen store: it is recycled
+	// feed, not free supply, because the Sabatier stage consumes twice
+	// the hydrogen per methane it makes as this stage returns, so the
+	// combined process retains a net hydrogen demand and the loop can
+	// never run on its own return. The reaction is endothermic: the
+	// authored electrical dose must at least cover the declared
+	// reaction heat demand, and the difference between the dose and the
+	// demand is process heat routed exactly once into the declared
+	// class-matched sink. The processor only processes the methane the
+	// actually supplied energy can drive at the declared dose; a full
+	// hydrogen or carbon destination caps processing rather than
+	// venting; the carbon destination is the configured useful store or
+	// the terminal-waste store surplus goes to (#403). Feed and return
+	// flows are qualified material above each store's protected reserve.
+	// Hazard class segregates the whole chain.
+	struct MethaneProcessorSettings
+	{
+		std::string id;
+		std::string hazardClass;      // normal or hazardous; the whole chain carries it
+		std::string methaneStoreId;   // CH4 feed
+		std::string hydrogenStoreId;  // recovered H2 destination (recycled feed)
+		std::string carbonStoreId;    // solid carbon: useful store or terminal waste
+		std::string thermalClass;     // service class of the processor's heat sink
+		std::string heatSinkId;       // reservoir receiving the process heat
+		double rateKgPerS{0.0};     // rated CH4 processing, 0 disables
+		double specificEnergyKWhPerKgCH4{2.0}; // electrical dose per kg CH4, must cover the reaction demand
+		double maxSinkTemperatureC{60.0}; // cooling qualified while the sink is below this
+		int priority{0};
+		bool operator==(MethaneProcessorSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationMethaneProcessors{8};
 
 	// A finite thermal buffer (#398): a bounded store of thermal energy
 	// that absorbs the cooling deficit its host reservoir cannot reject,
@@ -981,6 +1116,8 @@ namespace core
 		std::vector<ElectrolyzerSettings> electrolyzers;
 		std::vector<Co2CaptureSettings> co2Captures;
 		std::vector<FuelCellSettings> fuelCells;
+		std::vector<SabatierReactorSettings> sabatierReactors;
+		std::vector<MethaneProcessorSettings> methaneProcessors;
 		std::vector<ThermalBufferSettings> thermalBuffers;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
@@ -1354,6 +1491,8 @@ namespace core
 		double waterTreatmentPowerKW{0.0}; // treatment work drawn this tick (#402)
 		double electrolyzerPowerKW{0.0};   // electrolysis work drawn this tick (#404)
 		double co2CapturePowerKW{0.0};     // CO2 capture work drawn this tick (#404)
+		double sabatierPowerKW{0.0};       // Sabatier reactor work drawn this tick (#405)
+		double methaneProcessingPowerKW{0.0}; // methane processing work drawn this tick (#405)
 		// Fuel-cell backup service this tick (#406): electrical output
 		// added to the same allocation pool as solar and the generators,
 		// and the waste heat those cells routed to their sinks.
@@ -1430,6 +1569,17 @@ namespace core
 		// energy the conversion did not deliver as electricity, booked
 		// once at the sink boundary.
 		double lastFuelCellHeatKW{0.0};
+		// Sabatier heat this tick routed into this reservoir by the
+		// reactors that use it as their heat sink (#405): the exothermic
+		// reaction heat the products do not retain plus the electrical
+		// dose the reactor drew, booked once at the sink boundary.
+		double lastSabatierHeatKW{0.0};
+		// Methane-processing waste heat this tick routed into this
+		// reservoir by the processors that use it as their heat sink
+		// (#405): the part of the electrical dose the endothermic split
+		// did not absorb as reaction heat, booked once at the sink
+		// boundary.
+		double lastMethaneProcessingHeatKW{0.0};
 		// Buffer exchange this tick (#398): heat the thermal buffers
 		// hosted on this reservoir absorbed out of it (charge) and
 		// returned to it (discharge). Both are booked once at the
@@ -1453,11 +1603,13 @@ namespace core
 		double generatorEnergyKJ{0.0}; // cumulative generator waste/startup/decay heat into the reservoir
 		double electrolysisEnergyKJ{0.0}; // cumulative electrolysis process heat into the reservoir
 		double fuelCellEnergyKJ{0.0}; // cumulative fuel-cell waste heat into the reservoir
+		double sabatierEnergyKJ{0.0}; // cumulative Sabatier reaction and process heat into the reservoir (#405)
+		double methaneProcessingEnergyKJ{0.0}; // cumulative methane-processing waste heat into the reservoir (#405)
 		double bufferChargeEnergyKJ{0.0}; // cumulative heat absorbed out of the reservoir by buffers
 		double bufferDischargeEnergyKJ{0.0}; // cumulative heat returned into the reservoir by buffers
 		double atmosphereEnergyKJ{0.0}; // cumulative net compartment exchange into the reservoir
 		double rejectedEnergyKJ{0.0};
-		double residualKJ{0.0}; // starting + absorbed + routed + loop + condenser + generator + electrolysis + fuel cell + atmosphere + buffer discharge - buffer charge - rejected - current
+		double residualKJ{0.0}; // starting + absorbed + routed + loop + condenser + generator + electrolysis + fuel cell + Sabatier + methane processing + atmosphere + buffer discharge - buffer charge - rejected - current
 		bool operator==(StationThermalReservoirSnapshot const&) const = default;
 	};
 	// One coolant loop as of the most recent tick (#396): the authored
@@ -2053,6 +2205,106 @@ namespace core
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationFuelCellSnapshot const&) const = default;
 	};
+	// One Sabatier reactor as of the most recent tick (#405): the
+	// authored contract beside the CO2 and hydrogen actually consumed,
+	// the methane and water actually produced, the electrical dose
+	// actually supplied, the heat actually routed to the sink, and the
+	// closing mass and energy ledgers. The reactor's mass ledger closes
+	// over the conversion: CO2 + hydrogen = methane + water within the
+	// declared tolerance, and its energy ledger closes over supplied +
+	// released = routed: the electrical dose plus the exothermic heat
+	// the products do not retain all left through the sink - never a
+	// third destination and never vanished.
+	struct StationSabatierReactorSnapshot
+	{
+		std::string id;
+		std::string hazardClass;
+		std::string co2StoreId;
+		std::string hydrogenStoreId;
+		std::string methaneStoreId;
+		std::string waterStoreId;
+		std::string thermalClass;
+		std::string heatSinkId;
+		double rateKgPerS{0.0};
+		double specificEnergyKWhPerKgCO2{0.0};
+		double maxSinkTemperatureC{0.0};
+		int priority{0};
+		double scale{0.0}; // fraction of rated conversion the feeds and headroom sustained, [0, 1]
+		std::string limiter; // what bound the scale this tick (empty: none)
+		double lastRequestedKg{0.0};   // rated CO2 conversion demanded this tick
+		double lastCo2ConsumedKg{0.0};    // CO2 actually consumed this tick
+		double lastHydrogenConsumedKg{0.0}; // H2 actually consumed this tick
+		double lastMethaneProducedKg{0.0};  // CH4 actually produced this tick
+		double lastWaterProducedKg{0.0};    // H2O actually produced this tick
+		double lastPowerDemandKW{0.0};
+		double lastPowerSuppliedKW{0.0};
+		double lastPowerUnmetKW{0.0};
+		double lastUnmetConversionKg{0.0}; // conversion the supplied energy could not pay for
+		double lastReactionHeatKW{0.0};    // exothermic reaction heat released this tick
+		bool coolingAvailable{false};
+		std::string blockReason;       // why nothing ran this tick (empty: none)
+		bool disabled{false};          // zero rated conversion: no production
+		double co2ConsumedKg{0.0};
+		double hydrogenConsumedKg{0.0};
+		double methaneProducedKg{0.0};
+		double waterProducedKg{0.0};
+		double energySuppliedKJ{0.0};
+		double reactionHeatKJ{0.0};  // cumulative exothermic heat released by conversion
+		double heatRoutedKJ{0.0};    // cumulative dose + released heat routed into the sink
+		double residualKg{0.0};      // (co2 + hydrogen) - (methane + water)
+		double residualKJ{0.0};      // (supplied + released) - routed
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationSabatierReactorSnapshot const&) const = default;
+	};
+	// One methane processor as of the most recent tick (#405): the
+	// authored contract beside the methane actually consumed, the
+	// hydrogen actually returned and the solid carbon actually produced,
+	// the electrical dose actually supplied, the reaction heat actually
+	// absorbed and the waste heat actually routed, and the closing mass
+	// and energy ledgers. The processor's mass ledger closes over the
+	// split: methane = hydrogen + carbon within the declared tolerance,
+	// and its energy ledger closes over supplied = absorbed + routed:
+	// the electrical dose either drove the endothermic reaction or
+	// left as process heat into the sink - never a third destination
+	// and never vanished.
+	struct StationMethaneProcessorSnapshot
+	{
+		std::string id;
+		std::string hazardClass;
+		std::string methaneStoreId;
+		std::string hydrogenStoreId;
+		std::string carbonStoreId;
+		std::string thermalClass;
+		std::string heatSinkId;
+		double rateKgPerS{0.0};
+		double specificEnergyKWhPerKgCH4{0.0};
+		double maxSinkTemperatureC{0.0};
+		int priority{0};
+		double scale{0.0}; // fraction of rated processing the feed and headroom sustained, [0, 1]
+		std::string limiter; // what bound the scale this tick (empty: none)
+		double lastRequestedKg{0.0};   // rated CH4 processing demanded this tick
+		double lastMethaneConsumedKg{0.0};  // CH4 actually consumed this tick
+		double lastHydrogenReturnedKg{0.0}; // H2 actually returned this tick
+		double lastCarbonProducedKg{0.0};   // solid C actually produced this tick
+		double lastPowerDemandKW{0.0};
+		double lastPowerSuppliedKW{0.0};
+		double lastPowerUnmetKW{0.0};
+		double lastUnmetProcessingKg{0.0}; // processing the supplied energy could not drive
+		double lastReactionHeatKW{0.0};    // endothermic reaction heat absorbed this tick
+		bool coolingAvailable{false};
+		std::string blockReason;       // why nothing ran this tick (empty: none)
+		bool disabled{false};          // zero rated processing: no service
+		double methaneConsumedKg{0.0};
+		double hydrogenReturnedKg{0.0};
+		double carbonProducedKg{0.0};
+		double energySuppliedKJ{0.0};
+		double reactionHeatKJ{0.0};  // cumulative endothermic heat absorbed by processing
+		double heatRoutedKJ{0.0};    // cumulative dose minus absorbed heat routed into the sink
+		double residualKg{0.0};      // methane - hydrogen - carbon
+		double residualKJ{0.0};      // supplied - absorbed - routed
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationMethaneProcessorSnapshot const&) const = default;
+	};
 	struct StationSystemsSnapshot
 	{
 		bool enabled{false};
@@ -2118,6 +2370,12 @@ namespace core
 		// consumable draw.
 		std::vector<StationElectrolyzerSnapshot> electrolyzers;
 		std::vector<StationCo2CaptureSnapshot> co2Captures;
+		// The carbon recovery picture (#405): per-reactor CO2 and
+		// hydrogen consumption, methane and water production, energy and
+		// heat ledgers, and per-processor methane split into returned
+		// hydrogen and solid carbon with the closing ledgers.
+		std::vector<StationSabatierReactorSnapshot> sabatierReactors;
+		std::vector<StationMethaneProcessorSnapshot> methaneProcessors;
 		// The fuel-cell backup picture (#406): per-cell output, reactant
 	// consumption, product water, waste heat, closing ledgers and the
 		// endurance the usable reactants still buy.

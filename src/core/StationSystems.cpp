@@ -80,6 +80,8 @@ namespace core
 			std::vector<FuelCellSettings> const* fuelCells;
 			std::vector<ThermalBufferSettings> const* thermalBuffers;
 			std::vector<WasteEjectionSettings> const* wasteEjections;
+			std::vector<SabatierReactorSettings> const* sabatierReactors;
+			std::vector<MethaneProcessorSettings> const* methaneProcessors;
 			static void pushProfile(lua_State* state, ProfileSettings const& profile)
 			{
 				lua_createtable(state, 0, 3);
@@ -567,7 +569,52 @@ namespace core
 					lua_pushinteger(state, ejection.priority); lua_setfield(state, -2, "priority");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 23, 1);
+				// Authored Sabatier reactor descriptors cross the same boundary
+				// as plain immutable values (#405); each sandbox mirrors the
+				// stoichiometric conversion and audits its own mass and energy
+				// closure.
+				lua_createtable(state, static_cast<int>(sabatierReactors->size()), 0);
+				for (size_t index = 0; index < sabatierReactors->size(); ++index)
+				{
+					auto const& reactor = (*sabatierReactors)[index];
+					lua_createtable(state, 0, 11);
+					lua_pushstring(state, reactor.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, reactor.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
+					lua_pushstring(state, reactor.co2StoreId.c_str()); lua_setfield(state, -2, "co2Store");
+					lua_pushstring(state, reactor.hydrogenStoreId.c_str()); lua_setfield(state, -2, "hydrogenStore");
+					lua_pushstring(state, reactor.methaneStoreId.c_str()); lua_setfield(state, -2, "methaneStore");
+					lua_pushstring(state, reactor.waterStoreId.c_str()); lua_setfield(state, -2, "waterStore");
+					lua_pushstring(state, reactor.thermalClass.c_str()); lua_setfield(state, -2, "thermalClass");
+					lua_pushstring(state, reactor.heatSinkId.c_str()); lua_setfield(state, -2, "heatSink");
+					lua_pushnumber(state, reactor.rateKgPerS); lua_setfield(state, -2, "rateKgPerS");
+					lua_pushnumber(state, reactor.specificEnergyKWhPerKgCO2); lua_setfield(state, -2, "specificEnergyKWhPerKgCO2");
+					lua_pushnumber(state, reactor.maxSinkTemperatureC); lua_setfield(state, -2, "maxSinkTemperatureC");
+					lua_pushinteger(state, reactor.priority); lua_setfield(state, -2, "priority");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				// Authored methane processor descriptors cross the same
+				// boundary as plain immutable values (#405); each sandbox
+				// mirrors the stoichiometric split and audits its own mass and
+				// energy closure.
+				lua_createtable(state, static_cast<int>(methaneProcessors->size()), 0);
+				for (size_t index = 0; index < methaneProcessors->size(); ++index)
+				{
+					auto const& processor = (*methaneProcessors)[index];
+					lua_createtable(state, 0, 10);
+					lua_pushstring(state, processor.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, processor.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
+					lua_pushstring(state, processor.methaneStoreId.c_str()); lua_setfield(state, -2, "methaneStore");
+					lua_pushstring(state, processor.hydrogenStoreId.c_str()); lua_setfield(state, -2, "hydrogenStore");
+					lua_pushstring(state, processor.carbonStoreId.c_str()); lua_setfield(state, -2, "carbonStore");
+					lua_pushstring(state, processor.thermalClass.c_str()); lua_setfield(state, -2, "thermalClass");
+					lua_pushstring(state, processor.heatSinkId.c_str()); lua_setfield(state, -2, "heatSink");
+					lua_pushnumber(state, processor.rateKgPerS); lua_setfield(state, -2, "rateKgPerS");
+					lua_pushnumber(state, processor.specificEnergyKWhPerKgCH4); lua_setfield(state, -2, "specificEnergyKWhPerKgCH4");
+					lua_pushnumber(state, processor.maxSinkTemperatureC); lua_setfield(state, -2, "maxSinkTemperatureC");
+					lua_pushinteger(state, processor.priority); lua_setfield(state, -2, "priority");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 25, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -2148,6 +2195,119 @@ namespace core
 					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
 					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
 		}
+		// Carbon recovery contracts (#405). A Sabatier reactor converts
+		// captured CO2 and hydrogen into methane and water; the conversion
+		// is stoichiometric under the declared molar masses, so the mass
+		// ledger closes by construction. All four stores in the chain are
+		// plain mass stores carrying the reactor's own hazard class, and
+		// the heat sink must share the reactor's thermal service class.
+		// A methane processor splits methane into recovered hydrogen and
+		// solid carbon; the split is stoichiometric, and because the
+		// reaction is endothermic the authored electrical dose must at
+		// least cover the declared reaction heat demand - a dose below it
+		// would drive a reaction the machine cannot heat. The recovered
+		// hydrogen returns to the hydrogen store as recycled feed: the
+		// Sabatier stage consumes twice as much hydrogen per methane as
+		// the processor returns, so the combined loop retains a net
+		// hydrogen demand and the return is never free continuing supply.
+		if (settings.sabatierReactors.size() > MaxStationSabatierReactors)
+			return refuse("Station Sabatier reactors are limited to "
+				+ std::to_string(MaxStationSabatierReactors) + " entries");
+		if (settings.methaneProcessors.size() > MaxStationMethaneProcessors)
+			return refuse("Station methane processors are limited to "
+				+ std::to_string(MaxStationMethaneProcessors) + " entries");
+		for (auto const& reactor : settings.sabatierReactors)
+		{
+			auto const where = "Station Sabatier reactor '" + reactor.id + "'";
+			if (reactor.id.empty()) return refuse("Station Sabatier reactor id must not be empty");
+			if (reactor.id.size() > MaxStationStoreIdLength)
+				return refuse("Station Sabatier reactor id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!gasIds.insert(reactor.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
+				reactor.hazardClass) == StationWaterHazardClasses.end())
+				return refuse(where + " has unknown hazard class '" + reactor.hazardClass
+					+ "'; declared classes are: normal, hazardous");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				reactor.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + reactor.thermalClass
+					+ "'; declared classes are: " + declaredThermalClasses());
+			if (!std::isfinite(reactor.rateKgPerS) || reactor.rateKgPerS < 0.0)
+				return refuse(where + " rated CO2 conversion must be finite and non-negative");
+			if (!std::isfinite(reactor.specificEnergyKWhPerKgCO2)
+				|| reactor.specificEnergyKWhPerKgCO2 < 0.0)
+				return refuse(where + " specific energy must be finite and non-negative");
+			if (!std::isfinite(reactor.maxSinkTemperatureC)
+				|| reactor.maxSinkTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum sink temperature must be finite and above absolute zero");
+			if (!declareGasStore(reactor.co2StoreId, "CO2 feed", where,
+				reactor.hazardClass, false))
+				return false;
+			if (!declareGasStore(reactor.hydrogenStoreId, "hydrogen feed", where,
+				reactor.hazardClass, false))
+				return false;
+			if (!declareGasStore(reactor.methaneStoreId, "methane", where,
+				reactor.hazardClass, false))
+				return false;
+			if (!declareWaterStore(reactor.waterStoreId, "product water", where,
+				reactor.hazardClass, false))
+				return false;
+			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
+				{ return reservoir.id == reactor.heatSinkId; });
+			if (sink == settings.thermalReservoirs.end())
+				return refuse(where + " heat sink is unknown thermal reservoir '" + reactor.heatSinkId + "'");
+			if (sink->thermalClass != reactor.thermalClass)
+				return refuse(where + " thermal class '" + reactor.thermalClass
+					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
+					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
+		}
+		for (auto const& processor : settings.methaneProcessors)
+		{
+			auto const where = "Station methane processor '" + processor.id + "'";
+			if (processor.id.empty()) return refuse("Station methane processor id must not be empty");
+			if (processor.id.size() > MaxStationStoreIdLength)
+				return refuse("Station methane processor id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!gasIds.insert(processor.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
+				processor.hazardClass) == StationWaterHazardClasses.end())
+				return refuse(where + " has unknown hazard class '" + processor.hazardClass
+					+ "'; declared classes are: normal, hazardous");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				processor.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + processor.thermalClass
+					+ "'; declared classes are: " + declaredThermalClasses());
+			if (!std::isfinite(processor.rateKgPerS) || processor.rateKgPerS < 0.0)
+				return refuse(where + " rated methane processing must be finite and non-negative");
+			if (!std::isfinite(processor.specificEnergyKWhPerKgCH4)
+				|| processor.specificEnergyKWhPerKgCH4 * 3600.0
+					< StationMethaneProcessingReactionHeatKJPerKgMethane
+					- StationBalanceTolerance * std::max(1.0,
+						StationMethaneProcessingReactionHeatKJPerKgMethane))
+				return refuse(where + " specific energy is below the endothermic reaction heat the split must absorb: the electrical dose may not fund less than the reaction demands");
+			if (!std::isfinite(processor.maxSinkTemperatureC)
+				|| processor.maxSinkTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum sink temperature must be finite and above absolute zero");
+			if (!declareGasStore(processor.methaneStoreId, "methane feed", where,
+				processor.hazardClass, false))
+				return false;
+			if (!declareGasStore(processor.hydrogenStoreId, "recovered hydrogen", where,
+				processor.hazardClass, false))
+				return false;
+			if (!declareGasStore(processor.carbonStoreId, "solid carbon", where,
+				processor.hazardClass, false))
+				return false;
+			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
+				{ return reservoir.id == processor.heatSinkId; });
+			if (sink == settings.thermalReservoirs.end())
+				return refuse(where + " heat sink is unknown thermal reservoir '" + processor.heatSinkId + "'");
+			if (sink->thermalClass != processor.thermalClass)
+				return refuse(where + " thermal class '" + processor.thermalClass
+					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
+					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
+		}
 		diagnostic.clear(); return true;
 	}
 	void setStationSystemsSourceLoader(StationSystemsSourceLoader loader) { sourceLoader = std::move(loader); }
@@ -2373,6 +2533,8 @@ namespace core
 			double lastGeneratorHeatKW{0.0};
 			double lastElectrolysisHeatKW{0.0}; // cell process heat routed here this tick (#404)
 			double lastFuelCellHeatKW{0.0}; // fuel-cell waste heat routed here this tick (#406)
+			double lastSabatierHeatKW{0.0}; // Sabatier reaction + dose heat routed here this tick (#405)
+			double lastMethaneProcessingHeatKW{0.0}; // methane-processing waste heat routed here this tick (#405)
 			double lastAtmosphereHeatKW{0.0}; // reservoir side of the compartment exchanger this tick
 			double lastBufferChargeKW{0.0}; // heat absorbed out of the reservoir by buffers this tick (#398)
 			double lastBufferDischargeKW{0.0}; // heat returned into the reservoir by buffers this tick (#398)
@@ -2386,6 +2548,8 @@ namespace core
 			double generatorKJ{0.0};
 			double electrolysisKJ{0.0}; // cumulative electrolysis process heat into the reservoir
 			double fuelCellKJ{0.0}; // cumulative fuel-cell waste heat into the reservoir (#406)
+			double sabatierKJ{0.0}; // cumulative Sabatier reaction + dose heat into the reservoir (#405)
+			double methaneProcessingKJ{0.0}; // cumulative methane-processing waste heat into the reservoir (#405)
 			double atmosphereKJ{0.0}; // cumulative net compartment exchange into the reservoir
 			double bufferChargeKJ{0.0}; // cumulative heat absorbed out of the reservoir by buffers (#398)
 			double bufferDischargeKJ{0.0}; // cumulative heat returned into the reservoir by buffers (#398)
@@ -2859,6 +3023,88 @@ namespace core
 			double enduranceSeconds{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
+		// The authoritative ledger of one authored Sabatier reactor
+		// (#405). The reactor converts captured CO2 and hydrogen into
+		// methane and water at the declared stoichiometry; the reaction is
+		// exothermic, so the heat the products do not retain rides into
+		// the class-matched sink together with the electrical dose the
+		// reactor drew, booked exactly once. The reactor only converts the
+		// CO2 the actually supplied energy can pay for at the declared
+		// dose, feeds are drawn only above each store's protected reserve,
+		// and a full product store caps conversion rather than venting. A
+		// sink at or above the maximum sink temperature refuses the
+		// reactor whole and it spends nothing.
+		struct SabatierState
+		{
+			SabatierReactorSettings authored;
+			size_t co2StoreIndex{0};
+			size_t hydrogenStoreIndex{0};
+			size_t methaneStoreIndex{0};
+			size_t waterStoreIndex{0};
+			size_t sinkIndex{0};
+			size_t declarationIndex{0};
+			double lastScale{0.0};
+			std::string lastLimiter;
+			double lastRequestedKg{0.0};
+			double lastCo2ConsumedKg{0.0};
+			double lastHydrogenConsumedKg{0.0};
+			double lastMethaneProducedKg{0.0};
+			double lastWaterProducedKg{0.0};
+			double lastPowerDemandKW{0.0};
+			double lastPowerSuppliedKW{0.0};
+			double lastUnmetConversionKg{0.0};
+			double lastReactionHeatKW{0.0};
+			bool lastCoolingAvailable{false};
+			std::string lastBlockReason;
+			double co2ConsumedKg{0.0};
+			double hydrogenConsumedKg{0.0};
+			double methaneProducedKg{0.0};
+			double waterProducedKg{0.0};
+			double energySuppliedKJ{0.0};
+			double reactionHeatKJ{0.0};
+			double heatRoutedKJ{0.0};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
+		// The authoritative ledger of one authored methane processor
+		// (#405). The processor splits methane into recovered hydrogen
+		// and solid carbon at the declared stoichiometry; the reaction is
+		// endothermic, so the authored dose must cover the declared
+		// reaction heat demand and the difference is process heat routed
+		// exactly once into the class-matched sink. The recovered
+		// hydrogen returns to the hydrogen store as recycled feed - the
+		// reactor consumes twice as much per methane as the processor
+		// returns, so the combined loop retains a net hydrogen demand.
+		// A full hydrogen or carbon destination caps processing rather
+		// than venting, and a sink at or above the maximum sink
+		// temperature refuses the processor whole.
+		struct MethaneProcessorState
+		{
+			MethaneProcessorSettings authored;
+			size_t methaneStoreIndex{0};
+			size_t hydrogenStoreIndex{0};
+			size_t carbonStoreIndex{0};
+			size_t sinkIndex{0};
+			size_t declarationIndex{0};
+			double lastScale{0.0};
+			std::string lastLimiter;
+			double lastRequestedKg{0.0};
+			double lastMethaneConsumedKg{0.0};
+			double lastHydrogenReturnedKg{0.0};
+			double lastCarbonProducedKg{0.0};
+			double lastPowerDemandKW{0.0};
+			double lastPowerSuppliedKW{0.0};
+			double lastUnmetProcessingKg{0.0};
+			double lastReactionHeatKW{0.0};
+			bool lastCoolingAvailable{false};
+			std::string lastBlockReason;
+			double methaneConsumedKg{0.0};
+			double hydrogenReturnedKg{0.0};
+			double carbonProducedKg{0.0};
+			double energySuppliedKJ{0.0};
+			double reactionHeatKJ{0.0};
+			double heatRoutedKJ{0.0};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
 		std::vector<TransferState> transfers;
@@ -2885,11 +3131,19 @@ namespace core
 		std::vector<ElectrolyzerState> electrolyzers;
 		std::vector<Co2CaptureState> co2Captures;
 		std::vector<FuelCellState> fuelCells;
+		std::vector<SabatierState> sabatierReactors;
+		std::vector<MethaneProcessorState> methaneProcessors;
 		// Electrolyzers and capture machines compete for the same power pool
 		// and the same stores, so each runs in the declared deterministic
 		// order: priority descending, declaration order ascending.
 		std::vector<size_t> electrolyzerOrder;
 		std::vector<size_t> co2CaptureOrder;
+		// Carbon-recovery stages compete for the same power pool and share
+		// the hydrogen and methane stores, so each runs in the declared
+		// deterministic order: priority descending, declaration order
+		// ascending (#405).
+		std::vector<size_t> sabatierOrder;
+		std::vector<size_t> methaneProcessorOrder;
 		// Treatments compete for the same power pool and the same stores, so
 		// they run in the declared deterministic order: priority descending,
 		// declaration order ascending.
@@ -2976,6 +3230,8 @@ namespace core
 			auto const committedElectrolyzers = electrolyzers;
 			auto const committedCo2Captures = co2Captures;
 			auto const committedFuelCells = fuelCells;
+			auto const committedSabatierReactors = sabatierReactors;
+			auto const committedMethaneProcessors = methaneProcessors;
 			auto const committedAvailableGenerationKW = lastAvailableGenerationKW;
 			auto const committedBatteryShortfallKW = lastBatteryShortfallKW;
 			if (runLedger(tick, seconds, system, violation)) return true;
@@ -3000,6 +3256,8 @@ namespace core
 			electrolyzers = committedElectrolyzers;
 			co2Captures = committedCo2Captures;
 			fuelCells = committedFuelCells;
+			sabatierReactors = committedSabatierReactors;
+			methaneProcessors = committedMethaneProcessors;
 			lastAvailableGenerationKW = committedAvailableGenerationKW;
 			lastBatteryShortfallKW = committedBatteryShortfallKW;
 			return false;
@@ -3093,6 +3351,12 @@ namespace core
 			std::vector<StationTransferStatus> previousFuelCellStatus;
 			previousFuelCellStatus.reserve(fuelCells.size());
 			for (auto const& cell : fuelCells) previousFuelCellStatus.push_back(cell.status);
+			std::vector<StationTransferStatus> previousSabatierStatus;
+			previousSabatierStatus.reserve(sabatierReactors.size());
+			for (auto const& reactor : sabatierReactors) previousSabatierStatus.push_back(reactor.status);
+			std::vector<StationTransferStatus> previousMethaneProcessorStatus;
+			previousMethaneProcessorStatus.reserve(methaneProcessors.size());
+			for (auto const& processor : methaneProcessors) previousMethaneProcessorStatus.push_back(processor.status);
 			std::vector<double> qualified, unqualified;
 			qualified.reserve(stores.size());
 			unqualified.reserve(stores.size());
@@ -4998,6 +5262,354 @@ namespace core
 				else if (capturedKg > 1e-12) capture.status = StationTransferStatus::Partial;
 				else capture.status = StationTransferStatus::Rejected;
 			}
+			// Carbon recovery (#405) runs in the same phase after CO2
+			// capture: the Sabatier reactor converts captured CO2 and
+			// hydrogen into methane and water, and the methane processor
+			// splits methane into recovered hydrogen and solid carbon. Both
+			// compete for the same generation-and-battery pool, and their
+			// heat must land in the sink before the reservoir integrates.
+			// Each stage runs at one uniform scale per tick: the fraction of
+			// the rated throughput the drawable feeds and the product
+			// stores' headroom can sustain. The stage is paid for before a
+			// kilogram converts, and it only converts what the actually
+			// supplied energy can drive at the declared dose: the reactor
+			// routes its electrical dose plus the exothermic reaction heat
+			// into the class-matched sink, and the processor routes its dose
+			// minus the absorbed endothermic reaction heat into the sink,
+			// each booked exactly once. A tick that demands power and
+			// receives none is refused whole, and a sink at or above the
+			// maximum sink temperature refuses the stage whole: heat with
+			// nowhere to go is heat that cannot be made.
+			std::vector<double> sabatierHeatByReservoir(reservoirs.size(), 0.0);
+			std::vector<double> methaneHeatByReservoir(reservoirs.size(), 0.0);
+			double totalSabatierPowerKW{0.0};
+			for (size_t orderIndex : sabatierOrder)
+			{
+				auto& reactor = sabatierReactors[orderIndex];
+				auto& co2 = stores[reactor.co2StoreIndex];
+				auto& hydrogen = stores[reactor.hydrogenStoreIndex];
+				auto& methane = stores[reactor.methaneStoreIndex];
+				auto& water = stores[reactor.waterStoreIndex];
+				reactor.lastScale = 0.0;
+				reactor.lastLimiter.clear();
+				reactor.lastRequestedKg = 0.0;
+				reactor.lastCo2ConsumedKg = 0.0;
+				reactor.lastHydrogenConsumedKg = 0.0;
+				reactor.lastMethaneProducedKg = 0.0;
+				reactor.lastWaterProducedKg = 0.0;
+				reactor.lastPowerDemandKW = 0.0;
+				reactor.lastPowerSuppliedKW = 0.0;
+				reactor.lastUnmetConversionKg = 0.0;
+				reactor.lastReactionHeatKW = 0.0;
+				reactor.lastCoolingAvailable = false;
+				reactor.lastBlockReason.clear();
+				if (reactor.authored.rateKgPerS <= 0.0)
+				{
+					reactor.status = StationTransferStatus::Idle;
+					continue;
+				}
+				auto const tickSeconds = static_cast<double>(seconds);
+				auto const fullKg = reactor.authored.rateKgPerS * tickSeconds;
+				// Cooling is qualified while the sink sits below the maximum
+				// sink temperature: at or above it the interface cannot
+				// accept the reactor's dose and reaction heat.
+				auto const& sink = reservoirs[reactor.sinkIndex];
+				reactor.lastCoolingAvailable = sink.temperatureC + 1e-9
+					< reactor.authored.maxSinkTemperatureC;
+				if (!reactor.lastCoolingAvailable)
+				{
+					reactor.lastBlockReason = "cooling is not qualified: sink at or above the maximum sink temperature";
+					reactor.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				auto const drawableCo2Units = std::max(0.0,
+					qualified[reactor.co2StoreIndex] - co2.authored.protectedReserve);
+				auto const drawableHydrogenUnits = std::max(0.0,
+					qualified[reactor.hydrogenStoreIndex] - hydrogen.authored.protectedReserve);
+				auto const methaneHeadroomUnits = std::max(0.0, methane.authored.capacity
+					- (qualified[reactor.methaneStoreIndex] + unqualified[reactor.methaneStoreIndex]));
+				auto const waterHeadroomUnits = std::max(0.0, water.authored.capacity
+					- (qualified[reactor.waterStoreIndex] + unqualified[reactor.waterStoreIndex]));
+				double scale = 1.0;
+				std::string limiter;
+				auto const constrain = [&](double available, double required,
+					std::string const& reason)
+				{
+					if (required <= 0.0) return;
+					auto const fraction = available / required;
+					if (fraction < scale) { scale = fraction; limiter = reason; }
+				};
+				constrain(drawableCo2Units, kgToMass(co2.authored.unit, fullKg),
+					"CO2 feed store '" + co2.authored.id
+					+ "' has nothing drawable above its protected reserve");
+				constrain(drawableHydrogenUnits,
+					kgToMass(hydrogen.authored.unit,
+						fullKg * StationSabatierHydrogenMassPerCarbonDioxideKg),
+					"hydrogen feed store '" + hydrogen.authored.id
+					+ "' has nothing drawable above its protected reserve");
+				constrain(methaneHeadroomUnits,
+					kgToMass(methane.authored.unit,
+						fullKg * StationSabatierMethaneMassPerCarbonDioxideKg),
+					"methane store '" + methane.authored.id
+					+ "' is full: the product has nowhere to go");
+				constrain(waterHeadroomUnits,
+					kgToMass(water.authored.unit,
+						fullKg * StationSabatierWaterMassPerCarbonDioxideKg),
+					"product water store '" + water.authored.id
+					+ "' is full: the water has nowhere to go");
+				scale = std::max(0.0, std::min(1.0, scale));
+				reactor.lastScale = scale;
+				reactor.lastLimiter = limiter;
+				reactor.lastRequestedKg = fullKg;
+				if (scale <= 0.0)
+				{
+					reactor.lastBlockReason = limiter;
+					reactor.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				// The dose is authored in kWh per kilogram of converted CO2,
+				// so the power the reactor draws is the dose times the
+				// conversion rate converted to the pool's kW (kWh/s x 3600),
+				// mirroring the electrolysis contract (#404).
+				reactor.lastPowerDemandKW = scale * reactor.authored.rateKgPerS
+					* reactor.authored.specificEnergyKWhPerKgCO2 * 3600.0;
+				auto const fromGeneration = std::min(reactor.lastPowerDemandKW, availableGeneration);
+				availableGeneration -= fromGeneration;
+				auto const ask = reactor.lastPowerDemandKW - fromGeneration;
+				auto const fromBattery = drawBatteries(ask);
+				auto const suppliedKW = fromGeneration + fromBattery;
+				batterySuppliedKW += fromBattery;
+				batteryShortfallKW += ask - fromBattery;
+				reactor.lastPowerSuppliedKW = suppliedKW;
+				if (reactor.lastPowerDemandKW > 1e-12 && suppliedKW <= 1e-12)
+				{
+					// Nothing was paid: the tick is refused whole. No CO2
+					// converts and no product appears - a reactor with no
+					// power is not a reactor running for free.
+					reactor.lastBlockReason = "no electrical supply: the Sabatier reactor cannot run";
+					reactor.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				auto const energySuppliedKJ = suppliedKW * tickSeconds;
+				// Energy feasibility: the reactor only converts the CO2 the
+				// supplied energy can pay for at the declared dose. The dose
+				// is the operating cost of the conversion; curtailed power
+				// reduces conversion rather than gifting products for free.
+				auto const doseKJPerKg = reactor.authored.specificEnergyKWhPerKgCO2 * 3600.0;
+				auto const energyFeasibleKg = doseKJPerKg > 0.0
+					? energySuppliedKJ / doseKJPerKg : scale * fullKg;
+				// The extent is capped by the reactants that are actually
+				// drawable above their protected reserves, so the stage never
+				// plans a conversion the feeds cannot sustain.
+				auto extentKg = std::min(energyFeasibleKg,
+					massToKg(co2.authored.unit, drawableCo2Units));
+				extentKg = std::min(extentKg,
+					massToKg(hydrogen.authored.unit, drawableHydrogenUnits)
+						/ StationSabatierHydrogenMassPerCarbonDioxideKg);
+				// Move the flows. Each flow is clamped to its own drawable
+				// or headroom so a one-ulp roundoff at the limit can never
+				// overshoot (#556), and the ledger is recomputed from what
+				// actually moved.
+				auto const co2Units = std::min(kgToMass(co2.authored.unit, extentKg), drawableCo2Units);
+				auto const co2ActualKg = massToKg(co2.authored.unit, co2Units);
+				auto const hydrogenUnits = std::min(kgToMass(hydrogen.authored.unit,
+					co2ActualKg * StationSabatierHydrogenMassPerCarbonDioxideKg),
+					drawableHydrogenUnits);
+				auto const hydrogenActualKg = massToKg(hydrogen.authored.unit, hydrogenUnits);
+				// Products follow the limiting reactant that actually moved,
+				// so the stage never books more product than the reactants
+				// that moved can make.
+				auto const extentActualKg = std::min(co2ActualKg,
+					hydrogenActualKg / StationSabatierHydrogenMassPerCarbonDioxideKg);
+				auto const methaneUnits = std::min(kgToMass(methane.authored.unit,
+					extentActualKg * StationSabatierMethaneMassPerCarbonDioxideKg),
+					methaneHeadroomUnits);
+				auto const methaneActualKg = massToKg(methane.authored.unit, methaneUnits);
+				auto const waterUnits = std::min(kgToMass(water.authored.unit,
+					extentActualKg * StationSabatierWaterMassPerCarbonDioxideKg),
+					waterHeadroomUnits);
+				auto const waterActualKg = massToKg(water.authored.unit, waterUnits);
+				qualified[reactor.co2StoreIndex] -= co2Units;
+				flowOut[reactor.co2StoreIndex] += co2Units;
+				qualified[reactor.hydrogenStoreIndex] -= hydrogenUnits;
+				flowOut[reactor.hydrogenStoreIndex] += hydrogenUnits;
+				qualified[reactor.methaneStoreIndex] += methaneUnits;
+				flowIn[reactor.methaneStoreIndex] += methaneUnits;
+				qualified[reactor.waterStoreIndex] += waterUnits;
+				flowIn[reactor.waterStoreIndex] += waterUnits;
+				stagedUnitLoss[co2.authored.unit] += co2Units;
+				stagedUnitLoss[hydrogen.authored.unit] += hydrogenUnits;
+				stagedUnitLoss[methane.authored.unit] -= methaneUnits;
+				stagedUnitLoss[water.authored.unit] -= waterUnits;
+				// Energy: the electrical dose plus the exothermic heat the
+				// products do not retain leave through the sink, once and
+				// nowhere else.
+				auto const reactionHeatKJ = extentActualKg
+					* StationSabatierReactionHeatKJPerKgCarbonDioxide;
+				auto const heatKJ = energySuppliedKJ + reactionHeatKJ;
+				sabatierHeatByReservoir[reactor.sinkIndex] += heatKJ / tickSeconds;
+				reactor.lastReactionHeatKW = reactionHeatKJ / tickSeconds;
+				reactor.lastCo2ConsumedKg = co2ActualKg;
+				reactor.lastHydrogenConsumedKg = hydrogenActualKg;
+				reactor.lastMethaneProducedKg = methaneActualKg;
+				reactor.lastWaterProducedKg = waterActualKg;
+				reactor.lastUnmetConversionKg = std::max(0.0, scale * fullKg - extentActualKg);
+				reactor.co2ConsumedKg += co2ActualKg;
+				reactor.hydrogenConsumedKg += hydrogenActualKg;
+				reactor.methaneProducedKg += methaneActualKg;
+				reactor.waterProducedKg += waterActualKg;
+				reactor.energySuppliedKJ += energySuppliedKJ;
+				reactor.reactionHeatKJ += reactionHeatKJ;
+				reactor.heatRoutedKJ += heatKJ;
+				totalSabatierPowerKW += suppliedKW;
+				if (extentActualKg + 1e-12 >= fullKg
+					&& suppliedKW + 1e-12 >= reactor.lastPowerDemandKW)
+					reactor.status = StationTransferStatus::Full;
+				else reactor.status = StationTransferStatus::Partial;
+			}
+			double totalMethaneProcessingPowerKW{0.0};
+			for (size_t orderIndex : methaneProcessorOrder)
+			{
+				auto& processor = methaneProcessors[orderIndex];
+				auto& methane = stores[processor.methaneStoreIndex];
+				auto& hydrogen = stores[processor.hydrogenStoreIndex];
+				auto& carbon = stores[processor.carbonStoreIndex];
+				processor.lastScale = 0.0;
+				processor.lastLimiter.clear();
+				processor.lastRequestedKg = 0.0;
+				processor.lastMethaneConsumedKg = 0.0;
+				processor.lastHydrogenReturnedKg = 0.0;
+				processor.lastCarbonProducedKg = 0.0;
+				processor.lastPowerDemandKW = 0.0;
+				processor.lastPowerSuppliedKW = 0.0;
+				processor.lastUnmetProcessingKg = 0.0;
+				processor.lastReactionHeatKW = 0.0;
+				processor.lastCoolingAvailable = false;
+				processor.lastBlockReason.clear();
+				if (processor.authored.rateKgPerS <= 0.0)
+				{
+					processor.status = StationTransferStatus::Idle;
+					continue;
+				}
+				auto const tickSeconds = static_cast<double>(seconds);
+				auto const fullKg = processor.authored.rateKgPerS * tickSeconds;
+				auto const& sink = reservoirs[processor.sinkIndex];
+				processor.lastCoolingAvailable = sink.temperatureC + 1e-9
+					< processor.authored.maxSinkTemperatureC;
+				if (!processor.lastCoolingAvailable)
+				{
+					processor.lastBlockReason = "cooling is not qualified: sink at or above the maximum sink temperature";
+					processor.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				auto const drawableMethaneUnits = std::max(0.0,
+					qualified[processor.methaneStoreIndex] - methane.authored.protectedReserve);
+				auto const hydrogenHeadroomUnits = std::max(0.0, hydrogen.authored.capacity
+					- (qualified[processor.hydrogenStoreIndex] + unqualified[processor.hydrogenStoreIndex]));
+				auto const carbonHeadroomUnits = std::max(0.0, carbon.authored.capacity
+					- (qualified[processor.carbonStoreIndex] + unqualified[processor.carbonStoreIndex]));
+				double scale = 1.0;
+				std::string limiter;
+				auto const constrain = [&](double available, double required,
+					std::string const& reason)
+				{
+					if (required <= 0.0) return;
+					auto const fraction = available / required;
+					if (fraction < scale) { scale = fraction; limiter = reason; }
+				};
+				constrain(drawableMethaneUnits, kgToMass(methane.authored.unit, fullKg),
+					"methane feed store '" + methane.authored.id
+					+ "' has nothing drawable above its protected reserve");
+				constrain(hydrogenHeadroomUnits,
+					kgToMass(hydrogen.authored.unit,
+						fullKg * StationMethaneProcessingHydrogenMassPerMethaneKg),
+					"recovered hydrogen store '" + hydrogen.authored.id
+					+ "' is full: the recovered hydrogen has nowhere to go");
+				constrain(carbonHeadroomUnits,
+					kgToMass(carbon.authored.unit,
+						fullKg * StationMethaneProcessingCarbonMassPerMethaneKg),
+					"carbon store '" + carbon.authored.id
+					+ "' is full: the solid carbon has nowhere to go");
+				scale = std::max(0.0, std::min(1.0, scale));
+				processor.lastScale = scale;
+				processor.lastLimiter = limiter;
+				processor.lastRequestedKg = fullKg;
+				if (scale <= 0.0)
+				{
+					processor.lastBlockReason = limiter;
+					processor.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				processor.lastPowerDemandKW = scale * processor.authored.rateKgPerS
+					* processor.authored.specificEnergyKWhPerKgCH4 * 3600.0;
+				auto const fromGeneration = std::min(processor.lastPowerDemandKW, availableGeneration);
+				availableGeneration -= fromGeneration;
+				auto const ask = processor.lastPowerDemandKW - fromGeneration;
+				auto const fromBattery = drawBatteries(ask);
+				auto const suppliedKW = fromGeneration + fromBattery;
+				batterySuppliedKW += fromBattery;
+				batteryShortfallKW += ask - fromBattery;
+				processor.lastPowerSuppliedKW = suppliedKW;
+				if (processor.lastPowerDemandKW > 1e-12 && suppliedKW <= 1e-12)
+				{
+					processor.lastBlockReason = "no electrical supply: the methane processor cannot run";
+					processor.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				auto const energySuppliedKJ = suppliedKW * tickSeconds;
+				// Energy feasibility: the processor only splits the methane
+				// the supplied energy can drive against the endothermic
+				// reaction demand. The validation floor guarantees the dose
+				// covers the demand, so the absorbed heat never exceeds what
+				// was paid for and the routed waste heat stays non-negative.
+				auto const energyFeasibleKg = energySuppliedKJ
+					/ StationMethaneProcessingReactionHeatKJPerKgMethane;
+				auto const processedKg = std::min(scale * fullKg, energyFeasibleKg);
+				// Move the flows, clamped per flow so roundoff never
+				// overshoots, and recompute the ledger from what moved.
+				auto const methaneUnits = std::min(
+					kgToMass(methane.authored.unit, processedKg), drawableMethaneUnits);
+				auto const methaneActualKg = massToKg(methane.authored.unit, methaneUnits);
+				auto const hydrogenUnits = std::min(kgToMass(hydrogen.authored.unit,
+					methaneActualKg * StationMethaneProcessingHydrogenMassPerMethaneKg),
+					hydrogenHeadroomUnits);
+				auto const hydrogenActualKg = massToKg(hydrogen.authored.unit, hydrogenUnits);
+				auto const carbonUnits = std::min(kgToMass(carbon.authored.unit,
+					methaneActualKg * StationMethaneProcessingCarbonMassPerMethaneKg),
+					carbonHeadroomUnits);
+				auto const carbonActualKg = massToKg(carbon.authored.unit, carbonUnits);
+				qualified[processor.methaneStoreIndex] -= methaneUnits;
+				flowOut[processor.methaneStoreIndex] += methaneUnits;
+				qualified[processor.hydrogenStoreIndex] += hydrogenUnits;
+				flowIn[processor.hydrogenStoreIndex] += hydrogenUnits;
+				qualified[processor.carbonStoreIndex] += carbonUnits;
+				flowIn[processor.carbonStoreIndex] += carbonUnits;
+				stagedUnitLoss[methane.authored.unit] += methaneUnits;
+				stagedUnitLoss[hydrogen.authored.unit] -= hydrogenUnits;
+				stagedUnitLoss[carbon.authored.unit] -= carbonUnits;
+				// Energy: the dose either drove the endothermic reaction or
+				// leaves as process heat routed into the sink, once.
+				auto const reactionHeatKJ = methaneActualKg
+					* StationMethaneProcessingReactionHeatKJPerKgMethane;
+				auto const heatKJ = std::max(0.0, energySuppliedKJ - reactionHeatKJ);
+				methaneHeatByReservoir[processor.sinkIndex] += heatKJ / tickSeconds;
+				processor.lastReactionHeatKW = reactionHeatKJ / tickSeconds;
+				processor.lastMethaneConsumedKg = methaneActualKg;
+				processor.lastHydrogenReturnedKg = hydrogenActualKg;
+				processor.lastCarbonProducedKg = carbonActualKg;
+				processor.lastUnmetProcessingKg = std::max(0.0, scale * fullKg - methaneActualKg);
+				processor.methaneConsumedKg += methaneActualKg;
+				processor.hydrogenReturnedKg += hydrogenActualKg;
+				processor.carbonProducedKg += carbonActualKg;
+				processor.energySuppliedKJ += energySuppliedKJ;
+				processor.reactionHeatKJ += reactionHeatKJ;
+				processor.heatRoutedKJ += heatKJ;
+				totalMethaneProcessingPowerKW += suppliedKW;
+				if (methaneActualKg + 1e-12 >= fullKg
+					&& suppliedKW + 1e-12 >= processor.lastPowerDemandKW)
+					processor.status = StationTransferStatus::Full;
+				else processor.status = StationTransferStatus::Partial;
+			}
 			// Second loop pass: integrate the loop's temperature from the
 			// pump work, heater heat, exchanger exchange and the chiller
 			// extraction that actually moved this tick, and book the loop
@@ -5493,7 +6105,9 @@ namespace core
 						+ loopHeatIntoReservoir[index] + condenserHeatBySink[index]
 						+ generatorHeatKW + atmosphereHeatKW
 						+ electrolysisHeatByReservoir[index]
-						+ fuelCellHeatByReservoir[index];
+						+ fuelCellHeatByReservoir[index]
+						+ sabatierHeatByReservoir[index]
+						+ methaneHeatByReservoir[index];
 					// Net radiative rejection at the current emitting
 					// temperature: emissivity x view factor x area x sigma
 					// x (T^4 - T_sink^4). The environmental back-radiation
@@ -5656,6 +6270,8 @@ namespace core
 					reservoir.lastGeneratorHeatKW = generatorHeatKW;
 					reservoir.lastElectrolysisHeatKW = electrolysisHeatByReservoir[index];
 					reservoir.lastFuelCellHeatKW = fuelCellHeatByReservoir[index];
+					reservoir.lastSabatierHeatKW = sabatierHeatByReservoir[index];
+					reservoir.lastMethaneProcessingHeatKW = methaneHeatByReservoir[index];
 					reservoir.lastAtmosphereHeatKW = atmosphereHeatKW;
 					reservoir.lastHeatInKW = heatInKW;
 					reservoir.lastRejectedKW = rejectedKW;
@@ -5667,6 +6283,8 @@ namespace core
 					reservoir.generatorKJ += generatorHeatKW * dt;
 					reservoir.electrolysisKJ += electrolysisHeatByReservoir[index] * dt;
 					reservoir.fuelCellKJ += fuelCellHeatByReservoir[index] * dt;
+					reservoir.sabatierKJ += sabatierHeatByReservoir[index] * dt;
+					reservoir.methaneProcessingKJ += methaneHeatByReservoir[index] * dt;
 					reservoir.atmosphereKJ += atmosphereHeatKW * dt;
 					reservoir.bufferChargeKJ += bufferChargeKW * dt;
 					reservoir.bufferDischargeKJ += bufferDischargeKW * dt;
@@ -6084,6 +6702,8 @@ namespace core
 				if (!requireFinite(reservoir.lastAtmosphereHeatKW, where + "atmosphere exchange")) return false;
 				if (!requireFinite(reservoir.lastElectrolysisHeatKW, where + "electrolysis process heat")) return false;
 				if (!requireFinite(reservoir.lastFuelCellHeatKW, where + "fuel-cell waste heat")) return false;
+				if (!requireFinite(reservoir.lastSabatierHeatKW, where + "Sabatier reaction heat")) return false;
+				if (!requireFinite(reservoir.lastMethaneProcessingHeatKW, where + "methane-processing waste heat")) return false;
 				if (!requireFinite(reservoir.lastHeatInKW, where + "total heat inflow")) return false;
 				if (!requireFinite(reservoir.lastRejectedKW, where + "radiator rejection")) return false;
 				if (!requireFinite(reservoir.lastNetKW, where + "net heat balance")) return false;
@@ -6094,6 +6714,8 @@ namespace core
 				if (!requireFinite(reservoir.generatorKJ, where + "cumulative generator heat energy")) return false;
 				if (!requireFinite(reservoir.electrolysisKJ, where + "cumulative electrolysis process heat energy")) return false;
 				if (!requireFinite(reservoir.fuelCellKJ, where + "cumulative fuel-cell waste heat energy")) return false;
+				if (!requireFinite(reservoir.sabatierKJ, where + "cumulative Sabatier heat energy")) return false;
+				if (!requireFinite(reservoir.methaneProcessingKJ, where + "cumulative methane-processing heat energy")) return false;
 				if (!requireFinite(reservoir.atmosphereKJ, where + "cumulative atmosphere exchange energy")) return false;
 				if (!requireFinite(reservoir.rejectedKJ, where + "cumulative rejected energy")) return false;
 				if (!requireFinite(reservoir.lastBufferChargeKW, where + "buffer charge power")) return false;
@@ -6711,6 +7333,80 @@ namespace core
 				if (cell.lastOutputKW > 1e-9 && cell.lastHydrogenKg <= 1e-12)
 					return violation = where + "delivered power without consuming any hydrogen", false;
 			}
+			// Carbon recovery audits (#405): every reported magnitude is
+			// finite, the Sabatier mass ledger closes over CO2 + hydrogen =
+			// methane + water, its energy ledger closes over supplied +
+			// released = routed, and the methane split closes on mass with
+			// the energy ledger closing over supplied = absorbed + routed.
+			system = "Sabatier reactor";
+			for (auto const& reactor : sabatierReactors)
+			{
+				auto const where = "Sabatier reactor '" + reactor.authored.id + "' ";
+				if (!requireFinite(reactor.lastScale, where + "conversion scale")) return false;
+				if (!requireFinite(reactor.lastRequestedKg, where + "last requested conversion")) return false;
+				if (!requireFinite(reactor.lastCo2ConsumedKg, where + "last CO2 consumed")) return false;
+				if (!requireFinite(reactor.lastHydrogenConsumedKg, where + "last hydrogen consumed")) return false;
+				if (!requireFinite(reactor.lastMethaneProducedKg, where + "last methane produced")) return false;
+				if (!requireFinite(reactor.lastWaterProducedKg, where + "last water produced")) return false;
+				if (!requireFinite(reactor.lastPowerDemandKW, where + "last power demand")) return false;
+				if (!requireFinite(reactor.lastPowerSuppliedKW, where + "last power supplied")) return false;
+				if (!requireFinite(reactor.lastUnmetConversionKg, where + "last unmet conversion")) return false;
+				if (!requireFinite(reactor.lastReactionHeatKW, where + "last reaction heat")) return false;
+				if (!requireFinite(reactor.co2ConsumedKg, where + "cumulative CO2 consumed")) return false;
+				if (!requireFinite(reactor.hydrogenConsumedKg, where + "cumulative hydrogen consumed")) return false;
+				if (!requireFinite(reactor.methaneProducedKg, where + "cumulative methane produced")) return false;
+				if (!requireFinite(reactor.waterProducedKg, where + "cumulative water produced")) return false;
+				if (!requireFinite(reactor.energySuppliedKJ, where + "cumulative energy supplied")) return false;
+				if (!requireFinite(reactor.reactionHeatKJ, where + "cumulative reaction heat")) return false;
+				if (!requireFinite(reactor.heatRoutedKJ, where + "cumulative heat routed")) return false;
+				auto const massBound = StationBalanceTolerance * std::max(1.0,
+					reactor.methaneProducedKg + reactor.waterProducedKg);
+				auto const massResidual = reactor.co2ConsumedKg + reactor.hydrogenConsumedKg
+					- reactor.methaneProducedKg - reactor.waterProducedKg;
+				if (!std::isfinite(massResidual) || std::abs(massResidual) > massBound)
+					return violation = where
+						+ "CO2/hydrogen/methane/water conversion ledger does not close within tolerance", false;
+				auto const energyResidual = reactor.energySuppliedKJ + reactor.reactionHeatKJ
+					- reactor.heatRoutedKJ;
+				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > massBound)
+					return violation = where
+						+ "supplied/released/routed energy ledger does not close within tolerance", false;
+			}
+			system = "Methane processing";
+			for (auto const& processor : methaneProcessors)
+			{
+				auto const where = "methane processor '" + processor.authored.id + "' ";
+				if (!requireFinite(processor.lastScale, where + "processing scale")) return false;
+				if (!requireFinite(processor.lastRequestedKg, where + "last requested processing")) return false;
+				if (!requireFinite(processor.lastMethaneConsumedKg, where + "last methane consumed")) return false;
+				if (!requireFinite(processor.lastHydrogenReturnedKg, where + "last hydrogen returned")) return false;
+				if (!requireFinite(processor.lastCarbonProducedKg, where + "last carbon produced")) return false;
+				if (!requireFinite(processor.lastPowerDemandKW, where + "last power demand")) return false;
+				if (!requireFinite(processor.lastPowerSuppliedKW, where + "last power supplied")) return false;
+				if (!requireFinite(processor.lastUnmetProcessingKg, where + "last unmet processing")) return false;
+				if (!requireFinite(processor.lastReactionHeatKW, where + "last reaction heat")) return false;
+				if (!requireFinite(processor.methaneConsumedKg, where + "cumulative methane consumed")) return false;
+				if (!requireFinite(processor.hydrogenReturnedKg, where + "cumulative hydrogen returned")) return false;
+				if (!requireFinite(processor.carbonProducedKg, where + "cumulative carbon produced")) return false;
+				if (!requireFinite(processor.energySuppliedKJ, where + "cumulative energy supplied")) return false;
+				if (!requireFinite(processor.reactionHeatKJ, where + "cumulative reaction heat")) return false;
+				if (!requireFinite(processor.heatRoutedKJ, where + "cumulative heat routed")) return false;
+				auto const massBound = StationBalanceTolerance * std::max(1.0,
+					processor.hydrogenReturnedKg + processor.carbonProducedKg);
+				auto const massResidual = processor.methaneConsumedKg
+					- processor.hydrogenReturnedKg - processor.carbonProducedKg;
+				if (!std::isfinite(massResidual) || std::abs(massResidual) > massBound)
+					return violation = where
+						+ "methane/hydrogen/carbon split ledger does not close within tolerance", false;
+				auto const energyResidual = processor.energySuppliedKJ
+					- processor.reactionHeatKJ - processor.heatRoutedKJ;
+				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > massBound)
+					return violation = where
+						+ "supplied/absorbed/routed energy ledger does not close within tolerance", false;
+				if (processor.reactionHeatKJ > processor.energySuppliedKJ + massBound)
+					return violation = where
+						+ "absorbed more reaction heat than the electrical dose supplied", false;
+			}
 			system = "Power allocation";
 			for (auto const& array : solarArrays)
 			{
@@ -6789,6 +7485,8 @@ namespace core
 				if (!requireFinite(totalGeneratorDecayKW, "total generator decay heat")) return false;
 				if (!requireFinite(totalFuelCellOutputKW, "total fuel-cell backup output")) return false;
 				if (!requireFinite(totalFuelCellWasteKW, "total fuel-cell backup waste heat")) return false;
+				if (!requireFinite(totalSabatierPowerKW, "total Sabatier reactor power")) return false;
+				if (!requireFinite(totalMethaneProcessingPowerKW, "total methane processing power")) return false;
 			}
 			for (size_t index = 0; index < stores.size(); ++index)
 			{
@@ -7176,6 +7874,38 @@ namespace core
 					? "Fuel cell '" + cell.authored.id + "' rejected: " + reason
 					: "Fuel cell '" + cell.authored.id + "' partial: " + reason);
 			}
+			for (size_t index = 0; index < sabatierReactors.size(); ++index)
+			{
+				auto const& reactor = sabatierReactors[index];
+				if (reactor.status == previousSabatierStatus[index]) continue;
+				if (reactor.status == StationTransferStatus::Full)
+				{
+					appendBoundedEvent(events, tick, "Sabatier reactor '" + reactor.authored.id
+						+ "' converting at full rate");
+					continue;
+				}
+				auto const reason = !reactor.lastBlockReason.empty()
+					? reactor.lastBlockReason : reactor.lastLimiter;
+				appendBoundedEvent(events, tick, reactor.status == StationTransferStatus::Rejected
+					? "Sabatier reactor '" + reactor.authored.id + "' rejected: " + reason
+					: "Sabatier reactor '" + reactor.authored.id + "' partial: " + reason);
+			}
+			for (size_t index = 0; index < methaneProcessors.size(); ++index)
+			{
+				auto const& processor = methaneProcessors[index];
+				if (processor.status == previousMethaneProcessorStatus[index]) continue;
+				if (processor.status == StationTransferStatus::Full)
+				{
+					appendBoundedEvent(events, tick, "Methane processor '" + processor.authored.id
+						+ "' processing at full rate");
+					continue;
+				}
+				auto const reason = !processor.lastBlockReason.empty()
+					? processor.lastBlockReason : processor.lastLimiter;
+				appendBoundedEvent(events, tick, processor.status == StationTransferStatus::Rejected
+					? "Methane processor '" + processor.authored.id + "' rejected: " + reason
+					: "Methane processor '" + processor.authored.id + "' partial: " + reason);
+			}
 			// Delivery arrivals are discrete scenario events rather than a
 			// continuous per-tick service, so every arrival is announced with
 			// its own quantities: the refused remainder is the account for
@@ -7482,6 +8212,49 @@ namespace core
 			[&](size_t left, size_t right)
 			{ return mImpl->co2Captures[left].authored.priority
 				> mImpl->co2Captures[right].authored.priority; });
+		// Carbon-recovery ledgers start empty (#405): the authored
+		// contracts are resolved to store and sink indices at construction
+		// so the tick ledger never re-looks-up references, and every
+		// conversion, split and heat total reconstructs from zero on Reset
+		// and load. Reactors and processors compete for the same power pool
+		// and share the hydrogen and methane stores, so each runs in the
+		// declared deterministic order: priority descending, declaration
+		// order ascending.
+		for (auto const& reactor : settings.sabatierReactors)
+		{
+			Impl::SabatierState state;
+			state.authored = reactor;
+			state.co2StoreIndex = storeIndex[reactor.co2StoreId];
+			state.hydrogenStoreIndex = storeIndex[reactor.hydrogenStoreId];
+			state.methaneStoreIndex = storeIndex[reactor.methaneStoreId];
+			state.waterStoreIndex = storeIndex[reactor.waterStoreId];
+			state.sinkIndex = reservoirIndex[reactor.heatSinkId];
+			state.declarationIndex = mImpl->sabatierReactors.size();
+			mImpl->sabatierReactors.push_back(std::move(state));
+		}
+		mImpl->sabatierOrder.resize(mImpl->sabatierReactors.size());
+		std::iota(mImpl->sabatierOrder.begin(), mImpl->sabatierOrder.end(), size_t{0});
+		std::stable_sort(mImpl->sabatierOrder.begin(), mImpl->sabatierOrder.end(),
+			[&](size_t left, size_t right)
+			{ return mImpl->sabatierReactors[left].authored.priority
+				> mImpl->sabatierReactors[right].authored.priority; });
+		for (auto const& processor : settings.methaneProcessors)
+		{
+			Impl::MethaneProcessorState state;
+			state.authored = processor;
+			state.methaneStoreIndex = storeIndex[processor.methaneStoreId];
+			state.hydrogenStoreIndex = storeIndex[processor.hydrogenStoreId];
+			state.carbonStoreIndex = storeIndex[processor.carbonStoreId];
+			state.sinkIndex = reservoirIndex[processor.heatSinkId];
+			state.declarationIndex = mImpl->methaneProcessors.size();
+			mImpl->methaneProcessors.push_back(std::move(state));
+		}
+		mImpl->methaneProcessorOrder.resize(mImpl->methaneProcessors.size());
+		std::iota(mImpl->methaneProcessorOrder.begin(), mImpl->methaneProcessorOrder.end(), size_t{0});
+		std::stable_sort(mImpl->methaneProcessorOrder.begin(), mImpl->methaneProcessorOrder.end(),
+			[&](size_t left, size_t right)
+			{ return mImpl->methaneProcessors[left].authored.priority
+				> mImpl->methaneProcessors[right].authored.priority; });
 		// Fuel-cell backup units run on the supply side in declaration
 		// order (#406); their reactant and product stores are resolved to
 		// the same store indices the ledger mutates.
@@ -7588,7 +8361,8 @@ namespace core
 				&settings.atmospheres, &settings.airlockCycles, &settings.crews,
 				&settings.waterCollectors, &settings.waterTreatments,
 				&settings.electrolyzers, &settings.co2Captures, &settings.fuelCells,
-				&settings.thermalBuffers, &settings.wasteEjections};
+				&settings.thermalBuffers, &settings.wasteEjections,
+				&settings.sabatierReactors, &settings.methaneProcessors};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -7627,6 +8401,10 @@ namespace core
 				: ", " + std::to_string(settings.co2Captures.size()) + " CO2 capture machine(s)")
 			+ (settings.fuelCells.empty() ? std::string()
 				: ", " + std::to_string(settings.fuelCells.size()) + " fuel-cell backup unit(s)")
+			+ (settings.sabatierReactors.empty() ? std::string()
+				: ", " + std::to_string(settings.sabatierReactors.size()) + " Sabatier reactor(s)")
+			+ (settings.methaneProcessors.empty() ? std::string()
+				: ", " + std::to_string(settings.methaneProcessors.size()) + " methane processor(s)")
 			+ (settings.thermalBuffers.empty() ? std::string()
 				: ", " + std::to_string(settings.thermalBuffers.size()) + " thermal buffer(s)")
 			+ (settings.wasteEjections.empty() ? std::string()
@@ -7688,7 +8466,8 @@ namespace core
 			|| !mImpl->airlockCycles.empty() || !mImpl->crews.empty()
 			|| !mImpl->waterCollectors.empty() || !mImpl->waterTreatments.empty()
 			|| !mImpl->electrolyzers.empty() || !mImpl->co2Captures.empty()
-			|| !mImpl->fuelCells.empty() || !mImpl->thermalBuffers.empty())
+			|| !mImpl->fuelCells.empty() || !mImpl->thermalBuffers.empty()
+			|| !mImpl->sabatierReactors.empty() || !mImpl->methaneProcessors.empty())
 		{
 			std::string violationSystem, violation;
 			if (!mImpl->applyLedger(tick, seconds, violationSystem, violation))
@@ -7962,6 +8741,10 @@ namespace core
 			reservoirResult.electrolysisEnergyKJ = reservoir.electrolysisKJ;
 			reservoirResult.lastFuelCellHeatKW = reservoir.lastFuelCellHeatKW;
 			reservoirResult.fuelCellEnergyKJ = reservoir.fuelCellKJ;
+			reservoirResult.lastSabatierHeatKW = reservoir.lastSabatierHeatKW;
+			reservoirResult.sabatierEnergyKJ = reservoir.sabatierKJ;
+			reservoirResult.lastMethaneProcessingHeatKW = reservoir.lastMethaneProcessingHeatKW;
+			reservoirResult.methaneProcessingEnergyKJ = reservoir.methaneProcessingKJ;
 			reservoirResult.lastAtmosphereHeatKW = reservoir.lastAtmosphereHeatKW;
 			reservoirResult.lastBufferChargeKW = reservoir.lastBufferChargeKW;
 			reservoirResult.lastBufferDischargeKW = reservoir.lastBufferDischargeKW;
@@ -7986,7 +8769,8 @@ namespace core
 			reservoirResult.residualKJ = reservoirResult.startingEnergyKJ
 				+ reservoir.absorbedKJ + reservoir.routedKJ + reservoir.loopKJ
 				+ reservoir.condenserKJ + reservoir.generatorKJ + reservoir.electrolysisKJ
-				+ reservoir.fuelCellKJ + reservoir.atmosphereKJ
+				+ reservoir.fuelCellKJ + reservoir.sabatierKJ + reservoir.methaneProcessingKJ
+				+ reservoir.atmosphereKJ
 				+ reservoir.bufferDischargeKJ - reservoir.bufferChargeKJ
 				- reservoir.rejectedKJ - reservoirResult.currentEnergyKJ;
 			result.thermal.totalAbsorbedKW += reservoir.authored.absorbedHeatKW;
@@ -8563,6 +9347,108 @@ namespace core
 		}
 		result.power.fuelCellOutputKW = totalFuelCellOutput;
 		result.power.fuelCellWasteHeatKW = totalFuelCellWasteHeat;
+		// The Sabatier snapshot reports the authored reactor contract
+		// beside the CO2 and hydrogen actually consumed, the methane and
+		// water actually produced, the energy actually supplied and the
+		// heat actually routed: the conversion closes on mass and the
+		// energy closes over supplied + released = routed, so a reader can
+		// see where every kilogram and kilojoule went (#405).
+		double totalSabatierPower = 0.0;
+		for (auto const& reactor : mImpl->sabatierReactors)
+		{
+			StationSabatierReactorSnapshot reactorResult;
+			reactorResult.id = reactor.authored.id;
+			reactorResult.hazardClass = reactor.authored.hazardClass;
+			reactorResult.co2StoreId = reactor.authored.co2StoreId;
+			reactorResult.hydrogenStoreId = reactor.authored.hydrogenStoreId;
+			reactorResult.methaneStoreId = reactor.authored.methaneStoreId;
+			reactorResult.waterStoreId = reactor.authored.waterStoreId;
+			reactorResult.thermalClass = reactor.authored.thermalClass;
+			reactorResult.heatSinkId = reactor.authored.heatSinkId;
+			reactorResult.rateKgPerS = reactor.authored.rateKgPerS;
+			reactorResult.specificEnergyKWhPerKgCO2 = reactor.authored.specificEnergyKWhPerKgCO2;
+			reactorResult.maxSinkTemperatureC = reactor.authored.maxSinkTemperatureC;
+			reactorResult.priority = reactor.authored.priority;
+			reactorResult.scale = reactor.lastScale;
+			reactorResult.limiter = reactor.lastLimiter;
+			reactorResult.lastRequestedKg = reactor.lastRequestedKg;
+			reactorResult.lastCo2ConsumedKg = reactor.lastCo2ConsumedKg;
+			reactorResult.lastHydrogenConsumedKg = reactor.lastHydrogenConsumedKg;
+			reactorResult.lastMethaneProducedKg = reactor.lastMethaneProducedKg;
+			reactorResult.lastWaterProducedKg = reactor.lastWaterProducedKg;
+			reactorResult.lastPowerDemandKW = reactor.lastPowerDemandKW;
+			reactorResult.lastPowerSuppliedKW = reactor.lastPowerSuppliedKW;
+			reactorResult.lastPowerUnmetKW = reactor.lastPowerDemandKW - reactor.lastPowerSuppliedKW;
+			reactorResult.lastUnmetConversionKg = reactor.lastUnmetConversionKg;
+			reactorResult.lastReactionHeatKW = reactor.lastReactionHeatKW;
+			reactorResult.coolingAvailable = reactor.lastCoolingAvailable;
+			reactorResult.blockReason = reactor.lastBlockReason;
+			reactorResult.disabled = reactor.authored.rateKgPerS <= 0.0;
+			reactorResult.co2ConsumedKg = reactor.co2ConsumedKg;
+			reactorResult.hydrogenConsumedKg = reactor.hydrogenConsumedKg;
+			reactorResult.methaneProducedKg = reactor.methaneProducedKg;
+			reactorResult.waterProducedKg = reactor.waterProducedKg;
+			reactorResult.energySuppliedKJ = reactor.energySuppliedKJ;
+			reactorResult.reactionHeatKJ = reactor.reactionHeatKJ;
+			reactorResult.heatRoutedKJ = reactor.heatRoutedKJ;
+			reactorResult.residualKg = reactor.co2ConsumedKg + reactor.hydrogenConsumedKg
+				- reactor.methaneProducedKg - reactor.waterProducedKg;
+			reactorResult.residualKJ = reactor.energySuppliedKJ + reactor.reactionHeatKJ
+				- reactor.heatRoutedKJ;
+			reactorResult.status = reactor.status;
+			totalSabatierPower += reactor.lastPowerSuppliedKW;
+			result.sabatierReactors.push_back(std::move(reactorResult));
+		}
+		result.power.sabatierPowerKW = totalSabatierPower;
+		// The methane-processing snapshot reports the authored processor
+		// contract beside the methane actually split, the hydrogen
+		// actually returned and the solid carbon actually produced, with
+		// the closing mass and energy ledgers: the recycled hydrogen is
+		// visible as a booked return, never as free supply (#405).
+		double totalMethaneProcessingPower = 0.0;
+		for (auto const& processor : mImpl->methaneProcessors)
+		{
+			StationMethaneProcessorSnapshot processorResult;
+			processorResult.id = processor.authored.id;
+			processorResult.hazardClass = processor.authored.hazardClass;
+			processorResult.methaneStoreId = processor.authored.methaneStoreId;
+			processorResult.hydrogenStoreId = processor.authored.hydrogenStoreId;
+			processorResult.carbonStoreId = processor.authored.carbonStoreId;
+			processorResult.thermalClass = processor.authored.thermalClass;
+			processorResult.heatSinkId = processor.authored.heatSinkId;
+			processorResult.rateKgPerS = processor.authored.rateKgPerS;
+			processorResult.specificEnergyKWhPerKgCH4 = processor.authored.specificEnergyKWhPerKgCH4;
+			processorResult.maxSinkTemperatureC = processor.authored.maxSinkTemperatureC;
+			processorResult.priority = processor.authored.priority;
+			processorResult.scale = processor.lastScale;
+			processorResult.limiter = processor.lastLimiter;
+			processorResult.lastRequestedKg = processor.lastRequestedKg;
+			processorResult.lastMethaneConsumedKg = processor.lastMethaneConsumedKg;
+			processorResult.lastHydrogenReturnedKg = processor.lastHydrogenReturnedKg;
+			processorResult.lastCarbonProducedKg = processor.lastCarbonProducedKg;
+			processorResult.lastPowerDemandKW = processor.lastPowerDemandKW;
+			processorResult.lastPowerSuppliedKW = processor.lastPowerSuppliedKW;
+			processorResult.lastPowerUnmetKW = processor.lastPowerDemandKW - processor.lastPowerSuppliedKW;
+			processorResult.lastUnmetProcessingKg = processor.lastUnmetProcessingKg;
+			processorResult.lastReactionHeatKW = processor.lastReactionHeatKW;
+			processorResult.coolingAvailable = processor.lastCoolingAvailable;
+			processorResult.blockReason = processor.lastBlockReason;
+			processorResult.disabled = processor.authored.rateKgPerS <= 0.0;
+			processorResult.methaneConsumedKg = processor.methaneConsumedKg;
+			processorResult.hydrogenReturnedKg = processor.hydrogenReturnedKg;
+			processorResult.carbonProducedKg = processor.carbonProducedKg;
+			processorResult.energySuppliedKJ = processor.energySuppliedKJ;
+			processorResult.reactionHeatKJ = processor.reactionHeatKJ;
+			processorResult.heatRoutedKJ = processor.heatRoutedKJ;
+			processorResult.residualKg = processor.methaneConsumedKg
+				- processor.hydrogenReturnedKg - processor.carbonProducedKg;
+			processorResult.residualKJ = processor.energySuppliedKJ
+				- processor.reactionHeatKJ - processor.heatRoutedKJ;
+			processorResult.status = processor.status;
+			totalMethaneProcessingPower += processor.lastPowerSuppliedKW;
+			result.methaneProcessors.push_back(std::move(processorResult));
+		}
+		result.power.methaneProcessingPowerKW = totalMethaneProcessingPower;
 		// The delivery snapshot reports the authored schedule beside the
 		// runtime's arrival history: what each occurrence brought in, what
 		// the destination refused, and when the next arrival is due (#392).

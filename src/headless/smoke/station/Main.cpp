@@ -144,7 +144,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 82"), 11, "version: 65");
+		text.replace(text.find("version: 83"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -2265,8 +2265,8 @@ namespace
 		auto const bundled = core::bundledStationSystemsSource();
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -2325,8 +2325,8 @@ namespace
 		// model's own audits hold.
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -3710,8 +3710,8 @@ namespace
 			auto const bundled = core::bundledStationSystemsSource();
 			core::setStationSystemsSourceLoader([bundled] {
 				return "local factory = (function()\n" + bundled + "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -4675,13 +4675,13 @@ namespace
 			auto const bundled = core::bundledStationSystemsSource();
 			core::setStationSystemsSourceLoader([bundled] {
 				return "local factory = (function()\n" + bundled + "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 					"assert(#reservoirs == 1 and reservoirs[1].id == 'cabin'\n"
 					"\tand reservoirs[1].heatCapacityKJPerK == 100 and reservoirs[1].absorbedHeatKW == 0)\n"
 					"assert(#radiators == 1 and radiators[1].reservoir == 'cabin'\n"
 					"\tand radiators[1].areaM2 == 5000)\n"
 					"assert(#loads == 1 and loads[1].heatSinkId == 'cabin')\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 					"assert(model.reservoirs[1].temperature == 20)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
@@ -5309,8 +5309,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled, expectedLiteral] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -5381,7 +5381,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 					"assert(type(coolantLoops) == 'table' and #coolantLoops == 1, 'coolant loop descriptor crossing lost')\n"
 					"assert(coolantLoops[1].coolantCapacityKg > 0, 'corrupt coolant capacity crossing')\n"
 					"error('corrupt coolant descriptor crossing')\n"
@@ -6056,8 +6056,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled, expectedLiteral] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -6182,7 +6182,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 					"assert(type(chillers) == 'table' and #chillers == 1, 'chiller descriptor crossing lost')\n"
 					"assert(chillers[1].cop > 0, 'corrupt chiller COP crossing')\n"
 					"error('corrupt chiller descriptor crossing')\n"
@@ -6871,8 +6871,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
-					"return factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+					"return factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 					"end";
 			});
 			core::World probe("StartupAuditOverAllocationProbe", 2, 2);
@@ -7210,7 +7210,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 					"assert(type(generators) == 'table' and #generators == 1, 'generator descriptor crossing lost')\n"
 					"assert(generators[1].efficiency > 0, 'corrupt generator efficiency crossing')\n"
 					"error('corrupt generator descriptor crossing')\n"
@@ -7678,7 +7678,7 @@ namespace
 		// contained at construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 					"assert(type(crews) == 'table' and #crews == 1, 'crew descriptor crossing lost')\n"
 					"assert(crews[1].foodRate > 0, 'corrupt crew rate crossing')\n"
 					"error('corrupt crew descriptor crossing')\n"
@@ -7703,8 +7703,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -8480,8 +8480,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled, expectedLiteral] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -8540,7 +8540,7 @@ namespace
 		// is contained at construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 					"assert(type(atmospheres) == 'table' and #atmospheres == 1, 'atmosphere descriptor crossing lost')\n"
 					"assert(atmospheres[1].volumeM3 > 0, 'corrupt atmosphere volume crossing')\n"
 					"error('corrupt atmosphere descriptor crossing')\n"
@@ -8559,7 +8559,7 @@ namespace
 		// A corrupt airlock cycle crossing is contained the same way.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 					"assert(type(airlockCycles) == 'table' and #airlockCycles == 1, 'airlock cycle descriptor crossing lost')\n"
 					"error('corrupt airlock cycle descriptor crossing')\n"
 					"end";
@@ -9077,7 +9077,7 @@ namespace
 		// contained at construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 					"assert(type(waterCollectors) == 'table' and #waterCollectors == 1, 'water collector descriptor crossing lost')\n"
 					"assert(waterCollectors[1].maxRateKgPerS > 0, 'corrupt collector rate crossing')\n"
 					"error('corrupt water collector descriptor crossing')\n"
@@ -9099,7 +9099,7 @@ namespace
 		// contained the same way.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 					"assert(type(waterTreatments) == 'table' and #waterTreatments == 1, 'water treatment descriptor crossing lost')\n"
 					"assert(waterTreatments[1].recoveryRatio > 0 and waterTreatments[1].recoveryRatio <= 1, 'corrupt recovery ratio crossing')\n"
 					"error('corrupt water treatment descriptor crossing')\n"
@@ -9604,7 +9604,7 @@ namespace
 		// no partial result escapes.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 					"assert(type(electrolyzers) == 'table' and #electrolyzers == 1, 'electrolyzer descriptor crossing lost')\n"
 					"assert(electrolyzers[1].rateKgPerS > 0, 'corrupt electrolyzer rate crossing')\n"
 					"error('corrupt electrolyzer descriptor crossing')\n"
@@ -10140,7 +10140,7 @@ namespace
 		// disabled and no partial result escapes.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
 					"assert(type(fuelCells) == 'table' and #fuelCells == 1, 'fuel cell descriptor crossing lost')\n"
 					"assert(fuelCells[1].ratedOutputKW > 0, 'corrupt fuel cell rate crossing')\n"
 					"error('corrupt fuel cell descriptor crossing')\n"
@@ -10453,6 +10453,560 @@ void buffers(smoke::Context const&)
 	}
 }
 
+	// Carbon recovery through Sabatier and methane processing (#405): the
+	// reactor's conversion closes on mass (CO2 + hydrogen = methane +
+	// water) and on energy (supplied + released = routed), the processor's
+	// split closes on mass (methane = hydrogen + carbon) and on energy
+	// (supplied = absorbed + routed), the combined chain retains a net
+	// hydrogen demand because the reactor consumes twice the hydrogen per
+	// methane as the processor returns, and blocked destinations, hot
+	// sinks, missing power and disabled stages all refuse or cap without
+	// gifting product.
+	void carbonRecovery(smoke::Context const&)
+	{
+		auto const dt = static_cast<double>(core::World::getFixedTimestep());
+		auto approx = [](double actual, double expected)
+		{
+			auto const tolerance = 1e-6 * std::max(1.0, std::abs(expected));
+			return std::abs(actual - expected) <= tolerance;
+		};
+		auto const h2PerCo2 = core::StationSabatierHydrogenMassPerCarbonDioxideKg;
+		auto const ch4PerCo2 = core::StationSabatierMethaneMassPerCarbonDioxideKg;
+		auto const h2oPerCo2 = core::StationSabatierWaterMassPerCarbonDioxideKg;
+		auto const released = core::StationSabatierReactionHeatKJPerKgCarbonDioxide;
+		auto const h2PerCh4 = core::StationMethaneProcessingHydrogenMassPerMethaneKg;
+		auto const cPerCh4 = core::StationMethaneProcessingCarbonMassPerMethaneKg;
+		auto const demand = core::StationMethaneProcessingReactionHeatKJPerKgMethane;
+		auto closeTo = [](double actual, double expected, double relative)
+		{
+			return std::abs(actual - expected) <= relative * std::abs(expected);
+		};
+		// The declared stoichiometry must be exothermic on the Sabatier
+		// side and endothermic on the pyrolysis side, and the hydrogen
+		// returned per methane must be exactly half the hydrogen consumed
+		// per CO2 that made that methane - the net-demand identity the
+		// combined chain relies on.
+		require(released > 0.0, "the declared Sabatier reaction is not exothermic");
+		require(demand > 0.0, "the declared methane-processing reaction is not endothermic");
+		require(approx(ch4PerCo2 * h2PerCh4, h2PerCo2 / 2.0),
+			"the recycled hydrogen is not exactly half the Sabatier hydrogen demand");
+		auto plainStore = [](std::string const& id, double capacity, double starting,
+			double protectedReserve = 0.0)
+		{
+			core::ResourceStoreSettings settings;
+			settings.id = id;
+			settings.unit = "kg";
+			settings.capacity = capacity;
+			settings.startingQualified = starting;
+			settings.protectedReserve = protectedReserve;
+			return settings;
+		};
+		auto reservoir = [](std::string const& id, std::string const& thermalClass,
+			double startingC)
+		{
+			core::ThermalReservoirSettings settings;
+			settings.id = id;
+			settings.thermalClass = thermalClass;
+			settings.heatCapacityKJPerK = 10000.0;
+			settings.startingTemperatureC = startingC;
+			settings.minTemperatureC = -50.0;
+			settings.maxTemperatureC = 200.0;
+			return settings;
+		};
+		auto reactor = [](std::string const& id, std::string const& hazard)
+		{
+			core::SabatierReactorSettings settings;
+			settings.id = id;
+			settings.hazardClass = hazard;
+			settings.co2StoreId = "co2";
+			settings.hydrogenStoreId = "h2";
+			settings.methaneStoreId = "methane";
+			settings.waterStoreId = "rawWater";
+			settings.thermalClass = "low";
+			settings.heatSinkId = "sink";
+			settings.rateKgPerS = 0.001;
+			settings.specificEnergyKWhPerKgCO2 = 1.0;
+			settings.maxSinkTemperatureC = 60.0;
+			return settings;
+		};
+		auto processor = [](std::string const& id, std::string const& hazard)
+		{
+			core::MethaneProcessorSettings settings;
+			settings.id = id;
+			settings.hazardClass = hazard;
+			settings.methaneStoreId = "methane";
+			settings.hydrogenStoreId = "h2";
+			settings.carbonStoreId = "carbon";
+			settings.thermalClass = "low";
+			settings.heatSinkId = "sink";
+			settings.rateKgPerS = 0.001;
+			settings.specificEnergyKWhPerKgCH4 = 2.0;
+			settings.maxSinkTemperatureC = 60.0;
+			return settings;
+		};
+		auto carbonStores = [&]()
+		{
+			std::vector<core::ResourceStoreSettings> stores;
+			stores.push_back(plainStore("co2", 100.0, 10.0));
+			stores.push_back(plainStore("h2", 100.0, 10.0));
+			stores.push_back(plainStore("methane", 100.0, 0.0));
+			stores.push_back(plainStore("rawWater", 100.0, 0.0));
+			stores.push_back(plainStore("carbon", 100.0, 0.0));
+			return stores;
+		};
+		auto findStore = [](core::StationSystemsSnapshot const& snap, std::string const& id)
+		{
+			for (auto const& entry : snap.stores)
+				if (entry.id == id) return entry;
+			return core::StationSystemsStoreSnapshot{};
+		};
+		auto carbonConfigure = [&](core::World& world,
+			std::vector<core::ResourceStoreSettings> stores,
+			std::vector<core::SabatierReactorSettings> reactors,
+			std::vector<core::MethaneProcessorSettings> processors,
+			double solarKW,
+			double sinkStartingC = 10.0)
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = std::move(stores);
+			settings.thermalReservoirs = { reservoir("sink", "low", sinkStartingC) };
+			settings.sabatierReactors = std::move(reactors);
+			settings.methaneProcessors = std::move(processors);
+			if (solarKW > 0.0)
+			{
+				core::SolarArraySettings field;
+				field.id = "field";
+				field.capacityKW = solarKW;
+				settings.solarArrays = { field };
+			}
+			auto const ok = world.configureStationSystems(settings, false, &diagnostic);
+			return std::make_pair(ok, diagnostic);
+		};
+		// Refused configurations: every malformed carbon-recovery contract
+		// is rejected before anything runs, and none of the refusals
+		// mutates the World.
+		{
+			core::World bad("CarbonBad", 2, 2);
+			bad.pauseSimulation(); bad.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = carbonStores();
+			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
+			std::string diagnostic;
+			settings.sabatierReactors = { reactor("sab", "normal") };
+			settings.sabatierReactors[0].co2StoreId = "ghost";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("CO2 feed store 'ghost' does not exist") != std::string::npos,
+				"a Sabatier reactor fed by an unknown CO2 store was accepted");
+			settings.sabatierReactors = { reactor("sab", "normal") };
+			settings.sabatierReactors[0].heatSinkId = "ghost";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("unknown thermal reservoir") != std::string::npos,
+				"a Sabatier reactor on an unknown heat sink was accepted");
+			settings.sabatierReactors = { reactor("sab", "normal") };
+			settings.sabatierReactors[0].thermalClass = "warm";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("does not match heat sink") != std::string::npos,
+				"a thermal class mismatch against the reactor's heat sink was accepted");
+			settings.sabatierReactors = { reactor("sab", "normal"), reactor("sab2", "hazardous") };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("may not share a store") != std::string::npos,
+				"a hazardous reactor sharing the normal-class CO2 store was accepted");
+			settings.sabatierReactors = { reactor("sab", "normal") };
+			settings.sabatierReactors[0].maxSinkTemperatureC = -300.0;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("above absolute zero") != std::string::npos,
+				"a reactor sink temperature below absolute zero was accepted");
+			settings.sabatierReactors = {};
+			settings.methaneProcessors = { processor("pyrolysis", "normal") };
+			settings.methaneProcessors[0].specificEnergyKWhPerKgCH4 = 1.0;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("below the endothermic reaction heat") != std::string::npos,
+				"a methane dose below the declared reaction demand was accepted");
+			settings.methaneProcessors = { processor("pyrolysis", "normal") };
+			settings.methaneProcessors[0].carbonStoreId = "ghost";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("solid carbon store 'ghost' does not exist") != std::string::npos,
+				"a processor with an unknown carbon store was accepted");
+			settings.methaneProcessors = { processor("pyrolysis", "normal"), processor("pyrolysis2", "hazardous") };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("may not share a store") != std::string::npos,
+				"a hazardous processor sharing the normal-class methane store was accepted");
+			std::vector<core::SabatierReactorSettings> tooMany;
+			for (size_t index = 0; index <= core::MaxStationSabatierReactors; ++index)
+				tooMany.push_back(reactor("sab" + std::to_string(index), "normal"));
+			settings = core::StationSystemsSettings{};
+			settings.enabled = true;
+			settings.stores = carbonStores();
+			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
+			settings.sabatierReactors = tooMany;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("limited to") != std::string::npos,
+				"more than the declared Sabatier reactor budget was accepted");
+			require(!bad.getStationSystemsSnapshot().enabled && bad.getSimulationTick() == 0,
+				"a refused carbon-recovery configuration mutated the World");
+		}
+		// Nominal Sabatier conversion to stores: the conversion follows
+		// the declared stoichiometry, the energy closes over supplied +
+		// released = routed, the exothermic heat lands in the sink, and
+		// the per-unit boundary closes.
+		{
+			core::World world("CarbonSabatier", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(carbonConfigure(world, carbonStores(), { reactor("sab", "normal") }, {}, 100.0).first,
+				"nominal Sabatier setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "nominal Sabatier run failed");
+			auto const elapsed = 60.0 * dt;
+			auto const converted = 0.001 * elapsed;
+			auto const h2 = converted * h2PerCo2;
+			auto const ch4 = converted * ch4PerCo2;
+			auto const water = converted * h2oPerCo2;
+			auto const energy = 1.0 * 3600.0 * converted;
+			auto const heat = energy + converted * released;
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.sabatierReactors.size() == 1, "reactor missing from the snapshot");
+			auto const& cell = snap.sabatierReactors[0];
+			require(cell.status == core::StationTransferStatus::Full
+				&& approx(cell.scale, 1.0) && cell.coolingAvailable,
+				"the reactor is not running at full rate with a qualified sink");
+			require(approx(cell.co2ConsumedKg, converted) && approx(cell.hydrogenConsumedKg, h2)
+				&& approx(cell.methaneProducedKg, ch4) && approx(cell.waterProducedKg, water),
+				"the conversion did not follow the declared stoichiometry");
+			require(std::abs(cell.residualKg) < 1e-6,
+				"the CO2/hydrogen/methane/water ledger does not close");
+			require(approx(cell.energySuppliedKJ, energy) && approx(cell.reactionHeatKJ, converted * released)
+				&& approx(cell.heatRoutedKJ, heat) && std::abs(cell.residualKJ) < 1e-6,
+				"the supplied/released/routed energy ledger does not close");
+			require(approx(findStore(snap, "co2").currentQualified, 10.0 - converted)
+				&& approx(findStore(snap, "h2").currentQualified, 10.0 - h2),
+				"the feed stores lost the wrong amounts");
+			require(approx(findStore(snap, "methane").currentQualified, ch4)
+				&& approx(findStore(snap, "rawWater").currentQualified, water),
+				"the product stores did not receive the conversion");
+			require(approx(snap.power.sabatierPowerKW, 1.0 * 3600.0 * 0.001),
+				"the power snapshot does not report the reactor draw");
+			require(approx(snap.thermal.reservoirs[0].sabatierEnergyKJ, heat)
+				&& approx(snap.thermal.reservoirs[0].lastSabatierHeatKW, heat / elapsed),
+				"the reaction heat did not land in the sink reservoir");
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
+		}
+		// Nominal methane processing: the split follows the declared
+		// stoichiometry, the energy closes over supplied = absorbed +
+		// routed, the recovered hydrogen and solid carbon land in their
+		// stores, and the per-unit boundary closes.
+		{
+			core::World world("CarbonPyrolysis", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto stores = carbonStores();
+			for (auto& store : stores)
+				if (store.id == "methane") store.startingQualified = 10.0;
+			require(carbonConfigure(world, stores, {}, { processor("pyrolysis", "normal") }, 100.0).first,
+				"nominal methane-processing setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "nominal methane-processing run failed");
+			auto const elapsed = 60.0 * dt;
+			auto const processed = 0.001 * elapsed;
+			auto const h2 = processed * h2PerCh4;
+			auto const carbon = processed * cPerCh4;
+			auto const energy = 2.0 * 3600.0 * processed;
+			auto const absorbed = processed * demand;
+			auto const routed = energy - absorbed;
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.methaneProcessors.size() == 1, "processor missing from the snapshot");
+			auto const& unit = snap.methaneProcessors[0];
+			require(unit.status == core::StationTransferStatus::Full
+				&& approx(unit.scale, 1.0) && unit.coolingAvailable,
+				"the processor is not running at full rate with a qualified sink");
+			require(approx(unit.methaneConsumedKg, processed)
+				&& approx(unit.hydrogenReturnedKg, h2) && approx(unit.carbonProducedKg, carbon),
+				"the split did not follow the declared stoichiometry");
+			require(std::abs(unit.residualKg) < 1e-6,
+				"the methane/hydrogen/carbon split ledger does not close");
+			require(approx(unit.energySuppliedKJ, energy) && approx(unit.reactionHeatKJ, absorbed)
+				&& approx(unit.heatRoutedKJ, routed) && std::abs(unit.residualKJ) < 1e-6,
+				"the supplied/absorbed/routed energy ledger does not close");
+			require(approx(findStore(snap, "methane").currentQualified, 10.0 - processed)
+				&& approx(findStore(snap, "h2").currentQualified, 10.0 + h2)
+				&& approx(findStore(snap, "carbon").currentQualified, carbon),
+				"the feed and product stores moved the wrong amounts");
+			require(approx(snap.power.methaneProcessingPowerKW, 2.0 * 3600.0 * 0.001),
+				"the power snapshot does not report the processor draw");
+			require(approx(snap.thermal.reservoirs[0].methaneProcessingEnergyKJ, routed),
+				"the process waste heat did not land in the sink reservoir");
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
+		}
+		// Integrated chain: the reactor feeds the processor through the
+		// methane store and the processor returns hydrogen through the
+		// hydrogen store. The combined process retains a net hydrogen
+		// demand of exactly half the reactor's draw, so the recycled
+		// hydrogen can never keep the chain running: with a finite
+		// hydrogen store the chain drains it at the net rate and grinds
+		// to a halt while CO2 still has plenty of room.
+		{
+			core::World world("CarbonChain", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto const startingHydrogen = 0.0022;
+			auto chain = [&]()
+			{
+				std::vector<core::ResourceStoreSettings> stores;
+				stores.push_back(plainStore("co2", 100.0, 10.0));
+				stores.push_back(plainStore("h2", 100.0, startingHydrogen));
+				stores.push_back(plainStore("methane", 100.0, 0.0));
+				stores.push_back(plainStore("rawWater", 100.0, 0.0));
+				stores.push_back(plainStore("carbon", 100.0, 0.0));
+				return stores;
+			};
+			// The processor is rated at exactly the methane the reactor
+			// produces, so the chain runs at the reactor's pace.
+			auto chainProcessor = processor("pyrolysis", "normal");
+			chainProcessor.rateKgPerS = 0.001 * ch4PerCo2;
+			require(carbonConfigure(world, chain(), { reactor("sab", "normal") },
+				{ chainProcessor }, 100.0).first,
+				"integrated carbon-chain setup refused");
+			world.resumeSimulation();
+			// The net drain is h2PerCo2 / 2 per CO2, so 0.0022 kg of
+			// hydrogen sustains about 1441 ticks of the chain at the
+			// 1/60 s fixed timestep; run well past the exhaustion into
+			// the asymptotic decay tail.
+			require(world.advanceTicks(1550), "integrated carbon-chain run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& cell = snap.sabatierReactors[0];
+			auto const& unit = snap.methaneProcessors[0];
+			require(cell.co2ConsumedKg > 0.0 && unit.methaneConsumedKg > 0.0,
+				"the chain did not convert and process");
+			require(approx(unit.methaneConsumedKg, cell.methaneProducedKg),
+				"the processor did not consume the methane the reactor produced");
+			// Net hydrogen: reactor draw minus recycled return must equal
+			// half the reactor draw - the recycled share never covers the
+			// demand, so the store keeps draining.
+			auto const netHydrogen = cell.hydrogenConsumedKg - unit.hydrogenReturnedKg;
+			require(approx(netHydrogen, cell.hydrogenConsumedKg / 2.0),
+				"the combined chain does not retain the declared net hydrogen demand");
+			require(approx(findStore(snap, "h2").currentQualified, startingHydrogen - netHydrogen),
+				"the hydrogen store does not reflect the net demand");
+			require(unit.carbonProducedKg > 0.0
+				&& approx(findStore(snap, "carbon").currentQualified, unit.carbonProducedKg),
+				"the solid carbon did not land in its store");
+			// The chain bought exactly its net hydrogen supply times two
+			// over the demand ratio of CO2 conversion, and is now
+			// hydrogen-starved: the store is spent and the reactor names
+			// the hydrogen store as its limiter.
+			require(closeTo(cell.co2ConsumedKg, 2.0 * startingHydrogen / h2PerCo2, 0.01),
+				"the total CO2 converted is not the net hydrogen supply times two over the demand ratio");
+			require(findStore(snap, "h2").currentQualified < 1e-9,
+				"the hydrogen store was not drained by the net demand");
+			require(cell.limiter.find("hydrogen feed store") != std::string::npos
+				|| cell.blockReason.find("hydrogen feed store") != std::string::npos,
+				"the starved chain did not name the hydrogen store as its limiter");
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
+		}
+		// Blocked destinations refuse or cap without gifting product: a
+		// full methane store stops the reactor, a full carbon store stops
+		// the processor, and a filling water store caps the reactor once
+		// its headroom is gone - each naming the blocking store instead
+		// of venting.
+		{
+			core::World world("MethaneFull", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto stores = carbonStores();
+			for (auto& store : stores)
+				if (store.id == "methane") { store.capacity = 0.0005; store.startingQualified = 0.0005; }
+			require(carbonConfigure(world, stores, { reactor("sab", "normal") }, {}, 100.0).first,
+				"full-methane setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "full-methane run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.sabatierReactors[0].status == core::StationTransferStatus::Rejected
+				&& snap.sabatierReactors[0].co2ConsumedKg == 0.0
+				&& snap.sabatierReactors[0].blockReason.find("methane store") != std::string::npos,
+				"a full methane store did not refuse the reactor with a named reason");
+			require(findStore(snap, "methane").currentQualified <= 0.0005 + 1e-9,
+				"a blocked destination was overfilled");
+		}
+		{
+			core::World world("CarbonFull", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto stores = carbonStores();
+			for (auto& store : stores)
+			{
+				if (store.id == "carbon") { store.capacity = 0.0005; store.startingQualified = 0.0005; }
+				if (store.id == "methane") store.startingQualified = 10.0;
+			}
+			require(carbonConfigure(world, stores, {}, { processor("pyrolysis", "normal") }, 100.0).first,
+				"full-carbon setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "full-carbon run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.methaneProcessors[0].status == core::StationTransferStatus::Rejected
+				&& snap.methaneProcessors[0].methaneConsumedKg == 0.0
+				&& snap.methaneProcessors[0].blockReason.find("solid carbon") != std::string::npos,
+				"a full carbon store did not refuse the processor with a named reason");
+			require(approx(findStore(snap, "methane").currentQualified, 10.0),
+				"the methane feed moved while the carbon destination was full");
+		}
+		{
+			core::World world("WaterFills", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto stores = carbonStores();
+			for (auto& store : stores)
+				if (store.id == "rawWater") store.capacity = 0.0002;
+			require(carbonConfigure(world, stores, { reactor("sab", "normal") }, {}, 100.0).first,
+				"filling-water setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "filling-water run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(approx(findStore(snap, "rawWater").currentQualified, 0.0002),
+				"the water store did not fill to capacity");
+			require(snap.sabatierReactors[0].limiter.find("water store") != std::string::npos
+				|| snap.sabatierReactors[0].blockReason.find("water store") != std::string::npos,
+				"the filled water store did not become the named limiter");
+			// The whole run converted at most the water capacity's worth.
+			require(snap.sabatierReactors[0].co2ConsumedKg <= 0.0002 / h2oPerCo2 + 1e-9,
+				"the reactor converted past the water store's capacity");
+		}
+		// Blocked destinations cap throughput: a full methane store caps
+		// the reactor and a full carbon store caps the processor, each
+		// naming the blocking store instead of venting.
+		{
+			core::World world("CarbonBlocked", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto stores = carbonStores();
+			for (auto& store : stores)
+			{
+				if (store.id == "methane") { store.capacity = 0.0005; store.startingQualified = 0.0005; }
+				if (store.id == "carbon") { store.capacity = 0.0005; store.startingQualified = 0.0005; }
+			}
+			require(carbonConfigure(world, stores, { reactor("sab", "normal") },
+				{ processor("pyrolysis", "normal") }, 100.0).first,
+				"blocked-destination setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "blocked-destination run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.sabatierReactors[0].scale < 1.0
+				&& snap.sabatierReactors[0].limiter.find("methane store") != std::string::npos,
+				"a full methane store did not cap the reactor with a named limiter");
+			require(snap.methaneProcessors[0].scale < 1.0
+				&& snap.methaneProcessors[0].limiter.find("carbon store") != std::string::npos,
+				"a full carbon store did not cap the processor with a named limiter");
+			require(findStore(snap, "methane").currentQualified <= 0.0005 + 1e-9
+				&& findStore(snap, "carbon").currentQualified <= 0.0005 + 1e-9,
+				"a blocked destination was overfilled");
+		}
+		// Disabled stages: a zero rated rate is idle, not broken - no
+		// flows, no power draw, and the disabled flag is set.
+		{
+			core::World world("CarbonDisabled", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto offReactor = reactor("sab", "normal");
+			offReactor.rateKgPerS = 0.0;
+			auto offProcessor = processor("pyrolysis", "normal");
+			offProcessor.rateKgPerS = 0.0;
+			require(carbonConfigure(world, carbonStores(), { offReactor }, { offProcessor }, 100.0).first,
+				"disabled-stage setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "disabled-stage run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.sabatierReactors[0].disabled
+				&& snap.sabatierReactors[0].status == core::StationTransferStatus::Idle
+				&& snap.sabatierReactors[0].co2ConsumedKg == 0.0
+				&& snap.sabatierReactors[0].lastPowerSuppliedKW == 0.0,
+				"a zero-rate reactor is not an idle, zero-flow stage");
+			require(snap.methaneProcessors[0].disabled
+				&& snap.methaneProcessors[0].status == core::StationTransferStatus::Idle
+				&& snap.methaneProcessors[0].methaneConsumedKg == 0.0
+				&& snap.methaneProcessors[0].lastPowerSuppliedKW == 0.0,
+				"a zero-rate processor is not an idle, zero-flow stage");
+		}
+		// Cooling gate: a sink at or above the maximum refuses both
+		// stages whole - no flows, no power draw, reason named.
+		{
+			core::World world("CarbonHotSink", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(carbonConfigure(world, carbonStores(), { reactor("sab", "normal") },
+				{ processor("pyrolysis", "normal") }, 100.0, 70.0).first,
+				"hot-sink carbon setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "hot-sink carbon run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.sabatierReactors[0].status == core::StationTransferStatus::Rejected
+				&& !snap.sabatierReactors[0].coolingAvailable
+				&& snap.sabatierReactors[0].co2ConsumedKg == 0.0
+				&& snap.sabatierReactors[0].lastPowerSuppliedKW == 0.0
+				&& snap.sabatierReactors[0].blockReason.find("cooling is not qualified") != std::string::npos,
+				"a hot sink did not refuse the reactor whole");
+			require(snap.methaneProcessors[0].status == core::StationTransferStatus::Rejected
+				&& !snap.methaneProcessors[0].coolingAvailable
+				&& snap.methaneProcessors[0].methaneConsumedKg == 0.0
+				&& snap.methaneProcessors[0].lastPowerSuppliedKW == 0.0,
+				"a hot sink did not refuse the processor whole");
+		}
+		// Power starvation: with no generation and no battery, a tick
+		// that demands power receives none and is refused whole - no
+		// reactants move and the reason is named.
+		{
+			core::World world("CarbonNoPower", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto noPowerStores = carbonStores();
+			for (auto& store : noPowerStores)
+				if (store.id == "methane") store.startingQualified = 10.0;
+			require(carbonConfigure(world, noPowerStores, { reactor("sab", "normal") },
+				{ processor("pyrolysis", "normal") }, 0.0).first,
+				"no-power carbon setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "no-power carbon run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.sabatierReactors[0].status == core::StationTransferStatus::Rejected
+				&& snap.sabatierReactors[0].co2ConsumedKg == 0.0
+				&& snap.sabatierReactors[0].blockReason.find("no electrical supply") != std::string::npos,
+				"the reactor ran or drew reactants without power");
+			require(snap.methaneProcessors[0].status == core::StationTransferStatus::Rejected
+				&& snap.methaneProcessors[0].methaneConsumedKg == 0.0
+				&& snap.methaneProcessors[0].blockReason.find("no electrical supply") != std::string::npos,
+				"the processor ran or drew reactants without power");
+			require(approx(findStore(snap, "co2").currentQualified, 10.0)
+				&& approx(findStore(snap, "h2").currentQualified, 10.0),
+				"reactants moved without power");
+		}
+		// Protected reserves: the feeds are drawn only above each store's
+		// protected reserve, so a protected hydrogen reserve is never
+		// converted away - the chain stops at the reserve line, not
+		// through it.
+		{
+			core::World world("CarbonReserve", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto stores = carbonStores();
+			for (auto& store : stores)
+				if (store.id == "h2") store.protectedReserve = 9.98;
+			auto bigReactor = reactor("sab", "normal");
+			bigReactor.rateKgPerS = 0.01;
+			require(carbonConfigure(world, stores, { bigReactor }, {}, 100.0).first,
+				"protected-reserve carbon setup refused");
+			world.resumeSimulation();
+			// 0.02 kg of drawable hydrogen at 0.01 kg/s CO2 (0.001832 kg/s
+			// hydrogen) lasts about 655 ticks at the 1/60 s fixed
+			// timestep; run past the exhaustion.
+			require(world.advanceTicks(700), "protected-reserve carbon run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(findStore(snap, "h2").currentQualified >= 9.98 - 1e-9,
+				"the reactor drew into the protected hydrogen reserve");
+			require(closeTo(snap.sabatierReactors[0].co2ConsumedKg, 0.02 / h2PerCo2, 0.01),
+				"the conversion did not stop at the drawable hydrogen line");
+			require(snap.sabatierReactors[0].limiter.find("hydrogen feed store") != std::string::npos
+				|| snap.sabatierReactors[0].blockReason.find("hydrogen feed store") != std::string::npos,
+				"the reserve-capped reactor did not name the hydrogen store");
+		}
+	}
+
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power},
@@ -10465,7 +11019,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"failures", failures}};
+		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

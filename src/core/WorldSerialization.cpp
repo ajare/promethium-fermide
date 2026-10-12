@@ -816,7 +816,19 @@ namespace core
 		// ejected and unmet quantities and the external-loss bookings
 		// stay runtime-only, so load and Reset restart every ejection
 		// schedule from its authored beginning.
-		serializer.writeUint32("version", 82);
+		// Version 83 adds authored carbon-recovery contracts (#405):
+		// Sabatier reactors that convert captured CO2 and hydrogen into
+		// methane and water with a stoichiometric mass balance, a declared
+		// electrical dose and a class-matched heat sink, and methane
+		// processors that split methane into recovered hydrogen and solid
+		// carbon whose dose must cover the declared endothermic reaction
+		// demand; a pre-83 document carrying `sabatierReactors` or
+		// `methaneProcessors` is refused rather than silently dropped.
+		// The consumed reactants, produced products, energy and heat
+		// ledgers and the recycled-hydrogen returns stay runtime-only, so
+		// load and Reset reconstruct them from the authored starting
+		// conditions.
+		serializer.writeUint32("version", 83);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -1302,6 +1314,57 @@ namespace core
 					serializer.writeDouble("efficiency", cell.efficiency);
 					serializer.writeDouble("commandedOutputKW", cell.commandedOutputKW);
 					serializer.writeDouble("maxSinkTemperatureC", cell.maxSinkTemperatureC);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.sabatierReactors.empty())
+			{
+				// Authored Sabatier reactor contracts only; the consumed
+				// reactants, produced products and the energy and heat
+				// ledgers are runtime state reconstructed on load (#405).
+				serializer.beginArray("sabatierReactors");
+				for (auto const& reactor : mStationSystemsSettings.sabatierReactors)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", reactor.id);
+					serializer.writeString("hazardClass", reactor.hazardClass);
+					serializer.writeString("co2StoreId", reactor.co2StoreId);
+					serializer.writeString("hydrogenStoreId", reactor.hydrogenStoreId);
+					serializer.writeString("methaneStoreId", reactor.methaneStoreId);
+					serializer.writeString("waterStoreId", reactor.waterStoreId);
+					serializer.writeString("thermalClass", reactor.thermalClass);
+					serializer.writeString("heatSinkId", reactor.heatSinkId);
+					serializer.writeDouble("rateKgPerS", reactor.rateKgPerS);
+					serializer.writeDouble("specificEnergyKWhPerKgCO2",
+						reactor.specificEnergyKWhPerKgCO2);
+					serializer.writeDouble("maxSinkTemperatureC", reactor.maxSinkTemperatureC);
+					serializer.writeInt32("priority", reactor.priority);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.methaneProcessors.empty())
+			{
+				// Authored methane processor contracts only; the split,
+				// returned hydrogen, produced carbon and the energy and
+				// heat ledgers are runtime state reconstructed on load (#405).
+				serializer.beginArray("methaneProcessors");
+				for (auto const& processor : mStationSystemsSettings.methaneProcessors)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", processor.id);
+					serializer.writeString("hazardClass", processor.hazardClass);
+					serializer.writeString("methaneStoreId", processor.methaneStoreId);
+					serializer.writeString("hydrogenStoreId", processor.hydrogenStoreId);
+					serializer.writeString("carbonStoreId", processor.carbonStoreId);
+					serializer.writeString("thermalClass", processor.thermalClass);
+					serializer.writeString("heatSinkId", processor.heatSinkId);
+					serializer.writeDouble("rateKgPerS", processor.rateKgPerS);
+					serializer.writeDouble("specificEnergyKWhPerKgCH4",
+						processor.specificEnergyKWhPerKgCH4);
+					serializer.writeDouble("maxSinkTemperatureC", processor.maxSinkTemperatureC);
+					serializer.writeInt32("priority", processor.priority);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -2274,7 +2337,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 82)
+		if (version < 1 || version > 83)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2833,6 +2896,59 @@ namespace core
 					buffer.maxDischargeKW = serializer.readDouble("maxDischargeKW");
 					buffer.transferConductanceKWPerK = serializer.readDouble("transferConductanceKWPerK");
 					stationSettings.thermalBuffers.push_back(std::move(buffer));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("sabatierReactors"))
+			{
+				if (version < 83) throw SerializationException(
+					"Station Sabatier reactors require World schema 83");
+				serializer.beginArray("sabatierReactors");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					SabatierReactorSettings reactor;
+					reactor.id = serializer.readString("id");
+					reactor.hazardClass = serializer.readString("hazardClass");
+					reactor.co2StoreId = serializer.readString("co2StoreId");
+					reactor.hydrogenStoreId = serializer.readString("hydrogenStoreId");
+					reactor.methaneStoreId = serializer.readString("methaneStoreId");
+					reactor.waterStoreId = serializer.readString("waterStoreId");
+					reactor.thermalClass = serializer.readString("thermalClass");
+					reactor.heatSinkId = serializer.readString("heatSinkId");
+					reactor.rateKgPerS = serializer.readDouble("rateKgPerS");
+					reactor.specificEnergyKWhPerKgCO2 =
+						serializer.readDouble("specificEnergyKWhPerKgCO2");
+					reactor.maxSinkTemperatureC = serializer.readDouble("maxSinkTemperatureC");
+					reactor.priority = serializer.readInt32("priority");
+					stationSettings.sabatierReactors.push_back(std::move(reactor));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("methaneProcessors"))
+			{
+				if (version < 83) throw SerializationException(
+					"Station methane processors require World schema 83");
+				serializer.beginArray("methaneProcessors");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					MethaneProcessorSettings processor;
+					processor.id = serializer.readString("id");
+					processor.hazardClass = serializer.readString("hazardClass");
+					processor.methaneStoreId = serializer.readString("methaneStoreId");
+					processor.hydrogenStoreId = serializer.readString("hydrogenStoreId");
+					processor.carbonStoreId = serializer.readString("carbonStoreId");
+					processor.thermalClass = serializer.readString("thermalClass");
+					processor.heatSinkId = serializer.readString("heatSinkId");
+					processor.rateKgPerS = serializer.readDouble("rateKgPerS");
+					processor.specificEnergyKWhPerKgCH4 =
+						serializer.readDouble("specificEnergyKWhPerKgCH4");
+					processor.maxSinkTemperatureC = serializer.readDouble("maxSinkTemperatureC");
+					processor.priority = serializer.readInt32("priority");
+					stationSettings.methaneProcessors.push_back(std::move(processor));
 					serializer.endMap();
 				}
 				serializer.endArray();

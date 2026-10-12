@@ -58,6 +58,40 @@ local ELECTROLYSIS_CHEMICAL_KJ_PER_WATER_KG =
 -- exactly under the declared molar masses. Mirrors the host's
 -- StationFuelCellOxygenMassPerHydrogenKg (#406).
 local FUEL_CELL_O2_KG_PER_H2_KG = MOLAR_MASS_OXYGEN / (2.0 * MOLAR_MASS_HYDROGEN)
+-- Molar mass of solid carbon in kg/mol (#405): a constant of the
+-- declared species, mirroring the host's StationMolarMassCarbonKgPerMol.
+-- The declared methane molar mass is exactly the carbon plus two
+-- hydrogen molecules, so the methane-processing split closes under the
+-- declared molar masses.
+local MOLAR_MASS_CARBON = 0.0120107
+local MOLAR_MASS_METHANE = MOLAR_MASS_CARBON + 2.0 * MOLAR_MASS_HYDROGEN
+-- Lower heating value of methane in kJ/kg: mirrors the host's
+-- StationMethaneLowerHeatingValueKJPerKg (#405).
+local METHANE_LHV_KJ_PER_KG = 50004.0
+-- Stoichiometric masses of the Sabatier reaction CO2 + 4 H2 -> CH4 +
+-- 2 H2O per kilogram of CO2 converted, mirroring the host's
+-- StationSabatier* constants (#405): water is the mass-balance
+-- remainder so the stage closes exactly.
+local SABATIER_H2_KG_PER_CO2_KG = 4.0 * MOLAR_MASS_HYDROGEN / MOLAR_MASS_CARBON_DIOXIDE
+local SABATIER_CH4_KG_PER_CO2_KG = MOLAR_MASS_METHANE / MOLAR_MASS_CARBON_DIOXIDE
+local SABATIER_H2O_KG_PER_CO2_KG = 1.0 + SABATIER_H2_KG_PER_CO2_KG
+    - SABATIER_CH4_KG_PER_CO2_KG
+-- Exothermic heat released per kilogram of CO2 converted, mirroring
+-- the host's StationSabatierReactionHeatKJPerKgCarbonDioxide (#405):
+-- the chemical energy the hydrogen carried that the methane does not
+-- retain, derived from the declared heating values.
+local SABATIER_HEAT_KJ_PER_CO2_KG = SABATIER_H2_KG_PER_CO2_KG
+    * ELECTROLYSIS_H2_CHEMICAL_KJ_PER_KG - SABATIER_CH4_KG_PER_CO2_KG * METHANE_LHV_KJ_PER_KG
+-- Stoichiometric masses of methane processing CH4 -> C + 2 H2 per
+-- kilogram of CH4 processed, mirroring the host's
+-- StationMethaneProcessing* constants (#405): solid carbon is the
+-- mass-balance remainder.
+local METHANE_PROCESSING_H2_KG_PER_CH4_KG = 2.0 * MOLAR_MASS_HYDROGEN / MOLAR_MASS_METHANE
+local METHANE_PROCESSING_C_KG_PER_CH4_KG = 1.0 - METHANE_PROCESSING_H2_KG_PER_CH4_KG
+-- Endothermic reaction heat absorbed per kilogram of methane processed,
+-- mirroring the host's StationMethaneProcessingReactionHeatKJPerKgMethane
+-- (#405): the authored dose must at least cover this demand.
+local METHANE_PROCESSING_HEAT_KJ_PER_CH4_KG = 74.8 / MOLAR_MASS_METHANE
 local GAS_CONSTANT = 8.314462618
 local LATENT_HEAT_VAPORIZATION = 2257.0
 -- Schedule boundary tolerance: an occurrence scheduled exactly on the
@@ -192,7 +226,7 @@ end
 return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries,
     reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews,
     waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers,
-    wasteEjections)
+    wasteEjections, sabatierReactors, methaneProcessors)
     assert(type(name) == "string")
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
@@ -216,6 +250,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     assert(type(fuelCells) == "table", "fuel cell descriptors missing")
     assert(type(thermalBuffers) == "table", "thermal buffer descriptors missing")
     assert(type(wasteEjections) == "table", "waste ejection descriptors missing")
+    assert(type(sabatierReactors) == "table", "Sabatier reactor descriptors missing")
+    assert(type(methaneProcessors) == "table", "methane processor descriptors missing")
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
@@ -230,6 +266,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         water_collectors = {}, water_treatments = {}, water_treatment_order = {},
         electrolyzers = {}, electrolyzer_order = {},
         co2_captures = {}, co2_capture_order = {},
+        sabatier_reactors = {}, sabatier_order = {},
+        methane_processors = {}, methane_processor_order = {},
         fuel_cells = {}, thermal_buffers = {},
         waste_ejections = {},
     }
@@ -1767,6 +1805,116 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             enduranceSeconds = 0,
         }
     end
+    -- Carbon recovery contracts (#405). The sandbox mirrors the host's
+    -- refusals: a reactor or processor with an unknown or shared store, a
+    -- hazard-class mismatch, a compound store in the chain, or a methane
+    -- processor whose electrical dose would not cover the endothermic
+    -- reaction heat the split must absorb are all refused at
+    -- construction like any other bad descriptor.
+    assert(#sabatierReactors <= 8, 'station Sabatier reactors are limited to 8 entries')
+    assert(#methaneProcessors <= 8, 'station methane processors are limited to 8 entries')
+    for index = 1, #sabatierReactors do
+        local reactor = sabatierReactors[index]
+        assert(type(reactor) == 'table', 'Sabatier reactor descriptor must be a table')
+        assert(type(reactor.id) == 'string' and #reactor.id > 0, 'Sabatier reactor needs an id')
+        assert(reactor.hazardClass == 'normal' or reactor.hazardClass == 'hazardous',
+            'Sabatier reactor needs a declared hazard class (normal or hazardous)')
+        assert(type(reactor.thermalClass) == 'string'
+            and (reactor.thermalClass == 'low' or reactor.thermalClass == 'moderate'
+                or reactor.thermalClass == 'warm' or reactor.thermalClass == 'generation'),
+            'Sabatier reactor needs a declared thermal service class')
+        assert(type(reactor.rateKgPerS) == 'number'
+            and reactor.rateKgPerS == reactor.rateKgPerS
+            and reactor.rateKgPerS >= 0 and reactor.rateKgPerS < math.huge,
+            'Sabatier reactor rated CO2 conversion must be finite and non-negative')
+        assert(type(reactor.specificEnergyKWhPerKgCO2) == 'number'
+            and reactor.specificEnergyKWhPerKgCO2 == reactor.specificEnergyKWhPerKgCO2
+            and reactor.specificEnergyKWhPerKgCO2 >= 0 and reactor.specificEnergyKWhPerKgCO2 < math.huge,
+            'Sabatier reactor specific energy must be finite and non-negative')
+        assert(type(reactor.maxSinkTemperatureC) == 'number'
+            and reactor.maxSinkTemperatureC == reactor.maxSinkTemperatureC
+            and reactor.maxSinkTemperatureC > -273.15,
+            'Sabatier reactor maximum sink temperature must be finite and above absolute zero')
+        local co2 = declareGasStore(reactor.co2Store, 'CO2 feed', reactor.hazardClass, false)
+        local hydrogen = declareGasStore(reactor.hydrogenStore, 'hydrogen feed',
+            reactor.hazardClass, false)
+        local methane = declareGasStore(reactor.methaneStore, 'methane', reactor.hazardClass, false)
+        local water = declareWaterStore(reactor.waterStore, 'product water',
+            reactor.hazardClass, false)
+        local sink = reservoir_by_id[reactor.heatSink]
+        assert(sink ~= nil, 'Sabatier reactor heat sink reservoir is unknown')
+        assert(sink.thermalClass == reactor.thermalClass,
+            'Sabatier reactor thermal class must match its heat sink reservoir class')
+        object.sabatier_reactors[index] = {
+            id = reactor.id,
+            hazardClass = reactor.hazardClass,
+            co2 = co2, hydrogen = hydrogen, methane = methane, water = water, sink = sink,
+            rateKgPerS = reactor.rateKgPerS,
+            specificEnergyKWhPerKgCO2 = reactor.specificEnergyKWhPerKgCO2,
+            maxSinkTemperatureC = reactor.maxSinkTemperatureC,
+            priority = reactor.priority,
+            lastScale = 0, lastLimiter = '',
+            lastRequested = 0, lastCo2Consumed = 0, lastHydrogenConsumed = 0,
+            lastMethaneProduced = 0, lastWaterProduced = 0,
+            lastPowerDemand = 0, lastPowerSupplied = 0, lastUnmetConversion = 0,
+            lastReactionHeatKW = 0,
+            coolingAvailable = false, lastBlockReason = '',
+            co2ConsumedTotal = 0, hydrogenConsumedTotal = 0,
+            methaneProducedTotal = 0, waterProducedTotal = 0,
+            energySuppliedKJ = 0, reactionHeatKJ = 0, heatRoutedKJ = 0,
+        }
+    end
+    for index = 1, #methaneProcessors do
+        local processor = methaneProcessors[index]
+        assert(type(processor) == 'table', 'methane processor descriptor must be a table')
+        assert(type(processor.id) == 'string' and #processor.id > 0, 'methane processor needs an id')
+        assert(processor.hazardClass == 'normal' or processor.hazardClass == 'hazardous',
+            'methane processor needs a declared hazard class (normal or hazardous)')
+        assert(type(processor.thermalClass) == 'string'
+            and (processor.thermalClass == 'low' or processor.thermalClass == 'moderate'
+                or processor.thermalClass == 'warm' or processor.thermalClass == 'generation'),
+            'methane processor needs a declared thermal service class')
+        assert(type(processor.rateKgPerS) == 'number'
+            and processor.rateKgPerS == processor.rateKgPerS
+            and processor.rateKgPerS >= 0 and processor.rateKgPerS < math.huge,
+            'methane processor rated processing must be finite and non-negative')
+        assert(type(processor.specificEnergyKWhPerKgCH4) == 'number'
+            and processor.specificEnergyKWhPerKgCH4 == processor.specificEnergyKWhPerKgCH4
+            and processor.specificEnergyKWhPerKgCH4 * 3600.0
+                >= METHANE_PROCESSING_HEAT_KJ_PER_CH4_KG - 1e-9,
+            'methane processor specific energy is below the endothermic reaction heat the split must absorb')
+        assert(type(processor.maxSinkTemperatureC) == 'number'
+            and processor.maxSinkTemperatureC == processor.maxSinkTemperatureC
+            and processor.maxSinkTemperatureC > -273.15,
+            'methane processor maximum sink temperature must be finite and above absolute zero')
+        local methane = declareGasStore(processor.methaneStore, 'methane feed',
+            processor.hazardClass, false)
+        local hydrogen = declareGasStore(processor.hydrogenStore, 'recovered hydrogen',
+            processor.hazardClass, false)
+        local carbon = declareGasStore(processor.carbonStore, 'solid carbon',
+            processor.hazardClass, false)
+        local sink = reservoir_by_id[processor.heatSink]
+        assert(sink ~= nil, 'methane processor heat sink reservoir is unknown')
+        assert(sink.thermalClass == processor.thermalClass,
+            'methane processor thermal class must match its heat sink reservoir class')
+        object.methane_processors[index] = {
+            id = processor.id,
+            hazardClass = processor.hazardClass,
+            methane = methane, hydrogen = hydrogen, carbon = carbon, sink = sink,
+            rateKgPerS = processor.rateKgPerS,
+            specificEnergyKWhPerKgCH4 = processor.specificEnergyKWhPerKgCH4,
+            maxSinkTemperatureC = processor.maxSinkTemperatureC,
+            priority = processor.priority,
+            lastScale = 0, lastLimiter = '',
+            lastRequested = 0, lastMethaneConsumed = 0, lastHydrogenReturned = 0,
+            lastCarbonProduced = 0,
+            lastPowerDemand = 0, lastPowerSupplied = 0, lastUnmetProcessing = 0,
+            lastReactionHeatKW = 0,
+            coolingAvailable = false, lastBlockReason = '',
+            methaneConsumedTotal = 0, hydrogenReturnedTotal = 0, carbonProducedTotal = 0,
+            energySuppliedKJ = 0, reactionHeatKJ = 0, heatRoutedKJ = 0,
+        }
+    end
     -- Cells and capture machines compete for the same power pool and the
     -- same stores, so each runs in the declared deterministic order:
     -- priority descending, declaration index ascending.
@@ -1779,6 +1927,22 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     for index = 1, #object.co2_captures do object.co2_capture_order[index] = index end
     table.sort(object.co2_capture_order, function(left, right)
         local a, b = object.co2_captures[left], object.co2_captures[right]
+        if a.priority ~= b.priority then return a.priority > b.priority end
+        return left < right
+    end)
+    -- Carbon-recovery stages compete for the same power pool and share
+    -- the hydrogen and methane stores, so each runs in the declared
+    -- deterministic order: priority descending, declaration index
+    -- ascending (#405).
+    for index = 1, #object.sabatier_reactors do object.sabatier_order[index] = index end
+    table.sort(object.sabatier_order, function(left, right)
+        local a, b = object.sabatier_reactors[left], object.sabatier_reactors[right]
+        if a.priority ~= b.priority then return a.priority > b.priority end
+        return left < right
+    end)
+    for index = 1, #object.methane_processors do object.methane_processor_order[index] = index end
+    table.sort(object.methane_processor_order, function(left, right)
+        local a, b = object.methane_processors[left], object.methane_processors[right]
         if a.priority ~= b.priority then return a.priority > b.priority end
         return left < right
     end)
@@ -3817,6 +3981,324 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 and isFinite(capture.consumablesUsedTotal),
                 "CO2 capture machine '" .. capture.id .. "' result is not finite")
         end
+        -- Carbon recovery (#405) runs in the same phase after CO2
+        -- capture: the Sabatier reactor converts captured CO2 and
+        -- hydrogen into methane and water, and the methane processor
+        -- splits methane into recovered hydrogen and solid carbon. Both
+        -- compete for the same generation-and-battery pool, and their
+        -- heat must land in the sink before the reservoir integrates.
+        -- Each stage is paid for before a kilogram converts, and only
+        -- converts what the actually supplied energy can drive at the
+        -- declared dose. Mirrors the host exactly.
+        for _, order in ipairs(self.sabatier_order) do
+            local reactor = self.sabatier_reactors[order]
+            local co2 = reactor.co2
+            local hydrogen = reactor.hydrogen
+            reactor.lastScale = 0
+            reactor.lastLimiter = ''
+            reactor.lastRequested = 0
+            reactor.lastCo2Consumed = 0
+            reactor.lastHydrogenConsumed = 0
+            reactor.lastMethaneProduced = 0
+            reactor.lastWaterProduced = 0
+            reactor.lastPowerDemand = 0
+            reactor.lastPowerSupplied = 0
+            reactor.lastUnmetConversion = 0
+            reactor.lastReactionHeatKW = 0
+            reactor.coolingAvailable = false
+            reactor.lastBlockReason = ''
+            if reactor.rateKgPerS > 0 then
+                local fullKg = reactor.rateKgPerS * fixed_seconds
+                reactor.coolingAvailable = reactor.sink.temperature + 1e-9
+                    < reactor.maxSinkTemperatureC
+                if not reactor.coolingAvailable then
+                    reactor.lastBlockReason =
+                        'cooling is not qualified: sink at or above the maximum sink temperature'
+                else
+                    local drawableCo2 = math.max(0, co2.qualified - co2.protected_reserve)
+                    local drawableHydrogen = math.max(0,
+                        hydrogen.qualified - hydrogen.protected_reserve)
+                    local methaneHeadroom = math.max(0, reactor.methane.capacity
+                        - (reactor.methane.qualified + reactor.methane.unqualified))
+                    local waterHeadroom = math.max(0, reactor.water.capacity
+                        - (reactor.water.qualified + reactor.water.unqualified))
+                    local scale = 1.0
+                    local limiter = ''
+                    local function constrain(available, required, reason)
+                        if required <= 0 then return end
+                        local fraction = available / required
+                        if fraction < scale then
+                            scale = fraction
+                            limiter = reason
+                        end
+                    end
+                    constrain(drawableCo2, fromKg(co2.unit, fullKg),
+                        "CO2 feed store '" .. co2.id
+                            .. "' has nothing drawable above its protected reserve")
+                    constrain(drawableHydrogen,
+                        fromKg(hydrogen.unit,
+                            fullKg * SABATIER_H2_KG_PER_CO2_KG),
+                        "hydrogen feed store '" .. hydrogen.id
+                            .. "' has nothing drawable above its protected reserve")
+                    constrain(methaneHeadroom,
+                        fromKg(reactor.methane.unit,
+                            fullKg * SABATIER_CH4_KG_PER_CO2_KG),
+                        "methane store '" .. reactor.methane.id
+                            .. "' is full: the product has nowhere to go")
+                    constrain(waterHeadroom,
+                        fromKg(reactor.water.unit,
+                            fullKg * SABATIER_H2O_KG_PER_CO2_KG),
+                        "product water store '" .. reactor.water.id
+                            .. "' is full: the water has nowhere to go")
+                    if scale < 0 then scale = 0 end
+                    if scale > 1 then scale = 1 end
+                    reactor.lastScale = scale
+                    reactor.lastLimiter = limiter
+                    reactor.lastRequested = fullKg
+                    if scale > 0 then
+                        local powerDemand = scale * reactor.rateKgPerS
+                            * reactor.specificEnergyKWhPerKgCO2 * 3600.0
+                        reactor.lastPowerDemand = powerDemand
+                        local fromGeneration = math.min(powerDemand, generation)
+                        generation = generation - fromGeneration
+                        local fromBattery = drawBatteries(self,
+                            powerDemand - fromGeneration, fixed_hours)
+                        local supplied = fromGeneration + fromBattery
+                        batterySupplied = batterySupplied + fromBattery
+                        reactor.lastPowerSupplied = supplied
+                        if powerDemand > 1e-12 and supplied <= 1e-12 then
+                            reactor.lastBlockReason =
+                                'no electrical supply: the Sabatier reactor cannot run'
+                        else
+                            local energySuppliedKJ = supplied * fixed_seconds
+                            -- Energy feasibility: the reactor only
+                            -- converts the CO2 the supplied energy can
+                            -- pay for at the declared dose.
+                            local doseKJ = reactor.specificEnergyKWhPerKgCO2 * 3600.0
+                            local energyFeasibleKg = doseKJ > 0
+                                and energySuppliedKJ / doseKJ or fullKg * scale
+                            -- The extent is capped by the reactants that
+                            -- are actually drawable above their protected
+                            -- reserves.
+                            local extentKg = math.min(energyFeasibleKg,
+                                toKg(co2.unit, drawableCo2))
+                            extentKg = math.min(extentKg,
+                                toKg(hydrogen.unit, drawableHydrogen)
+                                    / SABATIER_H2_KG_PER_CO2_KG)
+                            -- Move the flows, clamped per flow so
+                            -- roundoff never overshoots (#556).
+                            local co2Units = math.min(
+                                fromKg(co2.unit, extentKg), drawableCo2)
+                            local co2ActualKg = toKg(co2.unit, co2Units)
+                            local hydrogenUnits = math.min(
+                                fromKg(hydrogen.unit,
+                                    co2ActualKg * SABATIER_H2_KG_PER_CO2_KG),
+                                drawableHydrogen)
+                            local hydrogenActualKg = toKg(hydrogen.unit, hydrogenUnits)
+                            -- Products follow the limiting reactant that
+                            -- actually moved.
+                            local extentActualKg = math.min(co2ActualKg,
+                                hydrogenActualKg / SABATIER_H2_KG_PER_CO2_KG)
+                            local methaneUnits = math.min(
+                                fromKg(reactor.methane.unit,
+                                    extentActualKg * SABATIER_CH4_KG_PER_CO2_KG),
+                                methaneHeadroom)
+                            local methaneActualKg = toKg(reactor.methane.unit, methaneUnits)
+                            local waterUnits = math.min(
+                                fromKg(reactor.water.unit,
+                                    extentActualKg * SABATIER_H2O_KG_PER_CO2_KG),
+                                waterHeadroom)
+                            local waterActualKg = toKg(reactor.water.unit, waterUnits)
+                            co2.qualified = co2.qualified - co2Units
+                            hydrogen.qualified = hydrogen.qualified - hydrogenUnits
+                            reactor.methane.qualified = reactor.methane.qualified + methaneUnits
+                            reactor.water.qualified = reactor.water.qualified + waterUnits
+                            self.unit_loss[co2.unit] =
+                                (self.unit_loss[co2.unit] or 0) + co2Units
+                            self.unit_loss[hydrogen.unit] =
+                                (self.unit_loss[hydrogen.unit] or 0) + hydrogenUnits
+                            self.unit_loss[reactor.methane.unit] =
+                                (self.unit_loss[reactor.methane.unit] or 0) - methaneUnits
+                            self.unit_loss[reactor.water.unit] =
+                                (self.unit_loss[reactor.water.unit] or 0) - waterUnits
+                            -- Energy: the dose plus the exothermic heat
+                            -- the products do not retain leave through
+                            -- the sink, once.
+                            local reactionHeatKJ = extentActualKg * SABATIER_HEAT_KJ_PER_CO2_KG
+                            local heatKJ = energySuppliedKJ + reactionHeatKJ
+                            reactor.sink.sabatierHeat =
+                                (reactor.sink.sabatierHeat or 0) + heatKJ / fixed_seconds
+                            reactor.lastReactionHeatKW = reactionHeatKJ / fixed_seconds
+                            reactor.lastCo2Consumed = co2ActualKg
+                            reactor.lastHydrogenConsumed = hydrogenActualKg
+                            reactor.lastMethaneProduced = methaneActualKg
+                            reactor.lastWaterProduced = waterActualKg
+                            reactor.lastUnmetConversion = math.max(0, fullKg * scale - extentActualKg)
+                            reactor.co2ConsumedTotal = reactor.co2ConsumedTotal + co2ActualKg
+                            reactor.hydrogenConsumedTotal =
+                                reactor.hydrogenConsumedTotal + hydrogenActualKg
+                            reactor.methaneProducedTotal =
+                                reactor.methaneProducedTotal + methaneActualKg
+                            reactor.waterProducedTotal = reactor.waterProducedTotal + waterActualKg
+                            reactor.energySuppliedKJ = reactor.energySuppliedKJ + energySuppliedKJ
+                            reactor.reactionHeatKJ = reactor.reactionHeatKJ + reactionHeatKJ
+                            reactor.heatRoutedKJ = reactor.heatRoutedKJ + heatKJ
+                        end
+                    end
+                end
+            end
+            assert(isFinite(reactor.lastScale) and isFinite(reactor.lastRequested)
+                and isFinite(reactor.lastCo2Consumed) and isFinite(reactor.lastHydrogenConsumed)
+                and isFinite(reactor.lastMethaneProduced) and isFinite(reactor.lastWaterProduced)
+                and isFinite(reactor.lastPowerDemand) and isFinite(reactor.lastPowerSupplied)
+                and isFinite(reactor.lastUnmetConversion) and isFinite(reactor.lastReactionHeatKW)
+                and isFinite(reactor.co2ConsumedTotal) and isFinite(reactor.hydrogenConsumedTotal)
+                and isFinite(reactor.methaneProducedTotal) and isFinite(reactor.waterProducedTotal)
+                and isFinite(reactor.energySuppliedKJ) and isFinite(reactor.reactionHeatKJ)
+                and isFinite(reactor.heatRoutedKJ),
+                "Sabatier reactor '" .. reactor.id .. "' result is not finite")
+        end
+        for _, order in ipairs(self.methane_processor_order) do
+            local processor = self.methane_processors[order]
+            local methane = processor.methane
+            local hydrogen = processor.hydrogen
+            processor.lastScale = 0
+            processor.lastLimiter = ''
+            processor.lastRequested = 0
+            processor.lastMethaneConsumed = 0
+            processor.lastHydrogenReturned = 0
+            processor.lastCarbonProduced = 0
+            processor.lastPowerDemand = 0
+            processor.lastPowerSupplied = 0
+            processor.lastUnmetProcessing = 0
+            processor.lastReactionHeatKW = 0
+            processor.coolingAvailable = false
+            processor.lastBlockReason = ''
+            if processor.rateKgPerS > 0 then
+                local fullKg = processor.rateKgPerS * fixed_seconds
+                processor.coolingAvailable = processor.sink.temperature + 1e-9
+                    < processor.maxSinkTemperatureC
+                if not processor.coolingAvailable then
+                    processor.lastBlockReason =
+                        'cooling is not qualified: sink at or above the maximum sink temperature'
+                else
+                    local drawableMethane = math.max(0,
+                        methane.qualified - methane.protected_reserve)
+                    local hydrogenHeadroom = math.max(0, hydrogen.capacity
+                        - (hydrogen.qualified + hydrogen.unqualified))
+                    local carbonHeadroom = math.max(0, processor.carbon.capacity
+                        - (processor.carbon.qualified + processor.carbon.unqualified))
+                    local scale = 1.0
+                    local limiter = ''
+                    local function constrain(available, required, reason)
+                        if required <= 0 then return end
+                        local fraction = available / required
+                        if fraction < scale then
+                            scale = fraction
+                            limiter = reason
+                        end
+                    end
+                    constrain(drawableMethane, fromKg(methane.unit, fullKg),
+                        "methane feed store '" .. methane.id
+                            .. "' has nothing drawable above its protected reserve")
+                    constrain(hydrogenHeadroom,
+                        fromKg(hydrogen.unit,
+                            fullKg * METHANE_PROCESSING_H2_KG_PER_CH4_KG),
+                        "recovered hydrogen store '" .. hydrogen.id
+                            .. "' is full: the recovered hydrogen has nowhere to go")
+                    constrain(carbonHeadroom,
+                        fromKg(processor.carbon.unit,
+                            fullKg * METHANE_PROCESSING_C_KG_PER_CH4_KG),
+                        "carbon store '" .. processor.carbon.id
+                            .. "' is full: the solid carbon has nowhere to go")
+                    if scale < 0 then scale = 0 end
+                    if scale > 1 then scale = 1 end
+                    processor.lastScale = scale
+                    processor.lastLimiter = limiter
+                    processor.lastRequested = fullKg
+                    if scale > 0 then
+                        local powerDemand = scale * processor.rateKgPerS
+                            * processor.specificEnergyKWhPerKgCH4 * 3600.0
+                        processor.lastPowerDemand = powerDemand
+                        local fromGeneration = math.min(powerDemand, generation)
+                        generation = generation - fromGeneration
+                        local fromBattery = drawBatteries(self,
+                            powerDemand - fromGeneration, fixed_hours)
+                        local supplied = fromGeneration + fromBattery
+                        batterySupplied = batterySupplied + fromBattery
+                        processor.lastPowerSupplied = supplied
+                        if powerDemand > 1e-12 and supplied <= 1e-12 then
+                            processor.lastBlockReason =
+                                'no electrical supply: the methane processor cannot run'
+                        else
+                            local energySuppliedKJ = supplied * fixed_seconds
+                            -- Energy feasibility: the processor only
+                            -- splits the methane the supplied energy can
+                            -- drive against the endothermic reaction
+                            -- demand.
+                            local energyFeasibleKg = energySuppliedKJ
+                                / METHANE_PROCESSING_HEAT_KJ_PER_CH4_KG
+                            local processedKg = math.min(fullKg * scale, energyFeasibleKg)
+                            local methaneUnits = math.min(
+                                fromKg(methane.unit, processedKg), drawableMethane)
+                            local methaneActualKg = toKg(methane.unit, methaneUnits)
+                            local hydrogenUnits = math.min(
+                                fromKg(hydrogen.unit,
+                                    methaneActualKg * METHANE_PROCESSING_H2_KG_PER_CH4_KG),
+                                hydrogenHeadroom)
+                            local hydrogenActualKg = toKg(hydrogen.unit, hydrogenUnits)
+                            local carbonUnits = math.min(
+                                fromKg(processor.carbon.unit,
+                                    methaneActualKg * METHANE_PROCESSING_C_KG_PER_CH4_KG),
+                                carbonHeadroom)
+                            local carbonActualKg = toKg(processor.carbon.unit, carbonUnits)
+                            methane.qualified = methane.qualified - methaneUnits
+                            hydrogen.qualified = hydrogen.qualified + hydrogenUnits
+                            processor.carbon.qualified = processor.carbon.qualified + carbonUnits
+                            self.unit_loss[methane.unit] =
+                                (self.unit_loss[methane.unit] or 0) + methaneUnits
+                            self.unit_loss[hydrogen.unit] =
+                                (self.unit_loss[hydrogen.unit] or 0) - hydrogenUnits
+                            self.unit_loss[processor.carbon.unit] =
+                                (self.unit_loss[processor.carbon.unit] or 0) - carbonUnits
+                            -- Energy: the dose either drove the
+                            -- endothermic reaction or leaves as process
+                            -- heat routed into the sink, once.
+                            local reactionHeatKJ = methaneActualKg
+                                * METHANE_PROCESSING_HEAT_KJ_PER_CH4_KG
+                            local heatKJ = math.max(0, energySuppliedKJ - reactionHeatKJ)
+                            processor.sink.methaneHeat =
+                                (processor.sink.methaneHeat or 0) + heatKJ / fixed_seconds
+                            processor.lastReactionHeatKW = reactionHeatKJ / fixed_seconds
+                            processor.lastMethaneConsumed = methaneActualKg
+                            processor.lastHydrogenReturned = hydrogenActualKg
+                            processor.lastCarbonProduced = carbonActualKg
+                            processor.lastUnmetProcessing =
+                                math.max(0, fullKg * scale - methaneActualKg)
+                            processor.methaneConsumedTotal =
+                                processor.methaneConsumedTotal + methaneActualKg
+                            processor.hydrogenReturnedTotal =
+                                processor.hydrogenReturnedTotal + hydrogenActualKg
+                            processor.carbonProducedTotal =
+                                processor.carbonProducedTotal + carbonActualKg
+                            processor.energySuppliedKJ =
+                                processor.energySuppliedKJ + energySuppliedKJ
+                            processor.reactionHeatKJ = processor.reactionHeatKJ + reactionHeatKJ
+                            processor.heatRoutedKJ = processor.heatRoutedKJ + heatKJ
+                        end
+                    end
+                end
+            end
+            assert(isFinite(processor.lastScale) and isFinite(processor.lastRequested)
+                and isFinite(processor.lastMethaneConsumed) and isFinite(processor.lastHydrogenReturned)
+                and isFinite(processor.lastCarbonProduced)
+                and isFinite(processor.lastPowerDemand) and isFinite(processor.lastPowerSupplied)
+                and isFinite(processor.lastUnmetProcessing) and isFinite(processor.lastReactionHeatKW)
+                and isFinite(processor.methaneConsumedTotal) and isFinite(processor.hydrogenReturnedTotal)
+                and isFinite(processor.carbonProducedTotal) and isFinite(processor.energySuppliedKJ)
+                and isFinite(processor.reactionHeatKJ) and isFinite(processor.heatRoutedKJ),
+                "methane processor '" .. processor.id .. "' result is not finite")
+        end
         -- Second loop pass: integrate the loop's temperature from the
         -- pump work, heater heat, exchanger exchange and the chiller
         -- extraction that actually moved this tick, and expose the
@@ -4108,10 +4590,24 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             -- reservoir integrates it as its own ledger term.
             local fuelCellHeat = reservoir.fuelCellHeat or 0
             reservoir.fuelCellHeat = 0
+            -- Sabatier heat enters the sink reservoir exactly once (#405):
+            -- the reactor booked its electrical dose plus the exothermic
+            -- reaction heat the products do not retain here in
+            -- applyPower, and the reservoir integrates it as its own
+            -- ledger term.
+            local sabatierHeat = reservoir.sabatierHeat or 0
+            reservoir.sabatierHeat = 0
+            -- Methane-processing waste heat enters the sink reservoir
+            -- exactly once (#405): the processor booked the part of its
+            -- electrical dose the endothermic split did not absorb here
+            -- in applyPower.
+            local methaneHeat = reservoir.methaneHeat or 0
+            reservoir.methaneHeat = 0
             local atmosphereHeat = reservoir.atmosphereHeat or 0
             reservoir.atmosphereHeat = 0
             local heatIn = reservoir.absorbedKW + routed + loopHeat + condenser
                 + generatorHeat + atmosphereHeat + electrolysisHeat + fuelCellHeat
+                + sabatierHeat + methaneHeat
             local rejected = 0
             local minSink = reservoir.temperature
             local maxSink = reservoir.temperature
@@ -4254,6 +4750,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             reservoir.generatorKJ = (reservoir.generatorKJ or 0) + generatorHeat * fixed_seconds
             reservoir.electrolysisKJ = (reservoir.electrolysisKJ or 0) + electrolysisHeat * fixed_seconds
             reservoir.fuelCellKJ = (reservoir.fuelCellKJ or 0) + fuelCellHeat * fixed_seconds
+            reservoir.sabatierKJ = (reservoir.sabatierKJ or 0) + sabatierHeat * fixed_seconds
+            reservoir.methaneProcessingKJ = (reservoir.methaneProcessingKJ or 0)
+                + methaneHeat * fixed_seconds
             reservoir.atmosphereKJ = (reservoir.atmosphereKJ or 0) + atmosphereHeat * fixed_seconds
             reservoir.bufferChargeKJ = (reservoir.bufferChargeKJ or 0)
                 + bufferCharge * fixed_seconds
@@ -4281,6 +4780,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local residual = startingEnergy + reservoir.absorbedKJ + reservoir.routedKJ
                 + (reservoir.loopKJ or 0) + (reservoir.condenserKJ or 0) + (reservoir.generatorKJ or 0)
                 + (reservoir.electrolysisKJ or 0) + (reservoir.fuelCellKJ or 0)
+                + (reservoir.sabatierKJ or 0) + (reservoir.methaneProcessingKJ or 0)
                 + (reservoir.atmosphereKJ or 0)
                 + (reservoir.bufferDischargeKJ or 0) - (reservoir.bufferChargeKJ or 0)
                 - reservoir.rejectedKJ
