@@ -2207,7 +2207,22 @@ namespace core
 					}
 					else
 					{
-						auto const requestKW = generator.authored.startupPowerKW;
+						// #562: the crank buys only the energy still owed.
+						// A startup duration that is not a whole number of
+						// fixed ticks must not round the final purchase up to
+						// a full tick at full startup power: the last interval
+						// is prorated to the remaining requirement, so the
+						// machine receives and dissipates exactly
+						// startupPowerKW x startupSeconds, never more. The
+						// prorated average bus draw stays within the authored
+						// startup power, and the pool only has to fund what is
+						// actually owed this tick.
+						auto const remainingStartupKJ = std::max(0.0,
+							startupRequiredKJ - generator.startupReceivedKJ);
+						auto const requestKW = dtSeconds > 0.0
+							? std::min(generator.authored.startupPowerKW,
+								remainingStartupKJ / dtSeconds)
+							: generator.authored.startupPowerKW;
 						auto const poolKW = availableGeneration + batteryDeliverableKW();
 						if (poolKW + 1e-9 < requestKW)
 						{

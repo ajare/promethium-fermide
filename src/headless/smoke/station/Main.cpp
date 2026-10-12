@@ -6648,6 +6648,166 @@ namespace
 			runShutdownProfile(2.5 * dt, { dt, dt, 0.5 * dt });
 			}
 		}
+		// #562: startup buys only the energy it is owed. A startup
+		// duration that is not a whole number of fixed ticks must not
+		// round the final crank up to a full tick at full startup
+		// power: the last interval is prorated, so the machine
+		// receives and dissipates exactly startupPowerKW x
+		// startupSeconds, never more, and the pool only funds what is
+		// actually owed.
+		{
+			auto startupGenerator = [](double startupPowerKW, double startupSeconds)
+			{
+				core::GeneratorSettings settings;
+				settings.id = "gen";
+				settings.fuelStoreId = "fuel";
+				settings.thermalClass = "moderate";
+				settings.heatSinkId = "hot";
+				settings.ratedOutputKW = 1.0;
+				settings.efficiency = 0.5;
+				settings.maxRampKWPerSecond = 100.0;
+				settings.commandedOutputKW = 1.0;
+				settings.startupPowerKW = startupPowerKW;
+				settings.startupSeconds = startupSeconds;
+				settings.shutdownHeatKW = 0.0;
+				settings.shutdownSeconds = 0.0;
+				settings.maxSinkTemperatureC = 90.0;
+				return settings;
+			};
+			// The ticket reproduction: a half-tick startup at 1 kW is
+			// owed half a tick of energy, not a whole one. The crank
+			// completes on its first drawing tick with the prorated
+			// average bus draw, and the sink books exactly the
+			// contracted startup energy.
+			{
+				core::World world("StartupFractional", 2, 2);
+				world.pauseSimulation(); world.finishBuild();
+				core::ProfileSettings sun; sun.constantLevel = 1.0;
+				auto const [ok, diagnostic] = auditConfigure(world,
+					{ auditFuel(100.0) }, { auditSink(1000.0) },
+					{ startupGenerator(1.0, dt / 2.0) },
+					{ core::SolarArraySettings{"field", 100.0, sun} });
+				require(ok, ("fractional-startup scenario rejected: " + diagnostic).c_str());
+				world.resumeSimulation();
+				// Tick 1 is the Stopped -> Starting transition; the
+				// crank draws on tick 2 and is owed only half a tick.
+				require(world.advanceTicks(2), "fractional-startup ticks failed");
+				auto const snap = world.getStationSystemsSnapshot();
+				auto const& live = snap.power.generators[0];
+				require(live.phase == core::StationGeneratorPhase::Running,
+					"the half-tick crank did not complete");
+				require(approx(live.startupRequiredKJ, 0.5 * dt, 1e-12)
+					&& approx(live.startupReceivedKJ, 0.5 * dt, 1e-12),
+					"the sub-tick startup did not receive exactly its contracted energy");
+				require(live.startupReceivedKJ <= live.startupRequiredKJ + 1e-12,
+					"the startup over drew its authored energy");
+				require(approx(live.startupDrawKW, 0.5, 1e-9),
+					"the final crank did not publish the prorated average bus draw");
+				require(approx(live.startupHeatKJ, 0.5 * dt, 1e-12),
+					"the startup dissipation is not the contracted startup energy");
+				// The sink integrated the prorated crank exactly once.
+				auto const& sinkLive = snap.thermal.reservoirs[0];
+				require(approx(sinkLive.generatorEnergyKJ, live.startupHeatKJ, 1e-9),
+					"the sink did not integrate the prorated startup heat exactly once");
+				require(sawEvent(world, "startup complete: running"),
+					"the completed prorated startup was not reported");
+			}
+			// Fractional final tick schedule: 2.5 ticks of cranking at
+			// 1 kW books two full ticks plus a half-tick final draw,
+			// reaching Running on the prorated tick with the exact
+			// contracted total and nothing after.
+			{
+				core::World world("StartupProfile", 2, 2);
+				world.pauseSimulation(); world.finishBuild();
+				core::ProfileSettings sun; sun.constantLevel = 1.0;
+				auto const [ok, diagnostic] = auditConfigure(world,
+					{ auditFuel(100.0) }, { auditSink(1000.0) },
+					{ startupGenerator(1.0, 2.5 * dt) },
+					{ core::SolarArraySettings{"field", 100.0, sun} });
+				require(ok, ("startup-profile scenario rejected: " + diagnostic).c_str());
+				world.resumeSimulation();
+				require(world.advanceTick(), "startup-profile transition tick failed");
+				require(world.getStationSystemsSnapshot().power.generators[0].phase
+					== core::StationGeneratorPhase::Starting,
+					"the generator did not enter Starting on the transition tick");
+				// Ticks 2 and 3 draw the full startup power; tick 4 is
+				// the prorated half-tick final interval.
+				std::vector<std::pair<double, double>> const cranks =
+					{{1.0, dt}, {1.0, 2.0 * dt}, {0.5, 2.5 * dt}};
+				for (auto const& [drawKW, receivedKJ] : cranks)
+				{
+					require(world.advanceTick(), "startup-profile crank tick failed");
+					auto const snap = world.getStationSystemsSnapshot();
+					auto const& live = snap.power.generators[0];
+					require(approx(live.startupDrawKW, drawKW, 1e-9)
+						&& approx(live.startupReceivedKJ, receivedKJ, 1e-12),
+						"the crank schedule did not match the prorated plan");
+					require(live.startupReceivedKJ <= live.startupRequiredKJ + 1e-12,
+						"a crank tick pushed the received energy past the contract");
+					require(approx(snap.power.generatorStartupDrawKW, drawKW, 1e-9),
+						"the published startup draw total does not match the crank");
+				}
+				auto const& done = world.getStationSystemsSnapshot().power.generators[0];
+				require(done.phase == core::StationGeneratorPhase::Running,
+					"the prorated final crank did not complete the startup");
+				require(approx(done.startupHeatKJ, 2.5 * dt, 1e-12),
+					"the startup dissipation is not exactly startupPowerKW x startupSeconds");
+				// One running tick later the crank is gone and the
+				// received total has not grown.
+				require(world.advanceTick(), "startup-profile running tick failed");
+				auto const running = world.getStationSystemsSnapshot().power.generators[0];
+				require(running.phase == core::StationGeneratorPhase::Running
+					&& running.startupDrawKW == 0.0
+					&& approx(running.startupReceivedKJ, 2.5 * dt, 1e-12),
+					"the startup ledger kept growing after completion");
+				// The sink integrated the prorated startup exactly once,
+				// alongside the running waste heat.
+				auto const& sinkLive = world.getStationSystemsSnapshot().thermal.reservoirs[0];
+				require(approx(sinkLive.generatorEnergyKJ,
+					running.startupHeatKJ + running.wasteHeatKJ, 1e-9),
+					"the sink did not integrate the startup and waste heat exactly once");
+				// Reset replay: the same five ticks reproduce the same
+				// snapshot and event history.
+				auto const expected = world.getStationSystemsSnapshot();
+				auto const expectedEvents = world.getStationSystemsEvents();
+				world.pauseSimulation(); world.resetSimulation(); world.resumeSimulation();
+				require(world.advanceTicks(5), "startup-profile replay failed");
+				require(world.getStationSystemsSnapshot() == expected,
+					"the fractional-startup scenario is not deterministic across Reset");
+				require(world.getStationSystemsEvents() == expectedEvents,
+					"the fractional-startup event history is not deterministic across Reset");
+			}
+			// The capped final tick only asks the pool for what it owes:
+			// with 0.75 kW of sun, the full-power crank tops up from
+			// the battery, but the prorated half-tick fits inside the
+			// sun alone, so the bank is never asked for the extra the
+			// old rounded-up tick would have taken.
+			{
+				core::World world("StartupProratedPool", 2, 2);
+				world.pauseSimulation(); world.finishBuild();
+				core::ProfileSettings sun; sun.constantLevel = 1.0;
+				auto const [ok, diagnostic] = auditConfigure(world,
+					{ auditFuel(100.0) }, { auditSink(1000.0) },
+					{ startupGenerator(1.0, 1.5 * dt) },
+					{ core::SolarArraySettings{"field", 0.75, sun} },
+					{ core::BatterySettings{"cell", 10.0, 10.0, 10.0, 5.0, 5.0} });
+				require(ok, ("prorated-pool startup scenario rejected: " + diagnostic).c_str());
+				world.resumeSimulation();
+				require(world.advanceTicks(2), "prorated-pool first crank tick failed");
+				auto const first = world.getStationSystemsSnapshot();
+				require(first.power.generators[0].phase == core::StationGeneratorPhase::Starting
+					&& approx(first.power.batteryDischargeKW, 0.25, 1e-9),
+					"the full-power crank did not top up exactly 0.25 kW from the battery");
+				require(world.advanceTick(), "prorated-pool final crank tick failed");
+				auto const snap = world.getStationSystemsSnapshot();
+				auto const& live = snap.power.generators[0];
+				require(live.phase == core::StationGeneratorPhase::Running
+					&& approx(live.startupReceivedKJ, 1.5 * dt, 1e-12),
+					"the prorated final crank did not complete the startup exactly");
+				require(snap.power.batteryDischargeKW <= 1e-12,
+					"the prorated final tick drew battery energy it was not owed");
+			}
+		}
 		// The bundled Lua sandbox receives the generator descriptors and
 		// mirrors the model: a corrupt crossing fails contained at
 		// construction through the integrated error path.

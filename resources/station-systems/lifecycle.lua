@@ -1746,7 +1746,22 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     gen.startupReceivedKJ = 0
                     gen.blockReason = 'fuel depleted during startup'
                 else
+                    -- #562 mirror: the crank buys only the energy still
+                    -- owed. A startup duration that is not a whole number
+                    -- of fixed ticks must not round the final purchase up
+                    -- to a full tick at full startup power: the last
+                    -- interval is prorated to the remaining requirement,
+                    -- so the machine receives and dissipates exactly
+                    -- startupPowerKW * startupSeconds, never more. The
+                    -- prorated average bus draw stays within the authored
+                    -- startup power, and the pool only has to fund what
+                    -- is actually owed this tick.
+                    local remainingStartupKJ = math.max(0, startupRequiredKJ - gen.startupReceivedKJ)
                     local requestKW = gen.startupPowerKW
+                    if fixed_seconds > 0 then
+                        requestKW = math.min(gen.startupPowerKW,
+                            remainingStartupKJ / fixed_seconds)
+                    end
                     local poolKW = generation + batteryDeliverableKW(self, fixed_hours)
                     if poolKW + 1e-9 < requestKW then
                         -- The startup energy support that qualified the
