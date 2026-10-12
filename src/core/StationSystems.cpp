@@ -5493,8 +5493,12 @@ namespace core
 					capture.status = StationTransferStatus::Rejected;
 					continue;
 				}
+				// The dose is authored in kWh per kilogram of captured CO2,
+				// so the power the machine draws is the dose times the
+				// throughput converted to the pool's kW (kWh/s x 3600),
+				// mirroring the electrolysis contract (#404, #567).
 				capture.lastPowerDemandKW = scale * capture.authored.maxRateKgPerS
-					* capture.authored.specificEnergyKWhPerKg;
+					* capture.authored.specificEnergyKWhPerKg * 3600.0;
 				auto const fromGeneration = std::min(capture.lastPowerDemandKW, availableGeneration);
 				availableGeneration -= fromGeneration;
 				auto const ask = capture.lastPowerDemandKW - fromGeneration;

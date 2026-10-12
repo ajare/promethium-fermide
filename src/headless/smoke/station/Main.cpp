@@ -9535,7 +9535,9 @@ namespace
 			require(approx(scrub.consumablesUsed, captured * 0.01)
 				&& approx(findStore(snap, "scrubberMedia").currentQualified, 10.0 - captured * 0.01),
 				"the regeneration consumable was not drawn with the capture");
-			require(approx(snap.power.co2CapturePowerKW, 0.5 * 0.001),
+			// 0.001 kg/s at 0.5 kWh/kg is 1.8 kW in pool units
+			// (rate x dose x 3600 s/h, #567).
+			require(approx(snap.power.co2CapturePowerKW, 0.5 * 3600.0 * 0.001),
 				"the power snapshot does not report the capture draw");
 			// The captured gas entered the store network from outside it:
 			// the boundary ledger carries it as collected inflow and closes.

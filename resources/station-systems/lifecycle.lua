@@ -4114,8 +4114,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 capture.lastLimiter = limiter
                 capture.lastRequested = fullKg
                 if scale > 0 then
+                    -- The dose is kWh per kg, so the draw is the dose
+                    -- times the throughput converted to the pool's kW
+                    -- (kWh/s x 3600), mirroring the host (#567).
                     local powerDemand = scale * capture.maxRateKgPerS
-                        * capture.specificEnergyKWhPerKg
+                        * capture.specificEnergyKWhPerKg * 3600.0
                     capture.lastPowerDemand = powerDemand
                     local fromGeneration = math.min(powerDemand, generation)
                     generation = generation - fromGeneration
