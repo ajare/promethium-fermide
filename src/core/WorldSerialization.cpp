@@ -828,7 +828,19 @@ namespace core
 		// ledgers and the recycled-hydrogen returns stay runtime-only, so
 		// load and Reset reconstruct them from the authored starting
 		// conditions.
-		serializer.writeUint32("version", 83);
+		// Version 84 adds authored nutrient-recovery contracts (#407):
+		// microbial processors that digest a compound organic-waste
+		// feedstock into recovered N/P/K/minerals, recovered water, CO2
+		// and a mass-balance-derived unrecoverable residue, with declared
+		// per-constituent recovery yields, oxygen/process-water/
+		// consumable/electricity costs, a feed-energy-capped exothermic
+		// reaction heat and a static operating temperature window; a
+		// pre-84 document carrying `microbialProcessors` is refused rather
+		// than silently dropped. The consumed feeds, recovered products,
+		// per-constituent recovery and energy/heat ledgers stay runtime-
+		// only, so load and Reset reconstruct them from the authored
+		// starting conditions.
+		serializer.writeUint32("version", 84);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -1363,6 +1375,51 @@ namespace core
 					serializer.writeDouble("rateKgPerS", processor.rateKgPerS);
 					serializer.writeDouble("specificEnergyKWhPerKgCH4",
 						processor.specificEnergyKWhPerKgCH4);
+					serializer.writeDouble("maxSinkTemperatureC", processor.maxSinkTemperatureC);
+					serializer.writeInt32("priority", processor.priority);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.microbialProcessors.empty())
+			{
+				// Authored microbial processor contracts only; the consumed
+				// feeds, recovered products, per-constituent recovery and
+				// the energy and heat ledgers are runtime state
+				// reconstructed on load (#407).
+				serializer.beginArray("microbialProcessors");
+				for (auto const& processor : mStationSystemsSettings.microbialProcessors)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", processor.id);
+					serializer.writeString("hazardClass", processor.hazardClass);
+					serializer.writeString("feedStoreId", processor.feedStoreId);
+					serializer.writeString("oxygenStoreId", processor.oxygenStoreId);
+					serializer.writeString("waterStoreId", processor.waterStoreId);
+					serializer.writeString("consumableStoreId", processor.consumableStoreId);
+					serializer.writeString("nutrientStoreId", processor.nutrientStoreId);
+					serializer.writeString("recoveredWaterStoreId", processor.recoveredWaterStoreId);
+					serializer.writeString("co2StoreId", processor.co2StoreId);
+					serializer.writeString("residueStoreId", processor.residueStoreId);
+					serializer.writeString("thermalClass", processor.thermalClass);
+					serializer.writeString("heatSinkId", processor.heatSinkId);
+					serializer.writeDouble("rateKgPerS", processor.rateKgPerS);
+					serializer.writeDouble("specificEnergyKWhPerKgFeed",
+						processor.specificEnergyKWhPerKgFeed);
+					serializer.writeDouble("oxygenPerKgFeedKg", processor.oxygenPerKgFeedKg);
+					serializer.writeDouble("processWaterPerKgFeedKg",
+						processor.processWaterPerKgFeedKg);
+					serializer.writeDouble("consumablePerKgFeed", processor.consumablePerKgFeed);
+					serializer.writeDouble("co2PerKgFeedKg", processor.co2PerKgFeedKg);
+					serializer.writeDouble("nitrogenRecovery", processor.nitrogenRecovery);
+					serializer.writeDouble("phosphorusRecovery", processor.phosphorusRecovery);
+					serializer.writeDouble("potassiumRecovery", processor.potassiumRecovery);
+					serializer.writeDouble("mineralsRecovery", processor.mineralsRecovery);
+					serializer.writeDouble("waterRecovery", processor.waterRecovery);
+					serializer.writeDouble("reactionHeatKJPerKgFeed",
+						processor.reactionHeatKJPerKgFeed);
+					serializer.writeDouble("minOperatingTemperatureC",
+						processor.minOperatingTemperatureC);
 					serializer.writeDouble("maxSinkTemperatureC", processor.maxSinkTemperatureC);
 					serializer.writeInt32("priority", processor.priority);
 					serializer.endMap();
@@ -2337,7 +2394,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 83)
+		if (version < 1 || version > 84)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2949,6 +3006,51 @@ namespace core
 					processor.maxSinkTemperatureC = serializer.readDouble("maxSinkTemperatureC");
 					processor.priority = serializer.readInt32("priority");
 					stationSettings.methaneProcessors.push_back(std::move(processor));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("microbialProcessors"))
+			{
+				if (version < 84) throw SerializationException(
+					"Station microbial processors require World schema 84");
+				serializer.beginArray("microbialProcessors");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					MicrobialProcessorSettings processor;
+					processor.id = serializer.readString("id");
+					processor.hazardClass = serializer.readString("hazardClass");
+					processor.feedStoreId = serializer.readString("feedStoreId");
+					processor.oxygenStoreId = serializer.readString("oxygenStoreId");
+					processor.waterStoreId = serializer.readString("waterStoreId");
+					processor.consumableStoreId = serializer.readString("consumableStoreId");
+					processor.nutrientStoreId = serializer.readString("nutrientStoreId");
+					processor.recoveredWaterStoreId = serializer.readString("recoveredWaterStoreId");
+					processor.co2StoreId = serializer.readString("co2StoreId");
+					processor.residueStoreId = serializer.readString("residueStoreId");
+					processor.thermalClass = serializer.readString("thermalClass");
+					processor.heatSinkId = serializer.readString("heatSinkId");
+					processor.rateKgPerS = serializer.readDouble("rateKgPerS");
+					processor.specificEnergyKWhPerKgFeed =
+						serializer.readDouble("specificEnergyKWhPerKgFeed");
+					processor.oxygenPerKgFeedKg = serializer.readDouble("oxygenPerKgFeedKg");
+					processor.processWaterPerKgFeedKg =
+						serializer.readDouble("processWaterPerKgFeedKg");
+					processor.consumablePerKgFeed = serializer.readDouble("consumablePerKgFeed");
+					processor.co2PerKgFeedKg = serializer.readDouble("co2PerKgFeedKg");
+					processor.nitrogenRecovery = serializer.readDouble("nitrogenRecovery");
+					processor.phosphorusRecovery = serializer.readDouble("phosphorusRecovery");
+					processor.potassiumRecovery = serializer.readDouble("potassiumRecovery");
+					processor.mineralsRecovery = serializer.readDouble("mineralsRecovery");
+					processor.waterRecovery = serializer.readDouble("waterRecovery");
+					processor.reactionHeatKJPerKgFeed =
+						serializer.readDouble("reactionHeatKJPerKgFeed");
+					processor.minOperatingTemperatureC =
+						serializer.readDouble("minOperatingTemperatureC");
+					processor.maxSinkTemperatureC = serializer.readDouble("maxSinkTemperatureC");
+					processor.priority = serializer.readInt32("priority");
+					stationSettings.microbialProcessors.push_back(std::move(processor));
 					serializer.endMap();
 				}
 				serializer.endArray();

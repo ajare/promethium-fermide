@@ -144,7 +144,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 83"), 11, "version: 65");
+		text.replace(text.find("version: 84"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -2265,8 +2265,8 @@ namespace
 		auto const bundled = core::bundledStationSystemsSource();
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -2325,8 +2325,8 @@ namespace
 		// model's own audits hold.
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -3710,8 +3710,8 @@ namespace
 			auto const bundled = core::bundledStationSystemsSource();
 			core::setStationSystemsSourceLoader([bundled] {
 				return "local factory = (function()\n" + bundled + "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -4675,13 +4675,13 @@ namespace
 			auto const bundled = core::bundledStationSystemsSource();
 			core::setStationSystemsSourceLoader([bundled] {
 				return "local factory = (function()\n" + bundled + "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 					"assert(#reservoirs == 1 and reservoirs[1].id == 'cabin'\n"
 					"\tand reservoirs[1].heatCapacityKJPerK == 100 and reservoirs[1].absorbedHeatKW == 0)\n"
 					"assert(#radiators == 1 and radiators[1].reservoir == 'cabin'\n"
 					"\tand radiators[1].areaM2 == 5000)\n"
 					"assert(#loads == 1 and loads[1].heatSinkId == 'cabin')\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 					"assert(model.reservoirs[1].temperature == 20)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
@@ -5309,8 +5309,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled, expectedLiteral] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -5381,7 +5381,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 					"assert(type(coolantLoops) == 'table' and #coolantLoops == 1, 'coolant loop descriptor crossing lost')\n"
 					"assert(coolantLoops[1].coolantCapacityKg > 0, 'corrupt coolant capacity crossing')\n"
 					"error('corrupt coolant descriptor crossing')\n"
@@ -6056,8 +6056,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled, expectedLiteral] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -6182,7 +6182,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 					"assert(type(chillers) == 'table' and #chillers == 1, 'chiller descriptor crossing lost')\n"
 					"assert(chillers[1].cop > 0, 'corrupt chiller COP crossing')\n"
 					"error('corrupt chiller descriptor crossing')\n"
@@ -6871,8 +6871,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
-					"return factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
+					"return factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 					"end";
 			});
 			core::World probe("StartupAuditOverAllocationProbe", 2, 2);
@@ -7210,7 +7210,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 					"assert(type(generators) == 'table' and #generators == 1, 'generator descriptor crossing lost')\n"
 					"assert(generators[1].efficiency > 0, 'corrupt generator efficiency crossing')\n"
 					"error('corrupt generator descriptor crossing')\n"
@@ -7678,7 +7678,7 @@ namespace
 		// contained at construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 					"assert(type(crews) == 'table' and #crews == 1, 'crew descriptor crossing lost')\n"
 					"assert(crews[1].foodRate > 0, 'corrupt crew rate crossing')\n"
 					"error('corrupt crew descriptor crossing')\n"
@@ -7703,8 +7703,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -8480,8 +8480,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled, expectedLiteral] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -8540,7 +8540,7 @@ namespace
 		// is contained at construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 					"assert(type(atmospheres) == 'table' and #atmospheres == 1, 'atmosphere descriptor crossing lost')\n"
 					"assert(atmospheres[1].volumeM3 > 0, 'corrupt atmosphere volume crossing')\n"
 					"error('corrupt atmosphere descriptor crossing')\n"
@@ -8559,7 +8559,7 @@ namespace
 		// A corrupt airlock cycle crossing is contained the same way.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 					"assert(type(airlockCycles) == 'table' and #airlockCycles == 1, 'airlock cycle descriptor crossing lost')\n"
 					"error('corrupt airlock cycle descriptor crossing')\n"
 					"end";
@@ -9077,7 +9077,7 @@ namespace
 		// contained at construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 					"assert(type(waterCollectors) == 'table' and #waterCollectors == 1, 'water collector descriptor crossing lost')\n"
 					"assert(waterCollectors[1].maxRateKgPerS > 0, 'corrupt collector rate crossing')\n"
 					"error('corrupt water collector descriptor crossing')\n"
@@ -9099,7 +9099,7 @@ namespace
 		// contained the same way.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 					"assert(type(waterTreatments) == 'table' and #waterTreatments == 1, 'water treatment descriptor crossing lost')\n"
 					"assert(waterTreatments[1].recoveryRatio > 0 and waterTreatments[1].recoveryRatio <= 1, 'corrupt recovery ratio crossing')\n"
 					"error('corrupt water treatment descriptor crossing')\n"
@@ -9604,7 +9604,7 @@ namespace
 		// no partial result escapes.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 					"assert(type(electrolyzers) == 'table' and #electrolyzers == 1, 'electrolyzer descriptor crossing lost')\n"
 					"assert(electrolyzers[1].rateKgPerS > 0, 'corrupt electrolyzer rate crossing')\n"
 					"error('corrupt electrolyzer descriptor crossing')\n"
@@ -10140,7 +10140,7 @@ namespace
 		// disabled and no partial result escapes.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)\n"
 					"assert(type(fuelCells) == 'table' and #fuelCells == 1, 'fuel cell descriptor crossing lost')\n"
 					"assert(fuelCells[1].ratedOutputKW > 0, 'corrupt fuel cell rate crossing')\n"
 					"error('corrupt fuel cell descriptor crossing')\n"
@@ -11007,6 +11007,504 @@ void buffers(smoke::Context const&)
 		}
 	}
 
+	void nutrientRecovery(smoke::Context const&)
+	{
+		auto const dt = static_cast<double>(core::World::getFixedTimestep());
+		auto approx = [](double actual, double expected)
+		{
+			auto const tolerance = 1e-6 * std::max(1.0, std::abs(expected));
+			return std::abs(actual - expected) <= tolerance;
+		};
+		auto closeTo = [](double actual, double expected, double relative)
+		{
+			return std::abs(actual - expected) <= relative * std::max(1e-12, std::abs(expected));
+		};
+		// The authored feedstock: a wet organic waste whose dry mass carries
+		// bound nutrient nitrogen, phosphorus, potassium and grouped
+		// minerals, plus an atmospheric nitrogen share that is NOT a
+		// nutrient. The declared yields recover 80% of N/P/K, 70% of the
+		// grouped minerals and 70% of the moisture; the residue is the
+		// mass-balance remainder.
+		core::ResourceCompositionSettings feedComposition;
+		feedComposition.moisture = 0.9;
+		feedComposition.nutrientNitrogen = 0.05;
+		feedComposition.atmosphericNitrogen = 0.02;
+		feedComposition.phosphorus = 0.02;
+		feedComposition.potassium = 0.02;
+		feedComposition.otherMinerals = 0.03;
+		feedComposition.energyKJPerKgDry = 8000.0;
+		auto const dryPerKg = 1.0 - feedComposition.moisture;
+		auto plainStore = [](std::string const& id, double capacity, double starting,
+			double protectedReserve = 0.0)
+		{
+			core::ResourceStoreSettings settings;
+			settings.id = id;
+			settings.unit = "kg";
+			settings.capacity = capacity;
+			settings.startingQualified = starting;
+			settings.protectedReserve = protectedReserve;
+			return settings;
+		};
+		auto compoundStore = [&](std::string const& id, double capacity, double starting,
+			core::ResourceCompositionSettings const& composition)
+		{
+			auto settings = plainStore(id, capacity, starting);
+			settings.composition = composition;
+			return settings;
+		};
+		auto reservoir = [](std::string const& id, std::string const& thermalClass,
+			double startingC)
+		{
+			core::ThermalReservoirSettings settings;
+			settings.id = id;
+			settings.thermalClass = thermalClass;
+			settings.heatCapacityKJPerK = 10000.0;
+			settings.startingTemperatureC = startingC;
+			settings.minTemperatureC = -50.0;
+			settings.maxTemperatureC = 200.0;
+			return settings;
+		};
+		auto processor = [](std::string const& id, std::string const& hazard)
+		{
+			core::MicrobialProcessorSettings settings;
+			settings.id = id;
+			settings.hazardClass = hazard;
+			settings.feedStoreId = "waste";
+			settings.oxygenStoreId = "oxygen";
+			settings.waterStoreId = "processWater";
+			settings.consumableStoreId = "media";
+			settings.nutrientStoreId = "nutrients";
+			settings.recoveredWaterStoreId = "recoveredWater";
+			settings.co2StoreId = "co2";
+			settings.residueStoreId = "residue";
+			settings.thermalClass = "low";
+			settings.heatSinkId = "sink";
+			settings.rateKgPerS = 0.001;
+			settings.specificEnergyKWhPerKgFeed = 2.0;
+			settings.oxygenPerKgFeedKg = 0.8;
+			settings.processWaterPerKgFeedKg = 0.5;
+			settings.consumablePerKgFeed = 0.01;
+			settings.co2PerKgFeedKg = 0.3;
+			settings.nitrogenRecovery = 0.8;
+			settings.phosphorusRecovery = 0.8;
+			settings.potassiumRecovery = 0.8;
+			settings.mineralsRecovery = 0.7;
+			settings.waterRecovery = 0.7;
+			settings.reactionHeatKJPerKgFeed = 600.0;
+			settings.minOperatingTemperatureC = 15.0;
+			settings.maxSinkTemperatureC = 45.0;
+			return settings;
+		};
+		auto nutrientStores = [&]()
+		{
+			std::vector<core::ResourceStoreSettings> stores;
+			stores.push_back(compoundStore("waste", 100.0, 10.0, feedComposition));
+			stores.push_back(plainStore("oxygen", 100.0, 10.0));
+			stores.push_back(plainStore("processWater", 100.0, 10.0));
+			stores.push_back(plainStore("media", 100.0, 10.0));
+			stores.push_back(plainStore("nutrients", 100.0, 0.0));
+			stores.push_back(plainStore("recoveredWater", 100.0, 0.0));
+			stores.push_back(plainStore("co2", 100.0, 0.0));
+			stores.push_back(plainStore("residue", 100.0, 0.0));
+			return stores;
+		};
+		auto findStore = [](core::StationSystemsSnapshot const& snap, std::string const& id)
+		{
+			for (auto const& entry : snap.stores)
+				if (entry.id == id) return entry;
+			return core::StationSystemsStoreSnapshot{};
+		};
+		auto nutrientConfigure = [&](core::World& world,
+			std::vector<core::ResourceStoreSettings> stores,
+			std::vector<core::MicrobialProcessorSettings> processors,
+			double solarKW,
+			double sinkStartingC = 20.0)
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = std::move(stores);
+			settings.thermalReservoirs = { reservoir("sink", "low", sinkStartingC) };
+			settings.microbialProcessors = std::move(processors);
+			if (solarKW > 0.0)
+			{
+				core::SolarArraySettings field;
+				field.id = "field";
+				field.capacityKW = solarKW;
+				settings.solarArrays = { field };
+			}
+			auto const ok = world.configureStationSystems(settings, false, &diagnostic);
+			return std::make_pair(ok, diagnostic);
+		};
+		// The declared per-kilogram-of-feed yields the nominal scenario
+		// must follow, derived from the feedstock composition.
+		auto const nutrientPerKgFeed = dryPerKg * (feedComposition.nutrientNitrogen * 0.8
+			+ feedComposition.phosphorus * 0.8 + feedComposition.potassium * 0.8
+			+ feedComposition.otherMinerals * 0.7);
+		auto const recoveredWaterPerKgFeed = feedComposition.moisture * 0.7;
+		auto const residuePerKgFeed = 1.0 + 0.8 + 0.5 - nutrientPerKgFeed
+			- recoveredWaterPerKgFeed - 0.3;
+		require(nutrientPerKgFeed > 0.0 && residuePerKgFeed > 0.0,
+			"the nominal feedstock/yield declaration is not a sane recovery scenario");
+		// Refused configurations: every malformed nutrient-recovery contract
+		// is rejected before anything runs, and none of the refusals
+		// mutates the World.
+		{
+			core::World bad("NutrientBad", 2, 2);
+			bad.pauseSimulation(); bad.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = nutrientStores();
+			settings.thermalReservoirs = { reservoir("sink", "low", 20.0) };
+			std::string diagnostic;
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors[0].feedStoreId = "ghost";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("feed store 'ghost' does not exist") != std::string::npos,
+				"a microbial processor fed by an unknown store was accepted");
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors[0].feedStoreId = "oxygen";
+			settings.microbialProcessors[0].oxygenStoreId = "oxygen2";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("no composition") != std::string::npos,
+				"a processor fed by a store with no declared composition was accepted");
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors[0].nutrientStoreId = "waste";
+			settings.microbialProcessors[0].feedStoreId = "nutrients";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("feed store 'nutrients' declares no composition") != std::string::npos,
+				"a swap of the compound feed onto a plain store was accepted");
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.stores.push_back(compoundStore("sludge", 10.0, 1.0, feedComposition));
+			settings.microbialProcessors[0].residueStoreId = "sludge";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("residue store 'sludge' declares a composition") != std::string::npos,
+				"a compound residue destination was accepted");
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors[0].nitrogenRecovery = 1.5;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("nitrogen recovery must be finite and from 0 to 1") != std::string::npos,
+				"a recovery yield above 1 was accepted");
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors[0].co2PerKgFeedKg = 2.0;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("would create mass") != std::string::npos,
+				"yields whose outputs exceed their inputs were accepted");
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors[0].reactionHeatKJPerKgFeed = 900.0;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("exceeds the feedstock's declared chemical energy") != std::string::npos,
+				"a reaction heat above the feed's declared chemical energy was accepted");
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors[0].minOperatingTemperatureC = 50.0;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("empty operating window") != std::string::npos,
+				"an empty operating temperature window was accepted");
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors[0].oxygenStoreId = "processWater";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("same store") != std::string::npos,
+				"two chain roles sharing one store were accepted");
+			settings.microbialProcessors = { processor("digester", "normal"),
+				processor("digester2", "hazardous") };
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("may not share a store") != std::string::npos,
+				"a hazardous processor sharing the normal-class waste feed was accepted");
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors[0].heatSinkId = "ghost";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("unknown thermal reservoir") != std::string::npos,
+				"a processor on an unknown heat sink was accepted");
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors[0].thermalClass = "warm";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("does not match heat sink") != std::string::npos,
+				"a thermal class mismatch against the processor's heat sink was accepted");
+			std::vector<core::MicrobialProcessorSettings> tooMany;
+			for (size_t index = 0; index <= core::MaxStationMicrobialProcessors; ++index)
+				tooMany.push_back(processor("digester" + std::to_string(index), "normal"));
+			settings = core::StationSystemsSettings{};
+			settings.enabled = true;
+			settings.stores = nutrientStores();
+			settings.thermalReservoirs = { reservoir("sink", "low", 20.0) };
+			settings.microbialProcessors = tooMany;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("limited to") != std::string::npos,
+				"more than the declared microbial processor budget was accepted");
+			require(!bad.getStationSystemsSnapshot().enabled && bad.getSimulationTick() == 0,
+				"a refused nutrient-recovery configuration mutated the World");
+		}
+		// Nominal digestion: the recovery follows the declared yields, the
+		// per-constituent recovery is funded by the feed's bound nutrients,
+		// the residue closes the mass balance, the energy closes over
+		// supplied + released = routed, and the per-unit and per-
+		// constituent boundary ledgers close.
+		{
+			core::World world("NutrientNominal", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(nutrientConfigure(world, nutrientStores(), { processor("digester", "normal") },
+				100.0).first, "nominal nutrient-recovery setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "nominal nutrient-recovery run failed");
+			auto const elapsed = 60.0 * dt;
+			auto const fed = 0.001 * elapsed;
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.microbialProcessors.size() == 1, "processor missing from the snapshot");
+			auto const& unit = snap.microbialProcessors[0];
+			require(unit.status == core::StationTransferStatus::Full
+				&& approx(unit.scale, 1.0) && unit.temperatureEligible,
+				"the processor is not running at full rate inside its operating window");
+			require(approx(unit.feedConsumedKg, fed)
+				&& approx(unit.oxygenConsumedKg, fed * 0.8)
+				&& approx(unit.waterConsumedKg, fed * 0.5)
+				&& approx(unit.consumablesUsed, fed * 0.01),
+				"the digestion inputs did not follow the declared rates");
+			require(approx(unit.nutrientProducedKg, fed * nutrientPerKgFeed)
+				&& approx(unit.recoveredWaterKg, fed * recoveredWaterPerKgFeed)
+				&& approx(unit.co2ProducedKg, fed * 0.3)
+				&& approx(unit.residueProducedKg, fed * residuePerKgFeed),
+				"the recovery did not follow the declared yields");
+			// Elemental balance: each recovered nutrient is the feed's
+			// bound content times its recovery fraction.
+			require(approx(unit.nitrogenRecoveredKg, fed * dryPerKg * feedComposition.nutrientNitrogen * 0.8)
+				&& approx(unit.phosphorusRecoveredKg, fed * dryPerKg * feedComposition.phosphorus * 0.8)
+				&& approx(unit.potassiumRecoveredKg, fed * dryPerKg * feedComposition.potassium * 0.8)
+				&& approx(unit.mineralsRecoveredKg, fed * dryPerKg * feedComposition.otherMinerals * 0.7),
+				"the per-constituent recovery does not match the feed's bound content times the declared yields");
+			require(std::abs(unit.residualKg) < 1e-6,
+				"the feed/oxygen/water/nutrient/water/CO2/residue mass ledger does not close");
+			// Energy: the dose plus the capped exothermic heat routed once.
+			auto const energy = 2.0 * 3600.0 * fed;
+			auto const released = 600.0 * fed;
+			require(approx(unit.energySuppliedKJ, energy) && approx(unit.reactionHeatKJ, released)
+				&& approx(unit.heatRoutedKJ, energy + released) && std::abs(unit.residualKJ) < 1e-6,
+				"the supplied/released/routed energy ledger does not close");
+			require(released <= fed * dryPerKg * feedComposition.energyKJPerKgDry + 1e-9,
+				"the released reaction heat exceeded the feedstock's chemical energy");
+			require(approx(findStore(snap, "waste").currentQualified, 10.0 - fed)
+				&& approx(findStore(snap, "oxygen").currentQualified, 10.0 - fed * 0.8)
+				&& approx(findStore(snap, "processWater").currentQualified, 10.0 - fed * 0.5)
+				&& approx(findStore(snap, "media").currentQualified, 10.0 - fed * 0.01),
+				"the input stores lost the wrong amounts");
+			require(approx(findStore(snap, "nutrients").currentQualified, fed * nutrientPerKgFeed)
+				&& approx(findStore(snap, "recoveredWater").currentQualified, fed * recoveredWaterPerKgFeed)
+				&& approx(findStore(snap, "co2").currentQualified, fed * 0.3)
+				&& approx(findStore(snap, "residue").currentQualified, fed * residuePerKgFeed),
+				"the product stores did not receive the recovery");
+			require(approx(snap.power.microbialProcessingPowerKW, 2.0 * 3600.0 * 0.001),
+				"the power snapshot does not report the processor draw");
+			require(approx(snap.thermal.reservoirs[0].microbialEnergyKJ, energy + released)
+				&& approx(snap.thermal.reservoirs[0].lastMicrobialHeatKW, (energy + released) / elapsed),
+				"the digestion heat did not land in the sink reservoir");
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
+			for (auto const& balance : snap.constituentBalances)
+				require(std::abs(balance.residual) <= 2e-6,
+					("constituent boundary residual for '" + balance.constituent + "' not closed").c_str());
+		}
+		// Atmospheric nitrogen cannot substitute: a feedstock whose
+		// nitrogen is entirely atmospheric recovers no nutrient nitrogen at
+		// all - the atmospheric share passes through to the residue, and
+		// only the other bound constituents are recovered.
+		{
+			core::World world("NutrientAtmospheric", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto atmosphericFeed = feedComposition;
+			atmosphericFeed.nutrientNitrogen = 0.0;
+			atmosphericFeed.atmosphericNitrogen = 0.07;
+			auto stores = nutrientStores();
+			stores[0] = compoundStore("waste", 100.0, 10.0, atmosphericFeed);
+			require(nutrientConfigure(world, stores, { processor("digester", "normal") },
+				100.0).first, "atmospheric-feed setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "atmospheric-feed run failed");
+			auto const elapsed = 60.0 * dt;
+			auto const fed = 0.001 * elapsed;
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& unit = snap.microbialProcessors[0];
+			require(unit.status == core::StationTransferStatus::Full,
+				"the atmospheric-feed processor is not running at full rate");
+			require(unit.nitrogenRecoveredKg == 0.0,
+				"atmospheric nitrogen was recovered as a nutrient without a configured process");
+			auto const otherNutrientPerKg = dryPerKg * (atmosphericFeed.phosphorus * 0.8
+				+ atmosphericFeed.potassium * 0.8 + atmosphericFeed.otherMinerals * 0.7);
+			require(approx(unit.nutrientProducedKg, fed * otherNutrientPerKg),
+				"the non-nitrogen nutrients did not follow the declared yields");
+			require(approx(unit.phosphorusRecoveredKg, fed * dryPerKg * atmosphericFeed.phosphorus * 0.8),
+				"the phosphorus recovery does not match the feed's bound content");
+			require(std::abs(unit.residualKg) < 1e-6,
+				"the atmospheric-feed mass ledger does not close");
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
+			for (auto const& balance : snap.constituentBalances)
+				require(std::abs(balance.residual) <= 2e-6,
+					("constituent boundary residual for '" + balance.constituent + "' not closed").c_str());
+		}
+		// Absent feedstock: with no qualified waste the processor is
+		// refused whole - no oxygen, water or consumable is drawn, no
+		// power is spent, and the limiter names the feed store.
+		{
+			core::World world("NutrientNoFeed", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto stores = nutrientStores();
+			stores[0].startingQualified = 0.0;
+			require(nutrientConfigure(world, stores, { processor("digester", "normal") },
+				100.0).first, "absent-feedstock setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "absent-feedstock run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.microbialProcessors[0].status == core::StationTransferStatus::Rejected
+				&& snap.microbialProcessors[0].feedConsumedKg == 0.0
+				&& snap.microbialProcessors[0].lastPowerSuppliedKW == 0.0
+				&& snap.microbialProcessors[0].blockReason.find("feed store") != std::string::npos,
+				"the processor ran or spent resources without feedstock");
+			require(approx(findStore(snap, "oxygen").currentQualified, 10.0)
+				&& approx(findStore(snap, "nutrients").currentQualified, 0.0),
+				"resources moved while the feed store was empty");
+		}
+		// Power starvation: with no generation and no battery, a tick
+		// that demands power receives none and is refused whole - no feed
+		// digests and the reason is named.
+		{
+			core::World world("NutrientNoPower", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(nutrientConfigure(world, nutrientStores(), { processor("digester", "normal") },
+				0.0).first, "no-power setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "no-power run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.microbialProcessors[0].status == core::StationTransferStatus::Rejected
+				&& snap.microbialProcessors[0].feedConsumedKg == 0.0
+				&& snap.microbialProcessors[0].blockReason.find("no electrical supply") != std::string::npos,
+				"the processor ran or drew feed without power");
+			require(approx(findStore(snap, "waste").currentQualified, 10.0)
+				&& approx(findStore(snap, "oxygen").currentQualified, 10.0),
+				"inputs moved without power");
+		}
+		// Temperature eligibility: the static operating window refuses the
+		// stage whole on either side - too cold the culture is dormant,
+		// too hot the heat cannot be rejected - with no flows and no power
+		// draw either way.
+		{
+			core::World cold("NutrientColdSink", 2, 2);
+			cold.pauseSimulation(); cold.finishBuild();
+			require(nutrientConfigure(cold, nutrientStores(), { processor("digester", "normal") },
+				100.0, 10.0).first, "cold-sink setup refused");
+			cold.resumeSimulation();
+			require(cold.advanceTicks(60), "cold-sink run failed");
+			auto const snap = cold.getStationSystemsSnapshot();
+			require(snap.microbialProcessors[0].status == core::StationTransferStatus::Rejected
+				&& !snap.microbialProcessors[0].temperatureEligible
+				&& snap.microbialProcessors[0].feedConsumedKg == 0.0
+				&& snap.microbialProcessors[0].lastPowerSuppliedKW == 0.0
+				&& snap.microbialProcessors[0].blockReason.find("minimum operating temperature") != std::string::npos,
+				"a below-window sink temperature did not refuse the processor whole");
+			core::World hot("NutrientHotSink", 2, 2);
+			hot.pauseSimulation(); hot.finishBuild();
+			require(nutrientConfigure(hot, nutrientStores(), { processor("digester", "normal") },
+				100.0, 50.0).first, "hot-sink setup refused");
+			hot.resumeSimulation();
+			require(hot.advanceTicks(60), "hot-sink run failed");
+			auto const hotSnap = hot.getStationSystemsSnapshot();
+			require(hotSnap.microbialProcessors[0].status == core::StationTransferStatus::Rejected
+				&& !hotSnap.microbialProcessors[0].temperatureEligible
+				&& hotSnap.microbialProcessors[0].feedConsumedKg == 0.0
+				&& hotSnap.microbialProcessors[0].lastPowerSuppliedKW == 0.0
+				&& hotSnap.microbialProcessors[0].blockReason.find("cooling is not qualified") != std::string::npos,
+				"an above-window sink temperature did not refuse the processor whole");
+		}
+		// Finite destinations backpressure the whole stage: a full
+		// nutrient store refuses the processor with a named reason, and a
+		// small recovered-water store caps the digestion once its headroom
+		// is gone - the total processed never exceeds what the tightest
+		// destination can hold.
+		{
+			core::World world("NutrientFullStore", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto stores = nutrientStores();
+			for (auto& store : stores)
+				if (store.id == "nutrients") { store.capacity = 0.0005; store.startingQualified = 0.0005; }
+			require(nutrientConfigure(world, stores, { processor("digester", "normal") },
+				100.0).first, "full-nutrient-store setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "full-nutrient-store run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.microbialProcessors[0].status == core::StationTransferStatus::Rejected
+				&& snap.microbialProcessors[0].feedConsumedKg == 0.0
+				&& snap.microbialProcessors[0].blockReason.find("nutrient store") != std::string::npos,
+				"a full nutrient store did not refuse the processor with a named reason");
+			require(findStore(snap, "nutrients").currentQualified <= 0.0005 + 1e-9,
+				"a blocked destination was overfilled");
+			core::World filling("NutrientWaterFills", 2, 2);
+			filling.pauseSimulation(); filling.finishBuild();
+			auto fillingStores = nutrientStores();
+			for (auto& store : fillingStores)
+				if (store.id == "recoveredWater") store.capacity = 0.0006;
+			require(nutrientConfigure(filling, fillingStores, { processor("digester", "normal") },
+				100.0).first, "filling-recovered-water setup refused");
+			filling.resumeSimulation();
+			require(filling.advanceTicks(180), "filling-recovered-water run failed");
+			auto const fillSnap = filling.getStationSystemsSnapshot();
+			require(approx(findStore(fillSnap, "recoveredWater").currentQualified, 0.0006),
+				"the recovered water store did not fill to capacity");
+			require(fillSnap.microbialProcessors[0].limiter.find("recovered water store") != std::string::npos
+				|| fillSnap.microbialProcessors[0].blockReason.find("recovered water store") != std::string::npos,
+				"the filled recovered-water store did not become the named limiter");
+			// The whole run digested at most the water capacity's worth.
+			require(fillSnap.microbialProcessors[0].feedConsumedKg
+				<= 0.0006 / recoveredWaterPerKgFeed + 1e-9,
+				"the processor digested past the recovered-water store's capacity");
+		}
+		// Protected reserves: the feed is drawn only above its protected
+		// reserve, so a protected waste reserve is never digested away -
+		// the run stops at the reserve line, not through it.
+		{
+			core::World world("NutrientReserve", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto stores = nutrientStores();
+			stores[0].startingQualified = 1.0;
+			stores[0].protectedReserve = 0.99;
+			require(nutrientConfigure(world, stores, { processor("digester", "normal") },
+				100.0).first, "protected-reserve setup refused");
+			world.resumeSimulation();
+			// 0.01 kg of drawable feed at 0.001 kg/s lasts 10 s = 600
+			// ticks; run past the exhaustion.
+			require(world.advanceTicks(660), "protected-reserve run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(findStore(snap, "waste").currentQualified >= 0.99 - 1e-9,
+				"the processor drew into the protected waste reserve");
+			require(closeTo(snap.microbialProcessors[0].feedConsumedKg, 0.01, 0.02),
+				"the digestion did not stop at the drawable feed line");
+			require(snap.microbialProcessors[0].limiter.find("feed store") != std::string::npos
+				|| snap.microbialProcessors[0].blockReason.find("feed store") != std::string::npos,
+				"the reserve-capped processor did not name the feed store");
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
+		}
+		// Disabled stage: a zero rated rate is idle, not broken - no
+		// flows, no power draw, and the disabled flag is set.
+		{
+			core::World world("NutrientDisabled", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto offProcessor = processor("digester", "normal");
+			offProcessor.rateKgPerS = 0.0;
+			require(nutrientConfigure(world, nutrientStores(), { offProcessor }, 100.0).first,
+				"disabled-stage setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "disabled-stage run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.microbialProcessors[0].disabled
+				&& snap.microbialProcessors[0].status == core::StationTransferStatus::Idle
+				&& snap.microbialProcessors[0].feedConsumedKg == 0.0
+				&& snap.microbialProcessors[0].lastPowerSuppliedKW == 0.0,
+				"a zero-rate processor is not an idle, zero-flow stage");
+		}
+	}
+
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power},
@@ -11019,7 +11517,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"failures", failures}};
+		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

@@ -27,7 +27,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
 	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply, rechargeable batteries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, and chillers supplying class-matched cold services. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Thermal reservoirs integrate temperature from their effective capacity under absorbed and routed equipment heat; radiators reject heat by the Stefan-Boltzmann law at the emitting temperature against the authored sink, emissivity and view factor. A load's emitted heat is booked exactly once: routed into its class-compatible reservoir or exported directly, never both. Declared temperature limits are reported, never clamped. Coolant loops hold a finite, loop-specific coolant inventory segregated by hazard class (coolant is never potable or nutrient water); the pump circulates only the coolant the loop actually holds, so an underfilled loop flows less and a dry loop flows nothing, and the freeze-protection heater thermostats the loop up to its setpoint within its capacity. Pump work and heater heat enter the loop exactly once and reach the reservoir only through the circulation-gated heat-only exchanger; the loop draw rides the same electrical pool as external loads. Chillers supply a cold service of their declared class through a class-matched coolant-loop evaporator and reservoir condenser: the delivered duty is capped by the loop's actual circulation, gated at the chilled setpoint, and refused while the sink is at or above the maximum condensing temperature; work at the configured COP plus auxiliaries rides the same electrical pool, and condenser heat equals extracted heat plus the work and auxiliaries actually supplied, booked once. Fuelled generators convert a finite energy-unit fuel inventory into bus electrical output at the declared efficiency: output is bounded by the installed rating and the ramp limit, starting only completes once the startup energy has actually been drawn from the shared pool while the class-matched sink is below its maximum sink temperature, and after output stops the configured shutdown heat and its cooling requirement persist for the decay period; waste, startup and decay heat route exactly once into the sink and the fuel ledger closes over fuel = electrical + waste. Within a tick, generators and fuel-cell backup units produce first, then power allocates, then coolant loops and chillers run, then compartment atmospheres cycle, crews metabolise and compartments exchange, then thermal integrates, then transfers, then conversions. Compartment atmospheres model an ideal-gas mixture in a fixed volume: absolute and partial pressures derive from the gas inventory and temperature, humidity caps at Magnus saturation with the excess condensing and releasing its latent heat into the compartment, occupancy is an authored load assignment whose oxygen draw is capped by the inventory (CO2 and metabolic heat scale with what was actually consumed), leakage is a constant total-mass rate capped by the inventory, and scheduled airlock cycles remove authored mass with an explicit recovered-versus-lost split; every gram leaving a compartment is booked as leaked, recovered or lost, compartments never mix automatically, and declared pressure and gas-quality limits are reported, never clamped. Crews are an authored population with an activity profile, never derived from World Agents: metabolism draws food and water from compound stores and oxygen from the compartment, and returns CO2, moisture and metabolic heat to the compartment and urine and organic waste to their own finite compound stores. One uniform metabolic scale per tick - the scarcest supply or tightest waste headroom - throttles every pathway together, so absent material never generates nominal waste; requested versus actual is explicit per pathway, the authored coefficients must close over mass, constituents and energy, and the consumed mass the returns do not carry away is reported as explicit retained body mass. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s), %zu airlock cycle(s), %zu crew(s), %zu water collector(s), %zu water treatment(s), %zu electrolyzer(s), %zu CO2 capture machine(s), %zu fuel-cell backup unit(s), %zu thermal buffer(s), %zu terminal-waste ejection(s), %zu Sabatier reactor(s) and %zu methane processor(s)",
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s), %zu airlock cycle(s), %zu crew(s), %zu water collector(s), %zu water treatment(s), %zu electrolyzer(s), %zu CO2 capture machine(s), %zu fuel-cell backup unit(s), %zu thermal buffer(s), %zu terminal-waste ejection(s), %zu Sabatier reactor(s), %zu methane processor(s) and %zu microbial processor(s)",
 		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
 		authored.stores.size(), authored.transfers.size(), authored.conversions.size(),
 		authored.solarArrays.size(), authored.equipmentLoads.size(), authored.batteries.size(),
@@ -38,7 +38,8 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		authored.electrolyzers.size(), authored.co2Captures.size(),
 		authored.fuelCells.size(), authored.thermalBuffers.size(),
 		authored.wasteEjections.size(),
-		authored.sabatierReactors.size(), authored.methaneProcessors.size());
+		authored.sabatierReactors.size(), authored.methaneProcessors.size(),
+		authored.microbialProcessors.size());
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
@@ -2582,6 +2583,46 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			processor.residualKg, processor.residualKJ);
 		if (processor.disabled)
 			ImGui::Text("  zero rated processing: no service");
+	}
+	ImGui::SeparatorText("Microbial processors (live; the digestion closes on mass - feed + oxygen + process water = nutrients + recovered water + CO2 + residue - with the residue as the balance term, and on energy - supplied + released = routed; recovered N/P/K/minerals are funded by the feed's bound nutrients only, atmospheric N never substitutes; the reaction heat is capped by the feed's chemical energy; the culture runs only inside the declared operating window; saturated destinations backpressure the whole stage)");
+	for (auto const& processor : snapshot.microbialProcessors)
+	{
+		char const* status = "idle";
+		switch (processor.status)
+		{
+		case core::StationTransferStatus::Full: status = "digesting at full rate"; break;
+		case core::StationTransferStatus::Partial: status = "digesting below rated (feeds, destinations or energy short)"; break;
+		case core::StationTransferStatus::Rejected: status = "refused (nothing digested)"; break;
+		case core::StationTransferStatus::Idle: break;
+		}
+		ImGui::Text("%s [%s] (%s -> %s + %s + %s + %s): %s | scale %.3f%s%s",
+			processor.id.c_str(), processor.hazardClass.c_str(),
+			processor.feedStoreId.c_str(), processor.nutrientStoreId.c_str(),
+			processor.recoveredWaterStoreId.c_str(), processor.co2StoreId.c_str(),
+			processor.residueStoreId.c_str(),
+			status, processor.scale,
+			processor.limiter.empty() ? "" : " | limited by: ",
+			processor.limiter.empty() ? "" : processor.limiter.c_str());
+		ImGui::Text("  last tick: feed %.6f kg + O2 %.6f kg + water %.6f kg + consumable %.6f -> nutrients %.6f kg + recovered water %.6f kg + CO2 %.6f kg + residue %.6f kg | power %.4f/%.4f kW | unmet %.6f kg | reaction heat %.4f kW | temperature %s%s",
+			processor.lastFeedConsumedKg, processor.lastOxygenConsumedKg,
+			processor.lastWaterConsumedKg, processor.lastConsumableUsed,
+			processor.lastNutrientProducedKg, processor.lastRecoveredWaterKg,
+			processor.lastCo2ProducedKg, processor.lastResidueProducedKg,
+			processor.lastPowerSuppliedKW, processor.lastPowerDemandKW,
+			processor.lastUnmetProcessingKg, processor.lastReactionHeatKW,
+			processor.temperatureEligible ? "eligible" : "NOT eligible",
+			processor.blockReason.empty() ? "" : (std::string(" - ") + processor.blockReason).c_str());
+		ImGui::Text("  cumulative: feed %.4f kg | O2 %.4f kg | water %.4f kg | consumable %.4f | nutrients %.4f kg (N %.4f + P %.4f + K %.4f + minerals %.4f) | recovered water %.4f kg | CO2 %.4f kg | residue %.4f kg | energy %.2f kJ supplied + %.2f kJ released heat routed %.2f kJ | residual mass %.2e kg / energy %.2e kJ",
+			processor.feedConsumedKg, processor.oxygenConsumedKg,
+			processor.waterConsumedKg, processor.consumablesUsed,
+			processor.nutrientProducedKg, processor.nitrogenRecoveredKg,
+			processor.phosphorusRecoveredKg, processor.potassiumRecoveredKg,
+			processor.mineralsRecoveredKg, processor.recoveredWaterKg,
+			processor.co2ProducedKg, processor.residueProducedKg,
+			processor.energySuppliedKJ, processor.reactionHeatKJ, processor.heatRoutedKJ,
+			processor.residualKg, processor.residualKJ);
+		if (processor.disabled)
+			ImGui::Text("  zero rated feed: no service");
 	}
 	for (auto const& diagnostic : world->getStationSystemsDiagnostics())
 	{

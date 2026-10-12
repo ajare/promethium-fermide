@@ -82,6 +82,7 @@ namespace core
 			std::vector<WasteEjectionSettings> const* wasteEjections;
 			std::vector<SabatierReactorSettings> const* sabatierReactors;
 			std::vector<MethaneProcessorSettings> const* methaneProcessors;
+			std::vector<MicrobialProcessorSettings> const* microbialProcessors;
 			static void pushProfile(lua_State* state, ProfileSettings const& profile)
 			{
 				lua_createtable(state, 0, 3);
@@ -614,7 +615,45 @@ namespace core
 					lua_pushinteger(state, processor.priority); lua_setfield(state, -2, "priority");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 25, 1);
+				// Authored microbial processor descriptors cross the same
+				// boundary as plain immutable values (#407); each sandbox
+				// mirrors the constituent-funded recovery, the balance-derived
+				// residue and audits its own mass and energy closure.
+				lua_createtable(state, static_cast<int>(microbialProcessors->size()), 0);
+				for (size_t index = 0; index < microbialProcessors->size(); ++index)
+				{
+					auto const& processor = (*microbialProcessors)[index];
+					lua_createtable(state, 0, 27);
+					lua_pushstring(state, processor.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, processor.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
+					lua_pushstring(state, processor.feedStoreId.c_str()); lua_setfield(state, -2, "feedStore");
+					lua_pushstring(state, processor.oxygenStoreId.c_str()); lua_setfield(state, -2, "oxygenStore");
+					lua_pushstring(state, processor.waterStoreId.c_str()); lua_setfield(state, -2, "waterStore");
+					lua_pushstring(state, processor.consumableStoreId.c_str()); lua_setfield(state, -2, "consumableStore");
+					lua_pushstring(state, processor.nutrientStoreId.c_str()); lua_setfield(state, -2, "nutrientStore");
+					lua_pushstring(state, processor.recoveredWaterStoreId.c_str()); lua_setfield(state, -2, "recoveredWaterStore");
+					lua_pushstring(state, processor.co2StoreId.c_str()); lua_setfield(state, -2, "co2Store");
+					lua_pushstring(state, processor.residueStoreId.c_str()); lua_setfield(state, -2, "residueStore");
+					lua_pushstring(state, processor.thermalClass.c_str()); lua_setfield(state, -2, "thermalClass");
+					lua_pushstring(state, processor.heatSinkId.c_str()); lua_setfield(state, -2, "heatSink");
+					lua_pushnumber(state, processor.rateKgPerS); lua_setfield(state, -2, "rateKgPerS");
+					lua_pushnumber(state, processor.specificEnergyKWhPerKgFeed); lua_setfield(state, -2, "specificEnergyKWhPerKgFeed");
+					lua_pushnumber(state, processor.oxygenPerKgFeedKg); lua_setfield(state, -2, "oxygenPerKgFeedKg");
+					lua_pushnumber(state, processor.processWaterPerKgFeedKg); lua_setfield(state, -2, "processWaterPerKgFeedKg");
+					lua_pushnumber(state, processor.consumablePerKgFeed); lua_setfield(state, -2, "consumablePerKgFeed");
+					lua_pushnumber(state, processor.co2PerKgFeedKg); lua_setfield(state, -2, "co2PerKgFeedKg");
+					lua_pushnumber(state, processor.nitrogenRecovery); lua_setfield(state, -2, "nitrogenRecovery");
+					lua_pushnumber(state, processor.phosphorusRecovery); lua_setfield(state, -2, "phosphorusRecovery");
+					lua_pushnumber(state, processor.potassiumRecovery); lua_setfield(state, -2, "potassiumRecovery");
+					lua_pushnumber(state, processor.mineralsRecovery); lua_setfield(state, -2, "mineralsRecovery");
+					lua_pushnumber(state, processor.waterRecovery); lua_setfield(state, -2, "waterRecovery");
+					lua_pushnumber(state, processor.reactionHeatKJPerKgFeed); lua_setfield(state, -2, "reactionHeatKJPerKgFeed");
+					lua_pushnumber(state, processor.minOperatingTemperatureC); lua_setfield(state, -2, "minOperatingTemperatureC");
+					lua_pushnumber(state, processor.maxSinkTemperatureC); lua_setfield(state, -2, "maxSinkTemperatureC");
+					lua_pushinteger(state, processor.priority); lua_setfield(state, -2, "priority");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 26, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -2308,6 +2347,177 @@ namespace core
 					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
 					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
 		}
+		// Nutrient recovery contracts (#407). A microbial processor digests
+		// a compound organic-waste feedstock and recovers its bound
+		// nutrients per constituent: the recovery yields are fractions of
+		// the feed's own bound nitrogen, phosphorus, potassium and grouped
+		// mineral content, so the recovered nutrients are funded by the
+		// feedstock alone. Atmospheric nitrogen in the feed is never a
+		// nutrient source - no configured process in this slice converts
+		// it, so it passes through to the residue and can never
+		// substitute for bound N. The feed must declare a composition:
+		// there is nothing to recover from an uncharacterised stream, and
+		// the product stores (nutrients, residue) must be plain mass
+		// stores, because a compound destination would create tracked
+		// constituents out of nothing. The residue rate is the
+		// mass-balance remainder of the declared inputs and outputs per
+		// kilogram of feed: a configuration whose declared outputs would
+	// exceed its inputs is refused rather than gifting mass. The
+		// exothermic reaction heat is capped by the feedstock's declared
+		// chemical energy per kilogram of feed - the released heat is
+		// paid for by the feed, never free - and the operating window
+		// must be a real window: minimum below maximum, both above
+		// absolute zero.
+		if (settings.microbialProcessors.size() > MaxStationMicrobialProcessors)
+			return refuse("Station microbial processors are limited to "
+				+ std::to_string(MaxStationMicrobialProcessors) + " entries");
+		std::map<std::string, std::string> microbialStoreClass;
+		auto declareMicrobialStore = [&](std::string const& storeId, char const* role,
+			std::string const& where, std::string const& hazardClass,
+			bool requireCompound) -> bool
+		{
+			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
+			if (found == settings.stores.end())
+				return refuse(where + " " + role + " store '" + storeId + "' does not exist");
+			if (!isMassUnit(found->unit))
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' must be a mass unit; nutrient recovery is mass-denominated (g or kg)");
+			if (requireCompound && !found->composition)
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' declares no composition; a microbial processor recovers bound nutrients from a declared compound feedstock, not from an uncharacterised stream");
+			if (!requireCompound && found->composition)
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' declares a composition; recovered product streams land as plain mass, so a compound destination would create tracked constituents out of nothing");
+			auto const existing = microbialStoreClass.find(storeId);
+			if (existing == microbialStoreClass.end())
+				microbialStoreClass.emplace(storeId, hazardClass);
+			else if (existing->second != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
+					+ existing->second + "-class nutrient process; hazardous and normal nutrient streams may not share a store");
+			return true;
+		};
+		std::set<std::string> microbialIds;
+		for (auto const& processor : settings.microbialProcessors)
+		{
+			auto const where = "Station microbial processor '" + processor.id + "'";
+			if (processor.id.empty()) return refuse("Station microbial processor id must not be empty");
+			if (processor.id.size() > MaxStationStoreIdLength)
+				return refuse("Station microbial processor id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!microbialIds.insert(processor.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
+				processor.hazardClass) == StationWaterHazardClasses.end())
+				return refuse(where + " has unknown hazard class '" + processor.hazardClass
+					+ "'; declared classes are: normal, hazardous");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				processor.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + processor.thermalClass
+					+ "'; declared classes are: " + declaredThermalClasses());
+			if (!std::isfinite(processor.rateKgPerS) || processor.rateKgPerS < 0.0)
+				return refuse(where + " rated feed processing must be finite and non-negative");
+			double const rateFields[]{processor.specificEnergyKWhPerKgFeed,
+				processor.oxygenPerKgFeedKg, processor.processWaterPerKgFeedKg,
+				processor.consumablePerKgFeed, processor.co2PerKgFeedKg,
+				processor.reactionHeatKJPerKgFeed};
+			char const* rateNames[]{"specific energy", "oxygen per kg feed",
+				"process water per kg feed", "consumable per kg feed",
+				"CO2 per kg feed", "reaction heat per kg feed"};
+			for (size_t field = 0; field < 6; ++field)
+				if (!std::isfinite(rateFields[field]) || rateFields[field] < 0.0)
+					return refuse(where + " " + rateNames[field] + " must be finite and non-negative");
+			double const recoveryFields[]{processor.nitrogenRecovery,
+				processor.phosphorusRecovery, processor.potassiumRecovery,
+				processor.mineralsRecovery, processor.waterRecovery};
+			char const* recoveryNames[]{"nitrogen recovery", "phosphorus recovery",
+				"potassium recovery", "minerals recovery", "water recovery"};
+			for (size_t field = 0; field < 5; ++field)
+				if (!std::isfinite(recoveryFields[field]) || recoveryFields[field] < 0.0
+					|| recoveryFields[field] > 1.0)
+					return refuse(where + " " + recoveryNames[field]
+						+ " must be finite and from 0 to 1: a yield cannot recover more than the feed carries");
+			if (!std::isfinite(processor.minOperatingTemperatureC)
+				|| processor.minOperatingTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " minimum operating temperature must be finite and above absolute zero");
+			if (!std::isfinite(processor.maxSinkTemperatureC)
+				|| processor.maxSinkTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum sink temperature must be finite and above absolute zero");
+			if (processor.minOperatingTemperatureC >= processor.maxSinkTemperatureC)
+				return refuse(where + " minimum operating temperature must be below the maximum sink temperature: an empty operating window is never a service");
+			std::string const chainIds[8]{processor.feedStoreId, processor.oxygenStoreId,
+				processor.waterStoreId, processor.consumableStoreId, processor.nutrientStoreId,
+				processor.recoveredWaterStoreId, processor.co2StoreId, processor.residueStoreId};
+			char const* chainRoles[8]{"feed", "oxygen", "process water", "consumable",
+				"nutrient", "recovered water", "CO2", "residue"};
+			for (size_t stream = 0; stream < 8; ++stream)
+				for (size_t other = stream + 1; other < 8; ++other)
+					if (chainIds[stream] == chainIds[other])
+						return refuse(where + " " + chainRoles[stream] + " store and "
+							+ chainRoles[other] + " store are the same store '"
+							+ chainIds[stream] + "'; the recovery chain needs distinct stores for every stream");
+			if (!declareMicrobialStore(processor.feedStoreId, "feed", where,
+				processor.hazardClass, true))
+				return false;
+			if (!declareGasStore(processor.oxygenStoreId, "oxygen", where,
+				processor.hazardClass, false))
+				return false;
+			if (!declareWaterStore(processor.waterStoreId, "process water", where,
+				processor.hazardClass, false))
+				return false;
+			{
+				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+					[&](ResourceStoreSettings const& store) { return store.id == processor.consumableStoreId; });
+				if (found == settings.stores.end())
+					return refuse(where + " consumable store '" + processor.consumableStoreId
+						+ "' does not exist");
+				auto const existing = microbialStoreClass.find(processor.consumableStoreId);
+				if (existing == microbialStoreClass.end())
+					microbialStoreClass.emplace(processor.consumableStoreId, processor.hazardClass);
+				else if (existing->second != processor.hazardClass)
+					return refuse(where + " consumable store '" + processor.consumableStoreId
+						+ "' is already used by a " + existing->second
+						+ "-class nutrient process; hazardous and normal nutrient streams may not share a store");
+			}
+			if (!declareMicrobialStore(processor.nutrientStoreId, "nutrient", where,
+				processor.hazardClass, false))
+				return false;
+			if (!declareWaterStore(processor.recoveredWaterStoreId, "recovered water", where,
+				processor.hazardClass, false))
+				return false;
+			if (!declareGasStore(processor.co2StoreId, "CO2", where,
+				processor.hazardClass, false))
+				return false;
+			if (!declareMicrobialStore(processor.residueStoreId, "residue", where,
+				processor.hazardClass, false))
+				return false;
+			auto const feed = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == processor.feedStoreId; });
+			auto const& composition = *feed->composition;
+			auto const dryPerKgFeed = 1.0 - composition.moisture;
+			auto const nutrientPerKgFeed = dryPerKgFeed * (composition.nutrientNitrogen
+				* processor.nitrogenRecovery + composition.phosphorus * processor.phosphorusRecovery
+				+ composition.potassium * processor.potassiumRecovery
+				+ composition.otherMinerals * processor.mineralsRecovery);
+			auto const recoveredWaterPerKgFeed = composition.moisture * processor.waterRecovery;
+			auto const residuePerKgFeed = 1.0 + processor.oxygenPerKgFeedKg
+				+ processor.processWaterPerKgFeedKg - nutrientPerKgFeed
+				- recoveredWaterPerKgFeed - processor.co2PerKgFeedKg;
+			if (residuePerKgFeed < -StationBalanceTolerance)
+				return refuse(where + " declared yields would create mass: the outputs exceed the feed plus oxygen plus process water, and an unrecoverable residue cannot be negative");
+			auto const feedEnergyKJPerKgFeed = dryPerKgFeed * composition.energyKJPerKgDry;
+			if (processor.reactionHeatKJPerKgFeed > feedEnergyKJPerKgFeed
+				+ StationBalanceTolerance * std::max(1.0, std::abs(feedEnergyKJPerKgFeed)))
+				return refuse(where + " declared reaction heat exceeds the feedstock's declared chemical energy: the digestion may not release more heat than the feed carries");
+			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
+				{ return reservoir.id == processor.heatSinkId; });
+			if (sink == settings.thermalReservoirs.end())
+				return refuse(where + " heat sink is unknown thermal reservoir '" + processor.heatSinkId + "'");
+			if (sink->thermalClass != processor.thermalClass)
+				return refuse(where + " thermal class '" + processor.thermalClass
+					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
+					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
+		}
 		diagnostic.clear(); return true;
 	}
 	void setStationSystemsSourceLoader(StationSystemsSourceLoader loader) { sourceLoader = std::move(loader); }
@@ -2535,6 +2745,7 @@ namespace core
 			double lastFuelCellHeatKW{0.0}; // fuel-cell waste heat routed here this tick (#406)
 			double lastSabatierHeatKW{0.0}; // Sabatier reaction + dose heat routed here this tick (#405)
 			double lastMethaneProcessingHeatKW{0.0}; // methane-processing waste heat routed here this tick (#405)
+			double lastMicrobialHeatKW{0.0}; // microbial digestion reaction + dose heat routed here this tick (#407)
 			double lastAtmosphereHeatKW{0.0}; // reservoir side of the compartment exchanger this tick
 			double lastBufferChargeKW{0.0}; // heat absorbed out of the reservoir by buffers this tick (#398)
 			double lastBufferDischargeKW{0.0}; // heat returned into the reservoir by buffers this tick (#398)
@@ -2550,6 +2761,7 @@ namespace core
 			double fuelCellKJ{0.0}; // cumulative fuel-cell waste heat into the reservoir (#406)
 			double sabatierKJ{0.0}; // cumulative Sabatier reaction + dose heat into the reservoir (#405)
 			double methaneProcessingKJ{0.0}; // cumulative methane-processing waste heat into the reservoir (#405)
+			double microbialKJ{0.0}; // cumulative microbial digestion reaction + process heat into the reservoir (#407)
 			double atmosphereKJ{0.0}; // cumulative net compartment exchange into the reservoir
 			double bufferChargeKJ{0.0}; // cumulative heat absorbed out of the reservoir by buffers (#398)
 			double bufferDischargeKJ{0.0}; // cumulative heat returned into the reservoir by buffers (#398)
@@ -3105,6 +3317,70 @@ namespace core
 			double heatRoutedKJ{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
+		// The authoritative ledger of one authored microbial processor
+		// (#407). The processor digests a compound organic-waste feed and
+		// recovers its bound N/P/K/minerals at the declared per-
+		// constituent yields, its moisture at the declared water recovery,
+		// the declared CO2 share, and the unrecoverable residue as the
+		// mass-balance remainder - so the digestion closes on mass by
+		// construction. It consumes oxygen, process water, consumable
+	// medium and electricity per kilogram of feed, and routes its
+		// exothermic reaction heat plus the electrical dose exactly once
+		// into the class-matched sink. Feeds draw only qualified material
+		// above each store's protected reserve; a saturated destination
+		// backpressures the whole stage through the uniform scale; the
+		// static operating window (minimum operating temperature up to
+		// the maximum sink temperature) gates eligibility against the
+		// sink reservoir without any dynamic culture condition.
+		struct MicrobialProcessorState
+		{
+			MicrobialProcessorSettings authored;
+			size_t feedStoreIndex{0};
+			size_t oxygenStoreIndex{0};
+			size_t waterStoreIndex{0};
+			size_t consumableStoreIndex{0};
+			size_t nutrientStoreIndex{0};
+			size_t recoveredWaterStoreIndex{0};
+			size_t co2StoreIndex{0};
+			size_t residueStoreIndex{0};
+			size_t sinkIndex{0};
+			size_t declarationIndex{0};
+			double lastScale{0.0};
+			std::string lastLimiter;
+			double lastRequestedKg{0.0};
+			double lastFeedConsumedKg{0.0};
+			double lastOxygenConsumedKg{0.0};
+			double lastWaterConsumedKg{0.0};
+			double lastConsumableRequested{0.0};
+			double lastConsumableUsed{0.0};
+			double lastConsumableUnmet{0.0};
+			double lastNutrientProducedKg{0.0};
+			double lastRecoveredWaterKg{0.0};
+			double lastCo2ProducedKg{0.0};
+			double lastResidueProducedKg{0.0};
+			double lastPowerDemandKW{0.0};
+			double lastPowerSuppliedKW{0.0};
+			double lastUnmetProcessingKg{0.0};
+			double lastReactionHeatKW{0.0};
+			bool lastTemperatureEligible{false};
+			std::string lastBlockReason;
+			double feedConsumedKg{0.0};
+			double oxygenConsumedKg{0.0};
+			double waterConsumedKg{0.0};
+			double consumablesUsed{0.0};
+			double nutrientProducedKg{0.0};
+			double recoveredWaterKg{0.0};
+			double co2ProducedKg{0.0};
+			double residueProducedKg{0.0};
+			double nitrogenRecoveredKg{0.0};
+			double phosphorusRecoveredKg{0.0};
+			double potassiumRecoveredKg{0.0};
+			double mineralsRecoveredKg{0.0};
+			double energySuppliedKJ{0.0};
+			double reactionHeatKJ{0.0};
+			double heatRoutedKJ{0.0};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
 		std::vector<TransferState> transfers;
@@ -3133,6 +3409,7 @@ namespace core
 		std::vector<FuelCellState> fuelCells;
 		std::vector<SabatierState> sabatierReactors;
 		std::vector<MethaneProcessorState> methaneProcessors;
+		std::vector<MicrobialProcessorState> microbialProcessors;
 		// Electrolyzers and capture machines compete for the same power pool
 		// and the same stores, so each runs in the declared deterministic
 		// order: priority descending, declaration order ascending.
@@ -3144,6 +3421,11 @@ namespace core
 		// ascending (#405).
 		std::vector<size_t> sabatierOrder;
 		std::vector<size_t> methaneProcessorOrder;
+		// Microbial processors compete for the same power pool and share
+		// the waste, water and CO2 stores, so each runs in the declared
+		// deterministic order: priority descending, declaration order
+		// ascending (#407).
+		std::vector<size_t> microbialProcessorOrder;
 		// Treatments compete for the same power pool and the same stores, so
 		// they run in the declared deterministic order: priority descending,
 		// declaration order ascending.
@@ -3232,6 +3514,7 @@ namespace core
 			auto const committedFuelCells = fuelCells;
 			auto const committedSabatierReactors = sabatierReactors;
 			auto const committedMethaneProcessors = methaneProcessors;
+			auto const committedMicrobialProcessors = microbialProcessors;
 			auto const committedAvailableGenerationKW = lastAvailableGenerationKW;
 			auto const committedBatteryShortfallKW = lastBatteryShortfallKW;
 			if (runLedger(tick, seconds, system, violation)) return true;
@@ -3258,6 +3541,7 @@ namespace core
 			fuelCells = committedFuelCells;
 			sabatierReactors = committedSabatierReactors;
 			methaneProcessors = committedMethaneProcessors;
+			microbialProcessors = committedMicrobialProcessors;
 			lastAvailableGenerationKW = committedAvailableGenerationKW;
 			lastBatteryShortfallKW = committedBatteryShortfallKW;
 			return false;
@@ -3357,6 +3641,9 @@ namespace core
 			std::vector<StationTransferStatus> previousMethaneProcessorStatus;
 			previousMethaneProcessorStatus.reserve(methaneProcessors.size());
 			for (auto const& processor : methaneProcessors) previousMethaneProcessorStatus.push_back(processor.status);
+			std::vector<StationTransferStatus> previousMicrobialProcessorStatus;
+			previousMicrobialProcessorStatus.reserve(microbialProcessors.size());
+			for (auto const& processor : microbialProcessors) previousMicrobialProcessorStatus.push_back(processor.status);
 			std::vector<double> qualified, unqualified;
 			qualified.reserve(stores.size());
 			unqualified.reserve(stores.size());
@@ -5610,6 +5897,330 @@ namespace core
 					processor.status = StationTransferStatus::Full;
 				else processor.status = StationTransferStatus::Partial;
 			}
+			// Nutrient recovery (#407) runs in the same phase after carbon
+			// recovery: the microbial processor digests the compound
+			// organic-waste feed, recovers its bound N/P/K/minerals at the
+			// declared per-constituent yields and its moisture at the
+			// declared water recovery, releases the declared CO2 share, and
+			// leaves the unrecoverable residue as the mass-balance
+			// remainder - so the digestion closes on mass by construction
+			// and the feed's atmospheric nitrogen can only pass through to
+			// the residue, never into the recovered nutrients. The stage
+			// competes for the same generation-and-battery pool, pays for
+			// itself before a kilogram digests, and only digests what the
+			// actually supplied energy can drive at the declared dose. Its
+			// exothermic reaction heat plus the electrical dose route into
+			// the class-matched sink exactly once. Feeds draw only above
+			// their protected reserves; saturated destinations cap the
+			// whole stage through the uniform scale instead of venting; the
+			// static operating window gates temperature eligibility against
+			// the sink reservoir without modelling any dynamic culture
+			// condition.
+			std::vector<double> microbialHeatByReservoir(reservoirs.size(), 0.0);
+			double totalMicrobialProcessingPowerKW{0.0};
+			for (size_t orderIndex : microbialProcessorOrder)
+			{
+				auto& processor = microbialProcessors[orderIndex];
+				auto& feed = stores[processor.feedStoreIndex];
+				auto& oxygen = stores[processor.oxygenStoreIndex];
+				auto& water = stores[processor.waterStoreIndex];
+				auto& consumable = stores[processor.consumableStoreIndex];
+				auto& nutrient = stores[processor.nutrientStoreIndex];
+				auto& recoveredWater = stores[processor.recoveredWaterStoreIndex];
+				auto& co2 = stores[processor.co2StoreIndex];
+				auto& residue = stores[processor.residueStoreIndex];
+				processor.lastScale = 0.0;
+				processor.lastLimiter.clear();
+				processor.lastRequestedKg = 0.0;
+				processor.lastFeedConsumedKg = 0.0;
+				processor.lastOxygenConsumedKg = 0.0;
+				processor.lastWaterConsumedKg = 0.0;
+				processor.lastConsumableRequested = 0.0;
+				processor.lastConsumableUsed = 0.0;
+				processor.lastConsumableUnmet = 0.0;
+				processor.lastNutrientProducedKg = 0.0;
+				processor.lastRecoveredWaterKg = 0.0;
+				processor.lastCo2ProducedKg = 0.0;
+				processor.lastResidueProducedKg = 0.0;
+				processor.lastPowerDemandKW = 0.0;
+				processor.lastPowerSuppliedKW = 0.0;
+				processor.lastUnmetProcessingKg = 0.0;
+				processor.lastReactionHeatKW = 0.0;
+				processor.lastTemperatureEligible = false;
+				processor.lastBlockReason.clear();
+				if (processor.authored.rateKgPerS <= 0.0)
+				{
+					processor.status = StationTransferStatus::Idle;
+					continue;
+				}
+				auto const tickSeconds = static_cast<double>(seconds);
+				auto const fullKg = processor.authored.rateKgPerS * tickSeconds;
+				// Static operating window: the culture runs at or above the
+				// minimum operating temperature and below the maximum sink
+				// temperature. Outside the window the stage is refused whole
+				// and spends nothing - no dynamic condition is modelled.
+				auto const& sink = reservoirs[processor.sinkIndex];
+				processor.lastTemperatureEligible = sink.temperatureC + 1e-9
+					>= processor.authored.minOperatingTemperatureC
+					&& sink.temperatureC + 1e-9 < processor.authored.maxSinkTemperatureC;
+				if (!processor.lastTemperatureEligible)
+				{
+					processor.lastBlockReason = sink.temperatureC + 1e-9
+						< processor.authored.minOperatingTemperatureC
+						? "below the minimum operating temperature: the culture is dormant"
+						: "cooling is not qualified: sink at or above the maximum sink temperature";
+					processor.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				auto const& composition = *feed.authored.composition;
+				auto const dryPerKgFeed = 1.0 - composition.moisture;
+				// The recovered nutrients are funded by the feed's bound
+				// constituents only: bound nitrogen, phosphorus, potassium
+				// and the grouped mineral term, each at its declared
+				// recovery fraction. Atmospheric nitrogen is not in this
+				// sum - it is not a nutrient and no configured process here
+				// converts it.
+				auto const nutrientPerKgFeed = dryPerKgFeed * (composition.nutrientNitrogen
+					* processor.authored.nitrogenRecovery + composition.phosphorus
+					* processor.authored.phosphorusRecovery + composition.potassium
+					* processor.authored.potassiumRecovery + composition.otherMinerals
+					* processor.authored.mineralsRecovery);
+				auto const recoveredWaterPerKgFeed = composition.moisture
+					* processor.authored.waterRecovery;
+				// The residue is the mass-balance remainder of the declared
+				// inputs and outputs per kilogram of feed: validation
+				// guaranteed it is non-negative, so the digestion can never
+				// create or destroy mass.
+				auto const residuePerKgFeed = 1.0 + processor.authored.oxygenPerKgFeedKg
+					+ processor.authored.processWaterPerKgFeedKg - nutrientPerKgFeed
+					- recoveredWaterPerKgFeed - processor.authored.co2PerKgFeedKg;
+				auto const drawableFeedUnits = std::max(0.0,
+					qualified[processor.feedStoreIndex] - feed.authored.protectedReserve);
+				auto const drawableOxygenUnits = std::max(0.0,
+					qualified[processor.oxygenStoreIndex] - oxygen.authored.protectedReserve);
+				auto const drawableWaterUnits = std::max(0.0,
+					qualified[processor.waterStoreIndex] - water.authored.protectedReserve);
+				auto const drawableConsumableUnits = std::max(0.0,
+					qualified[processor.consumableStoreIndex] - consumable.authored.protectedReserve);
+				auto const nutrientHeadroomUnits = std::max(0.0, nutrient.authored.capacity
+					- (qualified[processor.nutrientStoreIndex] + unqualified[processor.nutrientStoreIndex]));
+				auto const recoveredWaterHeadroomUnits = std::max(0.0,
+					recoveredWater.authored.capacity - (qualified[processor.recoveredWaterStoreIndex]
+						+ unqualified[processor.recoveredWaterStoreIndex]));
+				auto const co2HeadroomUnits = std::max(0.0, co2.authored.capacity
+					- (qualified[processor.co2StoreIndex] + unqualified[processor.co2StoreIndex]));
+				auto const residueHeadroomUnits = std::max(0.0, residue.authored.capacity
+					- (qualified[processor.residueStoreIndex] + unqualified[processor.residueStoreIndex]));
+				double scale = 1.0;
+				std::string limiter;
+				auto const constrain = [&](double available, double required,
+					std::string const& reason)
+				{
+					if (required <= 0.0) return;
+					auto const fraction = available / required;
+					if (fraction < scale) { scale = fraction; limiter = reason; }
+				};
+				constrain(drawableFeedUnits, kgToMass(feed.authored.unit, fullKg),
+					"organic waste feed store '" + feed.authored.id
+					+ "' has nothing drawable above its protected reserve");
+				constrain(drawableOxygenUnits,
+					kgToMass(oxygen.authored.unit,
+						fullKg * processor.authored.oxygenPerKgFeedKg),
+					"oxygen store '" + oxygen.authored.id
+					+ "' has nothing drawable above its protected reserve");
+				constrain(drawableWaterUnits,
+					kgToMass(water.authored.unit,
+						fullKg * processor.authored.processWaterPerKgFeedKg),
+					"process water store '" + water.authored.id
+					+ "' has nothing drawable above its protected reserve");
+				constrain(drawableConsumableUnits,
+					fullKg * processor.authored.consumablePerKgFeed,
+					"consumable store '" + consumable.authored.id
+					+ "' has nothing drawable above its protected reserve");
+				constrain(nutrientHeadroomUnits,
+					kgToMass(nutrient.authored.unit, fullKg * nutrientPerKgFeed),
+					"nutrient store '" + nutrient.authored.id
+					+ "' is full: the recovered nutrients have nowhere to go");
+				constrain(recoveredWaterHeadroomUnits,
+					kgToMass(recoveredWater.authored.unit, fullKg * recoveredWaterPerKgFeed),
+					"recovered water store '" + recoveredWater.authored.id
+					+ "' is full: the recovered water has nowhere to go");
+				constrain(co2HeadroomUnits,
+					kgToMass(co2.authored.unit, fullKg * processor.authored.co2PerKgFeedKg),
+					"CO2 store '" + co2.authored.id
+					+ "' is full: the carbon dioxide has nowhere to go");
+				constrain(residueHeadroomUnits,
+					kgToMass(residue.authored.unit, fullKg * residuePerKgFeed),
+					"residue store '" + residue.authored.id
+					+ "' is full: the unrecoverable residue has nowhere to go");
+				scale = std::max(0.0, std::min(1.0, scale));
+				processor.lastScale = scale;
+				processor.lastLimiter = limiter;
+				processor.lastRequestedKg = fullKg;
+				if (scale <= 0.0)
+				{
+					processor.lastBlockReason = limiter;
+					processor.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				processor.lastPowerDemandKW = scale * processor.authored.rateKgPerS
+					* processor.authored.specificEnergyKWhPerKgFeed * 3600.0;
+				auto const fromGeneration = std::min(processor.lastPowerDemandKW, availableGeneration);
+				availableGeneration -= fromGeneration;
+				auto const ask = processor.lastPowerDemandKW - fromGeneration;
+				auto const fromBattery = drawBatteries(ask);
+				auto const suppliedKW = fromGeneration + fromBattery;
+				batterySuppliedKW += fromBattery;
+				batteryShortfallKW += ask - fromBattery;
+				processor.lastPowerSuppliedKW = suppliedKW;
+				if (processor.lastPowerDemandKW > 1e-12 && suppliedKW <= 1e-12)
+				{
+					// Nothing was paid: the tick is refused whole. No feed
+					// digests, no oxygen is drawn and no product appears - a
+					// processor with no power is not a processor running for
+					// free.
+					processor.lastBlockReason =
+						"no electrical supply: the microbial processor cannot run";
+					processor.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				auto const energySuppliedKJ = suppliedKW * tickSeconds;
+				// Energy feasibility: the processor only digests the feed
+				// the supplied energy can pay for at the declared dose;
+				// curtailed power reduces digestion rather than gifting
+				// products for free.
+				auto const doseKJPerKg = processor.authored.specificEnergyKWhPerKgFeed * 3600.0;
+				auto const energyFeasibleKg = doseKJPerKg > 0.0
+					? energySuppliedKJ / doseKJPerKg : scale * fullKg;
+				// The extent is capped by the inputs that are actually
+				// drawable above their protected reserves, so the stage never
+				// plans a digestion the feeds cannot sustain.
+				auto extentKg = std::min(energyFeasibleKg,
+					massToKg(feed.authored.unit, drawableFeedUnits));
+				if (processor.authored.oxygenPerKgFeedKg > 0.0)
+					extentKg = std::min(extentKg,
+						massToKg(oxygen.authored.unit, drawableOxygenUnits)
+							/ processor.authored.oxygenPerKgFeedKg);
+				if (processor.authored.processWaterPerKgFeedKg > 0.0)
+					extentKg = std::min(extentKg,
+						massToKg(water.authored.unit, drawableWaterUnits)
+							/ processor.authored.processWaterPerKgFeedKg);
+				if (processor.authored.consumablePerKgFeed > 0.0)
+					extentKg = std::min(extentKg,
+						drawableConsumableUnits / processor.authored.consumablePerKgFeed);
+				// Move the flows, clamped per flow so roundoff never
+				// overshoots (#556), and recompute the ledger from what
+				// actually moved.
+				auto const feedUnits = std::min(kgToMass(feed.authored.unit, extentKg), drawableFeedUnits);
+				auto const feedActualKg = massToKg(feed.authored.unit, feedUnits);
+				auto const oxygenUnits = std::min(kgToMass(oxygen.authored.unit,
+					feedActualKg * processor.authored.oxygenPerKgFeedKg), drawableOxygenUnits);
+				auto const oxygenActualKg = massToKg(oxygen.authored.unit, oxygenUnits);
+				auto const waterUnits = std::min(kgToMass(water.authored.unit,
+					feedActualKg * processor.authored.processWaterPerKgFeedKg), drawableWaterUnits);
+				auto const waterActualKg = massToKg(water.authored.unit, waterUnits);
+				auto const consumableUnits = std::min(
+					feedActualKg * processor.authored.consumablePerKgFeed, drawableConsumableUnits);
+				auto const nutrientUnits = std::min(kgToMass(nutrient.authored.unit,
+					feedActualKg * nutrientPerKgFeed), nutrientHeadroomUnits);
+				auto const nutrientActualKg = massToKg(nutrient.authored.unit, nutrientUnits);
+				auto const recoveredWaterUnits = std::min(kgToMass(recoveredWater.authored.unit,
+					feedActualKg * recoveredWaterPerKgFeed), recoveredWaterHeadroomUnits);
+				auto const recoveredWaterActualKg = massToKg(recoveredWater.authored.unit,
+					recoveredWaterUnits);
+				auto const co2Units = std::min(kgToMass(co2.authored.unit,
+					feedActualKg * processor.authored.co2PerKgFeedKg), co2HeadroomUnits);
+				auto const co2ActualKg = massToKg(co2.authored.unit, co2Units);
+				auto const residueUnits = std::min(kgToMass(residue.authored.unit,
+					feedActualKg * residuePerKgFeed), residueHeadroomUnits);
+				auto const residueActualKg = massToKg(residue.authored.unit, residueUnits);
+				qualified[processor.feedStoreIndex] -= feedUnits;
+				flowOut[processor.feedStoreIndex] += feedUnits;
+				qualified[processor.oxygenStoreIndex] -= oxygenUnits;
+				flowOut[processor.oxygenStoreIndex] += oxygenUnits;
+				qualified[processor.waterStoreIndex] -= waterUnits;
+				flowOut[processor.waterStoreIndex] += waterUnits;
+				qualified[processor.consumableStoreIndex] -= consumableUnits;
+				flowOut[processor.consumableStoreIndex] += consumableUnits;
+				qualified[processor.nutrientStoreIndex] += nutrientUnits;
+				flowIn[processor.nutrientStoreIndex] += nutrientUnits;
+				qualified[processor.recoveredWaterStoreIndex] += recoveredWaterUnits;
+				flowIn[processor.recoveredWaterStoreIndex] += recoveredWaterUnits;
+				qualified[processor.co2StoreIndex] += co2Units;
+				flowIn[processor.co2StoreIndex] += co2Units;
+				qualified[processor.residueStoreIndex] += residueUnits;
+				flowIn[processor.residueStoreIndex] += residueUnits;
+				stagedUnitLoss[feed.authored.unit] += feedUnits;
+				stagedUnitLoss[oxygen.authored.unit] += oxygenUnits;
+				stagedUnitLoss[water.authored.unit] += waterUnits;
+				stagedUnitLoss[consumable.authored.unit] += consumableUnits;
+				stagedUnitLoss[nutrient.authored.unit] -= nutrientUnits;
+				stagedUnitLoss[recoveredWater.authored.unit] -= recoveredWaterUnits;
+				stagedUnitLoss[co2.authored.unit] -= co2Units;
+				stagedUnitLoss[residue.authored.unit] -= residueUnits;
+				// Constituent boundary: the compound feed's constituents
+				// leave the compound-material world with the feed, and the
+				// plain product stores carry none back. The recovered share
+				// is tracked in the processor's own per-constituent ledger;
+				// at the station boundary the whole feed constituent set is
+				// booked as leaving the compound stores, never created and
+				// never silently destroyed.
+				ConstituentLedger netChange;
+				addComposition(netChange, composition, feedActualKg, -1.0);
+				if (consumable.authored.composition)
+					addComposition(netChange, *consumable.authored.composition,
+						massToKg(consumable.authored.unit, consumableUnits), -1.0);
+				for (auto const& entry : netChange)
+					stagedLoss[entry.first] -= entry.second;
+				// Energy: the electrical dose plus the exothermic heat the
+				// products do not retain leave through the sink, once and
+				// nowhere else.
+				auto const reactionHeatKJ = feedActualKg
+					* processor.authored.reactionHeatKJPerKgFeed;
+				auto const heatKJ = energySuppliedKJ + reactionHeatKJ;
+				microbialHeatByReservoir[processor.sinkIndex] += heatKJ / tickSeconds;
+				processor.lastReactionHeatKW = reactionHeatKJ / tickSeconds;
+				// Per-constituent recovery: each recovered nutrient is the
+				// feed's bound content times its recovery fraction, so the
+				// elemental balance is visible per element and the
+				// atmospheric nitrogen share never appears here.
+				processor.nitrogenRecoveredKg += feedActualKg * dryPerKgFeed
+					* composition.nutrientNitrogen * processor.authored.nitrogenRecovery;
+				processor.phosphorusRecoveredKg += feedActualKg * dryPerKgFeed
+					* composition.phosphorus * processor.authored.phosphorusRecovery;
+				processor.potassiumRecoveredKg += feedActualKg * dryPerKgFeed
+					* composition.potassium * processor.authored.potassiumRecovery;
+				processor.mineralsRecoveredKg += feedActualKg * dryPerKgFeed
+					* composition.otherMinerals * processor.authored.mineralsRecovery;
+				processor.lastFeedConsumedKg = feedActualKg;
+				processor.lastOxygenConsumedKg = oxygenActualKg;
+				processor.lastWaterConsumedKg = waterActualKg;
+				processor.lastConsumableRequested = scale * fullKg
+					* processor.authored.consumablePerKgFeed;
+				processor.lastConsumableUsed = consumableUnits;
+				processor.lastConsumableUnmet = processor.lastConsumableRequested - consumableUnits;
+				processor.lastNutrientProducedKg = nutrientActualKg;
+				processor.lastRecoveredWaterKg = recoveredWaterActualKg;
+				processor.lastCo2ProducedKg = co2ActualKg;
+				processor.lastResidueProducedKg = residueActualKg;
+				processor.lastUnmetProcessingKg = std::max(0.0, scale * fullKg - feedActualKg);
+				processor.feedConsumedKg += feedActualKg;
+				processor.oxygenConsumedKg += oxygenActualKg;
+				processor.waterConsumedKg += waterActualKg;
+				processor.consumablesUsed += consumableUnits;
+				processor.nutrientProducedKg += nutrientActualKg;
+				processor.recoveredWaterKg += recoveredWaterActualKg;
+				processor.co2ProducedKg += co2ActualKg;
+				processor.residueProducedKg += residueActualKg;
+				processor.energySuppliedKJ += energySuppliedKJ;
+				processor.reactionHeatKJ += reactionHeatKJ;
+				processor.heatRoutedKJ += heatKJ;
+				totalMicrobialProcessingPowerKW += suppliedKW;
+				if (feedActualKg + 1e-12 >= fullKg
+					&& suppliedKW + 1e-12 >= processor.lastPowerDemandKW)
+					processor.status = StationTransferStatus::Full;
+				else processor.status = StationTransferStatus::Partial;
+			}
 			// Second loop pass: integrate the loop's temperature from the
 			// pump work, heater heat, exchanger exchange and the chiller
 			// extraction that actually moved this tick, and book the loop
@@ -6107,7 +6718,8 @@ namespace core
 						+ electrolysisHeatByReservoir[index]
 						+ fuelCellHeatByReservoir[index]
 						+ sabatierHeatByReservoir[index]
-						+ methaneHeatByReservoir[index];
+						+ methaneHeatByReservoir[index]
+						+ microbialHeatByReservoir[index];
 					// Net radiative rejection at the current emitting
 					// temperature: emissivity x view factor x area x sigma
 					// x (T^4 - T_sink^4). The environmental back-radiation
@@ -6272,6 +6884,7 @@ namespace core
 					reservoir.lastFuelCellHeatKW = fuelCellHeatByReservoir[index];
 					reservoir.lastSabatierHeatKW = sabatierHeatByReservoir[index];
 					reservoir.lastMethaneProcessingHeatKW = methaneHeatByReservoir[index];
+					reservoir.lastMicrobialHeatKW = microbialHeatByReservoir[index];
 					reservoir.lastAtmosphereHeatKW = atmosphereHeatKW;
 					reservoir.lastHeatInKW = heatInKW;
 					reservoir.lastRejectedKW = rejectedKW;
@@ -6285,6 +6898,7 @@ namespace core
 					reservoir.fuelCellKJ += fuelCellHeatByReservoir[index] * dt;
 					reservoir.sabatierKJ += sabatierHeatByReservoir[index] * dt;
 					reservoir.methaneProcessingKJ += methaneHeatByReservoir[index] * dt;
+					reservoir.microbialKJ += microbialHeatByReservoir[index] * dt;
 					reservoir.atmosphereKJ += atmosphereHeatKW * dt;
 					reservoir.bufferChargeKJ += bufferChargeKW * dt;
 					reservoir.bufferDischargeKJ += bufferDischargeKW * dt;
@@ -6704,6 +7318,7 @@ namespace core
 				if (!requireFinite(reservoir.lastFuelCellHeatKW, where + "fuel-cell waste heat")) return false;
 				if (!requireFinite(reservoir.lastSabatierHeatKW, where + "Sabatier reaction heat")) return false;
 				if (!requireFinite(reservoir.lastMethaneProcessingHeatKW, where + "methane-processing waste heat")) return false;
+				if (!requireFinite(reservoir.lastMicrobialHeatKW, where + "microbial digestion heat")) return false;
 				if (!requireFinite(reservoir.lastHeatInKW, where + "total heat inflow")) return false;
 				if (!requireFinite(reservoir.lastRejectedKW, where + "radiator rejection")) return false;
 				if (!requireFinite(reservoir.lastNetKW, where + "net heat balance")) return false;
@@ -6716,6 +7331,7 @@ namespace core
 				if (!requireFinite(reservoir.fuelCellKJ, where + "cumulative fuel-cell waste heat energy")) return false;
 				if (!requireFinite(reservoir.sabatierKJ, where + "cumulative Sabatier heat energy")) return false;
 				if (!requireFinite(reservoir.methaneProcessingKJ, where + "cumulative methane-processing heat energy")) return false;
+				if (!requireFinite(reservoir.microbialKJ, where + "cumulative microbial heat energy")) return false;
 				if (!requireFinite(reservoir.atmosphereKJ, where + "cumulative atmosphere exchange energy")) return false;
 				if (!requireFinite(reservoir.rejectedKJ, where + "cumulative rejected energy")) return false;
 				if (!requireFinite(reservoir.lastBufferChargeKW, where + "buffer charge power")) return false;
@@ -7407,6 +8023,82 @@ namespace core
 					return violation = where
 						+ "absorbed more reaction heat than the electrical dose supplied", false;
 			}
+			// Nutrient recovery audits (#407): every reported magnitude is
+			// finite, the digestion closes on mass - feed + oxygen + process
+			// water = nutrients + recovered water + CO2 + residue - with the
+			// residue as the balance term, its energy ledger closes over
+			// supplied + released = routed, the released heat never exceeds
+			// the feedstock's declared chemical energy, and the recovered
+			// per-constituent totals never exceed the feed's bound content -
+			// the atmospheric nitrogen share is never recovered.
+			system = "Microbial processing";
+			for (auto const& processor : microbialProcessors)
+			{
+				auto const where = "microbial processor '" + processor.authored.id + "' ";
+				if (!requireFinite(processor.lastScale, where + "processing scale")) return false;
+				if (!requireFinite(processor.lastRequestedKg, where + "last requested processing")) return false;
+				if (!requireFinite(processor.lastFeedConsumedKg, where + "last feed consumed")) return false;
+				if (!requireFinite(processor.lastOxygenConsumedKg, where + "last oxygen consumed")) return false;
+				if (!requireFinite(processor.lastWaterConsumedKg, where + "last process water consumed")) return false;
+				if (!requireFinite(processor.lastConsumableRequested, where + "last consumable requested")) return false;
+				if (!requireFinite(processor.lastConsumableUsed, where + "last consumable used")) return false;
+				if (!requireFinite(processor.lastConsumableUnmet, where + "last consumable unmet")) return false;
+				if (!requireFinite(processor.lastNutrientProducedKg, where + "last nutrients produced")) return false;
+				if (!requireFinite(processor.lastRecoveredWaterKg, where + "last recovered water")) return false;
+				if (!requireFinite(processor.lastCo2ProducedKg, where + "last CO2 produced")) return false;
+				if (!requireFinite(processor.lastResidueProducedKg, where + "last residue produced")) return false;
+				if (!requireFinite(processor.lastPowerDemandKW, where + "last power demand")) return false;
+				if (!requireFinite(processor.lastPowerSuppliedKW, where + "last power supplied")) return false;
+				if (!requireFinite(processor.lastUnmetProcessingKg, where + "last unmet processing")) return false;
+				if (!requireFinite(processor.lastReactionHeatKW, where + "last reaction heat")) return false;
+				if (!requireFinite(processor.feedConsumedKg, where + "cumulative feed consumed")) return false;
+				if (!requireFinite(processor.oxygenConsumedKg, where + "cumulative oxygen consumed")) return false;
+				if (!requireFinite(processor.waterConsumedKg, where + "cumulative process water consumed")) return false;
+				if (!requireFinite(processor.consumablesUsed, where + "cumulative consumables used")) return false;
+				if (!requireFinite(processor.nutrientProducedKg, where + "cumulative nutrients produced")) return false;
+				if (!requireFinite(processor.recoveredWaterKg, where + "cumulative recovered water")) return false;
+				if (!requireFinite(processor.co2ProducedKg, where + "cumulative CO2 produced")) return false;
+				if (!requireFinite(processor.residueProducedKg, where + "cumulative residue produced")) return false;
+				if (!requireFinite(processor.nitrogenRecoveredKg, where + "cumulative nitrogen recovered")) return false;
+				if (!requireFinite(processor.phosphorusRecoveredKg, where + "cumulative phosphorus recovered")) return false;
+				if (!requireFinite(processor.potassiumRecoveredKg, where + "cumulative potassium recovered")) return false;
+				if (!requireFinite(processor.mineralsRecoveredKg, where + "cumulative minerals recovered")) return false;
+				if (!requireFinite(processor.energySuppliedKJ, where + "cumulative energy supplied")) return false;
+				if (!requireFinite(processor.reactionHeatKJ, where + "cumulative reaction heat")) return false;
+				if (!requireFinite(processor.heatRoutedKJ, where + "cumulative heat routed")) return false;
+				if (processor.lastScale < -StationBalanceTolerance
+					|| processor.lastScale > 1.0 + StationBalanceTolerance)
+					return violation = where
+						+ "processing scale left the declared [0, 1] range", false;
+				auto const massBound = StationBalanceTolerance * std::max(1.0,
+					processor.nutrientProducedKg + processor.recoveredWaterKg
+						+ processor.co2ProducedKg + processor.residueProducedKg);
+				auto const massResidual = processor.feedConsumedKg + processor.oxygenConsumedKg
+					+ processor.waterConsumedKg - processor.nutrientProducedKg
+					- processor.recoveredWaterKg - processor.co2ProducedKg
+					- processor.residueProducedKg;
+				if (!std::isfinite(massResidual) || std::abs(massResidual) > massBound)
+					return violation = where
+						+ "feed/oxygen/water/nutrient/water/CO2/residue digestion ledger does not close within tolerance", false;
+				auto const energyResidual = processor.energySuppliedKJ + processor.reactionHeatKJ
+					- processor.heatRoutedKJ;
+				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > massBound)
+					return violation = where
+						+ "supplied/released/routed energy ledger does not close within tolerance", false;
+				auto const& composition = *stores[processor.feedStoreIndex].authored.composition;
+				auto const feedEnergyKJ = processor.feedConsumedKg
+					* (1.0 - composition.moisture) * composition.energyKJPerKgDry;
+				auto const energyCapBound = StationBalanceTolerance * std::max(1.0, std::abs(feedEnergyKJ));
+				if (processor.reactionHeatKJ > feedEnergyKJ + energyCapBound)
+					return violation = where
+						+ "released more reaction heat than the consumed feedstock's declared chemical energy", false;
+				auto const boundNutrientKJ = processor.feedConsumedKg
+					* (1.0 - composition.moisture) * composition.nutrientNitrogen;
+				auto const nutrientCapBound = StationBalanceTolerance * std::max(1.0, std::abs(boundNutrientKJ));
+				if (processor.nitrogenRecoveredKg > boundNutrientKJ + nutrientCapBound)
+					return violation = where
+						+ "recovered more nitrogen than the consumed feed's bound nutrient nitrogen carries", false;
+			}
 			system = "Power allocation";
 			for (auto const& array : solarArrays)
 			{
@@ -7487,6 +8179,7 @@ namespace core
 				if (!requireFinite(totalFuelCellWasteKW, "total fuel-cell backup waste heat")) return false;
 				if (!requireFinite(totalSabatierPowerKW, "total Sabatier reactor power")) return false;
 				if (!requireFinite(totalMethaneProcessingPowerKW, "total methane processing power")) return false;
+				if (!requireFinite(totalMicrobialProcessingPowerKW, "total microbial processing power")) return false;
 			}
 			for (size_t index = 0; index < stores.size(); ++index)
 			{
@@ -7906,6 +8599,22 @@ namespace core
 					? "Methane processor '" + processor.authored.id + "' rejected: " + reason
 					: "Methane processor '" + processor.authored.id + "' partial: " + reason);
 			}
+			for (size_t index = 0; index < microbialProcessors.size(); ++index)
+			{
+				auto const& processor = microbialProcessors[index];
+				if (processor.status == previousMicrobialProcessorStatus[index]) continue;
+				if (processor.status == StationTransferStatus::Full)
+				{
+					appendBoundedEvent(events, tick, "Microbial processor '" + processor.authored.id
+						+ "' digesting at full rate");
+					continue;
+				}
+				auto const reason = !processor.lastBlockReason.empty()
+					? processor.lastBlockReason : processor.lastLimiter;
+				appendBoundedEvent(events, tick, processor.status == StationTransferStatus::Rejected
+					? "Microbial processor '" + processor.authored.id + "' rejected: " + reason
+					: "Microbial processor '" + processor.authored.id + "' partial: " + reason);
+			}
 			// Delivery arrivals are discrete scenario events rather than a
 			// continuous per-tick service, so every arrival is announced with
 			// its own quantities: the refused remainder is the account for
@@ -8255,6 +8964,36 @@ namespace core
 			[&](size_t left, size_t right)
 			{ return mImpl->methaneProcessors[left].authored.priority
 				> mImpl->methaneProcessors[right].authored.priority; });
+		// Nutrient-recovery ledgers start empty (#407): the authored
+		// contracts are resolved to store and sink indices at construction
+		// so the tick ledger never re-looks-up references, and every
+		// consumption, recovery and heat total reconstructs from zero on
+		// Reset and load. Processors compete for the same power pool and
+		// share the waste, water and CO2 stores, so each runs in the
+		// declared deterministic order: priority descending, declaration
+		// order ascending.
+		for (auto const& processor : settings.microbialProcessors)
+		{
+			Impl::MicrobialProcessorState state;
+			state.authored = processor;
+			state.feedStoreIndex = storeIndex[processor.feedStoreId];
+			state.oxygenStoreIndex = storeIndex[processor.oxygenStoreId];
+			state.waterStoreIndex = storeIndex[processor.waterStoreId];
+			state.consumableStoreIndex = storeIndex[processor.consumableStoreId];
+			state.nutrientStoreIndex = storeIndex[processor.nutrientStoreId];
+			state.recoveredWaterStoreIndex = storeIndex[processor.recoveredWaterStoreId];
+			state.co2StoreIndex = storeIndex[processor.co2StoreId];
+			state.residueStoreIndex = storeIndex[processor.residueStoreId];
+			state.sinkIndex = reservoirIndex[processor.heatSinkId];
+			state.declarationIndex = mImpl->microbialProcessors.size();
+			mImpl->microbialProcessors.push_back(std::move(state));
+		}
+		mImpl->microbialProcessorOrder.resize(mImpl->microbialProcessors.size());
+		std::iota(mImpl->microbialProcessorOrder.begin(), mImpl->microbialProcessorOrder.end(), size_t{0});
+		std::stable_sort(mImpl->microbialProcessorOrder.begin(), mImpl->microbialProcessorOrder.end(),
+			[&](size_t left, size_t right)
+			{ return mImpl->microbialProcessors[left].authored.priority
+				> mImpl->microbialProcessors[right].authored.priority; });
 		// Fuel-cell backup units run on the supply side in declaration
 		// order (#406); their reactant and product stores are resolved to
 		// the same store indices the ledger mutates.
@@ -8362,7 +9101,8 @@ namespace core
 				&settings.waterCollectors, &settings.waterTreatments,
 				&settings.electrolyzers, &settings.co2Captures, &settings.fuelCells,
 				&settings.thermalBuffers, &settings.wasteEjections,
-				&settings.sabatierReactors, &settings.methaneProcessors};
+				&settings.sabatierReactors, &settings.methaneProcessors,
+				&settings.microbialProcessors};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -8745,6 +9485,8 @@ namespace core
 			reservoirResult.sabatierEnergyKJ = reservoir.sabatierKJ;
 			reservoirResult.lastMethaneProcessingHeatKW = reservoir.lastMethaneProcessingHeatKW;
 			reservoirResult.methaneProcessingEnergyKJ = reservoir.methaneProcessingKJ;
+			reservoirResult.lastMicrobialHeatKW = reservoir.lastMicrobialHeatKW;
+			reservoirResult.microbialEnergyKJ = reservoir.microbialKJ;
 			reservoirResult.lastAtmosphereHeatKW = reservoir.lastAtmosphereHeatKW;
 			reservoirResult.lastBufferChargeKW = reservoir.lastBufferChargeKW;
 			reservoirResult.lastBufferDischargeKW = reservoir.lastBufferDischargeKW;
@@ -8770,6 +9512,7 @@ namespace core
 				+ reservoir.absorbedKJ + reservoir.routedKJ + reservoir.loopKJ
 				+ reservoir.condenserKJ + reservoir.generatorKJ + reservoir.electrolysisKJ
 				+ reservoir.fuelCellKJ + reservoir.sabatierKJ + reservoir.methaneProcessingKJ
+				+ reservoir.microbialKJ
 				+ reservoir.atmosphereKJ
 				+ reservoir.bufferDischargeKJ - reservoir.bufferChargeKJ
 				- reservoir.rejectedKJ - reservoirResult.currentEnergyKJ;
@@ -9449,6 +10192,95 @@ namespace core
 			result.methaneProcessors.push_back(std::move(processorResult));
 		}
 		result.power.methaneProcessingPowerKW = totalMethaneProcessingPower;
+		// The nutrient-recovery snapshot reports the authored processor
+		// contract beside the feed, oxygen, process water and consumable
+		// actually consumed, the recovered nutrients, recovered water, CO2
+		// and residue actually produced, the energy actually supplied and
+		// the heat actually routed: the digestion closes on mass with the
+		// residue as the balance term, and the energy closes over supplied
+		// + released = routed, so a reader can see where every kilogram
+		// and kilojoule went. The per-constituent recovery totals show
+		// the recovered nitrogen, phosphorus, potassium and grouped
+		// minerals separately, funded only by the feed's bound nutrient
+		// constituents (#407).
+		double totalMicrobialProcessingPower = 0.0;
+		for (auto const& processor : mImpl->microbialProcessors)
+		{
+			StationMicrobialProcessorSnapshot processorResult;
+			processorResult.id = processor.authored.id;
+			processorResult.hazardClass = processor.authored.hazardClass;
+			processorResult.feedStoreId = processor.authored.feedStoreId;
+			processorResult.oxygenStoreId = processor.authored.oxygenStoreId;
+			processorResult.waterStoreId = processor.authored.waterStoreId;
+			processorResult.consumableStoreId = processor.authored.consumableStoreId;
+			processorResult.nutrientStoreId = processor.authored.nutrientStoreId;
+			processorResult.recoveredWaterStoreId = processor.authored.recoveredWaterStoreId;
+			processorResult.co2StoreId = processor.authored.co2StoreId;
+			processorResult.residueStoreId = processor.authored.residueStoreId;
+			processorResult.thermalClass = processor.authored.thermalClass;
+			processorResult.heatSinkId = processor.authored.heatSinkId;
+			processorResult.rateKgPerS = processor.authored.rateKgPerS;
+			processorResult.specificEnergyKWhPerKgFeed = processor.authored.specificEnergyKWhPerKgFeed;
+			processorResult.oxygenPerKgFeedKg = processor.authored.oxygenPerKgFeedKg;
+			processorResult.processWaterPerKgFeedKg = processor.authored.processWaterPerKgFeedKg;
+			processorResult.consumablePerKgFeed = processor.authored.consumablePerKgFeed;
+			processorResult.co2PerKgFeedKg = processor.authored.co2PerKgFeedKg;
+			processorResult.nitrogenRecovery = processor.authored.nitrogenRecovery;
+			processorResult.phosphorusRecovery = processor.authored.phosphorusRecovery;
+			processorResult.potassiumRecovery = processor.authored.potassiumRecovery;
+			processorResult.mineralsRecovery = processor.authored.mineralsRecovery;
+			processorResult.waterRecovery = processor.authored.waterRecovery;
+			processorResult.reactionHeatKJPerKgFeed = processor.authored.reactionHeatKJPerKgFeed;
+			processorResult.minOperatingTemperatureC = processor.authored.minOperatingTemperatureC;
+			processorResult.maxSinkTemperatureC = processor.authored.maxSinkTemperatureC;
+			processorResult.priority = processor.authored.priority;
+			processorResult.scale = processor.lastScale;
+			processorResult.limiter = processor.lastLimiter;
+			processorResult.lastRequestedKg = processor.lastRequestedKg;
+			processorResult.lastFeedConsumedKg = processor.lastFeedConsumedKg;
+			processorResult.lastOxygenConsumedKg = processor.lastOxygenConsumedKg;
+			processorResult.lastWaterConsumedKg = processor.lastWaterConsumedKg;
+			processorResult.lastConsumableRequested = processor.lastConsumableRequested;
+			processorResult.lastConsumableUsed = processor.lastConsumableUsed;
+			processorResult.lastConsumableUnmet = processor.lastConsumableUnmet;
+			processorResult.lastNutrientProducedKg = processor.lastNutrientProducedKg;
+			processorResult.lastRecoveredWaterKg = processor.lastRecoveredWaterKg;
+			processorResult.lastCo2ProducedKg = processor.lastCo2ProducedKg;
+			processorResult.lastResidueProducedKg = processor.lastResidueProducedKg;
+			processorResult.lastPowerDemandKW = processor.lastPowerDemandKW;
+			processorResult.lastPowerSuppliedKW = processor.lastPowerSuppliedKW;
+			processorResult.lastPowerUnmetKW = processor.lastPowerDemandKW - processor.lastPowerSuppliedKW;
+			processorResult.lastUnmetProcessingKg = processor.lastUnmetProcessingKg;
+			processorResult.lastReactionHeatKW = processor.lastReactionHeatKW;
+			processorResult.temperatureEligible = processor.lastTemperatureEligible;
+			processorResult.blockReason = processor.lastBlockReason;
+			processorResult.disabled = processor.authored.rateKgPerS <= 0.0;
+			processorResult.feedConsumedKg = processor.feedConsumedKg;
+			processorResult.oxygenConsumedKg = processor.oxygenConsumedKg;
+			processorResult.waterConsumedKg = processor.waterConsumedKg;
+			processorResult.consumablesUsed = processor.consumablesUsed;
+			processorResult.nutrientProducedKg = processor.nutrientProducedKg;
+			processorResult.recoveredWaterKg = processor.recoveredWaterKg;
+			processorResult.co2ProducedKg = processor.co2ProducedKg;
+			processorResult.residueProducedKg = processor.residueProducedKg;
+			processorResult.nitrogenRecoveredKg = processor.nitrogenRecoveredKg;
+			processorResult.phosphorusRecoveredKg = processor.phosphorusRecoveredKg;
+			processorResult.potassiumRecoveredKg = processor.potassiumRecoveredKg;
+			processorResult.mineralsRecoveredKg = processor.mineralsRecoveredKg;
+			processorResult.energySuppliedKJ = processor.energySuppliedKJ;
+			processorResult.reactionHeatKJ = processor.reactionHeatKJ;
+			processorResult.heatRoutedKJ = processor.heatRoutedKJ;
+			processorResult.residualKg = processor.feedConsumedKg + processor.oxygenConsumedKg
+				+ processor.waterConsumedKg - processor.nutrientProducedKg
+				- processor.recoveredWaterKg - processor.co2ProducedKg
+				- processor.residueProducedKg;
+			processorResult.residualKJ = processor.energySuppliedKJ + processor.reactionHeatKJ
+				- processor.heatRoutedKJ;
+			processorResult.status = processor.status;
+			totalMicrobialProcessingPower += processor.lastPowerSuppliedKW;
+			result.microbialProcessors.push_back(std::move(processorResult));
+		}
+		result.power.microbialProcessingPowerKW = totalMicrobialProcessingPower;
 		// The delivery snapshot reports the authored schedule beside the
 		// runtime's arrival history: what each occurrence brought in, what
 		// the destination refused, and when the next arrival is due (#392).

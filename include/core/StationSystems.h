@@ -1045,6 +1045,76 @@ namespace core
 		bool operator==(MethaneProcessorSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationMethaneProcessors{8};
+	// A microbial processor (#407): an aerobic digester that recovers
+	// nutrients and water from organic waste. The feedstock is a compound
+	// organic-waste store whose declared composition fixes how much bound
+	// nutrient nitrogen, phosphorus, potassium and grouped minerals each
+	// kilogram of feed carries; the recovery yields are declared per
+	// constituent as fractions of that bound content, so N, P and K stay
+	// separately recoverable and the trace minerals stay grouped. Only
+	// the feed's bound nutrients are recoverable: atmospheric nitrogen
+	// in the feedstock is not a nutrient source, and no configured
+	// process here substitutes it - the atmospheric N2 term passes
+	// through to the residue untouched.
+	// The process consumes oxygen, process water, electricity and a
+	// consumable culture medium per kilogram of feed, and produces
+	// recovered nutrients, recovered water, carbon dioxide and an
+	// unrecoverable residue. The residue rate is not authored separately:
+	// it is the mass-balance remainder of the declared inputs and outputs
+	// per kilogram of feed, so the declared yields can never create or
+	// destroy mass - a configuration whose outputs exceed its inputs is
+	// refused. The digestion is exothermic: the declared reaction heat is
+	// capped by the feedstock's own declared chemical energy, so the
+	// released heat is paid for by the feed rather than appearing for
+	// free, and it routes exactly once into the class-matched heat sink
+	// together with the electrical dose the processor drew.
+	// Temperature eligibility is a static window on the coupled thermal
+	// interface: the culture runs only while the sink reservoir sits at
+	// or above the declared minimum operating temperature and below the
+	// maximum sink temperature; outside the window the stage is refused
+	// whole. No dynamic culture condition is modelled in this slice -
+	// degradation, inhibition and recovery are separate work.
+	// Feed, oxygen and process water draw only qualified inventory above
+	// each store's protected reserve. Products land qualified in finite
+	// stores: the nutrient store, the recovered-water store a water
+	// treatment (#402) can qualify further, the CO2 store as carbon
+	// inventory, and the residue store, which may be the terminal-waste
+	// store ejection (#403) removes. A saturated destination
+	// backpressures the whole stage: the processor runs at one uniform
+	// scale per tick, so a full destination throttles consumption and
+	// production together and no pathway ever runs ahead of the others.
+	struct MicrobialProcessorSettings
+	{
+		std::string id;
+		std::string hazardClass;            // normal or hazardous; the whole chain carries it
+		std::string feedStoreId;            // compound organic-waste feed
+		std::string oxygenStoreId;          // O2 drawn per kg of feed
+		std::string waterStoreId;           // process water drawn per kg of feed
+		std::string consumableStoreId;      // microbial culture medium per kg of feed
+		std::string nutrientStoreId;        // recovered N/P/K/mineral product
+		std::string recoveredWaterStoreId;  // recovered water product
+		std::string co2StoreId;             // CO2 product inventory
+		std::string residueStoreId;         // unrecoverable residue
+		std::string thermalClass;           // service class of the processor's heat sink
+		std::string heatSinkId;             // reservoir receiving the reaction and process heat
+		double rateKgPerS{0.0};           // rated feed processing, 0 disables
+		double specificEnergyKWhPerKgFeed{2.0}; // electrical dose per kg of feed
+		double oxygenPerKgFeedKg{0.8};    // kg O2 consumed per kg of feed
+		double processWaterPerKgFeedKg{0.5}; // process water kg drawn per kg of feed
+		double consumablePerKgFeed{0.01}; // consumable units per kg of feed
+		double co2PerKgFeedKg{0.3};       // CO2 kg produced per kg of feed
+		double nitrogenRecovery{0.8};     // fraction of the feed's bound N recovered
+		double phosphorusRecovery{0.8};   // fraction of the feed's P recovered
+		double potassiumRecovery{0.8};    // fraction of the feed's K recovered
+		double mineralsRecovery{0.7};     // fraction of the feed's grouped minerals recovered
+		double waterRecovery{0.7};        // fraction of the feed's moisture recovered
+		double reactionHeatKJPerKgFeed{1500.0}; // exothermic heat, capped by the feed's chemical energy
+		double minOperatingTemperatureC{15.0}; // culture runs at or above this interface temperature
+		double maxSinkTemperatureC{45.0};      // heat rejection qualified while the sink is below this
+		int priority{0};
+		bool operator==(MicrobialProcessorSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationMicrobialProcessors{8};
 
 	// A finite thermal buffer (#398): a bounded store of thermal energy
 	// that absorbs the cooling deficit its host reservoir cannot reject,
@@ -1118,6 +1188,7 @@ namespace core
 		std::vector<FuelCellSettings> fuelCells;
 		std::vector<SabatierReactorSettings> sabatierReactors;
 		std::vector<MethaneProcessorSettings> methaneProcessors;
+		std::vector<MicrobialProcessorSettings> microbialProcessors;
 		std::vector<ThermalBufferSettings> thermalBuffers;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
@@ -1493,6 +1564,7 @@ namespace core
 		double co2CapturePowerKW{0.0};     // CO2 capture work drawn this tick (#404)
 		double sabatierPowerKW{0.0};       // Sabatier reactor work drawn this tick (#405)
 		double methaneProcessingPowerKW{0.0}; // methane processing work drawn this tick (#405)
+		double microbialProcessingPowerKW{0.0}; // microbial digestion work drawn this tick (#407)
 		// Fuel-cell backup service this tick (#406): electrical output
 		// added to the same allocation pool as solar and the generators,
 		// and the waste heat those cells routed to their sinks.
@@ -1580,6 +1652,13 @@ namespace core
 		// did not absorb as reaction heat, booked once at the sink
 		// boundary.
 		double lastMethaneProcessingHeatKW{0.0};
+		// Microbial digestion heat this tick routed into this reservoir
+		// by the processors that use it as their heat sink (#407): the
+		// exothermic reaction heat the products do not retain plus the
+		// electrical dose the processor drew, booked once at the sink
+		// boundary.
+		double lastMicrobialHeatKW{0.0};
+		double microbialEnergyKJ{0.0}; // cumulative microbial reaction + process heat into the reservoir (#407)
 		// Buffer exchange this tick (#398): heat the thermal buffers
 		// hosted on this reservoir absorbed out of it (charge) and
 		// returned to it (discharge). Both are booked once at the
@@ -1609,7 +1688,7 @@ namespace core
 		double bufferDischargeEnergyKJ{0.0}; // cumulative heat returned into the reservoir by buffers
 		double atmosphereEnergyKJ{0.0}; // cumulative net compartment exchange into the reservoir
 		double rejectedEnergyKJ{0.0};
-		double residualKJ{0.0}; // starting + absorbed + routed + loop + condenser + generator + electrolysis + fuel cell + Sabatier + methane processing + atmosphere + buffer discharge - buffer charge - rejected - current
+		double residualKJ{0.0}; // starting + absorbed + routed + loop + condenser + generator + electrolysis + fuel cell + Sabatier + methane processing + microbial + atmosphere + buffer discharge - buffer charge - rejected - current
 		bool operator==(StationThermalReservoirSnapshot const&) const = default;
 	};
 	// One coolant loop as of the most recent tick (#396): the authored
@@ -2305,6 +2384,95 @@ namespace core
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationMethaneProcessorSnapshot const&) const = default;
 	};
+	// One microbial processor as of the most recent tick (#407): the
+	// authored contract beside the feed, oxygen, process water and
+	// consumable actually consumed, the recovered nutrients, recovered
+	// water, CO2 and residue actually produced, the electrical dose
+	// actually supplied and the heat actually routed, and the closing
+	// mass and energy ledgers. The processor's mass ledger closes over
+	// the digestion: feed + oxygen + process water = nutrients +
+	// recovered water + CO2 + residue within the declared tolerance -
+	// the residue is the balance term, so nothing vanishes and nothing
+	// appears - and its energy ledger closes over supplied + released =
+	// routed: the electrical dose plus the exothermic reaction heat the
+	// products do not retain all left through the sink. The per-
+	// constituent recovery totals show the recovered nitrogen, phosphorus,
+	// potassium and grouped minerals separately, funded only by the
+	// feed's bound nutrient constituents; the feed's atmospheric nitrogen
+	// never appears in the recovered totals because no configured process
+	// here converts it. The scale reports the fraction of rated feed the
+	// feeds, destinations and supplied energy sustained, and the limiter
+	// names what bound it.
+	struct StationMicrobialProcessorSnapshot
+	{
+		std::string id;
+		std::string hazardClass;
+		std::string feedStoreId;
+		std::string oxygenStoreId;
+		std::string waterStoreId;
+		std::string consumableStoreId;
+		std::string nutrientStoreId;
+		std::string recoveredWaterStoreId;
+		std::string co2StoreId;
+		std::string residueStoreId;
+		std::string thermalClass;
+		std::string heatSinkId;
+		double rateKgPerS{0.0};
+		double specificEnergyKWhPerKgFeed{0.0};
+		double oxygenPerKgFeedKg{0.0};
+		double processWaterPerKgFeedKg{0.0};
+		double consumablePerKgFeed{0.0};
+		double co2PerKgFeedKg{0.0};
+		double nitrogenRecovery{0.0};
+		double phosphorusRecovery{0.0};
+		double potassiumRecovery{0.0};
+		double mineralsRecovery{0.0};
+		double waterRecovery{0.0};
+		double reactionHeatKJPerKgFeed{0.0};
+		double minOperatingTemperatureC{0.0};
+		double maxSinkTemperatureC{0.0};
+		int priority{0};
+		double scale{0.0}; // fraction of rated feed the feeds, destinations and energy sustained, [0, 1]
+		std::string limiter; // what bound the scale this tick (empty: none)
+		double lastRequestedKg{0.0};   // rated feed demanded this tick
+		double lastFeedConsumedKg{0.0};
+		double lastOxygenConsumedKg{0.0};
+		double lastWaterConsumedKg{0.0};
+		double lastConsumableRequested{0.0};
+		double lastConsumableUsed{0.0};
+		double lastConsumableUnmet{0.0};
+		double lastNutrientProducedKg{0.0};
+		double lastRecoveredWaterKg{0.0};
+		double lastCo2ProducedKg{0.0};
+		double lastResidueProducedKg{0.0};
+		double lastPowerDemandKW{0.0};
+		double lastPowerSuppliedKW{0.0};
+		double lastPowerUnmetKW{0.0};
+		double lastUnmetProcessingKg{0.0}; // feed the supplied energy could not digest
+		double lastReactionHeatKW{0.0};    // exothermic digestion heat released this tick
+		bool temperatureEligible{false};   // interface inside the declared operating window
+		std::string blockReason;           // why nothing ran this tick (empty: none)
+		bool disabled{false};              // zero rated feed: no service
+		double feedConsumedKg{0.0};
+		double oxygenConsumedKg{0.0};
+		double waterConsumedKg{0.0};
+		double consumablesUsed{0.0};
+		double nutrientProducedKg{0.0};
+		double recoveredWaterKg{0.0};
+		double co2ProducedKg{0.0};
+		double residueProducedKg{0.0};
+		double nitrogenRecoveredKg{0.0};   // recovered bound N, funded by the feed's nutrient nitrogen only
+		double phosphorusRecoveredKg{0.0};
+		double potassiumRecoveredKg{0.0};
+		double mineralsRecoveredKg{0.0};
+		double energySuppliedKJ{0.0};
+		double reactionHeatKJ{0.0};  // cumulative exothermic heat released by digestion
+		double heatRoutedKJ{0.0};    // cumulative dose + released heat routed into the sink
+		double residualKg{0.0};      // (feed + oxygen + water) - (nutrients + recoveredWater + co2 + residue)
+		double residualKJ{0.0};      // (supplied + released) - routed
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationMicrobialProcessorSnapshot const&) const = default;
+	};
 	struct StationSystemsSnapshot
 	{
 		bool enabled{false};
@@ -2376,6 +2544,11 @@ namespace core
 		// hydrogen and solid carbon with the closing ledgers.
 		std::vector<StationSabatierReactorSnapshot> sabatierReactors;
 		std::vector<StationMethaneProcessorSnapshot> methaneProcessors;
+		// The nutrient recovery picture (#407): per-processor feed,
+		// oxygen, water and consumable consumption, recovered nutrient /
+		// water / CO2 / residue production with the per-constituent
+		// recovery split, and the closing mass and energy ledgers.
+		std::vector<StationMicrobialProcessorSnapshot> microbialProcessors;
 		// The fuel-cell backup picture (#406): per-cell output, reactant
 	// consumption, product water, waste heat, closing ledgers and the
 		// endurance the usable reactants still buy.
