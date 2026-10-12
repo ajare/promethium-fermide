@@ -6,12 +6,6 @@
 
 #include <willpower/common/Logger.h>
 
-#include <willpower/application/AudioOptions.h>
-
-#include "AudioOutputOptions.h"
-#include "AudioSimulationOptions.h"
-#include "VideoOptions.h"
-#include "WorldDataGenerationOptions.h"
 
 struct ProgramOptions {
   struct ResourceLocation {
@@ -45,17 +39,7 @@ public:
 
   bool audioEnabled;
 
-  wp::application::AudioOptions audio;
-
-  bw::app::AudioOutput audioOutput{bw::app::AudioOutput::Speakers};
-
-  bw::app::AudioSimulationOptions audioSimulation;
-
   Input input;
-
-  bw::app::VideoOptions video;
-
-  bw::app::WorldDataGenerationOptions worldDataGeneration;
 
   Debugging debugging;
 };

@@ -618,6 +618,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/ext/willpower/cmake/ResourceSchemas.cmake")
 add_subdirectory(src/AppLib)
 if(PF_BUILD_GUI)
     add_subdirectory(src/Launcher)
+    add_subdirectory(src/Application)
 endif()
 
 # Compatibility remains runnable with BUILD_TESTING=OFF. Direct module targets

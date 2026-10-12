@@ -85,7 +85,6 @@ static application::ApplicationSettings* gAppSettings = nullptr;
 static application::resourcesystem::ResourceManager* gResourceMgr = nullptr;
 
 bool gDisplayDebugEnabled = false;
-static FrameRateTracker gGameFrameRate;
 
 // Rendering objects
 static mpp::RenderSystem* gRenderSystem = nullptr;
@@ -358,15 +357,6 @@ ProgramOptions startup(string const& configFile, LauncherLifecycle& lifecycle) {
   });
   gRenderSystem->createCoreResources(gRenderSystemResourceMgr);
 
-  // Audio
-  gAudioSystem = options.audioEnabled ? new wp::application::AudioSystem(options.audio) : nullptr;
-  if (gAudioSystem) {
-    lifecycle.track(Service::AudioSystem, []() {
-      delete gAudioSystem;
-      gAudioSystem = nullptr;
-    });
-  }
-
   // Resource manager
   gResourceMgr = new application::resourcesystem::ResourceManager(gRenderSystem, gRenderSystemResourceMgr, gAudioSystem, gLogger);
   lifecycle.track(Service::ResourceManager, []() {
@@ -439,19 +429,7 @@ ProgramOptions startup(string const& configFile, LauncherLifecycle& lifecycle) {
 
 void setupDebugPanel() {
   string fpsDisplay = "FPS: --";
-  if (gStateMgr->isCurrentState("Play") &&
-      !gGameFrameRate.samples().empty()) {
-    auto const fps = gGameFrameRate.framesPerSecond();
-    string fpsColour;
-    if (fps < 30.0) {
-      fpsColour = "[#FF0000FF]";
-    } else if (fps < 55.0) {
-      fpsColour = "[#FFFF00FF]";
-    } else {
-      fpsColour = "[#00FF00FF]";
-    }
-    fpsDisplay = std::format("FPS: {}{:.1f}", fpsColour, fps);
-  }
+  
   gRenderSystem->setDebugPreMessages({fpsDisplay});
 
   gRenderSystem->setDebugPostMessages(gStateMgr->getDebuggingText());
@@ -524,7 +502,6 @@ int main(int argc, char** argv) {
     gStateMgr->enterInitialState();
     gTimer->reset();
 
-    bool trackingGameFrameRate = false;
     while (gWindow->isActive()) {
       // Get frame time
       float frameTime = gTimer->getDeltaTime();
@@ -540,61 +517,25 @@ int main(int argc, char** argv) {
 
         updateImGui(updateFreq);
 
-        auto captureCpuUpdateTimings =
-            gDLL->cpuUpdateTimingCaptureEnabled();
-        optional<wp::Timer> cpuUpdateTimer;
-        if (captureCpuUpdateTimings) {
-          cpuUpdateTimer.emplace();
-        }
         auto startTime = elapsedSeconds();
 
         wp::Timer timerNs;
         auto startTimeNs = timerNs.elapsedNanoseconds();
-        auto gameStartNs = captureCpuUpdateTimings
-                               ? cpuUpdateTimer->elapsedNanoseconds()
-                               : 0;
+        auto gameStartNs = 0;
 
         gStateMgr->update(updateFreq);
 
-        auto gameEndNs = captureCpuUpdateTimings
-                             ? cpuUpdateTimer->elapsedNanoseconds()
-                             : 0;
+        auto gameEndNs = 0;
         int64_t audioUpdateNs = 0;
-        if (gAudioSystem) {
-          auto audioStartNs = captureCpuUpdateTimings
-                                  ? cpuUpdateTimer->elapsedNanoseconds()
-                                  : 0;
-          gAudioSystem->update();
-          if (captureCpuUpdateTimings) {
-            audioUpdateNs =
-                cpuUpdateTimer->elapsedNanoseconds() - audioStartNs;
-          }
-        }
 
         auto endTime = elapsedSeconds();
         auto endTimeNs = timerNs.elapsedNanoseconds();
-
-        if (captureCpuUpdateTimings) {
-          gDLL->recordCpuUpdateTimings(
-              static_cast<uint64_t>(gameEndNs - gameStartNs),
-              static_cast<uint64_t>(audioUpdateNs));
-        }
 
         numFramesProcessed++;
 
         totalTime += (endTime - startTime);
         totalTimeNs += (endTimeNs - startTimeNs);
       }
-
-      auto const gameStateActive =
-          gStateMgr->isCurrentState("Play");
-      if (gameStateActive && !trackingGameFrameRate) {
-        // The first presentation interval now begins in Play; loading and
-        // state-transition stalls can no longer enter the game FPS value.
-        gGameFrameRate.reset();
-        gDLL->resetFrameRateHistory();
-      }
-      trackingGameFrameRate = gameStateActive;
 
       // Render
       setupDebugPanel();
@@ -611,23 +552,11 @@ int main(int argc, char** argv) {
         gImGuiRenderer->render(gRenderSystem);
       }
 
-      // The game requests F11 captures during its update. Fulfil them only
-      // after launcher-owned overlays have been drawn so ImGui is included.
-      gDLL->captureScreenshotIfRequested(gRenderSystem);
-
       captureFrameIfRequested();  // [DEBUG-a4f2]
 
       // Flip to screen. Sample afterwards so this interval includes the
       // driver's present/VSync wait rather than only CPU submission time.
       gWindow->show();
-      if (trackingGameFrameRate && gStateMgr->isCurrentState("Play")) {
-        auto const presentedAt = elapsedSeconds();
-        gGameFrameRate.recordPresentedFrame(presentedAt);
-        if (!gGameFrameRate.samples().empty()) {
-          gDLL->recordFrameRate(
-              presentedAt, gGameFrameRate.framesPerSecond());
-        }
-      }
     }
   } catch (ExitApplicationException& e) {
     if (auto average = LauncherLifecycle::averageDuration(totalTime, numFramesProcessed)) {
