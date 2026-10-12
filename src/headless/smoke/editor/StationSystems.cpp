@@ -1652,6 +1652,137 @@ void bufferWorkflow(smoke::Context const&)
 	#undef REQ
 	require(driver.passed(), "Buffer workflow failed on the Test Engine");
 }
+	void microbialConditionWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO();
+		io.DisplaySize = {1200.0f, 2400.0f};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Microbial condition editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		core::StationSystemsSettings initial;
+		initial.enabled = true;
+		initial.observationIntervalSeconds = 2.0f;
+		auto plain = [](std::string const& id, double capacity, double starting)
+		{
+			core::ResourceStoreSettings store;
+			store.id = id;
+			store.unit = "kg";
+			store.capacity = capacity;
+			store.startingQualified = starting;
+			return store;
+		};
+		auto feed = plain("waste", 100.0, 10.0);
+		core::ResourceCompositionSettings composition;
+		composition.moisture = 0.9;
+		composition.nutrientNitrogen = 0.05;
+		composition.atmosphericNitrogen = 0.02;
+		composition.phosphorus = 0.02;
+		composition.potassium = 0.02;
+		composition.otherMinerals = 0.03;
+		composition.energyKJPerKgDry = 8000.0;
+		feed.composition = composition;
+		initial.stores.push_back(feed);
+		initial.stores.push_back(plain("oxygen", 100.0, 10.0));
+		initial.stores.push_back(plain("processWater", 100.0, 10.0));
+		initial.stores.push_back(plain("media", 100.0, 10.0));
+		initial.stores.push_back(plain("nutrients", 100.0, 0.0));
+		initial.stores.push_back(plain("recoveredWater", 100.0, 0.0));
+		initial.stores.push_back(plain("co2", 100.0, 0.0));
+		initial.stores.push_back(plain("residue", 100.0, 0.0));
+		initial.stores.push_back(plain("stock", 10.0, 1.0));
+		core::ThermalReservoirSettings sink;
+		sink.id = "sink";
+		sink.thermalClass = "low";
+		sink.heatCapacityKJPerK = 10000.0;
+		sink.startingTemperatureC = 20.0;
+		sink.minTemperatureC = -50.0;
+		sink.maxTemperatureC = 200.0;
+		initial.thermalReservoirs.push_back(sink);
+		core::SolarArraySettings field;
+		field.id = "field";
+		field.capacityKW = 100.0;
+		initial.solarArrays.push_back(field);
+		core::MicrobialProcessorSettings digester;
+		digester.id = "digester";
+		digester.hazardClass = "normal";
+		digester.feedStoreId = "waste";
+		digester.oxygenStoreId = "oxygen";
+		digester.waterStoreId = "processWater";
+		digester.consumableStoreId = "media";
+		digester.nutrientStoreId = "nutrients";
+		digester.recoveredWaterStoreId = "recoveredWater";
+		digester.co2StoreId = "co2";
+		digester.residueStoreId = "residue";
+		digester.thermalClass = "low";
+		digester.heatSinkId = "sink";
+		digester.rateKgPerS = 0.001;
+		digester.reactionHeatKJPerKgFeed = 600.0;
+		digester.initialCondition = 0.5;
+		digester.recoveryPerHour = 72.0;
+		digester.stockStoreId = "stock";
+		digester.stockUnitsPerConditionPoint = 10.0;
+		initial.microbialProcessors.push_back(digester);
+		require(world->configureStationSystems(initial, false, &diagnostic), diagnostic.c_str());
+		headless::TestEngineDriver driver([&]
+		{
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 2350});
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+
+		driver.run("station", "microbialConditionWorkflow", [&](ImGuiTestContext* ctx)
+		{
+			ctx->SetRef("Station Systems");
+			REQ(driver.contains("1 microbial processor(s)"),
+				"Authored microbial processor count missing from the window");
+			// Run: the live view shows the degraded culture recovering,
+			// funded by the replacement stock, with the condition and its
+			// change visible. Ticking never dirties the authored document.
+			world->markSaved();
+			world->resumeSimulation(); REQ(world->advanceTicks(60), "Editor run failed");
+			world->pauseSimulation(); ctx->Sleep(1);
+			REQ(driver.contains("condition 0.520")
+				&& driver.contains("benign, recovering")
+				&& driver.contains("drawn from 'stock'"),
+				"Live culture condition, recovery state or stock funding not displayed");
+			REQ(!world->isModified(), "Microbial condition ticking dirtied the authored document");
+			// An invalid drafted condition is refused with a visible
+			// diagnostic and never reaches the authored settings.
+			driver.typeValue(ctx, "Microbial processor 0 initial condition", "2");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(driver.contains("initial culture condition must be finite and from 0 to 1"),
+				"Invalid drafted initial condition diagnostic not shown");
+			REQ(world->getStationSystemsSettings().microbialProcessors[0].initialCondition == 0.5
+				&& world->getSimulationTick() == 60,
+				"Invalid drafted initial condition mutated the authored settings");
+			// A valid drafted recovery rate applies through the World-reset
+			// confirmation and restarts the culture from its authored start.
+			driver.typeValue(ctx, "Microbial processor 0 initial condition", "0.25");
+			driver.typeValue(ctx, "Microbial processor 0 recovery per hour", "36");
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(world->getStationSystemsSettings().microbialProcessors[0].initialCondition == 0.25
+				&& world->getStationSystemsSettings().microbialProcessors[0].recoveryPerHour == 36.0
+				&& history.undoCount() == 1 && world->getSimulationTick() == 0,
+				"Repaired microbial condition draft did not apply through the reset-confirmed flow");
+			ctx->Sleep(1);
+			world->resumeSimulation(); REQ(world->advanceTicks(60), "Post-apply run failed");
+			world->pauseSimulation(); ctx->Sleep(1);
+			// 0.25 + 1 s at 36/h = 0.26: the live view follows the new rate.
+			REQ(driver.contains("condition 0.260")
+				&& driver.contains("1 microbial processor(s)"),
+				"Applied recovery rate not reflected in the live condition display");
+		});
+		#undef REQ
+		require(driver.passed(), "Microbial condition workflow failed on the Test Engine");
+	}
 void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"station/windowWorkflow", workflow});
@@ -1668,4 +1799,5 @@ void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 	checks.push_back({"station/chillerWorkflow", chillerWorkflow});
 	checks.push_back({"station/generatorWorkflow", generatorWorkflow});
 	checks.push_back({"station/bufferWorkflow", bufferWorkflow});
+	checks.push_back({"station/microbialConditionWorkflow", microbialConditionWorkflow});
 }

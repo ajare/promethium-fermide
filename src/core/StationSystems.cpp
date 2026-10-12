@@ -623,7 +623,7 @@ namespace core
 				for (size_t index = 0; index < microbialProcessors->size(); ++index)
 				{
 					auto const& processor = (*microbialProcessors)[index];
-					lua_createtable(state, 0, 27);
+					lua_createtable(state, 0, 35);
 					lua_pushstring(state, processor.id.c_str()); lua_setfield(state, -2, "id");
 					lua_pushstring(state, processor.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
 					lua_pushstring(state, processor.feedStoreId.c_str()); lua_setfield(state, -2, "feedStore");
@@ -650,6 +650,17 @@ namespace core
 					lua_pushnumber(state, processor.reactionHeatKJPerKgFeed); lua_setfield(state, -2, "reactionHeatKJPerKgFeed");
 					lua_pushnumber(state, processor.minOperatingTemperatureC); lua_setfield(state, -2, "minOperatingTemperatureC");
 					lua_pushnumber(state, processor.maxSinkTemperatureC); lua_setfield(state, -2, "maxSinkTemperatureC");
+					// #408 condition/recovery coefficients cross as plain
+					// values; the sandbox mirrors the degradation rules and the
+					// bounded, stock-funded recovery.
+					lua_pushnumber(state, processor.initialCondition); lua_setfield(state, -2, "initialCondition");
+					lua_pushnumber(state, processor.starvationDegradePerHour); lua_setfield(state, -2, "starvationDegradePerHour");
+					lua_pushnumber(state, processor.consumableExhaustionDegradePerHour); lua_setfield(state, -2, "consumableExhaustionDegradePerHour");
+					lua_pushnumber(state, processor.coldStressDegradePerHour); lua_setfield(state, -2, "coldStressDegradePerHour");
+					lua_pushnumber(state, processor.heatStressDegradePerHour); lua_setfield(state, -2, "heatStressDegradePerHour");
+					lua_pushnumber(state, processor.recoveryPerHour); lua_setfield(state, -2, "recoveryPerHour");
+					lua_pushstring(state, processor.stockStoreId.c_str()); lua_setfield(state, -2, "stockStore");
+					lua_pushnumber(state, processor.stockUnitsPerConditionPoint); lua_setfield(state, -2, "stockUnitsPerConditionPoint");
 					lua_pushinteger(state, processor.priority); lua_setfield(state, -2, "priority");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
@@ -2444,14 +2455,38 @@ namespace core
 				return refuse(where + " maximum sink temperature must be finite and above absolute zero");
 			if (processor.minOperatingTemperatureC >= processor.maxSinkTemperatureC)
 				return refuse(where + " minimum operating temperature must be below the maximum sink temperature: an empty operating window is never a service");
-			std::string const chainIds[8]{processor.feedStoreId, processor.oxygenStoreId,
+			// #408 condition/recovery contract. The coefficients are
+			// provisional biological assumptions: the validation pins
+			// them finite and in range, not biologically correct.
+			if (!std::isfinite(processor.initialCondition)
+				|| processor.initialCondition < 0.0 || processor.initialCondition > 1.0)
+				return refuse(where + " initial culture condition must be finite and from 0 to 1");
+			double const biologyFields[]{processor.starvationDegradePerHour,
+				processor.consumableExhaustionDegradePerHour,
+				processor.coldStressDegradePerHour, processor.heatStressDegradePerHour,
+				processor.recoveryPerHour};
+			char const* biologyNames[]{"starvation degradation per hour",
+				"consumable exhaustion degradation per hour",
+				"cold stress degradation per hour", "heat stress degradation per hour",
+				"recovery per hour"};
+			for (size_t field = 0; field < 5; ++field)
+				if (!std::isfinite(biologyFields[field]) || biologyFields[field] < 0.0)
+					return refuse(where + " " + biologyNames[field]
+						+ " must be finite and non-negative (provisional biological assumption)");
+			if (!std::isfinite(processor.stockUnitsPerConditionPoint)
+				|| processor.stockUnitsPerConditionPoint < 0.0)
+				return refuse(where + " stock units per condition point must be finite and non-negative");
+			if (!processor.stockStoreId.empty() && processor.stockUnitsPerConditionPoint <= 0.0)
+				return refuse(where + " stock units per condition point must be positive when a replacement biological stock store is declared: recovery would otherwise restore capacity while consuming nothing per point");
+			std::string const chainIds[9]{processor.feedStoreId, processor.oxygenStoreId,
 				processor.waterStoreId, processor.consumableStoreId, processor.nutrientStoreId,
-				processor.recoveredWaterStoreId, processor.co2StoreId, processor.residueStoreId};
-			char const* chainRoles[8]{"feed", "oxygen", "process water", "consumable",
-				"nutrient", "recovered water", "CO2", "residue"};
-			for (size_t stream = 0; stream < 8; ++stream)
-				for (size_t other = stream + 1; other < 8; ++other)
-					if (chainIds[stream] == chainIds[other])
+				processor.recoveredWaterStoreId, processor.co2StoreId, processor.residueStoreId,
+				processor.stockStoreId};
+			char const* chainRoles[9]{"feed", "oxygen", "process water", "consumable",
+				"nutrient", "recovered water", "CO2", "residue", "replacement stock"};
+			for (size_t stream = 0; stream < 9; ++stream)
+				for (size_t other = stream + 1; other < 9; ++other)
+					if (!chainIds[stream].empty() && chainIds[stream] == chainIds[other])
 						return refuse(where + " " + chainRoles[stream] + " store and "
 							+ chainRoles[other] + " store are the same store '"
 							+ chainIds[stream] + "'; the recovery chain needs distinct stores for every stream");
@@ -2490,6 +2525,24 @@ namespace core
 			if (!declareMicrobialStore(processor.residueStoreId, "residue", where,
 				processor.hazardClass, false))
 				return false;
+			// The replacement biological stock store (#408) is an optional
+			// consumed input like the consumable: it must exist and stay
+			// hazard-class segregated from the rest of the nutrient chain.
+			if (!processor.stockStoreId.empty())
+			{
+				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+						[&](ResourceStoreSettings const& store) { return store.id == processor.stockStoreId; });
+				if (found == settings.stores.end())
+					return refuse(where + " replacement biological stock store '"
+						+ processor.stockStoreId + "' does not exist");
+				auto const existing = microbialStoreClass.find(processor.stockStoreId);
+				if (existing == microbialStoreClass.end())
+					microbialStoreClass.emplace(processor.stockStoreId, processor.hazardClass);
+				else if (existing->second != processor.hazardClass)
+					return refuse(where + " replacement biological stock store '"
+						+ processor.stockStoreId + "' is already used by a "
+						+ existing->second + "-class nutrient process; hazardous and normal nutrient streams may not share a store");
+			}
 			auto const feed = std::find_if(settings.stores.begin(), settings.stores.end(),
 				[&](ResourceStoreSettings const& store) { return store.id == processor.feedStoreId; });
 			auto const& composition = *feed->composition;
@@ -3344,7 +3397,16 @@ namespace core
 			size_t co2StoreIndex{0};
 			size_t residueStoreIndex{0};
 			size_t sinkIndex{0};
+			size_t stockStoreIndex{0};
+			bool hasStock{false};
 			size_t declarationIndex{0};
+			// #408 aggregate culture condition and recovery state.
+			double condition{1.0};
+			double lastConditionDelta{0.0};
+			std::string lastStressors;
+			bool lastRecovering{false};
+			double lastStockConsumedUnits{0.0};
+			double stockConsumedUnits{0.0};
 			double lastScale{0.0};
 			std::string lastLimiter;
 			double lastRequestedKg{0.0};
@@ -5922,8 +5984,11 @@ namespace core
 			// their protected reserves; saturated destinations cap the
 			// whole stage through the uniform scale instead of venting; the
 			// static operating window gates temperature eligibility against
-			// the sink reservoir without modelling any dynamic culture
-			// condition.
+			// the sink reservoir, and the aggregate culture condition
+			// (#408) throttles the uniform scale: a starved, medium-starved
+			// or temperature-stressed culture degrades and digests less,
+			// and it recovers only through the declared bounded rate and,
+			// when configured, consumed replacement biological stock.
 			std::vector<double> microbialHeatByReservoir(reservoirs.size(), 0.0);
 			double totalMicrobialProcessingPowerKW{0.0};
 			for (size_t orderIndex : microbialProcessorOrder)
@@ -5939,6 +6004,10 @@ namespace core
 				auto& residue = stores[processor.residueStoreIndex];
 				processor.lastScale = 0.0;
 				processor.lastLimiter.clear();
+				processor.lastConditionDelta = 0.0;
+				processor.lastStressors.clear();
+				processor.lastRecovering = false;
+				processor.lastStockConsumedUnits = 0.0;
 				processor.lastRequestedKg = 0.0;
 				processor.lastFeedConsumedKg = 0.0;
 				processor.lastOxygenConsumedKg = 0.0;
@@ -5963,11 +6032,93 @@ namespace core
 				}
 				auto const tickSeconds = static_cast<double>(seconds);
 				auto const fullKg = processor.authored.rateKgPerS * tickSeconds;
+				// Aggregate culture condition update (#408). The configured
+				// adverse-rule set acts every tick: no drawable feed above
+				// its reserve starves the culture, no drawable medium
+				// exhausts it, and the sink temperature outside the declared
+				// window stresses it cold or hot. The per-hour rates are
+				// provisional biological assumptions. Under benign
+				// conditions the culture recovers at most the declared
+				// recovery rate, funded - when a replacement stock store is
+				// configured - by stock actually drawn above its protected
+				// reserve, so recovery is bounded by time and resources and
+				// never instant. Condition itself is dimensionless: it never
+				// books material; only the stock draw moves mass, through
+				// the store ledger like any other consumption.
+				auto const hours = tickSeconds / 3600.0;
+				auto const& sink = reservoirs[processor.sinkIndex];
+				auto const starving = std::max(0.0, qualified[processor.feedStoreIndex]
+					- feed.authored.protectedReserve) <= 0.0;
+				auto const mediaExhausted = std::max(0.0,
+					qualified[processor.consumableStoreIndex]
+					- consumable.authored.protectedReserve) <= 0.0;
+				auto const coldStressed = sink.temperatureC + 1e-9
+					< processor.authored.minOperatingTemperatureC;
+				auto const heatStressed = sink.temperatureC + 1e-9
+					>= processor.authored.maxSinkTemperatureC;
+				std::string stressors;
+				double degradePerHour{0.0};
+				auto const stress = [&](bool active, double rate, char const* name)
+				{
+					if (!active) return;
+					degradePerHour += rate;
+					if (!stressors.empty()) stressors += '+';
+					stressors += name;
+				};
+				stress(starving, processor.authored.starvationDegradePerHour, "starvation");
+				stress(mediaExhausted, processor.authored.consumableExhaustionDegradePerHour,
+					"consumable exhaustion");
+				stress(coldStressed, processor.authored.coldStressDegradePerHour, "cold stress");
+				stress(heatStressed, processor.authored.heatStressDegradePerHour, "heat stress");
+				processor.lastStressors = stressors;
+				auto const conditionBefore = processor.condition;
+				if (degradePerHour > 0.0)
+				{
+					processor.condition = std::max(0.0,
+						processor.condition - degradePerHour * hours);
+				}
+				else if (processor.condition < 1.0 && processor.authored.recoveryPerHour > 0.0)
+				{
+					auto points = std::min(1.0 - processor.condition,
+						processor.authored.recoveryPerHour * hours);
+					if (processor.hasStock && points > 0.0)
+					{
+						auto& stock = stores[processor.stockStoreIndex];
+						auto const drawableStock = std::max(0.0,
+							qualified[processor.stockStoreIndex]
+							- stock.authored.protectedReserve);
+						auto const stockCapPoints = drawableStock
+							/ processor.authored.stockUnitsPerConditionPoint;
+						points = std::min(points, stockCapPoints);
+						if (points > 0.0)
+						{
+							auto const stockUnits = std::min(points
+								* processor.authored.stockUnitsPerConditionPoint,
+								drawableStock);
+							qualified[processor.stockStoreIndex] -= stockUnits;
+							flowOut[processor.stockStoreIndex] += stockUnits;
+							stagedUnitLoss[stock.authored.unit] += stockUnits;
+							if (stock.authored.composition)
+							{
+								ConstituentLedger stockChange;
+								addComposition(stockChange, *stock.authored.composition,
+									massToKg(stock.authored.unit, stockUnits), -1.0);
+								for (auto const& entry : stockChange)
+									stagedLoss[entry.first] -= entry.second;
+							}
+							processor.lastStockConsumedUnits = stockUnits;
+							processor.stockConsumedUnits += stockUnits;
+						}
+					}
+					processor.condition += points;
+					processor.lastRecovering = points > 0.0;
+				}
+				processor.lastConditionDelta = processor.condition - conditionBefore;
 				// Static operating window: the culture runs at or above the
 				// minimum operating temperature and below the maximum sink
 				// temperature. Outside the window the stage is refused whole
-				// and spends nothing - no dynamic condition is modelled.
-				auto const& sink = reservoirs[processor.sinkIndex];
+				// and spends nothing - the stress above already booked the
+				// condition cost of the excursion.
 				processor.lastTemperatureEligible = sink.temperatureC + 1e-9
 					>= processor.authored.minOperatingTemperatureC
 					&& sink.temperatureC + 1e-9 < processor.authored.maxSinkTemperatureC;
@@ -6061,6 +6212,12 @@ namespace core
 					kgToMass(residue.authored.unit, fullKg * residuePerKgFeed),
 					"residue store '" + residue.authored.id
 					+ "' is full: the unrecoverable residue has nowhere to go");
+				// Condition throttles the whole stage the same uniform way:
+				// a degraded culture simply cannot drive the full rated feed
+				// (#408). It never adds or removes material on its own.
+				constrain(processor.condition * fullKg, fullKg,
+					"culture condition degraded to " + std::to_string(processor.condition)
+					+ ": the stressed culture cannot process the full rated feed");
 				scale = std::max(0.0, std::min(1.0, scale));
 				processor.lastScale = scale;
 				processor.lastLimiter = limiter;
@@ -8059,7 +8216,17 @@ namespace core
 				if (!requireFinite(processor.lastPowerSuppliedKW, where + "last power supplied")) return false;
 				if (!requireFinite(processor.lastUnmetProcessingKg, where + "last unmet processing")) return false;
 				if (!requireFinite(processor.lastReactionHeatKW, where + "last reaction heat")) return false;
-				if (!requireFinite(processor.feedConsumedKg, where + "cumulative feed consumed")) return false;
+				if (!requireFinite(processor.condition, where + "culture condition")) return false;
+				if (!requireFinite(processor.lastConditionDelta, where + "last condition change")) return false;
+				if (!requireFinite(processor.lastStockConsumedUnits, where + "last replacement stock consumed")) return false;
+				if (!requireFinite(processor.stockConsumedUnits, where + "cumulative replacement stock consumed")) return false;
+				if (processor.condition < -StationBalanceTolerance
+					|| processor.condition > 1.0 + StationBalanceTolerance)
+					return violation = where
+						+ "culture condition left the declared [0, 1] range", false;
+				if (processor.stockConsumedUnits < -StationBalanceTolerance)
+					return violation = where
+						+ "replacement stock ledger went negative", false;
 				if (!requireFinite(processor.oxygenConsumedKg, where + "cumulative oxygen consumed")) return false;
 				if (!requireFinite(processor.waterConsumedKg, where + "cumulative process water consumed")) return false;
 				if (!requireFinite(processor.consumablesUsed, where + "cumulative consumables used")) return false;
@@ -8993,6 +9160,14 @@ namespace core
 			state.co2StoreIndex = storeIndex[processor.co2StoreId];
 			state.residueStoreIndex = storeIndex[processor.residueStoreId];
 			state.sinkIndex = reservoirIndex[processor.heatSinkId];
+			// #408: the replacement stock reference resolves like any other
+			// consumed store, and the culture starts at its authored
+			// condition; condition history and stock totals reconstruct
+			// from the authored start on Reset and load.
+			state.hasStock = !processor.stockStoreId.empty();
+			if (state.hasStock)
+				state.stockStoreIndex = storeIndex[processor.stockStoreId];
+			state.condition = processor.initialCondition;
 			state.declarationIndex = mImpl->microbialProcessors.size();
 			mImpl->microbialProcessors.push_back(std::move(state));
 		}
@@ -9215,7 +9390,8 @@ namespace core
 			|| !mImpl->waterCollectors.empty() || !mImpl->waterTreatments.empty()
 			|| !mImpl->electrolyzers.empty() || !mImpl->co2Captures.empty()
 			|| !mImpl->fuelCells.empty() || !mImpl->thermalBuffers.empty()
-			|| !mImpl->sabatierReactors.empty() || !mImpl->methaneProcessors.empty())
+			|| !mImpl->sabatierReactors.empty() || !mImpl->methaneProcessors.empty()
+			|| !mImpl->microbialProcessors.empty())
 		{
 			std::string violationSystem, violation;
 			if (!mImpl->applyLedger(tick, seconds, violationSystem, violation))
@@ -10241,7 +10417,23 @@ namespace core
 			processorResult.reactionHeatKJPerKgFeed = processor.authored.reactionHeatKJPerKgFeed;
 			processorResult.minOperatingTemperatureC = processor.authored.minOperatingTemperatureC;
 			processorResult.maxSinkTemperatureC = processor.authored.maxSinkTemperatureC;
+			processorResult.initialCondition = processor.authored.initialCondition;
+			processorResult.starvationDegradePerHour = processor.authored.starvationDegradePerHour;
+			processorResult.consumableExhaustionDegradePerHour
+				= processor.authored.consumableExhaustionDegradePerHour;
+			processorResult.coldStressDegradePerHour = processor.authored.coldStressDegradePerHour;
+			processorResult.heatStressDegradePerHour = processor.authored.heatStressDegradePerHour;
+			processorResult.recoveryPerHour = processor.authored.recoveryPerHour;
+			processorResult.stockStoreId = processor.authored.stockStoreId;
+			processorResult.stockUnitsPerConditionPoint
+				= processor.authored.stockUnitsPerConditionPoint;
 			processorResult.priority = processor.authored.priority;
+			processorResult.condition = processor.condition;
+			processorResult.lastConditionDelta = processor.lastConditionDelta;
+			processorResult.lastStressors = processor.lastStressors;
+			processorResult.recovering = processor.lastRecovering;
+			processorResult.lastStockConsumedUnits = processor.lastStockConsumedUnits;
+			processorResult.stockConsumedUnits = processor.stockConsumedUnits;
 			processorResult.scale = processor.lastScale;
 			processorResult.limiter = processor.lastLimiter;
 			processorResult.lastRequestedKg = processor.lastRequestedKg;

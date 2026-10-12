@@ -144,7 +144,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 84"), 11, "version: 65");
+		text.replace(text.find("version: 85"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -11222,6 +11222,92 @@ void buffers(smoke::Context const&)
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("unknown thermal reservoir") != std::string::npos,
 				"a processor on an unknown heat sink was accepted");
+			// #408 condition/recovery contract refusals.
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors[0].initialCondition = 1.5;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("initial culture condition must be finite and from 0 to 1")
+					!= std::string::npos,
+				"an initial culture condition above 1 was accepted");
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors[0].starvationDegradePerHour = -0.1;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("starvation degradation per hour must be finite and non-negative")
+					!= std::string::npos,
+				"a negative starvation degradation rate was accepted");
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors[0].recoveryPerHour = -1.0;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("recovery per hour must be finite and non-negative")
+					!= std::string::npos,
+				"a negative recovery rate was accepted");
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors[0].stockStoreId = "ghost";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("replacement biological stock store 'ghost' does not exist")
+					!= std::string::npos,
+				"a processor on an unknown replacement stock store was accepted");
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors[0].stockStoreId = "waste";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("feed store and replacement stock store are the same store")
+					!= std::string::npos,
+				"a replacement stock store doubling as the feed store was accepted");
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors[0].stockStoreId = "media";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("consumable store and replacement stock store are the same store")
+					!= std::string::npos,
+				"a replacement stock store doubling as the consumable was accepted");
+			settings.stores.push_back(plainStore("stock", 10.0, 1.0));
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors[0].stockStoreId = "stock";
+			settings.microbialProcessors[0].stockUnitsPerConditionPoint = 0.0;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("stock units per condition point must be positive when a replacement biological stock store is declared")
+					!= std::string::npos,
+				"a declared stock store with zero units per condition point was accepted");
+			settings.microbialProcessors = { processor("digester", "normal") };
+			settings.microbialProcessors[0].stockStoreId = "stock";
+			settings.microbialProcessors[0].stockUnitsPerConditionPoint = -2.0;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("stock units per condition point must be finite and non-negative")
+					!= std::string::npos,
+				"a negative stock units per condition point was accepted");
+			// A hazardous processor may not share the normal-class stock
+			// store that the normal processor already declared (#408).
+			{
+				auto hStores = settings.stores;
+				hStores.push_back(compoundStore("h_waste", 100.0, 10.0, feedComposition));
+				hStores.push_back(plainStore("h_oxygen", 100.0, 10.0));
+				hStores.push_back(plainStore("h_water", 100.0, 10.0));
+				hStores.push_back(plainStore("h_media", 100.0, 10.0));
+				hStores.push_back(plainStore("h_nutrients", 100.0, 0.0));
+				hStores.push_back(plainStore("h_recoveredWater", 100.0, 0.0));
+				hStores.push_back(plainStore("h_co2", 100.0, 0.0));
+				hStores.push_back(plainStore("h_residue", 100.0, 0.0));
+				core::StationSystemsSettings hazardSettings;
+				hazardSettings.enabled = true;
+				hazardSettings.stores = hStores;
+				hazardSettings.thermalReservoirs = { reservoir("sink", "low", 20.0) };
+				auto normal = processor("digester", "normal");
+				normal.stockStoreId = "stock";
+				auto hazardous = processor("digester2", "hazardous");
+				hazardous.feedStoreId = "h_waste";
+				hazardous.oxygenStoreId = "h_oxygen";
+				hazardous.waterStoreId = "h_water";
+				hazardous.consumableStoreId = "h_media";
+				hazardous.nutrientStoreId = "h_nutrients";
+				hazardous.recoveredWaterStoreId = "h_recoveredWater";
+				hazardous.co2StoreId = "h_co2";
+				hazardous.residueStoreId = "h_residue";
+				hazardous.stockStoreId = "stock";
+				hazardSettings.microbialProcessors = { normal, hazardous };
+				require(!core::validateStationSystemsSettings(hazardSettings, diagnostic)
+					&& diagnostic.find("replacement biological stock store 'stock' is already used by a normal-class nutrient process")
+						!= std::string::npos,
+					"a hazardous processor sharing the normal-class replacement stock store was accepted");
+			}
 			settings.microbialProcessors = { processor("digester", "normal") };
 			settings.microbialProcessors[0].thermalClass = "warm";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
@@ -11511,6 +11597,353 @@ void buffers(smoke::Context const&)
 		}
 	}
 
+	void microbialConditionRecovery(smoke::Context const&)
+	{
+		auto const dt = static_cast<double>(core::World::getFixedTimestep());
+		auto approx = [](double actual, double expected)
+		{
+			auto const tolerance = 1e-6 * std::max(1.0, std::abs(expected));
+			return std::abs(actual - expected) <= tolerance;
+		};
+		auto closeTo = [](double actual, double expected, double relative)
+		{
+			return std::abs(actual - expected) <= relative * std::max(1e-12, std::abs(expected));
+		};
+		// The #408 test biology: deliberately exaggerated provisional
+		// per-hour coefficients so hour-scale degradation and recovery are
+		// observable within short headless runs. Starvation 0.1/s, media
+		// exhaustion 0.2/s, cold stress 0.05/s, heat stress 0.4/s,
+		// recovery 0.02/s, replacement stock 10 kg per condition point.
+		core::ResourceCompositionSettings feedComposition;
+		feedComposition.moisture = 0.9;
+		feedComposition.nutrientNitrogen = 0.05;
+		feedComposition.atmosphericNitrogen = 0.02;
+		feedComposition.phosphorus = 0.02;
+		feedComposition.potassium = 0.02;
+		feedComposition.otherMinerals = 0.03;
+		feedComposition.energyKJPerKgDry = 8000.0;
+		auto plainStore = [](std::string const& id, double capacity, double starting,
+			double protectedReserve = 0.0)
+		{
+			core::ResourceStoreSettings settings;
+			settings.id = id;
+			settings.unit = "kg";
+			settings.capacity = capacity;
+			settings.startingQualified = starting;
+			settings.protectedReserve = protectedReserve;
+			return settings;
+		};
+		auto reservoir = [](std::string const& id, std::string const& thermalClass,
+			double startingC)
+		{
+			core::ThermalReservoirSettings settings;
+			settings.id = id;
+			settings.thermalClass = thermalClass;
+			settings.heatCapacityKJPerK = 10000.0;
+			settings.startingTemperatureC = startingC;
+			settings.minTemperatureC = -50.0;
+			settings.maxTemperatureC = 200.0;
+			return settings;
+		};
+		auto processor = [](std::string const& id)
+		{
+			core::MicrobialProcessorSettings settings;
+			settings.id = id;
+			settings.hazardClass = "normal";
+			settings.feedStoreId = "waste";
+			settings.oxygenStoreId = "oxygen";
+			settings.waterStoreId = "processWater";
+			settings.consumableStoreId = "media";
+			settings.nutrientStoreId = "nutrients";
+			settings.recoveredWaterStoreId = "recoveredWater";
+			settings.co2StoreId = "co2";
+			settings.residueStoreId = "residue";
+			settings.thermalClass = "low";
+			settings.heatSinkId = "sink";
+			settings.rateKgPerS = 0.001;
+			settings.specificEnergyKWhPerKgFeed = 2.0;
+			settings.oxygenPerKgFeedKg = 0.8;
+			settings.processWaterPerKgFeedKg = 0.5;
+			settings.consumablePerKgFeed = 0.01;
+			settings.co2PerKgFeedKg = 0.3;
+			settings.nitrogenRecovery = 0.8;
+			settings.phosphorusRecovery = 0.8;
+			settings.potassiumRecovery = 0.8;
+			settings.mineralsRecovery = 0.7;
+			settings.waterRecovery = 0.7;
+			settings.reactionHeatKJPerKgFeed = 600.0;
+			settings.minOperatingTemperatureC = 15.0;
+			settings.maxSinkTemperatureC = 45.0;
+			settings.starvationDegradePerHour = 360.0;
+			settings.consumableExhaustionDegradePerHour = 720.0;
+			settings.coldStressDegradePerHour = 180.0;
+			settings.heatStressDegradePerHour = 1440.0;
+			settings.recoveryPerHour = 72.0;
+			return settings;
+		};
+		auto conditionStores = [&]()
+		{
+			std::vector<core::ResourceStoreSettings> stores;
+			auto feed = plainStore("waste", 100.0, 10.0);
+			feed.composition = feedComposition;
+			stores.push_back(feed);
+			stores.push_back(plainStore("oxygen", 100.0, 10.0));
+			stores.push_back(plainStore("processWater", 100.0, 10.0));
+			stores.push_back(plainStore("media", 100.0, 10.0));
+			stores.push_back(plainStore("nutrients", 100.0, 0.0));
+			stores.push_back(plainStore("recoveredWater", 100.0, 0.0));
+			stores.push_back(plainStore("co2", 100.0, 0.0));
+			stores.push_back(plainStore("residue", 100.0, 0.0));
+			return stores;
+		};
+		auto findStore = [](core::StationSystemsSnapshot const& snap, std::string const& id)
+		{
+			for (auto const& entry : snap.stores)
+				if (entry.id == id) return entry;
+			return core::StationSystemsStoreSnapshot{};
+		};
+		auto configure = [&](core::World& world,
+			std::vector<core::ResourceStoreSettings> stores,
+			core::MicrobialProcessorSettings unit,
+			double sinkStartingC = 20.0,
+			std::vector<core::ResourceDeliverySettings> deliveries = {})
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = std::move(stores);
+			settings.thermalReservoirs = { reservoir("sink", "low", sinkStartingC) };
+			settings.microbialProcessors = { std::move(unit) };
+			settings.deliveries = std::move(deliveries);
+			core::SolarArraySettings field;
+			field.id = "field";
+			field.capacityKW = 100.0;
+			settings.solarArrays = { field };
+			return world.configureStationSystems(settings, false, &diagnostic);
+		};
+		auto conserve = [](core::StationSystemsSnapshot const& snap)
+		{
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
+			for (auto const& balance : snap.constituentBalances)
+				require(std::abs(balance.residual) <= 2e-6,
+					("constituent boundary residual for '" + balance.constituent + "' not closed").c_str());
+		};
+		// Benign operation leaves the culture at full condition: no
+		// stressor acts, no degradation is applied, and the snapshot
+		// reports the benign state.
+		{
+			core::World world("ConditionBenign", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(configure(world, conditionStores(), processor("digester")),
+				"benign-condition setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(120), "benign-condition run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& unit = snap.microbialProcessors[0];
+			require(approx(unit.condition, 1.0) && unit.lastStressors.empty()
+				&& !unit.recovering && unit.lastConditionDelta == 0.0
+				&& unit.stockConsumedUnits == 0.0,
+				"benign operation did not leave the culture at full, unstressed condition");
+			conserve(snap);
+		}
+		// Starvation degrades the culture once the feed is gone: the
+		// stressor is named, the condition falls at the declared rate,
+		// and nothing digests or moves past the exhausted feed.
+		{
+			core::World world("ConditionStarvation", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto stores = conditionStores();
+			// 0.003 kg of feed lasts 3 s at the rated 0.001 kg/s.
+			stores[0].startingQualified = 0.003;
+			require(configure(world, stores, processor("digester")),
+				"starvation setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(180), "starvation digest phase failed");
+			auto const digestSnap = world.getStationSystemsSnapshot();
+			require(approx(digestSnap.microbialProcessors[0].condition, 1.0)
+				&& approx(digestSnap.microbialProcessors[0].feedConsumedKg, 0.003),
+				"the culture did not digest the available feed at full condition");
+			require(world.advanceTicks(120), "starvation degrade phase failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& unit = snap.microbialProcessors[0];
+			// 2 s starved at 0.1 condition/s -> 0.8, within one tick of
+			// boundary rounding.
+			require(closeTo(unit.condition, 0.8, 0.01)
+				&& unit.lastStressors == "starvation"
+				&& !unit.recovering,
+				"starvation did not degrade the culture at the declared rate with a named stressor");
+			require(approx(unit.feedConsumedKg, 0.003)
+				&& findStore(snap, "waste").currentQualified <= 1e-9
+				&& approx(findStore(snap, "oxygen").currentQualified,
+					10.0 - 0.003 * 0.8),
+				"the starved processor kept consuming or fabricated material");
+			conserve(snap);
+		}
+		// Condition throttles actual processing: a culture starting at
+		// half condition drives only half the rated feed while every
+		// ledger still closes - reduced performance never breaks
+		// conservation, and the limiter names the condition.
+		{
+			core::World world("ConditionThrottle", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto unit = processor("digester");
+			unit.initialCondition = 0.5;
+			unit.recoveryPerHour = 0.0; // pure throttle: no recovery in this world
+			require(configure(world, conditionStores(), unit), "throttle setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "throttle run failed");
+			auto const elapsed = 60.0 * dt;
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& live = snap.microbialProcessors[0];
+			require(approx(live.condition, 0.5)
+				&& approx(live.scale, 0.5)
+				&& approx(live.feedConsumedKg, 0.5 * 0.001 * elapsed),
+				"half condition did not throttle the digestion to half the rated feed");
+			require(live.status == core::StationTransferStatus::Partial
+				&& live.limiter.find("culture condition degraded") != std::string::npos,
+				"the condition throttle was not reported as the limiter");
+			// nutrientPerKgFeed = 0.1 dry x (0.05+0.02+0.02)x0.8 + 0.03x0.7 = 0.0093
+			require(approx(live.nutrientProducedKg,
+				0.5 * 0.001 * elapsed * 0.0093),
+				"the throttled recovery did not scale with the digestion");
+			conserve(snap);
+			bool sawConditionEvent = false;
+			for (auto const& event : world.getStationSystemsEvents())
+				if (event.message.find("culture condition degraded") != std::string::npos)
+					sawConditionEvent = true;
+			require(sawConditionEvent,
+				"the condition throttle never surfaced through the event seam");
+		}
+		// Recovery is bounded and stock-funded: a damaged culture recovers
+		// only at the declared rate, each recovered condition point
+		// consumes the configured stock above nothing for free, and when
+		// the stock runs out the condition stops climbing - never an
+		// instant restore.
+		{
+			core::World world("ConditionStockRecovery", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto stores = conditionStores();
+			stores.push_back(plainStore("stock", 10.0, 1.0));
+			auto unit = processor("digester");
+			unit.initialCondition = 0.5;
+			unit.stockStoreId = "stock";
+			unit.stockUnitsPerConditionPoint = 10.0;
+			require(configure(world, stores, unit), "stock-recovery setup refused");
+			world.resumeSimulation();
+			// 1 s of recovery: 0.02 points at 10 kg/point = 0.2 kg stock.
+			require(world.advanceTicks(60), "stock-recovery first phase failed");
+			auto const first = world.getStationSystemsSnapshot();
+			require(closeTo(first.microbialProcessors[0].condition, 0.52, 0.01)
+				&& first.microbialProcessors[0].recovering
+				&& closeTo(findStore(first, "stock").currentQualified, 0.8, 0.01),
+				"recovery did not proceed at the declared rate funded by the declared stock");
+			require(first.microbialProcessors[0].condition < 0.99,
+				"recovery restored capacity instantly instead of being rate-bounded");
+			// 1.0 kg of stock buys at most 0.1 condition points: the
+			// culture caps at 0.6 once the stock is gone.
+			require(world.advanceTicks(360), "stock-recovery second phase failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(closeTo(snap.microbialProcessors[0].condition, 0.6, 0.01)
+				&& findStore(snap, "stock").currentQualified <= 1e-9
+				&& closeTo(snap.microbialProcessors[0].stockConsumedUnits, 1.0, 0.01)
+				&& snap.microbialProcessors[0].lastStockConsumedUnits < 1e-9,
+				"recovery did not stop when the replacement stock was exhausted");
+			conserve(snap);
+		}
+		// Temperature stress degrades the culture on both sides of the
+		// window even though the stage runs nowhere: the cold excursion
+		// costs cold-stress points, the hot excursion costs heat-stress
+		// points, and neither spends feed.
+		{
+			core::World cold("ConditionColdStress", 2, 2);
+			cold.pauseSimulation(); cold.finishBuild();
+			require(configure(cold, conditionStores(), processor("digester"), 10.0),
+				"cold-stress setup refused");
+			cold.resumeSimulation();
+			require(cold.advanceTicks(120), "cold-stress run failed");
+			auto const coldSnap = cold.getStationSystemsSnapshot();
+			require(closeTo(coldSnap.microbialProcessors[0].condition, 0.9, 0.01)
+				&& coldSnap.microbialProcessors[0].lastStressors == "cold stress"
+				&& coldSnap.microbialProcessors[0].feedConsumedKg == 0.0,
+				"the cold excursion did not degrade the culture at the declared rate");
+			conserve(coldSnap);
+			core::World hot("ConditionHeatStress", 2, 2);
+			hot.pauseSimulation(); hot.finishBuild();
+			require(configure(hot, conditionStores(), processor("digester"), 50.0),
+				"heat-stress setup refused");
+			hot.resumeSimulation();
+			require(hot.advanceTicks(120), "heat-stress run failed");
+			auto const hotSnap = hot.getStationSystemsSnapshot();
+			require(closeTo(hotSnap.microbialProcessors[0].condition, 0.2, 0.01)
+				&& hotSnap.microbialProcessors[0].lastStressors == "heat stress"
+				&& hotSnap.microbialProcessors[0].feedConsumedKg == 0.0,
+				"the hot excursion did not degrade the culture at the declared rate");
+			conserve(hotSnap);
+		}
+		// Consumable exhaustion degrades the culture through the named
+		// rule while the stage is refused for want of medium.
+		{
+			core::World world("ConditionMediaOut", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto stores = conditionStores();
+			stores[3].startingQualified = 0.0; // media store empty
+			require(configure(world, stores, processor("digester")),
+				"media-exhaustion setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "media-exhaustion run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(closeTo(snap.microbialProcessors[0].condition, 0.8, 0.01)
+				&& snap.microbialProcessors[0].lastStressors == "consumable exhaustion"
+				&& snap.microbialProcessors[0].feedConsumedKg == 0.0,
+				"media exhaustion did not degrade the culture at the declared rate");
+			conserve(snap);
+		}
+		// The full adversity/recovery cycle: digest at full condition,
+		// starve on the gap between feedings, then recover through the
+		// declared time-bound rate once the resupply lands - gradual,
+		// accounted, and conserved through every phase.
+		{
+			core::World world("ConditionCycle", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto stores = conditionStores();
+			stores[0].startingQualified = 0.003; // 3 s of feed
+			core::ResourceDeliverySettings resupply;
+			resupply.id = "feeddrop";
+			resupply.storeId = "waste";
+			resupply.unit = "kg";
+			resupply.quantity = 5.0;
+			resupply.firstOccurrenceSeconds = 6.0;
+			require(configure(world, stores, processor("digester"), 20.0, { resupply }),
+				"adversity-cycle setup refused");
+			world.resumeSimulation();
+			// Through the starvation gap: 3 s digesting, then degrading
+			// at 0.1/s until the 6 s resupply. Sample mid-gap while the
+			// culture is definitely unfed.
+			require(world.advanceTicks(300), "adversity-cycle starve phase failed");
+			auto const starved = world.getStationSystemsSnapshot();
+			require(closeTo(starved.microbialProcessors[0].condition, 0.8, 0.01)
+				&& starved.microbialProcessors[0].lastStressors == "starvation",
+				"the starvation gap did not degrade the culture as declared");
+			conserve(starved);
+			// After the resupply the culture is fed again: recovery
+			// advances at 0.02/s with no stock configured - time-bound
+			// recovery alone. 5 s of recovery adds at most 0.1.
+			require(world.advanceTicks(360), "adversity-cycle recovery phase failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(closeTo(snap.microbialProcessors[0].condition, 0.8, 0.01)
+				&& snap.microbialProcessors[0].lastStressors.empty()
+				&& snap.microbialProcessors[0].recovering
+				&& snap.microbialProcessors[0].stockConsumedUnits == 0.0,
+				"the fed culture did not recover through the declared bounded rate");
+			require(snap.microbialProcessors[0].feedConsumedKg > 0.003,
+				"the culture did not resume digesting after the resupply");
+			conserve(snap);
+		}
+	}
+
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power},
@@ -11523,7 +11956,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"failures", failures}};
+		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

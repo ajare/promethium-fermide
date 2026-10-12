@@ -1784,6 +1784,158 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		}
 		mDraft.methaneProcessors.push_back(std::move(processor));
 	}
+	ImGui::SeparatorText("Draft microbial processors (#407/#408; the digestion closes on mass - feed + oxygen + process water = nutrients + recovered water + CO2 + residue - with the residue as the balance term; the culture runs only inside the declared operating window; the condition/recovery coefficients below are provisional biological assumptions: starvation, consumable exhaustion, cold stress and heat stress degrade the aggregate culture condition, which throttles processing; recovery is bounded by the declared rate and, when a replacement biological stock store is declared, by the stock drawn above its protected reserve)");
+	for (size_t index = 0; index < mDraft.microbialProcessors.size(); )
+	{
+		auto& processor = mDraft.microbialProcessors[index];
+		auto const row = std::to_string(index);
+		bool removeProcessor = false;
+		char processorIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(processorIdBuffer, processor.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Microbial processor " + row + " id").c_str(),
+			processorIdBuffer, sizeof(processorIdBuffer)))
+			processor.id = processorIdBuffer;
+		char processorHazardBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(processorHazardBuffer, processor.hazardClass.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Microbial processor " + row + " hazard class").c_str(),
+			processorHazardBuffer, sizeof(processorHazardBuffer)))
+			processor.hazardClass = processorHazardBuffer;
+		char processorFeedBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(processorFeedBuffer, processor.feedStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Microbial processor " + row + " organic waste feed store").c_str(),
+			processorFeedBuffer, sizeof(processorFeedBuffer)))
+			processor.feedStoreId = processorFeedBuffer;
+		char processorOxygenBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(processorOxygenBuffer, processor.oxygenStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Microbial processor " + row + " oxygen store").c_str(),
+			processorOxygenBuffer, sizeof(processorOxygenBuffer)))
+			processor.oxygenStoreId = processorOxygenBuffer;
+		char processorWaterBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(processorWaterBuffer, processor.waterStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Microbial processor " + row + " process water store").c_str(),
+			processorWaterBuffer, sizeof(processorWaterBuffer)))
+			processor.waterStoreId = processorWaterBuffer;
+		char processorMediaBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(processorMediaBuffer, processor.consumableStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Microbial processor " + row + " culture medium store").c_str(),
+			processorMediaBuffer, sizeof(processorMediaBuffer)))
+			processor.consumableStoreId = processorMediaBuffer;
+		char processorNutrientBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(processorNutrientBuffer, processor.nutrientStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Microbial processor " + row + " recovered nutrient store").c_str(),
+			processorNutrientBuffer, sizeof(processorNutrientBuffer)))
+			processor.nutrientStoreId = processorNutrientBuffer;
+		char processorRecoveredWaterBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(processorRecoveredWaterBuffer, processor.recoveredWaterStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Microbial processor " + row + " recovered water store").c_str(),
+			processorRecoveredWaterBuffer, sizeof(processorRecoveredWaterBuffer)))
+			processor.recoveredWaterStoreId = processorRecoveredWaterBuffer;
+		char processorCo2Buffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(processorCo2Buffer, processor.co2StoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Microbial processor " + row + " CO2 store").c_str(),
+			processorCo2Buffer, sizeof(processorCo2Buffer)))
+			processor.co2StoreId = processorCo2Buffer;
+		char processorResidueBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(processorResidueBuffer, processor.residueStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Microbial processor " + row + " residue store").c_str(),
+			processorResidueBuffer, sizeof(processorResidueBuffer)))
+			processor.residueStoreId = processorResidueBuffer;
+		char processorStockBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(processorStockBuffer, processor.stockStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Microbial processor " + row + " replacement biological stock store").c_str(),
+			processorStockBuffer, sizeof(processorStockBuffer)))
+			processor.stockStoreId = processorStockBuffer;
+		char processorThermalBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(processorThermalBuffer, processor.thermalClass.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Microbial processor " + row + " heat sink thermal class").c_str(),
+			processorThermalBuffer, sizeof(processorThermalBuffer)))
+			processor.thermalClass = processorThermalBuffer;
+		char processorSinkBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(processorSinkBuffer, processor.heatSinkId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Microbial processor " + row + " heat sink reservoir").c_str(),
+			processorSinkBuffer, sizeof(processorSinkBuffer)))
+			processor.heatSinkId = processorSinkBuffer;
+		ImGui::PushItemWidth(140.0f);
+		ImGui::InputDouble(("Microbial processor " + row + " rated feed processing kg/s").c_str(),
+			&processor.rateKgPerS, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Microbial processor " + row + " specific energy kWh/kg feed").c_str(),
+			&processor.specificEnergyKWhPerKgFeed, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Microbial processor " + row + " oxygen per kg feed kg").c_str(),
+			&processor.oxygenPerKgFeedKg, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Microbial processor " + row + " process water per kg feed kg").c_str(),
+			&processor.processWaterPerKgFeedKg, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Microbial processor " + row + " medium units per kg feed").c_str(),
+			&processor.consumablePerKgFeed, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Microbial processor " + row + " CO2 per kg feed kg").c_str(),
+			&processor.co2PerKgFeedKg, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Microbial processor " + row + " nitrogen recovery").c_str(),
+			&processor.nitrogenRecovery, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Microbial processor " + row + " phosphorus recovery").c_str(),
+			&processor.phosphorusRecovery, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Microbial processor " + row + " potassium recovery").c_str(),
+			&processor.potassiumRecovery, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Microbial processor " + row + " minerals recovery").c_str(),
+			&processor.mineralsRecovery, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Microbial processor " + row + " water recovery").c_str(),
+			&processor.waterRecovery, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Microbial processor " + row + " reaction heat kJ/kg feed").c_str(),
+			&processor.reactionHeatKJPerKgFeed, 0.0, 0.0, "%.2f");
+		ImGui::InputDouble(("Microbial processor " + row + " min operating temperature C").c_str(),
+			&processor.minOperatingTemperatureC, 0.0, 0.0, "%.2f");
+		ImGui::InputDouble(("Microbial processor " + row + " max sink temperature C").c_str(),
+			&processor.maxSinkTemperatureC, 0.0, 0.0, "%.2f");
+		ImGui::InputDouble(("Microbial processor " + row + " initial condition").c_str(),
+			&processor.initialCondition, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Microbial processor " + row + " starvation degrade per hour").c_str(),
+			&processor.starvationDegradePerHour, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Microbial processor " + row + " consumable exhaustion degrade per hour").c_str(),
+			&processor.consumableExhaustionDegradePerHour, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Microbial processor " + row + " cold stress degrade per hour").c_str(),
+			&processor.coldStressDegradePerHour, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Microbial processor " + row + " heat stress degrade per hour").c_str(),
+			&processor.heatStressDegradePerHour, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Microbial processor " + row + " recovery per hour").c_str(),
+			&processor.recoveryPerHour, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Microbial processor " + row + " stock units per condition point").c_str(),
+			&processor.stockUnitsPerConditionPoint, 0.0, 0.0, "%.4f");
+		ImGui::InputInt(("Microbial processor " + row + " priority").c_str(), &processor.priority, 1, 0);
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove microbial processor " + row).c_str()))
+			removeProcessor = true;
+		ImGui::PopItemWidth();
+		if (removeProcessor)
+			mDraft.microbialProcessors.erase(mDraft.microbialProcessors.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
+	if (mDraft.microbialProcessors.size() < core::MaxStationMicrobialProcessors && ImGui::Button("Add microbial processor"))
+	{
+		core::MicrobialProcessorSettings processor;
+		processor.hazardClass = "normal";
+		processor.thermalClass = "low";
+		processor.rateKgPerS = 0.001;
+		if (!mDraft.stores.empty())
+		{
+			processor.feedStoreId = mDraft.stores.front().id;
+			processor.oxygenStoreId = mDraft.stores.front().id;
+			processor.waterStoreId = mDraft.stores.front().id;
+			processor.consumableStoreId = mDraft.stores.front().id;
+			processor.nutrientStoreId = mDraft.stores.front().id;
+			processor.recoveredWaterStoreId = mDraft.stores.front().id;
+			processor.co2StoreId = mDraft.stores.front().id;
+			processor.residueStoreId = mDraft.stores.front().id;
+		}
+		if (!mDraft.thermalReservoirs.empty())
+			processor.heatSinkId = mDraft.thermalReservoirs.front().id;
+		for (size_t candidate = mDraft.microbialProcessors.size() + 1;; ++candidate)
+		{
+			processor.id = "microbialprocessor" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.microbialProcessors.begin(), mDraft.microbialProcessors.end(),
+				[&](core::MicrobialProcessorSettings const& existing) { return existing.id == processor.id; });
+			if (!taken) break;
+		}
+		mDraft.microbialProcessors.push_back(std::move(processor));
+	}
 	ImGui::SeparatorText("Draft thermal buffers (kJ; finite phase-change store that rides through a cooling deficit: charge is capped by the host reservoir's deficit, discharge by its rejection surplus; access is circulation-gated or passive; the usable band maps stored energy to buffer temperature)");
 	for (size_t index = 0; index < mDraft.thermalBuffers.size(); )
 	{
@@ -2584,7 +2736,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		if (processor.disabled)
 			ImGui::Text("  zero rated processing: no service");
 	}
-	ImGui::SeparatorText("Microbial processors (live; the digestion closes on mass - feed + oxygen + process water = nutrients + recovered water + CO2 + residue - with the residue as the balance term, and on energy - supplied + released = routed; recovered N/P/K/minerals are funded by the feed's bound nutrients only, atmospheric N never substitutes; the reaction heat is capped by the feed's chemical energy; the culture runs only inside the declared operating window; saturated destinations backpressure the whole stage)");
+	ImGui::SeparatorText("Microbial processors (live; the digestion closes on mass - feed + oxygen + process water = nutrients + recovered water + CO2 + residue - with the residue as the balance term, and on energy - supplied + released = routed; recovered N/P/K/minerals are funded by the feed's bound nutrients only, atmospheric N never substitutes; the reaction heat is capped by the feed's chemical energy; the culture runs only inside the declared operating window; saturated destinations backpressure the whole stage; the aggregate culture condition degrades under starvation, consumable exhaustion and temperature stress and throttles processing, recovering only through the declared bounded rate and replacement stock - provisional biological assumptions)");
 	for (auto const& processor : snapshot.microbialProcessors)
 	{
 		char const* status = "idle";
@@ -2621,6 +2773,15 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			processor.co2ProducedKg, processor.residueProducedKg,
 			processor.energySuppliedKJ, processor.reactionHeatKJ, processor.heatRoutedKJ,
 			processor.residualKg, processor.residualKJ);
+		ImGui::Text("  condition %.3f | %s%s | last change %+.6f | replacement stock: %s consumed %.6f units this tick (%.4f total)",
+			processor.condition,
+			processor.lastStressors.empty() ? (processor.recovering
+				? "benign, recovering" : "benign, at full condition")
+				: ("stressed by " + processor.lastStressors).c_str(),
+			processor.lastConditionDelta,
+			processor.stockStoreId.empty() ? "none configured,"
+				: ("drawn from '" + processor.stockStoreId + "',").c_str(),
+			processor.lastStockConsumedUnits, processor.stockConsumedUnits);
 		if (processor.disabled)
 			ImGui::Text("  zero rated feed: no service");
 	}

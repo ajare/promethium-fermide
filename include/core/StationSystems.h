@@ -1072,8 +1072,26 @@ namespace core
 	// interface: the culture runs only while the sink reservoir sits at
 	// or above the declared minimum operating temperature and below the
 	// maximum sink temperature; outside the window the stage is refused
-	// whole. No dynamic culture condition is modelled in this slice -
-	// degradation, inhibition and recovery are separate work.
+	// whole.
+	// Aggregate culture condition and recovery (#408): the processor
+	// carries one aggregate condition in [0, 1] - never individual
+	// organisms - degraded by the configured adverse-rule set: feed
+	// starvation, culture-medium exhaustion, cold stress below the
+	// operating window and heat stress at or above the maximum sink
+	// temperature, each with its own per-hour degradation rate. The
+	// degradation, recovery and stock-consumption coefficients are
+	// provisional biological assumptions: tunable model parameters,
+	// not validated biology. Condition throttles the uniform per-tick
+	// processing scale, so a degraded culture digests proportionally
+	// less; it never creates or deletes feedstock, microbial material
+	// or stored nutrients by itself - every material change stays an
+	// accounted store exchange. Recovery is bounded: it proceeds only
+	// while the culture is fed, supplied with medium and inside its
+	// temperature window, at most recoveryPerHour toward full, and
+	// when a replacement biological stock store is declared each
+	// recovered condition point consumes the configured stock units
+	// from that store above its protected reserve. Recovery is never
+	// instant and no individual organism is simulated.
 	// Feed, oxygen and process water draw only qualified inventory above
 	// each store's protected reserve. Products land qualified in finite
 	// stores: the nutrient store, the recovered-water store a water
@@ -1111,6 +1129,17 @@ namespace core
 		double reactionHeatKJPerKgFeed{1500.0}; // exothermic heat, capped by the feed's chemical energy
 		double minOperatingTemperatureC{15.0}; // culture runs at or above this interface temperature
 		double maxSinkTemperatureC{45.0};      // heat rejection qualified while the sink is below this
+		// #408 condition/recovery coefficients. All provisional
+		// biological assumptions (condition points per hour), not
+		// validated biology.
+		double initialCondition{1.0};            // aggregate culture condition at start, [0, 1]
+		double starvationDegradePerHour{0.05};   // condition points lost per hour with no drawable feed
+		double consumableExhaustionDegradePerHour{0.05}; // points lost per hour with no drawable medium
+		double coldStressDegradePerHour{0.02};   // points lost per hour below the operating window
+		double heatStressDegradePerHour{0.10};   // points lost per hour at or above the max sink temperature
+		double recoveryPerHour{0.02};            // maximum points restored per hour under benign conditions
+		std::string stockStoreId;                // optional replacement biological stock consumed by recovery
+		double stockUnitsPerConditionPoint{1.0}; // stock units consumed per condition point restored
 		int priority{0};
 		bool operator==(MicrobialProcessorSettings const&) const = default;
 	};
@@ -2431,8 +2460,26 @@ namespace core
 		double reactionHeatKJPerKgFeed{0.0};
 		double minOperatingTemperatureC{0.0};
 		double maxSinkTemperatureC{0.0};
+		double initialCondition{0.0};
+		double starvationDegradePerHour{0.0};
+		double consumableExhaustionDegradePerHour{0.0};
+		double coldStressDegradePerHour{0.0};
+		double heatStressDegradePerHour{0.0};
+		double recoveryPerHour{0.0};
+		std::string stockStoreId;
+		double stockUnitsPerConditionPoint{0.0};
 		int priority{0};
-		double scale{0.0}; // fraction of rated feed the feeds, destinations and energy sustained, [0, 1]
+		// The condition picture (#408): the aggregate culture condition,
+		// the signed change applied this tick, the adverse rules that
+		// acted this tick (empty: benign), whether recovery advanced this
+		// tick, and the replacement stock actually consumed.
+		double condition{0.0};
+		double lastConditionDelta{0.0};
+		std::string lastStressors; // e.g. "starvation+heat stress" (empty: none acted)
+		bool recovering{false};
+		double lastStockConsumedUnits{0.0};
+		double stockConsumedUnits{0.0};
+		double scale{0.0}; // fraction of rated feed the feeds, destinations, condition and energy sustained, [0, 1]
 		std::string limiter; // what bound the scale this tick (empty: none)
 		double lastRequestedKg{0.0};   // rated feed demanded this tick
 		double lastFeedConsumedKg{0.0};

@@ -214,7 +214,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 84", "version: 64");
+		replaceAll(legacy, "version: 85", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -231,14 +231,14 @@ namespace
 			"authored store fields missing or live inventory leaked");
 		bool refused = false;
 		auto staleStores = withField;
-		replaceAll(staleStores, "version: 84", "version: 65");
+		replaceAll(staleStores, "version: 85", "version: 65");
 		auto const staleStoresPath = directory / "stale-stores.world.yaml";
 		writeFile(staleStoresPath, staleStores);
 		try { (void)core::loadWorldDocument(staleStoresPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-66 document carrying resource stores was silently accepted");
 		auto staleTransfers = withField;
-		replaceAll(staleTransfers, "version: 84", "version: 66");
+		replaceAll(staleTransfers, "version: 85", "version: 66");
 		auto const staleTransfersPath = directory / "stale-transfers.world.yaml";
 		writeFile(staleTransfersPath, staleTransfers);
 		refused = false;
@@ -246,7 +246,7 @@ namespace
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-67 document carrying resource transfers was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 84", "version: 64");
+		replaceAll(stale, "version: 85", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
 		refused = false;
@@ -384,7 +384,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 84", "version: 67");
+			replaceAll(stale, "version: 85", "version: 67");
 			auto const stalePath = directory / "stale-compounds.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -493,7 +493,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 84", "version: 69");
+			replaceAll(stale, "version: 85", "version: 69");
 			auto const stalePath = directory / "stale-batteries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -615,7 +615,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 84", "version: 68");
+			replaceAll(stale, "version: 85", "version: 68");
 			auto const stalePath = directory / "stale-power.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -742,7 +742,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 84", "version: 70");
+			replaceAll(stale, "version: 85", "version: 70");
 			auto const stalePath = directory / "stale-deliveries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -858,7 +858,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 84", "version: 81");
+			replaceAll(stale, "version: 85", "version: 81");
 			auto const stalePath = directory / "stale-waste-ejections.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -986,7 +986,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 84", "version: 71");
+			replaceAll(stale, "version: 85", "version: 71");
 			auto const stalePath = directory / "stale-thermal.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1124,7 +1124,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 84", "version: 80");
+			replaceAll(stale, "version: 85", "version: 80");
 			auto const stalePath = directory / "stale-buffer.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1265,7 +1265,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 84", "version: 72");
+			replaceAll(stale, "version: 85", "version: 72");
 			auto const stalePath = directory / "stale-coolant.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1428,7 +1428,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 84", "version: 73");
+			replaceAll(stale, "version: 85", "version: 73");
 			auto const stalePath = directory / "stale-chillers.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1576,7 +1576,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 84", "version: 74");
+			replaceAll(stale, "version: 85", "version: 74");
 			auto const stalePath = directory / "stale-generators.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1737,7 +1737,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 84", "version: 75");
+			replaceAll(stale, "version: 85", "version: 75");
 			auto const stalePath = directory / "stale-atmospheres.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1908,7 +1908,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 84", "version: 76");
+			replaceAll(stale, "version: 85", "version: 76");
 			auto const stalePath = directory / "stale-crews.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -2098,7 +2098,7 @@ void waterFiles(smoke::Context const& context)
 	// A pre-78 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 84", "version: 77");
+		replaceAll(stale, "version: 85", "version: 77");
 		auto const stalePath = directory / "stale-water.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -2272,7 +2272,7 @@ void gasFiles(smoke::Context const& context)
 	// A pre-79 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 84", "version: 78");
+		replaceAll(stale, "version: 85", "version: 78");
 		auto const stalePath = directory / "stale-gas.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -2428,7 +2428,7 @@ void fuelCellFiles(smoke::Context const& context)
 	// A pre-80 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 84", "version: 79");
+		replaceAll(stale, "version: 85", "version: 79");
 		auto const stalePath = directory / "stale-fuelcells.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -2597,7 +2597,7 @@ void carbonRecoveryFiles(smoke::Context const& context)
 	// A pre-83 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 84", "version: 82");
+		replaceAll(stale, "version: 85", "version: 82");
 		auto const stalePath = directory / "stale-carbon.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -2720,6 +2720,16 @@ void nutrientRecoveryFiles(smoke::Context const& context)
 	processor.reactionHeatKJPerKgFeed = 600.0;
 	processor.minOperatingTemperatureC = 15.0;
 	processor.maxSinkTemperatureC = 45.0;
+	// #408 condition/recovery contract, with non-default values so the
+	// file round trip exercises the new fields.
+	processor.initialCondition = 0.75;
+	processor.starvationDegradePerHour = 0.04;
+	processor.consumableExhaustionDegradePerHour = 0.06;
+	processor.coldStressDegradePerHour = 0.03;
+	processor.heatStressDegradePerHour = 0.12;
+	processor.recoveryPerHour = 0.03;
+	processor.stockStoreId = "stock";
+	processor.stockUnitsPerConditionPoint = 5.0;
 	processor.priority = 1;
 	core::World original("Nutrient Round Trip", 2, 2);
 	original.pauseSimulation();
@@ -2736,6 +2746,7 @@ void nutrientRecoveryFiles(smoke::Context const& context)
 	settings.stores.push_back(plainStore("recoveredWater", 100.0, 0.0));
 	settings.stores.push_back(plainStore("co2", 100.0, 0.0));
 	settings.stores.push_back(plainStore("residue", 100.0, 0.0));
+	settings.stores.push_back(plainStore("stock", 10.0, 1.0));
 	settings.thermalReservoirs.push_back(sink);
 	settings.solarArrays.push_back(field);
 	settings.microbialProcessors.push_back(processor);
@@ -2761,6 +2772,15 @@ void nutrientRecoveryFiles(smoke::Context const& context)
 		&& readFile(path).find("recoveredWaterStoreId") != std::string::npos
 		&& readFile(path).find("minOperatingTemperatureC") != std::string::npos,
 		"saved document lacks the nutrient-recovery contract");
+	require(readFile(path).find("initialCondition") != std::string::npos
+		&& readFile(path).find("starvationDegradePerHour") != std::string::npos
+		&& readFile(path).find("consumableExhaustionDegradePerHour") != std::string::npos
+		&& readFile(path).find("coldStressDegradePerHour") != std::string::npos
+		&& readFile(path).find("heatStressDegradePerHour") != std::string::npos
+		&& readFile(path).find("recoveryPerHour") != std::string::npos
+		&& readFile(path).find("stockStoreId") != std::string::npos
+		&& readFile(path).find("stockUnitsPerConditionPoint") != std::string::npos,
+		"saved document lacks the #408 condition/recovery contract");
 	auto const reopened = core::loadWorldDocument(path);
 	reopened->pauseSimulation();
 	require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
@@ -2782,16 +2802,17 @@ void nutrientRecoveryFiles(smoke::Context const& context)
 		&& reopenedBinary->getStationSystemsSnapshot().microbialProcessors[0].feedConsumedKg == 0.0,
 		"reopened binary nutrient document did not reconstruct the starting state");
 	auto const withField = serializeYaml(original);
-	// A pre-84 document carrying the new fields is refused.
+	// A pre-85 document carrying the #408 condition/recovery fields is
+	// refused rather than silently re-defaulted.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 84", "version: 83");
+		replaceAll(stale, "version: 85", "version: 84");
 		auto const stalePath = directory / "stale-nutrient.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
 		try { (void)core::loadWorldDocument(stalePath); }
 		catch (std::exception const&) { refused = true; }
-		require(refused, "a pre-84 document carrying nutrient recovery was silently accepted");
+		require(refused, "a pre-85 document carrying nutrient-recovery condition fields was silently accepted");
 	}
 	// A recovery yield above 1 is refused from a file.
 	{
@@ -2826,6 +2847,40 @@ void nutrientRecoveryFiles(smoke::Context const& context)
 		try { (void)core::loadWorldDocument(malformedPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "an empty microbial operating window was accepted from a file");
+	}
+	// An initial culture condition above 1 is refused from a file (#408).
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "initialCondition: 0.75", "initialCondition: 2.5");
+		auto const malformedPath = directory / "malformed-nutrient-initial-condition.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "an initial culture condition above 1 was accepted from a file");
+	}
+	// A negative degradation rate is refused from a file (#408).
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "starvationDegradePerHour: 0.04", "starvationDegradePerHour: -0.04");
+		auto const malformedPath = directory / "malformed-nutrient-degrade-rate.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a negative starvation degradation rate was accepted from a file");
+	}
+	// A declared stock store with zero units per condition point is
+	// refused from a file (#408).
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "stockUnitsPerConditionPoint: 5", "stockUnitsPerConditionPoint: 0");
+		auto const malformedPath = directory / "malformed-nutrient-stock-rate.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a zero stock units per condition point with a declared stock store was accepted from a file");
 	}
 }
 

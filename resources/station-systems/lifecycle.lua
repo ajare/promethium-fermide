@@ -2006,14 +2006,44 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             'microbial processor maximum sink temperature must be finite and above absolute zero')
         assert(processor.minOperatingTemperatureC < processor.maxSinkTemperatureC,
             'microbial processor minimum operating temperature must be below the maximum sink temperature: an empty operating window is never a service')
+        -- #408 condition/recovery contract. The coefficients are
+        -- provisional biological assumptions: the sandbox pins them
+        -- finite and in range, not biologically correct.
+        assert(type(processor.initialCondition) == 'number'
+            and processor.initialCondition == processor.initialCondition
+            and processor.initialCondition >= 0 and processor.initialCondition <= 1,
+            'microbial processor initial culture condition must be finite and from 0 to 1')
+        local biologyFields = {
+            { processor.starvationDegradePerHour, 'starvation degradation per hour' },
+            { processor.consumableExhaustionDegradePerHour,
+                'consumable exhaustion degradation per hour' },
+            { processor.coldStressDegradePerHour, 'cold stress degradation per hour' },
+            { processor.heatStressDegradePerHour, 'heat stress degradation per hour' },
+            { processor.recoveryPerHour, 'recovery per hour' },
+            { processor.stockUnitsPerConditionPoint, 'stock units per condition point' },
+        }
+        for _, entry in ipairs(biologyFields) do
+            assert(type(entry[1]) == 'number' and entry[1] == entry[1]
+                and entry[1] >= 0 and entry[1] < math.huge,
+                'microbial processor ' .. entry[2]
+                    .. ' must be finite and non-negative (provisional biological assumption)')
+        end
+        assert(processor.stockStore == nil or type(processor.stockStore) == 'string',
+            'microbial processor replacement stock store must be a store id or empty')
+        if processor.stockStore ~= nil and processor.stockStore ~= '' then
+            assert(processor.stockUnitsPerConditionPoint > 0,
+                'microbial processor stock units per condition point must be positive when a replacement biological stock store is declared: recovery would otherwise restore capacity while consuming nothing per point')
+        end
         local chainRoles = { 'feed', 'oxygen', 'process water', 'consumable',
-            'nutrient', 'recovered water', 'CO2', 'residue' }
+            'nutrient', 'recovered water', 'CO2', 'residue', 'replacement stock' }
         local chainIds = { processor.feedStore, processor.oxygenStore, processor.waterStore,
             processor.consumableStore, processor.nutrientStore, processor.recoveredWaterStore,
-            processor.co2Store, processor.residueStore }
-        for stream = 1, 8 do
-            for other = stream + 1, 8 do
-                assert(chainIds[stream] ~= chainIds[other],
+            processor.co2Store, processor.residueStore, processor.stockStore }
+        for stream = 1, 9 do
+            for other = stream + 1, 9 do
+                assert(chainIds[stream] == nil or chainIds[other] == nil
+                    or chainIds[stream] == '' or chainIds[other] == ''
+                    or chainIds[stream] ~= chainIds[other],
                     'microbial processor ' .. chainRoles[stream] .. ' store and '
                         .. chainRoles[other] .. ' store are the same store '
                         .. tostring(chainIds[stream])
@@ -2046,6 +2076,24 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             processor.hazardClass, false)
         local residue = declareMicrobialStore(processor.residueStore, 'residue',
             processor.hazardClass, false)
+        -- The replacement biological stock store (#408) is an optional
+        -- consumed input like the consumable: it must exist and stay
+        -- hazard-class segregated from the rest of the nutrient chain.
+        local stock = nil
+        if processor.stockStore ~= nil and processor.stockStore ~= '' then
+            stock = by_id[processor.stockStore]
+            assert(stock ~= nil, 'microbial processor replacement biological stock store is unknown')
+            local stockExisting = microbialStoreClass[stock.id]
+            if stockExisting == nil then
+                microbialStoreClass[stock.id] = processor.hazardClass
+            else
+                assert(stockExisting == processor.hazardClass,
+                    'microbial processor replacement biological stock store ' .. stock.id
+                        .. ' is shared between ' .. stockExisting .. '-class and '
+                        .. processor.hazardClass
+                        .. '-class nutrient processes: hazardous and normal nutrient streams may not share a store')
+            end
+        end
         local composition = feed.composition
         local dryPerKgFeed = 1 - composition.moisture
         local nutrientPerKgFeed = dryPerKgFeed * (composition.nutrientNitrogen
@@ -2088,7 +2136,18 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             reactionHeatKJPerKgFeed = processor.reactionHeatKJPerKgFeed,
             minOperatingTemperatureC = processor.minOperatingTemperatureC,
             maxSinkTemperatureC = processor.maxSinkTemperatureC,
+            initialCondition = processor.initialCondition,
+            starvationDegradePerHour = processor.starvationDegradePerHour,
+            consumableExhaustionDegradePerHour = processor.consumableExhaustionDegradePerHour,
+            coldStressDegradePerHour = processor.coldStressDegradePerHour,
+            heatStressDegradePerHour = processor.heatStressDegradePerHour,
+            recoveryPerHour = processor.recoveryPerHour,
+            stock = stock,
+            stockUnitsPerConditionPoint = processor.stockUnitsPerConditionPoint,
             priority = processor.priority,
+            condition = processor.initialCondition,
+            lastConditionDelta = 0, lastStressors = '', lastRecovering = false,
+            lastStockConsumed = 0, stockConsumedTotal = 0,
             lastScale = 0, lastLimiter = '',
             lastRequested = 0, lastFeedConsumed = 0, lastOxygenConsumed = 0,
             lastWaterConsumed = 0, lastConsumableRequested = 0, lastConsumableUsed = 0,
@@ -4547,10 +4606,91 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             proc.lastPowerSupplied = 0
             proc.lastUnmetProcessing = 0
             proc.lastReactionHeatKW = 0
+            proc.lastConditionDelta = 0
+            proc.lastStressors = ''
+            proc.lastRecovering = false
+            proc.lastStockConsumed = 0
             proc.temperatureEligible = false
             proc.lastBlockReason = ''
             if proc.rateKgPerS > 0 then
                 local fullKg = proc.rateKgPerS * fixed_seconds
+                -- Aggregate culture condition update (#408), mirroring
+                -- the host: the configured adverse-rule set acts every
+                -- tick - no drawable feed starves the culture, no
+                -- drawable medium exhausts it, and the sink temperature
+                -- outside the declared window stresses it cold or hot.
+                -- The per-hour rates are provisional biological
+                -- assumptions. Under benign conditions the culture
+                -- recovers at most the declared rate, funded - when a
+                -- replacement stock store is configured - by stock
+                -- actually drawn above its protected reserve, so
+                -- recovery is bounded by time and resources and never
+                -- instant. Condition itself is dimensionless: only the
+                -- stock draw moves mass, booked through the store
+                -- ledger like any other consumption.
+                local starving = math.max(0, feed.qualified - feed.protected_reserve) <= 0
+                local mediaExhausted = math.max(0,
+                    consumable.qualified - consumable.protected_reserve) <= 0
+                local coldStressed = proc.sink.temperature + 1e-9
+                    < proc.minOperatingTemperatureC
+                local heatStressed = proc.sink.temperature + 1e-9
+                    >= proc.maxSinkTemperatureC
+                local stressors = {}
+                local degradePerHour = 0
+                if starving then
+                    degradePerHour = degradePerHour + proc.starvationDegradePerHour
+                    stressors[#stressors + 1] = 'starvation'
+                end
+                if mediaExhausted then
+                    degradePerHour = degradePerHour + proc.consumableExhaustionDegradePerHour
+                    stressors[#stressors + 1] = 'consumable exhaustion'
+                end
+                if coldStressed then
+                    degradePerHour = degradePerHour + proc.coldStressDegradePerHour
+                    stressors[#stressors + 1] = 'cold stress'
+                end
+                if heatStressed then
+                    degradePerHour = degradePerHour + proc.heatStressDegradePerHour
+                    stressors[#stressors + 1] = 'heat stress'
+                end
+                proc.lastStressors = table.concat(stressors, '+')
+                local conditionBefore = proc.condition
+                if degradePerHour > 0 then
+                    proc.condition = math.max(0,
+                        proc.condition - degradePerHour * fixed_hours)
+                elseif proc.condition < 1 and proc.recoveryPerHour > 0 then
+                    local points = math.min(1 - proc.condition,
+                        proc.recoveryPerHour * fixed_hours)
+                    if proc.stock ~= nil and points > 0 then
+                        local drawableStock = math.max(0,
+                            proc.stock.qualified - proc.stock.protected_reserve)
+                        local stockCapPoints = drawableStock
+                            / proc.stockUnitsPerConditionPoint
+                        points = math.min(points, stockCapPoints)
+                        if points > 0 then
+                            local stockUnits = math.min(
+                                points * proc.stockUnitsPerConditionPoint,
+                                drawableStock)
+                            proc.stock.qualified = proc.stock.qualified - stockUnits
+                            self.unit_loss[proc.stock.unit] =
+                                (self.unit_loss[proc.stock.unit] or 0) + stockUnits
+                            if proc.stock.composition then
+                                local stockNet = {}
+                                addConstituents(stockNet, proc.stock.composition,
+                                    toKg(proc.stock.unit, stockUnits), -1)
+                                for constituent, change in pairs(stockNet) do
+                                    self.constituent_loss[constituent] =
+                                        (self.constituent_loss[constituent] or 0) - change
+                                end
+                            end
+                            proc.lastStockConsumed = stockUnits
+                            proc.stockConsumedTotal = proc.stockConsumedTotal + stockUnits
+                        end
+                    end
+                    proc.condition = proc.condition + points
+                    proc.lastRecovering = points > 0
+                end
+                proc.lastConditionDelta = proc.condition - conditionBefore
                 -- Static operating window: the culture runs at or above
                 -- the minimum operating temperature and below the
                 -- maximum sink temperature. Outside the window the stage
@@ -4636,6 +4776,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         fromKg(proc.residue.unit, fullKg * residuePerKgFeed),
                         "residue store '" .. proc.residue.id
                             .. "' is full: the unrecoverable residue has nowhere to go")
+                    -- Condition throttles the whole stage the same
+                    -- uniform way: a degraded culture simply cannot
+                    -- drive the full rated feed (#408). It never adds
+                    -- or removes material on its own.
+                    if proc.condition < scale then
+                        scale = proc.condition
+                        limiter = 'culture condition degraded to ' .. proc.condition
+                            .. ': the stressed culture cannot process the full rated feed'
+                    end
                     if scale < 0 then scale = 0 end
                     if scale > 1 then scale = 1 end
                     proc.lastScale = scale
@@ -4824,7 +4973,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 and isFinite(proc.nitrogenRecoveredTotal) and isFinite(proc.phosphorusRecoveredTotal)
                 and isFinite(proc.potassiumRecoveredTotal) and isFinite(proc.mineralsRecoveredTotal)
                 and isFinite(proc.energySuppliedKJ) and isFinite(proc.reactionHeatKJ)
-                and isFinite(proc.heatRoutedKJ),
+                and isFinite(proc.heatRoutedKJ)
+                and isFinite(proc.condition) and isFinite(proc.lastConditionDelta)
+                and isFinite(proc.lastStockConsumed) and isFinite(proc.stockConsumedTotal)
+                and proc.condition >= 0 and proc.condition <= 1,
                 "microbial processor '" .. proc.id .. "' result is not finite")
         end
         -- Second loop pass: integrate the loop's temperature from the

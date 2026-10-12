@@ -840,7 +840,18 @@ namespace core
 		// per-constituent recovery and energy/heat ledgers stay runtime-
 		// only, so load and Reset reconstruct them from the authored
 		// starting conditions.
-		serializer.writeUint32("version", 84);
+		// Version 85 extends the microbial processor contract with the
+		// #408 condition/recovery declaration: initial culture condition,
+		// the starvation, consumable-exhaustion, cold-stress and
+		// heat-stress degradation rates and the bounded recovery rate
+		// (all provisional biological assumptions), plus the optional
+		// replacement biological stock store and its consumption per
+		// recovered condition point. The condition trajectory, stressor
+		// history and stock-consumed ledger stay runtime-only, so load
+		// and Reset reconstruct them from the authored initial
+		// condition; a pre-85 document carrying `microbialProcessors` is
+		// refused rather than silently re-defaulting the biology.
+		serializer.writeUint32("version", 85);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -1421,6 +1432,19 @@ namespace core
 					serializer.writeDouble("minOperatingTemperatureC",
 						processor.minOperatingTemperatureC);
 					serializer.writeDouble("maxSinkTemperatureC", processor.maxSinkTemperatureC);
+					serializer.writeDouble("initialCondition", processor.initialCondition);
+					serializer.writeDouble("starvationDegradePerHour",
+						processor.starvationDegradePerHour);
+					serializer.writeDouble("consumableExhaustionDegradePerHour",
+						processor.consumableExhaustionDegradePerHour);
+					serializer.writeDouble("coldStressDegradePerHour",
+						processor.coldStressDegradePerHour);
+					serializer.writeDouble("heatStressDegradePerHour",
+						processor.heatStressDegradePerHour);
+					serializer.writeDouble("recoveryPerHour", processor.recoveryPerHour);
+					serializer.writeString("stockStoreId", processor.stockStoreId);
+					serializer.writeDouble("stockUnitsPerConditionPoint",
+						processor.stockUnitsPerConditionPoint);
 					serializer.writeInt32("priority", processor.priority);
 					serializer.endMap();
 				}
@@ -2394,7 +2418,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 84)
+		if (version < 1 || version > 85)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -3012,8 +3036,8 @@ namespace core
 			}
 			if (serializer.hasField("microbialProcessors"))
 			{
-				if (version < 84) throw SerializationException(
-					"Station microbial processors require World schema 84");
+				if (version < 85) throw SerializationException(
+					"Station microbial processors require World schema 85");
 				serializer.beginArray("microbialProcessors");
 				while (serializer.nextArrayItem())
 				{
@@ -3049,6 +3073,19 @@ namespace core
 					processor.minOperatingTemperatureC =
 						serializer.readDouble("minOperatingTemperatureC");
 					processor.maxSinkTemperatureC = serializer.readDouble("maxSinkTemperatureC");
+					processor.initialCondition = serializer.readDouble("initialCondition");
+					processor.starvationDegradePerHour =
+						serializer.readDouble("starvationDegradePerHour");
+					processor.consumableExhaustionDegradePerHour =
+						serializer.readDouble("consumableExhaustionDegradePerHour");
+					processor.coldStressDegradePerHour =
+						serializer.readDouble("coldStressDegradePerHour");
+					processor.heatStressDegradePerHour =
+						serializer.readDouble("heatStressDegradePerHour");
+					processor.recoveryPerHour = serializer.readDouble("recoveryPerHour");
+					processor.stockStoreId = serializer.readString("stockStoreId");
+					processor.stockUnitsPerConditionPoint =
+						serializer.readDouble("stockUnitsPerConditionPoint");
 					processor.priority = serializer.readInt32("priority");
 					stationSettings.microbialProcessors.push_back(std::move(processor));
 					serializer.endMap();
