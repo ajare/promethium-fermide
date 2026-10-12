@@ -624,6 +624,78 @@ namespace core
 		return saturationKPa * 1000.0 * volumeM3 * StationMolarMassWaterKgPerMol
 			/ (StationUniversalGasConstantJPerMolK * (temperatureC + StationCelsiusOffset));
 	}
+	// The compartment's temperature and its water vapour inventory are
+	// one coupled state (#564): the saturation the air can hold depends
+	// on the temperature, and the condensation that constraint forces
+	// releases latent heat back into that same temperature. Integrating
+	// the two in sequence - condensing against the tick-start
+	// temperature, then moving the temperature - leaves the gas
+	// supersaturated by however far the temperature fell during the
+	// tick, a phase change forever one tick behind its own constraint.
+	// Solving them together removes the lag. With C the compartment heat
+	// capacity, T0 its tick-start temperature, Q the tick's constant
+	// external heat rate (occupant sensible heat plus the exchanger
+	// exchange), L the latent heat of vaporization and m0 the vapour
+	// mass entering the solve, the end-of-tick equilibrium is either
+	//   unsaturated - no phase change, T = T0 + Q*dt/C, or
+	//   saturated   - the condensate x satisfies the fixed point
+	//       x = m0 - m_sat(T0 + (Q*dt + L*x)/C),
+	// where the latent term is the feedback: condensing warms the air,
+	// which raises the saturation capacity, which condenses less. The
+	// residual F(x) = m0 - m_sat(T0 + (Q*dt + L*x)/C) - x is strictly
+	// decreasing - m_sat never decreases with temperature and the
+	// temperature grows with x, and it is strictly decreasing in x
+	// wherever the saturation is flat because of the explicit -x term -
+	// so a fixed-count bisection lands on the unique root
+	// deterministically, and the published condensate is the bracket
+	// end where F <= 0: the remaining vapour never exceeds what the
+	// temperature that condensation itself produced can hold. The
+	// temperature is then booked from the condensate,
+	// C*(T - T0) = Q*dt + L*x, so the thermal ledger closes over
+	// exactly the latent heat that left the gas phase rather than a
+	// clamped display value hiding an unsatisfied constraint.
+	struct VapourThermalCoupling
+	{
+		double temperatureC{0.0};
+		double condensedKg{0.0};
+	};
+	VapourThermalCoupling solveVapourThermalCoupling(double capacityKJPerK,
+		double startTemperatureC, double externalHeatKW, double vapourKg,
+		double volumeM3, double dt)
+	{
+		auto const saturatedMassAt = [volumeM3](double temperatureC)
+		{
+			return stationSaturatedVapourMassKg(
+				stationSaturationVapourPressureKPa(temperatureC), volumeM3, temperatureC);
+		};
+		auto const freeTemperatureC = startTemperatureC + externalHeatKW * dt / capacityKJPerK;
+		// Air that still holds no more than saturation at the end of a
+		// phase-change-free tick never reaches the phase boundary: with a
+		// constant heat rate the temperature is monotone across the
+		// tick, so the end is its tightest point.
+		if (!(vapourKg > saturatedMassAt(freeTemperatureC)))
+			return {freeTemperatureC, 0.0};
+		// Saturated branch: bisect the condensate fixed point on [0, m0].
+		// F(0) > 0 because the unsaturated branch just failed, and
+		// F(m0) = -m_sat(...) <= 0, so the root is bracketed.
+		auto low = 0.0;
+		auto high = vapourKg;
+		for (int iteration = 0; iteration < 100; ++iteration)
+		{
+			auto const mid = 0.5 * (low + high);
+			auto const midTemperatureC = freeTemperatureC
+				+ StationLatentHeatVaporizationKJPerKg * mid / capacityKJPerK;
+			if (vapourKg - saturatedMassAt(midTemperatureC) - mid > 0.0) low = mid;
+			else high = mid;
+		}
+		// `high` is the bracket end where F <= 0: condensing it leaves
+		// the vapour at or below the saturation of the temperature the
+		// condensation itself produced.
+		auto const condensedKg = high;
+		return {freeTemperatureC
+			+ StationLatentHeatVaporizationKJPerKg * condensedKg / capacityKJPerK,
+			condensedKg};
+	}
 	uint64_t stationScheduleOccurrencesDue(double firstOccurrenceSeconds,
 		double recurrenceSeconds, double elapsedSeconds)
 	{
@@ -1652,9 +1724,11 @@ namespace core
 		// (#400). The compartment owns a finite gas inventory in a fixed
 		// volume; occupancy draws oxygen capped by what is actually there
 		// and scales CO2 production and metabolic heat with the fraction
-		// consumed; water vapour is capped by saturation at the current
-		// temperature, the excess condensing and releasing its latent
-		// heat into the compartment; leakage is a constant total-mass
+		// consumed; water vapour is capped by saturation at the
+		// compartment's own integrated temperature through the coupled
+		// phase/thermal solve (#564), the condensate releasing its
+		// latent heat into the same thermal state that sets the cap;
+		// leakage is a constant total-mass
 		// rate capped by the inventory and split composition-
 		// proportionally. Every removal pathway books its per-component
 		// amounts so the per-component ledger closes exactly: starting +
@@ -3126,9 +3200,9 @@ namespace core
 						? StationTransferStatus::Full : StationTransferStatus::Partial);
 				if (cycle.authored.recurrenceSeconds <= 0.0) cycle.exhausted = true;
 			}
-			// Then each compartment: occupancy draw, vapour constraint,
-			// leakage, thermal integration and derived pressures, in that
-			// documented order.
+			// Then each compartment: occupancy draw, leakage, the
+			// coupled vapour-phase/thermal integration and the derived
+			// pressures, in that documented order.
 			for (size_t atmosphereIndex = 0; atmosphereIndex < atmospheres.size(); ++atmosphereIndex)
 			{
 				auto& compartment = atmospheres[atmosphereIndex];
@@ -3155,22 +3229,6 @@ namespace core
 				compartment.co2ProducedKg += co2ProducedKg;
 				compartment.waterVapourKg += vapourAddedKg;
 				compartment.vapourAddedKg += vapourAddedKg;
-				// Vapour constraint at the current temperature: the air
-				// holds no more than saturation; the excess condenses now
-				// and its latent heat is released into the compartment
-				// this tick. The condensate leaves the gas phase and is
-				// reported, never destroyed; it does not re-evaporate in
-				// this slice.
-				auto const saturationKPa = stationSaturationVapourPressureKPa(compartment.temperatureC);
-				auto const saturatedMassKg = stationSaturatedVapourMassKg(
-					saturationKPa, compartment.authored.volumeM3, compartment.temperatureC);
-				auto condensedKg = 0.0;
-				if (compartment.waterVapourKg > saturatedMassKg)
-				{
-					condensedKg = compartment.waterVapourKg - saturatedMassKg;
-					compartment.waterVapourKg = saturatedMassKg;
-					compartment.condensedKg += condensedKg;
-				}
 				// Leakage: a constant authored total-mass rate capped by
 				// what the compartment holds, split composition-
 				// proportionally. The leaked mass leaves the station's
@@ -3195,18 +3253,30 @@ namespace core
 					compartment.leakWaterVapourKg += leakedWaterVapourKg;
 				}
 				compartment.leakedKg += leakedKg;
-				// Thermal integration: occupant sensible heat, the
-				// condensation latent heat and the heat-only reservoir
-				// exchange. The exchange came from the reservoir's implicit
-				// star solve above, which already negated it onto the
-				// reservoir, so it is only read here (#559).
+				// Thermal and phase state integrated together (#564):
+				// occupant sensible heat, the heat-only reservoir exchange
+				// and the saturation constraint on the water vapour, whose
+				// condensation latent heat feeds the very temperature that
+				// sets the cap, so the end-of-tick gas never publishes
+				// supersaturated against its own state. The exchange came
+				// from the reservoir's implicit star solve above, which
+				// already negated it onto the reservoir, so it is only
+				// read here (#559). The condensate leaves the gas phase
+				// and is reported, never destroyed; it does not
+				// re-evaporate in this slice.
 				auto const occupantHeatKW = occupants
 					* compartment.authored.sensibleHeatPerOccupantKW * metabolicFraction;
+				auto const exchangeKW = atmosphereExchangeKJ[atmosphereIndex] / dt;
+				auto const coupled = solveVapourThermalCoupling(
+					compartment.authored.thermalCapacityKJPerK, compartment.temperatureC,
+					occupantHeatKW + exchangeKW, compartment.waterVapourKg,
+					compartment.authored.volumeM3, dt);
+				auto const condensedKg = coupled.condensedKg;
 				auto const latentHeatKW = condensedKg
 					* StationLatentHeatVaporizationKJPerKg / dt;
-				auto const exchangeKW = atmosphereExchangeKJ[atmosphereIndex] / dt;
-				compartment.temperatureC += (occupantHeatKW + latentHeatKW + exchangeKW) * dt
-					/ compartment.authored.thermalCapacityKJPerK;
+				compartment.waterVapourKg -= condensedKg;
+				compartment.condensedKg += condensedKg;
+				compartment.temperatureC = coupled.temperatureC;
 				compartment.occupantHeatKJ += occupantHeatKW * dt;
 				compartment.latentHeatKJ += latentHeatKW * dt;
 				compartment.exchangedKJ += exchangeKW * dt;

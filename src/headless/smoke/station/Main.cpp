@@ -7120,8 +7120,13 @@ namespace
 			world.resumeSimulation();
 			require(world.advanceTicks(1), "vapour run failed");
 			auto const& steam = world.getStationSystemsSnapshot().atmospheres[0];
-			auto const saturationKPa = core::stationSaturationVapourPressureKPa(20.0);
-			auto const saturatedMass = core::stationSaturatedVapourMassKg(saturationKPa, 100.0, 20.0);
+			// #564: the constraint is the saturation at the published,
+			// coupled end-of-tick temperature - the latent heat warmed the
+			// air, so the capacity it holds is larger than the tick-start
+			// 20 C value the stale ordering used.
+			auto const saturationKPa = core::stationSaturationVapourPressureKPa(steam.temperatureC);
+			auto const saturatedMass = core::stationSaturatedVapourMassKg(
+				saturationKPa, 100.0, steam.temperatureC);
 			require(steam.condensedKg > 0.0, "supersaturated vapour did not condense");
 			require(steam.waterVapourKg <= saturatedMass + 1e-9,
 				"vapour stayed above the saturation mass");
@@ -7134,6 +7139,201 @@ namespace
 			// The vapour ledger closes: starting = current + condensed.
 			require(approx(3.0, steam.waterVapourKg + steam.condensedKg, 1e-9),
 				"the vapour ledger does not close over condensation");
+		}
+		// #564: cooling saturated air integrates the temperature and the
+		// phase change together. The published vapour inventory satisfies
+		// saturation at the published temperature - not a clamped display
+		// value over a supersaturated gas - the condensate and its latent
+		// heat are booked exactly, and the latent feedback slows the
+		// cooling by the heat the phase change absorbed.
+		{
+			core::World world("AtmosphereSaturatedCooling", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto compartment = atmosphere("air", "normal", 1.0, 0.2, 0.8, 0.0, 0.0, 20.0);
+			compartment.thermalCapacityKJPerK = 1.0;
+			compartment.minOxygenPartialPressureKPa = 0.0;
+			compartment.startingWaterVapourKg = core::stationSaturatedVapourMassKg(
+				core::stationSaturationVapourPressureKPa(20.0), 1.0, 20.0);
+			compartment.reservoirId = "cold";
+			compartment.exchangerConductanceKWPerK = 30.0;
+			require(atmosConfigure(world, { compartment }, {},
+				{ reservoir("cold", 1000.0, 0.0) }).first, "saturated cooling setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(1), "saturated cooling tick failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& air = snap.atmospheres[0];
+			auto const& cold = snap.thermal.reservoirs[0];
+			require(air.temperatureC < 20.0 - 1e-3, "the cold exchanger did not cool the air");
+			require(air.lastVapourCondensedKg > 0.0,
+				"cooling saturated air booked no condensate at the published temperature");
+			// The published gas satisfies saturation at its own
+			// temperature: the vapour partial pressure never exceeds the
+			// published saturation pressure. This is the supersaturation
+			// the old tick-start ordering hid behind the clamped humidity.
+			require(air.waterVapourPartialPressureKPa
+				<= air.saturationVapourPressureKPa * (1.0 + 1e-9),
+				"the published gas is supersaturated at its own temperature");
+			require(approx(air.relativeHumidity, 1.0, 1e-9),
+				"a cooling saturated compartment does not report its saturated state");
+			// The latent feedback: the air ends warmer than a phase-change-
+			// free tick would leave it. The exchange is the implicit star
+			// solve against the cold bus, so the free end temperature is
+			// known in closed form.
+			auto const weightKJPerK = dt * 30.0 / (1.0 + dt * 30.0 / 1.0);
+			auto const coupledBusC = (1000.0 * 0.0 + weightKJPerK * 20.0)
+				/ (1000.0 + weightKJPerK);
+			auto const freeTemperatureC = 20.0 + weightKJPerK * (coupledBusC - 20.0) / 1.0;
+			require(air.temperatureC > freeTemperatureC + 1.0,
+				"condensation latent heat did not slow the cooling");
+			// The condensate is booked, not destroyed, and its latent heat
+			// is in the compartment's thermal ledger.
+			require(approx(compartment.startingWaterVapourKg,
+				air.waterVapourKg + air.condensedKg, 1e-12),
+				"the vapour ledger does not close over the coupled condensation");
+			require(approx(air.latentHeatEnergyKJ, air.condensedKg * 2257.0, 1e-9),
+				"the latent heat ledger does not match the booked condensate");
+			require(std::abs(air.residualKJ) < 1e-9 && std::abs(cold.residualKJ) < 1e-6,
+				"the coupled compartment or reservoir ledger did not close");
+			require(approx(cold.lastAtmosphereHeatKW, -air.lastExchangeIntoCompartmentKW, 1e-9),
+				"the reservoir did not book the exact negation of the compartment exchange");
+		}
+		// The latent heat feedback is a real thermal inertia: two
+		// identical compartments cooled by identical buses, one holding
+		// saturated vapour and one bone dry, do not cool alike - the wet
+		// air gives up vapour and every gram of condensate spends the
+		// compartment's cooling against the latent heat, so the dry air
+		// reaches the cold side far sooner while the wet air tracks its
+		// saturation curve the whole way down.
+		{
+			core::World world("AtmosphereLatentInertia", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto wet = atmosphere("wet", "normal", 1.0, 0.2, 0.8, 0.0, 0.0, 20.0);
+			wet.thermalCapacityKJPerK = 1.0;
+			wet.minOxygenPartialPressureKPa = 0.0;
+			wet.startingWaterVapourKg = core::stationSaturatedVapourMassKg(
+				core::stationSaturationVapourPressureKPa(20.0), 1.0, 20.0);
+			wet.reservoirId = "cold-wet";
+			wet.exchangerConductanceKWPerK = 1.0;
+			auto dry = atmosphere("dry", "normal", 1.0, 0.2, 0.8, 0.0, 0.0, 20.0);
+			dry.thermalCapacityKJPerK = 1.0;
+			dry.minOxygenPartialPressureKPa = 0.0;
+			dry.reservoirId = "cold-dry";
+			dry.exchangerConductanceKWPerK = 1.0;
+			require(atmosConfigure(world, { wet, dry }, {},
+				{ reservoir("cold-wet", 1000.0, 0.0), reservoir("cold-dry", 1000.0, 0.0) }).first,
+				"latent inertia setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(300), "latent inertia run failed");
+			auto const& wetAir = world.getStationSystemsSnapshot().atmospheres[0];
+			auto const& dryAir = world.getStationSystemsSnapshot().atmospheres[1];
+			require(wetAir.condensedKg > 0.0 && dryAir.condensedKg == 0.0,
+				"the latent inertia comparison did not condense only the wet air");
+			require(wetAir.temperatureC > dryAir.temperatureC + 0.5,
+				"the condensing air cooled as fast as the dry air - no latent feedback");
+			require(wetAir.waterVapourPartialPressureKPa
+				<= wetAir.saturationVapourPressureKPa * (1.0 + 1e-9)
+				&& approx(wetAir.relativeHumidity, 1.0, 1e-9),
+				"the wet air left its saturation curve during the long cool-down");
+			require(std::abs(wetAir.residualKJ) < 1e-6 && std::abs(dryAir.residualKJ) < 1e-6,
+				"a latent inertia ledger did not close");
+		}
+		// Heating: warming air raises its saturation capacity, so a
+		// compartment starting saturated and gaining heat holds its
+		// vapour, books no condensation, and its humidity falls below
+		// saturation - the constraint binds only downward, and the
+		// coupled solve does not invent condensation on the warming
+		// branch.
+		{
+			core::World world("AtmosphereHeating", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto compartment = atmosphere("air", "normal", 1.0, 0.2, 0.8, 0.0, 0.0, 20.0);
+			compartment.thermalCapacityKJPerK = 1.0;
+			compartment.minOxygenPartialPressureKPa = 0.0;
+			compartment.startingWaterVapourKg = core::stationSaturatedVapourMassKg(
+				core::stationSaturationVapourPressureKPa(20.0), 1.0, 20.0);
+			compartment.reservoirId = "hot";
+			compartment.exchangerConductanceKWPerK = 1.0;
+			require(atmosConfigure(world, { compartment }, {},
+				{ reservoir("hot", 1000.0, 40.0) }).first, "heating setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(600), "heating run failed");
+			auto const& air = world.getStationSystemsSnapshot().atmospheres[0];
+			require(air.temperatureC > 25.0, "the warm bus did not heat the air");
+			require(air.condensedKg == 0.0 && air.lastVapourCondensedKg == 0.0,
+				"warming air booked condensation it should not have");
+			require(approx(air.waterVapourKg, compartment.startingWaterVapourKg, 1e-12),
+				"the warming air lost vapour it never condensed");
+			require(air.relativeHumidity < 1.0 - 1e-3,
+				"warming saturated air still reports full humidity");
+			require(std::abs(air.residualKJ) < 1e-6, "the heating ledger did not close");
+		}
+		// Replay: the coupled solve is a fixed-count bisection, so the
+		// saturated cooling scenario replays identically after a reset -
+		// the phase change is deterministic, not solver drift.
+		{
+			core::World world("AtmosphereCoolingReplay", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto compartment = atmosphere("air", "normal", 1.0, 0.2, 0.8, 0.0, 0.0, 20.0);
+			compartment.thermalCapacityKJPerK = 1.0;
+			compartment.minOxygenPartialPressureKPa = 0.0;
+			compartment.startingWaterVapourKg = core::stationSaturatedVapourMassKg(
+				core::stationSaturationVapourPressureKPa(20.0), 1.0, 20.0);
+			compartment.reservoirId = "cold";
+			compartment.exchangerConductanceKWPerK = 30.0;
+			require(atmosConfigure(world, { compartment }, {},
+				{ reservoir("cold", 1000.0, 0.0) }).first, "cooling replay setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(120), "cooling replay first pass failed");
+			auto const expected = world.getStationSystemsSnapshot();
+			auto const expectedEvents = world.getStationSystemsEvents();
+			require(expected.atmospheres[0].condensedKg > 0.0,
+				"the replay scenario condensed nothing to replay");
+			world.pauseSimulation();
+			world.resetSimulation();
+			world.resumeSimulation();
+			require(world.advanceTicks(120), "cooling replay second pass failed");
+			require(world.getStationSystemsSnapshot() == expected,
+				"the saturated cooling scenario is not deterministic across reset replay");
+			require(world.getStationSystemsEvents() == expectedEvents,
+				"the saturated cooling event history is not deterministic across reset replay");
+		}
+		// Compartment isolation under condensation: a cooling,
+		// condensing compartment shares the World with an untouched
+		// neighbour and never moves a gram or a joule into it - the
+		// condensate, the latent heat and the exchange all stay inside
+		// the compartment that booked them.
+		{
+			core::World world("AtmosphereCondensationIsolation", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto cooling = atmosphere("condensingSide", "normal", 1.0, 0.2, 0.8, 0.0, 0.0, 20.0);
+			cooling.thermalCapacityKJPerK = 1.0;
+			cooling.minOxygenPartialPressureKPa = 0.0;
+			cooling.startingWaterVapourKg = core::stationSaturatedVapourMassKg(
+				core::stationSaturationVapourPressureKPa(20.0), 1.0, 20.0);
+			cooling.reservoirId = "cold";
+			cooling.exchangerConductanceKWPerK = 30.0;
+			auto const neighbour = atmosphere("hazardSide", "hazardous", 100.0,
+				15.0, 85.0, 0.0, 0.0, 20.0);
+			require(atmosConfigure(world, { cooling, neighbour }, {},
+				{ reservoir("cold", 1000.0, 0.0) }).first,
+				"condensation isolation pair refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(600), "condensation isolation run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.atmospheres[0].condensedKg > 0.0,
+				"the isolation scenario's cooling side condensed nothing");
+			auto const& hazard = snap.atmospheres[1];
+			require(approx(hazard.oxygenKg, 15.0, 1e-12)
+				&& approx(hazard.nitrogenKg, 85.0, 1e-12)
+				&& approx(hazard.waterVapourKg, 0.0, 1e-12)
+				&& approx(hazard.condensedKg, 0.0, 1e-12)
+				&& approx(hazard.leakedKg, 0.0, 1e-12),
+				"the neighbour gained mass, condensate or loss from the condensing side");
+			require(approx(hazard.temperatureC, 20.0, 1e-12)
+				&& approx(hazard.lastExchangeIntoCompartmentKW, 0.0, 1e-12),
+				"the neighbour's thermal state moved with the other compartment's cooling");
+			require(approx(hazard.pressureKPa, hazard.startingPressureKPa, 1e-12),
+				"the neighbour's pressure moved without any process");
 		}
 		// Compartment isolation: a leaking, cycled compartment never
 		// moves a gram into its neighbour - normal and hazardous

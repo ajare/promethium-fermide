@@ -1290,8 +1290,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     -- Compartment atmospheres (#400): scheduled airlock cycles run first
     -- against the tick-start inventory in the shared scenario schedule
     -- order (occurrence time, priority descending, declaration order),
-    -- then each compartment runs its occupancy draw, vapour constraint,
-    -- leakage and thermal integration in the documented order. The
+    -- then each compartment runs its occupancy draw, leakage and the
+    -- coupled vapour-phase/thermal integration in the documented
+    -- order (#564). The
     -- ideal-gas partial pressure and Magnus saturation formulas mirror
     -- the host exactly; the reservoir books the exact negation of the
     -- compartment exchange in applyThermal, so the crossing is one
@@ -1380,19 +1381,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             compartment.co2Produced = compartment.co2Produced + co2Produced
             compartment.waterVapour = compartment.waterVapour + vapourAdded
             compartment.vapourAdded = compartment.vapourAdded + vapourAdded
-            -- Vapour constraint at the current temperature: the excess
-            -- over saturation condenses now and releases its latent
-            -- heat into the compartment this tick; the condensate
-            -- leaves the gas phase and is reported, never destroyed.
-            local saturation = saturationVapourPressureKPa(compartment.temperature)
-            local saturatedMass = saturatedVapourMassKg(saturation,
-                compartment.volumeM3, compartment.temperature)
-            local condensed = 0
-            if compartment.waterVapour > saturatedMass then
-                condensed = compartment.waterVapour - saturatedMass
-                compartment.waterVapour = saturatedMass
-                compartment.condensed = compartment.condensed + condensed
-            end
             -- Leakage: a constant authored total-mass rate capped by
             -- what the compartment holds, split composition-
             -- proportionally. Never routed into another compartment.
@@ -1414,21 +1402,55 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 compartment.leakWaterVapour = compartment.leakWaterVapour + leakedWaterVapour
             end
             compartment.leaked = compartment.leaked + leaked
-            -- Thermal integration on the authored effective capacity:
-            -- occupant sensible heat, condensation latent heat and the
-            -- heat-only reservoir exchange. The exchange came from the
-            -- reservoir's implicit star solve in applyPower, which
-            -- already paired it with the reservoir's own negation, so it
-            -- is only read here (#559).
+            -- Thermal and phase state are integrated together (#564),
+            -- mirroring the host's coupled solve. The saturation the air
+            -- holds depends on the temperature and the condensation it
+            -- forces releases latent heat into that same temperature;
+            -- solving them in sequence left the gas supersaturated by
+            -- whatever the temperature fell during the tick. The
+            -- condensate x is the fixed point
+            -- x = m0 - m_sat(T_free + L*x/C) with
+            -- T_free = T + Q*dt/C, found by a fixed-count bisection of
+            -- the strictly decreasing residual, so the published
+            -- vapour never exceeds the saturation of the temperature
+            -- the condensation itself produced and the thermal ledger
+            -- books exactly the latent heat that left the gas. The
+            -- condensate leaves the gas phase and is reported, never
+            -- destroyed; it does not re-evaporate in this slice.
             local occupantHeat = occupants * compartment.sensibleHeat * metabolicFraction
-            local latentHeat = condensed * LATENT_HEAT_VAPORIZATION / fixed_seconds
             local exchange = compartment.pendingExchangeKW or 0
             if compartment.reservoir then
                 compartment.reservoir.atmosphereHeat =
                     (compartment.reservoir.atmosphereHeat or 0) - exchange
             end
-            compartment.temperature = compartment.temperature
-                + (occupantHeat + latentHeat + exchange) * fixed_seconds / compartment.capacity
+            local freeTemperature = compartment.temperature
+                + (occupantHeat + exchange) * fixed_seconds / compartment.capacity
+            local condensed = 0
+            if compartment.waterVapour > saturatedVapourMassKg(
+                saturationVapourPressureKPa(freeTemperature),
+                compartment.volumeM3, freeTemperature) then
+                local low = 0
+                local high = compartment.waterVapour
+                for _ = 1, 100 do
+                    local mid = (low + high) * 0.5
+                    local midTemperature = freeTemperature
+                        + LATENT_HEAT_VAPORIZATION * mid / compartment.capacity
+                    local saturatedAtMid = saturatedVapourMassKg(
+                        saturationVapourPressureKPa(midTemperature),
+                        compartment.volumeM3, midTemperature)
+                    if compartment.waterVapour - saturatedAtMid - mid > 0 then
+                        low = mid
+                    else
+                        high = mid
+                    end
+                end
+                condensed = high
+            end
+            local latentHeat = condensed * LATENT_HEAT_VAPORIZATION / fixed_seconds
+            compartment.waterVapour = compartment.waterVapour - condensed
+            compartment.condensed = compartment.condensed + condensed
+            compartment.temperature = freeTemperature
+                + LATENT_HEAT_VAPORIZATION * condensed / compartment.capacity
             compartment.occupantHeatKJ = compartment.occupantHeatKJ + occupantHeat * fixed_seconds
             compartment.latentHeatKJ = compartment.latentHeatKJ + latentHeat * fixed_seconds
             compartment.exchangedKJ = compartment.exchangedKJ + exchange * fixed_seconds
