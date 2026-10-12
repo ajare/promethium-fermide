@@ -1,4 +1,4 @@
-# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, chilled thermal services, fuelled generators, compartment atmospheres with airlock cycles and crew metabolic returns (#386–#391, #393–#397, #399, #400, #401)
+# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, chilled thermal services, fuelled generators, compartment atmospheres with airlock cycles, crew metabolic returns and water recovery with qualification (#386–#391, #393–#397, #399–#402)
 
 Station systems are opt-in per World and disabled in existing documents. Open
 **View > Station Systems** or use the
@@ -1054,6 +1054,114 @@ crossings with contained construction refusal, plus an in-sandbox
 assertion that the mirror's own retained ledger closes and its
 metabolic scale stays within [0, 1] every tick.
 
+### Water recovery and qualification (#402)
+
+Water recovery is two authored contracts: a **collector** that condenses
+water vapour out of one compartment atmosphere onto a cold surface served
+by a coolant loop, and a **treatment** that turns raw water into treated
+water plus a retained concentrate. Both are hazard-classified (`normal` or
+`hazardous`) and the class is what keeps a potable stream from sharing
+equipment with a contaminated one.
+
+A collector needs a real cold surface, not merely a loop that exists:
+collection requires coolant actually circulating across it (the loop's
+circulation fraction, capped by its inventory and pump supply) **and** the
+surface colder than the compartment air. It condenses up to its configured
+maximum rate, stops at the configured relative-humidity target rather
+than stripping the air dry, and is capped by the destination raw water
+store's headroom. Each of those stops is reported as a `blockReason` with a
+`Rejected` status instead of the collector quietly idling.
+
+The latent heat the vapour gives up is routed into the coolant loop and
+**nowhere else**. It enters the loop's own energy ledger as an inflow term
+alongside pump work, heater heat and exchanger exchange, and the
+compartment never books it: the compartment's vapour ledger records the
+removal as a `collected` pathway and its thermal ledger stays untouched by
+the collector's latent heat, so one condensation is one heat source and is
+never counted twice. The loop's closing ledger — starting + pump + heater
++ exchanged + collector − extracted = capacity × temperature — is audited
+every tick.
+
+A treatment runs at one uniform processing scale per tick: the smallest
+fraction of its rated throughput that the drawable raw water (above its
+protected reserve), the treated-store headroom, the concentrate-store
+headroom and the drawable treatment consumables can sustain. The process is
+paid for before a kilogram moves. With no electrical supply at all the tick
+is refused whole — no water moves and no consumable is drawn, because a
+treatment with no power is not a treatment running for free. The
+processed mass splits by the configured recovery ratio into treated water
+and concentrate, and each output is clamped to its own headroom so a
+roundoff at the limit can never overshoot capacity.
+
+**Qualification is the full rated energy dose.** A treatment supplied its
+full power demand produces treated water that is admitted as *qualified*.
+A treatment running on curtailed power still runs — the machine is not
+stopped mid-stream — but its output is **held unqualified**, because a
+partial energy dose has not finished the water. The hold is explicit on the
+snapshot (`qualityAccepted` false with a `holdReason`), the held mass is
+tracked separately from accepted mass, and held water sits on the
+unqualified side of the treated store where transfers cannot pick it up.
+
+The **concentrate is retained, not usable**: it lands on the unqualified
+side of its store and stays accounted for there until a disposal
+capability exists. Nothing in this slice disposes of it, and its retained
+total is reported so the stream is never silently dropped.
+
+Every water-process store is a **plain mass store**. Condensate is pure
+water and the recovery split is mass-denominated, so a compound store
+would create dry constituents out of nothing; the treatment's consumable
+store is the one exception, being a supplied consumable rather than a
+water stream, and its draw books both the unit and constituent loss. Water
+stores shared between a normal-class and a hazardous-class process are
+refused at configuration — segregation is enforced up front rather than
+policed at runtime — and a collector may only serve a compartment of its
+own class, since condensate inherits the hazard of the air it came from.
+
+Within the tick, treatments run after the chillers and collectors run
+after the treatments, both before the coolant loop's second pass, so the
+latent heat a collector adds is inside the same integration the loop's
+ledger closes over, and condensate delivered this tick is processed from
+the next tick on rather than in the same breath in which it appeared.
+
+World schema 78 persists the two contracts — the collector's hazard class,
+compartment, loop, service class, destination store, maximum rate and
+humidity target, and the treatment's hazard class, four store references,
+throughput, recovery ratio, specific energy, consumable rate and priority.
+A pre-78 document carrying `waterCollectors` or `waterTreatments` is
+refused rather than silently dropped. Collected, processed, treated,
+accepted, held and concentrate totals, the energy and consumables drawn and
+the quality holds stay runtime-only: Load and Reset reconstruct them from
+the authored starting conditions. The Station Systems window drafts both
+contracts with full validation reporting and shows the live collection
+gating and routed latent heat, the processing scale and its limiter, the
+power demanded versus supplied, the quality hold state and the cumulative
+recovery, retention and energy ledgers.
+
+Water recovery acceptance coverage: refused configurations (unknown
+compartment, loop or store; a hazard class that does not match the
+compartment; an undeclared hazard class; a humidity target outside [0, 1];
+a negative rate; a service class that mismatches the loop's host
+reservoir; a compound water store; a store shared between normal and
+hazardous processes; a recovery ratio outside (0, 1]; a treatment sharing
+one store between two roles; over-budget contract counts) with no World
+mutation; nominal recovery where the collector runs at its configured
+rate, the routed latent heat matches the condensate exactly, the
+compartment's vapour falls by precisely what was collected while booking no
+latent heat of its own, the loop ledger closes with the collector term, and
+the treatment splits, qualifies and consumes at its authored rates with
+the concentrate retained unqualified; power curtailment (a partial dose
+runs the process and holds the whole output unqualified with a stated
+reason, and the shortfall is visible on the power draw); zero power (the
+tick is refused whole with no water and no consumables moved); cooling
+unavailable (a dry loop blocks collection with the reason named while the
+treatment keeps running off stored raw water); a cold surface warmer than
+the air (no condensation); the humidity target binding (collection stops
+short of the rate and reports the target stop); a full treated destination
+and an exhausted consumable store each capping the process and naming
+themselves as the limiter; deterministic Reset replay; and intact water
+descriptor crossings with contained construction refusal for both
+contracts.
+
 ## Explicit scope limit
 
 This slice implements lifecycle, authored finite store configuration,
@@ -1073,7 +1181,10 @@ constraint with latent-heat release, scheduled airlock losses with
 the recovered-versus-lost split, and heat-only reservoir coupling,
 and crew populations that consume food, water and oxygen and return
 CO2, moisture, urine, organic waste and metabolic heat under
-authored mass-, constituent- and energy-closing coefficients.
+authored mass-, constituent- and energy-closing coefficients, and water
+recovery with collector-side condensation onto a coolant-loop cold surface
+and treatment-side recovery into treated water plus retained concentrate
+under a full-power qualification rule.
 It adds no treatment or clearance
 workflows or ejection, no dynamic coolant leak, replenishment or
 loop-to-loop transfer (a loop's charge is its authored inventory and
@@ -1081,6 +1192,12 @@ nothing in this slice changes it), no powered or passive thermal-buffer
 access beyond the authored reservoirs themselves, and no chilled
 service distribution beyond the class-matched rollup (no per-consumer
 cold-side metering and no cascade or multi-stage refrigeration).
+It adds no concentrate disposal, no water distribution to consumers,
+no compound or contaminated-stream water chemistry (water-process stores
+are plain mass stores and the model carries no species beyond mass), no
+biological or pathogen modelling, and no reprocessing path for held
+water: a held batch stays held, and disposal, redistribution and quality
+recovery are later work.
 Compartment atmospheres are closed authored volumes: this slice adds
 no gas generation or processing (no O₂ generation, CO₂ scrubbing or
 combustion), no flow or pressure-driven transfer between

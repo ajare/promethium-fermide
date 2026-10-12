@@ -690,6 +690,61 @@ namespace core
 	};
 	inline constexpr size_t MaxStationCrews{8};
 
+	// Declared water hazard classes (#402). Normal and hazardous water are
+	// segregated services: a collector may only serve a compartment of its
+	// own class because condensate inherits the hazard of the air it was
+	// condensed from, and no store may be touched by both classes of water
+	// process. Segregation is enforced at configuration, not policed at
+	// runtime.
+	inline constexpr std::array<char const*, 2> StationWaterHazardClasses{
+		"normal", "hazardous"};
+	// A water collector (#402): condenses water vapour out of one
+	// compartment atmosphere onto a cold surface served by a coolant loop,
+	// delivering the condensate to a raw water store. The latent heat the
+	// vapour gives up rides into the coolant loop exactly once: the
+	// compartment never also books it, so the same condensation is never
+	// counted as a heat source twice. Collection needs coolant circulation
+	// and a cold surface colder than the compartment air, and stops at the
+	// configured relative-humidity target.
+	struct WaterCollectorSettings
+	{
+		std::string id;
+		std::string hazardClass;             // normal or hazardous; must match the compartment
+		std::string atmosphereId;            // compartment whose vapour is condensed
+		std::string coolingLoopId;           // loop serving the cold surface
+		std::string thermalClass;            // cold service class of the interface
+		std::string destStoreId;             // raw water store receiving condensate
+		double maxRateKgPerS{0.0};         // collection ceiling, 0 disables
+		double targetRelativeHumidity{0.5}; // condense down to this RH, [0, 1]
+		bool operator==(WaterCollectorSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationWaterCollectors{8};
+
+	// A water treatment (#402): processes raw water into treated water
+	// plus a retained concentrate, consuming declared electricity and
+	// treatment consumables. Full rated power qualifies the treated output;
+	// curtailed power holds it unqualified for reprocessing or disposal.
+	// The recovery ratio splits processed mass between treated water and
+	// concentrate, and the concentrate stays accounted as retained material
+	// pending a disposal capability. Every water-process store is a plain
+	// mass store: this slice does not model compound water streams.
+	struct WaterTreatmentSettings
+	{
+		std::string id;
+		std::string hazardClass;             // normal or hazardous
+		std::string sourceStoreId;           // raw water drawn from here
+		std::string treatedStoreId;          // treated water destination
+		std::string concentrateStoreId;      // retained concentrate, pending disposal
+		std::string consumableStoreId;       // treatment consumables
+		double throughputKgPerS{0.0};      // processing ceiling, 0 disables
+		double recoveryRatio{0.85};        // treated / processed, in (0, 1]
+		double specificEnergyKWhPerKg{0.5}; // electricity per kg processed
+		double consumablePerKg{0.01};      // consumable units per kg processed
+		int priority{0};
+		bool operator==(WaterTreatmentSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationWaterTreatments{8};
+
 	struct StationSystemsSettings
 	{
 		bool enabled{false};
@@ -709,6 +764,8 @@ namespace core
 		std::vector<AtmosphereSettings> atmospheres;
 		std::vector<AirlockCycleSettings> airlockCycles;
 		std::vector<CrewSettings> crews;
+		std::vector<WaterCollectorSettings> waterCollectors;
+		std::vector<WaterTreatmentSettings> waterTreatments;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// Profile shape validation and deterministic evaluation: the level of
@@ -775,6 +832,12 @@ namespace core
 		// boundary: current + lost - delivered must equal starting within
 		// tolerance, so delivered material is accounted, never implicit.
 		double delivered{0.0};
+		// Cumulative mass of this unit recovered out of a compartment
+		// atmosphere by a water collector (#402). It is inflow from
+		// outside the store boundary just like a delivery, so the residual
+		// closes as current + lost - delivered - collected against
+		// starting: the condensate is accounted, never implicit.
+		double collected{0.0};
 		double residual{0.0};
 		bool operator==(StationBalanceSnapshot const&) const = default;
 	};
@@ -1041,6 +1104,7 @@ namespace core
 		// waste and decay heat those generators routed to their sinks.
 		double generatorOutputKW{0.0};
 		double generatorStartupDrawKW{0.0};
+		double waterTreatmentPowerKW{0.0}; // treatment work drawn this tick (#402)
 		double generatorWasteHeatKW{0.0};
 		double generatorDecayHeatKW{0.0};
 		std::vector<StationSolarSourceSnapshot> sources;
@@ -1171,7 +1235,13 @@ namespace core
 		double heaterEnergyKJ{0.0};
 		double exchangedEnergyKJ{0.0};
 		double extractedEnergyKJ{0.0}; // cumulative chiller extraction out of the loop
-		double residualKJ{0.0}; // starting + pump + heater + exchanged - extracted - current
+		// Condenser-side water recovery heat this tick and cumulatively
+		// (#402): the latent heat the condensate gave up on the loop's
+		// cold surface. It enters the loop ledger as an inflow exactly once
+		// and never appears in the compartment's thermal ledger.
+		double collectorHeatKW{0.0};
+		double collectorHeatEnergyKJ{0.0};
+		double residualKJ{0.0}; // starting + pump + heater + exchanged + collector - extracted - current
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationCoolantLoopSnapshot const&) const = default;
 	};
@@ -1320,6 +1390,7 @@ namespace core
 		double lastVapourAddedKg{0.0};
 		double lastVapourCondensedKg{0.0};
 		double lastLeakedKg{0.0};
+		double lastCollectedKg{0.0}; // vapour removed by water recovery this tick
 		double lastCycleRemovedKg{0.0};
 		double lastCycleRecoveredKg{0.0};
 		double lastCycleLostKg{0.0};
@@ -1345,6 +1416,7 @@ namespace core
 		double vapourAddedKg{0.0};
 		double condensedKg{0.0};
 		double leakedKg{0.0};
+		double collectedKg{0.0}; // cumulative vapour removed by water recovery
 		double recoveredKg{0.0};
 		double lostKg{0.0};
 		double startingEnergyKJ{0.0};
@@ -1441,6 +1513,84 @@ namespace core
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationCrewSnapshot const&) const = default;
 	};
+	// One water collector as of the most recent tick (#402): the authored
+	// contract beside the condensate actually collected, the cold-surface
+	// conditions that gated collection, and the latent heat routed into
+	// the coolant loop. The collected mass leaves the compartment's vapour
+	// and enters the raw water store once; the latent heat enters the loop
+	// ledger once and never the compartment's, so the same condensation is
+	// never a heat source twice. A collector that could not collect reports
+	// the binding condition as a blockReason rather than silently idling.
+	struct StationWaterCollectorSnapshot
+	{
+		std::string id;
+		std::string hazardClass;
+		std::string atmosphereId;
+		std::string coolingLoopId;
+		std::string thermalClass;
+		std::string destStoreId;
+		double maxRateKgPerS{0.0};
+		double targetRelativeHumidity{0.0};
+		double lastRequestedKg{0.0};    // rate x dt demanded this tick
+		double lastCondensableKg{0.0};  // vapour above the humidity target
+		double lastCollectedKg{0.0};    // condensate actually delivered
+		double lastLatentHeatKW{0.0};   // latent heat routed into the loop
+		double lastCirculationFraction{0.0};
+		bool coldSurfaceAvailable{false};
+		std::string blockReason;        // why nothing was collected (empty: none)
+		bool disabled{false};           // zero max rate: no collection
+		double collectedKg{0.0};        // cumulative condensate delivered
+		double latentHeatEnergyKJ{0.0}; // cumulative latent heat routed to the loop
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationWaterCollectorSnapshot const&) const = default;
+	};
+	// One water treatment as of the most recent tick (#402): the authored
+	// contract beside the raw water actually processed, the treated water
+	// and retained concentrate produced, the electricity and consumables
+	// actually drawn, and the quality outcome. Full rated power qualifies
+	// the treated output; curtailed power holds it unqualified. The
+	// treatment's own mass ledger closes over processed = treated +
+	// concentrate within the declared tolerance, and the concentrate stays
+	// accounted as retained material pending a disposal capability.
+	struct StationWaterTreatmentSnapshot
+	{
+		std::string id;
+		std::string hazardClass;
+		std::string sourceStoreId;
+		std::string treatedStoreId;
+		std::string concentrateStoreId;
+		std::string consumableStoreId;
+		double throughputKgPerS{0.0};
+		double recoveryRatio{0.0};
+		double specificEnergyKWhPerKg{0.0};
+		double consumablePerKg{0.0};
+		int priority{0};
+		double scale{0.0}; // fraction of rated throughput that ran, [0, 1]
+		std::string limiter; // what bound the scale this tick (empty: none)
+		double lastProcessedKg{0.0};
+		double lastTreatedKg{0.0};
+		double lastConcentrateKg{0.0};
+		double lastPowerDemandKW{0.0};
+		double lastPowerSuppliedKW{0.0};
+		double lastPowerUnmetKW{0.0};
+		double lastConsumableRequested{0.0};
+		double lastConsumableUsed{0.0};
+		double lastConsumableUnmet{0.0};
+		bool qualityAccepted{false};
+		std::string holdReason; // why the output is held unqualified (empty: none)
+		bool disabled{false};   // zero throughput: no processing
+		double processedKg{0.0};
+		double treatedKg{0.0};
+		double acceptedKg{0.0};   // treated water admitted as qualified
+		double heldKg{0.0};       // treated water held unqualified
+		double concentrateKg{0.0}; // retained concentrate pending disposal
+		double energySuppliedKJ{0.0};
+		double energyOwedKJ{0.0}; // processed x specific energy at full cost
+		double consumablesUsed{0.0};
+		double residualKg{0.0}; // processed - treated - concentrate
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationWaterTreatmentSnapshot const&) const = default;
+	};
 	struct StationSystemsSnapshot
 	{
 		bool enabled{false};
@@ -1483,6 +1633,12 @@ namespace core
 		// limiter that bound it, and the closing consumption/return/
 		// retained ledger.
 		std::vector<StationCrewSnapshot> crews;
+		// The water recovery picture (#402): per-collector condensate,
+		// cold-surface gating and latent heat routed to the coolant loop,
+		// and per-treatment processed/treated/concentrate split with the
+		// electricity and consumables drawn and the quality hold state.
+		std::vector<StationWaterCollectorSnapshot> waterCollectors;
+		std::vector<StationWaterTreatmentSnapshot> waterTreatments;
 		// Soonest authored arrival still pending across every delivery, for
 		// the overview's "next delivery" readout (#392).
 		bool hasNextDelivery{false};

@@ -27,13 +27,14 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
 	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply, rechargeable batteries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, and chillers supplying class-matched cold services. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Thermal reservoirs integrate temperature from their effective capacity under absorbed and routed equipment heat; radiators reject heat by the Stefan-Boltzmann law at the emitting temperature against the authored sink, emissivity and view factor. A load's emitted heat is booked exactly once: routed into its class-compatible reservoir or exported directly, never both. Declared temperature limits are reported, never clamped. Coolant loops hold a finite, loop-specific coolant inventory segregated by hazard class (coolant is never potable or nutrient water); the pump circulates only the coolant the loop actually holds, so an underfilled loop flows less and a dry loop flows nothing, and the freeze-protection heater thermostats the loop up to its setpoint within its capacity. Pump work and heater heat enter the loop exactly once and reach the reservoir only through the circulation-gated heat-only exchanger; the loop draw rides the same electrical pool as external loads. Chillers supply a cold service of their declared class through a class-matched coolant-loop evaporator and reservoir condenser: the delivered duty is capped by the loop's actual circulation, gated at the chilled setpoint, and refused while the sink is at or above the maximum condensing temperature; work at the configured COP plus auxiliaries rides the same electrical pool, and condenser heat equals extracted heat plus the work and auxiliaries actually supplied, booked once. Fuelled generators convert a finite energy-unit fuel inventory into bus electrical output at the declared efficiency: output is bounded by the installed rating and the ramp limit, starting only completes once the startup energy has actually been drawn from the shared pool while the class-matched sink is below its maximum sink temperature, and after output stops the configured shutdown heat and its cooling requirement persist for the decay period; waste, startup and decay heat route exactly once into the sink and the fuel ledger closes over fuel = electrical + waste. Within a tick, generators produce first, then power allocates, then coolant loops and chillers run, then compartment atmospheres cycle, crews metabolise and compartments exchange, then thermal integrates, then transfers, then conversions. Compartment atmospheres model an ideal-gas mixture in a fixed volume: absolute and partial pressures derive from the gas inventory and temperature, humidity caps at Magnus saturation with the excess condensing and releasing its latent heat into the compartment, occupancy is an authored load assignment whose oxygen draw is capped by the inventory (CO2 and metabolic heat scale with what was actually consumed), leakage is a constant total-mass rate capped by the inventory, and scheduled airlock cycles remove authored mass with an explicit recovered-versus-lost split; every gram leaving a compartment is booked as leaked, recovered or lost, compartments never mix automatically, and declared pressure and gas-quality limits are reported, never clamped. Crews are an authored population with an activity profile, never derived from World Agents: metabolism draws food and water from compound stores and oxygen from the compartment, and returns CO2, moisture and metabolic heat to the compartment and urine and organic waste to their own finite compound stores. One uniform metabolic scale per tick - the scarcest supply or tightest waste headroom - throttles every pathway together, so absent material never generates nominal waste; requested versus actual is explicit per pathway, the authored coefficients must close over mass, constituents and energy, and the consumed mass the returns do not carry away is reported as explicit retained body mass. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s), %zu airlock cycle(s) and %zu crew(s)",
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s), %zu airlock cycle(s), %zu crew(s), %zu water collector(s) and %zu water treatment(s)",
 		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
 		authored.stores.size(), authored.transfers.size(), authored.conversions.size(),
 		authored.solarArrays.size(), authored.equipmentLoads.size(), authored.batteries.size(),
 		authored.deliveries.size(), authored.thermalReservoirs.size(), authored.radiators.size(),
 		authored.coolantLoops.size(), authored.chillers.size(), authored.generators.size(),
-		authored.atmospheres.size(), authored.airlockCycles.size());
+		authored.atmospheres.size(), authored.airlockCycles.size(), authored.crews.size(),
+		authored.waterCollectors.size(), authored.waterTreatments.size());
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
@@ -1159,6 +1160,157 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		}
 		mDraft.crews.push_back(std::move(crew));
 	}
+	ImGui::SeparatorText("Draft water collectors (#402; condensate inherits the compartment's hazard class; the cold surface needs coolant circulation and must be colder than the compartment air; latent heat routes into the coolant loop once; destination must be a plain mass store)");
+	for (size_t index = 0; index < mDraft.waterCollectors.size(); )
+	{
+		auto& collector = mDraft.waterCollectors[index];
+		auto const row = std::to_string(index);
+		bool removeCollector = false;
+		char collectorIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(collectorIdBuffer, collector.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Collector " + row + " id").c_str(),
+			collectorIdBuffer, sizeof(collectorIdBuffer)))
+			collector.id = collectorIdBuffer;
+		char collectorHazardBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(collectorHazardBuffer, collector.hazardClass.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Collector " + row + " hazard class").c_str(),
+			collectorHazardBuffer, sizeof(collectorHazardBuffer)))
+			collector.hazardClass = collectorHazardBuffer;
+		char collectorAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(collectorAtmosphereBuffer, collector.atmosphereId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Collector " + row + " atmosphere").c_str(),
+			collectorAtmosphereBuffer, sizeof(collectorAtmosphereBuffer)))
+			collector.atmosphereId = collectorAtmosphereBuffer;
+		char collectorLoopBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(collectorLoopBuffer, collector.coolingLoopId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Collector " + row + " cooling loop").c_str(),
+			collectorLoopBuffer, sizeof(collectorLoopBuffer)))
+			collector.coolingLoopId = collectorLoopBuffer;
+		char collectorClassBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(collectorClassBuffer, collector.thermalClass.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Collector " + row + " thermal class").c_str(),
+			collectorClassBuffer, sizeof(collectorClassBuffer)))
+			collector.thermalClass = collectorClassBuffer;
+		char collectorDestBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(collectorDestBuffer, collector.destStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Collector " + row + " raw water store").c_str(),
+			collectorDestBuffer, sizeof(collectorDestBuffer)))
+			collector.destStoreId = collectorDestBuffer;
+		ImGui::PushItemWidth(140.0f);
+		ImGui::InputDouble(("Collector " + row + " max rate kg/s").c_str(),
+			&collector.maxRateKgPerS, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Collector " + row + " target RH").c_str(),
+			&collector.targetRelativeHumidity, 0.0, 0.0, "%.3f");
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove collector " + row).c_str()))
+			removeCollector = true;
+		ImGui::PopItemWidth();
+		if (removeCollector)
+			mDraft.waterCollectors.erase(mDraft.waterCollectors.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
+	if (mDraft.waterCollectors.size() < core::MaxStationWaterCollectors && ImGui::Button("Add water collector"))
+	{
+		core::WaterCollectorSettings collector;
+		collector.hazardClass = "normal";
+		collector.thermalClass = "moderate";
+		collector.maxRateKgPerS = 0.001;
+		collector.targetRelativeHumidity = 0.5;
+		if (!mDraft.atmospheres.empty())
+			collector.atmosphereId = mDraft.atmospheres.back().id;
+		if (!mDraft.coolantLoops.empty())
+			collector.coolingLoopId = mDraft.coolantLoops.back().id;
+		if (!mDraft.stores.empty())
+			collector.destStoreId = mDraft.stores.front().id;
+		for (size_t candidate = mDraft.waterCollectors.size() + 1;; ++candidate)
+		{
+			collector.id = "collector" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.waterCollectors.begin(), mDraft.waterCollectors.end(),
+				[&](core::WaterCollectorSettings const& existing) { return existing.id == collector.id; });
+			if (!taken) break;
+		}
+		mDraft.waterCollectors.push_back(std::move(collector));
+	}
+	ImGui::SeparatorText("Draft water treatments (#402; raw water splits into treated water plus retained concentrate for declared electricity and consumables; full rated power qualifies the output, curtailed power holds it unqualified; water stores must be plain mass stores, the consumable store may be compound)");
+	for (size_t index = 0; index < mDraft.waterTreatments.size(); )
+	{
+		auto& treatment = mDraft.waterTreatments[index];
+		auto const row = std::to_string(index);
+		bool removeTreatment = false;
+		char treatmentIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(treatmentIdBuffer, treatment.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Treatment " + row + " id").c_str(),
+			treatmentIdBuffer, sizeof(treatmentIdBuffer)))
+			treatment.id = treatmentIdBuffer;
+		char treatmentHazardBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(treatmentHazardBuffer, treatment.hazardClass.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Treatment " + row + " hazard class").c_str(),
+			treatmentHazardBuffer, sizeof(treatmentHazardBuffer)))
+			treatment.hazardClass = treatmentHazardBuffer;
+		char treatmentSourceBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(treatmentSourceBuffer, treatment.sourceStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Treatment " + row + " raw water store").c_str(),
+			treatmentSourceBuffer, sizeof(treatmentSourceBuffer)))
+			treatment.sourceStoreId = treatmentSourceBuffer;
+		char treatmentTreatedBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(treatmentTreatedBuffer, treatment.treatedStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Treatment " + row + " treated store").c_str(),
+			treatmentTreatedBuffer, sizeof(treatmentTreatedBuffer)))
+			treatment.treatedStoreId = treatmentTreatedBuffer;
+		char treatmentConcentrateBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(treatmentConcentrateBuffer, treatment.concentrateStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Treatment " + row + " concentrate store").c_str(),
+			treatmentConcentrateBuffer, sizeof(treatmentConcentrateBuffer)))
+			treatment.concentrateStoreId = treatmentConcentrateBuffer;
+		char treatmentConsumableBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(treatmentConsumableBuffer, treatment.consumableStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Treatment " + row + " consumable store").c_str(),
+			treatmentConsumableBuffer, sizeof(treatmentConsumableBuffer)))
+			treatment.consumableStoreId = treatmentConsumableBuffer;
+		ImGui::PushItemWidth(140.0f);
+		ImGui::InputDouble(("Treatment " + row + " throughput kg/s").c_str(),
+			&treatment.throughputKgPerS, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Treatment " + row + " recovery ratio").c_str(),
+			&treatment.recoveryRatio, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Treatment " + row + " specific energy kWh/kg").c_str(),
+			&treatment.specificEnergyKWhPerKg, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Treatment " + row + " consumable per kg").c_str(),
+			&treatment.consumablePerKg, 0.0, 0.0, "%.6f");
+		ImGui::InputInt(("Treatment " + row + " priority").c_str(), &treatment.priority, 1, 0);
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove treatment " + row).c_str()))
+			removeTreatment = true;
+		ImGui::PopItemWidth();
+		if (removeTreatment)
+			mDraft.waterTreatments.erase(mDraft.waterTreatments.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
+	if (mDraft.waterTreatments.size() < core::MaxStationWaterTreatments && ImGui::Button("Add water treatment"))
+	{
+		core::WaterTreatmentSettings treatment;
+		treatment.hazardClass = "normal";
+		treatment.throughputKgPerS = 0.002;
+		treatment.recoveryRatio = 0.85;
+		treatment.specificEnergyKWhPerKg = 0.5;
+		treatment.consumablePerKg = 0.01;
+		if (!mDraft.stores.empty())
+		{
+			treatment.sourceStoreId = mDraft.stores.front().id;
+			treatment.treatedStoreId = mDraft.stores.front().id;
+			treatment.concentrateStoreId = mDraft.stores.front().id;
+			treatment.consumableStoreId = mDraft.stores.front().id;
+		}
+		for (size_t candidate = mDraft.waterTreatments.size() + 1;; ++candidate)
+		{
+			treatment.id = "treatment" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.waterTreatments.begin(), mDraft.waterTreatments.end(),
+				[&](core::WaterTreatmentSettings const& existing) { return existing.id == treatment.id; });
+			if (!taken) break;
+		}
+		mDraft.waterTreatments.push_back(std::move(treatment));
+	}
 	bool const draftChanged = mDraft != authored;
 	ImGui::TextUnformatted(draftChanged
 		? "Draft differs from the authored start conditions."
@@ -1260,7 +1412,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		ImGui::Text("Constituent %s (%s): starting %.6f, current %.6f, lost %.6f, delivered %.6f, residual %.9f (tolerance %.1e)",
 			balance.constituent.c_str(), balance.unit.c_str(), balance.starting,
 			balance.current, balance.lost, balance.delivered, balance.residual, snapshot.balanceTolerance);
-	ImGui::SeparatorText("Boundary balances (current + lost - delivered must stay within tolerance)");
+	ImGui::SeparatorText("Boundary balances (current + lost - delivered - collected must stay within tolerance)");
 	if (snapshot.balances.empty()) ImGui::TextDisabled("No Resource stores authored.");
 	for (auto const& balance : snapshot.balances)
 		ImGui::Text("Balance %s: starting %.3f, current %.3f, lost %.3f, delivered %.3f, residual %.9f (tolerance %.1e)",
@@ -1618,6 +1770,64 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			crew.heatKJ, crew.retainedKg);
 		if (crew.disabled)
 			ImGui::Text("  zero crew count: no demand, no returns");
+	}
+	ImGui::SeparatorText("Water collectors (live; condensate needs circulating coolant colder than the compartment air, stops at the humidity target, and its latent heat enters the coolant loop once)");
+	for (auto const& collector : snapshot.waterCollectors)
+	{
+		char const* status = "idle";
+		switch (collector.status)
+		{
+		case core::StationTransferStatus::Full: status = "collecting at the configured rate"; break;
+		case core::StationTransferStatus::Partial: status = "collecting below the configured rate"; break;
+		case core::StationTransferStatus::Rejected: status = "blocked (nothing collected)"; break;
+		case core::StationTransferStatus::Idle: break;
+		}
+		ImGui::Text("%s [%s] (%s -> %s via loop '%s', class %s): %s | cold surface %s, circulation %.3f",
+			collector.id.c_str(), collector.hazardClass.c_str(), collector.atmosphereId.c_str(),
+			collector.destStoreId.c_str(), collector.coolingLoopId.c_str(),
+			collector.thermalClass.c_str(), status,
+			collector.coldSurfaceAvailable ? "available" : "unavailable",
+			collector.lastCirculationFraction);
+		ImGui::Text("  last tick: requested %.6f kg, condensable %.6f kg, collected %.6f kg | latent heat to loop %.4f kW",
+			collector.lastRequestedKg, collector.lastCondensableKg,
+			collector.lastCollectedKg, collector.lastLatentHeatKW);
+		if (!collector.blockReason.empty())
+			ImGui::Text("  blocked: %s", collector.blockReason.c_str());
+		ImGui::Text("  cumulative: collected %.4f kg | latent heat routed %.2f kJ",
+			collector.collectedKg, collector.latentHeatEnergyKJ);
+		if (collector.disabled)
+			ImGui::Text("  zero maximum rate: no collection");
+	}
+	ImGui::SeparatorText("Water treatments (live; one uniform processing scale per tick; full rated power qualifies the output, curtailed power holds it unqualified; concentrate is retained pending disposal)");
+	for (auto const& treatment : snapshot.waterTreatments)
+	{
+		char const* status = "idle";
+		switch (treatment.status)
+		{
+		case core::StationTransferStatus::Full: status = "running at full rated power"; break;
+		case core::StationTransferStatus::Partial: status = "running on curtailed power (output held)"; break;
+		case core::StationTransferStatus::Rejected: status = "refused (nothing processed)"; break;
+		case core::StationTransferStatus::Idle: break;
+		}
+		ImGui::Text("%s [%s] (%s -> %s + %s, consumables from %s): %s | scale %.3f%s%s",
+			treatment.id.c_str(), treatment.hazardClass.c_str(), treatment.sourceStoreId.c_str(),
+			treatment.treatedStoreId.c_str(), treatment.concentrateStoreId.c_str(),
+			treatment.consumableStoreId.c_str(), status, treatment.scale,
+			treatment.limiter.empty() ? "" : " | limited by: ",
+			treatment.limiter.empty() ? "" : treatment.limiter.c_str());
+		ImGui::Text("  last tick: processed %.6f kg -> treated %.6f kg + concentrate %.6f kg | power %.4f/%.4f kW | consumable %.6f/%.6f",
+			treatment.lastProcessedKg, treatment.lastTreatedKg, treatment.lastConcentrateKg,
+			treatment.lastPowerSuppliedKW, treatment.lastPowerDemandKW,
+			treatment.lastConsumableUsed, treatment.lastConsumableRequested);
+		ImGui::Text("  quality: %s%s",
+			treatment.qualityAccepted ? "treated output accepted" : "treated output HELD UNQUALIFIED",
+			treatment.holdReason.empty() ? "" : (std::string(" - ") + treatment.holdReason).c_str());
+		ImGui::Text("  cumulative: processed %.4f kg | treated %.4f kg (accepted %.4f, held %.4f) | concentrate retained %.4f kg | energy %.2f/%.2f kJ | consumables %.4f",
+			treatment.processedKg, treatment.treatedKg, treatment.acceptedKg, treatment.heldKg,
+			treatment.concentrateKg, treatment.energySuppliedKJ, treatment.energyOwedKJ,
+			treatment.consumablesUsed);
+		if (treatment.disabled)
+			ImGui::Text("  zero throughput: no processing");
 	}
 	for (auto const& diagnostic : world->getStationSystemsDiagnostics())
 	{

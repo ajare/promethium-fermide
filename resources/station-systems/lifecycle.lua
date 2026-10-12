@@ -148,6 +148,14 @@ local function toKg(unit, mass)
     return mass
 end
 
+-- Inverse of toKg: a magnitude expressed in kilograms rendered in a
+-- store's own declared mass unit (#402, where the recovery rates are
+-- authored in kg/s against stores that may be grams).
+local function fromKg(unit, kg)
+    if unit == 'g' then return kg * 1000.0 end
+    return kg
+end
+
 -- Fuel energy is authored in the store's energy unit; the generator's
 -- physics runs in kWh. One factor converts store units to kWh and its
 -- reciprocal converts the required fuel energy back, so host and sandbox
@@ -160,7 +168,8 @@ local function energyUnitsToKWh(unit)
 end
 
 return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries,
-    reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews)
+    reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews,
+    waterCollectors, waterTreatments)
     assert(type(name) == "string")
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
@@ -177,16 +186,20 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     assert(type(atmospheres) == "table", "atmosphere descriptors missing")
     assert(type(airlockCycles) == "table", "airlock cycle descriptors missing")
     assert(type(crews) == "table", "crew descriptors missing")
+    assert(type(waterCollectors) == "table", "water collector descriptors missing")
+    assert(type(waterTreatments) == "table", "water treatment descriptors missing")
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
         starting_totals = {}, unit_loss = {}, unit_delivered = {},
+        unit_collected = {},
         starting_constituents = {}, constituent_loss = {},
         constituent_delivered = {},
         solar = {}, loads = {}, load_order = {}, batteries = {},
         deliveries = {}, reservoirs = {}, radiators = {}, coolant_loops = {},
         chillers = {}, generators = {}, atmospheres = {}, airlock_cycles = {},
         crews = {},
+        water_collectors = {}, water_treatments = {}, water_treatment_order = {},
     }
     local by_id = {}
     for index = 1, #stores do
@@ -576,6 +589,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             circulating = false,
             extractedKJ = 0,
             chillerExtraction = 0,
+            collectorHeat = 0,
+            collectorKJ = 0,
         }
     end
     -- Chillers (#397): a heat pump that supplies a cold service of its
@@ -1083,6 +1098,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             oxygenConsumed = 0, co2Produced = 0,
             vapourAdded = 0, condensed = 0,
             leaked = 0, recovered = 0, lost = 0,
+            collected = 0,
             occupantHeatKJ = 0, latentHeatKJ = 0, exchangedKJ = 0,
             crewHeatKJ = 0,
         }
@@ -1231,6 +1247,146 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             lastUnmet = false,
         }
     end
+    -- Water recovery contracts (#402). A collector condenses vapour out of
+    -- one compartment onto a coolant-loop cold surface; a treatment turns
+    -- raw water into treated water plus a retained concentrate. The sandbox
+    -- mirrors the collection gate, the recovery split and the quality rule
+    -- and re-audits its own accounting: a collector may never take more
+    -- than the compartment held above its humidity target, a treatment's
+    -- processed mass must leave as treated water plus concentrate and
+    -- nothing else, and every treated kilogram is either qualified or
+    -- held. A descriptor that would create water, or mix hazard classes in
+    -- one store, is refused at construction like any other bad descriptor.
+    assert(#waterCollectors <= 8, 'station water collectors are limited to 8 entries')
+    assert(#waterTreatments <= 8, 'station water treatments are limited to 8 entries')
+    local waterStoreClass = {}
+    local function declareWaterStore(storeId, role, hazardClass, allowCompound)
+        local store = by_id[storeId]
+        assert(store ~= nil, 'water ' .. role .. " store '" .. tostring(storeId) .. "' is unknown")
+        assert(store.unit == 'g' or store.unit == 'kg',
+            'water ' .. role .. " store '" .. store.id
+                .. "' must be a mass unit; water recovery is mass-denominated")
+        assert(allowCompound or store.composition == nil,
+            'water ' .. role .. " store '" .. store.id
+                .. "' must be a plain mass store: recovered water carries no dry constituents")
+        local existing = waterStoreClass[store.id]
+        if existing == nil then
+            waterStoreClass[store.id] = hazardClass
+        else
+            assert(existing == hazardClass,
+                'water ' .. role .. " store '" .. store.id .. "' is shared between "
+                    .. existing .. '-class and ' .. hazardClass
+                    .. '-class water processes: hazardous and normal water streams may not share a store')
+        end
+        return store
+    end
+    for index = 1, #waterCollectors do
+        local collector = waterCollectors[index]
+        assert(type(collector) == 'table', 'water collector descriptor must be a table')
+        assert(type(collector.id) == 'string' and #collector.id > 0, 'water collector needs an id')
+        assert(collector.hazardClass == 'normal' or collector.hazardClass == 'hazardous',
+            'water collector needs a declared hazard class (normal or hazardous)')
+        assert(type(collector.maxRateKgPerS) == 'number'
+            and collector.maxRateKgPerS == collector.maxRateKgPerS
+            and collector.maxRateKgPerS >= 0 and collector.maxRateKgPerS < math.huge,
+            'water collector maximum rate must be finite and non-negative')
+        assert(type(collector.targetRelativeHumidity) == 'number'
+            and collector.targetRelativeHumidity == collector.targetRelativeHumidity
+            and collector.targetRelativeHumidity >= 0 and collector.targetRelativeHumidity <= 1,
+            'water collector target relative humidity must be finite and from 0 to 1')
+        local compartment = atmosphere_by_id[collector.atmosphere]
+        assert(compartment ~= nil, 'water collector atmosphere compartment is unknown')
+        assert(compartment.hazardClass == collector.hazardClass,
+            'water collector hazard class must match the compartment it condenses from: condensate inherits the hazard of the air')
+        local loop = coolant_loop_by_id[collector.coolingLoop]
+        assert(loop ~= nil, 'water collector cooling loop is unknown')
+        assert(loop.reservoir.thermalClass == collector.thermalClass,
+            'water collector thermal class must match its coolant loop host reservoir class')
+        local destination = declareWaterStore(collector.destStore, 'raw water destination',
+            collector.hazardClass, false)
+        object.water_collectors[index] = {
+            id = collector.id,
+            hazardClass = collector.hazardClass,
+            compartment = compartment,
+            loop = loop,
+            dest = destination,
+            maxRateKgPerS = collector.maxRateKgPerS,
+            targetRelativeHumidity = collector.targetRelativeHumidity,
+            lastRequested = 0, lastCondensable = 0, lastCollected = 0,
+            lastLatentHeatKW = 0, lastCirculation = 0,
+            coldSurfaceAvailable = false, lastBlockReason = '',
+            collectedTotal = 0, latentHeatKJ = 0,
+        }
+    end
+    for index = 1, #waterTreatments do
+        local treatment = waterTreatments[index]
+        assert(type(treatment) == 'table', 'water treatment descriptor must be a table')
+        assert(type(treatment.id) == 'string' and #treatment.id > 0, 'water treatment needs an id')
+        assert(treatment.hazardClass == 'normal' or treatment.hazardClass == 'hazardous',
+            'water treatment needs a declared hazard class (normal or hazardous)')
+        assert(type(treatment.throughputKgPerS) == 'number'
+            and treatment.throughputKgPerS == treatment.throughputKgPerS
+            and treatment.throughputKgPerS >= 0 and treatment.throughputKgPerS < math.huge,
+            'water treatment throughput must be finite and non-negative')
+        assert(type(treatment.recoveryRatio) == 'number'
+            and treatment.recoveryRatio == treatment.recoveryRatio
+            and treatment.recoveryRatio > 0 and treatment.recoveryRatio <= 1,
+            'water treatment recovery ratio must be finite and above zero up to 1')
+        assert(type(treatment.specificEnergyKWhPerKg) == 'number'
+            and treatment.specificEnergyKWhPerKg == treatment.specificEnergyKWhPerKg
+            and treatment.specificEnergyKWhPerKg >= 0 and treatment.specificEnergyKWhPerKg < math.huge,
+            'water treatment specific energy must be finite and non-negative')
+        assert(type(treatment.consumablePerKg) == 'number'
+            and treatment.consumablePerKg == treatment.consumablePerKg
+            and treatment.consumablePerKg >= 0 and treatment.consumablePerKg < math.huge,
+            'water treatment consumable per kg must be finite and non-negative')
+        assert(type(treatment.priority) == 'number'
+            and treatment.priority == math.tointeger(treatment.priority),
+            'water treatment priority must be a finite integer')
+        local streamRoles = {'source', 'treated', 'concentrate'}
+        local streamIds = {treatment.sourceStore, treatment.treatedStore,
+            treatment.concentrateStore}
+        local streams = {}
+        for stream = 1, 3 do
+            for other = stream + 1, 3 do
+                assert(streamIds[stream] ~= streamIds[other],
+                    'water treatment ' .. streamRoles[stream] .. ' and '
+                        .. streamRoles[other] .. ' stores must be distinct')
+            end
+            streams[stream] = declareWaterStore(streamIds[stream], streamRoles[stream],
+                treatment.hazardClass, false)
+        end
+        local consumable = declareWaterStore(treatment.consumableStore, 'consumable',
+            treatment.hazardClass, true)
+        object.water_treatments[index] = {
+            id = treatment.id,
+            hazardClass = treatment.hazardClass,
+            source = streams[1], treated = streams[2], concentrate = streams[3],
+            consumable = consumable,
+            throughputKgPerS = treatment.throughputKgPerS,
+            recoveryRatio = treatment.recoveryRatio,
+            specificEnergyKWhPerKg = treatment.specificEnergyKWhPerKg,
+            consumablePerKg = treatment.consumablePerKg,
+            priority = treatment.priority,
+            lastScale = 0, lastLimiter = '',
+            lastProcessed = 0, lastTreated = 0, lastConcentrate = 0,
+            lastPowerDemand = 0, lastPowerSupplied = 0,
+            lastConsumableRequested = 0, lastConsumableUsed = 0,
+            qualityAccepted = false, lastHoldReason = '',
+            processedTotal = 0, treatedTotal = 0, acceptedTotal = 0,
+            heldTotal = 0, concentrateTotal = 0,
+            energySuppliedKJ = 0, energyOwedKJ = 0, consumablesUsedTotal = 0,
+        }
+    end
+    -- Treatments compete for the same power pool and the same stores, so
+    -- they run in the declared deterministic order: priority descending,
+    -- declaration index ascending.
+    for index = 1, #object.water_treatments do object.water_treatment_order[index] = index end
+    table.sort(object.water_treatment_order, function(left, right)
+        local a, b = object.water_treatments[left], object.water_treatments[right]
+        if a.priority ~= b.priority then return a.priority > b.priority end
+        return left < right
+    end)
     -- Declared deterministic order: priority descending, declaration index
     -- ascending. Including the index makes the comparator a total order, so
     -- the result cannot depend on sort stability.
@@ -1289,7 +1445,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             -- starting, so arriving material is accounted, never implicit.
             local residual = (totals[unit] or 0)
                 + (self.unit_loss[unit] or 0)
-                - (self.unit_delivered[unit] or 0) - starting
+                - (self.unit_delivered[unit] or 0)
+                - (self.unit_collected[unit] or 0) - starting
             local bound = BALANCE_TOLERANCE * math.max(1.0, math.abs(starting))
             assert(residual == residual and math.abs(residual) <= bound,
                 "conservation residual for unit '" .. unit .. "' exceeds tolerance")
@@ -2509,6 +2666,239 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 and isFinite(chiller.workKJ) and isFinite(chiller.condenserKJ),
                 "chiller '" .. chiller.id .. "' result is not finite")
         end
+        -- Water treatment (#402) runs after the chillers and before the
+        -- loop's second pass, mirroring the host: it competes for the same
+        -- generation-and-battery pool, and the collectors that feed heat
+        -- into those loops must land before the loops integrate. One
+        -- uniform scale per treatment per tick - the smallest fraction of
+        -- rated throughput the drawable raw water, the treated and
+        -- concentrate headroom and the drawable consumables can sustain -
+        -- and the process is paid for before a kilogram moves. A tick that
+        -- cannot pay at all is refused whole: no water moves and no
+        -- consumable is drawn.
+        for _, order in ipairs(self.water_treatment_order) do
+            local treatment = self.water_treatments[order]
+            local source = treatment.source
+            local treated = treatment.treated
+            local concentrate = treatment.concentrate
+            local consumable = treatment.consumable
+            treatment.lastScale = 0
+            treatment.lastLimiter = ''
+            treatment.lastProcessed = 0
+            treatment.lastTreated = 0
+            treatment.lastConcentrate = 0
+            treatment.lastPowerDemand = 0
+            treatment.lastPowerSupplied = 0
+            treatment.lastConsumableRequested = 0
+            treatment.lastConsumableUsed = 0
+            treatment.qualityAccepted = false
+            treatment.lastHoldReason = ''
+            if treatment.throughputKgPerS > 0 then
+                local fullKg = treatment.throughputKgPerS * fixed_seconds
+                local drawableSource = math.max(0,
+                    source.qualified - source.protected_reserve)
+                local treatedHeadroom = math.max(0,
+                    treated.capacity - (treated.qualified + treated.unqualified))
+                local concentrateHeadroom = math.max(0,
+                    concentrate.capacity - (concentrate.qualified + concentrate.unqualified))
+                local drawableConsumable = math.max(0,
+                    consumable.qualified - consumable.protected_reserve)
+                local scale = 1.0
+                local limiter = ''
+                local function constrain(available, required, reason)
+                    if required <= 0 then return end
+                    local fraction = available / required
+                    if fraction < scale then
+                        scale = fraction
+                        limiter = reason
+                    end
+                end
+                constrain(drawableSource, fromKg(source.unit, fullKg),
+                    "raw water store '" .. source.id
+                        .. "' has nothing drawable above its protected reserve")
+                constrain(treatedHeadroom,
+                    fromKg(treated.unit, fullKg * treatment.recoveryRatio),
+                    "treated water store '" .. treated.id .. "' is full")
+                constrain(concentrateHeadroom,
+                    fromKg(concentrate.unit, fullKg * (1 - treatment.recoveryRatio)),
+                    "concentrate store '" .. concentrate.id
+                        .. "' is full: the retained stream has nowhere to go")
+                constrain(drawableConsumable, treatment.consumablePerKg * fullKg,
+                    "treatment consumable store '" .. consumable.id .. "' is exhausted")
+                if scale < 0 then scale = 0 end
+                if scale > 1 then scale = 1 end
+                treatment.lastScale = scale
+                treatment.lastLimiter = limiter
+                if scale > 0 then
+                    local powerDemand = scale * treatment.throughputKgPerS
+                        * treatment.specificEnergyKWhPerKg
+                    treatment.lastPowerDemand = powerDemand
+                    local fromGeneration = math.min(powerDemand, generation)
+                    generation = generation - fromGeneration
+                    local fromBattery = drawBatteries(self,
+                        powerDemand - fromGeneration, fixed_hours)
+                    local supplied = fromGeneration + fromBattery
+                    batterySupplied = batterySupplied + fromBattery
+                    treatment.lastPowerSupplied = supplied
+                    if powerDemand <= 1e-12 or supplied > 1e-12 then
+                        -- Move the water. Each output is clamped to its
+                        -- own headroom so a one-ulp roundoff at the limit
+                        -- can never overshoot capacity (#556), and the kg
+                        -- ledger is recomputed from what actually moved.
+                        local processedUnits = math.min(
+                            fromKg(source.unit, fullKg * scale), drawableSource)
+                        local processedKg = toKg(source.unit, processedUnits)
+                        local treatedUnits = math.min(
+                            fromKg(treated.unit, processedKg * treatment.recoveryRatio),
+                            treatedHeadroom)
+                        local treatedKg = toKg(treated.unit, treatedUnits)
+                        local concentrateUnits = math.min(
+                            fromKg(concentrate.unit, math.max(0, processedKg - treatedKg)),
+                            concentrateHeadroom)
+                        local concentrateKg = toKg(concentrate.unit, concentrateUnits)
+                        source.qualified = source.qualified - processedUnits
+                        -- Quality: the full rated energy dose is what
+                        -- qualifies. A curtailed dose runs the machine but
+                        -- does not finish the water, so the output is held
+                        -- unqualified rather than passed through.
+                        local curtailed = supplied + 1e-12 < powerDemand
+                        treatment.qualityAccepted = not curtailed
+                        if curtailed then
+                            treated.unqualified = treated.unqualified + treatedUnits
+                            treatment.lastHoldReason = 'treatment energy curtailed: '
+                                .. 'the treated output is held unqualified'
+                        else
+                            treated.qualified = treated.qualified + treatedUnits
+                        end
+                        -- The concentrate is retained, not usable: it lands
+                        -- on the unqualified side of its store and stays
+                        -- accounted until a disposal capability exists.
+                        concentrate.unqualified = concentrate.unqualified + concentrateUnits
+                        treatment.lastConsumableRequested = treatment.consumablePerKg * processedKg
+                        local consumableUsed = math.min(treatment.lastConsumableRequested,
+                            drawableConsumable)
+                        consumable.qualified = consumable.qualified - consumableUsed
+                        treatment.lastConsumableUsed = consumableUsed
+                        -- Unit and constituent boundaries: the source gave
+                        -- the processed mass up, the treated and
+                        -- concentrate stores took their shares on, and the
+                        -- consumable was used out of existence.
+                        self.unit_loss[source.unit] =
+                            (self.unit_loss[source.unit] or 0) + processedUnits
+                        self.unit_loss[treated.unit] =
+                            (self.unit_loss[treated.unit] or 0) - treatedUnits
+                        self.unit_loss[concentrate.unit] =
+                            (self.unit_loss[concentrate.unit] or 0) - concentrateUnits
+                        self.unit_loss[consumable.unit] =
+                            (self.unit_loss[consumable.unit] or 0) + consumableUsed
+                        if consumable.composition then
+                            local net = {}
+                            addConstituents(net, consumable.composition,
+                                toKg(consumable.unit, consumableUsed), -1)
+                            for constituent, change in pairs(net) do
+                                self.constituent_loss[constituent] =
+                                    (self.constituent_loss[constituent] or 0) - change
+                            end
+                        end
+                        treatment.lastProcessed = processedKg
+                        treatment.lastTreated = treatedKg
+                        treatment.lastConcentrate = concentrateKg
+                        treatment.processedTotal = treatment.processedTotal + processedKg
+                        treatment.treatedTotal = treatment.treatedTotal + treatedKg
+                        treatment.concentrateTotal = treatment.concentrateTotal + concentrateKg
+                        if curtailed then
+                            treatment.heldTotal = treatment.heldTotal + treatedKg
+                        else
+                            treatment.acceptedTotal = treatment.acceptedTotal + treatedKg
+                        end
+                        treatment.energySuppliedKJ = treatment.energySuppliedKJ
+                            + supplied * fixed_seconds
+                        treatment.energyOwedKJ = treatment.energyOwedKJ
+                            + powerDemand * fixed_seconds
+                        treatment.consumablesUsedTotal = treatment.consumablesUsedTotal
+                            + consumableUsed
+                    end
+                end
+            end
+            assert(isFinite(treatment.lastScale) and isFinite(treatment.lastProcessed)
+                and isFinite(treatment.lastTreated) and isFinite(treatment.lastConcentrate)
+                and isFinite(treatment.lastPowerDemand) and isFinite(treatment.lastPowerSupplied)
+                and isFinite(treatment.lastConsumableRequested)
+                and isFinite(treatment.lastConsumableUsed)
+                and isFinite(treatment.processedTotal) and isFinite(treatment.treatedTotal)
+                and isFinite(treatment.acceptedTotal) and isFinite(treatment.heldTotal)
+                and isFinite(treatment.concentrateTotal)
+                and isFinite(treatment.energySuppliedKJ) and isFinite(treatment.energyOwedKJ)
+                and isFinite(treatment.consumablesUsedTotal),
+                "water treatment '" .. treatment.id .. "' result is not finite")
+        end
+        -- Water collectors (#402) run after the treatments and before the
+        -- loop's second pass, so the latent heat they add is inside the
+        -- same integration the loop's ledger closes over. The cold surface
+        -- only works while coolant is actually circulating across it and is
+        -- colder than the compartment air. The condensate is capped by the
+        -- vapour held above the humidity target and by the destination's
+        -- headroom, and the latent heat it gave up is booked into the
+        -- loop's ledger and never into the compartment's - one
+        -- condensation, one heat source.
+        for _, collector in ipairs(self.water_collectors) do
+            local compartment = collector.compartment
+            local loop = collector.loop
+            local dest = collector.dest
+            collector.lastRequested = 0
+            collector.lastCondensable = 0
+            collector.lastCollected = 0
+            collector.lastLatentHeatKW = 0
+            collector.lastCirculation = loop.lastCirculation
+            collector.coldSurfaceAvailable = loop.lastCirculation > 1e-12
+                and loop.temperature < compartment.temperature - 1e-9
+            collector.lastBlockReason = ''
+            if collector.maxRateKgPerS > 0 then
+                local requested = collector.maxRateKgPerS * fixed_seconds
+                local saturated = saturatedVapourMassKg(
+                    saturationVapourPressureKPa(compartment.temperature),
+                    compartment.volumeM3, compartment.temperature)
+                local condensable = math.max(0,
+                    compartment.waterVapour - collector.targetRelativeHumidity * saturated)
+                collector.lastRequested = requested
+                collector.lastCondensable = condensable
+                if not collector.coldSurfaceAvailable then
+                    collector.lastBlockReason = loop.lastCirculation <= 1e-12
+                        and 'no coolant circulation across the cold surface: nothing can be condensed'
+                        or 'the cold surface is not colder than the compartment air: no condensation'
+                elseif condensable <= 1e-12 then
+                    collector.lastBlockReason =
+                        'the compartment holds no vapour above the collection target'
+                else
+                    local destHeadroom = math.max(0, dest.capacity - (dest.qualified + dest.unqualified))
+                    local collectedUnits = math.min(
+                        fromKg(dest.unit, math.min(requested, condensable)), destHeadroom)
+                    if collectedUnits <= 0 then
+                        collector.lastBlockReason = "destination raw water store '" .. dest.id
+                            .. "' is full: nowhere to put the condensate"
+                    else
+                        local collectedKg = toKg(dest.unit, collectedUnits)
+                        collector.lastCollected = collectedKg
+                        compartment.waterVapour = compartment.waterVapour - collectedKg
+                        compartment.collected = (compartment.collected or 0) + collectedKg
+                        dest.qualified = dest.qualified + collectedUnits
+                        self.unit_collected[dest.unit] =
+                            (self.unit_collected[dest.unit] or 0) + collectedUnits
+                        -- The latent heat leaves the gas and enters the
+                        -- coolant, once.
+                        local latentHeatKW = collectedKg * LATENT_HEAT_VAPORIZATION / fixed_seconds
+                        loop.collectorHeat = (loop.collectorHeat or 0) + latentHeatKW
+                        collector.lastLatentHeatKW = latentHeatKW
+                        collector.latentHeatKJ = collector.latentHeatKJ + latentHeatKW * fixed_seconds
+                        collector.collectedTotal = collector.collectedTotal + collectedKg
+                    end
+                end
+            end
+            assert(isFinite(collector.lastRequested) and isFinite(collector.lastCondensable)
+                and isFinite(collector.lastCollected) and isFinite(collector.lastLatentHeatKW)
+                and isFinite(collector.collectedTotal) and isFinite(collector.latentHeatKJ),
+                "water collector '" .. collector.id .. "' result is not finite")
+        end
         -- Second loop pass: integrate the loop's temperature from the
         -- pump work, heater heat, exchanger exchange and the chiller
         -- extraction that actually moved this tick, and expose the
@@ -2520,16 +2910,19 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local disabled = loop.coolant <= 0
             local extraction = loop.chillerExtraction or 0
             loop.chillerExtraction = 0
+            local collectorHeat = loop.collectorHeat or 0
+            loop.collectorHeat = 0
             if not disabled then
                 local heatIntoLoop = loop.lastPumpSupplied + loop.lastHeaterSupplied
                 local loopCapacityKJ = loop.coolant * loop.cp
                 loop.temperature = loop.temperature
-                    + (heatIntoLoop + loop.lastExchange - extraction)
+                    + (heatIntoLoop + loop.lastExchange + collectorHeat - extraction)
                         * fixed_seconds / loopCapacityKJ
                 loop.pumpWorkKJ = loop.pumpWorkKJ + loop.lastPumpSupplied * fixed_seconds
                 loop.heaterKJ = loop.heaterKJ + loop.lastHeaterSupplied * fixed_seconds
                 loop.exchangedKJ = loop.exchangedKJ + loop.lastExchange * fixed_seconds
                 loop.extractedKJ = (loop.extractedKJ or 0) + extraction * fixed_seconds
+                loop.collectorKJ = (loop.collectorKJ or 0) + collectorHeat * fixed_seconds
             end
             -- The freeze condition is exposed, never clamped: the loop
             -- stays integrated and the shortfall stays visible.
@@ -2641,6 +3034,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- it. Neither side is ever a second budget.
         for _, gen in ipairs(self.generators) do
             totalSupplied = totalSupplied + gen.lastStartupDrawKW
+        end
+        -- Water treatment work rides the same pool (#402): it is never a
+        -- third budget beside the loads and the thermal plant.
+        for _, treatment in ipairs(self.water_treatments) do
+            totalSupplied = totalSupplied + treatment.lastPowerSupplied
         end
         local generationBound = BALANCE_TOLERANCE
             * math.max(1.0, math.abs(availableGeneration) + batterySupplied)
@@ -2868,7 +3266,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local startingEnergy = loop.startingCoolant * loop.cp * loop.startingTemperature
             local bound = BALANCE_TOLERANCE * math.max(1, math.abs(startingEnergy))
             local residual = startingEnergy + loop.pumpWorkKJ + loop.heaterKJ
-                + loop.exchangedKJ - (loop.extractedKJ or 0)
+                + loop.exchangedKJ + (loop.collectorKJ or 0) - (loop.extractedKJ or 0)
                 - loop.coolant * loop.cp * loop.temperature
             assert(residual == residual and math.abs(residual) <= bound,
                 "coolant loop '" .. loop.id .. "' thermal energy ledger residual "
@@ -3013,7 +3411,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     compartment.carbonDioxide },
                 { 'waterVapour', compartment.startingWaterVapour, compartment.vapourAdded,
                     compartment.condensed + compartment.leakWaterVapour
-                        + compartment.cycleWaterVapour,
+                        + compartment.cycleWaterVapour + (compartment.collected or 0),
                     compartment.waterVapour },
             }
             for _, closure in ipairs(closures) do
@@ -3117,6 +3515,52 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 "crew '" .. crew.id .. "' consumed/returned/retained ledger does not close")
         end
     end
+    -- Water recovery ledger audit (#402): the collector may never take
+    -- more condensate than the compartment held above its humidity target,
+    -- and the treatment's own account closes twice over - processed mass
+    -- leaves the machine as treated water plus concentrate and nothing
+    -- else, and every treated kilogram was either qualified or held, never
+    -- both and never neither. The treatment is never supplied more energy
+    -- than the process owed, and its scale stays inside the declared range.
+    local function checkWater(self)
+        for _, collector in ipairs(self.water_collectors) do
+            assert(isFinite(collector.lastRequested) and isFinite(collector.lastCondensable)
+                and isFinite(collector.lastCollected) and isFinite(collector.lastLatentHeatKW)
+                and isFinite(collector.collectedTotal) and isFinite(collector.latentHeatKJ),
+                "water collector '" .. collector.id .. "' ledger is not finite")
+            local bound = BALANCE_TOLERANCE * math.max(1, collector.lastCondensable)
+            assert(collector.lastCollected >= -bound,
+                "water collector '" .. collector.id .. "' collected a negative mass")
+            assert(collector.lastCollected <= collector.lastCondensable + bound,
+                "water collector '" .. collector.id
+                    .. "' collected more than the compartment held above its humidity target")
+        end
+        for _, treatment in ipairs(self.water_treatments) do
+            assert(isFinite(treatment.lastScale) and isFinite(treatment.processedTotal)
+                and isFinite(treatment.treatedTotal) and isFinite(treatment.acceptedTotal)
+                and isFinite(treatment.heldTotal) and isFinite(treatment.concentrateTotal)
+                and isFinite(treatment.energySuppliedKJ) and isFinite(treatment.energyOwedKJ)
+                and isFinite(treatment.consumablesUsedTotal),
+                "water treatment '" .. treatment.id .. "' ledger is not finite")
+            assert(treatment.lastScale >= 0 and treatment.lastScale <= 1 + 1e-12,
+                "water treatment '" .. treatment.id
+                    .. "' processing scale left the declared [0, 1] range")
+            local bound = BALANCE_TOLERANCE * math.max(1, treatment.processedTotal)
+            local split = treatment.processedTotal - treatment.treatedTotal
+                - treatment.concentrateTotal
+            assert(isFinite(split) and math.abs(split) <= bound,
+                "water treatment '" .. treatment.id
+                    .. "' processed/treated/concentrate ledger does not close")
+            local quality = treatment.treatedTotal - treatment.acceptedTotal
+                - treatment.heldTotal
+            assert(isFinite(quality) and math.abs(quality) <= bound,
+                "water treatment '" .. treatment.id
+                    .. "' accepted/held quality ledger does not close")
+            assert(treatment.energySuppliedKJ <= treatment.energyOwedKJ + bound,
+                "water treatment '" .. treatment.id
+                    .. "' was supplied more energy than the process owed")
+        end
+    end
     function object:advance(world_tick, fixed_seconds)
         assert(world_tick > 0 and fixed_seconds > 0)
         checkFiniteLimits(self)
@@ -3139,6 +3583,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         checkThermal(self)
         checkAtmospheres(self)
         checkCrews(self)
+        checkWater(self)
         self.ticks = self.ticks + 1
         return self.ticks
     end
@@ -3148,5 +3593,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     checkThermal(object)
     checkAtmospheres(object)
     checkCrews(object)
+    checkWater(object)
     return object
 end

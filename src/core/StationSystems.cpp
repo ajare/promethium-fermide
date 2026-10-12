@@ -73,6 +73,8 @@ namespace core
 			std::vector<AtmosphereSettings> const* atmospheres;
 			std::vector<AirlockCycleSettings> const* airlockCycles;
 			std::vector<CrewSettings> const* crews;
+			std::vector<WaterCollectorSettings> const* waterCollectors;
+			std::vector<WaterTreatmentSettings> const* waterTreatments;
 			static void pushProfile(lua_State* state, ProfileSettings const& profile)
 			{
 				lua_createtable(state, 0, 3);
@@ -422,7 +424,44 @@ namespace core
 					lua_pushnumber(state, crew.metabolicHeatPerCrewKW); lua_setfield(state, -2, "metabolicHeatKW");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 16, 1);
+				// Authored water recovery contracts cross the same boundary as
+				// plain immutable descriptors (#402); the sandbox mirrors the
+				// collection gate, the recovery split and the quality rule and
+				// re-audits its own accounting.
+				lua_createtable(state, static_cast<int>(waterCollectors->size()), 0);
+				for (size_t index = 0; index < waterCollectors->size(); ++index)
+				{
+					auto const& collector = (*waterCollectors)[index];
+					lua_createtable(state, 0, 8);
+					lua_pushstring(state, collector.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, collector.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
+					lua_pushstring(state, collector.atmosphereId.c_str()); lua_setfield(state, -2, "atmosphere");
+					lua_pushstring(state, collector.coolingLoopId.c_str()); lua_setfield(state, -2, "coolingLoop");
+					lua_pushstring(state, collector.thermalClass.c_str()); lua_setfield(state, -2, "thermalClass");
+					lua_pushstring(state, collector.destStoreId.c_str()); lua_setfield(state, -2, "destStore");
+					lua_pushnumber(state, collector.maxRateKgPerS); lua_setfield(state, -2, "maxRateKgPerS");
+					lua_pushnumber(state, collector.targetRelativeHumidity); lua_setfield(state, -2, "targetRelativeHumidity");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_createtable(state, static_cast<int>(waterTreatments->size()), 0);
+				for (size_t index = 0; index < waterTreatments->size(); ++index)
+				{
+					auto const& treatment = (*waterTreatments)[index];
+					lua_createtable(state, 0, 11);
+					lua_pushstring(state, treatment.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, treatment.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
+					lua_pushstring(state, treatment.sourceStoreId.c_str()); lua_setfield(state, -2, "sourceStore");
+					lua_pushstring(state, treatment.treatedStoreId.c_str()); lua_setfield(state, -2, "treatedStore");
+					lua_pushstring(state, treatment.concentrateStoreId.c_str()); lua_setfield(state, -2, "concentrateStore");
+					lua_pushstring(state, treatment.consumableStoreId.c_str()); lua_setfield(state, -2, "consumableStore");
+					lua_pushnumber(state, treatment.throughputKgPerS); lua_setfield(state, -2, "throughputKgPerS");
+					lua_pushnumber(state, treatment.recoveryRatio); lua_setfield(state, -2, "recoveryRatio");
+					lua_pushnumber(state, treatment.specificEnergyKWhPerKg); lua_setfield(state, -2, "specificEnergyKWhPerKg");
+					lua_pushnumber(state, treatment.consumablePerKg); lua_setfield(state, -2, "consumablePerKg");
+					lua_pushinteger(state, treatment.priority); lua_setfield(state, -2, "priority");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 18, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -462,6 +501,16 @@ namespace core
 			}
 			return list;
 		}
+		std::string declaredThermalClasses()
+		{
+			std::string list;
+			for (auto const* thermalClass : StationThermalServiceClasses)
+			{
+				if (!list.empty()) list += ", ";
+				list += thermalClass;
+			}
+			return list;
+		}
 		// Compound Resource materials are mass-denominated (#391); their
 		// constituents are accounted in kg and the energy term in kJ.
 		bool isMassUnit(std::string const& unit)
@@ -471,6 +520,13 @@ namespace core
 		double massToKg(std::string const& unit, double mass)
 		{
 			return unit == "g" ? mass * 0.001 : mass;
+		}
+		// Inverse of massToKg: a magnitude expressed in kilograms rendered
+		// in a store's own declared mass unit (#402, where the recovery
+		// rates are authored in kg/s against stores that may be grams).
+		double kgToMass(std::string const& unit, double kg)
+		{
+			return unit == "g" ? kg * 1000.0 : kg;
 		}
 		bool compositionsClose(ResourceCompositionSettings const& left,
 			ResourceCompositionSettings const& right)
@@ -1533,6 +1589,134 @@ namespace core
 				+ StationBalanceTolerance * std::max(1.0, std::abs(releasedKJPerS)))
 				return refuse(where + " metabolic heat exceeds the consumed food energy minus the energy still bound in the waste streams: heat may not be created from nothing");
 		}
+		// Water recovery contracts (#402). A collector condenses vapour out
+		// of one compartment onto a coolant-loop cold surface; a treatment
+		// turns raw water into treated water plus retained concentrate. Both
+		// carry a hazard class, and the class is what keeps a potable stream
+		// from sharing equipment with a contaminated one: a collector may
+		// only serve a compartment of its own class, since condensate
+		// inherits the hazard of the air it came from, and no store may be
+		// touched by both a normal-class and a hazardous-class water
+		// process. Every water store must be a plain mass store: condensate
+		// is pure water and the recovery split is mass-denominated, so a
+		// compound store would create dry constituents out of nothing. The
+		// treatment consumable store is the one exception - it is a supplied
+		// consumable, not a water stream, and may be compound.
+		if (settings.waterCollectors.size() > MaxStationWaterCollectors)
+			return refuse("Station water collectors are limited to "
+				+ std::to_string(MaxStationWaterCollectors) + " entries");
+		if (settings.waterTreatments.size() > MaxStationWaterTreatments)
+			return refuse("Station water treatments are limited to "
+				+ std::to_string(MaxStationWaterTreatments) + " entries");
+		std::map<std::string, std::string> waterStoreClass;
+		auto declareWaterStore = [&](std::string const& storeId, char const* role,
+			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+		{
+			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
+			if (found == settings.stores.end())
+				return refuse(where + " " + role + " store '" + storeId + "' does not exist");
+			if (!isMassUnit(found->unit))
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' must be a mass unit; water recovery is mass-denominated (g or kg)");
+			if (found->composition && !allowCompound)
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' declares a composition; recovered water streams are plain mass stores, so no dry constituent can be created from pure condensate");
+			auto const existing = waterStoreClass.find(storeId);
+			if (existing == waterStoreClass.end())
+				waterStoreClass.emplace(storeId, hazardClass);
+			else if (existing->second != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
+					+ existing->second + "-class water process; hazardous and normal water streams may not share a store");
+			return true;
+		};
+		std::set<std::string> waterIds;
+		for (auto const& collector : settings.waterCollectors)
+		{
+			auto const where = "Station water collector '" + collector.id + "'";
+			if (collector.id.empty()) return refuse("Station water collector id must not be empty");
+			if (collector.id.size() > MaxStationStoreIdLength)
+				return refuse("Station water collector id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!waterIds.insert(collector.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
+				collector.hazardClass) == StationWaterHazardClasses.end())
+				return refuse(where + " has unknown water hazard class '" + collector.hazardClass
+					+ "'; declared classes are: normal, hazardous");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				collector.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + collector.thermalClass
+					+ "'; declared classes are: " + declaredThermalClasses());
+			if (!std::isfinite(collector.maxRateKgPerS) || collector.maxRateKgPerS < 0.0)
+				return refuse(where + " maximum collection rate must be finite and non-negative");
+			if (!std::isfinite(collector.targetRelativeHumidity)
+				|| collector.targetRelativeHumidity < 0.0 || collector.targetRelativeHumidity > 1.0)
+				return refuse(where + " target relative humidity must be finite and from 0 to 1");
+			auto const compartment = std::find_if(settings.atmospheres.begin(),
+				settings.atmospheres.end(), [&](AtmosphereSettings const& atmosphere)
+				{ return atmosphere.id == collector.atmosphereId; });
+			if (compartment == settings.atmospheres.end())
+				return refuse(where + " condenses from unknown atmosphere compartment '" + collector.atmosphereId + "'");
+			if (compartment->hazardClass != collector.hazardClass)
+				return refuse(where + " hazard class '" + collector.hazardClass + "' does not match compartment '"
+					+ compartment->id + "' hazard class '" + compartment->hazardClass
+					+ "'; condensate inherits the hazard of the air it is condensed from");
+			auto const loop = std::find_if(settings.coolantLoops.begin(), settings.coolantLoops.end(),
+				[&](CoolantLoopSettings const& candidate) { return candidate.id == collector.coolingLoopId; });
+			if (loop == settings.coolantLoops.end())
+				return refuse(where + " cold surface is served by unknown coolant loop '" + collector.coolingLoopId + "'");
+			auto const host = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
+				{ return reservoir.id == loop->reservoirId; });
+			if (host == settings.thermalReservoirs.end())
+				return refuse(where + " coolant loop '" + loop->id + "' has no known host reservoir");
+			if (host->thermalClass != collector.thermalClass)
+				return refuse(where + " thermal class '" + collector.thermalClass + "' does not match coolant loop '"
+					+ loop->id + "' host reservoir class '" + host->thermalClass
+					+ "'; the cold surface serves only its own service class");
+			if (!declareWaterStore(collector.destStoreId, "raw water destination", where,
+				collector.hazardClass, false))
+				return false;
+		}
+		for (auto const& treatment : settings.waterTreatments)
+		{
+			auto const where = "Station water treatment '" + treatment.id + "'";
+			if (treatment.id.empty()) return refuse("Station water treatment id must not be empty");
+			if (treatment.id.size() > MaxStationStoreIdLength)
+				return refuse("Station water treatment id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!waterIds.insert(treatment.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
+				treatment.hazardClass) == StationWaterHazardClasses.end())
+				return refuse(where + " has unknown water hazard class '" + treatment.hazardClass
+					+ "'; declared classes are: normal, hazardous");
+			if (!std::isfinite(treatment.throughputKgPerS) || treatment.throughputKgPerS < 0.0)
+				return refuse(where + " throughput must be finite and non-negative");
+			if (!std::isfinite(treatment.recoveryRatio) || treatment.recoveryRatio <= 0.0
+				|| treatment.recoveryRatio > 1.0)
+				return refuse(where + " recovery ratio must be finite and above zero up to 1: a process that recovers nothing is not a recovery process");
+			if (!std::isfinite(treatment.specificEnergyKWhPerKg) || treatment.specificEnergyKWhPerKg < 0.0)
+				return refuse(where + " specific energy must be finite and non-negative");
+			if (!std::isfinite(treatment.consumablePerKg) || treatment.consumablePerKg < 0.0)
+				return refuse(where + " consumable per kg must be finite and non-negative");
+			char const* streamRoles[3]{"source", "treated", "concentrate"};
+			std::string const streamIds[3]{treatment.sourceStoreId, treatment.treatedStoreId,
+				treatment.concentrateStoreId};
+			for (size_t stream = 0; stream < 3; ++stream)
+			{
+				for (size_t other = stream + 1; other < 3; ++other)
+					if (streamIds[stream] == streamIds[other])
+						return refuse(where + " " + streamRoles[stream] + " store and " + streamRoles[other]
+							+ " store are the same store '" + streamIds[stream]
+							+ "'; the recovery split needs distinct source, treated and concentrate stores");
+				if (!declareWaterStore(streamIds[stream], streamRoles[stream], where,
+					treatment.hazardClass, false))
+					return false;
+			}
+			if (!declareWaterStore(treatment.consumableStoreId, "consumable", where,
+				treatment.hazardClass, true))
+				return false;
+		}
 		diagnostic.clear(); return true;
 	}
 	void setStationSystemsSourceLoader(StationSystemsSourceLoader loader) { sourceLoader = std::move(loader); }
@@ -1770,6 +1954,11 @@ namespace core
 			double lastCirculationFraction{0.0};
 			double lastFlowKgPerS{0.0};
 			double lastExchangeIntoLoopKW{0.0};
+			// Water-recovery latent heat deposited on this loop's cold surface
+			// this tick and cumulatively (#402): an inflow term of the loop's
+			// own energy ledger, booked once and never into the compartment.
+			double lastCollectorHeatKW{0.0};
+			double collectorHeatKJ{0.0};
 			double lastChillerExtractionKW{0.0};
 			double pumpWorkKJ{0.0};
 			double heaterKJ{0.0};
@@ -1889,6 +2078,10 @@ namespace core
 			double vapourAddedKg{0.0};
 			double condensedKg{0.0};
 			double leakedKg{0.0};
+			// Vapour removed by water recovery (#402): a booked disposal
+			// pathway of its own, so the condensate never reads as vanished.
+			double collectedKg{0.0};
+			double lastCollectedKg{0.0};
 			double recoveredKg{0.0};
 			double lostKg{0.0};
 			// Thermal ledger terms.
@@ -1996,6 +2189,71 @@ namespace core
 			bool lastUnmet{false};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
+		// The authoritative ledger of one authored water collector (#402).
+		// Collection is gated on the coolant loop's actual circulation and
+		// on the cold surface being colder than the compartment air; the
+		// condensate is capped by the vapour held above the humidity target
+		// and by the destination store's headroom. The latent heat the vapour
+		// gave up is booked into the loop's ledger and never into the
+		// compartment's, so one condensation is one heat source, not two.
+		struct WaterCollectorState
+		{
+			WaterCollectorSettings authored;
+			size_t atmosphereIndex{0};
+			size_t loopIndex{0};
+			size_t destStoreIndex{0};
+			double lastRequestedKg{0.0};
+			double lastCondensableKg{0.0};
+			double lastCollectedKg{0.0};
+			double lastLatentHeatKW{0.0};
+			double lastCirculationFraction{0.0};
+			bool lastColdSurfaceAvailable{false};
+			std::string lastBlockReason;
+			double collectedTotalKg{0.0};
+			double latentHeatRoutedKJ{0.0};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
+		// The authoritative ledger of one authored water treatment (#402).
+		// One uniform scale per tick: the smallest fraction of the rated
+		// throughput that the drawable raw water, the treated and
+		// concentrate headroom and the drawable consumables can sustain.
+		// Processing only runs if it can be paid for: with no electrical
+		// supply at all the tick is refused whole and nothing is drawn or
+		// moved. Curtailed supply runs the process but holds the output
+		// unqualified - a treatment that never received its full energy dose
+		// has not finished treating. The concentrate lands on the unqualified
+		// side of its store: retained, accounted, and unusable until a
+		// disposal capability exists.
+		struct WaterTreatmentState
+		{
+			WaterTreatmentSettings authored;
+			size_t sourceIndex{0};
+			size_t treatedIndex{0};
+			size_t concentrateIndex{0};
+			size_t consumableIndex{0};
+			size_t declarationIndex{0};
+			double lastScale{0.0};
+			std::string lastLimiter;
+			double lastProcessedKg{0.0};
+			double lastTreatedKg{0.0};
+			double lastConcentrateKg{0.0};
+			double lastPowerDemandKW{0.0};
+			double lastPowerSuppliedKW{0.0};
+			double lastConsumableRequested{0.0};
+			double lastConsumableUsed{0.0};
+			bool lastQualityAccepted{false};
+			std::string lastHoldReason;
+			double processedTotalKg{0.0};
+			double treatedTotalKg{0.0};
+			double acceptedTotalKg{0.0};
+			double heldTotalKg{0.0};
+			double concentrateTotalKg{0.0};
+			double energySuppliedKJ{0.0};
+			double energyOwedKJ{0.0};
+			double consumablesUsedTotal{0.0};
+			bool lastCurtailed{false};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
 		std::vector<TransferState> transfers;
@@ -2012,6 +2270,12 @@ namespace core
 		std::vector<AtmosphereState> atmospheres;
 		std::vector<AirlockCycleState> airlockCycles;
 		std::vector<CrewState> crews;
+		std::vector<WaterCollectorState> waterCollectors;
+		std::vector<WaterTreatmentState> waterTreatments;
+		// Treatments compete for the same power pool and the same stores, so
+		// they run in the declared deterministic order: priority descending,
+		// declaration order ascending.
+		std::vector<size_t> waterTreatmentOrder;
 		// Competing transfers are allocated in priority order (higher first),
 		// ties resolved by declaration order: a declared deterministic order.
 		std::vector<size_t> transferOrder;
@@ -2032,6 +2296,12 @@ namespace core
 		// accepted deliveries (#392). The per-unit boundary closes over it:
 		// current + lost - delivered must equal starting.
 		std::map<std::string, double> unitDelivered;
+		// Cumulative mass of each unit recovered out of a compartment
+		// atmosphere by a water collector (#402): the third external side
+		// of the per-unit boundary. Condensate arrives from outside the store
+		// network just as a delivery does, so the boundary closes as
+		// current + lost - delivered - collected == starting.
+		std::map<std::string, double> unitCollected;
 		// Per-constituent totals at run start and the cumulative declared
 		// conversion losses, the compound conservation boundary (#391):
 		// current + lost must equal starting within tolerance.
@@ -2081,6 +2351,8 @@ namespace core
 			auto const committedAtmospheres = atmospheres;
 			auto const committedAirlockCycles = airlockCycles;
 			auto const committedCrews = crews;
+			auto const committedWaterCollectors = waterCollectors;
+			auto const committedWaterTreatments = waterTreatments;
 			auto const committedAvailableGenerationKW = lastAvailableGenerationKW;
 			auto const committedBatteryShortfallKW = lastBatteryShortfallKW;
 			if (runLedger(tick, seconds, system, violation)) return true;
@@ -2098,6 +2370,8 @@ namespace core
 			atmospheres = committedAtmospheres;
 			airlockCycles = committedAirlockCycles;
 			crews = committedCrews;
+			waterCollectors = committedWaterCollectors;
+			waterTreatments = committedWaterTreatments;
 			lastAvailableGenerationKW = committedAvailableGenerationKW;
 			lastBatteryShortfallKW = committedBatteryShortfallKW;
 			return false;
@@ -2200,6 +2474,12 @@ namespace core
 			// failed tick never books deliveries it did not commit (#392).
 			ConstituentLedger stagedConstituentDelivered = constituentDelivered;
 			std::map<std::string, double> stagedUnitDelivered = unitDelivered;
+			// Water recovered out of a compartment atmosphere is a third
+			// external side of the per-unit boundary (#402): the condensate
+			// arrives from outside the store network, so it is staged and
+			// committed like a delivery and the boundary closes as
+			// current + lost - delivered - collected == starting.
+			std::map<std::string, double> stagedUnitCollected = unitCollected;
 			// Solar supply and external equipment allocation run before the
 			// resource ledger: the electrical service a load receives bounds
 			// its heat and material exchanges, and allocated power can never
@@ -3257,6 +3537,256 @@ namespace core
 					chiller.status = StationTransferStatus::Rejected;
 				else chiller.status = StationTransferStatus::Partial;
 			}
+			// Water treatment (#402) runs after the chillers and before the
+			// loop's second pass: it competes for the same generation-and-
+			// battery pool, and the collectors that feed heat into those loops
+			// must land before the loops integrate. Treatments run first, so
+			// condensate a collector delivers this tick is processed from the
+			// next tick on - water is never treated in the same breath in
+			// which it appeared. One uniform scale per treatment per tick:
+			// the smallest fraction of rated throughput the drawable raw
+			// water, the treated and concentrate headroom and the drawable
+			// consumables can sustain. The process is paid for before a single
+			// kilogram moves; a tick that cannot pay at all is refused whole.
+			double totalWaterTreatmentPowerKW{0.0};
+			for (size_t orderIndex : waterTreatmentOrder)
+			{
+				auto& treatment = waterTreatments[orderIndex];
+				auto& source = stores[treatment.sourceIndex];
+				auto& treated = stores[treatment.treatedIndex];
+				auto& concentrate = stores[treatment.concentrateIndex];
+				auto& consumable = stores[treatment.consumableIndex];
+				treatment.lastScale = 0.0;
+				treatment.lastLimiter.clear();
+				treatment.lastProcessedKg = 0.0;
+				treatment.lastTreatedKg = 0.0;
+				treatment.lastConcentrateKg = 0.0;
+				treatment.lastPowerDemandKW = 0.0;
+				treatment.lastPowerSuppliedKW = 0.0;
+				treatment.lastConsumableRequested = 0.0;
+				treatment.lastConsumableUsed = 0.0;
+				treatment.lastQualityAccepted = false;
+				treatment.lastHoldReason.clear();
+				if (treatment.authored.throughputKgPerS <= 0.0)
+				{
+					treatment.status = StationTransferStatus::Idle;
+					continue;
+				}
+				auto const tickSeconds = static_cast<double>(seconds);
+				auto const fullKg = treatment.authored.throughputKgPerS * tickSeconds;
+				auto const drawableSourceUnits = std::max(0.0,
+					qualified[treatment.sourceIndex] - source.authored.protectedReserve);
+				auto const treatedHeadroomUnits = std::max(0.0, treated.authored.capacity
+					- (qualified[treatment.treatedIndex] + unqualified[treatment.treatedIndex]));
+				auto const concentrateHeadroomUnits = std::max(0.0, concentrate.authored.capacity
+					- (qualified[treatment.concentrateIndex]
+						+ unqualified[treatment.concentrateIndex]));
+				auto const drawableConsumableUnits = std::max(0.0,
+					qualified[treatment.consumableIndex] - consumable.authored.protectedReserve);
+				double scale = 1.0;
+				std::string limiter;
+				auto const constrain = [&](double available, double required,
+					std::string const& reason)
+				{
+					if (required <= 0.0) return;
+					auto const fraction = available / required;
+					if (fraction < scale) { scale = fraction; limiter = reason; }
+				};
+				constrain(drawableSourceUnits, kgToMass(source.authored.unit, fullKg),
+					"raw water store '" + source.authored.id
+					+ "' has nothing drawable above its protected reserve");
+				constrain(treatedHeadroomUnits,
+					kgToMass(treated.authored.unit, fullKg * treatment.authored.recoveryRatio),
+					"treated water store '" + treated.authored.id + "' is full");
+				constrain(concentrateHeadroomUnits,
+					kgToMass(concentrate.authored.unit,
+						fullKg * (1.0 - treatment.authored.recoveryRatio)),
+					"concentrate store '" + concentrate.authored.id
+					+ "' is full: the retained stream has nowhere to go");
+				constrain(drawableConsumableUnits,
+					treatment.authored.consumablePerKg * fullKg,
+					"treatment consumable store '" + consumable.authored.id + "' is exhausted");
+				scale = std::max(0.0, std::min(1.0, scale));
+				treatment.lastScale = scale;
+				treatment.lastLimiter = limiter;
+				if (scale <= 0.0)
+				{
+					treatment.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				treatment.lastPowerDemandKW = scale * treatment.authored.throughputKgPerS
+					* treatment.authored.specificEnergyKWhPerKg;
+				auto const fromGeneration = std::min(treatment.lastPowerDemandKW, availableGeneration);
+				availableGeneration -= fromGeneration;
+				auto const ask = treatment.lastPowerDemandKW - fromGeneration;
+				auto const fromBattery = drawBatteries(ask);
+				auto const suppliedKW = fromGeneration + fromBattery;
+				batterySuppliedKW += fromBattery;
+				batteryShortfallKW += ask - fromBattery;
+				treatment.lastPowerSuppliedKW = suppliedKW;
+				if (treatment.lastPowerDemandKW > 1e-12 && suppliedKW <= 1e-12)
+				{
+					// Nothing was paid: the tick is refused whole. No water
+					// moves and no consumable is drawn - a treatment with no
+					// power is not a treatment running for free.
+					treatment.lastHoldReason = "no electrical supply: the treatment cannot run";
+					treatment.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				// Move the water. Each output is clamped to its own headroom
+				// so a one-ulp roundoff at the limit can never overshoot
+				// capacity (#556), and the kg ledger is recomputed from the
+				// units that actually moved.
+				auto const processedUnits = std::min(
+					kgToMass(source.authored.unit, fullKg * scale), drawableSourceUnits);
+				auto const processedKg = massToKg(source.authored.unit, processedUnits);
+				auto const treatedUnits = std::min(
+					kgToMass(treated.authored.unit, processedKg * treatment.authored.recoveryRatio),
+					treatedHeadroomUnits);
+				auto const treatedKg = massToKg(treated.authored.unit, treatedUnits);
+				auto const concentrateUnits = std::min(
+					kgToMass(concentrate.authored.unit, std::max(0.0, processedKg - treatedKg)),
+					concentrateHeadroomUnits);
+				auto const concentrateKg = massToKg(concentrate.authored.unit, concentrateUnits);
+				qualified[treatment.sourceIndex] -= processedUnits;
+				flowOut[treatment.sourceIndex] += processedUnits;
+				// Quality: the full rated energy dose is what qualifies. A
+				// curtailed dose runs the machine but does not finish the
+				// water, so the output is held unqualified rather than passed
+				// through on a partial treatment.
+				auto const curtailed = suppliedKW + 1e-12 < treatment.lastPowerDemandKW;
+				treatment.lastQualityAccepted = !curtailed;
+				if (curtailed)
+				{
+					treatment.lastHoldReason = "treatment energy curtailed: the treated output is held unqualified";
+					unqualified[treatment.treatedIndex] += treatedUnits;
+				}
+				else qualified[treatment.treatedIndex] += treatedUnits;
+				flowIn[treatment.treatedIndex] += treatedUnits;
+				// The concentrate is retained, not usable: it lands on the
+				// unqualified side of its store and stays accounted there
+				// until a disposal capability exists.
+				unqualified[treatment.concentrateIndex] += concentrateUnits;
+				flowIn[treatment.concentrateIndex] += concentrateUnits;
+				treatment.lastConsumableRequested = treatment.authored.consumablePerKg * processedKg;
+				auto const consumableUsed = std::min(treatment.lastConsumableRequested,
+					drawableConsumableUnits);
+				qualified[treatment.consumableIndex] -= consumableUsed;
+				flowOut[treatment.consumableIndex] += consumableUsed;
+				treatment.lastConsumableUsed = consumableUsed;
+				// Per-unit boundary: the source gave the processed mass up,
+				// the treated and concentrate stores took their shares on, and
+				// the consumable was used out of existence by the process.
+				stagedUnitLoss[source.authored.unit] += processedUnits;
+				stagedUnitLoss[treated.authored.unit] -= treatedUnits;
+				stagedUnitLoss[concentrate.authored.unit] -= concentrateUnits;
+				stagedUnitLoss[consumable.authored.unit] += consumableUsed;
+				if (consumable.authored.composition)
+				{
+					ConstituentLedger netChange;
+					addComposition(netChange, *consumable.authored.composition,
+						massToKg(consumable.authored.unit, consumableUsed), -1.0);
+					for (auto const& entry : netChange)
+						stagedLoss[entry.first] -= entry.second;
+				}
+				treatment.lastProcessedKg = processedKg;
+				treatment.lastTreatedKg = treatedKg;
+				treatment.lastConcentrateKg = concentrateKg;
+				treatment.processedTotalKg += processedKg;
+				treatment.treatedTotalKg += treatedKg;
+				treatment.concentrateTotalKg += concentrateKg;
+				if (curtailed) treatment.heldTotalKg += treatedKg;
+				else treatment.acceptedTotalKg += treatedKg;
+				treatment.energySuppliedKJ += suppliedKW * tickSeconds;
+				treatment.energyOwedKJ += treatment.lastPowerDemandKW * tickSeconds;
+				treatment.consumablesUsedTotal += consumableUsed;
+				treatment.lastCurtailed = curtailed;
+				totalWaterTreatmentPowerKW += suppliedKW;
+				if (!curtailed) treatment.status = StationTransferStatus::Full;
+				else treatment.status = StationTransferStatus::Partial;
+			}
+			// Water collectors (#402) run after the treatments and before
+			// the loop's second pass, so the latent heat they add is inside
+			// the same integration the loop's ledger closes over. The cold
+			// surface only works while coolant is actually circulating across
+			// it and is colder than the compartment air: no circulation, no
+			// condensation, and the reason stays visible rather than the
+			// collector quietly idling. The condensate is capped by the vapour
+			// held above the humidity target and by the destination's
+			// headroom, and the latent heat it gave up is booked into the
+			// loop's ledger and never into the compartment's - one
+			// condensation, one heat source.
+			std::vector<double> collectorHeatByLoop(coolantLoops.size(), 0.0);
+			for (auto& collector : waterCollectors)
+			{
+				auto& compartment = atmospheres[collector.atmosphereIndex];
+				auto& loop = coolantLoops[collector.loopIndex];
+				auto& dest = stores[collector.destStoreIndex];
+				collector.lastRequestedKg = 0.0;
+				collector.lastCondensableKg = 0.0;
+				collector.lastCollectedKg = 0.0;
+				collector.lastLatentHeatKW = 0.0;
+				collector.lastBlockReason.clear();
+				if (collector.authored.maxRateKgPerS <= 0.0)
+				{
+					collector.status = StationTransferStatus::Idle;
+					continue;
+				}
+				auto const tickSeconds = static_cast<double>(seconds);
+				auto const requestedKg = collector.authored.maxRateKgPerS * tickSeconds;
+				auto const saturatedKg = stationSaturatedVapourMassKg(
+					stationSaturationVapourPressureKPa(compartment.temperatureC),
+					compartment.authored.volumeM3, compartment.temperatureC);
+				auto const condensableKg = std::max(0.0, compartment.waterVapourKg
+					- collector.authored.targetRelativeHumidity * saturatedKg);
+				collector.lastRequestedKg = requestedKg;
+				collector.lastCondensableKg = condensableKg;
+				collector.lastCirculationFraction = loop.lastCirculationFraction;
+				collector.lastColdSurfaceAvailable = loop.lastCirculationFraction > 1e-12
+					&& loop.temperatureC < compartment.temperatureC - 1e-9;
+				if (!collector.lastColdSurfaceAvailable)
+				{
+					collector.lastBlockReason = loop.lastCirculationFraction <= 1e-12
+						? "no coolant circulation across the cold surface: nothing can be condensed"
+						: "the cold surface is not colder than the compartment air: no condensation";
+					collector.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				if (condensableKg <= 1e-12)
+				{
+					collector.lastBlockReason = "the compartment holds no vapour above the collection target";
+					collector.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				auto const destHeadroomUnits = std::max(0.0, dest.authored.capacity
+					- (qualified[collector.destStoreIndex] + unqualified[collector.destStoreIndex]));
+				auto const collectedUnits = std::min(
+					kgToMass(dest.authored.unit, std::min(requestedKg, condensableKg)),
+					destHeadroomUnits);
+				if (collectedUnits <= 0.0)
+				{
+					collector.lastBlockReason = "destination raw water store '" + dest.authored.id
+						+ "' is full: nowhere to put the condensate";
+					collector.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				auto const collectedKg = massToKg(dest.authored.unit, collectedUnits);
+				compartment.waterVapourKg -= collectedKg;
+				compartment.lastCollectedKg = collectedKg;
+				compartment.collectedKg += collectedKg;
+				qualified[collector.destStoreIndex] += collectedUnits;
+				flowIn[collector.destStoreIndex] += collectedUnits;
+				stagedUnitCollected[dest.authored.unit] += collectedUnits;
+				// The latent heat leaves the gas and enters the coolant, once.
+				auto const latentHeatKJ = collectedKg * StationLatentHeatVaporizationKJPerKg;
+				auto const latentHeatKW = latentHeatKJ / tickSeconds;
+				collectorHeatByLoop[collector.loopIndex] += latentHeatKW;
+				collector.lastLatentHeatKW = latentHeatKW;
+				collector.latentHeatRoutedKJ += latentHeatKJ;
+				collector.collectedTotalKg += collectedKg;
+				if (collectedKg + 1e-12 >= requestedKg) collector.status = StationTransferStatus::Full;
+				else collector.status = StationTransferStatus::Partial;
+			}
 			// Second loop pass: integrate the loop's temperature from the
 			// pump work, heater heat, exchanger exchange and the chiller
 			// extraction that actually moved this tick, and book the loop
@@ -3270,16 +3800,20 @@ namespace core
 				auto const disabled = loop.coolantKg <= 0.0;
 				auto const extractionKW = chillerExtractionByLoop[loopIndex];
 				loop.lastChillerExtractionKW = extractionKW;
+				auto const collectorHeatKW = collectorHeatByLoop[loopIndex];
+				loop.lastCollectorHeatKW = collectorHeatKW;
 				auto const loopCapacityKJ = loop.coolantKg * loop.authored.specificHeatKJPerKgK;
 				if (!disabled)
 				{
 					auto const heatIntoLoopKW = loop.lastPumpSuppliedKW + loop.lastHeaterSuppliedKW;
-					loop.temperatureC += (heatIntoLoopKW + loop.lastExchangeIntoLoopKW - extractionKW)
+					loop.temperatureC += (heatIntoLoopKW + loop.lastExchangeIntoLoopKW
+						+ collectorHeatKW - extractionKW)
 						* static_cast<double>(seconds) / loopCapacityKJ;
 					loop.pumpWorkKJ += loop.lastPumpSuppliedKW * static_cast<double>(seconds);
 					loop.heaterKJ += loop.lastHeaterSuppliedKW * static_cast<double>(seconds);
 					loop.exchangedKJ += loop.lastExchangeIntoLoopKW * static_cast<double>(seconds);
 					loop.extractedKJ += extractionKW * static_cast<double>(seconds);
+					loop.collectorHeatKJ += collectorHeatKW * static_cast<double>(seconds);
 				}
 				// The freeze condition is exposed, never clamped: the loop
 				// stays integrated and the shortfall stays visible.
@@ -4027,9 +4561,13 @@ namespace core
 				// The boundary now has an inflow side: accepted deliveries
 				// bring material in from outside the station, so the ledger
 				// closes over current + lost - delivered, never over current
-				// alone (#392).
+				// alone (#392). Water recovered out of a compartment
+				// atmosphere is a second inflow of the same kind (#402): the
+				// condensate comes from outside the store network, so it is
+				// subtracted on the same side rather than reading as a
+				// creation of mass.
 				auto const residual = currentTotals[unit] + stagedUnitLoss[unit]
-					- stagedUnitDelivered[unit] - starting;
+					- stagedUnitDelivered[unit] - stagedUnitCollected[unit] - starting;
 				if (!std::isfinite(residual)
 					|| std::abs(residual) > StationBalanceTolerance * std::max(1.0, std::abs(starting)))
 					return violation = "conservation residual " + std::to_string(residual)
@@ -4102,6 +4640,10 @@ namespace core
 				// every other service (#399); generator output is
 				// generation inside it. Neither side is ever a second budget.
 				for (auto const& generator : generators) totalSupplied += generator.lastStartupDrawKW;
+				// Water treatment work rides the same pool (#402): it is
+				// never a third budget beside the loads and the thermal plant.
+				for (auto const& treatment : waterTreatments)
+					totalSupplied += treatment.lastPowerSuppliedKW;
 				for (auto const& array : solarArrays) totalGeneration += array.lastAvailableKW;
 				for (auto const& generator : generators) totalGeneration += generator.outputKW;
 				for (auto const& battery : batteries) totalDischarged += battery.lastDischargeKW;
@@ -4152,6 +4694,8 @@ namespace core
 				if (!requireFinite(loss, "cumulative loss of constituent '" + constituent + "'")) return false;
 			for (auto const& [unit, delivered] : stagedUnitDelivered)
 				if (!requireFinite(delivered, "cumulative delivered amount of unit '" + unit + "'")) return false;
+			for (auto const& [unit, collected] : stagedUnitCollected)
+				if (!requireFinite(collected, "cumulative collected amount of unit '" + unit + "'")) return false;
 			for (auto const& [constituent, delivered] : stagedConstituentDelivered)
 				if (!requireFinite(delivered, "cumulative delivered constituent '" + constituent + "'")) return false;
 			for (auto const& delivery : deliveries)
@@ -4243,6 +4787,8 @@ namespace core
 				if (!requireFinite(loop.heaterKJ, where + "cumulative heater energy")) return false;
 				if (!requireFinite(loop.exchangedKJ, where + "cumulative exchanged energy")) return false;
 				if (!requireFinite(loop.extractedKJ, where + "cumulative chiller extracted energy")) return false;
+				if (!requireFinite(loop.lastCollectorHeatKW, where + "last water-recovery heat")) return false;
+				if (!requireFinite(loop.collectorHeatKJ, where + "cumulative water-recovery heat")) return false;
 				if (loop.coolantKg < 0.0)
 					return violation = where + "coolant inventory went negative", false;
 				if (loop.coolantKg > loop.authored.coolantCapacityKg + StationBalanceTolerance
@@ -4255,7 +4801,7 @@ namespace core
 					* loop.authored.specificHeatKJPerKgK * loop.authored.startingTemperatureC;
 				auto const bound = StationBalanceTolerance * std::max(1.0, std::abs(startingEnergyKJ));
 				auto const residual = startingEnergyKJ + loop.pumpWorkKJ + loop.heaterKJ
-					+ loop.exchangedKJ - loop.extractedKJ
+					+ loop.exchangedKJ + loop.collectorHeatKJ - loop.extractedKJ
 					- loop.coolantKg * loop.authored.specificHeatKJPerKgK
 					* loop.temperatureC;
 				if (!std::isfinite(residual) || std::abs(residual) > bound)
@@ -4482,7 +5028,8 @@ namespace core
 					{"waterVapour", compartment.authored.startingWaterVapourKg,
 						compartment.vapourAddedKg,
 						compartment.condensedKg + compartment.leakWaterVapourKg
-							+ compartment.cycleWaterVapourKg, compartment.waterVapourKg}}};
+							+ compartment.cycleWaterVapourKg + compartment.collectedKg,
+						compartment.waterVapourKg}}};
 				for (auto const& closure : closures)
 				{
 					auto const residual = closure.starting + closure.added
@@ -4586,6 +5133,73 @@ namespace core
 				if (!std::isfinite(closure) || std::abs(closure) > bound)
 					return violation = where + "consumed/returned/retained ledger does not close within tolerance", false;
 			}
+			// Water recovery ledgers (#402): the collector may only take what
+			// the compartment held above its target, and the treatment's own
+			// account closes twice over - processed mass leaves the machine as
+			// treated water plus concentrate and nothing else, and every
+			// treated kilogram was either qualified or held, never both and
+			// never neither. The treatment is never supplied more energy than
+			// the process owed, and held output always carries a stated reason.
+			system = "Water recovery";
+			for (auto const& collector : waterCollectors)
+			{
+				auto const where = "water collector '" + collector.authored.id + "' ";
+				if (!requireFinite(collector.lastRequestedKg, where + "last requested mass")) return false;
+				if (!requireFinite(collector.lastCondensableKg, where + "last condensable mass")) return false;
+				if (!requireFinite(collector.lastCollectedKg, where + "last collected mass")) return false;
+				if (!requireFinite(collector.lastLatentHeatKW, where + "last latent heat")) return false;
+				if (!requireFinite(collector.lastCirculationFraction, where + "last circulation fraction")) return false;
+				if (!requireFinite(collector.collectedTotalKg, where + "cumulative collected mass")) return false;
+				if (!requireFinite(collector.latentHeatRoutedKJ, where + "cumulative latent heat routed")) return false;
+				auto const collectBound = StationBalanceTolerance * std::max(1.0, collector.lastCondensableKg);
+				if (collector.lastCollectedKg < -collectBound)
+					return violation = where + "collected a negative mass", false;
+				if (collector.lastCollectedKg > collector.lastCondensableKg + collectBound)
+					return violation = where
+						+ "collected more condensate than the compartment held above its humidity target", false;
+			}
+			for (auto const& treatment : waterTreatments)
+			{
+				auto const where = "water treatment '" + treatment.authored.id + "' ";
+				if (!requireFinite(treatment.lastScale, where + "processing scale")) return false;
+				if (!requireFinite(treatment.lastProcessedKg, where + "last processed mass")) return false;
+				if (!requireFinite(treatment.lastTreatedKg, where + "last treated mass")) return false;
+				if (!requireFinite(treatment.lastConcentrateKg, where + "last concentrate mass")) return false;
+				if (!requireFinite(treatment.lastPowerDemandKW, where + "last power demand")) return false;
+				if (!requireFinite(treatment.lastPowerSuppliedKW, where + "last power supplied")) return false;
+				if (!requireFinite(treatment.lastConsumableRequested, where + "last consumable requested")) return false;
+				if (!requireFinite(treatment.lastConsumableUsed, where + "last consumable used")) return false;
+				if (!requireFinite(treatment.processedTotalKg, where + "cumulative processed mass")) return false;
+				if (!requireFinite(treatment.treatedTotalKg, where + "cumulative treated mass")) return false;
+				if (!requireFinite(treatment.acceptedTotalKg, where + "cumulative accepted mass")) return false;
+				if (!requireFinite(treatment.heldTotalKg, where + "cumulative held mass")) return false;
+				if (!requireFinite(treatment.concentrateTotalKg, where + "cumulative concentrate mass")) return false;
+				if (!requireFinite(treatment.energySuppliedKJ, where + "cumulative energy supplied")) return false;
+				if (!requireFinite(treatment.energyOwedKJ, where + "cumulative energy owed")) return false;
+				if (!requireFinite(treatment.consumablesUsedTotal, where + "cumulative consumables used")) return false;
+				if (!(treatment.lastScale >= 0.0 && treatment.lastScale <= 1.0 + 1e-12))
+					return violation = where + "processing scale left the declared [0, 1] range", false;
+				auto const splitBound = StationBalanceTolerance * std::max(1.0, treatment.processedTotalKg);
+				auto const splitResidual = treatment.processedTotalKg
+					- treatment.treatedTotalKg - treatment.concentrateTotalKg;
+				if (!std::isfinite(splitResidual) || std::abs(splitResidual) > splitBound)
+					return violation = where
+						+ "processed/treated/concentrate ledger does not close within tolerance", false;
+				auto const qualityResidual = treatment.treatedTotalKg
+					- treatment.acceptedTotalKg - treatment.heldTotalKg;
+				if (!std::isfinite(qualityResidual) || std::abs(qualityResidual) > splitBound)
+					return violation = where
+						+ "accepted/held quality ledger does not close within tolerance", false;
+				if (treatment.energySuppliedKJ > treatment.energyOwedKJ + splitBound)
+					return violation = where + "was supplied more energy than the process owed", false;
+				auto const consumableBound = StationBalanceTolerance
+					* std::max(1.0, treatment.lastConsumableRequested);
+				if (treatment.lastConsumableUsed > treatment.lastConsumableRequested + consumableBound)
+					return violation = where + "used more consumable than the processed mass calls for", false;
+				if (!treatment.lastQualityAccepted && treatment.lastProcessedKg > 0.0
+					&& treatment.lastHoldReason.empty())
+					return violation = where + "held treated output without a stated hold reason", false;
+			}
 			system = "Power allocation";
 			for (auto const& array : solarArrays)
 			{
@@ -4657,6 +5271,7 @@ namespace core
 				if (!requireFinite(totalCoolantPumpKW, "total coolant pump power")) return false;
 				if (!requireFinite(totalCoolantHeaterKW, "total freeze-protection heating power")) return false;
 				if (!requireFinite(totalChillerPowerKW, "total chiller power")) return false;
+				if (!requireFinite(totalWaterTreatmentPowerKW, "total water treatment power")) return false;
 				if (!requireFinite(totalGeneratorOutputKW, "total generator output power")) return false;
 				if (!requireFinite(totalGeneratorStartupKW, "total generator startup draw")) return false;
 				if (!requireFinite(totalGeneratorWasteKW, "total generator waste heat")) return false;
@@ -4672,6 +5287,7 @@ namespace core
 			constituentLoss = stagedLoss;
 			unitLoss = stagedUnitLoss;
 			unitDelivered = stagedUnitDelivered;
+			unitCollected = stagedUnitCollected;
 			constituentDelivered = stagedConstituentDelivered;
 			// Rejections and partial completions are visible: announce each
 			// status transition (after the commit) so the event log records
@@ -5182,6 +5798,39 @@ namespace core
 			state.atmosphereIndex = atmosphereIndex[crew.atmosphereId];
 			mImpl->crews.push_back(std::move(state));
 		}
+		// Water recovery ledgers start empty of recovery (#402): the
+		// authored contracts are resolved to compartment, loop and store
+		// indices at construction so the tick ledger never re-looks-up
+		// references, and every recovery total reconstructs from zero on
+		// Reset and load. Treatments compete for the same power pool and the
+		// same stores, so they run in the declared deterministic order:
+		// priority descending, declaration order ascending.
+		for (auto const& collector : settings.waterCollectors)
+		{
+			Impl::WaterCollectorState state;
+			state.authored = collector;
+			state.atmosphereIndex = atmosphereIndex[collector.atmosphereId];
+			state.loopIndex = loopIndex[collector.coolingLoopId];
+			state.destStoreIndex = storeIndex[collector.destStoreId];
+			mImpl->waterCollectors.push_back(std::move(state));
+		}
+		for (auto const& treatment : settings.waterTreatments)
+		{
+			Impl::WaterTreatmentState state;
+			state.authored = treatment;
+			state.sourceIndex = storeIndex[treatment.sourceStoreId];
+			state.treatedIndex = storeIndex[treatment.treatedStoreId];
+			state.concentrateIndex = storeIndex[treatment.concentrateStoreId];
+			state.consumableIndex = storeIndex[treatment.consumableStoreId];
+			state.declarationIndex = mImpl->waterTreatments.size();
+			mImpl->waterTreatments.push_back(std::move(state));
+		}
+		mImpl->waterTreatmentOrder.resize(mImpl->waterTreatments.size());
+		std::iota(mImpl->waterTreatmentOrder.begin(), mImpl->waterTreatmentOrder.end(), size_t{0});
+		std::stable_sort(mImpl->waterTreatmentOrder.begin(), mImpl->waterTreatmentOrder.end(),
+			[&](size_t left, size_t right)
+			{ return mImpl->waterTreatments[left].authored.priority
+				> mImpl->waterTreatments[right].authored.priority; });
 		for (auto const& load : settings.equipmentLoads)
 		{
 			Impl::LoadState state;
@@ -5259,7 +5908,8 @@ namespace core
 				&settings.solarArrays, &settings.equipmentLoads, &settings.batteries,
 				&settings.deliveries, &settings.thermalReservoirs, &settings.radiators,
 				&settings.coolantLoops, &settings.chillers, &settings.generators,
-				&settings.atmospheres, &settings.airlockCycles, &settings.crews};
+				&settings.atmospheres, &settings.airlockCycles, &settings.crews,
+				&settings.waterCollectors, &settings.waterTreatments};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -5287,7 +5937,11 @@ namespace core
 			+ std::to_string(settings.generators.size()) + " fuelled generator(s), "
 			+ std::to_string(settings.atmospheres.size()) + " atmosphere compartment(s) and "
 			+ std::to_string(settings.airlockCycles.size()) + " scheduled airlock cycle(s) and "
-			+ std::to_string(settings.crews.size()) + " crew(s)");
+			+ std::to_string(settings.crews.size()) + " crew(s)"
+			+ (settings.waterCollectors.empty() ? std::string()
+				: ", " + std::to_string(settings.waterCollectors.size()) + " water collector(s)")
+			+ (settings.waterTreatments.empty() ? std::string()
+				: ", " + std::to_string(settings.waterTreatments.size()) + " water treatment(s)"));
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
 	bool StationSystemsRuntime::advance(uint64_t tick, float seconds)
@@ -5341,7 +5995,8 @@ namespace core
 			|| !mImpl->deliveries.empty() || !mImpl->reservoirs.empty()
 			|| !mImpl->coolantLoops.empty() || !mImpl->chillers.empty()
 			|| !mImpl->generators.empty() || !mImpl->atmospheres.empty()
-			|| !mImpl->airlockCycles.empty() || !mImpl->crews.empty())
+			|| !mImpl->airlockCycles.empty() || !mImpl->crews.empty()
+			|| !mImpl->waterCollectors.empty() || !mImpl->waterTreatments.empty())
 		{
 			std::string violationSystem, violation;
 			if (!mImpl->applyLedger(tick, seconds, violationSystem, violation))
@@ -5412,8 +6067,10 @@ namespace core
 			auto const lost = mImpl->unitLoss.count(unit) ? mImpl->unitLoss.at(unit) : 0.0;
 			auto const delivered = mImpl->unitDelivered.count(unit)
 				? mImpl->unitDelivered.at(unit) : 0.0;
+			auto const collected = mImpl->unitCollected.count(unit)
+				? mImpl->unitCollected.at(unit) : 0.0;
 			result.balances.push_back({unit, starting, currentTotals[unit], lost, delivered,
-				currentTotals[unit] + lost - delivered - starting});
+				collected, currentTotals[unit] + lost - delivered - collected - starting});
 		}
 		for (auto const& [constituent, starting] : mImpl->startingConstituents)
 		{
@@ -5682,8 +6339,11 @@ namespace core
 			loopResult.heaterEnergyKJ = loop.heaterKJ;
 			loopResult.exchangedEnergyKJ = loop.exchangedKJ;
 			loopResult.extractedEnergyKJ = loop.extractedKJ;
+			loopResult.collectorHeatKW = loop.lastCollectorHeatKW;
+			loopResult.collectorHeatEnergyKJ = loop.collectorHeatKJ;
 			loopResult.residualKJ = loopResult.startingEnergyKJ + loop.pumpWorkKJ
-				+ loop.heaterKJ + loop.exchangedKJ - loop.extractedKJ - loopResult.currentEnergyKJ;
+				+ loop.heaterKJ + loop.exchangedKJ + loop.collectorHeatKJ
+				- loop.extractedKJ - loopResult.currentEnergyKJ;
 			loopResult.status = loop.status;
 			result.thermal.totalCirculationKgPerS += loop.lastFlowKgPerS;
 			result.thermal.totalFreezeHeatingKW += loop.lastHeaterSuppliedKW;
@@ -5818,6 +6478,8 @@ namespace core
 			atmosphereResult.lastVapourAddedKg = compartment.lastVapourAddedKg;
 			atmosphereResult.lastVapourCondensedKg = compartment.lastVapourCondensedKg;
 			atmosphereResult.lastLeakedKg = compartment.lastLeakedKg;
+			atmosphereResult.lastCollectedKg = compartment.lastCollectedKg;
+			atmosphereResult.collectedKg = compartment.collectedKg;
 			atmosphereResult.lastCycleRemovedKg = compartment.lastCycleRemovedKg;
 			atmosphereResult.lastCycleRecoveredKg = compartment.lastCycleRecoveredKg;
 			atmosphereResult.lastCycleLostKg = compartment.lastCycleLostKg;
@@ -5934,6 +6596,81 @@ namespace core
 			crewResult.status = crew.status;
 			result.crews.push_back(std::move(crewResult));
 		}
+		// The water recovery snapshot reports the authored contract beside
+		// the condensate actually collected, the cold-surface conditions
+		// that gated it and the latent heat routed into the coolant loop, and
+		// the treatment's processed/treated/concentrate split with its
+		// quality hold state (#402).
+		for (auto const& collector : mImpl->waterCollectors)
+		{
+			StationWaterCollectorSnapshot collectorResult;
+			collectorResult.id = collector.authored.id;
+			collectorResult.hazardClass = collector.authored.hazardClass;
+			collectorResult.atmosphereId = collector.authored.atmosphereId;
+			collectorResult.coolingLoopId = collector.authored.coolingLoopId;
+			collectorResult.thermalClass = collector.authored.thermalClass;
+			collectorResult.destStoreId = collector.authored.destStoreId;
+			collectorResult.maxRateKgPerS = collector.authored.maxRateKgPerS;
+			collectorResult.targetRelativeHumidity = collector.authored.targetRelativeHumidity;
+			collectorResult.lastRequestedKg = collector.lastRequestedKg;
+			collectorResult.lastCondensableKg = collector.lastCondensableKg;
+			collectorResult.lastCollectedKg = collector.lastCollectedKg;
+			collectorResult.lastLatentHeatKW = collector.lastLatentHeatKW;
+			collectorResult.lastCirculationFraction = collector.lastCirculationFraction;
+			collectorResult.coldSurfaceAvailable = collector.lastColdSurfaceAvailable;
+			collectorResult.blockReason = collector.lastBlockReason;
+			collectorResult.disabled = collector.authored.maxRateKgPerS <= 0.0;
+			collectorResult.collectedKg = collector.collectedTotalKg;
+			collectorResult.latentHeatEnergyKJ = collector.latentHeatRoutedKJ;
+			collectorResult.status = collector.status;
+			result.waterCollectors.push_back(std::move(collectorResult));
+		}
+		double totalWaterTreatmentPower = 0.0;
+		for (auto const& treatment : mImpl->waterTreatments)
+		{
+			StationWaterTreatmentSnapshot treatmentResult;
+			treatmentResult.id = treatment.authored.id;
+			treatmentResult.hazardClass = treatment.authored.hazardClass;
+			treatmentResult.sourceStoreId = treatment.authored.sourceStoreId;
+			treatmentResult.treatedStoreId = treatment.authored.treatedStoreId;
+			treatmentResult.concentrateStoreId = treatment.authored.concentrateStoreId;
+			treatmentResult.consumableStoreId = treatment.authored.consumableStoreId;
+			treatmentResult.throughputKgPerS = treatment.authored.throughputKgPerS;
+			treatmentResult.recoveryRatio = treatment.authored.recoveryRatio;
+			treatmentResult.specificEnergyKWhPerKg = treatment.authored.specificEnergyKWhPerKg;
+			treatmentResult.consumablePerKg = treatment.authored.consumablePerKg;
+			treatmentResult.priority = treatment.authored.priority;
+			treatmentResult.scale = treatment.lastScale;
+			treatmentResult.limiter = treatment.lastLimiter;
+			treatmentResult.lastProcessedKg = treatment.lastProcessedKg;
+			treatmentResult.lastTreatedKg = treatment.lastTreatedKg;
+			treatmentResult.lastConcentrateKg = treatment.lastConcentrateKg;
+			treatmentResult.lastPowerDemandKW = treatment.lastPowerDemandKW;
+			treatmentResult.lastPowerSuppliedKW = treatment.lastPowerSuppliedKW;
+			treatmentResult.lastPowerUnmetKW = treatment.lastPowerDemandKW
+				- treatment.lastPowerSuppliedKW;
+			treatmentResult.lastConsumableRequested = treatment.lastConsumableRequested;
+			treatmentResult.lastConsumableUsed = treatment.lastConsumableUsed;
+			treatmentResult.lastConsumableUnmet = treatment.lastConsumableRequested
+				- treatment.lastConsumableUsed;
+			treatmentResult.qualityAccepted = treatment.lastQualityAccepted;
+			treatmentResult.holdReason = treatment.lastHoldReason;
+			treatmentResult.disabled = treatment.authored.throughputKgPerS <= 0.0;
+			treatmentResult.processedKg = treatment.processedTotalKg;
+			treatmentResult.treatedKg = treatment.treatedTotalKg;
+			treatmentResult.acceptedKg = treatment.acceptedTotalKg;
+			treatmentResult.heldKg = treatment.heldTotalKg;
+			treatmentResult.concentrateKg = treatment.concentrateTotalKg;
+			treatmentResult.energySuppliedKJ = treatment.energySuppliedKJ;
+			treatmentResult.energyOwedKJ = treatment.energyOwedKJ;
+			treatmentResult.consumablesUsed = treatment.consumablesUsedTotal;
+			treatmentResult.residualKg = treatment.processedTotalKg
+				- treatment.treatedTotalKg - treatment.concentrateTotalKg;
+			treatmentResult.status = treatment.status;
+			totalWaterTreatmentPower += treatment.lastPowerSuppliedKW;
+			result.waterTreatments.push_back(std::move(treatmentResult));
+		}
+		result.power.waterTreatmentPowerKW = totalWaterTreatmentPower;
 		// The delivery snapshot reports the authored schedule beside the
 		// runtime's arrival history: what each occurrence brought in, what
 		// the destination refused, and when the next arrival is due (#392).

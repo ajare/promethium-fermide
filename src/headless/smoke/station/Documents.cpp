@@ -214,7 +214,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 77", "version: 64");
+		replaceAll(legacy, "version: 78", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -231,14 +231,14 @@ namespace
 			"authored store fields missing or live inventory leaked");
 		bool refused = false;
 		auto staleStores = withField;
-		replaceAll(staleStores, "version: 77", "version: 65");
+		replaceAll(staleStores, "version: 78", "version: 65");
 		auto const staleStoresPath = directory / "stale-stores.world.yaml";
 		writeFile(staleStoresPath, staleStores);
 		try { (void)core::loadWorldDocument(staleStoresPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-66 document carrying resource stores was silently accepted");
 		auto staleTransfers = withField;
-		replaceAll(staleTransfers, "version: 77", "version: 66");
+		replaceAll(staleTransfers, "version: 78", "version: 66");
 		auto const staleTransfersPath = directory / "stale-transfers.world.yaml";
 		writeFile(staleTransfersPath, staleTransfers);
 		refused = false;
@@ -246,7 +246,7 @@ namespace
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-67 document carrying resource transfers was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 77", "version: 64");
+		replaceAll(stale, "version: 78", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
 		refused = false;
@@ -384,7 +384,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 77", "version: 67");
+			replaceAll(stale, "version: 78", "version: 67");
 			auto const stalePath = directory / "stale-compounds.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -493,7 +493,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 77", "version: 69");
+			replaceAll(stale, "version: 78", "version: 69");
 			auto const stalePath = directory / "stale-batteries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -615,7 +615,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 77", "version: 68");
+			replaceAll(stale, "version: 78", "version: 68");
 			auto const stalePath = directory / "stale-power.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -742,7 +742,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 77", "version: 70");
+			replaceAll(stale, "version: 78", "version: 70");
 			auto const stalePath = directory / "stale-deliveries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -870,7 +870,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 77", "version: 71");
+			replaceAll(stale, "version: 78", "version: 71");
 			auto const stalePath = directory / "stale-thermal.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1031,7 +1031,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 77", "version: 72");
+			replaceAll(stale, "version: 78", "version: 72");
 			auto const stalePath = directory / "stale-coolant.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1194,7 +1194,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 77", "version: 73");
+			replaceAll(stale, "version: 78", "version: 73");
 			auto const stalePath = directory / "stale-chillers.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1342,7 +1342,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 77", "version: 74");
+			replaceAll(stale, "version: 78", "version: 74");
 			auto const stalePath = directory / "stale-generators.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1503,7 +1503,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 77", "version: 75");
+			replaceAll(stale, "version: 78", "version: 75");
 			auto const stalePath = directory / "stale-atmospheres.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1674,7 +1674,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 77", "version: 76");
+			replaceAll(stale, "version: 78", "version: 76");
 			auto const stalePath = directory / "stale-crews.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1726,6 +1726,195 @@ namespace
 	}
 }
 
+// Water recovery persistence (#402): the collector and treatment contracts
+// round-trip through the document, the runtime reconstructs its recovery
+// state from the authored starting conditions on load, and the scenario
+// replays identically from the reopened document. A pre-78 document
+// carrying the new fields is refused rather than silently dropped, and
+// malformed water values in a file are rejected.
+void waterFiles(smoke::Context const& context)
+{
+	namespace filesystem = std::filesystem;
+	auto const directory = context.temporaryRoot() / "station-water";
+	filesystem::create_directories(directory);
+	auto plainStore = [](std::string const& id, double capacity, double starting)
+	{
+		core::ResourceStoreSettings settings;
+		settings.id = id;
+		settings.unit = "kg";
+		settings.capacity = capacity;
+		settings.startingQualified = starting;
+		return settings;
+	};
+	core::AtmosphereSettings habitat;
+	habitat.id = "habitat";
+	habitat.hazardClass = "normal";
+	habitat.volumeM3 = 100.0;
+	habitat.startingOxygenKg = 20.0;
+	habitat.startingNitrogenKg = 80.0;
+	habitat.startingWaterVapourKg = 2.0;
+	habitat.startingTemperatureC = 25.0;
+	habitat.thermalCapacityKJPerK = 10000.0;
+	habitat.minPressureKPa = 1.0;
+	habitat.maxPressureKPa = 200.0;
+	core::ThermalReservoirSettings sink;
+	sink.id = "sink";
+	sink.thermalClass = "moderate";
+	sink.heatCapacityKJPerK = 10000.0;
+	sink.startingTemperatureC = 10.0;
+	sink.minTemperatureC = -50.0;
+	sink.maxTemperatureC = 200.0;
+	core::CoolantLoopSettings loop;
+	loop.id = "chilled";
+	loop.hazardClass = "normal";
+	loop.reservoirId = "sink";
+	loop.coolantCapacityKg = 100.0;
+	loop.startingCoolantKg = 100.0;
+	loop.specificHeatKJPerKgK = 4.0;
+	loop.startingTemperatureC = 5.0;
+	loop.freezeProtectionSetpointC = 0.0;
+	loop.pumpPowerKW = 0.1;
+	loop.ratedFlowKgPerS = 10.0;
+	loop.exchangerConductanceKWPerK = 0.0;
+	loop.heaterCapacityKW = 0.0;
+	core::SolarArraySettings field;
+	field.id = "field";
+	field.capacityKW = 1.0;
+	core::WaterCollectorSettings collector;
+	collector.id = "cond";
+	collector.hazardClass = "normal";
+	collector.atmosphereId = "habitat";
+	collector.coolingLoopId = "chilled";
+	collector.thermalClass = "moderate";
+	collector.destStoreId = "raw";
+	collector.maxRateKgPerS = 0.01;
+	collector.targetRelativeHumidity = 0.5;
+	core::WaterTreatmentSettings treatment;
+	treatment.id = "plant";
+	treatment.hazardClass = "normal";
+	treatment.sourceStoreId = "raw";
+	treatment.treatedStoreId = "treated";
+	treatment.concentrateStoreId = "concentrate";
+	treatment.consumableStoreId = "consumable";
+	treatment.throughputKgPerS = 0.005;
+	treatment.recoveryRatio = 0.8;
+	treatment.specificEnergyKWhPerKg = 0.5;
+	treatment.consumablePerKg = 0.01;
+	treatment.priority = 3;
+	core::World original("Water Round Trip", 2, 2);
+	original.pauseSimulation();
+	original.finishBuild();
+	core::StationSystemsSettings settings;
+	settings.enabled = true;
+	settings.observationIntervalSeconds = 2.0f;
+	settings.stores.push_back(plainStore("raw", 100.0, 50.0));
+	settings.stores.push_back(plainStore("treated", 100.0, 0.0));
+	settings.stores.push_back(plainStore("concentrate", 100.0, 0.0));
+	settings.stores.push_back(plainStore("consumable", 100.0, 10.0));
+	settings.atmospheres.push_back(habitat);
+	settings.thermalReservoirs.push_back(sink);
+	settings.coolantLoops.push_back(loop);
+	settings.solarArrays.push_back(field);
+	settings.waterCollectors.push_back(collector);
+	settings.waterTreatments.push_back(treatment);
+	std::string diagnostic;
+	require(original.configureStationSystems(settings, false, &diagnostic),
+		"Water recovery settings edit failed: " + diagnostic);
+	original.resumeSimulation();
+	require(original.advanceTicks(1800), "Water original run failed");
+	auto const expected = original.getStationSystemsSnapshot();
+	require(expected.waterCollectors.size() == 1
+		&& expected.waterTreatments.size() == 1
+		&& expected.waterCollectors[0].collectedKg > 0.0
+		&& expected.waterTreatments[0].processedKg > 0.0
+		&& expected.waterTreatments[0].acceptedKg > 0.0
+		&& expected.waterTreatments[0].concentrateKg > 0.0,
+		"Water scenario did not exercise collection and treatment before saving");
+	auto const path = directory / "water.world.yaml";
+	original.saveTo(path.string());
+	require(readFile(path).find("waterCollectors:") != std::string::npos,
+		"saved document lacks waterCollectors");
+	require(readFile(path).find("waterTreatments:") != std::string::npos,
+		"saved document lacks waterTreatments");
+	require(readFile(path).find("targetRelativeHumidity") != std::string::npos
+		&& readFile(path).find("recoveryRatio") != std::string::npos,
+		"saved document lacks the water recovery contract");
+	auto const reopened = core::loadWorldDocument(path);
+	reopened->pauseSimulation();
+	require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+		"authored water recovery settings did not survive the file round trip");
+	require(reopened->getStationSystemsSnapshot().waterCollectors[0].collectedKg == 0.0
+		&& reopened->getStationSystemsSnapshot().waterTreatments[0].processedKg == 0.0
+		&& reopened->getStationSystemsSnapshot().stores[1].currentQualified == 0.0,
+		"reopened World did not reconstruct the water recovery starting state");
+	reopened->resumeSimulation();
+	require(reopened->advanceTicks(1800), "Water reopened run failed");
+	require(reopened->getStationSystemsSnapshot() == expected,
+		"Water scenario is not reproducible from the document");
+	require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
+		"Water event history is not reproducible from the document");
+	auto const binaryPath = directory / "water.world";
+	original.saveTo(binaryPath.string());
+	auto const reopenedBinary = core::loadWorldDocument(binaryPath);
+	reopenedBinary->pauseSimulation();
+	require(reopenedBinary->getStationSystemsSnapshot().waterCollectors.size() == 1
+		&& reopenedBinary->getStationSystemsSnapshot().waterTreatments[0].processedKg == 0.0,
+		"reopened binary water document did not reconstruct the starting state");
+	auto const withField = serializeYaml(original);
+	// A pre-78 document carrying the new fields is refused.
+	{
+		auto stale = withField;
+		replaceAll(stale, "version: 78", "version: 77");
+		auto const stalePath = directory / "stale-water.world.yaml";
+		writeFile(stalePath, stale);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(stalePath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a pre-78 document carrying water recovery was silently accepted");
+	}
+	// Malformed water values in a file are rejected.
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "recoveryRatio: 0.8", "recoveryRatio: 0.0");
+		auto const malformedPath = directory / "malformed-recovery-ratio.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a zero recovery ratio was accepted from a file");
+	}
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "targetRelativeHumidity: 0.5", "targetRelativeHumidity: 1.5");
+		auto const malformedPath = directory / "malformed-target-humidity.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a humidity target above one was accepted from a file");
+	}
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "coolingLoopId: chilled", "coolingLoopId: ghost");
+		auto const malformedPath = directory / "malformed-collector-loop.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a collector on an unknown coolant loop was accepted from a file");
+	}
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "hazardClass: normal", "hazardClass: plasma");
+		auto const malformedPath = directory / "malformed-water-hazard.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "an undeclared water hazard class was accepted from a file");
+	}
+}
+
 void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"fileRoundTrip", fileRoundTrip});
@@ -1742,4 +1931,5 @@ void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"generatorFiles", generatorFiles});
 	checks.push_back({"atmosphereFiles", atmosphereFiles});
 	checks.push_back({"crewFiles", crewFiles});
+	checks.push_back({"waterFiles", waterFiles});
 }

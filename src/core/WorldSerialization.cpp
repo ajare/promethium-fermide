@@ -769,7 +769,17 @@ namespace core
 		// silently dropped. Consumption, returns, the metabolic scale
 		// and the retained-mass ledger stay runtime-only, so load and
 		// Reset reconstruct them from the authored starting conditions.
-		serializer.writeUint32("version", 77);
+		// Version 78 adds authored water recovery contracts (#402): water
+		// collectors that condense compartment vapour onto a coolant-loop
+		// cold surface into a raw water store, and water treatments that
+		// split raw water into treated water and a retained concentrate for
+		// declared electricity and consumables; a pre-78 document carrying
+		// `waterCollectors` or `waterTreatments` is refused rather than
+		// silently dropped. Collected, processed, accepted, held and
+		// concentrate totals, the energy and consumables drawn and the
+		// quality holds stay runtime-only, so load and Reset reconstruct
+		// them from the authored starting conditions.
+		serializer.writeUint32("version", 78);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -1134,6 +1144,52 @@ namespace core
 					serializer.writeDouble("urinePerCrewPerS", crew.urinePerCrewPerS);
 					serializer.writeDouble("organicWastePerCrewPerS", crew.organicWastePerCrewPerS);
 					serializer.writeDouble("metabolicHeatPerCrewKW", crew.metabolicHeatPerCrewKW);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.waterCollectors.empty())
+			{
+				// Authored water collector contracts only; the collected
+				// mass, the latent heat routed and the gating conditions are
+				// runtime state reconstructed on load (#402).
+				serializer.beginArray("waterCollectors");
+				for (auto const& collector : mStationSystemsSettings.waterCollectors)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", collector.id);
+					serializer.writeString("hazardClass", collector.hazardClass);
+					serializer.writeString("atmosphereId", collector.atmosphereId);
+					serializer.writeString("coolingLoopId", collector.coolingLoopId);
+					serializer.writeString("thermalClass", collector.thermalClass);
+					serializer.writeString("destStoreId", collector.destStoreId);
+					serializer.writeDouble("maxRateKgPerS", collector.maxRateKgPerS);
+					serializer.writeDouble("targetRelativeHumidity", collector.targetRelativeHumidity);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.waterTreatments.empty())
+			{
+				// Authored water treatment contracts only; the processed,
+				// treated, accepted, held and concentrate totals, the energy
+				// and consumables drawn and the quality holds are runtime
+				// state reconstructed on load (#402).
+				serializer.beginArray("waterTreatments");
+				for (auto const& treatment : mStationSystemsSettings.waterTreatments)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", treatment.id);
+					serializer.writeString("hazardClass", treatment.hazardClass);
+					serializer.writeString("sourceStoreId", treatment.sourceStoreId);
+					serializer.writeString("treatedStoreId", treatment.treatedStoreId);
+					serializer.writeString("concentrateStoreId", treatment.concentrateStoreId);
+					serializer.writeString("consumableStoreId", treatment.consumableStoreId);
+					serializer.writeDouble("throughputKgPerS", treatment.throughputKgPerS);
+					serializer.writeDouble("recoveryRatio", treatment.recoveryRatio);
+					serializer.writeDouble("specificEnergyKWhPerKg", treatment.specificEnergyKWhPerKg);
+					serializer.writeDouble("consumablePerKg", treatment.consumablePerKg);
+					serializer.writeInt32("priority", treatment.priority);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -2062,7 +2118,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 77)
+		if (version < 1 || version > 78)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2474,6 +2530,53 @@ namespace core
 					crew.organicWastePerCrewPerS = serializer.readDouble("organicWastePerCrewPerS");
 					crew.metabolicHeatPerCrewKW = serializer.readDouble("metabolicHeatPerCrewKW");
 					stationSettings.crews.push_back(std::move(crew));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("waterCollectors"))
+			{
+				if (version < 78) throw SerializationException(
+					"Station water collectors require World schema 78");
+				serializer.beginArray("waterCollectors");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					WaterCollectorSettings collector;
+					collector.id = serializer.readString("id");
+					collector.hazardClass = serializer.readString("hazardClass");
+					collector.atmosphereId = serializer.readString("atmosphereId");
+					collector.coolingLoopId = serializer.readString("coolingLoopId");
+					collector.thermalClass = serializer.readString("thermalClass");
+					collector.destStoreId = serializer.readString("destStoreId");
+					collector.maxRateKgPerS = serializer.readDouble("maxRateKgPerS");
+					collector.targetRelativeHumidity = serializer.readDouble("targetRelativeHumidity");
+					stationSettings.waterCollectors.push_back(std::move(collector));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("waterTreatments"))
+			{
+				if (version < 78) throw SerializationException(
+					"Station water treatments require World schema 78");
+				serializer.beginArray("waterTreatments");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					WaterTreatmentSettings treatment;
+					treatment.id = serializer.readString("id");
+					treatment.hazardClass = serializer.readString("hazardClass");
+					treatment.sourceStoreId = serializer.readString("sourceStoreId");
+					treatment.treatedStoreId = serializer.readString("treatedStoreId");
+					treatment.concentrateStoreId = serializer.readString("concentrateStoreId");
+					treatment.consumableStoreId = serializer.readString("consumableStoreId");
+					treatment.throughputKgPerS = serializer.readDouble("throughputKgPerS");
+					treatment.recoveryRatio = serializer.readDouble("recoveryRatio");
+					treatment.specificEnergyKWhPerKg = serializer.readDouble("specificEnergyKWhPerKg");
+					treatment.consumablePerKg = serializer.readDouble("consumablePerKg");
+					treatment.priority = serializer.readInt32("priority");
+					stationSettings.waterTreatments.push_back(std::move(treatment));
 					serializer.endMap();
 				}
 				serializer.endArray();
