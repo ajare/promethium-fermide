@@ -532,6 +532,31 @@ never silent creation or deletion of heat. Declared temperature limits
 are reported as above/below-limit crossings with transition events; they
 never clamp the integrated state.
 
+Passive conductance exchange — loop-to-reservoir and compartment-to-
+reservoir — is **not** integrated as a tick-start rate applied whole.
+`Q = G x (T_other - T_self) x dt` is only stable while `G x dt / C`
+stays small; past the bound it overshoots the equilibrium the two bodies
+share, and because the formula keeps pushing on the far side it reverses
+hot and cold bodies and drives temperatures below absolute zero (#559).
+Instead every reservoir's whole exchange star — all its coolant loops
+and all its pressurised compartments — is solved **implicitly** once per
+tick against the reservoir's end-of-tick temperature, so the leaves
+compete for the same finite heat rather than each draining a temperature
+none of them ever sees move. Eliminating the leaves from that implicit
+system leaves a closed form: with coupling `a_i = dt x G_i / C_i` and
+weight `w_i = dt x G_i / (1 + a_i)`, the reservoir ends at the weighted
+average of the tick-start temperatures and each leaf's heat is
+`w_i x (T_reservoir_end - T_leaf)`. Every weight is non-negative and
+each new temperature is a weighted average of temperatures that already
+existed, so the exchange approaches the coupled equilibrium as closely
+as the conductance allows but can never cross it, reverse a hot and a
+cold body, amplify their separation, or leave the range the tick started
+inside — however stiff the conductance or lopsided the capacities. The
+heat a leaf gains is exactly what the reservoir gives up, so both
+ledgers close on one number rather than two independently rounded ones.
+This is bounded integration, not clamping: nothing is capped behind the
+model's back and no declared service limit is silently enforced.
+
 A radiator rejects its host reservoir's heat by the Stefan-Boltzmann
 law: `emissivity x view factor x area x sigma x (T^4 - T_sink^4)`, at
 the reservoir's current emitting temperature against an authored
@@ -604,15 +629,18 @@ generation before it can be stored.
 
 Pump work and heater heat enter the loop exactly once (all pump work
 dissipates into the coolant it actually moves) and reach the reservoir
-only through the circulation-gated heat-only exchanger:
-`exchange = circulationFraction x conductance x (T_reservoir - T_loop)`.
-No circulation means no exchange — a blackout cannot push the loop's
-heat into the station or pull the station's heat into the loop for
-free. The reservoir books the exact negation of the loop's exchange as
-its own ledger term, so the crossing is one exchange accounted once on
-each side, and the loop's energy ledger — starting + pump work +
-heater + exchanged = capacity x temperature — closes within the
-declared tolerance every tick, in host and sandbox alike.
+only through the circulation-gated heat-only exchanger, whose worth this
+tick is `circulationFraction x conductance`. No circulation means no
+conductance — a blackout cannot push the loop's heat into the station or
+pull the station's heat into the loop for free. The exchange itself is
+the implicit star solve of the previous section, not a tick-start rate:
+a stiff exchanger on a small loop cannot overshoot the equilibrium the
+loop shares with its reservoir. The reservoir books the exact negation
+of the loop's exchange as its own ledger term, so the crossing is one
+exchange accounted once on each side, and the loop's energy ledger —
+starting + pump work + heater + exchanged = capacity x temperature —
+closes within the declared tolerance every tick, in host and sandbox
+alike.
 
 Insufficient coolant or electricity reduces the actual service and
 the shortfall stays visible: per-loop inventory and fill fraction,
@@ -836,13 +864,16 @@ segregated by construction.
 Thermal state integrates the compartment's own heat sources —
 occupant sensible heat, condensation latent heat and the heat-only
 exchange with the coupled reservoir — into the authored effective
-capacity with explicit Euler integration on the fixed tick. The
-reservoir books the exact negation of the exchange as its own
-atmosphere term, so both ledgers close against each other. Declared
-limits (minimum and maximum absolute pressure, minimum oxygen
-partial pressure, maximum carbon dioxide partial pressure) are
-reported as conditions, never clamped: the compartment keeps
-integrating and the ledger keeps closing while an excursion stands.
+capacity on the fixed tick. The exchange is the implicit star solve of
+the thermal section rather than a tick-start rate, so a stiff exchanger
+cannot drive the air past the equilibrium it shares with its reservoir
+into a negative absolute pressure (#559). The reservoir books the exact
+negation of the exchange as its own atmosphere term, so both ledgers
+close against each other. Declared limits (minimum and maximum absolute
+pressure, minimum oxygen partial pressure, maximum carbon dioxide
+partial pressure) are reported as conditions, never clamped: the
+compartment keeps integrating and the ledger keeps closing while an
+excursion stands.
 
 World schema 76 persists the authored compartment and airlock-cycle
 contracts (units: m³, kg, °C, kJ/K, kW/K, kg/s, seconds); a

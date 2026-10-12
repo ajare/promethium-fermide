@@ -55,6 +55,72 @@ local function isFinite(value)
     return type(value) == 'number' and value > -math.huge and value < math.huge
 end
 
+-- One body exchanging heat with a shared reservoir through a passive
+-- conductance. The weight is the implicit step's coupling coefficient:
+-- the heat this body gains is its weight times the gap between its own
+-- tick-start temperature and the coupled end-of-tick reservoir
+-- temperature the solver computes for the whole star. Mirrors
+-- PassiveExchangeLeaf in the host so both sides book identical numbers.
+local function passiveExchangeLeaf(capacityKJPerK, conductanceKWPerK, temperatureC)
+    return {
+        capacity = capacityKJPerK,
+        conductance = conductanceKWPerK,
+        temperature = temperatureC,
+        weight = 0,
+    }
+end
+
+-- Integrate one reservoir's whole exchange star over the tick
+-- implicitly and return the reservoir's coupled end-of-tick
+-- temperature, filling each leaf's weight.
+--
+-- A passive conductance is solved against the temperature difference
+-- *during* the tick, not the one it started with. Solving every edge
+-- against the reservoir's end-of-tick temperature rather than its
+-- tick-start temperature is what makes all the leaves sharing a
+-- reservoir compete for the same finite heat instead of each draining a
+-- temperature none of them ever sees move. Eliminating the leaves from
+-- that implicit system leaves a closed form: with coupling a = dt*G/C
+-- and weight w = dt*G/(1 + a), the reservoir ends at the weighted
+-- average of the tick-start temperatures, and each leaf's heat is
+-- w x (that average - its own temperature).
+--
+-- Every weight is non-negative and each new temperature is a weighted
+-- average of temperatures that already existed, so the exchange can
+-- approach the coupled equilibrium as closely as the conductance allows
+-- but can never cross it: no reversing a hot and a cold body, no
+-- amplifying their separation, and nothing driven below absolute zero by
+-- a stiff conductance. The heat a leaf gains is exactly the negation of
+-- what the reservoir gives up, so both ledgers close on the same number.
+local function solvePassiveExchange(leaves, reservoirCapacityKJPerK,
+    reservoirTemperatureC, fixed_seconds)
+    local weightedTemperatureKJ = 0
+    local weightKJPerK = 0
+    for _, leaf in ipairs(leaves) do
+        leaf.weight = 0
+        -- A dead conductance or a body with no heat capacity exchanges
+        -- nothing, and contributes nothing to the coupled temperature.
+        if leaf.conductance > 0 and leaf.capacity > 0 then
+            local coupling = fixed_seconds * leaf.conductance / leaf.capacity
+            leaf.weight = fixed_seconds * leaf.conductance / (1 + coupling)
+            weightedTemperatureKJ = weightedTemperatureKJ + leaf.weight * leaf.temperature
+            weightKJPerK = weightKJPerK + leaf.weight
+        end
+    end
+    -- The reservoir's own capacity is always positive, so the weighted
+    -- average is always defined; with no live leaves it is just the
+    -- reservoir's own starting temperature and nothing moves.
+    return (reservoirCapacityKJPerK * reservoirTemperatureC + weightedTemperatureKJ)
+        / (reservoirCapacityKJPerK + weightKJPerK)
+end
+
+-- The heat a leaf exchanges over the tick once the coupled end-of-tick
+-- reservoir temperature is known. Kept as its own expression so the
+-- host and the sandbox book the identical arithmetic.
+local function passiveExchangeHeatKJ(leaf, coupledReservoirTemperatureC)
+    return leaf.weight * (coupledReservoirTemperatureC - leaf.temperature)
+end
+
 -- Compound constituents are accounted in kg; the energy term in kJ.
 -- The seven mass constituents partition a compound store's wet mass
 -- exactly: water is the moisture term and dryOrganics is the dry-mass
@@ -1318,14 +1384,14 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             compartment.leaked = compartment.leaked + leaked
             -- Thermal integration on the authored effective capacity:
             -- occupant sensible heat, condensation latent heat and the
-            -- heat-only reservoir exchange. The reservoir books the
-            -- exact negation in applyThermal.
+            -- heat-only reservoir exchange. The exchange came from the
+            -- reservoir's implicit star solve in applyPower, which
+            -- already paired it with the reservoir's own negation, so it
+            -- is only read here (#559).
             local occupantHeat = occupants * compartment.sensibleHeat * metabolicFraction
             local latentHeat = condensed * LATENT_HEAT_VAPORIZATION / fixed_seconds
-            local exchange = 0
+            local exchange = compartment.pendingExchangeKW or 0
             if compartment.reservoir then
-                exchange = compartment.conductance
-                    * (compartment.reservoir.temperature - compartment.temperature)
                 compartment.reservoir.atmosphereHeat =
                     (compartment.reservoir.atmosphereHeat or 0) - exchange
             end
@@ -1918,20 +1984,19 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local pumpElectrical = pumpDemand > 0 and pumpSupplied / pumpDemand or 0
             local circulation = (disabled or loop.ratedFlow <= 0) and 0
                 or fill * pumpElectrical
-            -- Heat-only exchange through the circulation-gated
-            -- exchanger: no circulation, no exchange. The reservoir
-            -- books the exact negation in applyThermal, so the crossing
-            -- is one exchange accounted on both sides.
-            local exchange = circulation * loop.conductance
-                * (loop.reservoir.temperature - loop.temperature)
+            -- What the exchanger is worth this tick. The exchange itself
+            -- is not computed here: it is solved once per reservoir
+            -- below, together with every other body coupled to that
+            -- reservoir, so the whole star shares one finite heat
+            -- budget (#559). No circulation means no conductance.
+            loop.exchangeConductance = circulation * loop.conductance
             loop.lastPumpDemand = pumpDemand
             loop.lastPumpSupplied = pumpSupplied
             loop.lastHeaterDemand = heaterDemand
             loop.lastHeaterSupplied = heaterSupplied
             loop.lastCirculation = circulation
             loop.lastFlow = loop.ratedFlow * circulation
-            loop.lastExchange = exchange
-            assert(isFinite(loop.lastFlow) and isFinite(loop.lastExchange)
+            assert(isFinite(loop.lastFlow) and isFinite(loop.exchangeConductance)
                 and isFinite(circulation)
                 and isFinite(pumpSupplied) and isFinite(heaterSupplied),
                 "coolant loop '" .. loop.id .. "' allocation result is not finite")
@@ -2005,6 +2070,68 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 and isFinite(chiller.lastFraction) and isFinite(chiller.extractedKJ)
                 and isFinite(chiller.workKJ) and isFinite(chiller.condenserKJ),
                 "chiller '" .. chiller.id .. "' result is not finite")
+        end
+        -- Passive conductance exchange (#559) is integrated once per
+        -- reservoir over the whole star of bodies heat-only coupled to
+        -- it — every coolant loop and every pressurised compartment —
+        -- rather than edge by edge against a tick-start temperature
+        -- nobody updates. A tick-start rate applied whole moves a small
+        -- body past the equilibrium it shares with a large one: past the
+        -- crossing the formula keeps pushing, so a stiff conductance
+        -- reverses hot and cold and drives temperatures below absolute
+        -- zero, and several leaves on one reservoir each drain a
+        -- temperature none of them ever sees move. Solving the star
+        -- implicitly instead cannot overshoot whatever the conductance or
+        -- the capacity ratio; see solvePassiveExchange.
+        local stars = {}
+        for _, loop in ipairs(self.coolant_loops) do
+            loop.lastExchange = 0
+            if loop.exchangeConductance > 0 then
+                local star = stars[loop.reservoir]
+                if not star then
+                    star = {}
+                    stars[loop.reservoir] = star
+                end
+                star[#star + 1] = passiveExchangeLeaf(
+                    loop.coolant * loop.cp, loop.exchangeConductance, loop.temperature)
+                star[#star].kind = 'loop'
+                star[#star].ref = loop
+            end
+        end
+        for _, compartment in ipairs(self.atmospheres) do
+            compartment.pendingExchangeKW = 0
+            if compartment.reservoir and compartment.conductance > 0 then
+                local star = stars[compartment.reservoir]
+                if not star then
+                    star = {}
+                    stars[compartment.reservoir] = star
+                end
+                star[#star + 1] = passiveExchangeLeaf(
+                    compartment.capacity, compartment.conductance, compartment.temperature)
+                star[#star].kind = 'atmosphere'
+                star[#star].ref = compartment
+            end
+        end
+        for _, reservoir in ipairs(self.reservoirs) do
+            local leaves = stars[reservoir]
+            if leaves then
+                local coupled = solvePassiveExchange(leaves, reservoir.capacity,
+                    reservoir.temperature, fixed_seconds)
+                -- Each leaf's heat is booked on the leaf as a rate over
+                -- the tick and negated onto the reservoir by its own
+                -- pass below, so the two ledgers close on one number
+                -- rather than two rounded ones.
+                for _, leaf in ipairs(leaves) do
+                    local heatKJ = passiveExchangeHeatKJ(leaf, coupled)
+                    assert(isFinite(heatKJ),
+                        "passive exchange for '" .. leaf.ref.id .. "' is not finite")
+                    if leaf.kind == 'loop' then
+                        leaf.ref.lastExchange = heatKJ / fixed_seconds
+                    else
+                        leaf.ref.pendingExchangeKW = heatKJ / fixed_seconds
+                    end
+                end
+            end
         end
         -- Second loop pass: integrate the loop's temperature from the
         -- pump work, heater heat, exchanger exchange and the chiller

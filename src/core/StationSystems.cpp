@@ -540,6 +540,71 @@ namespace core
 		// assumption for compartment humidity.
 		return 0.61094 * std::exp(17.625 * temperatureC / (temperatureC + 243.04));
 	}
+	// One body exchanging heat with a shared reservoir through a passive
+	// conductance. The weight is the implicit step's coupling coefficient:
+	// the heat this body gains is its weight times the gap between its own
+	// tick-start temperature and the coupled end-of-tick reservoir
+	// temperature the solver computes for the whole star.
+	struct PassiveExchangeLeaf
+	{
+		double capacityKJPerK{0.0};
+		double conductanceKWPerK{0.0};
+		double temperatureC{0.0};
+		double weightKJPerK{0.0};
+	};
+	// Integrate one reservoir's whole exchange star over the tick
+	// implicitly and return the reservoir's coupled end-of-tick
+	// temperature, filling each leaf's weight.
+	//
+	// A passive conductance is solved against the temperature difference
+	// *during* the tick, not the one it started with. Solving every edge
+	// against the reservoir's end-of-tick temperature rather than its
+	// tick-start temperature is what makes all the leaves sharing a
+	// reservoir compete for the same finite heat instead of each draining
+	// a temperature none of them ever sees move. Eliminating the leaves
+	// from that implicit system leaves a closed form: with coupling
+	// a_i = dt*G_i/C_i and weight w_i = dt*G_i/(1 + a_i), the reservoir
+	// ends at the weighted average of the tick-start temperatures, and
+	// each leaf's heat is w_i x (that average - its own temperature).
+	//
+	// Every weight is non-negative and each new temperature is a weighted
+	// average of temperatures that already existed, so the exchange can
+	// approach the coupled equilibrium as closely as the conductance
+	// allows but can never cross it: no reversing a hot and a cold body,
+	// no amplifying their separation, and nothing driven below absolute
+	// zero by a stiff conductance. The heat a leaf gains is exactly the
+	// negation of what the reservoir gives up, so both ledgers close on
+	// the same number rather than on two independently rounded ones.
+	double solvePassiveExchange(std::vector<PassiveExchangeLeaf>& leaves,
+		double reservoirCapacityKJPerK, double reservoirTemperatureC, double dt)
+	{
+		double weightedTemperatureKJ{0.0};
+		double weightKJPerK{0.0};
+		for (auto& leaf : leaves)
+		{
+			leaf.weightKJPerK = 0.0;
+			// A dead conductance or a body with no heat capacity exchanges
+			// nothing, and contributes nothing to the coupled temperature.
+			if (leaf.conductanceKWPerK <= 0.0 || leaf.capacityKJPerK <= 0.0)
+				continue;
+			auto const coupling = dt * leaf.conductanceKWPerK / leaf.capacityKJPerK;
+			leaf.weightKJPerK = dt * leaf.conductanceKWPerK / (1.0 + coupling);
+			weightedTemperatureKJ += leaf.weightKJPerK * leaf.temperatureC;
+			weightKJPerK += leaf.weightKJPerK;
+		}
+		// The reservoir's own capacity is always positive, so the weighted
+		// average is always defined; with no live leaves it is just the
+		// reservoir's own starting temperature and nothing moves.
+		return (reservoirCapacityKJPerK * reservoirTemperatureC + weightedTemperatureKJ)
+			/ (reservoirCapacityKJPerK + weightKJPerK);
+	}
+	// The heat a leaf exchanges over the tick once the coupled end-of-tick
+	// reservoir temperature is known. Kept as its own expression so the
+	// host and the sandbox book the identical arithmetic.
+	double passiveExchangeHeatKJ(PassiveExchangeLeaf const& leaf, double coupledReservoirTemperatureC)
+	{
+		return leaf.weightKJPerK * (coupledReservoirTemperatureC - leaf.temperatureC);
+	}
 	double stationSaturatedVapourMassKg(double saturationKPa,
 		double volumeM3, double temperatureC)
 	{
@@ -2561,16 +2626,22 @@ namespace core
 			// every loop's demand is its own service, not a competing
 			// claim class.
 			std::vector<double> loopHeatIntoReservoir(reservoirs.size(), 0.0);
+			std::vector<double> atmosphereHeatByReservoir(reservoirs.size(), 0.0);
 			std::vector<double> chillerExtractionByLoop(coolantLoops.size(), 0.0);
 			std::vector<double> condenserHeatBySink(reservoirs.size(), 0.0);
+			// The conductance each loop actually presents across its
+			// exchanger this tick: gated by circulation, so a loop with no
+			// flow exchanges nothing however conductive its exchanger is.
+			std::vector<double> loopExchangeConductanceKWPerK(coolantLoops.size(), 0.0);
 			double totalCoolantPumpKW{0.0}, totalCoolantHeaterKW{0.0};
 			// The loop pass is split so the chillers (#397) can read this
 			// tick's circulation and have their extraction land inside the
 			// loop's own integration: allocation first, then chillers,
 			// then the loop integrates pump work, heater heat, exchanger
 			// exchange and chiller extraction together.
-			for (auto& loop : coolantLoops)
+			for (size_t loopIndex = 0; loopIndex < coolantLoops.size(); ++loopIndex)
 			{
+				auto& loop = coolantLoops[loopIndex];
 				auto const disabled = loop.coolantKg <= 0.0;
 				auto const fillFraction = disabled
 					? 0.0 : std::min(1.0, loop.coolantKg / loop.authored.coolantCapacityKg);
@@ -2625,16 +2696,13 @@ namespace core
 				loop.lastPumpSuppliedKW = pumpSuppliedKW;
 				loop.lastHeaterDemandKW = heaterDemandKW;
 				loop.lastHeaterSuppliedKW = heaterSuppliedKW;
-				// Heat-only exchange through the circulation-gated
-				// exchanger: no circulation, no exchange. The reservoir
-				// books the exact negation below, so the crossing is one
-				// exchange accounted on both sides.
-				auto const reservoirTemperatureC = reservoirs[loop.reservoirIndex].temperatureC;
-				auto const exchangeIntoLoopKW = circulationFraction
-					* loop.authored.exchangerConductanceKWPerK
-					* (reservoirTemperatureC - loop.temperatureC);
-				loop.lastExchangeIntoLoopKW = exchangeIntoLoopKW;
-				loopHeatIntoReservoir[loop.reservoirIndex] -= exchangeIntoLoopKW;
+				// What the exchanger is worth this tick. The exchange itself
+				// is not computed here: it is solved once per reservoir
+				// below, together with every other body coupled to that
+				// reservoir, so the whole star shares one finite heat
+				// budget (#559). No circulation means no conductance.
+				loopExchangeConductanceKWPerK[loopIndex] = circulationFraction
+					* loop.authored.exchangerConductanceKWPerK;
 				totalCoolantPumpKW += pumpSuppliedKW;
 				totalCoolantHeaterKW += heaterSuppliedKW;
 			}
@@ -2739,6 +2807,71 @@ namespace core
 					chiller.status = StationTransferStatus::Rejected;
 				else chiller.status = StationTransferStatus::Partial;
 			}
+			// Passive conductance exchange (#559) is integrated once per
+			// reservoir over the whole star of bodies heat-only coupled to
+			// it — every coolant loop and every pressurised compartment —
+			// rather than edge by edge against a tick-start temperature
+			// nobody updates. A tick-start rate applied whole moves a small
+			// body past the equilibrium it shares with a large one: past
+			// the crossing the formula keeps pushing, so a stiff conductance
+			// reverses hot and cold and drives temperatures below absolute
+			// zero, and several leaves on one reservoir each drain a
+			// temperature none of them ever sees move. Solving the star
+			// implicitly instead cannot overshoot whatever the conductance
+			// or the capacity ratio; see solvePassiveExchange.
+			std::vector<double> loopExchangeKJ(coolantLoops.size(), 0.0);
+			std::vector<double> atmosphereExchangeKJ(atmospheres.size(), 0.0);
+			auto const exchangeDt = static_cast<double>(seconds);
+			for (size_t reservoirIndex = 0; reservoirIndex < reservoirs.size(); ++reservoirIndex)
+			{
+				auto const& reservoir = reservoirs[reservoirIndex];
+				std::vector<PassiveExchangeLeaf> leaves;
+				std::vector<size_t> loopIndexes;
+				std::vector<size_t> atmosphereIndexes;
+				for (size_t loopIndex = 0; loopIndex < coolantLoops.size(); ++loopIndex)
+				{
+					auto const& loop = coolantLoops[loopIndex];
+					if (loop.reservoirIndex != reservoirIndex) continue;
+					auto const conductanceKWPerK = loopExchangeConductanceKWPerK[loopIndex];
+					if (conductanceKWPerK <= 0.0) continue;
+					leaves.push_back({loop.coolantKg * loop.authored.specificHeatKJPerKgK,
+						conductanceKWPerK, loop.temperatureC, 0.0});
+					loopIndexes.push_back(loopIndex);
+				}
+				for (size_t atmosphereIndex = 0; atmosphereIndex < atmospheres.size(); ++atmosphereIndex)
+				{
+					auto const& compartment = atmospheres[atmosphereIndex];
+					if (compartment.reservoirIndex != reservoirIndex) continue;
+					if (compartment.authored.exchangerConductanceKWPerK <= 0.0) continue;
+					leaves.push_back({compartment.authored.thermalCapacityKJPerK,
+						compartment.authored.exchangerConductanceKWPerK,
+						compartment.temperatureC, 0.0});
+					atmosphereIndexes.push_back(atmosphereIndex);
+				}
+				if (leaves.empty()) continue;
+				auto const coupledTemperatureC = solvePassiveExchange(leaves,
+					reservoir.authored.heatCapacityKJPerK, reservoir.temperatureC, exchangeDt);
+				// Each leaf's heat is booked on the leaf as a rate over the
+				// tick and negated onto the reservoir, so the two ledgers
+				// close on one number rather than two rounded ones.
+				for (size_t position = 0; position < leaves.size(); ++position)
+				{
+					auto const heatKJ = passiveExchangeHeatKJ(leaves[position], coupledTemperatureC);
+					if (position < loopIndexes.size())
+					{
+						auto const index = loopIndexes[position];
+						loopExchangeKJ[index] = heatKJ;
+						coolantLoops[index].lastExchangeIntoLoopKW = heatKJ / exchangeDt;
+						loopHeatIntoReservoir[reservoirIndex] -= heatKJ / exchangeDt;
+					}
+					else
+					{
+						auto const index = atmosphereIndexes[position - loopIndexes.size()];
+						atmosphereExchangeKJ[index] = heatKJ;
+						atmosphereHeatByReservoir[reservoirIndex] -= heatKJ / exchangeDt;
+					}
+				}
+			}
 			// Second loop pass: integrate the loop's temperature from the
 			// pump work, heater heat, exchanger exchange and the chiller
 			// extraction that actually moved this tick, and book the loop
@@ -2794,7 +2927,6 @@ namespace core
 			// cycles from different schedules never depend on an iteration
 			// accident and each occurrence fires exactly once however many
 			// ticks an accelerated update batches together.
-			std::vector<double> atmosphereHeatByReservoir(reservoirs.size(), 0.0);
 			struct DueAirlockCycle
 			{
 				StationScenarioEventKey key;
@@ -2874,8 +3006,9 @@ namespace core
 			// Then each compartment: occupancy draw, vapour constraint,
 			// leakage, thermal integration and derived pressures, in that
 			// documented order.
-			for (auto& compartment : atmospheres)
+			for (size_t atmosphereIndex = 0; atmosphereIndex < atmospheres.size(); ++atmosphereIndex)
 			{
+				auto& compartment = atmospheres[atmosphereIndex];
 				auto const dt = static_cast<double>(seconds);
 				auto const occupants = static_cast<double>(compartment.authored.occupants);
 				// Occupancy is an authored load assignment, never derived
@@ -2941,20 +3074,14 @@ namespace core
 				compartment.leakedKg += leakedKg;
 				// Thermal integration: occupant sensible heat, the
 				// condensation latent heat and the heat-only reservoir
-				// exchange. The exchange is booked once on each side: the
-				// reservoir gains the exact negation below, so the
-				// crossing is one exchange accounted on both sides.
+				// exchange. The exchange came from the reservoir's implicit
+				// star solve above, which already negated it onto the
+				// reservoir, so it is only read here (#559).
 				auto const occupantHeatKW = occupants
 					* compartment.authored.sensibleHeatPerOccupantKW * metabolicFraction;
 				auto const latentHeatKW = condensedKg
 					* StationLatentHeatVaporizationKJPerKg / dt;
-				auto exchangeKW = 0.0;
-				if (compartment.reservoirIndex != SIZE_MAX)
-					exchangeKW = compartment.authored.exchangerConductanceKWPerK
-						* (reservoirs[compartment.reservoirIndex].temperatureC
-							- compartment.temperatureC);
-				if (compartment.reservoirIndex != SIZE_MAX)
-					atmosphereHeatByReservoir[compartment.reservoirIndex] -= exchangeKW;
+				auto const exchangeKW = atmosphereExchangeKJ[atmosphereIndex] / dt;
 				compartment.temperatureC += (occupantHeatKW + latentHeatKW + exchangeKW) * dt
 					/ compartment.authored.thermalCapacityKJPerK;
 				compartment.occupantHeatKJ += occupantHeatKW * dt;

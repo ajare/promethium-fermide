@@ -4526,6 +4526,175 @@ namespace
 			require(sawEvent(world, "freeze-protection setpoint"),
 				"freeze exposure during eclipse not announced");
 		}
+		// #559: a stiff exchanger on a small loop against a small
+		// reservoir. A tick-start rate applied whole moves the loop far
+		// past the equilibrium it shares with the reservoir — the
+		// reported case drove 1 kg of coolant from 20 C to -966 C in one
+		// tick, below absolute zero. The exchange is solved implicitly
+		// against the reservoir's end-of-tick temperature instead, so it
+		// approaches the shared equilibrium as closely as the conductance
+		// allows and cannot cross it, reverse the two bodies, or leave the
+		// range of the temperatures the tick started inside.
+		{
+			core::World world("CoolantStiffExchange", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
+			auto const [ok, diagnostic] = coolantConfigure(world,
+				{ reservoir("bus", 1.0, 0.0) },
+				{ loop("stiff", "normal", "bus", 1.0, 1.0, 1.0, 20.0,
+					5.0, 1.0, 1.0, 1000.0, 0.0) },
+				{ field });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			// The effective capacity of the pair bounds how much heat one
+			// tick of passive exchange may move however stiff the
+			// conductance: C_eff = C_loop x C_bus / (C_loop + C_bus).
+			auto const effectiveCapacityKJPerK = 0.5;
+			auto previousGapK = 20.0;
+			for (int tick = 0; tick < 120; ++tick)
+			{
+				require(world.advanceTicks(1), "stiff-exchange tick failed");
+				auto const& snapshot = world.getStationSystemsSnapshot();
+				auto const& loopSnap = snapshot.coolantLoops[0];
+				auto const& bus = snapshot.thermal.reservoirs[0];
+				// Neither body leaves the range the exchange started with:
+				// no undershoot below the cold side, no overshoot past the
+				// hot side, and nothing near absolute zero.
+				require(loopSnap.loopTemperatureC > 0.0
+					&& loopSnap.loopTemperatureC <= 20.0 + 1e-9,
+					"stiff exchange drove the loop outside its starting range");
+				require(bus.temperatureC >= 0.0 && bus.temperatureC < 20.0,
+					"stiff exchange drove the reservoir outside the starting range");
+				// No reversal and no amplification: the hot side stays the
+				// hot side and the gap only ever closes.
+				auto const gapK = loopSnap.loopTemperatureC - bus.temperatureC;
+				require(gapK >= -1e-9, "stiff exchange reversed hot and cold");
+				require(gapK <= previousGapK + 1e-9,
+					"stiff exchange amplified the separation instead of closing it");
+				// The heat that crossed this tick is bounded by the
+				// equilibrium-limited transfer for the pair at the gap the
+				// tick started with — the exact ceiling the implicit solve
+				// approaches but never passes.
+				require(std::abs(loopSnap.exchangeIntoLoopKW) * dt
+					<= effectiveCapacityKJPerK * previousGapK + 1e-9,
+					"exchange moved more heat than the pair's equilibrium allows");
+				require(approx(bus.loopEnergyKJ, -loopSnap.exchangedEnergyKJ, 1e-6),
+					"stiff exchange is not equal and opposite across the ledgers");
+				require(std::abs(loopSnap.residualKJ) < 1e-6
+					&& std::abs(bus.residualKJ) < 1e-6,
+					"stiff-exchange loop or reservoir ledger did not close");
+				previousGapK = gapK;
+			}
+			// A stiff conductance settles the pair on its shared
+			// equilibrium rather than oscillating around it: the gap is
+			// essentially gone, with only the pump's own heat left in the
+			// loop's favour.
+			auto const& settled = world.getStationSystemsSnapshot();
+			require(settled.coolantLoops[0].loopTemperatureC
+				- settled.thermal.reservoirs[0].temperatureC < 0.05,
+				"stiff exchange never settled onto the shared equilibrium");
+		}
+		// Several loops sharing one reservoir must compete for the same
+		// finite heat, not each drain a temperature none of them ever sees
+		// move. Independent per-edge caps would let every loop pull as if
+		// the bus stayed at its tick-start temperature, collectively
+		// overdrawing it many times over. The star is solved as one system,
+		// so the bus and all its loops stay inside the range they started
+		// in and the bus books exactly what the loops together gave up.
+		{
+			core::World world("CoolantSharedReservoir", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
+			auto const [ok, diagnostic] = coolantConfigure(world,
+				{ reservoir("bus", 1.0, 0.0) },
+				{ loop("hot-a", "normal", "bus", 1.0, 1.0, 1.0, 20.0,
+					5.0, 1.0, 1.0, 1000.0, 0.0),
+				  loop("hot-b", "hazardous", "bus", 1.0, 1.0, 1.0, 20.0,
+					5.0, 1.0, 1.0, 1000.0, 0.0) },
+				{ field });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			for (int tick = 0; tick < 60; ++tick)
+			{
+				require(world.advanceTicks(1), "shared-reservoir tick failed");
+				auto const& snapshot = world.getStationSystemsSnapshot();
+				auto const& bus = snapshot.thermal.reservoirs[0];
+				for (auto const& loopSnap : snapshot.coolantLoops)
+				{
+					require(loopSnap.loopTemperatureC > 0.0
+						&& loopSnap.loopTemperatureC <= 20.0 + 1e-9,
+						"a shared-reservoir loop left the starting temperature range");
+				}
+				require(bus.temperatureC >= 0.0 && bus.temperatureC < 20.0,
+					"the shared bus left the starting temperature range");
+				// The bus's whole loop term is the sum of both loops'
+				// exchange, negated: no loop's heat counted twice, and no
+				// loop drew heat the bus never received.
+				require(approx(bus.loopEnergyKJ,
+					-(snapshot.coolantLoops[0].exchangedEnergyKJ
+						+ snapshot.coolantLoops[1].exchangedEnergyKJ), 1e-6),
+					"the shared bus did not book exactly what its loops gave up");
+				require(std::abs(bus.residualKJ) < 1e-6,
+					"shared-reservoir bus ledger did not close");
+			}
+		}
+		// #559 in the sandbox: the bundled Lua model runs the same
+		// implicit star and asserts its own loop temperatures stay inside
+		// the starting range and never reverse, while the host reports the
+		// exact tick-one exchange the closed form predicts — the two sides
+		// agree on the rule and on the numbers, not just on not crashing.
+		{
+			auto const coupling = dt * 1000.0 / 1.0;
+			auto const weightKJPerK = dt * 1000.0 / (1.0 + coupling);
+			auto const coupledTemperatureC = (1.0 * 0.0 + weightKJPerK * 20.0)
+				/ (1.0 + weightKJPerK);
+			auto const expectedExchangeKW = weightKJPerK * (coupledTemperatureC - 20.0) / dt;
+			char literal[64];
+			std::snprintf(literal, sizeof(literal), "%.17g", expectedExchangeKW);
+			auto const expectedLiteral = std::string(literal);
+			auto const bundled = core::bundledStationSystemsSource();
+			core::setStationSystemsSourceLoader([bundled, expectedLiteral] {
+				return std::string("local factory = (function()\n") + bundled
+					+ "\nend)()\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+					"local original = model.advance\n"
+					"function model.advance(self, tick, seconds)\n"
+					"local result = original(self, tick, seconds)\n"
+					"local loop, bus = self.coolant_loops[1], self.reservoirs[1]\n"
+					"if tick == 1 then\n"
+					"assert(math.abs(loop.lastExchange - " + expectedLiteral
+					+ ") < 1e-9, 'sandbox exchange did not follow the implicit star solve')\n"
+					"end\n"
+					"assert(loop.temperature > 0.0 and loop.temperature <= 20.0 + 1e-9,\n"
+					"  'sandbox stiff exchange drove the loop outside its starting range')\n"
+					"assert(bus.temperature >= 0.0 and bus.temperature < 20.0,\n"
+					"  'sandbox stiff exchange drove the reservoir outside the starting range')\n"
+					"assert(loop.temperature >= bus.temperature - 1e-9,\n"
+					"  'sandbox stiff exchange reversed hot and cold')\n"
+					"return result\n"
+					"end\n"
+					"return model\n"
+					"end";
+			});
+			core::World sandboxStiff("SandboxStiffExchange", 2, 2);
+			sandboxStiff.pauseSimulation(); sandboxStiff.finishBuild();
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
+			auto const [ok, diagnostic] = coolantConfigure(sandboxStiff,
+				{ reservoir("bus", 1.0, 0.0) },
+				{ loop("stiff", "normal", "bus", 1.0, 1.0, 1.0, 20.0,
+					5.0, 1.0, 1.0, 1000.0, 0.0) },
+				{ field });
+			require(ok, diagnostic.c_str());
+			sandboxStiff.resumeSimulation();
+			require(sandboxStiff.advanceTicks(60),
+				"Bundled Lua implicit exchange failed its in-sandbox assertions");
+			require(std::abs(sandboxStiff.getStationSystemsSnapshot()
+					.coolantLoops[0].loopTemperatureC - 20.0) < 20.0
+				&& sandboxStiff.getStationSystemsSnapshot().coolantLoops[0].exchangedEnergyKJ < 0.0,
+				"host did not mirror the sandbox's heat-out-of-loop exchange");
+			core::setStationSystemsSourceLoader({});
+		}
 		// Deterministic replay: the same authored scenario ticked twice
 		// from Reset produces identical snapshots and event history.
 		{
@@ -6023,6 +6192,175 @@ namespace
 				"the adiabatic compartment exchanged heat it should not have");
 			require(approx(bus.atmosphereEnergyKJ, -warmSide.exchangedEnergyKJ, 1e-6),
 				"the cumulative atmosphere exchange terms are not exact negations");
+		}
+		// #559: a stiff exchanger between a small compartment and a small
+		// reservoir. A tick-start rate applied whole drove the air from
+		// 20 C to -163 C in one tick, which reads out as a negative
+		// absolute pressure. The exchange is solved implicitly against the
+		// reservoir's end-of-tick temperature, so the air and the bus
+		// approach their shared equilibrium and cannot cross it, reverse,
+		// or leave the range the tick started inside — and the pressure
+		// stays physical because the temperature does.
+		{
+			core::World world("AtmosphereStiffExchange", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto compartment = atmosphere("stiffAir", "normal", 100.0, 30.0, 70.0, 0.0, 0.0, 20.0);
+			compartment.reservoirId = "bus";
+			compartment.thermalCapacityKJPerK = 1.0;
+			compartment.exchangerConductanceKWPerK = 100.0;
+			require(atmosConfigure(world, { compartment }, {},
+				{ reservoir("bus", 1.0, 0.0) }).first, "stiff air coupling refused");
+			world.resumeSimulation();
+			// C_eff for the air/bus pair bounds the heat one tick of
+			// passive exchange may move however stiff the conductance.
+			auto const effectiveCapacityKJPerK = 0.5;
+			auto previousGapK = 20.0;
+			for (int tick = 0; tick < 120; ++tick)
+			{
+				require(world.advanceTicks(1), "stiff air tick failed");
+				auto const& air = world.getStationSystemsSnapshot().atmospheres[0];
+				auto const& bus = world.getStationSystemsSnapshot().thermal.reservoirs[0];
+				// The air never leaves the range the exchange started in:
+				// no plunge below the cold side, no overshoot past its own
+				// starting warmth, and nothing near absolute zero.
+				require(air.temperatureC > 0.0
+					&& air.temperatureC <= 20.0 + 1e-9,
+					"stiff exchange drove the compartment outside its starting range");
+				require(bus.temperatureC >= 0.0 && bus.temperatureC < 20.0,
+					"stiff exchange drove the reservoir outside the starting range");
+				// A physical temperature keeps a physical pressure: the
+				// reported absolute pressure stays positive.
+				require(air.pressureKPa > 0.0,
+					"stiff exchange produced a non-physical compartment pressure");
+				// No reversal and no amplification: the warm side stays the
+				// warm side and the gap only ever closes.
+				auto const gapK = air.temperatureC - bus.temperatureC;
+				require(gapK >= -1e-9, "stiff exchange reversed warm air and cold bus");
+				require(gapK <= previousGapK + 1e-9,
+					"stiff exchange amplified the air/bus separation");
+				require(std::abs(air.lastExchangeIntoCompartmentKW) * dt
+					<= effectiveCapacityKJPerK * previousGapK + 1e-9,
+					"air exchange moved more heat than the pair's equilibrium allows");
+				require(approx(bus.atmosphereEnergyKJ, -air.exchangedEnergyKJ, 1e-6),
+					"stiff air exchange is not equal and opposite across the ledgers");
+				require(std::abs(air.residualKJ) < 1e-6
+					&& std::abs(bus.residualKJ) < 1e-6,
+					"stiff-air compartment or reservoir ledger did not close");
+				previousGapK = gapK;
+			}
+			auto const& settled = world.getStationSystemsSnapshot();
+			require(settled.atmospheres[0].temperatureC
+				- settled.thermal.reservoirs[0].temperatureC < 0.05,
+				"stiff air exchange never settled onto the shared equilibrium");
+		}
+		// A reservoir shared by a loop and a compartment is one star, not
+		// two independent edges: both leaves drain the same finite heat,
+		// so neither the bus nor either leaf leaves the range they started
+		// in, and the bus books exactly what the two together gave up.
+		{
+			core::World world("AtmosphereSharedReservoir", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.thermalReservoirs = { reservoir("bus", 1.0, 0.0) };
+			auto compartment = atmosphere("air", "normal", 100.0, 30.0, 70.0, 0.0, 0.0, 20.0);
+			compartment.reservoirId = "bus";
+			compartment.thermalCapacityKJPerK = 1.0;
+			compartment.exchangerConductanceKWPerK = 100.0;
+			settings.atmospheres = { compartment };
+			core::CoolantLoopSettings hotLoop;
+			hotLoop.id = "hot-loop";
+			hotLoop.hazardClass = "normal";
+			hotLoop.reservoirId = "bus";
+			hotLoop.coolantCapacityKg = 1.0;
+			hotLoop.startingCoolantKg = 1.0;
+			hotLoop.specificHeatKJPerKgK = 1.0;
+			hotLoop.startingTemperatureC = 20.0;
+			hotLoop.freezeProtectionSetpointC = 5.0;
+			hotLoop.pumpPowerKW = 1.0;
+			hotLoop.ratedFlowKgPerS = 1.0;
+			hotLoop.exchangerConductanceKWPerK = 1000.0;
+			hotLoop.heaterCapacityKW = 0.0;
+			settings.coolantLoops = { hotLoop };
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
+			settings.solarArrays = { field };
+			std::string diagnostic;
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			world.resumeSimulation();
+			for (int tick = 0; tick < 60; ++tick)
+			{
+				require(world.advanceTicks(1), "shared air/loop tick failed");
+				auto const& snapshot = world.getStationSystemsSnapshot();
+				auto const& bus = snapshot.thermal.reservoirs[0];
+				auto const& air = snapshot.atmospheres[0];
+				auto const& loopSnap = snapshot.coolantLoops[0];
+				require(bus.temperatureC >= 0.0 && bus.temperatureC < 20.0,
+					"the shared bus left the starting temperature range");
+				require(air.temperatureC > 0.0 && air.temperatureC <= 20.0 + 1e-9,
+					"the shared compartment left the starting temperature range");
+				require(loopSnap.loopTemperatureC > 0.0
+					&& loopSnap.loopTemperatureC <= 20.0 + 1e-9,
+					"the shared loop left the starting temperature range");
+				require(approx(bus.atmosphereEnergyKJ + bus.loopEnergyKJ,
+					-(air.exchangedEnergyKJ + loopSnap.exchangedEnergyKJ), 1e-6),
+					"the shared bus did not book exactly what its leaves gave up");
+				require(std::abs(bus.residualKJ) < 1e-6,
+					"shared air/loop bus ledger did not close");
+			}
+		}
+		// #559 in the sandbox: the bundled Lua model solves the same star
+		// for compartments, asserting its own air temperature stays inside
+		// the starting range and never reverses, while the host reports
+		// the exact tick-one exchange the closed form predicts.
+		{
+			auto const coupling = dt * 100.0 / 1.0;
+			auto const weightKJPerK = dt * 100.0 / (1.0 + coupling);
+			auto const coupledTemperatureC = (1.0 * 0.0 + weightKJPerK * 20.0)
+				/ (1.0 + weightKJPerK);
+			auto const expectedExchangeKW = weightKJPerK * (coupledTemperatureC - 20.0) / dt;
+			char literal[64];
+			std::snprintf(literal, sizeof(literal), "%.17g", expectedExchangeKW);
+			auto const expectedLiteral = std::string(literal);
+			auto const bundled = core::bundledStationSystemsSource();
+			core::setStationSystemsSourceLoader([bundled, expectedLiteral] {
+				return std::string("local factory = (function()\n") + bundled
+					+ "\nend)()\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+					"local original = model.advance\n"
+					"function model.advance(self, tick, seconds)\n"
+					"local result = original(self, tick, seconds)\n"
+					"local air, bus = self.atmospheres[1], self.reservoirs[1]\n"
+					"if tick == 1 then\n"
+					"assert(math.abs((air.pendingExchangeKW or 0) - " + expectedLiteral
+					+ ") < 1e-9, 'sandbox air exchange did not follow the implicit star solve')\n"
+					"end\n"
+					"assert(air.temperature > 0.0 and air.temperature <= 20.0 + 1e-9,\n"
+					"  'sandbox stiff exchange drove the compartment outside its starting range')\n"
+					"assert(bus.temperature >= 0.0 and bus.temperature < 20.0,\n"
+					"  'sandbox stiff exchange drove the reservoir outside the starting range')\n"
+					"assert(air.temperature >= bus.temperature - 1e-9,\n"
+					"  'sandbox stiff exchange reversed warm air and cold bus')\n"
+					"return result\n"
+					"end\n"
+					"return model\n"
+					"end";
+			});
+			core::World sandboxStiff("SandboxStiffAir", 2, 2);
+			sandboxStiff.pauseSimulation(); sandboxStiff.finishBuild();
+			auto compartment = atmosphere("stiffAir", "normal", 100.0, 30.0, 70.0, 0.0, 0.0, 20.0);
+			compartment.reservoirId = "bus";
+			compartment.thermalCapacityKJPerK = 1.0;
+			compartment.exchangerConductanceKWPerK = 100.0;
+			require(atmosConfigure(sandboxStiff, { compartment }, {},
+				{ reservoir("bus", 1.0, 0.0) }).first, "sandbox stiff air coupling refused");
+			sandboxStiff.resumeSimulation();
+			require(sandboxStiff.advanceTicks(60),
+				"Bundled Lua implicit air exchange failed its in-sandbox assertions");
+			require(sandboxStiff.getStationSystemsSnapshot().atmospheres[0].exchangedEnergyKJ < 0.0,
+				"host did not mirror the sandbox's heat-out-of-compartment exchange");
+			core::setStationSystemsSourceLoader({});
 		}
 		// The compartment's occupancy heat and the reservoir coupling
 		// both land in the same integrated thermal state, and the
