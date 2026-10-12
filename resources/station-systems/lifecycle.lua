@@ -2001,76 +2001,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 and isFinite(pumpSupplied) and isFinite(heaterSupplied),
                 "coolant loop '" .. loop.id .. "' allocation result is not finite")
         end
-        -- Chillers (#397) run between the loop allocation and the loop's
-        -- own integration, in declaration order: every loop's circulation
-        -- this tick is known, and the extraction lands in the loop's
-        -- temperature integration below. A chiller's cold service demand
-        -- is its rated capacity; the deliverable duty is capped by the
-        -- cold loop's circulation fraction (heat must reach the
-        -- evaporator), it is gated off at or below the chilled setpoint,
-        -- and it is refused whole while the condenser sink sits at or
-        -- above the maximum condensing temperature. The electrical
-        -- request - work at the configured COP plus the running
-        -- auxiliaries for the deliverable duty - is drawn from the same
-        -- generation-and-battery pool as every other load, never a
-        -- second budget. A curtailed grant duty-cycles the whole machine
-        -- at one delivered fraction, so extracted heat, work and
-        -- condenser heat all scale together and the condenser booking
-        -- equals extracted heat plus the work and auxiliaries actually
-        -- supplied at one consistent boundary.
-        for _, chiller in ipairs(self.chillers) do
-            local loop = chiller.coldLoop
-            local sink = chiller.condenser
-            local disabled = chiller.ratedKW <= 0
-            chiller.atSetpoint = not disabled
-                and loop.temperature <= chiller.chilledSetpoint + 1e-9
-            chiller.sinkOver = not disabled
-                and sink.temperature + 1e-9 >= chiller.maxCondensing
-            local coolingDemand = (disabled or chiller.atSetpoint)
-                and 0 or chiller.ratedKW
-            chiller.lastDemand = coolingDemand
-            chiller.lastCooling = 0
-            chiller.lastDeliverable = 0
-            chiller.lastPowerDemand = 0
-            chiller.lastPowerSupplied = 0
-            chiller.lastCondenserKW = 0
-            chiller.lastFraction = 0
-            chiller.admitted = not disabled and not chiller.sinkOver
-            if chiller.admitted and coolingDemand > 0 then
-                local deliverable = chiller.ratedKW * loop.lastCirculation
-                chiller.lastDeliverable = deliverable
-                if deliverable > 1e-12 then
-                    local powerDemand = deliverable / chiller.cop + chiller.auxKW
-                    chiller.lastPowerDemand = powerDemand
-                    local fromGeneration = math.min(powerDemand, generation)
-                    generation = generation - fromGeneration
-                    local fromBattery = drawBatteries(self,
-                        powerDemand - fromGeneration, fixed_hours)
-                    local supplied = fromGeneration + fromBattery
-                    batterySupplied = batterySupplied + fromBattery
-                    chiller.lastPowerSupplied = supplied
-                    local fraction = supplied / powerDemand
-                    chiller.lastFraction = fraction
-                    local cooling = deliverable * fraction
-                    chiller.lastCooling = cooling
-                    -- Condenser heat equals extracted heat plus the work
-                    -- and auxiliaries actually supplied: one boundary,
-                    -- booked once.
-                    chiller.lastCondenserKW = cooling + supplied
-                    loop.chillerExtraction = (loop.chillerExtraction or 0) + cooling
-                    chiller.extractedKJ = chiller.extractedKJ + cooling * fixed_seconds
-                    chiller.workKJ = chiller.workKJ + supplied * fixed_seconds
-                    chiller.condenserKJ = chiller.condenserKJ
-                        + chiller.lastCondenserKW * fixed_seconds
-                end
-            end
-            assert(isFinite(chiller.lastDemand) and isFinite(chiller.lastCooling)
-                and isFinite(chiller.lastDeliverable) and isFinite(chiller.lastPowerDemand)
-                and isFinite(chiller.lastPowerSupplied) and isFinite(chiller.lastCondenserKW)
-                and isFinite(chiller.lastFraction) and isFinite(chiller.extractedKJ)
-                and isFinite(chiller.workKJ) and isFinite(chiller.condenserKJ),
-                "chiller '" .. chiller.id .. "' result is not finite")
-        end
         -- Passive conductance exchange (#559) is integrated once per
         -- reservoir over the whole star of bodies heat-only coupled to
         -- it — every coolant loop and every pressurised compartment —
@@ -2082,7 +2012,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- zero, and several leaves on one reservoir each drain a
         -- temperature none of them ever sees move. Solving the star
         -- implicitly instead cannot overshoot whatever the conductance or
-        -- the capacity ratio; see solvePassiveExchange.
+        -- the capacity ratio; see solvePassiveExchange. The solve runs
+        -- before the chiller pass below so the exchanger's claim on each
+        -- loop this tick is known when the chiller's finite cold-side
+        -- bound is sized (#560); it reads only tick-start temperatures
+        -- and the circulation-gated conductance, so the chillers change
+        -- nothing it sees.
         local stars = {}
         for _, loop in ipairs(self.coolant_loops) do
             loop.lastExchange = 0
@@ -2132,6 +2067,99 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     end
                 end
             end
+        end
+        -- Chillers (#397) run between the loop allocation and the loop's
+        -- own integration, in declaration order: every loop's circulation
+        -- and exchanger share this tick are known, and the extraction
+        -- lands in the loop's temperature integration below. A chiller's
+        -- cold service demand is its rated capacity; the deliverable duty
+        -- is capped by the cold loop's circulation fraction (heat must
+        -- reach the evaporator) and by the heat the coolant actually
+        -- holds that can be extracted above the chilled setpoint (#560),
+        -- it is gated off at or below the chilled setpoint, and it is
+        -- refused whole while the condenser sink sits at or above the
+        -- maximum condensing temperature. The electrical
+        -- request - work at the configured COP plus the running
+        -- auxiliaries for the deliverable duty - is drawn from the same
+        -- generation-and-battery pool as every other load, never a
+        -- second budget. A curtailed grant duty-cycles the whole machine
+        -- at one delivered fraction, so extracted heat, work and
+        -- condenser heat all scale together and the condenser booking
+        -- equals extracted heat plus the work and auxiliaries actually
+        -- supplied at one consistent boundary.
+        for _, chiller in ipairs(self.chillers) do
+            local loop = chiller.coldLoop
+            local sink = chiller.condenser
+            local disabled = chiller.ratedKW <= 0
+            chiller.atSetpoint = not disabled
+                and loop.temperature <= chiller.chilledSetpoint + 1e-9
+            chiller.sinkOver = not disabled
+                and sink.temperature + 1e-9 >= chiller.maxCondensing
+            local coolingDemand = (disabled or chiller.atSetpoint)
+                and 0 or chiller.ratedKW
+            chiller.lastDemand = coolingDemand
+            chiller.lastCooling = 0
+            chiller.lastDeliverable = 0
+            chiller.lastPowerDemand = 0
+            chiller.lastPowerSupplied = 0
+            chiller.lastCondenserKW = 0
+            chiller.lastFraction = 0
+            chiller.admitted = not disabled and not chiller.sinkOver
+            if chiller.admitted and coolingDemand > 0 then
+                -- A nameplate rating is not a heat source (#560). Over
+                -- the tick the cold loop can give up only the heat its
+                -- own thermal mass holds above the chilled setpoint -
+                -- the cold-side interface the machine exists to hold -
+                -- plus the heat legitimately entering it this tick: pump
+                -- work, freeze-heater heat and the exchanger's implicit-
+                -- solve share, each counted exactly once. Extracting
+                -- more than that would end the tick below the setpoint,
+                -- so the loop may be cooled to the interface and no
+                -- further; the setpoint is validated above absolute
+                -- zero, so the coolant can never be driven below it.
+                -- Work, auxiliaries and the condenser booking all size
+                -- off the capped deliverable, so every ledger scales
+                -- with the duty that actually moves.
+                local loopCapacityKJ = loop.coolant * loop.cp
+                local extractableKJ = math.max(0,
+                    loopCapacityKJ * math.max(0, loop.temperature - chiller.chilledSetpoint)
+                    + (loop.lastPumpSupplied + loop.lastHeaterSupplied) * fixed_seconds
+                    + loop.lastExchange * fixed_seconds)
+                local circulationCapped = chiller.ratedKW * loop.lastCirculation
+                local deliverable = math.min(circulationCapped,
+                    extractableKJ / fixed_seconds)
+                chiller.lastDeliverable = deliverable
+                if deliverable > 1e-12 then
+                    local powerDemand = deliverable / chiller.cop + chiller.auxKW
+                    chiller.lastPowerDemand = powerDemand
+                    local fromGeneration = math.min(powerDemand, generation)
+                    generation = generation - fromGeneration
+                    local fromBattery = drawBatteries(self,
+                        powerDemand - fromGeneration, fixed_hours)
+                    local supplied = fromGeneration + fromBattery
+                    batterySupplied = batterySupplied + fromBattery
+                    chiller.lastPowerSupplied = supplied
+                    local fraction = supplied / powerDemand
+                    chiller.lastFraction = fraction
+                    local cooling = deliverable * fraction
+                    chiller.lastCooling = cooling
+                    -- Condenser heat equals extracted heat plus the work
+                    -- and auxiliaries actually supplied: one boundary,
+                    -- booked once.
+                    chiller.lastCondenserKW = cooling + supplied
+                    loop.chillerExtraction = (loop.chillerExtraction or 0) + cooling
+                    chiller.extractedKJ = chiller.extractedKJ + cooling * fixed_seconds
+                    chiller.workKJ = chiller.workKJ + supplied * fixed_seconds
+                    chiller.condenserKJ = chiller.condenserKJ
+                        + chiller.lastCondenserKW * fixed_seconds
+                end
+            end
+            assert(isFinite(chiller.lastDemand) and isFinite(chiller.lastCooling)
+                and isFinite(chiller.lastDeliverable) and isFinite(chiller.lastPowerDemand)
+                and isFinite(chiller.lastPowerSupplied) and isFinite(chiller.lastCondenserKW)
+                and isFinite(chiller.lastFraction) and isFinite(chiller.extractedKJ)
+                and isFinite(chiller.workKJ) and isFinite(chiller.condenserKJ),
+                "chiller '" .. chiller.id .. "' result is not finite")
         end
         -- Second loop pass: integrate the loop's temperature from the
         -- pump work, heater heat, exchanger exchange and the chiller

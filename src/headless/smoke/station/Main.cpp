@@ -5173,6 +5173,273 @@ namespace
 			require(sawEvent(world, "no coolant circulation at the cold-side interface"),
 				"zero-flow refusal reason not announced");
 		}
+		// #560: a nameplate rating is not a heat source. 1 kg of
+		// coolant at 0.0001 kJ/kg K holds 0.0001 kJ/K; the reported
+		// run let a 10 kW chiller extract the full rating in one tick
+		// and published -1480 C — heat the coolant never held. The
+		// admitted duty is now bounded by the heat the loop actually
+		// has above its chilled setpoint plus this tick's legitimate
+		// inflows: the loop lands on the setpoint, never below, the
+		// work and condenser scale with the duty that moved, and the
+		// unfundable remainder of the nameplate stays visible as unmet.
+		auto fullLoop = [](std::string const& id, std::string const& reservoirId,
+			double capacityKg, double startingKg, double cp, double startingC,
+			double freezeSetpointC, double pumpKW, double ratedFlow,
+			double conductance, double heaterKW)
+		{
+			core::CoolantLoopSettings settings;
+			settings.id = id;
+			settings.hazardClass = "normal";
+			settings.reservoirId = reservoirId;
+			settings.coolantCapacityKg = capacityKg;
+			settings.startingCoolantKg = startingKg;
+			settings.specificHeatKJPerKgK = cp;
+			settings.startingTemperatureC = startingC;
+			settings.freezeProtectionSetpointC = freezeSetpointC;
+			settings.pumpPowerKW = pumpKW;
+			settings.ratedFlowKgPerS = ratedFlow;
+			settings.exchangerConductanceKWPerK = conductance;
+			settings.heaterCapacityKW = heaterKW;
+			return settings;
+		};
+		{
+			core::World world("ChillerFiniteColdStore", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
+			auto const [ok, diagnostic] = chillerConfigure(world,
+				{ reservoir("cold", "moderate", 1000.0, 20.0),
+				  reservoir("sink", "moderate", 1000.0, 20.0) },
+				{ fullLoop("tiny", "cold", 1.0, 1.0, 0.0001, 20.0, 0.0, 1.0, 1.0, 1.0, 0.0) },
+				{ chiller("chiller", "moderate", "tiny", "sink", 10.0, 2.0, 0.0, 5.0, 45.0) },
+				{ field });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(1), "finite-cold-store tick failed");
+			auto const& snapshot = world.getStationSystemsSnapshot();
+			auto const& loopSnap = snapshot.coolantLoops[0];
+			auto const& chillerSnap = snapshot.chillers[0];
+			// The whole budget for the tick: 0.0001 kJ/K x 15 K above
+			// the chilled setpoint plus the pump's 1 kW x dt — about
+			// 1.09 kW of duty, not the 10 kW nameplate.
+			auto const expectedCoolingKW
+				= (1.0 * 0.0001 * 15.0 + 1.0 * dt) / dt;
+			require(expectedCoolingKW < 10.0, "test scenario lost its teeth");
+			require(approx(chillerSnap.deliverableKW, expectedCoolingKW, 1e-9)
+				&& approx(chillerSnap.coolingKW, expectedCoolingKW, 1e-9),
+				"the chiller delivered nameplate duty the coolant could not fund");
+			// Work, auxiliaries and the condenser all size off the duty
+			// that actually moved, never off the nameplate.
+			require(approx(chillerSnap.powerDemandKW, expectedCoolingKW / 2.0, 1e-9)
+				&& approx(chillerSnap.powerSuppliedKW, expectedCoolingKW / 2.0, 1e-9)
+				&& approx(chillerSnap.condenserHeatKW,
+					expectedCoolingKW + expectedCoolingKW / 2.0, 1e-9),
+				"work or condenser booking did not scale with the bounded duty");
+			// The loop lands exactly on the chilled setpoint: cooled to
+			// the cold-side interface and no further — nowhere near the
+			// -1480 C the unbounded integration published.
+			require(approx(loopSnap.loopTemperatureC, 5.0, 1e-6)
+				&& loopSnap.loopTemperatureC > -273.15,
+				"bounded extraction did not land the loop on its chilled setpoint");
+			// The unfundable remainder of the nameplate stays visible.
+			require(approx(chillerSnap.coolingUnmetKW, 10.0 - expectedCoolingKW, 1e-9)
+				&& chillerSnap.status == core::StationTransferStatus::Partial,
+				"the energy-bounded chiller hid its unmet demand");
+			require(std::abs(chillerSnap.residualKJ) < 1e-6
+				&& std::abs(loopSnap.residualKJ) < 1e-6
+				&& std::abs(snapshot.thermal.reservoirs[0].residualKJ) < 1e-6
+				&& std::abs(snapshot.thermal.reservoirs[1].residualKJ) < 1e-6,
+				"finite-cold-store ledgers did not close");
+		}
+		// Near-setpoint crossing and ordinary service (#560): a loop
+		// with real capacity cooling toward its setpoint. Far above the
+		// interface the rating binds and the energy cap stays out of the
+		// way; as the setpoint nears the cap takes over and lands the
+		// loop on the interface instead of driving through it; once
+		// there the thermostat gates the machine and the chiller removes
+		// the pump's arriving heat as it arrives. No tick ever ends
+		// below the chilled setpoint.
+		{
+			core::World world("ChillerSetpointCrossing", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
+			auto const [ok, diagnostic] = chillerConfigure(world,
+				{ reservoir("cold", "moderate", 1000.0, 20.0),
+				  reservoir("sink", "moderate", 1000.0, 20.0) },
+				{ fullLoop("chilled", "cold", 1.0, 1.0, 1.0, 5.5, 0.0, 0.1, 1.0, 0.0, 0.0) },
+				{ chiller("chiller", "moderate", "chilled", "sink", 10.0, 2.0, 0.0, 5.0, 45.0) },
+				{ field });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			bool sawCapped = false, sawGated = false;
+			for (int tick = 0; tick < 120; ++tick)
+			{
+				require(world.advanceTicks(1), "setpoint-crossing tick failed");
+				auto const& snap = world.getStationSystemsSnapshot();
+				auto const& loopSnap = snap.coolantLoops[0];
+				auto const& chillerSnap = snap.chillers[0];
+				require(loopSnap.loopTemperatureC >= 5.0 - 1e-9,
+					"the chiller drove the loop below its chilled setpoint");
+				require(loopSnap.loopTemperatureC > -273.15,
+					"the loop left the physical temperature range");
+				if (tick == 0)
+					require(approx(chillerSnap.coolingKW, 10.0, 1e-9),
+						"ordinary service away from the setpoint was capped");
+				if (chillerSnap.coolingKW > 1e-12
+					&& chillerSnap.coolingKW + 1e-9 < 10.0) sawCapped = true;
+				if (chillerSnap.coolingKW == 0.0 && chillerSnap.coolingDemandKW == 0.0)
+					sawGated = true;
+				require(std::abs(chillerSnap.residualKJ) < 1e-6
+					&& std::abs(loopSnap.residualKJ) < 1e-6,
+					"crossing ledgers did not close");
+			}
+			require(sawCapped, "the finite-energy cap never engaged on the crossing");
+			require(sawGated, "the chilled-setpoint gate never engaged after the crossing");
+			// Energy conservation over the whole crossing: everything
+			// the chiller extracted equals the loop's original excess
+			// above the setpoint plus the pump heat it was fed, less
+			// whatever excess the loop still holds.
+			auto const& finalSnap = world.getStationSystemsSnapshot();
+			auto const excessKJ = 1.0 * (5.5 - 5.0);
+			auto const pumpKJ = 0.1 * 120.0 * dt;
+			auto const remainingKJ = 1.0
+				* (finalSnap.coolantLoops[0].loopTemperatureC - 5.0);
+			require(approx(finalSnap.chillers[0].extractedEnergyKJ + remainingKJ,
+				excessKJ + pumpKJ, 1e-6),
+				"extracted heat did not equal the coolant's fundable energy");
+		}
+		// Shortage through the exchanger (#560): the loop sits a hair
+		// above its chilled setpoint while a stiff exchanger drains it
+		// toward a cold reservoir. Once this tick's exchange is counted
+		// the loop holds no extractable heat above the setpoint at all:
+		// the chiller is refused whole with the shortage reason, draws
+		// no power and books no condenser heat, and the whole demand
+		// stays visible as unmet. The passive drain is the exchanger's
+		// doing; the chiller invented nothing.
+		{
+			core::World world("ChillerNoExtractableHeat", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
+			auto const [ok, diagnostic] = chillerConfigure(world,
+				{ reservoir("cold", "moderate", 1000.0, 0.0),
+				  reservoir("sink", "moderate", 1000.0, 20.0) },
+				{ fullLoop("drained", "cold", 1.0, 1.0, 0.001, 5.001, 0.0, 0.1, 1.0, 1.0, 0.0) },
+				{ chiller("chiller", "moderate", "drained", "sink", 10.0, 2.0, 0.0, 5.0, 45.0) },
+				{ field });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(1), "no-extractable-heat tick failed");
+			auto const& snapshot = world.getStationSystemsSnapshot();
+			auto const& chillerSnap = snapshot.chillers[0];
+			require(chillerSnap.status == core::StationTransferStatus::Rejected
+				&& chillerSnap.admitted && !chillerSnap.sinkOverMaxCondensing,
+				"the heat-short chiller refusal state was wrong");
+			require(approx(chillerSnap.coolingDemandKW, 10.0)
+				&& chillerSnap.coolingKW == 0.0
+				&& approx(chillerSnap.coolingUnmetKW, 10.0),
+				"the heat-short chiller hid its demand");
+			require(chillerSnap.powerDemandKW == 0.0
+				&& chillerSnap.powerSuppliedKW == 0.0
+				&& chillerSnap.condenserHeatKW == 0.0
+				&& chillerSnap.extractedEnergyKJ == 0.0,
+				"a heat-short chiller drew power or booked heat");
+			require(chillerSnap.blockReason.find(
+				"holds no extractable heat above the chilled setpoint")
+				!= std::string::npos,
+				"the heat-short refusal reason was not reported");
+			require(sawEvent(world, "holds no extractable heat above the chilled setpoint"),
+				"the heat-short refusal was not announced");
+			// The loop cooled passively through its exchanger toward the
+			// cold reservoir — the drain is the exchange's, and the
+			// refused chiller added nothing to the story.
+			require(snapshot.coolantLoops[0].loopTemperatureC < 5.001
+				&& snapshot.coolantLoops[0].loopTemperatureC > -273.15,
+				"the drained loop did not cool through the exchanger");
+			require(snapshot.thermal.reservoirs[1].temperatureC == 20.0
+				&& snapshot.thermal.reservoirs[1].condenserEnergyKJ == 0.0,
+				"a refused chiller heated its sink");
+		}
+		// Deterministic replay (#560): the bounded reproduction run a
+		// second time from Reset produces an identical snapshot and
+		// event history — the bound is arithmetic on the loop's own
+		// state, not a timing accident.
+		{
+			core::World world("ChillerFiniteReplay", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
+			auto const [ok, diagnostic] = chillerConfigure(world,
+				{ reservoir("cold", "moderate", 1000.0, 20.0),
+				  reservoir("sink", "moderate", 1000.0, 20.0) },
+				{ fullLoop("tiny", "cold", 1.0, 1.0, 0.0001, 20.0, 0.0, 1.0, 1.0, 1.0, 0.0) },
+				{ chiller("chiller", "moderate", "tiny", "sink", 10.0, 2.0, 0.0, 5.0, 45.0) },
+				{ field });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(120), "finite-cold-store replay original failed");
+			auto const expected = world.getStationSystemsSnapshot();
+			auto const expectedEvents = world.getStationSystemsEvents();
+			require(expected.chillers[0].extractedEnergyKJ > 0.0,
+				"the replay scenario produced no bounded cooling at all");
+			world.pauseSimulation(); world.resetSimulation();
+			world.resumeSimulation();
+			require(world.advanceTicks(120), "finite-cold-store replay rerun failed");
+			require(world.getStationSystemsSnapshot() == expected,
+				"the bounded chiller run is not deterministic across Reset");
+			require(world.getStationSystemsEvents() == expectedEvents,
+				"the bounded chiller event history is not deterministic across Reset");
+		}
+		// #560 in the sandbox: the bundled Lua model applies the same
+		// finite cold-side bound — its tick-one cooling matches the
+		// number the host's bound predicts, and its loop temperature
+		// never leaves the range at or above the chilled setpoint the
+		// bound guarantees. Host and sandbox agree on the rule and on
+		// the numbers, not just on not crashing.
+		{
+			auto const expectedCoolingKW
+				= (1.0 * 0.0001 * 15.0 + 1.0 * dt) / dt;
+			char literal[64];
+			std::snprintf(literal, sizeof(literal), "%.17g", expectedCoolingKW);
+			auto const expectedLiteral = std::string(literal);
+			auto const bundled = core::bundledStationSystemsSource();
+			core::setStationSystemsSourceLoader([bundled, expectedLiteral] {
+				return std::string("local factory = (function()\n") + bundled
+					+ "\nend)()\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles)\n"
+					"local original = model.advance\n"
+					"function model.advance(self, tick, seconds)\n"
+					"local result = original(self, tick, seconds)\n"
+					"local loop, chiller = self.coolant_loops[1], self.chillers[1]\n"
+					"if tick == 1 then\n"
+					"assert(math.abs(chiller.lastCooling - " + expectedLiteral
+					+ ") < 1e-9, 'sandbox cooling did not follow the finite cold-side bound')\n"
+					"end\n"
+					"assert(loop.temperature >= chiller.chilledSetpoint - 1e-6,\n"
+					"  'sandbox bound let the loop below its chilled setpoint')\n"
+					"assert(loop.temperature > -273.15,\n"
+					"  'sandbox loop left the physical temperature range')\n"
+					"return result\n"
+					"end\n"
+					"return model\n"
+					"end";
+			});
+			core::World sandbox("SandboxFiniteColdStore", 2, 2);
+			sandbox.pauseSimulation(); sandbox.finishBuild();
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
+			auto const [ok, diagnostic] = chillerConfigure(sandbox,
+				{ reservoir("cold", "moderate", 1000.0, 20.0),
+				  reservoir("sink", "moderate", 1000.0, 20.0) },
+				{ fullLoop("tiny", "cold", 1.0, 1.0, 0.0001, 20.0, 0.0, 1.0, 1.0, 1.0, 0.0) },
+				{ chiller("chiller", "moderate", "tiny", "sink", 10.0, 2.0, 0.0, 5.0, 45.0) },
+				{ field });
+			require(ok, diagnostic.c_str());
+			sandbox.resumeSimulation();
+			require(sandbox.advanceTicks(120),
+				"Bundled Lua finite cold-side bound failed its in-sandbox assertions");
+			require(sandbox.getStationSystemsSnapshot().coolantLoops[0].loopTemperatureC
+				>= 5.0 - 1e-6,
+				"the host bound and the sandbox disagree on staying at the setpoint");
+			core::setStationSystemsSourceLoader({});
+		}
 		// Transient supply loss: full service under the sun, total loss
 		// through the eclipse, recovery when the sun returns — with the
 		// unmet demand visible during the outage, the refusal announced,

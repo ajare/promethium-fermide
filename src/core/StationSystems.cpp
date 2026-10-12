@@ -2706,107 +2706,6 @@ namespace core
 				totalCoolantPumpKW += pumpSuppliedKW;
 				totalCoolantHeaterKW += heaterSuppliedKW;
 			}
-			// Chillers (#397) run between the loop allocation and the
-			// loop's own integration, in declaration order: every loop's
-			// circulation this tick is known, and the extraction lands in
-			// the loop's temperature integration below. A chiller's cold
-			// service demand is its rated capacity; the duty it can
-			// actually deliver is capped by the cold loop's circulation
-			// fraction (heat must reach the evaporator — no circulation,
-			// no extracted heat), it is gated off at or below the chilled
-			// setpoint, and it is refused whole when the condenser sink
-			// sits at or above the maximum condensing temperature. The
-			// electrical request — work at the configured COP plus the
-			// running auxiliaries for the deliverable duty — is drawn
-			// from the same generation-and-battery pool as every other
-			// load, never a second budget. A curtailed grant duty-cycles
-			// the whole machine at one delivered fraction, so extracted
-			// heat, work and condenser heat all scale together and the
-			// condenser booking equals extracted heat plus the work and
-			// auxiliaries actually supplied at one consistent boundary.
-			double totalChillerPowerKW{0.0};
-			for (auto& chiller : chillers)
-			{
-				auto const disabled = chiller.authored.ratedCoolingCapacityKW <= 0.0;
-				auto const& loop = coolantLoops[chiller.loopIndex];
-				auto const& sink = reservoirs[chiller.sinkIndex];
-				chiller.lastAtSetpoint = !disabled
-					&& loop.temperatureC <= chiller.authored.chilledSetpointC + 1e-9;
-				chiller.lastSinkOver = !disabled
-					&& sink.temperatureC + 1e-9 >= chiller.authored.maxCondensingTemperatureC;
-				auto const coolingDemandKW = disabled || chiller.lastAtSetpoint
-					? 0.0 : chiller.authored.ratedCoolingCapacityKW;
-				chiller.lastCoolingDemandKW = coolingDemandKW;
-				chiller.lastDeliverableKW = 0.0;
-				chiller.lastPowerDemandKW = 0.0;
-				chiller.lastPowerSuppliedKW = 0.0;
-				chiller.lastCoolingKW = 0.0;
-				chiller.lastCondenserKW = 0.0;
-				chiller.lastDeliveredFraction = 0.0;
-				chiller.lastBlockReason.clear();
-				if (disabled || coolingDemandKW <= 0.0)
-				{
-					// Zero capacity disables the chiller outright; a cold
-					// side at its chilled setpoint needs no service this
-					// tick. Neither draws power nor moves heat.
-					chiller.lastAdmitted = !disabled && !chiller.lastSinkOver;
-					chiller.status = StationTransferStatus::Idle;
-					continue;
-				}
-				if (chiller.lastSinkOver)
-				{
-					// The hot-side temperature interface cannot accept the
-					// condenser heat: the chiller is refused whole, draws no
-					// power and books no heat, and its entire demand stays
-					// visible as unmet cold service.
-					chiller.lastAdmitted = false;
-					chiller.lastBlockReason = "condenser sink '" + chiller.authored.condenserReservoirId
-						+ "' is at or above the maximum condensing temperature";
-					chiller.status = StationTransferStatus::Rejected;
-					continue;
-				}
-				chiller.lastAdmitted = true;
-				chiller.lastDeliverableKW = chiller.authored.ratedCoolingCapacityKW
-					* loop.lastCirculationFraction;
-				if (chiller.lastDeliverableKW <= 1e-12)
-				{
-					// No coolant circulation at the evaporator: there is no
-					// heat to extract, so nothing is requested and the whole
-					// demand stays unmet rather than buying idle power.
-					chiller.lastBlockReason = "no coolant circulation at the cold-side interface";
-					chiller.status = StationTransferStatus::Rejected;
-					continue;
-				}
-				chiller.lastPowerDemandKW = chiller.lastDeliverableKW / chiller.authored.cop
-					+ chiller.authored.auxiliaryPowerKW;
-				auto const fromGeneration = std::min(chiller.lastPowerDemandKW, availableGeneration);
-				availableGeneration -= fromGeneration;
-				auto const ask = chiller.lastPowerDemandKW - fromGeneration;
-				auto const fromBattery = drawBatteries(ask);
-				auto const suppliedKW = fromGeneration + fromBattery;
-				batterySuppliedKW += fromBattery;
-				batteryShortfallKW += ask - fromBattery;
-				chiller.lastPowerSuppliedKW = suppliedKW;
-				auto const deliveredFraction = chiller.lastPowerDemandKW > 0.0
-					? suppliedKW / chiller.lastPowerDemandKW : 0.0;
-				chiller.lastDeliveredFraction = deliveredFraction;
-				auto const coolingKW = chiller.lastDeliverableKW * deliveredFraction;
-				chiller.lastCoolingKW = coolingKW;
-				// Condenser heat equals extracted heat plus the work and
-				// auxiliaries actually supplied: one boundary, booked once.
-				chiller.lastCondenserKW = coolingKW + suppliedKW;
-				chillerExtractionByLoop[chiller.loopIndex] += coolingKW;
-				condenserHeatBySink[chiller.sinkIndex] += chiller.lastCondenserKW;
-				chiller.extractedKJ += coolingKW * static_cast<double>(seconds);
-				chiller.workKJ += suppliedKW * static_cast<double>(seconds);
-				chiller.condenserKJ += chiller.lastCondenserKW * static_cast<double>(seconds);
-				totalChillerPowerKW += suppliedKW;
-				if (coolingKW + 1e-12 >= coolingDemandKW)
-					chiller.status = StationTransferStatus::Full;
-				else if (suppliedKW <= 1e-12)
-					chiller.status = StationTransferStatus::Rejected;
-				else chiller.status = StationTransferStatus::Partial;
-			}
 			// Passive conductance exchange (#559) is integrated once per
 			// reservoir over the whole star of bodies heat-only coupled to
 			// it — every coolant loop and every pressurised compartment —
@@ -2818,7 +2717,12 @@ namespace core
 			// zero, and several leaves on one reservoir each drain a
 			// temperature none of them ever sees move. Solving the star
 			// implicitly instead cannot overshoot whatever the conductance
-			// or the capacity ratio; see solvePassiveExchange.
+			// or the capacity ratio; see solvePassiveExchange. The solve
+			// runs before the chiller pass below so the exchanger's claim
+			// on each loop this tick is known when the chiller's finite
+			// cold-side bound is sized (#560); it reads only tick-start
+			// temperatures and the circulation-gated conductance, so the
+			// chillers change nothing it sees.
 			std::vector<double> loopExchangeKJ(coolantLoops.size(), 0.0);
 			std::vector<double> atmosphereExchangeKJ(atmospheres.size(), 0.0);
 			auto const exchangeDt = static_cast<double>(seconds);
@@ -2871,6 +2775,144 @@ namespace core
 						atmosphereHeatByReservoir[reservoirIndex] -= heatKJ / exchangeDt;
 					}
 				}
+			}
+			// Chillers (#397) run between the loop allocation and the
+			// loop's own integration, in declaration order: every loop's
+			// circulation and exchanger share this tick are known, and the
+			// extraction lands in the loop's temperature integration
+			// below. A chiller's cold service demand is its rated
+			// capacity; the duty it can actually deliver is capped by the
+			// cold loop's circulation fraction (heat must reach the
+			// evaporator — no circulation, no extracted heat) and by the
+			// heat the coolant actually holds that can be extracted above
+			// the chilled setpoint (#560), it is gated off at or below
+			// the chilled setpoint, and it is refused whole when the
+			// condenser sink sits at or above the maximum condensing
+			// temperature. The
+			// electrical request — work at the configured COP plus the
+			// running auxiliaries for the deliverable duty — is drawn
+			// from the same generation-and-battery pool as every other
+			// load, never a second budget. A curtailed grant duty-cycles
+			// the whole machine at one delivered fraction, so extracted
+			// heat, work and condenser heat all scale together and the
+			// condenser booking equals extracted heat plus the work and
+			// auxiliaries actually supplied at one consistent boundary.
+			double totalChillerPowerKW{0.0};
+			for (auto& chiller : chillers)
+			{
+				auto const disabled = chiller.authored.ratedCoolingCapacityKW <= 0.0;
+				auto const& loop = coolantLoops[chiller.loopIndex];
+				auto const& sink = reservoirs[chiller.sinkIndex];
+				chiller.lastAtSetpoint = !disabled
+					&& loop.temperatureC <= chiller.authored.chilledSetpointC + 1e-9;
+				chiller.lastSinkOver = !disabled
+					&& sink.temperatureC + 1e-9 >= chiller.authored.maxCondensingTemperatureC;
+				auto const coolingDemandKW = disabled || chiller.lastAtSetpoint
+					? 0.0 : chiller.authored.ratedCoolingCapacityKW;
+				chiller.lastCoolingDemandKW = coolingDemandKW;
+				chiller.lastDeliverableKW = 0.0;
+				chiller.lastPowerDemandKW = 0.0;
+				chiller.lastPowerSuppliedKW = 0.0;
+				chiller.lastCoolingKW = 0.0;
+				chiller.lastCondenserKW = 0.0;
+				chiller.lastDeliveredFraction = 0.0;
+				chiller.lastBlockReason.clear();
+				if (disabled || coolingDemandKW <= 0.0)
+				{
+					// Zero capacity disables the chiller outright; a cold
+					// side at its chilled setpoint needs no service this
+					// tick. Neither draws power nor moves heat.
+					chiller.lastAdmitted = !disabled && !chiller.lastSinkOver;
+					chiller.status = StationTransferStatus::Idle;
+					continue;
+				}
+				if (chiller.lastSinkOver)
+				{
+					// The hot-side temperature interface cannot accept the
+					// condenser heat: the chiller is refused whole, draws no
+					// power and books no heat, and its entire demand stays
+					// visible as unmet cold service.
+					chiller.lastAdmitted = false;
+					chiller.lastBlockReason = "condenser sink '" + chiller.authored.condenserReservoirId
+						+ "' is at or above the maximum condensing temperature";
+					chiller.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				chiller.lastAdmitted = true;
+				// A nameplate rating is not a heat source (#560). Over the
+				// tick the cold loop can give up only the heat its own
+				// thermal mass holds above the chilled setpoint — the
+				// cold-side interface the machine exists to hold — plus the
+				// heat legitimately entering it this tick: pump work,
+				// freeze-heater heat and the exchanger's implicit-solve
+				// share, each counted exactly once. With C the loop's heat
+				// capacity, T its tick-start temperature and Q_in the
+				// tick's inflows, the bound is the exact integration
+				// constraint: extracting more than C x (T - setpoint) +
+				// Q_in would end the tick below the setpoint, so the loop
+				// may be cooled to the interface and no further. The
+				// setpoint is validated above absolute zero, so the bound
+				// also keeps the published coolant temperature inside the
+				// physical range however lopsided the coolant capacity and
+				// the cooling rating. Work, auxiliaries and the condenser
+				// booking all size off the capped deliverable, so every
+				// ledger scales with the duty that actually moves.
+				auto const tickSeconds = static_cast<double>(seconds);
+				auto const loopHeatCapacityKJPerK = loop.coolantKg
+					* loop.authored.specificHeatKJPerKgK;
+				auto const extractableKJ = std::max(0.0,
+					loopHeatCapacityKJPerK * std::max(0.0,
+						loop.temperatureC - chiller.authored.chilledSetpointC)
+					+ (loop.lastPumpSuppliedKW + loop.lastHeaterSuppliedKW) * tickSeconds
+					+ loopExchangeKJ[chiller.loopIndex]);
+				auto const circulationCappedKW = chiller.authored.ratedCoolingCapacityKW
+					* loop.lastCirculationFraction;
+				chiller.lastDeliverableKW = std::min(circulationCappedKW,
+					extractableKJ / tickSeconds);
+				if (chiller.lastDeliverableKW <= 1e-12)
+				{
+					// Nothing can move through the evaporator this tick:
+					// either no coolant is circulating to bring heat to it,
+					// or the cold loop holds no extractable heat above its
+					// chilled setpoint once this tick's exchange is counted.
+					// Either way nothing is requested and the whole demand
+					// stays unmet rather than buying idle power or a
+					// temperature the coolant does not have.
+					chiller.lastBlockReason = circulationCappedKW <= 1e-12
+						? "no coolant circulation at the cold-side interface"
+						: "the cold loop holds no extractable heat above the chilled setpoint";
+					chiller.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				chiller.lastPowerDemandKW = chiller.lastDeliverableKW / chiller.authored.cop
+					+ chiller.authored.auxiliaryPowerKW;
+				auto const fromGeneration = std::min(chiller.lastPowerDemandKW, availableGeneration);
+				availableGeneration -= fromGeneration;
+				auto const ask = chiller.lastPowerDemandKW - fromGeneration;
+				auto const fromBattery = drawBatteries(ask);
+				auto const suppliedKW = fromGeneration + fromBattery;
+				batterySuppliedKW += fromBattery;
+				batteryShortfallKW += ask - fromBattery;
+				chiller.lastPowerSuppliedKW = suppliedKW;
+				auto const deliveredFraction = chiller.lastPowerDemandKW > 0.0
+					? suppliedKW / chiller.lastPowerDemandKW : 0.0;
+				chiller.lastDeliveredFraction = deliveredFraction;
+				auto const coolingKW = chiller.lastDeliverableKW * deliveredFraction;
+				chiller.lastCoolingKW = coolingKW;
+				// Condenser heat equals extracted heat plus the work and
+				// auxiliaries actually supplied: one boundary, booked once.
+				chiller.lastCondenserKW = coolingKW + suppliedKW;
+				chillerExtractionByLoop[chiller.loopIndex] += coolingKW;
+				condenserHeatBySink[chiller.sinkIndex] += chiller.lastCondenserKW;
+				chiller.extractedKJ += coolingKW * static_cast<double>(seconds);
+				chiller.workKJ += suppliedKW * static_cast<double>(seconds);
+				chiller.condenserKJ += chiller.lastCondenserKW * static_cast<double>(seconds);
+				totalChillerPowerKW += suppliedKW;
+				if (coolingKW + 1e-12 >= coolingDemandKW)
+					chiller.status = StationTransferStatus::Full;
+				else if (suppliedKW <= 1e-12)
+					chiller.status = StationTransferStatus::Rejected;
+				else chiller.status = StationTransferStatus::Partial;
 			}
 			// Second loop pass: integrate the loop's temperature from the
 			// pump work, heater heat, exchanger exchange and the chiller

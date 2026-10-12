@@ -685,7 +685,24 @@ while the cold loop is above the chilled setpoint and nothing at or
 below it. The duty the machine can actually deliver is capped by the
 cold loop's actual circulation fraction — heat must reach the
 evaporator, so a loop that is not moving yields no extractable heat
-and the service is refused whole rather than buying idle power. The
+and the service is refused whole rather than buying idle power —
+and by the heat the coolant actually holds (#560): a nameplate
+rating is not a heat source. Over the tick the loop can give up only
+the heat its own thermal mass holds above the chilled setpoint —
+the cold-side interface the machine exists to hold — plus the
+heat legitimately entering it this tick: pump work, freeze-heater
+heat and the exchanger's implicit-solve share, each counted exactly
+once. Extracting more than that would end the tick below the
+setpoint, so the loop may be cooled to the interface and no further;
+the setpoint is validated above absolute zero, so no capacity/rating
+combination can drive the published coolant temperature below it.
+This is bounded integration, not clamping: the capped duty, its work
+at the configured COP, its auxiliaries and the condenser booking
+all scale together off the heat that actually moves, the shortfall
+against the nameplate stays visible as unmet cold service, and a
+loop whose exchanger is already draining it past the setpoint funds
+no evaporator duty at all — such a chiller is refused whole with
+the no-extractable-heat reason. The
 chiller is refused whole while the condenser sink sits at or above the
 maximum condensing temperature: the hot-side interface cannot accept
 the heat, the chiller draws no power and books no heat, and the entire
@@ -709,9 +726,10 @@ every tick, in host and sandbox alike, and a residual beyond it fails
 the tick as a conservation violation rather than a silent rounding.
 
 Chillers run between the coolant-loop allocation and the loop's own
-integration: the tick's circulation is known when the chiller sizes
-its duty, and the extraction lands inside the loop's temperature
-integration. Within a tick, power allocates first, then coolant loops
+integration: the tick's circulation and the exchanger's implicit-
+solve share are both known when the chiller sizes its finite
+cold-side bound, and the extraction lands inside the loop's
+temperature integration. Within a tick, power allocates first, then coolant loops
 and chillers run, then thermal integrates, then transfers, then
 conversions.
 
@@ -1068,10 +1086,21 @@ temperature with no power draw, no condenser booking and the entire
 demand visible as unmet; zero-capacity disablement; the chilled-
 setpoint gate demanding nothing at or below the setpoint; circulation
 loss refusing the service with the no-circulation reason and the whole
-demand unmet; transient supply loss through an eclipse cycle with the
-unmet demand visible during the outage, recovery announced and ledgers
-closed across the transitions; deterministic Reset replay; and intact
-Lua chiller descriptor crossing with contained construction refusal.
+demand unmet; the finite cold-side bound (#560) on a tiny-capacity
+loop with a large rating (one tick lands the loop exactly on the
+chilled setpoint with work and condenser sized off the bounded duty,
+never below, and the unfundable nameplate remainder visible as
+unmet), the near-setpoint crossing (the rating binds far from the
+interface, the energy cap lands the loop on it, the thermostat gates
+afterward, no tick ends below the setpoint, and the extracted total
+equals the loop's fundable energy), and the exchanger-shortage
+refusal with the no-extractable-heat reason; transient supply loss
+through an eclipse cycle with the unmet demand visible during the
+outage, recovery announced and ledgers closed across the transitions;
+deterministic Reset replay; and intact Lua chiller descriptor
+crossing with contained construction refusal, with the bundled
+sandbox mirroring the same finite cold-side bound and agreeing with
+the host on the bounded tick-one duty to the reported number.
 
 Generator acceptance coverage: refused generator configurations
 (unknown or non-energy fuel store, unknown or cross-class heat sink,
