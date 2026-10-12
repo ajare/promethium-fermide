@@ -79,6 +79,7 @@ namespace core
 			std::vector<Co2CaptureSettings> const* co2Captures;
 			std::vector<FuelCellSettings> const* fuelCells;
 			std::vector<ThermalBufferSettings> const* thermalBuffers;
+			std::vector<WasteEjectionSettings> const* wasteEjections;
 			static void pushProfile(lua_State* state, ProfileSettings const& profile)
 			{
 				lua_createtable(state, 0, 3);
@@ -548,7 +549,25 @@ namespace core
 					lua_pushnumber(state, buffer.transferConductanceKWPerK); lua_setfield(state, -2, "transferConductanceKWPerK");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 22, 1);
+				// Authored terminal-waste ejection descriptors cross the same
+				// boundary as plain immutable values (#403); each sandbox
+				// mirrors the eligible-only removal and audits its own loss
+				// booking.
+				lua_createtable(state, static_cast<int>(wasteEjections->size()), 0);
+				for (size_t index = 0; index < wasteEjections->size(); ++index)
+				{
+					auto const& ejection = (*wasteEjections)[index];
+					lua_createtable(state, 0, 7);
+					lua_pushstring(state, ejection.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, ejection.storeId.c_str()); lua_setfield(state, -2, "store");
+					lua_pushstring(state, ejection.unit.c_str()); lua_setfield(state, -2, "unit");
+					lua_pushnumber(state, ejection.quantity); lua_setfield(state, -2, "quantity");
+					lua_pushnumber(state, ejection.firstOccurrenceSeconds); lua_setfield(state, -2, "firstSeconds");
+					lua_pushnumber(state, ejection.recurrenceSeconds); lua_setfield(state, -2, "recurrenceSeconds");
+					lua_pushinteger(state, ejection.priority); lua_setfield(state, -2, "priority");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 23, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -1523,6 +1542,52 @@ namespace core
 				return refuse(where + " recurrence must be zero or at least one World fixed tick ("
 					+ std::to_string(World::getFixedTimestep()) + " seconds)");
 		}
+		// Terminal-waste ejection schedules (#403): a scenario removal of
+		// disposal-ready (qualified) material from one waste store at
+		// authored times. The same schedule discipline as resupply
+		// deliveries governs them; what makes them different is direction:
+		// ejection can only remove what the store actually holds as
+		// eligible, so it never needs a capacity-shaped rule, but it must
+		// still name a real store in that store's own unit.
+		if (settings.wasteEjections.size() > MaxStationWasteEjections)
+			return refuse("Station waste ejections are limited to "
+				+ std::to_string(MaxStationWasteEjections) + " entries");
+		std::set<std::string> ejectionIds;
+		for (auto const& ejection : settings.wasteEjections)
+		{
+			auto const where = "Station waste ejection '" + ejection.id + "'";
+			if (ejection.id.empty()) return refuse("Station waste ejection id must not be empty");
+			if (ejection.id.size() > MaxStationStoreIdLength)
+				return refuse("Station waste ejection id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!ejectionIds.insert(ejection.id).second) return refuse(where + " id is duplicated");
+			auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == ejection.storeId; });
+			if (it == settings.stores.end())
+				return refuse(where + " targets unknown Resource store '" + ejection.storeId + "'");
+			// Ejection carries a store's own material out; it never
+			// converts units on the way through the boundary.
+			if (ejection.unit != it->unit)
+				return refuse(where + " unit '" + ejection.unit
+					+ "' does not match target store unit '" + it->unit + "'");
+			// An ejection that removes nothing specifies nothing; refusing
+			// it keeps every fired occurrence a real outflow.
+			if (!std::isfinite(ejection.quantity) || ejection.quantity <= 0.0)
+				return refuse(where + " quantity must be finite and positive");
+			if (!std::isfinite(ejection.firstOccurrenceSeconds)
+				|| ejection.firstOccurrenceSeconds < 0.0)
+				return refuse(where + " first occurrence must be finite and non-negative");
+			// Zero is a one-off; a recurring schedule must not repeat faster
+			// than one World fixed tick, so no tick is ever asked to absorb
+			// an unbounded burst of catch-up ejections.
+			if (!std::isfinite(ejection.recurrenceSeconds) || ejection.recurrenceSeconds < 0.0)
+				return refuse(where + " recurrence must be finite and non-negative (0 is a one-off)");
+			if (ejection.recurrenceSeconds > 0.0
+				&& ejection.recurrenceSeconds + StationScheduleTolerance
+					< static_cast<double>(World::getFixedTimestep()))
+				return refuse(where + " recurrence must be zero or at least one World fixed tick ("
+					+ std::to_string(World::getFixedTimestep()) + " seconds)");
+		}
 		// Compartment atmosphere contracts (#400): a fixed volume with a
 		// finite owned gas inventory, an authored effective thermal
 		// capacity, an optional heat-only reservoir coupling and an
@@ -2254,6 +2319,30 @@ namespace core
 			bool exhausted{false};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
+		// The authoritative ledger of one authored terminal-waste
+		// ejection (#403). An ejection is an external departure, not a
+		// station process: it removes only disposal-ready (qualified)
+		// material the store actually holds, capped at the scheduled
+		// quantity, and what it removes is booked as an external loss.
+		// Held (unqualified) waste is never touched, and a shortfall —
+		// scheduling more than the store can give — is a valid outcome,
+		// never a failure and never a deletion of held material.
+		struct WasteEjectionState
+		{
+			WasteEjectionSettings authored;
+			size_t storeIndex{0};
+			size_t declarationIndex{0};
+			uint64_t occurrencesFired{0};
+			uint64_t lastFiredTick{0};
+			double lastOccurrenceSeconds{0.0};
+			double lastScheduled{0.0};
+			double lastEjected{0.0};
+			double lastUnmet{0.0};
+			double ejectedTotal{0.0};
+			double unmetTotal{0.0};
+			bool exhausted{false};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
 		// The authoritative ledger of one authored radiator (#395).
 		// Rejection is recomputed every tick from the host reservoir's
 		// emitting temperature; the booked value is the net radiative
@@ -2778,6 +2867,10 @@ namespace core
 		std::vector<LoadState> loads;
 		std::vector<BatteryState> batteries;
 		std::vector<DeliveryState> deliveries;
+		// Authored terminal-waste ejection schedules (#403), run in the
+		// same scenario-event pass as the deliveries so one ordering
+		// governs coincident arrivals and departures.
+		std::vector<WasteEjectionState> wasteEjections;
 		std::vector<ReservoirState> reservoirs;
 		std::vector<RadiatorState> radiators;
 		std::vector<LoopState> coolantLoops;
@@ -2868,6 +2961,7 @@ namespace core
 			auto const committedSolarArrays = solarArrays;
 			auto const committedBatteries = batteries;
 			auto const committedDeliveries = deliveries;
+			auto const committedWasteEjections = wasteEjections;
 			auto const committedReservoirs = reservoirs;
 			auto const committedRadiators = radiators;
 			auto const committedCoolantLoops = coolantLoops;
@@ -2891,6 +2985,7 @@ namespace core
 			solarArrays = committedSolarArrays;
 			batteries = committedBatteries;
 			deliveries = committedDeliveries;
+			wasteEjections = committedWasteEjections;
 			reservoirs = committedReservoirs;
 			radiators = committedRadiators;
 			coolantLoops = committedCoolantLoops;
@@ -3041,6 +3136,7 @@ namespace core
 			{
 				StationScenarioEventKey key;
 				uint64_t occurrence{0};
+				bool isEjection{false};
 			};
 			std::vector<DueArrival> arrivals;
 			for (size_t index = 0; index < deliveries.size(); ++index)
@@ -3059,11 +3155,81 @@ namespace core
 					arrivals.push_back({{when, delivery.authored.priority, index}, occurrence});
 				}
 			}
+			// Terminal-waste ejections due since the last committed tick join
+			// the same scenario event list (#403): one ordering — occurrence
+			// time ascending, then service priority descending, then
+			// declaration — governs coincident arrivals and departures, and
+			// each occurrence fires exactly once however many ticks an
+			// accelerated update batches together.
+			for (size_t index = 0; index < wasteEjections.size(); ++index)
+			{
+				auto const& ejection = wasteEjections[index];
+				if (ejection.exhausted) continue;
+				auto const due = stationScheduleOccurrencesDue(
+					ejection.authored.firstOccurrenceSeconds,
+					ejection.authored.recurrenceSeconds, elapsed);
+				for (uint64_t occurrence = ejection.occurrencesFired; occurrence < due; ++occurrence)
+				{
+					auto const when = ejection.authored.recurrenceSeconds > 0.0
+						? ejection.authored.firstOccurrenceSeconds
+							+ static_cast<double>(occurrence) * ejection.authored.recurrenceSeconds
+						: ejection.authored.firstOccurrenceSeconds;
+					arrivals.push_back({{when, ejection.authored.priority, index}, occurrence, true});
+				}
+			}
 			std::sort(arrivals.begin(), arrivals.end(),
 				[](DueArrival const& left, DueArrival const& right)
-				{ return left.key < right.key; });
+				{
+					if (left.key.occurrenceSeconds != right.key.occurrenceSeconds)
+						return left.key.occurrenceSeconds < right.key.occurrenceSeconds;
+					if (left.key.priority != right.key.priority)
+						return left.key.priority > right.key.priority;
+					// Same time and priority: an arrival lands before an
+					// ejection runs, so material delivered this tick is
+					// disposal-ready for the ejection that follows it,
+					// whatever the two schedules' declaration order (#403).
+					if (left.isEjection != right.isEjection)
+						return !left.isEjection;
+					return left.key.declarationIndex < right.key.declarationIndex;
+				});
 			for (auto const& arrival : arrivals)
 			{
+				if (arrival.isEjection)
+				{
+					auto& ejection = wasteEjections[arrival.key.declarationIndex];
+					auto const& store = stores[ejection.storeIndex].authored;
+					// Only disposal-ready (qualified) material is eligible:
+					// held (unqualified/untreated) waste is never touched.
+					// The ejection removes at most what the store can give,
+					// so a shortfall is reported, never forced, and never
+					// deletes held material (#403).
+					auto const eligible = std::max(0.0, qualified[ejection.storeIndex]);
+					auto const ejected = std::min(ejection.authored.quantity, eligible);
+					auto const unmet = ejection.authored.quantity - ejected;
+					qualified[ejection.storeIndex] -= ejected;
+					flowOut[ejection.storeIndex] += ejected;
+					// Ejected material crosses the station boundary as an
+					// external loss: the per-unit and per-constituent
+					// ledgers close over it, so what left the station is
+					// accounted, never silently dropped.
+					stagedUnitLoss[store.unit] += ejected;
+					if (store.composition)
+						addComposition(stagedLoss, *store.composition,
+							massToKg(store.unit, ejected), 1.0);
+					ejection.occurrencesFired = arrival.occurrence + 1;
+					ejection.lastFiredTick = tick;
+					ejection.lastOccurrenceSeconds = arrival.key.occurrenceSeconds;
+					ejection.lastScheduled = ejection.authored.quantity;
+					ejection.lastEjected = ejected;
+					ejection.lastUnmet = unmet;
+					ejection.ejectedTotal += ejected;
+					ejection.unmetTotal += unmet;
+					ejection.status = ejected <= 0.0 ? StationTransferStatus::Rejected
+						: (unmet <= 0.0 ? StationTransferStatus::Full
+							: StationTransferStatus::Partial);
+					if (ejection.authored.recurrenceSeconds <= 0.0) ejection.exhausted = true;
+					continue;
+				}
 				auto& delivery = deliveries[arrival.key.declarationIndex];
 				auto const& store = stores[delivery.storeIndex].authored;
 				// The destination accepts only what fits inside its total
@@ -5875,6 +6041,14 @@ namespace core
 				if (!requireFinite(delivery.acceptedTotal, where + "cumulative accepted amount")) return false;
 				if (!requireFinite(delivery.rejectedTotal, where + "cumulative rejected amount")) return false;
 			}
+			for (auto const& ejection : wasteEjections)
+			{
+				auto const where = "waste ejection '" + ejection.authored.id + "' ";
+				if (!requireFinite(ejection.lastEjected, where + "ejected amount")) return false;
+				if (!requireFinite(ejection.lastUnmet, where + "unmet amount")) return false;
+				if (!requireFinite(ejection.ejectedTotal, where + "cumulative ejected amount")) return false;
+				if (!requireFinite(ejection.unmetTotal, where + "cumulative unmet amount")) return false;
+			}
 			for (auto const& transfer : transfers)
 			{
 				auto const where = "transfer '" + transfer.authored.id + "' ";
@@ -7026,6 +7200,30 @@ namespace core
 						+ std::to_string(delivery.lastRejected) + " " + delivery.authored.unit
 						+ ": destination '" + delivery.authored.storeId + "' is at capacity");
 			}
+			// Waste ejection occurrences are discrete scenario events too:
+			// every ejection is announced with what actually left the
+			// station, and the unmet remainder names why less went than was
+			// scheduled — nothing eligible was available (#403).
+			for (auto const& ejection : wasteEjections)
+			{
+				if (ejection.lastFiredTick != tick) continue;
+				auto const label = "Waste ejection '" + ejection.authored.id + "' at "
+					+ std::to_string(ejection.lastOccurrenceSeconds) + " s: ";
+				if (ejection.status == StationTransferStatus::Full)
+					appendBoundedEvent(events, tick, label + "ejected "
+						+ std::to_string(ejection.lastEjected) + " " + ejection.authored.unit
+						+ " from '" + ejection.authored.storeId + "' as external loss");
+				else if (ejection.status == StationTransferStatus::Partial)
+					appendBoundedEvent(events, tick, label + "ejected "
+						+ std::to_string(ejection.lastEjected) + " of "
+						+ std::to_string(ejection.lastScheduled) + " " + ejection.authored.unit
+						+ " from '" + ejection.authored.storeId + "' as external loss; "
+						+ std::to_string(ejection.lastUnmet)
+						+ " not ejectable: no more disposal-ready material held");
+				else
+					appendBoundedEvent(events, tick, label + "nothing ejected from '"
+						+ ejection.authored.storeId + "': no disposal-ready material held");
+			}
 			return true;
 		}
 	};
@@ -7348,6 +7546,18 @@ namespace core
 			state.declarationIndex = mImpl->deliveries.size();
 			mImpl->deliveries.push_back(std::move(state));
 		}
+		// Waste ejection schedules start unfired for the same reason
+		// delivery schedules do: reset and load reconstruct the authored
+		// beginning, so a replay restarts every ejection schedule rather
+		// than resuming a partially ejected one (#403).
+		for (auto const& ejection : settings.wasteEjections)
+		{
+			Impl::WasteEjectionState state;
+			state.authored = ejection;
+			state.storeIndex = storeIndex[ejection.storeId];
+			state.declarationIndex = mImpl->wasteEjections.size();
+			mImpl->wasteEjections.push_back(std::move(state));
+		}
 		// The compound conservation boundary is fixed at run start from the
 		// authored starting inventory of every compound store (#391).
 		for (auto const& store : mImpl->stores)
@@ -7378,7 +7588,7 @@ namespace core
 				&settings.atmospheres, &settings.airlockCycles, &settings.crews,
 				&settings.waterCollectors, &settings.waterTreatments,
 				&settings.electrolyzers, &settings.co2Captures, &settings.fuelCells,
-				&settings.thermalBuffers};
+				&settings.thermalBuffers, &settings.wasteEjections};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -7418,7 +7628,9 @@ namespace core
 			+ (settings.fuelCells.empty() ? std::string()
 				: ", " + std::to_string(settings.fuelCells.size()) + " fuel-cell backup unit(s)")
 			+ (settings.thermalBuffers.empty() ? std::string()
-				: ", " + std::to_string(settings.thermalBuffers.size()) + " thermal buffer(s)"));
+				: ", " + std::to_string(settings.thermalBuffers.size()) + " thermal buffer(s)")
+			+ (settings.wasteEjections.empty() ? std::string()
+				: ", " + std::to_string(settings.wasteEjections.size()) + " terminal-waste ejection(s)"));
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
 	bool StationSystemsRuntime::advance(uint64_t tick, float seconds)
@@ -7469,7 +7681,8 @@ namespace core
 		// integrated error path instead.
 		if (!mImpl->transferOrder.empty() || !mImpl->conversionOrder.empty()
 			|| !mImpl->loads.empty() || !mImpl->solarArrays.empty() || !mImpl->batteries.empty()
-			|| !mImpl->deliveries.empty() || !mImpl->reservoirs.empty()
+			|| !mImpl->deliveries.empty() || !mImpl->wasteEjections.empty()
+			|| !mImpl->reservoirs.empty()
 			|| !mImpl->coolantLoops.empty() || !mImpl->chillers.empty()
 			|| !mImpl->generators.empty() || !mImpl->atmospheres.empty()
 			|| !mImpl->airlockCycles.empty() || !mImpl->crews.empty()
@@ -8389,6 +8602,47 @@ namespace core
 				}
 			}
 			result.deliveries.push_back(std::move(deliveryResult));
+		}
+		// The waste ejection snapshot reports the authored schedule beside
+		// the runtime's departure history: what each occurrence actually
+		// ejected as external loss, what stayed behind held or absent, and
+		// when the next ejection is due (#403). The station-wide
+		// next-ejection readout is the soonest pending occurrence across
+		// every ejection schedule.
+		for (auto const& ejection : mImpl->wasteEjections)
+		{
+			StationWasteEjectionSnapshot ejectionResult;
+			ejectionResult.id = ejection.authored.id;
+			ejectionResult.storeId = ejection.authored.storeId;
+			ejectionResult.unit = ejection.authored.unit;
+			ejectionResult.quantity = ejection.authored.quantity;
+			ejectionResult.firstOccurrenceSeconds = ejection.authored.firstOccurrenceSeconds;
+			ejectionResult.recurrenceSeconds = ejection.authored.recurrenceSeconds;
+			ejectionResult.priority = ejection.authored.priority;
+			ejectionResult.occurrencesCompleted = ejection.occurrencesFired;
+			ejectionResult.lastOccurrenceSeconds = ejection.lastOccurrenceSeconds;
+			ejectionResult.lastScheduled = ejection.lastScheduled;
+			ejectionResult.lastEjected = ejection.lastEjected;
+			ejectionResult.lastUnmet = ejection.lastUnmet;
+			ejectionResult.ejectedTotal = ejection.ejectedTotal;
+			ejectionResult.unmetTotal = ejection.unmetTotal;
+			ejectionResult.exhausted = ejection.exhausted;
+			ejectionResult.status = ejection.status;
+			if (!ejection.exhausted)
+			{
+				ejectionResult.hasNextOccurrence = true;
+				ejectionResult.nextOccurrenceSeconds = ejection.authored.recurrenceSeconds > 0.0
+					? ejection.authored.firstOccurrenceSeconds
+						+ static_cast<double>(ejection.occurrencesFired) * ejection.authored.recurrenceSeconds
+					: ejection.authored.firstOccurrenceSeconds;
+				if (!result.hasNextWasteEjection
+					|| ejectionResult.nextOccurrenceSeconds < result.nextWasteEjectionSeconds)
+				{
+					result.hasNextWasteEjection = true;
+					result.nextWasteEjectionSeconds = ejectionResult.nextOccurrenceSeconds;
+				}
+			}
+			result.wasteEjections.push_back(std::move(ejectionResult));
 		}
 		return result;
 	}

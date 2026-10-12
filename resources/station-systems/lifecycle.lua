@@ -191,7 +191,8 @@ end
 
 return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries,
     reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews,
-    waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers)
+    waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers,
+    wasteEjections)
     assert(type(name) == "string")
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
@@ -214,6 +215,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     assert(type(co2Captures) == "table", "CO2 capture descriptors missing")
     assert(type(fuelCells) == "table", "fuel cell descriptors missing")
     assert(type(thermalBuffers) == "table", "thermal buffer descriptors missing")
+    assert(type(wasteEjections) == "table", "waste ejection descriptors missing")
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
@@ -229,6 +231,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         electrolyzers = {}, electrolyzer_order = {},
         co2_captures = {}, co2_capture_order = {},
         fuel_cells = {}, thermal_buffers = {},
+        waste_ejections = {},
     }
     local by_id = {}
     for index = 1, #stores do
@@ -1093,6 +1096,57 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             exhausted = false,
         }
     end
+    -- Terminal-waste ejection schedules (#403): an authored external
+    -- removal of a declared quantity from one waste store at declared
+    -- simulation times, once or recurring. Only disposal-ready
+    -- (qualified) material is eligible; held (unqualified/untreated)
+    -- waste is never ejected, and a store holding nothing eligible
+    -- simply ejects nothing — a shortfall is a valid outcome, never a
+    -- failure. What is ejected is booked as an external loss on the
+    -- same per-unit and per-constituent boundary the host ledger
+    -- closes over. The schedule rule and the deterministic scenario
+    -- ordering are the ones resupply deliveries established; at equal
+    -- time and priority, arrivals run before ejections.
+    for index = 1, #wasteEjections do
+        local ejection = wasteEjections[index]
+        assert(type(ejection) == 'table', 'waste ejection descriptor must be a table')
+        assert(type(ejection.id) == 'string' and #ejection.id > 0, 'waste ejection needs an id')
+        local target = by_id[ejection.store]
+        assert(target ~= nil, 'waste ejection target store is unknown')
+        assert(ejection.unit == target.unit,
+            'waste ejection unit must match its target store unit')
+        assert(type(ejection.quantity) == 'number'
+            and ejection.quantity == ejection.quantity and ejection.quantity > 0
+            and ejection.quantity < math.huge,
+            'waste ejection quantity must be finite and positive')
+        assert(type(ejection.firstSeconds) == 'number'
+            and ejection.firstSeconds == ejection.firstSeconds
+            and ejection.firstSeconds >= 0 and ejection.firstSeconds < math.huge,
+            'waste ejection first occurrence must be finite and non-negative')
+        assert(type(ejection.recurrenceSeconds) == 'number'
+            and ejection.recurrenceSeconds == ejection.recurrenceSeconds
+            and ejection.recurrenceSeconds >= 0 and ejection.recurrenceSeconds < math.huge,
+            'waste ejection recurrence must be finite and non-negative')
+        assert(type(ejection.priority) == 'number'
+            and ejection.priority == ejection.priority
+            and ejection.priority == math.tointeger(ejection.priority),
+            'waste ejection priority must be a finite integer')
+        object.waste_ejections[index] = {
+            id = ejection.id,
+            store = target,
+            unit = ejection.unit,
+            quantity = ejection.quantity,
+            firstSeconds = ejection.firstSeconds,
+            recurrenceSeconds = ejection.recurrenceSeconds,
+            priority = ejection.priority,
+            fired = 0,
+            lastEjected = 0,
+            lastUnmet = 0,
+            ejectedTotal = 0,
+            unmetTotal = 0,
+            exhausted = false,
+        }
+    end
     -- Compartment atmospheres (#400): a finite compartment-owned gas
     -- inventory in a fixed volume, integrated on an authored effective
     -- thermal capacity (air plus bonded structure) and optionally
@@ -1829,7 +1883,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     -- so coincident arrivals never depend on iteration order. The
     -- destination accepts only what fits its total capacity; the refused
     -- remainder stays accounted as rejected material and never enters the
-    -- station's own inventory (#392).
+    -- station's own inventory (#392). Terminal-waste ejections due at the
+    -- same time join the same ordered pass (#403): at equal time and
+    -- priority an arrival lands before an ejection runs, so material
+    -- delivered this tick is disposal-ready for the ejection that
+    -- follows it.
     local function applyDeliveries(self, elapsed)
         local arrivals = {}
         for index = 1, #self.deliveries do
@@ -1850,38 +1908,92 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 end
             end
         end
+        for index = 1, #self.waste_ejections do
+            local ejection = self.waste_ejections[index]
+            if not ejection.exhausted then
+                local due = occurrencesDue(ejection.firstSeconds,
+                    ejection.recurrenceSeconds, elapsed)
+                for occurrence = ejection.fired + 1, due do
+                    local when = ejection.recurrenceSeconds > 0
+                        and ejection.firstSeconds + (occurrence - 1) * ejection.recurrenceSeconds
+                        or ejection.firstSeconds
+                    arrivals[#arrivals + 1] = {
+                        when = when,
+                        priority = ejection.priority,
+                        declaration = index,
+                        occurrence = occurrence,
+                        ejection = true,
+                    }
+                end
+            end
+        end
         table.sort(arrivals, function(left, right)
             if left.when ~= right.when then return left.when < right.when end
             if left.priority ~= right.priority then return left.priority > right.priority end
+            local leftEjection = left.ejection and 1 or 0
+            local rightEjection = right.ejection and 1 or 0
+            if leftEjection ~= rightEjection then return leftEjection < rightEjection end
             return left.declaration < right.declaration
         end)
         for _, arrival in ipairs(arrivals) do
-            local delivery = self.deliveries[arrival.declaration]
-            local store = delivery.store
-            local headroom = math.max(0.0,
-                store.capacity - (store.qualified + store.unqualified))
-            local accepted = math.min(delivery.quantity, headroom)
-            local rejected = delivery.quantity - accepted
-            assert(accepted >= 0 and rejected >= 0
-                and accepted == accepted and rejected == rejected,
-                "delivery accepted/rejected amounts are not finite and non-negative")
-            if delivery.qualified then
-                store.qualified = store.qualified + accepted
+            if arrival.ejection then
+                local ejection = self.waste_ejections[arrival.declaration]
+                local store = ejection.store
+                -- Only disposal-ready (qualified) material is eligible:
+                -- held (unqualified/untreated) waste is never touched.
+                -- The ejection removes at most what the store can give,
+                -- so a shortfall is reported, never forced, and never
+                -- deletes held material. What is ejected crosses the
+                -- station boundary as an external loss, booked on the
+                -- same per-unit and per-constituent ledgers the host
+                -- closes over (#403).
+                local eligible = math.max(0.0, store.qualified)
+                local ejected = math.min(ejection.quantity, eligible)
+                local unmet = ejection.quantity - ejected
+                assert(ejected >= 0 and unmet >= 0
+                    and ejected == ejected and unmet == unmet,
+                    "waste ejection amounts are not finite and non-negative")
+                store.qualified = store.qualified - ejected
+                self.unit_loss[store.unit] =
+                    (self.unit_loss[store.unit] or 0) + ejected
+                if store.composition then
+                    addConstituents(self.constituent_loss, store.composition,
+                        toKg(store.unit, ejected), 1)
+                end
+                ejection.fired = arrival.occurrence
+                ejection.lastEjected = ejected
+                ejection.lastUnmet = unmet
+                ejection.ejectedTotal = ejection.ejectedTotal + ejected
+                ejection.unmetTotal = ejection.unmetTotal + unmet
+                if ejection.recurrenceSeconds <= 0 then ejection.exhausted = true end
             else
-                store.unqualified = store.unqualified + accepted
+                local delivery = self.deliveries[arrival.declaration]
+                local store = delivery.store
+                local headroom = math.max(0.0,
+                    store.capacity - (store.qualified + store.unqualified))
+                local accepted = math.min(delivery.quantity, headroom)
+                local rejected = delivery.quantity - accepted
+                assert(accepted >= 0 and rejected >= 0
+                    and accepted == accepted and rejected == rejected,
+                    "delivery accepted/rejected amounts are not finite and non-negative")
+                if delivery.qualified then
+                    store.qualified = store.qualified + accepted
+                else
+                    store.unqualified = store.unqualified + accepted
+                end
+                self.unit_delivered[store.unit] =
+                    (self.unit_delivered[store.unit] or 0) + accepted
+                if store.composition then
+                    addConstituents(self.constituent_delivered, store.composition,
+                        toKg(store.unit, accepted), 1)
+                end
+                delivery.fired = arrival.occurrence
+                delivery.lastAccepted = accepted
+                delivery.lastRejected = rejected
+                delivery.acceptedTotal = delivery.acceptedTotal + accepted
+                delivery.rejectedTotal = delivery.rejectedTotal + rejected
+                if delivery.recurrenceSeconds <= 0 then delivery.exhausted = true end
             end
-            self.unit_delivered[store.unit] =
-                (self.unit_delivered[store.unit] or 0) + accepted
-            if store.composition then
-                addConstituents(self.constituent_delivered, store.composition,
-                    toKg(store.unit, accepted), 1)
-            end
-            delivery.fired = arrival.occurrence
-            delivery.lastAccepted = accepted
-            delivery.lastRejected = rejected
-            delivery.acceptedTotal = delivery.acceptedTotal + accepted
-            delivery.rejectedTotal = delivery.rejectedTotal + rejected
-            if delivery.recurrenceSeconds <= 0 then delivery.exhausted = true end
         end
     end
     -- Mirror of the host ledger: same deterministic order, same limits.

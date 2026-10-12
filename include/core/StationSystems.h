@@ -139,6 +139,33 @@ namespace core
 		bool operator==(ResourceDeliverySettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationResourceDeliveries{16};
+	// A scheduled external removal of a declared quantity from one waste
+	// store (#403). Ejection is a scenario event, not a station process:
+	// it carries material out across the station boundary at declared
+	// simulation times, in the store's own unit, and only what is
+	// disposal-ready — the store's qualified contents. Held
+	// (unqualified/untreated) waste is never ejected, and a store that
+	// holds nothing eligible simply ejects nothing: a shortfall is a
+	// valid outcome, never a failure. What is ejected is booked as an
+	// external loss on the station's per-unit and per-constituent
+	// ledgers, so the boundary closes over it and material never
+	// disappears silently. A recurrence of zero is a one-off ejection;
+	// a positive recurrence repeats the same quantity every
+	// recurrenceSeconds, reusing the same schedule rule and the same
+	// deterministic scenario ordering as resupply deliveries. At equal
+	// occurrence time and priority, arrivals run before ejections.
+	struct WasteEjectionSettings
+	{
+		std::string id;
+		std::string storeId;              // waste store to eject from
+		std::string unit;                 // must match the target store's unit
+		double quantity{0.0};           // store units per occurrence, > 0
+		double firstOccurrenceSeconds{0.0}; // first ejection, >= 0
+		double recurrenceSeconds{0.0};  // 0 = one-off, else >= one fixed tick
+		int priority{0};                // higher runs first among coincidents
+		bool operator==(WasteEjectionSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationWasteEjections{16};
 	// Schedule boundary tolerance (#392). Authored times meet the fixed-tick
 	// grid in binary floating point and 1/60 is not exactly representable,
 	// so an occurrence scheduled exactly on a tick boundary can land a few
@@ -940,6 +967,7 @@ namespace core
 		std::vector<EquipmentLoadSettings> equipmentLoads;
 		std::vector<BatterySettings> batteries;
 		std::vector<ResourceDeliverySettings> deliveries;
+		std::vector<WasteEjectionSettings> wasteEjections;
 		std::vector<ThermalReservoirSettings> thermalReservoirs;
 		std::vector<RadiatorSettings> radiators;
 		std::vector<CoolantLoopSettings> coolantLoops;
@@ -1102,6 +1130,36 @@ namespace core
 		double nextOccurrenceSeconds{0.0};
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationDeliverySnapshot const&) const = default;
+	};
+	// One authored terminal-waste ejection as of the most recent tick:
+	// what its schedule says, what the last occurrence actually
+	// ejected, what it could not eject because the store held no more
+	// disposal-ready material, and when the next ejection is due
+	// (#403). Unmet material never left the store — held waste stays
+	// held, absent material was never there — so it is reported here
+	// rather than as a loss; only what was actually ejected is booked
+	// as external loss in the station's boundary ledgers.
+	struct StationWasteEjectionSnapshot
+	{
+		std::string id;
+		std::string storeId;
+		std::string unit;
+		double quantity{0.0};
+		double firstOccurrenceSeconds{0.0};
+		double recurrenceSeconds{0.0}; // 0 = one-off
+		int priority{0};
+		uint64_t occurrencesCompleted{0};
+		double lastOccurrenceSeconds{0.0};
+		double lastScheduled{0.0};
+		double lastEjected{0.0};
+		double lastUnmet{0.0};       // scheduled minus ejectable material
+		double ejectedTotal{0.0};
+		double unmetTotal{0.0};
+		bool exhausted{false};            // one-off already ejected
+		bool hasNextOccurrence{false};
+		double nextOccurrenceSeconds{0.0};
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationWasteEjectionSnapshot const&) const = default;
 	};
 
 	// One solar array as of the most recent tick: installed capacity, the
@@ -2008,6 +2066,11 @@ namespace core
 		std::vector<StationBalanceSnapshot> balances;
 		std::vector<StationConstituentBalanceSnapshot> constituentBalances;
 		std::vector<StationDeliverySnapshot> deliveries;
+		// The terminal-waste ejection picture (#403): per-ejection
+		// schedule, last-occurrence ejected/unmet split and cumulative
+		// totals. Ejected material appears in the balance ledgers as
+		// external loss.
+		std::vector<StationWasteEjectionSnapshot> wasteEjections;
 		StationPowerSnapshot power;
 		// The thermal picture (#395): reservoir temperatures, heat flows
 		// and limits, radiator rejection and the per-reservoir energy
@@ -2063,6 +2126,11 @@ namespace core
 		// the overview's "next delivery" readout (#392).
 		bool hasNextDelivery{false};
 		double nextDeliverySeconds{0.0};
+		// Soonest authored ejection still pending across every waste
+		// ejection schedule, for the overview's "next ejection" readout
+		// (#403).
+		bool hasNextWasteEjection{false};
+		double nextWasteEjectionSeconds{0.0};
 		double balanceTolerance{StationBalanceTolerance};
 		bool operator==(StationSystemsSnapshot const&) const = default;
 	};

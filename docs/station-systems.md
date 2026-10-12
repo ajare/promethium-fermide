@@ -1,4 +1,4 @@
-# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, chilled thermal services, fuelled generators, compartment atmospheres with airlock cycles, crew metabolic returns, water recovery with qualification, oxygen production with finite CO2 capture, and finite thermal buffers that ride through cooling deficits (#386–#391, #393–#402, #404)
+# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, terminal-waste storage and scheduled ejection, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, chilled thermal services, fuelled generators, compartment atmospheres with airlock cycles, crew metabolic returns, water recovery with qualification, oxygen production with finite CO2 capture, and finite thermal buffers that ride through cooling deficits (#386–#391, #393–#404, #406)
 
 Station systems are opt-in per World and disabled in existing documents. Open
 **View > Station Systems** or use the
@@ -1444,6 +1444,90 @@ efficiency is the product of the two efficiencies (about 50 % for the
 tested pair) — the cycle loses energy exactly as declared and creates
 none; deterministic Reset replay; and intact Lua fuel-cell descriptor
 crossings with contained construction refusal.
+
+### Terminal-waste storage and ejection (#403)
+
+Terminal waste is material at the end of its useful life inside the
+station, removed across the boundary on an authored schedule. Each
+ejection contract names one existing Resource store, the same unit as
+that store, a positive quantity, a first ejection time, and an
+optional recurrence interval — the same schedule discipline as
+resupply deliveries, including the one-off zero recurrence and the
+at-le-one-fixed-tick rule. Normal and hazardous terminal waste are
+kept separate the way every other material in the station is kept
+separate: in their own stores, each with its own ejection contract.
+
+Only disposal-ready material is eligible. A waste store's qualified
+contents are disposal-ready; its held (unqualified/untreated)
+contents are not, and an ejection never touches them. Each
+occurrence removes at most the scheduled quantity and at most the
+disposal-ready material the store actually holds; the difference
+between scheduled and ejected is reported as unmet, never forced,
+never taken from held stock, and never a failure. An ejection on an
+empty or fully-held store ejects nothing and still counts as an
+occurrence, so the schedule never stalls or disappears. What is
+ejected crosses the station boundary as an external loss: it is
+booked in the per-unit and per-constituent `lost` ledgers, so the
+balance closes as current + lost - delivered - collected == starting
+with the ejected mass explicitly gone from the station and held waste
+explicitly retained.
+
+Ejections run in the same scenario-event pass as deliveries, under
+the same total order: occurrence time, then higher priority first,
+then — at equal time and priority — arrivals before ejections, so
+material delivered this tick is disposal-ready for the ejection that
+follows it. A higher-priority ejection runs before a coincident
+delivery and can only remove what was already in the store. This is
+a scenario input: ejection is authored removal at scheduled times,
+not a simulated safe trajectory, navigation certification, or a
+disposal-process model.
+
+Not-immediately-needed material is not automatically terminal waste:
+recovered and surplus resources stay in their stores until capacity
+is reached (full destinations refuse and backpressure inflow through
+the existing store-capacity rules), and an authored ejection removes
+only its scheduled quantity, never the surplus beyond it.
+
+World schema 82 persists the authored ejection contracts (units: kg,
+L, gallons, seconds); a pre-82 document carrying `wasteEjections` is
+refused rather than silently dropped. Occurrence counts, the
+ejected/unmet split and the loss bookings are runtime-only: Load and
+Reset restart every ejection schedule from its authored beginning and
+repeated cycles replay identically. The separate Station Systems
+window drafts ejections (store, unit, quantity, first occurrence,
+recurrence, priority) with full validation reporting, and shows the
+live ejected/unmet amounts, occurrence counts, the next ejection
+time, and the store's remaining usable-versus-held split for every
+contract beside the existing views.
+
+Ejection acceptance coverage: refused configurations (unknown target
+store, cross-unit ejection, zero/negative quantity, negative first
+occurrence, sub-tick recurrence, duplicate and empty ids,
+over-budget count, and refused configurations leaving authored
+settings untouched); one-off ejection with the scheduled removal at
+its tick, spent-schedule silence afterward, and the boundary closing
+over the external loss; empty-store and fully-held-store ejections
+reported as nothing-ejectable without failing the station; held-waste
+preservation (only the qualified pool is removed, held stock stays
+behind occupying capacity, the shortfall visible as unmet);
+recurrence firing exactly once per period with the dry-store
+occurrences still counted and the ejected total capped by what the
+store could give; coincident delivery/ejection ordering at equal
+priority (arrival lands first and is ejectable the same tick) and
+with a higher-priority ejection (later-arriving material stays
+behind); no-automatic-waste (an unhooked store stays full, an hooked
+store loses only its scheduled quantity); the bundled Lua sandbox
+mirroring the same eligible-only removal and loss booking and
+agreeing with the host ledger for the same scenario; and Reset
+restarting the authored schedule from authored state. File coverage:
+schema-82 round trips through both document formats with only
+authored fields persisted, live ejection state never leaking, the
+scenario and its event history reproducible from the document, and
+pre-82 documents carrying `wasteEjections` refused. Editor coverage:
+the real Station Systems window drafts, validates, refuses and
+applies ejection edits through the reset-confirmed flow, and the
+live view reports the ejected/unmet split and the retained held
+waste.
 
 ## Explicit scope limit
 

@@ -855,6 +855,115 @@ namespace
 		require(driver.passed(), "Delivery workflow failed on the Test Engine");
 	}
 
+	// #403: terminal-waste ejection schedules are drafted, validated and
+	// applied through the real Station Systems window controls, and the
+	// live view reports the next ejection together with the ejected and
+	// not-ejectable amounts, while held waste stays visibly behind.
+	void wasteEjectionWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO();
+		io.DisplaySize = {1200, 1700};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Waste ejection editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		core::StationSystemsSettings initial;
+		initial.enabled = true;
+		initial.observationIntervalSeconds = 2.0f;
+		core::ResourceStoreSettings dump;
+		dump.id = "dump";
+		dump.unit = "kg";
+		dump.capacity = 60.0;
+		dump.startingQualified = 8.0;
+		dump.startingUnqualified = 5.0;
+		initial.stores.push_back(dump);
+		core::WasteEjectionSettings haul;
+		haul.id = "haul";
+		haul.storeId = "dump";
+		haul.unit = "kg";
+		haul.quantity = 5.0;
+		haul.firstOccurrenceSeconds = 1.0;
+		haul.recurrenceSeconds = 2.0;
+		initial.wasteEjections.push_back(haul);
+		require(world->configureStationSystems(initial, false, &diagnostic), diagnostic.c_str());
+		window.visible = true;
+		headless::TestEngineDriver driver([&]
+		{
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 1650});
+			window.render(world, history);
+		});
+		driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+
+		driver.run("station", "wasteEjectionWorkflow", [&](ImGuiTestContext* ctx)
+		{
+			ctx->SetRef("Station Systems");
+			REQ(driver.contains("1 terminal-waste ejection(s)"),
+				"Authored waste ejection count missing from the window");
+			REQ(driver.contains("haul <- dump (kg)")
+				&& driver.contains("next ejection at 1.000 s"),
+				"Authored next-ejection schedule not displayed");
+			// Run into the scenario: the store starts with 8 kg disposal-ready
+			// and 5 kg held. Occurrences at 1, 3 and 5 seconds eject 5, then
+			// the remaining 3, then find nothing eligible - the held waste is
+			// still visibly behind, and ticking never dirties the document.
+			world->markSaved();
+			world->resumeSimulation();
+			if (!world->advanceTicks(300))
+			{ REQ(false, "Waste ejection editor run failed"); }
+			world->pauseSimulation();
+			ctx->Sleep(1);
+			REQ(driver.contains("haul <- dump (kg): nothing-ejectable | last at 5.000 s: 0.000 of 5.000 ejected, 5.000 not ejectable | total ejected 8.000, unmet 7.000 | 3 occurrence(s)"),
+				"Live ejection ejected/unmet accounting not displayed");
+			REQ(driver.contains("dump (kg): usable 0.000, held 5.000 of capacity 60.000"),
+				"Held waste not displayed as retained in the store");
+			REQ(driver.contains("next ejection at 7.000 s"),
+				"Next ejection not advanced past the fired occurrences");
+			REQ(!world->isModified(), "Ejection ticking dirtied the authored document");
+			// An invalid drafted ejection is refused with a visible diagnostic
+			// and never reaches the authored settings or the history.
+			ctx->ItemInputValue("Waste ejection 0 quantity", "0");
+			ctx->ItemClick("Apply settings");
+			ctx->ItemClick("Confirm World reset");
+			ctx->Sleep(1);
+			REQ(driver.contains("quantity must be finite and positive"),
+				"Invalid ejection quantity diagnostic not shown");
+			REQ(world->getStationSystemsSettings().wasteEjections[0].quantity == 5.0
+				&& history.undoCount() == 0 && world->getSimulationTick() == 300,
+				"Invalid ejection draft mutated the authored settings");
+			// Repair the draft; the confirmed reset applies it and the live
+			// view restarts the schedule from the authored beginning.
+			ctx->ItemInputValue("Waste ejection 0 quantity", "4");
+			ctx->ItemClick("Apply settings");
+			ctx->Sleep(1);
+			REQ(driver.contains("Confirm?"),
+				"Ejection edit bypassed the World reset confirmation");
+			ctx->ItemClick("Confirm World reset");
+			REQ(world->getStationSystemsSettings().wasteEjections[0].quantity == 4.0
+				&& history.undoCount() == 1 && world->getSimulationTick() == 0,
+				"Repaired ejection draft did not apply through the reset-confirmed flow");
+			ctx->Sleep(1);
+			REQ(driver.contains("0 occurrence(s)") && driver.contains("next ejection at 1.000 s"),
+				"Applied ejection did not restart from authored state");
+			// A drafted sub-tick recurrence is refused: the schedule can
+			// never ask one tick to absorb an unbounded catch-up burst.
+			ctx->ItemInputValue("Waste ejection 0 recurrence seconds", "0.005");
+			ctx->ItemClick("Apply settings");
+			ctx->Sleep(1);
+			REQ(driver.contains("at least one World fixed tick"),
+				"Sub-tick ejection recurrence was accepted");
+			ctx->ItemClick("Cancel edits");
+			REQ(world->getStationSystemsSettings().wasteEjections[0].recurrenceSeconds == 2.0,
+				"Cancelled recurrence edit did not restore the authored schedule");
+		});
+		#undef REQ
+		require(driver.passed(), "Waste ejection workflow failed on the Test Engine");
+	}
+
 	// #395: thermal reservoirs and radiators are drafted, validated and
 	// applied through the real Station Systems window controls, and the
 	// live view reports temperatures, heat flows, limits and the closing
@@ -1553,6 +1662,7 @@ void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 	checks.push_back({"station/powerWorkflow", powerWorkflow});
 	checks.push_back({"station/batteryWorkflow", batteryWorkflow});
 	checks.push_back({"station/deliveryWorkflow", deliveryWorkflow});
+	checks.push_back({"station/wasteEjectionWorkflow", wasteEjectionWorkflow});
 	checks.push_back({"station/thermalWorkflow", thermalWorkflow});
 	checks.push_back({"station/coolantWorkflow", coolantWorkflow});
 	checks.push_back({"station/chillerWorkflow", chillerWorkflow});

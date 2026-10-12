@@ -808,7 +808,15 @@ namespace core
 		// dropped. The stored energy, charge/discharge results and the
 		// storage ledgers stay runtime-only, so load and Reset reconstruct
 		// them from the authored starting conditions.
-		serializer.writeUint32("version", 81);
+		// Version 82 adds authored terminal-waste ejection schedules (#403):
+		// scheduled external removals of disposal-ready (qualified)
+		// material from one waste store, once or recurring, in that
+		// store's own unit; a pre-82 document carrying `wasteEjections`
+		// is refused rather than silently dropped. Fired occurrences,
+		// ejected and unmet quantities and the external-loss bookings
+		// stay runtime-only, so load and Reset restart every ejection
+		// schedule from its authored beginning.
+		serializer.writeUint32("version", 82);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -1358,6 +1366,26 @@ namespace core
 					serializer.writeDouble("recurrenceSeconds", delivery.recurrenceSeconds);
 					serializer.writeBool("arrivesQualified", delivery.arrivesQualified);
 					serializer.writeInt32("priority", delivery.priority);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.wasteEjections.empty())
+			{
+				// Authored schedules only; fired occurrences and the
+				// ejected/unmet split are runtime state reconstructed on
+				// load, exactly as for resupply deliveries (#403).
+				serializer.beginArray("wasteEjections");
+				for (auto const& ejection : mStationSystemsSettings.wasteEjections)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", ejection.id);
+					serializer.writeString("storeId", ejection.storeId);
+					serializer.writeString("unit", ejection.unit);
+					serializer.writeDouble("quantity", ejection.quantity);
+					serializer.writeDouble("firstOccurrenceSeconds", ejection.firstOccurrenceSeconds);
+					serializer.writeDouble("recurrenceSeconds", ejection.recurrenceSeconds);
+					serializer.writeInt32("priority", ejection.priority);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -2246,7 +2274,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 81)
+		if (version < 1 || version > 82)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2849,6 +2877,27 @@ namespace core
 					delivery.arrivesQualified = serializer.readBool("arrivesQualified");
 					delivery.priority = serializer.readInt32("priority");
 					stationSettings.deliveries.push_back(std::move(delivery));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("wasteEjections"))
+			{
+				if (version < 82) throw SerializationException(
+					"Station waste ejections require World schema 82");
+				serializer.beginArray("wasteEjections");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					WasteEjectionSettings ejection;
+					ejection.id = serializer.readString("id");
+					ejection.storeId = serializer.readString("storeId");
+					ejection.unit = serializer.readString("unit");
+					ejection.quantity = serializer.readDouble("quantity");
+					ejection.firstOccurrenceSeconds = serializer.readDouble("firstOccurrenceSeconds");
+					ejection.recurrenceSeconds = serializer.readDouble("recurrenceSeconds");
+					ejection.priority = serializer.readInt32("priority");
+					stationSettings.wasteEjections.push_back(std::move(ejection));
 					serializer.endMap();
 				}
 				serializer.endArray();

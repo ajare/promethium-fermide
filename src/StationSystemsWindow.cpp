@@ -27,7 +27,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
 	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply, rechargeable batteries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, and chillers supplying class-matched cold services. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Thermal reservoirs integrate temperature from their effective capacity under absorbed and routed equipment heat; radiators reject heat by the Stefan-Boltzmann law at the emitting temperature against the authored sink, emissivity and view factor. A load's emitted heat is booked exactly once: routed into its class-compatible reservoir or exported directly, never both. Declared temperature limits are reported, never clamped. Coolant loops hold a finite, loop-specific coolant inventory segregated by hazard class (coolant is never potable or nutrient water); the pump circulates only the coolant the loop actually holds, so an underfilled loop flows less and a dry loop flows nothing, and the freeze-protection heater thermostats the loop up to its setpoint within its capacity. Pump work and heater heat enter the loop exactly once and reach the reservoir only through the circulation-gated heat-only exchanger; the loop draw rides the same electrical pool as external loads. Chillers supply a cold service of their declared class through a class-matched coolant-loop evaporator and reservoir condenser: the delivered duty is capped by the loop's actual circulation, gated at the chilled setpoint, and refused while the sink is at or above the maximum condensing temperature; work at the configured COP plus auxiliaries rides the same electrical pool, and condenser heat equals extracted heat plus the work and auxiliaries actually supplied, booked once. Fuelled generators convert a finite energy-unit fuel inventory into bus electrical output at the declared efficiency: output is bounded by the installed rating and the ramp limit, starting only completes once the startup energy has actually been drawn from the shared pool while the class-matched sink is below its maximum sink temperature, and after output stops the configured shutdown heat and its cooling requirement persist for the decay period; waste, startup and decay heat route exactly once into the sink and the fuel ledger closes over fuel = electrical + waste. Within a tick, generators and fuel-cell backup units produce first, then power allocates, then coolant loops and chillers run, then compartment atmospheres cycle, crews metabolise and compartments exchange, then thermal integrates, then transfers, then conversions. Compartment atmospheres model an ideal-gas mixture in a fixed volume: absolute and partial pressures derive from the gas inventory and temperature, humidity caps at Magnus saturation with the excess condensing and releasing its latent heat into the compartment, occupancy is an authored load assignment whose oxygen draw is capped by the inventory (CO2 and metabolic heat scale with what was actually consumed), leakage is a constant total-mass rate capped by the inventory, and scheduled airlock cycles remove authored mass with an explicit recovered-versus-lost split; every gram leaving a compartment is booked as leaked, recovered or lost, compartments never mix automatically, and declared pressure and gas-quality limits are reported, never clamped. Crews are an authored population with an activity profile, never derived from World Agents: metabolism draws food and water from compound stores and oxygen from the compartment, and returns CO2, moisture and metabolic heat to the compartment and urine and organic waste to their own finite compound stores. One uniform metabolic scale per tick - the scarcest supply or tightest waste headroom - throttles every pathway together, so absent material never generates nominal waste; requested versus actual is explicit per pathway, the authored coefficients must close over mass, constituents and energy, and the consumed mass the returns do not carry away is reported as explicit retained body mass. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s), %zu airlock cycle(s), %zu crew(s), %zu water collector(s), %zu water treatment(s), %zu electrolyzer(s), %zu CO2 capture machine(s), %zu fuel-cell backup unit(s) and %zu thermal buffer(s)",
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s), %zu airlock cycle(s), %zu crew(s), %zu water collector(s), %zu water treatment(s), %zu electrolyzer(s), %zu CO2 capture machine(s), %zu fuel-cell backup unit(s), %zu thermal buffer(s) and %zu terminal-waste ejection(s)",
 		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
 		authored.stores.size(), authored.transfers.size(), authored.conversions.size(),
 		authored.solarArrays.size(), authored.equipmentLoads.size(), authored.batteries.size(),
@@ -36,7 +36,8 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		authored.atmospheres.size(), authored.airlockCycles.size(), authored.crews.size(),
 		authored.waterCollectors.size(), authored.waterTreatments.size(),
 		authored.electrolyzers.size(), authored.co2Captures.size(),
-		authored.fuelCells.size(), authored.thermalBuffers.size());
+		authored.fuelCells.size(), authored.thermalBuffers.size(),
+		authored.wasteEjections.size());
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
@@ -539,6 +540,60 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			if (!taken) break;
 		}
 		mDraft.deliveries.push_back(std::move(delivery));
+	}
+	ImGui::SeparatorText("Draft terminal-waste ejections (#403; scheduled removals of disposal-ready (qualified) material only; held/untreated waste stays behind; what is ejected is booked as external loss; recurrence 0 is a one-off)");
+	for (size_t index = 0; index < mDraft.wasteEjections.size(); )
+	{
+		auto& ejection = mDraft.wasteEjections[index];
+		auto const row = std::to_string(index);
+		bool removeEjection = false;
+		ImGui::PushItemWidth(220);
+		char ejectionIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(ejectionIdBuffer, ejection.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Waste ejection " + row + " id").c_str(), ejectionIdBuffer, sizeof(ejectionIdBuffer)))
+			ejection.id = ejectionIdBuffer;
+		char ejectionStoreBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(ejectionStoreBuffer, ejection.storeId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Waste ejection " + row + " store").c_str(),
+			ejectionStoreBuffer, sizeof(ejectionStoreBuffer)))
+			ejection.storeId = ejectionStoreBuffer;
+		char ejectionUnitBuffer[8]{};
+		std::strncpy(ejectionUnitBuffer, ejection.unit.c_str(), sizeof(ejectionUnitBuffer) - 1);
+		if (ImGui::InputText(("Waste ejection " + row + " unit").c_str(), ejectionUnitBuffer, sizeof(ejectionUnitBuffer)))
+			ejection.unit = ejectionUnitBuffer;
+		ImGui::InputDouble(("Waste ejection " + row + " quantity").c_str(), &ejection.quantity, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Waste ejection " + row + " first occurrence seconds").c_str(),
+			&ejection.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Waste ejection " + row + " recurrence seconds").c_str(),
+			&ejection.recurrenceSeconds, 0.0, 0.0, "%.3f");
+		ImGui::SameLine();
+		ImGui::InputInt(("Waste ejection " + row + " priority").c_str(), &ejection.priority);
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove waste ejection " + row).c_str()))
+			removeEjection = true;
+		ImGui::PopItemWidth();
+		if (removeEjection)
+			mDraft.wasteEjections.erase(mDraft.wasteEjections.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
+	if (mDraft.wasteEjections.size() < core::MaxStationWasteEjections && ImGui::Button("Add waste ejection"))
+	{
+		core::WasteEjectionSettings ejection;
+		ejection.quantity = 10.0;
+		if (!mDraft.stores.empty())
+		{
+			ejection.storeId = mDraft.stores.front().id;
+			ejection.unit = mDraft.stores.front().unit;
+		}
+		for (size_t candidate = mDraft.wasteEjections.size() + 1;; ++candidate)
+		{
+			ejection.id = "ejection" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.wasteEjections.begin(), mDraft.wasteEjections.end(),
+				[&](core::WasteEjectionSettings const& existing) { return existing.id == ejection.id; });
+			if (!taken) break;
+		}
+		mDraft.wasteEjections.push_back(std::move(ejection));
 	}
 	ImGui::SeparatorText("Draft thermal reservoirs (kJ/K, degrees C; limits are declared service limits, absorbed heat is environmental)");
 	for (size_t index = 0; index < mDraft.thermalReservoirs.size(); )
@@ -1827,6 +1882,33 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			ImGui::Text("  next arrival at %.3f s (%s)", delivery.nextOccurrenceSeconds,
 				delivery.recurrenceSeconds > 0.0
 					? ("recurring every " + std::to_string(delivery.recurrenceSeconds) + " s").c_str()
+					: "one-off");
+	}
+	ImGui::SeparatorText("Terminal-waste ejections (live; only disposal-ready (qualified) material is ejected, held/untreated waste stays behind, ejected material is booked as external loss; shortfalls are outcomes, never failures)");
+	if (snapshot.wasteEjections.empty()) ImGui::TextDisabled("No terminal-waste ejections authored.");
+	else if (snapshot.hasNextWasteEjection)
+		ImGui::Text("Next ejection due at %.3f s", snapshot.nextWasteEjectionSeconds);
+	for (auto const& ejection : snapshot.wasteEjections)
+	{
+		char const* status = "idle";
+		switch (ejection.status)
+		{
+		case core::StationTransferStatus::Full: status = "ejected"; break;
+		case core::StationTransferStatus::Partial: status = "partially-ejected"; break;
+		case core::StationTransferStatus::Rejected: status = "nothing-ejectable"; break;
+		case core::StationTransferStatus::Idle: break;
+		}
+		ImGui::Text("%s <- %s (%s): %s | last at %.3f s: %.3f of %.3f ejected, %.3f not ejectable | total ejected %.3f, unmet %.3f | %llu occurrence(s) | priority %d",
+			ejection.id.c_str(), ejection.storeId.c_str(), ejection.unit.c_str(), status,
+			ejection.lastOccurrenceSeconds, ejection.lastEjected, ejection.lastScheduled,
+			ejection.lastUnmet, ejection.ejectedTotal, ejection.unmetTotal,
+			static_cast<unsigned long long>(ejection.occurrencesCompleted), ejection.priority);
+		if (ejection.exhausted)
+			ImGui::Text("  one-off schedule spent: no further ejections");
+		else
+			ImGui::Text("  next ejection at %.3f s (%s)", ejection.nextOccurrenceSeconds,
+				ejection.recurrenceSeconds > 0.0
+					? ("recurring every " + std::to_string(ejection.recurrenceSeconds) + " s").c_str()
 					: "one-off");
 	}
 	if (snapshot.enabled && !snapshot.healthy)
