@@ -539,6 +539,12 @@ namespace core
 	// temperature (Magnus form): p_sat = 0.61094 x exp(17.625 t / (t +
 	// 243.04)). This is the documented vapour-capacity assumption; the
 	// compartment air holds no more vapour than this at its temperature.
+	// Documented supported domain (#565): strictly above -243.04 C, the
+	// temperature where the expression is singular and its exponent
+	// overflows below it. At or below the singular temperature the
+	// function returns a finite valid continuation of zero vapour
+	// capacity - air that cold holds no vapour, matching the in-domain
+	// limit - so an overflow is never published as a shortage.
 	double stationSaturationVapourPressureKPa(double temperatureC);
 	// The vapour mass in kg that saturates a volume at a temperature: the
 	// inverse of the ideal-gas partial pressure at saturation.

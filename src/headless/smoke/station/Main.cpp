@@ -3636,6 +3636,262 @@ namespace
 			&& huge.getStationSystemsSnapshot().power.surplusKW == 1e308
 			&& huge.getStationSystemsSnapshot().power.totalSuppliedKW == 1.0,
 			"Finite extreme generation refused as if non-finite");
+		// #565: derived atmosphere pressures, the saturation model and
+		// the thermal/class rollups cannot escape the non-finite-result
+		// containment. Reproduction A: a 1e-310 m3 compartment with a
+		// kilogram of gas is individually-valid authored input whose
+		// starting ideal-gas pressure already overflows to infinity.
+		// The authoring audit refuses it transactionally: no runtime,
+		// no snapshot, no mutation of the World.
+		core::World thinAir("ThinAir", 2, 2);
+		thinAir.pauseSimulation(); thinAir.finishBuild();
+		auto const thinAirBefore = yaml(thinAir);
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			core::AtmosphereSettings thin;
+			thin.id = "air";
+			thin.hazardClass = "normal";
+			thin.volumeM3 = 1e-310;
+			thin.startingOxygenKg = 0.2;
+			thin.startingNitrogenKg = 0.8;
+			thin.startingTemperatureC = 20.0;
+			thin.thermalCapacityKJPerK = 1.0;
+			thin.minPressureKPa = 1.0;
+			thin.maxPressureKPa = 200.0;
+			settings.atmospheres = {thin};
+			std::string diagnostic;
+			require(!thinAir.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("non-finite pressure") != std::string::npos,
+				"Overflowing starting atmosphere pressure not refused at authoring");
+			require(yaml(thinAir) == thinAirBefore
+				&& !thinAir.getStationSystemsSnapshot().enabled,
+				"Refused atmosphere mutated the World or published a snapshot");
+		}
+		// Reproduction B: the Magnus saturation expression is singular
+		// at -243.04 C and overflowed to infinity below it. The model
+		// now carries a documented finite continuation - zero vapour
+		// capacity at or below the singular temperature - so the
+		// initial snapshot and every tick publish a finite saturation
+		// of 0 instead of an overflow dressed up as a shortage.
+		core::setStationSystemsSourceLoader({});
+		core::World coldSat("ColdSaturation", 2, 2);
+		coldSat.pauseSimulation(); coldSat.finishBuild();
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			core::AtmosphereSettings cold;
+			cold.id = "air";
+			cold.hazardClass = "normal";
+			cold.volumeM3 = 1.0;
+			cold.startingOxygenKg = 0.2;
+			cold.startingNitrogenKg = 0.8;
+			cold.startingTemperatureC = -243.05;
+			cold.thermalCapacityKJPerK = 1.0;
+			cold.minPressureKPa = 1.0;
+			cold.maxPressureKPa = 200.0;
+			settings.atmospheres = {cold};
+			std::string diagnostic;
+			require(coldSat.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+		}
+		{
+			auto const initial = coldSat.getStationSystemsSnapshot();
+			require(initial.healthy && initial.atmospheres.size() == 1
+				&& initial.atmospheres[0].saturationVapourPressureKPa == 0.0
+				&& std::isfinite(initial.atmospheres[0].pressureKPa),
+				"Initial snapshot published a non-finite saturation or pressure");
+		}
+		coldSat.resumeSimulation();
+		require(coldSat.advanceTicks(10) && coldSat.getStationSystemsSnapshot().healthy
+			&& coldSat.getStationSystemsDiagnostics().empty()
+			&& coldSat.getStationSystemsSnapshot().atmospheres[0].saturationVapourPressureKPa == 0.0
+			&& std::isfinite(coldSat.getStationSystemsSnapshot().atmospheres[0].relativeHumidity),
+			"Saturation continuation did not keep the tick finite and healthy");
+		// Reproduction C: two loops each circulate a finite 1e308 kg/s;
+		// the station-wide circulation rollup the snapshot publishes
+		// overflows to infinity even though every per-loop result is
+		// finite. With the bundled mirror the sandbox rejects the
+		// overflowed aggregate itself; with a non-mirroring sandbox the
+		// host ledger refuses the commit naming the coolant-circulation
+		// rollup. Either way the tick fails whole and nothing publishes.
+		core::setStationSystemsSourceLoader({});
+		core::World circulation("CirculationOverflow", 2, 2);
+		circulation.pauseSimulation(); circulation.finishBuild();
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.solarArrays = {{"array", 100.0, {}}};
+			core::ThermalReservoirSettings sink;
+			sink.id = "sink"; sink.thermalClass = "moderate";
+			sink.heatCapacityKJPerK = 1000.0; sink.startingTemperatureC = 20.0;
+			sink.minTemperatureC = -100.0; sink.maxTemperatureC = 200.0;
+			settings.thermalReservoirs = {sink};
+			core::CoolantLoopSettings loopA;
+			loopA.id = "loop-a"; loopA.hazardClass = "normal"; loopA.reservoirId = "sink";
+			loopA.coolantCapacityKg = 1.0; loopA.startingCoolantKg = 1.0;
+			loopA.specificHeatKJPerKgK = 4.0; loopA.startingTemperatureC = 20.0;
+			loopA.pumpPowerKW = 1.0; loopA.ratedFlowKgPerS = 1e308;
+			core::CoolantLoopSettings loopB = loopA;
+			loopB.id = "loop-b";
+			settings.coolantLoops = {loopA, loopB};
+			std::string diagnostic;
+			require(circulation.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+		}
+		circulation.resumeSimulation();
+		auto const circulationBefore = circulation.getStationSystemsSnapshot();
+		auto const circulationEvents = circulation.getStationSystemsEvents();
+		require(!circulation.advanceTick(), "Infinite circulation rollup published as healthy");
+		require(circulation.isSimulationPaused()
+			&& !circulation.getStationSystemsSnapshot().healthy
+			&& circulation.getSimulationTick() == 0,
+			"Circulation rollup failure not fail-visible and synchronized");
+		auto expectedCirculation = circulationBefore;
+		expectedCirculation.healthy = false;
+		require(circulation.getStationSystemsSnapshot() == expectedCirculation
+			&& circulation.getStationSystemsEvents() == circulationEvents,
+			"Failed circulation rollup tick published partial state");
+		{
+			auto const diagnostics = circulation.getStationSystemsDiagnostics();
+			require(diagnostics.size() == 1 && diagnostics[0].worldTick == 1
+				&& diagnostics[0].message.find("finite") != std::string::npos,
+				"Circulation rollup diagnostic missing or wrong");
+		}
+		core::setStationSystemsSourceLoader([] {
+			return "return function() local n = 0 "
+				"return {advance=function() n = n + 1; return n end} end";
+		});
+		core::World hostCirculation("HostCirculation", 2, 2);
+		hostCirculation.pauseSimulation(); hostCirculation.finishBuild();
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.solarArrays = {{"array", 100.0, {}}};
+			core::ThermalReservoirSettings sink;
+			sink.id = "sink"; sink.thermalClass = "moderate";
+			sink.heatCapacityKJPerK = 1000.0; sink.startingTemperatureC = 20.0;
+			sink.minTemperatureC = -100.0; sink.maxTemperatureC = 200.0;
+			settings.thermalReservoirs = {sink};
+			core::CoolantLoopSettings loopA;
+			loopA.id = "loop-a"; loopA.hazardClass = "normal"; loopA.reservoirId = "sink";
+			loopA.coolantCapacityKg = 1.0; loopA.startingCoolantKg = 1.0;
+			loopA.specificHeatKJPerKgK = 4.0; loopA.startingTemperatureC = 20.0;
+			loopA.pumpPowerKW = 1.0; loopA.ratedFlowKgPerS = 1e308;
+			core::CoolantLoopSettings loopB = loopA;
+			loopB.id = "loop-b";
+			settings.coolantLoops = {loopA, loopB};
+			std::string diagnostic;
+			require(hostCirculation.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+		}
+		hostCirculation.resumeSimulation();
+		require(!hostCirculation.advanceTick(), "Host committed an infinite circulation rollup");
+		auto const hostCirculationDiagnostics = hostCirculation.getStationSystemsDiagnostics();
+		require(hostCirculationDiagnostics.size() == 1
+			&& hostCirculationDiagnostics[0].system == "Coolant circulation"
+			&& hostCirculationDiagnostics[0].failure == Failure::ConversionError
+			&& hostCirculationDiagnostics[0].message
+				.find("non-finite station total coolant circulation flow") != std::string::npos,
+			"Host circulation rollup audit diagnostic missing or wrong");
+		// Reproduction D: two 1e308 kW chillers in one service class
+		// overflow the published cold-class capacity even though both
+		// machines are gated off at their chilled setpoint and every
+		// per-chiller result is finite. The capacity is authored-derived,
+		// so the bundled sandbox's initial audit refuses the whole
+		// configuration transactionally before any state exists, and the
+		// host ledger's own class-rollup audit refuses the tick when a
+		// sandbox mirrors nothing.
+		core::setStationSystemsSourceLoader({});
+		core::World coldClass("ColdClassOverflow", 2, 2);
+		coldClass.pauseSimulation(); coldClass.finishBuild();
+		auto const coldClassBefore = yaml(coldClass);
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.solarArrays = {{"array", 100.0, {}}};
+			core::ThermalReservoirSettings cold;
+			cold.id = "cold"; cold.thermalClass = "moderate";
+			cold.heatCapacityKJPerK = 1000.0; cold.startingTemperatureC = 20.0;
+			cold.minTemperatureC = -100.0; cold.maxTemperatureC = 200.0;
+			core::ThermalReservoirSettings hot = cold;
+			hot.id = "hot";
+			settings.thermalReservoirs = {cold, hot};
+			core::CoolantLoopSettings loopA;
+			loopA.id = "loop-a"; loopA.hazardClass = "normal"; loopA.reservoirId = "cold";
+			loopA.coolantCapacityKg = 1.0; loopA.startingCoolantKg = 1.0;
+			loopA.specificHeatKJPerKgK = 4.0; loopA.startingTemperatureC = 5.0;
+			loopA.pumpPowerKW = 1.0; loopA.ratedFlowKgPerS = 1.0;
+			loopA.exchangerConductanceKWPerK = 1.0;
+			core::CoolantLoopSettings loopB = loopA;
+			loopB.id = "loop-b";
+			settings.coolantLoops = {loopA, loopB};
+			core::ChillerSettings chillerA;
+			chillerA.id = "chiller-a"; chillerA.thermalClass = "moderate";
+			chillerA.coldLoopId = "loop-a"; chillerA.condenserReservoirId = "hot";
+			chillerA.ratedCoolingCapacityKW = 1e308; chillerA.cop = 2.0;
+			chillerA.auxiliaryPowerKW = 0.0; chillerA.chilledSetpointC = 5.0;
+			chillerA.maxCondensingTemperatureC = 45.0;
+			core::ChillerSettings chillerB = chillerA;
+			chillerB.id = "chiller-b"; chillerB.coldLoopId = "loop-b";
+			settings.chillers = {chillerA, chillerB};
+			std::string diagnostic;
+			require(!coldClass.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("cold-service class 'moderate' rollup is not finite")
+					!= std::string::npos,
+				"Overflowing cold-class capacity not refused at configuration");
+			require(yaml(coldClass) == coldClassBefore
+				&& !coldClass.getStationSystemsSnapshot().enabled,
+				"Refused cold-class capacity mutated the World or published a snapshot");
+		}
+		core::setStationSystemsSourceLoader([] {
+			return "return function() local n = 0 "
+				"return {advance=function() n = n + 1; return n end} end";
+		});
+		core::World hostColdClass("HostColdClass", 2, 2);
+		hostColdClass.pauseSimulation(); hostColdClass.finishBuild();
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.solarArrays = {{"array", 100.0, {}}};
+			core::ThermalReservoirSettings cold;
+			cold.id = "cold"; cold.thermalClass = "moderate";
+			cold.heatCapacityKJPerK = 1000.0; cold.startingTemperatureC = 20.0;
+			cold.minTemperatureC = -100.0; cold.maxTemperatureC = 200.0;
+			core::ThermalReservoirSettings hot = cold;
+			hot.id = "hot";
+			settings.thermalReservoirs = {cold, hot};
+			core::CoolantLoopSettings loopA;
+			loopA.id = "loop-a"; loopA.hazardClass = "normal"; loopA.reservoirId = "cold";
+			loopA.coolantCapacityKg = 1.0; loopA.startingCoolantKg = 1.0;
+			loopA.specificHeatKJPerKgK = 4.0; loopA.startingTemperatureC = 5.0;
+			loopA.pumpPowerKW = 1.0; loopA.ratedFlowKgPerS = 1.0;
+			loopA.exchangerConductanceKWPerK = 1.0;
+			core::CoolantLoopSettings loopB = loopA;
+			loopB.id = "loop-b";
+			settings.coolantLoops = {loopA, loopB};
+			core::ChillerSettings chillerA;
+			chillerA.id = "chiller-a"; chillerA.thermalClass = "moderate";
+			chillerA.coldLoopId = "loop-a"; chillerA.condenserReservoirId = "hot";
+			chillerA.ratedCoolingCapacityKW = 1e308; chillerA.cop = 2.0;
+			chillerA.auxiliaryPowerKW = 0.0; chillerA.chilledSetpointC = 5.0;
+			chillerA.maxCondensingTemperatureC = 45.0;
+			core::ChillerSettings chillerB = chillerA;
+			chillerB.id = "chiller-b"; chillerB.coldLoopId = "loop-b";
+			settings.chillers = {chillerA, chillerB};
+			std::string diagnostic;
+			require(hostColdClass.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+		}
+		hostColdClass.resumeSimulation();
+		require(!hostColdClass.advanceTick(), "Host committed an infinite cold-class capacity");
+		auto const hostColdClassDiagnostics = hostColdClass.getStationSystemsDiagnostics();
+		require(hostColdClassDiagnostics.size() == 1
+			&& hostColdClassDiagnostics[0].system == "Chilled thermal service"
+			&& hostColdClassDiagnostics[0].failure == Failure::ConversionError
+			&& hostColdClassDiagnostics[0].message
+				.find("cold-service class 'moderate' total cooling capacity") != std::string::npos,
+			"Host cold-class rollup audit diagnostic missing or wrong");
 		unaffected.resumeSimulation();
 		require(unaffected.advanceTick() && unaffected.getStationSystemsSnapshot().healthy,
 			"Non-finite containment leaked between Worlds");

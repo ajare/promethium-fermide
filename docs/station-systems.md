@@ -382,6 +382,27 @@ structured diagnostic names the failed value. Ordinary finite
 shortages remain valid outcomes; a large-but-finite magnitude is
 never refused.
 
+The same containment now covers the atmosphere and thermal publish
+paths (#565). The snapshot derives compartment partial pressures,
+absolute pressure and saturation vapour capacity, and publishes
+station-wide thermal rollups (absorbed/routed/rejected heat,
+circulation, freeze heating, pump power, cooling provided/unmet,
+condenser heat, generator output/startup/waste/decay) and one
+cold-service account per thermal class; every one of these derived
+aggregates is audited finite in the host ledger and in the bundled
+Lua mirror before the tick may commit. Two finite 1e308 kW chiller
+ratings in one class overflow the class capacity even with both
+machines gated off, and two finite 1e308 kg/s loop flows overflow
+the circulation total; both now fail the tick whole. Authored
+compartment states that are inconsistent from the start — a starting
+gas inventory whose ideal-gas pressure in the declared volume is
+already infinite — are refused transactionally at configuration:
+no runtime is constructed and the World is not mutated. The Magnus
+saturation model's documented domain is strictly above -243.04 C,
+where the expression is singular; at or below it the model carries
+a finite continuation of zero vapour capacity rather than
+publishing an overflow as a shortage.
+
 World schema 69 persists the authored arrays and load contracts (units:
 kW, seconds, fractions); a pre-69 document carrying `solarArrays` or
 `equipmentLoads` is refused rather than silently dropped. Allocation
@@ -858,7 +879,12 @@ above saturation condenses within the tick, the condensate leaves
 the vapour inventory (reported as condensed mass, not destroyed)
 and releases 2257 kJ/kg of latent heat into the compartment, so a
 compartment cannot sit above saturation and relative humidity never
-exceeds 100 %.
+exceeds 100 %. The curve's documented supported domain is strictly
+above -243.04 C, where the expression is singular and its exponent
+overflows below it; at or below that temperature the model
+continues finitely at zero vapour capacity — air that cold holds no
+vapour — so an out-of-domain temperature never publishes an
+overflow as a valid shortage (#565).
 
 Occupancy is an authored load assignment — a count plus per-
 occupant rates for oxygen use, carbon dioxide production, sensible

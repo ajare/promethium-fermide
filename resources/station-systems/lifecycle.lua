@@ -957,6 +957,28 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     -- the sandbox re-audits the per-component and thermal conservation
     -- every tick so a corrupt crossing or model drift fails contained
     -- like any other script failure.
+    -- Ideal-gas partial pressure and Magnus saturation formulas shared
+    -- by the constructor audit and the per-tick integration; they
+    -- mirror the host formulas exactly (#400, #565).
+    local function partialPressureKPa(massKg, molarMassKgPerMol, volumeM3, temperatureC)
+        return massKg / molarMassKgPerMol * GAS_CONSTANT * (temperatureC + KELVIN_OFFSET)
+            / volumeM3 / 1000.0
+    end
+    local function saturationVapourPressureKPa(temperatureC)
+        -- #565: the Magnus expression is singular at -243.04 C and its
+        -- exponent overflows to infinity below that point. The
+        -- documented supported domain is strictly above the singular
+        -- temperature; at or below it the model carries a finite valid
+        -- continuation - air that cold holds no vapour, which is
+        -- exactly where the in-domain curve is already heading -
+        -- instead of publishing an overflow as a shortage.
+        if temperatureC <= -243.04 then return 0.0 end
+        return 0.61094 * math.exp(17.625 * temperatureC / (temperatureC + 243.04))
+    end
+    local function saturatedVapourMassKg(saturationKPa, volumeM3, temperatureC)
+        return saturationKPa * 1000.0 * volumeM3 * MOLAR_MASS_WATER
+            / (GAS_CONSTANT * (temperatureC + KELVIN_OFFSET))
+    end
     local atmosphere_by_id = {}
     for index = 1, #atmospheres do
         local atmosphere = atmospheres[index]
@@ -1006,6 +1028,25 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             'atmosphere pressure limits must be finite and positive with min below max')
         checkAmount('minimum oxygen partial pressure', atmosphere.minOxygenPartialPressureKPa, false)
         checkAmount('maximum CO2 partial pressure', atmosphere.maxCarbonDioxidePartialPressureKPa, false)
+        -- #565: mirror of the host authoring refusal. Every authored
+        -- field being finite does not make the starting state
+        -- publishable: the ideal-gas division by a tiny volume can
+        -- overflow, and a compartment whose starting inventory already
+        -- derives a non-finite pressure is an inconsistent authored
+        -- input, refused rather than published as a healthy state.
+        local startingOxygenKPa = partialPressureKPa(atmosphere.startingOxygenKg,
+            MOLAR_MASS_OXYGEN, atmosphere.volumeM3, atmosphere.startingTemperatureC)
+        local startingNitrogenKPa = partialPressureKPa(atmosphere.startingNitrogenKg,
+            MOLAR_MASS_NITROGEN, atmosphere.volumeM3, atmosphere.startingTemperatureC)
+        local startingCarbonDioxideKPa = partialPressureKPa(atmosphere.startingCarbonDioxideKg,
+            MOLAR_MASS_CARBON_DIOXIDE, atmosphere.volumeM3, atmosphere.startingTemperatureC)
+        local startingVapourKPa = partialPressureKPa(atmosphere.startingWaterVapourKg,
+            MOLAR_MASS_WATER, atmosphere.volumeM3, atmosphere.startingTemperatureC)
+        assert(isFinite(startingOxygenKPa) and isFinite(startingNitrogenKPa)
+            and isFinite(startingCarbonDioxideKPa) and isFinite(startingVapourKPa)
+            and isFinite(startingOxygenKPa + startingNitrogenKPa
+                + startingCarbonDioxideKPa + startingVapourKPa),
+            'atmosphere starting inventory derives a non-finite pressure in its volume and temperature')
         object.atmospheres[index] = {
             id = atmosphere.id,
             hazardClass = atmosphere.hazardClass,
@@ -1255,17 +1296,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     -- the host exactly; the reservoir books the exact negation of the
     -- compartment exchange in applyThermal, so the crossing is one
     -- exchange accounted once on each side.
-    local function partialPressureKPa(massKg, molarMassKgPerMol, volumeM3, temperatureC)
-        return massKg / molarMassKgPerMol * GAS_CONSTANT * (temperatureC + KELVIN_OFFSET)
-            / volumeM3 / 1000.0
-    end
-    local function saturationVapourPressureKPa(temperatureC)
-        return 0.61094 * math.exp(17.625 * temperatureC / (temperatureC + 243.04))
-    end
-    local function saturatedVapourMassKg(saturationKPa, volumeM3, temperatureC)
-        return saturationKPa * 1000.0 * volumeM3 * MOLAR_MASS_WATER
-            / (GAS_CONSTANT * (temperatureC + KELVIN_OFFSET))
-    end
+    -- the ideal-gas partial pressure and Magnus saturation formulas
+    -- moved above the constructor so the authoring audit can use them.
     local function applyAtmospheres(self, elapsed, fixed_seconds)
         local cycles = {}
         for index = 1, #self.airlock_cycles do
@@ -2619,6 +2651,64 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             assert(gen.phase ~= 'running' or gen.lastCoolingAvailable,
                 "generator '" .. gen.id .. "' ran while its cooling interface was unqualified")
         end
+        -- #565: every published thermal/class rollup is a sum of
+        -- individually finite terms; the aggregate must itself be
+        -- finite before the snapshot that publishes it can commit.
+        -- Two finite 1e308 flows or ratings sum to infinity and pass
+        -- every inequality audit, so the sums are checked explicitly.
+        local absorbedTotal, routedTotal, rejectedTotal = 0, 0, 0
+        for _, reservoir in ipairs(self.reservoirs) do
+            absorbedTotal = absorbedTotal + reservoir.absorbedKW
+            routedTotal = routedTotal + reservoir.lastRouted
+            rejectedTotal = rejectedTotal + reservoir.lastRejected
+        end
+        local circulationTotal, freezeHeatingTotal, pumpPowerTotal = 0, 0, 0
+        for _, loop in ipairs(self.coolant_loops) do
+            circulationTotal = circulationTotal + loop.lastFlow
+            freezeHeatingTotal = freezeHeatingTotal + loop.lastHeaterSupplied
+            pumpPowerTotal = pumpPowerTotal + loop.lastPumpSupplied
+        end
+        local coolingProvidedTotal, coolingUnmetTotal = 0, 0
+        local condenserHeatTotal, chillerPowerTotal = 0, 0
+        local classRollups = {}
+        for _, chiller in ipairs(self.chillers) do
+            coolingProvidedTotal = coolingProvidedTotal + chiller.lastCooling
+            coolingUnmetTotal = coolingUnmetTotal + (chiller.lastDemand - chiller.lastCooling)
+            condenserHeatTotal = condenserHeatTotal + chiller.lastCondenserKW
+            chillerPowerTotal = chillerPowerTotal + chiller.lastPowerSupplied
+            local rollup = classRollups[chiller.thermalClass]
+            if rollup == nil then
+                rollup = { capacity = 0, provided = 0, unmet = 0, work = 0, condenser = 0 }
+                classRollups[chiller.thermalClass] = rollup
+            end
+            rollup.capacity = rollup.capacity + chiller.ratedKW
+            rollup.provided = rollup.provided + chiller.lastCooling
+            rollup.unmet = rollup.unmet + (chiller.lastDemand - chiller.lastCooling)
+            rollup.work = rollup.work + chiller.lastPowerSupplied
+            rollup.condenser = rollup.condenser + chiller.lastCondenserKW
+        end
+        local generatorOutputTotal, generatorStartupTotal = 0, 0
+        local generatorWasteTotal, generatorDecayTotal = 0, 0
+        for _, gen in ipairs(self.generators) do
+            generatorOutputTotal = generatorOutputTotal + gen.outputKW
+            generatorStartupTotal = generatorStartupTotal + gen.lastStartupDrawKW
+            generatorWasteTotal = generatorWasteTotal + gen.lastWasteHeatKW
+            generatorDecayTotal = generatorDecayTotal + gen.lastDecayHeatKW
+        end
+        local aggregates = { absorbedTotal, routedTotal, rejectedTotal,
+            circulationTotal, freezeHeatingTotal, pumpPowerTotal,
+            coolingProvidedTotal, coolingUnmetTotal, condenserHeatTotal,
+            chillerPowerTotal, generatorOutputTotal, generatorStartupTotal,
+            generatorWasteTotal, generatorDecayTotal }
+        for _, value in ipairs(aggregates) do
+            assert(isFinite(value), 'station thermal rollup aggregate is not finite')
+        end
+        for thermalClass, rollup in pairs(classRollups) do
+            assert(isFinite(rollup.capacity) and isFinite(rollup.provided)
+                and isFinite(rollup.unmet) and isFinite(rollup.work)
+                and isFinite(rollup.condenser),
+                "cold-service class '" .. thermalClass .. "' rollup is not finite")
+        end
     end
     -- Atmosphere containment ledger (#400): per-component closure and
     -- thermal closure within the declared tolerance, mirroring the host
@@ -2685,6 +2775,25 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 assert(isFinite(value),
                     "atmosphere '" .. compartment.id .. "' value is not finite")
             end
+            -- #565: the published derived magnitudes - the partial
+            -- pressures, the absolute pressure and the saturation
+            -- vapour capacity - are computed from this state by the
+            -- snapshot; a finite inventory in a tiny volume can
+            -- overflow the ideal-gas division, so every derived
+            -- published magnitude is audited finite here too.
+            local oxygenKPa = partialPressureKPa(compartment.oxygen, MOLAR_MASS_OXYGEN,
+                compartment.volumeM3, compartment.temperature)
+            local nitrogenKPa = partialPressureKPa(compartment.nitrogen, MOLAR_MASS_NITROGEN,
+                compartment.volumeM3, compartment.temperature)
+            local carbonDioxideKPa = partialPressureKPa(compartment.carbonDioxide,
+                MOLAR_MASS_CARBON_DIOXIDE, compartment.volumeM3, compartment.temperature)
+            local vapourKPa = partialPressureKPa(compartment.waterVapour, MOLAR_MASS_WATER,
+                compartment.volumeM3, compartment.temperature)
+            assert(isFinite(oxygenKPa) and isFinite(nitrogenKPa)
+                and isFinite(carbonDioxideKPa) and isFinite(vapourKPa)
+                and isFinite(oxygenKPa + nitrogenKPa + carbonDioxideKPa + vapourKPa)
+                and isFinite(saturationVapourPressureKPa(compartment.temperature)),
+                "atmosphere '" .. compartment.id .. "' derived pressure is not finite")
         end
         for _, cycle in ipairs(self.airlock_cycles) do
             assert(isFinite(cycle.removedTotal) and isFinite(cycle.recoveredTotal)

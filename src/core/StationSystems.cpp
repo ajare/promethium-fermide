@@ -537,7 +537,17 @@ namespace core
 	double stationSaturationVapourPressureKPa(double temperatureC)
 	{
 		// Magnus form over liquid water: the documented vapour-capacity
-		// assumption for compartment humidity.
+		// assumption for compartment humidity: p_sat = 0.61094 x
+		// exp(17.625 t / (t + 243.04)). The expression is singular at
+		// -243.04 C and its exponent overflows to infinity below that
+		// point, so the documented supported domain is strictly above
+		// the singular temperature. At or below it the model carries a
+		// finite valid continuation instead of the raw expression: air
+		// that cold holds no vapour at all, which is exactly where the
+		// in-domain curve is already heading, so the continuation is a
+		// vapour capacity of zero rather than an overflow published as
+		// a shortage (#565).
+		if (temperatureC <= -243.04) return 0.0;
 		return 0.61094 * std::exp(17.625 * temperatureC / (temperatureC + 243.04));
 	}
 	// One body exchanging heat with a shared reservoir through a passive
@@ -1263,6 +1273,32 @@ namespace core
 			if (!std::isfinite(atmosphere.maxCarbonDioxidePartialPressureKPa)
 				|| atmosphere.maxCarbonDioxidePartialPressureKPa < 0.0)
 				return refuse(where + " maximum carbon dioxide partial pressure must be finite and non-negative");
+			// #565: every authored field being finite does not make the
+			// starting state publishable. The ideal-gas division by a tiny
+			// volume can overflow, and a compartment whose starting
+			// inventory already derives a non-finite pressure is an
+			// inconsistent authored input: it is refused here, before any
+			// runtime exists, so no initial or reset snapshot can ever
+			// publish a non-finite derived pressure as a healthy state.
+			{
+				auto const startingOxygenKPa = stationAtmospherePartialPressureKPa(
+					atmosphere.startingOxygenKg, StationMolarMassOxygenKgPerMol,
+					atmosphere.volumeM3, atmosphere.startingTemperatureC);
+				auto const startingNitrogenKPa = stationAtmospherePartialPressureKPa(
+					atmosphere.startingNitrogenKg, StationMolarMassNitrogenKgPerMol,
+					atmosphere.volumeM3, atmosphere.startingTemperatureC);
+				auto const startingCarbonDioxideKPa = stationAtmospherePartialPressureKPa(
+					atmosphere.startingCarbonDioxideKg, StationMolarMassCarbonDioxideKgPerMol,
+					atmosphere.volumeM3, atmosphere.startingTemperatureC);
+				auto const startingVapourKPa = stationAtmospherePartialPressureKPa(
+					atmosphere.startingWaterVapourKg, StationMolarMassWaterKgPerMol,
+					atmosphere.volumeM3, atmosphere.startingTemperatureC);
+				if (!std::isfinite(startingOxygenKPa) || !std::isfinite(startingNitrogenKPa)
+					|| !std::isfinite(startingCarbonDioxideKPa) || !std::isfinite(startingVapourKPa)
+					|| !std::isfinite(startingOxygenKPa + startingNitrogenKPa
+						+ startingCarbonDioxideKPa + startingVapourKPa))
+					return refuse(where + " starting inventory in this volume and temperature derives a non-finite pressure");
+			}
 		}
 		// Scheduled airlock cycle contracts (#400): each cycle draws from
 		// one declared compartment on the shared scenario schedule rule
@@ -3669,6 +3705,7 @@ namespace core
 				}
 			}
 			system = "Thermal control";
+			double totalAbsorbedKW = 0.0, totalRoutedKW = 0.0, totalRejectedKW = 0.0;
 			for (auto const& reservoir : reservoirs)
 			{
 				auto const where = "thermal reservoir '" + reservoir.authored.id + "' ";
@@ -3688,16 +3725,29 @@ namespace core
 				if (!requireFinite(reservoir.generatorKJ, where + "cumulative generator heat energy")) return false;
 				if (!requireFinite(reservoir.atmosphereKJ, where + "cumulative atmosphere exchange energy")) return false;
 				if (!requireFinite(reservoir.rejectedKJ, where + "cumulative rejected energy")) return false;
+				totalAbsorbedKW += reservoir.authored.absorbedHeatKW;
+				totalRoutedKW += reservoir.lastHeatRoutedKW;
+				totalRejectedKW += reservoir.lastRejectedKW;
 			}
 			for (auto const& radiator : radiators)
 				if (!requireFinite(radiator.lastRejectedKW,
 					"radiator '" + radiator.authored.id + "' rejected power")) return false;
+			// #565: the station-wide thermal rollups the snapshot publishes
+			// are sums of individually finite terms; the aggregate must
+			// itself be finite before the tick that produced it can be
+			// committed, or an overflowed total escapes containment through
+			// the publish path.
+			if (!requireFinite(totalAbsorbedKW, "station total absorbed heat power")) return false;
+			if (!requireFinite(totalRoutedKW, "station total routed heat power")) return false;
+			if (!requireFinite(totalRejectedKW, "station total rejected heat power")) return false;
 			// Coolant loop ledger (#396): starting + pump work + heater +
 			// exchanged from the reservoir must equal the loop's current
 			// capacity x temperature within the declared tolerance. The
 			// loop's coolant inventory is finite and never grows: a dry
 			// loop stays dry, and its ledger stays closed at zero service.
 			system = "Coolant circulation";
+			double totalCirculationKgPerS = 0.0, totalFreezeHeatingKW = 0.0;
+			double totalPumpPowerKW = 0.0;
 			for (auto const& loop : coolantLoops)
 			{
 				auto const where = "coolant loop '" + loop.authored.id + "' ";
@@ -3718,6 +3768,9 @@ namespace core
 				if (loop.coolantKg > loop.authored.coolantCapacityKg + StationBalanceTolerance
 					* std::max(1.0, loop.authored.coolantCapacityKg))
 					return violation = where + "coolant inventory exceeds the loop capacity", false;
+				totalCirculationKgPerS += loop.lastFlowKgPerS;
+				totalFreezeHeatingKW += loop.lastHeaterSuppliedKW;
+				totalPumpPowerKW += loop.lastPumpSuppliedKW;
 				auto const startingEnergyKJ = loop.authored.startingCoolantKg
 					* loop.authored.specificHeatKJPerKgK * loop.authored.startingTemperatureC;
 				auto const bound = StationBalanceTolerance * std::max(1.0, std::abs(startingEnergyKJ));
@@ -3730,6 +3783,14 @@ namespace core
 						+ std::to_string(residual) + " exceeds tolerance "
 						+ std::to_string(StationBalanceTolerance), false;
 			}
+			// #565: the published circulation and freeze-heating rollups
+			// are sums of individually finite per-loop terms; the aggregate
+			// must itself be finite before the tick may commit, or an
+			// overflowed station total escapes containment through the
+			// publish path.
+			if (!requireFinite(totalCirculationKgPerS, "station total coolant circulation flow")) return false;
+			if (!requireFinite(totalFreezeHeatingKW, "station total freeze-protection heating power")) return false;
+			if (!requireFinite(totalPumpPowerKW, "station total coolant pump power")) return false;
 			// Chilled service ledger (#397): the chiller's condenser heat
 			// must equal the cold-side heat it extracted plus the work and
 			// auxiliaries it was actually supplied, cumulatively and within
@@ -3737,6 +3798,13 @@ namespace core
 			// booked twice or vanished once — a conservation violation that
 			// fails the whole tick, never a silent rounding.
 			system = "Chilled thermal service";
+			double totalCoolingProvidedKW = 0.0, totalCoolingUnmetKW = 0.0, totalCondenserHeatKW = 0.0;
+			double totalChillerSuppliedKW = 0.0;
+			// Cold-service rollups segregated by thermal service class: the
+			// snapshot publishes one capacity/provided/unmet/work/condenser
+			// account per class, and every aggregate must be finite before
+			// the tick commits (#565).
+			std::map<std::string, std::array<double, 5>> classRollups;
 			for (auto const& chiller : chillers)
 			{
 				auto const where = "chiller '" + chiller.authored.id + "' ";
@@ -3761,6 +3829,34 @@ namespace core
 					return violation = where + "condenser ledger residual "
 						+ std::to_string(residual) + " exceeds tolerance "
 						+ std::to_string(StationBalanceTolerance), false;
+				totalCoolingProvidedKW += chiller.lastCoolingKW;
+				totalCoolingUnmetKW += chiller.lastCoolingDemandKW - chiller.lastCoolingKW;
+				totalCondenserHeatKW += chiller.lastCondenserKW;
+				totalChillerSuppliedKW += chiller.lastPowerSuppliedKW;
+				auto& rollup = classRollups[chiller.authored.thermalClass];
+				rollup[0] += chiller.authored.ratedCoolingCapacityKW;
+				rollup[1] += chiller.lastCoolingKW;
+				rollup[2] += chiller.lastCoolingDemandKW - chiller.lastCoolingKW;
+				rollup[3] += chiller.lastPowerSuppliedKW;
+				rollup[4] += chiller.lastCondenserKW;
+			}
+			if (!requireFinite(totalCoolingProvidedKW, "station total cooling provided power")) return false;
+			if (!requireFinite(totalCoolingUnmetKW, "station total cooling unmet power")) return false;
+			if (!requireFinite(totalCondenserHeatKW, "station total condenser heat power")) return false;
+			if (!requireFinite(totalChillerSuppliedKW, "station total chiller electrical power")) return false;
+			// #565: a cold-class capacity is a sum of authored ratings —
+			// two finite 1e308 kW chillers in one class overflow the
+			// published capacity even when every per-chiller result is
+			// finite and the machines are gated off. The class rollup is
+			// audited before the successful state may publish it.
+			for (auto const& entry : classRollups)
+			{
+				auto const where = "cold-service class '" + entry.first + "' ";
+				if (!requireFinite(entry.second[0], where + "total cooling capacity")) return false;
+				if (!requireFinite(entry.second[1], where + "total cooling provided")) return false;
+				if (!requireFinite(entry.second[2], where + "total cooling unmet")) return false;
+				if (!requireFinite(entry.second[3], where + "total service work power")) return false;
+				if (!requireFinite(entry.second[4], where + "total condenser heat")) return false;
 			}
 			// Generator fuel ledger (#399): every joule of fuel energy the
 			// generator consumed must appear as delivered electrical energy
@@ -3800,7 +3896,19 @@ namespace core
 				if (generator.phase == StationGeneratorPhase::Running
 					&& generator.lastFuelDrawKWh <= 0.0 && generator.outputKW > 1e-12)
 					return violation = where + "delivered electrical output without burning fuel", false;
+				totalGeneratorOutputKW += generator.outputKW;
+				totalGeneratorStartupKW += generator.lastStartupDrawKW;
+				totalGeneratorWasteKW += generator.lastWasteHeatKW;
+				totalGeneratorDecayKW += generator.lastDecayHeatKW;
 			}
+			// #565: the published generator rollups are sums of
+			// individually finite per-machine terms; an overflowed
+			// aggregate must fail the tick rather than publish infinity
+			// through the snapshot's power section.
+			if (!requireFinite(totalGeneratorOutputKW, "station total generator output power")) return false;
+			if (!requireFinite(totalGeneratorStartupKW, "station total generator startup draw power")) return false;
+			if (!requireFinite(totalGeneratorWasteKW, "station total generator waste heat power")) return false;
+			if (!requireFinite(totalGeneratorDecayKW, "station total generator decay heat power")) return false;
 			// Atmosphere containment ledger (#400): every component of
 			// every compartment closes over its own pathways - starting +
 			// added - consumed/condensed/leaked/cycled must equal the
@@ -3836,6 +3944,34 @@ namespace core
 				if (!requireFinite(compartment.recoveredKg, where + "cumulative recovered mass")) return false;
 				if (!requireFinite(compartment.lostKg, where + "cumulative lost mass")) return false;
 				if (!requireFinite(compartment.condensedKg, where + "cumulative condensed mass")) return false;
+				// #565: the snapshot publishes the derived partial
+				// pressures, absolute pressure and saturation vapour
+				// capacity computed from this compartment state. A finite
+				// inventory in a tiny volume can overflow the ideal-gas
+				// derivation, and an infinite published pressure is not a
+				// physical result, so every derived published magnitude is
+				// audited before the tick may commit.
+				auto const derivedOxygenKPa = stationAtmospherePartialPressureKPa(
+					compartment.oxygenKg, StationMolarMassOxygenKgPerMol,
+					compartment.authored.volumeM3, compartment.temperatureC);
+				auto const derivedNitrogenKPa = stationAtmospherePartialPressureKPa(
+					compartment.nitrogenKg, StationMolarMassNitrogenKgPerMol,
+					compartment.authored.volumeM3, compartment.temperatureC);
+				auto const derivedCarbonDioxideKPa = stationAtmospherePartialPressureKPa(
+					compartment.carbonDioxideKg, StationMolarMassCarbonDioxideKgPerMol,
+					compartment.authored.volumeM3, compartment.temperatureC);
+				auto const derivedVapourKPa = stationAtmospherePartialPressureKPa(
+					compartment.waterVapourKg, StationMolarMassWaterKgPerMol,
+					compartment.authored.volumeM3, compartment.temperatureC);
+				if (!requireFinite(derivedOxygenKPa, where + "derived oxygen partial pressure")) return false;
+				if (!requireFinite(derivedNitrogenKPa, where + "derived nitrogen partial pressure")) return false;
+				if (!requireFinite(derivedCarbonDioxideKPa, where + "derived carbon dioxide partial pressure")) return false;
+				if (!requireFinite(derivedVapourKPa, where + "derived water vapour partial pressure")) return false;
+				if (!requireFinite(derivedOxygenKPa + derivedNitrogenKPa
+					+ derivedCarbonDioxideKPa + derivedVapourKPa,
+					where + "derived absolute pressure")) return false;
+				if (!requireFinite(stationSaturationVapourPressureKPa(compartment.temperatureC),
+					where + "derived saturation vapour pressure")) return false;
 				auto const startingTotalKg = compartment.authored.startingOxygenKg
 					+ compartment.authored.startingNitrogenKg
 					+ compartment.authored.startingCarbonDioxideKg
