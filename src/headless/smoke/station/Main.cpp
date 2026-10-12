@@ -8661,8 +8661,8 @@ namespace
 			return settings;
 		};
 		// 0.005 kg/s throughput at 80% recovery: 0.004 kg/s treated and
-		// 0.001 kg/s concentrate, costing 0.0025 kW and 5e-5 consumable
-		// units per second.
+		// 0.001 kg/s concentrate, costing 9 kW (0.005 kg/s x 0.5 kWh/kg
+		// x 3600 s/h) and 5e-5 consumable units per second.
 		auto treatment = [](std::string const& id, std::string const& hazard)
 		{
 			core::WaterTreatmentSettings settings;
@@ -8815,7 +8815,7 @@ namespace
 			world.pauseSimulation(); world.finishBuild();
 			require(waterConfigure(world, waterStores(), { coldLoop("chilled", 100.0, 5.0) },
 				{ collector("cond", "normal", 0.01, 0.5) },
-				{ treatment("plant", "normal") }, 1.0).first, "nominal water recovery refused");
+				{ treatment("plant", "normal") }, 10.0).first, "nominal water recovery refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "nominal water recovery run failed");
 			auto const elapsed = 60.0 * dt;
@@ -8859,6 +8859,10 @@ namespace
 				&& approx(plant.heldKg, 0.0), "a full-power treatment output was not accepted");
 			require(approx(plant.energySuppliedKJ, plant.energyOwedKJ),
 				"a fully powered treatment did not receive its full energy dose");
+			// The owed ledger is the physical dose: processed kg x 0.5 kWh/kg
+			// x 3600 kJ/kWh (#566).
+			require(approx(plant.energyOwedKJ, processed * 0.5 * 3600.0),
+				"the energy-owed ledger does not match the rated kWh dose");
 			require(approx(plant.consumablesUsed, processed * 0.01), "consumable usage mismatch");
 			require(std::abs(plant.residualKg) < 1e-6,
 				"the processed/treated/concentrate ledger does not close");
@@ -8888,11 +8892,11 @@ namespace
 		{
 			core::World world("WaterCurtailed", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
-			// The array covers the loop pump (0.1 kW) and only 0.001 kW of the
-			// treatment's 0.0025 kW demand.
+			// The array covers the loop pump (0.1 kW) and only 1.0 kW of the
+			// treatment's 9 kW demand.
 			require(waterConfigure(world, waterStores(), { coldLoop("chilled", 100.0, 5.0) },
 				{ collector("cond", "normal", 0.01, 0.5) },
-				{ treatment("plant", "normal") }, 0.101).first, "curtailed water setup refused");
+				{ treatment("plant", "normal") }, 1.1).first, "curtailed water setup refused");
 			world.resumeSimulation();
 			require(world.advanceTicks(60), "curtailed water run failed");
 			auto const snap = world.getStationSystemsSnapshot();

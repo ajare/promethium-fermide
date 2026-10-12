@@ -2013,7 +2013,7 @@ void waterFiles(smoke::Context const& context)
 	loop.heaterCapacityKW = 0.0;
 	core::SolarArraySettings field;
 	field.id = "field";
-	field.capacityKW = 1.0;
+	field.capacityKW = 10.0;
 	core::WaterCollectorSettings collector;
 	collector.id = "cond";
 	collector.hazardClass = "normal";

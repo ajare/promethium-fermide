@@ -5055,8 +5055,12 @@ namespace core
 					treatment.status = StationTransferStatus::Rejected;
 					continue;
 				}
+				// The dose is authored in kWh per kilogram of processed water,
+				// so the power the treatment draws is the dose times the
+				// throughput converted to the pool's kW (kWh/s x 3600),
+				// mirroring the electrolysis contract (#404, #566).
 				treatment.lastPowerDemandKW = scale * treatment.authored.throughputKgPerS
-					* treatment.authored.specificEnergyKWhPerKg;
+					* treatment.authored.specificEnergyKWhPerKg * 3600.0;
 				auto const fromGeneration = std::min(treatment.lastPowerDemandKW, availableGeneration);
 				availableGeneration -= fromGeneration;
 				auto const ask = treatment.lastPowerDemandKW - fromGeneration;

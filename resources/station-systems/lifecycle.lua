@@ -3712,8 +3712,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 treatment.lastScale = scale
                 treatment.lastLimiter = limiter
                 if scale > 0 then
+                    -- The dose is kWh per kg, so the draw is the dose
+                    -- times the throughput converted to the pool's kW
+                    -- (kWh/s x 3600), mirroring the host (#566).
                     local powerDemand = scale * treatment.throughputKgPerS
-                        * treatment.specificEnergyKWhPerKg
+                        * treatment.specificEnergyKWhPerKg * 3600.0
                     treatment.lastPowerDemand = powerDemand
                     local fromGeneration = math.min(powerDemand, generation)
                     generation = generation - fromGeneration
