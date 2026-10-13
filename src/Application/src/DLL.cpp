@@ -8,8 +8,7 @@
 #include "StatePlay.h"
 #include "StateController.h"
 #include "StateLifecycle.h"
-#include "Map.h"
-#include "MapWorldDefinitionFactory.h"
+#include "ApplicationResources.h"
 
 namespace {
 
@@ -61,8 +60,7 @@ void dllOnEntry(wp::Logger* logger,
                 wp::application::AudioSystem*) {
   using namespace pf::application;
   if (resourceMgr) {
-    resourceMgr->addResourceFactory(new MapResourceFactory());
-    resourceMgr->addResourceDefinitionFactory(new MapWorldDefinitionFactory());
+    registerApplicationResourceTypes(*resourceMgr);
   }
   factories.clear();
   nextFactory = 0;

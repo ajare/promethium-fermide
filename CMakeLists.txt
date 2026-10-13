@@ -431,6 +431,7 @@ endforeach()
 
 # Managed Agent resources have a CPU-only import seam shared with headless editor checks.
 add_library(pf-agent-resources STATIC src/ApplicationAgentTypes.cpp)
+set_target_properties(pf-agent-resources PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(pf-agent-resources PUBLIC promethium-fermide-core Willpower.Application)
 target_compile_features(pf-agent-resources PUBLIC cxx_std_20)
 if(MSVC)
@@ -584,7 +585,7 @@ if(PF_BUILD_GUI)
     target_link_libraries(editor PRIVATE
         pf-render pf-metrics pf-agent-editing pf-agent-resources libglew_static nfd::nfd
         spdlog::spdlog SDL2::SDL2-static OpenGL::GL
-        Willpower.Application ext::mpp-helper
+        Willpower.Application ext::mpp-helper PromethiumFermide
     )
     if(WIN32)
         target_link_libraries(editor PRIVATE SDL2::SDL2main)
@@ -599,7 +600,7 @@ if(PF_BUILD_GUI)
     add_custom_target(pf-sector-assets ALL
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/resources"
-            "$<TARGET_FILE_DIR:editor>"
+            "${PF_OUTPUT_DIR}"
         VERBATIM
     )
     add_dependencies(editor pf-sector-assets)

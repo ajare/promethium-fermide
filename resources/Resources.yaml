@@ -201,3 +201,19 @@ Resources:
     - type: "World"
       name: "Office"
       location: "Office.world.yaml"
+  Namespace:
+    name: World
+    Resource:
+      - type: World
+        name: WorldFile
+        location: test-worlds/room-height-test-1.world.yaml
+      - type: Map
+        name: World
+        DependentResources:
+          DependentResource:
+            id: World
+            ref: WorldFile
+        Definitions:
+          Definition:
+            factory: PromethiumFermide
+            Resource: World

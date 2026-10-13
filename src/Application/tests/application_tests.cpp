@@ -110,7 +110,7 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
               "MapLoad must create and load the World resource");
       worldLifetime = map->getWorld()->getLifetimeToken();
     } else if (child->getName() == "MapUnload" || child->getName() == "Unload") {
-      auto source = map->getDependentResource("Yaml");
+      auto source = map->getDependentResource("World");
       require(worldLifetime.expired() && !map->getWorld() &&
                   !manager.isResourceLoaded(map) && !manager.isResourceCreated(map) &&
                   !manager.isResourceLoaded(source) && !manager.isResourceCreated(source),

@@ -1,14 +1,21 @@
 add_library(PromethiumFermide SHARED
     src/DLL.cpp
+    "${PROJECT_SOURCE_DIR}/src/ApplicationResources.cpp"
     src/Map.cpp
     src/MapResources.cpp
     src/MapWorldDefinitionFactory.cpp
     src/StateController.cpp
     src/StateLifecycle.cpp
-    src/StatePlay.cpp)
-target_include_directories(PromethiumFermide PUBLIC include)
+    src/StatePlay.cpp
+    render/Render.cpp
+    render/WorldDrawList.cpp
+    render/SectorTileset.cpp
+    render/ObjectTileset.cpp
+    render/WorldRenderer.cpp)
+target_include_directories(PromethiumFermide PUBLIC include PRIVATE render)
 target_compile_definitions(PromethiumFermide PRIVATE PF_APPLICATION_EXPORT)
-target_link_libraries(PromethiumFermide PUBLIC AppLib promethium-fermide-core)
+target_link_libraries(PromethiumFermide PUBLIC AppLib promethium-fermide-core
+    PRIVATE pf-agent-resources)
 pf_apply_headless_verification_policy(PromethiumFermide)
 willpower_add_header_filter(PromethiumFermide)
 set_target_properties(PromethiumFermide PROPERTIES
@@ -24,17 +31,11 @@ add_custom_target(pf-application-assets ALL
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_BINARY_DIR}/Game.yaml"
         "$<TARGET_FILE_DIR:Launcher>/Game.yaml"
-    COMMAND ${CMAKE_COMMAND} -E make_directory
+    # Remove the obsolete build-tree copy of the separate application manifest.
+    COMMAND ${CMAKE_COMMAND} -E rm -rf
         "$<TARGET_FILE_DIR:Launcher>/application-resources"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/resources/Resources.yaml"
-        "$<TARGET_FILE_DIR:Launcher>/application-resources/Resources.yaml"
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        "$<TARGET_FILE_DIR:Launcher>/application-resources/test-worlds"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${PROJECT_SOURCE_DIR}/resources/test-worlds/room-height-test-1.world.yaml"
-        "$<TARGET_FILE_DIR:Launcher>/application-resources/test-worlds/room-height-test-1.world.yaml"
     VERBATIM)
+add_dependencies(pf-application-assets pf-sector-assets)
 set_target_properties(pf-application-assets PROPERTIES FOLDER Application)
 add_dependencies(Launcher PromethiumFermide pf-application-assets)
 
@@ -48,7 +49,7 @@ if(BUILD_TESTING)
     willpower_deploy_runtime_dlls(pf_application_tests)
     willpower_deploy_vendor_dlls(pf_application_tests)
     add_test(NAME pf_application COMMAND pf_application_tests
-        "$<TARGET_FILE_DIR:Launcher>/application-resources")
+        "$<TARGET_FILE_DIR:Launcher>")
     set_tests_properties(pf_application PROPERTIES LABELS "application" TIMEOUT 30)
 
     add_executable(pf_application_map_tests tests/map_tests.cpp
@@ -60,6 +61,18 @@ if(BUILD_TESTING)
     willpower_deploy_runtime_dlls(pf_application_map_tests)
     willpower_deploy_vendor_dlls(pf_application_map_tests)
     add_test(NAME pf_application_map COMMAND pf_application_map_tests
-        "$<TARGET_FILE_DIR:Launcher>/application-resources")
+        "$<TARGET_FILE_DIR:Launcher>")
     set_tests_properties(pf_application_map PROPERTIES LABELS "application" TIMEOUT 30)
+
+    add_executable(pf_application_render_tests tests/render_tests.cpp
+        ../Launcher/src/DirectoryResourceLocation.cpp)
+    target_include_directories(pf_application_render_tests PRIVATE render ../Launcher/include)
+    target_link_libraries(pf_application_render_tests PRIVATE PromethiumFermide)
+    add_dependencies(pf_application_render_tests pf-application-assets)
+    pf_apply_headless_verification_policy(pf_application_render_tests)
+    willpower_deploy_runtime_dlls(pf_application_render_tests)
+    willpower_deploy_vendor_dlls(pf_application_render_tests)
+    add_test(NAME pf_application_render COMMAND pf_application_render_tests
+        "$<TARGET_FILE_DIR:Launcher>")
+    set_tests_properties(pf_application_render PROPERTIES LABELS "application;render" TIMEOUT 30)
 endif()

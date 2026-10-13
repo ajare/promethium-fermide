@@ -12,7 +12,7 @@ Configuration:
     ResourceLocations:
       ResourceLocation:
         type: Directory
-        path: application-resources/
+        path: ./
         definition: Resources.yaml
     Debug:
       InGame: disabled

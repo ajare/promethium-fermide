@@ -1,10 +1,19 @@
 #include <utility>
+#include <stdexcept>
 
 #include <core/World.h>
+#include <willpower/application/resourcesystem/ResourceManager.h>
 
+#include "ApplicationResources.h"
 #include "Map.h"
+#include "MapWorldDefinitionFactory.h"
 
 namespace pf::application {
+
+void registerMapResourceTypes(wp::application::resourcesystem::ResourceManager& manager) {
+  manager.addResourceFactory(new MapResourceFactory());
+  manager.addResourceDefinitionFactory(new MapWorldDefinitionFactory());
+}
 
 Map::Map(std::string const& name, std::string const& namesp,
          std::string const& source, std::map<std::string, std::string> const& tags,
@@ -14,19 +23,25 @@ Map::Map(std::string const& name, std::string const& namesp,
 Map::~Map() = default;
 
 core::World* Map::getWorld() noexcept {
-  return mWorld.get();
+  return mWorldResource ? mWorldResource->world().get() : nullptr;
 }
 
 core::World const* Map::getWorld() const noexcept {
-  return mWorld.get();
+  return mWorldResource ? mWorldResource->world().get() : nullptr;
 }
 
-void Map::setWorld(std::unique_ptr<core::World> world) noexcept {
-  mWorld = std::move(world);
+std::shared_ptr<WorldResource> const& Map::getWorldResource() const noexcept {
+  return mWorldResource;
 }
 
-void Map::clearWorld() noexcept {
-  mWorld.reset();
+void Map::setWorldResource(std::shared_ptr<WorldResource> resource) {
+  if (resource && !resource->world())
+    throw std::invalid_argument("Map requires a created World resource");
+  mWorldResource = std::move(resource);
+}
+
+void Map::clearWorldResource() noexcept {
+  mWorldResource.reset();
 }
 
 MapResourceFactory::MapResourceFactory()

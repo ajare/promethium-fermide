@@ -10,6 +10,7 @@
 
 #include "DirectoryResourceLocation.h"
 
+#include "ApplicationResources.h"
 #include "Map.h"
 #include "MapResources.h"
 
@@ -26,47 +27,34 @@ void require(bool condition, char const* message) {
   if (!condition) throw std::runtime_error(message);
 }
 
-void checkOwnership() {
-  std::weak_ptr<void const> finalLifetime;
+void checkBorrowing(wp::application::resourcesystem::ResourceManager& manager,
+                    std::shared_ptr<WorldResource> const& source) {
+  auto const lifetime = source->world()->getLifetimeToken();
   {
     Map map("Map", "Application", "", {}, nullptr);
     Map const& view = map;
     require(!map.getWorld() && !view.getWorld(), "Map must start without a World");
+    map.setWorldResource(source);
+    require(map.getWorldResource() == source && map.getWorld() == source->world().get() &&
+                view.getWorld() == source->world().get(),
+            "Map must borrow the WorldResource's exact World instance");
 
-    auto first = std::make_unique<core::World>("First", 2, 1);
-    auto const firstLifetime = first->getLifetimeToken();
-    auto* firstPointer = first.get();
-    map.setWorld(std::move(first));
-    require(!first && map.getWorld() == firstPointer && view.getWorld() == firstPointer,
-            "Map must take exclusive ownership and expose the same World");
-    require(view.getWorld()->getName() == "First" &&
-                view.getWorld()->getCellsWide() == 2,
-            "World must remain accessible through Map");
+    // Reject an uncreated World resource without discarding the valid binding.
+    auto uncreated = std::static_pointer_cast<WorldResource>(manager.getResource("Citadel"));
+    bool rejected = false;
+    try { map.setWorldResource(uncreated); } catch (std::invalid_argument const&) { rejected = true; }
+    require(rejected && map.getWorldResource() == source, "Invalid binding must preserve the current resource");
 
-    auto second = std::make_unique<core::World>("Second", 3, 1);
-    auto const secondLifetime = second->getLifetimeToken();
-    map.setWorld(std::move(second));
-    require(firstLifetime.expired() && !secondLifetime.expired(),
-            "Replacing the World must destroy the old instance");
-    require(view.getWorld()->getName() == "Second", "Replacement World missing");
-
-    map.clearWorld();
-    require(secondLifetime.expired() && !view.getWorld(),
-            "Clearing must destroy the World");
-    map.clearWorld(); // Repeated clearing is harmless.
-
-    auto third = std::make_unique<core::World>("Third", 1, 1);
-    auto const thirdLifetime = third->getLifetimeToken();
-    map.setWorld(std::move(third));
-    map.setWorld(nullptr);
-    require(thirdLifetime.expired() && !map.getWorld(),
-            "Setting a null World must release ownership");
-
-    auto final = std::make_unique<core::World>("Final", 1, 1);
-    finalLifetime = final->getLifetimeToken();
-    map.setWorld(std::move(final));
+    map.clearWorldResource();
+    require(!map.getWorld() && !map.getWorldResource() && !lifetime.expired(),
+            "Clearing Map must not destroy a World owned by its resource");
+    map.clearWorldResource();
+    map.setWorldResource(source);
+    map.setWorldResource(nullptr);
+    require(!map.getWorld() && !lifetime.expired(), "A null binding must only clear the adapter");
+    map.setWorldResource(source);
   }
-  require(finalLifetime.expired(), "Destroying Map must destroy its World");
+  require(!lifetime.expired(), "Map destruction must not destroy another resource's World");
 }
 
 void checkFactory() {
@@ -83,11 +71,6 @@ void checkFactory() {
   require(map->getGridOptions().cellSize == 512.0f,
           "Map must retain the reference acceleration grid size");
 
-  auto world = std::make_unique<core::World>("Owned", 1, 1);
-  auto const lifetime = world->getLifetimeToken();
-  map->setWorld(std::move(world));
-  resource.reset();
-  require(lifetime.expired(), "Resource destruction must release the World");
 }
 
 class FailingWorldLocation final : public DirectoryResourceLocation {
@@ -99,7 +82,7 @@ public:
   uint8_t* readData(std::string const& source, uint32_t* size) override {
     if (mFail && source == "test-worlds/room-height-test-1.world.yaml") {
       *size = 1;
-      return new uint8_t[1]{'['}; // Invalid YAML, after the TextFile has been created.
+      return new uint8_t[1]{'['}; // Invalid YAML for the WorldResource loader.
     }
     return DirectoryResourceLocation::readData(source, size);
   }
@@ -120,7 +103,7 @@ void checkFailureCleanup(std::string const& directory) {
     pf::application::MapResources resources(manager, &logger);
     resources.scan();
     auto map = std::dynamic_pointer_cast<Map>(manager.getResource("World", "World"));
-    auto source = map->getDependentResource("Yaml");
+    auto source = map->getDependentResource("World");
     bool rejected = false;
     try { resources.load(); } catch (std::exception const&) { rejected = true; }
     require(rejected && !map->getWorld() && !manager.isResourceLoaded(map) &&
@@ -153,15 +136,26 @@ void checkManifest(std::string const& directory) {
     auto source = manager.getResource("WorldFile", "World");
     auto resource = manager.getResource("World", "World");
     auto map = std::dynamic_pointer_cast<Map>(resource);
-    require(source->getType() == "TextFile" &&
+    require(source->getType() == "World" &&
                 source->getSource() == "test-worlds/room-height-test-1.world.yaml",
             "Manifest must reference the room-height WorldFile");
-    require(map && !map->getWorld() && map->getDependentResource("Yaml") == source,
-            "Manifest must declare an unloaded Application Map with a Yaml dependency");
+    require(map && !map->getWorld() && map->getDependentResource("World") == source,
+            "Manifest must declare an unloaded Application Map with a World dependency");
     manager.createResource(map);
     require(map->getWorld() && map->getWorld()->getCellsWide() == 16 &&
                 map->getWorld()->getLevelsHigh() == 3 && map->getWorld()->getLayerCount() == 2,
-            "Definition factory must deserialize the staged WorldFile");
+            "WorldResource must deserialize the staged WorldFile");
+    auto worldResource = std::static_pointer_cast<WorldResource>(source);
+    require(map->getWorldResource() == worldResource && map->getWorld() == worldResource->world().get(),
+            "Definition factory must reuse the dependency's World without deserializing a duplicate");
+    checkBorrowing(manager, worldResource);
+    auto const lifetime = map->getWorld()->getLifetimeToken();
+    manager.destroyResources({source});
+    require(lifetime.expired() && !map->getWorld(),
+            "Map must not keep a stale World alive after dependency data is destroyed");
+    manager.createResource(source);
+    require(map->getWorld() == worldResource->world().get() && map->getWorld(),
+            "A retained WorldResource must expose its newly created World");
     dllOnExit();
   }
 }
@@ -169,7 +163,6 @@ void checkManifest(std::string const& directory) {
 
 int main(int argc, char** argv) {
   try {
-    checkOwnership();
     checkFactory();
     require(argc == 2, "Expected the staged application resource directory");
     checkManifest(argv[1]);

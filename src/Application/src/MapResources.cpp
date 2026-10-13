@@ -28,7 +28,7 @@ void MapResources::load() {
   if (mMap) return;
   auto map = std::dynamic_pointer_cast<Map>(mManager.getResource("World", "World"));
   if (!map) throw std::runtime_error("World/World must be an Application Map");
-  map->getDependentResource("Yaml"); // Validate cleanup's dependency before acquisition.
+  map->getDependentResource("World"); // Validate cleanup's dependency before acquisition.
   mManager.acquireResource(map);
   mMap = std::move(map);
   try {
@@ -45,12 +45,12 @@ void MapResources::load() {
 void MapResources::unload() {
   if (!mMap) return;
   auto map = std::move(mMap); // Release our acquisition exactly once.
-  auto source = map->getDependentResource("Yaml");
+  auto source = map->getDependentResource("World");
   mManager.releaseResource(map);
   // Respect any other consumer's acquisition. With no other owner, destroy
   // created data as well as unloading: the next run must deserialize afresh.
   if (!mManager.isResourceLoaded(map)) {
-    map->clearWorld();
+    map->clearWorldResource();
     mManager.destroyResources({map});
   }
   if (!mManager.isResourceLoaded(source)) mManager.destroyResources({source});

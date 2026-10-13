@@ -9,13 +9,17 @@
 namespace core {
 class World;
 }
+class WorldResource;
 
 namespace pf::application {
+
+PF_APPLICATION_API void registerMapResourceTypes(
+    wp::application::resourcesystem::ResourceManager& manager);
 
 // Resource identity and geometry belong to AppLib; the simulation aggregate
 // remains a World. Constructing this resource does not create or load a World.
 class PF_APPLICATION_API Map final : public applib::Map {
-  std::unique_ptr<core::World> mWorld;
+  std::shared_ptr<WorldResource> mWorldResource;
 
 public:
   Map(std::string const& name, std::string const& namesp,
@@ -26,11 +30,13 @@ public:
   Map(Map const&) = delete;
   Map& operator=(Map const&) = delete;
 
-  // Borrowed pointers remain valid until replacement, clearing, or destruction.
+  // The WorldResource owns the World. These borrowed pointers remain valid only
+  // while its created data is retained by the resource lifecycle.
   core::World* getWorld() noexcept;
   core::World const* getWorld() const noexcept;
-  void setWorld(std::unique_ptr<core::World> world) noexcept;
-  void clearWorld() noexcept;
+  std::shared_ptr<WorldResource> const& getWorldResource() const noexcept;
+  void setWorldResource(std::shared_ptr<WorldResource> resource);
+  void clearWorldResource() noexcept;
 };
 
 class PF_APPLICATION_API MapResourceFactory final
