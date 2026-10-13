@@ -524,13 +524,18 @@ namespace core
 		case SimulationPhase::Movement:
 			// Sample every predecessor before any Agent moves this tick.
 			updateQueueStandingTargets();
-			for (auto const& [id, agent] : mWorld.mAgents.entries())
+			for (auto const player = mWorld.getPlayerControlledAgent(); auto const& [id, agent] : mWorld.mAgents.entries())
 			{
 				(void)id;
 				// A deactivated Agent is not simulated (#118): no phase of the
 				// tick moves it, commits for it, or cleans up traversal on its
 				// behalf, and its queued door presses are not pressed.
 				if (!agent->isActive()) continue;
+				if (agent->isPlayerControlled())
+				{
+					if (id == player) mWorld.advancePlayerControlledAgent(id, timestep);
+					continue;
+				}
 				auto const movementStart = agent->getGlobalPosition();
 				auto const approachingDoor = agent->getState() == Agent::State::MovingToVertex
 					|| (agent->getState() == Agent::State::TraversingEdge && agent->mTraversalTask

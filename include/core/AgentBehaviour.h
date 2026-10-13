@@ -15,6 +15,12 @@
 
 namespace core
 {
+	// Immutable host behaviour, outside every registry-local namespace. The
+	// behaviour registry reserves UINT64_MAX rather than allocating it.
+	inline constexpr AgentBehaviourId PlayerControlledBehaviour{ UINT64_MAX };
+	inline constexpr uint64_t PlayerControlledBehaviourRevision{ 1 };
+	inline constexpr char PlayerControlledBehaviourName[]{ "Player controlled" };
+
 	// The typed configuration vocabulary an Agent behaviour declares. Schemas
 	// are structured registry metadata, never executable Lua: configuration is
 	// validated against them before any source executes.

@@ -515,18 +515,15 @@ std::optional<string> renderAgentMovementActionPopup(shared_ptr<const core::Worl
 void renderAgentBehaviourAssignmentCell(shared_ptr<core::World> const& world,
 	core::AgentId agent)
 {
-	if (!world || !world->hasAttachedAgentBehaviourRegistry())
-	{
-		ImGui::TextDisabled("None");
-		return;
-	}
+	if (!world) return;
 	auto const& registry = world->getAgentBehaviourRegistry();
 	auto const& assignment = world->getAgentBehaviourAssignment(agent);
 	char const* preview = "None";
 	if (assignment)
 	{
-		auto const* definition = registry->lookupAgentBehaviour(assignment->behaviour);
-		preview = definition ? definition->getName().c_str() : "Invalid";
+		auto const* definition = registry ? registry->lookupAgentBehaviour(assignment->behaviour) : nullptr;
+		preview = assignment->behaviour == core::PlayerControlledBehaviour
+			? core::PlayerControlledBehaviourName : definition ? definition->getName().c_str() : "Invalid";
 	}
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	if (ImGui::BeginCombo("##agentBehaviour", preview))
@@ -537,7 +534,14 @@ void renderAgentBehaviourAssignmentCell(shared_ptr<core::World> const& world,
 			if (assignment && !commitAgentBehaviourClear(world, agent, diagnostic))
 				logRefusal(diagnostic);
 		}
-		for (auto const id : registry->getBehaviourIdsAlphabetically())
+		bool const playerSelected = assignment && assignment->behaviour == core::PlayerControlledBehaviour;
+		if (ImGui::Selectable("Player controlled (built-in)", playerSelected) && !playerSelected)
+		{
+			string diagnostic;
+			if (!commitAgentBehaviourAssignment(world, agent, core::PlayerControlledBehaviour,
+				core::PlayerControlledBehaviourRevision, {}, diagnostic)) logRefusal(diagnostic);
+		}
+		if (registry) for (auto const id : registry->getBehaviourIdsAlphabetically())
 		{
 			auto const* definition = registry->lookupAgentBehaviour(id);
 			if (!definition) continue;
@@ -560,17 +564,21 @@ void renderAgentBehaviourConfigurationPanel(shared_ptr<core::World> const& world
 {
 	ImGui::SeparatorText("Agent behaviour");
 	if (!world) return;
-	if (!world->hasAttachedAgentBehaviourRegistry())
-	{
-		ImGui::TextDisabled("No Agent behaviour registry attached.");
-		return;
-	}
-
 	ImGui::SetNextItemWidth(-1.0f);
 	renderAgentBehaviourAssignmentCell(world, agent);
 	auto assignment = world->getAgentBehaviourAssignment(agent);
 	if (!assignment) return;
+	if (assignment->behaviour == core::PlayerControlledBehaviour)
+	{
+		ImGui::TextDisabled("Player controlled (built-in). Idles in editor simulation.");
+		return;
+	}
 	auto const& registry = world->getAgentBehaviourRegistry();
+	if (!registry)
+	{
+		ImGui::TextDisabled("The assigned behaviour registry is unavailable.");
+		return;
+	}
 	auto const* behaviour = registry->lookupAgentBehaviour(assignment->behaviour);
 	if (!behaviour)
 	{

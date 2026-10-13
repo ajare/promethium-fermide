@@ -904,6 +904,11 @@ namespace core
 		// or a reset works on them.
 		bool isActive() const { return mActive; }
 
+		bool isPlayerControlled() const
+		{
+			return mBehaviourAssignment
+				&& mBehaviourAssignment->behaviour == PlayerControlledBehaviour;
+		}
 		std::optional<AgentBehaviourAssignment> const& getBehaviourAssignment() const
 		{
 			return mBehaviourAssignment;

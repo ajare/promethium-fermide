@@ -241,7 +241,7 @@ namespace core
 			AgentBehaviourTeardownReason::Reset);
 		mRandomSeed = seed;
 		for (auto const& [agentId, agent] : mAgents.entries())
-			if (agent && agent->getBehaviourAssignment())
+			if (agent && agent->getBehaviourAssignment() && !agent->isPlayerControlled())
 				mSimulationCoordinator.clearAgentMovementForBehaviourEdit(agentId);
 		modify();
 		return true;
@@ -597,6 +597,13 @@ namespace core
 				if (diagnostic) *diagnostic = std::move(message);
 				return false;
 			};
+			if (behaviourId == PlayerControlledBehaviour)
+			{
+				if (revision != PlayerControlledBehaviourRevision || !configuration.empty())
+					return reject("Player controlled requires revision 1 and no configuration");
+				if (normalized) normalized->clear();
+				return true;
+			}
 			auto const* behaviour = registry.lookupAgentBehaviour(behaviourId);
 			if (!behaviour)
 				return reject(format("Agent behaviour {} is not defined in the attached registry",
@@ -674,7 +681,7 @@ namespace core
 		mAgentBehaviourRegistry = std::move(registry);
 		mAgentBehaviourDependencyDiagnostic.clear();
 		for (auto const& [agentId, agent] : mAgents.entries())
-			if (agent && agent->getBehaviourAssignment())
+			if (agent && agent->getBehaviourAssignment() && !agent->isPlayerControlled())
 				mSimulationCoordinator.clearAgentMovementForBehaviourEdit(agentId);
 		if (referenceChanges) modify();
 	}
@@ -702,7 +709,7 @@ namespace core
 			mAgentBehaviourRuntime->consumeDiagnostics());
 		for (auto const& [agentId, agent] : mAgents.entries())
 		{
-			if (!agent || !agent->getBehaviourAssignment()) continue;
+			if (!agent || !agent->getBehaviourAssignment() || agent->isPlayerControlled()) continue;
 			mSimulationCoordinator.clearAgentMovementForBehaviourEdit(agentId);
 			agent->clearBehaviourAssignment();
 		}
@@ -746,7 +753,7 @@ namespace core
 			mAgentBehaviourRuntime->consumeDiagnostics());
 		for (auto const& [agentId, agent] : mAgents.entries())
 		{
-			if (!agent || !agent->getBehaviourAssignment()) continue;
+			if (!agent || !agent->getBehaviourAssignment() || agent->isPlayerControlled()) continue;
 			mSimulationCoordinator.clearAgentMovementForBehaviourEdit(agentId);
 			agent->clearBehaviourAssignment();
 		}
@@ -876,7 +883,7 @@ namespace core
 		if (registryChanges && previousRegistry)
 			previousRegistry->unregisterWorld(*this);
 		for (auto const& [agentId, agent] : mAgents.entries())
-			if (agent && agent->getBehaviourAssignment())
+			if (agent && agent->getBehaviourAssignment() && !agent->isPlayerControlled())
 				mSimulationCoordinator.clearAgentMovementForBehaviourEdit(agentId);
 	}
 
@@ -942,6 +949,13 @@ namespace core
 		uint64_t revision, AgentBehaviourConfiguration const& configuration,
 		AgentBehaviourConfiguration* normalized, string* diagnostic) const
 	{
+		if (behaviour == PlayerControlledBehaviour)
+		{
+			bool valid = revision == PlayerControlledBehaviourRevision && configuration.empty();
+			if (diagnostic) *diagnostic = valid ? "" : "Player controlled requires revision 1 and no configuration";
+			if (valid && normalized) normalized->clear();
+			return valid;
+		}
 		if (!mAgentBehaviourRegistry)
 		{
 			if (diagnostic) *diagnostic =
@@ -1042,7 +1056,7 @@ namespace core
 		for (auto const& [id, agent] : mAgents.entries())
 		{
 			(void)id;
-			if (agent && agent->getBehaviourAssignment()) ++count;
+			if (agent && agent->getBehaviourAssignment() && !agent->isPlayerControlled()) ++count;
 		}
 		return count;
 	}
@@ -8048,6 +8062,7 @@ namespace core
 			throw WorldException(this, "Simulation cannot be paused from inside a simulation phase");
 
 		mSimulationPaused = true;
+		mPlayerMovementDirection = 0;
 		mAccumulatedTime = 0.0;
 		mSimulationCoordinator.cancelAllTraversalForTopologyRebuild();
 		mSimulationCoordinator.publishTopologyEvent(SimulationEventType::SimulationPaused);

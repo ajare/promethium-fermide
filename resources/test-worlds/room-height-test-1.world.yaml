@@ -1,4 +1,4 @@
-version: 59
+version: 64
 nextDumbwaiterId: 1
 nextFurnitureId: 1
 name: Untitled
@@ -75,15 +75,16 @@ nextAgentGroupId: 1
 agents:
   - id: 1
     agent:
+      type: Human
+      typeId: Human
+      resource: human.agent.lua
       name: Agent 1
       flags: 0
+      behaviour:
+        id: 18446744073709551615
+        revision: 1
+        configuration:
+          []
     sector: 0
     localX: 2.0625
     localY: 0
-    path:
-      destinationMarker: 1
-      destinationSector: 2
-      destinationLocalX: 2.640625
-      destinationLocalY: 0
-      active: true
-      action: idle

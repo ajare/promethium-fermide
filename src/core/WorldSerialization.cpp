@@ -2591,7 +2591,15 @@ namespace core
 				if (version < 13)
 					throw SerializationException(
 						"Agent behaviour assignments require World serialization version 13");
-				if (!mAgentBehaviourRegistryReference)
+				if (agent->isPlayerControlled())
+				{
+					auto const& assignment = *agent->getBehaviourAssignment();
+					string diagnostic;
+					if (!validateAgentBehaviourAssignment(assignment.behaviour, assignment.revision,
+						assignment.configuration, nullptr, &diagnostic))
+						throw SerializationException(diagnostic);
+				}
+				else if (!mAgentBehaviourRegistryReference)
 					throw SerializationException(format(
 						"Serialized Agent '{}' has a behaviour assignment but the World has no Agent behaviour registry",
 						agent->getName()));
@@ -2998,7 +3006,11 @@ namespace core
 		mNextQueueTicketValue = 1;
 		mNextDoorOpenLeaseValue = 1;
 		mAccumulatedTime = 0.0;
-		if (!preserveBehaviourRuntime) mTimeScale = 1.0;
+		if (!preserveBehaviourRuntime)
+		{
+			mTimeScale = 1.0;
+			mPlayerMovementDirection = 0;
+		}
 		mRecordingTickChanges = false;
 		mTickAgents.clear();
 		mTickOperations.clear();

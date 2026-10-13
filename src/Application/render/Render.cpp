@@ -1671,6 +1671,15 @@ WorldDrawList drawWorld(std::shared_ptr<const core::World> const& world, float w
         gRenderSettings.xOffset = (width - contentWidth * zoom) * 0.5f - minimum.x * CORE_CELL_WIDTH_PIXELS * zoom;
         gRenderSettings.yOffset = (height - contentHeight * zoom) * 0.5f - minimum.y * CORE_LEVEL_HEIGHT_PIXELS * zoom;
     }
+    if (auto player = world->lookupAgent(world->getPlayerControlledAgent()); player) {
+        auto const* agent = player.entity;
+        auto centre = agent->getGlobalPosition();
+        centre.y += agent->getHeight() * 0.5f;
+        gRenderSettings.visibleLayer = static_cast<int>(agent->getSector()->getLayerIndex());
+        gRenderSettings.worldZoom = 1.0f;
+        gRenderSettings.xOffset = width * 0.5f - centre.x * CORE_CELL_WIDTH_PIXELS;
+        gRenderSettings.yOffset = height * 0.5f - centre.y * CORE_LEVEL_HEIGHT_PIXELS;
+    }
     renderWorld(world, &commands);
     return commands;
 }

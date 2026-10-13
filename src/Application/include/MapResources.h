@@ -21,6 +21,8 @@ public:
   MapResources(MapResources const&) = delete;
   MapResources& operator=(MapResources const&) = delete;
 
+  Map* getMap() const { return mMap.get(); }
+
   void scan();
   void load();
   void unload();

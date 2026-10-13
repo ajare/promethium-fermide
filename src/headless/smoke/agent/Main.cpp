@@ -4,6 +4,7 @@ int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks;
 	agent_smoke::registerIdentity(checks);
+	agent_smoke::registerPlayerControl(checks);
 	agent_smoke::registerGroup(checks);
 	agent_smoke::registerGroupAssignment(checks);
 	agent_smoke::registerGroupCount(checks);

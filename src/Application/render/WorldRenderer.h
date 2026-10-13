@@ -10,8 +10,9 @@ namespace mpp { class ResourceManager; }
 namespace wp::application::resourcesystem { class ResourceManager; }
 
 namespace pf::application::render {
-// Application-only viewport: Layer 0, centred and fitted to the window. No
-// simulation updates, editor globals, debug overlays or ImGui context.
+// Application-only viewport: follows the first Player-controlled Agent and its
+// Layer, or fits Layer 0 when none exists. No simulation updates, editor globals,
+// debug overlays or ImGui context.
 PF_APPLICATION_API WorldDrawList drawWorld(std::shared_ptr<const core::World> const& world,
                                           float width, float height);
 class WorldRenderer {

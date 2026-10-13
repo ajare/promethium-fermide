@@ -8,6 +8,8 @@
 #include <willpower/application/StateExceptions.h>
 #include <willpower/application/resourcesystem/ResourceManager.h>
 #include <core/World.h>
+#include <core/Agent.h>
+#include <cmath>
 
 #include "Application.h"
 #include "Map.h"
@@ -24,6 +26,46 @@ void requireNoMap(applib::StateTransitionData const& data) {
               !map.prevMap.mapRenderer && !map.nextMap.mapRenderer &&
               !map.prevMap.mapCollisionSim && !map.nextMap.mapCollisionSim,
           "Lifecycle must not populate map data");
+}
+
+void checkPlayerKeys(wp::application::State& play, core::World& world) {
+  using wp::application::Key;
+  using wp::application::KeyEvent;
+  auto key = [&](KeyEvent event, Key value) { play._injectKeyInput(event, value, {}); };
+  auto x = [&](core::AgentId id) { return world.lookupAgent(id).entity->getGlobalPosition().x; };
+  world.pauseSimulation();
+  auto first = world.getPlayerControlledAgent();
+  if (!first) first = world.createAgent("Keyboard player", 0, 0, 1.f);
+  auto second = world.createAgent("Other player", 0, 0, 1.5f);
+  require(world.setAgentBehaviourAssignment(second, core::PlayerControlledBehaviour, 1, {}) &&
+              (world.lookupAgent(first).entity->isPlayerControlled() ||
+               world.setAgentBehaviourAssignment(first, core::PlayerControlledBehaviour, 1, {})),
+          "Built-in must be assignable without a behaviour registry");
+  require(world.resumeSimulation(), "Cannot resume keyboard fixture");
+  float start = x(first), other = x(second);
+  auto speed = world.lookupAgent(first).entity->getWalkSpeed();
+  key(KeyEvent::Pressed, Key::RightArrow); play._update(1.f);
+  require(std::abs(x(first) - start - speed) < 0.0001f && x(second) == other,
+          "App arrows must move only the first eligible Agent");
+  key(KeyEvent::Pressed, Key::LeftArrow); play._update(1.f);
+  require(std::abs(x(first) - start - speed) < 0.0001f, "Both arrows must cancel");
+  key(KeyEvent::Released, Key::RightArrow); play._update(1.f);
+  require(std::abs(x(first) - start) < 0.0001f, "Held left must reverse direction");
+  key(KeyEvent::Released, Key::LeftArrow); play._update(1.f);
+  require(std::abs(x(first) - start) < 0.0001f, "Released arrows must stop immediately");
+  key(KeyEvent::Pressed, Key::RightArrow);
+  play._suspend(true, true, true);
+  play._suspend(false, false, false);
+  play._update(1.f);
+  require(std::abs(x(first) - start) < 0.0001f, "Suspending must clear held Player input");
+  world.pauseSimulation();
+  require(world.clearAgentBehaviourAssignment(first) && world.clearAgentBehaviourAssignment(second),
+          "Cannot clear Player assignments");
+  require(world.resumeSimulation(), "Cannot resume without Player");
+  key(KeyEvent::Pressed, Key::RightArrow); play._update(1.f);
+  require(!world.getPlayerControlledAgent() && std::abs(x(first) - start) < 0.0001f,
+          "No eligible Agent must disable Player input");
+  key(KeyEvent::Released, Key::RightArrow);
 }
 
 // Drive the actual factory-created states through the same exception/resume
@@ -72,9 +114,19 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
         require(map && manager.isResourceLoaded(map) && map->getWorld(),
                 "Map must remain loaded throughout Play");
         auto const tick = map->getWorld()->getSimulationTick();
-        child->_update(10.0f);
-        require(map->getWorld()->getSimulationTick() == tick,
-                "Play must not update the World");
+        require(!map->getWorld()->isSimulationPaused() &&
+                    map->getWorld()->getSimulationTimeScale() == 1.0,
+                "Play must start the simulation at normal speed");
+        child->_update(1.0f);
+        require(map->getWorld()->getSimulationTick() == tick + 60,
+                "Play must advance one second at normal speed");
+        checkPlayerKeys(*child, *map->getWorld());
+        auto const suspendTick = map->getWorld()->getSimulationTick();
+        child->_suspend(true, true, true);
+        child->_update(1.0f);
+        require(map->getWorld()->getSimulationTick() == suspendTick,
+                "Suspended Play must not update the World");
+        child->_resume(arguments);
         if (exitInPlay) {
           child.reset();
           controller.reset(); // Same ordering as Launcher on an early exit.
@@ -108,6 +160,11 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
     } else if (child->getName() == "MapLoad") {
       require(map->getWorld() && manager.isResourceLoaded(map),
               "MapLoad must create and load the World resource");
+      require(map->getWorld()->getSimulationTick() == 0,
+              "Loading must not advance the simulation");
+      // Play must override a paused/non-normal runtime configuration on entry.
+      map->getWorld()->pauseSimulation();
+      map->getWorld()->setSimulationTimeScale(2.0);
       worldLifetime = map->getWorld()->getLifetimeToken();
     } else if (child->getName() == "MapUnload" || child->getName() == "Unload") {
       auto source = map->getDependentResource("World");

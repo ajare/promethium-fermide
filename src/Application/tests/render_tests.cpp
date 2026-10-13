@@ -143,6 +143,41 @@ void checkNoOverlaysAndAgents() {
   world.reset();
   require(lifetime.expired(), "Command building must not keep a stale render World alive");
 }
+void checkPlayerCamera() {
+  auto world = std::make_shared<core::World>("Follow Player", 80, 8);
+  world->addRoom("Front", 0, 0, 0, 80, 1);
+  auto back = world->addRoom("Back", 1, 5, 0, 80, 1);
+  world->finishBuild(); world->pauseSimulation();
+  auto id = world->createAgent("Back-Layer player", back, 0, 50.f);
+  require(world->setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}),
+          "Camera fixture must accept built-in assignment");
+  auto centred = [](render::WorldDrawList const& draws, float width) {
+    float low = width, high = 0;
+    bool found = false;
+    for (auto const& command : draws.commands())
+      if (auto triangle = std::get_if<render::WorldDrawList::Triangle>(&command);
+          triangle && triangle->texture == render::WorldDrawList::Texture::ObjectAtlas) {
+        found = true;
+        for (auto position : triangle->positions) {
+          low = std::min(low, position.x); high = std::max(high, position.x);
+        }
+      }
+    require(found && std::abs((low + high) * 0.5f - width * 0.5f) < 0.001f,
+            "Player artwork must be visible on its Layer and centred horizontally");
+  };
+  auto draws = render::drawWorld(world, 640, 360);
+  centred(draws, 640); checkCanvas(draws, 640, 360);
+  require(world->resumeSimulation(), "Camera fixture cannot resume");
+  world->setPlayerMovementDirection(1); world->update(1.f);
+  auto const tick = world->getSimulationTick();
+  draws = render::drawWorld(world, 320, 200);
+  centred(draws, 320); checkCanvas(draws, 320, 200);
+  require(world->getSimulationTick() == tick, "Following must not update simulation");
+  world->pauseSimulation(); world->clearAgentBehaviourAssignment(id);
+  require(textured(render::drawWorld(world, 640, 360), render::WorldDrawList::Texture::ObjectAtlas) == 0,
+          "No Player must restore Layer-0 camera rather than reveal a back-Layer Agent");
+}
+
 void checkFurniture(std::filesystem::path const& directory, render::ObjectTileset const& atlas) {
   auto world = std::make_shared<core::World>("Application Furniture", 8, 2);
   auto room = world->addRoom("Front", 0, 0, 0, 8, 1);
@@ -205,6 +240,7 @@ int main(int argc, char** argv) {
     auto atlas = installAtlases(directory);
     checkStagedMap(directory);
     checkNoOverlaysAndAgents();
+    checkPlayerCamera();
     checkFurniture(directory, atlas);
     checkNestedApertures();
     require(render::drawWorld(nullptr, 1280, 720).commands().empty(), "Null World must draw nothing");

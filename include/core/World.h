@@ -684,6 +684,9 @@ namespace core
 		// Lua/sol2 types out of this domain header and its per-Agent environments
 		// prevent mutable module or instance state crossing assignments.
 		std::unique_ptr<AgentBehaviourRuntimeAdapter> mAgentBehaviourRuntime;
+		// App-only transient input. Editor simulation never supplies this intent.
+		int mPlayerMovementDirection{ 0 };
+		void advancePlayerControlledAgent(AgentId agent, float timestep);
 
 		// Registered Agent-type definitions, keyed by stable type ID. The bundled
 		// Human is registered at construction; additional types are attached
@@ -1827,10 +1830,16 @@ namespace core
 			std::string* diagnostic = nullptr);
 		std::optional<AgentBehaviourAssignment> const& getAgentBehaviourAssignment(
 			AgentId agent) const;
+		// Registry-dependent assignments only; immutable built-ins need no package.
 		uint32_t getAgentBehaviourAssignmentCount() const;
 		// True while an enabled instance, or its safe movement teardown, owns the
 		// Agent's movement intent. Editor/manual path controls use this one gate.
 		bool agentBehaviourOwnsMovement(AgentId agent) const;
+
+		// Lowest stable-ID eligible Agent, including inactive Agents (no fallback).
+		AgentId getPlayerControlledAgent() const;
+		// Held input: -1 left, 0 idle, +1 right. Never authored or persisted.
+		void setPlayerMovementDirection(int direction);
 		// Runtime failures are value diagnostics and are not authored or persisted.
 		// Inspecting or consuming them does not consume the public simulation event
 		// queue. The non-consuming snapshot supports persistent editor presentation;
