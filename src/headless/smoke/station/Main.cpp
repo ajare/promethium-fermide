@@ -12481,6 +12481,480 @@ void buffers(smoke::Context const&)
 	// satisfies the light-energy cap (2 kg/kWh x 1700 kJ/kg = 3400 <=
 	// 3600 kJ per kWh). Every scenario also runs the bundled Lua
 	// sandbox, whose own crop audit contains the model if it drifts.
+	// The #571 nutrient-conservation check: respiration burns only the
+	// organic a population actually holds, so the bound nitrogen,
+	// phosphorus, potassium and mineral mass survives every tick instead
+	// of being reclassified as fuel as the biomass shrinks. Every
+	// constituent a population ever held - its authored start plus
+	// everything it drew from the uptake stores - must still be
+	// accounted for in exactly one place: living, harvested to a
+	// destination, routed to waste on death, booked as uncontained
+	// loss, or respired away as organic. The chemical-energy basis is
+	// the organic fraction alone, so the energy fixed by growth equals
+	// the energy respired as heat plus the energy still carried in the
+	// organic matter left alive or harvested.
+	void nutrientConservation(smoke::Context const&)
+	{
+		auto closeTo = [](double actual, double expected, double relative)
+		{
+			return std::abs(actual - expected) <= relative * std::max(1e-12, std::abs(expected));
+		};
+		auto advanceOrDiagnose = [](core::World& world, uint64_t ticks, char const* what)
+		{
+			if (world.advanceTicks(ticks)) return true;
+			auto const diagnostics = world.getStationSystemsDiagnostics();
+			std::fprintf(stderr, "%s failed: %s\n", what,
+				diagnostics.empty() ? "(no Station diagnostic)" : diagnostics.back().message.c_str());
+			return false;
+		};
+		auto organicFractionOf = [](core::ResourceCompositionSettings const& composition)
+		{
+			return 1.0 - (composition.nutrientNitrogen + composition.phosphorus
+				+ composition.potassium + composition.otherMinerals);
+		};
+		// The closure residual for one population: what came in, minus
+		// everything the population accounts for across its sinks. Zero
+		// on every constituent means nothing was created or destroyed.
+		// The organic term also closes the energy ledger on the organic
+		// basis, so a wrong energy basis shows up here too.
+		auto closure = [&](core::ResourceCompositionSettings const& composition,
+			double initialBiomassKg, double grownKg, double drawnNitrogenKg,
+			double drawnPhosphorusKg, double drawnPotassiumKg, double drawnMineralsKg,
+			double respiredOrganicKg, double chemicalEnergyFixedKJ, double respirationHeatKJ,
+			double energyKJPerKgOrganic,
+			std::vector<core::StationBiologicalConstituents> const& sinks)
+		{
+			double organic = 0.0, nitrogen = 0.0, phosphorus = 0.0, potassium = 0.0, minerals = 0.0;
+			for (auto const& sink : sinks)
+			{
+				organic += sink.organicKg;
+				nitrogen += sink.nutrientNitrogenKg;
+				phosphorus += sink.phosphorusKg;
+				potassium += sink.potassiumKg;
+				minerals += sink.mineralsKg;
+			}
+			auto const initialOrganicKg = initialBiomassKg * organicFractionOf(composition);
+			// Organic enters only through photosynthesis: the grown dry
+			// mass contributes its organic fraction, drawn from the
+			// compartment's carbon dioxide rather than from a store.
+			auto const grownOrganicKg = grownKg * organicFractionOf(composition);
+			return std::array<double, 6>{
+				initialOrganicKg + grownOrganicKg - organic - respiredOrganicKg,
+				initialBiomassKg * composition.nutrientNitrogen + drawnNitrogenKg - nitrogen,
+				initialBiomassKg * composition.phosphorus + drawnPhosphorusKg - phosphorus,
+				initialBiomassKg * composition.potassium + drawnPotassiumKg - potassium,
+				initialBiomassKg * composition.otherMinerals + drawnMineralsKg - minerals,
+				initialOrganicKg * energyKJPerKgOrganic + chemicalEnergyFixedKJ
+					- respirationHeatKJ - organic * energyKJPerKgOrganic,
+			};
+		};
+		auto requireClosed = [](std::array<double, 6> const& residual, std::string const& where)
+		{
+			std::array<char const*, 6> const names = {"organic", "nitrogen", "phosphorus",
+				"potassium", "minerals", "energy"};
+			for (size_t i = 0; i < residual.size(); ++i)
+			{
+				require(std::abs(residual[i]) <= 1e-9,
+					(where + ": the " + names[i] + " balance does not close (residual "
+						+ std::to_string(residual[i]) + ")").c_str());
+			}
+		};
+		// A nutrient-rich test crop: 80% of its dry mass is bound
+		// nutrient and only 20% is respirable organic, so a model that
+		// reclassifies nutrient as fuel loses four fifths of the canopy's
+		// declared material and this check cannot pass.
+		auto richComposition = []()
+		{
+			core::ResourceCompositionSettings composition;
+			composition.moisture = 0.0;
+			composition.nutrientNitrogen = 0.5;
+			composition.atmosphericNitrogen = 0.0;
+			composition.phosphorus = 0.1;
+			composition.potassium = 0.1;
+			composition.otherMinerals = 0.1;
+			composition.energyKJPerKgDry = 1700.0;
+			return composition;
+		}();
+		auto store = [](std::string const& id, double capacity, double starting)
+		{
+			core::ResourceStoreSettings settings;
+			settings.id = id;
+			settings.unit = "kg";
+			settings.capacity = capacity;
+			settings.startingQualified = starting;
+			return settings;
+		};
+		auto habitat = []()
+		{
+			core::AtmosphereSettings settings;
+			settings.id = "habitat";
+			settings.hazardClass = "normal";
+			settings.volumeM3 = 100.0;
+			settings.startingOxygenKg = 40.0;
+			settings.startingNitrogenKg = 80.0;
+			settings.startingCarbonDioxideKg = 5.0;
+			settings.startingWaterVapourKg = 1.0;
+			settings.startingTemperatureC = 22.0;
+			settings.thermalCapacityKJPerK = 20000.0;
+			settings.minPressureKPa = 1.0;
+			settings.maxPressureKPa = 200.0;
+			return settings;
+		};
+		auto uptakeStores = [&]()
+		{
+			std::vector<core::ResourceStoreSettings> stores;
+			stores.push_back(store("irrigation", 200.0, 150.0));
+			stores.push_back(store("fertN", 50.0, 40.0));
+			stores.push_back(store("fertP", 50.0, 40.0));
+			stores.push_back(store("fertK", 50.0, 40.0));
+			stores.push_back(store("fertMin", 50.0, 40.0));
+			return stores;
+		};
+		auto richCrop = [&]()
+		{
+			core::CropPopulationSettings settings;
+			settings.id = "canopy";
+			settings.atmosphereId = "habitat";
+			settings.waterStoreId = "irrigation";
+			settings.nitrogenStoreId = "fertN";
+			settings.phosphorusStoreId = "fertP";
+			settings.potassiumStoreId = "fertK";
+			settings.mineralsStoreId = "fertMin";
+			settings.composition = richComposition;
+			settings.growingAreaM2 = 10.0;
+			settings.maxBiomassDensityKgPerM2 = 2.0;
+			settings.initialBiomassKg = 1.0;
+			settings.lampRatedKW = 3.6;
+			settings.illuminationProfile.constantLevel = 0.0;
+			settings.circulationPowerKW = 0.1;
+			settings.growthYieldKgPerKWh = 2.0;
+			// Exaggerated test biology, as the starvation checks elsewhere
+			// use: the point is that the organic runs out inside a short
+			// headless run, not that the rate is plausible.
+			settings.respirationPerHour = 600.0;
+			settings.transpirationKgPerKgGrowth = 0.0;
+			settings.minGrowingTemperatureC = 10.0;
+			settings.maxGrowingTemperatureC = 35.0;
+			settings.wasteStoreId = "waste";
+			return settings;
+		};
+		auto configureCrop = [&](core::World& world,
+			std::vector<core::ResourceStoreSettings> stores,
+			std::vector<core::CropPopulationSettings> crops)
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = std::move(stores);
+			settings.atmospheres = { habitat() };
+			settings.cropPopulations = std::move(crops);
+			core::SolarArraySettings field;
+			field.id = "field";
+			field.capacityKW = 100.0;
+			settings.solarArrays = { field };
+			return std::make_pair(world.configureStationSystems(settings, false, &diagnostic),
+				diagnostic);
+		};
+		// Starvation preserves the nutrients the crop cannot burn: a dark
+		// 1 kg canopy that is 80% bound nutrient respires away only its
+		// 0.2 kg of organic matter, then dies with 0.8 kg of nutrient
+		// residue that must arrive in the waste store intact. Before the
+		// fix the same run respired essentially the whole kilogram and
+		// reported the nitrogen as gone.
+		{
+			core::World world("NutrientStarve", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto stores = uptakeStores();
+			stores.push_back(store("waste", 10.0, 0.0));
+			auto unit = richCrop();
+			auto const [ok, diagnostic] = configureCrop(world, std::move(stores), { unit });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 300, "crop nutrient-starvation run"),
+				"the crop nutrient-starvation run failed");
+			world.pauseSimulation();
+			auto const& c = world.getStationSystemsSnapshot().cropPopulations[0];
+			require(c.dead, "the nutrient-rich canopy did not starve once its organic ran out");
+			require(closeTo(c.respirationKg, 0.2, 1e-6),
+				"respiration burned past the organic inventory and into the bound nutrients");
+			require(closeTo(c.deadResidueToWasteKg, 0.8, 1e-6),
+				"the nutrient residue left the canopy in the wrong amount");
+			require(closeTo(c.deadResidueToWasteConstituents.nutrientNitrogenKg, 0.5, 1e-6),
+				"the canopy's nitrogen did not survive to the waste path");
+			require(closeTo(c.deadResidueToWasteConstituents.phosphorusKg, 0.1, 1e-6),
+				"the canopy's phosphorus did not survive to the waste path");
+			require(closeTo(c.deadResidueToWasteConstituents.potassiumKg, 0.1, 1e-6),
+				"the canopy's potassium did not survive to the waste path");
+			require(closeTo(c.deadResidueToWasteConstituents.mineralsKg, 0.1, 1e-6),
+				"the canopy's minerals did not survive to the waste path");
+			requireClosed(closure(richComposition, unit.initialBiomassKg, c.growthKg,
+				c.nitrogenDrawnKg, c.phosphorusDrawnKg, c.potassiumDrawnKg, c.mineralsDrawnKg,
+				c.respirationKg, c.chemicalEnergyFixedKJ, c.respirationHeatKJ,
+				c.energyKJPerKgOrganic,
+				{c.livingConstituents, c.harvestedToFoodConstituents,
+					c.harvestedToWasteConstituents, c.deadResidueToWasteConstituents,
+					c.deadResidueLostConstituents}),
+				"the starved crop nutrient ledger");
+		}
+		// The same starvation with a full waste path: the residue cannot
+		// all be routed, and the remainder must be booked as explicit
+		// uncontained loss on the actual constituent inventory, not on
+		// the declared mix. The ledger still closes across waste and loss.
+		{
+			core::World world("NutrientStarveFullWaste", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto stores = uptakeStores();
+			stores.push_back(store("waste", 0.3, 0.0));
+			auto unit = richCrop();
+			auto const [ok, diagnostic] = configureCrop(world, std::move(stores), { unit });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 300, "crop full-waste starvation run"),
+				"the crop full-waste starvation run failed");
+			world.pauseSimulation();
+			auto const& c = world.getStationSystemsSnapshot().cropPopulations[0];
+			require(c.dead, "the nutrient-rich canopy did not starve once its organic ran out");
+			require(closeTo(c.respirationKg, 0.2, 1e-6),
+				"respiration burned past the organic inventory and into the bound nutrients");
+			require(closeTo(c.deadResidueToWasteKg, 0.3, 1e-6),
+				"the waste path did not take everything its headroom allowed");
+			require(closeTo(c.deadResidueLostKg, 0.5, 1e-6),
+				"the unroutable residue was not booked as explicit loss");
+			// The loss carries the canopy's real constituent proportions,
+			// not the declared composition: 0.5/0.8 of the residue's 0.5 kg
+			// of nitrogen is lost, the rest survives in the waste store.
+			require(closeTo(c.deadResidueLostConstituents.nutrientNitrogenKg, 0.3125, 1e-6),
+				"the uncontained loss did not carry the actual nitrogen share");
+			require(closeTo(c.deadResidueToWasteConstituents.nutrientNitrogenKg, 0.1875, 1e-6),
+				"the routed residue did not carry the actual nitrogen share");
+			requireClosed(closure(richComposition, unit.initialBiomassKg, c.growthKg,
+				c.nitrogenDrawnKg, c.phosphorusDrawnKg, c.potassiumDrawnKg, c.mineralsDrawnKg,
+				c.respirationKg, c.chemicalEnergyFixedKJ, c.respirationHeatKJ,
+				c.energyKJPerKgOrganic,
+				{c.livingConstituents, c.harvestedToFoodConstituents,
+					c.harvestedToWasteConstituents, c.deadResidueToWasteConstituents,
+					c.deadResidueLostConstituents}),
+				"the full-waste starved crop nutrient ledger");
+		}
+		// A growing, harvested canopy closes the same ledger across every
+		// destination at once: the living stand, the food store, the waste
+		// store and the respiration that ran between harvests.
+		{
+			core::World world("NutrientHarvest", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto stores = uptakeStores();
+			stores.push_back(store("food", 50.0, 0.0));
+			stores.push_back(store("waste", 50.0, 0.0));
+			auto unit = richCrop();
+			unit.illuminationProfile.constantLevel = 1.0;
+			unit.transpirationKgPerKgGrowth = 0.0;
+			unit.foodStoreId = "food";
+			unit.wasteStoreId = "waste";
+			unit.edibleFraction = 0.6;
+			unit.harvestTriggerKg = 0.5;
+			unit.harvestFraction = 1.0;
+			auto const [ok, diagnostic] = configureCrop(world, std::move(stores), { unit });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 900, "crop harvest nutrient run"),
+				"the crop harvest nutrient run failed");
+			world.pauseSimulation();
+			auto const& c = world.getStationSystemsSnapshot().cropPopulations[0];
+			require(c.harvestedKg > 0.0, "the canopy never harvested");
+			requireClosed(closure(richComposition, unit.initialBiomassKg, c.growthKg,
+				c.nitrogenDrawnKg, c.phosphorusDrawnKg, c.potassiumDrawnKg, c.mineralsDrawnKg,
+				c.respirationKg, c.chemicalEnergyFixedKJ, c.respirationHeatKJ,
+				c.energyKJPerKgOrganic,
+				{c.livingConstituents, c.harvestedToFoodConstituents,
+					c.harvestedToWasteConstituents, c.deadResidueToWasteConstituents,
+					c.deadResidueLostConstituents}),
+				"the harvested crop nutrient ledger");
+			// The harvested yield is nutrient-richer than the declared
+			// composition, because respiration has been removing organic
+			// while the nutrients stayed. Routing the declared mix instead
+			// of the actual inventory would put too little nitrogen into
+			// the product and leave the difference unaccounted.
+			auto const harvestedTotal = c.harvestedToFoodConstituents.organicKg
+				+ c.harvestedToFoodConstituents.nutrientNitrogenKg
+				+ c.harvestedToFoodConstituents.phosphorusKg
+				+ c.harvestedToFoodConstituents.potassiumKg
+				+ c.harvestedToFoodConstituents.mineralsKg;
+			require(harvestedTotal > 0.0,
+				"the harvested constituent inventory is empty");
+			require(c.harvestedToFoodConstituents.nutrientNitrogenKg
+				> harvestedTotal * unit.composition.nutrientNitrogen,
+				"the harvested yield did not carry the enriched nutrient share");
+		}
+		// The same closure for an algae culture, which runs the identical
+		// biology on its own state. A dark, nutrient-rich culture burns
+		// only its organic share and dies with its nutrients intact in the
+		// waste path.
+		auto richCulture = [&]()
+		{
+			core::AlgaeCultureSettings settings;
+			settings.id = "pond";
+			settings.atmosphereId = "habitat";
+			settings.waterStoreId = "makeup";
+			settings.nitrogenStoreId = "fertN";
+			settings.phosphorusStoreId = "fertP";
+			settings.potassiumStoreId = "fertK";
+			settings.mineralsStoreId = "fertMin";
+			settings.composition = richComposition;
+			settings.cultureVolumeL = 1000.0;
+			settings.maxBiomassDensityKgPerL = 0.002;
+			settings.initialBiomassKg = 1.0;
+			settings.lampRatedKW = 36.0;
+			settings.illuminationProfile.constantLevel = 0.0;
+			settings.circulationPowerKW = 0.1;
+			settings.growthYieldKgPerKWh = 2.0;
+			settings.respirationPerHour = 600.0;
+			settings.evaporationKgPerKgGrowth = 0.0;
+			settings.minGrowingTemperatureC = 10.0;
+			settings.maxGrowingTemperatureC = 35.0;
+			settings.foodStoreId = "afood";
+			settings.recoveryStoreId = "arecovery";
+			settings.wasteStoreId = "awaste";
+			settings.foodFraction = 0.4;
+			settings.recoveryFraction = 0.3;
+			return settings;
+		};
+		auto configureAlgae = [&](core::World& world,
+			std::vector<core::ResourceStoreSettings> stores,
+			std::vector<core::AlgaeCultureSettings> cultures)
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = std::move(stores);
+			settings.atmospheres = { habitat() };
+			settings.algaeCultures = std::move(cultures);
+			core::SolarArraySettings field;
+			field.id = "field";
+			field.capacityKW = 100.0;
+			settings.solarArrays = { field };
+			return std::make_pair(world.configureStationSystems(settings, false, &diagnostic),
+				diagnostic);
+		};
+		auto algaeSinks = [](core::StationAlgaeCultureSnapshot const& c)
+		{
+			return std::vector<core::StationBiologicalConstituents>{
+				c.livingConstituents, c.harvestedToFoodConstituents,
+				c.harvestedToRecoveryConstituents, c.harvestedToWasteConstituents,
+				c.deadResidueToWasteConstituents, c.deadResidueLostConstituents};
+		};
+		{
+			core::World world("AlgaeNutrientStarve", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto stores = uptakeStores();
+			stores[0].id = "makeup";
+			stores.push_back(store("afood", 50.0, 0.0));
+			stores.push_back(store("arecovery", 50.0, 0.0));
+			stores.push_back(store("awaste", 50.0, 0.0));
+			auto unit = richCulture();
+			auto const [ok, diagnostic] = configureAlgae(world, std::move(stores), { unit });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 300, "algae nutrient-starvation run"),
+				"the algae nutrient-starvation run failed");
+			world.pauseSimulation();
+			auto const& c = world.getStationSystemsSnapshot().algaeCultures[0];
+			require(c.dead, "the nutrient-rich culture did not starve once its organic ran out");
+			require(closeTo(c.respirationKg, 0.2, 1e-6),
+				"algae respiration burned past the organic inventory and into the bound nutrients");
+			require(closeTo(c.deadResidueToWasteConstituents.nutrientNitrogenKg, 0.5, 1e-6),
+				"the culture's nitrogen did not survive to the waste path");
+			require(closeTo(c.deadResidueToWasteConstituents.phosphorusKg, 0.1, 1e-6),
+				"the culture's phosphorus did not survive to the waste path");
+			require(closeTo(c.deadResidueToWasteConstituents.potassiumKg, 0.1, 1e-6),
+				"the culture's potassium did not survive to the waste path");
+			require(closeTo(c.deadResidueToWasteConstituents.mineralsKg, 0.1, 1e-6),
+				"the culture's minerals did not survive to the waste path");
+			requireClosed(closure(richComposition, unit.initialBiomassKg, c.growthKg,
+				c.nitrogenDrawnKg, c.phosphorusDrawnKg, c.potassiumDrawnKg, c.mineralsDrawnKg,
+				c.respirationKg, c.chemicalEnergyFixedKJ, c.respirationHeatKJ,
+				c.energyKJPerKgOrganic, algaeSinks(c)),
+				"the starved algae nutrient ledger");
+		}
+		// The same starvation with a full waste path: the culture's
+		// residue spills past the waste headroom into explicit uncontained
+		// loss, routed on the actual constituent inventory. The ledger
+		// still closes.
+		{
+			core::World world("AlgaeNutrientStarveFullWaste", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto stores = uptakeStores();
+			stores[0].id = "makeup";
+			stores.push_back(store("afood", 50.0, 0.0));
+			stores.push_back(store("arecovery", 50.0, 0.0));
+			stores.push_back(store("awaste", 0.3, 0.0));
+			auto unit = richCulture();
+			auto const [ok, diagnostic] = configureAlgae(world, std::move(stores), { unit });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 300, "algae full-waste starvation run"),
+				"the algae full-waste starvation run failed");
+			world.pauseSimulation();
+			auto const& c = world.getStationSystemsSnapshot().algaeCultures[0];
+			require(c.dead, "the nutrient-rich culture did not starve once its organic ran out");
+			require(closeTo(c.respirationKg, 0.2, 1e-6),
+				"algae respiration burned past the organic inventory and into the bound nutrients");
+			require(closeTo(c.deadResidueToWasteKg, 0.3, 1e-6),
+				"the waste path did not take everything its headroom allowed");
+			require(closeTo(c.deadResidueLostKg, 0.5, 1e-6),
+				"the unroutable residue was not booked as explicit loss");
+			require(closeTo(c.deadResidueLostConstituents.nutrientNitrogenKg, 0.3125, 1e-6),
+				"the uncontained loss did not carry the actual nitrogen share");
+			require(closeTo(c.deadResidueToWasteConstituents.nutrientNitrogenKg, 0.1875, 1e-6),
+				"the routed residue did not carry the actual nitrogen share");
+			requireClosed(closure(richComposition, unit.initialBiomassKg, c.growthKg,
+				c.nitrogenDrawnKg, c.phosphorusDrawnKg, c.potassiumDrawnKg, c.mineralsDrawnKg,
+				c.respirationKg, c.chemicalEnergyFixedKJ, c.respirationHeatKJ,
+				c.energyKJPerKgOrganic, algaeSinks(c)),
+				"the full-waste starved algae nutrient ledger");
+		}
+		// A growing, three-way-harvested culture closes the same ledger
+		// across all four sinks at once: the living stand, the food store,
+		// the recovery store and the waste store, plus the respiration
+		// that ran between harvests.
+		{
+			core::World world("AlgaeNutrientHarvest", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto stores = uptakeStores();
+			stores[0].id = "makeup";
+			stores.push_back(store("afood", 50.0, 0.0));
+			stores.push_back(store("arecovery", 50.0, 0.0));
+			stores.push_back(store("awaste", 50.0, 0.0));
+			auto unit = richCulture();
+			unit.illuminationProfile.constantLevel = 1.0;
+			unit.harvestTriggerKg = 0.5;
+			unit.harvestFraction = 1.0;
+			auto const [ok, diagnostic] = configureAlgae(world, std::move(stores), { unit });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 900, "algae harvest nutrient run"),
+				"the algae harvest nutrient run failed");
+			world.pauseSimulation();
+			auto const& c = world.getStationSystemsSnapshot().algaeCultures[0];
+			require(c.harvestedKg > 0.0, "the culture never harvested");
+			require(c.harvestedToRecoveryConstituents.organicKg > 0.0
+				&& c.harvestedToWasteConstituents.organicKg > 0.0,
+				"the harvest did not reach every declared destination");
+			requireClosed(closure(richComposition, unit.initialBiomassKg, c.growthKg,
+				c.nitrogenDrawnKg, c.phosphorusDrawnKg, c.potassiumDrawnKg, c.mineralsDrawnKg,
+				c.respirationKg, c.chemicalEnergyFixedKJ, c.respirationHeatKJ,
+				c.energyKJPerKgOrganic, algaeSinks(c)),
+				"the harvested algae nutrient ledger");
+		}
+	}
+
 	void crops(smoke::Context const&)
 	{
 		auto closeTo = [](double actual, double expected, double relative)
@@ -15366,7 +15840,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"outages", outages}, {"failures", failures}, {"dispatch", dispatch}, {"protectedServices", protectedServices}};
+		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"nutrientConservation", nutrientConservation}, {"outages", outages}, {"failures", failures}, {"dispatch", dispatch}, {"protectedServices", protectedServices}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

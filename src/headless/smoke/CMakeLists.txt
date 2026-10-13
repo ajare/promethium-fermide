@@ -86,7 +86,12 @@ foreach(check lifecycle batching eventBound persistence stores transfers compoun
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
         deliveries wasteEjections thermal coolant chillers generators outages buffers atmospheres crews water containment gas crops failures dispatch fileRoundTrip writeFailure legacyFiles structuralReplay
-        compoundFiles powerFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles outageFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles)
+        compoundFiles powerFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles outageFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles
+        # #571: harvest, algae and the nutrient-conservation closure were
+        # reachable through the binary but never registered here, so they
+        # ran in no CI pass. The nutrient ledger needs to actually run to
+        # protect the respiration/harvest/death accounting.
+        harvest algae nutrientConservation)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()

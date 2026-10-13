@@ -213,6 +213,92 @@ local function addConstituents(totals, composition, wetMassKg, sign)
     totals.energy = (totals.energy or 0) + sign * dry * composition.energyKJPerKgDry
 end
 
+-- The living biological constituent inventory (#571): the actual
+-- dry-mass amounts of respirable organic matter and bound nutrients a
+-- biological population carries, routes and loses. Kept as real
+-- inventories rather than re-derived from a fixed composition fraction
+-- of a shrinking biomass, so respiring organic matter can never
+-- reclassify a nutrient as fuel. Mirrors the host's
+-- StationBiologicalConstituents.
+local function organicFractionOf(composition)
+    return 1 - (composition.nutrientNitrogen + composition.phosphorus
+        + composition.potassium + composition.otherMinerals)
+end
+
+-- The chemical-energy basis for the organic material (#571): the
+-- declared dry-biomass chemical energy is carried wholly by the
+-- organic fraction, because the bound nutrients are not fuel. A
+-- composition with no organic matter carries no chemical energy.
+local function chemicalEnergyKJPerKgOrganic(composition)
+    local fraction = organicFractionOf(composition)
+    if fraction <= 0 then return 0 end
+    return composition.energyKJPerKgDry / fraction
+end
+
+local function newConstituents()
+    return {
+        organicKg = 0, nutrientNitrogenKg = 0, phosphorusKg = 0,
+        potassiumKg = 0, mineralsKg = 0,
+    }
+end
+
+-- A share of an inventory, for splitting a routed mass across the
+-- constituents it actually carries rather than a declared mix.
+local function scaleConstituents(inventory, share)
+    local result = newConstituents()
+    result.organicKg = inventory.organicKg * share
+    result.nutrientNitrogenKg = inventory.nutrientNitrogenKg * share
+    result.phosphorusKg = inventory.phosphorusKg * share
+    result.potassiumKg = inventory.potassiumKg * share
+    result.mineralsKg = inventory.mineralsKg * share
+    return result
+end
+
+local function mergeConstituents(total, part)
+    total.organicKg = total.organicKg + part.organicKg
+    total.nutrientNitrogenKg = total.nutrientNitrogenKg + part.nutrientNitrogenKg
+    total.phosphorusKg = total.phosphorusKg + part.phosphorusKg
+    total.potassiumKg = total.potassiumKg + part.potassiumKg
+    total.mineralsKg = total.mineralsKg + part.mineralsKg
+    return total
+end
+
+-- Keep the living inventory consistent with the biomass ledger: the
+-- organic share is whatever dry mass the population holds beyond its
+-- tracked nutrients, so the inventory always sums to the living
+-- biomass exactly and the nutrients are never silently resized by
+-- unit roundoff.
+local function settleLivingOrganic(inventory, livingBiomassKg)
+    inventory.organicKg = livingBiomassKg - (inventory.nutrientNitrogenKg
+        + inventory.phosphorusKg + inventory.potassiumKg + inventory.mineralsKg)
+end
+
+-- Take a share of the living inventory, returning what came off. The
+-- nutrients come off as real tracked amounts and the organic share is
+-- re-closed against the remaining biomass ledger.
+local function takeConstituents(inventory, share, remainingBiomassKg)
+    local removed = scaleConstituents(inventory, share)
+    inventory.nutrientNitrogenKg = inventory.nutrientNitrogenKg - removed.nutrientNitrogenKg
+    inventory.phosphorusKg = inventory.phosphorusKg - removed.phosphorusKg
+    inventory.potassiumKg = inventory.potassiumKg - removed.potassiumKg
+    inventory.mineralsKg = inventory.mineralsKg - removed.mineralsKg
+    settleLivingOrganic(inventory, remainingBiomassKg)
+    return removed
+end
+
+-- The constituent inventory a declared dry biomass carries at a
+-- declared composition. Nothing new is authored: the inventory is
+-- derived wholly from settings that already exist.
+local function constituentsOf(dryMassKg, composition)
+    local inventory = newConstituents()
+    inventory.nutrientNitrogenKg = dryMassKg * composition.nutrientNitrogen
+    inventory.phosphorusKg = dryMassKg * composition.phosphorus
+    inventory.potassiumKg = dryMassKg * composition.potassium
+    inventory.mineralsKg = dryMassKg * composition.otherMinerals
+    settleLivingOrganic(inventory, dryMassKg)
+    return inventory
+end
+
 -- Compound materials are mass-denominated; constituents normalize to kg.
 local function toKg(unit, mass)
     if unit == 'g' then return mass * 0.001 end
@@ -2537,6 +2623,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             harvestFraction = crop.harvestFraction,
             priority = crop.priority or 0,
             livingBiomassKg = crop.initialBiomassKg,
+            -- Kept for the #571 constituent closure audit.
+            initialBiomassKg = crop.initialBiomassKg,
+            -- The living constituent inventory (#571) opens at the
+            -- declared initial biomass under the declared composition.
+            livingConstituents = constituentsOf(crop.initialBiomassKg, crop.composition),
+            harvestedToFoodConstituents = newConstituents(),
+            harvestedToWasteConstituents = newConstituents(),
+            deadResidueToWasteConstituents = newConstituents(),
+            deadResidueLostConstituents = newConstituents(),
             dead = false,
             lastIllumination = 0, lastLightRequested = 0, lastLightSupplied = 0,
             lastCirculationRequested = 0, lastCirculationSupplied = 0,
@@ -2761,6 +2856,16 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             harvestFraction = algae.harvestFraction,
             priority = algae.priority or 0,
             livingBiomassKg = algae.initialBiomassKg,
+            -- Kept for the #571 constituent closure audit.
+            initialBiomassKg = algae.initialBiomassKg,
+            -- The living constituent inventory (#571) opens at the
+            -- declared initial biomass under the declared composition.
+            livingConstituents = constituentsOf(algae.initialBiomassKg, algae.composition),
+            harvestedToFoodConstituents = newConstituents(),
+            harvestedToRecoveryConstituents = newConstituents(),
+            harvestedToWasteConstituents = newConstituents(),
+            deadResidueToWasteConstituents = newConstituents(),
+            deadResidueLostConstituents = newConstituents(),
             dead = false,
             lastIllumination = 0, lastLightRequested = 0, lastLightSupplied = 0,
             lastCirculationRequested = 0, lastCirculationSupplied = 0,
@@ -6179,9 +6284,13 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 -- drawn per kilogram of dry growth from their own
                 -- stores.
                 local composition = crop.composition
-                local organicFraction = 1 - (composition.nutrientNitrogen
-                    + composition.phosphorus + composition.potassium
-                    + composition.otherMinerals)
+                local organicFraction = organicFractionOf(composition)
+                -- The chemical-energy basis for the organic material
+                -- (#571): the declared dry-biomass energy is carried
+                -- wholly by the organic fraction, so a kilogram of
+                -- organic matter respired and a kilogram still held in
+                -- the canopy are priced the same way.
+                local energyKJPerKgOrganic = chemicalEnergyKJPerKgOrganic(composition)
                 local co2PerKgGrowth = organicFraction * PHOTOSYNTHESIS_CO2_KG_PER_ORGANIC_KG
                 local assimilationWaterPerKgGrowth = organicFraction
                     * PHOTOSYNTHESIS_WATER_KG_PER_ORGANIC_KG
@@ -6339,13 +6448,32 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         (self.constituent_loss[constituent] or 0) - change
                 end
                 crop.livingBiomassKg = crop.livingBiomassKg + growthKg
-                -- Respiration runs day and night against the declared
-                -- organic content of the living biomass, capped by the
-                -- oxygen the compartment actually holds: a canopy in an
-                -- oxygen-poor compartment simply cannot burn more than
-                -- it can breathe, and the shortfall is reported, never
-                -- invented around.
-                local organicContent = crop.livingBiomassKg * organicFraction
+                -- The living constituent inventory (#571): the organic
+                -- share of the growth is fixed carbon, and every bound
+                -- nutrient is exactly what the draw took from its own
+                -- store, so the inventory records what the canopy really
+                -- holds instead of a declared fraction of a changing
+                -- total.
+                crop.livingConstituents.nutrientNitrogenKg =
+                    crop.livingConstituents.nutrientNitrogenKg
+                    + toKg(crop.nitrogen.unit, nitrogenUnits)
+                crop.livingConstituents.phosphorusKg = crop.livingConstituents.phosphorusKg
+                    + toKg(crop.phosphorus.unit, phosphorusUnits)
+                crop.livingConstituents.potassiumKg = crop.livingConstituents.potassiumKg
+                    + toKg(crop.potassium.unit, potassiumUnits)
+                crop.livingConstituents.mineralsKg = crop.livingConstituents.mineralsKg
+                    + toKg(crop.minerals.unit, mineralsUnits)
+                settleLivingOrganic(crop.livingConstituents, crop.livingBiomassKg)
+                -- Respiration runs day and night against the organic the
+                -- canopy actually holds, capped by the oxygen the
+                -- compartment really has: a canopy in an oxygen-poor
+                -- compartment simply cannot burn more than it can
+                -- breathe, and the shortfall is reported, never invented
+                -- around. The cap is the tracked organic inventory rather
+                -- than a declared fraction of the living mass, so the
+                -- bound nutrients are never reclassified as fuel as the
+                -- biomass shrinks (#571).
+                local organicContent = crop.livingConstituents.organicKg
                 local respirationRequested = math.min(
                     crop.respirationPerHour * crop.livingBiomassKg * fixed_hours,
                     organicContent)
@@ -6376,16 +6504,27 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 compartment.cropVapourAdded = compartment.cropVapourAdded
                     + respirationWaterKg + transpiredKg
                 crop.livingBiomassKg = crop.livingBiomassKg - respiredOrganicKg
+                settleLivingOrganic(crop.livingConstituents, crop.livingBiomassKg)
                 -- Adverse-condition death (#410), mirroring the host:
                 -- when respiration exhausts the living organic content
-                -- the canopy starves. The remaining non-respirable
-                -- residue is routed to the declared waste store as far
-                -- as its headroom reaches; whatever the waste path cannot
-                -- hold is booked as explicit uncontained loss. Nothing
-                -- vanishes silently, and the dead never regrow for free.
-                if crop.livingBiomassKg * organicFraction <= 1e-9 then
+                -- the canopy starves. The check is on the tracked
+                -- organic inventory, so starvation is the organic
+                -- actually running out rather than the total mass merely
+                -- reading low because nutrients were mistaken for fuel
+                -- (#571). The remaining residue is routed to the
+                -- declared waste store as far as its headroom reaches;
+                -- whatever the waste path cannot hold is booked as
+                -- explicit uncontained loss. Nothing vanishes silently,
+                -- and the dead never regrow for free.
+                if crop.livingConstituents.organicKg <= 1e-9 then
                     crop.dead = true
+                    -- The residue carries the constituents the canopy
+                    -- actually holds, in their real proportions rather
+                    -- than the declared mix, so a residue left
+                    -- nutrient-rich by a long respiration run is routed
+                    -- as the nutrient-rich material it is.
                     local residueKg = crop.livingBiomassKg
+                    local residueConstituents = scaleConstituents(crop.livingConstituents, 1)
                     local routedKg = 0
                     if crop.waste then
                         local wasteHeadroomUnits = math.max(0, crop.waste.capacity
@@ -6405,6 +6544,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     end
                     crop.livingBiomassKg = crop.livingBiomassKg - residueKg
                     local lostKg = residueKg - routedKg
+                    local routedShare = residueKg > 0 and routedKg / residueKg or 0
+                    mergeConstituents(crop.deadResidueToWasteConstituents,
+                        scaleConstituents(residueConstituents, routedShare))
+                    mergeConstituents(crop.deadResidueLostConstituents,
+                        scaleConstituents(residueConstituents, 1 - routedShare))
+                    crop.livingConstituents = newConstituents()
                     crop.lastDeadResidueToWasteKg = routedKg
                     crop.lastDeadResidueLostKg = lostKg
                     crop.deadResidueToWasteKg = crop.deadResidueToWasteKg + routedKg
@@ -6438,6 +6583,20 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     local wasteAcceptedKg = toKg(crop.waste.unit, wasteAcceptedUnits)
                     local harvestedKg = foodAcceptedKg + wasteAcceptedKg
                     local constrainedKg = requestedKg - harvestedKg
+                    -- The yield carries the constituents the canopy
+                    -- actually holds, in their real proportions, split by
+                    -- the share of the harvested mass each destination
+                    -- took (#571).
+                    local harvestShare = crop.livingBiomassKg > 0
+                        and harvestedKg / crop.livingBiomassKg or 0
+                    local removedConstituents = takeConstituents(crop.livingConstituents,
+                        harvestShare, crop.livingBiomassKg - harvestedKg)
+                    if harvestedKg > 0 then
+                        mergeConstituents(crop.harvestedToFoodConstituents,
+                            scaleConstituents(removedConstituents, foodAcceptedKg / harvestedKg))
+                        mergeConstituents(crop.harvestedToWasteConstituents,
+                            scaleConstituents(removedConstituents, wasteAcceptedKg / harvestedKg))
+                    end
                     if foodAcceptedUnits > 0 then
                         crop.food.qualified = crop.food.qualified + foodAcceptedUnits
                         self.unit_harvested[crop.food.unit] =
@@ -6480,9 +6639,13 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 end
                 -- Energy: the light energy not fixed as biomass
                 -- chemical energy, the circulation pump work and the
-                -- respiration heat land in the compartment once.
+                -- respiration heat land in the compartment once, priced
+                -- on the organic basis (#571) so the chemical energy
+                -- fixed by growth is exactly the energy later respired
+                -- plus the energy still held in living and harvested
+                -- organic matter.
                 local chemicalEnergyFixedKJ = growthKg * composition.energyKJPerKgDry
-                local respirationHeatKJ = respiredOrganicKg * composition.energyKJPerKgDry
+                local respirationHeatKJ = respiredOrganicKg * energyKJPerKgOrganic
                 local heatIntoCompartmentKJ = lightEnergyKJ - chemicalEnergyFixedKJ
                     + circulationEnergyKJ + respirationHeatKJ
                 compartment.cropHeat = (compartment.cropHeat or 0)
@@ -6634,9 +6797,13 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     >= culture.minGrowingTemperatureC
                     and compartment.temperature + 1e-9 < culture.maxGrowingTemperatureC
                 local composition = culture.composition
-                local organicFraction = 1 - (composition.nutrientNitrogen
-                    + composition.phosphorus + composition.potassium
-                    + composition.otherMinerals)
+                local organicFraction = organicFractionOf(composition)
+                -- The chemical-energy basis for the organic material
+                -- (#571): the declared dry-biomass energy is carried
+                -- wholly by the organic fraction, so a kilogram of
+                -- organic matter respired and a kilogram still held in
+                -- the culture are priced the same way.
+                local energyKJPerKgOrganic = chemicalEnergyKJPerKgOrganic(composition)
                 local co2PerKgGrowth = organicFraction * PHOTOSYNTHESIS_CO2_KG_PER_ORGANIC_KG
                 local assimilationWaterPerKgGrowth = organicFraction
                     * PHOTOSYNTHESIS_WATER_KG_PER_ORGANIC_KG
@@ -6794,10 +6961,29 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         (self.constituent_loss[constituent] or 0) - change
                 end
                 culture.livingBiomassKg = culture.livingBiomassKg + growthKg
-                -- Respiration runs day and night against the declared
-                -- organic content of the living biomass, capped by the
-                -- oxygen the compartment actually holds.
-                local organicContent = culture.livingBiomassKg * organicFraction
+                -- The living constituent inventory (#571): the organic
+                -- share of the growth is fixed carbon, and every bound
+                -- nutrient is exactly what the draw took from its own
+                -- store, so the inventory records what the culture really
+                -- holds instead of a declared fraction of a changing
+                -- total.
+                culture.livingConstituents.nutrientNitrogenKg =
+                    culture.livingConstituents.nutrientNitrogenKg
+                    + toKg(culture.nitrogen.unit, nitrogenUnits)
+                culture.livingConstituents.phosphorusKg = culture.livingConstituents.phosphorusKg
+                    + toKg(culture.phosphorus.unit, phosphorusUnits)
+                culture.livingConstituents.potassiumKg = culture.livingConstituents.potassiumKg
+                    + toKg(culture.potassium.unit, potassiumUnits)
+                culture.livingConstituents.mineralsKg = culture.livingConstituents.mineralsKg
+                    + toKg(culture.minerals.unit, mineralsUnits)
+                settleLivingOrganic(culture.livingConstituents, culture.livingBiomassKg)
+                -- Respiration runs day and night against the organic the
+                -- culture actually holds, capped by the oxygen the
+                -- compartment really has. The cap is the tracked organic
+                -- inventory rather than a declared fraction of the living
+                -- mass, so the bound nutrients are never reclassified as
+                -- fuel as the biomass shrinks (#571).
+                local organicContent = culture.livingConstituents.organicKg
                 local respirationRequested = math.min(
                     culture.respirationPerHour * culture.livingBiomassKg * fixed_hours,
                     organicContent)
@@ -6828,6 +7014,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 compartment.algaeVapourAdded = compartment.algaeVapourAdded
                     + respirationWaterKg + evaporatedKg
                 culture.livingBiomassKg = culture.livingBiomassKg - respiredOrganicKg
+                settleLivingOrganic(culture.livingConstituents, culture.livingBiomassKg)
                 -- Adverse-condition death (#411): when respiration
                 -- exhausts the living organic content the culture
                 -- starves. The remaining non-respirable residue is
@@ -6835,9 +7022,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 -- headroom reaches; whatever the waste path cannot hold
                 -- is booked as explicit uncontained loss. Nothing
                 -- vanishes silently, and the dead never regrow for free.
-                if culture.livingBiomassKg * organicFraction <= 1e-9 then
+                if culture.livingConstituents.organicKg <= 1e-9 then
                     culture.dead = true
+                    -- The residue carries the constituents the culture
+                    -- actually holds, in their real proportions rather
+                    -- than the declared mix, so a residue left
+                    -- nutrient-rich by a long respiration run is routed
+                    -- as the nutrient-rich material it is (#571).
                     local residueKg = culture.livingBiomassKg
+                    local residueConstituents = scaleConstituents(culture.livingConstituents, 1)
                     local routedKg = 0
                     if culture.waste then
                         local wasteHeadroomUnits = math.max(0, culture.waste.capacity
@@ -6857,6 +7050,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     end
                     culture.livingBiomassKg = culture.livingBiomassKg - residueKg
                     local lostKg = residueKg - routedKg
+                    local routedShare = residueKg > 0 and routedKg / residueKg or 0
+                    mergeConstituents(culture.deadResidueToWasteConstituents,
+                        scaleConstituents(residueConstituents, routedShare))
+                    mergeConstituents(culture.deadResidueLostConstituents,
+                        scaleConstituents(residueConstituents, 1 - routedShare))
+                    culture.livingConstituents = newConstituents()
                     culture.lastDeadResidueToWasteKg = routedKg
                     culture.lastDeadResidueLostKg = lostKg
                     culture.deadResidueToWasteKg = culture.deadResidueToWasteKg + routedKg
@@ -6901,6 +7100,23 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     local wasteAcceptedKg = toKg(culture.waste.unit, wasteAcceptedUnits)
                     local harvestedKg = foodAcceptedKg + recoveryAcceptedKg + wasteAcceptedKg
                     local constrainedKg = requestedKg - harvestedKg
+                    -- The yield carries the constituents the culture
+                    -- actually holds, in their real proportions, split by
+                    -- the share of the harvested mass each destination
+                    -- took (#571).
+                    local harvestShare = culture.livingBiomassKg > 0
+                        and harvestedKg / culture.livingBiomassKg or 0
+                    local removedConstituents = takeConstituents(culture.livingConstituents,
+                        harvestShare, culture.livingBiomassKg - harvestedKg)
+                    if harvestedKg > 0 then
+                        mergeConstituents(culture.harvestedToFoodConstituents,
+                            scaleConstituents(removedConstituents, foodAcceptedKg / harvestedKg))
+                        mergeConstituents(culture.harvestedToRecoveryConstituents,
+                            scaleConstituents(removedConstituents,
+                                recoveryAcceptedKg / harvestedKg))
+                        mergeConstituents(culture.harvestedToWasteConstituents,
+                            scaleConstituents(removedConstituents, wasteAcceptedKg / harvestedKg))
+                    end
                     if foodAcceptedUnits > 0 then
                         culture.food.qualified = culture.food.qualified + foodAcceptedUnits
                         self.unit_harvested[culture.food.unit] =
@@ -6962,8 +7178,13 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 -- chemical energy, the circulation pump work and the
                 -- respiration heat land in the compartment once, booked
                 -- as the algae thermal term beside the crop heat.
+                -- Respiration heat is priced on the organic basis
+                -- (#571), the same basis the living organic matter is
+                -- carried on, so the chemical energy fixed by growth is
+                -- exactly the energy later respired plus the energy still
+                -- held in living and harvested organic matter.
                 local chemicalEnergyFixedKJ = growthKg * composition.energyKJPerKgDry
-                local respirationHeatKJ = respiredOrganicKg * composition.energyKJPerKgDry
+                local respirationHeatKJ = respiredOrganicKg * energyKJPerKgOrganic
                 local heatIntoCompartmentKJ = lightEnergyKJ - chemicalEnergyFixedKJ
                     + circulationEnergyKJ + respirationHeatKJ
                 compartment.algaeHeat = (compartment.algaeHeat or 0)
@@ -8058,6 +8279,83 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     -- closes over delivered = fixed + respired + heat, the fixed
     -- chemical energy may never exceed the delivered light energy, and
     -- the Living biomass stays inside its declared Growing capacity.
+    -- The #571 biological constituent closure, shared by crops and
+    -- algae. Every constituent a population ever held - its authored
+    -- start, plus the organic its growth fixed from carbon dioxide,
+    -- plus every bound nutrient it drew from its uptake stores - must
+    -- still be accounted for in exactly one place: living, harvested
+    -- to a destination, routed to waste on death, or booked as
+    -- uncontained loss. Respiration is the only exit for organic
+    -- matter, and it can only ever take organic the population
+    -- actually had, never the bound nutrients beside it.
+    local function checkBiologicalConstituents(population, label)
+        local sinks = {
+            population.livingConstituents,
+            population.harvestedToFoodConstituents,
+            population.harvestedToWasteConstituents,
+            population.deadResidueToWasteConstituents,
+            population.deadResidueLostConstituents,
+        }
+        if population.harvestedToRecoveryConstituents then
+            sinks[#sinks + 1] = population.harvestedToRecoveryConstituents
+        end
+        local organic, nitrogen, phosphorus, potassium, minerals = 0, 0, 0, 0, 0
+        for _, sink in ipairs(sinks) do
+            assert(isFinite(sink.organicKg) and isFinite(sink.nutrientNitrogenKg)
+                and isFinite(sink.phosphorusKg) and isFinite(sink.potassiumKg)
+                and isFinite(sink.mineralsKg),
+                label .. " constituent inventory is not finite")
+            organic = organic + sink.organicKg
+            nitrogen = nitrogen + sink.nutrientNitrogenKg
+            phosphorus = phosphorus + sink.phosphorusKg
+            potassium = potassium + sink.potassiumKg
+            minerals = minerals + sink.mineralsKg
+        end
+        local composition = population.composition
+        local organicFraction = organicFractionOf(composition)
+        local initialOrganicKg = population.initialBiomassKg * organicFraction
+        local grownOrganicKg = population.growthKg * organicFraction
+        local bound = BALANCE_TOLERANCE * math.max(1,
+            population.growthKg + population.respirationKg + initialOrganicKg
+            + population.nitrogenDrawnKg + population.phosphorusDrawnKg
+            + population.potassiumDrawnKg + population.mineralsDrawnKg)
+        assert(math.abs(initialOrganicKg + grownOrganicKg - organic
+            - population.respirationKg) <= bound,
+            label .. " organic balance does not close")
+        assert(math.abs(population.initialBiomassKg * composition.nutrientNitrogen
+            + population.nitrogenDrawnKg - nitrogen) <= bound,
+            label .. " nitrogen balance does not close")
+        assert(math.abs(population.initialBiomassKg * composition.phosphorus
+            + population.phosphorusDrawnKg - phosphorus) <= bound,
+            label .. " phosphorus balance does not close")
+        assert(math.abs(population.initialBiomassKg * composition.potassium
+            + population.potassiumDrawnKg - potassium) <= bound,
+            label .. " potassium balance does not close")
+        assert(math.abs(population.initialBiomassKg * composition.otherMinerals
+            + population.mineralsDrawnKg - minerals) <= bound,
+            label .. " mineral balance does not close")
+        -- The chemical-energy basis is the organic fraction alone, so
+        -- the energy the population started with plus the energy its
+        -- growth fixed is exactly the energy it respired as heat plus
+        -- the energy still carried in organic matter.
+        local energyPerKgOrganic = chemicalEnergyKJPerKgOrganic(composition)
+        local energyBound = BALANCE_TOLERANCE * math.max(1,
+            population.chemicalEnergyFixedKJ + population.respirationHeatKJ
+            + initialOrganicKg * energyPerKgOrganic)
+        assert(math.abs(initialOrganicKg * energyPerKgOrganic
+            + population.chemicalEnergyFixedKJ - population.respirationHeatKJ
+            - organic * energyPerKgOrganic) <= energyBound,
+            label .. " organic chemical-energy balance does not close")
+        -- The living inventory must sum back to the living biomass
+        -- ledger it is a partition of.
+        local living = population.livingConstituents
+        local livingBound = BALANCE_TOLERANCE * math.max(1, population.livingBiomassKg)
+        assert(math.abs(living.organicKg + living.nutrientNitrogenKg
+            + living.phosphorusKg + living.potassiumKg + living.mineralsKg
+            - population.livingBiomassKg) <= livingBound,
+            label .. " living constituent inventory does not sum to the living biomass")
+    end
+
     local function checkCrops(self)
         for _, crop in ipairs(self.crop_populations) do
             assert(isFinite(crop.livingBiomassKg) and isFinite(crop.lastIllumination)
@@ -8114,6 +8412,23 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             assert(crop.chemicalEnergyFixedKJ <= crop.lightEnergyKJ + energyCapBound,
                 "crop population '" .. crop.id
                     .. "' fixed more chemical energy than the delivered light energy carries")
+            checkBiologicalConstituents(crop,
+                "crop population '" .. crop.id .. "'")
+        end
+    end
+    -- The algae culture audit (#571): the cultures run the same biology
+    -- on their own state, so the same constituent closure is asserted
+    -- over them. Algae had no sandbox-side conservation audit before this;
+    -- without one the culture's nutrient ledger was checked nowhere but
+    -- the host.
+    local function checkAlgae(self)
+        for _, culture in ipairs(self.algae_cultures) do
+            local capacityBound = BALANCE_TOLERANCE * math.max(1, culture.capacityKg)
+            assert(culture.livingBiomassKg >= -capacityBound
+                and culture.livingBiomassKg <= culture.capacityKg + capacityBound,
+                "algae culture '" .. culture.id
+                    .. "' living biomass left its declared culture capacity")
+            checkBiologicalConstituents(culture, "algae culture '" .. culture.id .. "'")
         end
     end
     function object:advance(world_tick, fixed_seconds)
@@ -8146,6 +8461,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         checkFuelCells(self)
         checkMicrobial(self)
         checkCrops(self)
+        checkAlgae(self)
         self.ticks = self.ticks + 1
         return self.ticks
     end
@@ -8159,5 +8475,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     checkFuelCells(object)
     checkMicrobial(object)
     checkCrops(object)
+    checkAlgae(object)
     return object
 end

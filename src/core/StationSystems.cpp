@@ -45,9 +45,12 @@ namespace core
 			// per-tick cost follows the configured scenario, and compile
 			// footprint is what the construction pass allocates. The algae
 			// culture slice (#411) pushed the compiled model past the
-			// previous 512 KiB ceiling; the budget rises with the model as
-			// the crop slices did before it.
-			script::ScratchBudget budget{1024 * 1024, 250'000};
+			// previous 512 KiB ceiling; the living biological constituent
+			// inventories (#571), which the sandbox mirrors tick for tick
+			// alongside the host ledger, pushed it past 1 MiB. The budget
+			// rises with the model as the crop and algae slices did before
+			// it.
+			script::ScratchBudget budget{2 * 1024 * 1024, 250000};
 			script::ModuleLoader loader;
 			std::unique_ptr<lua_State, script::StateCloser> state;
 			int reference{LUA_NOREF};
@@ -901,6 +904,85 @@ namespace core
 				+ composition.atmosphericNitrogen + composition.phosphorus
 				+ composition.potassium + composition.otherMinerals));
 			ledger["energy"] += sign * dry * composition.energyKJPerKgDry;
+		}
+		// The internal alias for the published biological constituent
+		// inventory (#571): the actual dry-mass amounts of respirable
+		// organic matter and bound nutrients a biological population
+		// carries, routes and loses.
+		using BiologicalConstituents = StationBiologicalConstituents;
+		// The declared organic fraction of a dry biological composition:
+		// the share of dry mass that is respirable organic matter.
+		double organicFractionOf(ResourceCompositionSettings const& composition)
+		{
+			return 1.0 - (composition.nutrientNitrogen + composition.phosphorus
+				+ composition.potassium + composition.otherMinerals);
+		}
+		// The chemical-energy basis for the organic material (#571): the
+		// declared dry-biomass chemical energy is carried wholly by the
+		// organic fraction, because the bound nutrients are not fuel. So
+		// a kilogram of organic matter carries the dry-biomass energy
+		// divided by the organic fraction, which makes the energy fixed
+		// during growth equal to the energy later respired plus the energy
+		// still carried in the living and harvested organic matter. A
+		// composition with no organic matter carries no chemical energy.
+		double chemicalEnergyKJPerKgOrganic(ResourceCompositionSettings const& composition)
+		{
+			auto const organicFraction = organicFractionOf(composition);
+			if (organicFraction <= 0.0) return 0.0;
+			return composition.energyKJPerKgDry / organicFraction;
+		}
+		// A share of an inventory, for splitting a routed mass across the
+		// constituents it actually carries rather than a declared mix.
+		BiologicalConstituents scaledConstituents(BiologicalConstituents const& inventory,
+			double share)
+		{
+			auto result = BiologicalConstituents{};
+			result.organicKg = inventory.organicKg * share;
+			result.nutrientNitrogenKg = inventory.nutrientNitrogenKg * share;
+			result.phosphorusKg = inventory.phosphorusKg * share;
+			result.potassiumKg = inventory.potassiumKg * share;
+			result.mineralsKg = inventory.mineralsKg * share;
+			return result;
+		}
+		// Keep the living inventory consistent with the biomass ledger
+		// (#571): the organic share is whatever dry mass the population
+		// holds beyond its tracked nutrients, so the inventory always
+		// sums to the living biomass exactly and the nutrients are never
+		// silently resized by unit roundoff.
+		void settleLivingOrganic(BiologicalConstituents& inventory, double livingBiomassKg)
+		{
+			inventory.organicKg = livingBiomassKg - (inventory.nutrientNitrogenKg
+				+ inventory.phosphorusKg + inventory.potassiumKg + inventory.mineralsKg);
+		}
+		// Take a share of the living inventory, returning what came off
+		// (#571). The nutrients come off as real tracked amounts and the
+		// organic share is re-closed against the remaining biomass ledger,
+		// so the inventory keeps summing to the living biomass exactly.
+		BiologicalConstituents takeConstituents(BiologicalConstituents& inventory, double share,
+			double remainingBiomassKg)
+		{
+			auto const removed = scaledConstituents(inventory, share);
+			inventory.nutrientNitrogenKg -= removed.nutrientNitrogenKg;
+			inventory.phosphorusKg -= removed.phosphorusKg;
+			inventory.potassiumKg -= removed.potassiumKg;
+			inventory.mineralsKg -= removed.mineralsKg;
+			settleLivingOrganic(inventory, remainingBiomassKg);
+			return removed;
+		}
+		// The constituent inventory a declared dry biomass carries at a
+		// declared composition (#571). Nothing new is authored: the
+		// inventory is derived wholly from settings that already exist, so
+		// reset and persistence behaviour is untouched.
+		BiologicalConstituents constituentsOf(double dryMassKg,
+			ResourceCompositionSettings const& composition)
+		{
+			auto inventory = BiologicalConstituents{};
+			inventory.nutrientNitrogenKg = dryMassKg * composition.nutrientNitrogen;
+			inventory.phosphorusKg = dryMassKg * composition.phosphorus;
+			inventory.potassiumKg = dryMassKg * composition.potassium;
+			inventory.mineralsKg = dryMassKg * composition.otherMinerals;
+			settleLivingOrganic(inventory, dryMassKg);
+			return inventory;
 		}
 	}
 	bool validateStationProfile(ProfileSettings const& profile, std::string const& where,
@@ -4184,6 +4266,18 @@ namespace core
 			size_t wasteStoreIndex{0};
 			double capacityKg{0.0};
 			double livingBiomassKg{0.0};
+			// The living constituent inventory (#571): the actual dry-mass
+			// organic matter and bound nutrients the canopy holds, kept as
+			// real amounts rather than re-derived from the declared
+			// composition each tick, so burning organic matter can never
+			// reclassify a nutrient as fuel. Sums to livingBiomassKg.
+			BiologicalConstituents livingConstituents;
+			// Cumulative constituent routing (#571): where the canopy's
+			// actual constituents went, by destination.
+			BiologicalConstituents harvestedToFoodConstituents;
+			BiologicalConstituents harvestedToWasteConstituents;
+			BiologicalConstituents deadResidueToWasteConstituents;
+			BiologicalConstituents deadResidueLostConstituents;
 			double lastIllumination{0.0};
 			double lastLightRequestedKW{0.0};
 			double lastLightSuppliedKW{0.0};
@@ -4273,6 +4367,19 @@ namespace core
 			size_t wasteStoreIndex{0};
 			double capacityKg{0.0};
 			double livingBiomassKg{0.0};
+			// The living constituent inventory (#571): the actual dry-mass
+			// organic matter and bound nutrients the culture holds, kept as
+			// real amounts rather than re-derived from the declared
+			// composition each tick, so burning organic matter can never
+			// reclassify a nutrient as fuel. Sums to livingBiomassKg.
+			BiologicalConstituents livingConstituents;
+			// Cumulative constituent routing (#571): where the culture's
+			// actual constituents went, across the three destinations.
+			BiologicalConstituents harvestedToFoodConstituents;
+			BiologicalConstituents harvestedToRecoveryConstituents;
+			BiologicalConstituents harvestedToWasteConstituents;
+			BiologicalConstituents deadResidueToWasteConstituents;
+			BiologicalConstituents deadResidueLostConstituents;
 			double lastIllumination{0.0};
 			double lastLightRequestedKW{0.0};
 			double lastLightSuppliedKW{0.0};
@@ -8053,9 +8160,15 @@ namespace core
 				// masses: CO2 + H2O = organic + O2, and the mirror
 				// respiration identity organic + O2 = CO2 + H2O.
 				auto const& composition = crop.authored.composition;
-				auto const organicFraction = 1.0 - (composition.nutrientNitrogen
-					+ composition.phosphorus + composition.potassium
-					+ composition.otherMinerals);
+				auto const organicFraction = organicFractionOf(composition);
+				// The chemical-energy basis for the organic material
+				// (#571): the declared dry-biomass energy is carried wholly
+				// by the organic fraction, so a kilogram of organic matter
+				// respired and a kilogram of organic matter still held in the
+				// canopy are priced the same way, and the chemical energy
+				// fixed during growth equals the energy later respired plus
+				// the energy still carried.
+				auto const energyKJPerKgOrganic = chemicalEnergyKJPerKgOrganic(composition);
 				auto const co2PerKgGrowth = organicFraction * StationPhotosynthesisCO2PerOrganicKg;
 				auto const assimilationWaterPerKgGrowth = organicFraction
 					* StationPhotosynthesisWaterPerOrganicKg;
@@ -8211,13 +8324,29 @@ namespace core
 				for (auto const& entry : netChange)
 					stagedLoss[entry.first] -= entry.second;
 				crop.livingBiomassKg += growthKg;
-				// Respiration runs day and night against the declared
-				// organic content of the living biomass, capped by the
-				// oxygen the compartment actually holds: a canopy in an
-				// oxygen-poor compartment simply cannot burn more than it
-				// can breathe, and the shortfall is reported, never
-				// invented around.
-				auto const organicContentKg = crop.livingBiomassKg * organicFraction;
+				// The living constituent inventory (#571): the organic share
+				// of the growth is fixed carbon, and every bound nutrient is
+				// exactly what the draw took from its own store, so the
+				// inventory records what the canopy really holds instead of a
+				// declared fraction of a changing total.
+				crop.livingConstituents.nutrientNitrogenKg += massToKg(
+					nitrogen.authored.unit, nitrogenUnits);
+				crop.livingConstituents.phosphorusKg += massToKg(
+					phosphorus.authored.unit, phosphorusUnits);
+				crop.livingConstituents.potassiumKg += massToKg(
+					potassium.authored.unit, potassiumUnits);
+				crop.livingConstituents.mineralsKg += massToKg(
+					minerals.authored.unit, mineralsUnits);
+				settleLivingOrganic(crop.livingConstituents, crop.livingBiomassKg);
+				// Respiration runs day and night against the organic the
+				// canopy actually holds, capped by the oxygen the compartment
+				// really has: a canopy in an oxygen-poor compartment simply
+				// cannot burn more than it can breathe, and the shortfall is
+				// reported, never invented around. The cap is the tracked
+				// organic inventory rather than a declared fraction of the
+				// living mass, so the bound nutrients are never reclassified
+				// as fuel as the biomass shrinks (#571).
+				auto const organicContentKg = crop.livingConstituents.organicKg;
 				auto const respirationRequestedKg = std::min(
 					crop.authored.respirationPerHour * crop.livingBiomassKg * hours,
 					organicContentKg);
@@ -8247,6 +8376,7 @@ namespace core
 				compartment.waterVapourKg += respirationWaterKg + transpiredKg;
 				compartment.cropVapourAddedKg += respirationWaterKg + transpiredKg;
 				crop.livingBiomassKg -= respiredOrganicKg;
+				settleLivingOrganic(crop.livingConstituents, crop.livingBiomassKg);
 				// Adverse-condition death (#410): respiration runs day and
 				// night against the living organic content, and when that
 				// content is exhausted the canopy starves - the population is
@@ -8259,10 +8389,16 @@ namespace core
 				// takes the biomass down is never mistaken for starvation.
 				crop.lastDeadResidueToWasteKg = 0.0;
 				crop.lastDeadResidueLostKg = 0.0;
-				if (!crop.dead && crop.livingBiomassKg * organicFraction <= 1e-9)
+				if (!crop.dead && crop.livingConstituents.organicKg <= 1e-9)
 				{
 					crop.dead = true;
+					// The residue carries the constituents the canopy
+					// actually holds, in their real proportions rather than
+					// the declared mix, so a residue left nutrient-rich by a
+					// long respiration run is routed as the nutrient-rich
+					// material it is (#571).
 					auto const residueKg = crop.livingBiomassKg;
+					auto const residueConstituents = crop.livingConstituents;
 					double routedKg = 0.0;
 					if (!crop.authored.wasteStoreId.empty())
 					{
@@ -8283,6 +8419,12 @@ namespace core
 					}
 					crop.livingBiomassKg -= residueKg;
 					auto const lostKg = residueKg - routedKg;
+					auto const routedShare = residueKg > 0.0 ? routedKg / residueKg : 0.0;
+					crop.deadResidueToWasteConstituents
+						+= scaledConstituents(residueConstituents, routedShare);
+					crop.deadResidueLostConstituents
+						+= scaledConstituents(residueConstituents, 1.0 - routedShare);
+					crop.livingConstituents = BiologicalConstituents{};
 					crop.lastDeadResidueToWasteKg = routedKg;
 					crop.lastDeadResidueLostKg = lostKg;
 					crop.deadResidueToWasteKg += routedKg;
@@ -8300,6 +8442,17 @@ namespace core
 				// recreates what was already lost. The harvest runs after the
 				// same tick's growth, so a canopy that crosses the trigger
 				// mid-tick is harvested on that tick.
+				//
+				// Two accounting surfaces meet here and stay distinct (#571).
+				// The compound-store ledger keeps booking the destination's
+				// own declared composition, because a compound store is
+				// homogeneous by declaration and its stored constituents are
+				// derived from that declaration - booking the population's
+				// drifted mix there would break the store-level balance the
+				// admission check was built to hold. The population's own
+				// constituent inventory is the biological surface: it records
+				// the actual material that left the canopy, so the nutrient
+				// ledger closes on what the canopy really carried.
 				if (!crop.dead && crop.authored.harvestTriggerKg > 0.0
 					&& crop.livingBiomassKg + 1e-12 >= crop.authored.harvestTriggerKg)
 				{
@@ -8322,6 +8475,20 @@ namespace core
 					auto const wasteAcceptedKg = massToKg(waste.authored.unit, wasteAcceptedUnits);
 					auto const harvestedKg = foodAcceptedKg + wasteAcceptedKg;
 					auto const constrainedKg = requestedKg - harvestedKg;
+					// The yield carries the constituents the canopy actually
+					// holds, in their real proportions, split by the share of
+					// the harvested mass each destination took (#571).
+					auto const harvestShare = crop.livingBiomassKg > 0.0
+						? harvestedKg / crop.livingBiomassKg : 0.0;
+					auto const removedConstituents = takeConstituents(crop.livingConstituents,
+						harvestShare, crop.livingBiomassKg - harvestedKg);
+					if (harvestedKg > 0.0)
+					{
+						crop.harvestedToFoodConstituents += scaledConstituents(removedConstituents,
+							foodAcceptedKg / harvestedKg);
+						crop.harvestedToWasteConstituents += scaledConstituents(removedConstituents,
+							wasteAcceptedKg / harvestedKg);
+					}
 					if (foodAcceptedUnits > 0.0)
 					{
 						qualified[crop.foodStoreIndex] += foodAcceptedUnits;
@@ -8362,9 +8529,14 @@ namespace core
 				// energy, the circulation pump work and the respiration
 				// heat land in the compartment once. Validation guaranteed
 				// the fixed chemical energy never exceeds the light energy
-				// delivered, so nothing is fixed from nothing.
+				// delivered, so nothing is fixed from nothing. Respiration
+				// heat is priced on the organic basis (#571), the same basis
+				// the living organic matter is carried on, so the chemical
+				// energy fixed by growth is exactly the energy later respired
+				// plus the energy still held in living and harvested organic
+				// matter.
 				auto const chemicalEnergyFixedKJ = growthKg * composition.energyKJPerKgDry;
-				auto const respirationHeatKJ = respiredOrganicKg * composition.energyKJPerKgDry;
+				auto const respirationHeatKJ = respiredOrganicKg * energyKJPerKgOrganic;
 				auto const heatIntoCompartmentKJ = lightEnergyKJ - chemicalEnergyFixedKJ
 					+ circulationEnergyKJ + respirationHeatKJ;
 				cropHeatByAtmosphere[crop.atmosphereIndex] += heatIntoCompartmentKJ / tickSeconds;
@@ -8538,9 +8710,15 @@ namespace core
 				// the bound nutrient fractions are drawn per kilogram of
 				// dry growth from the culture's own stores.
 				auto const& composition = culture.authored.composition;
-				auto const organicFraction = 1.0 - (composition.nutrientNitrogen
-					+ composition.phosphorus + composition.potassium
-					+ composition.otherMinerals);
+				auto const organicFraction = organicFractionOf(composition);
+				// The chemical-energy basis for the organic material
+				// (#571): the declared dry-biomass energy is carried wholly
+				// by the organic fraction, so a kilogram of organic matter
+				// respired and a kilogram still held in the culture are priced
+				// the same way, and the chemical energy fixed during growth
+				// equals the energy later respired plus the energy still
+				// carried.
+				auto const energyKJPerKgOrganic = chemicalEnergyKJPerKgOrganic(composition);
 				auto const co2PerKgGrowth = organicFraction * StationPhotosynthesisCO2PerOrganicKg;
 				auto const assimilationWaterPerKgGrowth = organicFraction
 					* StationPhotosynthesisWaterPerOrganicKg;
@@ -8697,10 +8875,27 @@ namespace core
 				for (auto const& entry : netChange)
 					stagedLoss[entry.first] -= entry.second;
 				culture.livingBiomassKg += growthKg;
-				// Respiration runs day and night against the declared
-				// organic content of the living biomass, capped by the
-				// oxygen the compartment actually holds.
-				auto const organicContentKg = culture.livingBiomassKg * organicFraction;
+				// The living constituent inventory (#571): the organic share
+				// of the growth is fixed carbon, and every bound nutrient is
+				// exactly what the draw took from its own store, so the
+				// inventory records what the culture really holds instead of
+				// a declared fraction of a changing total.
+				culture.livingConstituents.nutrientNitrogenKg += massToKg(
+					nitrogen.authored.unit, nitrogenUnits);
+				culture.livingConstituents.phosphorusKg += massToKg(
+					phosphorus.authored.unit, phosphorusUnits);
+				culture.livingConstituents.potassiumKg += massToKg(
+					potassium.authored.unit, potassiumUnits);
+				culture.livingConstituents.mineralsKg += massToKg(
+					minerals.authored.unit, mineralsUnits);
+				settleLivingOrganic(culture.livingConstituents, culture.livingBiomassKg);
+				// Respiration runs day and night against the organic the
+				// culture actually holds, capped by the oxygen the compartment
+				// really has. The cap is the tracked organic inventory rather
+				// than a declared fraction of the living mass, so the bound
+				// nutrients are never reclassified as fuel as the biomass
+				// shrinks (#571).
+				auto const organicContentKg = culture.livingConstituents.organicKg;
 				auto const respirationRequestedKg = std::min(
 					culture.authored.respirationPerHour * culture.livingBiomassKg * hours,
 					organicContentKg);
@@ -8730,6 +8925,7 @@ namespace core
 				compartment.waterVapourKg += respirationWaterKg + evaporatedKg;
 				compartment.algaeVapourAddedKg += respirationWaterKg + evaporatedKg;
 				culture.livingBiomassKg -= respiredOrganicKg;
+				settleLivingOrganic(culture.livingConstituents, culture.livingBiomassKg);
 				// Adverse-condition death: when respiration exhausts the
 				// living organic content the culture starves. The remaining
 				// non-respirable residue is routed to the declared waste
@@ -8739,10 +8935,16 @@ namespace core
 				// free.
 				culture.lastDeadResidueToWasteKg = 0.0;
 				culture.lastDeadResidueLostKg = 0.0;
-				if (!culture.dead && culture.livingBiomassKg * organicFraction <= 1e-9)
+				if (!culture.dead && culture.livingConstituents.organicKg <= 1e-9)
 				{
 					culture.dead = true;
+					// The residue carries the constituents the culture
+					// actually holds, in their real proportions rather than
+					// the declared mix, so a residue left nutrient-rich by a
+					// long respiration run is routed as the nutrient-rich
+					// material it is (#571).
 					auto const residueKg = culture.livingBiomassKg;
+					auto const residueConstituents = culture.livingConstituents;
 					double routedKg = 0.0;
 					if (!culture.authored.wasteStoreId.empty())
 					{
@@ -8763,6 +8965,12 @@ namespace core
 					}
 					culture.livingBiomassKg -= residueKg;
 					auto const lostKg = residueKg - routedKg;
+					auto const routedShare = residueKg > 0.0 ? routedKg / residueKg : 0.0;
+					culture.deadResidueToWasteConstituents
+						+= scaledConstituents(residueConstituents, routedShare);
+					culture.deadResidueLostConstituents
+						+= scaledConstituents(residueConstituents, 1.0 - routedShare);
+					culture.livingConstituents = BiologicalConstituents{};
 					culture.lastDeadResidueToWasteKg = routedKg;
 					culture.lastDeadResidueLostKg = lostKg;
 					culture.deadResidueToWasteKg += routedKg;
@@ -8813,6 +9021,22 @@ namespace core
 					auto const wasteAcceptedKg = massToKg(waste.authored.unit, wasteAcceptedUnits);
 					auto const harvestedKg = foodAcceptedKg + recoveryAcceptedKg + wasteAcceptedKg;
 					auto const constrainedKg = requestedKg - harvestedKg;
+					// The yield carries the constituents the culture actually
+					// holds, in their real proportions, split by the share of
+					// the harvested mass each destination took (#571).
+					auto const harvestShare = culture.livingBiomassKg > 0.0
+						? harvestedKg / culture.livingBiomassKg : 0.0;
+					auto const removedConstituents = takeConstituents(culture.livingConstituents,
+						harvestShare, culture.livingBiomassKg - harvestedKg);
+					if (harvestedKg > 0.0)
+					{
+						culture.harvestedToFoodConstituents += scaledConstituents(removedConstituents,
+							foodAcceptedKg / harvestedKg);
+						culture.harvestedToRecoveryConstituents += scaledConstituents(
+							removedConstituents, recoveryAcceptedKg / harvestedKg);
+						culture.harvestedToWasteConstituents += scaledConstituents(removedConstituents,
+							wasteAcceptedKg / harvestedKg);
+					}
 					if (foodAcceptedUnits > 0.0)
 					{
 						qualified[culture.foodStoreIndex] += foodAcceptedUnits;
@@ -8868,9 +9092,13 @@ namespace core
 				// Energy: the light energy not fixed as biomass chemical
 				// energy, the circulation pump work and the respiration
 				// heat land in the compartment once, booked as the algae
-				// thermal term beside the crop heat.
+				// thermal term beside the crop heat. Respiration heat is
+				// priced on the organic basis (#571), the same basis the
+				// living organic matter is carried on, so the chemical energy
+				// fixed by growth is exactly the energy later respired plus
+				// the energy still held in living and harvested organic matter.
 				auto const chemicalEnergyFixedKJ = growthKg * composition.energyKJPerKgDry;
-				auto const respirationHeatKJ = respiredOrganicKg * composition.energyKJPerKgDry;
+				auto const respirationHeatKJ = respiredOrganicKg * energyKJPerKgOrganic;
 				auto const heatIntoCompartmentKJ = lightEnergyKJ - chemicalEnergyFixedKJ
 					+ circulationEnergyKJ + respirationHeatKJ;
 				algaeHeatByAtmosphere[culture.atmosphereIndex] += heatIntoCompartmentKJ / tickSeconds;
@@ -12112,6 +12340,11 @@ namespace core
 				state.wasteStoreIndex = storeIndex[crop.wasteStoreId];
 			state.capacityKg = crop.growingAreaM2 * crop.maxBiomassDensityKgPerM2;
 			state.livingBiomassKg = crop.initialBiomassKg;
+			// The living constituent inventory (#571) opens at the declared
+			// initial biomass under the declared composition, so the organic
+			// and bound-nutrient amounts the canopy starts with are real
+			// quantities rather than a fraction re-applied every tick.
+			state.livingConstituents = constituentsOf(crop.initialBiomassKg, crop.composition);
 			mImpl->cropPopulations.push_back(std::move(state));
 		}
 		mImpl->cropOrder.resize(mImpl->cropPopulations.size());
@@ -12149,6 +12382,11 @@ namespace core
 				state.wasteStoreIndex = storeIndex[algae.wasteStoreId];
 			state.capacityKg = algae.cultureVolumeL * algae.maxBiomassDensityKgPerL;
 			state.livingBiomassKg = algae.initialBiomassKg;
+			// The living constituent inventory (#571) opens at the declared
+			// initial biomass under the declared composition, so the organic
+			// and bound-nutrient amounts the culture starts with are real
+			// quantities rather than a fraction re-applied every tick.
+			state.livingConstituents = constituentsOf(algae.initialBiomassKg, algae.composition);
 			mImpl->algaeCultures.push_back(std::move(state));
 		}
 		mImpl->algaeOrder.resize(mImpl->algaeCultures.size());
@@ -13595,6 +13833,15 @@ namespace core
 			cropResult.livingBiomassKg = crop.livingBiomassKg;
 			cropResult.capacityFraction = crop.capacityKg > 0.0
 				? crop.livingBiomassKg / crop.capacityKg : 0.0;
+			// The living constituent inventory and its energy basis (#571).
+			cropResult.livingConstituents = crop.livingConstituents;
+			cropResult.energyKJPerKgOrganic = chemicalEnergyKJPerKgOrganic(crop.authored.composition);
+			cropResult.livingChemicalEnergyKJ = crop.livingConstituents.organicKg
+				* cropResult.energyKJPerKgOrganic;
+			cropResult.harvestedToFoodConstituents = crop.harvestedToFoodConstituents;
+			cropResult.harvestedToWasteConstituents = crop.harvestedToWasteConstituents;
+			cropResult.deadResidueToWasteConstituents = crop.deadResidueToWasteConstituents;
+			cropResult.deadResidueLostConstituents = crop.deadResidueLostConstituents;
 			cropResult.lastIlluminationLevel = crop.lastIllumination;
 			cropResult.lastLightRequestedKW = crop.lastLightRequestedKW;
 			cropResult.lastLightSuppliedKW = crop.lastLightSuppliedKW;
@@ -13715,6 +13962,16 @@ namespace core
 			algaeResult.livingBiomassKg = culture.livingBiomassKg;
 			algaeResult.capacityFraction = culture.capacityKg > 0.0
 				? culture.livingBiomassKg / culture.capacityKg : 0.0;
+			// The living constituent inventory and its energy basis (#571).
+			algaeResult.livingConstituents = culture.livingConstituents;
+			algaeResult.energyKJPerKgOrganic = chemicalEnergyKJPerKgOrganic(culture.authored.composition);
+			algaeResult.livingChemicalEnergyKJ = culture.livingConstituents.organicKg
+				* algaeResult.energyKJPerKgOrganic;
+			algaeResult.harvestedToFoodConstituents = culture.harvestedToFoodConstituents;
+			algaeResult.harvestedToRecoveryConstituents = culture.harvestedToRecoveryConstituents;
+			algaeResult.harvestedToWasteConstituents = culture.harvestedToWasteConstituents;
+			algaeResult.deadResidueToWasteConstituents = culture.deadResidueToWasteConstituents;
+			algaeResult.deadResidueLostConstituents = culture.deadResidueLostConstituents;
 			algaeResult.lastIlluminationLevel = culture.lastIllumination;
 			algaeResult.lastLightRequestedKW = culture.lastLightRequestedKW;
 			algaeResult.lastLightSuppliedKW = culture.lastLightSuppliedKW;

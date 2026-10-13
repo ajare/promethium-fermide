@@ -1269,6 +1269,31 @@ namespace core
 	};
 	inline constexpr size_t MaxStationMicrobialProcessors{8};
 
+	// The living biological constituent inventory (#571): the actual dry-mass
+	// amounts of each tracked constituent a Biological population carries,
+	// routes and loses. Organic matter is the respirable share; the bound
+	// nutrient fractions are non-respirable and are preserved until harvest
+	// or death routes them out. Tracked as real inventories rather than
+	// re-derived from a fixed composition fraction of a shrinking biomass,
+	// so respiration can never reclassify a nutrient as fuel.
+	struct StationBiologicalConstituents
+	{
+		double organicKg{0.0};
+		double nutrientNitrogenKg{0.0};
+		double phosphorusKg{0.0};
+		double potassiumKg{0.0};
+		double mineralsKg{0.0};
+		StationBiologicalConstituents& operator+=(StationBiologicalConstituents const& other)
+		{
+			organicKg += other.organicKg;
+			nutrientNitrogenKg += other.nutrientNitrogenKg;
+			phosphorusKg += other.phosphorusKg;
+			potassiumKg += other.potassiumKg;
+			mineralsKg += other.mineralsKg;
+			return *this;
+		}
+		bool operator==(StationBiologicalConstituents const&) const = default;
+	};
 	// A crop population (#409): an aggregate living stand of crops inside
 	// one Atmosphere compartment, growing from a declared dry Living biomass
 	// under the resources actually delivered to it. Three quantities are kept
@@ -3070,6 +3095,26 @@ namespace core
 		// declared capacity and the fraction of it filled.
 		double livingBiomassKg{0.0};
 		double capacityFraction{0.0}; // livingBiomassKg / capacityKg, [0, 1]
+		// The living constituent inventory (#571): the actual dry-mass
+		// organic matter and bound nutrients the living stand carries,
+		// summing to livingBiomassKg. Respiration burns only the organic
+		// share, so the nutrients stay put until harvest or death routes
+		// them out instead of being reclassified as fuel each tick.
+		StationBiologicalConstituents livingConstituents;
+		// The chemical-energy basis for the remaining organic material
+		// (#571): declared dry-biomass energy over the declared organic
+		// fraction, since bound nutrients carry no fuel. Respiration heat
+		// and carried living energy both use it, so chemical energy fixed
+		// equals energy respired plus energy still carried.
+		double energyKJPerKgOrganic{0.0};
+		double livingChemicalEnergyKJ{0.0};
+		// Cumulative constituent routing (#571): where this population's
+		// actual constituents went. Harvest splits by destination; death
+		// residue splits between the waste path and uncontained loss.
+		StationBiologicalConstituents harvestedToFoodConstituents;
+		StationBiologicalConstituents harvestedToWasteConstituents;
+		StationBiologicalConstituents deadResidueToWasteConstituents;
+		StationBiologicalConstituents deadResidueLostConstituents;
 		// The light and circulation actually delivered this tick.
 		double lastIlluminationLevel{0.0};   // profile level [0, 1]
 		double lastLightRequestedKW{0.0};
@@ -3209,6 +3254,27 @@ namespace core
 		// the declared culture capacity and the fraction of it filled.
 		double livingBiomassKg{0.0};
 		double capacityFraction{0.0}; // livingBiomassKg / capacityKg, [0, 1]
+		// The living constituent inventory (#571): the actual dry-mass
+		// organic matter and bound nutrients the culture carries, summing
+		// to livingBiomassKg. Respiration burns only the organic share,
+		// so the nutrients stay put until harvest or death routes them out
+		// instead of being reclassified as fuel each tick.
+		StationBiologicalConstituents livingConstituents;
+		// The chemical-energy basis for the remaining organic material
+		// (#571): declared dry-biomass energy over the declared organic
+		// fraction, since bound nutrients carry no fuel. Respiration heat
+		// and carried living energy both use it, so chemical energy fixed
+		// equals energy respired plus energy still carried.
+		double energyKJPerKgOrganic{0.0};
+		double livingChemicalEnergyKJ{0.0};
+		// Cumulative constituent routing (#571): where this culture's
+		// actual constituents went. Harvest splits across the three
+		// destinations; death residue splits between waste and loss.
+		StationBiologicalConstituents harvestedToFoodConstituents;
+		StationBiologicalConstituents harvestedToRecoveryConstituents;
+		StationBiologicalConstituents harvestedToWasteConstituents;
+		StationBiologicalConstituents deadResidueToWasteConstituents;
+		StationBiologicalConstituents deadResidueLostConstituents;
 		// The light and circulation actually delivered this tick.
 		double lastIlluminationLevel{0.0};
 		double lastLightRequestedKW{0.0};
