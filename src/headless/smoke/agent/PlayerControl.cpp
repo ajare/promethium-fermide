@@ -490,8 +490,13 @@ namespace
 			"A body outside the Stairwell doorway must not be auto-aligned or admitted");
 		walk(world, 1, .5f);
 		world.pauseSimulation(); world.setRoomHeightScale(bottom, .4f);
+		world.resumeSimulation(); world.setPlayerCrouch(true); world.update(core::World::getFixedTimestep());
+		auto const loweredPose = world.lookupAgent(id).entity->getPose();
+		up(); require(world.lookupAgent(id).entity->getSector()->getIndex() == stairs
+			&& world.lookupAgent(id).entity->getPose() == loweredPose,
+			"Stairwell entry must preserve a supported current low-space pose");
 		up(); require(world.lookupAgent(id).entity->getSector()->getIndex() == bottom,
-			"Low starting clearance must refuse Stairwell entry instead of automatically crawling");
+			"Lowered Stairwell exit must return to the fitting low landing");
 		world.pauseSimulation(); world.setRoomHeightScale(bottom, 1.f);
 		auto profile = world.lookupAgent(id).entity->getEffectiveMobilityProfile().value;
 		profile.set(core::TraversalKind::Stairwell, core::MobilityUse::CannotUse);
@@ -543,6 +548,10 @@ namespace
 			require(sector() == bottom && x(world, id) != lowerX, "Near approach must walk, never snap to the endpoint");
 			drive(direction, 1, .6f);
 			require(sector() == stairs && position().y > 0.f && position().y < 1.f, "Up and approach must mount and ascend");
+			world.setPlayerCrouch(true); world.update(core::World::getFixedTimestep());
+			require(world.lookupAgent(id).entity->getPose() == core::Pose::Crawling,
+				"Posture input while walking must select Crawling on the Staircase flight");
+			world.setPlayerCrouch(false); world.update(core::World::getFixedTimestep());
 			auto stopped = position();
 			drive(0, 0, 1.f);
 			for (int second = 0; second < 30; ++second) world.update(1.f);

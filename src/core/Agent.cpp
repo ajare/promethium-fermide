@@ -1318,6 +1318,12 @@ namespace core
 	std::optional<PoseSelection> Agent::selectDoorPose(float clearance,
 		bool beginningMovement, float openingWidth) const
 	{
+		if (isPlayerControlled() && !mFurnitureUse)
+		{
+			auto speed = getPhysicalBaseline().automaticSpeedRatio(AutomaticPoseContext::DoorCrossing, mPose);
+			return speed && poseFits(mPose, clearance, getSupportElevation(), openingWidth)
+				? std::optional<PoseSelection>{{mPose, *speed}} : std::nullopt;
+		}
 		// Retained Action ownership is not an automatic movement choice. Predict
 		// departure without releasing it; Furniture support ends on departure.
 		if (!beginningMovement && !mFurnitureUse && mRetainedActionPose)
@@ -1358,7 +1364,7 @@ namespace core
 	{
 		if (mPlayerPose && !isPlayerControlled()) mPlayerPose.reset();
 		if (mFurnitureUse || mRetainedActionPose || (mTraversalTask && mTraversalTask->crossingPose)) return;
-		if (mPlayerPose && !mTraversalTask && !mPlayerLadderMount)
+		if (mPlayerPose)
 		{ mPose = *mPlayerPose; return; }
 		auto const* sector = physicalMovementSector();
 		if (auto choice = sector ? requiredPoseFor(*sector, getGlobalPosition().y)
@@ -2446,6 +2452,9 @@ namespace core
 					traversalSpeed = mTraversalTask->edge->getType() == EdgeType::Ladder
 						? getClimbSpeed() : getWalkSpeed();
 				if (mTraversalTask->crossingPose) traversalSpeed *= mTraversalTask->crossingPose->speedRatio;
+				else if (isPlayerControlled() && mPlayerPose)
+					traversalSpeed *= getPhysicalBaseline().automaticSpeedRatio(
+						AutomaticPoseContext::RoomMovement, *mPlayerPose).value_or(0.f);
 				if (moveToPosition(mTraversalTask->destinationVertex->getPosition(), frameTime,
 					traversalSpeed))
 					mState = State::AwaitingTraversalCommit;

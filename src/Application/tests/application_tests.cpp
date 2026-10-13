@@ -274,8 +274,14 @@ void checkPlayerStaircaseKeys(wp::application::State& play, core::World& world) 
     key(horizontal, true); key(vertical, true); play._update(.6f);
     require(world.lookupAgent(id).entity->getSector()->getIndex() == stairs,
             "Actual Up/Down key input must mount the appropriate Staircase endpoint");
-    auto stopped = world.lookupAgent(id).entity->getGlobalPosition();
+    key(Key::C, true); play._update(.1f);
+    auto actor = world.lookupAgent(id).entity;
+    require(actor->getPose() == core::Pose::Crawling && actor->getPoseImageTile() == "human-crawling",
+            "Actual C+horizontal must crawl visually on Staircases and Escalators in both directions");
+    auto stopped = actor->getGlobalPosition();
     key(horizontal, false); key(vertical, false); play._update(.2f);
+    require(actor->getPose() == core::Pose::Crouching, "Held C without horizontal input must crouch on steps");
+    key(Key::C, false); play._update(0.f);
     require(std::abs(world.lookupAgent(id).entity->getGlobalPosition().distanceTo(stopped) - std::abs(belt) * .2f) < .0001f,
             "Releasing horizontal input must stop on stationary stairs or ride moving Escalator steps");
     key(horizontal, true);
@@ -313,8 +319,14 @@ void checkPlayerLadderKeys(wp::application::State& play, core::World& world) {
     auto position = [&] { return world.lookupAgent(id).entity->getGlobalPosition(); };
     key(Key::RightArrow, true); key(vertical, true); play._update(.6f);
     require(position().y > 0.f && position().y < 2.f, "Actual Up/Down input must mount fixed Ladders");
+    key(Key::C, true); play._update(.1f);
+    require(world.lookupAgent(id).entity->getPose() == core::Pose::Crawling,
+            "Actual C must preserve Crawling while climbing either Ladder type");
     key(Key::RightArrow, false);
     auto before = position(); play._update(.2f);
+    require(world.lookupAgent(id).entity->getPose() == core::Pose::Crouching,
+            "C without horizontal input must crouch while climbing vertically");
+    key(Key::C, false);
     require(std::abs(position().distanceTo(before) - world.lookupAgent(id).entity->getClimbSpeed() * .2f) < .0001f,
             "Climbing must use vertical input without requiring Left/Right");
     key(vertical, false); before = position(); play._update(.2f);
@@ -344,24 +356,26 @@ void checkPlayerPoseKeys(wp::application::State& play, core::World& world) {
   world.pauseSimulation(); require(world.deserialize(*reader, data), "Cannot install keyboard pose Player"); world.resumeSimulation();
   auto actor = world.lookupAgent(id).entity;
   auto key = [&](Key k, bool pressed) { play._injectKeyInput(pressed ? KeyEvent::Pressed : KeyEvent::Released, k, {}); play._update(core::World::getFixedTimestep()); };
-  key(Key::DownArrow, true); require(actor->getPose() == core::Pose::Crouching, "Actual Down must crouch");
-  key(Key::RightArrow, true); require(actor->getPose() == core::Pose::Crawling, "Actual Down+Right must crawl");
+  key(Key::DownArrow, true); require(actor->getPose() == core::Pose::Standing, "Down alone must no longer crouch on a Floor");
+  key(Key::DownArrow, false);
+  key(Key::C, true); require(actor->getPose() == core::Pose::Crouching, "Actual C must crouch");
+  key(Key::RightArrow, true); require(actor->getPose() == core::Pose::Crawling, "Actual C+Right must crawl");
   auto x = actor->getGlobalPosition().x;
-  for (int i = 0; i < 10; ++i) key(Key::DownArrow, true);
-  require(actor->getPose() == core::Pose::Crawling && actor->getGlobalPosition().x > x, "Repeated Down must retain crawling motion");
-  key(Key::DownArrow, false); require(actor->getPose() == core::Pose::Standing, "Releasing Down during motion must stand");
-  key(Key::DownArrow, true); key(Key::RightArrow, false);
-  require(actor->getPose() == core::Pose::Crouching, "Stopping horizontal movement must crouch while Down remains held");
+  for (int i = 0; i < 10; ++i) key(Key::C, true);
+  require(actor->getPose() == core::Pose::Crawling && actor->getGlobalPosition().x > x, "Repeated C must retain crawling motion");
+  key(Key::C, false); require(actor->getPose() == core::Pose::Standing, "Releasing C during motion must stand");
+  key(Key::C, true); key(Key::RightArrow, false);
+  require(actor->getPose() == core::Pose::Crouching, "Stopping horizontal movement must crouch while C remains held");
   x = actor->getGlobalPosition().x; key(Key::LeftArrow, true);
-  require(actor->getPose() == core::Pose::Crawling && actor->getGlobalPosition().x < x, "Actual Down+Left must crawl");
+  require(actor->getPose() == core::Pose::Crawling && actor->getGlobalPosition().x < x, "Actual C+Left must crawl");
   key(Key::RightArrow, true); require(actor->getPose() == core::Pose::Crouching, "Opposite horizontal keys must cancel movement and crouch");
-  key(Key::LeftArrow, false); key(Key::RightArrow, false); key(Key::DownArrow, false);
+  key(Key::LeftArrow, false); key(Key::RightArrow, false); key(Key::C, false);
   require(actor->getPose() == core::Pose::Standing, "Releasing all posture input must restore Standing");
   play._injectKeyInput(KeyEvent::Pressed, Key::LeftShift, wp::application::KeyModifiers::Shift);
-  play._injectKeyInput(KeyEvent::Pressed, Key::DownArrow, wp::application::KeyModifiers::Shift);
+  play._injectKeyInput(KeyEvent::Pressed, Key::C, wp::application::KeyModifiers::Shift);
   play._update(core::World::getFixedTimestep());
-  require(actor->getPose() == core::Pose::Standing, "Shift+Down browsing must not crouch even without a selector");
-  play._injectKeyInput(KeyEvent::Released, Key::DownArrow, wp::application::KeyModifiers::Shift);
+  require(actor->getPose() == core::Pose::Standing, "Shift must suppress C posture input even without a selector");
+  play._injectKeyInput(KeyEvent::Released, Key::C, wp::application::KeyModifiers::Shift);
   play._injectKeyInput(KeyEvent::Released, Key::LeftShift, {});
 }
 
@@ -466,12 +480,12 @@ void checkPlayerChamberKeys(wp::application::State& play, core::World& world) {
           require(pos.y + envelope->y <= min.y + .0001f, "Keyboard Player's actual pose must not overlap Bulkhead leaf");
       }
     };
-    if (crawl) key(Key::DownArrow, true);
+    if (crawl) key(Key::C, true);
     key(Key::RightArrow, true);
     for (int i = 0; i < 1800 && actor->getSector()->getIndex() != index; ++i) step();
     key(Key::RightArrow, false);
     require(actor->getSector()->getIndex() == index, "Actual Right must enter sensor-operated Chamber without Up");
-    if (crawl) require(actor->getPose() == core::Pose::Crawling, "Actual Down+Right must preserve Crawling through Chamber entry");
+    if (crawl) require(actor->getPose() == core::Pose::Crawling, "Actual C+Right must preserve Crawling through Chamber entry");
     auto stopped = actor->getGlobalPosition(); for (int i = 0; i < 60; ++i) step();
     require(actor->getGlobalPosition().distanceTo(stopped) < .001f, "Release must stop Chamber Player without slot alignment");
     if (subtype == core::ChamberSubtype::SecurityScanner) {
@@ -490,8 +504,8 @@ void checkPlayerChamberKeys(wp::application::State& play, core::World& world) {
     require(actor->getSector()->getIndex() == right && world.getSimulationSnapshot().securityScanners.front().occupants.empty(),
       "Actual Right must manually leave both Chamber subtypes");
     if (crawl) {
-      require(actor->getPose() == core::Pose::Crawling, "Actual Down+Right must preserve Crawling through Chamber exit");
-      key(Key::DownArrow, false); step(); require(actor->getPose() == core::Pose::Standing, "Actual Down release must safely restore Standing after exit");
+      require(actor->getPose() == core::Pose::Crawling, "Actual C+Right must preserve Crawling through Chamber exit");
+      key(Key::C, false); step(); require(actor->getPose() == core::Pose::Standing, "Actual C release must safely restore Standing after exit");
     }
   }
 }

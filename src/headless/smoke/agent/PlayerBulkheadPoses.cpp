@@ -42,7 +42,7 @@ void standalone(bool reverse, bool closing, bool wide, float gap, smoke::Context
  require(leafMin.y >= gap && leafMin.y < gap + .01f, "Cannot stage physical leaf opening");
  auto actor = world.lookupAgent(id).entity;
  require(!door->admitsPlayerPassage(*actor, 0.f), "Partial leaf must block Standing");
- world.setPlayerStairSelection(false, true); world.update(core::World::getFixedTimestep());
+ world.setPlayerCrouch(true); world.update(core::World::getFixedTimestep());
  require(actor->getPose() == core::Pose::Crouching && door->admitsPlayerPassage(*actor, 0.f) == (gap > actor->getHeight()), "Geometry must use Crouching height, not automatically choose Crawling: pose=" + std::to_string((int)actor->getPose())
   + ", opening=" + std::to_string(door->getOpenPercentage()) + ", y=" + std::to_string(actor->getGlobalPosition().y));
  if (closing) { door->releaseOpenLease(); require(door->close(), "Cannot close pose Bulkhead"); }
@@ -57,8 +57,8 @@ void standalone(bool reverse, bool closing, bool wide, float gap, smoke::Context
  world.setPlayerMovementDirection(0); world.update(core::World::getFixedTimestep());
  auto stoppedPose = gap > actor->getPoseEnvelope(core::Pose::Crouching)->y ? core::Pose::Crouching : core::Pose::Crawling;
  require(actor->getPose() == stoppedPose, "Stopping may Crouch only when the larger envelope clears the leaf");
- world.setPlayerStairSelection(false, false); world.update(core::World::getFixedTimestep());
- require(actor->getPose() == stoppedPose, "Releasing Down must not expand to Standing through leaf");
+ world.setPlayerCrouch(false); world.update(core::World::getFixedTimestep());
+ require(actor->getPose() == stoppedPose, "Releasing C must not expand to Standing through leaf");
  world.setPlayerMovementDirection(direction); world.update(1.f);
  require(actor->getSector()->getIndex() == (reverse ? left : right) && actor->getPose() == core::Pose::Standing,
    "Player must complete pose-aware passage then safely restore Standing");
@@ -74,7 +74,7 @@ void oversizedChambers(smoke::Context const& context) {
   require(world.setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}), "Cannot assign oversized chamber Player");
   world.resumeSimulation(); if (kind == 0) world.requestPlayerDoorAction(); world.update(.1f);
   world.setPlayerMovementDirection(-1); world.update(1.3f);
-  world.setPlayerStairSelection(false, true); world.setPlayerMovementDirection(1); world.update(3.f);
+  world.setPlayerCrouch(true); world.setPlayerMovementDirection(1); world.update(3.f);
   auto actor = world.lookupAgent(id).entity;
   require(actor->getPose() == core::Pose::Crawling && actor->getSector()->getIndex() == left,
     "Wider Crawling envelope must not enter a chamber whose interior cannot contain it");

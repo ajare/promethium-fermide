@@ -15,10 +15,10 @@ class StatePlay final : public applib::State {
   core::World* mWorld{nullptr}; // Borrowed from Controller's MapResources.
   bool mLeftHeld{false}, mRightHeld{false}, mUpHeld{false}, mDownHeld{false};
   bool mCursorPressed[4]{false, false, false, false};
-  bool mSpaceHeld{false}, mShiftHeld{false}, mF11Held{false};
+  bool mSpaceHeld{false}, mShiftHeld{false}, mF11Held{false}, mCrouchHeld{false};
   PlayDebug mDebug;
   void resetInput() {
-    mLeftHeld = mRightHeld = mUpHeld = mDownHeld = mSpaceHeld = mShiftHeld = mF11Held = false;
+    mLeftHeld = mRightHeld = mUpHeld = mDownHeld = mSpaceHeld = mShiftHeld = mF11Held = mCrouchHeld = false;
     for (auto& held : mCursorPressed) held = false;
   }
 protected:

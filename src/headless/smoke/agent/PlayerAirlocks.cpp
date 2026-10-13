@@ -72,7 +72,7 @@ void partialOpening(bool reverse, bool crawl = false) {
  world.resumeSimulation();
  auto actor = world.lookupAgent(id).entity;
  bool crawledUnderStandingHeight = false;
- if (crawl) world.setPlayerStairSelection(false, true);
+ if (crawl) world.setPlayerCrouch(true);
  auto step = [&] {
   world.update(core::World::getFixedTimestep());
   require(chamber->getDoor(0)->isClosed() || chamber->getDoor(1)->isClosed(), "Partial passage must retain Airlock interlock");

@@ -689,7 +689,7 @@ namespace core
 		std::unique_ptr<AgentBehaviourRuntimeAdapter> mAgentBehaviourRuntime;
 		// App-only transient input. Editor simulation never supplies this intent.
 		int mPlayerMovementDirection{ 0 };
-		bool mPlayerStairUp{ false }, mPlayerStairDown{ false };
+		bool mPlayerStairUp{ false }, mPlayerStairDown{ false }, mPlayerCrouch{ false };
 		AgentId mPlayerDoorAction{};
 		void performPlayerDoorAction();
 		std::shared_ptr<const Edge> playerStaircaseApproach(Agent const& agent) const;
@@ -701,7 +701,8 @@ namespace core
 		void advancePlayerStaircaseAgent(Agent& agent, float timestep);
 		void advancePlayerStairwellAgent(Agent& agent, float timestep);
 		void advancePlayerControlledAgent(AgentId agent, float timestep);
-		void updatePlayerPose(Agent& agent, float height, float left, float right);
+		void updatePlayerPose(Agent& agent, float height, float left, float right, bool transitSupport = false);
+		void updatePlayerClimbingPose(Agent& agent);
 		bool advancePlayerChamberAgent(Agent& agent, float timestep);
 		bool advancePlayerTransportAgent(Agent& agent, float timestep);
 		bool tryPlayerPlatformMount(Agent& agent);
@@ -1874,6 +1875,7 @@ namespace core
 		// Held input: -1 left, 0 idle, +1 right. Never authored or persisted.
 		void setPlayerMovementDirection(int direction);
 		void setPlayerStairSelection(bool up, bool down);
+		void setPlayerCrouch(bool held);
 		[[nodiscard]] float maximumInstalledStandingWidth() const;
 		// One Up keypress, consumed at the next allocation phase; never saved.
 		void requestPlayerDoorAction();

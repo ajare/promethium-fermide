@@ -92,16 +92,16 @@ void journey(core::ChamberSubtype subtype, bool reverse, uint32_t width) {
    && scene.snapshot().reservations.empty() && scene.snapshot().crossings.empty(), "Reset must restore authored position and clear Chamber ownership");
 }
 void crawlJourney(core::ChamberSubtype subtype, bool reverse) {
- Scene scene(subtype, reverse, 1); scene.world.setPlayerStairSelection(false, true);
+ Scene scene(subtype, reverse, 1); scene.world.setPlayerCrouch(true);
  scene.move(scene.direction); bool checkedExpansion = false;
  for (int i = 0; i < 1800 && scene.actor()->getSector()->getIndex() != scene.index; ++i) {
   scene.step(); core::Vector2 min, max; scene.chamber->getDoor(scene.chamber->getEntrySide())->getCurrentShape(min, max);
   auto pos = scene.actor()->getGlobalPosition(); auto envelope = scene.actor()->getPoseEnvelope(scene.actor()->getPose());
   if (!checkedExpansion && !scene.snapshot().crossings.empty() && min.y < pos.y + scene.actor()->getStandingHeight() - .05f
     && pos.x + envelope->x * .5f > min.x && pos.x - envelope->x * .5f < max.x) {
-   scene.move(0); scene.world.setPlayerStairSelection(false, false); scene.step();
-   require(scene.actor()->getPose() == core::Pose::Crawling, "Down release mid-crossing must not stand into a Bulkhead leaf");
-   scene.world.setPlayerStairSelection(false, true); scene.move(scene.direction); checkedExpansion = true;
+   scene.move(0); scene.world.setPlayerCrouch(false); scene.step();
+   require(scene.actor()->getPose() == core::Pose::Crawling, "C release mid-crossing must not stand into a Bulkhead leaf");
+   scene.world.setPlayerCrouch(true); scene.move(scene.direction); checkedExpansion = true;
   }
  }
  scene.move(0); require(checkedExpansion && scene.actor()->getSector()->getIndex() == scene.index
@@ -111,8 +111,8 @@ void crawlJourney(core::ChamberSubtype subtype, bool reverse) {
  scene.exit();
  require(scene.actor()->getPose() == core::Pose::Crawling && scene.crawledUnderStandingHeight,
    "Scanner/Decontamination thresholds must admit explicit Crawling beneath a leaf that still blocks Standing");
- scene.world.setPlayerStairSelection(false, false); scene.wait(1);
- require(scene.actor()->getPose() == core::Pose::Standing, "Completed crawler must safely stand on landing after releasing Down");
+ scene.world.setPlayerCrouch(false); scene.wait(1);
+ require(scene.actor()->getPose() == core::Pose::Standing, "Completed crawler must safely stand on landing after releasing C");
 }
 void partialCrossing(core::ChamberSubtype subtype) {
  Scene scene(subtype, false, 2);
@@ -154,17 +154,17 @@ void walkingDuringProcessing(core::ChamberSubtype subtype) {
  }
  for (int i = 0; i < 2400 && scene.chamber->getPhase() != core::SecurityScannerPhase::Scanning; ++i) scene.step();
  require(scene.chamber->getPhase() == core::SecurityScannerPhase::Scanning, "Fixture must start specialized processing");
- scene.world.setPlayerStairSelection(false, true); scene.wait(1);
- require(scene.actor()->getPose() == core::Pose::Crouching, "Down must crouch inside the processing Chamber");
+ scene.world.setPlayerCrouch(true); scene.wait(1);
+ require(scene.actor()->getPose() == core::Pose::Crouching, "C must crouch inside the processing Chamber");
  auto original = scene.actor()->getGlobalPosition(); scene.move(1); scene.wait(4);
- require(scene.actor()->getPose() == core::Pose::Crawling, "Down plus walking must crawl inside the Chamber");
+ require(scene.actor()->getPose() == core::Pose::Crawling, "C plus walking must crawl inside the Chamber");
  require(scene.actor()->getGlobalPosition().x > original.x && scene.snapshot().occupants.size() == 1,
    "Player must retain bounded manual walking and capacity during processing");
  scene.move(-1); scene.wait(4); scene.move(0);
  require(scene.actor()->getGlobalPosition().distanceTo(original) < .0001f, "Manual reversal during processing must preserve physical position");
- scene.wait(1); require(scene.actor()->getPose() == core::Pose::Crouching, "Stopped Chamber occupant must crouch while holding Down");
- scene.world.setPlayerStairSelection(false, false); scene.wait(1);
- require(scene.actor()->getPose() == core::Pose::Standing, "Chamber occupant must stand on Down release when it fits");
+ scene.wait(1); require(scene.actor()->getPose() == core::Pose::Crouching, "Stopped Chamber occupant must crouch while holding C");
+ scene.world.setPlayerCrouch(false); scene.wait(1);
+ require(scene.actor()->getPose() == core::Pose::Standing, "Chamber occupant must stand on C release when it fits");
 }
 void directionCapacityAndReset(core::ChamberSubtype subtype) {
  {

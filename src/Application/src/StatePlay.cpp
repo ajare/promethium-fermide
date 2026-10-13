@@ -60,6 +60,7 @@ void StatePlay::updateImpl(float elapsedSeconds) {
   if (mWorld) {
     mWorld->setPlayerMovementDirection(mShiftHeld ? 0 : int(mRightHeld) - int(mLeftHeld));
     mWorld->setPlayerStairSelection(!mShiftHeld && mUpHeld, !mShiftHeld && mDownHeld);
+    mWorld->setPlayerCrouch(!mShiftHeld && mCrouchHeld);
     mWorld->update(elapsedSeconds);
     mDebug.observe(*mWorld);
   }
@@ -80,8 +81,8 @@ void StatePlay::injectKeyInputImpl(wp::application::KeyEvent event,
   int cursor = key == Key::LeftArrow ? 0 : key == Key::RightArrow ? 1
     : key == Key::UpArrow ? 2 : key == Key::DownArrow ? 3 : -1;
   if (mShiftHeld) {
-    mLeftHeld = mRightHeld = mUpHeld = mDownHeld = false;
-    if (mWorld) { mWorld->setPlayerMovementDirection(0); mWorld->setPlayerStairSelection(false, false); }
+    mLeftHeld = mRightHeld = mUpHeld = mDownHeld = mCrouchHeld = false;
+    if (mWorld) { mWorld->setPlayerMovementDirection(0); mWorld->setPlayerStairSelection(false, false); mWorld->setPlayerCrouch(false); }
   }
   if (cursor >= 0) {
     bool fresh = pressed && !mCursorPressed[cursor];
@@ -108,6 +109,8 @@ void StatePlay::injectKeyInputImpl(wp::application::KeyEvent event,
   }
   else if (key == wp::application::Key::DownArrow)
     mDownHeld = event == wp::application::KeyEvent::Pressed;
+  else if (key == Key::C)
+    mCrouchHeld = pressed && !mShiftHeld;
   if (event == wp::application::KeyEvent::Pressed &&
       key == wp::application::Key::Escape) {
     resetInput();

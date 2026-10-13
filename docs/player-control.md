@@ -26,17 +26,17 @@ camera is used.
   to cross; holding Up or keyboard repeat never queues another action.
 - The Agent must be on the Door's Level in one of its connected Locations. Opening
   requires its centre inside the Door's physical X-bounds; crossing requires its
-  entire Standing body inside the aperture. There is no automatic alignment.
+  entire current-pose body inside the aperture. There is no automatic alignment.
 - Player opening ignores arm length and remote activation distance, but preserves
   Object usage capability, Door Mobility, Access permissions and Broken state.
   None cannot open a Door, but can cross an already open eligible doorway. Existing
   Permission adherence and destination Location requirements still govern passage;
   a fully open Broken Door can remain passable.
-- Crossing uses normal Standing Door-context speed, admission lanes and safety
+- Crossing retains the current supported pose and its declared Door-context speed, admission lanes and safety
   leases. Left/Right and further Up presses are ignored while crossing. Pause
   freezes an admitted crossing; it finishes safely on resume.
 - Press **Up** inside a Stairwell landing doorway to enter the Stairwell sector,
-  or to exit into that Level's adjacent Location. Standing body fit, Stairwell
+  or to exit into that Level's adjacent Location. Current-pose body fit, Stairwell
   Mobility and destination Location permissions apply; Up preserves X and does
   not align the Agent. Open Stairwell entry does not require Object usage capability.
 - Stairwells have visible horizontal side platforms at quarter-Level bends and
@@ -45,13 +45,13 @@ camera is used.
   Agent type's Standing width. Wider types count even when not placed. Installing
   a type that changes existing platform geometry requires a paused, unoccupied
   Stairwell; a type too wide for the two-cell sector is refused.
-- Left/Right walks on platforms at effective walking speed. At departure onto
+- Left/Right walks on platforms at effective pose-adjusted walking speed. At departure onto
   a flight, hold **Up** to ascend or **Down** to descend. Selection is sampled at
   departure, never stored in advance: neither or both keys stops at the junction.
   If the chosen flight points against horizontal input, change Left/Right to match;
   there is no automatic turn. During a departure attempt, Up selects rather than
   exits the doorway; otherwise a fresh Up press keeps its doorway-exit meaning.
-- Flights use effective ascent/descent speed. On arrival, horizontal input walks
+- Flights use effective ascent/descent speed multiplied by the current pose's Room movement ratio. On arrival, horizontal input walks
   onto the side platform rather than automatically entering another flight.
   Reverse toward the junction and hold the desired selection to depart again.
   Reversing mid-flight walks back toward its source. Releasing keys stops exactly
@@ -70,11 +70,11 @@ camera is used.
 - On a stationary Staircase, Left/Right follows the slope at effective directional stair
   speed. Release stops exactly in place; reverse input retraces the flight.
   Up/Down is not required once mounted. Reaching either endpoint automatically
-  dismounts into its connected Location, subject to Standing fit and Location
+  dismounts into its connected Location, subject to current-pose fit and Location
   permissions. An open upper Room wall without Floor lands directly in the
   adjacent supported Location. Pause freezes the admitted task and clears input;
   Staircases and Escalators do not require Object usage capability or Buttons.
-- On a moving Escalator, Left/Right adds effective walking speed in the selected
+- On a moving Escalator, Left/Right adds pose-adjusted effective walking speed in the selected
   direction to the signed belt speed along the slope. Either endpoint can be
   mounted against the belt only when effective walking speed strictly exceeds
   belt speed; equal or faster opposing belts refuse new Player entry without
@@ -95,13 +95,13 @@ camera is used.
   to the exact mount before entering, with no snapping or automatic alignment.
   Eligible Ladder approach suppresses Up's Door action. This supports both
   Ladders inside multi-Level Rooms and Ladder Transits behind their landings.
-- Once mounted, hold **Up/Down** to climb at effective climb speed, without
+- Once mounted, hold **Up/Down** to climb at effective climb speed multiplied by the current pose's Room movement ratio, without
   Left/Right. Release or hold both vertical keys to stop exactly; opposite
   vertical input reverses. Horizontal input does not move a mounted climber.
   Reversal is refused while another climber shares the span. Stopping retains
   admitted Ladder capacity, including for Room Ladders, until a safe endpoint.
   Reaching either connected endpoint automatically dismounts; intermediate
-  Levels without a mount are not exits. Standing clearance, Ladder Mobility,
+  Levels without a mount are not exits. Current-pose clearance, Ladder Mobility,
   resource admission and landing Location permissions remain authoritative.
   A refused exit allows retracing the Ladder. Pause freezes the admitted task
   and clears input; Reset restores the authored landing and discards mounted
@@ -143,26 +143,31 @@ camera is used.
   crouches/crawls. Up supports ordinary Doors between Locations, open enclosed
   Lift/Shuttle Doors, Stairwell landing doorways, contextual Ladder entry/climbing
   and physical Button interaction. Windows and BoothWindows do not admit entry.
-- Without explicit Down posture input, an Agent initially in a space that cannot
+- Without explicit C posture input, an Agent initially in a space that cannot
   accommodate Standing remains stationary in its existing fitting pose.
 
 ## Player crouching and crawling
 
-- Hold **Down** while stationary to use **Crouching**, or hold **Down + Left/Right**
+- Hold **C** while stationary to use **Crouching**, or hold **C + Left/Right**
   to use **Crawling**. Unsupported requested poses do nothing: the existing pose
   remains unchanged and no capability is invented. Opposite horizontal keys
-  cancel movement, selecting Crouching while Down remains held.
-- Release Down to restore **Standing** only when the whole body has clearance
+  cancel movement, selecting Crouching while C remains held.
+- Release C to restore **Standing** only when the whole body has clearance
   and support. Otherwise retain the lowered pose until Standing safely fits.
   Explicit crawling can traverse supported low Room space, using the Agent
   type's declared Room movement speed ratio, envelope and normal Floor/wall/
   Location permission checks. Input never snaps the Agent or creates support.
-- Flat vehicle and Chamber interiors also support these poses and keep their
-  existing physical bounds. Bulkhead thresholds retain the current pose and use
-  its declared Door-context speed; safe pose changes are allowed mid-crossing.
-  Ordinary Doors and transport thresholds still require Standing. Posture input
-  never bypasses admission or interlocks. Ladder/stair
-  descent keeps priority and crossing/climbing owns its pose.
+- Every passenger Transit preserves the current supported pose, visual tile and
+  physical envelope. Staircases, Stairwells, Ladders and vehicle interiors use the
+  declared Room movement ratio with their normal walking/stair/climb speed;
+  Escalator belt motion is never pose-scaled. Wider bodies remain bounded by
+  Stairwell walls, Ladder sectors and vehicle compartments. A moving Platform
+  lift supplies real support even between integer Levels.
+- Ordinary Doors, transport Doors and Bulkhead thresholds retain the current pose
+  and use its declared Door-context speed. Bulkheads permit safe mid-crossing pose
+  changes; timed Layer crossings retain their accepted pose until completion.
+  Posture never bypasses admission or interlocks. Down selects descent only;
+  it no longer changes posture. C works independently of climbing selection.
 - Shift+cursor remains destination browsing, not posture input. Pausing freezes
   posture and clears held input; Reset and behaviour handoff release runtime
   Player pose ownership. Inactive Agents do not receive posture input.
@@ -244,7 +249,7 @@ camera is used.
   input reverses. Movement remains bounded by the chamber and its controlled
   thresholds, with no slot alignment or automatic ejection. Stopped partial Door
   crossings retain their permit and provisional capacity; retracing cancels them.
-- A Security Scanner waits until the Player's Standing body covers its central
+- A Security Scanner waits until the Player's current-pose body covers its central
   scan position. Walk there explicitly; there is no snapping. Decontamination
   batches do not require manual occupants to align to assigned capacity slots.
   Existing pre-delay, scanning/decontamination and post-pause timers run with both
@@ -259,7 +264,7 @@ camera is used.
 - Up crosses an aligned, fully open enclosed Lift or Shuttle Door in either
   direction, without alignment or approach automation. Left/Right crosses a
   stopped Platform lift's supported open boundary. Capacity, crossing reservations,
-  Mobility, Standing fit and landing permissions still apply.
+  Mobility, current-pose fit and landing permissions still apply.
 - Left/Right walks within the occupied vehicle, including during travel. Movement
   remains bounded by the car or occupied Shuttle carriage. Leaving requires a
   stationary, safe open landing and explicit Player input.
@@ -335,3 +340,11 @@ vertical-key cancellation, automatic dismounting, arm-length Button interaction,
 repeat suppression, extension-then-climbing, manual Lift entry and Shift/Space
 selector controls; `pf_application_render` covers selector windowing/colours, camera following, Layer selection,
 resize and the no-Player fallback.
+
+`agent-playerControlPoses` additionally checks custom pose speed ratios, artwork,
+body dimensions, mounted posture changes on every climbing surface, wider
+Stairwell bodies and pose-adjusted opposing Escalator admission. Manual transport
+checks include crawling through Lift/Shuttle and Platform boundaries and posture
+changes on moving Platforms between integer Levels. Keyboard coverage verifies
+C posture on both stair directions and both Ladder kinds; Down alone no longer
+changes posture.

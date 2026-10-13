@@ -54,8 +54,13 @@ namespace
   for (int i = 0; i < 120 && direction * (centre - actor->getGlobalPosition().x) > .05f; ++i) world.update(core::World::getFixedTimestep());
   world.setPlayerMovementDirection(0);
   for (int i = 0; i < 180 && !door->isOpen(); ++i) world.update(core::World::getFixedTimestep());
+  world.setPlayerCrouch(true); world.setPlayerMovementDirection(direction); tick(world, .02f);
+  require(actor->getPose() == core::Pose::Crawling, "Transport approach must select Crawling");
   float x = actor->getGlobalPosition().x;
-  world.requestPlayerDoorAction(); tick(world, 1.f);
+  world.requestPlayerDoorAction(); tick(world, .02f);
+  require(actor->hasActiveLocomotionTask() && actor->getPose() == core::Pose::Crawling,
+    "Lift/Shuttle threshold must retain actual Crawling, not force Standing");
+  world.setPlayerMovementDirection(0); tick(world, 1.f);
   require(actor->getSector()->getIndex() == transit, std::string(shuttle ? "Shuttle" : "Lift") + " Up must board an open vehicle: phase=" + std::to_string((int)vehicle(world, resource).liftStopPhase) + ", door=" + std::to_string(door->isOpen()) + ", x=" + std::to_string(actor->getGlobalPosition().x));
   require(std::abs(actor->getGlobalPosition().x - x) < .001f, "Boarding must preserve physical X, not align to a slot");
   auto selector = world.getPlayerTransportSelector();
@@ -81,13 +86,13 @@ namespace
    world.update(1.f);
    auto moving = vehicle(world, resource);
    if (moving.liftMoving && !walkedDuringTravel) {
-    world.setPlayerStairSelection(false, true); tick(world, .02f);
-    require(actor->getPose() == core::Pose::Crouching, "Down must crouch inside a moving enclosed vehicle");
+    world.setPlayerCrouch(true); tick(world, .02f);
+    require(actor->getPose() == core::Pose::Crouching, "C must crouch inside a moving enclosed vehicle");
     float relative = actor->getGlobalPosition().x - (shuttle ? vehicle(world, resource).liftPosition : 0.f);
     world.setPlayerMovementDirection(1); tick(world, .1f);
-    require(actor->getPose() == core::Pose::Crawling, "Down plus horizontal movement must crawl inside the vehicle");
-    world.setPlayerMovementDirection(0); world.setPlayerStairSelection(false, false); tick(world, .02f);
-    require(actor->getPose() == core::Pose::Standing, "Releasing Down inside the vehicle must restore Standing");
+    require(actor->getPose() == core::Pose::Crawling, "C plus horizontal movement must crawl inside the vehicle");
+    world.setPlayerMovementDirection(0); world.setPlayerCrouch(false); tick(world, .02f);
+    require(actor->getPose() == core::Pose::Standing, "Releasing C inside the vehicle must restore Standing");
     float after = actor->getGlobalPosition().x - (shuttle ? vehicle(world, resource).liftPosition : 0.f);
     require(after > relative + .01f, "Ordinary movement must work while vehicle travels without automatic slot alignment");
     walkedDuringTravel = true;
@@ -156,9 +161,11 @@ namespace
   require(!world.getPlayerTransportSelector() && vehicle(world, created.traversalResource).occupantCount == 0,
     "Forbidden Platform lift entry must not fall through to ordinary Floor movement");
   world.pauseSimulation(); world.setAgentIndividualMobilityProfile(id, profile); world.resumeSimulation();
+  world.setPlayerCrouch(true);
   world.setPlayerMovementDirection(actor->getGlobalPosition().x < 4.5f ? 1 : -1);
   for (int i = 0; i < 240 && !world.getPlayerTransportSelector(); ++i) world.update(core::World::getFixedTimestep());
-  world.setPlayerMovementDirection(0);
+  require(actor->getPose() == core::Pose::Crawling, "Platform virtual boundary must preserve Crawling");
+  world.setPlayerMovementDirection(0); tick(world, .02f);
   auto selector = world.getPlayerTransportSelector();
   require(selector && !selector->horizontal, "Left/Right must manually board a stopped Platform lift");
   world.pauseSimulation(); world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None); world.resumeSimulation();
@@ -183,12 +190,41 @@ namespace
   require(vehicle(world, created.traversalResource).liftScheduledStops.empty(), "Reset must discard runtime service requests");
   require(!world.getPlayerTransportSelector(), "Reset must not retain selector or crossing state");
  }
+ void movingPlatformPose()
+ {
+  core::World world("Moving Platform posture", 12, 3);
+  auto room = world.addRoom("Room", 0, 0, 0, 12, 3);
+  for (uint32_t x = 0; x < 12; ++x) world.addSectorWalkway(room, 2, x);
+  core::World::CreateLiftOptions options; options.cellsWide = 1; options.stopOffsets = {0, 2};
+  options.platformStopDurationSeconds = 3.f;
+  auto created = world.addSectorPlatformLift(room, 0, 4, options);
+  world.finishBuild(); world.pauseSimulation();
+  auto point = world.lookupInteractionPoint(created.buttons.front().interactionPoint).entity;
+  auto id = world.createAgent("Player", room, 0, point->getPosition().x);
+  require(world.setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}), "Cannot assign Platform pose Player");
+  world.resumeSimulation(); world.requestPlayerDoorAction(); tick(world, .5f);
+  world.setPlayerMovementDirection(point->getPosition().x < 4.5f ? 1 : -1);
+  for (int i = 0; i < 300 && !world.getPlayerTransportSelector(); ++i) world.update(core::World::getFixedTimestep());
+  require(world.getPlayerTransportSelector().has_value(), "Cannot board moving Platform fixture");
+  world.setPlayerMovementDirection(0); world.confirmPlayerTransportStop();
+  auto actor = world.lookupAgent(id).entity;
+  for (int i = 0; i < 900 && actor->getGlobalPosition().y < .05f; ++i) world.update(core::World::getFixedTimestep());
+  require(vehicle(world, created.traversalResource).liftMoving && actor->getGlobalPosition().y > 0.f,
+   "Fixture must exercise fractional-height Platform support");
+  world.setPlayerCrouch(true); tick(world, .02f);
+  require(actor->getPose() == core::Pose::Crouching, "C must crouch on a moving Platform, without integer Room Floor support");
+  auto x = actor->getGlobalPosition().x; world.setPlayerMovementDirection(x < 4.5f ? 1 : -1); tick(world, .1f);
+  require(actor->getPose() == core::Pose::Crawling && std::abs(actor->getGlobalPosition().x - x) > .01f,
+   "C plus horizontal input must crawl within moving Platform bounds");
+  world.setPlayerCrouch(false); world.setPlayerMovementDirection(0); tick(world, .02f);
+  require(actor->getPose() == core::Pose::Standing, "Releasing C must safely stand on a moving Platform");
+ }
 }
 namespace agent_smoke
 {
  void registerPlayerTransports(std::vector<smoke::Check>& checks)
  {
   checks.push_back({"playerControlLiftCalledLanding", [](smoke::Context const&) { calledLanding(); }});
-  checks.push_back({"playerControlManualTransports", [](smoke::Context const&) { enclosed(false); enclosed(true); platform(); }});
+  checks.push_back({"playerControlManualTransports", [](smoke::Context const&) { enclosed(false); enclosed(true); platform(); movingPlatformPose(); }});
  }
 }
