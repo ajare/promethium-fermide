@@ -271,7 +271,7 @@ namespace
 		core::World::CreateDoorOptions buttons; buttons.activationMode = core::DoorActivationMode::RemoteControlled;
 		buttons.controls[0] = buttons.controls[1] = true;
 		fixture(2.5f, buttons, [&](auto& world, auto, auto door, auto, auto) {
-			press(world); require(door->isClosed(), "Up must not operate a Button-required Door");
+			press(world); require(door->isClosed(), "Up at a Door centre must not auto-approach its Buttons");
 		});
 	}
 
@@ -611,7 +611,7 @@ namespace
 			core::World world("Ladder restrictions", 12, 2);
 			auto bottom = world.addRoom("Bottom", 0, 0, 0, 12, 1);
 			world.addCorridor(1, 0, 12);
-			auto result = world.addLadder(1, 0, 4, {2, scenario == 5, true});
+			auto result = world.addLadder(1, 0, 4, {2, scenario == 5, scenario != 5});
 			world.finishBuild(); world.pauseSimulation();
 			auto id = world.createAgent("Player", bottom, 0, scenario == 0 ? 3.5f : 4.35f); assign(world, id);
 			if (scenario == 6)
@@ -626,7 +626,7 @@ namespace
 			world.setPlayerStairSelection(scenario != 3, scenario == 3 || scenario == 4);
 			world.update(scenario == 0 ? .1f : .6f);
 			require(world.lookupAgent(id).entity->getSector()->getIndex() == bottom,
-				"Far, stopped, away, wrong/ambiguous, extensible, forbidden, low and disabled mounts must refuse entry");
+				"Far, stopped, away, wrong/ambiguous, retracted, forbidden, low and disabled mounts must refuse entry");
 		}
 		for (bool low : {false, true})
 		{
@@ -937,6 +937,7 @@ namespace
 
 void agent_smoke::registerPlayerControl(std::vector<smoke::Check>& checks)
 {
+	registerPlayerButtons(checks);
 	checks.push_back({"playerControlBasics", [](smoke::Context const&) { basics(); }});
 	checks.push_back({"playerControlBoundaries", [](smoke::Context const&) { boundaries(); }});
 	checks.push_back({"playerControlBulkheads", [](smoke::Context const&) { bulkheads(); }});

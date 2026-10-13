@@ -55,12 +55,15 @@ upper endpoint while walking toward the flight (within 0.25 World units).
 Left/Right follows the slope with reversal and automatic endpoint dismount.
 Moving Escalators add belt motion to walking, including walking against the belt;
 release rides the steps. Broken Escalators stop and behave as stationary stairs.
-Fixed Ladders mount while walking toward their centre with Up from below or Down
+Fixed and fully extended extensible Ladders mount while walking toward their centre with Up from below or Down
 from above, within 0.25 World units. Once mounted, Up/Down climbs, release stops,
 and opposite input reverses while alone; endpoint arrivals automatically dismount.
-This includes Room Ladders. Extensible Ladders remain unsupported.
-Walls, low spaces,
-closed Bulkhead Doors and Floor gaps block movement. Buttons, transport boarding
+This includes Room Ladders. When no higher-priority climb or doorway action applies,
+a fresh Up press operates one physical Button within effective arm length and its
+Interaction point reach. Buttons require Arms capability, Buttons Mobility and
+Access permissions; they never auto-approach or repeat while Up is held. Extensible
+Ladders can be deployed via their Buttons before climbing. Walls, low spaces,
+closed Bulkhead Doors and Floor gaps block movement. Transport boarding
 and automatic crouching/crawling are not supported. Without an eligible
 Agent, Player input is disabled and the fitted Layer-0 camera remains.
 See [Player control](../../docs/player-control.md) for authoring and validation.

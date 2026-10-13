@@ -327,6 +327,66 @@ void checkPlayerLadderKeys(wp::application::State& play, core::World& world) {
   }
 }
 
+void checkPlayerButtonKeys(wp::application::State& play, core::World& world) {
+  using wp::application::Key;
+  using wp::application::KeyEvent;
+  auto install = [&](core::World& fixture) {
+    auto writer = core::YamlSerializer::toString();
+    core::SerializationWorkData data; data.markSerializedUnmodified = false;
+    fixture.serialize(*writer, data); writer->serialize();
+    auto reader = core::YamlSerializer::fromString(writer->getSerializedString()); reader->deserialize();
+    world.pauseSimulation(); require(world.deserialize(*reader, data), "Cannot install Button keyboard fixture");
+    require(world.resumeSimulation(), "Cannot resume Button fixture");
+  };
+  auto key = [&](Key k, bool held) { play._injectKeyInput(held ? KeyEvent::Pressed : KeyEvent::Released, k, {}); };
+  auto pressCount = [&] {
+    size_t count = 0;
+    for (auto const& event : world.consumeSimulationEvents())
+      if (event.type == core::SimulationEventType::InteractionRequestAdded) ++count;
+    return count;
+  };
+  core::World fixture("Keyboard Button", 12, 2);
+  auto room = fixture.addRoom("Room", 0, 0, 0, 12, 1);
+  auto control = fixture.addSectorLightSwitch(room, 4);
+  auto startX = fixture.lookupInteractionPoint(control.interactionPoint).entity->getPosition().x - .125f;
+  fixture.finishBuild(); fixture.pauseSimulation();
+  auto id = fixture.createAgent("Keyboard player", room, 0, startX);
+  require(fixture.setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}), "Cannot assign Button player");
+  install(fixture); world.consumeSimulationEvents();
+  key(Key::UpArrow, true); play._update(.1f);
+  require(pressCount() == 1, "Actual Up must press a reachable Button");
+  require(std::abs(world.lookupAgent(id).entity->getGlobalPosition().x - startX) < .0001f, "Button key must not move the Player");
+  key(Key::UpArrow, true); play._update(1.f);
+  require(pressCount() == 0, "Held Up and keyboard repeat must not repeat a Button action");
+  key(Key::UpArrow, false); key(Key::UpArrow, true); play._update(.1f);
+  require(pressCount() == 1, "A fresh Up press must allow another Button action");
+  key(Key::UpArrow, false); play._update(1.f);
+  world.pauseSimulation(); world.setAgentIndividualObjectUsageDistance(id, .0625f); world.resumeSimulation();
+  key(Key::UpArrow, true); play._update(.1f);
+  require(pressCount() == 0, "Actual Up must honor effective arm length");
+  key(Key::UpArrow, false);
+
+  core::World ladderFixture("Keyboard extensible Ladder", 12, 2);
+  auto bottom = ladderFixture.addRoom("Bottom", 0, 0, 0, 12, 1);
+  auto top = ladderFixture.addCorridor(1, 0, 12);
+  auto result = ladderFixture.addLadder(1, 0, 4, {2, true, false});
+  auto buttonX = ladderFixture.lookupInteractionPoint(result.controls[0].interactionPoint).entity->getPosition().x;
+  ladderFixture.finishBuild(); ladderFixture.pauseSimulation();
+  id = ladderFixture.createAgent("Keyboard player", bottom, 0, buttonX);
+  require(ladderFixture.setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}), "Cannot assign extensible Ladder player");
+  install(ladderFixture); world.consumeSimulationEvents();
+  key(Key::UpArrow, true); play._update(.1f);
+  require(pressCount() == 1, "Up must activate the extensible Ladder Button");
+  for (int second = 0; second < 8; ++second) play._update(1.f);
+  require(std::abs(world.lookupAgent(id).entity->getGlobalPosition().x - buttonX) < .0001f, "Ladder extension must not auto-approach its mount");
+  key(Key::UpArrow, false);
+  auto horizontal = buttonX < 4.5f ? Key::RightArrow : Key::LeftArrow;
+  key(horizontal, true); key(Key::UpArrow, true);
+  for (int second = 0; second < 10; ++second) play._update(1.f);
+  require(world.lookupAgent(id).entity->getSector()->getIndex() == top, "Actual Up must climb and dismount a fully extended Ladder");
+  key(horizontal, false); key(Key::UpArrow, false); play._update(0.f);
+}
+
 // Drive the actual factory-created states through the same exception/resume
 // contract as Launcher, without entering their graphics-dependent scenes.
 void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
@@ -385,6 +445,7 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
         checkPlayerStairKeys(*child, *map->getWorld());
         checkPlayerStaircaseKeys(*child, *map->getWorld());
         checkPlayerLadderKeys(*child, *map->getWorld());
+        checkPlayerButtonKeys(*child, *map->getWorld());
         auto const suspendTick = map->getWorld()->getSimulationTick();
         child->_suspend(true, true, true);
         child->_update(1.0f);

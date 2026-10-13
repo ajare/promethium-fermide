@@ -1447,7 +1447,8 @@ namespace core
 				// not be overridden by earlier work, and cancellation must not resume
 				// that work later.
 				auto actor = mWorld.mAgents.find(request->mActor);
-				if (!actor || !mWorld.agentCanOperateInteraction(pointId, *actor, false))
+				if (!actor || !mWorld.agentCanOperateInteraction(pointId, *actor, false)
+					|| (actor->isPlayerControlled() && !mWorld.interactionRequestEligible(pointId, request->mActor, true)))
 				{
 					cancelInteraction(requestId);
 					continue;
@@ -1518,7 +1519,10 @@ namespace core
 				cancelInteraction(point->mActiveRequest);
 				continue;
 			}
-			if (!actor || !mWorld.agentCanOperateInteraction(pointId, *actor, false))
+			// Manual presses never chase the Button or execute while crossing.
+			// Walking away or shortening arm length cancels unpressed Player work.
+			if (!actor || !mWorld.agentCanOperateInteraction(pointId, *actor, false)
+				|| (actor->isPlayerControlled() && !mWorld.interactionRequestEligible(pointId, request->mActor, true)))
 			{
 				// A deactivated Agent must not walk to the point or press it, and a
 				// Buttons-forbidden Agent must not press it either; the point must
@@ -1533,6 +1537,7 @@ namespace core
 			if (actor->getObjectUsage() != ObjectUsage::RemoteControl
 				&& !mWorld.agentCanPhysicallyOperate(*actor, actor->getGlobalPosition().distanceTo(point->mPosition), point->mReach))
 			{
+				// Player work was reach-checked above; only autonomous Agents approach.
 				actor->moveToPosition(point->mPosition, frameTime);
 				continue;
 			}

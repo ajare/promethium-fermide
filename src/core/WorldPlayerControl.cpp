@@ -1,5 +1,6 @@
 #include "core/World.h"
 #include "core/BulkheadDoorSectorObject.h"
+#include "core/Button.h"
 #include "core/ForceBridgeSectorObject.h"
 #include "core/Location.h"
 #include "core/DoorEdge.h"
@@ -219,6 +220,26 @@ namespace core
 				static_cast<DoorEdge const&>(*candidate.edge).getDoor()->requestOpen();
 				return;
 			}
+		// Physical Buttons are the last meaning of a fresh Up press. Use the
+		// shared arm-length/geometry gate, never remote range or auto-approach.
+		if (agent->getObjectUsage() != ObjectUsage::Arms || agentForbidsButtons(agent)) return;
+		InteractionPointId selected;
+		float nearest = 0.f;
+		for (auto const& [pointId, point] : mInteractionPoints.entries())
+		{
+			auto placement = physicalControlPlacement(pointId);
+			if (!placement || std::abs(position.y - point->getPosition().y) > PoseFitTolerance
+				|| !agentCanOperateInteraction(pointId, *agent, true)
+				|| !missingInteractionPermissions(*point, *agent).empty()
+				|| isControlTargetBroken(pointId)) continue;
+			auto button = std::dynamic_pointer_cast<Button>(mSectors[placement->sectorIndex]
+				->getObject(placement->objectIndex)->_getObject());
+			if (!button || !button->isEnabled()) continue;
+			auto const distance = position.distanceTo(point->getPosition());
+			if (!selected || distance < nearest || (distance == nearest && pointId < selected))
+			{ selected = pointId; nearest = distance; }
+		}
+		if (selected) requestInteraction(selected, id);
 	}
 
 	std::shared_ptr<const Edge> World::playerStaircaseApproach(Agent const& agent) const
@@ -267,7 +288,7 @@ namespace core
 		for (auto const& edge : getGraph()->getEdges())
 		{
 			auto mount = std::dynamic_pointer_cast<LadderMountEdge const>(edge);
-			if (!mount || mount->getLadder()->isExtensible()) continue;
+			if (!mount || !mount->getLadder()->admitsNewTraversals()) continue;
 			auto source = edge->getVertex(0), destination = edge->getVertex(1);
 			if (!std::dynamic_pointer_cast<LadderVertex const>(destination)) std::swap(source, destination);
 			if (source->getSector().get() != agent.getSector()) continue;

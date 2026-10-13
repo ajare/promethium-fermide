@@ -85,7 +85,7 @@ camera is used.
   resumed belt motion applies immediately. Moving Escalators use Escalator
   Mobility; Broken ones use Staircase Mobility. Pause freezes both walking and
   belt carriage, and resume with cleared keys rides a working belt.
-- Fixed, non-extensible Ladders use contextual endpoint mounting. On the landing
+- Fixed Ladders and fully extended extensible Ladders use contextual endpoint mounting. On the landing
   Level, walk toward the mount while holding **Up** from below or **Down** from
   above, within **0.25 World units** of its centre. Either horizontal approach
   side works; neither or both vertical keys refuses mounting. The Agent walks
@@ -103,15 +103,40 @@ camera is used.
   A refused exit allows retracing the Ladder. Pause freezes the admitted task
   and clears input; Reset restores the authored landing and discards mounted
   state. Fixed Ladders require neither Object usage capability nor Buttons.
-  Extensible Ladders and their controls remain outside Player control.
-- Overlapping candidates prefer an admissible open doorway, then nearest centre,
+  Extensible Ladders retain their existing Buttons Mobility, permission and
+  admission gates. Retracted or extending Ladders cannot mount. Up at an
+  extension Button deploys the Ladder, without approaching or mounting it;
+  wait for full extension, then explicitly walk to its mount. Safe retraction
+  waits for admitted climbing leases to drain, including stopped Room climbers.
+- A fresh **Up** press, when no higher-priority climb selection, Door opening or
+  doorway crossing can occur, presses one eligible physical **Button**. Button
+  pressing is always the lowest-priority Up action. Holding Up or keyboard
+  repeat does not generate additional presses.
+- Buttons require **Arms** Object usage, effective arm length, the Interaction
+  point's geometric reach, the owning Location and Level, Buttons Mobility and
+  Access permissions. Permission adherence never bypasses authorization for
+  operation. None and Remote control do not gain physical Button operation.
+  Reach is inclusive and uses the existing floor-Level approach point, including
+  for vertically stacked Buttons; the effective limit is the smaller of arm
+  length and Interaction point reach. Disabled Buttons and Broken target devices
+  are not selected. Among eligible Buttons choose the nearest approach point,
+  then lowest stable Interaction point ID. Each stack member retains its own
+  command and permission requirement.
+- Pressing uses normal Interaction queues, durations and typed Device operations.
+  It never walks, snaps or aligns the Player. An unpressed queued/active request
+  is cancelled if the Player leaves reach or begins crossing; capability and
+  authorization changes retain existing cancellation/rejection rules. Accepted
+  device operations retain their normal safe completion behavior. Physical
+  controls can open controlled Doors, deploy Force Bridges/Ladders, switch lights
+  or issue existing transport calls; calling a transport does not board it.
+- Overlapping doorway candidates prefer an admissible open doorway, then nearest centre,
   then stable traversal-resource identity. One press performs at most one action.
 - Solid walls, closed/opening Bulkhead Doors, low spaces and unsupported Floor
   edges stop the Agent's leading body edge, except at a selected open Staircase
-  endpoint where the flight supplies support. Input never operates Buttons, boards
-  transports, uses extensible Ladders, or automatically crouches/crawls. Up
+  endpoint where the flight supplies support. Input never boards
+  transports or automatically crouches/crawls. Up
   supports ordinary Doors between Locations, Stairwell landing doorways, and
-  contextual fixed Ladder entry/climbing;
+  contextual Ladder entry/climbing and physical Button interaction;
   transport-owned Doors, Windows and BoothWindows do not.
 - An Agent initially in a space that cannot accommodate Standing remains
   stationary in its existing fitting pose; input does not force it through the
@@ -146,12 +171,14 @@ work and does not add a new Agent type.
 `agent-playerControlStairwellPlatforms`, `agent-playerControlStaircases`, and
 `agent-playerControlStaircaseRestrictions`, `agent-playerControlEscalators`,
 `agent-playerControlLadders`, `agent-playerControlLadderRestrictions`, and
-`agent-playerControlLadderSharedCapacity` exercise
+`agent-playerControlLadderSharedCapacity`, `agent-playerControlButtons`,
+`agent-playerControlButtonPriority`, and `agent-playerControlExtensibleLadders` exercise
 walking, timed bidirectional Layer transitions, mirrored zig-zag stair movement,
 ascent/descent speed, narrow capacity, pause/reset, geometry, capability,
 permissions, low clearance and Broken Doors through the World/coordinator seam. `agent-playerControlEditorWorkflow` covers the picker,
 undo/redo and clipboard. `pf_application` covers actual Play key injection, Up repeat suppression and
 suspension, held Up/Down platform departure and Staircase/Escalator mounting,
 wrong-way walking, riding on release, fixed Ladder entry/climbing/reversal,
-vertical-key cancellation and automatic dismounting; `pf_application_render` covers camera following, Layer selection,
+vertical-key cancellation, automatic dismounting, arm-length Button interaction,
+repeat suppression and extension-then-climbing; `pf_application_render` covers camera following, Layer selection,
 resize and the no-Player fallback.
