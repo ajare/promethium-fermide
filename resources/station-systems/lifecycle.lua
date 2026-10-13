@@ -6209,7 +6209,13 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 -- recovery is bounded by time and resources and never
                 -- instant. Condition itself is dimensionless: only the
                 -- stock draw moves mass, booked through the store
-                -- ledger like any other consumption.
+                -- ledger like any other consumption. Recovery requires
+                -- the absence of any active stressor, independent of
+                -- its configured rate (#570): a zero degradation
+                -- coefficient disables only that rule's degradation
+                -- contribution, not the benign precondition - an
+                -- unfed, unsupplied or out-of-window culture never
+                -- spends replacement stock to heal.
                 local starving = math.max(0, feed.qualified - feed.protected_reserve) <= 0
                 local mediaExhausted = math.max(0,
                     consumable.qualified - consumable.protected_reserve) <= 0
@@ -6237,7 +6243,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 end
                 proc.lastStressors = table.concat(stressors, '+')
                 local conditionBefore = proc.condition
-                if degradePerHour > 0 then
+                -- Any active stressor bars recovery, even one whose
+                -- coefficient is zero (#570).
+                if #stressors > 0 then
                     proc.condition = math.max(0,
                         proc.condition - degradePerHour * fixed_hours)
                 elseif proc.condition < 1 and proc.recoveryPerHour > 0 then

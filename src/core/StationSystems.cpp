@@ -8082,13 +8082,19 @@ namespace core
 				// exhausts it, and the sink temperature outside the declared
 				// window stresses it cold or hot. The per-hour rates are
 				// provisional biological assumptions. Under benign
-				// conditions the culture recovers at most the declared
-				// recovery rate, funded - when a replacement stock store is
-				// configured - by stock actually drawn above its protected
-				// reserve, so recovery is bounded by time and resources and
-				// never instant. Condition itself is dimensionless: it never
-				// books material; only the stock draw moves mass, through
-				// the store ledger like any other consumption.
+				// conditions - no adverse rule acting at all, independent
+				// of the configured rates - the culture recovers at most the
+				// declared recovery rate, funded - when a replacement stock
+				// store is configured - by stock actually drawn above its
+				// protected reserve, so recovery is bounded by time and
+				// resources and never instant. Condition itself is
+				// dimensionless: it never books material; only the stock
+				// draw moves mass, through the store ledger like any other
+				// consumption. A zero degradation coefficient disables only
+				// that rule's degradation contribution (#570): a stressor
+				// whose coefficient is zero is still active and still bars
+				// recovery, so an unfed, unsupplied or out-of-window culture
+				// can never spend replacement stock to heal.
 				auto const hours = tickSeconds / 3600.0;
 				auto const& sink = reservoirs[processor.sinkIndex];
 				auto const starving = std::max(0.0, qualified[processor.feedStoreIndex]
@@ -8116,7 +8122,10 @@ namespace core
 				stress(heatStressed, processor.authored.heatStressDegradePerHour, "heat stress");
 				processor.lastStressors = stressors;
 				auto const conditionBefore = processor.condition;
-				if (degradePerHour > 0.0)
+				// Recovery is gated on the absence of active adverse
+				// conditions, not on the summed rate: any active stressor
+				// bars recovery even when its coefficient is zero (#570).
+				if (!stressors.empty())
 				{
 					processor.condition = std::max(0.0,
 						processor.condition - degradePerHour * hours);

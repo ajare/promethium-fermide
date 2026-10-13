@@ -12618,6 +12618,133 @@ void buffers(smoke::Context const&)
 				"the culture did not resume digesting after the resupply");
 			conserve(snap);
 		}
+		// Zero-coefficient stressors still bar recovery (#570): a zero
+		// degradation coefficient disables only that rule's degradation
+		// contribution, not the benign precondition for recovery. With
+		// each stressor active at a zero rate the culture neither degrades
+		// nor recovers - with or without replacement stock - and the
+		// snapshot still names the stressor. The controls show the same
+		// all-zero configuration still recovers under benign conditions
+		// and still degrades at the rate of any nonzero co-acting rule.
+		{
+			auto zeroRate = [&]()
+			{
+				auto unit = processor("digester");
+				unit.initialCondition = 0.5;
+				unit.starvationDegradePerHour = 0.0;
+				unit.consumableExhaustionDegradePerHour = 0.0;
+				unit.coldStressDegradePerHour = 0.0;
+				unit.heatStressDegradePerHour = 0.0;
+				return unit;
+			};
+			auto zeroRateScenario = [&](char const* name,
+				std::vector<core::ResourceStoreSettings> stores,
+				std::string const& expectedStressor,
+				double sinkStartingC, bool withStock)
+			{
+				core::World world(name, 2, 2);
+				world.pauseSimulation(); world.finishBuild();
+				if (withStock)
+					stores.push_back(plainStore("stock", 10.0, 1.0));
+				auto unit = zeroRate();
+				if (withStock)
+				{
+					unit.stockStoreId = "stock";
+					unit.stockUnitsPerConditionPoint = 10.0;
+				}
+				require(configure(world, std::move(stores), std::move(unit), sinkStartingC),
+					(std::string(name) + " setup refused").c_str());
+				world.resumeSimulation();
+				require(world.advanceTicks(120), (std::string(name) + " run failed").c_str());
+				auto const snap = world.getStationSystemsSnapshot();
+				auto const& unitSnap = snap.microbialProcessors[0];
+				require(unitSnap.lastStressors == expectedStressor
+					&& !unitSnap.recovering
+					&& approx(unitSnap.condition, 0.5)
+					&& unitSnap.lastConditionDelta == 0.0
+					&& unitSnap.stockConsumedUnits == 0.0
+					&& unitSnap.lastStockConsumedUnits == 0.0,
+					(std::string("zero-rate ") + expectedStressor
+						+ (withStock ? " with stock" : " without stock")
+						+ " was not frozen at its initial condition").c_str());
+				if (withStock)
+					require(approx(findStore(snap, "stock").currentQualified, 1.0),
+						(std::string("zero-rate ") + expectedStressor
+							+ " drew replacement stock while the culture was barred from recovery")
+							.c_str());
+				conserve(snap);
+			};
+			// Starvation: empty feed store, zero starvation coefficient.
+			{
+				auto stores = conditionStores();
+				stores[0].startingQualified = 0.0;
+				zeroRateScenario("ZeroRateStarvingNoStock", stores, "starvation", 20.0, false);
+				zeroRateScenario("ZeroRateStarvingWithStock", stores, "starvation", 20.0, true);
+			}
+			// Empty medium: zero consumable-exhaustion coefficient.
+			{
+				auto stores = conditionStores();
+				stores[3].startingQualified = 0.0;
+				zeroRateScenario("ZeroRateMediaOutNoStock", stores,
+					"consumable exhaustion", 20.0, false);
+				zeroRateScenario("ZeroRateMediaOutWithStock", stores,
+					"consumable exhaustion", 20.0, true);
+			}
+			// Cold: sink below the minimum operating temperature with a
+			// zero cold-stress coefficient.
+			zeroRateScenario("ZeroRateColdNoStock", conditionStores(),
+				"cold stress", 10.0, false);
+			zeroRateScenario("ZeroRateColdWithStock", conditionStores(),
+				"cold stress", 10.0, true);
+			// Hot: sink at or above the maximum sink temperature with a
+			// zero heat-stress coefficient.
+			zeroRateScenario("ZeroRateHotNoStock", conditionStores(),
+				"heat stress", 50.0, false);
+			zeroRateScenario("ZeroRateHotWithStock", conditionStores(),
+				"heat stress", 50.0, true);
+			// Control: the same all-zero configuration under benign
+			// conditions still recovers at the declared rate - zero
+			// coefficients disable the degradation contributions, not
+			// recovery itself.
+			{
+				core::World world("ZeroRateBenignRecovers", 2, 2);
+				world.pauseSimulation(); world.finishBuild();
+				require(configure(world, conditionStores(), zeroRate()),
+					"all-zero benign control setup refused");
+				world.resumeSimulation();
+				require(world.advanceTicks(60), "all-zero benign control run failed");
+				auto const snap = world.getStationSystemsSnapshot();
+				auto const& unitSnap = snap.microbialProcessors[0];
+				// 1 s at 72/hour = 0.02 points on top of 0.5.
+				require(closeTo(unitSnap.condition, 0.52, 0.01)
+					&& unitSnap.lastStressors.empty() && unitSnap.recovering,
+					"the all-zero benign culture did not recover as declared");
+				conserve(snap);
+			}
+			// Control: a zero starvation coefficient does not mask a
+			// co-acting nonzero rule - the culture still degrades at the
+			// nonzero rate and never recovers while that stressor acts.
+			{
+				core::World world("ZeroRateMixedDegrades", 2, 2);
+				world.pauseSimulation(); world.finishBuild();
+				auto stores = conditionStores();
+				stores[3].startingQualified = 0.0; // media empty
+				auto unit = zeroRate();
+				unit.consumableExhaustionDegradePerHour = 720.0; // nonzero co-actor
+				require(configure(world, std::move(stores), std::move(unit)),
+					"mixed zero/nonzero control setup refused");
+				world.resumeSimulation();
+				require(world.advanceTicks(60), "mixed zero/nonzero control run failed");
+				auto const snap = world.getStationSystemsSnapshot();
+				auto const& unitSnap = snap.microbialProcessors[0];
+				// 1 s at 720/hour = 0.2 points off 0.5.
+				require(closeTo(unitSnap.condition, 0.3, 0.01)
+					&& unitSnap.lastStressors == "consumable exhaustion"
+					&& !unitSnap.recovering,
+					"the zero starvation coefficient masked the nonzero exhaustion rule");
+				conserve(snap);
+			}
+		}
 	}
 
 	// The #409 crop check: a crop population grows a dry Living biomass
