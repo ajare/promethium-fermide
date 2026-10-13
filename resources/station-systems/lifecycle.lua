@@ -274,6 +274,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         conversions = {}, conversion_order = {},
         starting_totals = {}, unit_loss = {}, unit_delivered = {},
         unit_collected = {},
+        unit_harvested = {}, constituent_harvested = {},
         starting_constituents = {}, constituent_loss = {},
         constituent_delivered = {},
         solar = {}, loads = {}, load_order = {}, batteries = {},
@@ -2281,6 +2282,58 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             'crop maximum growing temperature must be finite and above absolute zero')
         assert(crop.minGrowingTemperatureC < crop.maxGrowingTemperatureC,
             'crop minimum growing temperature must be below the maximum growing temperature: an empty growing window is never a service')
+        -- Harvest contract (#410), mirroring the host validation: the
+        -- edible and harvest fractions are declared shares of real
+        -- material and must sit inside their physical ranges, a trigger
+        -- above the declared Growing capacity could never fire, and an
+        -- enabled harvest needs both destination stores. Named
+        -- destinations must be mass-denominated, distinct from each
+        -- other, and composition-compatible with the crop's declared
+        -- dry mass so harvested constituents enter stores exactly as
+        -- declared.
+        assert(isFinite(crop.edibleFraction) and crop.edibleFraction >= 0
+            and crop.edibleFraction <= 1,
+            'crop edible fraction must be finite and from 0 to 1: the edible share of the harvested dry mass cannot exceed the harvest')
+        assert(isFinite(crop.harvestFraction) and crop.harvestFraction > 0
+            and crop.harvestFraction <= 1,
+            'crop harvest fraction must be finite and from above 0 to 1: a harvest that removes nothing is not a harvest')
+        assert(isFinite(crop.harvestTriggerKg) and crop.harvestTriggerKg >= 0,
+            'crop harvest trigger must be finite and non-negative (0 disables the harvest)')
+        assert(crop.harvestTriggerKg <= capacityKg + BALANCE_TOLERANCE,
+            'crop harvest trigger exceeds the declared Growing capacity: the harvest could never fire, so the rule is dead as configured')
+        local destinationRoles = { 'food', 'waste' }
+        local destinationIds = { crop.foodStore, crop.wasteStore }
+        local destinationStores = {}
+        for role = 1, 2 do
+            if destinationIds[role] == nil or destinationIds[role] == '' then
+                assert(crop.harvestTriggerKg <= 0,
+                    'crop harvest is enabled but the ' .. destinationRoles[role]
+                        .. ' destination store is not named: harvested living material must have a declared destination')
+            else
+                local store = by_id[destinationIds[role]]
+                assert(store ~= nil, 'crop ' .. destinationRoles[role] .. ' store is unknown')
+                assert(store.unit == 'g' or store.unit == 'kg',
+                    'crop ' .. destinationRoles[role] .. " store '" .. store.id
+                        .. "' must be a mass unit; harvested dry biomass is mass-denominated")
+                assert(destinationIds[1] ~= destinationIds[2],
+                    'crop food store and waste store are the same store: edible and inedible yield need distinct destinations so the split stays visible')
+                if store.composition then
+                    local close = function(a, b)
+                        return math.abs(a - b) <= BALANCE_TOLERANCE
+                    end
+                    assert(close(store.composition.moisture, composition.moisture)
+                        and close(store.composition.nutrientNitrogen, composition.nutrientNitrogen)
+                        and close(store.composition.atmosphericNitrogen, composition.atmosphericNitrogen)
+                        and close(store.composition.phosphorus, composition.phosphorus)
+                        and close(store.composition.potassium, composition.potassium)
+                        and close(store.composition.otherMinerals, composition.otherMinerals)
+                        and close(store.composition.energyKJPerKgDry, composition.energyKJPerKgDry),
+                        'crop ' .. destinationRoles[role] .. " store '" .. store.id
+                            .. "' declares a composition different from the crop's declared dry-mass composition: harvested material enters a store exactly as declared, and a different compound material is a boundary only an explicit conversion may cross")
+                end
+                destinationStores[role] = store
+            end
+        end
         object.crop_populations[index] = {
             id = crop.id,
             compartment = compartment,
@@ -2299,8 +2352,13 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             transpirationKgPerKgGrowth = crop.transpirationKgPerKgGrowth,
             minGrowingTemperatureC = crop.minGrowingTemperatureC,
             maxGrowingTemperatureC = crop.maxGrowingTemperatureC,
+            food = destinationStores[1], waste = destinationStores[2],
+            edibleFraction = crop.edibleFraction,
+            harvestTriggerKg = crop.harvestTriggerKg,
+            harvestFraction = crop.harvestFraction,
             priority = crop.priority or 0,
             livingBiomassKg = crop.initialBiomassKg,
+            dead = false,
             lastIllumination = 0, lastLightRequested = 0, lastLightSupplied = 0,
             lastCirculationRequested = 0, lastCirculationSupplied = 0,
             lastGrowthPotential = 0, lastGrowthScale = 0, lastGrowthLimiter = '',
@@ -2314,6 +2372,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             lastRespirationHeatKW = 0, lastOxygenLimited = false,
             lastHeatIntoCompartmentKW = 0, temperatureEligible = false,
             lastBlockReason = '',
+            lastHarvestRequestedKg = 0, lastHarvestedKg = 0, lastFoodAddedKg = 0,
+            lastWasteAddedKg = 0, lastSurplusEdibleToWasteKg = 0,
+            lastHarvestConstrainedKg = 0, lastHarvestLimiter = '',
+            lastDeadResidueToWasteKg = 0, lastDeadResidueLostKg = 0,
             growthKg = 0, co2DrawnKg = 0, waterDrawnKg = 0,
             nitrogenDrawnKg = 0, phosphorusDrawnKg = 0, potassiumDrawnKg = 0,
             mineralsDrawnKg = 0, oxygenReleasedKg = 0, transpiredKg = 0,
@@ -2322,6 +2384,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             lightEnergyKJ = 0, circulationEnergyKJ = 0,
             chemicalEnergyFixedKJ = 0, respirationHeatKJ = 0,
             heatIntoCompartmentKJ = 0,
+            harvestedKg = 0, foodProducedKg = 0, wasteProducedKg = 0,
+            surplusEdibleToWasteKg = 0, deadResidueToWasteKg = 0,
+            deadResidueLostKg = 0,
         }
     end
     -- Crop populations compete for the same power pool and share the
@@ -2434,7 +2499,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local residual = (totals[unit] or 0)
                 + (self.unit_loss[unit] or 0)
                 - (self.unit_delivered[unit] or 0)
-                - (self.unit_collected[unit] or 0) - starting
+                - (self.unit_collected[unit] or 0)
+                - (self.unit_harvested[unit] or 0) - starting
             local bound = BALANCE_TOLERANCE * math.max(1.0, math.abs(starting))
             assert(residual == residual and math.abs(residual) <= bound,
                 "conservation residual for unit '" .. unit .. "' exceeds tolerance")
@@ -2452,7 +2518,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         for constituent, starting in pairs(self.starting_constituents) do
             local residual = (totals[constituent] or 0)
                 + (self.constituent_loss[constituent] or 0)
-                - (self.constituent_delivered[constituent] or 0) - starting
+                - (self.constituent_delivered[constituent] or 0)
+                - (self.constituent_harvested[constituent] or 0) - starting
             local bound = BALANCE_TOLERANCE * math.max(1.0, math.abs(starting))
             assert(residual == residual and math.abs(residual) <= bound,
                 "constituent conservation residual for '" .. constituent .. "' exceeds tolerance")
@@ -5214,7 +5281,21 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             crop.lastHeatIntoCompartmentKW = 0
             crop.temperatureEligible = false
             crop.lastBlockReason = ''
-            if crop.growingAreaM2 > 0 then
+            crop.lastHarvestRequestedKg = 0
+            crop.lastHarvestedKg = 0
+            crop.lastFoodAddedKg = 0
+            crop.lastWasteAddedKg = 0
+            crop.lastSurplusEdibleToWasteKg = 0
+            crop.lastHarvestConstrainedKg = 0
+            crop.lastHarvestLimiter = ''
+            crop.lastDeadResidueToWasteKg = 0
+            crop.lastDeadResidueLostKg = 0
+            if crop.dead then
+                -- A dead population stays dead: it grows nothing, respires
+                -- nothing and harvests nothing, because nothing in this
+                -- model recreates living biomass for free (#410).
+                crop.lastBlockReason = 'population is dead: the living organic content was respired away under adverse conditions and nothing here recreates living biomass for free'
+            elseif crop.growingAreaM2 > 0 then
                 crop.lastIllumination = evaluateProfile(crop.illumination, elapsed)
                 crop.lastLightRequested = crop.lampRatedKW * crop.lastIllumination
                 crop.lastCirculationRequested = crop.circulationPowerKW
@@ -5445,6 +5526,108 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 compartment.cropVapourAdded = compartment.cropVapourAdded
                     + respirationWaterKg + transpiredKg
                 crop.livingBiomassKg = crop.livingBiomassKg - respiredOrganicKg
+                -- Adverse-condition death (#410), mirroring the host:
+                -- when respiration exhausts the living organic content
+                -- the canopy starves. The remaining non-respirable
+                -- residue is routed to the declared waste store as far
+                -- as its headroom reaches; whatever the waste path cannot
+                -- hold is booked as explicit uncontained loss. Nothing
+                -- vanishes silently, and the dead never regrow for free.
+                if crop.livingBiomassKg * organicFraction <= 1e-9 then
+                    crop.dead = true
+                    local residueKg = crop.livingBiomassKg
+                    local routedKg = 0
+                    if crop.waste then
+                        local wasteHeadroomUnits = math.max(0, crop.waste.capacity
+                            - crop.waste.qualified - crop.waste.unqualified)
+                        local routedUnits = math.min(
+                            fromKg(crop.waste.unit, residueKg), wasteHeadroomUnits)
+                        routedKg = toKg(crop.waste.unit, routedUnits)
+                        if routedUnits > 0 then
+                            crop.waste.qualified = crop.waste.qualified + routedUnits
+                            self.unit_harvested[crop.waste.unit] =
+                                (self.unit_harvested[crop.waste.unit] or 0) + routedUnits
+                            if crop.waste.composition then
+                                addConstituents(self.constituent_harvested, composition,
+                                    routedKg, 1)
+                            end
+                        end
+                    end
+                    crop.livingBiomassKg = crop.livingBiomassKg - residueKg
+                    local lostKg = residueKg - routedKg
+                    crop.lastDeadResidueToWasteKg = routedKg
+                    crop.lastDeadResidueLostKg = lostKg
+                    crop.deadResidueToWasteKg = crop.deadResidueToWasteKg + routedKg
+                    crop.deadResidueLostKg = crop.deadResidueLostKg + lostKg
+                end
+                -- Harvest (#410), mirroring the host: the declared
+                -- trigger removes real living dry biomass; the edible
+                -- share lands in the food store, the inedible remainder
+                -- plus any edible surplus the food store cannot hold
+                -- rides the waste path, and what neither destination can
+                -- place stays living rather than being discarded. The
+                -- harvest runs after the same tick's growth, so a
+                -- canopy crossing the trigger mid-tick is harvested on
+                -- that tick.
+                if crop.harvestTriggerKg > 0
+                    and crop.livingBiomassKg + 1e-12 >= crop.harvestTriggerKg then
+                    local requestedKg = crop.harvestFraction * crop.livingBiomassKg
+                    local edibleRequestedKg = requestedKg * crop.edibleFraction
+                    local inedibleRequestedKg = requestedKg - edibleRequestedKg
+                    local foodHeadroomUnits = math.max(0, crop.food.capacity
+                        - crop.food.qualified - crop.food.unqualified)
+                    local wasteHeadroomUnits = math.max(0, crop.waste.capacity
+                        - crop.waste.qualified - crop.waste.unqualified)
+                    local foodAcceptedUnits = math.min(
+                        fromKg(crop.food.unit, edibleRequestedKg), foodHeadroomUnits)
+                    local foodAcceptedKg = toKg(crop.food.unit, foodAcceptedUnits)
+                    local surplusEdibleKg = edibleRequestedKg - foodAcceptedKg
+                    local wasteNeededKg = inedibleRequestedKg + surplusEdibleKg
+                    local wasteAcceptedUnits = math.min(
+                        fromKg(crop.waste.unit, wasteNeededKg), wasteHeadroomUnits)
+                    local wasteAcceptedKg = toKg(crop.waste.unit, wasteAcceptedUnits)
+                    local harvestedKg = foodAcceptedKg + wasteAcceptedKg
+                    local constrainedKg = requestedKg - harvestedKg
+                    if foodAcceptedUnits > 0 then
+                        crop.food.qualified = crop.food.qualified + foodAcceptedUnits
+                        self.unit_harvested[crop.food.unit] =
+                            (self.unit_harvested[crop.food.unit] or 0) + foodAcceptedUnits
+                        if crop.food.composition then
+                            addConstituents(self.constituent_harvested, composition,
+                                foodAcceptedKg, 1)
+                        end
+                    end
+                    if wasteAcceptedUnits > 0 then
+                        crop.waste.qualified = crop.waste.qualified + wasteAcceptedUnits
+                        self.unit_harvested[crop.waste.unit] =
+                            (self.unit_harvested[crop.waste.unit] or 0) + wasteAcceptedUnits
+                        if crop.waste.composition then
+                            addConstituents(self.constituent_harvested, composition,
+                                wasteAcceptedKg, 1)
+                        end
+                    end
+                    crop.livingBiomassKg = crop.livingBiomassKg - harvestedKg
+                    crop.lastHarvestRequestedKg = requestedKg
+                    crop.lastHarvestedKg = harvestedKg
+                    crop.lastFoodAddedKg = foodAcceptedKg
+                    crop.lastWasteAddedKg = wasteAcceptedKg
+                    crop.lastSurplusEdibleToWasteKg = surplusEdibleKg
+                    crop.lastHarvestConstrainedKg = constrainedKg
+                    if constrainedKg > 1e-12 then
+                        crop.lastHarvestLimiter = 'harvest destinations cannot hold the yield: food store '
+                            .. crop.food.id .. ' and waste store ' .. crop.waste.id
+                            .. ' are full, the remainder stays living'
+                    elseif surplusEdibleKg > 1e-12 then
+                        crop.lastHarvestLimiter = 'food store ' .. crop.food.id
+                            .. ' is full: the edible surplus is routed through the waste path'
+                    else
+                        crop.lastHarvestLimiter = ''
+                    end
+                    crop.harvestedKg = crop.harvestedKg + harvestedKg
+                    crop.foodProducedKg = crop.foodProducedKg + foodAcceptedKg
+                    crop.wasteProducedKg = crop.wasteProducedKg + wasteAcceptedKg
+                    crop.surplusEdibleToWasteKg = crop.surplusEdibleToWasteKg + surplusEdibleKg
+                end
                 -- Energy: the light energy not fixed as biomass
                 -- chemical energy, the circulation pump work and the
                 -- respiration heat land in the compartment once.

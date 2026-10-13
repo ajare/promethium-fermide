@@ -863,7 +863,14 @@ namespace core
 		// growth and respiration pathway ledgers and the energy and heat
 		// totals stay runtime-only, so load and Reset reconstruct them
 		// from the authored starting conditions.
-		serializer.writeUint32("version", 86);
+		// Version 87 adds the crop harvest contract (#410): harvest
+		// trigger, harvest fraction, edible fraction and the food and
+		// waste destination stores on each crop population. A pre-87
+		// document keeps its crops with the harvest disabled (trigger 0),
+		// so existing Worlds grow exactly as before; the harvest,
+		// starvation-death and loss ledgers stay runtime-only, so load
+		// and Reset reconstruct them from the authored conditions.
+		serializer.writeUint32("version", 87);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -1511,6 +1518,11 @@ namespace core
 					serializer.writeDouble("transpirationKgPerKgGrowth", crop.transpirationKgPerKgGrowth);
 					serializer.writeDouble("minGrowingTemperatureC", crop.minGrowingTemperatureC);
 					serializer.writeDouble("maxGrowingTemperatureC", crop.maxGrowingTemperatureC);
+					serializer.writeString("foodStoreId", crop.foodStoreId);
+					serializer.writeString("wasteStoreId", crop.wasteStoreId);
+					serializer.writeDouble("edibleFraction", crop.edibleFraction);
+					serializer.writeDouble("harvestTriggerKg", crop.harvestTriggerKg);
+					serializer.writeDouble("harvestFraction", crop.harvestFraction);
 					serializer.writeInt32("priority", crop.priority);
 					serializer.endMap();
 				}
@@ -2484,7 +2496,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 86)
+		if (version < 1 || version > 87)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -3209,6 +3221,19 @@ namespace core
 					crop.transpirationKgPerKgGrowth = serializer.readDouble("transpirationKgPerKgGrowth");
 					crop.minGrowingTemperatureC = serializer.readDouble("minGrowingTemperatureC");
 					crop.maxGrowingTemperatureC = serializer.readDouble("maxGrowingTemperatureC");
+					// Harvest contract fields (#410): a pre-87 document
+					// carries none of them, and the defaults keep the
+					// harvest disabled so existing Worlds are unchanged.
+					if (version >= 87 && serializer.hasField("foodStoreId"))
+						crop.foodStoreId = serializer.readString("foodStoreId");
+					if (version >= 87 && serializer.hasField("wasteStoreId"))
+						crop.wasteStoreId = serializer.readString("wasteStoreId");
+					if (version >= 87 && serializer.hasField("edibleFraction"))
+						crop.edibleFraction = serializer.readDouble("edibleFraction");
+					if (version >= 87 && serializer.hasField("harvestTriggerKg"))
+						crop.harvestTriggerKg = serializer.readDouble("harvestTriggerKg");
+					if (version >= 87 && serializer.hasField("harvestFraction"))
+						crop.harvestFraction = serializer.readDouble("harvestFraction");
 					crop.priority = serializer.readInt32("priority");
 					stationSettings.cropPopulations.push_back(std::move(crop));
 					serializer.endMap();

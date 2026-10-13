@@ -1812,6 +1812,8 @@ void cropWorkflow(smoke::Context const&)
 		initial.stores.push_back(plain("fertP", 10.0, 5.0));
 		initial.stores.push_back(plain("fertK", 10.0, 5.0));
 		initial.stores.push_back(plain("fertMin", 10.0, 5.0));
+		initial.stores.push_back(plain("food", 10.0, 0.0));
+		initial.stores.push_back(plain("waste", 10.0, 0.0));
 		core::AtmosphereSettings habitat;
 		habitat.id = "habitat";
 		habitat.hazardClass = "normal";
@@ -1857,6 +1859,11 @@ void cropWorkflow(smoke::Context const&)
 		canopy.transpirationKgPerKgGrowth = 5.0;
 		canopy.minGrowingTemperatureC = 10.0;
 		canopy.maxGrowingTemperatureC = 35.0;
+		canopy.foodStoreId = "food";
+		canopy.wasteStoreId = "waste";
+		canopy.edibleFraction = 0.6;
+		canopy.harvestTriggerKg = 0.3;
+		canopy.harvestFraction = 1.0;
 		initial.cropPopulations.push_back(canopy);
 		require(world->configureStationSystems(initial, false, &diagnostic), diagnostic.c_str());
 		headless::TestEngineDriver driver([&]
@@ -1884,6 +1891,10 @@ void cropWorkflow(smoke::Context const&)
 				&& driver.contains("capacity 20.0000 kg")
 				&& driver.contains("growing"),
 				"Live crop canopy, declared capacity or growth not displayed");
+			REQ(driver.contains("harvest: trigger 0.3000 kg")
+				&& driver.contains("food 'food'")
+				&& driver.contains("waste 'waste'"),
+				"Harvest rule and destinations not displayed in the live crop view");
 			REQ(!world->isModified(), "Crop growth ticking dirtied the authored document");
 			// An invalid drafted initial biomass (fuller than the installation
 			// can support) is refused with a visible diagnostic and never
@@ -1900,9 +1911,11 @@ void cropWorkflow(smoke::Context const&)
 			// confirmation and restarts the population from its authored start.
 			driver.typeValue(ctx, "Crop 0 initial dry biomass kg", "2");
 			driver.typeValue(ctx, "Crop 0 growing area m2", "20");
+			driver.typeValue(ctx, "Crop 0 harvest trigger kg (0 disables harvest)", "0.5");
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(world->getStationSystemsSettings().cropPopulations[0].growingAreaM2 == 20.0
 				&& world->getStationSystemsSettings().cropPopulations[0].initialBiomassKg == 2.0
+				&& world->getStationSystemsSettings().cropPopulations[0].harvestTriggerKg == 0.5
 				&& history.undoCount() == 1 && world->getSimulationTick() == 0,
 				"Repaired crop draft did not apply through the reset-confirmed flow");
 			ctx->Sleep(1);

@@ -1936,7 +1936,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		}
 		mDraft.microbialProcessors.push_back(std::move(processor));
 	}
-	ImGui::SeparatorText("Draft crop populations (#409; dry-mass living biomass on a declared composition with no moisture and no atmospheric nitrogen; growth is funded by delivered lamp light only after the essential circulation draw, plus CO2, irrigation water and each tracked nutrient, and only inside the declared growing window; respiration burns dry organic for oxygen and returns CO2, vapour and heat; the canopy stops at declared capacity and never photosynthesises for free in darkness or without power - all biological coefficients are provisional assumptions, harvest deferred to #410)");
+	ImGui::SeparatorText("Draft crop populations (#409/#410; dry-mass living biomass on a declared composition with no moisture and no atmospheric nitrogen; growth is funded by delivered lamp light only after the essential circulation draw, plus CO2, irrigation water and each tracked nutrient, and only inside the declared growing window; respiration burns dry organic for oxygen and returns CO2, vapour and heat; the canopy stops at declared capacity and never photosynthesises for free in darkness or without power; the harvest contract (trigger, fraction, edible share, food and waste stores) removes real living material and preserves its declared constituents - destinations must be mass stores whose declared composition matches the crop's; 0 trigger disables the harvest - all biological coefficients are provisional assumptions)");
 	for (size_t index = 0; index < mDraft.cropPopulations.size(); )
 	{
 		auto& crop = mDraft.cropPopulations[index];
@@ -1997,6 +1997,22 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			&crop.minGrowingTemperatureC, 0.0, 0.0, "%.2f");
 		ImGui::InputDouble(("Crop " + row + " max growing temperature C").c_str(),
 			&crop.maxGrowingTemperatureC, 0.0, 0.0, "%.2f");
+		char cropFoodBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(cropFoodBuffer, crop.foodStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Crop " + row + " food store").c_str(),
+			cropFoodBuffer, sizeof(cropFoodBuffer)))
+			crop.foodStoreId = cropFoodBuffer;
+		char cropWasteBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(cropWasteBuffer, crop.wasteStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Crop " + row + " waste store").c_str(),
+			cropWasteBuffer, sizeof(cropWasteBuffer)))
+			crop.wasteStoreId = cropWasteBuffer;
+		ImGui::InputDouble(("Crop " + row + " harvest trigger kg (0 disables harvest)").c_str(),
+			&crop.harvestTriggerKg, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Crop " + row + " harvest fraction of living biomass").c_str(),
+			&crop.harvestFraction, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Crop " + row + " edible fraction of harvest").c_str(),
+			&crop.edibleFraction, 0.0, 0.0, "%.4f");
 		bool cropPeriodic = crop.illuminationProfile.periodSeconds > 0.0;
 		if (ImGui::Checkbox(("Crop " + row + " periodic illumination").c_str(), &cropPeriodic))
 		{
@@ -2941,7 +2957,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		if (processor.disabled)
 			ImGui::Text("  zero rated feed: no service");
 	}
-	ImGui::SeparatorText("Crop populations (live; dry-mass living biomass beside declared capacity; growth is funded by delivered lamp light only after the essential circulation draw, plus CO2, irrigation water and each tracked nutrient, and only inside the declared growing window; respiration burns dry organic for oxygen and returns CO2, vapour and heat; the canopy stops at capacity and never photosynthesises for free in darkness or without power - provisional biological assumptions, harvest deferred to #410)");
+	ImGui::SeparatorText("Crop populations (live; dry-mass living biomass beside declared capacity; growth is funded by delivered lamp light only after the essential circulation draw, plus CO2, irrigation water and each tracked nutrient, and only inside the declared growing window; respiration burns dry organic for oxygen and returns CO2, vapour and heat; the canopy stops at capacity and never photosynthesises for free in darkness or without power; harvest removes real living material at the declared trigger, preserving its declared constituents into the food and waste stores - full destinations constrain the harvest or route the edible surplus through the waste path, and a canopy whose living organic content is respired away dies, its residue routed to waste or booked as explicit loss - provisional biological assumptions)");
 	if (snapshot.cropPopulations.empty()) ImGui::TextDisabled("No crop populations authored.");
 	for (auto const& crop : snapshot.cropPopulations)
 	{
@@ -2985,6 +3001,18 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			crop.chemicalEnergyFixedKJ, crop.respirationHeatKJ,
 			crop.heatIntoCompartmentKJ,
 			crop.residualKg, crop.residualKJ);
+		ImGui::Text("  harvest: trigger %.4f kg (fraction %.3f, edible %.3f) -> food '%s' / waste '%s' | last: requested %.6f kg, harvested %.6f kg (food %.6f, waste %.6f, surplus edible routed %.6f, constrained %.6f)%s | cumulative: harvested %.4f kg (food %.4f, waste %.4f, surplus routed %.4f) | dead residue: %.4f kg to waste, %.4f kg lost uncontained%s",
+			crop.harvestTriggerKg, crop.harvestFraction, crop.edibleFraction,
+			crop.foodStoreId.empty() ? "-" : crop.foodStoreId.c_str(),
+			crop.wasteStoreId.empty() ? "-" : crop.wasteStoreId.c_str(),
+			crop.lastHarvestRequestedKg, crop.lastHarvestedKg,
+			crop.lastFoodAddedKg, crop.lastWasteAddedKg,
+			crop.lastSurplusEdibleToWasteKg, crop.lastHarvestConstrainedKg,
+			crop.lastHarvestLimiter.empty() ? "" : (" | " + crop.lastHarvestLimiter).c_str(),
+			crop.harvestedKg, crop.foodProducedKg, crop.wasteProducedKg,
+			crop.surplusEdibleToWasteKg,
+			crop.deadResidueToWasteKg, crop.deadResidueLostKg,
+			crop.dead ? " | POPULATION DEAD: the living organic content was respired away; nothing recreates it for free" : "");
 		if (crop.disabled)
 			ImGui::Text("  zero growing area: no service");
 	}

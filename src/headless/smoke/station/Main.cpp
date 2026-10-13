@@ -145,7 +145,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 86"), 11, "version: 65");
+		text.replace(text.find("version: 87"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -12369,6 +12369,529 @@ void buffers(smoke::Context const&)
 		}
 	}
 
+	// The #410 harvest check: a crop population's declared harvest rule
+	// removes real living dry biomass and preserves its declared
+	// constituents into the food and waste stores; full destinations
+	// constrain the harvest or route the edible surplus through the
+	// waste path; a canopy whose living organic content is respired away
+	// dies and its residue is routed to waste or booked as explicit
+	// uncontained loss; and a coupled crew eats the harvested food from
+	// the same store. Test biology is deliberately exaggerated so the
+	// hour-scale growth, respiration and starvation are observable in
+	// short headless runs; every scenario also runs the bundled Lua
+	// sandbox, whose own harvest and loss audit contains the model if
+	// it drifts.
+	void harvest(smoke::Context const&)
+	{
+		auto closeTo = [](double actual, double expected, double relative)
+		{
+			return std::abs(actual - expected) <= relative * std::max(1e-12, std::abs(expected));
+		};
+		auto advanceOrDiagnose = [](core::World& world, uint64_t ticks, char const* what)
+		{
+			if (world.advanceTicks(ticks)) return true;
+			auto const diagnostics = world.getStationSystemsDiagnostics();
+			std::fprintf(stderr, "%s failed: %s\n", what,
+				diagnostics.empty() ? "(no Station diagnostic)" : diagnostics.back().message.c_str());
+			return false;
+		};
+		auto sawEvent = [](core::World& world, std::string const& needle)
+		{
+			for (auto const& event : world.getStationSystemsEvents())
+				if (event.message.find(needle) != std::string::npos) return true;
+			return false;
+		};
+		auto cropComposition = []()
+		{
+			core::ResourceCompositionSettings composition;
+			composition.moisture = 0.0;
+			composition.nutrientNitrogen = 0.05;
+			composition.atmosphericNitrogen = 0.0;
+			composition.phosphorus = 0.02;
+			composition.potassium = 0.03;
+			composition.otherMinerals = 0.05;
+			composition.energyKJPerKgDry = 1700.0;
+			return composition;
+		};
+		auto cropStore = [](std::string const& id, double capacity, double starting,
+			std::optional<core::ResourceCompositionSettings> composition = std::nullopt)
+		{
+			core::ResourceStoreSettings settings;
+			settings.id = id;
+			settings.unit = "kg";
+			settings.capacity = capacity;
+			settings.startingQualified = starting;
+			settings.composition = std::move(composition);
+			return settings;
+		};
+		auto habitat = []()
+		{
+			core::AtmosphereSettings settings;
+			settings.id = "habitat";
+			settings.hazardClass = "normal";
+			settings.volumeM3 = 100.0;
+			settings.startingOxygenKg = 40.0;
+			settings.startingNitrogenKg = 80.0;
+			settings.startingCarbonDioxideKg = 5.0;
+			settings.startingWaterVapourKg = 1.0;
+			settings.startingTemperatureC = 22.0;
+			settings.thermalCapacityKJPerK = 20000.0;
+			settings.minPressureKPa = 1.0;
+			settings.maxPressureKPa = 200.0;
+			return settings;
+		};
+		// A fast-growing test canopy: 0.02 kg/s of dry biomass under full
+		// light, so a sub-kilogram harvest trigger is crossed within a
+		// short headless run.
+		auto crop = [&]()
+		{
+			core::CropPopulationSettings settings;
+			settings.id = "canopy";
+			settings.atmosphereId = "habitat";
+			settings.waterStoreId = "irrigation";
+			settings.nitrogenStoreId = "fertN";
+			settings.phosphorusStoreId = "fertP";
+			settings.potassiumStoreId = "fertK";
+			settings.mineralsStoreId = "fertMin";
+			settings.composition = cropComposition();
+			settings.growingAreaM2 = 10.0;
+			settings.maxBiomassDensityKgPerM2 = 2.0; // 20 kg Growing capacity
+			settings.initialBiomassKg = 0.1;
+			settings.lampRatedKW = 36.0;
+			settings.illuminationProfile.constantLevel = 1.0;
+			settings.circulationPowerKW = 0.1;
+			settings.growthYieldKgPerKWh = 2.0;
+			settings.respirationPerHour = 0.5;
+			settings.transpirationKgPerKgGrowth = 1.0;
+			settings.minGrowingTemperatureC = 10.0;
+			settings.maxGrowingTemperatureC = 35.0;
+			settings.foodStoreId = "food";
+			settings.wasteStoreId = "waste";
+			settings.edibleFraction = 0.6;
+			settings.harvestTriggerKg = 0.3;
+			settings.harvestFraction = 1.0;
+			return settings;
+		};
+		auto fullStores = [&]()
+		{
+			std::vector<core::ResourceStoreSettings> stores;
+			stores.push_back(cropStore("irrigation", 200.0, 150.0));
+			stores.push_back(cropStore("fertN", 10.0, 5.0));
+			stores.push_back(cropStore("fertP", 10.0, 5.0));
+			stores.push_back(cropStore("fertK", 10.0, 5.0));
+			stores.push_back(cropStore("fertMin", 10.0, 5.0));
+			stores.push_back(cropStore("food", 10.0, 0.0));
+			stores.push_back(cropStore("waste", 10.0, 0.0));
+			return stores;
+		};
+		auto configure = [&](core::World& world,
+			std::vector<core::ResourceStoreSettings> stores,
+			std::vector<core::CropPopulationSettings> populations,
+			std::vector<core::CrewSettings> crews = {},
+			double solarKW = 100.0)
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = std::move(stores);
+			settings.atmospheres = { habitat() };
+			settings.cropPopulations = std::move(populations);
+			settings.crews = std::move(crews);
+			core::SolarArraySettings field;
+			field.id = "field";
+			field.capacityKW = solarKW;
+			settings.solarArrays = { field };
+			return std::make_pair(
+				world.configureStationSystems(settings, false, &diagnostic), diagnostic);
+		};
+		auto findStore = [](core::StationSystemsSnapshot const& snap, std::string const& id)
+		{
+			for (auto const& entry : snap.stores)
+				if (entry.id == id) return entry;
+			return core::StationSystemsStoreSnapshot{};
+		};
+		// Refused harvest contracts: every malformed harvest declaration is
+		// rejected before anything runs, each with its own diagnostic.
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = fullStores();
+			settings.atmospheres = { habitat() };
+			std::string diagnostic;
+			settings.cropPopulations = { crop() };
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				"the nominal harvest contract was refused");
+			settings.cropPopulations = { crop() };
+			settings.cropPopulations[0].foodStoreId = "";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("food destination store is not named") != std::string::npos,
+				"a harvest enabled without a food destination was accepted");
+			settings.cropPopulations = { crop() };
+			settings.cropPopulations[0].wasteStoreId = "ghost";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("waste store 'ghost' does not exist") != std::string::npos,
+				"a harvest into an unknown waste store was accepted");
+			settings.cropPopulations = { crop() };
+			settings.stores = fullStores();
+			settings.stores[5].unit = "L";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("food store 'food' must be a mass unit") != std::string::npos,
+				"a harvest into a non-mass food store was accepted");
+			settings.cropPopulations = { crop() };
+			settings.stores = fullStores();
+			settings.cropPopulations[0].wasteStoreId = "food";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("food store and waste store are the same store")
+					!= std::string::npos,
+				"a harvest with one destination for edible and inedible yield was accepted");
+			settings.cropPopulations = { crop() };
+			settings.cropPopulations[0].edibleFraction = 1.5;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("edible fraction must be finite and from 0 to 1")
+					!= std::string::npos,
+				"an edible fraction above the harvest was accepted");
+			settings.cropPopulations = { crop() };
+			settings.cropPopulations[0].harvestFraction = 0.0;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("a harvest that removes nothing is not a harvest")
+					!= std::string::npos,
+				"a zero harvest fraction was accepted");
+			settings.cropPopulations = { crop() };
+			settings.cropPopulations[0].harvestTriggerKg = 25.0;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("harvest trigger exceeds the declared Growing capacity")
+					!= std::string::npos,
+				"a harvest trigger above the Growing capacity was accepted");
+			settings.cropPopulations = { crop() };
+			settings.stores = fullStores();
+			core::ResourceCompositionSettings different;
+			different.moisture = 0.0;
+			different.nutrientNitrogen = 0.1;
+			different.energyKJPerKgDry = 900.0;
+			settings.stores[5].composition = different;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("declares a composition different from the crop's")
+					!= std::string::npos,
+				"a harvest into a store declaring a different compound material was accepted");
+			// A harvest-disabled population (trigger 0) needs no
+			// destinations and stays valid.
+			settings.cropPopulations = { crop() };
+			settings.cropPopulations[0].harvestTriggerKg = 0.0;
+			settings.cropPopulations[0].foodStoreId = "";
+			settings.cropPopulations[0].wasteStoreId = "";
+			settings.stores = fullStores();
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				"a harvest-disabled crop population was refused");
+		}
+		// Basic harvest: the canopy crosses its trigger, real living
+		// material is removed, and the declared edible/inedible split
+		// lands in the food and waste stores with the constituents
+		// preserved and every ledger closed.
+		{
+			core::World world("HarvestBasic", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto const [ok, diagnostic] = configure(world, fullStores(), { crop() });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 1200, "basic harvest run"), "basic harvest run failed");
+			world.pauseSimulation();
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& c = snap.cropPopulations[0];
+			require(c.growthKg > 0.0, "the canopy did not grow before harvesting");
+			require(c.harvestedKg > 0.0, "the harvest never fired");
+			require(c.foodProducedKg > 0.0 && c.wasteProducedKg > 0.0,
+				"the harvest did not fill both the food and waste streams");
+			require(closeTo(c.foodProducedKg + c.wasteProducedKg, c.harvestedKg, 1e-9),
+				"the harvested mass does not equal food plus waste");
+			require(closeTo(c.foodProducedKg, c.harvestedKg * 0.6, 1e-6),
+				"the food stream does not follow the declared edible fraction");
+			require(closeTo(findStore(snap, "food").currentQualified, c.foodProducedKg, 1e-9),
+				"the food store does not hold the harvested edible mass");
+			require(closeTo(findStore(snap, "waste").currentQualified, c.wasteProducedKg, 1e-9),
+				"the waste store does not hold the harvested inedible mass");
+			require(c.livingBiomassKg < 0.3 + 1e-9,
+				"the living biomass stayed above the harvest trigger after harvesting");
+			require(std::abs(c.residualKg) <= 1e-9
+				&& std::abs(c.residualKJ) <= 1e-6 * std::max(1.0, c.lightEnergyKJ),
+				"the harvested canopy's mass/energy ledgers do not close");
+			bool foodBalance = false;
+			for (auto const& balance : snap.balances)
+			{
+				require(std::abs(balance.residual) <= 1e-6,
+					("harvest-run boundary residual for '" + balance.unit + "' not closed").c_str());
+				if (balance.unit == "kg")
+				{
+					foodBalance = balance.harvested > 0.0;
+					require(balance.harvested >= c.harvestedKg - 1e-9,
+						"the per-unit harvested term does not account the harvest inflow");
+				}
+			}
+			require(foodBalance, "the balance ledger carries no harvested inflow term");
+			require(sawEvent(world, "harvested"),
+				"the harvest occurrence was not announced in the event log");
+		}
+		// Full food destination: the edible surplus is routed through
+		// the eligible waste path rather than discarded, and the limiter
+		// names the full food store.
+		{
+			core::World world("HarvestSurplus", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto stores = fullStores();
+			stores[5] = cropStore("food", 0.1, 0.0);
+			auto const [ok, diagnostic] = configure(world, std::move(stores), { crop() });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 1200, "surplus harvest run"), "surplus harvest run failed");
+			world.pauseSimulation();
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& c = snap.cropPopulations[0];
+			require(c.surplusEdibleToWasteKg > 0.0,
+				"the edible surplus was not routed through the waste path");
+			require(findStore(snap, "food").currentQualified <= 0.1 + 1e-9,
+				"the food store overflowed its capacity");
+			require(c.wasteProducedKg > c.harvestedKg * 0.4 + 1e-9,
+				"the waste stream did not carry the routed edible surplus");
+			require(std::abs(c.residualKg) <= 1e-9,
+				"the surplus-routed harvest's mass ledger does not close");
+			require(sawEvent(world, "harvested"),
+				"the surplus harvest was not announced");
+		}
+		// Full food AND full waste: the harvest is constrained - the
+		// unplaceable remainder stays living rather than vanishing, and
+		// the constraint is announced.
+		{
+			core::World world("HarvestConstrained", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto stores = fullStores();
+			stores[5] = cropStore("food", 0.05, 0.0);
+			stores[6] = cropStore("waste", 0.05, 0.0);
+			auto const [ok, diagnostic] = configure(world, std::move(stores), { crop() });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 1200, "constrained harvest run"),
+				"constrained harvest run failed");
+			world.pauseSimulation();
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& c = snap.cropPopulations[0];
+			require(c.harvestedKg > 0.0 && c.harvestedKg < 0.11,
+				"the harvest was not capped by the tiny destinations");
+			require(c.lastHarvestConstrainedKg > 0.0,
+				"the constrained remainder is not reported");
+			require(c.livingBiomassKg > 0.1,
+				"the constrained harvest discarded living material instead of leaving it standing");
+			require(std::abs(c.residualKg) <= 1e-9,
+				"the constrained harvest's mass ledger does not close");
+			require(sawEvent(world, "harvest constrained"),
+				"the harvest constraint was not announced in the event log");
+		}
+		// Starvation death: in darkness the canopy respires its living
+		// organic content away and dies; the residue is routed to the
+		// waste store, the loss is explicit, and the dead population
+		// never grows, respires or harvests again.
+		{
+			core::World world("HarvestStarved", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto unit = crop();
+			unit.illuminationProfile.constantLevel = 0.0;
+			unit.initialBiomassKg = 0.001;
+			unit.respirationPerHour = 600.0; // exaggerated test biology
+			auto const [ok, diagnostic] = configure(world, fullStores(), { unit });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 6000, "starvation run"), "starvation run failed");
+			world.pauseSimulation();
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& c = snap.cropPopulations[0];
+			require(c.dead, "the starved canopy did not die");
+			require(c.growthKg == 0.0 && c.co2DrawnKg == 0.0,
+				"the starved canopy grew in darkness");
+			require(c.respirationKg > 0.0,
+				"the starved canopy did not respire its organic content away");
+			require(c.deadResidueToWasteKg + c.deadResidueLostKg > 0.0,
+				"the dead residue was not accounted");
+			require(c.livingBiomassKg <= 1e-9,
+				"the dead population still holds living biomass");
+			require(c.blockReason.find("dead") != std::string::npos,
+				"the dead population's block reason does not name the death");
+			require(sawEvent(world, "died"),
+				"the starvation death was not announced in the event log");
+			// Recovery cannot recreate lost biomass for free: running on
+			// changes nothing for the dead population.
+			auto const respirationAtDeath = c.respirationKg;
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 600, "post-death run"), "post-death run failed");
+			world.pauseSimulation();
+			auto const after = world.getStationSystemsSnapshot();
+			require(after.cropPopulations[0].dead
+				&& after.cropPopulations[0].respirationKg == respirationAtDeath
+				&& after.cropPopulations[0].livingBiomassKg <= 1e-9,
+				"the dead population revived or kept respiring after death");
+		}
+		// Death with a full waste store: the residue cannot be contained
+		// and is booked as explicit uncontained loss, never silently
+		// deleted.
+		{
+			core::World world("HarvestLostResidue", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto unit = crop();
+			unit.illuminationProfile.constantLevel = 0.0;
+			unit.initialBiomassKg = 0.001;
+			unit.respirationPerHour = 600.0;
+			auto stores = fullStores();
+			stores[6] = cropStore("waste", 1.0, 1.0); // full: no headroom
+			auto const [ok, diagnostic] = configure(world, std::move(stores), { unit });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 6000, "lost-residue run"), "lost-residue run failed");
+			world.pauseSimulation();
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& c = snap.cropPopulations[0];
+			require(c.dead, "the starved canopy did not die");
+			require(c.deadResidueToWasteKg == 0.0
+				&& c.deadResidueLostKg > 0.0,
+				"the dead residue was not booked as explicit uncontained loss");
+			require(std::abs(c.residualKg) <= 1e-9,
+				"the lost-residue mass ledger does not close");
+		}
+		// Coupled crew consumption: the harvested food feeds a crew that
+		// eats from the same store; the store holds harvest minus crew
+		// consumption and both populations' ledgers close together.
+		{
+			core::World world("HarvestCrew", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			// The crew's food store is the crop's food store: dry, with the
+			// crop's declared composition so the harvest may enter it.
+			auto stores = fullStores();
+			stores[5] = cropStore("food", 10.0, 0.001, cropComposition());
+			core::ResourceCompositionSettings waterComposition;
+			waterComposition.moisture = 0.999;
+			waterComposition.otherMinerals = 0.001;
+			stores.push_back(cropStore("crewWater", 10.0, 5.0, waterComposition));
+			core::ResourceCompositionSettings urineComposition;
+			urineComposition.moisture = 0.95;
+			urineComposition.nutrientNitrogen = 0.02;
+			urineComposition.phosphorus = 0.005;
+			urineComposition.potassium = 0.01;
+			urineComposition.otherMinerals = 0.01;
+			urineComposition.energyKJPerKgDry = 500.0;
+			stores.push_back(cropStore("urine", 10.0, 0.0, urineComposition));
+			core::ResourceCompositionSettings wasteComposition;
+			wasteComposition.moisture = 0.5;
+			wasteComposition.energyKJPerKgDry = 1000.0;
+			stores.push_back(cropStore("organicWaste", 10.0, 0.0, wasteComposition));
+			core::CrewSettings crew;
+			crew.id = "crew";
+			crew.atmosphereId = "habitat";
+			crew.crewCount = 1;
+			crew.activityProfile.constantLevel = 1.0;
+			crew.foodStoreId = "food";
+			crew.waterStoreId = "crewWater";
+			crew.urineStoreId = "urine";
+			crew.organicWasteStoreId = "organicWaste";
+			crew.foodPerCrewPerS = 0.0005;
+			crew.waterPerCrewPerS = 0.001;
+			crew.oxygenPerCrewKgPerS = 0.0005;
+			crew.co2PerCrewKgPerS = 0.0004;
+			crew.moisturePerCrewKgPerS = 0.0002;
+			crew.urinePerCrewPerS = 0.0002;
+			crew.organicWastePerCrewPerS = 0.0001;
+			crew.metabolicHeatPerCrewKW = 0.1;
+			auto const [ok, diagnostic] = configure(world, std::move(stores), { crop() }, { crew });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 1200, "crew-coupled harvest run"),
+				"crew-coupled harvest run failed");
+			world.pauseSimulation();
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& c = snap.cropPopulations[0];
+			auto const& crewSnap = snap.crews[0];
+			require(c.foodProducedKg > 0.0, "the canopy produced no food for the crew");
+			require(crewSnap.foodConsumed > 0.0,
+				"the crew consumed no food while the canopy was harvesting");
+			// The food store holds exactly what the harvest put in minus
+			// what the crew ate: the two populations share one store and
+			// neither creates nor destroys food.
+			require(closeTo(findStore(snap, "food").currentQualified,
+				0.001 + c.foodProducedKg - crewSnap.foodConsumed, 1e-9),
+				"the shared food store does not balance harvest against crew consumption");
+			require(std::abs(c.residualKg) <= 1e-9,
+				"the crew-coupled canopy's mass ledger does not close");
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("crew-coupled run boundary residual for '" + balance.unit + "' not closed").c_str());
+		}
+		// Persistence: harvest settings round-trip through the World
+		// document, and the harvest/death runtime state is never
+		// restored - a loaded or Reset world reconstructs the living
+		// population from its authored initial condition (#410).
+		{
+			core::World world("HarvestPersist", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto const [ok, diagnostic] = configure(world, fullStores(), { crop() });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 1200, "harvest persistence run"),
+				"harvest persistence run failed");
+			world.pauseSimulation();
+			require(world.getStationSystemsSnapshot().cropPopulations[0].harvestedKg > 0.0,
+				"the persistence fixture did not harvest");
+			std::string text = yaml(world);
+			require(text.find("harvestTriggerKg: 0.3") != std::string::npos
+				&& text.find("foodStoreId: food") != std::string::npos
+				&& text.find("wasteStoreId: waste") != std::string::npos,
+				"the harvest contract did not travel through the World document");
+			require(text.find("harvestedKg") == std::string::npos
+				&& text.find("deadResidueLostKg") == std::string::npos,
+				"runtime harvest ledgers leaked into the World document");
+			auto input = core::YamlSerializer::fromString(text);
+			input->deserialize();
+			core::SerializationWorkData data;
+			core::World loaded("HarvestPersistLoaded", 2, 2);
+			loaded.deserialize(*input, data);
+			require(loaded.getStationSystemsSettings() == world.getStationSystemsSettings(),
+				"harvest settings did not round-trip");
+			auto const loadedSnap = loaded.getStationSystemsSnapshot();
+			require(loadedSnap.worldTick == 0
+				&& loadedSnap.cropPopulations[0].harvestedKg == 0.0
+				&& !loadedSnap.cropPopulations[0].dead
+				&& loadedSnap.cropPopulations[0].livingBiomassKg == 0.1,
+				"the loaded world restored live harvest/death state instead of the authored start");
+		}
+		// Determinism: two identically-authored harvest worlds advanced
+		// identically end identically, field for field.
+		{
+			core::World first("HarvestDetA", 2, 2);
+			core::World second("HarvestDetB", 2, 2);
+			first.pauseSimulation();
+			second.pauseSimulation();
+			first.finishBuild();
+			second.finishBuild();
+			require(configure(first, fullStores(), { crop() }).first
+				&& configure(second, fullStores(), { crop() }).first,
+				"the harvest determinism pair failed to configure");
+			first.resumeSimulation();
+			second.resumeSimulation();
+			require(first.advanceTicks(1200) && second.advanceTicks(1200),
+				"the harvest determinism pair failed to advance");
+			first.pauseSimulation();
+			second.pauseSimulation();
+			require(first.getStationSystemsSnapshot().cropPopulations[0]
+				== second.getStationSystemsSnapshot().cropPopulations[0],
+				"identically-authored harvest canopies diverged");
+			require(first.getStationSystemsSnapshot().stores
+				== second.getStationSystemsSnapshot().stores,
+				"the stores of identically-authored harvest worlds diverged");
+		}
+	}
+
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power},
@@ -12381,7 +12904,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"failures", failures}};
+		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

@@ -1234,6 +1234,32 @@ namespace core
 		double transpirationKgPerKgGrowth{0.0}; // water transpired per kg of growth (provisional)
 		double minGrowingTemperatureC{10.0}; // growth at or above this compartment temperature
 		double maxGrowingTemperatureC{35.0}; // growth below this compartment temperature
+		// Harvest contract (#410): when the living dry biomass reaches the
+		// declared trigger the population is harvested - real living
+		// material is removed and its declared dry-mass constituents are
+		// preserved into the food and waste stores rather than vanishing.
+		// The edible fraction of the harvested dry mass is booked into the
+		// food store; the inedible remainder, plus any edible surplus the
+		// food store cannot hold, is routed through the waste store. A
+		// destination that is full constrains the harvest: the remainder
+		// stays living rather than being discarded for free. Harvest is
+		// disabled while the trigger is zero; enabling it requires both
+		// destination stores. Both destinations must be mass-denominated,
+		// distinct from each other, and if they declare a composition it
+		// must match the crop's declared composition: harvested material
+		// enters a store exactly as declared, and a store declaring a
+		// different material is a compound boundary that only an explicit
+		// conversion may cross. Under adverse conditions the living
+		// organic content is respired away; once it is exhausted the
+		// population dies, and the remaining non-respirable residue is
+		// routed to the waste store or booked as explicit uncontained
+		// loss - never silently deleted, and never recoverable as living
+		// biomass for free.
+		std::string foodStoreId;      // edible yield destination (mass unit)
+		std::string wasteStoreId;     // inedible yield and dead-residue destination (mass unit)
+		double edibleFraction{0.5};   // [0, 1] of harvested dry mass that is edible food
+		double harvestTriggerKg{0.0}; // harvest when living biomass reaches this; 0 disables harvest
+		double harvestFraction{1.0};  // (0, 1] fraction of living biomass removed per harvest
 		int priority{0};
 		bool operator==(CropPopulationSettings const&) const = default;
 	};
@@ -1387,6 +1413,14 @@ namespace core
 		// collected against starting: the condensate and the captured gas
 		// are accounted, never implicit.
 		double collected{0.0};
+		// Cumulative mass of this unit admitted into stores by crop harvest
+		// and dead-residue routing (#410). Living biomass lives outside the
+		// store network, so harvested material arriving in the food and
+		// waste stores is inflow on the same boundary as a delivery: the
+		// residual closes as current + lost - delivered - collected -
+		// harvested against starting, so harvest never reads as creation
+		// of mass.
+		double harvested{0.0};
 		double residual{0.0};
 		bool operator==(StationBalanceSnapshot const&) const = default;
 	};
@@ -1432,6 +1466,12 @@ namespace core
 		double lost{0.0};
 		// Cumulative constituent admitted by accepted deliveries (#392).
 		double delivered{0.0};
+		// Cumulative constituent admitted into compound stores by crop
+		// harvest and dead-residue routing (#410), at the crop's declared
+		// composition. The residual closes as current + lost - delivered -
+		// harvested against starting: the constituents a harvest carries
+		// into the food and waste streams are accounted, never implicit.
+		double harvested{0.0};
 		double residual{0.0};
 		bool operator==(StationConstituentBalanceSnapshot const&) const = default;
 	};
@@ -2639,8 +2679,12 @@ namespace core
 	// the light energy actually supplied either became the declared
 	// chemical energy of new biomass, came back out as respiration heat,
 	// or left as heat into the compartment - nothing is free and nothing
-	// vanishes. Harvest is deferred: no edible yield is removed here, and
-	// growth simply stops at the declared capacity.
+	// closes over fixed + respired = delivered. Harvest (#410) removes
+	// actual living material at the declared trigger and preserves its
+	// declared constituents into the food and waste stores; full
+	// destinations constrain the harvest or route the edible surplus
+	// through the waste path, and starvation death routes the dead
+	// residue to waste or books it as explicit uncontained loss.
 	struct StationCropPopulationSnapshot
 	{
 		std::string id;
@@ -2663,6 +2707,11 @@ namespace core
 		double transpirationKgPerKgGrowth{0.0};
 		double minGrowingTemperatureC{0.0};
 		double maxGrowingTemperatureC{0.0};
+		std::string foodStoreId;
+		std::string wasteStoreId;
+		double edibleFraction{0.0};
+		double harvestTriggerKg{0.0};
+		double harvestFraction{0.0};
 		int priority{0};
 		// The living-biomass picture: current dry Living biomass beside the
 		// declared capacity and the fraction of it filled.
@@ -2699,6 +2748,24 @@ namespace core
 		double lastRespirationWaterKg{0.0};
 		double lastRespirationHeatKW{0.0};
 		bool lastOxygenLimited{false}; // respiration bound by compartment oxygen
+		// The harvest that ran this tick (#410): the requested removal, the
+		// living material actually taken, what landed in the food and waste
+		// stores, the edible surplus that had to ride the waste path, what
+		// the full destinations refused, and the limiter that bound it.
+		double lastHarvestRequestedKg{0.0};
+		double lastHarvestedKg{0.0};
+		double lastFoodAddedKg{0.0};
+		double lastWasteAddedKg{0.0};
+		double lastSurplusEdibleToWasteKg{0.0};
+		double lastHarvestConstrainedKg{0.0};
+		std::string lastHarvestLimiter;
+		// The adverse-condition loss (#410): once the living organic content
+		// is respired away the population is dead, its remaining residue
+		// routed to the waste store or booked as uncontained loss, and it
+		// never grows, respires or harvests again.
+		bool dead{false};
+		double lastDeadResidueToWasteKg{0.0};
+		double lastDeadResidueLostKg{0.0};
 		// Heat into the compartment this tick: the light energy not fixed as
 		// biomass chemical energy, plus the respiration heat.
 		double lastHeatIntoCompartmentKW{0.0};
@@ -2724,6 +2791,15 @@ namespace core
 		double chemicalEnergyFixedKJ{0.0};   // declared chemical energy of new growth
 		double respirationHeatKJ{0.0};
 		double heatIntoCompartmentKJ{0.0};
+		// Cumulative harvest and loss (#410): everything removed from the
+		// living pool, split by destination, with the dead residue that
+		// could not be contained and is gone for good.
+		double harvestedKg{0.0};
+		double foodProducedKg{0.0};
+		double wasteProducedKg{0.0};
+		double surplusEdibleToWasteKg{0.0};
+		double deadResidueToWasteKg{0.0};
+		double deadResidueLostKg{0.0};
 		// Closing residuals: the mass ledger residual over
 		// (CO2 + water + nutrients + respiration O2) - (O2 released + CO2
 		// returned + vapour returned) - delta biomass, and the energy ledger

@@ -702,6 +702,11 @@ namespace core
 					lua_pushnumber(state, crop.transpirationKgPerKgGrowth); lua_setfield(state, -2, "transpirationKgPerKgGrowth");
 					lua_pushnumber(state, crop.minGrowingTemperatureC); lua_setfield(state, -2, "minGrowingTemperatureC");
 					lua_pushnumber(state, crop.maxGrowingTemperatureC); lua_setfield(state, -2, "maxGrowingTemperatureC");
+					lua_pushstring(state, crop.foodStoreId.c_str()); lua_setfield(state, -2, "foodStore");
+					lua_pushstring(state, crop.wasteStoreId.c_str()); lua_setfield(state, -2, "wasteStore");
+					lua_pushnumber(state, crop.edibleFraction); lua_setfield(state, -2, "edibleFraction");
+					lua_pushnumber(state, crop.harvestTriggerKg); lua_setfield(state, -2, "harvestTriggerKg");
+					lua_pushnumber(state, crop.harvestFraction); lua_setfield(state, -2, "harvestFraction");
 					lua_pushinteger(state, crop.priority); lua_setfield(state, -2, "priority");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
@@ -2718,6 +2723,53 @@ namespace core
 				return refuse(where + " maximum growing temperature must be finite and above absolute zero");
 			if (crop.minGrowingTemperatureC >= crop.maxGrowingTemperatureC)
 				return refuse(where + " minimum growing temperature must be below the maximum growing temperature: an empty growing window is never a service");
+			// Harvest contract (#410). The edible and harvest fractions are
+			// declared shares of real material, so they must sit inside
+			// their physical ranges; a harvest trigger above the declared
+			// Growing capacity could never fire and is refused as a dead
+			// rule; and enabling a harvest without both destinations would
+			// remove living material with nowhere accounted to put it.
+			// Destination stores are validated whenever named, and required
+			// whenever the harvest is enabled: mass-denominated, distinct
+			// from each other, and composition-compatible with the crop's
+			// declared dry mass so the harvested constituents enter the
+			// stores exactly as declared rather than reinterpreted.
+			if (!std::isfinite(crop.edibleFraction) || crop.edibleFraction < 0.0
+				|| crop.edibleFraction > 1.0)
+				return refuse(where + " edible fraction must be finite and from 0 to 1: the edible share of the harvested dry mass cannot exceed the harvest");
+			if (!std::isfinite(crop.harvestFraction) || crop.harvestFraction <= 0.0
+				|| crop.harvestFraction > 1.0)
+				return refuse(where + " harvest fraction must be finite and from above 0 to 1: a harvest that removes nothing is not a harvest");
+			if (!std::isfinite(crop.harvestTriggerKg) || crop.harvestTriggerKg < 0.0)
+				return refuse(where + " harvest trigger must be finite and non-negative (0 disables the harvest)");
+			if (crop.harvestTriggerKg > capacityKg + StationBalanceTolerance)
+				return refuse(where + " harvest trigger exceeds the declared Growing capacity: the harvest could never fire, so the rule is dead as configured");
+			std::string const destinationIds[2]{crop.foodStoreId, crop.wasteStoreId};
+			char const* destinationRoles[2]{"food", "waste"};
+			for (size_t stream = 0; stream < 2; ++stream)
+			{
+				if (destinationIds[stream].empty())
+				{
+					if (crop.harvestTriggerKg > 0.0)
+						return refuse(where + " harvest is enabled but the " + destinationRoles[stream]
+							+ " destination store is not named: harvested living material must have a declared destination");
+					continue;
+				}
+				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+						[&](ResourceStoreSettings const& store) { return store.id == destinationIds[stream]; });
+				if (found == settings.stores.end())
+					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
+						+ "' does not exist");
+				if (!isMassUnit(found->unit))
+					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
+						+ "' must be a mass unit; harvested dry biomass is mass-denominated (g or kg)");
+				if (!destinationIds[0].empty() && destinationIds[0] == destinationIds[1])
+					return refuse(where + " food store and waste store are the same store '" + destinationIds[0]
+						+ "'; edible and inedible yield need distinct destinations so the split stays visible");
+				if (found->composition && !compositionsClose(*found->composition, composition))
+					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
+						+ "' declares a composition different from the crop's declared dry-mass composition: harvested material enters a store exactly as declared, and a different compound material is a boundary only an explicit conversion may cross");
+			}
 		}
 		diagnostic.clear(); return true;
 	}
@@ -3633,6 +3685,8 @@ namespace core
 			size_t phosphorusStoreIndex{0};
 			size_t potassiumStoreIndex{0};
 			size_t mineralsStoreIndex{0};
+			size_t foodStoreIndex{0};
+			size_t wasteStoreIndex{0};
 			double capacityKg{0.0};
 			double livingBiomassKg{0.0};
 			double lastIllumination{0.0};
@@ -3663,6 +3717,17 @@ namespace core
 			double lastHeatIntoCompartmentKW{0.0};
 			bool lastTemperatureEligible{false};
 			std::string lastBlockReason;
+			// Harvest and adverse-condition loss state (#410).
+			double lastHarvestRequestedKg{0.0};
+			double lastHarvestedKg{0.0};
+			double lastFoodAddedKg{0.0};
+			double lastWasteAddedKg{0.0};
+			double lastSurplusEdibleToWasteKg{0.0};
+			double lastHarvestConstrainedKg{0.0};
+			std::string lastHarvestLimiter;
+			bool dead{false};
+			double lastDeadResidueToWasteKg{0.0};
+			double lastDeadResidueLostKg{0.0};
 			double growthKg{0.0};
 			double co2DrawnKg{0.0};
 			double waterDrawnKg{0.0};
@@ -3681,6 +3746,12 @@ namespace core
 			double chemicalEnergyFixedKJ{0.0};
 			double respirationHeatKJ{0.0};
 			double heatIntoCompartmentKJ{0.0};
+			double harvestedKg{0.0};
+			double foodProducedKg{0.0};
+			double wasteProducedKg{0.0};
+			double surplusEdibleToWasteKg{0.0};
+			double deadResidueToWasteKg{0.0};
+			double deadResidueLostKg{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
 		StationSystemsSettings settings;
@@ -3764,6 +3835,18 @@ namespace core
 		// network just as a delivery does, so the boundary closes as
 		// current + lost - delivered - collected == starting.
 		std::map<std::string, double> unitCollected;
+		// Cumulative mass of each unit admitted into stores by crop harvest
+		// and dead-residue routing (#410): living biomass lives outside the
+		// store network, so harvested material arriving in the food and
+		// waste stores is inflow on the same boundary as a delivery. The
+		// per-unit boundary closes as current + lost - delivered -
+		// collected - harvested == starting, so harvest never reads as
+		// creation of mass.
+		std::map<std::string, double> unitHarvested;
+		// Cumulative constituents admitted into compound stores by crop
+		// harvest and dead-residue routing (#410), at the crop's declared
+		// composition, the compound side of the same boundary.
+		ConstituentLedger constituentHarvested;
 		// Per-constituent totals at run start and the cumulative declared
 		// conversion losses, the compound conservation boundary (#391):
 		// current + lost must equal starting within tolerance.
@@ -3957,6 +4040,16 @@ namespace core
 			std::vector<StationTransferStatus> previousCropStatus;
 			previousCropStatus.reserve(cropPopulations.size());
 			for (auto const& crop : cropPopulations) previousCropStatus.push_back(crop.status);
+			std::vector<bool> previousCropDead;
+			previousCropDead.reserve(cropPopulations.size());
+			for (auto const& crop : cropPopulations) previousCropDead.push_back(crop.dead);
+			// Harvest state for event edge detection (#410): idle, actively
+			// harvesting, or constrained by full destinations.
+			std::vector<double> previousCropHarvestState;
+			previousCropHarvestState.reserve(cropPopulations.size());
+			for (auto const& crop : cropPopulations)
+				previousCropHarvestState.push_back(crop.lastHarvestConstrainedKg > 1e-12 ? 2.0
+					: crop.lastHarvestedKg > 0.0 ? 1.0 : 0.0);
 			std::vector<double> qualified, unqualified;
 			qualified.reserve(stores.size());
 			unqualified.reserve(stores.size());
@@ -3981,6 +4074,11 @@ namespace core
 			// committed like a delivery and the boundary closes as
 			// current + lost - delivered - collected == starting.
 			std::map<std::string, double> stagedUnitCollected = unitCollected;
+			// Harvest inflow is staged alongside the other external sides of
+			// the boundary (#410): a failed tick never books harvested
+			// material it did not commit.
+			std::map<std::string, double> stagedUnitHarvested = unitHarvested;
+			ConstituentLedger stagedConstituentHarvested = constituentHarvested;
 			// Solar supply and external equipment allocation run before the
 			// resource ledger: the electrical service a load receives bounds
 			// its heat and material exchanges, and allocated power can never
@@ -6705,9 +6803,27 @@ namespace core
 				crop.lastHeatIntoCompartmentKW = 0.0;
 				crop.lastTemperatureEligible = false;
 				crop.lastBlockReason.clear();
+				crop.lastHarvestRequestedKg = 0.0;
+				crop.lastHarvestedKg = 0.0;
+				crop.lastFoodAddedKg = 0.0;
+				crop.lastWasteAddedKg = 0.0;
+				crop.lastSurplusEdibleToWasteKg = 0.0;
+				crop.lastHarvestConstrainedKg = 0.0;
+				crop.lastHarvestLimiter.clear();
+				crop.lastDeadResidueToWasteKg = 0.0;
+				crop.lastDeadResidueLostKg = 0.0;
 				if (crop.authored.growingAreaM2 <= 0.0)
 				{
 					crop.status = StationTransferStatus::Idle;
+					continue;
+				}
+				// A dead population stays dead: it grows nothing, respires
+				// nothing and harvests nothing, because nothing in this model
+				// recreates living biomass for free (#410).
+				if (crop.dead)
+				{
+					crop.lastBlockReason = "population is dead: the living organic content was respired away under adverse conditions and nothing here recreates living biomass for free";
+					crop.status = StationTransferStatus::Rejected;
 					continue;
 				}
 				auto const tickSeconds = static_cast<double>(seconds);
@@ -6948,6 +7064,117 @@ namespace core
 				compartment.waterVapourKg += respirationWaterKg + transpiredKg;
 				compartment.cropVapourAddedKg += respirationWaterKg + transpiredKg;
 				crop.livingBiomassKg -= respiredOrganicKg;
+				// Adverse-condition death (#410): respiration runs day and
+				// night against the living organic content, and when that
+				// content is exhausted the canopy starves - the population is
+				// dead, not paused. The remaining non-respirable residue is
+				// routed to the declared waste store as far as its headroom
+				// reaches, and whatever the waste path cannot hold is booked
+				// as explicit uncontained loss: nothing vanishes silently,
+				// and a dead population never regrows living biomass for
+				// free. The check runs after respiration so a harvest that
+				// takes the biomass down is never mistaken for starvation.
+				crop.lastDeadResidueToWasteKg = 0.0;
+				crop.lastDeadResidueLostKg = 0.0;
+				if (!crop.dead && crop.livingBiomassKg * organicFraction <= 1e-9)
+				{
+					crop.dead = true;
+					auto const residueKg = crop.livingBiomassKg;
+					double routedKg = 0.0;
+					if (!crop.authored.wasteStoreId.empty())
+					{
+						auto& waste = stores[crop.wasteStoreIndex];
+						auto const wasteHeadroomUnits = std::max(0.0, waste.authored.capacity
+							- qualified[crop.wasteStoreIndex] - unqualified[crop.wasteStoreIndex]);
+						auto const routedUnits = std::min(
+							kgToMass(waste.authored.unit, residueKg), wasteHeadroomUnits);
+						routedKg = massToKg(waste.authored.unit, routedUnits);
+						if (routedUnits > 0.0)
+						{
+							qualified[crop.wasteStoreIndex] += routedUnits;
+							flowIn[crop.wasteStoreIndex] += routedUnits;
+							stagedUnitHarvested[waste.authored.unit] += routedUnits;
+							if (waste.authored.composition)
+								addComposition(stagedConstituentHarvested, composition, routedKg, 1.0);
+						}
+					}
+					crop.livingBiomassKg -= residueKg;
+					auto const lostKg = residueKg - routedKg;
+					crop.lastDeadResidueToWasteKg = routedKg;
+					crop.lastDeadResidueLostKg = lostKg;
+					crop.deadResidueToWasteKg += routedKg;
+					crop.deadResidueLostKg += lostKg;
+				}
+				// Harvest (#410): when the living dry biomass reaches the
+				// declared trigger the population is harvested - real living
+				// material is removed from the canopy and its declared
+				// constituents are preserved into the stores. The edible
+				// share lands in the food store; the inedible remainder, plus
+				// any edible surplus the food store cannot hold, rides the
+				// waste path. Full destinations constrain the harvest: what
+				// cannot be placed stays living rather than being discarded,
+				// so recovery never disposes of biomass for free and never
+				// recreates what was already lost. The harvest runs after the
+				// same tick's growth, so a canopy that crosses the trigger
+				// mid-tick is harvested on that tick.
+				if (!crop.dead && crop.authored.harvestTriggerKg > 0.0
+					&& crop.livingBiomassKg + 1e-12 >= crop.authored.harvestTriggerKg)
+				{
+					auto const requestedKg = crop.authored.harvestFraction * crop.livingBiomassKg;
+					auto const edibleRequestedKg = requestedKg * crop.authored.edibleFraction;
+					auto const inedibleRequestedKg = requestedKg - edibleRequestedKg;
+					auto& food = stores[crop.foodStoreIndex];
+					auto& waste = stores[crop.wasteStoreIndex];
+					auto const foodHeadroomUnits = std::max(0.0, food.authored.capacity
+						- qualified[crop.foodStoreIndex] - unqualified[crop.foodStoreIndex]);
+					auto const wasteHeadroomUnits = std::max(0.0, waste.authored.capacity
+						- qualified[crop.wasteStoreIndex] - unqualified[crop.wasteStoreIndex]);
+					auto const foodAcceptedUnits = std::min(
+						kgToMass(food.authored.unit, edibleRequestedKg), foodHeadroomUnits);
+					auto const foodAcceptedKg = massToKg(food.authored.unit, foodAcceptedUnits);
+					auto const surplusEdibleKg = edibleRequestedKg - foodAcceptedKg;
+					auto const wasteNeededKg = inedibleRequestedKg + surplusEdibleKg;
+					auto const wasteAcceptedUnits = std::min(
+						kgToMass(waste.authored.unit, wasteNeededKg), wasteHeadroomUnits);
+					auto const wasteAcceptedKg = massToKg(waste.authored.unit, wasteAcceptedUnits);
+					auto const harvestedKg = foodAcceptedKg + wasteAcceptedKg;
+					auto const constrainedKg = requestedKg - harvestedKg;
+					if (foodAcceptedUnits > 0.0)
+					{
+						qualified[crop.foodStoreIndex] += foodAcceptedUnits;
+						flowIn[crop.foodStoreIndex] += foodAcceptedUnits;
+						stagedUnitHarvested[food.authored.unit] += foodAcceptedUnits;
+						if (food.authored.composition)
+							addComposition(stagedConstituentHarvested, composition, foodAcceptedKg, 1.0);
+					}
+					if (wasteAcceptedUnits > 0.0)
+					{
+						qualified[crop.wasteStoreIndex] += wasteAcceptedUnits;
+						flowIn[crop.wasteStoreIndex] += wasteAcceptedUnits;
+						stagedUnitHarvested[waste.authored.unit] += wasteAcceptedUnits;
+						if (waste.authored.composition)
+							addComposition(stagedConstituentHarvested, composition, wasteAcceptedKg, 1.0);
+					}
+					crop.livingBiomassKg -= harvestedKg;
+					crop.lastHarvestRequestedKg = requestedKg;
+					crop.lastHarvestedKg = harvestedKg;
+					crop.lastFoodAddedKg = foodAcceptedKg;
+					crop.lastWasteAddedKg = wasteAcceptedKg;
+					crop.lastSurplusEdibleToWasteKg = surplusEdibleKg;
+					crop.lastHarvestConstrainedKg = constrainedKg;
+					if (constrainedKg > 1e-12)
+						crop.lastHarvestLimiter = "harvest destinations cannot hold the yield: food store '"
+							+ food.authored.id + "' and waste store '" + waste.authored.id
+							+ "' are full, the remainder stays living";
+					else if (surplusEdibleKg > 1e-12)
+						crop.lastHarvestLimiter = "food store '" + food.authored.id
+							+ "' is full: the edible surplus is routed through the waste path";
+					else crop.lastHarvestLimiter.clear();
+					crop.harvestedKg += harvestedKg;
+					crop.foodProducedKg += foodAcceptedKg;
+					crop.wasteProducedKg += wasteAcceptedKg;
+					crop.surplusEdibleToWasteKg += surplusEdibleKg;
+				}
 				// Energy: the light energy not fixed as biomass chemical
 				// energy, the circulation pump work and the respiration
 				// heat land in the compartment once. Validation guaranteed
@@ -7913,7 +8140,8 @@ namespace core
 				// subtracted on the same side rather than reading as a
 				// creation of mass.
 				auto const residual = currentTotals[unit] + stagedUnitLoss[unit]
-					- stagedUnitDelivered[unit] - stagedUnitCollected[unit] - starting;
+					- stagedUnitDelivered[unit] - stagedUnitCollected[unit]
+					- stagedUnitHarvested[unit] - starting;
 				if (!std::isfinite(residual)
 					|| std::abs(residual) > StationBalanceTolerance * std::max(1.0, std::abs(starting)))
 					return violation = "conservation residual " + std::to_string(residual)
@@ -7934,7 +8162,8 @@ namespace core
 			{
 				auto const residual = (currentConstituents.count(constituent)
 						? currentConstituents.at(constituent) : 0.0)
-					+ stagedLoss[constituent] - stagedConstituentDelivered[constituent] - starting;
+					+ stagedLoss[constituent] - stagedConstituentDelivered[constituent]
+					- stagedConstituentHarvested[constituent] - starting;
 				if (!std::isfinite(residual)
 					|| std::abs(residual) > StationBalanceTolerance * std::max(1.0, std::abs(starting)))
 					return violation = "constituent conservation residual " + std::to_string(residual)
@@ -8052,6 +8281,10 @@ namespace core
 				if (!requireFinite(delivered, "cumulative delivered amount of unit '" + unit + "'")) return false;
 			for (auto const& [unit, collected] : stagedUnitCollected)
 				if (!requireFinite(collected, "cumulative collected amount of unit '" + unit + "'")) return false;
+			for (auto const& [unit, harvested] : stagedUnitHarvested)
+				if (!requireFinite(harvested, "cumulative harvested amount of unit '" + unit + "'")) return false;
+			for (auto const& [constituent, harvested] : stagedConstituentHarvested)
+				if (!requireFinite(harvested, "cumulative harvested constituent '" + constituent + "'")) return false;
 			for (auto const& [constituent, delivered] : stagedConstituentDelivered)
 				if (!requireFinite(delivered, "cumulative delivered constituent '" + constituent + "'")) return false;
 			for (auto const& delivery : deliveries)
@@ -9089,6 +9322,8 @@ namespace core
 			unitDelivered = stagedUnitDelivered;
 			unitCollected = stagedUnitCollected;
 			constituentDelivered = stagedConstituentDelivered;
+			unitHarvested = stagedUnitHarvested;
+			constituentHarvested = stagedConstituentHarvested;
 			// Rejections and partial completions are visible: announce each
 			// status transition (after the commit) so the event log records
 			// where material stalled without flooding every tick.
@@ -9531,6 +9766,40 @@ namespace core
 					? "Crop population '" + crop.authored.id + "' growth stopped: " + reason
 					: "Crop population '" + crop.authored.id + "' growth limited: " + reason);
 			}
+			// Harvest occurrences and adverse-condition deaths are discrete
+			// scenario events, announced on their transitions so the log
+			// records the cut, the surplus routing, the constraint and the
+			// death without flooding a continuous harvest (#410).
+			for (size_t index = 0; index < cropPopulations.size(); ++index)
+			{
+				auto const& crop = cropPopulations[index];
+				if (crop.dead && !previousCropDead[index])
+				{
+					appendBoundedEvent(events, tick, "Crop population '" + crop.authored.id
+						+ "' died: the living organic content was respired away under adverse conditions; "
+						+ std::to_string(crop.lastDeadResidueToWasteKg)
+						+ " kg dead residue routed to the waste store and "
+						+ std::to_string(crop.lastDeadResidueLostKg)
+						+ " kg lost uncontained - the loss is explicit and cannot be recovered as living biomass");
+					continue;
+				}
+				auto const harvestState = crop.lastHarvestConstrainedKg > 1e-12 ? 2.0
+					: crop.lastHarvestedKg > 0.0 ? 1.0 : 0.0;
+				if (harvestState == previousCropHarvestState[index]) continue;
+				if (harvestState == 2.0)
+					appendBoundedEvent(events, tick, "Crop population '" + crop.authored.id
+						+ "' harvest constrained: " + std::to_string(crop.lastHarvestConstrainedKg)
+						+ " kg of the declared harvest could not be placed because the food and waste destinations are full; the remainder stays living");
+				else if (harvestState == 1.0)
+					appendBoundedEvent(events, tick, "Crop population '" + crop.authored.id
+						+ "' harvested " + std::to_string(crop.lastHarvestedKg)
+						+ " kg of living dry biomass: " + std::to_string(crop.lastFoodAddedKg)
+						+ " kg to the food store '" + crop.authored.foodStoreId + "' and "
+						+ std::to_string(crop.lastWasteAddedKg) + " kg to the waste store '"
+						+ crop.authored.wasteStoreId + "' ("
+						+ std::to_string(crop.lastSurplusEdibleToWasteKg)
+						+ " kg edible surplus routed through the waste path)");
+			}
 			// Delivery arrivals are discrete scenario events rather than a
 			// continuous per-tick service, so every arrival is announced with
 			// its own quantities: the refused remainder is the account for
@@ -9936,6 +10205,12 @@ namespace core
 			state.phosphorusStoreIndex = storeIndex[crop.phosphorusStoreId];
 			state.potassiumStoreIndex = storeIndex[crop.potassiumStoreId];
 			state.mineralsStoreIndex = storeIndex[crop.mineralsStoreId];
+			// Harvest destinations resolve only when named; the harvest is
+			// disabled while the trigger is zero (#410).
+			if (!crop.foodStoreId.empty())
+				state.foodStoreIndex = storeIndex[crop.foodStoreId];
+			if (!crop.wasteStoreId.empty())
+				state.wasteStoreIndex = storeIndex[crop.wasteStoreId];
 			state.capacityKg = crop.growingAreaM2 * crop.maxBiomassDensityKgPerM2;
 			state.livingBiomassKg = crop.initialBiomassKg;
 			mImpl->cropPopulations.push_back(std::move(state));
@@ -10233,8 +10508,11 @@ namespace core
 				? mImpl->unitDelivered.at(unit) : 0.0;
 			auto const collected = mImpl->unitCollected.count(unit)
 				? mImpl->unitCollected.at(unit) : 0.0;
+			auto const harvested = mImpl->unitHarvested.count(unit)
+				? mImpl->unitHarvested.at(unit) : 0.0;
 			result.balances.push_back({unit, starting, currentTotals[unit], lost, delivered,
-				collected, currentTotals[unit] + lost - delivered - collected - starting});
+				collected, harvested,
+				currentTotals[unit] + lost - delivered - collected - harvested - starting});
 		}
 		for (auto const& [constituent, starting] : mImpl->startingConstituents)
 		{
@@ -10244,9 +10522,12 @@ namespace core
 				? mImpl->constituentLoss.at(constituent) : 0.0;
 			auto const delivered = mImpl->constituentDelivered.count(constituent)
 				? mImpl->constituentDelivered.at(constituent) : 0.0;
+			auto const harvested = mImpl->constituentHarvested.count(constituent)
+				? mImpl->constituentHarvested.at(constituent) : 0.0;
 			result.constituentBalances.push_back({constituent,
 				std::string(constituent == StationEnergyConstituent ? "kJ" : "kg"),
-				starting, current, lost, delivered, current + lost - delivered - starting});
+				starting, current, lost, delivered, harvested,
+				current + lost - delivered - harvested - starting});
 		}
 		result.balanceTolerance = StationBalanceTolerance;
 		// The power snapshot reports the most recent tick's solar supply
@@ -11287,6 +11568,11 @@ namespace core
 			cropResult.transpirationKgPerKgGrowth = crop.authored.transpirationKgPerKgGrowth;
 			cropResult.minGrowingTemperatureC = crop.authored.minGrowingTemperatureC;
 			cropResult.maxGrowingTemperatureC = crop.authored.maxGrowingTemperatureC;
+			cropResult.foodStoreId = crop.authored.foodStoreId;
+			cropResult.wasteStoreId = crop.authored.wasteStoreId;
+			cropResult.edibleFraction = crop.authored.edibleFraction;
+			cropResult.harvestTriggerKg = crop.authored.harvestTriggerKg;
+			cropResult.harvestFraction = crop.authored.harvestFraction;
 			cropResult.priority = crop.authored.priority;
 			cropResult.livingBiomassKg = crop.livingBiomassKg;
 			cropResult.capacityFraction = crop.capacityKg > 0.0
@@ -11319,6 +11605,16 @@ namespace core
 			cropResult.lastHeatIntoCompartmentKW = crop.lastHeatIntoCompartmentKW;
 			cropResult.temperatureEligible = crop.lastTemperatureEligible;
 			cropResult.blockReason = crop.lastBlockReason;
+			cropResult.lastHarvestRequestedKg = crop.lastHarvestRequestedKg;
+			cropResult.lastHarvestedKg = crop.lastHarvestedKg;
+			cropResult.lastFoodAddedKg = crop.lastFoodAddedKg;
+			cropResult.lastWasteAddedKg = crop.lastWasteAddedKg;
+			cropResult.lastSurplusEdibleToWasteKg = crop.lastSurplusEdibleToWasteKg;
+			cropResult.lastHarvestConstrainedKg = crop.lastHarvestConstrainedKg;
+			cropResult.lastHarvestLimiter = crop.lastHarvestLimiter;
+			cropResult.dead = crop.dead;
+			cropResult.lastDeadResidueToWasteKg = crop.lastDeadResidueToWasteKg;
+			cropResult.lastDeadResidueLostKg = crop.lastDeadResidueLostKg;
 			cropResult.disabled = crop.authored.growingAreaM2 <= 0.0;
 			cropResult.growthKg = crop.growthKg;
 			cropResult.co2DrawnKg = crop.co2DrawnKg;
@@ -11338,12 +11634,19 @@ namespace core
 			cropResult.chemicalEnergyFixedKJ = crop.chemicalEnergyFixedKJ;
 			cropResult.respirationHeatKJ = crop.respirationHeatKJ;
 			cropResult.heatIntoCompartmentKJ = crop.heatIntoCompartmentKJ;
+			cropResult.harvestedKg = crop.harvestedKg;
+			cropResult.foodProducedKg = crop.foodProducedKg;
+			cropResult.wasteProducedKg = crop.wasteProducedKg;
+			cropResult.surplusEdibleToWasteKg = crop.surplusEdibleToWasteKg;
+			cropResult.deadResidueToWasteKg = crop.deadResidueToWasteKg;
+			cropResult.deadResidueLostKg = crop.deadResidueLostKg;
 			cropResult.residualKg = crop.co2DrawnKg + crop.waterDrawnKg
 				+ crop.nitrogenDrawnKg + crop.phosphorusDrawnKg + crop.potassiumDrawnKg
 				+ crop.mineralsDrawnKg + crop.respirationO2DrawnKg
 				- crop.oxygenReleasedKg - crop.respirationCo2ReturnedKg
 				- crop.respirationWaterKg - crop.transpiredKg
-				- (crop.growthKg - crop.respirationKg);
+				- (crop.harvestedKg + crop.deadResidueToWasteKg + crop.deadResidueLostKg)
+				- (crop.livingBiomassKg - crop.authored.initialBiomassKg);
 			cropResult.residualKJ = crop.lightEnergyKJ + crop.circulationEnergyKJ
 				+ crop.respirationHeatKJ - crop.chemicalEnergyFixedKJ
 				- crop.heatIntoCompartmentKJ;
