@@ -1,5 +1,6 @@
 version: 65
-nextDumbwaiterId: 1
+nextDumbwaiterId: 2
+dumbwaiterPhysicalButtons: true
 nextFurnitureId: 1
 name: Untitled
 randomSeed: 0
@@ -77,8 +78,8 @@ construction:
   - type: corridor
     layer: 0
     y: 2
-    x: 11
-    cellsWide: 4
+    x: 9
+    cellsWide: 6
     levelsHigh: 1
   - type: corridor
     layer: 0
@@ -120,7 +121,7 @@ construction:
     layer: 0
     y: 4
     x: 0
-    cellsWide: 2
+    cellsWide: 3
     levelsHigh: 1
   - type: stairwell
     layer: 1
@@ -221,6 +222,49 @@ construction:
     sensorDistance: 0.5
     leftWasOpen: false
     rightWasOpen: false
+  - type: room
+    name: Room 5
+    layer: 1
+    y: 4
+    x: 0
+    cellsWide: 5
+    levelsHigh: 1
+    topLevelHeight: 0.9
+    hasHeightScale: false
+  - type: door
+    layer: 0
+    y: 4
+    x: 4
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+    hasSpeedOverride: false
+    hasHeightScale: false
+  - type: boothWindow
+    layer: 0
+    y: 4
+    x: 1
+    cellsWide: 1
+    levelsHigh: 1
+    initialState: closed
+    panelPermissionRequirement:
+      []
+  - type: dumbwaiter
+    id: 1
+    layer: 1
+    y: 2
+    x: 9
+    initialStop: 0
+    travelSeconds: 2
+    lowerLandingPermissionRequirement:
+      []
+    upperLandingPermissionRequirement:
+      []
 agentGroups:
   []
 accessPermissions:
@@ -249,6 +293,6 @@ agents:
         revision: 1
         configuration:
           []
-    sector: 8
-    localX: 1.5625
+    sector: 6
+    localX: 1.625
     localY: 0

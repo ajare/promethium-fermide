@@ -7,6 +7,7 @@
 #include "core/BulkheadDoorEdge.h"
 #include "core/AirlockTransit.h"
 #include "core/ChamberTransit.h"
+#include "core/Window.h"
 #include "core/Graph.h"
 #include "core/MobilityProfile.h"
 #include "core/StairwellMountEdge.h"
@@ -230,21 +231,27 @@ namespace core
 				static_cast<DoorEdge const&>(*candidate.edge).getDoor()->requestOpen();
 				return;
 			}
-		// Physical Buttons are the last meaning of a fresh Up press. Use the
-		// shared arm-length/geometry gate, never remote range or auto-approach.
+		// Physical Buttons and owned back-side BoothWindow panels are the last
+		// meaning of Up. Use physical reach, never remote range or auto-approach.
 		if (agent->getObjectUsage() != ObjectUsage::Arms || agentForbidsButtons(agent)) return;
 		InteractionPointId selected;
 		float nearest = 0.f;
 		for (auto const& [pointId, point] : mInteractionPoints.entries())
 		{
 			auto placement = physicalControlPlacement(pointId);
-			if (!placement || std::abs(position.y - point->getPosition().y) > PoseFitTolerance
+			auto booth = lookupBoothWindow(point->mBoothWindowOwner);
+			bool boothPanel = booth && !booth->getDumbwaiterOwner() && booth->getPanel() == pointId
+				&& booth->getBackSector().get() == agent->getSector();
+			if ((!placement && !boothPanel) || std::abs(position.y - point->getPosition().y) > PoseFitTolerance
 				|| !agentCanOperateInteraction(pointId, *agent, true)
 				|| !missingInteractionPermissions(*point, *agent).empty()
 				|| isControlTargetBroken(pointId)) continue;
-			auto button = std::dynamic_pointer_cast<Button>(mSectors[placement->sectorIndex]
-				->getObject(placement->objectIndex)->_getObject());
-			if (!button || !button->isEnabled()) continue;
+			if (!boothPanel)
+			{
+				auto button = std::dynamic_pointer_cast<Button>(mSectors[placement->sectorIndex]
+					->getObject(placement->objectIndex)->_getObject());
+				if (!button || !button->isEnabled()) continue;
+			}
 			auto const distance = position.distanceTo(point->getPosition());
 			if (!selected || distance < nearest || (distance == nearest && pointId < selected))
 			{ selected = pointId; nearest = distance; }

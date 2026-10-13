@@ -14,6 +14,7 @@
 #include <core/DoorSectorObject.h>
 #include <core/AirlockTransit.h>
 #include <core/ChamberTransit.h>
+#include <core/WindowSectorObject.h>
 #include <core/YamlSerializer.h>
 #include <cmath>
 
@@ -330,6 +331,44 @@ void checkPlayerLadderKeys(wp::application::State& play, core::World& world) {
   }
 }
 
+void checkPlayerBoothWindowKeys(wp::application::State& play, core::World& world) {
+  using wp::application::Key; using wp::application::KeyEvent;
+  auto key = [&](bool pressed) { play._injectKeyInput(pressed ? KeyEvent::Pressed : KeyEvent::Released, Key::UpArrow, {}); };
+  for (bool backSide : {false, true}) {
+    core::World fixture("Keyboard BoothWindow", 12, 2);
+    auto front = fixture.addRoom("Front", 0, 0, 0, 8, 1);
+    auto back = fixture.addRoom("Back", 1, 0, 0, 8, 1);
+    fixture.addBoothWindow(0, 0, 3, core::Window::State::Closed);
+    fixture.finishBuild(); fixture.pauseSimulation();
+    auto id = fixture.createAgent("Player", backSide ? back : front, 0, 3.5f);
+    require(fixture.setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}), "Cannot assign keyboard BoothWindow Player");
+    auto writer = core::YamlSerializer::toString(); core::SerializationWorkData data; data.markSerializedUnmodified = false;
+    fixture.serialize(*writer, data); writer->serialize();
+    auto reader = core::YamlSerializer::fromString(writer->getSerializedString()); reader->deserialize();
+    world.pauseSimulation(); require(world.deserialize(*reader, data), "Cannot install keyboard BoothWindow"); world.resumeSimulation();
+    std::shared_ptr<const core::BoothWindow> booth;
+    for (uint32_t i = 0; i < world.getSector(front)->getNumObjects(); ++i)
+      if (auto object = std::dynamic_pointer_cast<const core::WindowSectorObject>(world.getSector(front)->getObject(i)))
+        booth = std::dynamic_pointer_cast<const core::BoothWindow>(object->getWindow());
+    require(bool(booth), "Missing keyboard BoothWindow");
+    auto step = [&] { play._update(core::World::getFixedTimestep()); };
+    key(true); step();
+    for (int i = 0; i < 10; ++i) { key(true); step(); }
+    for (int i = 0; i < 120; ++i) step();
+    key(false);
+    require(booth->getTargetOpen() == backSide && booth->getProgress() == (backSide ? 1.f : 0.f),
+      "Actual Up must open only from back-side panel; repeat must not retoggle");
+    size_t requests = 0;
+    for (auto const& event : world.getSimulationEvents())
+      if (event.type == core::SimulationEventType::InteractionRequestAdded && event.interactionRequest.point == booth->getPanel()) ++requests;
+    require(requests == (backSide ? 1u : 0u), "Held/repeated Up must create exactly one eligible back-side operation");
+    key(true); step(); key(false); for (int i = 0; i < 120; ++i) step();
+    auto actor = world.lookupAgent(id).entity;
+    require(!booth->getTargetOpen() && booth->getProgress() == 0.f && actor->getSector()->getIndex() == (backSide ? back : front)
+      && std::abs(actor->getGlobalPosition().x - 3.5f) < .001f, "Fresh Up must close without auto-approach or BoothWindow traversal");
+  }
+}
+
 void checkPlayerChamberKeys(wp::application::State& play, core::World& world) {
   using wp::application::Key; using wp::application::KeyEvent;
   auto key = [&](Key k, bool pressed) { play._injectKeyInput(pressed ? KeyEvent::Pressed : KeyEvent::Released, k, {}); };
@@ -619,6 +658,7 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
         checkPlayerTransportKeys(*child, *map->getWorld());
         checkPlayerAirlockKeys(*child, *map->getWorld());
         checkPlayerChamberKeys(*child, *map->getWorld());
+        checkPlayerBoothWindowKeys(*child, *map->getWorld());
         auto const suspendTick = map->getWorld()->getSimulationTick();
         child->_suspend(true, true, true);
         child->_update(1.0f);

@@ -62,6 +62,10 @@ This includes Room Ladders. When no higher-priority climb or doorway action appl
 a fresh Up press operates one physical Button within effective arm length and its
 Interaction point reach. Buttons require Arms capability, Buttons Mobility and
 Access permissions; they never auto-approach or repeat while Up is held.
+The same lowest-priority fresh Up action toggles a standalone BoothWindow through
+its owned back-side shutter control, with physical Arms reach and permission
+checks. Front-side operation and BoothWindow traversal remain unavailable;
+Dumbwaiter-owned shutters retain their normal landing-button interlocks.
 Airlock outside Buttons use Up to call; Left/Right manually enters the open
 entrance, walks inside and exits through the committed opposite Door after the
 normal interlock cycle. Player Bulkhead collision uses the moving leaf's bounding

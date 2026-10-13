@@ -144,6 +144,25 @@ camera is used.
   stationary in its existing fitting pose; input does not force it through the
   ceiling.
 
+## BoothWindow shutters
+
+- A fresh **Up** press within reach of a standalone BoothWindow's owned **back-side
+  control** toggles its shutter open/closed. The Player must be in that back-side
+  Location on the control's Level, with Arms capability, effective arm length,
+  Buttons Mobility and every required Access permission. Permission adherence
+  does not bypass operation authorization.
+- BoothWindow controls share physical Buttons' lowest Up priority, after contextual
+  climbing and Door actions. Eligible controls use nearest approach point, then
+  stable Interaction point ID. Holding Up or keyboard repeat never retoggles.
+- Operation uses normal Interaction queues and shutter animation, without approach
+  automation or alignment. Busy accepted requests retain normal deduplication;
+  after completion another fresh press can toggle again. Leaving reach cancels
+  an unactivated request; an accepted toggle still finishes safely.
+- The front side cannot operate the shutter. BoothWindows remain non-traversable.
+  Dumbwaiter-owned apertures retain their landing-button/interlock ownership and
+  do not acquire independent shutter controls. Pause freezes animation; Reset
+  restores the authored shutter state.
+
 ## Manual Airlocks
 
 - A fresh **Up** press at an eligible outside Button requests its Airlock entrance
