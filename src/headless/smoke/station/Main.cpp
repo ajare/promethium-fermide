@@ -17491,6 +17491,206 @@ void protectedServices(smoke::Context const&)
 			"the protected chiller dependency allocation was not deterministic");
 	}
 
+	// Scenario 5c: protected chiller credit reconciliation (#580).
+	// The protected cooling credit is sized from the loop's tick-start
+	// heat, but the loop's implicit exchange with its reservoir is only
+	// solved later in the tick, so the credit is a reservation, not
+	// spent work: every watt the real duty cannot use must return to
+	// the source it came from, and the battery ledger, the generation
+	// surplus, the competing consumers and the protected requested/
+	// supplied/unmet account must all agree on the work that actually
+	// moved. A critical chiller on a critical loop whose cold reservoir
+	// drags the extractable heat to zero (or near it) must strand
+	// nothing on the bus.
+	auto creditRun = [&](double solarKW, double conductanceKWPerK,
+		bool withBattery, bool withCompetitor)
+	{
+		auto world = std::make_unique<core::World>("ChillerCredit", 2, 2);
+		world->pauseSimulation();
+		world->finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		settings.thermalReservoirs = { reservoir("sink", "low", -20.0),
+			reservoir("hot", "low", 20.0) };
+		auto loop = normalLoop("loop", 1.0, 1.0);
+		loop.criticalService = true;
+		loop.exchangerConductanceKWPerK = conductanceKWPerK;
+		settings.coolantLoops = { loop };
+		settings.chillers = { criticalChiller("chiller", "loop") };
+		if (solarKW > 0.0) settings.solarArrays = { solarArray(solarKW) };
+		if (withBattery)
+		{
+			core::BatterySettings bank;
+			bank.id = "bank";
+			bank.nameplateKWh = 10.0;
+			bank.usableKWh = 9.0;
+			bank.startingStoredKWh = 5.0;
+			bank.maxChargeKW = 5.0;
+			bank.maxDischargeKW = 10.0;
+			bank.dischargeEfficiency = 0.9;
+			settings.batteries = { bank };
+		}
+		if (withCompetitor)
+			settings.equipmentLoads = { discretionaryLoad("experiment", 1.0, 1.0) };
+		configure(*world, settings, "chiller credit rig");
+		world->resumeSimulation();
+		runOrDiagnose(*world, 1, "chiller credit run");
+		return world;
+	};
+	auto const tickHours = static_cast<double>(core::World::getFixedTimestep()) / 3600.0;
+	// The exchange leaves the cold loop no extractable heat: the whole
+	// 2 kW work reservation has no consumer, so it returns to the bus
+	// as surplus, the protected account reports only the pump as
+	// supplied, and the competing discretionary load never saw those
+	// watts spent.
+	{
+		auto world = creditRun(3.0, 1.0e6, false, true);
+		auto const& snap = world->getStationSystemsSnapshot();
+		require(closeTo(snap.coolantLoops[0].pumpSuppliedKW, 1.0),
+			"the protected pump did not run in the credit reconciliation rig");
+		require(closeTo(snap.chillers[0].coolingKW, 0.0)
+			&& closeTo(snap.chillers[0].powerSuppliedKW, 0.0),
+			"the exchange-blocked chiller consumed work it could not convert");
+		require(closeTo(snap.power.protectedDemandKW, 3.0)
+			&& closeTo(snap.power.protectedSuppliedKW, 1.0)
+			&& closeTo(snap.power.protectedUnmetKW, 2.0),
+			"the protected account still counts the unused reservation as supplied work");
+		require(snap.power.protectedUnmet,
+			"the reconciled unmet cooling did not raise the protected alarm");
+		auto const* cooling = findProtectedService(snap, "chiller", "critical-cooling");
+		require(cooling != nullptr
+			&& closeTo(cooling->requestedKW, 2.0)
+			&& closeTo(cooling->suppliedKW, 0.0)
+			&& closeTo(cooling->unmetKW, 2.0)
+			&& cooling->reason.find("returned to the pool") != std::string::npos,
+			"the reconciled cooling service does not expose the returned credit");
+		// Whole-bus energy balance: solar in = pump + chiller work +
+		// surplus; the unused credit is back on the bus, not stranded.
+		require(closeTo(snap.power.surplusKW, 2.0)
+			&& closeTo(snap.power.availableGenerationKW,
+				snap.coolantLoops[0].pumpSuppliedKW
+				+ snap.chillers[0].powerSuppliedKW + snap.power.surplusKW),
+			"the whole-bus energy balance does not close on the returned credit");
+		require(closeTo(snap.power.loads[0].suppliedKW, 0.0),
+			"the competing discretionary load received power in the reconciliation rig");
+		require(sawEvent(*world, "Protected critical-cooling 'chiller' unmet"),
+			"the reconciled unused cooling was not announced as unmet");
+	}
+	// The exchange leaves a small but nonzero duty: the credit funds the
+	// duty that really moves, only the remainder returns, and every
+	// ledger agrees on that one number.
+	{
+		auto world = creditRun(3.0, 36.0, false, true);
+		auto const& snap = world->getStationSystemsSnapshot();
+		auto const work = snap.chillers[0].powerSuppliedKW;
+		require(work > 0.5 && work < 2.0,
+			"the exchange-limited duty is not a smaller-but-nonzero share of the credit");
+		require(closeTo(snap.chillers[0].coolingKW, work),
+			"the cooling delivered does not match the work actually powered");
+		require(closeTo(snap.power.protectedSuppliedKW, 1.0 + work)
+			&& closeTo(snap.power.protectedUnmetKW, 2.0 - work),
+			"the protected account does not agree with the work that actually moved");
+		require(closeTo(snap.power.surplusKW, 2.0 - work)
+			&& closeTo(snap.power.availableGenerationKW,
+				snap.coolantLoops[0].pumpSuppliedKW + work + snap.power.surplusKW),
+			"the whole-bus energy balance does not close on the partially used credit");
+		require(closeTo(snap.power.loads[0].suppliedKW, 0.0),
+			"the competing discretionary load took power ahead of the protected bundle");
+	}
+	// A battery-funded credit whose duty is zero: the refund goes back
+	// into storage, not just off the discharge report - the battery paid
+	// only for the pump, the work it never supplied never left storage.
+	{
+		auto world = creditRun(0.0, 1.0e6, true, false);
+		auto const& snap = world->getStationSystemsSnapshot();
+		require(closeTo(snap.coolantLoops[0].pumpSuppliedKW, 1.0)
+			&& closeTo(snap.chillers[0].powerSuppliedKW, 0.0),
+			"the battery-funded reconciliation rig did not run as authored");
+		auto const& bank = snap.power.batteries[0];
+		require(closeTo(bank.lastDischargeKW, 1.0),
+			"the refunded battery credit still counted as discharge this tick");
+		require(closeTo(bank.storedKWh, 5.0 - 1.0 * tickHours / 0.9),
+			"the refunded battery energy did not return to storage");
+		require(closeTo(bank.dischargedKWh, 1.0 * tickHours / 0.9)
+			&& closeTo(bank.deliveredKWh, 1.0 * tickHours),
+			"the battery energy ledger does not close on the reconciled credit");
+		require(closeTo(snap.power.protectedSuppliedKW, 1.0)
+			&& closeTo(snap.power.surplusKW, 0.0),
+			"the protected and surplus accounts disagree with the battery-funded reconciliation");
+	}
+	// A battery-funded credit with a smaller-but-nonzero duty: the
+	// battery discharges exactly the pump plus the work that moved, and
+	// the unused remainder of its draw is back in storage.
+	{
+		auto world = creditRun(0.0, 36.0, true, false);
+		auto const& snap = world->getStationSystemsSnapshot();
+		auto const work = snap.chillers[0].powerSuppliedKW;
+		require(work > 0.5 && work < 2.0,
+			"the battery-funded exchange-limited duty is not smaller but nonzero");
+		auto const& bank = snap.power.batteries[0];
+		require(closeTo(bank.lastDischargeKW, 1.0 + work),
+			"the battery still discharged the unused part of the protected credit");
+		require(closeTo(bank.storedKWh, 5.0 - (1.0 + work) * tickHours / 0.9),
+			"the unused battery-funded credit did not return to storage");
+		require(closeTo(snap.power.protectedSuppliedKW, 1.0 + work)
+			&& closeTo(snap.power.protectedUnmetKW, 2.0 - work),
+			"the protected account disagrees with the battery-funded actual work");
+		require(closeTo(snap.power.surplusKW, 0.0),
+			"a battery-funded reconciliation reported surplus it does not have");
+	}
+	// Determinism: two identical reconciliation runs agree on every
+	// protected, delivered and battery scalar.
+	{
+		auto const first = creditRun(0.0, 36.0, true, true);
+		auto const second = creditRun(0.0, 36.0, true, true);
+		auto const& a = first->getStationSystemsSnapshot();
+		auto const& b = second->getStationSystemsSnapshot();
+		require(closeTo(a.power.protectedSuppliedKW, b.power.protectedSuppliedKW)
+			&& closeTo(a.chillers[0].powerSuppliedKW, b.chillers[0].powerSuppliedKW)
+			&& closeTo(a.power.batteries[0].storedKWh, b.power.batteries[0].storedKWh)
+			&& closeTo(a.power.surplusKW, b.power.surplusKW),
+			"the protected chiller credit reconciliation was not deterministic");
+	}
+	// Host/Lua seam: the bundled sandbox refunds the unused credit in
+	// its own battery ledger and protected account, and both agree with
+	// the host snapshot for the same tick.
+	{
+		SourceScope scope;
+		auto const bundled = core::bundledStationSystemsSource();
+		core::setStationSystemsSourceLoader([bundled] {
+			return "local factory = (function()\n" + bundled + "\nend)()\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, cropPopulations, algaeCultures, outages, dispatchMode)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, cropPopulations, algaeCultures, outages, dispatchMode)\n"
+				"local original = model.advance\n"
+				"function model.advance(self, world_tick, fixed_seconds)\n"
+				"local result = original(self, world_tick, fixed_seconds)\n"
+				"local chiller = self.chillers[1]\n"
+				"local bank = self.batteries[1]\n"
+				"local hours = fixed_seconds / 3600.0\n"
+				"if world_tick == 1 then\n"
+				"assert(math.abs(chiller.lastPowerSupplied) < 1e-12, 'sandbox chiller spent credit it could not convert')\n"
+				"assert(math.abs(self.protectedSupplied - 1.0) < 1e-12, 'sandbox protected account not reconciled to actual work')\n"
+				"assert(math.abs(self.protectedUnmet - 2.0) < 1e-12, 'sandbox protected unmet not reconciled')\n"
+				"assert(math.abs(bank.last_discharge - 1.0) < 1e-12, 'sandbox battery still discharged the refunded credit')\n"
+				"assert(math.abs(bank.stored - (5.0 - 1.0 * hours / 0.9)) < 1e-12, 'sandbox battery energy not returned to storage')\n"
+				"else\n"
+				"assert(math.abs(self.protectedSupplied - (1.0 + chiller.lastPowerSupplied)) < 1e-12, 'sandbox protected account disagrees with the actual work')\n"
+				"assert(math.abs(bank.last_discharge - (1.0 + chiller.lastPowerSupplied)) < 1e-12, 'sandbox battery discharge disagrees with the actual work')\n"
+				"end\n"
+				"return result\n"
+				"end\n"
+				"return model\n"
+				"end";
+		});
+		auto world = creditRun(0.0, 1.0e6, true, false);
+		// The host ledger over the same tick agrees with what the sandbox
+		// asserted for its own battery and protected accounts.
+		auto const& snap = world->getStationSystemsSnapshot();
+		require(closeTo(snap.power.protectedSuppliedKW, 1.0)
+			&& closeTo(snap.power.batteries[0].lastDischargeKW, 1.0),
+			"the host and sandbox chiller credit reconciliation disagree");
+	}
+
 	// Scenario 6: authored persistence. The protected flags round-trip
 	// with the World document, and a pre-92 document carrying them is
 	// refused rather than silently dropping the protection.

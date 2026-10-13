@@ -5211,12 +5211,19 @@ namespace core
 			// Route a power need through the batteries in declaration order
 			// and return what they actually delivered. Each battery records
 			// the need routed to it and whatever it could not supply.
-			auto const drawBatteries = [&](double needKW)
+			// The optional contributions vector records, per battery, how
+			// much of the need it actually delivered, so a caller that later
+			// discovers the draw was for work that never happens can undo
+			// exactly its own draw (#580). Callers that spend the energy for
+			// good pass no vector and see no change.
+			auto const drawBatteries = [&](double needKW,
+				std::vector<std::pair<size_t, double>>* contributions = nullptr)
 			{
 				if (needKW <= 0.0) return 0.0;
 				auto remaining = needKW;
-				for (auto& battery : batteries)
+				for (size_t batteryIndex = 0; batteryIndex < batteries.size(); ++batteryIndex)
 				{
+					auto& battery = batteries[batteryIndex];
 					if (remaining <= 1e-15) break;
 					if (batteryDisabled(battery)) continue;
 					auto const cap = deliverableKW(battery, hours);
@@ -5229,6 +5236,8 @@ namespace core
 						battery.dischargedKWh += drawn;
 						battery.deliveredKWh += give * hours;
 						battery.lastDischargeKW += give;
+						if (contributions != nullptr)
+							contributions->push_back({batteryIndex, give});
 					}
 					battery.lastDischargeRequestedKW += remaining;
 					battery.lastDischargeShortfallKW += remaining - give;
@@ -6061,6 +6070,22 @@ namespace core
 			std::vector<double> protectedLoopPumpKW(coolantLoops.size(), 0.0);
 			std::vector<double> protectedLoopHeaterKW(coolantLoops.size(), 0.0);
 			std::vector<double> protectedChillerPowerKW(chillers.size(), 0.0);
+			// #580: a protected chiller credit is a reservation, not spent
+			// work: the duty the machine can actually convert is only known
+			// after the loop's implicit exchange is solved later in the
+			// tick. The draw's composition is recorded here so the chiller
+			// pass can refund every watt it cannot use back to the source
+			// it came from, and point at its protected service entry so the
+			// protected account can be reconciled to the work actually
+			// supplied.
+			struct ProtectedChillerDraw
+			{
+				double fromGenerationKW{0.0};
+				std::vector<std::pair<size_t, double>> fromBatteryKW{};
+			};
+			std::vector<ProtectedChillerDraw> protectedChillerDraws(chillers.size());
+			std::vector<size_t> chillerProtectedServiceIndex(
+				chillers.size(), static_cast<size_t>(-1));
 			std::vector<double> protectedCropCirculationKW(cropPopulations.size(), 0.0);
 			std::vector<double> protectedAlgaeCirculationKW(algaeCultures.size(), 0.0);
 			std::vector<StationProtectedServiceSnapshot> protectedServices;
@@ -6223,9 +6248,21 @@ namespace core
 				// Only the work the powered circulation can actually use is
 				// drawn from the pool; the remainder of the potential stays
 				// explicit unmet critical service instead of buying power
-				// the chiller cannot convert into cooling.
-				auto const suppliedKW = drawProtected(usableWorkKW);
+				// the chiller cannot convert into cooling. The draw is made
+				// through the same generation-first, battery-second order as
+				// drawProtected, but tracked (#580): the chiller pass owns
+				// the reservation from here and refunds whatever the real
+				// heat calculation leaves unused instead of stranding it.
+				auto const creditFromGenerationKW = std::min(usableWorkKW, availableGeneration);
+				availableGeneration -= creditFromGenerationKW;
+				std::vector<std::pair<size_t, double>> creditFromBatteryKW;
+				auto const creditFromBatteryTotalKW = drawBatteries(
+					usableWorkKW - creditFromGenerationKW, &creditFromBatteryKW);
+				batterySuppliedKW += creditFromBatteryTotalKW;
+				auto const suppliedKW = creditFromGenerationKW + creditFromBatteryTotalKW;
 				protectedChillerPowerKW[chillerIndex] = suppliedKW;
+				protectedChillerDraws[chillerIndex].fromGenerationKW = creditFromGenerationKW;
+				protectedChillerDraws[chillerIndex].fromBatteryKW = std::move(creditFromBatteryKW);
 				recordProtected(chiller.authored.id, "critical-cooling", requestedKW,
 					suppliedKW, circulationFraction + 1e-12 < 1.0
 						? "the protected chiller's cold-loop circulation is unpowered or "
@@ -6235,6 +6272,7 @@ namespace core
 							? "the shared electrical pool cannot supply the protected cooling work: "
 								"the chiller runs curtailed and the cold service falls short"
 							: std::string{});
+				chillerProtectedServiceIndex[chillerIndex] = protectedServices.size() - 1;
 			}
 			// Biological essential circulation: the pumps that deliver gas,
 			// water and nutrients across the canopy or through the culture
@@ -6743,6 +6781,52 @@ namespace core
 			// condenser booking equals extracted heat plus the work and
 			// auxiliaries actually supplied at one consistent boundary.
 			double totalChillerPowerKW{0.0};
+			// #580: the protected chiller credit is a reservation against
+			// the pool, not spent work. The duty the machine can actually
+			// convert is only known once the loop's implicit exchange has
+			// been solved, so every watt of credit this pass cannot use is
+			// returned to the source it came from - battery draws are undone
+			// last-drawn-first, so the work that was actually used keeps the
+			// generation-first order the pool spends in - and the protected
+			// service account is reconciled to the work actually supplied,
+			// so battery discharge, generation surplus, charging, consumers
+			// and the protected requested/supplied/unmet totals all agree
+			// on the duty that really moved.
+			auto const refundChillerCredit = [&](size_t chillerIndex, double refundKW)
+			{
+				if (refundKW <= 1e-15) return;
+				auto& draw = protectedChillerDraws[chillerIndex];
+				for (auto it = draw.fromBatteryKW.rbegin();
+					it != draw.fromBatteryKW.rend() && refundKW > 1e-15; ++it)
+				{
+					auto const give = std::min(refundKW, it->second);
+					if (give <= 0.0) continue;
+					auto& battery = batteries[it->first];
+					auto const storedKWh = give * hours / battery.authored.dischargeEfficiency;
+					battery.stored += storedKWh;
+					battery.dischargedKWh -= storedKWh;
+					battery.deliveredKWh -= give * hours;
+					battery.lastDischargeKW -= give;
+					batterySuppliedKW -= give;
+					it->second -= give;
+					refundKW -= give;
+				}
+				availableGeneration += refundKW;
+			};
+			auto const reconcileChillerProtected = [&](size_t chillerIndex)
+			{
+				if (chillerProtectedServiceIndex[chillerIndex] == static_cast<size_t>(-1)) return;
+				auto const creditKW = protectedChillerPowerKW[chillerIndex];
+				auto const actualKW = chillers[chillerIndex].lastPowerSuppliedKW;
+				if (actualKW == creditKW) return;
+				protectedSuppliedKW += actualKW - creditKW;
+				auto& service = protectedServices[chillerProtectedServiceIndex[chillerIndex]];
+				service.suppliedKW = actualKW;
+				service.unmetKW = std::max(0.0, service.requestedKW - actualKW);
+				if (actualKW < creditKW && service.reason.empty())
+					service.reason = "the protected cooling credit was reconciled to the duty "
+						"the cold loop could actually deliver: unused work was returned to the pool";
+			};
 			for (size_t chillerIndex = 0; chillerIndex < chillers.size(); ++chillerIndex)
 			{
 				auto& chiller = chillers[chillerIndex];
@@ -6785,6 +6869,11 @@ namespace core
 					if (capacityDisabled && !disabled)
 						chiller.lastBlockReason = "a scheduled outage has taken the chiller's full rated cooling capacity out of service";
 					chiller.status = StationTransferStatus::Idle;
+					// #580: a refusal before any work is drawn still owns the
+					// reservation the admission phase took for this machine -
+					// nothing verified was spent, so all of it goes back.
+					refundChillerCredit(chillerIndex, protectedChillerPowerKW[chillerIndex]);
+					reconcileChillerProtected(chillerIndex);
 					continue;
 				}
 				if (chiller.lastSinkOver)
@@ -6797,6 +6886,10 @@ namespace core
 					chiller.lastBlockReason = "condenser sink '" + chiller.authored.condenserReservoirId
 						+ "' is at or above the maximum condensing temperature";
 					chiller.status = StationTransferStatus::Rejected;
+					// #580: the whole-machine refusal uses no work, so the
+					// whole reservation returns to the pool.
+					refundChillerCredit(chillerIndex, protectedChillerPowerKW[chillerIndex]);
+					reconcileChillerProtected(chillerIndex);
 					continue;
 				}
 				chiller.lastAdmitted = true;
@@ -6843,6 +6936,11 @@ namespace core
 						? "no coolant circulation at the cold-side interface"
 						: "the cold loop holds no extractable heat above the chilled setpoint";
 					chiller.status = StationTransferStatus::Rejected;
+					// #580: the exchange left nothing to cool, so the work
+					// reserved against the tick-start heat has no consumer:
+					// return it all instead of stranding it.
+					refundChillerCredit(chillerIndex, protectedChillerPowerKW[chillerIndex]);
+					reconcileChillerProtected(chillerIndex);
 					continue;
 				}
 				chiller.lastPowerDemandKW = chiller.lastDeliverableKW / chiller.authored.cop
@@ -6856,6 +6954,10 @@ namespace core
 				double const fromCreditKW = std::min(remainingDemandKW, creditKW);
 				remainingDemandKW -= fromCreditKW;
 				creditKW -= fromCreditKW;
+				// #580: the credit beyond what this tick's real duty needs is
+				// not spent work - return it to the pool instead of dropping
+				// it, so the reservation never strands bus energy.
+				refundChillerCredit(chillerIndex, creditKW);
 				auto const fromGeneration = std::min(remainingDemandKW, availableGeneration);
 				availableGeneration -= fromGeneration;
 				auto const ask = remainingDemandKW - fromGeneration;
@@ -6878,12 +6980,25 @@ namespace core
 				chiller.workKJ += suppliedKW * static_cast<double>(seconds);
 				chiller.condenserKJ += chiller.lastCondenserKW * static_cast<double>(seconds);
 				totalChillerPowerKW += suppliedKW;
+				reconcileChillerProtected(chillerIndex);
 				if (coolingKW + 1e-12 >= coolingDemandKW)
 					chiller.status = StationTransferStatus::Full;
 				else if (suppliedKW <= 1e-12)
 					chiller.status = StationTransferStatus::Rejected;
 				else chiller.status = StationTransferStatus::Partial;
 			}
+			// #580: republish the protected totals after the chiller pass
+			// so the snapshot, the station alarm and the event announcements
+			// report the reconciled cooling work - the duty that actually
+			// moved - rather than the pre-verification reservation.
+			if (!std::isfinite(protectedSuppliedKW))
+			{
+				system = "Power allocation";
+				return violation = "reconciled protected critical service totals are not finite", false;
+			}
+			lastProtectedSuppliedKW = protectedSuppliedKW;
+			lastProtectedUnmetTotalKW = std::max(0.0, protectedDemandKW - protectedSuppliedKW);
+			lastProtectedServices = protectedServices;
 			// Water treatment (#402) runs after the chillers and before the
 			// loop's second pass: it competes for the same generation-and-
 			// battery pool, and the collectors that feed heat into those loops

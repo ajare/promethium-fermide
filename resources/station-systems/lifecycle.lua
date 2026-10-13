@@ -3785,7 +3785,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     -- Route a power need through the batteries in declaration order and
     -- return what they actually delivered. dtHours is the crossing
     -- duration in HOURS: kW x hours = kWh, never kW x seconds (#547).
-    local function drawBatteries(self, needKW, dtHours)
+    -- The optional contributions table records, per battery, how much of
+    -- the need it actually delivered, so a caller that later discovers
+    -- the draw was for work that never happens can undo exactly its own
+    -- draw (#580). Callers that spend the energy for good pass no table
+    -- and see no change.
+    local function drawBatteries(self, needKW, dtHours, contributions)
         if needKW <= 0 then return 0 end
         local remaining = needKW
         for _, battery in ipairs(self.batteries) do
@@ -3799,6 +3804,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     battery.discharged = battery.discharged + drawn
                     battery.delivered = battery.delivered + give * dtHours
                     battery.last_discharge = battery.last_discharge + give
+                    if contributions then
+                        table.insert(contributions, {battery = battery, give = give})
+                    end
                 end
                 remaining = remaining - give
             end
@@ -4559,8 +4567,18 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- the work the unpowered circulation cannot use is never drawn
         -- from the pool to be wasted. Mirrors the host ledger exactly.
         local chiller_circulation_resolved = {}
+        -- #580: a protected chiller credit is a reservation, not spent
+        -- work: the duty the machine can actually convert is only known
+        -- after the loop's implicit exchange is solved later in the tick.
+        -- The draw's composition is recorded on the chiller so the
+        -- chiller pass can refund every watt it cannot use back to the
+        -- source it came from, and point at the protected service entry
+        -- so the protected account can be reconciled to the work
+        -- actually supplied. Mirrors the host ledger exactly.
         for _, chiller in ipairs(self.chillers) do
             chiller.protectedPowerSupplied = 0
+            chiller.protectedDraw = nil
+            chiller.protectedServiceIndex = nil
             if chiller.criticalService then
                 local loop = chiller.coldLoop
                 local sink = chiller.condenser
@@ -4627,17 +4645,32 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     local usableWork = deliverable > 1e-12
                         and deliverable / chiller.cop + chiller.auxKW or 0
                     if requested > 0 then
-                        local supplied = drawProtected(usableWork)
+                        -- The draw is made through the same generation-
+                        -- first, battery-second order as drawProtected,
+                        -- but tracked (#580): the chiller pass owns the
+                        -- reservation from here and refunds whatever the
+                        -- real heat calculation leaves unused instead of
+                        -- stranding it.
+                        local creditFromGeneration = math.min(usableWork, generation)
+                        generation = generation - creditFromGeneration
+                        local creditFromBattery = {}
+                        local creditBatteryTotal = drawBatteries(self,
+                            usableWork - creditFromGeneration, fixed_hours, creditFromBattery)
+                        batterySupplied = batterySupplied + creditBatteryTotal
+                        local supplied = creditFromGeneration + creditBatteryTotal
                         chiller.protectedPowerSupplied = supplied
+                        chiller.protectedDraw = {fromGeneration = creditFromGeneration,
+                            fromBattery = creditFromBattery}
                         recordProtected(chiller.id, 'critical-cooling', requested, supplied,
                             circulationFraction + 1e-12 < 1
                             and "the protected chiller's cold-loop circulation is unpowered or "
                                 .. 'curtailed: cooling service is limited by the circulation the '
                                 .. 'pool could power'
-                            or (supplied + 1e-12 < requested
+                                or (supplied + 1e-12 < requested
                                 and 'the shared electrical pool cannot supply the protected cooling '
                                     .. 'work: the chiller runs curtailed and the cold service falls short'
                                 or ''))
+                        chiller.protectedServiceIndex = #protected_services
                     end
                 end
             end
@@ -4707,6 +4740,58 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         self.protectedSupplied = protected_supplied
         self.protectedUnmet = math.max(0, protected_demand - protected_supplied)
         self.protectedServices = protected_services
+        -- #580: the protected chiller credit is a reservation against
+        -- the pool, not spent work. The duty the machine can actually
+        -- convert is only known once the loop's implicit exchange has
+        -- been solved, so every watt of credit the chiller pass cannot
+        -- use returns to the source it came from - battery draws are
+        -- undone last-drawn-first, so the work that was actually used
+        -- keeps the generation-first order the pool spends in - and the
+        -- protected service account is reconciled to the work actually
+        -- supplied, so battery discharge, generation surplus, charging,
+        -- consumers and the protected requested/supplied/unmet totals
+        -- all agree on the duty that really moved. Mirrors the host
+        -- ledger exactly.
+        local function refundProtectedChillerCredit(chiller, refundKW)
+            if refundKW <= 1e-15 then return end
+            local draw = chiller.protectedDraw
+            if draw then
+                for i = #draw.fromBattery, 1, -1 do
+                    if refundKW <= 1e-15 then break end
+                    local entry = draw.fromBattery[i]
+                    local give = math.min(refundKW, entry.give)
+                    if give > 0 then
+                        local battery = entry.battery
+                        local stored = give * fixed_hours / battery.dischargeEfficiency
+                        battery.stored = battery.stored + stored
+                        battery.discharged = battery.discharged - stored
+                        battery.delivered = battery.delivered - give * fixed_hours
+                        battery.last_discharge = battery.last_discharge - give
+                        batterySupplied = batterySupplied - give
+                        entry.give = entry.give - give
+                        refundKW = refundKW - give
+                    end
+                end
+            end
+            generation = generation + refundKW
+        end
+        local function reconcileProtectedChiller(self, chiller)
+            local index = chiller.protectedServiceIndex
+            if not index then return end
+            local credit = chiller.protectedPowerSupplied or 0
+            local actual = chiller.lastPowerSupplied
+            if actual == credit then return end
+            protected_supplied = protected_supplied + actual - credit
+            local service = protected_services[index]
+            service.supplied = actual
+            service.unmet = math.max(0, service.requested - actual)
+            if actual < credit and service.reason == '' then
+                service.reason = 'the protected cooling credit was reconciled to the duty '
+                    .. 'the cold loop could actually deliver: unused work was returned to the pool'
+            end
+            self.protectedSupplied = protected_supplied
+            self.protectedUnmet = math.max(0, protected_demand - protected_supplied)
+        end
         local supplied = {}
         for _, index in ipairs(self.load_order) do
             local load = self.loads[index]
@@ -5032,6 +5117,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             chiller.lastCondenserKW = 0
             chiller.lastFraction = 0
             chiller.admitted = not disabled and not capacityDisabled and not chiller.sinkOver
+            -- #580: the reservation the admission phase took for this
+            -- machine is owned by this pass: every watt the real duty
+            -- does not consume returns to the pool, in every refusal and
+            -- partial-demand branch, and the protected account is
+            -- reconciled to the work actually supplied.
+            local credit = chiller.protectedPowerSupplied or 0
             if chiller.admitted and coolingDemand > 0 then
                 -- A nameplate rating is not a heat source (#560). Over
                 -- the tick the cold loop can give up only the heat its
@@ -5063,9 +5154,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     -- ahead of the discretionary external loads first;
                     -- only duty beyond the credit (heat that entered the
                     -- cold loop during the tick) still competes in the
-                    -- general pool.
-                    local credit = chiller.protectedPowerSupplied or 0
+                    -- general pool. #580: the credit beyond the real duty
+                    -- is not spent work - it goes straight back to the
+                    -- pool instead of being dropped.
                     local fromCredit = math.min(powerDemand, credit)
+                    refundProtectedChillerCredit(chiller, credit - fromCredit)
                     local remaining = powerDemand - fromCredit
                     local fromGeneration = math.min(remaining, generation)
                     generation = generation - fromGeneration
@@ -5087,8 +5180,19 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     chiller.workKJ = chiller.workKJ + supplied * fixed_seconds
                     chiller.condenserKJ = chiller.condenserKJ
                         + chiller.lastCondenserKW * fixed_seconds
+                else
+                    -- Nothing can move through the evaporator this tick:
+                    -- the whole reservation has no consumer and returns
+                    -- to the pool (#580).
+                    refundProtectedChillerCredit(chiller, credit)
                 end
+            else
+                -- A refusal before any work is drawn still owns the
+                -- reservation: nothing verified was spent, so all of it
+                -- goes back (#580).
+                refundProtectedChillerCredit(chiller, credit)
             end
+            reconcileProtectedChiller(self, chiller)
             assert(isFinite(chiller.lastDemand) and isFinite(chiller.lastCooling)
                 and isFinite(chiller.lastDeliverable) and isFinite(chiller.lastPowerDemand)
                 and isFinite(chiller.lastPowerSupplied) and isFinite(chiller.lastCondenserKW)
