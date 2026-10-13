@@ -1886,9 +1886,7 @@ void bufferWorkflow(smoke::Context const&)
 			world->markSaved();
 			world->resumeSimulation(); REQ(world->advanceTicks(60), "Editor run failed");
 			world->pauseSimulation(); ctx->Sleep(1);
-			REQ(driver.contains("condition 0.520")
-				&& driver.contains("benign, recovering")
-				&& driver.contains("drawn from 'stock'"),
+			REQ(driver.contains("condition 0.520 | benign, recovering | last change +0.000333 | replacement stock: drawn from 'stock', consumed 0.003333 units this tick (0.2000 total)"),
 				"Live culture condition, recovery state or stock funding not displayed");
 			REQ(!world->isModified(), "Microbial condition ticking dirtied the authored document");
 			// An invalid drafted condition is refused with a visible
@@ -1917,6 +1915,37 @@ void bufferWorkflow(smoke::Context const&)
 			REQ(driver.contains("condition 0.260")
 				&& driver.contains("1 microbial processor(s)"),
 				"Applied recovery rate not reflected in the live condition display");
+
+			// Render real World snapshots for every description branch and
+			// both configured and absent replacement stock. Check the entire
+			// line so displaced printf arguments cannot pass on substrings.
+			auto checkReadout = [&](core::StationSystemsSettings const& settings,
+				char const* expected)
+			{
+				if (!driver.require(world->configureStationSystems(settings, true, &diagnostic),
+					diagnostic.c_str())) return false;
+				world->resumeSimulation();
+				if (!driver.require(world->advanceTicks(60), "Readout run failed")) return false;
+				world->pauseSimulation(); ctx->Sleep(1);
+				return driver.require(driver.contains(expected), "Complete microbial condition readout incorrect");
+			};
+			auto benign = initial;
+			benign.microbialProcessors[0].initialCondition = 1.0;
+			benign.microbialProcessors[0].stockStoreId.clear();
+			REQ(checkReadout(benign,
+				"condition 1.000 | benign, at full condition | last change +0.000000 | replacement stock: none configured, consumed 0.000000 units this tick (0.0000 total)"),
+				"Benign readout failed");
+			auto recovering = initial;
+			recovering.microbialProcessors[0].stockStoreId.clear();
+			REQ(checkReadout(recovering,
+				"condition 0.520 | benign, recovering | last change +0.000333 | replacement stock: none configured, consumed 0.000000 units this tick (0.0000 total)"),
+				"Recovery without configured stock readout failed");
+			auto stressed = benign;
+			stressed.stores[0].startingQualified = 0.0;
+			stressed.microbialProcessors[0].starvationDegradePerHour = 72.0;
+			REQ(checkReadout(stressed,
+				"condition 0.980 | stressed by starvation | last change -0.000333 | replacement stock: none configured, consumed 0.000000 units this tick (0.0000 total)"),
+				"Stressed readout failed");
 		});
 		#undef REQ
 		require(driver.passed(), "Microbial condition workflow failed on the Test Engine");

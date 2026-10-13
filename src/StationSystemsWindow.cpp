@@ -3287,7 +3287,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			processor.co2ProducedKg, processor.residueProducedKg,
 			processor.energySuppliedKJ, processor.reactionHeatKJ, processor.heatRoutedKJ,
 			processor.residualKg, processor.residualKJ);
-		ImGui::Text("  condition %.3f | %s%s | last change %+.6f | replacement stock: %s consumed %.6f units this tick (%.4f total)",
+		ImGui::Text("  condition %.3f | %s | last change %+.6f | replacement stock: %s consumed %.6f units this tick (%.4f total)",
 			processor.condition,
 			processor.lastStressors.empty() ? (processor.recovering
 				? "benign, recovering" : "benign, at full condition")
