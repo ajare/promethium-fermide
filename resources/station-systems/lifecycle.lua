@@ -92,6 +92,21 @@ local METHANE_PROCESSING_C_KG_PER_CH4_KG = 1.0 - METHANE_PROCESSING_H2_KG_PER_CH
 -- mirroring the host's StationMethaneProcessingReactionHeatKJPerKgMethane
 -- (#405): the authored dose must at least cover this demand.
 local METHANE_PROCESSING_HEAT_KJ_PER_CH4_KG = 74.8 / MOLAR_MASS_METHANE
+-- Crop photosynthetic stoichiometry (#409): dry crop organic matter is
+-- modelled as carbohydrate with the empirical formula CH2O. Its molar
+-- mass is defined as the closure of the exchange itself - one CO2 plus
+-- one H2O minus one O2 - so the per-kilogram-organic ratios below close
+-- the mass ledger exactly by construction rather than approximately:
+-- CO2 drawn + water drawn = organic fixed + O2 released, and the mirror
+-- respiration identity organic + O2 = CO2 + water hold on the same
+-- declared molar masses. Mirrors the host's StationMolarMassCarbohydrate
+-- and StationPhotosynthesis* constants.
+local MOLAR_MASS_CARBOHYDRATE = MOLAR_MASS_CARBON_DIOXIDE + MOLAR_MASS_WATER
+    - MOLAR_MASS_OXYGEN
+local PHOTOSYNTHESIS_CO2_KG_PER_ORGANIC_KG = MOLAR_MASS_CARBON_DIOXIDE
+    / MOLAR_MASS_CARBOHYDRATE
+local PHOTOSYNTHESIS_O2_KG_PER_ORGANIC_KG = MOLAR_MASS_OXYGEN / MOLAR_MASS_CARBOHYDRATE
+local PHOTOSYNTHESIS_WATER_KG_PER_ORGANIC_KG = MOLAR_MASS_WATER / MOLAR_MASS_CARBOHYDRATE
 local GAS_CONSTANT = 8.314462618
 local LATENT_HEAT_VAPORIZATION = 2257.0
 -- Schedule boundary tolerance: an occurrence scheduled exactly on the
@@ -226,7 +241,7 @@ end
 return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries,
     reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews,
     waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers,
-    wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors)
+    wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)
     assert(type(name) == "string")
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
@@ -253,6 +268,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     assert(type(sabatierReactors) == "table", "Sabatier reactor descriptors missing")
     assert(type(methaneProcessors) == "table", "methane processor descriptors missing")
     assert(type(microbialProcessors) == "table", "microbial processor descriptors missing")
+    assert(type(cropPopulations) == "table", "crop population descriptors missing")
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
@@ -270,6 +286,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         sabatier_reactors = {}, sabatier_order = {},
         methane_processors = {}, methane_processor_order = {},
         microbial_processors = {}, microbial_order = {},
+        crop_populations = {}, crop_order = {},
         fuel_cells = {}, thermal_buffers = {},
         waste_ejections = {},
     }
@@ -1322,6 +1339,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             collected = 0,
             occupantHeatKJ = 0, latentHeatKJ = 0, exchangedKJ = 0,
             crewHeatKJ = 0,
+            -- Crop gas and heat pathways (#409): the O2 a canopy
+            -- released by photosynthesis, the O2 it drew by
+            -- respiration, the CO2 it fixed and returned, the vapour it
+            -- transpired and respired, and the crop heat - each a booked
+            -- pathway so the compartment's per-component and thermal
+            -- closures stay exact with crops present.
+            cropOxygenAdded = 0, cropOxygenDrawn = 0,
+            cropCarbonDioxideAdded = 0, cropCarbonDioxideDrawn = 0,
+            cropVapourAdded = 0, cropHeatKJ = 0,
         }
         atmosphere_by_id[atmosphere.id] = object.atmospheres[index]
     end
@@ -2164,6 +2190,150 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             energySuppliedKJ = 0, reactionHeatKJ = 0, heatRoutedKJ = 0,
         }
     end
+    -- Crop production contracts (#409), mirroring the host validation:
+    -- the declared composition is a dry-mass basis with no moisture and
+    -- no atmospheric nitrogen, the declared nutrient fractions leave a
+    -- non-negative organic dry-mass balance, the growth yield may not
+    -- fix more chemical energy per kWh of light than a kWh carries, the
+    -- growing window is a real window above absolute zero, and the
+    -- population starts within its declared Growing capacity. Every
+    -- tracked nutrient draws from its own separate mass store so
+    -- depletion stays visible per resource. All biological
+    -- coefficients are provisional assumptions: the sandbox pins them
+    -- finite and in range, not agronomically correct.
+    assert(#cropPopulations <= 8, 'station crop populations are limited to 8 entries')
+    local cropIds = {}
+    for index = 1, #cropPopulations do
+        local crop = cropPopulations[index]
+        assert(type(crop) == 'table', 'crop population descriptor must be a table')
+        assert(type(crop.id) == 'string' and #crop.id > 0, 'crop population needs an id')
+        assert(cropIds[crop.id] == nil, 'crop population id is duplicated')
+        cropIds[crop.id] = true
+        local compartment = atmosphere_by_id[crop.atmosphere]
+        assert(compartment ~= nil, 'crop population atmosphere compartment is unknown')
+        local uptakeRoles = { 'irrigation water', 'nitrogen', 'phosphorus',
+            'potassium', 'minerals' }
+        local uptakeIds = { crop.waterStore, crop.nitrogenStore, crop.phosphorusStore,
+            crop.potassiumStore, crop.mineralsStore }
+        local uptakeStores = {}
+        for role = 1, 5 do
+            local store = by_id[uptakeIds[role]]
+            assert(store ~= nil, 'crop ' .. uptakeRoles[role] .. ' store is unknown')
+            assert(store.unit == 'g' or store.unit == 'kg',
+                'crop ' .. uptakeRoles[role] .. " store '" .. store.id
+                    .. "' must be a mass unit; crop uptake is mass-denominated")
+            for other = role + 1, 5 do
+                assert(uptakeIds[role] ~= uptakeIds[other],
+                    'crop ' .. uptakeRoles[role] .. ' store and ' .. uptakeRoles[other]
+                        .. ' store are the same store: every tracked nutrient and the irrigation water need distinct stores so depletion stays visible per resource')
+            end
+            uptakeStores[role] = store
+        end
+        local composition = crop.composition
+        assert(type(composition) == 'table', 'crop population needs a declared composition')
+        assert(isFinite(composition.moisture) and composition.moisture == 0,
+            'crop declared composition carries moisture: Living biomass is tracked as dry mass, so the crop declaration must not carry a water fraction')
+        assert(isFinite(composition.atmosphericNitrogen) and composition.atmosphericNitrogen == 0,
+            'crop declared composition carries atmospheric nitrogen: crops take up bound nutrient nitrogen, not air, and no configured process converts one into the other')
+        local dryFractions = { composition.nutrientNitrogen, composition.phosphorus,
+            composition.potassium, composition.otherMinerals }
+        local dryNames = { 'nutrient nitrogen', 'phosphorus', 'potassium', 'other minerals' }
+        local dryTotal = 0
+        for field = 1, 4 do
+            assert(isFinite(dryFractions[field]) and dryFractions[field] >= 0,
+                'crop declared ' .. dryNames[field] .. ' fraction must be finite and non-negative')
+            dryTotal = dryTotal + dryFractions[field]
+        end
+        assert(dryTotal <= 1 + BALANCE_TOLERANCE,
+            'crop declared dry nutrient fractions exceed 1: the organic dry-mass balance would be negative')
+        assert(isFinite(composition.energyKJPerKgDry) and composition.energyKJPerKgDry > 0,
+            'crop declared chemical energy per dry kg must be finite and positive: the respiration heat and fixed-energy ledger depend on it')
+        assert(isFinite(crop.growingAreaM2) and crop.growingAreaM2 >= 0,
+            'crop growing area must be finite and non-negative')
+        assert(isFinite(crop.maxBiomassDensityKgPerM2) and crop.maxBiomassDensityKgPerM2 > 0,
+            'crop maximum biomass density must be finite and positive')
+        local capacityKg = crop.growingAreaM2 * crop.maxBiomassDensityKgPerM2
+        assert(isFinite(crop.initialBiomassKg) and crop.initialBiomassKg >= 0,
+            'crop initial living biomass must be finite and non-negative')
+        assert(crop.initialBiomassKg <= capacityKg + BALANCE_TOLERANCE,
+            'crop initial living biomass exceeds the declared Growing capacity: the population cannot start fuller than the installation can support')
+        assert(isFinite(crop.lampRatedKW) and crop.lampRatedKW >= 0,
+            'crop lamp rated power must be finite and non-negative')
+        local illumination = crop.illumination
+            or { constantLevel = 1, periodSeconds = 0, segments = {} }
+        checkProfile(illumination, 'crop ' .. crop.id .. ' illumination profile')
+        assert(isFinite(crop.circulationPowerKW) and crop.circulationPowerKW >= 0,
+            'crop circulation power must be finite and non-negative')
+        assert(isFinite(crop.growthYieldKgPerKWh) and crop.growthYieldKgPerKWh >= 0,
+            'crop growth yield per kWh must be finite and non-negative (provisional biological assumption)')
+        assert(crop.growthYieldKgPerKWh * composition.energyKJPerKgDry
+            <= 3600 + BALANCE_TOLERANCE * 3600,
+            'crop declared growth yield would fix more chemical energy per kWh of light than the light carries: photosynthesis is never a free source of chemical energy')
+        assert(isFinite(crop.respirationPerHour) and crop.respirationPerHour >= 0,
+            'crop respiration per hour must be finite and non-negative (provisional biological assumption)')
+        assert(isFinite(crop.transpirationKgPerKgGrowth) and crop.transpirationKgPerKgGrowth >= 0,
+            'crop transpiration per kg growth must be finite and non-negative (provisional biological assumption)')
+        assert(isFinite(crop.minGrowingTemperatureC)
+            and crop.minGrowingTemperatureC > -KELVIN_OFFSET,
+            'crop minimum growing temperature must be finite and above absolute zero')
+        assert(isFinite(crop.maxGrowingTemperatureC)
+            and crop.maxGrowingTemperatureC > -KELVIN_OFFSET,
+            'crop maximum growing temperature must be finite and above absolute zero')
+        assert(crop.minGrowingTemperatureC < crop.maxGrowingTemperatureC,
+            'crop minimum growing temperature must be below the maximum growing temperature: an empty growing window is never a service')
+        object.crop_populations[index] = {
+            id = crop.id,
+            compartment = compartment,
+            water = uptakeStores[1], nitrogen = uptakeStores[2],
+            phosphorus = uptakeStores[3], potassium = uptakeStores[4],
+            minerals = uptakeStores[5],
+            composition = composition,
+            growingAreaM2 = crop.growingAreaM2,
+            maxBiomassDensityKgPerM2 = crop.maxBiomassDensityKgPerM2,
+            capacityKg = capacityKg,
+            lampRatedKW = crop.lampRatedKW,
+            illumination = readProfile(illumination),
+            circulationPowerKW = crop.circulationPowerKW,
+            growthYieldKgPerKWh = crop.growthYieldKgPerKWh,
+            respirationPerHour = crop.respirationPerHour,
+            transpirationKgPerKgGrowth = crop.transpirationKgPerKgGrowth,
+            minGrowingTemperatureC = crop.minGrowingTemperatureC,
+            maxGrowingTemperatureC = crop.maxGrowingTemperatureC,
+            priority = crop.priority or 0,
+            livingBiomassKg = crop.initialBiomassKg,
+            lastIllumination = 0, lastLightRequested = 0, lastLightSupplied = 0,
+            lastCirculationRequested = 0, lastCirculationSupplied = 0,
+            lastGrowthPotential = 0, lastGrowthScale = 0, lastGrowthLimiter = '',
+            lastGrowthKg = 0, lastCo2DrawnKg = 0, lastAssimilationWaterKg = 0,
+            lastNitrogenDrawnKg = 0, lastPhosphorusDrawnKg = 0,
+            lastPotassiumDrawnKg = 0, lastMineralsDrawnKg = 0,
+            lastOxygenReleasedKg = 0, lastTranspiredKg = 0,
+            lastRespirationRequestedKg = 0, lastRespirationKg = 0,
+            lastRespirationO2DrawnKg = 0, lastRespirationLimiter = '',
+            lastRespirationCo2ReturnedKg = 0, lastRespirationWaterKg = 0,
+            lastRespirationHeatKW = 0, lastOxygenLimited = false,
+            lastHeatIntoCompartmentKW = 0, temperatureEligible = false,
+            lastBlockReason = '',
+            growthKg = 0, co2DrawnKg = 0, waterDrawnKg = 0,
+            nitrogenDrawnKg = 0, phosphorusDrawnKg = 0, potassiumDrawnKg = 0,
+            mineralsDrawnKg = 0, oxygenReleasedKg = 0, transpiredKg = 0,
+            respirationKg = 0, respirationO2DrawnKg = 0,
+            respirationCo2ReturnedKg = 0, respirationWaterKg = 0,
+            lightEnergyKJ = 0, circulationEnergyKJ = 0,
+            chemicalEnergyFixedKJ = 0, respirationHeatKJ = 0,
+            heatIntoCompartmentKJ = 0,
+        }
+    end
+    -- Crop populations compete for the same power pool and share the
+    -- compartment and uptake stores, so each runs in the declared
+    -- deterministic order: priority descending, declaration index
+    -- ascending (#409).
+    for index = 1, #object.crop_populations do object.crop_order[index] = index end
+    table.sort(object.crop_order, function(left, right)
+        local a, b = object.crop_populations[left], object.crop_populations[right]
+        if a.priority ~= b.priority then return a.priority > b.priority end
+        return left < right
+    end)
     -- Cells and capture machines compete for the same power pool and the
     -- same stores, so each runs in the declared deterministic order:
     -- priority descending, declaration index ascending.
@@ -2690,13 +2860,20 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local occupantHeat = occupants * compartment.sensibleHeat * metabolicFraction
             local crewHeat = compartment.crewHeat or 0
             compartment.crewHeat = 0
+            -- Crop heat (#409): the lamp energy not fixed as biomass
+            -- chemical energy, the circulation pump work and the
+            -- respiration heat, routed into this compartment by the
+            -- canopies assigned to it and entering the same coupled
+            -- vapour/thermal solve as every other thermal term.
+            local cropHeat = compartment.cropHeat or 0
+            compartment.cropHeat = 0
             local exchange = compartment.pendingExchangeKW or 0
             if compartment.reservoir then
                 compartment.reservoir.atmosphereHeat =
                     (compartment.reservoir.atmosphereHeat or 0) - exchange
             end
             local freeTemperature = compartment.temperature
-                + (occupantHeat + crewHeat + exchange) * fixed_seconds / compartment.capacity
+                + (occupantHeat + crewHeat + cropHeat + exchange) * fixed_seconds / compartment.capacity
             local condensed = 0
             if compartment.waterVapour > saturatedVapourMassKg(
                 saturationVapourPressureKPa(freeTemperature),
@@ -2725,6 +2902,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 + LATENT_HEAT_VAPORIZATION * condensed / compartment.capacity
             compartment.occupantHeatKJ = compartment.occupantHeatKJ + occupantHeat * fixed_seconds
             compartment.crewHeatKJ = compartment.crewHeatKJ + crewHeat * fixed_seconds
+            compartment.cropHeatKJ = compartment.cropHeatKJ + cropHeat * fixed_seconds
             compartment.latentHeatKJ = compartment.latentHeatKJ + latentHeat * fixed_seconds
             compartment.exchangedKJ = compartment.exchangedKJ + exchange * fixed_seconds
         end
@@ -4979,6 +5157,358 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 and proc.condition >= 0 and proc.condition <= 1,
                 "microbial processor '" .. proc.id .. "' result is not finite")
         end
+        -- Crop production (#409) runs in the same power-consumer phase
+        -- after nutrient recovery, mirroring the host: the canopy grows
+        -- its dry Living biomass under the resources actually delivered
+        -- and respires day and night. The essential circulation demand
+        -- - the pumps that deliver gas, water and nutrients across the
+        -- canopy - is drawn ahead of the discretionary lamp demand from
+        -- the same pool, so shedding lighting never starves the
+        -- circulation the biology depends on. Growth potential comes
+        -- from the light energy actually delivered: darkness or a
+        -- blackout photosynthesises nothing for free. One uniform
+        -- growth scale then binds the potential to the compartment CO2,
+        -- the drawable irrigation water, each drawable tracked nutrient
+        -- and the remaining Growing capacity headroom - N, P, K and
+        -- the grouped minerals are funded by their own separate
+        -- stores, so one abundant nutrient never hides another's
+        -- exhaustion, and the limiter names whichever bound first.
+        -- Growth is qualified only inside the declared temperature
+        -- window; outside it the canopy grows nothing but still
+        -- respires. Respiration burns the declared organic content of
+        -- the living biomass capped by the oxygen the compartment
+        -- actually holds, returning CO2, vapour and heat; the light
+        -- energy not fixed as biomass chemical energy, the circulation
+        -- pump work and the respiration heat land in the compartment
+        -- exactly once before its coupled vapour/thermal solve.
+        -- Harvest is deferred: nothing is removed here, and growth
+        -- simply stops at the declared capacity.
+        for _, order in ipairs(self.crop_order) do
+            local crop = self.crop_populations[order]
+            local compartment = crop.compartment
+            crop.lastIllumination = 0
+            crop.lastLightRequested = 0
+            crop.lastLightSupplied = 0
+            crop.lastCirculationRequested = 0
+            crop.lastCirculationSupplied = 0
+            crop.lastGrowthPotential = 0
+            crop.lastGrowthScale = 0
+            crop.lastGrowthLimiter = ''
+            crop.lastGrowthKg = 0
+            crop.lastCo2DrawnKg = 0
+            crop.lastAssimilationWaterKg = 0
+            crop.lastNitrogenDrawnKg = 0
+            crop.lastPhosphorusDrawnKg = 0
+            crop.lastPotassiumDrawnKg = 0
+            crop.lastMineralsDrawnKg = 0
+            crop.lastOxygenReleasedKg = 0
+            crop.lastTranspiredKg = 0
+            crop.lastRespirationRequestedKg = 0
+            crop.lastRespirationKg = 0
+            crop.lastRespirationO2DrawnKg = 0
+            crop.lastRespirationLimiter = ''
+            crop.lastRespirationCo2ReturnedKg = 0
+            crop.lastRespirationWaterKg = 0
+            crop.lastRespirationHeatKW = 0
+            crop.lastOxygenLimited = false
+            crop.lastHeatIntoCompartmentKW = 0
+            crop.temperatureEligible = false
+            crop.lastBlockReason = ''
+            if crop.growingAreaM2 > 0 then
+                crop.lastIllumination = evaluateProfile(crop.illumination, elapsed)
+                crop.lastLightRequested = crop.lampRatedKW * crop.lastIllumination
+                crop.lastCirculationRequested = crop.circulationPowerKW
+                -- The essential circulation is paid for first: the
+                -- pumps draw from the same pool ahead of the
+                -- discretionary lamp demand.
+                local circulationFromGeneration = math.min(crop.lastCirculationRequested,
+                    generation)
+                generation = generation - circulationFromGeneration
+                local circulationFromBattery = drawBatteries(self,
+                    crop.lastCirculationRequested - circulationFromGeneration, fixed_hours)
+                crop.lastCirculationSupplied = circulationFromGeneration + circulationFromBattery
+                batterySupplied = batterySupplied + circulationFromBattery
+                local lightFromGeneration = math.min(crop.lastLightRequested, generation)
+                generation = generation - lightFromGeneration
+                local lightFromBattery = drawBatteries(self,
+                    crop.lastLightRequested - lightFromGeneration, fixed_hours)
+                crop.lastLightSupplied = lightFromGeneration + lightFromBattery
+                batterySupplied = batterySupplied + lightFromBattery
+                local circulationFraction = crop.lastCirculationRequested > 1e-12
+                    and crop.lastCirculationSupplied / crop.lastCirculationRequested or 1
+                local lightEnergyKJ = crop.lastLightSupplied * fixed_seconds
+                local circulationEnergyKJ = crop.lastCirculationSupplied * fixed_seconds
+                crop.lastGrowthPotential = lightEnergyKJ * crop.growthYieldKgPerKWh / 3600
+                crop.temperatureEligible = compartment.temperature + 1e-9
+                    >= crop.minGrowingTemperatureC
+                    and compartment.temperature + 1e-9 < crop.maxGrowingTemperatureC
+                -- The dry-mass basis: the organic balance of the
+                -- declared composition is what growth builds and
+                -- respiration burns; the bound nutrient fractions are
+                -- drawn per kilogram of dry growth from their own
+                -- stores.
+                local composition = crop.composition
+                local organicFraction = 1 - (composition.nutrientNitrogen
+                    + composition.phosphorus + composition.potassium
+                    + composition.otherMinerals)
+                local co2PerKgGrowth = organicFraction * PHOTOSYNTHESIS_CO2_KG_PER_ORGANIC_KG
+                local assimilationWaterPerKgGrowth = organicFraction
+                    * PHOTOSYNTHESIS_WATER_KG_PER_ORGANIC_KG
+                local oxygenPerKgGrowth = organicFraction * PHOTOSYNTHESIS_O2_KG_PER_ORGANIC_KG
+                local drawableWater = math.max(0,
+                    crop.water.qualified - crop.water.protected_reserve)
+                local drawableNitrogen = math.max(0,
+                    crop.nitrogen.qualified - crop.nitrogen.protected_reserve)
+                local drawablePhosphorus = math.max(0,
+                    crop.phosphorus.qualified - crop.phosphorus.protected_reserve)
+                local drawablePotassium = math.max(0,
+                    crop.potassium.qualified - crop.potassium.protected_reserve)
+                local drawableMinerals = math.max(0,
+                    crop.minerals.qualified - crop.minerals.protected_reserve)
+                local capacityHeadroom = math.max(0, crop.capacityKg - crop.livingBiomassKg)
+                local scale = 1
+                local limiter = ''
+                local function constrain(available, required, reason)
+                    if required <= 0 then return end
+                    local fraction = available / required
+                    if fraction < scale then
+                        scale = fraction
+                        limiter = reason
+                    end
+                end
+                if not crop.temperatureEligible then
+                    scale = 0
+                    limiter = compartment.temperature + 1e-9 < crop.minGrowingTemperatureC
+                        and "compartment '" .. compartment.id
+                            .. "' is below the minimum growing temperature: the canopy is dormant"
+                        or "compartment '" .. compartment.id
+                            .. "' is at or above the maximum growing temperature: growth is heat-stopped"
+                elseif crop.lastGrowthPotential <= 0 then
+                    -- No light energy delivered: nothing drives
+                    -- photosynthesis. Darkness - or lamps with no
+                    -- power - grows nothing for free.
+                    scale = 0
+                    limiter = crop.lastLightRequested <= 1e-12
+                        and 'no light delivered: the illumination profile is dark, photosynthesis cannot run'
+                        or 'no light energy delivered: the lamps received no power, photosynthesis cannot run for free'
+                else
+                    constrain(circulationFraction * crop.lastGrowthPotential,
+                        crop.lastGrowthPotential,
+                        'canopy circulation is not supplied: the gas, water and nutrient exchange cannot run')
+                    constrain(math.max(0, compartment.carbonDioxide),
+                        crop.lastGrowthPotential * co2PerKgGrowth,
+                        "compartment '" .. compartment.id .. "' holds no carbon dioxide to fix")
+                    constrain(drawableWater,
+                        fromKg(crop.water.unit, crop.lastGrowthPotential
+                            * (assimilationWaterPerKgGrowth + crop.transpirationKgPerKgGrowth)),
+                        "irrigation water store '" .. crop.water.id
+                            .. "' has nothing drawable above its protected reserve")
+                    constrain(drawableNitrogen,
+                        fromKg(crop.nitrogen.unit, crop.lastGrowthPotential
+                            * composition.nutrientNitrogen),
+                        "nitrogen store '" .. crop.nitrogen.id
+                            .. "' has nothing drawable above its protected reserve")
+                    constrain(drawablePhosphorus,
+                        fromKg(crop.phosphorus.unit, crop.lastGrowthPotential
+                            * composition.phosphorus),
+                        "phosphorus store '" .. crop.phosphorus.id
+                            .. "' has nothing drawable above its protected reserve")
+                    constrain(drawablePotassium,
+                        fromKg(crop.potassium.unit, crop.lastGrowthPotential
+                            * composition.potassium),
+                        "potassium store '" .. crop.potassium.id
+                            .. "' has nothing drawable above its protected reserve")
+                    constrain(drawableMinerals,
+                        fromKg(crop.minerals.unit, crop.lastGrowthPotential
+                            * composition.otherMinerals),
+                        "minerals store '" .. crop.minerals.id
+                            .. "' has nothing drawable above its protected reserve")
+                    constrain(capacityHeadroom, crop.lastGrowthPotential,
+                        "growing capacity of '" .. crop.id
+                            .. "' is full: the canopy has no room to grow")
+                end
+                if scale < 0 then scale = 0 end
+                if scale > 1 then scale = 1 end
+                crop.lastGrowthScale = scale
+                crop.lastGrowthLimiter = limiter
+                -- The growth that actually runs: the potential at the
+                -- binding scale, capped by the capacity headroom, and
+                -- every flow derived from that actual growth so the
+                -- stoichiometric closure holds on what really moved.
+                -- Each draw is clamped to its own drawable so roundoff
+                -- never overshoots (#556).
+                local growthKg = math.min(crop.lastGrowthPotential * scale, capacityHeadroom)
+                local co2DrawnKg = math.min(growthKg * co2PerKgGrowth,
+                    math.max(0, compartment.carbonDioxide))
+                local assimilationWaterKg = growthKg * assimilationWaterPerKgGrowth
+                local transpiredKg = growthKg * crop.transpirationKgPerKgGrowth
+                local irrigationUnits = math.min(
+                    fromKg(crop.water.unit, assimilationWaterKg + transpiredKg), drawableWater)
+                local irrigationActualKg = toKg(crop.water.unit, irrigationUnits)
+                local nitrogenUnits = math.min(
+                    fromKg(crop.nitrogen.unit, growthKg * composition.nutrientNitrogen),
+                    drawableNitrogen)
+                local phosphorusUnits = math.min(
+                    fromKg(crop.phosphorus.unit, growthKg * composition.phosphorus),
+                    drawablePhosphorus)
+                local potassiumUnits = math.min(
+                    fromKg(crop.potassium.unit, growthKg * composition.potassium),
+                    drawablePotassium)
+                local mineralsUnits = math.min(
+                    fromKg(crop.minerals.unit, growthKg * composition.otherMinerals),
+                    drawableMinerals)
+                local oxygenReleasedKg = growthKg * oxygenPerKgGrowth
+                compartment.carbonDioxide = compartment.carbonDioxide - co2DrawnKg
+                compartment.cropCarbonDioxideDrawn =
+                    (compartment.cropCarbonDioxideDrawn or 0) + co2DrawnKg
+                compartment.oxygen = compartment.oxygen + oxygenReleasedKg
+                compartment.cropOxygenAdded =
+                    (compartment.cropOxygenAdded or 0) + oxygenReleasedKg
+                crop.water.qualified = crop.water.qualified - irrigationUnits
+                crop.nitrogen.qualified = crop.nitrogen.qualified - nitrogenUnits
+                crop.phosphorus.qualified = crop.phosphorus.qualified - phosphorusUnits
+                crop.potassium.qualified = crop.potassium.qualified - potassiumUnits
+                crop.minerals.qualified = crop.minerals.qualified - mineralsUnits
+                self.unit_loss[crop.water.unit] =
+                    (self.unit_loss[crop.water.unit] or 0) + irrigationUnits
+                self.unit_loss[crop.nitrogen.unit] =
+                    (self.unit_loss[crop.nitrogen.unit] or 0) + nitrogenUnits
+                self.unit_loss[crop.phosphorus.unit] =
+                    (self.unit_loss[crop.phosphorus.unit] or 0) + phosphorusUnits
+                self.unit_loss[crop.potassium.unit] =
+                    (self.unit_loss[crop.potassium.unit] or 0) + potassiumUnits
+                self.unit_loss[crop.minerals.unit] =
+                    (self.unit_loss[crop.minerals.unit] or 0) + mineralsUnits
+                -- Constituent boundary: what the uptake stores carry as
+                -- declared compound material leaves the compound-
+                -- material world with the draw; plain stores contribute
+                -- nothing to the ledger.
+                local net = {}
+                if crop.water.composition then
+                    addConstituents(net, crop.water.composition, irrigationActualKg, -1)
+                end
+                if crop.nitrogen.composition then
+                    addConstituents(net, crop.nitrogen.composition,
+                        toKg(crop.nitrogen.unit, nitrogenUnits), -1)
+                end
+                if crop.phosphorus.composition then
+                    addConstituents(net, crop.phosphorus.composition,
+                        toKg(crop.phosphorus.unit, phosphorusUnits), -1)
+                end
+                if crop.potassium.composition then
+                    addConstituents(net, crop.potassium.composition,
+                        toKg(crop.potassium.unit, potassiumUnits), -1)
+                end
+                if crop.minerals.composition then
+                    addConstituents(net, crop.minerals.composition,
+                        toKg(crop.minerals.unit, mineralsUnits), -1)
+                end
+                for constituent, change in pairs(net) do
+                    self.constituent_loss[constituent] =
+                        (self.constituent_loss[constituent] or 0) - change
+                end
+                crop.livingBiomassKg = crop.livingBiomassKg + growthKg
+                -- Respiration runs day and night against the declared
+                -- organic content of the living biomass, capped by the
+                -- oxygen the compartment actually holds: a canopy in an
+                -- oxygen-poor compartment simply cannot burn more than
+                -- it can breathe, and the shortfall is reported, never
+                -- invented around.
+                local organicContent = crop.livingBiomassKg * organicFraction
+                local respirationRequested = math.min(
+                    crop.respirationPerHour * crop.livingBiomassKg * fixed_hours,
+                    organicContent)
+                local respirationO2Required = respirationRequested
+                    * PHOTOSYNTHESIS_O2_KG_PER_ORGANIC_KG
+                local respirationScale = respirationO2Required > 0
+                    and math.min(1, math.max(0, compartment.oxygen) / respirationO2Required)
+                    or 1
+                local respiredOrganicKg = respirationRequested * respirationScale
+                local respirationO2DrawnKg = math.min(respirationO2Required * respirationScale,
+                    math.max(0, compartment.oxygen))
+                local respirationCo2Kg = respiredOrganicKg * PHOTOSYNTHESIS_CO2_KG_PER_ORGANIC_KG
+                local respirationWaterKg = respiredOrganicKg
+                    * PHOTOSYNTHESIS_WATER_KG_PER_ORGANIC_KG
+                if respirationScale < 1 - 1e-12 and respirationRequested > 0 then
+                    crop.lastOxygenLimited = true
+                    crop.lastRespirationLimiter = "compartment '" .. compartment.id
+                        .. "' oxygen inventory cannot supply the respiration draw"
+                end
+                compartment.oxygen = compartment.oxygen - respirationO2DrawnKg
+                compartment.cropOxygenDrawn =
+                    (compartment.cropOxygenDrawn or 0) + respirationO2DrawnKg
+                compartment.carbonDioxide = compartment.carbonDioxide + respirationCo2Kg
+                compartment.cropCarbonDioxideAdded =
+                    (compartment.cropCarbonDioxideAdded or 0) + respirationCo2Kg
+                compartment.waterVapour = compartment.waterVapour
+                    + respirationWaterKg + transpiredKg
+                compartment.cropVapourAdded = compartment.cropVapourAdded
+                    + respirationWaterKg + transpiredKg
+                crop.livingBiomassKg = crop.livingBiomassKg - respiredOrganicKg
+                -- Energy: the light energy not fixed as biomass
+                -- chemical energy, the circulation pump work and the
+                -- respiration heat land in the compartment once.
+                local chemicalEnergyFixedKJ = growthKg * composition.energyKJPerKgDry
+                local respirationHeatKJ = respiredOrganicKg * composition.energyKJPerKgDry
+                local heatIntoCompartmentKJ = lightEnergyKJ - chemicalEnergyFixedKJ
+                    + circulationEnergyKJ + respirationHeatKJ
+                compartment.cropHeat = (compartment.cropHeat or 0)
+                    + heatIntoCompartmentKJ / fixed_seconds
+                crop.lastGrowthKg = growthKg
+                crop.lastCo2DrawnKg = co2DrawnKg
+                crop.lastAssimilationWaterKg = assimilationWaterKg
+                crop.lastNitrogenDrawnKg = toKg(crop.nitrogen.unit, nitrogenUnits)
+                crop.lastPhosphorusDrawnKg = toKg(crop.phosphorus.unit, phosphorusUnits)
+                crop.lastPotassiumDrawnKg = toKg(crop.potassium.unit, potassiumUnits)
+                crop.lastMineralsDrawnKg = toKg(crop.minerals.unit, mineralsUnits)
+                crop.lastOxygenReleasedKg = oxygenReleasedKg
+                crop.lastTranspiredKg = transpiredKg
+                crop.lastRespirationRequestedKg = respirationRequested
+                crop.lastRespirationKg = respiredOrganicKg
+                crop.lastRespirationO2DrawnKg = respirationO2DrawnKg
+                crop.lastRespirationCo2ReturnedKg = respirationCo2Kg
+                crop.lastRespirationWaterKg = respirationWaterKg
+                crop.lastRespirationHeatKW = respirationHeatKJ / fixed_seconds
+                crop.lastHeatIntoCompartmentKW = heatIntoCompartmentKJ / fixed_seconds
+                crop.growthKg = crop.growthKg + growthKg
+                crop.co2DrawnKg = crop.co2DrawnKg + co2DrawnKg
+                crop.waterDrawnKg = crop.waterDrawnKg + irrigationActualKg
+                crop.nitrogenDrawnKg = crop.nitrogenDrawnKg + toKg(crop.nitrogen.unit, nitrogenUnits)
+                crop.phosphorusDrawnKg = crop.phosphorusDrawnKg
+                    + toKg(crop.phosphorus.unit, phosphorusUnits)
+                crop.potassiumDrawnKg = crop.potassiumDrawnKg
+                    + toKg(crop.potassium.unit, potassiumUnits)
+                crop.mineralsDrawnKg = crop.mineralsDrawnKg
+                    + toKg(crop.minerals.unit, mineralsUnits)
+                crop.oxygenReleasedKg = crop.oxygenReleasedKg + oxygenReleasedKg
+                crop.transpiredKg = crop.transpiredKg + transpiredKg
+                crop.respirationKg = crop.respirationKg + respiredOrganicKg
+                crop.respirationO2DrawnKg = crop.respirationO2DrawnKg + respirationO2DrawnKg
+                crop.respirationCo2ReturnedKg = crop.respirationCo2ReturnedKg + respirationCo2Kg
+                crop.respirationWaterKg = crop.respirationWaterKg + respirationWaterKg
+                crop.lightEnergyKJ = crop.lightEnergyKJ + lightEnergyKJ
+                crop.circulationEnergyKJ = crop.circulationEnergyKJ + circulationEnergyKJ
+                crop.chemicalEnergyFixedKJ = crop.chemicalEnergyFixedKJ + chemicalEnergyFixedKJ
+                crop.respirationHeatKJ = crop.respirationHeatKJ + respirationHeatKJ
+                crop.heatIntoCompartmentKJ = crop.heatIntoCompartmentKJ + heatIntoCompartmentKJ
+                if scale <= 1e-12 then
+                    crop.lastBlockReason = limiter
+                end
+            end
+            assert(isFinite(crop.livingBiomassKg) and isFinite(crop.lastIllumination)
+                and isFinite(crop.lastLightRequested) and isFinite(crop.lastLightSupplied)
+                and isFinite(crop.lastCirculationRequested) and isFinite(crop.lastCirculationSupplied)
+                and isFinite(crop.lastGrowthPotential) and isFinite(crop.lastGrowthScale)
+                and isFinite(crop.lastGrowthKg) and isFinite(crop.lastCo2DrawnKg)
+                and isFinite(crop.lastAssimilationWaterKg) and isFinite(crop.lastNitrogenDrawnKg)
+                and isFinite(crop.lastPhosphorusDrawnKg) and isFinite(crop.lastPotassiumDrawnKg)
+                and isFinite(crop.lastMineralsDrawnKg) and isFinite(crop.lastOxygenReleasedKg)
+                and isFinite(crop.lastTranspiredKg) and isFinite(crop.lastRespirationRequestedKg)
+                and isFinite(crop.lastRespirationKg) and isFinite(crop.lastRespirationO2DrawnKg)
+                and isFinite(crop.lastRespirationCo2ReturnedKg) and isFinite(crop.lastRespirationWaterKg)
+                and isFinite(crop.lastRespirationHeatKW) and isFinite(crop.lastHeatIntoCompartmentKW),
+                "crop population '" .. crop.id .. "' result is not finite")
+        end
         -- Second loop pass: integrate the loop's temperature from the
         -- pump work, heater heat, exchanger exchange and the chiller
         -- extraction that actually moved this tick, and expose the
@@ -5674,18 +6204,22 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 "atmosphere '" .. compartment.id .. "' gas inventory went negative")
             local closures = {
                 { 'oxygen', compartment.startingOxygen,
-                    compartment.electrolysisOxygen or 0,
+                    (compartment.electrolysisOxygen or 0)
+                        + (compartment.cropOxygenAdded or 0),
                     compartment.oxygenConsumed + compartment.leakOxygen
-                        + compartment.cycleOxygen,
+                        + compartment.cycleOxygen + (compartment.cropOxygenDrawn or 0),
                     compartment.oxygen },
                 { 'nitrogen', compartment.startingNitrogen, 0,
                     compartment.leakNitrogen + compartment.cycleNitrogen,
                     compartment.nitrogen },
-                { 'carbonDioxide', compartment.startingCarbonDioxide, compartment.co2Produced,
+                { 'carbonDioxide', compartment.startingCarbonDioxide,
+                    compartment.co2Produced + (compartment.cropCarbonDioxideAdded or 0),
                     compartment.leakCarbonDioxide + compartment.cycleCarbonDioxide
-                        + (compartment.capturedCarbonDioxide or 0),
+                        + (compartment.capturedCarbonDioxide or 0)
+                        + (compartment.cropCarbonDioxideDrawn or 0),
                     compartment.carbonDioxide },
-                { 'waterVapour', compartment.startingWaterVapour, compartment.vapourAdded,
+                { 'waterVapour', compartment.startingWaterVapour,
+                    compartment.vapourAdded + (compartment.cropVapourAdded or 0),
                     compartment.condensed + compartment.leakWaterVapour
                         + compartment.cycleWaterVapour + (compartment.collected or 0),
                     compartment.waterVapour },
@@ -5706,13 +6240,13 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 "atmosphere '" .. compartment.id
                     .. "' airlock recovered/lost split residual exceeds tolerance")
             -- Thermal closure: starting + occupant heat + crew heat
-            -- (#401) + latent heat + exchanged from the reservoir must
-            -- equal the compartment's current capacity x temperature
-            -- within the tolerance.
+            -- (#401) + crop heat (#409) + latent heat + exchanged from
+            -- the reservoir must equal the compartment's current
+            -- capacity x temperature within the tolerance.
             local startingEnergy = compartment.capacity * compartment.startingTemperature
             local thermalBound = BALANCE_TOLERANCE * math.max(1, math.abs(startingEnergy))
             local thermalResidual = startingEnergy + compartment.occupantHeatKJ
-                + compartment.crewHeatKJ
+                + compartment.crewHeatKJ + compartment.cropHeatKJ
                 + compartment.latentHeatKJ + compartment.exchangedKJ
                 - compartment.capacity * compartment.temperature
             assert(thermalResidual == thermalResidual and math.abs(thermalResidual) <= thermalBound,
@@ -5723,7 +6257,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 compartment.leaked, compartment.recovered, compartment.lost,
                 compartment.condensed, compartment.oxygenConsumed, compartment.co2Produced,
                 compartment.vapourAdded, compartment.occupantHeatKJ,
-                compartment.crewHeatKJ,
+                compartment.crewHeatKJ, compartment.cropHeatKJ,
                 compartment.latentHeatKJ, compartment.exchangedKJ }
             for _, value in ipairs(values) do
                 assert(isFinite(value),
@@ -5934,6 +6468,75 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     .. "' recovered more nitrogen than the consumed feed's bound nutrient nitrogen carries")
         end
     end
+    -- Crop production ledger (#409), mirroring the host audit: the
+    -- population's own account must close over its pathways. The mass
+    -- ledger closes over the whole population: CO2 drawn + irrigation
+    -- water drawn + each nutrient drawn + respiration oxygen drawn,
+    -- minus the oxygen released by growth, the CO2 and water vapour
+    -- returned by respiration and the transpired vapour, equals the net
+    -- change in dry Living biomass - so growth never creates material
+    -- out of light and respiration never destroys it. The energy ledger
+    -- closes over delivered = fixed + respired + heat, the fixed
+    -- chemical energy may never exceed the delivered light energy, and
+    -- the Living biomass stays inside its declared Growing capacity.
+    local function checkCrops(self)
+        for _, crop in ipairs(self.crop_populations) do
+            assert(isFinite(crop.livingBiomassKg) and isFinite(crop.lastIllumination)
+                and isFinite(crop.lastLightRequested) and isFinite(crop.lastLightSupplied)
+                and isFinite(crop.lastCirculationRequested) and isFinite(crop.lastCirculationSupplied)
+                and isFinite(crop.lastGrowthPotential) and isFinite(crop.lastGrowthScale)
+                and isFinite(crop.lastGrowthKg) and isFinite(crop.lastCo2DrawnKg)
+                and isFinite(crop.lastAssimilationWaterKg) and isFinite(crop.lastNitrogenDrawnKg)
+                and isFinite(crop.lastPhosphorusDrawnKg) and isFinite(crop.lastPotassiumDrawnKg)
+                and isFinite(crop.lastMineralsDrawnKg) and isFinite(crop.lastOxygenReleasedKg)
+                and isFinite(crop.lastTranspiredKg) and isFinite(crop.lastRespirationRequestedKg)
+                and isFinite(crop.lastRespirationKg) and isFinite(crop.lastRespirationO2DrawnKg)
+                and isFinite(crop.lastRespirationCo2ReturnedKg)
+                and isFinite(crop.lastRespirationWaterKg)
+                and isFinite(crop.lastRespirationHeatKW)
+                and isFinite(crop.lastHeatIntoCompartmentKW)
+                and isFinite(crop.growthKg) and isFinite(crop.co2DrawnKg)
+                and isFinite(crop.waterDrawnKg) and isFinite(crop.nitrogenDrawnKg)
+                and isFinite(crop.phosphorusDrawnKg) and isFinite(crop.potassiumDrawnKg)
+                and isFinite(crop.mineralsDrawnKg) and isFinite(crop.oxygenReleasedKg)
+                and isFinite(crop.transpiredKg) and isFinite(crop.respirationKg)
+                and isFinite(crop.respirationO2DrawnKg) and isFinite(crop.respirationCo2ReturnedKg)
+                and isFinite(crop.respirationWaterKg) and isFinite(crop.lightEnergyKJ)
+                and isFinite(crop.circulationEnergyKJ) and isFinite(crop.chemicalEnergyFixedKJ)
+                and isFinite(crop.respirationHeatKJ) and isFinite(crop.heatIntoCompartmentKJ),
+                "crop population '" .. crop.id .. "' ledger is not finite")
+            assert(crop.lastGrowthScale >= -BALANCE_TOLERANCE
+                and crop.lastGrowthScale <= 1 + BALANCE_TOLERANCE,
+                "crop population '" .. crop.id
+                    .. "' growth scale left the declared [0, 1] range")
+            local capacityBound = BALANCE_TOLERANCE * math.max(1, crop.capacityKg)
+            assert(crop.livingBiomassKg >= -capacityBound
+                and crop.livingBiomassKg <= crop.capacityKg + capacityBound,
+                "crop population '" .. crop.id
+                    .. "' living biomass left its declared Growing capacity")
+            local bound = BALANCE_TOLERANCE * math.max(1,
+                crop.growthKg + crop.respirationKg + crop.co2DrawnKg + crop.oxygenReleasedKg)
+            local massResidual = crop.co2DrawnKg + crop.waterDrawnKg
+                + crop.nitrogenDrawnKg + crop.phosphorusDrawnKg + crop.potassiumDrawnKg
+                + crop.mineralsDrawnKg + crop.respirationO2DrawnKg
+                - crop.oxygenReleasedKg - crop.respirationCo2ReturnedKg
+                - crop.respirationWaterKg - crop.transpiredKg
+                - (crop.growthKg - crop.respirationKg)
+            assert(math.abs(massResidual) <= bound,
+                "crop population '" .. crop.id
+                    .. "' growth/respiration mass ledger does not close")
+            local energyResidual = crop.lightEnergyKJ + crop.circulationEnergyKJ
+                + crop.respirationHeatKJ - crop.chemicalEnergyFixedKJ
+                - crop.heatIntoCompartmentKJ
+            assert(math.abs(energyResidual) <= bound,
+                "crop population '" .. crop.id
+                    .. "' delivered/fixed/respired/heat energy ledger does not close")
+            local energyCapBound = BALANCE_TOLERANCE * math.max(1, crop.lightEnergyKJ)
+            assert(crop.chemicalEnergyFixedKJ <= crop.lightEnergyKJ + energyCapBound,
+                "crop population '" .. crop.id
+                    .. "' fixed more chemical energy than the delivered light energy carries")
+        end
+    end
     function object:advance(world_tick, fixed_seconds)
         assert(world_tick > 0 and fixed_seconds > 0)
         checkFiniteLimits(self)
@@ -5959,6 +6562,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         checkWater(self)
         checkFuelCells(self)
         checkMicrobial(self)
+        checkCrops(self)
         self.ticks = self.ticks + 1
         return self.ticks
     end
@@ -5971,5 +6575,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     checkWater(object)
     checkFuelCells(object)
     checkMicrobial(object)
+    checkCrops(object)
     return object
 end

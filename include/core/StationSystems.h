@@ -562,6 +562,26 @@ namespace core
 	// and evaporation would absorb it. Documented constant of the working
 	// fluid, not an authored process coefficient.
 	inline constexpr double StationLatentHeatVaporizationKJPerKg{2257.0};
+	// Crop photosynthetic stoichiometry (#409): dry crop organic matter is
+	// modelled as carbohydrate with the empirical formula CH2O. Its molar
+	// mass is defined as the closure of the exchange itself - one CO2 plus
+	// one H2O minus one O2 - so the per-kilogram-organic ratios below close
+	// the mass ledger exactly by construction rather than approximately:
+	// CO2 drawn + water drawn = organic fixed + O2 released, and the mirror
+	// respiration identity organic + O2 = CO2 + water hold on the same
+	// declared molar masses.
+	inline constexpr double StationMolarMassCarbohydrateKgPerMol{
+		StationMolarMassCarbonDioxideKgPerMol + StationMolarMassWaterKgPerMol
+		- StationMolarMassOxygenKgPerMol};
+	// kg of CO2 drawn from the compartment per kg of dry organic fixed.
+	inline constexpr double StationPhotosynthesisCO2PerOrganicKg{
+		StationMolarMassCarbonDioxideKgPerMol / StationMolarMassCarbohydrateKgPerMol};
+	// kg of O2 released into the compartment per kg of dry organic fixed.
+	inline constexpr double StationPhotosynthesisO2PerOrganicKg{
+		StationMolarMassOxygenKgPerMol / StationMolarMassCarbohydrateKgPerMol};
+	// kg of assimilation water drawn per kg of dry organic fixed.
+	inline constexpr double StationPhotosynthesisWaterPerOrganicKg{
+		StationMolarMassWaterKgPerMol / StationMolarMassCarbohydrateKgPerMol};
 	// Ideal-gas partial pressure in kPa of a dry mass of a gas species in
 	// a volume at a temperature: p = (m / M) x R x T / V.
 	double stationAtmospherePartialPressureKPa(double massKg,
@@ -1145,6 +1165,80 @@ namespace core
 	};
 	inline constexpr size_t MaxStationMicrobialProcessors{8};
 
+	// A crop population (#409): an aggregate living stand of crops inside
+	// one Atmosphere compartment, growing from a declared dry Living biomass
+	// under the resources actually delivered to it. Three quantities are kept
+	// separate, per the domain: the population's dry Living biomass (runtime
+	// state, never a store), the installation's Growing capacity (declared
+	// illuminated growing area x maximum supported dry biomass density),
+	// and the station's stored food - which this slice never touches: crops
+	// grow and respire, and Harvest is deferred to a later ticket. The
+	// declared composition fixes the dry-mass basis of the living biomass:
+	// the organic fraction (the dry-mass balance) is what photosynthesis
+	// builds and respiration burns, while the bound nutrient nitrogen,
+	// phosphorus, potassium and grouped mineral fractions are drawn from
+	// their own separate stores, so one abundant nutrient can never
+	// substitute for an exhausted one. Atmospheric nitrogen is refused in
+	// the declared composition: crops take up bound nutrient nitrogen, not
+	// air, and no configured process here converts one form into the other.
+	// Growth is limited by every real input together, at one uniform growth
+	// scale per tick: the light energy actually delivered (installed lamp
+	// power x the illumination profile x the fraction the power pool
+	// actually supplied - darkness or a blackout photosynthesizes nothing
+	// for free), the CO2 actually present in the compartment, the irrigation
+	// water drawable above the store's protected reserve, each tracked
+	// nutrient drawable above its own reserve, and the remaining Growing
+	// capacity headroom. The essential canopy circulation demand - the
+	// pumps that actually deliver gas, water and nutrients across the
+	// canopy - is drawn from the same power pool ahead of the discretionary
+	// lamp demand, so shedding lighting never starves the circulation that
+	// the biology depends on; unsupplied circulation stops growth whole.
+	// Growth is only qualified while the compartment temperature sits inside
+	// the declared growing window; outside it the canopy is dormant or heat-
+	// stopped and grows nothing, but still respires.
+	// Respiration runs day and night: the declared organic content of the
+	// living biomass is burned at the declared per-hour rate, drawing the
+	// oxygen the compartment actually holds and returning CO2, water vapour
+	// and heat to that compartment. Transpiration draws irrigation water in
+	// proportion to growth and returns it as vapour. Every exchange is a
+	// real transfer: the CO2, water, nutrient and oxygen flows move through
+	// the compartment and store inventories, the light energy not fixed as
+	// chemical biomass energy and the respiration heat land once in the
+	// compartment's thermal solve, and the mass and energy ledgers close
+	// over fixed + respired = delivered.
+	// All biological coefficients - growth yield per kWh of light,
+	// respiration per hour, transpiration per kilogram of growth, the
+	// supported biomass density and the growing window - are provisional
+	// biological assumptions: tunable model parameters, not validated
+	// agronomy. Validation rejects declarations that would fix more
+	// chemical energy than the light can deliver, declare an empty growing
+	// window, or start above the declared capacity.
+	struct CropPopulationSettings
+	{
+		std::string id;
+		std::string atmosphereId;             // compartment the canopy exchanges gas and heat with
+		std::string waterStoreId;             // irrigation water above the protected reserve
+		std::string nitrogenStoreId;          // bound nutrient nitrogen available for uptake
+		std::string phosphorusStoreId;        // phosphorus available for uptake
+		std::string potassiumStoreId;         // potassium available for uptake
+		std::string mineralsStoreId;          // grouped trace minerals available for uptake
+		ResourceCompositionSettings composition; // declared dry-mass basis of the living biomass
+		double growingAreaM2{0.0};          // illuminated growing area; 0 disables the population
+		double maxBiomassDensityKgPerM2{2.0}; // supported dry biomass per unit area (provisional)
+		double initialBiomassKg{0.0};       // starting dry living biomass, [0, area x density]
+		double lampRatedKW{0.0};            // installed lighting capacity
+		ProfileSettings illuminationProfile; // [0, 1] fraction of lamp capacity delivered as light
+		double circulationPowerKW{0.0};     // essential canopy circulation demand, drawn first
+		double growthYieldKgPerKWh{0.01};   // dry biomass fixed per kWh of delivered light (provisional)
+		double respirationPerHour{0.012};   // dry organic burned per dry biomass per hour (provisional)
+		double transpirationKgPerKgGrowth{0.0}; // water transpired per kg of growth (provisional)
+		double minGrowingTemperatureC{10.0}; // growth at or above this compartment temperature
+		double maxGrowingTemperatureC{35.0}; // growth below this compartment temperature
+		int priority{0};
+		bool operator==(CropPopulationSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationCropPopulations{8};
+
 	// A finite thermal buffer (#398): a bounded store of thermal energy
 	// that absorbs the cooling deficit its host reservoir cannot reject,
 	// rides through the outage, and returns the stored heat only when
@@ -1219,6 +1313,7 @@ namespace core
 		std::vector<MethaneProcessorSettings> methaneProcessors;
 		std::vector<MicrobialProcessorSettings> microbialProcessors;
 		std::vector<ThermalBufferSettings> thermalBuffers;
+		std::vector<CropPopulationSettings> cropPopulations;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// Profile shape validation and deterministic evaluation: the level of
@@ -1594,6 +1689,7 @@ namespace core
 		double sabatierPowerKW{0.0};       // Sabatier reactor work drawn this tick (#405)
 		double methaneProcessingPowerKW{0.0}; // methane processing work drawn this tick (#405)
 		double microbialProcessingPowerKW{0.0}; // microbial digestion work drawn this tick (#407)
+		double cropPowerKW{0.0}; // crop lamp and circulation work drawn this tick (#409)
 		// Fuel-cell backup service this tick (#406): electrical output
 		// added to the same allocation pool as solar and the generators,
 		// and the waste heat those cells routed to their sinks.
@@ -1997,6 +2093,13 @@ namespace core
 		// occupancy heat - and the thermal ledger closes over it.
 		double lastCrewHeatKW{0.0};
 		double crewHeatEnergyKJ{0.0};
+		// Crop heat delivered into this compartment this tick and
+		// cumulatively (#409): the lamp energy not fixed as biomass
+		// chemical energy plus the respiration heat, booked as its own
+		// thermal term beside the crew heat and entering the same coupled
+		// vapour/thermal solve and thermal ledger.
+		double lastCropHeatKW{0.0};
+		double cropHeatEnergyKJ{0.0};
 		// Cumulative pathway ledger: every gram that moved, by pathway.
 		double oxygenConsumedKg{0.0};
 		double co2ProducedKg{0.0};
@@ -2520,6 +2623,119 @@ namespace core
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationMicrobialProcessorSnapshot const&) const = default;
 	};
+	// One crop population as of the most recent tick (#409): the authored
+	// contract beside the dry Living biomass actually held, the declared
+	// Growing capacity, the light actually delivered versus requested, the
+	// growth and respiration actually achieved, every resource flow that
+	// funded or resulted from them, the growth scale and the limiter that
+	// bound it, and the closing mass and energy ledgers. The mass ledger
+	// closes over the whole population: CO2 drawn + irrigation water drawn
+	// + nutrients drawn + respiration oxygen drawn = oxygen released by
+	// growth + CO2 returned by respiration + vapour returned (assimilation
+	// water, transpiration and respiration water) + the change in dry
+	// Living biomass - within the declared tolerance, so growth never
+	// creates material out of light and respiration never destroys it.
+	// The energy ledger closes over delivered = fixed + respired + heat:
+	// the light energy actually supplied either became the declared
+	// chemical energy of new biomass, came back out as respiration heat,
+	// or left as heat into the compartment - nothing is free and nothing
+	// vanishes. Harvest is deferred: no edible yield is removed here, and
+	// growth simply stops at the declared capacity.
+	struct StationCropPopulationSnapshot
+	{
+		std::string id;
+		std::string atmosphereId;
+		std::string waterStoreId;
+		std::string nitrogenStoreId;
+		std::string phosphorusStoreId;
+		std::string potassiumStoreId;
+		std::string mineralsStoreId;
+		ResourceCompositionSettings composition;
+		double growingAreaM2{0.0};
+		double maxBiomassDensityKgPerM2{0.0};
+		double capacityKg{0.0};         // growingAreaM2 x maxBiomassDensityKgPerM2
+		double initialBiomassKg{0.0};
+		double lampRatedKW{0.0};
+		ProfileSettings illuminationProfile;
+		double circulationPowerKW{0.0};
+		double growthYieldKgPerKWh{0.0};
+		double respirationPerHour{0.0};
+		double transpirationKgPerKgGrowth{0.0};
+		double minGrowingTemperatureC{0.0};
+		double maxGrowingTemperatureC{0.0};
+		int priority{0};
+		// The living-biomass picture: current dry Living biomass beside the
+		// declared capacity and the fraction of it filled.
+		double livingBiomassKg{0.0};
+		double capacityFraction{0.0}; // livingBiomassKg / capacityKg, [0, 1]
+		// The light and circulation actually delivered this tick.
+		double lastIlluminationLevel{0.0};   // profile level [0, 1]
+		double lastLightRequestedKW{0.0};
+		double lastLightSuppliedKW{0.0};
+		double lastCirculationRequestedKW{0.0};
+		double lastCirculationSuppliedKW{0.0};
+		// The growth the delivered resources funded this tick, its uniform
+		// scale and the limiter that bound it, plus every input the growth
+		// actually consumed and everything it returned.
+		double lastGrowthPotentialKg{0.0}; // light-driven potential before limits
+		double lastGrowthScale{0.0};       // uniform growth scale after limits, [0, 1]
+		std::string lastGrowthLimiter;     // what bound the growth scale (empty: none)
+		double lastGrowthKg{0.0};
+		double lastCo2DrawnKg{0.0};
+		double lastAssimilationWaterKg{0.0};
+		double lastNitrogenDrawnKg{0.0};
+		double lastPhosphorusDrawnKg{0.0};
+		double lastPotassiumDrawnKg{0.0};
+		double lastMineralsDrawnKg{0.0};
+		double lastOxygenReleasedKg{0.0};
+		double lastTranspiredKg{0.0};
+		// The respiration that ran this tick: the organic actually burned,
+		// the oxygen actually drawn and the CO2, vapour and heat returned.
+		double lastRespirationRequestedKg{0.0};
+		double lastRespirationKg{0.0};
+		double lastRespirationO2DrawnKg{0.0};
+		std::string lastRespirationLimiter;
+		double lastRespirationCo2ReturnedKg{0.0};
+		double lastRespirationWaterKg{0.0};
+		double lastRespirationHeatKW{0.0};
+		bool lastOxygenLimited{false}; // respiration bound by compartment oxygen
+		// Heat into the compartment this tick: the light energy not fixed as
+		// biomass chemical energy, plus the respiration heat.
+		double lastHeatIntoCompartmentKW{0.0};
+		bool temperatureEligible{false}; // compartment inside the growing window
+		std::string blockReason;         // why nothing grew this tick (empty: none)
+		bool disabled{false};            // zero growing area: no service
+		// Cumulative pathway ledger.
+		double growthKg{0.0};
+		double co2DrawnKg{0.0};
+		double waterDrawnKg{0.0};
+		double nitrogenDrawnKg{0.0};
+		double phosphorusDrawnKg{0.0};
+		double potassiumDrawnKg{0.0};
+		double mineralsDrawnKg{0.0};
+		double oxygenReleasedKg{0.0};
+		double transpiredKg{0.0};
+		double respirationKg{0.0};
+		double respirationO2DrawnKg{0.0};
+		double respirationCo2ReturnedKg{0.0};
+		double respirationWaterKg{0.0};
+		double lightEnergyKJ{0.0};
+		double circulationEnergyKJ{0.0};
+		double chemicalEnergyFixedKJ{0.0};   // declared chemical energy of new growth
+		double respirationHeatKJ{0.0};
+		double heatIntoCompartmentKJ{0.0};
+		// Closing residuals: the mass ledger residual over
+		// (CO2 + water + nutrients + respiration O2) - (O2 released + CO2
+		// returned + vapour returned) - delta biomass, and the energy ledger
+		// residual over delivered light + circulation work + respired heat
+		// - fixed chemical - heat into the compartment (respiration heat is
+		// paid from the burned biomass, not the delivered light, so it
+		// closes on the plus side beside the delivered energy).
+		double residualKg{0.0};
+		double residualKJ{0.0};
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationCropPopulationSnapshot const&) const = default;
+	};
 	struct StationSystemsSnapshot
 	{
 		bool enabled{false};
@@ -2596,6 +2812,12 @@ namespace core
 		// water / CO2 / residue production with the per-constituent
 		// recovery split, and the closing mass and energy ledgers.
 		std::vector<StationMicrobialProcessorSnapshot> microbialProcessors;
+		// The crop production picture (#409): per-population dry Living
+		// biomass against the declared Growing capacity, the light and
+		// circulation actually delivered, the resource-limited growth and
+		// day-and-night respiration with every gas, water and nutrient flow,
+		// the limiting resource, and the closing mass and energy ledgers.
+		std::vector<StationCropPopulationSnapshot> cropPopulations;
 		// The fuel-cell backup picture (#406): per-cell output, reactant
 	// consumption, product water, waste heat, closing ledgers and the
 		// endurance the usable reactants still buy.

@@ -27,7 +27,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
 	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply, rechargeable batteries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, and chillers supplying class-matched cold services. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Thermal reservoirs integrate temperature from their effective capacity under absorbed and routed equipment heat; radiators reject heat by the Stefan-Boltzmann law at the emitting temperature against the authored sink, emissivity and view factor. A load's emitted heat is booked exactly once: routed into its class-compatible reservoir or exported directly, never both. Declared temperature limits are reported, never clamped. Coolant loops hold a finite, loop-specific coolant inventory segregated by hazard class (coolant is never potable or nutrient water); the pump circulates only the coolant the loop actually holds, so an underfilled loop flows less and a dry loop flows nothing, and the freeze-protection heater thermostats the loop up to its setpoint within its capacity. Pump work and heater heat enter the loop exactly once and reach the reservoir only through the circulation-gated heat-only exchanger; the loop draw rides the same electrical pool as external loads. Chillers supply a cold service of their declared class through a class-matched coolant-loop evaporator and reservoir condenser: the delivered duty is capped by the loop's actual circulation, gated at the chilled setpoint, and refused while the sink is at or above the maximum condensing temperature; work at the configured COP plus auxiliaries rides the same electrical pool, and condenser heat equals extracted heat plus the work and auxiliaries actually supplied, booked once. Fuelled generators convert a finite energy-unit fuel inventory into bus electrical output at the declared efficiency: output is bounded by the installed rating and the ramp limit, starting only completes once the startup energy has actually been drawn from the shared pool while the class-matched sink is below its maximum sink temperature, and after output stops the configured shutdown heat and its cooling requirement persist for the decay period; waste, startup and decay heat route exactly once into the sink and the fuel ledger closes over fuel = electrical + waste. Within a tick, generators and fuel-cell backup units produce first, then power allocates, then coolant loops and chillers run, then compartment atmospheres cycle, crews metabolise and compartments exchange, then thermal integrates, then transfers, then conversions. Compartment atmospheres model an ideal-gas mixture in a fixed volume: absolute and partial pressures derive from the gas inventory and temperature, humidity caps at Magnus saturation with the excess condensing and releasing its latent heat into the compartment, occupancy is an authored load assignment whose oxygen draw is capped by the inventory (CO2 and metabolic heat scale with what was actually consumed), leakage is a constant total-mass rate capped by the inventory, and scheduled airlock cycles remove authored mass with an explicit recovered-versus-lost split; every gram leaving a compartment is booked as leaked, recovered or lost, compartments never mix automatically, and declared pressure and gas-quality limits are reported, never clamped. Crews are an authored population with an activity profile, never derived from World Agents: metabolism draws food and water from compound stores and oxygen from the compartment, and returns CO2, moisture and metabolic heat to the compartment and urine and organic waste to their own finite compound stores. One uniform metabolic scale per tick - the scarcest supply or tightest waste headroom - throttles every pathway together, so absent material never generates nominal waste; requested versus actual is explicit per pathway, the authored coefficients must close over mass, constituents and energy, and the consumed mass the returns do not carry away is reported as explicit retained body mass. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s), %zu airlock cycle(s), %zu crew(s), %zu water collector(s), %zu water treatment(s), %zu electrolyzer(s), %zu CO2 capture machine(s), %zu fuel-cell backup unit(s), %zu thermal buffer(s), %zu terminal-waste ejection(s), %zu Sabatier reactor(s), %zu methane processor(s) and %zu microbial processor(s)",
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s), %zu airlock cycle(s), %zu crew(s), %zu water collector(s), %zu water treatment(s), %zu electrolyzer(s), %zu CO2 capture machine(s), %zu fuel-cell backup unit(s), %zu thermal buffer(s), %zu terminal-waste ejection(s), %zu Sabatier reactor(s), %zu methane processor(s), %zu microbial processor(s) and %zu crop population(s)",
 		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
 		authored.stores.size(), authored.transfers.size(), authored.conversions.size(),
 		authored.solarArrays.size(), authored.equipmentLoads.size(), authored.batteries.size(),
@@ -39,7 +39,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		authored.fuelCells.size(), authored.thermalBuffers.size(),
 		authored.wasteEjections.size(),
 		authored.sabatierReactors.size(), authored.methaneProcessors.size(),
-		authored.microbialProcessors.size());
+		authored.microbialProcessors.size(), authored.cropPopulations.size());
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
@@ -1936,6 +1936,162 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		}
 		mDraft.microbialProcessors.push_back(std::move(processor));
 	}
+	ImGui::SeparatorText("Draft crop populations (#409; dry-mass living biomass on a declared composition with no moisture and no atmospheric nitrogen; growth is funded by delivered lamp light only after the essential circulation draw, plus CO2, irrigation water and each tracked nutrient, and only inside the declared growing window; respiration burns dry organic for oxygen and returns CO2, vapour and heat; the canopy stops at declared capacity and never photosynthesises for free in darkness or without power - all biological coefficients are provisional assumptions, harvest deferred to #410)");
+	for (size_t index = 0; index < mDraft.cropPopulations.size(); )
+	{
+		auto& crop = mDraft.cropPopulations[index];
+		auto const row = std::to_string(index);
+		bool removeCrop = false;
+		ImGui::PushItemWidth(220);
+		char cropIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(cropIdBuffer, crop.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Crop " + row + " id").c_str(), cropIdBuffer, sizeof(cropIdBuffer)))
+			crop.id = cropIdBuffer;
+		char cropAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(cropAtmosphereBuffer, crop.atmosphereId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Crop " + row + " atmosphere").c_str(),
+			cropAtmosphereBuffer, sizeof(cropAtmosphereBuffer)))
+			crop.atmosphereId = cropAtmosphereBuffer;
+		char cropWaterBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(cropWaterBuffer, crop.waterStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Crop " + row + " irrigation water store").c_str(),
+			cropWaterBuffer, sizeof(cropWaterBuffer)))
+			crop.waterStoreId = cropWaterBuffer;
+		char cropNitrogenBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(cropNitrogenBuffer, crop.nitrogenStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Crop " + row + " nitrogen store").c_str(),
+			cropNitrogenBuffer, sizeof(cropNitrogenBuffer)))
+			crop.nitrogenStoreId = cropNitrogenBuffer;
+		char cropPhosphorusBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(cropPhosphorusBuffer, crop.phosphorusStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Crop " + row + " phosphorus store").c_str(),
+			cropPhosphorusBuffer, sizeof(cropPhosphorusBuffer)))
+			crop.phosphorusStoreId = cropPhosphorusBuffer;
+		char cropPotassiumBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(cropPotassiumBuffer, crop.potassiumStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Crop " + row + " potassium store").c_str(),
+			cropPotassiumBuffer, sizeof(cropPotassiumBuffer)))
+			crop.potassiumStoreId = cropPotassiumBuffer;
+		char cropMineralsBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(cropMineralsBuffer, crop.mineralsStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Crop " + row + " minerals store").c_str(),
+			cropMineralsBuffer, sizeof(cropMineralsBuffer)))
+			crop.mineralsStoreId = cropMineralsBuffer;
+		ImGui::InputDouble(("Crop " + row + " growing area m2").c_str(),
+			&crop.growingAreaM2, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Crop " + row + " max biomass density kg/m2").c_str(),
+			&crop.maxBiomassDensityKgPerM2, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Crop " + row + " initial dry biomass kg").c_str(),
+			&crop.initialBiomassKg, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Crop " + row + " lamp rated kW").c_str(),
+			&crop.lampRatedKW, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Crop " + row + " circulation power kW (drawn before lamp)").c_str(),
+			&crop.circulationPowerKW, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Crop " + row + " growth yield kg per kWh light").c_str(),
+			&crop.growthYieldKgPerKWh, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Crop " + row + " respiration per hour").c_str(),
+			&crop.respirationPerHour, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Crop " + row + " transpiration kg per kg growth").c_str(),
+			&crop.transpirationKgPerKgGrowth, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Crop " + row + " min growing temperature C").c_str(),
+			&crop.minGrowingTemperatureC, 0.0, 0.0, "%.2f");
+		ImGui::InputDouble(("Crop " + row + " max growing temperature C").c_str(),
+			&crop.maxGrowingTemperatureC, 0.0, 0.0, "%.2f");
+		bool cropPeriodic = crop.illuminationProfile.periodSeconds > 0.0;
+		if (ImGui::Checkbox(("Crop " + row + " periodic illumination").c_str(), &cropPeriodic))
+		{
+			if (cropPeriodic)
+			{
+				if (crop.illuminationProfile.periodSeconds <= 0.0) crop.illuminationProfile.periodSeconds = 120.0;
+				if (crop.illuminationProfile.segments.empty())
+					crop.illuminationProfile.segments.push_back({0.0, 1.0});
+			}
+			else
+			{
+				crop.illuminationProfile.periodSeconds = 0.0;
+				crop.illuminationProfile.segments.clear();
+			}
+		}
+		if (!cropPeriodic)
+			ImGui::InputDouble(("Crop " + row + " constant illumination level").c_str(),
+				&crop.illuminationProfile.constantLevel, 0.0, 0.0, "%.3f");
+		else
+		{
+			ImGui::InputDouble(("Crop " + row + " illumination period seconds").c_str(),
+				&crop.illuminationProfile.periodSeconds, 0.0, 0.0, "%.1f");
+			for (size_t segment = 0; segment < crop.illuminationProfile.segments.size(); ++segment)
+			{
+				auto& stretch = crop.illuminationProfile.segments[segment];
+				auto const segmentRow = "Crop " + row + " illumination segment " + std::to_string(segment);
+				ImGui::InputDouble((segmentRow + " start").c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+				ImGui::SameLine();
+				ImGui::InputDouble((segmentRow + " level").c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+				ImGui::SameLine();
+				if (ImGui::Button(("Remove " + segmentRow).c_str()))
+					crop.illuminationProfile.segments.erase(
+						crop.illuminationProfile.segments.begin() + static_cast<std::ptrdiff_t>(segment));
+			}
+			if (crop.illuminationProfile.segments.size() < core::MaxStationProfileSegments
+				&& ImGui::Button(("Add illumination segment to crop " + row).c_str()))
+				crop.illuminationProfile.segments.push_back(
+					{crop.illuminationProfile.periodSeconds * 0.5, 0.0});
+		}
+		ImGui::Text("  declared dry-mass composition (moisture and atmospheric nitrogen must be 0 for crops):");
+		ImGui::InputDouble(("Crop " + row + " composition moisture fraction").c_str(),
+			&crop.composition.moisture, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Crop " + row + " composition nutrient nitrogen fraction").c_str(),
+			&crop.composition.nutrientNitrogen, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Crop " + row + " composition atmospheric nitrogen fraction").c_str(),
+			&crop.composition.atmosphericNitrogen, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Crop " + row + " composition phosphorus fraction").c_str(),
+			&crop.composition.phosphorus, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Crop " + row + " composition potassium fraction").c_str(),
+			&crop.composition.potassium, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Crop " + row + " composition other minerals fraction").c_str(),
+			&crop.composition.otherMinerals, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Crop " + row + " composition energy kJ per kg dry").c_str(),
+			&crop.composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
+		ImGui::InputInt(("Crop " + row + " priority").c_str(), &crop.priority, 1, 0);
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove crop " + row).c_str()))
+			removeCrop = true;
+		ImGui::PopItemWidth();
+		if (removeCrop)
+			mDraft.cropPopulations.erase(mDraft.cropPopulations.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
+	if (mDraft.cropPopulations.size() < core::MaxStationCropPopulations && ImGui::Button("Add crop population"))
+	{
+		core::CropPopulationSettings crop;
+		crop.growingAreaM2 = 10.0;
+		crop.maxBiomassDensityKgPerM2 = 2.0;
+		crop.initialBiomassKg = 1.0;
+		crop.lampRatedKW = 1.0;
+		crop.illuminationProfile.constantLevel = 1.0;
+		crop.circulationPowerKW = 0.1;
+		crop.growthYieldKgPerKWh = 0.01;
+		crop.respirationPerHour = 0.012;
+		crop.composition.energyKJPerKgDry = 1700.0;
+		if (!mDraft.atmospheres.empty())
+			crop.atmosphereId = mDraft.atmospheres.front().id;
+		if (!mDraft.stores.empty())
+		{
+			crop.waterStoreId = mDraft.stores.front().id;
+			crop.nitrogenStoreId = mDraft.stores.front().id;
+			crop.phosphorusStoreId = mDraft.stores.front().id;
+			crop.potassiumStoreId = mDraft.stores.front().id;
+			crop.mineralsStoreId = mDraft.stores.front().id;
+		}
+		for (size_t candidate = mDraft.cropPopulations.size() + 1;; ++candidate)
+		{
+			crop.id = "croppopulation" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.cropPopulations.begin(), mDraft.cropPopulations.end(),
+				[&](core::CropPopulationSettings const& existing) { return existing.id == crop.id; });
+			if (!taken) break;
+		}
+		mDraft.cropPopulations.push_back(std::move(crop));
+	}
 	ImGui::SeparatorText("Draft thermal buffers (kJ; finite phase-change store that rides through a cooling deficit: charge is capped by the host reservoir's deficit, discharge by its rejection surplus; access is circulation-gated or passive; the usable band maps stored energy to buffer temperature)");
 	for (size_t index = 0; index < mDraft.thermalBuffers.size(); )
 	{
@@ -2784,6 +2940,53 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			processor.lastStockConsumedUnits, processor.stockConsumedUnits);
 		if (processor.disabled)
 			ImGui::Text("  zero rated feed: no service");
+	}
+	ImGui::SeparatorText("Crop populations (live; dry-mass living biomass beside declared capacity; growth is funded by delivered lamp light only after the essential circulation draw, plus CO2, irrigation water and each tracked nutrient, and only inside the declared growing window; respiration burns dry organic for oxygen and returns CO2, vapour and heat; the canopy stops at capacity and never photosynthesises for free in darkness or without power - provisional biological assumptions, harvest deferred to #410)");
+	if (snapshot.cropPopulations.empty()) ImGui::TextDisabled("No crop populations authored.");
+	for (auto const& crop : snapshot.cropPopulations)
+	{
+		char const* status = "idle";
+		switch (crop.status)
+		{
+		case core::StationTransferStatus::Full: status = "growing at full funded rate"; break;
+		case core::StationTransferStatus::Partial: status = "growing below potential (resources or capacity short)"; break;
+		case core::StationTransferStatus::Rejected: status = "refused (nothing grew)"; break;
+		case core::StationTransferStatus::Idle: break;
+		}
+		ImGui::Text("%s [%s]: %s | living %.4f / capacity %.4f kg (%.1f%%) | growth scale %.3f%s%s",
+			crop.id.c_str(), crop.atmosphereId.c_str(), status,
+			crop.livingBiomassKg, crop.capacityKg, crop.capacityFraction * 100.0,
+			crop.lastGrowthScale,
+			crop.lastGrowthLimiter.empty() ? "" : " | limited by: ",
+			crop.lastGrowthLimiter.empty() ? "" : crop.lastGrowthLimiter.c_str());
+		ImGui::Text("  last tick: growth %.6f kg (potential %.6f) | CO2 %.6f kg + water %.6f kg + N %.6f + P %.6f + K %.6f + minerals %.6f kg drawn | O2 released %.6f kg | transpired %.6f kg | light %.4f/%.4f kW | circulation %.4f/%.4f kW | respiration %.6f/%.6f kg (O2 drawn %.6f kg, CO2 returned %.6f kg, vapour %.6f kg, heat %.4f kW)%s | heat into compartment %.4f kW | temperature %s%s",
+			crop.lastGrowthKg, crop.lastGrowthPotentialKg,
+			crop.lastCo2DrawnKg, crop.lastAssimilationWaterKg,
+			crop.lastNitrogenDrawnKg, crop.lastPhosphorusDrawnKg,
+			crop.lastPotassiumDrawnKg, crop.lastMineralsDrawnKg,
+			crop.lastOxygenReleasedKg, crop.lastTranspiredKg,
+			crop.lastLightSuppliedKW, crop.lastLightRequestedKW,
+			crop.lastCirculationSuppliedKW, crop.lastCirculationRequestedKW,
+			crop.lastRespirationKg, crop.lastRespirationRequestedKg,
+			crop.lastRespirationO2DrawnKg, crop.lastRespirationCo2ReturnedKg,
+			crop.lastRespirationWaterKg, crop.lastRespirationHeatKW,
+			crop.lastOxygenLimited ? " [O2-limited respiration]" : "",
+			crop.lastHeatIntoCompartmentKW,
+			crop.temperatureEligible ? "eligible" : "NOT eligible",
+			crop.blockReason.empty() ? "" : (std::string(" - ") + crop.blockReason).c_str());
+		ImGui::Text("  cumulative: growth %.4f kg | CO2 %.4f kg | water %.4f kg | N %.4f + P %.4f + K %.4f + minerals %.4f kg | O2 released %.4f kg | transpired %.4f kg | respiration %.4f kg (O2 %.4f kg, CO2 %.4f kg, vapour %.4f kg) | light %.2f kJ + circulation %.2f kJ | chemical fixed %.2f kJ | respiration heat %.2f kJ | heat into compartment %.2f kJ | residual mass %.2e kg / energy %.2e kJ",
+			crop.growthKg, crop.co2DrawnKg, crop.waterDrawnKg,
+			crop.nitrogenDrawnKg, crop.phosphorusDrawnKg,
+			crop.potassiumDrawnKg, crop.mineralsDrawnKg,
+			crop.oxygenReleasedKg, crop.transpiredKg,
+			crop.respirationKg, crop.respirationO2DrawnKg,
+			crop.respirationCo2ReturnedKg, crop.respirationWaterKg,
+			crop.lightEnergyKJ, crop.circulationEnergyKJ,
+			crop.chemicalEnergyFixedKJ, crop.respirationHeatKJ,
+			crop.heatIntoCompartmentKJ,
+			crop.residualKg, crop.residualKJ);
+		if (crop.disabled)
+			ImGui::Text("  zero growing area: no service");
 	}
 	for (auto const& diagnostic : world->getStationSystemsDiagnostics())
 	{

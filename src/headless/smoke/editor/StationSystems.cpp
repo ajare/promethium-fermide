@@ -1783,6 +1783,139 @@ void bufferWorkflow(smoke::Context const&)
 		#undef REQ
 		require(driver.passed(), "Microbial condition workflow failed on the Test Engine");
 	}
+void cropWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO();
+		io.DisplaySize = {1200.0f, 4200.0f};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Crop workflow editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		core::StationSystemsSettings initial;
+		initial.enabled = true;
+		initial.observationIntervalSeconds = 1.0f;
+		auto plain = [](std::string const& id, double capacity, double starting)
+		{
+			core::ResourceStoreSettings store;
+			store.id = id;
+			store.unit = "kg";
+			store.capacity = capacity;
+			store.startingQualified = starting;
+			return store;
+		};
+		initial.stores.push_back(plain("irrigation", 200.0, 150.0));
+		initial.stores.push_back(plain("fertN", 10.0, 5.0));
+		initial.stores.push_back(plain("fertP", 10.0, 5.0));
+		initial.stores.push_back(plain("fertK", 10.0, 5.0));
+		initial.stores.push_back(plain("fertMin", 10.0, 5.0));
+		core::AtmosphereSettings habitat;
+		habitat.id = "habitat";
+		habitat.hazardClass = "normal";
+		habitat.volumeM3 = 100.0;
+		habitat.startingOxygenKg = 40.0;
+		habitat.startingNitrogenKg = 80.0;
+		habitat.startingCarbonDioxideKg = 5.0;
+		habitat.startingWaterVapourKg = 1.0;
+		habitat.startingTemperatureC = 22.0;
+		habitat.thermalCapacityKJPerK = 20000.0;
+		habitat.minPressureKPa = 1.0;
+		habitat.maxPressureKPa = 200.0;
+		initial.atmospheres.push_back(habitat);
+		core::SolarArraySettings field;
+		field.id = "field";
+		field.capacityKW = 100.0;
+		initial.solarArrays.push_back(field);
+		core::CropPopulationSettings canopy;
+		canopy.id = "canopy";
+		canopy.atmosphereId = "habitat";
+		canopy.waterStoreId = "irrigation";
+		canopy.nitrogenStoreId = "fertN";
+		canopy.phosphorusStoreId = "fertP";
+		canopy.potassiumStoreId = "fertK";
+		canopy.mineralsStoreId = "fertMin";
+		core::ResourceCompositionSettings composition;
+		composition.moisture = 0.0;
+		composition.nutrientNitrogen = 0.05;
+		composition.atmosphericNitrogen = 0.0;
+		composition.phosphorus = 0.02;
+		composition.potassium = 0.03;
+		composition.otherMinerals = 0.05;
+		composition.energyKJPerKgDry = 1700.0;
+		canopy.composition = composition;
+		canopy.growingAreaM2 = 10.0;
+		canopy.maxBiomassDensityKgPerM2 = 2.0; // 20 kg Growing capacity
+		canopy.initialBiomassKg = 1.0;
+		canopy.lampRatedKW = 3.6;
+		canopy.illuminationProfile.constantLevel = 1.0;
+		canopy.circulationPowerKW = 0.1;
+		canopy.growthYieldKgPerKWh = 2.0;
+		canopy.respirationPerHour = 0.5;
+		canopy.transpirationKgPerKgGrowth = 5.0;
+		canopy.minGrowingTemperatureC = 10.0;
+		canopy.maxGrowingTemperatureC = 35.0;
+		initial.cropPopulations.push_back(canopy);
+		require(world->configureStationSystems(initial, false, &diagnostic), diagnostic.c_str());
+		headless::TestEngineDriver driver([&]
+		{
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 4100});
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+
+		driver.run("station", "cropWorkflow", [&](ImGuiTestContext* ctx)
+		{
+			ctx->SetRef("Station Systems");
+			REQ(driver.contains("1 crop population(s)"),
+				"Authored crop population count missing from the window");
+			// Run: the live view shows the canopy growing inside its declared
+			// capacity, funded by delivered light, with the growth scale and
+			// the living-biomass picture visible. Ticking never dirties the
+			// authored document.
+			world->markSaved();
+			world->resumeSimulation(); REQ(world->advanceTicks(120), "Editor run failed");
+			world->pauseSimulation(); ctx->Sleep(1);
+			REQ(driver.contains("canopy [habitat]")
+				&& driver.contains("capacity 20.0000 kg")
+				&& driver.contains("growing"),
+				"Live crop canopy, declared capacity or growth not displayed");
+			REQ(!world->isModified(), "Crop growth ticking dirtied the authored document");
+			// An invalid drafted initial biomass (fuller than the installation
+			// can support) is refused with a visible diagnostic and never
+			// reaches the authored settings.
+			driver.typeValue(ctx, "Crop 0 initial dry biomass kg", "999");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(driver.contains("exceeds the declared Growing capacity"),
+				"Invalid drafted initial biomass diagnostic not shown");
+			REQ(world->getStationSystemsSettings().cropPopulations[0].initialBiomassKg == 1.0
+				&& world->getSimulationTick() == 120,
+				"Invalid drafted initial biomass mutated the authored settings");
+			// A valid drafted growing area applies through the World-reset
+			// confirmation and restarts the population from its authored start.
+			driver.typeValue(ctx, "Crop 0 initial dry biomass kg", "2");
+			driver.typeValue(ctx, "Crop 0 growing area m2", "20");
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(world->getStationSystemsSettings().cropPopulations[0].growingAreaM2 == 20.0
+				&& world->getStationSystemsSettings().cropPopulations[0].initialBiomassKg == 2.0
+				&& history.undoCount() == 1 && world->getSimulationTick() == 0,
+				"Repaired crop draft did not apply through the reset-confirmed flow");
+			ctx->Sleep(1);
+			world->resumeSimulation(); REQ(world->advanceTicks(120), "Post-apply run failed");
+			world->pauseSimulation(); ctx->Sleep(1);
+			// The doubled area doubles the declared capacity to 40 kg.
+			REQ(driver.contains("capacity 40.0000 kg")
+				&& driver.contains("1 crop population(s)"),
+				"Applied growing area not reflected in the live capacity display");
+		});
+		#undef REQ
+		require(driver.passed(), "Crop workflow failed on the Test Engine");
+	}
 void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"station/windowWorkflow", workflow});
@@ -1800,4 +1933,5 @@ void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 	checks.push_back({"station/generatorWorkflow", generatorWorkflow});
 	checks.push_back({"station/bufferWorkflow", bufferWorkflow});
 	checks.push_back({"station/microbialConditionWorkflow", microbialConditionWorkflow});
+	checks.push_back({"station/cropWorkflow", cropWorkflow});
 }

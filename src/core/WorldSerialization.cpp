@@ -851,7 +851,19 @@ namespace core
 		// and Reset reconstruct them from the authored initial
 		// condition; a pre-85 document carrying `microbialProcessors` is
 		// refused rather than silently re-defaulting the biology.
-		serializer.writeUint32("version", 85);
+		// Version 86 adds authored crop-production contracts (#409):
+		// crop populations that grow a dry Living biomass inside one
+		// Atmosphere compartment under delivered lamp power, compartment
+		// CO2, irrigation water and separately-tracked N/P/K/mineral
+		// stores inside a declared growing window and below a declared
+		// Growing capacity, with day-and-night respiration, transpiration
+		// and a declared dry-mass composition; a pre-86 document
+		// carrying `cropPopulations` is refused rather than silently
+		// dropping the agriculture. The Living biomass trajectory, the
+		// growth and respiration pathway ledgers and the energy and heat
+		// totals stay runtime-only, so load and Reset reconstruct them
+		// from the authored starting conditions.
+		serializer.writeUint32("version", 86);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -1446,6 +1458,60 @@ namespace core
 					serializer.writeDouble("stockUnitsPerConditionPoint",
 						processor.stockUnitsPerConditionPoint);
 					serializer.writeInt32("priority", processor.priority);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.cropPopulations.empty())
+			{
+				// Authored crop population contracts only; the Living
+				// biomass trajectory, the growth and respiration pathway
+				// ledgers and the energy and heat totals are runtime state
+				// reconstructed on load (#409).
+				serializer.beginArray("cropPopulations");
+				for (auto const& crop : mStationSystemsSettings.cropPopulations)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", crop.id);
+					serializer.writeString("atmosphereId", crop.atmosphereId);
+					serializer.writeString("waterStoreId", crop.waterStoreId);
+					serializer.writeString("nitrogenStoreId", crop.nitrogenStoreId);
+					serializer.writeString("phosphorusStoreId", crop.phosphorusStoreId);
+					serializer.writeString("potassiumStoreId", crop.potassiumStoreId);
+					serializer.writeString("mineralsStoreId", crop.mineralsStoreId);
+					serializer.beginMap("composition");
+					serializer.writeDouble("moisture", crop.composition.moisture);
+					serializer.writeDouble("nutrientNitrogen", crop.composition.nutrientNitrogen);
+					serializer.writeDouble("atmosphericNitrogen", crop.composition.atmosphericNitrogen);
+					serializer.writeDouble("phosphorus", crop.composition.phosphorus);
+					serializer.writeDouble("potassium", crop.composition.potassium);
+					serializer.writeDouble("otherMinerals", crop.composition.otherMinerals);
+					serializer.writeDouble("energyKJPerKgDry", crop.composition.energyKJPerKgDry);
+					serializer.endMap();
+					serializer.writeDouble("growingAreaM2", crop.growingAreaM2);
+					serializer.writeDouble("maxBiomassDensityKgPerM2", crop.maxBiomassDensityKgPerM2);
+					serializer.writeDouble("initialBiomassKg", crop.initialBiomassKg);
+					serializer.writeDouble("lampRatedKW", crop.lampRatedKW);
+					serializer.beginMap("illumination");
+					serializer.writeDouble("constantLevel", crop.illuminationProfile.constantLevel);
+					serializer.writeDouble("periodSeconds", crop.illuminationProfile.periodSeconds);
+					serializer.beginArray("segments");
+					for (auto const& segment : crop.illuminationProfile.segments)
+					{
+						serializer.beginMap("");
+						serializer.writeDouble("startSeconds", segment.startSeconds);
+						serializer.writeDouble("level", segment.level);
+						serializer.endMap();
+					}
+					serializer.endArray();
+					serializer.endMap();
+					serializer.writeDouble("circulationPowerKW", crop.circulationPowerKW);
+					serializer.writeDouble("growthYieldKgPerKWh", crop.growthYieldKgPerKWh);
+					serializer.writeDouble("respirationPerHour", crop.respirationPerHour);
+					serializer.writeDouble("transpirationKgPerKgGrowth", crop.transpirationKgPerKgGrowth);
+					serializer.writeDouble("minGrowingTemperatureC", crop.minGrowingTemperatureC);
+					serializer.writeDouble("maxGrowingTemperatureC", crop.maxGrowingTemperatureC);
+					serializer.writeInt32("priority", crop.priority);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -2418,7 +2484,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 85)
+		if (version < 1 || version > 86)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -3088,6 +3154,63 @@ namespace core
 						serializer.readDouble("stockUnitsPerConditionPoint");
 					processor.priority = serializer.readInt32("priority");
 					stationSettings.microbialProcessors.push_back(std::move(processor));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("cropPopulations"))
+			{
+				if (version < 86) throw SerializationException(
+					"Station crop populations require World schema 86");
+				serializer.beginArray("cropPopulations");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					CropPopulationSettings crop;
+					crop.id = serializer.readString("id");
+					crop.atmosphereId = serializer.readString("atmosphereId");
+					crop.waterStoreId = serializer.readString("waterStoreId");
+					crop.nitrogenStoreId = serializer.readString("nitrogenStoreId");
+					crop.phosphorusStoreId = serializer.readString("phosphorusStoreId");
+					crop.potassiumStoreId = serializer.readString("potassiumStoreId");
+					crop.mineralsStoreId = serializer.readString("mineralsStoreId");
+					serializer.beginMap("composition");
+					crop.composition.moisture = serializer.readDouble("moisture");
+					crop.composition.nutrientNitrogen = serializer.readDouble("nutrientNitrogen");
+					crop.composition.atmosphericNitrogen =
+						serializer.readDouble("atmosphericNitrogen");
+					crop.composition.phosphorus = serializer.readDouble("phosphorus");
+					crop.composition.potassium = serializer.readDouble("potassium");
+					crop.composition.otherMinerals = serializer.readDouble("otherMinerals");
+					crop.composition.energyKJPerKgDry = serializer.readDouble("energyKJPerKgDry");
+					serializer.endMap();
+					crop.growingAreaM2 = serializer.readDouble("growingAreaM2");
+					crop.maxBiomassDensityKgPerM2 = serializer.readDouble("maxBiomassDensityKgPerM2");
+					crop.initialBiomassKg = serializer.readDouble("initialBiomassKg");
+					crop.lampRatedKW = serializer.readDouble("lampRatedKW");
+					serializer.beginMap("illumination");
+					crop.illuminationProfile.constantLevel = serializer.readDouble("constantLevel");
+					crop.illuminationProfile.periodSeconds = serializer.readDouble("periodSeconds");
+					serializer.beginArray("segments");
+					while (serializer.nextArrayItem())
+					{
+						serializer.beginMap("");
+						ProfileSegmentSettings segment;
+						segment.startSeconds = serializer.readDouble("startSeconds");
+						segment.level = serializer.readDouble("level");
+						serializer.endMap();
+						crop.illuminationProfile.segments.push_back(segment);
+					}
+					serializer.endArray();
+					serializer.endMap();
+					crop.circulationPowerKW = serializer.readDouble("circulationPowerKW");
+					crop.growthYieldKgPerKWh = serializer.readDouble("growthYieldKgPerKWh");
+					crop.respirationPerHour = serializer.readDouble("respirationPerHour");
+					crop.transpirationKgPerKgGrowth = serializer.readDouble("transpirationKgPerKgGrowth");
+					crop.minGrowingTemperatureC = serializer.readDouble("minGrowingTemperatureC");
+					crop.maxGrowingTemperatureC = serializer.readDouble("maxGrowingTemperatureC");
+					crop.priority = serializer.readInt32("priority");
+					stationSettings.cropPopulations.push_back(std::move(crop));
 					serializer.endMap();
 				}
 				serializer.endArray();

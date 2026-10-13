@@ -274,6 +274,8 @@ set(editor_names
     station/chillerWorkflow
     station/generatorWorkflow
     station/bufferWorkflow
+    station/microbialConditionWorkflow
+    station/cropWorkflow
 )
 
 if(DEFINED LANE)

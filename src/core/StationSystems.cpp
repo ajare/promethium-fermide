@@ -83,6 +83,7 @@ namespace core
 			std::vector<SabatierReactorSettings> const* sabatierReactors;
 			std::vector<MethaneProcessorSettings> const* methaneProcessors;
 			std::vector<MicrobialProcessorSettings> const* microbialProcessors;
+			std::vector<CropPopulationSettings> const* cropPopulations;
 			static void pushProfile(lua_State* state, ProfileSettings const& profile)
 			{
 				lua_createtable(state, 0, 3);
@@ -664,7 +665,47 @@ namespace core
 					lua_pushinteger(state, processor.priority); lua_setfield(state, -2, "priority");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 26, 1);
+				// Authored crop population descriptors cross the same
+				// boundary as plain immutable values (#409); each sandbox
+				// mirrors the resource-limited growth, the day-and-night
+				// respiration and audits its own mass and energy closure.
+				lua_createtable(state, static_cast<int>(cropPopulations->size()), 0);
+				for (size_t index = 0; index < cropPopulations->size(); ++index)
+				{
+					auto const& crop = (*cropPopulations)[index];
+					lua_createtable(state, 0, 20);
+					lua_pushstring(state, crop.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, crop.atmosphereId.c_str()); lua_setfield(state, -2, "atmosphere");
+					lua_pushstring(state, crop.waterStoreId.c_str()); lua_setfield(state, -2, "waterStore");
+					lua_pushstring(state, crop.nitrogenStoreId.c_str()); lua_setfield(state, -2, "nitrogenStore");
+					lua_pushstring(state, crop.phosphorusStoreId.c_str()); lua_setfield(state, -2, "phosphorusStore");
+					lua_pushstring(state, crop.potassiumStoreId.c_str()); lua_setfield(state, -2, "potassiumStore");
+					lua_pushstring(state, crop.mineralsStoreId.c_str()); lua_setfield(state, -2, "mineralsStore");
+					lua_createtable(state, 0, 7);
+					lua_pushnumber(state, crop.composition.moisture); lua_setfield(state, -2, "moisture");
+					lua_pushnumber(state, crop.composition.nutrientNitrogen); lua_setfield(state, -2, "nutrientNitrogen");
+					lua_pushnumber(state, crop.composition.atmosphericNitrogen); lua_setfield(state, -2, "atmosphericNitrogen");
+					lua_pushnumber(state, crop.composition.phosphorus); lua_setfield(state, -2, "phosphorus");
+					lua_pushnumber(state, crop.composition.potassium); lua_setfield(state, -2, "potassium");
+					lua_pushnumber(state, crop.composition.otherMinerals); lua_setfield(state, -2, "otherMinerals");
+					lua_pushnumber(state, crop.composition.energyKJPerKgDry); lua_setfield(state, -2, "energyKJPerKgDry");
+					lua_setfield(state, -2, "composition");
+					lua_pushnumber(state, crop.growingAreaM2); lua_setfield(state, -2, "growingAreaM2");
+					lua_pushnumber(state, crop.maxBiomassDensityKgPerM2); lua_setfield(state, -2, "maxBiomassDensityKgPerM2");
+					lua_pushnumber(state, crop.initialBiomassKg); lua_setfield(state, -2, "initialBiomassKg");
+					lua_pushnumber(state, crop.lampRatedKW); lua_setfield(state, -2, "lampRatedKW");
+					pushProfile(state, crop.illuminationProfile);
+					lua_setfield(state, -2, "illumination");
+					lua_pushnumber(state, crop.circulationPowerKW); lua_setfield(state, -2, "circulationPowerKW");
+					lua_pushnumber(state, crop.growthYieldKgPerKWh); lua_setfield(state, -2, "growthYieldKgPerKWh");
+					lua_pushnumber(state, crop.respirationPerHour); lua_setfield(state, -2, "respirationPerHour");
+					lua_pushnumber(state, crop.transpirationKgPerKgGrowth); lua_setfield(state, -2, "transpirationKgPerKgGrowth");
+					lua_pushnumber(state, crop.minGrowingTemperatureC); lua_setfield(state, -2, "minGrowingTemperatureC");
+					lua_pushnumber(state, crop.maxGrowingTemperatureC); lua_setfield(state, -2, "maxGrowingTemperatureC");
+					lua_pushinteger(state, crop.priority); lua_setfield(state, -2, "priority");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 27, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -2571,6 +2612,113 @@ namespace core
 					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
 					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
 		}
+		// Crop production contracts (#409). A crop population grows a dry
+		// Living biomass inside one Atmosphere compartment under the
+		// resources actually delivered: lamp power through the declared
+		// illumination profile, CO2 from the compartment, irrigation water
+		// and each tracked nutrient from its own separate store, inside a
+		// declared growing temperature window and below the declared
+		// Growing capacity (growing area x maximum supported density).
+		// The declared composition fixes the dry-mass basis: the organic
+		// balance is what growth builds and respiration burns, and the
+		// bound nutrient fractions are funded by the matching stores
+		// alone, so one abundant nutrient can never substitute for an
+		// exhausted one. Atmospheric nitrogen is refused: crops take up
+		// bound nutrient nitrogen, not air, and no configured process here
+		// converts one form into the other. Moisture is refused too: Living
+		// biomass is tracked as dry mass, so a water fraction in this
+		// declaration would count water the population never carries.
+		// The growth yield may not fix more chemical energy per kWh of
+		// light than a kWh of light carries: photosynthesis is never a
+		// free source of chemical energy. All biological coefficients are
+		// provisional assumptions: the validation pins them finite and in
+		// range, not agronomically correct.
+		if (settings.cropPopulations.size() > MaxStationCropPopulations)
+			return refuse("Station crop populations are limited to "
+				+ std::to_string(MaxStationCropPopulations) + " entries");
+		std::set<std::string> cropIds;
+		for (auto const& crop : settings.cropPopulations)
+		{
+			auto const where = "Station crop population '" + crop.id + "'";
+			if (crop.id.empty()) return refuse("Station crop population id must not be empty");
+			if (crop.id.size() > MaxStationStoreIdLength)
+				return refuse("Station crop population id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!cropIds.insert(crop.id).second) return refuse(where + " id is duplicated");
+			if (std::find_if(settings.atmospheres.begin(), settings.atmospheres.end(),
+				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == crop.atmosphereId; })
+				== settings.atmospheres.end())
+				return refuse(where + " grows in unknown atmosphere compartment '" + crop.atmosphereId + "'");
+			std::string const uptakeIds[5]{crop.waterStoreId, crop.nitrogenStoreId,
+				crop.phosphorusStoreId, crop.potassiumStoreId, crop.mineralsStoreId};
+			char const* uptakeRoles[5]{"irrigation water", "nitrogen", "phosphorus",
+				"potassium", "minerals"};
+			for (size_t stream = 0; stream < 5; ++stream)
+			{
+				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+					[&](ResourceStoreSettings const& store) { return store.id == uptakeIds[stream]; });
+				if (found == settings.stores.end())
+					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
+						+ "' does not exist");
+				if (!isMassUnit(found->unit))
+					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
+						+ "' must be a mass unit; crop uptake is mass-denominated (g or kg)");
+				for (size_t other = stream + 1; other < 5; ++other)
+					if (uptakeIds[stream] == uptakeIds[other])
+						return refuse(where + " " + uptakeRoles[stream] + " store and "
+							+ uptakeRoles[other] + " store are the same store '"
+							+ uptakeIds[stream] + "'; every tracked nutrient and the irrigation water need distinct stores so depletion stays visible per resource");
+			}
+			auto const& composition = crop.composition;
+			if (!std::isfinite(composition.moisture) || composition.moisture != 0.0)
+				return refuse(where + " declared composition carries moisture; Living biomass is tracked as dry mass, so the crop declaration must not carry a water fraction");
+			if (!std::isfinite(composition.atmosphericNitrogen) || composition.atmosphericNitrogen != 0.0)
+				return refuse(where + " declared composition carries atmospheric nitrogen; crops take up bound nutrient nitrogen, not air, and no configured process converts one into the other");
+			double const dryFractions[]{composition.nutrientNitrogen, composition.phosphorus,
+				composition.potassium, composition.otherMinerals};
+			char const* dryNames[]{"nutrient nitrogen", "phosphorus", "potassium", "other minerals"};
+			for (size_t field = 0; field < 4; ++field)
+				if (!std::isfinite(dryFractions[field]) || dryFractions[field] < 0.0)
+					return refuse(where + " declared " + dryNames[field]
+						+ " fraction must be finite and non-negative");
+			if (dryFractions[0] + dryFractions[1] + dryFractions[2] + dryFractions[3]
+				> 1.0 + StationBalanceTolerance)
+				return refuse(where + " declared dry nutrient fractions exceed 1: the organic dry-mass balance would be negative");
+			if (!std::isfinite(composition.energyKJPerKgDry) || composition.energyKJPerKgDry <= 0.0)
+				return refuse(where + " declared chemical energy per dry kg must be finite and positive: the respiration heat and fixed-energy ledger depend on it");
+			if (!std::isfinite(crop.growingAreaM2) || crop.growingAreaM2 < 0.0)
+				return refuse(where + " growing area must be finite and non-negative");
+			if (!std::isfinite(crop.maxBiomassDensityKgPerM2) || crop.maxBiomassDensityKgPerM2 <= 0.0)
+				return refuse(where + " maximum biomass density must be finite and positive");
+			auto const capacityKg = crop.growingAreaM2 * crop.maxBiomassDensityKgPerM2;
+			if (!std::isfinite(crop.initialBiomassKg) || crop.initialBiomassKg < 0.0)
+				return refuse(where + " initial living biomass must be finite and non-negative");
+			if (crop.initialBiomassKg > capacityKg + StationBalanceTolerance)
+				return refuse(where + " initial living biomass exceeds the declared Growing capacity: the population cannot start fuller than the installation can support");
+			if (!std::isfinite(crop.lampRatedKW) || crop.lampRatedKW < 0.0)
+				return refuse(where + " lamp rated power must be finite and non-negative");
+			if (!validateStationProfile(crop.illuminationProfile, where + " illumination profile", diagnostic))
+				return false;
+			if (!std::isfinite(crop.circulationPowerKW) || crop.circulationPowerKW < 0.0)
+				return refuse(where + " circulation power must be finite and non-negative");
+			if (!std::isfinite(crop.growthYieldKgPerKWh) || crop.growthYieldKgPerKWh < 0.0)
+				return refuse(where + " growth yield per kWh must be finite and non-negative (provisional biological assumption)");
+			if (crop.growthYieldKgPerKWh * composition.energyKJPerKgDry
+				> 3600.0 + StationBalanceTolerance * 3600.0)
+				return refuse(where + " declared growth yield would fix more chemical energy per kWh of light than the light carries: photosynthesis is never a free source of chemical energy");
+			if (!std::isfinite(crop.respirationPerHour) || crop.respirationPerHour < 0.0)
+				return refuse(where + " respiration per hour must be finite and non-negative (provisional biological assumption)");
+			if (!std::isfinite(crop.transpirationKgPerKgGrowth) || crop.transpirationKgPerKgGrowth < 0.0)
+				return refuse(where + " transpiration per kg growth must be finite and non-negative (provisional biological assumption)");
+			if (!std::isfinite(crop.minGrowingTemperatureC)
+				|| crop.minGrowingTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " minimum growing temperature must be finite and above absolute zero");
+			if (!std::isfinite(crop.maxGrowingTemperatureC)
+				|| crop.maxGrowingTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum growing temperature must be finite and above absolute zero");
+			if (crop.minGrowingTemperatureC >= crop.maxGrowingTemperatureC)
+				return refuse(where + " minimum growing temperature must be below the maximum growing temperature: an empty growing window is never a service");
+		}
 		diagnostic.clear(); return true;
 	}
 	void setStationSystemsSourceLoader(StationSystemsSourceLoader loader) { sourceLoader = std::move(loader); }
@@ -3028,6 +3176,21 @@ namespace core
 			// closes over it.
 			double crewHeatKJ{0.0};
 			double lastCrewHeatKW{0.0};
+			// Crop gas and heat pathways (#409): the O2 a canopy released
+			// by photosynthesis, the O2 it drew by respiration, the CO2 it
+			// fixed, the CO2 it returned, and the vapour it transpired and
+			// respired - each a booked addition or removal pathway so the
+			// compartment's per-component closure stays exact with crops
+			// present. Crop heat (lamp energy not fixed as biomass chemical
+			// energy, circulation pump work and respiration heat) is its
+			// own thermal term beside the crew heat.
+			double cropOxygenAddedKg{0.0};
+			double cropOxygenDrawnKg{0.0};
+			double cropCarbonDioxideAddedKg{0.0};
+			double cropCarbonDioxideDrawnKg{0.0};
+			double cropVapourAddedKg{0.0};
+			double cropHeatKJ{0.0};
+			double lastCropHeatKW{0.0};
 			// Last-tick observables.
 			double lastOxygenDemandKg{0.0};
 			double lastOxygenConsumedKg{0.0};
@@ -3443,6 +3606,83 @@ namespace core
 			double heatRoutedKJ{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
+		// The authoritative ledger of one authored crop population
+		// (#409). The population's dry Living biomass is runtime state
+		// initialised from the authored start; the Growing capacity is
+		// derived from the declared area and density. Growth runs at one
+		// uniform scale per tick - the smallest of the fractions the
+		// delivered light, the compartment CO2, the drawable irrigation
+		// water, each drawable tracked nutrient and the remaining capacity
+		// headroom can sustain - so a missing input stops growth whole
+		// instead of letting the canopy run on borrowed material. The
+		// essential circulation demand is drawn ahead of the discretionary
+		// lamp demand from the same pool, and unsupplied circulation stops
+		// growth: gas, water and nutrients only reach the canopy if the
+		// pumps run. Respiration runs day and night against the declared
+		// organic content, capped by the oxygen the compartment actually
+		// holds. Every flow moves through the compartment and store
+		// inventories; the mass ledger closes over delivered = fixed +
+		// respired + returned, and the energy ledger over light = fixed
+		// chemical + respired heat + heat into the compartment.
+		struct CropPopulationState
+		{
+			CropPopulationSettings authored;
+			size_t atmosphereIndex{0};
+			size_t waterStoreIndex{0};
+			size_t nitrogenStoreIndex{0};
+			size_t phosphorusStoreIndex{0};
+			size_t potassiumStoreIndex{0};
+			size_t mineralsStoreIndex{0};
+			double capacityKg{0.0};
+			double livingBiomassKg{0.0};
+			double lastIllumination{0.0};
+			double lastLightRequestedKW{0.0};
+			double lastLightSuppliedKW{0.0};
+			double lastCirculationRequestedKW{0.0};
+			double lastCirculationSuppliedKW{0.0};
+			double lastGrowthPotentialKg{0.0};
+			double lastGrowthScale{0.0};
+			std::string lastGrowthLimiter;
+			double lastGrowthKg{0.0};
+			double lastCo2DrawnKg{0.0};
+			double lastAssimilationWaterKg{0.0};
+			double lastNitrogenDrawnKg{0.0};
+			double lastPhosphorusDrawnKg{0.0};
+			double lastPotassiumDrawnKg{0.0};
+			double lastMineralsDrawnKg{0.0};
+			double lastOxygenReleasedKg{0.0};
+			double lastTranspiredKg{0.0};
+			double lastRespirationRequestedKg{0.0};
+			double lastRespirationKg{0.0};
+			double lastRespirationO2DrawnKg{0.0};
+			std::string lastRespirationLimiter;
+			double lastRespirationCo2ReturnedKg{0.0};
+			double lastRespirationWaterKg{0.0};
+			double lastRespirationHeatKW{0.0};
+			bool lastOxygenLimited{false};
+			double lastHeatIntoCompartmentKW{0.0};
+			bool lastTemperatureEligible{false};
+			std::string lastBlockReason;
+			double growthKg{0.0};
+			double co2DrawnKg{0.0};
+			double waterDrawnKg{0.0};
+			double nitrogenDrawnKg{0.0};
+			double phosphorusDrawnKg{0.0};
+			double potassiumDrawnKg{0.0};
+			double mineralsDrawnKg{0.0};
+			double oxygenReleasedKg{0.0};
+			double transpiredKg{0.0};
+			double respirationKg{0.0};
+			double respirationO2DrawnKg{0.0};
+			double respirationCo2ReturnedKg{0.0};
+			double respirationWaterKg{0.0};
+			double lightEnergyKJ{0.0};
+			double circulationEnergyKJ{0.0};
+			double chemicalEnergyFixedKJ{0.0};
+			double respirationHeatKJ{0.0};
+			double heatIntoCompartmentKJ{0.0};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
 		std::vector<TransferState> transfers;
@@ -3472,6 +3712,7 @@ namespace core
 		std::vector<SabatierState> sabatierReactors;
 		std::vector<MethaneProcessorState> methaneProcessors;
 		std::vector<MicrobialProcessorState> microbialProcessors;
+		std::vector<CropPopulationState> cropPopulations;
 		// Electrolyzers and capture machines compete for the same power pool
 		// and the same stores, so each runs in the declared deterministic
 		// order: priority descending, declaration order ascending.
@@ -3488,6 +3729,11 @@ namespace core
 		// deterministic order: priority descending, declaration order
 		// ascending (#407).
 		std::vector<size_t> microbialProcessorOrder;
+		// Crop populations compete for the same power pool (lamp and
+		// circulation demand) and share the compartment and uptake stores,
+		// so each runs in the declared deterministic order: priority
+		// descending, declaration order ascending (#409).
+		std::vector<size_t> cropOrder;
 		// Treatments compete for the same power pool and the same stores, so
 		// they run in the declared deterministic order: priority descending,
 		// declaration order ascending.
@@ -3577,6 +3823,7 @@ namespace core
 			auto const committedSabatierReactors = sabatierReactors;
 			auto const committedMethaneProcessors = methaneProcessors;
 			auto const committedMicrobialProcessors = microbialProcessors;
+			auto const committedCropPopulations = cropPopulations;
 			auto const committedAvailableGenerationKW = lastAvailableGenerationKW;
 			auto const committedBatteryShortfallKW = lastBatteryShortfallKW;
 			if (runLedger(tick, seconds, system, violation)) return true;
@@ -3604,6 +3851,7 @@ namespace core
 			sabatierReactors = committedSabatierReactors;
 			methaneProcessors = committedMethaneProcessors;
 			microbialProcessors = committedMicrobialProcessors;
+			cropPopulations = committedCropPopulations;
 			lastAvailableGenerationKW = committedAvailableGenerationKW;
 			lastBatteryShortfallKW = committedBatteryShortfallKW;
 			return false;
@@ -3706,6 +3954,9 @@ namespace core
 			std::vector<StationTransferStatus> previousMicrobialProcessorStatus;
 			previousMicrobialProcessorStatus.reserve(microbialProcessors.size());
 			for (auto const& processor : microbialProcessors) previousMicrobialProcessorStatus.push_back(processor.status);
+			std::vector<StationTransferStatus> previousCropStatus;
+			previousCropStatus.reserve(cropPopulations.size());
+			for (auto const& crop : cropPopulations) previousCropStatus.push_back(crop.status);
 			std::vector<double> qualified, unqualified;
 			qualified.reserve(stores.size());
 			unqualified.reserve(stores.size());
@@ -6386,6 +6637,371 @@ namespace core
 					processor.status = StationTransferStatus::Full;
 				else processor.status = StationTransferStatus::Partial;
 			}
+			// Crop production (#409) runs in the same power-consumer phase
+			// after nutrient recovery: the canopy grows its dry Living
+			// biomass under the resources actually delivered and respires
+			// day and night. The essential circulation demand - the pumps
+			// that deliver gas, water and nutrients across the canopy - is
+			// drawn from the generation-and-battery pool ahead of the
+			// discretionary lamp demand, so shedding lighting never
+			// starves the circulation the biology depends on. Growth
+			// potential comes from the light energy actually delivered:
+			// darkness or a blackout photosynthesises nothing for free. A
+			// single uniform growth scale then binds the potential to what
+			// the compartment CO2, the drawable irrigation water, each
+			// drawable tracked nutrient and the remaining Growing capacity
+			// headroom can actually sustain - N, P, K and the grouped
+			// minerals are funded by their own separate stores, so one
+			// abundant nutrient never hides another's exhaustion, and the
+			// limiter names whichever bound first. Growth is qualified only
+			// inside the declared temperature window; outside it the canopy
+			// is dormant or heat-stopped and grows nothing, but still
+			// respires. Respiration burns the declared organic content of
+			// the living biomass at the declared per-hour rate, capped by
+			// the oxygen the compartment actually holds, returning CO2,
+			// water vapour and heat. Every flow moves through the
+			// compartment and store inventories, and the light energy not
+			// fixed as biomass chemical energy, the circulation pump work
+			// and the respiration heat land in the compartment exactly
+			// once, before its coupled vapour/thermal solve. Harvest is
+			// deferred: nothing is removed here, and growth simply stops
+			// at the declared capacity.
+			std::vector<double> cropHeatByAtmosphere(atmospheres.size(), 0.0);
+			double totalCropPowerKW{0.0};
+			for (size_t orderIndex : cropOrder)
+			{
+				auto& crop = cropPopulations[orderIndex];
+				auto& compartment = atmospheres[crop.atmosphereIndex];
+				auto& water = stores[crop.waterStoreIndex];
+				auto& nitrogen = stores[crop.nitrogenStoreIndex];
+				auto& phosphorus = stores[crop.phosphorusStoreIndex];
+				auto& potassium = stores[crop.potassiumStoreIndex];
+				auto& minerals = stores[crop.mineralsStoreIndex];
+				crop.lastIllumination = 0.0;
+				crop.lastLightRequestedKW = 0.0;
+				crop.lastLightSuppliedKW = 0.0;
+				crop.lastCirculationRequestedKW = 0.0;
+				crop.lastCirculationSuppliedKW = 0.0;
+				crop.lastGrowthPotentialKg = 0.0;
+				crop.lastGrowthScale = 0.0;
+				crop.lastGrowthLimiter.clear();
+				crop.lastGrowthKg = 0.0;
+				crop.lastCo2DrawnKg = 0.0;
+				crop.lastAssimilationWaterKg = 0.0;
+				crop.lastNitrogenDrawnKg = 0.0;
+				crop.lastPhosphorusDrawnKg = 0.0;
+				crop.lastPotassiumDrawnKg = 0.0;
+				crop.lastMineralsDrawnKg = 0.0;
+				crop.lastOxygenReleasedKg = 0.0;
+				crop.lastTranspiredKg = 0.0;
+				crop.lastRespirationRequestedKg = 0.0;
+				crop.lastRespirationKg = 0.0;
+				crop.lastRespirationO2DrawnKg = 0.0;
+				crop.lastRespirationLimiter.clear();
+				crop.lastRespirationCo2ReturnedKg = 0.0;
+				crop.lastRespirationWaterKg = 0.0;
+				crop.lastRespirationHeatKW = 0.0;
+				crop.lastOxygenLimited = false;
+				crop.lastHeatIntoCompartmentKW = 0.0;
+				crop.lastTemperatureEligible = false;
+				crop.lastBlockReason.clear();
+				if (crop.authored.growingAreaM2 <= 0.0)
+				{
+					crop.status = StationTransferStatus::Idle;
+					continue;
+				}
+				auto const tickSeconds = static_cast<double>(seconds);
+				auto const hours = tickSeconds / 3600.0;
+				crop.lastIllumination = evaluateStationProfile(crop.authored.illuminationProfile, elapsed);
+				crop.lastLightRequestedKW = crop.authored.lampRatedKW * crop.lastIllumination;
+				crop.lastCirculationRequestedKW = crop.authored.circulationPowerKW;
+				// The essential circulation is paid for first: the pumps
+				// that actually deliver gas, water and nutrients across
+				// the canopy draw from the same pool ahead of the
+				// discretionary lamp demand, so shedding lighting never
+				// starves the circulation the biology depends on.
+				auto const circulationFromGeneration = std::min(crop.lastCirculationRequestedKW,
+					availableGeneration);
+				availableGeneration -= circulationFromGeneration;
+				auto const circulationFromBattery = drawBatteries(
+					crop.lastCirculationRequestedKW - circulationFromGeneration);
+				crop.lastCirculationSuppliedKW = circulationFromGeneration + circulationFromBattery;
+				batterySuppliedKW += circulationFromBattery;
+				batteryShortfallKW += crop.lastCirculationRequestedKW - crop.lastCirculationSuppliedKW;
+				auto const lightFromGeneration = std::min(crop.lastLightRequestedKW, availableGeneration);
+				availableGeneration -= lightFromGeneration;
+				auto const lightFromBattery = drawBatteries(crop.lastLightRequestedKW - lightFromGeneration);
+				crop.lastLightSuppliedKW = lightFromGeneration + lightFromBattery;
+				batterySuppliedKW += lightFromBattery;
+				batteryShortfallKW += crop.lastLightRequestedKW - crop.lastLightSuppliedKW;
+				auto const circulationFraction = crop.lastCirculationRequestedKW > 1e-12
+					? crop.lastCirculationSuppliedKW / crop.lastCirculationRequestedKW : 1.0;
+				auto const lightEnergyKJ = crop.lastLightSuppliedKW * tickSeconds;
+				auto const circulationEnergyKJ = crop.lastCirculationSuppliedKW * tickSeconds;
+				crop.lastGrowthPotentialKg = lightEnergyKJ * crop.authored.growthYieldKgPerKWh / 3600.0;
+				// Growing window: the canopy grows only while the
+				// compartment temperature sits at or above the minimum and
+				// below the maximum; outside it growth stops whole, but
+				// respiration below continues regardless.
+				crop.lastTemperatureEligible = compartment.temperatureC + 1e-9
+					>= crop.authored.minGrowingTemperatureC
+					&& compartment.temperatureC + 1e-9 < crop.authored.maxGrowingTemperatureC;
+				// The dry-mass basis: the organic balance of the declared
+				// composition is what growth builds and respiration burns;
+				// the bound nutrient fractions are drawn per kilogram of
+				// dry growth from their own stores. The stoichiometric
+				// ratios close the exchange exactly on the declared molar
+				// masses: CO2 + H2O = organic + O2, and the mirror
+				// respiration identity organic + O2 = CO2 + H2O.
+				auto const& composition = crop.authored.composition;
+				auto const organicFraction = 1.0 - (composition.nutrientNitrogen
+					+ composition.phosphorus + composition.potassium
+					+ composition.otherMinerals);
+				auto const co2PerKgGrowth = organicFraction * StationPhotosynthesisCO2PerOrganicKg;
+				auto const assimilationWaterPerKgGrowth = organicFraction
+					* StationPhotosynthesisWaterPerOrganicKg;
+				auto const oxygenPerKgGrowth = organicFraction * StationPhotosynthesisO2PerOrganicKg;
+				auto const drawableWaterUnits = std::max(0.0,
+					qualified[crop.waterStoreIndex] - water.authored.protectedReserve);
+				auto const drawableNitrogenUnits = std::max(0.0,
+					qualified[crop.nitrogenStoreIndex] - nitrogen.authored.protectedReserve);
+				auto const drawablePhosphorusUnits = std::max(0.0,
+					qualified[crop.phosphorusStoreIndex] - phosphorus.authored.protectedReserve);
+				auto const drawablePotassiumUnits = std::max(0.0,
+					qualified[crop.potassiumStoreIndex] - potassium.authored.protectedReserve);
+				auto const drawableMineralsUnits = std::max(0.0,
+					qualified[crop.mineralsStoreIndex] - minerals.authored.protectedReserve);
+				auto const capacityHeadroomKg = std::max(0.0, crop.capacityKg - crop.livingBiomassKg);
+				double scale = 1.0;
+				std::string limiter;
+				auto const constrain = [&](double available, double required, std::string const& reason)
+				{
+					if (required <= 0.0) return;
+					auto const fraction = available / required;
+					if (fraction < scale) { scale = fraction; limiter = reason; }
+				};
+				if (!crop.lastTemperatureEligible)
+				{
+					scale = 0.0;
+					limiter = compartment.temperatureC + 1e-9 < crop.authored.minGrowingTemperatureC
+						? "compartment '" + compartment.authored.id
+							+ "' is below the minimum growing temperature: the canopy is dormant"
+						: "compartment '" + compartment.authored.id
+							+ "' is at or above the maximum growing temperature: growth is heat-stopped";
+				}
+				else if (crop.lastGrowthPotentialKg <= 0.0)
+				{
+					// No light energy delivered: nothing drives
+					// photosynthesis. Darkness - or lamps with no power -
+					// grows nothing for free.
+					scale = 0.0;
+					limiter = crop.lastLightRequestedKW <= 1e-12
+						? "no light delivered: the illumination profile is dark, photosynthesis cannot run"
+						: "no light energy delivered: the lamps received no power, photosynthesis cannot run for free";
+				}
+				else
+				{
+					constrain(circulationFraction * crop.lastGrowthPotentialKg,
+						crop.lastGrowthPotentialKg,
+						"canopy circulation is not supplied: the gas, water and nutrient exchange cannot run");
+					constrain(std::max(0.0, compartment.carbonDioxideKg),
+						crop.lastGrowthPotentialKg * co2PerKgGrowth,
+						"compartment '" + compartment.authored.id + "' holds no carbon dioxide to fix");
+					constrain(drawableWaterUnits,
+						kgToMass(water.authored.unit, crop.lastGrowthPotentialKg
+							* (assimilationWaterPerKgGrowth + crop.authored.transpirationKgPerKgGrowth)),
+						"irrigation water store '" + water.authored.id
+							+ "' has nothing drawable above its protected reserve");
+					constrain(drawableNitrogenUnits,
+						kgToMass(nitrogen.authored.unit, crop.lastGrowthPotentialKg
+							* composition.nutrientNitrogen),
+						"nitrogen store '" + nitrogen.authored.id
+							+ "' has nothing drawable above its protected reserve");
+					constrain(drawablePhosphorusUnits,
+						kgToMass(phosphorus.authored.unit, crop.lastGrowthPotentialKg
+							* composition.phosphorus),
+						"phosphorus store '" + phosphorus.authored.id
+							+ "' has nothing drawable above its protected reserve");
+					constrain(drawablePotassiumUnits,
+						kgToMass(potassium.authored.unit, crop.lastGrowthPotentialKg
+							* composition.potassium),
+						"potassium store '" + potassium.authored.id
+							+ "' has nothing drawable above its protected reserve");
+					constrain(drawableMineralsUnits,
+						kgToMass(minerals.authored.unit, crop.lastGrowthPotentialKg
+							* composition.otherMinerals),
+						"minerals store '" + minerals.authored.id
+							+ "' has nothing drawable above its protected reserve");
+					constrain(capacityHeadroomKg, crop.lastGrowthPotentialKg,
+						"growing capacity of '" + crop.authored.id
+							+ "' is full: the canopy has no room to grow");
+				}
+				scale = std::max(0.0, std::min(1.0, scale));
+				crop.lastGrowthScale = scale;
+				crop.lastGrowthLimiter = limiter;
+				// The growth that actually runs: the potential at the
+				// binding scale, capped by the capacity headroom, and
+				// every flow derived from that actual growth so the
+				// stoichiometric closure holds on what really moved.
+				// Each draw is clamped to its own drawable so roundoff
+				// never overshoots (#556).
+				auto const growthKg = std::min(crop.lastGrowthPotentialKg * scale, capacityHeadroomKg);
+				auto const co2DrawnKg = std::min(growthKg * co2PerKgGrowth,
+					std::max(0.0, compartment.carbonDioxideKg));
+				auto const assimilationWaterKg = growthKg * assimilationWaterPerKgGrowth;
+				auto const transpiredKg = growthKg * crop.authored.transpirationKgPerKgGrowth;
+				auto const irrigationUnits = std::min(
+					kgToMass(water.authored.unit, assimilationWaterKg + transpiredKg),
+					drawableWaterUnits);
+				auto const irrigationActualKg = massToKg(water.authored.unit, irrigationUnits);
+				auto const nitrogenUnits = std::min(
+					kgToMass(nitrogen.authored.unit, growthKg * composition.nutrientNitrogen),
+					drawableNitrogenUnits);
+				auto const phosphorusUnits = std::min(
+					kgToMass(phosphorus.authored.unit, growthKg * composition.phosphorus),
+					drawablePhosphorusUnits);
+				auto const potassiumUnits = std::min(
+					kgToMass(potassium.authored.unit, growthKg * composition.potassium),
+					drawablePotassiumUnits);
+				auto const mineralsUnits = std::min(
+					kgToMass(minerals.authored.unit, growthKg * composition.otherMinerals),
+					drawableMineralsUnits);
+				auto const oxygenReleasedKg = growthKg * oxygenPerKgGrowth;
+				// Move the growth flows: CO2 out of the compartment, O2 in,
+				// irrigation water and every nutrient out of their own
+				// stores above their protected reserves, and the dry mass
+				// onto the Living biomass ledger.
+				compartment.carbonDioxideKg -= co2DrawnKg;
+				compartment.cropCarbonDioxideDrawnKg += co2DrawnKg;
+				compartment.oxygenKg += oxygenReleasedKg;
+				compartment.cropOxygenAddedKg += oxygenReleasedKg;
+				qualified[crop.waterStoreIndex] -= irrigationUnits;
+				flowOut[crop.waterStoreIndex] += irrigationUnits;
+				qualified[crop.nitrogenStoreIndex] -= nitrogenUnits;
+				flowOut[crop.nitrogenStoreIndex] += nitrogenUnits;
+				qualified[crop.phosphorusStoreIndex] -= phosphorusUnits;
+				flowOut[crop.phosphorusStoreIndex] += phosphorusUnits;
+				qualified[crop.potassiumStoreIndex] -= potassiumUnits;
+				flowOut[crop.potassiumStoreIndex] += potassiumUnits;
+				qualified[crop.mineralsStoreIndex] -= mineralsUnits;
+				flowOut[crop.mineralsStoreIndex] += mineralsUnits;
+				stagedUnitLoss[water.authored.unit] += irrigationUnits;
+				stagedUnitLoss[nitrogen.authored.unit] += nitrogenUnits;
+				stagedUnitLoss[phosphorus.authored.unit] += phosphorusUnits;
+				stagedUnitLoss[potassium.authored.unit] += potassiumUnits;
+				stagedUnitLoss[minerals.authored.unit] += mineralsUnits;
+				// Constituent boundary: what the uptake stores carry as
+				// declared compound material leaves the compound-material
+				// world with the draw, exactly like every other consumer;
+				// plain stores contribute nothing to the ledger.
+				ConstituentLedger netChange;
+				if (water.authored.composition)
+					addComposition(netChange, *water.authored.composition, irrigationActualKg, -1.0);
+				if (nitrogen.authored.composition)
+					addComposition(netChange, *nitrogen.authored.composition,
+						massToKg(nitrogen.authored.unit, nitrogenUnits), -1.0);
+				if (phosphorus.authored.composition)
+					addComposition(netChange, *phosphorus.authored.composition,
+						massToKg(phosphorus.authored.unit, phosphorusUnits), -1.0);
+				if (potassium.authored.composition)
+					addComposition(netChange, *potassium.authored.composition,
+						massToKg(potassium.authored.unit, potassiumUnits), -1.0);
+				if (minerals.authored.composition)
+					addComposition(netChange, *minerals.authored.composition,
+						massToKg(minerals.authored.unit, mineralsUnits), -1.0);
+				for (auto const& entry : netChange)
+					stagedLoss[entry.first] -= entry.second;
+				crop.livingBiomassKg += growthKg;
+				// Respiration runs day and night against the declared
+				// organic content of the living biomass, capped by the
+				// oxygen the compartment actually holds: a canopy in an
+				// oxygen-poor compartment simply cannot burn more than it
+				// can breathe, and the shortfall is reported, never
+				// invented around.
+				auto const organicContentKg = crop.livingBiomassKg * organicFraction;
+				auto const respirationRequestedKg = std::min(
+					crop.authored.respirationPerHour * crop.livingBiomassKg * hours,
+					organicContentKg);
+				auto const respirationO2RequiredKg = respirationRequestedKg
+					* StationPhotosynthesisO2PerOrganicKg;
+				auto const respirationScale = respirationO2RequiredKg > 0.0
+					? std::min(1.0, std::max(0.0, compartment.oxygenKg) / respirationO2RequiredKg)
+					: 1.0;
+				auto const respiredOrganicKg = respirationRequestedKg * respirationScale;
+				auto const respirationO2DrawnKg = std::min(
+					respirationO2RequiredKg * respirationScale,
+					std::max(0.0, compartment.oxygenKg));
+				auto const respirationCo2ReturnedKg = respiredOrganicKg
+					* StationPhotosynthesisCO2PerOrganicKg;
+				auto const respirationWaterKg = respiredOrganicKg
+					* StationPhotosynthesisWaterPerOrganicKg;
+				if (respirationScale < 1.0 - 1e-12 && respirationRequestedKg > 0.0)
+				{
+					crop.lastOxygenLimited = true;
+					crop.lastRespirationLimiter = "compartment '" + compartment.authored.id
+						+ "' oxygen inventory cannot supply the respiration draw";
+				}
+				compartment.oxygenKg -= respirationO2DrawnKg;
+				compartment.cropOxygenDrawnKg += respirationO2DrawnKg;
+				compartment.carbonDioxideKg += respirationCo2ReturnedKg;
+				compartment.cropCarbonDioxideAddedKg += respirationCo2ReturnedKg;
+				compartment.waterVapourKg += respirationWaterKg + transpiredKg;
+				compartment.cropVapourAddedKg += respirationWaterKg + transpiredKg;
+				crop.livingBiomassKg -= respiredOrganicKg;
+				// Energy: the light energy not fixed as biomass chemical
+				// energy, the circulation pump work and the respiration
+				// heat land in the compartment once. Validation guaranteed
+				// the fixed chemical energy never exceeds the light energy
+				// delivered, so nothing is fixed from nothing.
+				auto const chemicalEnergyFixedKJ = growthKg * composition.energyKJPerKgDry;
+				auto const respirationHeatKJ = respiredOrganicKg * composition.energyKJPerKgDry;
+				auto const heatIntoCompartmentKJ = lightEnergyKJ - chemicalEnergyFixedKJ
+					+ circulationEnergyKJ + respirationHeatKJ;
+				cropHeatByAtmosphere[crop.atmosphereIndex] += heatIntoCompartmentKJ / tickSeconds;
+				crop.lastHeatIntoCompartmentKW = heatIntoCompartmentKJ / tickSeconds;
+				crop.lastRespirationHeatKW = respirationHeatKJ / tickSeconds;
+				crop.lastGrowthKg = growthKg;
+				crop.lastCo2DrawnKg = co2DrawnKg;
+				crop.lastAssimilationWaterKg = assimilationWaterKg;
+				crop.lastNitrogenDrawnKg = massToKg(nitrogen.authored.unit, nitrogenUnits);
+				crop.lastPhosphorusDrawnKg = massToKg(phosphorus.authored.unit, phosphorusUnits);
+				crop.lastPotassiumDrawnKg = massToKg(potassium.authored.unit, potassiumUnits);
+				crop.lastMineralsDrawnKg = massToKg(minerals.authored.unit, mineralsUnits);
+				crop.lastOxygenReleasedKg = oxygenReleasedKg;
+				crop.lastTranspiredKg = transpiredKg;
+				crop.lastRespirationRequestedKg = respirationRequestedKg;
+				crop.lastRespirationKg = respiredOrganicKg;
+				crop.lastRespirationO2DrawnKg = respirationO2DrawnKg;
+				crop.lastRespirationCo2ReturnedKg = respirationCo2ReturnedKg;
+				crop.lastRespirationWaterKg = respirationWaterKg;
+				crop.growthKg += growthKg;
+				crop.co2DrawnKg += co2DrawnKg;
+				crop.waterDrawnKg += irrigationActualKg;
+				crop.nitrogenDrawnKg += massToKg(nitrogen.authored.unit, nitrogenUnits);
+				crop.phosphorusDrawnKg += massToKg(phosphorus.authored.unit, phosphorusUnits);
+				crop.potassiumDrawnKg += massToKg(potassium.authored.unit, potassiumUnits);
+				crop.mineralsDrawnKg += massToKg(minerals.authored.unit, mineralsUnits);
+				crop.oxygenReleasedKg += oxygenReleasedKg;
+				crop.transpiredKg += transpiredKg;
+				crop.respirationKg += respiredOrganicKg;
+				crop.respirationO2DrawnKg += respirationO2DrawnKg;
+				crop.respirationCo2ReturnedKg += respirationCo2ReturnedKg;
+				crop.respirationWaterKg += respirationWaterKg;
+				crop.lightEnergyKJ += lightEnergyKJ;
+				crop.circulationEnergyKJ += circulationEnergyKJ;
+				crop.chemicalEnergyFixedKJ += chemicalEnergyFixedKJ;
+				crop.respirationHeatKJ += respirationHeatKJ;
+				crop.heatIntoCompartmentKJ += heatIntoCompartmentKJ;
+				totalCropPowerKW += crop.lastLightSuppliedKW + crop.lastCirculationSuppliedKW;
+				if (scale <= 1e-12)
+				{
+					crop.lastBlockReason = limiter;
+					crop.status = StationTransferStatus::Rejected;
+				}
+				else if (scale >= 1.0 - 1e-12 && !crop.lastOxygenLimited)
+					crop.status = StationTransferStatus::Full;
+				else crop.status = StationTransferStatus::Partial;
+			}
 			// Second loop pass: integrate the loop's temperature from the
 			// pump work, heater heat, exchanger exchange and the chiller
 			// extraction that actually moved this tick, and book the loop
@@ -6792,10 +7408,16 @@ namespace core
 				// term beside the compartment's own occupancy heat and
 				// entering the same coupled vapour/thermal solve.
 				auto const crewHeatKW = crewHeatByAtmosphere[atmosphereIndex];
+				// Crop heat (#409): the lamp energy not fixed as biomass
+				// chemical energy, the circulation pump work and the
+				// respiration heat, routed into this compartment by the
+				// canopies assigned to it and entering the same coupled
+				// vapour/thermal solve as every other thermal term.
+				auto const cropHeatKW = cropHeatByAtmosphere[atmosphereIndex];
 				auto const exchangeKW = atmosphereExchangeKJ[atmosphereIndex] / dt;
 				auto const coupled = solveVapourThermalCoupling(
 					compartment.authored.thermalCapacityKJPerK, compartment.temperatureC,
-					occupantHeatKW + crewHeatKW + exchangeKW, compartment.waterVapourKg,
+					occupantHeatKW + crewHeatKW + cropHeatKW + exchangeKW, compartment.waterVapourKg,
 					compartment.authored.volumeM3, dt);
 				auto const condensedKg = coupled.condensedKg;
 				auto const latentHeatKW = condensedKg
@@ -6806,6 +7428,8 @@ namespace core
 				compartment.occupantHeatKJ += occupantHeatKW * dt;
 				compartment.crewHeatKJ += crewHeatKW * dt;
 				compartment.lastCrewHeatKW = crewHeatKW;
+				compartment.cropHeatKJ += cropHeatKW * dt;
+				compartment.lastCropHeatKW = cropHeatKW;
 				compartment.latentHeatKJ += latentHeatKW * dt;
 				compartment.exchangedKJ += exchangeKW * dt;
 				// Publish last-tick observables.
@@ -7811,19 +8435,20 @@ namespace core
 				};
 				std::array<ComponentClosure, 4> const closures{{
 					{"oxygen", compartment.authored.startingOxygenKg,
-						compartment.electrolysisOxygenKg,
+						compartment.electrolysisOxygenKg + compartment.cropOxygenAddedKg,
 						compartment.oxygenConsumedKg + compartment.leakOxygenKg
-							+ compartment.cycleOxygenKg, compartment.oxygenKg},
+							+ compartment.cycleOxygenKg + compartment.cropOxygenDrawnKg,
+						compartment.oxygenKg},
 					{"nitrogen", compartment.authored.startingNitrogenKg, 0.0,
 						compartment.leakNitrogenKg + compartment.cycleNitrogenKg,
 						compartment.nitrogenKg},
 					{"carbonDioxide", compartment.authored.startingCarbonDioxideKg,
-						compartment.co2ProducedKg,
+						compartment.co2ProducedKg + compartment.cropCarbonDioxideAddedKg,
 						compartment.leakCarbonDioxideKg + compartment.cycleCarbonDioxideKg
-							+ compartment.capturedCarbonDioxideKg,
+							+ compartment.capturedCarbonDioxideKg + compartment.cropCarbonDioxideDrawnKg,
 						compartment.carbonDioxideKg},
 					{"waterVapour", compartment.authored.startingWaterVapourKg,
-						compartment.vapourAddedKg,
+						compartment.vapourAddedKg + compartment.cropVapourAddedKg,
 						compartment.condensedKg + compartment.leakWaterVapourKg
 							+ compartment.cycleWaterVapourKg + compartment.collectedKg,
 						compartment.waterVapourKg}}};
@@ -7847,15 +8472,15 @@ namespace core
 						+ std::to_string(splitResidual) + " exceeds tolerance "
 						+ std::to_string(StationBalanceTolerance), false;
 				// Thermal closure: starting + occupant heat + crew heat
-				// (#401) + latent heat + exchanged from the reservoir must
-				// equal the compartment's current capacity x temperature
-				// within the declared tolerance.
+				// (#401) + crop heat (#409) + latent heat + exchanged from
+				// the reservoir must equal the compartment's current capacity
+				// x temperature within the declared tolerance.
 				auto const startingEnergyKJ = compartment.authored.thermalCapacityKJPerK
 					* compartment.authored.startingTemperatureC;
 				auto const thermalBound = StationBalanceTolerance
 					* std::max(1.0, std::abs(startingEnergyKJ));
 				auto const thermalResidual = startingEnergyKJ + compartment.occupantHeatKJ
-					+ compartment.crewHeatKJ
+					+ compartment.crewHeatKJ + compartment.cropHeatKJ
 					+ compartment.latentHeatKJ + compartment.exchangedKJ
 					- compartment.authored.thermalCapacityKJPerK * compartment.temperatureC;
 				if (!std::isfinite(thermalResidual) || std::abs(thermalResidual) > thermalBound)
@@ -8274,6 +8899,101 @@ namespace core
 					return violation = where
 						+ "recovered more nitrogen than the consumed feed's bound nutrient nitrogen carries", false;
 			}
+			// Crop production ledger (#409): the population's own account
+			// must close over its pathways. The mass ledger closes over the
+			// whole population: CO2 drawn + irrigation water drawn + each
+			// nutrient drawn + respiration oxygen drawn, minus the oxygen
+			// released by growth, the CO2 and water vapour returned by
+			// respiration and the transpired vapour, equals the net change
+			// in dry Living biomass - so growth never creates material out
+			// of light and respiration never destroys it. The energy ledger
+			// closes over delivered = fixed + respired + heat: the light
+			// and circulation energy actually supplied either became the
+			// declared chemical energy of new biomass, came back out as
+			// respiration heat, or left as heat into the compartment. The
+			// fixed chemical energy may never exceed the light energy
+			// delivered, and the Living biomass stays inside its declared
+			// Growing capacity.
+			system = "Crop production";
+			for (auto const& crop : cropPopulations)
+			{
+				auto const where = "crop population '" + crop.authored.id + "' ";
+				if (!requireFinite(crop.livingBiomassKg, where + "living biomass")) return false;
+				if (!requireFinite(crop.lastIllumination, where + "evaluated illumination")) return false;
+				if (!requireFinite(crop.lastLightRequestedKW, where + "last light requested")) return false;
+				if (!requireFinite(crop.lastLightSuppliedKW, where + "last light supplied")) return false;
+				if (!requireFinite(crop.lastCirculationRequestedKW, where + "last circulation requested")) return false;
+				if (!requireFinite(crop.lastCirculationSuppliedKW, where + "last circulation supplied")) return false;
+				if (!requireFinite(crop.lastGrowthPotentialKg, where + "last growth potential")) return false;
+				if (!requireFinite(crop.lastGrowthScale, where + "growth scale")) return false;
+				if (!requireFinite(crop.lastGrowthKg, where + "last growth")) return false;
+				if (!requireFinite(crop.lastCo2DrawnKg, where + "last CO2 drawn")) return false;
+				if (!requireFinite(crop.lastAssimilationWaterKg, where + "last assimilation water")) return false;
+				if (!requireFinite(crop.lastNitrogenDrawnKg, where + "last nitrogen drawn")) return false;
+				if (!requireFinite(crop.lastPhosphorusDrawnKg, where + "last phosphorus drawn")) return false;
+				if (!requireFinite(crop.lastPotassiumDrawnKg, where + "last potassium drawn")) return false;
+				if (!requireFinite(crop.lastMineralsDrawnKg, where + "last minerals drawn")) return false;
+				if (!requireFinite(crop.lastOxygenReleasedKg, where + "last oxygen released")) return false;
+				if (!requireFinite(crop.lastTranspiredKg, where + "last transpired water")) return false;
+				if (!requireFinite(crop.lastRespirationRequestedKg, where + "last respiration requested")) return false;
+				if (!requireFinite(crop.lastRespirationKg, where + "last respiration")) return false;
+				if (!requireFinite(crop.lastRespirationO2DrawnKg, where + "last respiration oxygen drawn")) return false;
+				if (!requireFinite(crop.lastRespirationCo2ReturnedKg, where + "last respiration CO2 returned")) return false;
+				if (!requireFinite(crop.lastRespirationWaterKg, where + "last respiration water returned")) return false;
+				if (!requireFinite(crop.lastRespirationHeatKW, where + "last respiration heat")) return false;
+				if (!requireFinite(crop.lastHeatIntoCompartmentKW, where + "last heat into compartment")) return false;
+				if (!requireFinite(crop.growthKg, where + "cumulative growth")) return false;
+				if (!requireFinite(crop.co2DrawnKg, where + "cumulative CO2 drawn")) return false;
+				if (!requireFinite(crop.waterDrawnKg, where + "cumulative irrigation water drawn")) return false;
+				if (!requireFinite(crop.nitrogenDrawnKg, where + "cumulative nitrogen drawn")) return false;
+				if (!requireFinite(crop.phosphorusDrawnKg, where + "cumulative phosphorus drawn")) return false;
+				if (!requireFinite(crop.potassiumDrawnKg, where + "cumulative potassium drawn")) return false;
+				if (!requireFinite(crop.mineralsDrawnKg, where + "cumulative minerals drawn")) return false;
+				if (!requireFinite(crop.oxygenReleasedKg, where + "cumulative oxygen released")) return false;
+				if (!requireFinite(crop.transpiredKg, where + "cumulative transpired water")) return false;
+				if (!requireFinite(crop.respirationKg, where + "cumulative respiration")) return false;
+				if (!requireFinite(crop.respirationO2DrawnKg, where + "cumulative respiration oxygen drawn")) return false;
+				if (!requireFinite(crop.respirationCo2ReturnedKg, where + "cumulative respiration CO2 returned")) return false;
+				if (!requireFinite(crop.respirationWaterKg, where + "cumulative respiration water returned")) return false;
+				if (!requireFinite(crop.lightEnergyKJ, where + "cumulative light energy")) return false;
+				if (!requireFinite(crop.circulationEnergyKJ, where + "cumulative circulation energy")) return false;
+				if (!requireFinite(crop.chemicalEnergyFixedKJ, where + "cumulative fixed chemical energy")) return false;
+				if (!requireFinite(crop.respirationHeatKJ, where + "cumulative respiration heat")) return false;
+				if (!requireFinite(crop.heatIntoCompartmentKJ, where + "cumulative heat into compartment")) return false;
+				if (crop.livingBiomassKg < -StationBalanceTolerance)
+					return violation = where + "living biomass went negative", false;
+				if (crop.livingBiomassKg > crop.capacityKg
+					+ StationBalanceTolerance * std::max(1.0, crop.capacityKg))
+					return violation = where
+						+ "living biomass exceeds the declared Growing capacity", false;
+				if (crop.lastGrowthScale < -StationBalanceTolerance
+					|| crop.lastGrowthScale > 1.0 + StationBalanceTolerance)
+					return violation = where
+						+ "growth scale left the declared [0, 1] range", false;
+				auto const massBound = StationBalanceTolerance * std::max(1.0,
+					crop.growthKg + crop.respirationKg + crop.co2DrawnKg
+						+ crop.oxygenReleasedKg);
+				auto const massResidual = crop.co2DrawnKg + crop.waterDrawnKg
+					+ crop.nitrogenDrawnKg + crop.phosphorusDrawnKg + crop.potassiumDrawnKg
+					+ crop.mineralsDrawnKg + crop.respirationO2DrawnKg
+					- crop.oxygenReleasedKg - crop.respirationCo2ReturnedKg
+					- crop.respirationWaterKg - crop.transpiredKg
+					- (crop.growthKg - crop.respirationKg);
+				if (!std::isfinite(massResidual) || std::abs(massResidual) > massBound)
+					return violation = where
+						+ "growth/respiration mass ledger does not close within tolerance", false;
+				auto const energyResidual = crop.lightEnergyKJ + crop.circulationEnergyKJ
+					+ crop.respirationHeatKJ - crop.chemicalEnergyFixedKJ
+					- crop.heatIntoCompartmentKJ;
+				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > massBound)
+					return violation = where
+						+ "delivered/fixed/respired/heat energy ledger does not close within tolerance", false;
+				auto const energyCapBound = StationBalanceTolerance
+					* std::max(1.0, crop.lightEnergyKJ);
+				if (crop.chemicalEnergyFixedKJ > crop.lightEnergyKJ + energyCapBound)
+					return violation = where
+						+ "fixed more chemical energy than the delivered light energy carries", false;
+			}
 			system = "Power allocation";
 			for (auto const& array : solarArrays)
 			{
@@ -8355,6 +9075,7 @@ namespace core
 				if (!requireFinite(totalSabatierPowerKW, "total Sabatier reactor power")) return false;
 				if (!requireFinite(totalMethaneProcessingPowerKW, "total methane processing power")) return false;
 				if (!requireFinite(totalMicrobialProcessingPowerKW, "total microbial processing power")) return false;
+				if (!requireFinite(totalCropPowerKW, "total crop lamp and circulation power")) return false;
 			}
 			for (size_t index = 0; index < stores.size(); ++index)
 			{
@@ -8790,6 +9511,26 @@ namespace core
 					? "Microbial processor '" + processor.authored.id + "' rejected: " + reason
 					: "Microbial processor '" + processor.authored.id + "' partial: " + reason);
 			}
+			// Crop growth transitions are announced so the event log records
+			// the day/night rhythm, the limiting resource and recovery
+			// without flooding every tick (#409): a canopy growing in full,
+			// one throttled by a resource, and one stopped whole.
+			for (size_t index = 0; index < cropPopulations.size(); ++index)
+			{
+				auto const& crop = cropPopulations[index];
+				if (crop.status == previousCropStatus[index]) continue;
+				if (crop.status == StationTransferStatus::Full)
+				{
+					appendBoundedEvent(events, tick, "Crop population '" + crop.authored.id
+						+ "' growing at full potential");
+					continue;
+				}
+				auto const reason = !crop.lastBlockReason.empty()
+					? crop.lastBlockReason : crop.lastGrowthLimiter;
+				appendBoundedEvent(events, tick, crop.status == StationTransferStatus::Rejected
+					? "Crop population '" + crop.authored.id + "' growth stopped: " + reason
+					: "Crop population '" + crop.authored.id + "' growth limited: " + reason);
+			}
 			// Delivery arrivals are discrete scenario events rather than a
 			// continuous per-tick service, so every arrival is announced with
 			// its own quantities: the refused remainder is the account for
@@ -9177,6 +9918,34 @@ namespace core
 			[&](size_t left, size_t right)
 			{ return mImpl->microbialProcessors[left].authored.priority
 				> mImpl->microbialProcessors[right].authored.priority; });
+		// Crop production ledgers start from the authored Living biomass
+		// (#409): the Growing capacity is derived from the declared area
+		// and density at construction, the population starts at its
+		// authored dry biomass, and every growth, respiration, uptake and
+		// heat total reconstructs from zero on Reset and load. Populations
+		// compete for the same power pool and share the compartment and
+		// uptake stores, so each runs in the declared deterministic
+		// order: priority descending, declaration order ascending.
+		for (auto const& crop : settings.cropPopulations)
+		{
+			Impl::CropPopulationState state;
+			state.authored = crop;
+			state.atmosphereIndex = atmosphereIndex[crop.atmosphereId];
+			state.waterStoreIndex = storeIndex[crop.waterStoreId];
+			state.nitrogenStoreIndex = storeIndex[crop.nitrogenStoreId];
+			state.phosphorusStoreIndex = storeIndex[crop.phosphorusStoreId];
+			state.potassiumStoreIndex = storeIndex[crop.potassiumStoreId];
+			state.mineralsStoreIndex = storeIndex[crop.mineralsStoreId];
+			state.capacityKg = crop.growingAreaM2 * crop.maxBiomassDensityKgPerM2;
+			state.livingBiomassKg = crop.initialBiomassKg;
+			mImpl->cropPopulations.push_back(std::move(state));
+		}
+		mImpl->cropOrder.resize(mImpl->cropPopulations.size());
+		std::iota(mImpl->cropOrder.begin(), mImpl->cropOrder.end(), size_t{0});
+		std::stable_sort(mImpl->cropOrder.begin(), mImpl->cropOrder.end(),
+			[&](size_t left, size_t right)
+			{ return mImpl->cropPopulations[left].authored.priority
+				> mImpl->cropPopulations[right].authored.priority; });
 		// Fuel-cell backup units run on the supply side in declaration
 		// order (#406); their reactant and product stores are resolved to
 		// the same store indices the ledger mutates.
@@ -9285,7 +10054,7 @@ namespace core
 				&settings.electrolyzers, &settings.co2Captures, &settings.fuelCells,
 				&settings.thermalBuffers, &settings.wasteEjections,
 				&settings.sabatierReactors, &settings.methaneProcessors,
-				&settings.microbialProcessors};
+				&settings.microbialProcessors, &settings.cropPopulations};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -9972,10 +10741,13 @@ namespace core
 				* compartment.temperatureC;
 			atmosphereResult.occupantHeatEnergyKJ = compartment.occupantHeatKJ;
 			atmosphereResult.crewHeatEnergyKJ = compartment.crewHeatKJ;
+			atmosphereResult.lastCropHeatKW = compartment.lastCropHeatKW;
+			atmosphereResult.cropHeatEnergyKJ = compartment.cropHeatKJ;
 			atmosphereResult.latentHeatEnergyKJ = compartment.latentHeatKJ;
 			atmosphereResult.exchangedEnergyKJ = compartment.exchangedKJ;
 			atmosphereResult.residualKJ = atmosphereResult.startingEnergyKJ
 				+ compartment.occupantHeatKJ + compartment.crewHeatKJ
+				+ compartment.cropHeatKJ
 				+ compartment.latentHeatKJ + compartment.exchangedKJ
 				- atmosphereResult.currentEnergyKJ;
 			atmosphereResult.status = compartment.status;
@@ -10481,6 +11253,105 @@ namespace core
 			result.microbialProcessors.push_back(std::move(processorResult));
 		}
 		result.power.microbialProcessingPowerKW = totalMicrobialProcessingPower;
+		// The crop snapshot reports the authored contract beside the dry
+		// Living biomass actually held against the declared Growing
+		// capacity, the light and circulation actually delivered versus
+		// requested, the resource-limited growth and day-and-night
+		// respiration with every gas, water and nutrient flow, the growth
+		// scale and the limiter that bound it, and the closing mass and
+		// energy residuals: a reader can see exactly why the canopy grew
+		// - or did not - and where every kilogram and kilojoule went
+		// (#409). Harvest is deferred: the population's yield stays in
+		// its living biomass until a later ticket removes it.
+		double totalCropPower = 0.0;
+		for (auto const& crop : mImpl->cropPopulations)
+		{
+			StationCropPopulationSnapshot cropResult;
+			cropResult.id = crop.authored.id;
+			cropResult.atmosphereId = crop.authored.atmosphereId;
+			cropResult.waterStoreId = crop.authored.waterStoreId;
+			cropResult.nitrogenStoreId = crop.authored.nitrogenStoreId;
+			cropResult.phosphorusStoreId = crop.authored.phosphorusStoreId;
+			cropResult.potassiumStoreId = crop.authored.potassiumStoreId;
+			cropResult.mineralsStoreId = crop.authored.mineralsStoreId;
+			cropResult.composition = crop.authored.composition;
+			cropResult.growingAreaM2 = crop.authored.growingAreaM2;
+			cropResult.maxBiomassDensityKgPerM2 = crop.authored.maxBiomassDensityKgPerM2;
+			cropResult.capacityKg = crop.capacityKg;
+			cropResult.initialBiomassKg = crop.authored.initialBiomassKg;
+			cropResult.lampRatedKW = crop.authored.lampRatedKW;
+			cropResult.illuminationProfile = crop.authored.illuminationProfile;
+			cropResult.circulationPowerKW = crop.authored.circulationPowerKW;
+			cropResult.growthYieldKgPerKWh = crop.authored.growthYieldKgPerKWh;
+			cropResult.respirationPerHour = crop.authored.respirationPerHour;
+			cropResult.transpirationKgPerKgGrowth = crop.authored.transpirationKgPerKgGrowth;
+			cropResult.minGrowingTemperatureC = crop.authored.minGrowingTemperatureC;
+			cropResult.maxGrowingTemperatureC = crop.authored.maxGrowingTemperatureC;
+			cropResult.priority = crop.authored.priority;
+			cropResult.livingBiomassKg = crop.livingBiomassKg;
+			cropResult.capacityFraction = crop.capacityKg > 0.0
+				? crop.livingBiomassKg / crop.capacityKg : 0.0;
+			cropResult.lastIlluminationLevel = crop.lastIllumination;
+			cropResult.lastLightRequestedKW = crop.lastLightRequestedKW;
+			cropResult.lastLightSuppliedKW = crop.lastLightSuppliedKW;
+			cropResult.lastCirculationRequestedKW = crop.lastCirculationRequestedKW;
+			cropResult.lastCirculationSuppliedKW = crop.lastCirculationSuppliedKW;
+			cropResult.lastGrowthPotentialKg = crop.lastGrowthPotentialKg;
+			cropResult.lastGrowthScale = crop.lastGrowthScale;
+			cropResult.lastGrowthLimiter = crop.lastGrowthLimiter;
+			cropResult.lastGrowthKg = crop.lastGrowthKg;
+			cropResult.lastCo2DrawnKg = crop.lastCo2DrawnKg;
+			cropResult.lastAssimilationWaterKg = crop.lastAssimilationWaterKg;
+			cropResult.lastNitrogenDrawnKg = crop.lastNitrogenDrawnKg;
+			cropResult.lastPhosphorusDrawnKg = crop.lastPhosphorusDrawnKg;
+			cropResult.lastPotassiumDrawnKg = crop.lastPotassiumDrawnKg;
+			cropResult.lastMineralsDrawnKg = crop.lastMineralsDrawnKg;
+			cropResult.lastOxygenReleasedKg = crop.lastOxygenReleasedKg;
+			cropResult.lastTranspiredKg = crop.lastTranspiredKg;
+			cropResult.lastRespirationRequestedKg = crop.lastRespirationRequestedKg;
+			cropResult.lastRespirationKg = crop.lastRespirationKg;
+			cropResult.lastRespirationO2DrawnKg = crop.lastRespirationO2DrawnKg;
+			cropResult.lastRespirationLimiter = crop.lastRespirationLimiter;
+			cropResult.lastRespirationCo2ReturnedKg = crop.lastRespirationCo2ReturnedKg;
+			cropResult.lastRespirationWaterKg = crop.lastRespirationWaterKg;
+			cropResult.lastRespirationHeatKW = crop.lastRespirationHeatKW;
+			cropResult.lastOxygenLimited = crop.lastOxygenLimited;
+			cropResult.lastHeatIntoCompartmentKW = crop.lastHeatIntoCompartmentKW;
+			cropResult.temperatureEligible = crop.lastTemperatureEligible;
+			cropResult.blockReason = crop.lastBlockReason;
+			cropResult.disabled = crop.authored.growingAreaM2 <= 0.0;
+			cropResult.growthKg = crop.growthKg;
+			cropResult.co2DrawnKg = crop.co2DrawnKg;
+			cropResult.waterDrawnKg = crop.waterDrawnKg;
+			cropResult.nitrogenDrawnKg = crop.nitrogenDrawnKg;
+			cropResult.phosphorusDrawnKg = crop.phosphorusDrawnKg;
+			cropResult.potassiumDrawnKg = crop.potassiumDrawnKg;
+			cropResult.mineralsDrawnKg = crop.mineralsDrawnKg;
+			cropResult.oxygenReleasedKg = crop.oxygenReleasedKg;
+			cropResult.transpiredKg = crop.transpiredKg;
+			cropResult.respirationKg = crop.respirationKg;
+			cropResult.respirationO2DrawnKg = crop.respirationO2DrawnKg;
+			cropResult.respirationCo2ReturnedKg = crop.respirationCo2ReturnedKg;
+			cropResult.respirationWaterKg = crop.respirationWaterKg;
+			cropResult.lightEnergyKJ = crop.lightEnergyKJ;
+			cropResult.circulationEnergyKJ = crop.circulationEnergyKJ;
+			cropResult.chemicalEnergyFixedKJ = crop.chemicalEnergyFixedKJ;
+			cropResult.respirationHeatKJ = crop.respirationHeatKJ;
+			cropResult.heatIntoCompartmentKJ = crop.heatIntoCompartmentKJ;
+			cropResult.residualKg = crop.co2DrawnKg + crop.waterDrawnKg
+				+ crop.nitrogenDrawnKg + crop.phosphorusDrawnKg + crop.potassiumDrawnKg
+				+ crop.mineralsDrawnKg + crop.respirationO2DrawnKg
+				- crop.oxygenReleasedKg - crop.respirationCo2ReturnedKg
+				- crop.respirationWaterKg - crop.transpiredKg
+				- (crop.growthKg - crop.respirationKg);
+			cropResult.residualKJ = crop.lightEnergyKJ + crop.circulationEnergyKJ
+				+ crop.respirationHeatKJ - crop.chemicalEnergyFixedKJ
+				- crop.heatIntoCompartmentKJ;
+			cropResult.status = crop.status;
+			totalCropPower += crop.lastLightSuppliedKW + crop.lastCirculationSuppliedKW;
+			result.cropPopulations.push_back(std::move(cropResult));
+		}
+		result.power.cropPowerKW = totalCropPower;
 		// The delivery snapshot reports the authored schedule beside the
 		// runtime's arrival history: what each occurrence brought in, what
 		// the destination refused, and when the next arrival is due (#392).
