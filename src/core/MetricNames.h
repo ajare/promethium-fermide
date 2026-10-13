@@ -112,6 +112,7 @@ inline std::string metricName(DeviceCommandType value) { switch(value) {
 case DeviceCommandType::SetSectorLights: return "set_sector_lights";
 case DeviceCommandType::OpenDoor: return "open_door";
 case DeviceCommandType::SetExtendedState: return "set_extended_state";
+case DeviceCommandType::ToggleExtendedState: return "toggle_extended_state";
 case DeviceCommandType::CallLift: return "call_lift";
 case DeviceCommandType::SelectLiftDestination: return "select_lift_destination";
 case DeviceCommandType::CallShuttle: return "call_shuttle";

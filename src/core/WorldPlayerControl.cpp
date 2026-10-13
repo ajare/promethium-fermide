@@ -642,6 +642,17 @@ namespace core
 			{
 				auto bridge = std::dynamic_pointer_cast<ForceBridgeSectorObject>(sector->getObject(cell.floorIndex));
 				if (!bridge || !bridge->getForceBridge()->admitsNewTraversals()) return nullptr;
+				auto const device = bridge->getForceBridge();
+				auto const resource = mTraversalResources.find(device->getTraversalResourceId());
+				if (resource && !resource->mEnabled)
+				{
+					// A pending safe retract refuses new entry but lets the existing
+					// manual occupant walk off the still-supported span.
+					auto const left = device->getPosition().x;
+					auto const right = left + device->getSize().x;
+					if (source != sector || position.x + agent->getWidth() * .5f <= left
+						|| position.x - agent->getWidth() * .5f >= right) return nullptr;
+				}
 			}
 			return sector;
 		};

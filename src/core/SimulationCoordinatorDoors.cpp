@@ -69,7 +69,8 @@ namespace core
 		if (resource->mRetractionPending) resource->mEnabled = broken;
 		if (broken)
 			for (auto const& [operationId, operation] : mWorld.mDeviceOperations.entries())
-				if (operation->mHasCommand && operation->mCommand.type == DeviceCommandType::SetExtendedState
+				if (operation->mHasCommand && (operation->mCommand.type == DeviceCommandType::SetExtendedState
+					|| operation->mCommand.type == DeviceCommandType::ToggleExtendedState)
 					&& operation->mCommand.traversalResource == id
 					&& (operation->mState == DeviceOperationState::Pending
 						|| operation->mState == DeviceOperationState::Running))

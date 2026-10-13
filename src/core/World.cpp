@@ -3729,7 +3729,7 @@ namespace core
 		{
 			auto object = control.sector->_getObject(control.index);
 			DeviceCommand command;
-			command.type = DeviceCommandType::SetExtendedState;
+			command.type = DeviceCommandType::ToggleExtendedState;
 			command.desiredState = true;
 			command.traversalResource = traversalResource;
 			auto point = createPhysicalControlInteractionPoint("Ladder extension control",
@@ -3745,11 +3745,11 @@ namespace core
 		if (options.extensible)
 		{
 			createdControls[CORE_LADDER_ENDPOINT_LOW] = createPhysicalControl("Ladder button", landingLayer, y0,
-				transportControlDemand(foreSector0, physicalControl::OwnerType::Ladder, controlGeometry, x, y0, 1), 0);
+				transportControlDemand(foreSector0, physicalControl::OwnerType::Ladder, controlGeometry, x, y0, 1), CORE_BUTTON_F_AUTO_REENABLE);
 			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_LOW], CORE_LADDER_ENDPOINT_LOW);
 
 			createdControls[CORE_LADDER_ENDPOINT_HIGH] = createPhysicalControl("Ladder button", landingLayer, y1,
-				transportControlDemand(foreSector1, physicalControl::OwnerType::Ladder, controlGeometry, x, y1, 1), 0);
+				transportControlDemand(foreSector1, physicalControl::OwnerType::Ladder, controlGeometry, x, y1, 1), CORE_BUTTON_F_AUTO_REENABLE);
 			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_HIGH], CORE_LADDER_ENDPOINT_HIGH);
 		}
 
@@ -5016,6 +5016,7 @@ namespace core
 				if (resource->mDoor && resource->mDoor->isBroken()) return true;
 				break;
 			case DeviceCommandType::SetExtendedState:
+			case DeviceCommandType::ToggleExtendedState:
 				if (resource->mExtensible && resource->mExtensible->isBroken()) return true;
 				break;
 			case DeviceCommandType::CallLift:
@@ -7495,8 +7496,8 @@ namespace core
 
 			if (options.controlCount > 0)
 			{
-				createdControls[0] = _createForceBridgeButton(fbObject.sector, x, y, options.width, options.fromSide, 0);
-				DeviceCommand command{ DeviceCommandType::SetExtendedState, {}, true, traversalResource };
+				createdControls[0] = _createForceBridgeButton(fbObject.sector, x, y, options.width, options.fromSide, CORE_BUTTON_F_AUTO_REENABLE);
+				DeviceCommand command{ DeviceCommandType::ToggleExtendedState, {}, false, traversalResource };
 				auto point = createPhysicalControlInteractionPoint("Force bridge extension control",
 					createdControls[0], (float)y, CORE_RESOURCE_SLOT_WIDTH * 0.5f + 0.001f,
 					getFixedTimestep(), { { command, InteractionBindingRequirement::Required } });
@@ -7507,8 +7508,8 @@ namespace core
 			}
 			if (options.controlCount > 1)
 			{
-				createdControls[1] = _createForceBridgeButton(fbObject.sector, x, y, options.width, 1 - options.fromSide, 0);
-				DeviceCommand command{ DeviceCommandType::SetExtendedState, {}, true, traversalResource };
+				createdControls[1] = _createForceBridgeButton(fbObject.sector, x, y, options.width, 1 - options.fromSide, CORE_BUTTON_F_AUTO_REENABLE);
+				DeviceCommand command{ DeviceCommandType::ToggleExtendedState, {}, false, traversalResource };
 				auto point = createPhysicalControlInteractionPoint("Force bridge extension control",
 					createdControls[1], (float)y, CORE_RESOURCE_SLOT_WIDTH * 0.5f + 0.001f,
 					getFixedTimestep(), { { command, InteractionBindingRequirement::Required } });
@@ -7685,7 +7686,7 @@ namespace core
 		{
 			auto object = control.sector->_getObject(control.index);
 			DeviceCommand command;
-			command.type = DeviceCommandType::SetExtendedState;
+			command.type = DeviceCommandType::ToggleExtendedState;
 			command.desiredState = true;
 			command.traversalResource = traversalResource;
 			auto point = createPhysicalControlInteractionPoint("Ladder extension control",
@@ -7712,13 +7713,13 @@ namespace core
 		{
 			// Endpoints independently participate in the complete row allocation.
 			createdControls[CORE_LADDER_ENDPOINT_LOW] = createPhysicalControl("Ladder button", layerIndex, y0,
-				transportControlDemand(sector, physicalControl::OwnerType::Ladder, controlGeometry, x, y0, 1), 0);
+				transportControlDemand(sector, physicalControl::OwnerType::Ladder, controlGeometry, x, y0, 1), CORE_BUTTON_F_AUTO_REENABLE);
 			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_LOW], CORE_LADDER_ENDPOINT_LOW);
 
 
 			// Upper
 			createdControls[CORE_LADDER_ENDPOINT_HIGH] = createPhysicalControl("Ladder button", layerIndex, y1,
-				transportControlDemand(sector, physicalControl::OwnerType::Ladder, controlGeometry, x, y1, 1), 0);
+				transportControlDemand(sector, physicalControl::OwnerType::Ladder, controlGeometry, x, y1, 1), CORE_BUTTON_F_AUTO_REENABLE);
 			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_HIGH], CORE_LADDER_ENDPOINT_HIGH);
 
 		}

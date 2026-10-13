@@ -209,12 +209,47 @@ namespace
 			require(world.lookupAgent(id).entity->getGlobalPosition().distanceTo(before) < .0001f, "Bridge operation must not move its operator");
 			if (!broken)
 			{
+				world.consumeSimulationEvents(); press(world);
+				require(requests(world).size() == 1, "Second Bridge press must enqueue a new activation");
+				for (int second = 0; second < 8; ++second) world.update(1.f);
+				require(bridge->isRetracted(), "A second Force Bridge Button press must retract");
+				press(world);
+				for (int second = 0; second < 8; ++second) world.update(1.f);
+				require(bridge->isExtended(), "A third Force Bridge Button press must extend again");
 				world.setPlayerStairSelection(false, false); world.setPlayerMovementDirection(1);
 				world.update(3.f);
 				require(std::abs(world.lookupAgent(id).entity->getGlobalPosition().x - before.x
 					- world.lookupAgent(id).entity->getWalkSpeed() * 3.f) < .0001f, "An extended Force Bridge must admit existing Player Floor movement");
 			}
 		}
+	}
+	void bridgeSafeRetraction()
+	{
+		core::World world("Manual Force Bridge safe retraction", 12, 2);
+		auto room = world.addRoom("Room", 0, 0, 0, 12, 2);
+		world.addSectorWalkway(room, 1, 3); world.addSectorWalkway(room, 1, 6);
+		core::World::CreateForceBridgeOptions options; options.width = 2;
+		options.startExtended = true; options.controlCount = 2;
+		auto result = world.addSectorForceBridge(room, 1, 4, options);
+		auto bridge = std::dynamic_pointer_cast<core::ForceBridgeSectorObject>(result.forceBridge.sector->getObject(result.forceBridge.index))->getForceBridge();
+		auto control = result.controls[0].interactionPoint;
+		world.finishBuild(); world.pauseSimulation();
+		auto id = player(world, room, 1, 5.f);
+		auto operatorId = world.createAgent("Retractor", room, 1, world.lookupInteractionPoint(control).entity->getPosition().x);
+		world.resumeSimulation();
+		require(bool(world.requestInteraction(control, operatorId)), "Cannot press Bridge toggle");
+		for (int second = 0; second < 8; ++second) world.update(1.f);
+		require(bridge->isExtended(), "Retraction must retain support under a stopped manual Floor occupant");
+		auto snapshot = world.getSimulationSnapshot();
+		auto resource = std::find_if(snapshot.traversalResources.begin(), snapshot.traversalResources.end(),
+			[&](auto const& value) { return value.id == result.traversalResource; });
+		require(resource != snapshot.traversalResources.end() && !resource->enabled, "Pending retract must close Bridge admission");
+		world.setPlayerMovementDirection(1);
+		for (int second = 0; second < 3; ++second) world.update(1.f);
+		world.setPlayerMovementDirection(0);
+		require(world.lookupAgent(id).entity->getGlobalPosition().x > 6.f, "Existing occupant must be able to leave during pending retraction");
+		for (int second = 0; second < 8; ++second) world.update(1.f);
+		require(bridge->isRetracted(), "Bridge must retract only after its manual occupant clears the span");
 	}
 	void safeRetraction()
 	{
@@ -228,11 +263,9 @@ namespace
 			auto ladder = embedded ? std::dynamic_pointer_cast<core::LadderSectorObject>(result.ladder.sector->getObject(result.ladder.index))->getLadder()
 				: std::dynamic_pointer_cast<core::LadderTransit>(result.ladder.sector)->getLadder();
 			world.finishBuild(); world.pauseSimulation(); auto id = player(world, bottom, 0, 4.35f);
-			auto operatorId = world.createAgent("Retractor", bottom, 0, .5f);
-			core::DeviceCommand command; command.type = core::DeviceCommandType::SetExtendedState;
-			command.traversalResource = result.traversalResource; command.desiredState = false;
-			auto control = world.createInteractionPoint("Safe retract", core::SectorId{uint64_t(bottom) + 1}, {.5f, 0.f}, .25f,
-				core::World::getFixedTimestep(), {{command, core::InteractionBindingRequirement::Required}});
+			auto control = result.controls[0].interactionPoint;
+			auto operatorId = world.createAgent("Retractor", bottom, 0,
+				world.lookupInteractionPoint(control).entity->getPosition().x);
 			world.resumeSimulation(); world.setPlayerMovementDirection(1); world.setPlayerStairSelection(true, false);
 			for (int step = 0; step < 60 && world.lookupAgent(id).entity->getGlobalPosition().y < .4f; ++step) world.update(.1f);
 			require(world.lookupAgent(id).entity->getGlobalPosition().y >= .4f, "Player must mount an already extended Ladder");
@@ -266,6 +299,13 @@ namespace
 			require(requests(world).size() == 1 && !ladder->isRetracted(), "Up must operate the endpoint's Ladder extension Button");
 			for (int second = 0; second < 8; ++second) world.update(1.f);
 			require(ladder->isExtended(), "The existing device operation must complete Ladder extension");
+			world.consumeSimulationEvents(); press(world);
+			require(requests(world).size() == 1, "Second Ladder press must enqueue a new activation");
+			for (int second = 0; second < 8; ++second) world.update(1.f);
+			require(ladder->isRetracted(), "Either endpoint Button must retract an unused Ladder");
+			press(world);
+			for (int second = 0; second < 8; ++second) world.update(1.f);
+			require(ladder->isExtended(), "Either endpoint Button must extend the Ladder again");
 			require(world.lookupAgent(id).entity->getGlobalPosition().distanceTo(initialPosition) < .0001f, "Extending must not approach or mount the Ladder automatically");
 			world.setPlayerMovementDirection(initialPosition.x < 4.5f ? 1 : -1);
 			world.setPlayerStairSelection(!descending, descending);
@@ -282,7 +322,7 @@ namespace agent_smoke
 {
 	void registerPlayerButtons(std::vector<smoke::Check>& checks)
 	{
-		checks.push_back({"playerControlButtons", [](smoke::Context const&) { buttons(); queuedPress(); bridgeButton(); }});
+		checks.push_back({"playerControlButtons", [](smoke::Context const&) { buttons(); queuedPress(); bridgeButton(); bridgeSafeRetraction(); }});
 		checks.push_back({"playerControlButtonPriority", [](smoke::Context const&) { priority(); stackedButtons(); }});
 		checks.push_back({"playerControlExtensibleLadders", [](smoke::Context const&) { extensibleLadders(); safeRetraction(); }});
 	}

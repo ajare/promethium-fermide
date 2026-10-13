@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "core/SimulationCoordinator.h"
+#include "core/ForceBridge.h"
 #include "core/Shuttle.h"
 #include "core/Window.h"
 
@@ -83,7 +84,8 @@ namespace core
 					&& binding.command.stopIndex < 2;
 			else if (auto resource = mWorld.mTraversalResources.find(binding.command.traversalResource))
 				validTarget = binding.command.type == DeviceCommandType::OpenDoor ? resource->mDoor != nullptr
-					: binding.command.type == DeviceCommandType::SetExtendedState ? resource->mExtensible != nullptr
+					: (binding.command.type == DeviceCommandType::SetExtendedState
+						|| binding.command.type == DeviceCommandType::ToggleExtendedState) ? resource->mExtensible != nullptr
 					: (binding.command.type == DeviceCommandType::CallLift
 						|| binding.command.type == DeviceCommandType::SelectLiftDestination
 						|| binding.command.type == DeviceCommandType::CallShuttle
@@ -182,7 +184,7 @@ namespace core
 		auto resource = mWorld.mTraversalResources.find(command.traversalResource);
 		bool const broken = resource && ((command.type == DeviceCommandType::OpenDoor
 			&& resource->mDoor && resource->mDoor->isBroken())
-			|| (command.type == DeviceCommandType::SetExtendedState
+			|| ((command.type == DeviceCommandType::SetExtendedState || command.type == DeviceCommandType::ToggleExtendedState)
 				&& resource->mExtensible && resource->mExtensible->isBroken())
 			|| ((command.type == DeviceCommandType::CallLift
 				|| command.type == DeviceCommandType::SelectLiftDestination)
@@ -192,7 +194,8 @@ namespace core
 				&& resource->mShuttle && resource->mShuttle->isBroken()));
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 		{
-			if (command.type != DeviceCommandType::SetAccessPanelState
+			if (command.type != DeviceCommandType::ToggleExtendedState
+				&& command.type != DeviceCommandType::SetAccessPanelState
 				&& command.type != DeviceCommandType::ToggleBoothWindow
 				&& command.type != DeviceCommandType::PressDumbwaiterLanding
 				&& !broken && missing.empty() && operation->mHasCommand && operation->mCommand == command
@@ -205,6 +208,7 @@ namespace core
 		auto name = command.type == DeviceCommandType::SetSectorLights
 			? string("Set sector lights ") + (command.desiredState ? "on" : "off")
 			: command.type == DeviceCommandType::OpenDoor ? "Open door"
+			: command.type == DeviceCommandType::ToggleExtendedState ? "Toggle resource extension"
 			: command.type == DeviceCommandType::SetExtendedState
 				? string(command.desiredState ? "Extend resource" : "Retract resource")
 			: command.type == DeviceCommandType::CallLift ? "Call lift"
@@ -384,7 +388,8 @@ namespace core
 				|| actor->getState() == Agent::State::Idle || actor->getState() == Agent::State::WaitingForTraversal);
 	}
 
-	InteractionRequestId SimulationCoordinator::requestInteraction(InteractionPointId pointId, AgentId actorId)
+	InteractionRequestId SimulationCoordinator::requestInteraction(InteractionPointId pointId, AgentId actorId,
+		bool prepareTraversal)
 	{
 		mWorld.invalidateSimulationSnapshot();
 		auto point = mWorld.mInteractionPoints.find(pointId);
@@ -427,7 +432,13 @@ namespace core
 		auto request = mWorld.mInteractionRequests.find(id);
 		for (auto const& binding : point->mBindings)
 		{
-			request->mOperations.emplace_back(findOrCreateDeviceOperation(binding.command, actorId), binding.requirement);
+			auto command = binding.command;
+			if (prepareTraversal && command.type == DeviceCommandType::ToggleExtendedState)
+			{
+				command.type = DeviceCommandType::SetExtendedState;
+				command.desiredState = true;
+			}
+			request->mOperations.emplace_back(findOrCreateDeviceOperation(command, actorId), binding.requirement);
 		}
 		point->mQueue.push_back(id);
 
@@ -473,7 +484,7 @@ namespace core
 			auto early = mWorld.mInteractionRequests.find(earlyId);
 			if (early && early->mActor == actor && early->mPoint == point) return earlyId;
 		}
-		return requestInteraction(point, actor);
+		return requestInteraction(point, actor, true);
 	}
 
 	InteractionRequestId SimulationCoordinator::requestInteractionWhilePassing(
@@ -767,6 +778,25 @@ namespace core
 	void SimulationCoordinator::advanceDeviceOperations()
 	{
 		mWorld.invalidateSimulationSnapshot();
+		auto canRetract = [&](TraversalResource const& resource)
+		{
+			if (!resource.mExtensionRequestLeases.empty() || !resource.mExtensionOccupantLeases.empty()) return false;
+			// Manual Floor walking has no routed crossing task/lease. Retain its
+			// support too, including a stopped or deactivated Player on the span.
+			if (resource.mForceBridge)
+				for (auto const& [agentId, agent] : mWorld.mAgents.entries())
+				{
+					(void)agentId;
+					if (!agent->getSector() || !any_of(resource.mQueueLanes.begin(), resource.mQueueLanes.end(),
+						[&](auto const& lane) { return lane.sector == SectorId{uint64_t(agent->getSector()->getIndex()) + 1}; })) continue;
+					auto const position = agent->getGlobalPosition();
+					auto const bridgePosition = resource.mForceBridge->getPosition();
+					if (std::abs(position.y - bridgePosition.y) < .001f
+						&& position.x + agent->getWidth() * .5f > bridgePosition.x
+						&& position.x - agent->getWidth() * .5f < bridgePosition.x + resource.mForceBridge->getSize().x) return false;
+				}
+			return true;
+		};
 		// The physical safe-retract intent outlives its queryable operation, which
 		// fails on breakage. Restoration may resume it only after leases drain.
 		for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
@@ -774,7 +804,7 @@ namespace core
 			(void)resourceId;
 			if (!resource->mRetractionPending || !resource->mExtensible
 				|| resource->mExtensible->isBroken()) continue;
-			if (resource->mExtensionRequestLeases.empty() && resource->mExtensionOccupantLeases.empty())
+			if (canRetract(*resource))
 			{
 				resource->mExtensible->retract();
 				if (resource->mExtensible->isRetracted()) resource->mRetractionPending = false;
@@ -831,7 +861,8 @@ namespace core
 						operation->mState = DeviceOperationState::Rejected;
 					}
 				}
-				else if (operation->mCommand.type == DeviceCommandType::SetExtendedState)
+				else if (operation->mCommand.type == DeviceCommandType::SetExtendedState
+					|| operation->mCommand.type == DeviceCommandType::ToggleExtendedState)
 				{
 					auto resource = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
 					if (!resource || !resource->mExtensible || !resource->mExtensible->isExtensible())
@@ -842,19 +873,36 @@ namespace core
 					{
 						operation->mState = DeviceOperationState::Failed;
 					}
-					else if (operation->mCommand.desiredState)
-					{
-						resource->mRetractionPending = false;
-						resource->mEnabled = true;
-						if (!resource->mExtensible->extend())
-							operation->mState = DeviceOperationState::Rejected;
-					}
 					else
 					{
-						// Accepting a safe retract closes admission immediately. Physical
-						// retraction starts only after every independently-owned lease drains.
-						resource->mRetractionPending = true;
-						resource->mEnabled = false;
+						// Resolve an activation once, against the current extension target.
+						if (operation->mCommand.type == DeviceCommandType::ToggleExtendedState)
+							operation->mCommand.desiredState = resource->mRetractionPending
+								|| !(resource->mExtensible->isExtended() || resource->mExtensible->isExtending());
+						// Opposite targets supersede old operations, not physical position.
+						for (auto const& [otherId, other] : mWorld.mDeviceOperations.entries())
+							if (otherId != id && other->mState == DeviceOperationState::Running
+								&& (other->mCommand.type == DeviceCommandType::SetExtendedState
+									|| other->mCommand.type == DeviceCommandType::ToggleExtendedState)
+								&& other->mCommand.traversalResource == operation->mCommand.traversalResource
+								&& other->mCommand.desiredState != operation->mCommand.desiredState)
+							{
+								touchDeviceOperation(otherId, *other);
+								other->mState = DeviceOperationState::Cancelled;
+							}
+						if (operation->mCommand.desiredState)
+						{
+							resource->mRetractionPending = false;
+							resource->mEnabled = true;
+							if (!resource->mExtensible->extend())
+								operation->mState = DeviceOperationState::Rejected;
+						}
+						else
+						{
+							// Close admission now; physical retraction waits for users.
+							resource->mRetractionPending = true;
+							resource->mEnabled = false;
+						}
 					}
 				}
 				continue;
@@ -888,7 +936,8 @@ namespace core
 				operation->mState = acceptAirlockCommand(operation->mCommand)
 					? DeviceOperationState::Succeeded : DeviceOperationState::Rejected;
 			}
-			else if (operation->mCommand.type == DeviceCommandType::SetExtendedState)
+			else if (operation->mCommand.type == DeviceCommandType::SetExtendedState
+				|| operation->mCommand.type == DeviceCommandType::ToggleExtendedState)
 			{
 				auto resource = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
 				if (!resource || !resource->mExtensible || resource->mExtensible->isBroken())
@@ -901,8 +950,7 @@ namespace core
 				}
 				else if (!operation->mCommand.desiredState)
 				{
-					if (resource->mExtensionRequestLeases.empty()
-						&& resource->mExtensionOccupantLeases.empty())
+					if (canRetract(*resource))
 					{
 						if (!resource->mExtensible->isRetracted() && !resource->mExtensible->isRetracting())
 							resource->mExtensible->retract();
@@ -1183,7 +1231,7 @@ namespace core
 				if (command.type == DeviceCommandType::OpenDoor)
 					return command.desiredState && resource->mDoor && !resource->mDoor->isOpen()
 						&& command.traversalResource == upcoming;
-				if (command.type == DeviceCommandType::SetExtendedState)
+				if (command.type == DeviceCommandType::SetExtendedState || command.type == DeviceCommandType::ToggleExtendedState)
 				{
 					// Endpoint controls remain independent even within one Room.
 					bool nearest = none_of(controls.begin(), controls.end(), [&](auto otherId)
@@ -1192,7 +1240,7 @@ namespace core
 						return other && other->mSector == sector
 							&& other->mPosition.distanceTo(source->getPosition()) + .001f < point->mPosition.distanceTo(source->getPosition());
 					});
-					return nearest && command.desiredState && resource->mExtensible && !resource->mExtensible->admitsNewTraversals()
+					return nearest && (command.desiredState || command.type == DeviceCommandType::ToggleExtendedState) && resource->mExtensible && !resource->mExtensible->admitsNewTraversals()
 						&& command.traversalResource == upcoming;
 				}
 				if (command.type == DeviceCommandType::RequestAirlock)
@@ -1300,7 +1348,7 @@ namespace core
 			for (auto pointId : controls)
 			{
 				if (!mWorld.agentCanOperateInteraction(pointId, agent, true)) continue;
-				if (auto request = requestInteraction(pointId, actor))
+				if (auto request = requestInteraction(pointId, actor, true))
 				{
 					agent.mEarlyDoorPressInteraction = request;
 					agent.mEarlyDoorPressAttempted = true;

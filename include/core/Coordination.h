@@ -66,7 +66,8 @@ namespace core
 		SetBoothWindowState,
 		ToggleBoothWindow,
 		PressDumbwaiterLanding,
-		SetAccessPanelState
+		SetAccessPanelState,
+		ToggleExtendedState
 	};
 
 	enum struct DoorOpenLeaseKind
@@ -89,8 +90,8 @@ namespace core
 		TraversalRequestId request;
 	};
 
-	// Desired-state commands are idempotent and coalescible. ToggleBoothWindow
-	// and PressDumbwaiterLanding are activations, never coalesced. A landing
+	// Desired-state commands are idempotent and coalescible. ToggleBoothWindow,
+	// ToggleExtendedState and PressDumbwaiterLanding are activations, never coalesced. A landing
 	// press reserves busy at acceptance; a toggle resolves its target once.
 	struct DeviceCommand
 	{

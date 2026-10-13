@@ -379,9 +379,19 @@ void checkPlayerButtonKeys(wp::application::State& play, core::World& world) {
   require(pressCount() == 1, "Up must activate the extensible Ladder Button");
   for (int second = 0; second < 8; ++second) play._update(1.f);
   require(std::abs(world.lookupAgent(id).entity->getGlobalPosition().x - buttonX) < .0001f, "Ladder extension must not auto-approach its mount");
-  key(Key::UpArrow, false);
+  key(Key::UpArrow, false); key(Key::UpArrow, true); play._update(.1f);
+  require(pressCount() == 1, "A second Up must toggle the Ladder toward retraction");
+  for (int second = 0; second < 8; ++second) play._update(1.f);
+  auto const retracted = world.getSimulationSnapshot().traversalResources.front();
+  require(!retracted.extended && !retracted.retractionPending,
+    "Actual Up must complete retraction of an unused extensible Ladder");
+  key(Key::UpArrow, false); key(Key::UpArrow, true); play._update(.1f);
+  require(pressCount() == 1, "A third Up must toggle the Ladder toward extension");
+  for (int second = 0; second < 8; ++second) play._update(1.f);
+  // Keep Up held while walking from the Button to the contextual mount.
+  // A fresh press while still at the Button would correctly retract again.
   auto horizontal = buttonX < 4.5f ? Key::RightArrow : Key::LeftArrow;
-  key(horizontal, true); key(Key::UpArrow, true);
+  key(horizontal, true);
   for (int second = 0; second < 10; ++second) play._update(1.f);
   require(world.lookupAgent(id).entity->getSector()->getIndex() == top, "Actual Up must climb and dismount a fully extended Ladder");
   key(horizontal, false); key(Key::UpArrow, false); play._update(0.f);

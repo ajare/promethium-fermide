@@ -170,7 +170,8 @@ namespace core
 		// Requesting an interaction. A traversal request queues behind whatever
 		// the point is already doing; a request made while passing does not wait -
 		// it activates its operations and presses the control immediately.
-		InteractionRequestId requestInteraction(InteractionPointId point, AgentId actor);
+		InteractionRequestId requestInteraction(InteractionPointId point, AgentId actor,
+			bool prepareTraversal = false);
 
 		InteractionRequestId requestInteractionForTraversal(InteractionPointId point, AgentId actor);
 

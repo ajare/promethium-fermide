@@ -105,7 +105,7 @@ camera is used.
   state. Fixed Ladders require neither Object usage capability nor Buttons.
   Extensible Ladders retain their existing Buttons Mobility, permission and
   admission gates. Retracted or extending Ladders cannot mount. Up at an
-  extension Button deploys the Ladder, without approaching or mounting it;
+  extension Button toggles the Ladder between extended and retracted, without approaching or mounting it;
   wait for full extension, then explicitly walk to its mount. Safe retraction
   waits for admitted climbing leases to drain, including stopped Room climbers.
 - A fresh **Up** press, when no higher-priority climb selection, Door opening or
@@ -127,8 +127,11 @@ camera is used.
   is cancelled if the Player leaves reach or begins crossing; capability and
   authorization changes retain existing cancellation/rejection rules. Accepted
   device operations retain their normal safe completion behavior. Physical
-  controls can open controlled Doors, deploy Force Bridges/Ladders, switch lights
+  controls can open controlled Doors, toggle Force Bridges/Ladders, switch lights
   or issue existing transport calls; calling a transport does not board it.
+  Retraction closes new admission immediately and waits for reservations and
+  occupants to clear, including stopped manual Force Bridge walkers. Autonomous
+  route preparation still requests extension, never a toggle.
 - Overlapping doorway candidates prefer an admissible open doorway, then nearest centre,
   then stable traversal-resource identity. One press performs at most one action.
 - Solid walls, closed/opening Bulkhead Doors, low spaces and unsupported Floor
