@@ -91,7 +91,7 @@ foreach(check lifecycle batching eventBound persistence stores transfers compoun
         # reachable through the binary but never registered here, so they
         # ran in no CI pass. The nutrient ledger needs to actually run to
         # protect the respiration/harvest/death accounting.
-        harvest algae nutrientConservation)
+        harvest algae nutrientConservation bioContainment bioHazardFiles)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()

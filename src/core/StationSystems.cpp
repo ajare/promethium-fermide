@@ -2231,9 +2231,10 @@ namespace core
 				return refuse("Station crew id exceeds "
 					+ std::to_string(MaxStationStoreIdLength) + " characters");
 			if (!crewIds.insert(crew.id).second) return refuse(where + " id is duplicated");
-			if (std::find_if(settings.atmospheres.begin(), settings.atmospheres.end(),
-				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == crew.atmosphereId; })
-				== settings.atmospheres.end())
+			auto const habitat = std::find_if(settings.atmospheres.begin(),
+				settings.atmospheres.end(),
+				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == crew.atmosphereId; });
+			if (habitat == settings.atmospheres.end())
 				return refuse(where + " breathes in unknown atmosphere compartment '" + crew.atmosphereId + "'");
 			if (crew.crewCount < 0) return refuse(where + " crew count must not be negative");
 			if (!validateStationProfile(crew.activityProfile, where + " activity profile", diagnostic))
@@ -2261,6 +2262,18 @@ namespace core
 				if (!found->composition)
 					return refuse(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
 						+ "' has no declared composition; crew streams require compound stores to close the element balance");
+				// Hazard segregation (#573): the breathing compartment is the
+				// containment boundary, so every crew stream - food and water in,
+				// urine and organic waste out - is pinned to the compartment's
+				// own hazard class. A hazardous store can never feed or receive a
+				// normal population, and a normal store can never be claimed as
+				// the destination of a hazardous crew's returns: crossing that
+				// boundary is a release process with its own clearance contract,
+				// not metabolism.
+				if (found->hazardClass != habitat->hazardClass)
+					return refuse(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
+						+ "' is authored " + found->hazardClass + "-class but the crew breathes in '"
+						+ habitat->id + "', a " + habitat->hazardClass + "-class compartment: a crew may only consume and return material of its compartment's hazard class; crew returns never relabel material across the hazard boundary");
 				streamStores[stream] = &*found;
 			}
 			auto const* food = streamStores[0];
@@ -3037,9 +3050,10 @@ namespace core
 				return refuse("Station crop population id exceeds "
 					+ std::to_string(MaxStationStoreIdLength) + " characters");
 			if (!cropIds.insert(crop.id).second) return refuse(where + " id is duplicated");
-			if (std::find_if(settings.atmospheres.begin(), settings.atmospheres.end(),
-				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == crop.atmosphereId; })
-				== settings.atmospheres.end())
+			auto const compartment = std::find_if(settings.atmospheres.begin(),
+				settings.atmospheres.end(),
+				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == crop.atmosphereId; });
+			if (compartment == settings.atmospheres.end())
 				return refuse(where + " grows in unknown atmosphere compartment '" + crop.atmosphereId + "'");
 			std::string const uptakeIds[5]{crop.waterStoreId, crop.nitrogenStoreId,
 				crop.phosphorusStoreId, crop.potassiumStoreId, crop.mineralsStoreId};
@@ -3063,6 +3077,18 @@ namespace core
 						+ uptakePurityNames[stream] + ": the uptake spends the drawn mass exactly as "
 						+ uptakePurityNames[stream]
 						+ " and owns no residual stream to account for any other constituent; only an explicit conversion may cross that boundary");
+				// Hazard segregation (#573): the growing compartment is the
+				// containment boundary, so every store the population touches -
+				// irrigation water and each tracked nutrient in, harvested food
+				// and waste out - must carry the compartment's own hazard class.
+				// Hazardous irrigation can never feed a normal canopy, and a
+				// normal store can never receive a hazardous population's
+				// harvest or death residue: relabelling across the boundary is
+				// a release process, not a harvest.
+				if (found->hazardClass != compartment->hazardClass)
+					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
+						+ "' is authored " + found->hazardClass + "-class but the population grows in '"
+						+ compartment->id + "', a " + compartment->hazardClass + "-class compartment: a crop may only take up and harvest material of its compartment's hazard class; harvest and death residue never relabel material across the hazard boundary");
 				for (size_t other = stream + 1; other < 5; ++other)
 					if (uptakeIds[stream] == uptakeIds[other])
 						return refuse(where + " " + uptakeRoles[stream] + " store and "
@@ -3164,6 +3190,10 @@ namespace core
 				if (found->composition && !compositionsClose(*found->composition, composition))
 					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
 						+ "' declares a composition different from the crop's declared dry-mass composition: harvested material enters a store exactly as declared, and a different compound material is a boundary only an explicit conversion may cross");
+				if (found->hazardClass != compartment->hazardClass)
+					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
+						+ "' is authored " + found->hazardClass + "-class but the population grows in '"
+						+ compartment->id + "', a " + compartment->hazardClass + "-class compartment: a crop may only take up and harvest material of its compartment's hazard class; harvest and death residue never relabel material across the hazard boundary");
 			}
 		}
 		// Algae culture contracts (#411). A separate Biological population
@@ -3195,9 +3225,10 @@ namespace core
 				return refuse("Station algae culture id exceeds "
 					+ std::to_string(MaxStationStoreIdLength) + " characters");
 			if (!algaeIds.insert(algae.id).second) return refuse(where + " id is duplicated");
-			if (std::find_if(settings.atmospheres.begin(), settings.atmospheres.end(),
-				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == algae.atmosphereId; })
-				== settings.atmospheres.end())
+			auto const compartment = std::find_if(settings.atmospheres.begin(),
+				settings.atmospheres.end(),
+				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == algae.atmosphereId; });
+			if (compartment == settings.atmospheres.end())
 				return refuse(where + " runs in unknown atmosphere compartment '" + algae.atmosphereId + "'");
 			std::string const uptakeIds[5]{algae.waterStoreId, algae.nitrogenStoreId,
 				algae.phosphorusStoreId, algae.potassiumStoreId, algae.mineralsStoreId};
@@ -3221,6 +3252,13 @@ namespace core
 						+ uptakePurityNames[stream] + ": the uptake spends the drawn mass exactly as "
 						+ uptakePurityNames[stream]
 						+ " and owns no residual stream to account for any other constituent; only an explicit conversion may cross that boundary");
+				// Hazard segregation (#573): as with the crops, the culture
+				// compartment is the containment boundary and every uptake and
+				// harvest destination must carry its hazard class.
+				if (found->hazardClass != compartment->hazardClass)
+					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
+						+ "' is authored " + found->hazardClass + "-class but the culture runs in '"
+						+ compartment->id + "', a " + compartment->hazardClass + "-class compartment: an algae culture may only take up and harvest material of its compartment's hazard class; the harvest partition and death residue never relabel material across the hazard boundary");
 				for (size_t other = stream + 1; other < 5; ++other)
 					if (uptakeIds[stream] == uptakeIds[other])
 						return refuse(where + " " + uptakeRoles[stream] + " store and "
@@ -3328,6 +3366,10 @@ namespace core
 				if (found->composition && !compositionsClose(*found->composition, composition))
 					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
 						+ "' declares a composition different from the culture's declared dry-mass composition: harvested material enters a store exactly as declared, and a different compound material is a boundary only an explicit conversion may cross");
+				if (found->hazardClass != compartment->hazardClass)
+					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
+						+ "' is authored " + found->hazardClass + "-class but the culture runs in '"
+						+ compartment->id + "', a " + compartment->hazardClass + "-class compartment: an algae culture may only take up and harvest material of its compartment's hazard class; the harvest partition and death residue never relabel material across the hazard boundary");
 			}
 		}
 		diagnostic.clear(); return true;

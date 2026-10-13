@@ -3181,6 +3181,210 @@ void nutrientRecoveryFiles(smoke::Context const& context)
 	}
 }
 
+// Hazard segregation on biological pathways (#573) through the document
+// seam: a whole-chain hazardous crop rig round-trips and replays from the
+// file with its classes intact, and a document whose authored hazard
+// classes cross the biological boundary - a normal compartment wrapped
+// around hazardous feed, or a hazardous destination inside a normal
+// chain - is refused on load rather than silently accepted.
+void bioHazardFiles(smoke::Context const& context)
+{
+	namespace filesystem = std::filesystem;
+	auto const directory = context.temporaryRoot() / "station-bio-hazard";
+	filesystem::create_directories(directory);
+	// Replace the first occurrence of `from` that appears after `anchor`
+	// - the blocks are serialised id-first, so anchoring on the id pins
+	// the edit to the intended entry.
+	auto replaceOnceAfter = [](std::string& text, std::string const& anchor,
+		std::string const& from, std::string const& to)
+	{
+		auto const at = text.find(anchor);
+		require(at != std::string::npos, ("missing anchor: " + anchor).c_str());
+		auto const hit = text.find(from, at);
+		require(hit != std::string::npos, ("missing field after anchor: " + from).c_str());
+		text.replace(hit, from.size(), to);
+	};
+	auto store = [](std::string const& id, std::string const& hazard,
+		double capacity, double starting)
+	{
+		core::ResourceStoreSettings settings;
+		settings.id = id;
+		settings.unit = "kg";
+		settings.hazardClass = hazard;
+		settings.capacity = capacity;
+		settings.startingQualified = starting;
+		return settings;
+	};
+	auto compartment = [](std::string const& id, std::string const& hazard)
+	{
+		core::AtmosphereSettings settings;
+		settings.id = id;
+		settings.hazardClass = hazard;
+		settings.volumeM3 = 100.0;
+		settings.startingOxygenKg = 40.0;
+		settings.startingNitrogenKg = 80.0;
+		settings.startingCarbonDioxideKg = 5.0;
+		settings.startingWaterVapourKg = 1.0;
+		settings.startingTemperatureC = 22.0;
+		settings.thermalCapacityKJPerK = 20000.0;
+		settings.minPressureKPa = 1.0;
+		settings.maxPressureKPa = 200.0;
+		return settings;
+	};
+	core::ResourceCompositionSettings cropComposition;
+	cropComposition.moisture = 0.0;
+	cropComposition.nutrientNitrogen = 0.05;
+	cropComposition.atmosphericNitrogen = 0.0;
+	cropComposition.phosphorus = 0.02;
+	cropComposition.potassium = 0.03;
+	cropComposition.otherMinerals = 0.05;
+	cropComposition.energyKJPerKgDry = 1700.0;
+	core::CropPopulationSettings crop;
+	crop.id = "canopy";
+	crop.atmosphereId = "hazHabitat";
+	crop.waterStoreId = "hazIrrigation";
+	crop.nitrogenStoreId = "hazFertN";
+	crop.phosphorusStoreId = "hazFertP";
+	crop.potassiumStoreId = "hazFertK";
+	crop.mineralsStoreId = "hazFertMin";
+	crop.composition = cropComposition;
+	crop.growingAreaM2 = 10.0;
+	crop.maxBiomassDensityKgPerM2 = 2.0;
+	crop.initialBiomassKg = 0.1;
+	crop.lampRatedKW = 36.0;
+	crop.illuminationProfile.constantLevel = 1.0;
+	crop.circulationPowerKW = 0.1;
+	crop.growthYieldKgPerKWh = 2.0;
+	crop.respirationPerHour = 0.5;
+	crop.transpirationKgPerKgGrowth = 1.0;
+	crop.minGrowingTemperatureC = 10.0;
+	crop.maxGrowingTemperatureC = 35.0;
+	crop.foodStoreId = "hazFood";
+	crop.wasteStoreId = "hazWaste";
+	crop.edibleFraction = 0.6;
+	crop.harvestTriggerKg = 0.3;
+	crop.harvestFraction = 1.0;
+	auto hazRig = [&]()
+	{
+		std::vector<core::ResourceStoreSettings> stores;
+		stores.push_back(store("hazIrrigation", "hazardous", 200.0, 150.0));
+		stores.push_back(store("hazFertN", "hazardous", 10.0, 5.0));
+		stores.push_back(store("hazFertP", "hazardous", 10.0, 5.0));
+		stores.push_back(store("hazFertK", "hazardous", 10.0, 5.0));
+		stores.push_back(store("hazFertMin", "hazardous", 10.0, 5.0));
+		stores.push_back(store("hazFood", "hazardous", 10.0, 0.0));
+		stores.push_back(store("hazWaste", "hazardous", 10.0, 0.0));
+		return stores;
+	};
+	core::World original("BioHazard Round Trip", 2, 2);
+	original.pauseSimulation();
+	original.finishBuild();
+	core::StationSystemsSettings settings;
+	settings.enabled = true;
+	settings.observationIntervalSeconds = 2.0f;
+	settings.stores = hazRig();
+	settings.atmospheres = { compartment("hazHabitat", "hazardous") };
+	settings.cropPopulations = { crop };
+	core::SolarArraySettings field;
+	field.id = "field";
+	field.capacityKW = 100.0;
+	settings.solarArrays = { field };
+	std::string diagnostic;
+	require(original.configureStationSystems(settings, false, &diagnostic),
+		"BioHazard settings edit failed: " + diagnostic);
+	original.resumeSimulation();
+	require(original.advanceTicks(1200), "BioHazard original run failed");
+	auto const expected = original.getStationSystemsSnapshot();
+	require(expected.cropPopulations.size() == 1
+		&& expected.cropPopulations[0].harvestedKg > 0.0
+		&& expected.cropPopulations[0].foodProducedKg > 0.0,
+		"the hazardous crop scenario did not harvest before saving");
+	for (auto const& entry : expected.stores)
+		require(entry.hazardClass == "hazardous",
+			"the hazardous chain carried a non-hazardous store before saving");
+	for (auto const* suffix : {".world.yaml", ".world"})
+	{
+		auto const path = directory / (std::string("bio-hazard") + suffix);
+		original.saveTo(path.string());
+		auto const reopened = core::loadWorldDocument(path);
+		require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+			"hazardous biological settings did not survive the file round trip");
+		auto const fresh = reopened->getStationSystemsSnapshot();
+		require(fresh.cropPopulations.size() == 1
+			&& fresh.cropPopulations[0].harvestedKg == 0.0,
+			"reopened World did not restart the hazardous biological scenario");
+		for (auto const& entry : fresh.stores)
+			require(entry.hazardClass == "hazardous",
+				"a hazardous store class was lost across the file round trip");
+		reopened->resumeSimulation();
+		require(reopened->advanceTicks(1200), "BioHazard reopened run failed");
+		require(reopened->getStationSystemsSnapshot() == expected,
+			"the hazardous biological scenario is not reproducible from the document");
+	}
+	auto const withField = serializeYaml(original);
+	// A document that rewrites the compartment to normal while the whole
+	// feed chain stays hazardous is refused on load: the compartment is
+	// the containment boundary and the chain may not hang off a class it
+	// does not match.
+	{
+		auto malformed = withField;
+		replaceOnceAfter(malformed, "id: hazHabitat",
+			"hazardClass: hazardous", "hazardClass: normal");
+		auto const malformedPath = directory / "cross-class-compartment.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a normal compartment wrapped around a hazardous crop chain was accepted from a file");
+	}
+	// A single hazardous store inside an otherwise normal chain - the
+	// reviewed irrigation bypass - is refused on load.
+	{
+		auto normalSettings = original.getStationSystemsSettings();
+		normalSettings.atmospheres[0].hazardClass = "normal";
+		for (auto& entry : normalSettings.stores)
+			entry.hazardClass = "normal";
+		core::World normalWorld("BioNormal Rig", 2, 2);
+		normalWorld.pauseSimulation();
+		normalWorld.finishBuild();
+		require(normalWorld.configureStationSystems(normalSettings, false, &diagnostic),
+			("the normal crop rig was refused: " + diagnostic).c_str());
+		auto const normalField = serializeYaml(normalWorld);
+		auto malformed = normalField;
+		replaceOnceAfter(malformed, "id: hazIrrigation",
+			"hazardClass: normal", "hazardClass: hazardous");
+		auto const malformedPath = directory / "cross-class-irrigation.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a hazardous irrigation store feeding a normal canopy was accepted from a file");
+	}
+	// A hazardous harvest destination inside a normal chain is refused
+	// on load: the harvest may not launder material into a foreign class.
+	{
+		auto normalSettings = original.getStationSystemsSettings();
+		normalSettings.atmospheres[0].hazardClass = "normal";
+		for (auto& entry : normalSettings.stores)
+			entry.hazardClass = "normal";
+		core::World normalWorld("BioNormal Rig 2", 2, 2);
+		normalWorld.pauseSimulation();
+		normalWorld.finishBuild();
+		require(normalWorld.configureStationSystems(normalSettings, false, &diagnostic),
+			("the second normal crop rig was refused: " + diagnostic).c_str());
+		auto const normalField = serializeYaml(normalWorld);
+		auto malformed = normalField;
+		replaceOnceAfter(malformed, "id: hazFood",
+			"hazardClass: normal", "hazardClass: hazardous");
+		auto const malformedPath = directory / "cross-class-food-destination.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a hazardous crop food destination in a normal chain was accepted from a file");
+	}
+}
+
 void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"fileRoundTrip", fileRoundTrip});
@@ -3200,6 +3404,7 @@ void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"outageFiles", outageFiles});
 	checks.push_back({"atmosphereFiles", atmosphereFiles});
 	checks.push_back({"crewFiles", crewFiles});
+	checks.push_back({"bioHazardFiles", bioHazardFiles});
 	checks.push_back({"waterFiles", waterFiles});
 	checks.push_back({"containmentFiles", containmentFiles});
 	checks.push_back({"gasFiles", gasFiles});

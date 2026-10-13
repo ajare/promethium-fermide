@@ -1697,6 +1697,17 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             assert(store ~= nil, 'crew ' .. streamRoles[stream] .. ' store is unknown')
             assert(store.composition ~= nil,
                 'crew ' .. streamRoles[stream] .. ' store must declare a composition')
+            -- Hazard segregation (#573): the breathing compartment is the
+            -- containment boundary, so every crew stream is pinned to its
+            -- hazard class. Hazardous feed never enters a normal
+            -- population and normal stores never receive a hazardous
+            -- crew's returns; crossing the boundary is a release
+            -- process, not metabolism.
+            assert(store.hazardClass == compartment.hazardClass,
+                'crew ' .. streamRoles[stream] .. " store '" .. store.id .. "' is authored "
+                    .. store.hazardClass .. "-class but the crew breathes in '" .. compartment.id
+                    .. "', a " .. compartment.hazardClass
+                    .. "-class compartment: a crew may only consume and return material of its compartment's hazard class")
             streams[stream] = store
         end
         local food, water, urine, waste = streams[1], streams[2], streams[3], streams[4]
@@ -2531,6 +2542,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         .. UPTAKE_PURITY_NAMES[role]
                         .. ' and owns no residual stream to account for any other constituent; only an explicit conversion may cross that boundary')
             end
+            -- Hazard segregation (#573): the growing compartment is the
+            -- containment boundary; every uptake store must carry its
+            -- hazard class, so hazardous irrigation can never feed a
+            -- normal canopy.
+            assert(store.hazardClass == compartment.hazardClass,
+                'crop ' .. uptakeRoles[role] .. " store '" .. store.id .. "' is authored "
+                    .. store.hazardClass .. "-class but the population grows in '" .. compartment.id
+                    .. "', a " .. compartment.hazardClass
+                    .. "-class compartment: a crop may only take up and harvest material of its compartment's hazard class")
             for other = role + 1, 5 do
                 assert(uptakeIds[role] ~= uptakeIds[other],
                     'crop ' .. uptakeRoles[role] .. ' store and ' .. uptakeRoles[other]
@@ -2639,6 +2659,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         'crop ' .. destinationRoles[role] .. " store '" .. store.id
                             .. "' declares a composition different from the crop's declared dry-mass composition: harvested material enters a store exactly as declared, and a different compound material is a boundary only an explicit conversion may cross")
                 end
+                -- Hazard segregation (#573): harvested food and waste are
+                -- pinned to the compartment's hazard class; the harvest
+                -- and the death residue never relabel material across
+                -- the hazard boundary.
+                assert(store.hazardClass == compartment.hazardClass,
+                    'crop ' .. destinationRoles[role] .. " store '" .. store.id .. "' is authored "
+                        .. store.hazardClass .. "-class but the population grows in '" .. compartment.id
+                        .. "', a " .. compartment.hazardClass
+                        .. "-class compartment: a crop may only take up and harvest material of its compartment's hazard class")
                 destinationStores[role] = store
             end
         end
@@ -2764,6 +2793,14 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         .. UPTAKE_PURITY_NAMES[role]
                         .. ' and owns no residual stream to account for any other constituent; only an explicit conversion may cross that boundary')
             end
+            -- Hazard segregation (#573): the culture compartment is the
+            -- containment boundary; every uptake store must carry its
+            -- hazard class.
+            assert(store.hazardClass == compartment.hazardClass,
+                'algae ' .. uptakeRoles[role] .. " store '" .. store.id .. "' is authored "
+                    .. store.hazardClass .. "-class but the culture runs in '" .. compartment.id
+                    .. "', a " .. compartment.hazardClass
+                    .. "-class compartment: an algae culture may only take up and harvest material of its compartment's hazard class")
             for other = role + 1, 5 do
                 assert(uptakeIds[role] ~= uptakeIds[other],
                     'algae ' .. uptakeRoles[role] .. ' store and ' .. uptakeRoles[other]
@@ -2879,6 +2916,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         'algae ' .. destinationRoles[role] .. " store '" .. store.id
                             .. "' declares a composition different from the culture's declared dry-mass composition: harvested material enters a store exactly as declared, and a different compound material is a boundary only an explicit conversion may cross")
                 end
+                -- Hazard segregation (#573): the food, recovery and waste
+                -- destinations of the harvest partition are pinned to the
+                -- compartment's hazard class; the partition and the death
+                -- residue never relabel material across the boundary.
+                assert(store.hazardClass == compartment.hazardClass,
+                    'algae ' .. destinationRoles[role] .. " store '" .. store.id .. "' is authored "
+                        .. store.hazardClass .. "-class but the culture runs in '" .. compartment.id
+                        .. "', a " .. compartment.hazardClass
+                        .. "-class compartment: an algae culture may only take up and harvest material of its compartment's hazard class")
                 destinationStores[role] = store
             end
         end
