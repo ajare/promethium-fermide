@@ -13114,6 +13114,66 @@ void buffers(smoke::Context const&)
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("dry nutrient fractions exceed 1") != std::string::npos,
 				"a crop whose declared dry nutrient fractions leave no organic mass was accepted");
+			// Uptake store composition purity (#572): the uptake spends the
+			// drawn mass exactly as the role's own material, so a compound
+			// uptake store must be pure in that role. A wrong-element
+			// compound, atmospheric nitrogen in the bound-nitrogen role,
+			// a mixed recovered-nutrient product, or a wet compound in a
+			// dry nutrient role are all conversions the contract does not
+			// own and are refused; plain stores and pure compounds are not.
+			settings.cropPopulations = { crop() };
+			settings.stores = fullStores();
+			core::ResourceCompositionSettings purePhosphorus;
+			purePhosphorus.phosphorus = 1.0;
+			settings.stores[1].composition = purePhosphorus;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("nitrogen store 'fertN' declares a compound composition that is not pure bound nutrient nitrogen")
+					!= std::string::npos,
+				"a phosphorus-only compound store was accepted as the crop nitrogen source");
+			settings.cropPopulations = { crop() };
+			settings.stores = fullStores();
+			core::ResourceCompositionSettings pureAtmospheric;
+			pureAtmospheric.atmosphericNitrogen = 1.0;
+			settings.stores[1].composition = pureAtmospheric;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("not pure bound nutrient nitrogen") != std::string::npos,
+				"an atmospheric-nitrogen compound store was accepted as the crop bound-nitrogen source");
+			settings.cropPopulations = { crop() };
+			settings.stores = fullStores();
+			core::ResourceCompositionSettings mixedRecovered;
+			mixedRecovered.nutrientNitrogen = 0.4;
+			mixedRecovered.phosphorus = 0.3;
+			mixedRecovered.potassium = 0.3;
+			settings.stores[1].composition = mixedRecovered;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("not pure bound nutrient nitrogen") != std::string::npos,
+				"a mixed recovered-nutrient store was accepted as a pure nitrogen source");
+			settings.cropPopulations = { crop() };
+			settings.stores = fullStores();
+			core::ResourceCompositionSettings wetNitrogen;
+			wetNitrogen.moisture = 0.2;
+			wetNitrogen.nutrientNitrogen = 1.0;
+			settings.stores[1].composition = wetNitrogen;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("not pure bound nutrient nitrogen") != std::string::npos,
+				"a wet compound store was accepted as a dry nutrient-nitrogen source");
+			settings.cropPopulations = { crop() };
+			settings.stores = fullStores();
+			core::ResourceCompositionSettings nutrientSolution;
+			nutrientSolution.moisture = 0.99;
+			nutrientSolution.nutrientNitrogen = 0.01;
+			settings.stores[0].composition = nutrientSolution;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("irrigation water store 'irrigation' declares a compound composition that is not pure water")
+					!= std::string::npos,
+				"a nutrient solution was accepted as pure irrigation water");
+			settings.cropPopulations = { crop() };
+			settings.stores = fullStores();
+			core::ResourceCompositionSettings pureNitrogen;
+			pureNitrogen.nutrientNitrogen = 1.0;
+			settings.stores[1].composition = pureNitrogen;
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				"pure-compound uptake stores matching their roles were refused");
 			settings.cropPopulations = { crop() };
 			settings.cropPopulations[0].initialBiomassKg = 25.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
@@ -13250,6 +13310,75 @@ void buffers(smoke::Context const&)
 				"the growth limiter does not name the exhausted phosphorus store");
 			require(c.growthKg > 0.0 && c.growthKg < 0.05,
 				"growth did not bind to the scarce phosphorus");
+		}
+		// The #572 reproducer through the public World seam: a store
+		// declaring a phosphorus-only compound bound as the crop's
+		// nitrogen source is refused at configuration, so no tick can
+		// ever grow nitrogen-containing biomass from a source that
+		// contains no nitrogen.
+		{
+			core::World world("CropWrongElement", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto stores = fullStores();
+			core::ResourceCompositionSettings purePhosphorus;
+			purePhosphorus.phosphorus = 1.0;
+			stores[1].composition = purePhosphorus;
+			auto const [ok, diagnostic] = configure(world, std::move(stores), habitat(), { crop() });
+			require(!ok
+				&& diagnostic.find("nitrogen store 'fertN' declares a compound composition that is not pure bound nutrient nitrogen")
+					!= std::string::npos,
+				"the P-only-compound nitrogen source was accepted through the World seam");
+		}
+		// Pure-compound uptake with single-element depletion (#572): a
+		// store declaring pure bound nutrient nitrogen funds growth 1:1
+		// exactly like a plain store, and when it runs dry the growth
+		// binds to nitrogen alone - the compartment's 80 kg of
+		// atmospheric nitrogen is never touched as a substitute, and
+		// every other nutrient is drawn only in its declared proportion
+		// of the growth that actually ran.
+		{
+			core::World world("CropPureCompoundN", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto stores = fullStores();
+			core::ResourceCompositionSettings pureNitrogen;
+			pureNitrogen.nutrientNitrogen = 1.0;
+			stores[1].composition = pureNitrogen;
+			stores[1].capacity = 1.0;
+			stores[1].startingQualified = 0.0008;
+			auto const [ok, diagnostic] = configure(world, std::move(stores), habitat(), { crop() });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 600, "pure-compound nitrogen crop run"),
+				"pure-compound nitrogen crop run failed");
+			world.pauseSimulation();
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& c = snap.cropPopulations[0];
+			// The pure compound funded nitrogen 1:1: every kg drawn is a
+			// kg of bound nutrient nitrogen, exactly the declared share of
+			// the growth that ran.
+			require(closeTo(c.nitrogenDrawnKg, c.growthKg * 0.05, 1e-6),
+				"the pure nitrogen compound did not fund the declared nitrogen share 1:1");
+			require(c.nitrogenDrawnKg > 0.0007
+				&& findStore(snap, "fertN").currentQualified < 1e-9,
+				"the scarce pure-nitrogen store was not drawn down");
+			require(c.lastGrowthLimiter.find("nitrogen") != std::string::npos,
+				"the growth limiter does not name the exhausted nitrogen store");
+			// No substitution from the air: the compartment's atmospheric
+			// nitrogen inventory is untouched, and the other nutrients
+			// follow the growth that actually ran, not the nitrogen.
+			require(closeTo(snap.atmospheres[0].nitrogenKg, 80.0, 1e-12),
+				"atmospheric nitrogen was drawn to substitute for the exhausted nutrient store");
+			require(closeTo(c.phosphorusDrawnKg, c.growthKg * 0.02, 1e-6)
+				&& closeTo(c.potassiumDrawnKg, c.growthKg * 0.03, 1e-6)
+				&& closeTo(c.mineralsDrawnKg, c.growthKg * 0.05, 1e-6),
+				"the other tracked nutrients did not follow their declared growth proportions");
+			require(c.growthKg > 0.0 && c.growthKg < 0.02,
+				"growth did not bind to the scarce pure nitrogen store");
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("pure-compound crop-run boundary residual for '" + balance.unit + "' not closed").c_str());
 		}
 		// Capacity saturation: a canopy started near its Growing capacity
 		// fills the headroom and then grows no further; the limiter names
@@ -14113,6 +14242,47 @@ void buffers(smoke::Context const&)
 				&& diagnostic.find("declares a composition different from the culture's")
 					!= std::string::npos,
 				"a harvest into a store declaring a different compound material was accepted");
+			// Uptake composition purity (#572), the same rule as the crops:
+			// the culture spends the drawn mass exactly as the role's own
+			// material, so a compound uptake store must be pure in that
+			// role for the culture water and every tracked nutrient.
+			settings.algaeCultures = { culture() };
+			settings.stores = fullStores();
+			core::ResourceCompositionSettings purePhosphorus;
+			purePhosphorus.phosphorus = 1.0;
+			settings.stores[1].composition = purePhosphorus;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("nitrogen store 'fertN' declares a compound composition that is not pure bound nutrient nitrogen")
+					!= std::string::npos,
+				"a phosphorus-only compound store was accepted as the culture nitrogen source");
+			settings.algaeCultures = { culture() };
+			settings.stores = fullStores();
+			core::ResourceCompositionSettings mixedRecovered;
+			mixedRecovered.nutrientNitrogen = 0.4;
+			mixedRecovered.phosphorus = 0.3;
+			mixedRecovered.otherMinerals = 0.3;
+			settings.stores[2].composition = mixedRecovered;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("phosphorus store 'fertP' declares a compound composition that is not pure phosphorus")
+					!= std::string::npos,
+				"a mixed recovered-nutrient store was accepted as a pure phosphorus source");
+			settings.algaeCultures = { culture() };
+			settings.stores = fullStores();
+			core::ResourceCompositionSettings mineralSolution;
+			mineralSolution.moisture = 0.995;
+			mineralSolution.otherMinerals = 0.005;
+			settings.stores[0].composition = mineralSolution;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("culture water store 'makeup' declares a compound composition that is not pure water")
+					!= std::string::npos,
+				"a mineral solution was accepted as pure culture water");
+			settings.algaeCultures = { culture() };
+			settings.stores = fullStores();
+			core::ResourceCompositionSettings purePotassium;
+			purePotassium.potassium = 1.0;
+			settings.stores[3].composition = purePotassium;
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				"pure-compound culture uptake stores matching their roles were refused");
 			settings.algaeCultures = { culture() };
 			settings.algaeCultures[0].initialBiomassKg = 3.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)

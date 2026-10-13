@@ -884,6 +884,43 @@ namespace core
 				&& close(left.otherMinerals, right.otherMinerals)
 				&& close(left.energyKJPerKgDry, right.energyKJPerKgDry);
 		}
+		// Biological uptake role purity (#572). A crop or culture uptake
+		// spends the drawn mass exactly as the role's own material:
+		// irrigation/culture water is spent as water, and each tracked
+		// nutrient draw is spent as that nutrient. A plain store with no
+		// declared composition is accepted as the role material by
+		// convention; a compound store must declare itself to BE that
+		// material - pure in the role constituent, with no moisture for
+		// the nutrient roles and no other constituent riding along,
+		// because the uptake owns no residual stream to account for
+		// anything else the drawn mass carries. A P-only compound can
+		// never fund nitrogen-containing biomass, atmospheric nitrogen is
+		// never a match for the bound-nitrogen role, and one tracked
+		// nutrient never substitutes for another: crossing those
+		// boundaries is a conversion the uptake contract does not own,
+		// so it is refused at configuration. Roles: 0 water, 1 nitrogen,
+		// 2 phosphorus, 3 potassium, 4 minerals.
+		bool isPureUptakeComposition(ResourceCompositionSettings const& composition,
+			size_t role)
+		{
+			auto const close = [](double a, double b)
+			{ return std::abs(a - b) <= StationBalanceTolerance; };
+			double const fractions[5]{composition.moisture, composition.nutrientNitrogen,
+				composition.phosphorus, composition.potassium, composition.otherMinerals};
+			if (!close(fractions[role], 1.0)) return false;
+			if (role == 0)
+			{
+				for (size_t field = 1; field < 5; ++field)
+					if (!close(fractions[field], 0.0)) return false;
+			}
+			else
+			{
+				if (!close(fractions[0], 0.0)) return false;
+				for (size_t field = 1; field < 5; ++field)
+					if (field != role && !close(fractions[field], 0.0)) return false;
+			}
+			return true;
+		}
 		using ConstituentLedger = std::map<std::string, double>;
 		// Add the constituent amounts of a compound wet mass to a ledger.
 		// The seven mass constituents partition the wet mass exactly: water
@@ -3008,6 +3045,8 @@ namespace core
 				crop.phosphorusStoreId, crop.potassiumStoreId, crop.mineralsStoreId};
 			char const* uptakeRoles[5]{"irrigation water", "nitrogen", "phosphorus",
 				"potassium", "minerals"};
+			char const* uptakePurityNames[5]{"water", "bound nutrient nitrogen",
+				"phosphorus", "potassium", "other minerals"};
 			for (size_t stream = 0; stream < 5; ++stream)
 			{
 				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
@@ -3018,6 +3057,12 @@ namespace core
 				if (!isMassUnit(found->unit))
 					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
 						+ "' must be a mass unit; crop uptake is mass-denominated (g or kg)");
+				if (found->composition && !isPureUptakeComposition(*found->composition, stream))
+					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
+						+ "' declares a compound composition that is not pure "
+						+ uptakePurityNames[stream] + ": the uptake spends the drawn mass exactly as "
+						+ uptakePurityNames[stream]
+						+ " and owns no residual stream to account for any other constituent; only an explicit conversion may cross that boundary");
 				for (size_t other = stream + 1; other < 5; ++other)
 					if (uptakeIds[stream] == uptakeIds[other])
 						return refuse(where + " " + uptakeRoles[stream] + " store and "
@@ -3158,6 +3203,8 @@ namespace core
 				algae.phosphorusStoreId, algae.potassiumStoreId, algae.mineralsStoreId};
 			char const* uptakeRoles[5]{"culture water", "nitrogen", "phosphorus",
 				"potassium", "minerals"};
+			char const* uptakePurityNames[5]{"water", "bound nutrient nitrogen",
+				"phosphorus", "potassium", "other minerals"};
 			for (size_t stream = 0; stream < 5; ++stream)
 			{
 				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
@@ -3168,6 +3215,12 @@ namespace core
 				if (!isMassUnit(found->unit))
 					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
 						+ "' must be a mass unit; culture uptake is mass-denominated (g or kg)");
+				if (found->composition && !isPureUptakeComposition(*found->composition, stream))
+					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
+						+ "' declares a compound composition that is not pure "
+						+ uptakePurityNames[stream] + ": the uptake spends the drawn mass exactly as "
+						+ uptakePurityNames[stream]
+						+ " and owns no residual stream to account for any other constituent; only an explicit conversion may cross that boundary");
 				for (size_t other = stream + 1; other < 5; ++other)
 					if (uptakeIds[stream] == uptakeIds[other])
 						return refuse(where + " " + uptakeRoles[stream] + " store and "

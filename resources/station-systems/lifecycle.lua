@@ -235,6 +235,40 @@ local function chemicalEnergyKJPerKgOrganic(composition)
     return composition.energyKJPerKgDry / fraction
 end
 
+-- Biological uptake role purity (#572), mirroring the host's
+-- isPureUptakeComposition: the uptake spends the drawn mass exactly as
+-- the role's own material - irrigation/culture water as water, each
+-- tracked nutrient draw as that nutrient. A plain store with no
+-- declared composition is accepted as the role material by convention;
+-- a compound store must declare itself to BE that material: pure in the
+-- role constituent, with no moisture for the nutrient roles and no
+-- other constituent riding along, because the uptake owns no residual
+-- stream to account for anything else the drawn mass carries. A
+-- phosphorus-only compound can never fund nitrogen-containing biomass,
+-- atmospheric nitrogen is never a match for the bound-nitrogen role,
+-- and one tracked nutrient never substitutes for another. Roles: 1
+-- water, 2 nitrogen, 3 phosphorus, 4 potassium, 5 minerals.
+local UPTAKE_PURITY_NAMES = { 'water', 'bound nutrient nitrogen',
+    'phosphorus', 'potassium', 'other minerals' }
+local function isPureUptakeComposition(composition, role)
+    local fractions = { composition.moisture, composition.nutrientNitrogen,
+        composition.phosphorus, composition.potassium, composition.otherMinerals }
+    if math.abs(fractions[role] - 1) > BALANCE_TOLERANCE then return false end
+    if role == 1 then
+        for field = 2, 5 do
+            if math.abs(fractions[field]) > BALANCE_TOLERANCE then return false end
+        end
+    else
+        if math.abs(fractions[1]) > BALANCE_TOLERANCE then return false end
+        for field = 2, 5 do
+            if field ~= role and math.abs(fractions[field]) > BALANCE_TOLERANCE then
+                return false
+            end
+        end
+    end
+    return true
+end
+
 local function newConstituents()
     return {
         organicKg = 0, nutrientNitrogenKg = 0, phosphorusKg = 0,
@@ -2488,6 +2522,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             assert(store.unit == 'g' or store.unit == 'kg',
                 'crop ' .. uptakeRoles[role] .. " store '" .. store.id
                     .. "' must be a mass unit; crop uptake is mass-denominated")
+            if store.composition then
+                assert(isPureUptakeComposition(store.composition, role),
+                    'crop ' .. uptakeRoles[role] .. " store '" .. store.id
+                        .. "' declares a compound composition that is not pure "
+                        .. UPTAKE_PURITY_NAMES[role]
+                        .. ': the uptake spends the drawn mass exactly as '
+                        .. UPTAKE_PURITY_NAMES[role]
+                        .. ' and owns no residual stream to account for any other constituent; only an explicit conversion may cross that boundary')
+            end
             for other = role + 1, 5 do
                 assert(uptakeIds[role] ~= uptakeIds[other],
                     'crop ' .. uptakeRoles[role] .. ' store and ' .. uptakeRoles[other]
@@ -2712,6 +2755,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             assert(store.unit == 'g' or store.unit == 'kg',
                 'algae ' .. uptakeRoles[role] .. " store '" .. store.id
                     .. "' must be a mass unit; culture uptake is mass-denominated")
+            if store.composition then
+                assert(isPureUptakeComposition(store.composition, role),
+                    'algae ' .. uptakeRoles[role] .. " store '" .. store.id
+                        .. "' declares a compound composition that is not pure "
+                        .. UPTAKE_PURITY_NAMES[role]
+                        .. ': the uptake spends the drawn mass exactly as '
+                        .. UPTAKE_PURITY_NAMES[role]
+                        .. ' and owns no residual stream to account for any other constituent; only an explicit conversion may cross that boundary')
+            end
             for other = role + 1, 5 do
                 assert(uptakeIds[role] ~= uptakeIds[other],
                     'algae ' .. uptakeRoles[role] .. ' store and ' .. uptakeRoles[other]
