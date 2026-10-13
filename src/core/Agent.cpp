@@ -835,6 +835,7 @@ namespace core
 		mRememberedDeviceConditions.clear();
 		mOccupiedUsablePoint = {};
 		mPose = Pose::Standing;
+		mPlayerPose.reset();
 		mRetainedActionPose = false;
 		mRoutePlanningSequence = 0;
 		mRoutePlanningTotalTicks = 0;
@@ -1355,7 +1356,10 @@ namespace core
 
 	void Agent::syncPoseToSector()
 	{
+		if (mPlayerPose && !isPlayerControlled()) mPlayerPose.reset();
 		if (mFurnitureUse || mRetainedActionPose || (mTraversalTask && mTraversalTask->crossingPose)) return;
+		if (mPlayerPose && !mTraversalTask && !mPlayerLadderMount)
+		{ mPose = *mPlayerPose; return; }
 		auto const* sector = physicalMovementSector();
 		if (auto choice = sector ? requiredPoseFor(*sector, getGlobalPosition().y)
 			: std::optional<PoseSelection>{{Pose::Standing, 1.0f}})
@@ -1364,6 +1368,9 @@ namespace core
 
 	float Agent::getRoomMovementSpeed() const
 	{
+		if (isPlayerControlled() && mPlayerPose)
+			return getWalkSpeed() * getPhysicalBaseline().automaticSpeedRatio(
+				AutomaticPoseContext::RoomMovement, *mPlayerPose).value_or(0.f);
 		auto const* sector = physicalMovementSector();
 		auto choice = sector ? requiredPoseFor(*sector, getGlobalPosition().y)
 			: std::optional<PoseSelection>{{Pose::Standing, 1.0f}};

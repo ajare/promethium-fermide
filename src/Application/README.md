@@ -44,7 +44,11 @@ the two implementations are intentionally independent so they can diverge.
 
 Assign the editor's built-in **Player controlled** behaviour to any Agent to
 control the lowest-ID eligible Agent in Play. Hold Left/Right to walk Standing;
-release to stop (both keys cancel). The camera follows that Agent and its Layer.
+release to stop (both keys cancel). On walkable floors, hold Down to Crouch,
+or Down plus Left/Right to Crawl, only if the Agent declares the requested pose.
+Releasing Down restores Standing only where the whole body fits; otherwise the
+lowered pose is retained until safe. Motion uses declared pose/context speeds.
+Ladder/stair descent retains priority. The camera follows that Agent and its Layer.
 Press Up to cross an aligned open ordinary Door between Layers, or otherwise
 open an eligible manual Door; press again once open to cross. Up also enters or
 exits Stairwell landing doorways. Left/Right walks on visible side platforms;
@@ -87,8 +91,9 @@ names, and Space requests a visit. Shift+cursor suppresses locomotion even when
 no selector is available. Requests survive leaving; Player passengers never
 align to slots or disembark automatically. Extensible
 Ladders can be deployed via their Buttons before climbing. Walls, low spaces,
-closed Bulkhead Doors and Floor gaps block movement. Automatic
-crouching/crawling is not supported. Without an eligible
+closed Bulkhead Doors and Floor gaps block movement. Low spaces require explicit
+supported posture input; Door/device crossings retain existing Standing admission.
+Without an eligible
 Agent, Player input is disabled and the fitted Layer-0 camera remains.
 See [Player control](../../docs/player-control.md) for authoring and validation.
 

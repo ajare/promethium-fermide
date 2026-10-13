@@ -701,6 +701,7 @@ namespace core
 		void advancePlayerStaircaseAgent(Agent& agent, float timestep);
 		void advancePlayerStairwellAgent(Agent& agent, float timestep);
 		void advancePlayerControlledAgent(AgentId agent, float timestep);
+		void updatePlayerPose(Agent& agent, float height, float left, float right);
 		bool advancePlayerChamberAgent(Agent& agent, float timestep);
 		bool advancePlayerTransportAgent(Agent& agent, float timestep);
 		bool tryPlayerPlatformMount(Agent& agent);

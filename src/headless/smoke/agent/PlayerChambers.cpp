@@ -128,11 +128,17 @@ void walkingDuringProcessing(core::ChamberSubtype subtype) {
  }
  for (int i = 0; i < 2400 && scene.chamber->getPhase() != core::SecurityScannerPhase::Scanning; ++i) scene.step();
  require(scene.chamber->getPhase() == core::SecurityScannerPhase::Scanning, "Fixture must start specialized processing");
+ scene.world.setPlayerStairSelection(false, true); scene.wait(1);
+ require(scene.actor()->getPose() == core::Pose::Crouching, "Down must crouch inside the processing Chamber");
  auto original = scene.actor()->getGlobalPosition(); scene.move(1); scene.wait(4);
+ require(scene.actor()->getPose() == core::Pose::Crawling, "Down plus walking must crawl inside the Chamber");
  require(scene.actor()->getGlobalPosition().x > original.x && scene.snapshot().occupants.size() == 1,
    "Player must retain bounded manual walking and capacity during processing");
  scene.move(-1); scene.wait(4); scene.move(0);
  require(scene.actor()->getGlobalPosition().distanceTo(original) < .0001f, "Manual reversal during processing must preserve physical position");
+ scene.wait(1); require(scene.actor()->getPose() == core::Pose::Crouching, "Stopped Chamber occupant must crouch while holding Down");
+ scene.world.setPlayerStairSelection(false, false); scene.wait(1);
+ require(scene.actor()->getPose() == core::Pose::Standing, "Chamber occupant must stand on Down release when it fits");
 }
 void directionCapacityAndReset(core::ChamberSubtype subtype) {
  {

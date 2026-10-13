@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cmath>
 #include <utility>
+#include <limits>
 
 namespace core
 {
@@ -216,6 +217,7 @@ namespace core
 			finishFurnitureUse(id);
 			agent->mOccupiedUsablePoint = {};
 			agent->mRetainedActionPose = false;
+			agent->mPlayerPose.reset();
 			agent->mPose = Pose::Standing;
 			if (candidate.edge->getType() == EdgeType::StairwellMount)
 			{
@@ -410,6 +412,7 @@ namespace core
 		task.request = request; task.permit = lookup.entity->getPermit();
 		finishFurnitureUse(getAgentId(&agent));
 		agent.mOccupiedUsablePoint = {};
+		agent.mPlayerPose.reset();
 		agent.mRetainedActionPose = false;
 		agent.mTraversalTask = std::move(task);
 		agent.mState = Agent::State::TraversingEdge;
@@ -714,15 +717,66 @@ namespace core
 		if (!chamber) return false;
 		// A stopped Player owns its slot and may walk during closure/cycling, but
 		// never crosses a closed entrance or an uncommitted exit.
-		float left = chamberDoor(0)->getPosition().x + chamberDoor(0)->getSize().x + half;
-		float right = chamberDoor(1)->getPosition().x - half;
-		if (left <= right && agent.poseFits(Pose::Standing, chamber->getEffectiveTopLevelHeight()))
+		float left = chamberDoor(0)->getPosition().x + chamberDoor(0)->getSize().x;
+		float right = chamberDoor(1)->getPosition().x;
+		updatePlayerPose(agent, chamber->getEffectiveTopLevelHeight(), left, right);
+		half = agent.getWidth() * .5f;
+		if (left + half <= right - half && agent.poseFits(agent.getPose(), chamber->getEffectiveTopLevelHeight()))
 		{
-			position.x = std::clamp(position.x + mPlayerMovementDirection * agent.getWalkSpeed() * timestep, left, right);
+			position.x = std::clamp(position.x + mPlayerMovementDirection * agent.getRoomMovementSpeed() * timestep, left + half, right - half);
 			agent.setPosition({const_cast<Sector*>(agent.getSector()), position - agent.getSector()->getPosition()}, false);
-			agent.mPose = Pose::Standing;
 		}
 		return true;
+	}
+
+	void World::updatePlayerPose(Agent& agent, float height, float left, float right)
+	{
+		if (agent.mTraversalTask || agent.mPlayerLadderMount || agent.mFurnitureUse) return;
+		if (!mPlayerStairDown && !agent.mPlayerPose) return;
+		Pose desired = mPlayerStairDown ? (mPlayerMovementDirection ? Pose::Crawling : Pose::Crouching)
+			: Pose::Standing;
+		auto envelope = agent.getPoseEnvelope(desired);
+		auto position = agent.getGlobalPosition();
+		if (!envelope || !agent.poseFits(desired, height)
+			|| position.x - envelope->x * .5f < left - PoseFitTolerance
+			|| position.x + envelope->x * .5f > right + PoseFitTolerance) return;
+		if (isLocationLike(agent.getSector()->getType()))
+		{
+			int y = (int)std::round(position.y);
+			if (std::abs(position.y - y) > PoseFitTolerance || y < 0 || y >= (int)getLevelsHigh()) return;
+			auto layer = getLayer(agent.getSector()->getLayerIndex());
+			int first = (int)std::floor(position.x - envelope->x * .5f + PoseFitTolerance);
+			int last = (int)std::floor(position.x + envelope->x * .5f - PoseFitTolerance);
+			if (first < 0 || last >= (int)getCellsWide()) return;
+			for (int x = first; x <= last; ++x)
+			{
+				auto const& cell = layer->getCellDefinition(x, y);
+				if (!cell.isTraversableOnFoot() || cell.sectorIndex >= mSectors.size()) return;
+				auto const& sector = *mSectors[cell.sectorIndex];
+				if (!isLocationLike(sector.getType()) || !agent.poseFits(desired, sector.getPosition().y
+					+ sector.getLevelsHigh() - 1 + sector.getEffectiveTopLevelHeight() - position.y)) return;
+				if (&sector != agent.getSector() && sector.getType() == SectorType::Location
+					&& (static_cast<Location const&>(sector).getPermissionRequirement() & ~effectiveAccessGrants(agent)).any()) return;
+				for (int side : {CORE_SIDE_LEFT, CORE_SIDE_RIGHT})
+					if (sector.getEndType(y - sector.getCellY(), side) == SectorEndType::Wall
+						&& (side == CORE_SIDE_LEFT ? position.x - envelope->x * .5f < sector.getPosition().x - PoseFitTolerance
+							: position.x + envelope->x * .5f > sector.getPosition().x + sector.getSize().x + PoseFitTolerance)) return;
+				for (uint32_t i = 0; i < sector.getNumObjects(); ++i)
+					if (auto object = std::dynamic_pointer_cast<const BulkheadDoorSectorObject>(sector.getObject(i)))
+					{
+						Vector2 min, max; object->getDoor()->getCurrentShape(min, max);
+						if (min.x < max.x && min.y < max.y
+							&& position.x - envelope->x * .5f < max.x - PoseFitTolerance
+							&& position.x + envelope->x * .5f > min.x + PoseFitTolerance
+							&& position.y < max.y - PoseFitTolerance
+							&& position.y + envelope->y > min.y + PoseFitTolerance) return;
+					}
+			}
+		}
+		agent.mRetainedActionPose = false;
+		agent.mPose = desired;
+		if (mPlayerStairDown) agent.mPlayerPose = desired;
+		else agent.mPlayerPose.reset();
 	}
 
 	void World::advancePlayerControlledAgent(AgentId id, float timestep)
@@ -754,10 +808,13 @@ namespace core
 		}
 		agent->mState = Agent::State::Idle;
 		if (advancePlayerTransportAgent(*agent, timestep)) return;
-		if (!mPlayerMovementDirection) return;
 		auto* source = agent->getSector();
 		if (!source || !isLocationLike(source->getType())) return;
 		auto position = agent->getGlobalPosition();
+		updatePlayerPose(*agent, source->getPosition().y + source->getLevelsHigh() - 1
+			+ source->getEffectiveTopLevelHeight() - position.y,
+			-std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity());
+		if (!mPlayerMovementDirection) return;
 		auto const level = static_cast<int>(std::round(position.y));
 		if (level < 0 || level >= static_cast<int>(getLevelsHigh())
 			|| std::abs(position.y - level) > PoseFitTolerance) return;
@@ -767,10 +824,9 @@ namespace core
 		{
 			auto const ceiling = sector.getPosition().y + sector.getLevelsHigh() - 1
 				+ sector.getEffectiveTopLevelHeight();
-			return agent->poseFits(Pose::Standing, ceiling - position.y);
+			return agent->poseFits(agent->mPlayerPose.value_or(Pose::Standing), ceiling - position.y);
 		};
-		// A lowered environmental starting pose may be retained, but never used
-		// to turn manual input into crouching/crawling locomotion.
+		// Movement uses the selected supported pose, never invented headroom.
 		if (!fits(*source)) return;
 		auto cellSector = [&](int x) -> Sector*
 		{
@@ -831,7 +887,7 @@ namespace core
 
 		int const direction = mPlayerMovementDirection;
 		float const halfWidth = agent->getWidth() * 0.5f;
-		float targetX = position.x + direction * agent->getWalkSpeed() * timestep;
+		float targetX = position.x + direction * agent->getRoomMovementSpeed() * timestep;
 		auto stairMount = playerStaircaseApproach(*agent);
 		auto const ladderMount = playerLadderApproach(*agent);
 		if (ladderMount && (!stairMount
@@ -898,7 +954,10 @@ namespace core
 			destination->enterAgent(agent, {destination, position - destination->getPosition()}, false);
 		}
 		else agent->setPosition({source, position - source->getPosition()}, false);
-		agent->mPose = Pose::Standing;
+		if (!agent->mPlayerPose) agent->mPose = Pose::Standing;
+		updatePlayerPose(*agent, destination->getPosition().y + destination->getLevelsHigh() - 1
+			+ destination->getEffectiveTopLevelHeight() - position.y,
+			-std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity());
 	}
 
 	bool World::playerTransportLandingSupported(Sector const& sector, Vector2 position, float halfWidth) const
@@ -1055,8 +1114,10 @@ namespace core
 				|| std::abs(agent.getGlobalPosition().y - vehicle.mLiftPosition) > PoseFitTolerance)) continue;
 			auto position = agent.getGlobalPosition();
 			float left = vehicle.mLift->getPosition().x, right = left + vehicle.mLift->getSize().x;
-			float half = agent.getPoseEnvelope(Pose::Standing).value_or(Vector2{}).x * .5f;
-			float next = position.x + mPlayerMovementDirection * agent.getWalkSpeed() * getFixedTimestep();
+			if (aboard && !crossing) updatePlayerPose(agent, agent.getSector()->getPosition().y
+				+ agent.getSector()->getLevelsHigh() - 1 + agent.getSector()->getEffectiveTopLevelHeight() - position.y, left, right);
+			float half = crossing ? agent.getPoseEnvelope(Pose::Standing).value_or(Vector2{}).x * .5f : agent.getWidth() * .5f;
+			float next = position.x + mPlayerMovementDirection * agent.getRoomMovementSpeed() * getFixedTimestep();
 			bool inside = next - half >= left && next + half <= right;
 			if (!aboard && !crossing && (next + half <= left || next - half >= right)) continue;
 			if (half * 2.f > right - left || !agent.poseFits(Pose::Standing,
@@ -1098,6 +1159,9 @@ namespace core
 				}
 				mPlayerPlatformCrossing = PlayerPlatformCrossing{resourceId, requestId, request->mPermit,
 					destination, id, request->mCapacityPosition, !aboard};
+				agent.mPlayerPose.reset(); agent.mPose = Pose::Standing;
+				half = agent.getWidth() * .5f;
+				next = position.x + mPlayerMovementDirection * agent.getWalkSpeed() * getFixedTimestep();
 				crossing = true;
 			}
 			if (!crossing)
@@ -1147,15 +1211,15 @@ namespace core
 			float width = vehicle.mLift ? vehicle.mLift->getSize().x : (float)vehicle.mShuttle->getCarWidth();
 			if (vehicle.mShuttle) left += ((uint32_t)std::distance(vehicle.mOccupants.begin(), occupant)
 				/ vehicle.mShuttleCapacityPerCarriage) * (width + 1.f);
-			auto envelope = agent.getPoseEnvelope(Pose::Standing);
-			auto half = envelope.value_or(Vector2{}).x * .5f;
 			float height = vehicle.mLift ? vehicle.mLift->getSize().y : vehicle.mShuttle->getSize().y;
-			if (!envelope || width < 2.f * half || !agent.poseFits(Pose::Standing, height)) return true;
+			updatePlayerPose(agent, height, left, left + width);
+			auto envelope = agent.getPoseEnvelope(agent.getPose());
+			auto half = envelope.value_or(Vector2{}).x * .5f;
+			if (!envelope || width < 2.f * half || !agent.poseFits(agent.getPose(), height)) return true;
 			auto position = agent.getGlobalPosition();
-			position.x = std::clamp(position.x + mPlayerMovementDirection * agent.getWalkSpeed() * timestep,
+			position.x = std::clamp(position.x + mPlayerMovementDirection * agent.getRoomMovementSpeed() * timestep,
 				left + half, left + width - half);
 			agent.setPosition({const_cast<Sector*>(agent.getSector()), position - agent.getSector()->getPosition()}, false);
-			agent.mPose = Pose::Standing;
 			return true;
 		}
 		return tryPlayerPlatformMount(agent);

@@ -605,7 +605,10 @@ namespace core
 		if (!agent) return;
 		mWorld.mMovementGoals.erase(id);
 		mWorld.mPausedPathIntents.erase(id);
+		bool const manualPose = agent->mPlayerPose.has_value();
+		agent->mPlayerPose.reset();
 		agent->clearRuntimePath();
+		if (manualPose) agent->syncPoseToSector();
 		agent->mResetPosition = agent->mPosition;
 		agent->mResetLocalDepth = agent->mLocalDepth;
 		agent->mResetPath.reset();

@@ -140,9 +140,27 @@ camera is used.
   crouches/crawls. Up supports ordinary Doors between Locations, open enclosed
   Lift/Shuttle Doors, Stairwell landing doorways, contextual Ladder entry/climbing
   and physical Button interaction. Windows and BoothWindows do not admit entry.
-- An Agent initially in a space that cannot accommodate Standing remains
-  stationary in its existing fitting pose; input does not force it through the
-  ceiling.
+- Without explicit Down posture input, an Agent initially in a space that cannot
+  accommodate Standing remains stationary in its existing fitting pose.
+
+## Player crouching and crawling
+
+- Hold **Down** while stationary to use **Crouching**, or hold **Down + Left/Right**
+  to use **Crawling**. Unsupported requested poses do nothing: the existing pose
+  remains unchanged and no capability is invented. Opposite horizontal keys
+  cancel movement, selecting Crouching while Down remains held.
+- Release Down to restore **Standing** only when the whole body has clearance
+  and support. Otherwise retain the lowered pose until Standing safely fits.
+  Explicit crawling can traverse supported low Room space, using the Agent
+  type's declared Room movement speed ratio, envelope and normal Floor/wall/
+  Location permission checks. Input never snaps the Agent or creates support.
+- Flat vehicle and Chamber interiors also support these poses and keep their
+  existing physical bounds. Door/device crossings retain their existing Standing
+  admission and crossing rules; posture input does not bypass them. Ladder/stair
+  descent keeps priority and crossing/climbing owns its pose.
+- Shift+cursor remains destination browsing, not posture input. Pausing freezes
+  posture and clears held input; Reset and behaviour handoff release runtime
+  Player pose ownership. Inactive Agents do not receive posture input.
 
 ## Access panels
 

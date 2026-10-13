@@ -332,6 +332,39 @@ void checkPlayerLadderKeys(wp::application::State& play, core::World& world) {
   }
 }
 
+void checkPlayerPoseKeys(wp::application::State& play, core::World& world) {
+  using wp::application::Key; using wp::application::KeyEvent;
+  core::World fixture("Keyboard Player poses", 12, 2);
+  auto room = fixture.addRoom("Room", 0, 0, 0, 12, 1); fixture.finishBuild(); fixture.pauseSimulation();
+  auto id = fixture.createAgent("Player", room, 0, 3.f);
+  require(fixture.setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}), "Cannot assign keyboard pose Player");
+  auto writer = core::YamlSerializer::toString(); core::SerializationWorkData data; data.markSerializedUnmodified = false;
+  fixture.serialize(*writer, data); writer->serialize();
+  auto reader = core::YamlSerializer::fromString(writer->getSerializedString()); reader->deserialize();
+  world.pauseSimulation(); require(world.deserialize(*reader, data), "Cannot install keyboard pose Player"); world.resumeSimulation();
+  auto actor = world.lookupAgent(id).entity;
+  auto key = [&](Key k, bool pressed) { play._injectKeyInput(pressed ? KeyEvent::Pressed : KeyEvent::Released, k, {}); play._update(core::World::getFixedTimestep()); };
+  key(Key::DownArrow, true); require(actor->getPose() == core::Pose::Crouching, "Actual Down must crouch");
+  key(Key::RightArrow, true); require(actor->getPose() == core::Pose::Crawling, "Actual Down+Right must crawl");
+  auto x = actor->getGlobalPosition().x;
+  for (int i = 0; i < 10; ++i) key(Key::DownArrow, true);
+  require(actor->getPose() == core::Pose::Crawling && actor->getGlobalPosition().x > x, "Repeated Down must retain crawling motion");
+  key(Key::DownArrow, false); require(actor->getPose() == core::Pose::Standing, "Releasing Down during motion must stand");
+  key(Key::DownArrow, true); key(Key::RightArrow, false);
+  require(actor->getPose() == core::Pose::Crouching, "Stopping horizontal movement must crouch while Down remains held");
+  x = actor->getGlobalPosition().x; key(Key::LeftArrow, true);
+  require(actor->getPose() == core::Pose::Crawling && actor->getGlobalPosition().x < x, "Actual Down+Left must crawl");
+  key(Key::RightArrow, true); require(actor->getPose() == core::Pose::Crouching, "Opposite horizontal keys must cancel movement and crouch");
+  key(Key::LeftArrow, false); key(Key::RightArrow, false); key(Key::DownArrow, false);
+  require(actor->getPose() == core::Pose::Standing, "Releasing all posture input must restore Standing");
+  play._injectKeyInput(KeyEvent::Pressed, Key::LeftShift, wp::application::KeyModifiers::Shift);
+  play._injectKeyInput(KeyEvent::Pressed, Key::DownArrow, wp::application::KeyModifiers::Shift);
+  play._update(core::World::getFixedTimestep());
+  require(actor->getPose() == core::Pose::Standing, "Shift+Down browsing must not crouch even without a selector");
+  play._injectKeyInput(KeyEvent::Released, Key::DownArrow, wp::application::KeyModifiers::Shift);
+  play._injectKeyInput(KeyEvent::Released, Key::LeftShift, {});
+}
+
 void checkPlayerAccessPanelKeys(wp::application::State& play, core::World& world) {
   using wp::application::Key; using wp::application::KeyEvent;
   auto key = [&](bool pressed) { play._injectKeyInput(pressed ? KeyEvent::Pressed : KeyEvent::Released, Key::UpArrow, {}); };
@@ -695,6 +728,7 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
         checkPlayerChamberKeys(*child, *map->getWorld());
         checkPlayerBoothWindowKeys(*child, *map->getWorld());
         checkPlayerAccessPanelKeys(*child, *map->getWorld());
+        checkPlayerPoseKeys(*child, *map->getWorld());
         auto const suspendTick = map->getWorld()->getSimulationTick();
         child->_suspend(true, true, true);
         child->_update(1.0f);

@@ -340,6 +340,8 @@ namespace core
 		int mLocalDepth{ 0 };
 		// Runtime bodily stance, deliberately absent from serialization.
 		Pose mPose{ Pose::Standing };
+		// Runtime-only ownership for held Player posture input, never authored.
+		std::optional<Pose> mPlayerPose;
 		// True while mPose was authored by a Marker Action's set_pose effect and
 		// is retained until successful replacement or actual physical departure.
 		// Distinguishes a retained Action pose from the Sector-derived pose that

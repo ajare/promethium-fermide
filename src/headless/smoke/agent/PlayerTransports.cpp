@@ -81,8 +81,13 @@ namespace
    world.update(1.f);
    auto moving = vehicle(world, resource);
    if (moving.liftMoving && !walkedDuringTravel) {
-    float relative = actor->getGlobalPosition().x - (shuttle ? moving.liftPosition : 0.f);
-    world.setPlayerMovementDirection(1); tick(world, .1f); world.setPlayerMovementDirection(0);
+    world.setPlayerStairSelection(false, true); tick(world, .02f);
+    require(actor->getPose() == core::Pose::Crouching, "Down must crouch inside a moving enclosed vehicle");
+    float relative = actor->getGlobalPosition().x - (shuttle ? vehicle(world, resource).liftPosition : 0.f);
+    world.setPlayerMovementDirection(1); tick(world, .1f);
+    require(actor->getPose() == core::Pose::Crawling, "Down plus horizontal movement must crawl inside the vehicle");
+    world.setPlayerMovementDirection(0); world.setPlayerStairSelection(false, false); tick(world, .02f);
+    require(actor->getPose() == core::Pose::Standing, "Releasing Down inside the vehicle must restore Standing");
     float after = actor->getGlobalPosition().x - (shuttle ? vehicle(world, resource).liftPosition : 0.f);
     require(after > relative + .01f, "Ordinary movement must work while vehicle travels without automatic slot alignment");
     walkedDuringTravel = true;

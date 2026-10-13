@@ -302,6 +302,6 @@ agents:
         revision: 1
         configuration:
           []
-    sector: 6
-    localX: 1.625
+    sector: 0
+    localX: 4.734375
     localY: 0
