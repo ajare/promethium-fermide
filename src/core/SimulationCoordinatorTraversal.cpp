@@ -408,7 +408,7 @@ namespace core
 			|| (agent.isPlayerControlled() && (request->mEdgeType == EdgeType::StairwellMount
 				|| (request->mEdgeType == EdgeType::LiftMount && traversalResource && traversalResource->mOpenPlatformLift)))
 			|| (agent.isPlayerControlled() && request->mEdgeType == EdgeType::BulkheadDoor
-				&& traversalResource && traversalResource->mAirlock)
+				&& traversalResource && (traversalResource->mAirlock || traversalResource->mSecurityScanner))
 			|| (request->mEdgeType == EdgeType::Lift && traversalResource
 				&& traversalResource->mLift && !traversalResource->mOpenPlatformLift)
 			|| (request->mEdgeType == EdgeType::Shuttle && traversalResource
@@ -475,17 +475,20 @@ namespace core
 				resource.mAdmissionReservations[slot] = {};
 				resource.mOccupants[slot] = owner;
 				if (!chamber.mOccupant) chamber.mOccupant = owner;
-				resource.mScannerAdmittedPath = agent.mPath.path;
-				resource.mScannerCommittedPath = std::make_shared<Path>();
-				// Retain only the forward chamber journey, not mutable destination
-				// intent. Recovery starts with interior walking from the current position.
-				for (size_t node = agent.mPath.targetNode + 1; node < agent.mPath.path->nodes.size(); ++node)
+				if (!agent.isPlayerControlled())
 				{
-					resource.mScannerCommittedPath->nodes.push_back(agent.mPath.path->nodes[node]);
-					if (agent.mPath.path->nodes[node].targetVertex->getSector().get() != &chamber) break;
+					resource.mScannerAdmittedPath = agent.mPath.path;
+					resource.mScannerCommittedPath = std::make_shared<Path>();
+					// Only autonomous occupants retain a walking Path. Player occupancy
+					// commits the exit without inventing movement or alignment targets.
+					for (size_t node = agent.mPath.targetNode + 1; node < agent.mPath.path->nodes.size(); ++node)
+					{
+						resource.mScannerCommittedPath->nodes.push_back(agent.mPath.path->nodes[node]);
+						if (agent.mPath.path->nodes[node].targetVertex->getSector().get() != &chamber) break;
+					}
+					resource.mChamberAdmittedPaths[owner] = resource.mScannerAdmittedPath;
+					resource.mChamberCommittedPaths[owner] = resource.mScannerCommittedPath;
 				}
-				resource.mChamberAdmittedPaths[owner] = resource.mScannerAdmittedPath;
-				resource.mChamberCommittedPaths[owner] = resource.mScannerCommittedPath;
 				if (chamber.getSubtype() == ChamberSubtype::SecurityScanner)
 					chamber.mPhase = SecurityScannerPhase::Positioning;
 				request->mCapacityPosition = ~0u;

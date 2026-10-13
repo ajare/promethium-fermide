@@ -80,6 +80,48 @@ construction:
     x: 11
     cellsWide: 4
     levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 3
+    x: 12
+    cellsWide: 4
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 4
+    x: 12
+    cellsWide: 4
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 5
+    x: 12
+    cellsWide: 4
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 0
+    x: 12
+    cellsWide: 4
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 4
+    x: 7
+    cellsWide: 3
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 4
+    x: 4
+    cellsWide: 3
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 4
+    x: 0
+    cellsWide: 2
+    levelsHigh: 1
   - type: stairwell
     layer: 1
     y: 1
@@ -103,6 +145,25 @@ construction:
     extensible: true
     startExtended: false
     directionalBatchLimit: 4
+  - type: lift
+    layer: 1
+    y: 0
+    x: 14
+    cellsWide: 1
+    levelsHigh: 6
+    stopOffsets: [0, 2, 3, 4, 5]
+    capacity: 2
+    minimumDwellSeconds: 0.75
+    maximumBoardingSeconds: 5
+    initialStop: 0
+    stopShortNames:
+      - LG
+      - 1
+      - 2
+      - 3
+      - 4
+    destinationPermissionRequirements:
+      []
   - type: marker
     sectorIndex: 2
     levelIndex: 0
@@ -133,75 +194,6 @@ construction:
     sectorIndex: 2
   - type: objectTombstone
     sectorIndex: 2
-  - type: corridor
-    layer: 0
-    y: 3
-    x: 12
-    cellsWide: 4
-    levelsHigh: 1
-  - type: corridor
-    layer: 0
-    y: 4
-    x: 12
-    cellsWide: 4
-    levelsHigh: 1
-  - type: corridor
-    layer: 0
-    y: 5
-    x: 12
-    cellsWide: 4
-    levelsHigh: 1
-  - type: corridor
-    layer: 0
-    y: 0
-    x: 12
-    cellsWide: 4
-    levelsHigh: 1
-  - type: lift
-    layer: 1
-    y: 0
-    x: 14
-    cellsWide: 1
-    levelsHigh: 6
-    stopOffsets: [0, 2, 3, 4, 5]
-    capacity: 2
-    minimumDwellSeconds: 0.75
-    maximumBoardingSeconds: 5
-    initialStop: 0
-    stopShortNames:
-      - LG
-      - 1
-      - 2
-      - 3
-      - 4
-    destinationPermissionRequirements:
-      []
-  - type: corridor
-    layer: 0
-    y: 4
-    x: 7
-    cellsWide: 3
-    levelsHigh: 1
-  - type: airlock
-    layer: 0
-    y: 4
-    x: 10
-    cellsWide: 2
-    cycleSeconds: 3
-    leftWasOpen: false
-    rightWasOpen: false
-  - type: corridor
-    layer: 0
-    y: 4
-    x: 4
-    cellsWide: 3
-    levelsHigh: 1
-  - type: corridor
-    layer: 0
-    y: 4
-    x: 0
-    cellsWide: 2
-    levelsHigh: 1
   - type: bulkheadDoor
     layer: 0
     y: 4
@@ -214,6 +206,21 @@ construction:
     crossingLanes: 1
     automaticSensorDistance: 0.5
     hasSpeedOverride: false
+  - type: chamber
+    subtype: securityScanner
+    layer: 0
+    y: 4
+    x: 10
+    cellsWide: 2
+    levelsHigh: 1
+    leftToRight: false
+    capacity: 1
+    preDelaySeconds: 1
+    scanSeconds: 2
+    postPauseSeconds: 1
+    sensorDistance: 0.5
+    leftWasOpen: false
+    rightWasOpen: false
 agentGroups:
   []
 accessPermissions:
@@ -242,6 +249,6 @@ agents:
         revision: 1
         configuration:
           []
-    sector: 11
+    sector: 8
     localX: 1.5625
     localY: 0

@@ -171,6 +171,31 @@ camera is used.
   safe Standing clearance and Floor support still apply. Reset discards runtime
   occupancy and restores the authored position.
 
+## Manual Security Scanners and Decontamination Chambers
+
+- Hold **Left/Right** toward the authored entrance. Its sensor opens the Door;
+  no Up press, Button, Arms capability or automatic approach is required.
+  Walk through once the live Bulkhead leaf clears the Standing body, even before
+  full opening. Wrong-side entry is refused.
+- Entry claims shared capacity and commits the authored opposite exit. Older
+  eligible queued entrants retain priority. Door Mobility, destination permissions,
+  Standing fit through both thresholds and supported exit Floor remain mandatory.
+  Security Scanners admit one occupant; Decontamination capacity equals cell width
+  and retains the existing boarding deadline and autonomous batching rules.
+- Left/Right walks inside, including during processing. Release stops and opposite
+  input reverses. Movement remains bounded by the chamber and its controlled
+  thresholds, with no slot alignment or automatic ejection. Stopped partial Door
+  crossings retain their permit and provisional capacity; retracing cancels them.
+- A Security Scanner waits until the Player's Standing body covers its central
+  scan position. Walk there explicitly; there is no snapping. Decontamination
+  batches do not require manual occupants to align to assigned capacity slots.
+  Existing pre-delay, scanning/decontamination and post-pause timers run with both
+  Doors closed, then the opposite Door opens. Exit explicitly with Left/Right.
+- Committed exits survive tightened permissions. Pause and deactivation preserve
+  admitted manual doorway safety and occupied capacity. Reset clears runtime
+  ownership and restores the authored Location. Autonomous passengers retain
+  their existing alignment, processing and exit behavior, including shared batches.
+
 ## Manual transport riding
 
 - Up crosses an aligned, fully open enclosed Lift or Shuttle Door in either

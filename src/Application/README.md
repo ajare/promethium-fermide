@@ -68,6 +68,11 @@ normal interlock cycle. Player Bulkhead collision uses the moving leaf's boundin
 box, allowing passage before full opening as soon as the Standing body clears it;
 autonomous Agents retain their fully-open gate. Release stops, retaining capacity and crossing safety;
 there is no automatic alignment or ejection, even in shared autonomous batches.
+Security Scanner and Decontamination Chamber sensors open their directional
+entrances without Up. Left/Right enters, walks inside during processing and
+explicitly exits. Scanners wait for the Player to walk across the central scan
+position; Decontamination batches need no manual slot alignment. Capacity,
+processing timers and committed exits remain authoritative.
 Open enclosed Lift/Shuttle Doors also use Up for manual boarding and exit;
 Platform lifts use ordinary Left/Right. While aboard an open stationary vehicle,
 Shift+Up/Down (Lift/Platform lift) or Shift+Left/Right (Shuttle) browses Stop short

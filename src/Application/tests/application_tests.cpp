@@ -13,6 +13,7 @@
 #include <core/Agent.h>
 #include <core/DoorSectorObject.h>
 #include <core/AirlockTransit.h>
+#include <core/ChamberTransit.h>
 #include <core/YamlSerializer.h>
 #include <cmath>
 
@@ -329,6 +330,52 @@ void checkPlayerLadderKeys(wp::application::State& play, core::World& world) {
   }
 }
 
+void checkPlayerChamberKeys(wp::application::State& play, core::World& world) {
+  using wp::application::Key; using wp::application::KeyEvent;
+  auto key = [&](Key k, bool pressed) { play._injectKeyInput(pressed ? KeyEvent::Pressed : KeyEvent::Released, k, {}); };
+  for (auto subtype : {core::ChamberSubtype::SecurityScanner, core::ChamberSubtype::Decontamination}) {
+    core::World fixture("Keyboard Chamber", 12, 2);
+    auto left = fixture.addRoom("Left", 0, 0, 0, 4, 1);
+    auto right = fixture.addRoom("Right", 0, 0, 6, 4, 1);
+    auto index = fixture.addChamber(0, 0, 4, 2, true, subtype);
+    fixture.finishBuild(); fixture.pauseSimulation();
+    require(fixture.setChamberConfiguration(index, .5f, .2f, .3f, .2f), "Cannot configure keyboard Chamber");
+    auto id = fixture.createAgent("Player", left, 0, 3.5f);
+    require(fixture.setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}), "Cannot assign keyboard Chamber Player");
+    auto writer = core::YamlSerializer::toString(); core::SerializationWorkData data; data.markSerializedUnmodified = false;
+    fixture.serialize(*writer, data); writer->serialize();
+    auto reader = core::YamlSerializer::fromString(writer->getSerializedString()); reader->deserialize();
+    world.pauseSimulation(); require(world.deserialize(*reader, data), "Cannot install keyboard Chamber"); world.resumeSimulation();
+    auto chamber = std::dynamic_pointer_cast<const core::ChamberTransit>(world.getSector(index));
+    auto actor = world.lookupAgent(id).entity;
+    auto step = [&] {
+      play._update(core::World::getFixedTimestep());
+      require(chamber->getDoor(0)->isClosed() || chamber->getDoor(1)->isClosed(), "Keyboard Chamber movement must preserve interlock");
+    };
+    key(Key::RightArrow, true);
+    for (int i = 0; i < 1800 && actor->getSector()->getIndex() != index; ++i) step();
+    key(Key::RightArrow, false);
+    require(actor->getSector()->getIndex() == index, "Actual Right must enter sensor-operated Chamber without Up");
+    auto stopped = actor->getGlobalPosition(); for (int i = 0; i < 60; ++i) step();
+    require(actor->getGlobalPosition().distanceTo(stopped) < .001f, "Release must stop Chamber Player without slot alignment");
+    if (subtype == core::ChamberSubtype::SecurityScanner) {
+      require(chamber->getPhase() == core::SecurityScannerPhase::Positioning, "Scanner must wait for explicit scan-position approach");
+      key(Key::RightArrow, true);
+      for (int i = 0; i < 600 && chamber->getPhase() == core::SecurityScannerPhase::Positioning; ++i) step();
+      key(Key::RightArrow, false);
+    }
+    stopped = actor->getGlobalPosition();
+    for (int i = 0; i < 4000 && !chamber->getDoor(1)->isOpen(); ++i) step();
+    require(chamber->getDoor(1)->isOpen() && actor->getGlobalPosition().distanceTo(stopped) < .001f,
+      "Processing must open exit without moving Player");
+    key(Key::RightArrow, true);
+    for (int i = 0; i < 1800 && actor->getSector()->getIndex() != right; ++i) step();
+    key(Key::RightArrow, false);
+    require(actor->getSector()->getIndex() == right && world.getSimulationSnapshot().securityScanners.front().occupants.empty(),
+      "Actual Right must manually leave both Chamber subtypes");
+  }
+}
+
 void checkPlayerAirlockKeys(wp::application::State& play, core::World& world) {
   using wp::application::Key; using wp::application::KeyEvent;
   auto key = [&](Key k, bool pressed) { play._injectKeyInput(pressed ? KeyEvent::Pressed : KeyEvent::Released, k, {}); };
@@ -571,6 +618,7 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
         checkPlayerButtonKeys(*child, *map->getWorld());
         checkPlayerTransportKeys(*child, *map->getWorld());
         checkPlayerAirlockKeys(*child, *map->getWorld());
+        checkPlayerChamberKeys(*child, *map->getWorld());
         auto const suspendTick = map->getWorld()->getSimulationTick();
         child->_suspend(true, true, true);
         child->_update(1.0f);

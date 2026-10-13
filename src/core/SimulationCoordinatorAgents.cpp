@@ -173,11 +173,12 @@ namespace core
 				(void)resourceId;
 				if (!resource->mAirlock && !resource->mSecurityScanner) continue;
 				bool occupant = find(resource->mOccupants.begin(), resource->mOccupants.end(), id) != resource->mOccupants.end();
-				if (!occupant && !(resource->mAirlock && hasCommittedMovement(*agent)))
+				if (!occupant && !((resource->mAirlock || (resource->mSecurityScanner && agent->isPlayerControlled()))
+					&& hasCommittedMovement(*agent)))
 				{
 					// Pausing retained selected boarders. Deactivation abandons
 					// unadopted admission, but never an occupied slot or an
-					// already underway Airlock entry crossing.
+					// already underway Airlock or manual Chamber entry crossing.
 					if ((agent->mTraversalTask && agent->mTraversalTask->edge->getTraversalResourceId() == resourceId)
 						|| (agent->mQueuedTraversalTask && agent->mQueuedTraversalTask->edge->getTraversalResourceId() == resourceId))
 					{

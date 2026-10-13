@@ -6,6 +6,7 @@
 #include "core/DoorEdge.h"
 #include "core/BulkheadDoorEdge.h"
 #include "core/AirlockTransit.h"
+#include "core/ChamberTransit.h"
 #include "core/Graph.h"
 #include "core/MobilityProfile.h"
 #include "core/StairwellMountEdge.h"
@@ -593,16 +594,19 @@ namespace core
 		}
 	}
 
-	bool World::advancePlayerAirlockAgent(Agent& agent, float timestep)
+	bool World::advancePlayerChamberAgent(Agent& agent, float timestep)
 	{
 		auto half = agent.getPoseEnvelope(Pose::Standing).value_or(Vector2{}).x * .5f;
 		auto position = agent.getGlobalPosition();
-		auto chamber = dynamic_cast<AirlockTransit const*>(agent.getSector());
+		auto airlock = dynamic_cast<AirlockTransit const*>(agent.getSector());
+		auto scanner = dynamic_cast<ChamberTransit const*>(agent.getSector());
+		auto chamber = airlock ? static_cast<Transit const*>(airlock) : static_cast<Transit const*>(scanner);
+		auto chamberDoor = [&](int side) { return airlock ? airlock->getDoor(side) : scanner->getDoor(side); };
 		bool crossing = false;
 		if (agent.mTraversalTask)
 		{
 			auto resource = mTraversalResources.find(agent.mTraversalTask->edge->getTraversalResourceId());
-			crossing = resource && resource->mAirlock;
+			crossing = resource && (resource->mAirlock || resource->mSecurityScanner);
 			if (!crossing) return false;
 		}
 		if (!crossing && !chamber)
@@ -618,7 +622,7 @@ namespace core
 			for (auto const& edge : getGraph()->getEdges())
 			{
 				auto threshold = std::dynamic_pointer_cast<const BulkheadDoorEdge>(edge);
-				if (!threshold || !threshold->getDoor()->isAirlockOwned()) continue;
+				if (!threshold || !threshold->getDoor()->isChamberOwned()) continue;
 				auto source = edge->getVertex(0), destination = edge->getVertex(1);
 				if (source->getSector().get() != agent.getSector()) std::swap(source, destination);
 				if (source->getSector().get() != agent.getSector()) continue;
@@ -634,7 +638,7 @@ namespace core
 				for (auto const& sector : {source->getSector(), destination->getSector()})
 					fit = fit && agent.poseFits(Pose::Standing, sector->getPosition().y + sector->getLevelsHigh() - 1
 						+ sector->getEffectiveTopLevelHeight() - position.y);
-				if (destination->getSector()->getType() != SectorType::Airlock)
+				if (isLocationLike(destination->getSector()->getType()))
 					fit = fit && (chamber || canAgentAccessLocation(*destination->getSector(), agent))
 						&& playerTransportLandingSupported(*destination->getSector(),
 							{boundary + direction * (door->getSize().x + half), position.y}, half);
@@ -697,8 +701,8 @@ namespace core
 		if (!chamber) return false;
 		// A stopped Player owns its slot and may walk during closure/cycling, but
 		// never crosses a closed entrance or an uncommitted exit.
-		float left = chamber->getDoor(0)->getPosition().x + chamber->getDoor(0)->getSize().x + half;
-		float right = chamber->getDoor(1)->getPosition().x - half;
+		float left = chamberDoor(0)->getPosition().x + chamberDoor(0)->getSize().x + half;
+		float right = chamberDoor(1)->getPosition().x - half;
 		if (left <= right && agent.poseFits(Pose::Standing, chamber->getEffectiveTopLevelHeight()))
 		{
 			position.x = std::clamp(position.x + mPlayerMovementDirection * agent.getWalkSpeed() * timestep, left, right);
@@ -712,7 +716,7 @@ namespace core
 	{
 		auto* agent = mAgents.find(id);
 		if (!agent || !agent->isActive() || !agent->isPlayerControlled()) return;
-		if (advancePlayerAirlockAgent(*agent, timestep)) return;
+		if (advancePlayerChamberAgent(*agent, timestep)) return;
 		if (agent->mPlayerLadderMount)
 		{
 			advancePlayerLadderAgent(*agent, timestep);
