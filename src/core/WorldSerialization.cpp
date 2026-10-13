@@ -883,7 +883,18 @@ namespace core
 		// The clearance state, holds and clearance ledgers stay runtime-
 		// only, so load and Reset reconstruct them from the authored
 		// starting conditions.
-		serializer.writeUint32("version", 88);
+		// Version 89 adds authored algae culture contracts (#411): a
+		// separate Biological population with its own active culture
+		// volume and density-per-litre Growing capacity, its own light,
+		// circulation, gas, nutrient and temperature coefficients, and a
+		// three-way harvest partition into declared food, recovery and
+		// waste destination stores. A pre-89 document carrying
+		// `algaeCultures` is refused rather than silently dropping the
+		// cultures. The Living biomass trajectory, the growth and
+		// respiration pathway ledgers, the harvest partition totals and
+		// the energy and heat totals stay runtime-only, so load and Reset
+		// reconstruct them from the authored starting conditions.
+		serializer.writeUint32("version", 89);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -1540,6 +1551,67 @@ namespace core
 					serializer.writeDouble("harvestTriggerKg", crop.harvestTriggerKg);
 					serializer.writeDouble("harvestFraction", crop.harvestFraction);
 					serializer.writeInt32("priority", crop.priority);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.algaeCultures.empty())
+			{
+				// Authored algae culture contracts only; the Living
+				// biomass trajectory, the growth, respiration, harvest
+				// partition and heat ledgers are runtime state
+				// reconstructed on load (#411).
+				serializer.beginArray("algaeCultures");
+				for (auto const& algae : mStationSystemsSettings.algaeCultures)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", algae.id);
+					serializer.writeString("atmosphereId", algae.atmosphereId);
+					serializer.writeString("waterStoreId", algae.waterStoreId);
+					serializer.writeString("nitrogenStoreId", algae.nitrogenStoreId);
+					serializer.writeString("phosphorusStoreId", algae.phosphorusStoreId);
+					serializer.writeString("potassiumStoreId", algae.potassiumStoreId);
+					serializer.writeString("mineralsStoreId", algae.mineralsStoreId);
+					serializer.beginMap("composition");
+					serializer.writeDouble("moisture", algae.composition.moisture);
+					serializer.writeDouble("nutrientNitrogen", algae.composition.nutrientNitrogen);
+					serializer.writeDouble("atmosphericNitrogen", algae.composition.atmosphericNitrogen);
+					serializer.writeDouble("phosphorus", algae.composition.phosphorus);
+					serializer.writeDouble("potassium", algae.composition.potassium);
+					serializer.writeDouble("otherMinerals", algae.composition.otherMinerals);
+					serializer.writeDouble("energyKJPerKgDry", algae.composition.energyKJPerKgDry);
+					serializer.endMap();
+					serializer.writeDouble("cultureVolumeL", algae.cultureVolumeL);
+					serializer.writeDouble("maxBiomassDensityKgPerL", algae.maxBiomassDensityKgPerL);
+					serializer.writeDouble("initialBiomassKg", algae.initialBiomassKg);
+					serializer.writeDouble("lampRatedKW", algae.lampRatedKW);
+					serializer.beginMap("illumination");
+					serializer.writeDouble("constantLevel", algae.illuminationProfile.constantLevel);
+					serializer.writeDouble("periodSeconds", algae.illuminationProfile.periodSeconds);
+					serializer.beginArray("segments");
+					for (auto const& segment : algae.illuminationProfile.segments)
+					{
+						serializer.beginMap("");
+						serializer.writeDouble("startSeconds", segment.startSeconds);
+						serializer.writeDouble("level", segment.level);
+						serializer.endMap();
+					}
+					serializer.endArray();
+					serializer.endMap();
+					serializer.writeDouble("circulationPowerKW", algae.circulationPowerKW);
+					serializer.writeDouble("growthYieldKgPerKWh", algae.growthYieldKgPerKWh);
+					serializer.writeDouble("respirationPerHour", algae.respirationPerHour);
+					serializer.writeDouble("evaporationKgPerKgGrowth", algae.evaporationKgPerKgGrowth);
+					serializer.writeDouble("minGrowingTemperatureC", algae.minGrowingTemperatureC);
+					serializer.writeDouble("maxGrowingTemperatureC", algae.maxGrowingTemperatureC);
+					serializer.writeString("foodStoreId", algae.foodStoreId);
+					serializer.writeString("recoveryStoreId", algae.recoveryStoreId);
+					serializer.writeString("wasteStoreId", algae.wasteStoreId);
+					serializer.writeDouble("foodFraction", algae.foodFraction);
+					serializer.writeDouble("recoveryFraction", algae.recoveryFraction);
+					serializer.writeDouble("harvestTriggerKg", algae.harvestTriggerKg);
+					serializer.writeDouble("harvestFraction", algae.harvestFraction);
+					serializer.writeInt32("priority", algae.priority);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -2512,7 +2584,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 88)
+		if (version < 1 || version > 89)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -3270,6 +3342,70 @@ namespace core
 						crop.harvestFraction = serializer.readDouble("harvestFraction");
 					crop.priority = serializer.readInt32("priority");
 					stationSettings.cropPopulations.push_back(std::move(crop));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("algaeCultures"))
+			{
+				if (version < 89) throw SerializationException(
+					"Station algae cultures require World schema 89");
+				serializer.beginArray("algaeCultures");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					AlgaeCultureSettings algae;
+					algae.id = serializer.readString("id");
+					algae.atmosphereId = serializer.readString("atmosphereId");
+					algae.waterStoreId = serializer.readString("waterStoreId");
+					algae.nitrogenStoreId = serializer.readString("nitrogenStoreId");
+					algae.phosphorusStoreId = serializer.readString("phosphorusStoreId");
+					algae.potassiumStoreId = serializer.readString("potassiumStoreId");
+					algae.mineralsStoreId = serializer.readString("mineralsStoreId");
+					serializer.beginMap("composition");
+					algae.composition.moisture = serializer.readDouble("moisture");
+					algae.composition.nutrientNitrogen = serializer.readDouble("nutrientNitrogen");
+					algae.composition.atmosphericNitrogen =
+						serializer.readDouble("atmosphericNitrogen");
+					algae.composition.phosphorus = serializer.readDouble("phosphorus");
+					algae.composition.potassium = serializer.readDouble("potassium");
+					algae.composition.otherMinerals = serializer.readDouble("otherMinerals");
+					algae.composition.energyKJPerKgDry = serializer.readDouble("energyKJPerKgDry");
+					serializer.endMap();
+					algae.cultureVolumeL = serializer.readDouble("cultureVolumeL");
+					algae.maxBiomassDensityKgPerL = serializer.readDouble("maxBiomassDensityKgPerL");
+					algae.initialBiomassKg = serializer.readDouble("initialBiomassKg");
+					algae.lampRatedKW = serializer.readDouble("lampRatedKW");
+					serializer.beginMap("illumination");
+					algae.illuminationProfile.constantLevel = serializer.readDouble("constantLevel");
+					algae.illuminationProfile.periodSeconds = serializer.readDouble("periodSeconds");
+					serializer.beginArray("segments");
+					while (serializer.nextArrayItem())
+					{
+						serializer.beginMap("");
+						ProfileSegmentSettings segment;
+						segment.startSeconds = serializer.readDouble("startSeconds");
+						segment.level = serializer.readDouble("level");
+						serializer.endMap();
+						algae.illuminationProfile.segments.push_back(segment);
+					}
+					serializer.endArray();
+					serializer.endMap();
+					algae.circulationPowerKW = serializer.readDouble("circulationPowerKW");
+					algae.growthYieldKgPerKWh = serializer.readDouble("growthYieldKgPerKWh");
+					algae.respirationPerHour = serializer.readDouble("respirationPerHour");
+					algae.evaporationKgPerKgGrowth = serializer.readDouble("evaporationKgPerKgGrowth");
+					algae.minGrowingTemperatureC = serializer.readDouble("minGrowingTemperatureC");
+					algae.maxGrowingTemperatureC = serializer.readDouble("maxGrowingTemperatureC");
+					algae.foodStoreId = serializer.readString("foodStoreId");
+					algae.recoveryStoreId = serializer.readString("recoveryStoreId");
+					algae.wasteStoreId = serializer.readString("wasteStoreId");
+					algae.foodFraction = serializer.readDouble("foodFraction");
+					algae.recoveryFraction = serializer.readDouble("recoveryFraction");
+					algae.harvestTriggerKg = serializer.readDouble("harvestTriggerKg");
+					algae.harvestFraction = serializer.readDouble("harvestFraction");
+					algae.priority = serializer.readInt32("priority");
+					stationSettings.algaeCultures.push_back(std::move(algae));
 					serializer.endMap();
 				}
 				serializer.endArray();

@@ -39,7 +39,15 @@ namespace core
 		}
 		struct ScriptObject
 		{
-			script::ScratchBudget budget{512 * 1024, 100'000};
+			// The station lifecycle model grows with each systems slice;
+			// the sandbox budget is sized to the compiled footprint of the
+			// bundled model plus headroom, not to a scenario cost - the
+			// per-tick cost follows the configured scenario, and compile
+			// footprint is what the construction pass allocates. The algae
+			// culture slice (#411) pushed the compiled model past the
+			// previous 512 KiB ceiling; the budget rises with the model as
+			// the crop slices did before it.
+			script::ScratchBudget budget{1024 * 1024, 250'000};
 			script::ModuleLoader loader;
 			std::unique_ptr<lua_State, script::StateCloser> state;
 			int reference{LUA_NOREF};
@@ -84,6 +92,7 @@ namespace core
 			std::vector<MethaneProcessorSettings> const* methaneProcessors;
 			std::vector<MicrobialProcessorSettings> const* microbialProcessors;
 			std::vector<CropPopulationSettings> const* cropPopulations;
+			std::vector<AlgaeCultureSettings> const* algaeCultures;
 			static void pushProfile(lua_State* state, ProfileSettings const& profile)
 			{
 				lua_createtable(state, 0, 3);
@@ -713,7 +722,55 @@ namespace core
 					lua_pushinteger(state, crop.priority); lua_setfield(state, -2, "priority");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 27, 1);
+				// Authored algae culture descriptors (#411) cross the same
+				// boundary as plain immutable values; the sandbox mirrors the
+				// culture lifecycle and audits it itself. The culture keeps its
+				// own volume, density, coefficients and destinations - nothing
+				// here is shared with the crop declarations.
+				lua_createtable(state, static_cast<int>(algaeCultures->size()), 0);
+				for (size_t index = 0; index < algaeCultures->size(); ++index)
+				{
+					auto const& algae = (*algaeCultures)[index];
+					lua_createtable(state, 0, 2);
+					lua_pushstring(state, algae.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, algae.atmosphereId.c_str()); lua_setfield(state, -2, "atmosphere");
+					lua_pushstring(state, algae.waterStoreId.c_str()); lua_setfield(state, -2, "waterStore");
+					lua_pushstring(state, algae.nitrogenStoreId.c_str()); lua_setfield(state, -2, "nitrogenStore");
+					lua_pushstring(state, algae.phosphorusStoreId.c_str()); lua_setfield(state, -2, "phosphorusStore");
+					lua_pushstring(state, algae.potassiumStoreId.c_str()); lua_setfield(state, -2, "potassiumStore");
+					lua_pushstring(state, algae.mineralsStoreId.c_str()); lua_setfield(state, -2, "mineralsStore");
+					lua_createtable(state, 0, 7);
+					lua_pushnumber(state, algae.composition.moisture); lua_setfield(state, -2, "moisture");
+					lua_pushnumber(state, algae.composition.nutrientNitrogen); lua_setfield(state, -2, "nutrientNitrogen");
+					lua_pushnumber(state, algae.composition.atmosphericNitrogen); lua_setfield(state, -2, "atmosphericNitrogen");
+					lua_pushnumber(state, algae.composition.phosphorus); lua_setfield(state, -2, "phosphorus");
+					lua_pushnumber(state, algae.composition.potassium); lua_setfield(state, -2, "potassium");
+					lua_pushnumber(state, algae.composition.otherMinerals); lua_setfield(state, -2, "otherMinerals");
+					lua_pushnumber(state, algae.composition.energyKJPerKgDry); lua_setfield(state, -2, "energyKJPerKgDry");
+					lua_setfield(state, -2, "composition");
+					lua_pushnumber(state, algae.cultureVolumeL); lua_setfield(state, -2, "cultureVolumeL");
+					lua_pushnumber(state, algae.maxBiomassDensityKgPerL); lua_setfield(state, -2, "maxBiomassDensityKgPerL");
+					lua_pushnumber(state, algae.initialBiomassKg); lua_setfield(state, -2, "initialBiomassKg");
+					lua_pushnumber(state, algae.lampRatedKW); lua_setfield(state, -2, "lampRatedKW");
+					pushProfile(state, algae.illuminationProfile);
+					lua_setfield(state, -2, "illumination");
+					lua_pushnumber(state, algae.circulationPowerKW); lua_setfield(state, -2, "circulationPowerKW");
+					lua_pushnumber(state, algae.growthYieldKgPerKWh); lua_setfield(state, -2, "growthYieldKgPerKWh");
+					lua_pushnumber(state, algae.respirationPerHour); lua_setfield(state, -2, "respirationPerHour");
+					lua_pushnumber(state, algae.evaporationKgPerKgGrowth); lua_setfield(state, -2, "evaporationKgPerKgGrowth");
+					lua_pushnumber(state, algae.minGrowingTemperatureC); lua_setfield(state, -2, "minGrowingTemperatureC");
+					lua_pushnumber(state, algae.maxGrowingTemperatureC); lua_setfield(state, -2, "maxGrowingTemperatureC");
+					lua_pushstring(state, algae.foodStoreId.c_str()); lua_setfield(state, -2, "foodStore");
+					lua_pushstring(state, algae.recoveryStoreId.c_str()); lua_setfield(state, -2, "recoveryStore");
+					lua_pushstring(state, algae.wasteStoreId.c_str()); lua_setfield(state, -2, "wasteStore");
+					lua_pushnumber(state, algae.foodFraction); lua_setfield(state, -2, "foodFraction");
+					lua_pushnumber(state, algae.recoveryFraction); lua_setfield(state, -2, "recoveryFraction");
+					lua_pushnumber(state, algae.harvestTriggerKg); lua_setfield(state, -2, "harvestTriggerKg");
+					lua_pushnumber(state, algae.harvestFraction); lua_setfield(state, -2, "harvestFraction");
+					lua_pushinteger(state, algae.priority); lua_setfield(state, -2, "priority");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 28, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -2842,6 +2899,162 @@ namespace core
 						+ "' declares a composition different from the crop's declared dry-mass composition: harvested material enters a store exactly as declared, and a different compound material is a boundary only an explicit conversion may cross");
 			}
 		}
+		// Algae culture contracts (#411). A separate Biological population
+		// with its own installation limits: the Growing capacity here is the
+		// active culture volume times the supported dry-mass density per
+		// litre - never derived from, shared with, or substitutable by a
+		// crop's illuminated-area capacity. The lifecycle rules are the
+		// same as the crops' by design: dry-mass composition with no
+		// moisture and no atmospheric nitrogen, a growth yield that can
+		// never fix more chemical energy than the light delivers, a real
+		// growing window, and a start within the declared capacity. The
+		// harvest contract partitions the harvested dry mass into three
+		// declared destinations - food, recovery and waste - so enabling
+		// the harvest requires all three, pairwise distinct, mass-
+		// denominated and composition-compatible with the culture's
+		// declared dry mass; the food and recovery fractions together may
+		// not exceed the harvest, because the unrecoverable remainder is
+		// the waste share and a partition that spends more than 100% of
+		// the harvest is not conservative accounting.
+		if (settings.algaeCultures.size() > MaxStationAlgaeCultures)
+			return refuse("Station algae cultures are limited to "
+				+ std::to_string(MaxStationAlgaeCultures) + " entries");
+		std::set<std::string> algaeIds;
+		for (auto const& algae : settings.algaeCultures)
+		{
+			auto const where = "Station algae culture '" + algae.id + "'";
+			if (algae.id.empty()) return refuse("Station algae culture id must not be empty");
+			if (algae.id.size() > MaxStationStoreIdLength)
+				return refuse("Station algae culture id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!algaeIds.insert(algae.id).second) return refuse(where + " id is duplicated");
+			if (std::find_if(settings.atmospheres.begin(), settings.atmospheres.end(),
+				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == algae.atmosphereId; })
+				== settings.atmospheres.end())
+				return refuse(where + " runs in unknown atmosphere compartment '" + algae.atmosphereId + "'");
+			std::string const uptakeIds[5]{algae.waterStoreId, algae.nitrogenStoreId,
+				algae.phosphorusStoreId, algae.potassiumStoreId, algae.mineralsStoreId};
+			char const* uptakeRoles[5]{"culture water", "nitrogen", "phosphorus",
+				"potassium", "minerals"};
+			for (size_t stream = 0; stream < 5; ++stream)
+			{
+				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+					[&](ResourceStoreSettings const& store) { return store.id == uptakeIds[stream]; });
+				if (found == settings.stores.end())
+					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
+						+ "' does not exist");
+				if (!isMassUnit(found->unit))
+					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
+						+ "' must be a mass unit; culture uptake is mass-denominated (g or kg)");
+				for (size_t other = stream + 1; other < 5; ++other)
+					if (uptakeIds[stream] == uptakeIds[other])
+						return refuse(where + " " + uptakeRoles[stream] + " store and "
+							+ uptakeRoles[other] + " store are the same store '"
+							+ uptakeIds[stream] + "'; every tracked nutrient and the culture water need distinct stores so depletion stays visible per resource");
+			}
+			auto const& composition = algae.composition;
+			if (!std::isfinite(composition.moisture) || composition.moisture != 0.0)
+				return refuse(where + " declared composition carries moisture; Living biomass is tracked as dry mass, so the culture declaration must not carry a water fraction");
+			if (!std::isfinite(composition.atmosphericNitrogen) || composition.atmosphericNitrogen != 0.0)
+				return refuse(where + " declared composition carries atmospheric nitrogen; the culture takes up bound nutrient nitrogen, not air, and no configured process converts one into the other");
+			double const dryFractions[]{composition.nutrientNitrogen, composition.phosphorus,
+				composition.potassium, composition.otherMinerals};
+			char const* dryNames[]{"nutrient nitrogen", "phosphorus", "potassium", "other minerals"};
+			for (size_t field = 0; field < 4; ++field)
+				if (!std::isfinite(dryFractions[field]) || dryFractions[field] < 0.0)
+					return refuse(where + " declared " + dryNames[field]
+						+ " fraction must be finite and non-negative");
+			if (dryFractions[0] + dryFractions[1] + dryFractions[2] + dryFractions[3]
+				> 1.0 + StationBalanceTolerance)
+				return refuse(where + " declared dry nutrient fractions exceed 1: the organic dry-mass balance would be negative");
+			if (!std::isfinite(composition.energyKJPerKgDry) || composition.energyKJPerKgDry <= 0.0)
+				return refuse(where + " declared chemical energy per dry kg must be finite and positive: the respiration heat and fixed-energy ledger depend on it");
+			if (!std::isfinite(algae.cultureVolumeL) || algae.cultureVolumeL < 0.0)
+				return refuse(where + " active culture volume must be finite and non-negative");
+			if (!std::isfinite(algae.maxBiomassDensityKgPerL) || algae.maxBiomassDensityKgPerL <= 0.0)
+				return refuse(where + " maximum biomass density per litre must be finite and positive");
+			auto const capacityKg = algae.cultureVolumeL * algae.maxBiomassDensityKgPerL;
+			if (!std::isfinite(algae.initialBiomassKg) || algae.initialBiomassKg < 0.0)
+				return refuse(where + " initial living biomass must be finite and non-negative");
+			if (algae.initialBiomassKg > capacityKg + StationBalanceTolerance)
+				return refuse(where + " initial living biomass exceeds the declared culture capacity: the culture cannot start fuller than the installation can support");
+			if (!std::isfinite(algae.lampRatedKW) || algae.lampRatedKW < 0.0)
+				return refuse(where + " lamp rated power must be finite and non-negative");
+			if (!validateStationProfile(algae.illuminationProfile, where + " illumination profile", diagnostic))
+				return false;
+			if (!std::isfinite(algae.circulationPowerKW) || algae.circulationPowerKW < 0.0)
+				return refuse(where + " culture circulation power must be finite and non-negative");
+			if (!std::isfinite(algae.growthYieldKgPerKWh) || algae.growthYieldKgPerKWh < 0.0)
+				return refuse(where + " growth yield per kWh must be finite and non-negative (provisional biological assumption)");
+			if (algae.growthYieldKgPerKWh * composition.energyKJPerKgDry
+				> 3600.0 + StationBalanceTolerance * 3600.0)
+				return refuse(where + " declared growth yield would fix more chemical energy per kWh of light than the light carries: photosynthesis is never a free source of chemical energy");
+			if (!std::isfinite(algae.respirationPerHour) || algae.respirationPerHour < 0.0)
+				return refuse(where + " respiration per hour must be finite and non-negative (provisional biological assumption)");
+			if (!std::isfinite(algae.evaporationKgPerKgGrowth) || algae.evaporationKgPerKgGrowth < 0.0)
+				return refuse(where + " evaporation per kg growth must be finite and non-negative (provisional biological assumption)");
+			if (!std::isfinite(algae.minGrowingTemperatureC)
+				|| algae.minGrowingTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " minimum growing temperature must be finite and above absolute zero");
+			if (!std::isfinite(algae.maxGrowingTemperatureC)
+				|| algae.maxGrowingTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum growing temperature must be finite and above absolute zero");
+			if (algae.minGrowingTemperatureC >= algae.maxGrowingTemperatureC)
+				return refuse(where + " minimum growing temperature must be below the maximum growing temperature: an empty growing window is never a service");
+			// Harvest partition contract (#411): the food and recovery
+			// fractions are declared shares of the harvested dry mass and
+			// together may not exceed it - the unrecoverable remainder is
+			// the waste share, so a partition spending more than 100% of
+			// the harvest is refused as non-conservative. A trigger above
+			// the declared culture capacity could never fire and is refused
+			// as a dead rule; enabling the harvest requires all three
+			// destinations, pairwise distinct, mass-denominated and
+			// composition-compatible with the culture's declared dry mass.
+			if (!std::isfinite(algae.foodFraction) || algae.foodFraction < 0.0
+				|| algae.foodFraction > 1.0)
+				return refuse(where + " food fraction must be finite and from 0 to 1: the edible share of the harvested dry mass cannot exceed the harvest");
+			if (!std::isfinite(algae.recoveryFraction) || algae.recoveryFraction < 0.0
+				|| algae.recoveryFraction > 1.0)
+				return refuse(where + " recovery fraction must be finite and from 0 to 1: the recoverable share of the harvested dry mass cannot exceed the harvest");
+			if (algae.foodFraction + algae.recoveryFraction > 1.0 + StationBalanceTolerance)
+				return refuse(where + " food and recovery fractions together exceed 1: the harvest partition must leave a non-negative unrecoverable remainder for the waste path, so the declared destinations can never claim more than the harvest");
+			if (!std::isfinite(algae.harvestFraction) || algae.harvestFraction <= 0.0
+				|| algae.harvestFraction > 1.0)
+				return refuse(where + " harvest fraction must be finite and from above 0 to 1: a harvest that removes nothing is not a harvest");
+			if (!std::isfinite(algae.harvestTriggerKg) || algae.harvestTriggerKg < 0.0)
+				return refuse(where + " harvest trigger must be finite and non-negative (0 disables the harvest)");
+			if (algae.harvestTriggerKg > capacityKg + StationBalanceTolerance)
+				return refuse(where + " harvest trigger exceeds the declared culture capacity: the harvest could never fire, so the rule is dead as configured");
+			std::string const destinationIds[3]{algae.foodStoreId, algae.recoveryStoreId,
+				algae.wasteStoreId};
+			char const* destinationRoles[3]{"food", "recovery", "waste"};
+			for (size_t stream = 0; stream < 3; ++stream)
+			{
+				if (destinationIds[stream].empty())
+				{
+					if (algae.harvestTriggerKg > 0.0)
+						return refuse(where + " harvest is enabled but the " + destinationRoles[stream]
+							+ " destination store is not named: harvested living material must have a declared destination");
+					continue;
+				}
+				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+						[&](ResourceStoreSettings const& store) { return store.id == destinationIds[stream]; });
+				if (found == settings.stores.end())
+					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
+						+ "' does not exist");
+				if (!isMassUnit(found->unit))
+					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
+						+ "' must be a mass unit; harvested dry biomass is mass-denominated (g or kg)");
+				for (size_t other = stream + 1; other < 3; ++other)
+					if (!destinationIds[other].empty() && destinationIds[stream] == destinationIds[other])
+						return refuse(where + " " + destinationRoles[stream] + " store and "
+							+ destinationRoles[other] + " store are the same store '"
+							+ destinationIds[stream] + "'; the food, recovery and waste yield need distinct destinations so the partition stays visible");
+				if (found->composition && !compositionsClose(*found->composition, composition))
+					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
+						+ "' declares a composition different from the culture's declared dry-mass composition: harvested material enters a store exactly as declared, and a different compound material is a boundary only an explicit conversion may cross");
+			}
+		}
 		diagnostic.clear(); return true;
 	}
 	void setStationSystemsSourceLoader(StationSystemsSourceLoader loader) { sourceLoader = std::move(loader); }
@@ -3314,6 +3527,17 @@ namespace core
 			double cropVapourAddedKg{0.0};
 			double cropHeatKJ{0.0};
 			double lastCropHeatKW{0.0};
+			// Algae culture gas and heat pathways (#411): booked as their
+			// own terms beside the crop pathways, so the compartment's per-
+			// component closure stays exact with both populations present
+			// and neither population's exchanges can be read as the other's.
+			double algaeOxygenAddedKg{0.0};
+			double algaeOxygenDrawnKg{0.0};
+			double algaeCarbonDioxideAddedKg{0.0};
+			double algaeCarbonDioxideDrawnKg{0.0};
+			double algaeVapourAddedKg{0.0};
+			double algaeHeatKJ{0.0};
+			double lastAlgaeHeatKW{0.0};
 			// Last-tick observables.
 			double lastOxygenDemandKg{0.0};
 			double lastOxygenConsumedKg{0.0};
@@ -3837,6 +4061,102 @@ namespace core
 			double deadResidueLostKg{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
+		// The authoritative ledger of one authored algae culture (#411).
+		// The lifecycle and accounting behaviour is the same as the crop
+		// population's - dry Living biomass, uniform-scaled resource-
+		// limited growth, day-and-night respiration, conservative harvest
+		// and explicit death-loss routing - but every quantity here is
+		// the culture's own: its capacity comes from the active culture
+		// volume times the supported density per litre, and its harvest
+		// partitions into three destinations (food, recovery, waste)
+		// with a conservative cascade. No field is shared with, derived
+		// from, or mutated by any crop population.
+		struct AlgaeCultureState
+		{
+			AlgaeCultureSettings authored;
+			size_t atmosphereIndex{0};
+			size_t waterStoreIndex{0};
+			size_t nitrogenStoreIndex{0};
+			size_t phosphorusStoreIndex{0};
+			size_t potassiumStoreIndex{0};
+			size_t mineralsStoreIndex{0};
+			size_t foodStoreIndex{0};
+			size_t recoveryStoreIndex{0};
+			size_t wasteStoreIndex{0};
+			double capacityKg{0.0};
+			double livingBiomassKg{0.0};
+			double lastIllumination{0.0};
+			double lastLightRequestedKW{0.0};
+			double lastLightSuppliedKW{0.0};
+			double lastCirculationRequestedKW{0.0};
+			double lastCirculationSuppliedKW{0.0};
+			double lastGrowthPotentialKg{0.0};
+			double lastGrowthScale{0.0};
+			std::string lastGrowthLimiter;
+			double lastGrowthKg{0.0};
+			double lastCo2DrawnKg{0.0};
+			double lastAssimilationWaterKg{0.0};
+			double lastNitrogenDrawnKg{0.0};
+			double lastPhosphorusDrawnKg{0.0};
+			double lastPotassiumDrawnKg{0.0};
+			double lastMineralsDrawnKg{0.0};
+			double lastOxygenReleasedKg{0.0};
+			double lastEvaporatedKg{0.0};
+			double lastRespirationRequestedKg{0.0};
+			double lastRespirationKg{0.0};
+			double lastRespirationO2DrawnKg{0.0};
+			std::string lastRespirationLimiter;
+			double lastRespirationCo2ReturnedKg{0.0};
+			double lastRespirationWaterKg{0.0};
+			double lastRespirationHeatKW{0.0};
+			bool lastOxygenLimited{false};
+			double lastHeatIntoCompartmentKW{0.0};
+			bool lastTemperatureEligible{false};
+			std::string lastBlockReason;
+			// Three-way harvest state (#411): what each destination
+			// accepted, the food surplus that rode the recovery path, the
+			// recovery surplus that rode the waste path, and what no
+			// destination could place.
+			double lastHarvestRequestedKg{0.0};
+			double lastHarvestedKg{0.0};
+			double lastFoodAddedKg{0.0};
+			double lastRecoveryAddedKg{0.0};
+			double lastWasteAddedKg{0.0};
+			double lastFoodSurplusToRecoveryKg{0.0};
+			double lastRecoverySurplusToWasteKg{0.0};
+			double lastHarvestConstrainedKg{0.0};
+			std::string lastHarvestLimiter;
+			bool dead{false};
+			double lastDeadResidueToWasteKg{0.0};
+			double lastDeadResidueLostKg{0.0};
+			double growthKg{0.0};
+			double co2DrawnKg{0.0};
+			double waterDrawnKg{0.0};
+			double nitrogenDrawnKg{0.0};
+			double phosphorusDrawnKg{0.0};
+			double potassiumDrawnKg{0.0};
+			double mineralsDrawnKg{0.0};
+			double oxygenReleasedKg{0.0};
+			double evaporatedKg{0.0};
+			double respirationKg{0.0};
+			double respirationO2DrawnKg{0.0};
+			double respirationCo2ReturnedKg{0.0};
+			double respirationWaterKg{0.0};
+			double lightEnergyKJ{0.0};
+			double circulationEnergyKJ{0.0};
+			double chemicalEnergyFixedKJ{0.0};
+			double respirationHeatKJ{0.0};
+			double heatIntoCompartmentKJ{0.0};
+			double harvestedKg{0.0};
+			double foodProducedKg{0.0};
+			double recoveryProducedKg{0.0};
+			double wasteProducedKg{0.0};
+			double foodSurplusToRecoveryKg{0.0};
+			double recoverySurplusToWasteKg{0.0};
+			double deadResidueToWasteKg{0.0};
+			double deadResidueLostKg{0.0};
+			StationTransferStatus status{StationTransferStatus::Idle};
+		};
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
 		std::vector<TransferState> transfers;
@@ -3867,6 +4187,7 @@ namespace core
 		std::vector<MethaneProcessorState> methaneProcessors;
 		std::vector<MicrobialProcessorState> microbialProcessors;
 		std::vector<CropPopulationState> cropPopulations;
+		std::vector<AlgaeCultureState> algaeCultures;
 		// Electrolyzers and capture machines compete for the same power pool
 		// and the same stores, so each runs in the declared deterministic
 		// order: priority descending, declaration order ascending.
@@ -3888,6 +4209,11 @@ namespace core
 		// so each runs in the declared deterministic order: priority
 		// descending, declaration order ascending (#409).
 		std::vector<size_t> cropOrder;
+		// Algae cultures compete with each other, the crops and every other
+		// power consumer for the same pool and share the compartment and
+		// uptake stores, so each runs in the declared deterministic order:
+		// priority descending, declaration order ascending (#411).
+		std::vector<size_t> algaeOrder;
 		// Treatments compete for the same power pool and the same stores, so
 		// they run in the declared deterministic order: priority descending,
 		// declaration order ascending.
@@ -3990,6 +4316,7 @@ namespace core
 			auto const committedMethaneProcessors = methaneProcessors;
 			auto const committedMicrobialProcessors = microbialProcessors;
 			auto const committedCropPopulations = cropPopulations;
+			auto const committedAlgaeCultures = algaeCultures;
 			auto const committedAvailableGenerationKW = lastAvailableGenerationKW;
 			auto const committedBatteryShortfallKW = lastBatteryShortfallKW;
 			if (runLedger(tick, seconds, system, violation)) return true;
@@ -4018,6 +4345,7 @@ namespace core
 			methaneProcessors = committedMethaneProcessors;
 			microbialProcessors = committedMicrobialProcessors;
 			cropPopulations = committedCropPopulations;
+			algaeCultures = committedAlgaeCultures;
 			lastAvailableGenerationKW = committedAvailableGenerationKW;
 			lastBatteryShortfallKW = committedBatteryShortfallKW;
 			return false;
@@ -4133,6 +4461,19 @@ namespace core
 			for (auto const& crop : cropPopulations)
 				previousCropHarvestState.push_back(crop.lastHarvestConstrainedKg > 1e-12 ? 2.0
 					: crop.lastHarvestedKg > 0.0 ? 1.0 : 0.0);
+			// Algae culture status, death and harvest state for event edge
+			// detection (#411), mirroring the crops' own edge detection.
+			std::vector<StationTransferStatus> previousAlgaeStatus;
+			previousAlgaeStatus.reserve(algaeCultures.size());
+			for (auto const& culture : algaeCultures) previousAlgaeStatus.push_back(culture.status);
+			std::vector<bool> previousAlgaeDead;
+			previousAlgaeDead.reserve(algaeCultures.size());
+			for (auto const& culture : algaeCultures) previousAlgaeDead.push_back(culture.dead);
+			std::vector<double> previousAlgaeHarvestState;
+			previousAlgaeHarvestState.reserve(algaeCultures.size());
+			for (auto const& culture : algaeCultures)
+				previousAlgaeHarvestState.push_back(culture.lastHarvestConstrainedKg > 1e-12 ? 2.0
+					: culture.lastHarvestedKg > 0.0 ? 1.0 : 0.0);
 			std::vector<double> qualified, unqualified;
 			qualified.reserve(stores.size());
 			unqualified.reserve(stores.size());
@@ -7370,6 +7711,517 @@ namespace core
 					crop.status = StationTransferStatus::Full;
 				else crop.status = StationTransferStatus::Partial;
 			}
+			// Algae cultures (#411) run in the same power-consumer phase
+			// after the crops, reusing the same biological lifecycle and
+			// accounting behaviour on their own state: the culture grows its
+			// dry Living biomass under the resources actually delivered and
+			// respires day and night. The essential culture circulation -
+			// the pumps that keep the culture mixed and deliver gas,
+			// nutrients and light uniformly through the volume - is drawn
+			// ahead of the discretionary lamp demand from the same pool,
+			// so shedding lighting never starves the circulation the
+			// biology depends on. Growth potential comes from the light
+			// energy actually delivered: darkness or a blackout
+			// photosynthesises nothing for free. One uniform growth scale
+			// binds the potential to the compartment CO2, the drawable
+			// culture water, each drawable tracked nutrient and the
+			// remaining culture capacity headroom - the capacity here is
+			// the active culture volume times the supported density per
+			// litre, never a crop's illuminated-area capacity, and no
+			// population reads or mutates another's state. Growth is
+			// qualified only inside the declared temperature window.
+			// Respiration burns the declared organic content capped by the
+			// oxygen the compartment actually holds, returning CO2, vapour
+			// and heat; culture water lost with the growth evaporates from
+			// the open culture and returns as vapour. The harvest
+			// partitions the removed dry mass into the three declared
+			// destinations conservatively: the food share into the food
+			// store, the recovery share into the recovery store, the
+			// unrecoverable remainder into the waste store, with each
+			// destination's surplus cascading to the next - food surplus
+			// rides the recovery path, recovery surplus rides the waste
+			// path - and what no destination can place stays living rather
+			// than being discarded for free.
+			std::vector<double> algaeHeatByAtmosphere(atmospheres.size(), 0.0);
+			double totalAlgaePowerKW{0.0};
+			for (size_t orderIndex : algaeOrder)
+			{
+				auto& culture = algaeCultures[orderIndex];
+				auto& compartment = atmospheres[culture.atmosphereIndex];
+				auto& water = stores[culture.waterStoreIndex];
+				auto& nitrogen = stores[culture.nitrogenStoreIndex];
+				auto& phosphorus = stores[culture.phosphorusStoreIndex];
+				auto& potassium = stores[culture.potassiumStoreIndex];
+				auto& minerals = stores[culture.mineralsStoreIndex];
+				culture.lastIllumination = 0.0;
+				culture.lastLightRequestedKW = 0.0;
+				culture.lastLightSuppliedKW = 0.0;
+				culture.lastCirculationRequestedKW = 0.0;
+				culture.lastCirculationSuppliedKW = 0.0;
+				culture.lastGrowthPotentialKg = 0.0;
+				culture.lastGrowthScale = 0.0;
+				culture.lastGrowthLimiter.clear();
+				culture.lastGrowthKg = 0.0;
+				culture.lastCo2DrawnKg = 0.0;
+				culture.lastAssimilationWaterKg = 0.0;
+				culture.lastNitrogenDrawnKg = 0.0;
+				culture.lastPhosphorusDrawnKg = 0.0;
+				culture.lastPotassiumDrawnKg = 0.0;
+				culture.lastMineralsDrawnKg = 0.0;
+				culture.lastOxygenReleasedKg = 0.0;
+				culture.lastEvaporatedKg = 0.0;
+				culture.lastRespirationRequestedKg = 0.0;
+				culture.lastRespirationKg = 0.0;
+				culture.lastRespirationO2DrawnKg = 0.0;
+				culture.lastRespirationLimiter.clear();
+				culture.lastRespirationCo2ReturnedKg = 0.0;
+				culture.lastRespirationWaterKg = 0.0;
+				culture.lastRespirationHeatKW = 0.0;
+				culture.lastOxygenLimited = false;
+				culture.lastHeatIntoCompartmentKW = 0.0;
+				culture.lastTemperatureEligible = false;
+				culture.lastBlockReason.clear();
+				culture.lastHarvestRequestedKg = 0.0;
+				culture.lastHarvestedKg = 0.0;
+				culture.lastFoodAddedKg = 0.0;
+				culture.lastRecoveryAddedKg = 0.0;
+				culture.lastWasteAddedKg = 0.0;
+				culture.lastFoodSurplusToRecoveryKg = 0.0;
+				culture.lastRecoverySurplusToWasteKg = 0.0;
+				culture.lastHarvestConstrainedKg = 0.0;
+				culture.lastHarvestLimiter.clear();
+				culture.lastDeadResidueToWasteKg = 0.0;
+				culture.lastDeadResidueLostKg = 0.0;
+				if (culture.authored.cultureVolumeL <= 0.0)
+				{
+					culture.status = StationTransferStatus::Idle;
+					continue;
+				}
+				// A dead culture stays dead: it grows nothing, respires
+				// nothing and harvests nothing, because nothing in this
+				// model recreates living biomass for free.
+				if (culture.dead)
+				{
+					culture.lastBlockReason = "culture is dead: the living organic content was respired away under adverse conditions and nothing here recreates living biomass for free";
+					culture.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				auto const tickSeconds = static_cast<double>(seconds);
+				auto const hours = tickSeconds / 3600.0;
+				culture.lastIllumination = evaluateStationProfile(culture.authored.illuminationProfile, elapsed);
+				culture.lastLightRequestedKW = culture.authored.lampRatedKW * culture.lastIllumination;
+				culture.lastCirculationRequestedKW = culture.authored.circulationPowerKW;
+				// The essential circulation is paid for first: the pumps
+				// that keep the culture mixed draw from the same pool ahead
+				// of the discretionary lamp demand.
+				auto const circulationFromGeneration = std::min(culture.lastCirculationRequestedKW,
+					availableGeneration);
+				availableGeneration -= circulationFromGeneration;
+				auto const circulationFromBattery = drawBatteries(
+					culture.lastCirculationRequestedKW - circulationFromGeneration);
+				culture.lastCirculationSuppliedKW = circulationFromGeneration + circulationFromBattery;
+				batterySuppliedKW += circulationFromBattery;
+				batteryShortfallKW += culture.lastCirculationRequestedKW - culture.lastCirculationSuppliedKW;
+				auto const lightFromGeneration = std::min(culture.lastLightRequestedKW, availableGeneration);
+				availableGeneration -= lightFromGeneration;
+				auto const lightFromBattery = drawBatteries(culture.lastLightRequestedKW - lightFromGeneration);
+				culture.lastLightSuppliedKW = lightFromGeneration + lightFromBattery;
+				batterySuppliedKW += lightFromBattery;
+				batteryShortfallKW += culture.lastLightRequestedKW - culture.lastLightSuppliedKW;
+				auto const circulationFraction = culture.lastCirculationRequestedKW > 1e-12
+					? culture.lastCirculationSuppliedKW / culture.lastCirculationRequestedKW : 1.0;
+				auto const lightEnergyKJ = culture.lastLightSuppliedKW * tickSeconds;
+				auto const circulationEnergyKJ = culture.lastCirculationSuppliedKW * tickSeconds;
+				culture.lastGrowthPotentialKg = lightEnergyKJ * culture.authored.growthYieldKgPerKWh / 3600.0;
+				culture.lastTemperatureEligible = compartment.temperatureC + 1e-9
+					>= culture.authored.minGrowingTemperatureC
+					&& compartment.temperatureC + 1e-9 < culture.authored.maxGrowingTemperatureC;
+				// The dry-mass basis is the same shared lifecycle rule as
+				// the crops': the organic balance of the declared
+				// composition is what growth builds and respiration burns;
+				// the bound nutrient fractions are drawn per kilogram of
+				// dry growth from the culture's own stores.
+				auto const& composition = culture.authored.composition;
+				auto const organicFraction = 1.0 - (composition.nutrientNitrogen
+					+ composition.phosphorus + composition.potassium
+					+ composition.otherMinerals);
+				auto const co2PerKgGrowth = organicFraction * StationPhotosynthesisCO2PerOrganicKg;
+				auto const assimilationWaterPerKgGrowth = organicFraction
+					* StationPhotosynthesisWaterPerOrganicKg;
+				auto const oxygenPerKgGrowth = organicFraction * StationPhotosynthesisO2PerOrganicKg;
+				auto const drawableWaterUnits = std::max(0.0,
+					qualified[culture.waterStoreIndex] - water.authored.protectedReserve);
+				auto const drawableNitrogenUnits = std::max(0.0,
+					qualified[culture.nitrogenStoreIndex] - nitrogen.authored.protectedReserve);
+				auto const drawablePhosphorusUnits = std::max(0.0,
+					qualified[culture.phosphorusStoreIndex] - phosphorus.authored.protectedReserve);
+				auto const drawablePotassiumUnits = std::max(0.0,
+					qualified[culture.potassiumStoreIndex] - potassium.authored.protectedReserve);
+				auto const drawableMineralsUnits = std::max(0.0,
+					qualified[culture.mineralsStoreIndex] - minerals.authored.protectedReserve);
+				auto const capacityHeadroomKg = std::max(0.0, culture.capacityKg - culture.livingBiomassKg);
+				double scale = 1.0;
+				std::string limiter;
+				auto const constrain = [&](double available, double required, std::string const& reason)
+				{
+					if (required <= 0.0) return;
+					auto const fraction = available / required;
+					if (fraction < scale) { scale = fraction; limiter = reason; }
+				};
+				if (!culture.lastTemperatureEligible)
+				{
+					scale = 0.0;
+					limiter = compartment.temperatureC + 1e-9 < culture.authored.minGrowingTemperatureC
+						? "compartment '" + compartment.authored.id
+							+ "' is below the minimum growing temperature: the culture is dormant"
+						: "compartment '" + compartment.authored.id
+							+ "' is at or above the maximum growing temperature: growth is heat-stopped";
+				}
+				else if (culture.lastGrowthPotentialKg <= 0.0)
+				{
+					// No light energy delivered: nothing drives
+					// photosynthesis. Darkness - or lamps with no power -
+					// grows nothing for free.
+					scale = 0.0;
+					limiter = culture.lastLightRequestedKW <= 1e-12
+						? "no light delivered: the illumination profile is dark, photosynthesis cannot run"
+						: "no light energy delivered: the lamps received no power, photosynthesis cannot run for free";
+				}
+				else
+				{
+					constrain(circulationFraction * culture.lastGrowthPotentialKg,
+						culture.lastGrowthPotentialKg,
+						"culture circulation is not supplied: the gas, nutrient and light distribution cannot run");
+					constrain(std::max(0.0, compartment.carbonDioxideKg),
+						culture.lastGrowthPotentialKg * co2PerKgGrowth,
+						"compartment '" + compartment.authored.id + "' holds no carbon dioxide to fix");
+					constrain(drawableWaterUnits,
+						kgToMass(water.authored.unit, culture.lastGrowthPotentialKg
+							* (assimilationWaterPerKgGrowth + culture.authored.evaporationKgPerKgGrowth)),
+						"culture water store '" + water.authored.id
+							+ "' has nothing drawable above its protected reserve");
+					constrain(drawableNitrogenUnits,
+						kgToMass(nitrogen.authored.unit, culture.lastGrowthPotentialKg
+							* composition.nutrientNitrogen),
+						"nitrogen store '" + nitrogen.authored.id
+							+ "' has nothing drawable above its protected reserve");
+					constrain(drawablePhosphorusUnits,
+						kgToMass(phosphorus.authored.unit, culture.lastGrowthPotentialKg
+							* composition.phosphorus),
+						"phosphorus store '" + phosphorus.authored.id
+							+ "' has nothing drawable above its protected reserve");
+					constrain(drawablePotassiumUnits,
+						kgToMass(potassium.authored.unit, culture.lastGrowthPotentialKg
+							* composition.potassium),
+						"potassium store '" + potassium.authored.id
+							+ "' has nothing drawable above its protected reserve");
+					constrain(drawableMineralsUnits,
+						kgToMass(minerals.authored.unit, culture.lastGrowthPotentialKg
+							* composition.otherMinerals),
+						"minerals store '" + minerals.authored.id
+							+ "' has nothing drawable above its protected reserve");
+					constrain(capacityHeadroomKg, culture.lastGrowthPotentialKg,
+						"culture capacity of '" + culture.authored.id
+							+ "' is full: the culture has no room to grow");
+				}
+				scale = std::max(0.0, std::min(1.0, scale));
+				culture.lastGrowthScale = scale;
+				culture.lastGrowthLimiter = limiter;
+				// The growth that actually runs: the potential at the
+				// binding scale, capped by the capacity headroom, and
+				// every flow derived from that actual growth so the
+				// stoichiometric closure holds on what really moved.
+				// Each draw is clamped to its own drawable so roundoff
+				// never overshoots (#556).
+				auto const growthKg = std::min(culture.lastGrowthPotentialKg * scale, capacityHeadroomKg);
+				auto const co2DrawnKg = std::min(growthKg * co2PerKgGrowth,
+					std::max(0.0, compartment.carbonDioxideKg));
+				auto const assimilationWaterKg = growthKg * assimilationWaterPerKgGrowth;
+				auto const evaporatedKg = growthKg * culture.authored.evaporationKgPerKgGrowth;
+				auto const makeupWaterUnits = std::min(
+					kgToMass(water.authored.unit, assimilationWaterKg + evaporatedKg),
+					drawableWaterUnits);
+				auto const makeupWaterActualKg = massToKg(water.authored.unit, makeupWaterUnits);
+				auto const nitrogenUnits = std::min(
+					kgToMass(nitrogen.authored.unit, growthKg * composition.nutrientNitrogen),
+					drawableNitrogenUnits);
+				auto const phosphorusUnits = std::min(
+					kgToMass(phosphorus.authored.unit, growthKg * composition.phosphorus),
+					drawablePhosphorusUnits);
+				auto const potassiumUnits = std::min(
+					kgToMass(potassium.authored.unit, growthKg * composition.potassium),
+					drawablePotassiumUnits);
+				auto const mineralsUnits = std::min(
+					kgToMass(minerals.authored.unit, growthKg * composition.otherMinerals),
+					drawableMineralsUnits);
+				auto const oxygenReleasedKg = growthKg * oxygenPerKgGrowth;
+				// Move the growth flows: CO2 out of the compartment, O2 in,
+				// culture water and every nutrient out of the culture's own
+				// stores above their protected reserves, and the dry mass
+				// onto the Living biomass ledger. The compartment books the
+				// algae pathways as its own terms beside the crop pathways.
+				compartment.carbonDioxideKg -= co2DrawnKg;
+				compartment.algaeCarbonDioxideDrawnKg += co2DrawnKg;
+				compartment.oxygenKg += oxygenReleasedKg;
+				compartment.algaeOxygenAddedKg += oxygenReleasedKg;
+				qualified[culture.waterStoreIndex] -= makeupWaterUnits;
+				flowOut[culture.waterStoreIndex] += makeupWaterUnits;
+				qualified[culture.nitrogenStoreIndex] -= nitrogenUnits;
+				flowOut[culture.nitrogenStoreIndex] += nitrogenUnits;
+				qualified[culture.phosphorusStoreIndex] -= phosphorusUnits;
+				flowOut[culture.phosphorusStoreIndex] += phosphorusUnits;
+				qualified[culture.potassiumStoreIndex] -= potassiumUnits;
+				flowOut[culture.potassiumStoreIndex] += potassiumUnits;
+				qualified[culture.mineralsStoreIndex] -= mineralsUnits;
+				flowOut[culture.mineralsStoreIndex] += mineralsUnits;
+				stagedUnitLoss[water.authored.unit] += makeupWaterUnits;
+				stagedUnitLoss[nitrogen.authored.unit] += nitrogenUnits;
+				stagedUnitLoss[phosphorus.authored.unit] += phosphorusUnits;
+				stagedUnitLoss[potassium.authored.unit] += potassiumUnits;
+				stagedUnitLoss[minerals.authored.unit] += mineralsUnits;
+				// Constituent boundary: what the uptake stores carry as
+				// declared compound material leaves the compound-material
+				// world with the draw, exactly like every other consumer;
+				// plain stores contribute nothing to the ledger.
+				ConstituentLedger netChange;
+				if (water.authored.composition)
+					addComposition(netChange, *water.authored.composition, makeupWaterActualKg, -1.0);
+				if (nitrogen.authored.composition)
+					addComposition(netChange, *nitrogen.authored.composition,
+						massToKg(nitrogen.authored.unit, nitrogenUnits), -1.0);
+				if (phosphorus.authored.composition)
+					addComposition(netChange, *phosphorus.authored.composition,
+						massToKg(phosphorus.authored.unit, phosphorusUnits), -1.0);
+				if (potassium.authored.composition)
+					addComposition(netChange, *potassium.authored.composition,
+						massToKg(potassium.authored.unit, potassiumUnits), -1.0);
+				if (minerals.authored.composition)
+					addComposition(netChange, *minerals.authored.composition,
+						massToKg(minerals.authored.unit, mineralsUnits), -1.0);
+				for (auto const& entry : netChange)
+					stagedLoss[entry.first] -= entry.second;
+				culture.livingBiomassKg += growthKg;
+				// Respiration runs day and night against the declared
+				// organic content of the living biomass, capped by the
+				// oxygen the compartment actually holds.
+				auto const organicContentKg = culture.livingBiomassKg * organicFraction;
+				auto const respirationRequestedKg = std::min(
+					culture.authored.respirationPerHour * culture.livingBiomassKg * hours,
+					organicContentKg);
+				auto const respirationO2RequiredKg = respirationRequestedKg
+					* StationPhotosynthesisO2PerOrganicKg;
+				auto const respirationScale = respirationO2RequiredKg > 0.0
+					? std::min(1.0, std::max(0.0, compartment.oxygenKg) / respirationO2RequiredKg)
+					: 1.0;
+				auto const respiredOrganicKg = respirationRequestedKg * respirationScale;
+				auto const respirationO2DrawnKg = std::min(
+					respirationO2RequiredKg * respirationScale,
+					std::max(0.0, compartment.oxygenKg));
+				auto const respirationCo2ReturnedKg = respiredOrganicKg
+					* StationPhotosynthesisCO2PerOrganicKg;
+				auto const respirationWaterKg = respiredOrganicKg
+					* StationPhotosynthesisWaterPerOrganicKg;
+				if (respirationScale < 1.0 - 1e-12 && respirationRequestedKg > 0.0)
+				{
+					culture.lastOxygenLimited = true;
+					culture.lastRespirationLimiter = "compartment '" + compartment.authored.id
+						+ "' oxygen inventory cannot supply the respiration draw";
+				}
+				compartment.oxygenKg -= respirationO2DrawnKg;
+				compartment.algaeOxygenDrawnKg += respirationO2DrawnKg;
+				compartment.carbonDioxideKg += respirationCo2ReturnedKg;
+				compartment.algaeCarbonDioxideAddedKg += respirationCo2ReturnedKg;
+				compartment.waterVapourKg += respirationWaterKg + evaporatedKg;
+				compartment.algaeVapourAddedKg += respirationWaterKg + evaporatedKg;
+				culture.livingBiomassKg -= respiredOrganicKg;
+				// Adverse-condition death: when respiration exhausts the
+				// living organic content the culture starves. The remaining
+				// non-respirable residue is routed to the declared waste
+				// store as far as its headroom reaches; whatever the waste
+				// path cannot hold is booked as explicit uncontained loss.
+				// Nothing vanishes silently, and the dead never regrow for
+				// free.
+				culture.lastDeadResidueToWasteKg = 0.0;
+				culture.lastDeadResidueLostKg = 0.0;
+				if (!culture.dead && culture.livingBiomassKg * organicFraction <= 1e-9)
+				{
+					culture.dead = true;
+					auto const residueKg = culture.livingBiomassKg;
+					double routedKg = 0.0;
+					if (!culture.authored.wasteStoreId.empty())
+					{
+						auto& waste = stores[culture.wasteStoreIndex];
+						auto const wasteHeadroomUnits = std::max(0.0, waste.authored.capacity
+							- qualified[culture.wasteStoreIndex] - unqualified[culture.wasteStoreIndex]);
+						auto const routedUnits = std::min(
+							kgToMass(waste.authored.unit, residueKg), wasteHeadroomUnits);
+						routedKg = massToKg(waste.authored.unit, routedUnits);
+						if (routedUnits > 0.0)
+						{
+							qualified[culture.wasteStoreIndex] += routedUnits;
+							flowIn[culture.wasteStoreIndex] += routedUnits;
+							stagedUnitHarvested[waste.authored.unit] += routedUnits;
+							if (waste.authored.composition)
+								addComposition(stagedConstituentHarvested, composition, routedKg, 1.0);
+						}
+					}
+					culture.livingBiomassKg -= residueKg;
+					auto const lostKg = residueKg - routedKg;
+					culture.lastDeadResidueToWasteKg = routedKg;
+					culture.lastDeadResidueLostKg = lostKg;
+					culture.deadResidueToWasteKg += routedKg;
+					culture.deadResidueLostKg += lostKg;
+				}
+				// Harvest (#411): the declared trigger removes real living
+				// dry biomass, and the removed mass is partitioned into
+				// the three declared destinations conservatively. The food
+				// share enters the food store as far as its headroom
+				// reaches; the food surplus rides the recovery path beside
+				// the declared recovery share; whatever recovery cannot
+				// hold rides the waste path beside the unrecoverable
+				// remainder; and what no destination can place stays
+				// living rather than being discarded for free. Full
+				// destinations constrain the harvest, they never dispose
+				// of biomass. The harvest runs after the same tick's
+				// growth, so a culture crossing the trigger mid-tick is
+				// harvested on that tick.
+				if (!culture.dead && culture.authored.harvestTriggerKg > 0.0
+					&& culture.livingBiomassKg + 1e-12 >= culture.authored.harvestTriggerKg)
+				{
+					auto const requestedKg = culture.authored.harvestFraction * culture.livingBiomassKg;
+					auto const foodRequestedKg = requestedKg * culture.authored.foodFraction;
+					auto const recoveryRequestedKg = requestedKg * culture.authored.recoveryFraction;
+					auto const unrecoverableRequestedKg = requestedKg - foodRequestedKg
+						- recoveryRequestedKg;
+					auto& food = stores[culture.foodStoreIndex];
+					auto& recovery = stores[culture.recoveryStoreIndex];
+					auto& waste = stores[culture.wasteStoreIndex];
+					auto const foodHeadroomUnits = std::max(0.0, food.authored.capacity
+						- qualified[culture.foodStoreIndex] - unqualified[culture.foodStoreIndex]);
+					auto const recoveryHeadroomUnits = std::max(0.0, recovery.authored.capacity
+						- qualified[culture.recoveryStoreIndex] - unqualified[culture.recoveryStoreIndex]);
+					auto const wasteHeadroomUnits = std::max(0.0, waste.authored.capacity
+						- qualified[culture.wasteStoreIndex] - unqualified[culture.wasteStoreIndex]);
+					auto const foodAcceptedUnits = std::min(
+						kgToMass(food.authored.unit, foodRequestedKg), foodHeadroomUnits);
+					auto const foodAcceptedKg = massToKg(food.authored.unit, foodAcceptedUnits);
+					auto const foodSurplusKg = foodRequestedKg - foodAcceptedKg;
+					auto const recoveryNeededKg = recoveryRequestedKg + foodSurplusKg;
+					auto const recoveryAcceptedUnits = std::min(
+						kgToMass(recovery.authored.unit, recoveryNeededKg), recoveryHeadroomUnits);
+					auto const recoveryAcceptedKg = massToKg(recovery.authored.unit, recoveryAcceptedUnits);
+					auto const recoverySurplusKg = recoveryNeededKg - recoveryAcceptedKg;
+					auto const wasteNeededKg = unrecoverableRequestedKg + recoverySurplusKg;
+					auto const wasteAcceptedUnits = std::min(
+						kgToMass(waste.authored.unit, wasteNeededKg), wasteHeadroomUnits);
+					auto const wasteAcceptedKg = massToKg(waste.authored.unit, wasteAcceptedUnits);
+					auto const harvestedKg = foodAcceptedKg + recoveryAcceptedKg + wasteAcceptedKg;
+					auto const constrainedKg = requestedKg - harvestedKg;
+					if (foodAcceptedUnits > 0.0)
+					{
+						qualified[culture.foodStoreIndex] += foodAcceptedUnits;
+						flowIn[culture.foodStoreIndex] += foodAcceptedUnits;
+						stagedUnitHarvested[food.authored.unit] += foodAcceptedUnits;
+						if (food.authored.composition)
+							addComposition(stagedConstituentHarvested, composition, foodAcceptedKg, 1.0);
+					}
+					if (recoveryAcceptedUnits > 0.0)
+					{
+						qualified[culture.recoveryStoreIndex] += recoveryAcceptedUnits;
+						flowIn[culture.recoveryStoreIndex] += recoveryAcceptedUnits;
+						stagedUnitHarvested[recovery.authored.unit] += recoveryAcceptedUnits;
+						if (recovery.authored.composition)
+							addComposition(stagedConstituentHarvested, composition, recoveryAcceptedKg, 1.0);
+					}
+					if (wasteAcceptedUnits > 0.0)
+					{
+						qualified[culture.wasteStoreIndex] += wasteAcceptedUnits;
+						flowIn[culture.wasteStoreIndex] += wasteAcceptedUnits;
+						stagedUnitHarvested[waste.authored.unit] += wasteAcceptedUnits;
+						if (waste.authored.composition)
+							addComposition(stagedConstituentHarvested, composition, wasteAcceptedKg, 1.0);
+					}
+					culture.livingBiomassKg -= harvestedKg;
+					culture.lastHarvestRequestedKg = requestedKg;
+					culture.lastHarvestedKg = harvestedKg;
+					culture.lastFoodAddedKg = foodAcceptedKg;
+					culture.lastRecoveryAddedKg = recoveryAcceptedKg;
+					culture.lastWasteAddedKg = wasteAcceptedKg;
+					culture.lastFoodSurplusToRecoveryKg = foodSurplusKg;
+					culture.lastRecoverySurplusToWasteKg = recoverySurplusKg;
+					culture.lastHarvestConstrainedKg = constrainedKg;
+					if (constrainedKg > 1e-12)
+						culture.lastHarvestLimiter = "harvest destinations cannot hold the yield: food store '"
+							+ food.authored.id + "', recovery store '" + recovery.authored.id
+							+ "' and waste store '" + waste.authored.id
+							+ "' are full, the remainder stays living";
+					else if (recoverySurplusKg > 1e-12)
+						culture.lastHarvestLimiter = "recovery store '" + recovery.authored.id
+							+ "' is full: the recovery surplus is routed through the waste path";
+					else if (foodSurplusKg > 1e-12)
+						culture.lastHarvestLimiter = "food store '" + food.authored.id
+							+ "' is full: the edible surplus is routed through the recovery path";
+					else culture.lastHarvestLimiter.clear();
+					culture.harvestedKg += harvestedKg;
+					culture.foodProducedKg += foodAcceptedKg;
+					culture.recoveryProducedKg += recoveryAcceptedKg;
+					culture.wasteProducedKg += wasteAcceptedKg;
+					culture.foodSurplusToRecoveryKg += foodSurplusKg;
+					culture.recoverySurplusToWasteKg += recoverySurplusKg;
+				}
+				// Energy: the light energy not fixed as biomass chemical
+				// energy, the circulation pump work and the respiration
+				// heat land in the compartment once, booked as the algae
+				// thermal term beside the crop heat.
+				auto const chemicalEnergyFixedKJ = growthKg * composition.energyKJPerKgDry;
+				auto const respirationHeatKJ = respiredOrganicKg * composition.energyKJPerKgDry;
+				auto const heatIntoCompartmentKJ = lightEnergyKJ - chemicalEnergyFixedKJ
+					+ circulationEnergyKJ + respirationHeatKJ;
+				algaeHeatByAtmosphere[culture.atmosphereIndex] += heatIntoCompartmentKJ / tickSeconds;
+				culture.lastHeatIntoCompartmentKW = heatIntoCompartmentKJ / tickSeconds;
+				culture.lastRespirationHeatKW = respirationHeatKJ / tickSeconds;
+				culture.lastGrowthKg = growthKg;
+				culture.lastCo2DrawnKg = co2DrawnKg;
+				culture.lastAssimilationWaterKg = assimilationWaterKg;
+				culture.lastNitrogenDrawnKg = massToKg(nitrogen.authored.unit, nitrogenUnits);
+				culture.lastPhosphorusDrawnKg = massToKg(phosphorus.authored.unit, phosphorusUnits);
+				culture.lastPotassiumDrawnKg = massToKg(potassium.authored.unit, potassiumUnits);
+				culture.lastMineralsDrawnKg = massToKg(minerals.authored.unit, mineralsUnits);
+				culture.lastOxygenReleasedKg = oxygenReleasedKg;
+				culture.lastEvaporatedKg = evaporatedKg;
+				culture.lastRespirationRequestedKg = respirationRequestedKg;
+				culture.lastRespirationKg = respiredOrganicKg;
+				culture.lastRespirationO2DrawnKg = respirationO2DrawnKg;
+				culture.lastRespirationCo2ReturnedKg = respirationCo2ReturnedKg;
+				culture.lastRespirationWaterKg = respirationWaterKg;
+				culture.growthKg += growthKg;
+				culture.co2DrawnKg += co2DrawnKg;
+				culture.waterDrawnKg += makeupWaterActualKg;
+				culture.nitrogenDrawnKg += massToKg(nitrogen.authored.unit, nitrogenUnits);
+				culture.phosphorusDrawnKg += massToKg(phosphorus.authored.unit, phosphorusUnits);
+				culture.potassiumDrawnKg += massToKg(potassium.authored.unit, potassiumUnits);
+				culture.mineralsDrawnKg += massToKg(minerals.authored.unit, mineralsUnits);
+				culture.oxygenReleasedKg += oxygenReleasedKg;
+				culture.evaporatedKg += evaporatedKg;
+				culture.respirationKg += respiredOrganicKg;
+				culture.respirationO2DrawnKg += respirationO2DrawnKg;
+				culture.respirationCo2ReturnedKg += respirationCo2ReturnedKg;
+				culture.respirationWaterKg += respirationWaterKg;
+				culture.lightEnergyKJ += lightEnergyKJ;
+				culture.circulationEnergyKJ += circulationEnergyKJ;
+				culture.chemicalEnergyFixedKJ += chemicalEnergyFixedKJ;
+				culture.respirationHeatKJ += respirationHeatKJ;
+				culture.heatIntoCompartmentKJ += heatIntoCompartmentKJ;
+				totalAlgaePowerKW += culture.lastLightSuppliedKW + culture.lastCirculationSuppliedKW;
+				if (scale <= 1e-12)
+				{
+					culture.lastBlockReason = limiter;
+					culture.status = StationTransferStatus::Rejected;
+				}
+				else if (scale >= 1.0 - 1e-12 && !culture.lastOxygenLimited)
+					culture.status = StationTransferStatus::Full;
+				else culture.status = StationTransferStatus::Partial;
+			}
 			// Second loop pass: integrate the loop's temperature from the
 			// pump work, heater heat, exchanger exchange and the chiller
 			// extraction that actually moved this tick, and book the loop
@@ -7782,10 +8634,15 @@ namespace core
 				// canopies assigned to it and entering the same coupled
 				// vapour/thermal solve as every other thermal term.
 				auto const cropHeatKW = cropHeatByAtmosphere[atmosphereIndex];
+				// Algae culture heat (#411): booked as its own thermal term
+				// beside the crop heat, entering the same coupled vapour/
+				// thermal solve; the two populations never share a heat
+				// pathway.
+				auto const algaeHeatKW = algaeHeatByAtmosphere[atmosphereIndex];
 				auto const exchangeKW = atmosphereExchangeKJ[atmosphereIndex] / dt;
 				auto const coupled = solveVapourThermalCoupling(
 					compartment.authored.thermalCapacityKJPerK, compartment.temperatureC,
-					occupantHeatKW + crewHeatKW + cropHeatKW + exchangeKW, compartment.waterVapourKg,
+					occupantHeatKW + crewHeatKW + cropHeatKW + algaeHeatKW + exchangeKW, compartment.waterVapourKg,
 					compartment.authored.volumeM3, dt);
 				auto const condensedKg = coupled.condensedKg;
 				auto const latentHeatKW = condensedKg
@@ -7798,6 +8655,8 @@ namespace core
 				compartment.lastCrewHeatKW = crewHeatKW;
 				compartment.cropHeatKJ += cropHeatKW * dt;
 				compartment.lastCropHeatKW = cropHeatKW;
+				compartment.algaeHeatKJ += algaeHeatKW * dt;
+				compartment.lastAlgaeHeatKW = algaeHeatKW;
 				compartment.latentHeatKJ += latentHeatKW * dt;
 				compartment.exchangedKJ += exchangeKW * dt;
 				// Publish last-tick observables.
@@ -8809,20 +9668,25 @@ namespace core
 				};
 				std::array<ComponentClosure, 4> const closures{{
 					{"oxygen", compartment.authored.startingOxygenKg,
-						compartment.electrolysisOxygenKg + compartment.cropOxygenAddedKg,
+						compartment.electrolysisOxygenKg + compartment.cropOxygenAddedKg
+							+ compartment.algaeOxygenAddedKg,
 						compartment.oxygenConsumedKg + compartment.leakOxygenKg
-							+ compartment.cycleOxygenKg + compartment.cropOxygenDrawnKg,
+							+ compartment.cycleOxygenKg + compartment.cropOxygenDrawnKg
+							+ compartment.algaeOxygenDrawnKg,
 						compartment.oxygenKg},
 					{"nitrogen", compartment.authored.startingNitrogenKg, 0.0,
 						compartment.leakNitrogenKg + compartment.cycleNitrogenKg,
 						compartment.nitrogenKg},
 					{"carbonDioxide", compartment.authored.startingCarbonDioxideKg,
-						compartment.co2ProducedKg + compartment.cropCarbonDioxideAddedKg,
+						compartment.co2ProducedKg + compartment.cropCarbonDioxideAddedKg
+							+ compartment.algaeCarbonDioxideAddedKg,
 						compartment.leakCarbonDioxideKg + compartment.cycleCarbonDioxideKg
-							+ compartment.capturedCarbonDioxideKg + compartment.cropCarbonDioxideDrawnKg,
+							+ compartment.capturedCarbonDioxideKg + compartment.cropCarbonDioxideDrawnKg
+							+ compartment.algaeCarbonDioxideDrawnKg,
 						compartment.carbonDioxideKg},
 					{"waterVapour", compartment.authored.startingWaterVapourKg,
-						compartment.vapourAddedKg + compartment.cropVapourAddedKg,
+						compartment.vapourAddedKg + compartment.cropVapourAddedKg
+							+ compartment.algaeVapourAddedKg,
 						compartment.condensedKg + compartment.leakWaterVapourKg
 							+ compartment.cycleWaterVapourKg + compartment.collectedKg,
 						compartment.waterVapourKg}}};
@@ -8854,7 +9718,7 @@ namespace core
 				auto const thermalBound = StationBalanceTolerance
 					* std::max(1.0, std::abs(startingEnergyKJ));
 				auto const thermalResidual = startingEnergyKJ + compartment.occupantHeatKJ
-					+ compartment.crewHeatKJ + compartment.cropHeatKJ
+					+ compartment.crewHeatKJ + compartment.cropHeatKJ + compartment.algaeHeatKJ
 					+ compartment.latentHeatKJ + compartment.exchangedKJ
 					- compartment.authored.thermalCapacityKJPerK * compartment.temperatureC;
 				if (!std::isfinite(thermalResidual) || std::abs(thermalResidual) > thermalBound)
@@ -9961,6 +10825,59 @@ namespace core
 						+ std::to_string(crop.lastSurplusEdibleToWasteKg)
 						+ " kg edible surplus routed through the waste path)");
 			}
+			// Algae culture growth transitions, harvest partitions and
+			// deaths are announced the same way the crops' are (#411): the
+			// two populations are reported distinctly in the event log.
+			for (size_t index = 0; index < algaeCultures.size(); ++index)
+			{
+				auto const& culture = algaeCultures[index];
+				if (culture.status == previousAlgaeStatus[index]) continue;
+				if (culture.status == StationTransferStatus::Full)
+				{
+					appendBoundedEvent(events, tick, "Algae culture '" + culture.authored.id
+						+ "' growing at full potential");
+					continue;
+				}
+				auto const reason = !culture.lastBlockReason.empty()
+					? culture.lastBlockReason : culture.lastGrowthLimiter;
+				appendBoundedEvent(events, tick, culture.status == StationTransferStatus::Rejected
+					? "Algae culture '" + culture.authored.id + "' growth stopped: " + reason
+					: "Algae culture '" + culture.authored.id + "' growth limited: " + reason);
+			}
+			for (size_t index = 0; index < algaeCultures.size(); ++index)
+			{
+				auto const& culture = algaeCultures[index];
+				if (culture.dead && !previousAlgaeDead[index])
+				{
+					appendBoundedEvent(events, tick, "Algae culture '" + culture.authored.id
+						+ "' died: the living organic content was respired away under adverse conditions; "
+						+ std::to_string(culture.lastDeadResidueToWasteKg)
+						+ " kg dead residue routed to the waste store and "
+						+ std::to_string(culture.lastDeadResidueLostKg)
+						+ " kg lost uncontained - the loss is explicit and cannot be recovered as living biomass");
+					continue;
+				}
+				auto const harvestState = culture.lastHarvestConstrainedKg > 1e-12 ? 2.0
+					: culture.lastHarvestedKg > 0.0 ? 1.0 : 0.0;
+				if (harvestState == previousAlgaeHarvestState[index]) continue;
+				if (harvestState == 2.0)
+					appendBoundedEvent(events, tick, "Algae culture '" + culture.authored.id
+						+ "' harvest constrained: " + std::to_string(culture.lastHarvestConstrainedKg)
+						+ " kg of the declared harvest could not be placed because the food, recovery and waste destinations are full; the remainder stays living");
+				else if (harvestState == 1.0)
+					appendBoundedEvent(events, tick, "Algae culture '" + culture.authored.id
+						+ "' harvested " + std::to_string(culture.lastHarvestedKg)
+						+ " kg of living dry biomass: " + std::to_string(culture.lastFoodAddedKg)
+						+ " kg to the food store '" + culture.authored.foodStoreId + "', "
+						+ std::to_string(culture.lastRecoveryAddedKg)
+						+ " kg to the recovery store '" + culture.authored.recoveryStoreId + "' and "
+						+ std::to_string(culture.lastWasteAddedKg) + " kg to the waste store '"
+						+ culture.authored.wasteStoreId + "' ("
+						+ std::to_string(culture.lastFoodSurplusToRecoveryKg)
+						+ " kg food surplus routed through the recovery path, "
+						+ std::to_string(culture.lastRecoverySurplusToWasteKg)
+						+ " kg recovery surplus routed through the waste path)");
+			}
 			// Delivery arrivals are discrete scenario events rather than a
 			// continuous per-tick service, so every arrival is announced with
 			// its own quantities: the refused remainder is the account for
@@ -10386,6 +11303,43 @@ namespace core
 			[&](size_t left, size_t right)
 			{ return mImpl->cropPopulations[left].authored.priority
 				> mImpl->cropPopulations[right].authored.priority; });
+		// Algae culture ledgers start from the authored Living biomass
+		// (#411): the culture capacity is derived from the declared
+		// volume and density per litre at construction, the culture starts
+		// at its authored dry biomass, and every growth, respiration,
+		// uptake, harvest and heat total reconstructs from zero on Reset
+		// and load. Cultures compete for the same power pool and share the
+		// compartment and uptake stores, so each runs in the declared
+		// deterministic order: priority descending, declaration order
+		// ascending.
+		for (auto const& algae : settings.algaeCultures)
+		{
+			Impl::AlgaeCultureState state;
+			state.authored = algae;
+			state.atmosphereIndex = atmosphereIndex[algae.atmosphereId];
+			state.waterStoreIndex = storeIndex[algae.waterStoreId];
+			state.nitrogenStoreIndex = storeIndex[algae.nitrogenStoreId];
+			state.phosphorusStoreIndex = storeIndex[algae.phosphorusStoreId];
+			state.potassiumStoreIndex = storeIndex[algae.potassiumStoreId];
+			state.mineralsStoreIndex = storeIndex[algae.mineralsStoreId];
+			// Harvest destinations resolve only when named; the harvest is
+			// disabled while the trigger is zero.
+			if (!algae.foodStoreId.empty())
+				state.foodStoreIndex = storeIndex[algae.foodStoreId];
+			if (!algae.recoveryStoreId.empty())
+				state.recoveryStoreIndex = storeIndex[algae.recoveryStoreId];
+			if (!algae.wasteStoreId.empty())
+				state.wasteStoreIndex = storeIndex[algae.wasteStoreId];
+			state.capacityKg = algae.cultureVolumeL * algae.maxBiomassDensityKgPerL;
+			state.livingBiomassKg = algae.initialBiomassKg;
+			mImpl->algaeCultures.push_back(std::move(state));
+		}
+		mImpl->algaeOrder.resize(mImpl->algaeCultures.size());
+		std::iota(mImpl->algaeOrder.begin(), mImpl->algaeOrder.end(), size_t{0});
+		std::stable_sort(mImpl->algaeOrder.begin(), mImpl->algaeOrder.end(),
+			[&](size_t left, size_t right)
+			{ return mImpl->algaeCultures[left].authored.priority
+				> mImpl->algaeCultures[right].authored.priority; });
 		// Fuel-cell backup units run on the supply side in declaration
 		// order (#406); their reactant and product stores are resolved to
 		// the same store indices the ledger mutates.
@@ -10494,7 +11448,8 @@ namespace core
 				&settings.electrolyzers, &settings.co2Captures, &settings.fuelCells,
 				&settings.thermalBuffers, &settings.wasteEjections,
 				&settings.sabatierReactors, &settings.methaneProcessors,
-				&settings.microbialProcessors, &settings.cropPopulations};
+				&settings.microbialProcessors, &settings.cropPopulations,
+				&settings.algaeCultures};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -11190,11 +12145,13 @@ namespace core
 			atmosphereResult.crewHeatEnergyKJ = compartment.crewHeatKJ;
 			atmosphereResult.lastCropHeatKW = compartment.lastCropHeatKW;
 			atmosphereResult.cropHeatEnergyKJ = compartment.cropHeatKJ;
+			atmosphereResult.lastAlgaeHeatKW = compartment.lastAlgaeHeatKW;
+			atmosphereResult.algaeHeatEnergyKJ = compartment.algaeHeatKJ;
 			atmosphereResult.latentHeatEnergyKJ = compartment.latentHeatKJ;
 			atmosphereResult.exchangedEnergyKJ = compartment.exchangedKJ;
 			atmosphereResult.residualKJ = atmosphereResult.startingEnergyKJ
 				+ compartment.occupantHeatKJ + compartment.crewHeatKJ
-				+ compartment.cropHeatKJ
+				+ compartment.cropHeatKJ + compartment.algaeHeatKJ
 				+ compartment.latentHeatKJ + compartment.exchangedKJ
 				- atmosphereResult.currentEnergyKJ;
 			atmosphereResult.status = compartment.status;
@@ -11830,6 +12787,130 @@ namespace core
 			result.cropPopulations.push_back(std::move(cropResult));
 		}
 		result.power.cropPowerKW = totalCropPower;
+		// The algae snapshot reports the authored contract beside the
+		// living-biomass picture, the delivered light and circulation,
+		// the resource-limited growth and day-and-night respiration, the
+		// three-way harvest partition with its cascade surpluses and the
+		// closing mass and energy residuals - exposed distinctly from the
+		// crop populations so a reader can see each population's own
+		// capacity basis, flows and ledgers (#411).
+		double totalAlgaePower = 0.0;
+		for (auto const& culture : mImpl->algaeCultures)
+		{
+			StationAlgaeCultureSnapshot algaeResult;
+			algaeResult.id = culture.authored.id;
+			algaeResult.atmosphereId = culture.authored.atmosphereId;
+			algaeResult.waterStoreId = culture.authored.waterStoreId;
+			algaeResult.nitrogenStoreId = culture.authored.nitrogenStoreId;
+			algaeResult.phosphorusStoreId = culture.authored.phosphorusStoreId;
+			algaeResult.potassiumStoreId = culture.authored.potassiumStoreId;
+			algaeResult.mineralsStoreId = culture.authored.mineralsStoreId;
+			algaeResult.composition = culture.authored.composition;
+			algaeResult.cultureVolumeL = culture.authored.cultureVolumeL;
+			algaeResult.maxBiomassDensityKgPerL = culture.authored.maxBiomassDensityKgPerL;
+			algaeResult.capacityKg = culture.capacityKg;
+			algaeResult.initialBiomassKg = culture.authored.initialBiomassKg;
+			algaeResult.lampRatedKW = culture.authored.lampRatedKW;
+			algaeResult.illuminationProfile = culture.authored.illuminationProfile;
+			algaeResult.circulationPowerKW = culture.authored.circulationPowerKW;
+			algaeResult.growthYieldKgPerKWh = culture.authored.growthYieldKgPerKWh;
+			algaeResult.respirationPerHour = culture.authored.respirationPerHour;
+			algaeResult.evaporationKgPerKgGrowth = culture.authored.evaporationKgPerKgGrowth;
+			algaeResult.minGrowingTemperatureC = culture.authored.minGrowingTemperatureC;
+			algaeResult.maxGrowingTemperatureC = culture.authored.maxGrowingTemperatureC;
+			algaeResult.foodStoreId = culture.authored.foodStoreId;
+			algaeResult.recoveryStoreId = culture.authored.recoveryStoreId;
+			algaeResult.wasteStoreId = culture.authored.wasteStoreId;
+			algaeResult.foodFraction = culture.authored.foodFraction;
+			algaeResult.recoveryFraction = culture.authored.recoveryFraction;
+			algaeResult.harvestTriggerKg = culture.authored.harvestTriggerKg;
+			algaeResult.harvestFraction = culture.authored.harvestFraction;
+			algaeResult.priority = culture.authored.priority;
+			algaeResult.livingBiomassKg = culture.livingBiomassKg;
+			algaeResult.capacityFraction = culture.capacityKg > 0.0
+				? culture.livingBiomassKg / culture.capacityKg : 0.0;
+			algaeResult.lastIlluminationLevel = culture.lastIllumination;
+			algaeResult.lastLightRequestedKW = culture.lastLightRequestedKW;
+			algaeResult.lastLightSuppliedKW = culture.lastLightSuppliedKW;
+			algaeResult.lastCirculationRequestedKW = culture.lastCirculationRequestedKW;
+			algaeResult.lastCirculationSuppliedKW = culture.lastCirculationSuppliedKW;
+			algaeResult.lastGrowthPotentialKg = culture.lastGrowthPotentialKg;
+			algaeResult.lastGrowthScale = culture.lastGrowthScale;
+			algaeResult.lastGrowthLimiter = culture.lastGrowthLimiter;
+			algaeResult.lastGrowthKg = culture.lastGrowthKg;
+			algaeResult.lastCo2DrawnKg = culture.lastCo2DrawnKg;
+			algaeResult.lastAssimilationWaterKg = culture.lastAssimilationWaterKg;
+			algaeResult.lastNitrogenDrawnKg = culture.lastNitrogenDrawnKg;
+			algaeResult.lastPhosphorusDrawnKg = culture.lastPhosphorusDrawnKg;
+			algaeResult.lastPotassiumDrawnKg = culture.lastPotassiumDrawnKg;
+			algaeResult.lastMineralsDrawnKg = culture.lastMineralsDrawnKg;
+			algaeResult.lastOxygenReleasedKg = culture.lastOxygenReleasedKg;
+			algaeResult.lastEvaporatedKg = culture.lastEvaporatedKg;
+			algaeResult.lastRespirationRequestedKg = culture.lastRespirationRequestedKg;
+			algaeResult.lastRespirationKg = culture.lastRespirationKg;
+			algaeResult.lastRespirationO2DrawnKg = culture.lastRespirationO2DrawnKg;
+			algaeResult.lastRespirationLimiter = culture.lastRespirationLimiter;
+			algaeResult.lastRespirationCo2ReturnedKg = culture.lastRespirationCo2ReturnedKg;
+			algaeResult.lastRespirationWaterKg = culture.lastRespirationWaterKg;
+			algaeResult.lastRespirationHeatKW = culture.lastRespirationHeatKW;
+			algaeResult.lastOxygenLimited = culture.lastOxygenLimited;
+			algaeResult.lastHarvestRequestedKg = culture.lastHarvestRequestedKg;
+			algaeResult.lastHarvestedKg = culture.lastHarvestedKg;
+			algaeResult.lastFoodAddedKg = culture.lastFoodAddedKg;
+			algaeResult.lastRecoveryAddedKg = culture.lastRecoveryAddedKg;
+			algaeResult.lastWasteAddedKg = culture.lastWasteAddedKg;
+			algaeResult.lastFoodSurplusToRecoveryKg = culture.lastFoodSurplusToRecoveryKg;
+			algaeResult.lastRecoverySurplusToWasteKg = culture.lastRecoverySurplusToWasteKg;
+			algaeResult.lastHarvestConstrainedKg = culture.lastHarvestConstrainedKg;
+			algaeResult.lastHarvestLimiter = culture.lastHarvestLimiter;
+			algaeResult.dead = culture.dead;
+			algaeResult.lastDeadResidueToWasteKg = culture.lastDeadResidueToWasteKg;
+			algaeResult.lastDeadResidueLostKg = culture.lastDeadResidueLostKg;
+			algaeResult.lastHeatIntoCompartmentKW = culture.lastHeatIntoCompartmentKW;
+			algaeResult.temperatureEligible = culture.lastTemperatureEligible;
+			algaeResult.blockReason = culture.lastBlockReason;
+			algaeResult.disabled = culture.authored.cultureVolumeL <= 0.0;
+			algaeResult.growthKg = culture.growthKg;
+			algaeResult.co2DrawnKg = culture.co2DrawnKg;
+			algaeResult.waterDrawnKg = culture.waterDrawnKg;
+			algaeResult.nitrogenDrawnKg = culture.nitrogenDrawnKg;
+			algaeResult.phosphorusDrawnKg = culture.phosphorusDrawnKg;
+			algaeResult.potassiumDrawnKg = culture.potassiumDrawnKg;
+			algaeResult.mineralsDrawnKg = culture.mineralsDrawnKg;
+			algaeResult.oxygenReleasedKg = culture.oxygenReleasedKg;
+			algaeResult.evaporatedKg = culture.evaporatedKg;
+			algaeResult.respirationKg = culture.respirationKg;
+			algaeResult.respirationO2DrawnKg = culture.respirationO2DrawnKg;
+			algaeResult.respirationCo2ReturnedKg = culture.respirationCo2ReturnedKg;
+			algaeResult.respirationWaterKg = culture.respirationWaterKg;
+			algaeResult.lightEnergyKJ = culture.lightEnergyKJ;
+			algaeResult.circulationEnergyKJ = culture.circulationEnergyKJ;
+			algaeResult.chemicalEnergyFixedKJ = culture.chemicalEnergyFixedKJ;
+			algaeResult.respirationHeatKJ = culture.respirationHeatKJ;
+			algaeResult.heatIntoCompartmentKJ = culture.heatIntoCompartmentKJ;
+			algaeResult.harvestedKg = culture.harvestedKg;
+			algaeResult.foodProducedKg = culture.foodProducedKg;
+			algaeResult.recoveryProducedKg = culture.recoveryProducedKg;
+			algaeResult.wasteProducedKg = culture.wasteProducedKg;
+			algaeResult.foodSurplusToRecoveryKg = culture.foodSurplusToRecoveryKg;
+			algaeResult.recoverySurplusToWasteKg = culture.recoverySurplusToWasteKg;
+			algaeResult.deadResidueToWasteKg = culture.deadResidueToWasteKg;
+			algaeResult.deadResidueLostKg = culture.deadResidueLostKg;
+			algaeResult.residualKg = culture.co2DrawnKg + culture.waterDrawnKg
+				+ culture.nitrogenDrawnKg + culture.phosphorusDrawnKg + culture.potassiumDrawnKg
+				+ culture.mineralsDrawnKg + culture.respirationO2DrawnKg
+				- culture.oxygenReleasedKg - culture.respirationCo2ReturnedKg
+				- culture.respirationWaterKg - culture.evaporatedKg
+				- (culture.harvestedKg + culture.deadResidueToWasteKg + culture.deadResidueLostKg)
+				- (culture.livingBiomassKg - culture.authored.initialBiomassKg);
+			algaeResult.residualKJ = culture.lightEnergyKJ + culture.circulationEnergyKJ
+				+ culture.respirationHeatKJ - culture.chemicalEnergyFixedKJ
+				- culture.heatIntoCompartmentKJ;
+			algaeResult.status = culture.status;
+			totalAlgaePower += culture.lastLightSuppliedKW + culture.lastCirculationSuppliedKW;
+			result.algaeCultures.push_back(std::move(algaeResult));
+		}
+		result.power.algaePowerKW = totalAlgaePower;
 		// The delivery snapshot reports the authored schedule beside the
 		// runtime's arrival history: what each occurrence brought in, what
 		// the destination refused, and when the next arrival is due (#392).

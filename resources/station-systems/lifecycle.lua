@@ -241,7 +241,8 @@ end
 return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries,
     reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews,
     waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers,
-    wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)
+    wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations,
+    algaeCultures)
     assert(type(name) == "string")
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
@@ -269,6 +270,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     assert(type(methaneProcessors) == "table", "methane processor descriptors missing")
     assert(type(microbialProcessors) == "table", "microbial processor descriptors missing")
     assert(type(cropPopulations) == "table", "crop population descriptors missing")
+    assert(type(algaeCultures) == "table", "algae culture descriptors missing")
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
@@ -288,6 +290,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         methane_processors = {}, methane_processor_order = {},
         microbial_processors = {}, microbial_order = {},
         crop_populations = {}, crop_order = {},
+        algae_cultures = {}, algae_order = {},
         fuel_cells = {}, thermal_buffers = {},
         waste_ejections = {},
     }
@@ -1370,6 +1373,14 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             cropOxygenAdded = 0, cropOxygenDrawn = 0,
             cropCarbonDioxideAdded = 0, cropCarbonDioxideDrawn = 0,
             cropVapourAdded = 0, cropHeatKJ = 0,
+            -- Algae culture gas and heat pathways (#411): booked as
+            -- their own terms beside the crop pathways, so the
+            -- compartment's per-component and thermal closures stay
+            -- exact with both populations present and neither
+            -- population's exchanges read as the other's.
+            algaeOxygenAdded = 0, algaeOxygenDrawn = 0,
+            algaeCarbonDioxideAdded = 0, algaeCarbonDioxideDrawn = 0,
+            algaeVapourAdded = 0, algaeHeatKJ = 0,
         }
         atmosphere_by_id[atmosphere.id] = object.atmospheres[index]
     end
@@ -2463,6 +2474,232 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         if a.priority ~= b.priority then return a.priority > b.priority end
         return left < right
     end)
+    -- Algae culture contracts (#411), mirroring the host validation:
+    -- a separate Biological population with its own installation limits.
+    -- The Growing capacity here is the active culture volume times the
+    -- supported dry-mass density per litre - never derived from a
+    -- crop's illuminated-area capacity. The lifecycle rules are the
+    -- same shared ones: a dry-mass composition with no moisture and no
+    -- atmospheric nitrogen, a growth yield that can never fix more
+    -- chemical energy than the light delivers, a real growing window,
+    -- and a start within the declared capacity. The harvest partitions
+    -- the removed dry mass into three declared destinations - food,
+    -- recovery and waste - so an enabled harvest needs all three,
+    -- pairwise distinct, mass-denominated and composition-compatible
+    -- with the culture's declared dry mass; the food and recovery
+    -- fractions together may not exceed the harvest, because the
+    -- unrecoverable remainder is the waste share and a partition that
+    -- spends more than 100% of the harvest is not conservative
+    -- accounting. All biological coefficients are provisional
+    -- assumptions.
+    assert(#algaeCultures <= 8, 'station algae cultures are limited to 8 entries')
+    local algaeIds = {}
+    for index = 1, #algaeCultures do
+        local algae = algaeCultures[index]
+        assert(type(algae) == 'table', 'algae culture descriptor must be a table')
+        assert(type(algae.id) == 'string' and #algae.id > 0, 'algae culture needs an id')
+        assert(algaeIds[algae.id] == nil, 'algae culture id is duplicated')
+        algaeIds[algae.id] = true
+        local compartment = atmosphere_by_id[algae.atmosphere]
+        assert(compartment ~= nil, 'algae culture atmosphere compartment is unknown')
+        local uptakeRoles = { 'culture water', 'nitrogen', 'phosphorus',
+            'potassium', 'minerals' }
+        local uptakeIds = { algae.waterStore, algae.nitrogenStore, algae.phosphorusStore,
+            algae.potassiumStore, algae.mineralsStore }
+        local uptakeStores = {}
+        for role = 1, 5 do
+            local store = by_id[uptakeIds[role]]
+            assert(store ~= nil, 'algae ' .. uptakeRoles[role] .. ' store is unknown')
+            assert(store.unit == 'g' or store.unit == 'kg',
+                'algae ' .. uptakeRoles[role] .. " store '" .. store.id
+                    .. "' must be a mass unit; culture uptake is mass-denominated")
+            for other = role + 1, 5 do
+                assert(uptakeIds[role] ~= uptakeIds[other],
+                    'algae ' .. uptakeRoles[role] .. ' store and ' .. uptakeRoles[other]
+                        .. ' store are the same store: every tracked nutrient and the culture water need distinct stores so depletion stays visible per resource')
+            end
+            uptakeStores[role] = store
+        end
+        local composition = algae.composition
+        assert(type(composition) == 'table', 'algae culture needs a declared composition')
+        assert(isFinite(composition.moisture) and composition.moisture == 0,
+            'algae declared composition carries moisture: Living biomass is tracked as dry mass, so the culture declaration must not carry a water fraction')
+        assert(isFinite(composition.atmosphericNitrogen) and composition.atmosphericNitrogen == 0,
+            'algae declared composition carries atmospheric nitrogen: the culture takes up bound nutrient nitrogen, not air, and no configured process converts one into the other')
+        local dryFractions = { composition.nutrientNitrogen, composition.phosphorus,
+            composition.potassium, composition.otherMinerals }
+        local dryNames = { 'nutrient nitrogen', 'phosphorus', 'potassium', 'other minerals' }
+        local dryTotal = 0
+        for field = 1, 4 do
+            assert(isFinite(dryFractions[field]) and dryFractions[field] >= 0,
+                'algae declared ' .. dryNames[field] .. ' fraction must be finite and non-negative')
+            dryTotal = dryTotal + dryFractions[field]
+        end
+        assert(dryTotal <= 1 + BALANCE_TOLERANCE,
+            'algae declared dry nutrient fractions exceed 1: the organic dry-mass balance would be negative')
+        assert(isFinite(composition.energyKJPerKgDry) and composition.energyKJPerKgDry > 0,
+            'algae declared chemical energy per dry kg must be finite and positive: the respiration heat and fixed-energy ledger depend on it')
+        assert(isFinite(algae.cultureVolumeL) and algae.cultureVolumeL >= 0,
+            'algae active culture volume must be finite and non-negative')
+        assert(isFinite(algae.maxBiomassDensityKgPerL) and algae.maxBiomassDensityKgPerL > 0,
+            'algae maximum biomass density per litre must be finite and positive')
+        local capacityKg = algae.cultureVolumeL * algae.maxBiomassDensityKgPerL
+        assert(isFinite(algae.initialBiomassKg) and algae.initialBiomassKg >= 0,
+            'algae initial living biomass must be finite and non-negative')
+        assert(algae.initialBiomassKg <= capacityKg + BALANCE_TOLERANCE,
+            'algae initial living biomass exceeds the declared culture capacity: the culture cannot start fuller than the installation can support')
+        assert(isFinite(algae.lampRatedKW) and algae.lampRatedKW >= 0,
+            'algae lamp rated power must be finite and non-negative')
+        local illumination = algae.illumination
+            or { constantLevel = 1, periodSeconds = 0, segments = {} }
+        checkProfile(illumination, 'algae ' .. algae.id .. ' illumination profile')
+        assert(isFinite(algae.circulationPowerKW) and algae.circulationPowerKW >= 0,
+            'algae culture circulation power must be finite and non-negative')
+        assert(isFinite(algae.growthYieldKgPerKWh) and algae.growthYieldKgPerKWh >= 0,
+            'algae growth yield per kWh must be finite and non-negative (provisional biological assumption)')
+        assert(algae.growthYieldKgPerKWh * composition.energyKJPerKgDry
+            <= 3600 + BALANCE_TOLERANCE * 3600,
+            'algae declared growth yield would fix more chemical energy per kWh of light than the light carries: photosynthesis is never a free source of chemical energy')
+        assert(isFinite(algae.respirationPerHour) and algae.respirationPerHour >= 0,
+            'algae respiration per hour must be finite and non-negative (provisional biological assumption)')
+        assert(isFinite(algae.evaporationKgPerKgGrowth) and algae.evaporationKgPerKgGrowth >= 0,
+            'algae evaporation per kg growth must be finite and non-negative (provisional biological assumption)')
+        assert(isFinite(algae.minGrowingTemperatureC)
+            and algae.minGrowingTemperatureC > -KELVIN_OFFSET,
+            'algae minimum growing temperature must be finite and above absolute zero')
+        assert(isFinite(algae.maxGrowingTemperatureC)
+            and algae.maxGrowingTemperatureC > -KELVIN_OFFSET,
+            'algae maximum growing temperature must be finite and above absolute zero')
+        assert(algae.minGrowingTemperatureC < algae.maxGrowingTemperatureC,
+            'algae minimum growing temperature must be below the maximum growing temperature: an empty growing window is never a service')
+        -- Harvest partition contract (#411): the food and recovery
+        -- fractions are declared shares of the harvested dry mass and
+        -- together may not exceed it; a trigger above the declared
+        -- culture capacity could never fire; and an enabled harvest
+        -- needs all three destinations, pairwise distinct, mass-
+        -- denominated and composition-compatible with the culture's
+        -- declared dry mass so harvested constituents enter stores
+        -- exactly as declared.
+        assert(isFinite(algae.foodFraction) and algae.foodFraction >= 0
+            and algae.foodFraction <= 1,
+            'algae food fraction must be finite and from 0 to 1: the edible share of the harvested dry mass cannot exceed the harvest')
+        assert(isFinite(algae.recoveryFraction) and algae.recoveryFraction >= 0
+            and algae.recoveryFraction <= 1,
+            'algae recovery fraction must be finite and from 0 to 1: the recoverable share of the harvested dry mass cannot exceed the harvest')
+        assert(algae.foodFraction + algae.recoveryFraction <= 1 + BALANCE_TOLERANCE,
+            'algae food and recovery fractions together exceed 1: the harvest partition must leave a non-negative unrecoverable remainder for the waste path, so the declared destinations can never claim more than the harvest')
+        assert(isFinite(algae.harvestFraction) and algae.harvestFraction > 0
+            and algae.harvestFraction <= 1,
+            'algae harvest fraction must be finite and from above 0 to 1: a harvest that removes nothing is not a harvest')
+        assert(isFinite(algae.harvestTriggerKg) and algae.harvestTriggerKg >= 0,
+            'algae harvest trigger must be finite and non-negative (0 disables the harvest)')
+        assert(algae.harvestTriggerKg <= capacityKg + BALANCE_TOLERANCE,
+            'algae harvest trigger exceeds the declared culture capacity: the harvest could never fire, so the rule is dead as configured')
+        local destinationRoles = { 'food', 'recovery', 'waste' }
+        local destinationIds = { algae.foodStore, algae.recoveryStore, algae.wasteStore }
+        local destinationStores = {}
+        for role = 1, 3 do
+            if destinationIds[role] == nil or destinationIds[role] == '' then
+                assert(algae.harvestTriggerKg <= 0,
+                    'algae harvest is enabled but the ' .. destinationRoles[role]
+                        .. ' destination store is not named: harvested living material must have a declared destination')
+            else
+                local store = by_id[destinationIds[role]]
+                assert(store ~= nil, 'algae ' .. destinationRoles[role] .. ' store is unknown')
+                assert(store.unit == 'g' or store.unit == 'kg',
+                    'algae ' .. destinationRoles[role] .. " store '" .. store.id
+                        .. "' must be a mass unit; harvested dry biomass is mass-denominated")
+                for other = role + 1, 3 do
+                    assert(destinationIds[role] ~= destinationIds[other],
+                        'algae ' .. destinationRoles[role] .. ' store and '
+                            .. destinationRoles[other] .. ' store are the same store: the food, recovery and waste yield need distinct destinations so the partition stays visible')
+                end
+                if store.composition then
+                    local close = function(a, b)
+                        return math.abs(a - b) <= BALANCE_TOLERANCE
+                    end
+                    assert(close(store.composition.moisture, composition.moisture)
+                        and close(store.composition.nutrientNitrogen, composition.nutrientNitrogen)
+                        and close(store.composition.atmosphericNitrogen, composition.atmosphericNitrogen)
+                        and close(store.composition.phosphorus, composition.phosphorus)
+                        and close(store.composition.potassium, composition.potassium)
+                        and close(store.composition.otherMinerals, composition.otherMinerals)
+                        and close(store.composition.energyKJPerKgDry, composition.energyKJPerKgDry),
+                        'algae ' .. destinationRoles[role] .. " store '" .. store.id
+                            .. "' declares a composition different from the culture's declared dry-mass composition: harvested material enters a store exactly as declared, and a different compound material is a boundary only an explicit conversion may cross")
+                end
+                destinationStores[role] = store
+            end
+        end
+        object.algae_cultures[index] = {
+            id = algae.id,
+            compartment = compartment,
+            water = uptakeStores[1], nitrogen = uptakeStores[2],
+            phosphorus = uptakeStores[3], potassium = uptakeStores[4],
+            minerals = uptakeStores[5],
+            composition = composition,
+            cultureVolumeL = algae.cultureVolumeL,
+            maxBiomassDensityKgPerL = algae.maxBiomassDensityKgPerL,
+            capacityKg = capacityKg,
+            lampRatedKW = algae.lampRatedKW,
+            illumination = readProfile(illumination),
+            circulationPowerKW = algae.circulationPowerKW,
+            growthYieldKgPerKWh = algae.growthYieldKgPerKWh,
+            respirationPerHour = algae.respirationPerHour,
+            evaporationKgPerKgGrowth = algae.evaporationKgPerKgGrowth,
+            minGrowingTemperatureC = algae.minGrowingTemperatureC,
+            maxGrowingTemperatureC = algae.maxGrowingTemperatureC,
+            food = destinationStores[1], recovery = destinationStores[2],
+            waste = destinationStores[3],
+            foodFraction = algae.foodFraction,
+            recoveryFraction = algae.recoveryFraction,
+            harvestTriggerKg = algae.harvestTriggerKg,
+            harvestFraction = algae.harvestFraction,
+            priority = algae.priority or 0,
+            livingBiomassKg = algae.initialBiomassKg,
+            dead = false,
+            lastIllumination = 0, lastLightRequested = 0, lastLightSupplied = 0,
+            lastCirculationRequested = 0, lastCirculationSupplied = 0,
+            lastGrowthPotential = 0, lastGrowthScale = 0, lastGrowthLimiter = '',
+            lastGrowthKg = 0, lastCo2DrawnKg = 0, lastAssimilationWaterKg = 0,
+            lastNitrogenDrawnKg = 0, lastPhosphorusDrawnKg = 0,
+            lastPotassiumDrawnKg = 0, lastMineralsDrawnKg = 0,
+            lastOxygenReleasedKg = 0, lastEvaporatedKg = 0,
+            lastRespirationRequestedKg = 0, lastRespirationKg = 0,
+            lastRespirationO2DrawnKg = 0, lastRespirationLimiter = '',
+            lastRespirationCo2ReturnedKg = 0, lastRespirationWaterKg = 0,
+            lastRespirationHeatKW = 0, lastOxygenLimited = false,
+            lastHeatIntoCompartmentKW = 0, temperatureEligible = false,
+            lastBlockReason = '',
+            lastHarvestRequestedKg = 0, lastHarvestedKg = 0, lastFoodAddedKg = 0,
+            lastRecoveryAddedKg = 0, lastWasteAddedKg = 0,
+            lastFoodSurplusToRecoveryKg = 0, lastRecoverySurplusToWasteKg = 0,
+            lastHarvestConstrainedKg = 0, lastHarvestLimiter = '',
+            lastDeadResidueToWasteKg = 0, lastDeadResidueLostKg = 0,
+            growthKg = 0, co2DrawnKg = 0, waterDrawnKg = 0,
+            nitrogenDrawnKg = 0, phosphorusDrawnKg = 0, potassiumDrawnKg = 0,
+            mineralsDrawnKg = 0, oxygenReleasedKg = 0, evaporatedKg = 0,
+            respirationKg = 0, respirationO2DrawnKg = 0,
+            respirationCo2ReturnedKg = 0, respirationWaterKg = 0,
+            lightEnergyKJ = 0, circulationEnergyKJ = 0,
+            chemicalEnergyFixedKJ = 0, respirationHeatKJ = 0,
+            heatIntoCompartmentKJ = 0,
+            harvestedKg = 0, foodProducedKg = 0, recoveryProducedKg = 0,
+            wasteProducedKg = 0, foodSurplusToRecoveryKg = 0,
+            recoverySurplusToWasteKg = 0, deadResidueToWasteKg = 0,
+            deadResidueLostKg = 0,
+        }
+    end
+    -- Algae cultures compete for the same power pool and share the
+    -- compartment and uptake stores, so each runs in the declared
+    -- deterministic order: priority descending, declaration index
+    -- ascending (#411).
+    for index = 1, #object.algae_cultures do object.algae_order[index] = index end
+    table.sort(object.algae_order, function(left, right)
+        local a, b = object.algae_cultures[left], object.algae_cultures[right]
+        if a.priority ~= b.priority then return a.priority > b.priority end
+        return left < right
+    end)
     -- Cells and capture machines compete for the same power pool and the
     -- same stores, so each runs in the declared deterministic order:
     -- priority descending, declaration index ascending.
@@ -2998,13 +3235,20 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             -- vapour/thermal solve as every other thermal term.
             local cropHeat = compartment.cropHeat or 0
             compartment.cropHeat = 0
+            -- Algae culture heat (#411): booked as its own thermal term
+            -- beside the crop heat, entering the same coupled vapour/
+            -- thermal solve; the two populations never share a heat
+            -- pathway.
+            local algaeHeat = compartment.algaeHeat or 0
+            compartment.algaeHeat = 0
             local exchange = compartment.pendingExchangeKW or 0
             if compartment.reservoir then
                 compartment.reservoir.atmosphereHeat =
                     (compartment.reservoir.atmosphereHeat or 0) - exchange
             end
             local freeTemperature = compartment.temperature
-                + (occupantHeat + crewHeat + cropHeat + exchange) * fixed_seconds / compartment.capacity
+                + (occupantHeat + crewHeat + cropHeat + algaeHeat + exchange)
+                    * fixed_seconds / compartment.capacity
             local condensed = 0
             if compartment.waterVapour > saturatedVapourMassKg(
                 saturationVapourPressureKPa(freeTemperature),
@@ -3034,6 +3278,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             compartment.occupantHeatKJ = compartment.occupantHeatKJ + occupantHeat * fixed_seconds
             compartment.crewHeatKJ = compartment.crewHeatKJ + crewHeat * fixed_seconds
             compartment.cropHeatKJ = compartment.cropHeatKJ + cropHeat * fixed_seconds
+            compartment.algaeHeatKJ = compartment.algaeHeatKJ + algaeHeat * fixed_seconds
             compartment.latentHeatKJ = compartment.latentHeatKJ + latentHeat * fixed_seconds
             compartment.exchangedKJ = compartment.exchangedKJ + exchange * fixed_seconds
         end
@@ -5812,6 +6057,491 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 and isFinite(crop.lastRespirationHeatKW) and isFinite(crop.lastHeatIntoCompartmentKW),
                 "crop population '" .. crop.id .. "' result is not finite")
         end
+        -- Algae cultures (#411) run in the same power-consumer phase
+        -- after the crops, reusing the same biological lifecycle and
+        -- accounting behaviour on their own state: the culture grows its
+        -- dry Living biomass under the resources actually delivered and
+        -- respires day and night. The essential culture circulation is
+        -- drawn ahead of the discretionary lamp demand from the same
+        -- pool. Growth potential comes from the light energy actually
+        -- delivered; one uniform growth scale binds the potential to
+        -- the compartment CO2, the drawable culture water, each
+        -- drawable tracked nutrient and the remaining culture capacity
+        -- headroom - the capacity here is the active culture volume
+        -- times the supported density per litre, never a crop's
+        -- illuminated-area capacity, and no population reads or mutates
+        -- another's state. The harvest partitions the removed dry mass
+        -- into the three declared destinations conservatively: the food
+        -- share into the food store, the recovery share into the
+        -- recovery store, the unrecoverable remainder into the waste
+        -- store, with each destination's surplus cascading to the next
+        -- and what no destination can place staying living rather than
+        -- being discarded for free.
+        for _, order in ipairs(self.algae_order) do
+            local culture = self.algae_cultures[order]
+            local compartment = culture.compartment
+            culture.lastIllumination = 0
+            culture.lastLightRequested = 0
+            culture.lastLightSupplied = 0
+            culture.lastCirculationRequested = 0
+            culture.lastCirculationSupplied = 0
+            culture.lastGrowthPotential = 0
+            culture.lastGrowthScale = 0
+            culture.lastGrowthLimiter = ''
+            culture.lastGrowthKg = 0
+            culture.lastCo2DrawnKg = 0
+            culture.lastAssimilationWaterKg = 0
+            culture.lastNitrogenDrawnKg = 0
+            culture.lastPhosphorusDrawnKg = 0
+            culture.lastPotassiumDrawnKg = 0
+            culture.lastMineralsDrawnKg = 0
+            culture.lastOxygenReleasedKg = 0
+            culture.lastEvaporatedKg = 0
+            culture.lastRespirationRequestedKg = 0
+            culture.lastRespirationKg = 0
+            culture.lastRespirationO2DrawnKg = 0
+            culture.lastRespirationLimiter = ''
+            culture.lastRespirationCo2ReturnedKg = 0
+            culture.lastRespirationWaterKg = 0
+            culture.lastRespirationHeatKW = 0
+            culture.lastOxygenLimited = false
+            culture.lastHeatIntoCompartmentKW = 0
+            culture.temperatureEligible = false
+            culture.lastBlockReason = ''
+            culture.lastHarvestRequestedKg = 0
+            culture.lastHarvestedKg = 0
+            culture.lastFoodAddedKg = 0
+            culture.lastRecoveryAddedKg = 0
+            culture.lastWasteAddedKg = 0
+            culture.lastFoodSurplusToRecoveryKg = 0
+            culture.lastRecoverySurplusToWasteKg = 0
+            culture.lastHarvestConstrainedKg = 0
+            culture.lastHarvestLimiter = ''
+            culture.lastDeadResidueToWasteKg = 0
+            culture.lastDeadResidueLostKg = 0
+            if culture.dead then
+                -- A dead culture stays dead: it grows nothing, respires
+                -- nothing and harvests nothing, because nothing in this
+                -- model recreates living biomass for free (#411).
+                culture.lastBlockReason = 'culture is dead: the living organic content was respired away under adverse conditions and nothing here recreates living biomass for free'
+            elseif culture.cultureVolumeL > 0 then
+                culture.lastIllumination = evaluateProfile(culture.illumination, elapsed)
+                culture.lastLightRequested = culture.lampRatedKW * culture.lastIllumination
+                culture.lastCirculationRequested = culture.circulationPowerKW
+                -- The essential circulation is paid for first: the
+                -- pumps draw from the same pool ahead of the
+                -- discretionary lamp demand.
+                local circulationFromGeneration = math.min(culture.lastCirculationRequested,
+                    generation)
+                generation = generation - circulationFromGeneration
+                local circulationFromBattery = drawBatteries(self,
+                    culture.lastCirculationRequested - circulationFromGeneration, fixed_hours)
+                culture.lastCirculationSupplied = circulationFromGeneration + circulationFromBattery
+                batterySupplied = batterySupplied + circulationFromBattery
+                local lightFromGeneration = math.min(culture.lastLightRequested, generation)
+                generation = generation - lightFromGeneration
+                local lightFromBattery = drawBatteries(self,
+                    culture.lastLightRequested - lightFromGeneration, fixed_hours)
+                culture.lastLightSupplied = lightFromGeneration + lightFromBattery
+                batterySupplied = batterySupplied + lightFromBattery
+                local circulationFraction = culture.lastCirculationRequested > 1e-12
+                    and culture.lastCirculationSupplied / culture.lastCirculationRequested or 1
+                local lightEnergyKJ = culture.lastLightSupplied * fixed_seconds
+                local circulationEnergyKJ = culture.lastCirculationSupplied * fixed_seconds
+                culture.lastGrowthPotential = lightEnergyKJ * culture.growthYieldKgPerKWh / 3600
+                culture.temperatureEligible = compartment.temperature + 1e-9
+                    >= culture.minGrowingTemperatureC
+                    and compartment.temperature + 1e-9 < culture.maxGrowingTemperatureC
+                local composition = culture.composition
+                local organicFraction = 1 - (composition.nutrientNitrogen
+                    + composition.phosphorus + composition.potassium
+                    + composition.otherMinerals)
+                local co2PerKgGrowth = organicFraction * PHOTOSYNTHESIS_CO2_KG_PER_ORGANIC_KG
+                local assimilationWaterPerKgGrowth = organicFraction
+                    * PHOTOSYNTHESIS_WATER_KG_PER_ORGANIC_KG
+                local oxygenPerKgGrowth = organicFraction * PHOTOSYNTHESIS_O2_KG_PER_ORGANIC_KG
+                local drawableWater = math.max(0,
+                    culture.water.qualified - culture.water.protected_reserve)
+                local drawableNitrogen = math.max(0,
+                    culture.nitrogen.qualified - culture.nitrogen.protected_reserve)
+                local drawablePhosphorus = math.max(0,
+                    culture.phosphorus.qualified - culture.phosphorus.protected_reserve)
+                local drawablePotassium = math.max(0,
+                    culture.potassium.qualified - culture.potassium.protected_reserve)
+                local drawableMinerals = math.max(0,
+                    culture.minerals.qualified - culture.minerals.protected_reserve)
+                local capacityHeadroom = math.max(0, culture.capacityKg - culture.livingBiomassKg)
+                local scale = 1
+                local limiter = ''
+                local function constrain(available, required, reason)
+                    if required <= 0 then return end
+                    local fraction = available / required
+                    if fraction < scale then
+                        scale = fraction
+                        limiter = reason
+                    end
+                end
+                if not culture.temperatureEligible then
+                    scale = 0
+                    limiter = compartment.temperature + 1e-9 < culture.minGrowingTemperatureC
+                        and "compartment '" .. compartment.id
+                            .. "' is below the minimum growing temperature: the culture is dormant"
+                        or "compartment '" .. compartment.id
+                            .. "' is at or above the maximum growing temperature: growth is heat-stopped"
+                elseif culture.lastGrowthPotential <= 0 then
+                    -- No light energy delivered: nothing drives
+                    -- photosynthesis. Darkness - or lamps with no
+                    -- power - grows nothing for free.
+                    scale = 0
+                    limiter = culture.lastLightRequested <= 1e-12
+                        and 'no light delivered: the illumination profile is dark, photosynthesis cannot run'
+                        or 'no light energy delivered: the lamps received no power, photosynthesis cannot run for free'
+                else
+                    constrain(circulationFraction * culture.lastGrowthPotential,
+                        culture.lastGrowthPotential,
+                        'culture circulation is not supplied: the gas, nutrient and light distribution cannot run')
+                    constrain(math.max(0, compartment.carbonDioxide),
+                        culture.lastGrowthPotential * co2PerKgGrowth,
+                        "compartment '" .. compartment.id .. "' holds no carbon dioxide to fix")
+                    constrain(drawableWater,
+                        fromKg(culture.water.unit, culture.lastGrowthPotential
+                            * (assimilationWaterPerKgGrowth + culture.evaporationKgPerKgGrowth)),
+                        "culture water store '" .. culture.water.id
+                            .. "' has nothing drawable above its protected reserve")
+                    constrain(drawableNitrogen,
+                        fromKg(culture.nitrogen.unit, culture.lastGrowthPotential
+                            * composition.nutrientNitrogen),
+                        "nitrogen store '" .. culture.nitrogen.id
+                            .. "' has nothing drawable above its protected reserve")
+                    constrain(drawablePhosphorus,
+                        fromKg(culture.phosphorus.unit, culture.lastGrowthPotential
+                            * composition.phosphorus),
+                        "phosphorus store '" .. culture.phosphorus.id
+                            .. "' has nothing drawable above its protected reserve")
+                    constrain(drawablePotassium,
+                        fromKg(culture.potassium.unit, culture.lastGrowthPotential
+                            * composition.potassium),
+                        "potassium store '" .. culture.potassium.id
+                            .. "' has nothing drawable above its protected reserve")
+                    constrain(drawableMinerals,
+                        fromKg(culture.minerals.unit, culture.lastGrowthPotential
+                            * composition.otherMinerals),
+                        "minerals store '" .. culture.minerals.id
+                            .. "' has nothing drawable above its protected reserve")
+                    constrain(capacityHeadroom, culture.lastGrowthPotential,
+                        "culture capacity of '" .. culture.id
+                            .. "' is full: the culture has no room to grow")
+                end
+                if scale < 0 then scale = 0 end
+                if scale > 1 then scale = 1 end
+                culture.lastGrowthScale = scale
+                culture.lastGrowthLimiter = limiter
+                -- The growth that actually runs: the potential at the
+                -- binding scale, capped by the capacity headroom, and
+                -- every flow derived from that actual growth so the
+                -- stoichiometric closure holds on what really moved.
+                -- Each draw is clamped to its own drawable so roundoff
+                -- never overshoots (#556).
+                local growthKg = math.min(culture.lastGrowthPotential * scale, capacityHeadroom)
+                local co2DrawnKg = math.min(growthKg * co2PerKgGrowth,
+                    math.max(0, compartment.carbonDioxide))
+                local assimilationWaterKg = growthKg * assimilationWaterPerKgGrowth
+                local evaporatedKg = growthKg * culture.evaporationKgPerKgGrowth
+                local makeupWaterUnits = math.min(
+                    fromKg(culture.water.unit, assimilationWaterKg + evaporatedKg), drawableWater)
+                local makeupWaterActualKg = toKg(culture.water.unit, makeupWaterUnits)
+                local nitrogenUnits = math.min(
+                    fromKg(culture.nitrogen.unit, growthKg * composition.nutrientNitrogen),
+                    drawableNitrogen)
+                local phosphorusUnits = math.min(
+                    fromKg(culture.phosphorus.unit, growthKg * composition.phosphorus),
+                    drawablePhosphorus)
+                local potassiumUnits = math.min(
+                    fromKg(culture.potassium.unit, growthKg * composition.potassium),
+                    drawablePotassium)
+                local mineralsUnits = math.min(
+                    fromKg(culture.minerals.unit, growthKg * composition.otherMinerals),
+                    drawableMinerals)
+                local oxygenReleasedKg = growthKg * oxygenPerKgGrowth
+                compartment.carbonDioxide = compartment.carbonDioxide - co2DrawnKg
+                compartment.algaeCarbonDioxideDrawn =
+                    (compartment.algaeCarbonDioxideDrawn or 0) + co2DrawnKg
+                compartment.oxygen = compartment.oxygen + oxygenReleasedKg
+                compartment.algaeOxygenAdded =
+                    (compartment.algaeOxygenAdded or 0) + oxygenReleasedKg
+                culture.water.qualified = culture.water.qualified - makeupWaterUnits
+                culture.nitrogen.qualified = culture.nitrogen.qualified - nitrogenUnits
+                culture.phosphorus.qualified = culture.phosphorus.qualified - phosphorusUnits
+                culture.potassium.qualified = culture.potassium.qualified - potassiumUnits
+                culture.minerals.qualified = culture.minerals.qualified - mineralsUnits
+                self.unit_loss[culture.water.unit] =
+                    (self.unit_loss[culture.water.unit] or 0) + makeupWaterUnits
+                self.unit_loss[culture.nitrogen.unit] =
+                    (self.unit_loss[culture.nitrogen.unit] or 0) + nitrogenUnits
+                self.unit_loss[culture.phosphorus.unit] =
+                    (self.unit_loss[culture.phosphorus.unit] or 0) + phosphorusUnits
+                self.unit_loss[culture.potassium.unit] =
+                    (self.unit_loss[culture.potassium.unit] or 0) + potassiumUnits
+                self.unit_loss[culture.minerals.unit] =
+                    (self.unit_loss[culture.minerals.unit] or 0) + mineralsUnits
+                -- Constituent boundary: what the uptake stores carry as
+                -- declared compound material leaves the compound-
+                -- material world with the draw; plain stores contribute
+                -- nothing to the ledger.
+                local net = {}
+                if culture.water.composition then
+                    addConstituents(net, culture.water.composition, makeupWaterActualKg, -1)
+                end
+                if culture.nitrogen.composition then
+                    addConstituents(net, culture.nitrogen.composition,
+                        toKg(culture.nitrogen.unit, nitrogenUnits), -1)
+                end
+                if culture.phosphorus.composition then
+                    addConstituents(net, culture.phosphorus.composition,
+                        toKg(culture.phosphorus.unit, phosphorusUnits), -1)
+                end
+                if culture.potassium.composition then
+                    addConstituents(net, culture.potassium.composition,
+                        toKg(culture.potassium.unit, potassiumUnits), -1)
+                end
+                if culture.minerals.composition then
+                    addConstituents(net, culture.minerals.composition,
+                        toKg(culture.minerals.unit, mineralsUnits), -1)
+                end
+                for constituent, change in pairs(net) do
+                    self.constituent_loss[constituent] =
+                        (self.constituent_loss[constituent] or 0) - change
+                end
+                culture.livingBiomassKg = culture.livingBiomassKg + growthKg
+                -- Respiration runs day and night against the declared
+                -- organic content of the living biomass, capped by the
+                -- oxygen the compartment actually holds.
+                local organicContent = culture.livingBiomassKg * organicFraction
+                local respirationRequested = math.min(
+                    culture.respirationPerHour * culture.livingBiomassKg * fixed_hours,
+                    organicContent)
+                local respirationO2Required = respirationRequested
+                    * PHOTOSYNTHESIS_O2_KG_PER_ORGANIC_KG
+                local respirationScale = respirationO2Required > 0
+                    and math.min(1, math.max(0, compartment.oxygen) / respirationO2Required)
+                    or 1
+                local respiredOrganicKg = respirationRequested * respirationScale
+                local respirationO2DrawnKg = math.min(respirationO2Required * respirationScale,
+                    math.max(0, compartment.oxygen))
+                local respirationCo2Kg = respiredOrganicKg * PHOTOSYNTHESIS_CO2_KG_PER_ORGANIC_KG
+                local respirationWaterKg = respiredOrganicKg
+                    * PHOTOSYNTHESIS_WATER_KG_PER_ORGANIC_KG
+                if respirationScale < 1 - 1e-12 and respirationRequested > 0 then
+                    culture.lastOxygenLimited = true
+                    culture.lastRespirationLimiter = "compartment '" .. compartment.id
+                        .. "' oxygen inventory cannot supply the respiration draw"
+                end
+                compartment.oxygen = compartment.oxygen - respirationO2DrawnKg
+                compartment.algaeOxygenDrawn =
+                    (compartment.algaeOxygenDrawn or 0) + respirationO2DrawnKg
+                compartment.carbonDioxide = compartment.carbonDioxide + respirationCo2Kg
+                compartment.algaeCarbonDioxideAdded =
+                    (compartment.algaeCarbonDioxideAdded or 0) + respirationCo2Kg
+                compartment.waterVapour = compartment.waterVapour
+                    + respirationWaterKg + evaporatedKg
+                compartment.algaeVapourAdded = compartment.algaeVapourAdded
+                    + respirationWaterKg + evaporatedKg
+                culture.livingBiomassKg = culture.livingBiomassKg - respiredOrganicKg
+                -- Adverse-condition death (#411): when respiration
+                -- exhausts the living organic content the culture
+                -- starves. The remaining non-respirable residue is
+                -- routed to the declared waste store as far as its
+                -- headroom reaches; whatever the waste path cannot hold
+                -- is booked as explicit uncontained loss. Nothing
+                -- vanishes silently, and the dead never regrow for free.
+                if culture.livingBiomassKg * organicFraction <= 1e-9 then
+                    culture.dead = true
+                    local residueKg = culture.livingBiomassKg
+                    local routedKg = 0
+                    if culture.waste then
+                        local wasteHeadroomUnits = math.max(0, culture.waste.capacity
+                            - culture.waste.qualified - culture.waste.unqualified)
+                        local routedUnits = math.min(
+                            fromKg(culture.waste.unit, residueKg), wasteHeadroomUnits)
+                        routedKg = toKg(culture.waste.unit, routedUnits)
+                        if routedUnits > 0 then
+                            culture.waste.qualified = culture.waste.qualified + routedUnits
+                            self.unit_harvested[culture.waste.unit] =
+                                (self.unit_harvested[culture.waste.unit] or 0) + routedUnits
+                            if culture.waste.composition then
+                                addConstituents(self.constituent_harvested, composition,
+                                    routedKg, 1)
+                            end
+                        end
+                    end
+                    culture.livingBiomassKg = culture.livingBiomassKg - residueKg
+                    local lostKg = residueKg - routedKg
+                    culture.lastDeadResidueToWasteKg = routedKg
+                    culture.lastDeadResidueLostKg = lostKg
+                    culture.deadResidueToWasteKg = culture.deadResidueToWasteKg + routedKg
+                    culture.deadResidueLostKg = culture.deadResidueLostKg + lostKg
+                end
+                -- Harvest (#411): the declared trigger removes real
+                -- living dry biomass, and the removed mass is
+                -- partitioned into the three declared destinations
+                -- conservatively. The food share enters the food store
+                -- as far as its headroom reaches; the food surplus rides
+                -- the recovery path beside the declared recovery share;
+                -- whatever recovery cannot hold rides the waste path
+                -- beside the unrecoverable remainder; and what no
+                -- destination can place stays living rather than being
+                -- discarded for free. The harvest runs after the same
+                -- tick's growth.
+                if culture.harvestTriggerKg > 0
+                    and culture.livingBiomassKg + 1e-12 >= culture.harvestTriggerKg then
+                    local requestedKg = culture.harvestFraction * culture.livingBiomassKg
+                    local foodRequestedKg = requestedKg * culture.foodFraction
+                    local recoveryRequestedKg = requestedKg * culture.recoveryFraction
+                    local unrecoverableRequestedKg = requestedKg - foodRequestedKg
+                        - recoveryRequestedKg
+                    local foodHeadroomUnits = math.max(0, culture.food.capacity
+                        - culture.food.qualified - culture.food.unqualified)
+                    local recoveryHeadroomUnits = math.max(0, culture.recovery.capacity
+                        - culture.recovery.qualified - culture.recovery.unqualified)
+                    local wasteHeadroomUnits = math.max(0, culture.waste.capacity
+                        - culture.waste.qualified - culture.waste.unqualified)
+                    local foodAcceptedUnits = math.min(
+                        fromKg(culture.food.unit, foodRequestedKg), foodHeadroomUnits)
+                    local foodAcceptedKg = toKg(culture.food.unit, foodAcceptedUnits)
+                    local foodSurplusKg = foodRequestedKg - foodAcceptedKg
+                    local recoveryNeededKg = recoveryRequestedKg + foodSurplusKg
+                    local recoveryAcceptedUnits = math.min(
+                        fromKg(culture.recovery.unit, recoveryNeededKg), recoveryHeadroomUnits)
+                    local recoveryAcceptedKg = toKg(culture.recovery.unit, recoveryAcceptedUnits)
+                    local recoverySurplusKg = recoveryNeededKg - recoveryAcceptedKg
+                    local wasteNeededKg = unrecoverableRequestedKg + recoverySurplusKg
+                    local wasteAcceptedUnits = math.min(
+                        fromKg(culture.waste.unit, wasteNeededKg), wasteHeadroomUnits)
+                    local wasteAcceptedKg = toKg(culture.waste.unit, wasteAcceptedUnits)
+                    local harvestedKg = foodAcceptedKg + recoveryAcceptedKg + wasteAcceptedKg
+                    local constrainedKg = requestedKg - harvestedKg
+                    if foodAcceptedUnits > 0 then
+                        culture.food.qualified = culture.food.qualified + foodAcceptedUnits
+                        self.unit_harvested[culture.food.unit] =
+                            (self.unit_harvested[culture.food.unit] or 0) + foodAcceptedUnits
+                        if culture.food.composition then
+                            addConstituents(self.constituent_harvested, composition,
+                                foodAcceptedKg, 1)
+                        end
+                    end
+                    if recoveryAcceptedUnits > 0 then
+                        culture.recovery.qualified = culture.recovery.qualified + recoveryAcceptedUnits
+                        self.unit_harvested[culture.recovery.unit] =
+                            (self.unit_harvested[culture.recovery.unit] or 0) + recoveryAcceptedUnits
+                        if culture.recovery.composition then
+                            addConstituents(self.constituent_harvested, composition,
+                                recoveryAcceptedKg, 1)
+                        end
+                    end
+                    if wasteAcceptedUnits > 0 then
+                        culture.waste.qualified = culture.waste.qualified + wasteAcceptedUnits
+                        self.unit_harvested[culture.waste.unit] =
+                            (self.unit_harvested[culture.waste.unit] or 0) + wasteAcceptedUnits
+                        if culture.waste.composition then
+                            addConstituents(self.constituent_harvested, composition,
+                                wasteAcceptedKg, 1)
+                        end
+                    end
+                    culture.livingBiomassKg = culture.livingBiomassKg - harvestedKg
+                    culture.lastHarvestRequestedKg = requestedKg
+                    culture.lastHarvestedKg = harvestedKg
+                    culture.lastFoodAddedKg = foodAcceptedKg
+                    culture.lastRecoveryAddedKg = recoveryAcceptedKg
+                    culture.lastWasteAddedKg = wasteAcceptedKg
+                    culture.lastFoodSurplusToRecoveryKg = foodSurplusKg
+                    culture.lastRecoverySurplusToWasteKg = recoverySurplusKg
+                    culture.lastHarvestConstrainedKg = constrainedKg
+                    if constrainedKg > 1e-12 then
+                        culture.lastHarvestLimiter = 'harvest destinations cannot hold the yield: food store '
+                            .. culture.food.id .. ', recovery store ' .. culture.recovery.id
+                            .. ' and waste store ' .. culture.waste.id
+                            .. ' are full, the remainder stays living'
+                    elseif recoverySurplusKg > 1e-12 then
+                        culture.lastHarvestLimiter = 'recovery store ' .. culture.recovery.id
+                            .. ' is full: the recovery surplus is routed through the waste path'
+                    elseif foodSurplusKg > 1e-12 then
+                        culture.lastHarvestLimiter = 'food store ' .. culture.food.id
+                            .. ' is full: the edible surplus is routed through the recovery path'
+                    else
+                        culture.lastHarvestLimiter = ''
+                    end
+                    culture.harvestedKg = culture.harvestedKg + harvestedKg
+                    culture.foodProducedKg = culture.foodProducedKg + foodAcceptedKg
+                    culture.recoveryProducedKg = culture.recoveryProducedKg + recoveryAcceptedKg
+                    culture.wasteProducedKg = culture.wasteProducedKg + wasteAcceptedKg
+                    culture.foodSurplusToRecoveryKg = culture.foodSurplusToRecoveryKg + foodSurplusKg
+                    culture.recoverySurplusToWasteKg = culture.recoverySurplusToWasteKg + recoverySurplusKg
+                end
+                -- Energy: the light energy not fixed as biomass
+                -- chemical energy, the circulation pump work and the
+                -- respiration heat land in the compartment once, booked
+                -- as the algae thermal term beside the crop heat.
+                local chemicalEnergyFixedKJ = growthKg * composition.energyKJPerKgDry
+                local respirationHeatKJ = respiredOrganicKg * composition.energyKJPerKgDry
+                local heatIntoCompartmentKJ = lightEnergyKJ - chemicalEnergyFixedKJ
+                    + circulationEnergyKJ + respirationHeatKJ
+                compartment.algaeHeat = (compartment.algaeHeat or 0)
+                    + heatIntoCompartmentKJ / fixed_seconds
+                culture.lastGrowthKg = growthKg
+                culture.lastCo2DrawnKg = co2DrawnKg
+                culture.lastAssimilationWaterKg = assimilationWaterKg
+                culture.lastNitrogenDrawnKg = toKg(culture.nitrogen.unit, nitrogenUnits)
+                culture.lastPhosphorusDrawnKg = toKg(culture.phosphorus.unit, phosphorusUnits)
+                culture.lastPotassiumDrawnKg = toKg(culture.potassium.unit, potassiumUnits)
+                culture.lastMineralsDrawnKg = toKg(culture.minerals.unit, mineralsUnits)
+                culture.lastOxygenReleasedKg = oxygenReleasedKg
+                culture.lastEvaporatedKg = evaporatedKg
+                culture.lastRespirationRequestedKg = respirationRequested
+                culture.lastRespirationKg = respiredOrganicKg
+                culture.lastRespirationO2DrawnKg = respirationO2DrawnKg
+                culture.lastRespirationCo2ReturnedKg = respirationCo2Kg
+                culture.lastRespirationWaterKg = respirationWaterKg
+                culture.lastRespirationHeatKW = respirationHeatKJ / fixed_seconds
+                culture.lastHeatIntoCompartmentKW = heatIntoCompartmentKJ / fixed_seconds
+                culture.growthKg = culture.growthKg + growthKg
+                culture.co2DrawnKg = culture.co2DrawnKg + co2DrawnKg
+                culture.waterDrawnKg = culture.waterDrawnKg + makeupWaterActualKg
+                culture.nitrogenDrawnKg = culture.nitrogenDrawnKg + toKg(culture.nitrogen.unit, nitrogenUnits)
+                culture.phosphorusDrawnKg = culture.phosphorusDrawnKg
+                    + toKg(culture.phosphorus.unit, phosphorusUnits)
+                culture.potassiumDrawnKg = culture.potassiumDrawnKg
+                    + toKg(culture.potassium.unit, potassiumUnits)
+                culture.mineralsDrawnKg = culture.mineralsDrawnKg
+                    + toKg(culture.minerals.unit, mineralsUnits)
+                culture.oxygenReleasedKg = culture.oxygenReleasedKg + oxygenReleasedKg
+                culture.evaporatedKg = culture.evaporatedKg + evaporatedKg
+                culture.respirationKg = culture.respirationKg + respiredOrganicKg
+                culture.respirationO2DrawnKg = culture.respirationO2DrawnKg + respirationO2DrawnKg
+                culture.respirationCo2ReturnedKg = culture.respirationCo2ReturnedKg + respirationCo2Kg
+                culture.respirationWaterKg = culture.respirationWaterKg + respirationWaterKg
+                culture.lightEnergyKJ = culture.lightEnergyKJ + lightEnergyKJ
+                culture.circulationEnergyKJ = culture.circulationEnergyKJ + circulationEnergyKJ
+                culture.chemicalEnergyFixedKJ = culture.chemicalEnergyFixedKJ + chemicalEnergyFixedKJ
+                culture.respirationHeatKJ = culture.respirationHeatKJ + respirationHeatKJ
+                culture.heatIntoCompartmentKJ = culture.heatIntoCompartmentKJ + heatIntoCompartmentKJ
+                if scale <= 1e-12 then
+                    culture.lastBlockReason = limiter
+                end
+            end
+            assert(isFinite(culture.livingBiomassKg) and isFinite(culture.lastIllumination)
+                and isFinite(culture.lastLightRequested) and isFinite(culture.lastLightSupplied)
+                and isFinite(culture.lastCirculationRequested) and isFinite(culture.lastCirculationSupplied)
+                and isFinite(culture.lastGrowthPotential) and isFinite(culture.lastGrowthScale)
+                and isFinite(culture.lastGrowthKg) and isFinite(culture.lastCo2DrawnKg)
+                and isFinite(culture.lastAssimilationWaterKg) and isFinite(culture.lastNitrogenDrawnKg)
+                and isFinite(culture.lastPhosphorusDrawnKg) and isFinite(culture.lastPotassiumDrawnKg)
+                and isFinite(culture.lastMineralsDrawnKg) and isFinite(culture.lastOxygenReleasedKg)
+                and isFinite(culture.lastEvaporatedKg) and isFinite(culture.lastRespirationRequestedKg)
+                and isFinite(culture.lastRespirationKg) and isFinite(culture.lastRespirationO2DrawnKg)
+                and isFinite(culture.lastRespirationCo2ReturnedKg) and isFinite(culture.lastRespirationWaterKg)
+                and isFinite(culture.lastRespirationHeatKW) and isFinite(culture.lastHeatIntoCompartmentKW),
+                "algae culture '" .. culture.id .. "' result is not finite")
+        end
         -- Second loop pass: integrate the loop's temperature from the
         -- pump work, heater heat, exchanger exchange and the chiller
         -- extraction that actually moved this tick, and expose the
@@ -6508,21 +7238,26 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local closures = {
                 { 'oxygen', compartment.startingOxygen,
                     (compartment.electrolysisOxygen or 0)
-                        + (compartment.cropOxygenAdded or 0),
+                        + (compartment.cropOxygenAdded or 0)
+                        + (compartment.algaeOxygenAdded or 0),
                     compartment.oxygenConsumed + compartment.leakOxygen
-                        + compartment.cycleOxygen + (compartment.cropOxygenDrawn or 0),
+                        + compartment.cycleOxygen + (compartment.cropOxygenDrawn or 0)
+                        + (compartment.algaeOxygenDrawn or 0),
                     compartment.oxygen },
                 { 'nitrogen', compartment.startingNitrogen, 0,
                     compartment.leakNitrogen + compartment.cycleNitrogen,
                     compartment.nitrogen },
                 { 'carbonDioxide', compartment.startingCarbonDioxide,
-                    compartment.co2Produced + (compartment.cropCarbonDioxideAdded or 0),
+                    compartment.co2Produced + (compartment.cropCarbonDioxideAdded or 0)
+                        + (compartment.algaeCarbonDioxideAdded or 0),
                     compartment.leakCarbonDioxide + compartment.cycleCarbonDioxide
                         + (compartment.capturedCarbonDioxide or 0)
-                        + (compartment.cropCarbonDioxideDrawn or 0),
+                        + (compartment.cropCarbonDioxideDrawn or 0)
+                        + (compartment.algaeCarbonDioxideDrawn or 0),
                     compartment.carbonDioxide },
                 { 'waterVapour', compartment.startingWaterVapour,
-                    compartment.vapourAdded + (compartment.cropVapourAdded or 0),
+                    compartment.vapourAdded + (compartment.cropVapourAdded or 0)
+                        + (compartment.algaeVapourAdded or 0),
                     compartment.condensed + compartment.leakWaterVapour
                         + compartment.cycleWaterVapour + (compartment.collected or 0),
                     compartment.waterVapour },
@@ -6550,6 +7285,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local thermalBound = BALANCE_TOLERANCE * math.max(1, math.abs(startingEnergy))
             local thermalResidual = startingEnergy + compartment.occupantHeatKJ
                 + compartment.crewHeatKJ + compartment.cropHeatKJ
+                + compartment.algaeHeatKJ
                 + compartment.latentHeatKJ + compartment.exchangedKJ
                 - compartment.capacity * compartment.temperature
             assert(thermalResidual == thermalResidual and math.abs(thermalResidual) <= thermalBound,

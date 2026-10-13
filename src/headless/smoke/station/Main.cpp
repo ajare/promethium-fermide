@@ -145,7 +145,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 88"), 11, "version: 65");
+		text.replace(text.find("version: 89"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -2266,8 +2266,8 @@ namespace
 		auto const bundled = core::bundledStationSystemsSource();
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -2326,8 +2326,8 @@ namespace
 		// model's own audits hold.
 		core::setStationSystemsSourceLoader([bundled] {
 			return "local factory = (function()\n" + bundled + "\nend)()\n"
-				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
-				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 				"local original = model.advance\n"
 				"function model.advance(self, tick, seconds)\n"
 				"local result = original(self, tick, seconds)\n"
@@ -3711,8 +3711,8 @@ namespace
 			auto const bundled = core::bundledStationSystemsSource();
 			core::setStationSystemsSourceLoader([bundled] {
 				return "local factory = (function()\n" + bundled + "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -4676,13 +4676,13 @@ namespace
 			auto const bundled = core::bundledStationSystemsSource();
 			core::setStationSystemsSourceLoader([bundled] {
 				return "local factory = (function()\n" + bundled + "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"assert(#reservoirs == 1 and reservoirs[1].id == 'cabin'\n"
 					"\tand reservoirs[1].heatCapacityKJPerK == 100 and reservoirs[1].absorbedHeatKW == 0)\n"
 					"assert(#radiators == 1 and radiators[1].reservoir == 'cabin'\n"
 					"\tand radiators[1].areaM2 == 5000)\n"
 					"assert(#loads == 1 and loads[1].heatSinkId == 'cabin')\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"assert(model.reservoirs[1].temperature == 20)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
@@ -5310,8 +5310,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled, expectedLiteral] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -5382,7 +5382,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"assert(type(coolantLoops) == 'table' and #coolantLoops == 1, 'coolant loop descriptor crossing lost')\n"
 					"assert(coolantLoops[1].coolantCapacityKg > 0, 'corrupt coolant capacity crossing')\n"
 					"error('corrupt coolant descriptor crossing')\n"
@@ -6057,8 +6057,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled, expectedLiteral] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -6183,7 +6183,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"assert(type(chillers) == 'table' and #chillers == 1, 'chiller descriptor crossing lost')\n"
 					"assert(chillers[1].cop > 0, 'corrupt chiller COP crossing')\n"
 					"error('corrupt chiller descriptor crossing')\n"
@@ -6872,8 +6872,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
-					"return factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
+					"return factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"end";
 			});
 			core::World probe("StartupAuditOverAllocationProbe", 2, 2);
@@ -7211,7 +7211,7 @@ namespace
 		// construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"assert(type(generators) == 'table' and #generators == 1, 'generator descriptor crossing lost')\n"
 					"assert(generators[1].efficiency > 0, 'corrupt generator efficiency crossing')\n"
 					"error('corrupt generator descriptor crossing')\n"
@@ -7679,7 +7679,7 @@ namespace
 		// contained at construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"assert(type(crews) == 'table' and #crews == 1, 'crew descriptor crossing lost')\n"
 					"assert(crews[1].foodRate > 0, 'corrupt crew rate crossing')\n"
 					"error('corrupt crew descriptor crossing')\n"
@@ -7704,8 +7704,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -8481,8 +8481,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled, expectedLiteral] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -8541,7 +8541,7 @@ namespace
 		// is contained at construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"assert(type(atmospheres) == 'table' and #atmospheres == 1, 'atmosphere descriptor crossing lost')\n"
 					"assert(atmospheres[1].volumeM3 > 0, 'corrupt atmosphere volume crossing')\n"
 					"error('corrupt atmosphere descriptor crossing')\n"
@@ -8560,7 +8560,7 @@ namespace
 		// A corrupt airlock cycle crossing is contained the same way.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"assert(type(airlockCycles) == 'table' and #airlockCycles == 1, 'airlock cycle descriptor crossing lost')\n"
 					"error('corrupt airlock cycle descriptor crossing')\n"
 					"end";
@@ -9091,7 +9091,7 @@ namespace
 		// contained at construction through the integrated error path.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"assert(type(waterCollectors) == 'table' and #waterCollectors == 1, 'water collector descriptor crossing lost')\n"
 					"assert(waterCollectors[1].maxRateKgPerS > 0, 'corrupt collector rate crossing')\n"
 					"error('corrupt water collector descriptor crossing')\n"
@@ -9113,7 +9113,7 @@ namespace
 		// contained the same way.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"assert(type(waterTreatments) == 'table' and #waterTreatments == 1, 'water treatment descriptor crossing lost')\n"
 					"assert(waterTreatments[1].recoveryRatio > 0 and waterTreatments[1].recoveryRatio <= 1, 'corrupt recovery ratio crossing')\n"
 					"error('corrupt water treatment descriptor crossing')\n"
@@ -9589,8 +9589,8 @@ namespace
 			auto const bundled = core::bundledStationSystemsSource();
 			core::setStationSystemsSourceLoader([bundled] {
 				return "local factory = (function()\n" + bundled + "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
-					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"local original = model.advance\n"
 					"function model.advance(self, tick, seconds)\n"
 					"local result = original(self, tick, seconds)\n"
@@ -10131,7 +10131,7 @@ namespace
 		// no partial result escapes.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"assert(type(electrolyzers) == 'table' and #electrolyzers == 1, 'electrolyzer descriptor crossing lost')\n"
 					"assert(electrolyzers[1].rateKgPerS > 0, 'corrupt electrolyzer rate crossing')\n"
 					"error('corrupt electrolyzer descriptor crossing')\n"
@@ -10667,7 +10667,7 @@ namespace
 		// disabled and no partial result escapes.
 		{
 			core::setStationSystemsSourceLoader([] {
-				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+				return "return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
 					"assert(type(fuelCells) == 'table' and #fuelCells == 1, 'fuel cell descriptor crossing lost')\n"
 					"assert(fuelCells[1].ratedOutputKW > 0, 'corrupt fuel cell rate crossing')\n"
 					"error('corrupt fuel cell descriptor crossing')\n"
@@ -13412,6 +13412,728 @@ void buffers(smoke::Context const&)
 		}
 	}
 
+	// The #411 algae check: a separate algae culture runs the same
+	// biological lifecycle as the crops with its own installation limits -
+	// capacity from the active culture volume times the supported density
+	// per litre, its own coefficients, and a harvest that partitions the
+	// removed dry mass into three declared destinations (food, recovery,
+	// waste) conservatively, each destination's surplus cascading to the
+	// next and what none can hold staying living. Malformed culture and
+	// harvest-partition contracts are refused at the boundary; the
+	// culture starves independently of the crops; the culture stops at
+	// its own capacity; and a crop and an algae culture sharing the same
+	// compartment, power pool and nutrient stores compete without either
+	// creating, destroying or shadowing the other's material. Test
+	// biology is deliberately exaggerated so the hour-scale growth,
+	// respiration and starvation are observable in short headless runs;
+	// every scenario also runs the bundled Lua sandbox, whose own
+	// harvest and loss audit contains the model if it drifts.
+	void algae(smoke::Context const&)
+	{
+		auto closeTo = [](double actual, double expected, double relative)
+		{
+			return std::abs(actual - expected) <= relative * std::max(1e-12, std::abs(expected));
+		};
+		auto advanceOrDiagnose = [](core::World& world, uint64_t ticks, char const* what)
+		{
+			if (world.advanceTicks(ticks)) return true;
+			auto const diagnostics = world.getStationSystemsDiagnostics();
+			std::fprintf(stderr, "%s failed: %s\n", what,
+				diagnostics.empty() ? "(no Station diagnostic)" : diagnostics.back().message.c_str());
+			return false;
+		};
+		auto sawEvent = [](core::World& world, std::string const& needle)
+		{
+			for (auto const& event : world.getStationSystemsEvents())
+				if (event.message.find(needle) != std::string::npos) return true;
+			return false;
+		};
+		auto cultureComposition = []()
+		{
+			core::ResourceCompositionSettings composition;
+			composition.moisture = 0.0;
+			composition.nutrientNitrogen = 0.06;
+			composition.atmosphericNitrogen = 0.0;
+			composition.phosphorus = 0.02;
+			composition.potassium = 0.03;
+			composition.otherMinerals = 0.04;
+			composition.energyKJPerKgDry = 1700.0;
+			return composition;
+		};
+		auto cultureStore = [](std::string const& id, double capacity, double starting,
+			std::optional<core::ResourceCompositionSettings> composition = std::nullopt)
+		{
+			core::ResourceStoreSettings settings;
+			settings.id = id;
+			settings.unit = "kg";
+			settings.capacity = capacity;
+			settings.startingQualified = starting;
+			settings.composition = std::move(composition);
+			return settings;
+		};
+		auto habitat = []()
+		{
+			core::AtmosphereSettings settings;
+			settings.id = "habitat";
+			settings.hazardClass = "normal";
+			settings.volumeM3 = 100.0;
+			settings.startingOxygenKg = 40.0;
+			settings.startingNitrogenKg = 80.0;
+			settings.startingCarbonDioxideKg = 5.0;
+			settings.startingWaterVapourKg = 1.0;
+			settings.startingTemperatureC = 22.0;
+			settings.thermalCapacityKJPerK = 20000.0;
+			settings.minPressureKPa = 1.0;
+			settings.maxPressureKPa = 200.0;
+			return settings;
+		};
+		// A fast-growing test culture: 1000 L of active volume at 2 g of
+		// dry biomass per litre is a 2 kg installation capacity, and
+		// 0.02 kg/s of growth under full light crosses a sub-kilogram
+		// harvest trigger within a short headless run.
+		auto culture = [&]()
+		{
+			core::AlgaeCultureSettings settings;
+			settings.id = "pond";
+			settings.atmosphereId = "habitat";
+			settings.waterStoreId = "makeup";
+			settings.nitrogenStoreId = "fertN";
+			settings.phosphorusStoreId = "fertP";
+			settings.potassiumStoreId = "fertK";
+			settings.mineralsStoreId = "fertMin";
+			settings.composition = cultureComposition();
+			settings.cultureVolumeL = 1000.0;
+			settings.maxBiomassDensityKgPerL = 0.002; // 2 kg culture capacity
+			settings.initialBiomassKg = 0.1;
+			settings.lampRatedKW = 36.0;
+			settings.illuminationProfile.constantLevel = 1.0;
+			settings.circulationPowerKW = 0.1;
+			settings.growthYieldKgPerKWh = 2.0;
+			settings.respirationPerHour = 0.5;
+			settings.evaporationKgPerKgGrowth = 1.0;
+			settings.minGrowingTemperatureC = 10.0;
+			settings.maxGrowingTemperatureC = 35.0;
+			settings.foodStoreId = "afood";
+			settings.recoveryStoreId = "arecovery";
+			settings.wasteStoreId = "awaste";
+			settings.foodFraction = 0.4;
+			settings.recoveryFraction = 0.3;
+			settings.harvestTriggerKg = 0.3;
+			settings.harvestFraction = 1.0;
+			return settings;
+		};
+		auto fullStores = [&]()
+		{
+			std::vector<core::ResourceStoreSettings> stores;
+			stores.push_back(cultureStore("makeup", 200.0, 150.0));
+			stores.push_back(cultureStore("fertN", 10.0, 5.0));
+			stores.push_back(cultureStore("fertP", 10.0, 5.0));
+			stores.push_back(cultureStore("fertK", 10.0, 5.0));
+			stores.push_back(cultureStore("fertMin", 10.0, 5.0));
+			stores.push_back(cultureStore("afood", 10.0, 0.0));
+			stores.push_back(cultureStore("arecovery", 10.0, 0.0));
+			stores.push_back(cultureStore("awaste", 10.0, 0.0));
+			return stores;
+		};
+		auto configure = [&](core::World& world,
+			std::vector<core::ResourceStoreSettings> stores,
+			std::vector<core::AlgaeCultureSettings> cultures,
+			std::vector<core::CropPopulationSettings> crops = {},
+			double solarKW = 100.0)
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = std::move(stores);
+			settings.atmospheres = { habitat() };
+			settings.algaeCultures = std::move(cultures);
+			settings.cropPopulations = std::move(crops);
+			core::SolarArraySettings field;
+			field.id = "field";
+			field.capacityKW = solarKW;
+			settings.solarArrays = { field };
+			return std::make_pair(
+				world.configureStationSystems(settings, false, &diagnostic), diagnostic);
+		};
+		auto findStore = [](core::StationSystemsSnapshot const& snap, std::string const& id)
+		{
+			for (auto const& entry : snap.stores)
+				if (entry.id == id) return entry;
+			return core::StationSystemsStoreSnapshot{};
+		};
+		// Refused culture and harvest-partition contracts: every malformed
+		// declaration is rejected before anything runs, each with its own
+		// diagnostic.
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = fullStores();
+			settings.atmospheres = { habitat() };
+			std::string diagnostic;
+			settings.algaeCultures = { culture() };
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				"the nominal algae contract was refused");
+			settings.algaeCultures = { culture() };
+			settings.algaeCultures[0].foodStoreId = "";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("food destination store is not named") != std::string::npos,
+				"a harvest enabled without a food destination was accepted");
+			settings.algaeCultures = { culture() };
+			settings.algaeCultures[0].recoveryStoreId = "";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("recovery destination store is not named") != std::string::npos,
+				"a harvest enabled without a recovery destination was accepted");
+			settings.algaeCultures = { culture() };
+			settings.algaeCultures[0].wasteStoreId = "ghost";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("waste store 'ghost' does not exist") != std::string::npos,
+				"a harvest into an unknown waste store was accepted");
+			settings.algaeCultures = { culture() };
+			settings.stores = fullStores();
+			settings.stores[6].unit = "L";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("recovery store 'arecovery' must be a mass unit")
+					!= std::string::npos,
+				"a harvest into a non-mass recovery store was accepted");
+			settings.algaeCultures = { culture() };
+			settings.stores = fullStores();
+			settings.algaeCultures[0].recoveryStoreId = "afood";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("food store and recovery store are the same store")
+					!= std::string::npos,
+				"a harvest with one destination for two partition shares was accepted");
+			settings.algaeCultures = { culture() };
+			settings.algaeCultures[0].foodFraction = 0.7;
+			settings.algaeCultures[0].recoveryFraction = 0.5;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("food and recovery fractions together exceed 1")
+					!= std::string::npos,
+				"a harvest partition claiming more than 100% of the harvest was accepted");
+			settings.algaeCultures = { culture() };
+			settings.algaeCultures[0].harvestFraction = 0.0;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("a harvest that removes nothing is not a harvest")
+					!= std::string::npos,
+				"a zero harvest fraction was accepted");
+			settings.algaeCultures = { culture() };
+			settings.algaeCultures[0].harvestTriggerKg = 3.0;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("harvest trigger exceeds the declared culture capacity")
+					!= std::string::npos,
+				"a harvest trigger above the culture capacity was accepted");
+			settings.algaeCultures = { culture() };
+			settings.stores = fullStores();
+			core::ResourceCompositionSettings different;
+			different.moisture = 0.0;
+			different.nutrientNitrogen = 0.2;
+			different.energyKJPerKgDry = 900.0;
+			settings.stores[5].composition = different;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("declares a composition different from the culture's")
+					!= std::string::npos,
+				"a harvest into a store declaring a different compound material was accepted");
+			settings.algaeCultures = { culture() };
+			settings.algaeCultures[0].initialBiomassKg = 3.0;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("initial living biomass exceeds the declared culture capacity")
+					!= std::string::npos,
+				"a culture starting fuller than its installation was accepted");
+			// A harvest-disabled culture (trigger 0) needs no
+			// destinations and stays valid.
+			settings.algaeCultures = { culture() };
+			settings.algaeCultures[0].harvestTriggerKg = 0.0;
+			settings.algaeCultures[0].foodStoreId = "";
+			settings.algaeCultures[0].recoveryStoreId = "";
+			settings.algaeCultures[0].wasteStoreId = "";
+			settings.stores = fullStores();
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				"a harvest-disabled algae culture was refused");
+		}
+		// Basic three-way harvest: the culture crosses its trigger, real
+		// living material is removed, and the declared food/recovery/waste
+		// partition lands in the three stores with the constituents
+		// preserved and every ledger closed.
+		{
+			core::World world("AlgaeBasic", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto const [ok, diagnostic] = configure(world, fullStores(), { culture() });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 1200, "basic algae harvest run"),
+				"basic algae harvest run failed");
+			world.pauseSimulation();
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& c = snap.algaeCultures[0];
+			require(c.capacityKg > 0.0 && closeTo(c.capacityKg, 2.0, 1e-9),
+				"the culture capacity is not the declared volume times density");
+			require(c.growthKg > 0.0, "the culture did not grow before harvesting");
+			require(c.harvestedKg > 0.0, "the harvest never fired");
+			require(c.foodProducedKg > 0.0 && c.recoveryProducedKg > 0.0
+				&& c.wasteProducedKg > 0.0,
+				"the harvest did not fill all three partition streams");
+			require(closeTo(c.foodProducedKg + c.recoveryProducedKg + c.wasteProducedKg,
+				c.harvestedKg, 1e-9),
+				"the harvested mass does not equal food plus recovery plus waste");
+			require(closeTo(c.foodProducedKg, c.harvestedKg * 0.4, 1e-6),
+				"the food stream does not follow the declared food fraction");
+			require(closeTo(c.recoveryProducedKg, c.harvestedKg * 0.3, 1e-6),
+				"the recovery stream does not follow the declared recovery fraction");
+			require(closeTo(findStore(snap, "afood").currentQualified, c.foodProducedKg, 1e-9),
+				"the food store does not hold the harvested food mass");
+			require(closeTo(findStore(snap, "arecovery").currentQualified, c.recoveryProducedKg, 1e-9),
+				"the recovery store does not hold the harvested recovery mass");
+			require(closeTo(findStore(snap, "awaste").currentQualified, c.wasteProducedKg, 1e-9),
+				"the waste store does not hold the harvested waste mass");
+			require(c.livingBiomassKg < 0.3 + 1e-9,
+				"the living biomass stayed above the harvest trigger after harvesting");
+			require(std::abs(c.residualKg) <= 1e-9
+				&& std::abs(c.residualKJ) <= 1e-6 * std::max(1.0, c.lightEnergyKJ),
+				"the harvested culture's mass/energy ledgers do not close");
+			bool harvestBalance = false;
+			for (auto const& balance : snap.balances)
+			{
+				require(std::abs(balance.residual) <= 1e-6,
+					("algae harvest-run boundary residual for '" + balance.unit
+						+ "' not closed").c_str());
+				if (balance.unit == "kg")
+				{
+					harvestBalance = balance.harvested > 0.0;
+					require(balance.harvested >= c.harvestedKg - 1e-9,
+						"the per-unit harvested term does not account the algae harvest inflow");
+				}
+			}
+			require(harvestBalance, "the balance ledger carries no algae harvested inflow term");
+			require(sawEvent(world, "Algae culture 'pond' harvested"),
+				"the algae harvest occurrence was not announced in the event log");
+		}
+		// Full food destination: the food surplus rides the recovery
+		// path rather than being discarded, and the limiter names the
+		// full food store.
+		{
+			core::World world("AlgaeFoodSurplus", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto stores = fullStores();
+			stores[5] = cultureStore("afood", 0.05, 0.0);
+			auto const [ok, diagnostic] = configure(world, std::move(stores), { culture() });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 1200, "algae food-surplus run"),
+				"algae food-surplus run failed");
+			world.pauseSimulation();
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& c = snap.algaeCultures[0];
+			require(c.foodSurplusToRecoveryKg > 0.0,
+				"the food surplus was not routed through the recovery path");
+			require(findStore(snap, "afood").currentQualified <= 0.05 + 1e-9,
+				"the food store overflowed its capacity");
+			require(c.recoveryProducedKg > c.harvestedKg * 0.3 + 1e-9,
+				"the recovery stream did not carry the routed food surplus");
+			require(std::abs(c.residualKg) <= 1e-9,
+				"the food-surplus harvest's mass ledger does not close");
+		}
+		// Full food AND full recovery: the recovery surplus rides the
+		// waste path, and the limiter names the full recovery store.
+		{
+			core::World world("AlgaeRecoverySurplus", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto stores = fullStores();
+			stores[5] = cultureStore("afood", 0.05, 0.0);
+			stores[6] = cultureStore("arecovery", 0.05, 0.0);
+			auto const [ok, diagnostic] = configure(world, std::move(stores), { culture() });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 1200, "algae recovery-surplus run"),
+				"algae recovery-surplus run failed");
+			world.pauseSimulation();
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& c = snap.algaeCultures[0];
+			require(c.recoverySurplusToWasteKg > 0.0,
+				"the recovery surplus was not routed through the waste path");
+			require(findStore(snap, "arecovery").currentQualified <= 0.05 + 1e-9,
+				"the recovery store overflowed its capacity");
+			require(c.wasteProducedKg > c.harvestedKg * 0.3 + 1e-9,
+				"the waste stream did not carry the routed recovery surplus");
+			require(std::abs(c.residualKg) <= 1e-9,
+				"the recovery-surplus harvest's mass ledger does not close");
+		}
+		// All destinations full: the harvest is constrained - the
+		// unplaceable remainder stays living rather than vanishing, and
+		// the constraint is announced.
+		{
+			core::World world("AlgaeConstrained", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto stores = fullStores();
+			stores[5] = cultureStore("afood", 0.02, 0.0);
+			stores[6] = cultureStore("arecovery", 0.02, 0.0);
+			stores[7] = cultureStore("awaste", 0.02, 0.0);
+			auto const [ok, diagnostic] = configure(world, std::move(stores), { culture() });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 1200, "algae constrained harvest run"),
+				"algae constrained harvest run failed");
+			world.pauseSimulation();
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& c = snap.algaeCultures[0];
+			require(c.harvestedKg > 0.0 && c.harvestedKg < 0.07,
+				"the harvest was not capped by the tiny destinations");
+			require(c.lastHarvestConstrainedKg > 0.0,
+				"the constrained remainder is not reported");
+			require(c.livingBiomassKg > 0.1,
+				"the constrained harvest discarded living material instead of leaving it standing");
+			require(std::abs(c.residualKg) <= 1e-9,
+				"the constrained harvest's mass ledger does not close");
+			require(sawEvent(world, "harvest constrained"),
+				"the algae harvest constraint was not announced in the event log");
+		}
+		// Culture capacity: with the harvest disabled the culture grows
+		// to its own declared capacity and stops there - the limiter
+		// names the culture capacity, the capacity fraction saturates
+		// at 1.0 and the living biomass never crosses the installation
+		// limit.
+		{
+			core::World world("AlgaeCapacity", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto full = culture();
+			full.harvestTriggerKg = 0.0;
+			full.foodStoreId = "";
+			full.recoveryStoreId = "";
+			full.wasteStoreId = "";
+			full.initialBiomassKg = 1.99;
+			full.respirationPerHour = 0.05; // slow burn so the fill is visible
+			auto const [ok, diagnostic] = configure(world, fullStores(), { full });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 1200, "algae capacity run"),
+				"algae capacity run failed");
+			world.pauseSimulation();
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& c = snap.algaeCultures[0];
+			require(c.livingBiomassKg <= 2.0 + 1e-9,
+				"the culture grew past its declared culture capacity");
+			require(c.capacityFraction <= 1.0 + 1e-9 && c.capacityFraction > 0.9,
+				"the reported capacity fraction does not track the full culture");
+			require(c.lastGrowthLimiter.find("culture capacity") != std::string::npos
+				|| c.blockReason.find("culture capacity") != std::string::npos,
+				"the capacity limiter was not named once the culture filled");
+			require(std::abs(c.residualKg) <= 1e-9,
+				"the capacity-saturated culture's mass ledger does not close");
+		}
+		// Independent starvation: a dark culture respires its living
+		// organic content away and dies while a lit crop in the same
+		// compartment keeps growing - the two populations starve and
+		// live independently, and the dead culture never grows, respires
+		// or harvests again. The mirror case (dark crop, lit culture)
+		// shows the same independence the other way.
+		{
+			core::World world("AlgaeIndependentStarvation", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto dark = culture();
+			dark.illuminationProfile.constantLevel = 0.0;
+			dark.initialBiomassKg = 0.001;
+			dark.respirationPerHour = 600.0; // exaggerated test biology
+			auto crop = core::CropPopulationSettings{};
+			crop.id = "canopy";
+			crop.atmosphereId = "habitat";
+			crop.waterStoreId = "makeup";
+			crop.nitrogenStoreId = "fertN";
+			crop.phosphorusStoreId = "fertP";
+			crop.potassiumStoreId = "fertK";
+			crop.mineralsStoreId = "fertMin";
+			crop.composition = cultureComposition();
+			crop.growingAreaM2 = 10.0;
+			crop.maxBiomassDensityKgPerM2 = 2.0;
+			crop.initialBiomassKg = 0.1;
+			crop.lampRatedKW = 36.0;
+			crop.illuminationProfile.constantLevel = 1.0;
+			crop.circulationPowerKW = 0.1;
+			crop.growthYieldKgPerKWh = 2.0;
+			crop.respirationPerHour = 0.5;
+			crop.transpirationKgPerKgGrowth = 1.0;
+			crop.minGrowingTemperatureC = 10.0;
+			crop.maxGrowingTemperatureC = 35.0;
+			crop.foodStoreId = "cfood";
+			crop.wasteStoreId = "cwaste";
+			crop.edibleFraction = 0.6;
+			crop.harvestTriggerKg = 0.3;
+			crop.harvestFraction = 1.0;
+			auto stores = fullStores();
+			stores.push_back(cultureStore("cfood", 10.0, 0.0));
+			stores.push_back(cultureStore("cwaste", 10.0, 0.0));
+			auto const [ok, diagnostic] = configure(world, std::move(stores), { dark }, { crop });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 6000, "algae independent starvation run"),
+				"algae independent starvation run failed");
+			world.pauseSimulation();
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& c = snap.algaeCultures[0];
+			auto const& g = snap.cropPopulations[0];
+			require(c.dead, "the dark culture did not die");
+			require(c.growthKg == 0.0 && c.co2DrawnKg == 0.0,
+				"the dark culture grew in darkness");
+			require(c.respirationKg > 0.0,
+				"the dark culture did not respire its organic content away");
+			require(c.deadResidueToWasteKg + c.deadResidueLostKg > 0.0,
+				"the dead culture's residue was not accounted");
+			require(c.blockReason.find("dead") != std::string::npos,
+				"the dead culture's block reason does not name the death");
+			require(!g.dead && g.growthKg > 0.0,
+				"the lit crop stopped growing while the culture starved - the populations are not independent");
+			require(sawEvent(world, "Algae culture 'pond' died"),
+				"the algae starvation death was not announced in the event log");
+			// Recovery cannot recreate lost biomass for free: running on
+			// changes nothing for the dead culture.
+			auto const respirationAtDeath = c.respirationKg;
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 600, "post-death algae run"),
+				"post-death algae run failed");
+			world.pauseSimulation();
+			auto const after = world.getStationSystemsSnapshot();
+			require(after.algaeCultures[0].dead
+				&& after.algaeCultures[0].respirationKg == respirationAtDeath
+				&& after.algaeCultures[0].livingBiomassKg <= 1e-9,
+				"the dead culture revived or kept respiring after death");
+		}
+		// Combined resource competition: a crop and an algae culture
+		// sharing the same compartment, the same power pool and the same
+		// nitrogen store compete for them. The shared nitrogen store
+		// drains to empty and both populations name it as their limiter;
+		// the total nitrogen drawn equals what the store held - neither
+		// population creates nutrient or consumes the other's share
+		// twice; and both populations' ledgers close together.
+		{
+			core::World world("AlgaeCompetition", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto sharedN = culture();
+			sharedN.harvestTriggerKg = 0.0;
+			sharedN.foodStoreId = "";
+			sharedN.recoveryStoreId = "";
+			sharedN.wasteStoreId = "";
+			auto crop = core::CropPopulationSettings{};
+			crop.id = "canopy";
+			crop.atmosphereId = "habitat";
+			crop.waterStoreId = "makeup";
+			crop.nitrogenStoreId = "fertN"; // the same store the culture draws
+			crop.phosphorusStoreId = "fertP";
+			crop.potassiumStoreId = "fertK";
+			crop.mineralsStoreId = "fertMin";
+			crop.composition = cultureComposition();
+			crop.growingAreaM2 = 10.0;
+			crop.maxBiomassDensityKgPerM2 = 2.0;
+			crop.initialBiomassKg = 0.1;
+			crop.lampRatedKW = 36.0;
+			crop.illuminationProfile.constantLevel = 1.0;
+			crop.circulationPowerKW = 0.1;
+			crop.growthYieldKgPerKWh = 2.0;
+			crop.respirationPerHour = 0.5;
+			crop.transpirationKgPerKgGrowth = 1.0;
+			crop.minGrowingTemperatureC = 10.0;
+			crop.maxGrowingTemperatureC = 35.0;
+			crop.foodStoreId = "cfood";
+			crop.wasteStoreId = "cwaste";
+			crop.edibleFraction = 0.6;
+			crop.harvestTriggerKg = 0.3;
+			crop.harvestFraction = 1.0;
+			auto stores = fullStores();
+			stores[1] = cultureStore("fertN", 10.0, 0.02); // scarce shared N
+			stores.push_back(cultureStore("cfood", 10.0, 0.0));
+			stores.push_back(cultureStore("cwaste", 10.0, 0.0));
+			auto const [ok, diagnostic] = configure(world, std::move(stores), { sharedN }, { crop });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 1200, "algae/crop competition run"),
+				"algae/crop competition run failed");
+			world.pauseSimulation();
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& c = snap.algaeCultures[0];
+			auto const& g = snap.cropPopulations[0];
+			require(findStore(snap, "fertN").currentQualified <= 1e-9,
+				"the shared nitrogen store was not drained by the competing populations");
+			require(c.nitrogenDrawnKg > 0.0 && g.nitrogenDrawnKg > 0.0,
+				"one of the competing populations drew no shared nitrogen at all");
+			require(closeTo(c.nitrogenDrawnKg + g.nitrogenDrawnKg, 0.02, 1e-6),
+				"the shared nitrogen drawn does not equal what the store held - mass was created or double-counted");
+			require(c.growthKg > 0.0 && g.growthKg > 0.0,
+				"a competing population never grew while the shared store held nitrogen");
+			require(std::abs(c.residualKg) <= 1e-9 && std::abs(g.residualKg) <= 1e-9,
+				"the competing populations' mass ledgers do not close");
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("algae/crop competition boundary residual for '" + balance.unit
+						+ "' not closed").c_str());
+			// The two populations keep their own capacities: the crop's
+			// 20 kg illuminated-area capacity and the culture's 2 kg
+			// culture-volume capacity never merge or shadow each other.
+			require(!closeTo(g.capacityKg, c.capacityKg, 1e-9)
+				&& closeTo(c.capacityKg, 2.0, 1e-9) && closeTo(g.capacityKg, 20.0, 1e-9),
+				"the two populations' capacity bases are not independent");
+		}
+		// Power competition: one small solar field cannot light both the
+		// crop's lamps and the culture's lamps. The essential circulation
+		// draws are paid first, the earlier-declared crop's light is paid
+		// next, and the culture's lamps run short - the shortfall is
+		// reported, never invented around, and the culture still grows on
+		// the light it actually received.
+		{
+			core::World world("AlgaePowerCompetition", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto shared = culture();
+			shared.harvestTriggerKg = 0.0;
+			shared.foodStoreId = "";
+			shared.recoveryStoreId = "";
+			shared.wasteStoreId = "";
+			auto crop = core::CropPopulationSettings{};
+			crop.id = "canopy";
+			crop.atmosphereId = "habitat";
+			crop.waterStoreId = "makeup";
+			crop.nitrogenStoreId = "fertN";
+			crop.phosphorusStoreId = "fertP";
+			crop.potassiumStoreId = "fertK";
+			crop.mineralsStoreId = "fertMin";
+			crop.composition = cultureComposition();
+			crop.growingAreaM2 = 10.0;
+			crop.maxBiomassDensityKgPerM2 = 2.0;
+			crop.initialBiomassKg = 0.1;
+			crop.lampRatedKW = 36.0;
+			crop.illuminationProfile.constantLevel = 1.0;
+			crop.circulationPowerKW = 0.1;
+			crop.growthYieldKgPerKWh = 2.0;
+			crop.respirationPerHour = 0.5;
+			crop.transpirationKgPerKgGrowth = 1.0;
+			crop.minGrowingTemperatureC = 10.0;
+			crop.maxGrowingTemperatureC = 35.0;
+			crop.foodStoreId = "cfood";
+			crop.wasteStoreId = "cwaste";
+			crop.edibleFraction = 0.6;
+			crop.harvestTriggerKg = 0.0;
+			auto stores = fullStores();
+			stores.push_back(cultureStore("cfood", 10.0, 0.0));
+			stores.push_back(cultureStore("cwaste", 10.0, 0.0));
+			// 40 kW against 72.2 kW of combined demand: the crop's full
+			// 36.1 kW fits, the culture's lamps run on the remainder.
+			auto const [ok, diagnostic] = configure(world, std::move(stores), { shared }, { crop }, 40.0);
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 600, "algae/crop power competition run"),
+				"algae/crop power competition run failed");
+			world.pauseSimulation();
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& c = snap.algaeCultures[0];
+			auto const& g = snap.cropPopulations[0];
+			require(closeTo(g.lastLightSuppliedKW, 36.0, 1e-6),
+				"the crop's lamps did not receive their full demand ahead of the culture");
+			require(c.lastLightSuppliedKW < 36.0 - 1.0,
+				"the culture's lamps were not starved by the shared power pool");
+			require(c.lastCirculationSuppliedKW + c.lastLightSuppliedKW
+				+ g.lastCirculationSuppliedKW + g.lastLightSuppliedKW <= 40.0 + 1e-6,
+				"the combined draw exceeded the solar supply - free power appeared");
+			require(c.growthKg > 0.0,
+				"the culture grew nothing despite receiving partial light - the shortfall was not converted into growth");
+			require(std::abs(c.residualKJ) <= 1e-6 * std::max(1.0, c.lightEnergyKJ)
+				&& std::abs(g.residualKJ) <= 1e-6 * std::max(1.0, g.lightEnergyKJ),
+				"the power-competing populations' energy ledgers do not close");
+		}
+		// Persistence: the algae contract round-trips through the World
+		// document, and the harvest/death runtime state is never
+		// restored - a loaded world reconstructs the living culture from
+		// its authored initial condition (#411).
+		{
+			core::World world("AlgaePersist", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto const [ok, diagnostic] = configure(world, fullStores(), { culture() });
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 1200, "algae persistence run"),
+				"algae persistence run failed");
+			world.pauseSimulation();
+			require(world.getStationSystemsSnapshot().algaeCultures[0].harvestedKg > 0.0,
+				"the persistence fixture did not harvest");
+			std::string text = yaml(world);
+			require(text.find("harvestTriggerKg: 0.3") != std::string::npos
+				&& text.find("foodStoreId: afood") != std::string::npos
+				&& text.find("recoveryStoreId: arecovery") != std::string::npos
+				&& text.find("wasteStoreId: awaste") != std::string::npos
+				&& text.find("cultureVolumeL: 1000") != std::string::npos,
+				"the algae contract did not travel through the World document");
+			require(text.find("deadResidueLostKg") == std::string::npos,
+				"runtime algae ledgers leaked into the World document");
+			auto input = core::YamlSerializer::fromString(text);
+			input->deserialize();
+			core::SerializationWorkData data;
+			core::World loaded("AlgaePersistLoaded", 2, 2);
+			loaded.deserialize(*input, data);
+			require(loaded.getStationSystemsSettings() == world.getStationSystemsSettings(),
+				"algae settings did not round-trip");
+			auto const loadedSnap = loaded.getStationSystemsSnapshot();
+			require(loadedSnap.worldTick == 0
+				&& loadedSnap.algaeCultures[0].harvestedKg == 0.0
+				&& !loadedSnap.algaeCultures[0].dead
+				&& loadedSnap.algaeCultures[0].livingBiomassKg == 0.1,
+				"the loaded world restored live algae harvest/death state instead of the authored start");
+			// A pre-89 document carrying `algaeCultures` is refused rather
+			// than silently dropping the cultures.
+			{
+				auto stale = text;
+				size_t const position = stale.find("version: 89");
+				require(position != std::string::npos, "the fixture document carries no version line");
+				stale.replace(position, std::string("version: 89").size(), "version: 88");
+				require(stale.find("algaeCultures") != std::string::npos,
+					"the fixture document carries no algae cultures to test the guard with");
+				bool refused = false;
+				try
+				{
+					auto const input2 = core::YamlSerializer::fromString(stale);
+					input2->deserialize();
+					core::SerializationWorkData data2;
+					core::World staleWorld("AlgaeStale", 2, 2);
+					staleWorld.deserialize(*input2, data2);
+				}
+				catch (std::exception const& error)
+				{
+					refused = true;
+					require(std::string(error.what()).find("schema 89") != std::string::npos,
+						"the pre-89 algae refusal does not name the required schema");
+				}
+				require(refused, "a pre-89 document carrying algae cultures was silently accepted");
+			}
+		}
+		// Determinism: two identically-authored algae worlds advanced
+		// identically end identically, field for field.
+		{
+			core::World first("AlgaeDetA", 2, 2);
+			core::World second("AlgaeDetB", 2, 2);
+			first.pauseSimulation();
+			second.pauseSimulation();
+			first.finishBuild();
+			second.finishBuild();
+			require(configure(first, fullStores(), { culture() }).first
+				&& configure(second, fullStores(), { culture() }).first,
+				"the algae determinism pair failed to configure");
+			first.resumeSimulation();
+			second.resumeSimulation();
+			require(first.advanceTicks(1200) && second.advanceTicks(1200),
+				"the algae determinism pair failed to advance");
+			first.pauseSimulation();
+			second.pauseSimulation();
+			require(first.getStationSystemsSnapshot().algaeCultures[0]
+				== second.getStationSystemsSnapshot().algaeCultures[0],
+				"identically-authored algae cultures diverged");
+			require(first.getStationSystemsSnapshot().stores
+				== second.getStationSystemsSnapshot().stores,
+				"the stores of identically-authored algae worlds diverged");
+		}
+	}
+
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power},
@@ -13424,7 +14146,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"failures", failures}};
+		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

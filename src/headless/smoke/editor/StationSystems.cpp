@@ -2067,6 +2067,156 @@ void cropWorkflow(smoke::Context const&)
 		#undef REQ
 		require(driver.passed(), "Crop workflow failed on the Test Engine");
 	}
+	void algaeWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO();
+		io.DisplaySize = {1200.0f, 4200.0f};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Algae workflow editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		core::StationSystemsSettings initial;
+		initial.enabled = true;
+		initial.observationIntervalSeconds = 1.0f;
+		auto plain = [](std::string const& id, double capacity, double starting)
+		{
+			core::ResourceStoreSettings store;
+			store.id = id;
+			store.unit = "kg";
+			store.capacity = capacity;
+			store.startingQualified = starting;
+			return store;
+		};
+		initial.stores.push_back(plain("makeup", 200.0, 150.0));
+		initial.stores.push_back(plain("fertN", 10.0, 5.0));
+		initial.stores.push_back(plain("fertP", 10.0, 5.0));
+		initial.stores.push_back(plain("fertK", 10.0, 5.0));
+		initial.stores.push_back(plain("fertMin", 10.0, 5.0));
+		initial.stores.push_back(plain("afood", 10.0, 0.0));
+		initial.stores.push_back(plain("arecovery", 10.0, 0.0));
+		initial.stores.push_back(plain("awaste", 10.0, 0.0));
+		core::AtmosphereSettings habitat;
+		habitat.id = "habitat";
+		habitat.hazardClass = "normal";
+		habitat.volumeM3 = 100.0;
+		habitat.startingOxygenKg = 40.0;
+		habitat.startingNitrogenKg = 80.0;
+		habitat.startingCarbonDioxideKg = 5.0;
+		habitat.startingWaterVapourKg = 1.0;
+		habitat.startingTemperatureC = 22.0;
+		habitat.thermalCapacityKJPerK = 20000.0;
+		habitat.minPressureKPa = 1.0;
+		habitat.maxPressureKPa = 200.0;
+		initial.atmospheres.push_back(habitat);
+		core::SolarArraySettings field;
+		field.id = "field";
+		field.capacityKW = 100.0;
+		initial.solarArrays.push_back(field);
+		core::AlgaeCultureSettings pond;
+		pond.id = "pond";
+		pond.atmosphereId = "habitat";
+		pond.waterStoreId = "makeup";
+		pond.nitrogenStoreId = "fertN";
+		pond.phosphorusStoreId = "fertP";
+		pond.potassiumStoreId = "fertK";
+		pond.mineralsStoreId = "fertMin";
+		core::ResourceCompositionSettings composition;
+		composition.moisture = 0.0;
+		composition.nutrientNitrogen = 0.06;
+		composition.atmosphericNitrogen = 0.0;
+		composition.phosphorus = 0.02;
+		composition.potassium = 0.03;
+		composition.otherMinerals = 0.04;
+		composition.energyKJPerKgDry = 1700.0;
+		pond.composition = composition;
+		pond.cultureVolumeL = 1000.0;
+		pond.maxBiomassDensityKgPerL = 0.002; // 2 kg culture capacity
+		pond.initialBiomassKg = 0.5;
+		pond.lampRatedKW = 3.6;
+		pond.illuminationProfile.constantLevel = 1.0;
+		pond.circulationPowerKW = 0.1;
+		pond.growthYieldKgPerKWh = 2.0;
+		pond.respirationPerHour = 0.5;
+		pond.evaporationKgPerKgGrowth = 1.0;
+		pond.minGrowingTemperatureC = 10.0;
+		pond.maxGrowingTemperatureC = 35.0;
+		pond.foodStoreId = "afood";
+		pond.recoveryStoreId = "arecovery";
+		pond.wasteStoreId = "awaste";
+		pond.foodFraction = 0.4;
+		pond.recoveryFraction = 0.3;
+		pond.harvestTriggerKg = 0.3;
+		pond.harvestFraction = 1.0;
+		initial.algaeCultures.push_back(pond);
+		require(world->configureStationSystems(initial, false, &diagnostic), diagnostic.c_str());
+		headless::TestEngineDriver driver([&]
+		{
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 4100});
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+
+		driver.run("station", "algaeWorkflow", [&](ImGuiTestContext* ctx)
+		{
+			ctx->SetRef("Station Systems");
+			REQ(driver.contains("1 algae culture(s)"),
+				"Authored algae culture count missing from the window");
+			// Run: the live view shows the culture growing inside its own
+			// culture-volume capacity, funded by delivered light, with the
+			// three-way harvest rule displayed. Ticking never dirties the
+			// authored document.
+			world->markSaved();
+			world->resumeSimulation(); REQ(world->advanceTicks(120), "Editor run failed");
+			world->pauseSimulation(); ctx->Sleep(1);
+			REQ(driver.contains("pond [habitat]")
+				&& driver.contains("culture capacity 2.0000 kg")
+				&& driver.contains("growing"),
+				"Live algae culture, declared culture capacity or growth not displayed");
+			REQ(driver.contains("harvest: trigger 0.3000 kg")
+				&& driver.contains("food 'afood'")
+				&& driver.contains("recovery 'arecovery'")
+				&& driver.contains("waste 'awaste'"),
+				"Harvest partition rule and destinations not displayed in the live culture view");
+			REQ(!world->isModified(), "Algae growth ticking dirtied the authored document");
+			// An invalid drafted partition (food + recovery above the
+			// harvest) is refused with a visible diagnostic and never
+			// reaches the authored settings.
+			driver.typeValue(ctx, "Algae 0 recovery fraction of harvest", "0.9");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(driver.contains("food and recovery fractions together exceed 1"),
+				"Invalid drafted harvest partition diagnostic not shown");
+			REQ(world->getStationSystemsSettings().algaeCultures[0].recoveryFraction == 0.3
+				&& world->getSimulationTick() == 120,
+				"Invalid drafted harvest partition mutated the authored settings");
+			// A valid drafted culture volume applies through the
+			// reset-confirmed flow and restarts the population from its
+			// authored start.
+			driver.typeValue(ctx, "Algae 0 recovery fraction of harvest", "0.3");
+			driver.typeValue(ctx, "Algae 0 active culture volume L", "2000");
+			driver.typeValue(ctx, "Algae 0 initial dry biomass kg", "1");
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(world->getStationSystemsSettings().algaeCultures[0].cultureVolumeL == 2000.0
+				&& world->getStationSystemsSettings().algaeCultures[0].initialBiomassKg == 1.0
+				&& history.undoCount() == 1 && world->getSimulationTick() == 0,
+				"Repaired algae draft did not apply through the reset-confirmed flow");
+			ctx->Sleep(1);
+			world->resumeSimulation(); REQ(world->advanceTicks(120), "Post-apply run failed");
+			world->pauseSimulation(); ctx->Sleep(1);
+			// The doubled volume doubles the declared capacity to 4 kg.
+			REQ(driver.contains("culture capacity 4.0000 kg")
+				&& driver.contains("1 algae culture(s)"),
+				"Applied culture volume not reflected in the live capacity display");
+		});
+		#undef REQ
+		require(driver.passed(), "Algae workflow failed on the Test Engine");
+	}
 void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"station/windowWorkflow", workflow});
@@ -2086,4 +2236,5 @@ void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 	checks.push_back({"station/bufferWorkflow", bufferWorkflow});
 	checks.push_back({"station/microbialConditionWorkflow", microbialConditionWorkflow});
 	checks.push_back({"station/cropWorkflow", cropWorkflow});
+	checks.push_back({"station/algaeWorkflow", algaeWorkflow});
 }

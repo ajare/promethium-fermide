@@ -1301,6 +1301,86 @@ namespace core
 	};
 	inline constexpr size_t MaxStationCropPopulations{8};
 
+	// An algae culture (#411): a separate Biological population running in
+	// its own installation, with its own living biomass, culture volume,
+	// capacity, coefficients and condition - never shared with, derived
+	// from, or substituted by the crop populations. It reuses the same
+	// biological lifecycle and accounting behaviour as crops: dry Living
+	// biomass on a declared dry-mass basis (no moisture, no atmospheric
+	// nitrogen), growth funded only by the light energy actually
+	// delivered after the essential culture circulation draw, the CO2
+	// actually present in the compartment, culture water and each tracked
+	// N/P/K/mineral store drawn above its own protected reserve, and the
+	// remaining capacity headroom at one uniform growth scale per tick
+	// with the binding limiter named. The Growing capacity here is the
+	// installation's active culture volume times the supported dry-mass
+	// density per unit volume - distinct from the crop's illuminated area
+	// basis and from any crop capacity. Growth qualifies only inside the
+	// declared temperature window; respiration runs day and night against
+	// the living organic content, drawing real O2 and returning CO2,
+	// water vapour and heat to the compartment; culture water lost with
+	// the growth (evaporation from the open culture) is drawn from the
+	// makeup store and returned as vapour. The harvest contract partitions
+	// the harvested dry mass into three declared destinations - food,
+	// recovery and waste - conservatively: each share enters its own store
+	// as far as its headroom reaches, the surplus the food store cannot
+	// hold rides the recovery path, whatever recovery cannot hold rides
+	// the waste path, and what no destination can place stays living
+	// rather than being discarded for free. All three destinations must be
+	// mass-denominated, distinct from each other, and composition-
+	// compatible with the culture's declared dry mass. Under adverse
+	// conditions the living organic content is respired away; once it is
+	// exhausted the culture dies, and the remaining non-respirable residue
+	// is routed to the waste store or booked as explicit uncontained
+	// loss - never silently deleted, and never recoverable as living
+	// biomass for free. All biological coefficients are provisional
+	// assumptions: tunable model parameters, not validated phycology.
+	struct AlgaeCultureSettings
+	{
+		std::string id;
+		std::string atmosphereId;             // compartment the culture exchanges gas and heat with
+		std::string waterStoreId;             // culture makeup water above the protected reserve
+		std::string nitrogenStoreId;          // bound nutrient nitrogen available for uptake
+		std::string phosphorusStoreId;        // phosphorus available for uptake
+		std::string potassiumStoreId;         // potassium available for uptake
+		std::string mineralsStoreId;          // grouped trace minerals available for uptake
+		ResourceCompositionSettings composition; // declared dry-mass basis of the living biomass
+		double cultureVolumeL{0.0};         // active culture volume; 0 disables the culture
+		double maxBiomassDensityKgPerL{0.002}; // supported dry biomass per litre of culture (provisional)
+		double initialBiomassKg{0.0};       // starting dry living biomass, [0, volume x density]
+		double lampRatedKW{0.0};            // installed lighting capacity over the culture
+		ProfileSettings illuminationProfile; // [0, 1] fraction of lamp capacity delivered as light
+		double circulationPowerKW{0.0};     // essential culture circulation demand, drawn first
+		double growthYieldKgPerKWh{0.01};   // dry biomass fixed per kWh of delivered light (provisional)
+		double respirationPerHour{0.012};   // dry organic burned per dry biomass per hour (provisional)
+		double evaporationKgPerKgGrowth{0.0}; // culture water evaporated per kg of growth (provisional)
+		double minGrowingTemperatureC{10.0}; // growth at or above this compartment temperature
+		double maxGrowingTemperatureC{35.0}; // growth below this compartment temperature
+		// Harvest contract (#411): when the living dry biomass reaches the
+		// declared trigger the culture is harvested - real living material
+		// is removed and its declared dry-mass constituents are preserved
+		// into the three declared destinations. The food fraction lands in
+		// the food store, the recovery fraction in the recovery store, and
+		// the unrecoverable remainder in the waste store; a surplus the
+		// food store cannot hold rides the recovery path, and whatever the
+		// recovery path cannot hold rides the waste path. Full
+		// destinations constrain the harvest: the remainder stays living.
+		// Harvest is disabled while the trigger is zero; enabling it
+		// requires all three destination stores. The food and recovery
+		// fractions together may not exceed 1 - the waste share is the
+		// balance of the harvest.
+		std::string foodStoreId;      // edible yield destination (mass unit)
+		std::string recoveryStoreId;  // recoverable yield destination (mass unit)
+		std::string wasteStoreId;     // unrecoverable yield and dead-residue destination (mass unit)
+		double foodFraction{0.4};     // [0, 1] of harvested dry mass that is edible food
+		double recoveryFraction{0.3}; // [0, 1] of harvested dry mass routed to recovery
+		double harvestTriggerKg{0.0}; // harvest when living biomass reaches this; 0 disables harvest
+		double harvestFraction{1.0};  // (0, 1] fraction of living biomass removed per harvest
+		int priority{0};
+		bool operator==(AlgaeCultureSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationAlgaeCultures{8};
+
 	// A finite thermal buffer (#398): a bounded store of thermal energy
 	// that absorbs the cooling deficit its host reservoir cannot reject,
 	// rides through the outage, and returns the stored heat only when
@@ -1376,6 +1456,7 @@ namespace core
 		std::vector<MicrobialProcessorSettings> microbialProcessors;
 		std::vector<ThermalBufferSettings> thermalBuffers;
 		std::vector<CropPopulationSettings> cropPopulations;
+		std::vector<AlgaeCultureSettings> algaeCultures;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// Profile shape validation and deterministic evaluation: the level of
@@ -1770,6 +1851,7 @@ namespace core
 		double methaneProcessingPowerKW{0.0}; // methane processing work drawn this tick (#405)
 		double microbialProcessingPowerKW{0.0}; // microbial digestion work drawn this tick (#407)
 		double cropPowerKW{0.0}; // crop lamp and circulation work drawn this tick (#409)
+		double algaePowerKW{0.0}; // algae lamp and culture circulation work drawn this tick (#411)
 		// Fuel-cell backup service this tick (#406): electrical output
 		// added to the same allocation pool as solar and the generators,
 		// and the waste heat those cells routed to their sinks.
@@ -2180,6 +2262,11 @@ namespace core
 		// vapour/thermal solve and thermal ledger.
 		double lastCropHeatKW{0.0};
 		double cropHeatEnergyKJ{0.0};
+		// Algae culture heat delivered into this compartment this tick and
+		// cumulatively (#411): booked as its own thermal term beside the
+		// crop heat - the two populations never share a heat pathway.
+		double lastAlgaeHeatKW{0.0};
+		double algaeHeatEnergyKJ{0.0};
 		// Cumulative pathway ledger: every gram that moved, by pathway.
 		double oxygenConsumedKg{0.0};
 		double co2ProducedKg{0.0};
@@ -2867,6 +2954,145 @@ namespace core
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationCropPopulationSnapshot const&) const = default;
 	};
+	// The algae culture snapshot (#411): the authored contract beside the
+	// living-biomass picture, the delivered light and circulation, the
+	// resource-limited growth and day-and-night respiration with every
+	// gas, water and nutrient flow, the three-way harvest partition with
+	// its cascade surpluses, the death and residue accounting, and the
+	// closing mass and energy residuals. The algae population is exposed
+	// distinctly from the crop populations: its own capacity basis
+	// (culture volume x density per litre), its own coefficients and its
+	// own ledgers, so neither population's state can be read as the
+	// other's.
+	struct StationAlgaeCultureSnapshot
+	{
+		std::string id;
+		std::string atmosphereId;
+		std::string waterStoreId;
+		std::string nitrogenStoreId;
+		std::string phosphorusStoreId;
+		std::string potassiumStoreId;
+		std::string mineralsStoreId;
+		ResourceCompositionSettings composition;
+		double cultureVolumeL{0.0};
+		double maxBiomassDensityKgPerL{0.0};
+		double capacityKg{0.0};        // cultureVolumeL x maxBiomassDensityKgPerL
+		double initialBiomassKg{0.0};
+		double lampRatedKW{0.0};
+		ProfileSettings illuminationProfile;
+		double circulationPowerKW{0.0};
+		double growthYieldKgPerKWh{0.0};
+		double respirationPerHour{0.0};
+		double evaporationKgPerKgGrowth{0.0};
+		double minGrowingTemperatureC{0.0};
+		double maxGrowingTemperatureC{0.0};
+		std::string foodStoreId;
+		std::string recoveryStoreId;
+		std::string wasteStoreId;
+		double foodFraction{0.0};
+		double recoveryFraction{0.0};
+		double harvestTriggerKg{0.0};
+		double harvestFraction{0.0};
+		int priority{0};
+		// The living-biomass picture: current dry Living biomass beside
+		// the declared culture capacity and the fraction of it filled.
+		double livingBiomassKg{0.0};
+		double capacityFraction{0.0}; // livingBiomassKg / capacityKg, [0, 1]
+		// The light and circulation actually delivered this tick.
+		double lastIlluminationLevel{0.0};
+		double lastLightRequestedKW{0.0};
+		double lastLightSuppliedKW{0.0};
+		double lastCirculationRequestedKW{0.0};
+		double lastCirculationSuppliedKW{0.0};
+		// The growth the delivered resources funded this tick.
+		double lastGrowthPotentialKg{0.0};
+		double lastGrowthScale{0.0};
+		std::string lastGrowthLimiter;
+		double lastGrowthKg{0.0};
+		double lastCo2DrawnKg{0.0};
+		double lastAssimilationWaterKg{0.0};
+		double lastNitrogenDrawnKg{0.0};
+		double lastPhosphorusDrawnKg{0.0};
+		double lastPotassiumDrawnKg{0.0};
+		double lastMineralsDrawnKg{0.0};
+		double lastOxygenReleasedKg{0.0};
+		double lastEvaporatedKg{0.0};
+		// The respiration that ran this tick.
+		double lastRespirationRequestedKg{0.0};
+		double lastRespirationKg{0.0};
+		double lastRespirationO2DrawnKg{0.0};
+		std::string lastRespirationLimiter;
+		double lastRespirationCo2ReturnedKg{0.0};
+		double lastRespirationWaterKg{0.0};
+		double lastRespirationHeatKW{0.0};
+		bool lastOxygenLimited{false};
+		// The three-way harvest partition that ran this tick: the
+		// requested removal, what each destination accepted, the food
+		// surplus that rode the recovery path, the recovery surplus that
+		// rode the waste path, what the full destinations refused, and
+		// the limiter that bound it.
+		double lastHarvestRequestedKg{0.0};
+		double lastHarvestedKg{0.0};
+		double lastFoodAddedKg{0.0};
+		double lastRecoveryAddedKg{0.0};
+		double lastWasteAddedKg{0.0};
+		double lastFoodSurplusToRecoveryKg{0.0};
+		double lastRecoverySurplusToWasteKg{0.0};
+		double lastHarvestConstrainedKg{0.0};
+		std::string lastHarvestLimiter;
+		// The adverse-condition loss: once the living organic content is
+		// respired away the culture is dead, its remaining residue routed
+		// to the waste store or booked as uncontained loss, and it never
+		// grows, respires or harvests again.
+		bool dead{false};
+		double lastDeadResidueToWasteKg{0.0};
+		double lastDeadResidueLostKg{0.0};
+		// Heat into the compartment this tick.
+		double lastHeatIntoCompartmentKW{0.0};
+		bool temperatureEligible{false};
+		std::string blockReason;
+		bool disabled{false}; // zero culture volume: no service
+		// Cumulative pathway ledger.
+		double growthKg{0.0};
+		double co2DrawnKg{0.0};
+		double waterDrawnKg{0.0};
+		double nitrogenDrawnKg{0.0};
+		double phosphorusDrawnKg{0.0};
+		double potassiumDrawnKg{0.0};
+		double mineralsDrawnKg{0.0};
+		double oxygenReleasedKg{0.0};
+		double evaporatedKg{0.0};
+		double respirationKg{0.0};
+		double respirationO2DrawnKg{0.0};
+		double respirationCo2ReturnedKg{0.0};
+		double respirationWaterKg{0.0};
+		double lightEnergyKJ{0.0};
+		double circulationEnergyKJ{0.0};
+		double chemicalEnergyFixedKJ{0.0};
+		double respirationHeatKJ{0.0};
+		double heatIntoCompartmentKJ{0.0};
+		// Cumulative harvest and loss: everything removed from the living
+		// pool, split by destination and cascade route, with the dead
+		// residue that could not be contained and is gone for good.
+		double harvestedKg{0.0};
+		double foodProducedKg{0.0};
+		double recoveryProducedKg{0.0};
+		double wasteProducedKg{0.0};
+		double foodSurplusToRecoveryKg{0.0};
+		double recoverySurplusToWasteKg{0.0};
+		double deadResidueToWasteKg{0.0};
+		double deadResidueLostKg{0.0};
+		// Closing residuals: the mass ledger residual over
+		// (CO2 + water + nutrients + respiration O2) - (O2 released +
+		// CO2 returned + vapour returned) - delta biomass - harvest and
+		// residue outflow, and the energy ledger residual over delivered
+		// light + circulation work + respired heat - fixed chemical -
+		// heat into the compartment.
+		double residualKg{0.0};
+		double residualKJ{0.0};
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationAlgaeCultureSnapshot const&) const = default;
+	};
 	struct StationSystemsSnapshot
 	{
 		bool enabled{false};
@@ -2949,6 +3175,10 @@ namespace core
 		// day-and-night respiration with every gas, water and nutrient flow,
 		// the limiting resource, and the closing mass and energy ledgers.
 		std::vector<StationCropPopulationSnapshot> cropPopulations;
+		// The algae picture (#411): separate cultures with their own
+		// living biomass, culture-volume capacity, coefficients, harvest
+		// partition and ledgers, exposed distinctly from the crops.
+		std::vector<StationAlgaeCultureSnapshot> algaeCultures;
 		// The fuel-cell backup picture (#406): per-cell output, reactant
 	// consumption, product water, waste heat, closing ledgers and the
 		// endurance the usable reactants still buy.

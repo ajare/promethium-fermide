@@ -27,7 +27,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
 	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply, rechargeable batteries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, and chillers supplying class-matched cold services. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Thermal reservoirs integrate temperature from their effective capacity under absorbed and routed equipment heat; radiators reject heat by the Stefan-Boltzmann law at the emitting temperature against the authored sink, emissivity and view factor. A load's emitted heat is booked exactly once: routed into its class-compatible reservoir or exported directly, never both. Declared temperature limits are reported, never clamped. Coolant loops hold a finite, loop-specific coolant inventory segregated by hazard class (coolant is never potable or nutrient water); the pump circulates only the coolant the loop actually holds, so an underfilled loop flows less and a dry loop flows nothing, and the freeze-protection heater thermostats the loop up to its setpoint within its capacity. Pump work and heater heat enter the loop exactly once and reach the reservoir only through the circulation-gated heat-only exchanger; the loop draw rides the same electrical pool as external loads. Chillers supply a cold service of their declared class through a class-matched coolant-loop evaporator and reservoir condenser: the delivered duty is capped by the loop's actual circulation, gated at the chilled setpoint, and refused while the sink is at or above the maximum condensing temperature; work at the configured COP plus auxiliaries rides the same electrical pool, and condenser heat equals extracted heat plus the work and auxiliaries actually supplied, booked once. Fuelled generators convert a finite energy-unit fuel inventory into bus electrical output at the declared efficiency: output is bounded by the installed rating and the ramp limit, starting only completes once the startup energy has actually been drawn from the shared pool while the class-matched sink is below its maximum sink temperature, and after output stops the configured shutdown heat and its cooling requirement persist for the decay period; waste, startup and decay heat route exactly once into the sink and the fuel ledger closes over fuel = electrical + waste. Within a tick, generators and fuel-cell backup units produce first, then power allocates, then coolant loops and chillers run, then compartment atmospheres cycle, crews metabolise and compartments exchange, then thermal integrates, then transfers, then conversions. Compartment atmospheres model an ideal-gas mixture in a fixed volume: absolute and partial pressures derive from the gas inventory and temperature, humidity caps at Magnus saturation with the excess condensing and releasing its latent heat into the compartment, occupancy is an authored load assignment whose oxygen draw is capped by the inventory (CO2 and metabolic heat scale with what was actually consumed), leakage is a constant total-mass rate capped by the inventory, and scheduled airlock cycles remove authored mass with an explicit recovered-versus-lost split; every gram leaving a compartment is booked as leaked, recovered or lost, compartments never mix automatically, and declared pressure and gas-quality limits are reported, never clamped. Crews are an authored population with an activity profile, never derived from World Agents: metabolism draws food and water from compound stores and oxygen from the compartment, and returns CO2, moisture and metabolic heat to the compartment and urine and organic waste to their own finite compound stores. One uniform metabolic scale per tick - the scarcest supply or tightest waste headroom - throttles every pathway together, so absent material never generates nominal waste; requested versus actual is explicit per pathway, the authored coefficients must close over mass, constituents and energy, and the consumed mass the returns do not carry away is reported as explicit retained body mass. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s), %zu airlock cycle(s), %zu crew(s), %zu water collector(s), %zu water treatment(s), %zu electrolyzer(s), %zu CO2 capture machine(s), %zu fuel-cell backup unit(s), %zu thermal buffer(s), %zu terminal-waste ejection(s), %zu Sabatier reactor(s), %zu methane processor(s), %zu microbial processor(s) and %zu crop population(s)",
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s), %zu airlock cycle(s), %zu crew(s), %zu water collector(s), %zu water treatment(s), %zu electrolyzer(s), %zu CO2 capture machine(s), %zu fuel-cell backup unit(s), %zu thermal buffer(s), %zu terminal-waste ejection(s), %zu Sabatier reactor(s), %zu methane processor(s), %zu microbial processor(s), %zu crop population(s) and %zu algae culture(s)",
 		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
 		authored.stores.size(), authored.transfers.size(), authored.conversions.size(),
 		authored.solarArrays.size(), authored.equipmentLoads.size(), authored.batteries.size(),
@@ -39,7 +39,8 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		authored.fuelCells.size(), authored.thermalBuffers.size(),
 		authored.wasteEjections.size(),
 		authored.sabatierReactors.size(), authored.methaneProcessors.size(),
-		authored.microbialProcessors.size(), authored.cropPopulations.size());
+		authored.microbialProcessors.size(), authored.cropPopulations.size(),
+		authored.algaeCultures.size());
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
@@ -2120,6 +2121,185 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		}
 		mDraft.cropPopulations.push_back(std::move(crop));
 	}
+	ImGui::SeparatorText("Draft algae cultures (#411; a separate Biological population with its own living biomass, active culture volume and density-per-litre capacity, coefficients and condition - never shared with crops; growth is funded by delivered lamp light only after the essential culture circulation draw, plus CO2, culture water and each tracked nutrient, and only inside the declared growing window; respiration burns dry organic for oxygen and returns CO2, vapour and heat; the culture stops at capacity and never photosynthesises for free in darkness or without power; the harvest contract (trigger, fraction, food and recovery shares, food/recovery/waste stores) removes real living material and partitions it conservatively into the three declared destinations - each destination's surplus cascades to the next and what none can hold stays living; all three destinations must be mass stores whose declared composition matches the culture's; 0 trigger disables the harvest - all biological coefficients are provisional assumptions)");
+	for (size_t index = 0; index < mDraft.algaeCultures.size(); )
+	{
+		auto& algae = mDraft.algaeCultures[index];
+		auto const row = std::to_string(index);
+		bool removeAlgae = false;
+		ImGui::PushItemWidth(220);
+		char algaeIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(algaeIdBuffer, algae.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Algae " + row + " id").c_str(), algaeIdBuffer, sizeof(algaeIdBuffer)))
+			algae.id = algaeIdBuffer;
+		char algaeAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(algaeAtmosphereBuffer, algae.atmosphereId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Algae " + row + " atmosphere").c_str(),
+			algaeAtmosphereBuffer, sizeof(algaeAtmosphereBuffer)))
+			algae.atmosphereId = algaeAtmosphereBuffer;
+		char algaeWaterBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(algaeWaterBuffer, algae.waterStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Algae " + row + " culture water store").c_str(),
+			algaeWaterBuffer, sizeof(algaeWaterBuffer)))
+			algae.waterStoreId = algaeWaterBuffer;
+		char algaeNitrogenBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(algaeNitrogenBuffer, algae.nitrogenStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Algae " + row + " nitrogen store").c_str(),
+			algaeNitrogenBuffer, sizeof(algaeNitrogenBuffer)))
+			algae.nitrogenStoreId = algaeNitrogenBuffer;
+		char algaePhosphorusBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(algaePhosphorusBuffer, algae.phosphorusStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Algae " + row + " phosphorus store").c_str(),
+			algaePhosphorusBuffer, sizeof(algaePhosphorusBuffer)))
+			algae.phosphorusStoreId = algaePhosphorusBuffer;
+		char algaePotassiumBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(algaePotassiumBuffer, algae.potassiumStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Algae " + row + " potassium store").c_str(),
+			algaePotassiumBuffer, sizeof(algaePotassiumBuffer)))
+			algae.potassiumStoreId = algaePotassiumBuffer;
+		char algaeMineralsBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(algaeMineralsBuffer, algae.mineralsStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Algae " + row + " minerals store").c_str(),
+			algaeMineralsBuffer, sizeof(algaeMineralsBuffer)))
+			algae.mineralsStoreId = algaeMineralsBuffer;
+		ImGui::InputDouble(("Algae " + row + " active culture volume L").c_str(),
+			&algae.cultureVolumeL, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Algae " + row + " max biomass density kg/L").c_str(),
+			&algae.maxBiomassDensityKgPerL, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Algae " + row + " initial dry biomass kg").c_str(),
+			&algae.initialBiomassKg, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Algae " + row + " lamp rated kW").c_str(),
+			&algae.lampRatedKW, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Algae " + row + " circulation power kW (drawn before lamp)").c_str(),
+			&algae.circulationPowerKW, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Algae " + row + " growth yield kg per kWh light").c_str(),
+			&algae.growthYieldKgPerKWh, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Algae " + row + " respiration per hour").c_str(),
+			&algae.respirationPerHour, 0.0, 0.0, "%.6f");
+		ImGui::InputDouble(("Algae " + row + " evaporation kg per kg growth").c_str(),
+			&algae.evaporationKgPerKgGrowth, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Algae " + row + " min growing temperature C").c_str(),
+			&algae.minGrowingTemperatureC, 0.0, 0.0, "%.2f");
+		ImGui::InputDouble(("Algae " + row + " max growing temperature C").c_str(),
+			&algae.maxGrowingTemperatureC, 0.0, 0.0, "%.2f");
+		char algaeFoodBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(algaeFoodBuffer, algae.foodStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Algae " + row + " food store").c_str(),
+			algaeFoodBuffer, sizeof(algaeFoodBuffer)))
+			algae.foodStoreId = algaeFoodBuffer;
+		char algaeRecoveryBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(algaeRecoveryBuffer, algae.recoveryStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Algae " + row + " recovery store").c_str(),
+			algaeRecoveryBuffer, sizeof(algaeRecoveryBuffer)))
+			algae.recoveryStoreId = algaeRecoveryBuffer;
+		char algaeWasteBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(algaeWasteBuffer, algae.wasteStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Algae " + row + " waste store").c_str(),
+			algaeWasteBuffer, sizeof(algaeWasteBuffer)))
+			algae.wasteStoreId = algaeWasteBuffer;
+		ImGui::InputDouble(("Algae " + row + " harvest trigger kg (0 disables harvest)").c_str(),
+			&algae.harvestTriggerKg, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Algae " + row + " harvest fraction of living biomass").c_str(),
+			&algae.harvestFraction, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Algae " + row + " food fraction of harvest").c_str(),
+			&algae.foodFraction, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Algae " + row + " recovery fraction of harvest").c_str(),
+			&algae.recoveryFraction, 0.0, 0.0, "%.4f");
+		bool algaePeriodic = algae.illuminationProfile.periodSeconds > 0.0;
+		if (ImGui::Checkbox(("Algae " + row + " periodic illumination").c_str(), &algaePeriodic))
+		{
+			if (algaePeriodic)
+			{
+				if (algae.illuminationProfile.periodSeconds <= 0.0) algae.illuminationProfile.periodSeconds = 120.0;
+				if (algae.illuminationProfile.segments.empty())
+					algae.illuminationProfile.segments.push_back({0.0, 1.0});
+			}
+			else
+			{
+				algae.illuminationProfile.periodSeconds = 0.0;
+				algae.illuminationProfile.segments.clear();
+			}
+		}
+		if (!algaePeriodic)
+			ImGui::InputDouble(("Algae " + row + " constant illumination level").c_str(),
+				&algae.illuminationProfile.constantLevel, 0.0, 0.0, "%.3f");
+		else
+		{
+			ImGui::InputDouble(("Algae " + row + " illumination period seconds").c_str(),
+				&algae.illuminationProfile.periodSeconds, 0.0, 0.0, "%.1f");
+			for (size_t segment = 0; segment < algae.illuminationProfile.segments.size(); ++segment)
+			{
+				auto& stretch = algae.illuminationProfile.segments[segment];
+				auto const segmentRow = "Algae " + row + " illumination segment " + std::to_string(segment);
+				ImGui::InputDouble((segmentRow + " start").c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+				ImGui::SameLine();
+				ImGui::InputDouble((segmentRow + " level").c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+				ImGui::SameLine();
+				if (ImGui::Button(("Remove " + segmentRow).c_str()))
+					algae.illuminationProfile.segments.erase(
+						algae.illuminationProfile.segments.begin() + static_cast<std::ptrdiff_t>(segment));
+			}
+			if (algae.illuminationProfile.segments.size() < core::MaxStationProfileSegments
+				&& ImGui::Button(("Add illumination segment to algae " + row).c_str()))
+				algae.illuminationProfile.segments.push_back(
+					{algae.illuminationProfile.periodSeconds * 0.5, 0.0});
+		}
+		ImGui::Text("  declared dry-mass composition (moisture and atmospheric nitrogen must be 0 for cultures):");
+		ImGui::InputDouble(("Algae " + row + " composition moisture fraction").c_str(),
+			&algae.composition.moisture, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Algae " + row + " composition nutrient nitrogen fraction").c_str(),
+			&algae.composition.nutrientNitrogen, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Algae " + row + " composition atmospheric nitrogen fraction").c_str(),
+			&algae.composition.atmosphericNitrogen, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Algae " + row + " composition phosphorus fraction").c_str(),
+			&algae.composition.phosphorus, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Algae " + row + " composition potassium fraction").c_str(),
+			&algae.composition.potassium, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Algae " + row + " composition other minerals fraction").c_str(),
+			&algae.composition.otherMinerals, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble(("Algae " + row + " composition energy kJ per kg dry").c_str(),
+			&algae.composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
+		ImGui::InputInt(("Algae " + row + " priority").c_str(), &algae.priority, 1, 0);
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove algae " + row).c_str()))
+			removeAlgae = true;
+		ImGui::PopItemWidth();
+		if (removeAlgae)
+			mDraft.algaeCultures.erase(mDraft.algaeCultures.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
+	if (mDraft.algaeCultures.size() < core::MaxStationAlgaeCultures && ImGui::Button("Add algae culture"))
+	{
+		core::AlgaeCultureSettings algae;
+		algae.cultureVolumeL = 1000.0;
+		algae.maxBiomassDensityKgPerL = 0.002;
+		algae.initialBiomassKg = 0.5;
+		algae.lampRatedKW = 1.0;
+		algae.illuminationProfile.constantLevel = 1.0;
+		algae.circulationPowerKW = 0.1;
+		algae.growthYieldKgPerKWh = 0.01;
+		algae.respirationPerHour = 0.012;
+		algae.composition.energyKJPerKgDry = 1700.0;
+		if (!mDraft.atmospheres.empty())
+			algae.atmosphereId = mDraft.atmospheres.front().id;
+		if (!mDraft.stores.empty())
+		{
+			algae.waterStoreId = mDraft.stores.front().id;
+			algae.nitrogenStoreId = mDraft.stores.front().id;
+			algae.phosphorusStoreId = mDraft.stores.front().id;
+			algae.potassiumStoreId = mDraft.stores.front().id;
+			algae.mineralsStoreId = mDraft.stores.front().id;
+		}
+		for (size_t candidate = mDraft.algaeCultures.size() + 1;; ++candidate)
+		{
+			algae.id = "algaeculture" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.algaeCultures.begin(), mDraft.algaeCultures.end(),
+				[&](core::AlgaeCultureSettings const& existing) { return existing.id == algae.id; });
+			if (!taken) break;
+		}
+		mDraft.algaeCultures.push_back(std::move(algae));
+	}
 	ImGui::SeparatorText("Draft thermal buffers (kJ; finite phase-change store that rides through a cooling deficit: charge is capped by the host reservoir's deficit, discharge by its rejection surplus; access is circulation-gated or passive; the usable band maps stored energy to buffer temperature)");
 	for (size_t index = 0; index < mDraft.thermalBuffers.size(); )
 	{
@@ -3038,6 +3218,68 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			crop.dead ? " | POPULATION DEAD: the living organic content was respired away; nothing recreates it for free" : "");
 		if (crop.disabled)
 			ImGui::Text("  zero growing area: no service");
+	}
+	ImGui::SeparatorText("Algae cultures (live; a separate Biological population with its own living biomass beside its own culture-volume capacity; growth is funded by delivered lamp light only after the essential culture circulation draw, plus CO2, culture water and each tracked nutrient, and only inside the declared growing window; respiration burns dry organic for oxygen and returns CO2, vapour and heat; the culture stops at capacity and never photosynthesises for free in darkness or without power; harvest removes real living material at the declared trigger and partitions it conservatively into the food, recovery and waste stores - each destination's surplus cascades to the next, and what none can hold stays living; a culture whose living organic content is respired away dies, its residue routed to waste or booked as explicit loss - provisional biological assumptions)");
+	if (snapshot.algaeCultures.empty()) ImGui::TextDisabled("No algae cultures authored.");
+	for (auto const& algae : snapshot.algaeCultures)
+	{
+		char const* status = "idle";
+		switch (algae.status)
+		{
+		case core::StationTransferStatus::Full: status = "growing at full funded rate"; break;
+		case core::StationTransferStatus::Partial: status = "growing below potential (resources or capacity short)"; break;
+		case core::StationTransferStatus::Rejected: status = "refused (nothing grew)"; break;
+		case core::StationTransferStatus::Idle: break;
+		}
+		ImGui::Text("%s [%s]: %s | living %.4f / culture capacity %.4f kg (%.1f%%) | growth scale %.3f%s%s",
+			algae.id.c_str(), algae.atmosphereId.c_str(), status,
+			algae.livingBiomassKg, algae.capacityKg, algae.capacityFraction * 100.0,
+			algae.lastGrowthScale,
+			algae.lastGrowthLimiter.empty() ? "" : " | limited by: ",
+			algae.lastGrowthLimiter.empty() ? "" : algae.lastGrowthLimiter.c_str());
+		ImGui::Text("  last tick: growth %.6f kg (potential %.6f) | CO2 %.6f kg + water %.6f kg + N %.6f + P %.6f + K %.6f + minerals %.6f kg drawn | O2 released %.6f kg | evaporated %.6f kg | light %.4f/%.4f kW | circulation %.4f/%.4f kW | respiration %.6f/%.6f kg (O2 drawn %.6f kg, CO2 returned %.6f kg, vapour %.6f kg, heat %.4f kW)%s | heat into compartment %.4f kW | temperature %s%s",
+			algae.lastGrowthKg, algae.lastGrowthPotentialKg,
+			algae.lastCo2DrawnKg, algae.lastAssimilationWaterKg,
+			algae.lastNitrogenDrawnKg, algae.lastPhosphorusDrawnKg,
+			algae.lastPotassiumDrawnKg, algae.lastMineralsDrawnKg,
+			algae.lastOxygenReleasedKg, algae.lastEvaporatedKg,
+			algae.lastLightSuppliedKW, algae.lastLightRequestedKW,
+			algae.lastCirculationSuppliedKW, algae.lastCirculationRequestedKW,
+			algae.lastRespirationKg, algae.lastRespirationRequestedKg,
+			algae.lastRespirationO2DrawnKg, algae.lastRespirationCo2ReturnedKg,
+			algae.lastRespirationWaterKg, algae.lastRespirationHeatKW,
+			algae.lastOxygenLimited ? " [O2-limited respiration]" : "",
+			algae.lastHeatIntoCompartmentKW,
+			algae.temperatureEligible ? "eligible" : "NOT eligible",
+			algae.blockReason.empty() ? "" : (std::string(" - ") + algae.blockReason).c_str());
+		ImGui::Text("  cumulative: growth %.4f kg | CO2 %.4f kg | water %.4f kg | N %.4f + P %.4f + K %.4f + minerals %.4f kg | O2 released %.4f kg | evaporated %.4f kg | respiration %.4f kg (O2 %.4f kg, CO2 %.4f kg, vapour %.4f kg) | light %.2f kJ + circulation %.2f kJ | chemical fixed %.2f kJ | respiration heat %.2f kJ | heat into compartment %.2f kJ | residual mass %.2e kg / energy %.2e kJ",
+			algae.growthKg, algae.co2DrawnKg, algae.waterDrawnKg,
+			algae.nitrogenDrawnKg, algae.phosphorusDrawnKg,
+			algae.potassiumDrawnKg, algae.mineralsDrawnKg,
+			algae.oxygenReleasedKg, algae.evaporatedKg,
+			algae.respirationKg, algae.respirationO2DrawnKg,
+			algae.respirationCo2ReturnedKg, algae.respirationWaterKg,
+			algae.lightEnergyKJ, algae.circulationEnergyKJ,
+			algae.chemicalEnergyFixedKJ, algae.respirationHeatKJ,
+			algae.heatIntoCompartmentKJ,
+			algae.residualKg, algae.residualKJ);
+		ImGui::Text("  harvest: trigger %.4f kg (fraction %.3f, food %.3f + recovery %.3f) -> food '%s' / recovery '%s' / waste '%s' | last: requested %.6f kg, harvested %.6f kg (food %.6f, recovery %.6f, waste %.6f, food surplus routed %.6f, recovery surplus routed %.6f, constrained %.6f)%s | cumulative: harvested %.4f kg (food %.4f, recovery %.4f, waste %.4f) | dead residue: %.4f kg to waste, %.4f kg lost uncontained%s",
+			algae.harvestTriggerKg, algae.harvestFraction, algae.foodFraction,
+			algae.recoveryFraction,
+			algae.foodStoreId.empty() ? "-" : algae.foodStoreId.c_str(),
+			algae.recoveryStoreId.empty() ? "-" : algae.recoveryStoreId.c_str(),
+			algae.wasteStoreId.empty() ? "-" : algae.wasteStoreId.c_str(),
+			algae.lastHarvestRequestedKg, algae.lastHarvestedKg,
+			algae.lastFoodAddedKg, algae.lastRecoveryAddedKg, algae.lastWasteAddedKg,
+			algae.lastFoodSurplusToRecoveryKg, algae.lastRecoverySurplusToWasteKg,
+			algae.lastHarvestConstrainedKg,
+			algae.lastHarvestLimiter.empty() ? "" : (" | " + algae.lastHarvestLimiter).c_str(),
+			algae.harvestedKg, algae.foodProducedKg, algae.recoveryProducedKg,
+			algae.wasteProducedKg,
+			algae.deadResidueToWasteKg, algae.deadResidueLostKg,
+			algae.dead ? " | CULTURE DEAD: the living organic content was respired away; nothing recreates it for free" : "");
+		if (algae.disabled)
+			ImGui::Text("  zero culture volume: no service");
 	}
 	for (auto const& diagnostic : world->getStationSystemsDiagnostics())
 	{
