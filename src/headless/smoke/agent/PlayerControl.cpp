@@ -5,6 +5,7 @@
 #include "core/BinarySerializer.h"
 #include "core/YamlSerializer.h"
 #include "core/BulkheadDoorSectorObject.h"
+#include "core/DoorSectorObject.h"
 #include <cmath>
 
 namespace
@@ -143,6 +144,156 @@ namespace
 		door->releaseOpenLease();
 	}
 
+	void doorways()
+	{
+		core::World world("Player Door", 8, 2);
+		auto front = world.addRoom("Front", 0, 0, 0, 8, 1);
+		auto back = world.addRoom("Back", 1, 0, 0, 8, 1);
+		core::World::CreateDoorOptions options;
+		options.holdOpenSeconds = 30.f;
+		auto result = world.addSectorDoor(0, 0, 2, options);
+		auto door = std::dynamic_pointer_cast<core::DoorSectorObject>(result.door.sector->getObject(result.door.index))->getDoor();
+		world.finishBuild(); world.pauseSimulation();
+		auto id = world.createAgent("Player", front, 0, 2.5f); assign(world, id);
+		world.setAgentIndividualObjectUsageDistance(id, 0.f);
+		walk(world, 0, 0.f);
+		world.requestPlayerDoorAction(); world.update(1.f / 60.f);
+		require(door->isOpening(), "Up must open manual Door despite zero interaction range");
+		world.update(3.f);
+		require(door->isOpen() && world.lookupAgent(id).entity->getSector()->getIndex() == front,
+			"Opening must not queue or automatically perform crossing");
+		world.requestPlayerDoorAction(); world.update(1.f / 60.f);
+		require(world.lookupAgent(id).entity->hasActiveLocomotionTask()
+			&& world.lookupAgent(id).entity->getState() == core::Agent::State::TraversingEdge,
+			"Open doorway must start an authoritative timed crossing");
+		world.setPlayerMovementDirection(1); world.update(1.f / 60.f);
+		near(x(world, id), 2.5f, "Walking must be ignored during crossing");
+		world.requestPlayerDoorAction(); // Underway presses are discarded, not queued for return.
+		world.pauseSimulation(); world.update(1.f);
+		require(world.setDoorBroken(result.traversalResource, true), "Cannot break admitted Door");
+		require(world.lookupAgent(id).entity->getSector()->getIndex() == front,
+			"Pause must freeze admitted crossing");
+		require(world.resumeSimulation(), "Cannot resume admitted crossing"); world.update(.2f);
+		require(world.lookupAgent(id).entity->getSector()->getIndex() == back
+			&& !world.lookupAgent(id).entity->hasActiveLocomotionTask(), "Admitted crossing must survive Broken edits, commit and release its lane");
+		near(x(world, id), 2.5f, "Layer transition must preserve X");
+		world.requestPlayerDoorAction(); world.update(.2f);
+		require(world.lookupAgent(id).entity->getSector()->getIndex() == front, "Up must cross in reverse too");
+		world.requestPlayerDoorAction(); world.resetSimulation(); world.resumeSimulation(); world.update(.2f);
+		require(world.lookupAgent(id).entity->getSector()->getIndex() == front && !door->isOpening(),
+			"Reset must discard pending Up and restore authored position");
+	}
+
+	void doorwayRestrictions()
+	{
+		auto fixture = [](float playerX, core::World::CreateDoorOptions options, auto check) {
+			core::World world("Door restrictions", 8, 3);
+			auto front = world.addRoom("Front", 0, 0, 0, 8, 2);
+			auto back = world.addRoom("Back", 1, 0, 0, 8, 2);
+			options.holdOpenSeconds = 30.f;
+			auto result = world.addSectorDoor(0, 0, 2, options);
+			auto door = std::dynamic_pointer_cast<core::DoorSectorObject>(result.door.sector->getObject(result.door.index))->getDoor();
+			world.finishBuild(); world.pauseSimulation();
+			auto id = world.createAgent("Player", front, 0, playerX); assign(world, id);
+			check(world, id, door, result.traversalResource, back);
+		};
+		auto press = [](core::World& world) { walk(world, 0, 0.f); world.requestPlayerDoorAction(); world.update(.2f); };
+		fixture(1.9f, {}, [&](auto& world, auto, auto door, auto, auto) {
+			press(world); require(door->isClosed(), "Outside doorway X-bounds must not open");
+		});
+		fixture(2.15f, {}, [&](auto& world, auto id, auto door, auto, auto) {
+			press(world); world.update(3.f); require(door->isOpen(), "Centre-in-bounds must permit opening");
+			press(world); require(world.lookupAgent(id).entity->getSector()->getLayerIndex() == 0,
+				"Body outside aperture must prevent crossing without auto-aligning");
+		});
+		fixture(2.5f, {}, [&](auto& world, auto id, auto door, auto resource, auto back) {
+			auto permission = world.addAccessPermission("Door access");
+			world.setManualDoorPermissionRequirement(resource, {permission});
+			press(world); require(door->isClosed(), "Unauthorized player cannot open");
+			world.pauseSimulation(); world.grantAgentAccessPermission(id, permission);
+			world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None);
+			press(world); require(door->isClosed(), "None capability cannot open");
+			world.pauseSimulation(); world.setAgentIndividualObjectUsage(id, core::ObjectUsage::RemoteControl);
+			world.setAgentIndividualObjectUsageDistance(id, 0.f);
+			press(world); world.update(3.f); require(door->isOpen(), "Remote player also ignores distance");
+			world.pauseSimulation(); world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None);
+			world.setLocationPermissionRequirement(back, {world.addAccessPermission("Room access")});
+			press(world); require(world.lookupAgent(id).entity->getSector()->getLayerIndex() == 0,
+				"Location authorization must still gate entry");
+			world.pauseSimulation(); world.setLocationPermissionRequirement(back, {});
+			press(world); require(world.lookupAgent(id).entity->getSector()->getIndex() == back,
+				"None may cross an already open authorized doorway");
+		});
+		fixture(2.5f, {}, [&](auto& world, auto id, auto door, auto, auto) {
+			auto profile = world.lookupAgent(id).entity->getEffectiveMobilityProfile().value;
+			profile.set(core::TraversalKind::Door, core::MobilityUse::CannotUse);
+			world.setAgentIndividualMobilityProfile(id, profile);
+			press(world); require(door->isClosed(), "Forbidden Door Mobility must prevent opening");
+		});
+		fixture(2.5f, {}, [&](auto& world, auto id, auto door, auto resource, auto back) {
+			press(world); world.update(3.f);
+			world.pauseSimulation();
+			auto permission = world.addAccessPermission("Protected open Door");
+			world.setManualDoorPermissionRequirement(resource, {permission});
+			press(world); require(world.lookupAgent(id).entity->getSector()->getLayerIndex() == 0,
+				"Permission-adhering player must decline an unauthorized open Door");
+			world.pauseSimulation(); world.setAgentIndividualPermissionAdherence(id, false);
+			press(world); require(world.lookupAgent(id).entity->getSector()->getIndex() == back,
+				"Non-adhering player may use an already open Door");
+			require(door->admitsNewCrossings(), "Passage must not close the Door");
+		});
+		core::World::CreateDoorOptions broken;
+		broken.initiallyBroken = true;
+		fixture(2.5f, broken, [&](auto& world, auto, auto door, auto, auto) {
+			press(world); require(door->isClosed(), "Broken closed Door must not open");
+		});
+		broken.brokenOpenPercentage = 1.f;
+		fixture(2.5f, broken, [&](auto& world, auto id, auto, auto, auto back) {
+			press(world); require(world.lookupAgent(id).entity->getSector()->getIndex() == back,
+				"Fully open Broken Door remains passable");
+		});
+		core::World::CreateDoorOptions low; low.heightScale = .4f;
+		fixture(2.5f, low, [&](auto& world, auto id, auto door, auto, auto) {
+			press(world); world.update(3.f); require(door->isOpen(), "Low Door can be opened");
+			press(world); require(world.lookupAgent(id).entity->getSector()->getLayerIndex() == 0
+				&& world.lookupAgent(id).entity->getPose() == core::Pose::Standing,
+				"Low opening must refuse crossing, not auto-crouch");
+		});
+		core::World::CreateDoorOptions buttons; buttons.activationMode = core::DoorActivationMode::RemoteControlled;
+		buttons.controls[0] = buttons.controls[1] = true;
+		fixture(2.5f, buttons, [&](auto& world, auto, auto door, auto, auto) {
+			press(world); require(door->isClosed(), "Up must not operate a Button-required Door");
+		});
+	}
+
+	void doorwaySelection()
+	{
+		auto run = [](bool bothOpen) {
+			core::World world("Overlapping Player Doors", 8, 2);
+			world.addLayer();
+			auto front = world.addRoom("Front", 0, 0, 0, 8, 1);
+			auto middle = world.addRoom("Middle", 1, 0, 0, 8, 1);
+			auto back = world.addRoom("Back", 2, 0, 0, 8, 1);
+			core::World::CreateDoorOptions options;
+			options.holdOpenSeconds = 30.f;
+			auto a = world.addSectorDoor(0, 0, 2, options);
+			if (!bothOpen) options.width = 2;
+			auto b = world.addSectorDoor(1, 0, 2, options);
+			auto first = std::dynamic_pointer_cast<core::DoorSectorObject>(a.door.sector->getObject(a.door.index))->getDoor();
+			auto second = std::dynamic_pointer_cast<core::DoorSectorObject>(b.door.sector->getObject(b.door.index))->getDoor();
+			world.finishBuild(); world.pauseSimulation();
+			auto id = world.createAgent("Player", middle, 0, 2.5f); assign(world, id);
+			second->requestOpen(); if (bothOpen) first->requestOpen();
+			walk(world, 0, 3.f);
+			world.requestPlayerDoorAction(); world.update(.2f);
+			require(world.lookupAgent(id).entity->getSector()->getIndex() == (bothOpen ? front : back),
+				bothOpen ? "Coincident passable Doors must use stable identity tie-break"
+				: "An open farther doorway must take priority over a nearer closed Door");
+			if (!bothOpen) require(first->isClosed(), "Crossing priority must not open another Door");
+		};
+		run(false); run(true);
+	}
+
 	void persistenceAndPermissions()
 	{
 		core::World world("Portable Player", 10, 2);
@@ -189,5 +340,7 @@ void agent_smoke::registerPlayerControl(std::vector<smoke::Check>& checks)
 	checks.push_back({"playerControlBasics", [](smoke::Context const&) { basics(); }});
 	checks.push_back({"playerControlBoundaries", [](smoke::Context const&) { boundaries(); }});
 	checks.push_back({"playerControlBulkheads", [](smoke::Context const&) { bulkheads(); }});
+	checks.push_back({"playerControlDoorways", [](smoke::Context const&) { doorways(); }});
+	checks.push_back({"playerControlDoorwayRestrictions", [](smoke::Context const&) { doorwayRestrictions(); doorwaySelection(); }});
 	checks.push_back({"playerControlPersistence", [](smoke::Context const&) { persistenceAndPermissions(); }});
 }

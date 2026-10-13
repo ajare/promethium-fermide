@@ -8062,7 +8062,7 @@ namespace core
 			throw WorldException(this, "Simulation cannot be paused from inside a simulation phase");
 
 		mSimulationPaused = true;
-		mPlayerMovementDirection = 0;
+		clearPlayerInput();
 		mAccumulatedTime = 0.0;
 		mSimulationCoordinator.cancelAllTraversalForTopologyRebuild();
 		mSimulationCoordinator.publishTopologyEvent(SimulationEventType::SimulationPaused);

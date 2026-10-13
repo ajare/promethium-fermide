@@ -2,10 +2,13 @@
 #include "core/BulkheadDoorSectorObject.h"
 #include "core/ForceBridgeSectorObject.h"
 #include "core/Location.h"
+#include "core/DoorEdge.h"
+#include "core/Graph.h"
 #include "core/MobilityProfile.h"
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace core
 {
@@ -21,11 +24,119 @@ namespace core
 		mPlayerMovementDirection = isSimulationPaused() ? 0 : std::clamp(direction, -1, 1);
 	}
 
+	void World::clearPlayerInput()
+	{
+		mPlayerMovementDirection = 0;
+		mPlayerDoorAction = {};
+	}
+
+	void World::requestPlayerDoorAction()
+	{
+		if (!isSimulationPaused()) mPlayerDoorAction = getPlayerControlledAgent();
+	}
+
+	void World::performPlayerDoorAction()
+	{
+		auto const id = std::exchange(mPlayerDoorAction, AgentId{});
+		auto* agent = mAgents.find(id);
+		if (!agent || id != getPlayerControlledAgent() || !agent->isActive()
+			|| agent->mTraversalTask || !agent->getSector()) return;
+		auto const position = agent->getGlobalPosition();
+		struct Candidate
+		{
+			std::shared_ptr<const DoorEdge> edge;
+			std::shared_ptr<const Vertex> source, destination;
+			float distance;
+			bool passable, openable;
+		};
+		std::vector<Candidate> candidates;
+		for (auto const& edge : getGraph()->getEdges())
+		{
+			auto ordinary = std::dynamic_pointer_cast<DoorEdge const>(edge);
+			if (!ordinary) continue;
+			auto door = ordinary->getDoor();
+			if (typeid(*door) != typeid(Door) || door->isLiftOwned() || door->isShuttleOwned()
+				|| !door->getFrontSector() || !door->getBackSector()
+				|| !isLocationLike(door->getFrontSector()->getType())
+				|| !isLocationLike(door->getBackSector()->getType())) continue;
+			auto source = edge->getVertex(0), destination = edge->getVertex(1);
+			if (source->getSector().get() != agent->getSector()) std::swap(source, destination);
+			if (source->getSector().get() != agent->getSector()
+				|| std::abs(position.y - door->getPosition().y) > PoseFitTolerance
+				|| position.x < door->getPosition().x
+				|| position.x > door->getPosition().x + door->getSize().x
+				|| agentForbidsEdge(agent, *edge, TraversalKind::Door)) continue;
+			auto resource = mTraversalResources.find(door->getTraversalResourceId());
+			if (!resource || !resource->mEnabled) continue;
+			auto const halfWidth = agent->getPoseEnvelope(Pose::Standing).value_or(Vector2{}).x * .5f;
+			auto const pose = door->selectAgentCrossing(*agent, position.y, true);
+			auto const standingRoom = [&](Sector const& sector) {
+				return agent->poseFits(Pose::Standing, sector.getPosition().y + sector.getLevelsHigh() - 1
+					+ sector.getEffectiveTopLevelHeight() - position.y);
+			};
+			bool const passable = door->admitsNewCrossings() && pose && pose->pose == Pose::Standing
+				&& standingRoom(*source->getSector()) && standingRoom(*destination->getSector())
+				&& position.x - halfWidth >= door->getPosition().x - PoseFitTolerance
+				&& position.x + halfWidth <= door->getPosition().x + door->getSize().x + PoseFitTolerance
+				&& canAgentAccessLocation(*destination->getSector(), *agent)
+				&& agentAdheresToDoorPermission(door->getTraversalResourceId(),
+					SectorId{uint64_t(agent->getSector()->getIndex()) + 1}, id);
+			// Player geometry replaces distance, not capability or authorization.
+			bool const openable = door->getActivationMode() == DoorActivationMode::Manual
+				&& !door->isBroken() && !door->isOpen() && !door->isOpening()
+				&& agentCanOperateObjects(*agent) && agentSatisfiesDoorPermission(*door, *agent);
+			if (passable || openable) candidates.push_back({ordinary, source, destination,
+				std::abs(position.x - (door->getPosition().x + door->getSize().x * .5f)), passable, openable});
+		}
+		std::sort(candidates.begin(), candidates.end(), [](auto const& a, auto const& b) {
+			if (a.passable != b.passable) return a.passable > b.passable;
+			if (a.distance != b.distance) return a.distance < b.distance;
+			return a.edge->getTraversalResourceId() < b.edge->getTraversalResourceId();
+		});
+		for (auto const& candidate : candidates)
+		{
+			if (!candidate.passable) continue;
+			agent->mPathStartPosition = position;
+			auto request = createTraversalRequest(*agent, candidate.edge, candidate.source, candidate.destination);
+			allocateTraversalRequest(request, candidate.edge, candidate.destination);
+			auto lookup = lookupTraversalRequest(request);
+			if (!lookup || lookup.entity->getState() != TraversalRequestState::Granted)
+			{
+				cancelTraversal(request, {});
+				releaseTraversal(request, {});
+				continue; // Never auto-align, queue movement, or bypass another Agent's lane.
+			}
+			Agent::TraversalTask task;
+			task.edge = candidate.edge;
+			task.sourceVertex = candidate.source;
+			task.destinationVertex = candidate.destination;
+			task.request = request;
+			task.permit = lookup.entity->getPermit();
+			task.crossingPose = candidate.edge->getDoor()->selectAgentCrossing(*agent, position.y, true);
+			task.traversalTicksRemaining = Door::crossingDurationTicks(task.crossingPose->speedRatio);
+			finishFurnitureUse(id);
+			agent->mOccupiedUsablePoint = {};
+			agent->mRetainedActionPose = false;
+			agent->mPose = Pose::Standing;
+			agent->mTraversalTask = std::move(task);
+			agent->mState = Agent::State::TraversingEdge;
+			return;
+		}
+		for (auto const& candidate : candidates)
+			if (candidate.openable) { candidate.edge->getDoor()->requestOpen(); return; }
+	}
+
 	void World::advancePlayerControlledAgent(AgentId id, float timestep)
 	{
 		auto* agent = mAgents.find(id);
-		if (!agent || !agent->isActive() || !agent->isPlayerControlled()
-			|| !mPlayerMovementDirection) return;
+		if (!agent || !agent->isActive() || !agent->isPlayerControlled()) return;
+		if (agent->mTraversalTask)
+		{
+			agent->update(timestep);
+			return;
+		}
+		agent->mState = Agent::State::Idle;
+		if (!mPlayerMovementDirection) return;
 		auto* source = agent->getSector();
 		if (!source || !isLocationLike(source->getType())) return;
 		auto position = agent->getGlobalPosition();

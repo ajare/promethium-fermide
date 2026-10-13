@@ -45,8 +45,10 @@ the two implementations are intentionally independent so they can diverge.
 Assign the editor's built-in **Player controlled** behaviour to any Agent to
 control the lowest-ID eligible Agent in Play. Hold Left/Right to walk Standing;
 release to stop (both keys cancel). The camera follows that Agent and its Layer.
-Walls, low spaces, closed Bulkhead Doors and Floor gaps block movement; no device
-operation or automatic crouching/crawling is performed. Without an eligible
+Press Up to cross an aligned open ordinary Door between Layers, or otherwise
+open an eligible manual Door; press again once open to cross. Walls, low spaces,
+closed Bulkhead Doors and Floor gaps block movement. Buttons, transport boarding
+and automatic crouching/crawling are not supported. Without an eligible
 Agent, Player input is disabled and the fitted Layer-0 camera remains.
 See [Player control](../../docs/player-control.md) for authoring and validation.
 
@@ -71,8 +73,8 @@ The repository's single source manifest, `resources/Resources.yaml`, declares
 the World resource `World/WorldFile` for `test-worlds/room-height-test-1.world.yaml`
 and the Map resource `World/World`
 as its dependent Map alongside all existing editor resources. Both hosts register
-the combined resource types and use the same staged `Resources.yaml` and root
-resource tree beside their executables. Explicit resource creation loads the
+the combined resource types and read the original `resources/Resources.yaml` and
+resource tree in the repository, without build-directory asset copies. Explicit resource creation loads the
 World during MapLoad; simulation time starts advancing only in Play.
 
 Play derives from `applib::State` to reuse its scene, camera, and render-pipeline
@@ -97,8 +99,11 @@ cd build-windows\bin\x64\Release
 Launcher.exe
 ```
 
-Building Launcher also builds the application and deploys its default
-`Game.yaml` and the complete root `resources/` tree (including `Resources.yaml`)
-next to Launcher, using the same asset staging target as the editor.
+Building Launcher also builds the application and generates its default
+`Game.yaml` next to Launcher. The configuration references the repository's
+`resources/` directory by absolute path; Worlds, scripts, manifests and artwork
+are read directly from their originals, so edits are visible on restart without
+staging assets or rebuilding C++. The editor also uses the original resource tree.
 The DLL filename in the configuration is generated for the host platform.
-Run Launcher from that output directory so relative paths resolve correctly.
+Run Launcher from that output directory so the relative DLL path resolves correctly.
+These development builds require the source checkout to remain at its configured path.

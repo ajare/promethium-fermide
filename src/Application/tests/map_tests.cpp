@@ -144,7 +144,7 @@ void checkManifest(std::string const& directory) {
     manager.createResource(map);
     require(map->getWorld() && map->getWorld()->getCellsWide() == 16 &&
                 map->getWorld()->getLevelsHigh() == 3 && map->getWorld()->getLayerCount() == 2,
-            "WorldResource must deserialize the staged WorldFile");
+            "WorldResource must deserialize the repository WorldFile");
     auto worldResource = std::static_pointer_cast<WorldResource>(source);
     require(map->getWorldResource() == worldResource && map->getWorld() == worldResource->world().get(),
             "Definition factory must reuse the dependency's World without deserializing a duplicate");
@@ -164,7 +164,7 @@ void checkManifest(std::string const& directory) {
 int main(int argc, char** argv) {
   try {
     checkFactory();
-    require(argc == 2, "Expected the staged application resource directory");
+    require(argc == 2, "Expected the repository resource directory");
     checkManifest(argv[1]);
     checkFailureCleanup(argv[1]);
     return 0;

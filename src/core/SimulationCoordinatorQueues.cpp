@@ -833,7 +833,13 @@ namespace core
 				}
 				if (useCrossingBand)
 				{
-					if (!isWithinDoorCrossingBand(agent->getGlobalPosition(), lane.origin, crossingWidth))
+					// Player Up uses the complete Standing body inside the aperture,
+					// not the historical fixed-width autonomous arrival band.
+					auto const width = agent->isPlayerControlled()
+						? std::max(0.f, (resource.mDoor->getSize().x
+							- agent->getPoseEnvelope(Pose::Standing).value_or(Vector2{}).x) * .5f)
+						: crossingWidth;
+					if (!isWithinDoorCrossingBand(agent->getGlobalPosition(), lane.origin, width))
 					{
 						continue;
 					}

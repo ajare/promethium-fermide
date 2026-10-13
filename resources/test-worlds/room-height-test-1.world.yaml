@@ -57,6 +57,33 @@ construction:
     sectorIndex: 1
     levelIndex: 0
     side: right
+  - type: room
+    name: Room 4
+    layer: 1
+    y: 1
+    x: 2
+    cellsWide: 5
+    levelsHigh: 1
+    topLevelHeight: 0.9
+    hasHeightScale: false
+  - type: objectTombstone
+    sectorIndex: 0
+  - type: objectTombstone
+    sectorIndex: 3
+  - type: door
+    layer: 0
+    y: 1
+    x: 2
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+    hasSpeedOverride: false
+    hasHeightScale: false
 agentGroups:
   []
 accessPermissions:

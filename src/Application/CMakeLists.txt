@@ -35,11 +35,11 @@ add_custom_target(pf-application-assets ALL
     COMMAND ${CMAKE_COMMAND} -E rm -rf
         "$<TARGET_FILE_DIR:Launcher>/application-resources"
     VERBATIM)
-add_dependencies(pf-application-assets pf-sector-assets)
 set_target_properties(pf-application-assets PROPERTIES FOLDER Application)
 add_dependencies(Launcher PromethiumFermide pf-application-assets)
 
 if(BUILD_TESTING)
+    add_dependencies(launcher_program_options_tests pf-application-assets)
     add_executable(pf_application_tests tests/application_tests.cpp
         ../Launcher/src/DirectoryResourceLocation.cpp)
     target_include_directories(pf_application_tests PRIVATE ../Launcher/include)
@@ -49,7 +49,7 @@ if(BUILD_TESTING)
     willpower_deploy_runtime_dlls(pf_application_tests)
     willpower_deploy_vendor_dlls(pf_application_tests)
     add_test(NAME pf_application COMMAND pf_application_tests
-        "$<TARGET_FILE_DIR:Launcher>")
+        "${PROJECT_SOURCE_DIR}/resources")
     set_tests_properties(pf_application PROPERTIES LABELS "application" TIMEOUT 30)
 
     add_executable(pf_application_map_tests tests/map_tests.cpp
@@ -61,7 +61,7 @@ if(BUILD_TESTING)
     willpower_deploy_runtime_dlls(pf_application_map_tests)
     willpower_deploy_vendor_dlls(pf_application_map_tests)
     add_test(NAME pf_application_map COMMAND pf_application_map_tests
-        "$<TARGET_FILE_DIR:Launcher>")
+        "${PROJECT_SOURCE_DIR}/resources")
     set_tests_properties(pf_application_map PROPERTIES LABELS "application" TIMEOUT 30)
 
     add_executable(pf_application_render_tests tests/render_tests.cpp
@@ -73,6 +73,6 @@ if(BUILD_TESTING)
     willpower_deploy_runtime_dlls(pf_application_render_tests)
     willpower_deploy_vendor_dlls(pf_application_render_tests)
     add_test(NAME pf_application_render COMMAND pf_application_render_tests
-        "$<TARGET_FILE_DIR:Launcher>")
+        "${PROJECT_SOURCE_DIR}/resources")
     set_tests_properties(pf_application_render PROPERTIES LABELS "application;render" TIMEOUT 30)
 endif()

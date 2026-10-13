@@ -59,7 +59,8 @@ if(BUILD_TESTING)
     pf_apply_headless_verification_policy(launcher_program_options_tests)
     willpower_deploy_runtime_dlls(launcher_program_options_tests)
     willpower_deploy_vendor_dlls(launcher_program_options_tests)
-    add_test(NAME launcher_program_options COMMAND launcher_program_options_tests)
+    add_test(NAME launcher_program_options COMMAND launcher_program_options_tests
+        "$<TARGET_FILE_DIR:Launcher>/Game.yaml" "${PROJECT_SOURCE_DIR}/resources")
 
     add_executable(launcher_window_input_tests
         tests/window_input_tests.cpp

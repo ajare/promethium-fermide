@@ -518,6 +518,7 @@ namespace core
 				if (!agent->isActive()) continue;
 				agent->allocateTraversal();
 			}
+			mWorld.performPlayerDoorAction();
 			allocateInteractions();
 			break;
 
@@ -533,7 +534,9 @@ namespace core
 				if (!agent->isActive()) continue;
 				if (agent->isPlayerControlled())
 				{
-					if (id == player) mWorld.advancePlayerControlledAgent(id, timestep);
+					// Selection changes do not revoke an admitted crossing.
+					if (id == player || agent->mTraversalTask)
+						mWorld.advancePlayerControlledAgent(id, timestep);
 					continue;
 				}
 				auto const movementStart = agent->getGlobalPosition();

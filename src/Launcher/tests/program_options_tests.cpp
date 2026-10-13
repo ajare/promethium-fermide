@@ -133,12 +133,24 @@ void removedOptionsAreRejected() {
 }
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
   try {
     validConfigurationParses();
     inputOptionsParse();
     invalidInputOptionsAreRejected();
     removedOptionsAreRejected();
+    require(argc == 1 || argc == 3, "Expected generated Game.yaml and repository resource root.");
+    if (argc == 3) {
+      auto const options = parseProgramOptions(argv[1]);
+      require(options.resourceLocations.size() == 1, "Generated Launcher configuration must use one resource root.");
+      auto const& location = options.resourceLocations.front();
+      auto const root = std::filesystem::path(location.path);
+      require(location.type == "Directory" && root.is_absolute() &&
+                  std::filesystem::equivalent(root, std::filesystem::path(argv[2])) &&
+                  location.definitionFile == "Resources.yaml" &&
+                  std::filesystem::exists(root / location.definitionFile),
+              "Launcher must reference the original repository resources, not staged build assets.");
+    }
 
     std::cout << "Program-options schema validation passed\n";
     return 0;

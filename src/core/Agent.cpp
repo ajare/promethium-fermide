@@ -2286,6 +2286,7 @@ namespace core
 		{
 			mWorld->releaseTraversal(mTraversalTask->request, mTraversalTask->permit);
 			mTraversalTask.reset();
+			if (isPlayerControlled() || !mPath.path) mState = State::Idle;
 			syncPoseToSector();
 			syncStandingRouteObservation();
 			mTraversalLocalGoal.reset();

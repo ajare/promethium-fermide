@@ -686,6 +686,8 @@ namespace core
 		std::unique_ptr<AgentBehaviourRuntimeAdapter> mAgentBehaviourRuntime;
 		// App-only transient input. Editor simulation never supplies this intent.
 		int mPlayerMovementDirection{ 0 };
+		AgentId mPlayerDoorAction{};
+		void performPlayerDoorAction();
 		void advancePlayerControlledAgent(AgentId agent, float timestep);
 
 		// Registered Agent-type definitions, keyed by stable type ID. The bundled
@@ -1840,6 +1842,9 @@ namespace core
 		AgentId getPlayerControlledAgent() const;
 		// Held input: -1 left, 0 idle, +1 right. Never authored or persisted.
 		void setPlayerMovementDirection(int direction);
+		// One Up keypress, consumed at the next allocation phase; never saved.
+		void requestPlayerDoorAction();
+		void clearPlayerInput();
 		// Runtime failures are value diagnostics and are not authored or persisted.
 		// Inspecting or consuming them does not consume the public simulation event
 		// queue. The non-consuming snapshot supports persistent editor presentation;

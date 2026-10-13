@@ -16,30 +16,42 @@ camera is used.
 - Release the key to stop. Holding both keys stops movement.
 - Pause, reset, suspension, and leaving Play clear transient movement input.
 - The camera centres on the controlled Agent at normal zoom and shows its Layer.
-- Movement stays on the current Layer and Level. Usable open boundaries and
-  fully open standalone Bulkhead Doors permit entry into adjacent Locations,
+- Left/Right movement stays on the current Layer and Level. Usable open boundaries
+  and fully open standalone Bulkhead Doors permit entry into adjacent Locations,
   subject to Standing fit and existing passage restrictions.
+- Press **Up** to cross an eligible fully open ordinary Door into its connected
+  Location on the adjacent Layer, in either direction. If no crossing can start,
+  Up instead opens an eligible manual Door. Press again after it finishes opening
+  to cross; holding Up or keyboard repeat never queues another action.
+- The Agent must be on the Door's Level in one of its connected Locations. Opening
+  requires its centre inside the Door's physical X-bounds; crossing requires its
+  entire Standing body inside the aperture. There is no automatic alignment.
+- Player opening ignores arm length and remote activation distance, but preserves
+  Object usage capability, Door Mobility, Access permissions and Broken state.
+  None cannot open a Door, but can cross an already open eligible doorway. Existing
+  Permission adherence and destination Location requirements still govern passage;
+  a fully open Broken Door can remain passable.
+- Crossing uses normal Standing Door-context speed, admission lanes and safety
+  leases. Left/Right and further Up presses are ignored while crossing. Pause
+  freezes an admitted crossing; it finishes safely on resume.
+- Overlapping candidates prefer an admissible open doorway, then nearest centre,
+  then stable traversal-resource identity. One press performs at most one action.
 - Solid walls, closed/opening Bulkhead Doors, low spaces and unsupported Floor
-  edges stop the Agent's leading body edge. Input never operates a device,
-  climbs, changes Layer, or automatically crouches/crawls.
+  edges stop the Agent's leading body edge. Input never operates Buttons, boards
+  transports, climbs, or automatically crouches/crawls. Only ordinary Doors between
+  Locations support Up; transport-owned Doors, Windows and BoothWindows do not.
 - An Agent initially in a space that cannot accommodate Standing remains
   stationary in its existing fitting pose; input does not force it through the
   ceiling.
 
 ## Editing the World used by Launcher
 
-Launcher loads the staged World beside its executable, not the repository's
-`resources/` source file. If you edit and save the source World **after** building,
-refresh the assets before restarting Launcher:
-
-```sh
-cmake --build build-linux --config Release --target pf-sector-assets
-```
-
-No C++ rebuild is needed. Alternatively, edit the staged World under
-`build-linux/bin/x64/Release/test-worlds/` directly, but the next build will
-replace that copy with the source resources. Prefer saving source changes and
-then staging them.
+Launcher reads the original World at
+`resources/test-worlds/room-height-test-1.world.yaml` through the repository's
+`resources/Resources.yaml`. Save your changes there and restart Launcher; no
+asset staging or C++ rebuild is needed. Build-directory resource copies are not
+used. Generated `Game.yaml` references the repository resource directory by
+absolute path, so the source checkout must remain at its configured location.
 
 Assignment is authored and survives YAML/binary save/load, Reset, history and
 cross-World clipboard placement. Key state and movement direction are runtime
@@ -55,8 +67,10 @@ work and does not add a new Agent type.
 ## Release validation
 
 `agent-playerControlBasics`, `agent-playerControlBoundaries`,
-`agent-playerControlBulkheads`, and `agent-playerControlPersistence` exercise the
-World/coordinator seam. `agent-playerControlEditorWorkflow` covers the picker,
-undo/redo and clipboard. `pf_application` covers actual Play key injection and
+`agent-playerControlBulkheads`, `agent-playerControlPersistence`,
+`agent-playerControlDoorways`, and `agent-playerControlDoorwayRestrictions` exercise
+walking, timed bidirectional Layer transitions, pause/reset, geometry, capability,
+permissions, low clearance and Broken Doors through the World/coordinator seam. `agent-playerControlEditorWorkflow` covers the picker,
+undo/redo and clipboard. `pf_application` covers actual Play key injection, Up repeat suppression and
 suspension; `pf_application_render` covers camera following, Layer selection,
 resize and the no-Player fallback.

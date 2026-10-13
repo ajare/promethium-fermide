@@ -596,15 +596,6 @@ if(PF_BUILD_GUI)
     )
     willpower_deploy_runtime_dlls(editor)
 
-    # Copy on every build so manifest and art edits deploy without a C++ relink.
-    add_custom_target(pf-sector-assets ALL
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_CURRENT_SOURCE_DIR}/resources"
-            "${PF_OUTPUT_DIR}"
-        VERBATIM
-    )
-    add_dependencies(editor pf-sector-assets)
-
     add_custom_command(TARGET editor POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/resources/promethium-fermide.ini"

@@ -26,8 +26,8 @@ void StatePlay::setup(wp::application::resourcesystem::ResourceManager* resource
 }
 
 void StatePlay::teardown() {
-  if (mWorld) mWorld->setPlayerMovementDirection(0);
-  mLeftHeld = mRightHeld = false;
+  if (mWorld) mWorld->clearPlayerInput();
+  mLeftHeld = mRightHeld = mUpHeld = false;
   mRenderer.reset();
   mWorld = nullptr;
 }
@@ -39,15 +39,15 @@ void StatePlay::resumeImpl(void* args) {
   auto* map = resources ? resources->getMap() : nullptr;
   mWorld = map ? map->getWorld() : nullptr;
   if (!mWorld) throw std::runtime_error("Play requires the loaded World Map");
-  mLeftHeld = mRightHeld = false;
-  mWorld->setPlayerMovementDirection(0);
+  mLeftHeld = mRightHeld = mUpHeld = false;
+  mWorld->clearPlayerInput();
   mWorld->setSimulationTimeScale(1.0);
   if (!mWorld->resumeSimulation()) throw std::runtime_error("Play cannot resume the World");
 }
 
 void StatePlay::suspendImpl(void*) {
-  mLeftHeld = mRightHeld = false;
-  if (mWorld) mWorld->setPlayerMovementDirection(0);
+  mLeftHeld = mRightHeld = mUpHeld = false;
+  if (mWorld) mWorld->clearPlayerInput();
 }
 
 void StatePlay::updateImpl(float elapsedSeconds) {
@@ -64,10 +64,15 @@ void StatePlay::injectKeyInputImpl(wp::application::KeyEvent event,
     mLeftHeld = event == wp::application::KeyEvent::Pressed;
   else if (key == wp::application::Key::RightArrow)
     mRightHeld = event == wp::application::KeyEvent::Pressed;
+  else if (key == wp::application::Key::UpArrow) {
+    bool const pressed = event == wp::application::KeyEvent::Pressed;
+    if (pressed && !mUpHeld && mWorld) mWorld->requestPlayerDoorAction();
+    mUpHeld = pressed;
+  }
   if (event == wp::application::KeyEvent::Pressed &&
       key == wp::application::Key::Escape) {
-    mLeftHeld = mRightHeld = false;
-    if (mWorld) mWorld->setPlayerMovementDirection(0);
+    mLeftHeld = mRightHeld = mUpHeld = false;
+    if (mWorld) mWorld->clearPlayerInput();
     // Controller resumes with Play's identity and runs the unload sequence.
     throw wp::application::ReturnFromStateException(&mTransitionData);
   }

@@ -11,6 +11,8 @@
 #include <willpower/application/resourcesystem/ImageSetResource.h>
 #include <core/World.h>
 #include <core/Agent.h>
+#include <core/DoorSectorObject.h>
+#include <core/YamlSerializer.h>
 #include <cmath>
 
 #include "Application.h"
@@ -153,6 +155,48 @@ void checkPlayerKeys(wp::application::State& play, core::World& world) {
   key(KeyEvent::Released, Key::RightArrow);
 }
 
+void checkPlayerDoorKeys(wp::application::State& play, core::World& world) {
+  using wp::application::Key;
+  using wp::application::KeyEvent;
+  core::World fixture("Keyboard Door", 8, 2);
+  auto front = fixture.addRoom("Front", 0, 0, 0, 8, 1);
+  fixture.addRoom("Back", 1, 0, 0, 8, 1);
+  core::World::CreateDoorOptions options;
+  options.holdOpenSeconds = 30.f;
+  auto result = fixture.addSectorDoor(0, 0, 2, options);
+  fixture.finishBuild(); fixture.pauseSimulation();
+  auto id = fixture.createAgent("Keyboard player", front, 0, 2.5f);
+  require(fixture.setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}),
+          "Cannot assign keyboard Door player");
+  auto writer = core::YamlSerializer::toString();
+  core::SerializationWorkData data; data.markSerializedUnmodified = false;
+  fixture.serialize(*writer, data); writer->serialize();
+  auto reader = core::YamlSerializer::fromString(writer->getSerializedString()); reader->deserialize();
+  world.pauseSimulation();
+  require(world.deserialize(*reader, data), "Cannot install keyboard Door fixture");
+  auto door = std::dynamic_pointer_cast<core::DoorSectorObject>(
+      world.getSector(front)->getObject(result.door.index))->getDoor();
+  require(world.resumeSimulation(), "Cannot resume keyboard Door fixture");
+  auto key = [&](KeyEvent event) { play._injectKeyInput(event, Key::UpArrow, {}); };
+  key(KeyEvent::Pressed); play._update(1.f / 60.f);
+  require(door->isOpening(), "App Up must open a manual Door");
+  key(KeyEvent::Pressed); play._update(3.f);
+  key(KeyEvent::Pressed); play._update(.2f);
+  require(door->isOpen() && world.lookupAgent(id).entity->getSector()->getLayerIndex() == 0,
+          "Holding/repeating Up must not queue crossing");
+  key(KeyEvent::Released); key(KeyEvent::Pressed); play._update(.2f);
+  require(world.lookupAgent(id).entity->getSector()->getLayerIndex() == 1,
+          "A fresh Up must cross the open doorway");
+  key(KeyEvent::Released); key(KeyEvent::Pressed);
+  play._suspend(true, true, true); play._suspend(false, false, false); play._update(.2f);
+  require(world.lookupAgent(id).entity->getSector()->getLayerIndex() == 1,
+          "Suspension must discard a pending Up action");
+  key(KeyEvent::Pressed); play._update(.2f);
+  require(world.lookupAgent(id).entity->getSector()->getLayerIndex() == 0,
+          "Suspension must clear the held Up latch");
+  key(KeyEvent::Released);
+}
+
 // Drive the actual factory-created states through the same exception/resume
 // contract as Launcher, without entering their graphics-dependent scenes.
 void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
@@ -207,6 +251,7 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
         require(map->getWorld()->getSimulationTick() == tick + 60,
                 "Play must advance one second at normal speed");
         checkPlayerKeys(*child, *map->getWorld());
+        checkPlayerDoorKeys(*child, *map->getWorld());
         auto const suspendTick = map->getWorld()->getSimulationTick();
         child->_suspend(true, true, true);
         child->_update(1.0f);
@@ -287,7 +332,7 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
 
 int main(int argc, char** argv) {
   try {
-    require(argc == 2, "Expected the staged resource directory");
+    require(argc == 2, "Expected the repository resource directory");
     require(std::string_view(dllGetName()) == "Promethium Fermide",
             "Application name mismatch");
     require(dllSetArgument("Unknown", "true") != 0,

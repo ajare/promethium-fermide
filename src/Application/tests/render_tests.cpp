@@ -233,7 +233,7 @@ void checkNestedApertures() {
 
 int main(int argc, char** argv) {
   try {
-    require(argc == 2, "Expected the staged Application resource directory");
+    require(argc == 2, "Expected the repository resource directory");
     auto directory = std::filesystem::path(argv[1]);
     // The same source manifest supplies the CPU-only artwork rectangles; no
     // graphics context, texture upload, auxiliary manifest or ImGui is needed.

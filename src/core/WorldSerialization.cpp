@@ -3009,7 +3009,7 @@ namespace core
 		if (!preserveBehaviourRuntime)
 		{
 			mTimeScale = 1.0;
-			mPlayerMovementDirection = 0;
+			clearPlayerInput();
 		}
 		mRecordingTickChanges = false;
 		mTickAgents.clear();
