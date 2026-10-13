@@ -5,6 +5,9 @@
 #include "core/DoorEdge.h"
 #include "core/Graph.h"
 #include "core/MobilityProfile.h"
+#include "core/StairwellMountEdge.h"
+#include "core/StairwellTransit.h"
+#include "core/SectorEdge.h"
 
 #include <algorithm>
 #include <cmath>
@@ -24,10 +27,26 @@ namespace core
 		mPlayerMovementDirection = isSimulationPaused() ? 0 : std::clamp(direction, -1, 1);
 	}
 
+	float World::maximumInstalledStandingWidth() const
+	{
+		float width = bundledHumanBaseline().width;
+		for (auto const& [id, definition] : mAgentTypes)
+			if (auto baseline = registeredAgentTypeBaseline(id, definition->resourceName))
+				if (baseline->supportsPose(Pose::Standing)) width = std::max(width, baseline->width);
+		return width;
+	}
+
+	void World::setPlayerStairSelection(bool up, bool down)
+	{
+		mPlayerStairUp = !isSimulationPaused() && up;
+		mPlayerStairDown = !isSimulationPaused() && down;
+	}
+
 	void World::clearPlayerInput()
 	{
 		mPlayerMovementDirection = 0;
 		mPlayerDoorAction = {};
+		mPlayerStairUp = mPlayerStairDown = false;
 	}
 
 	void World::requestPlayerDoorAction()
@@ -39,13 +58,34 @@ namespace core
 	{
 		auto const id = std::exchange(mPlayerDoorAction, AgentId{});
 		auto* agent = mAgents.find(id);
-		if (!agent || id != getPlayerControlledAgent() || !agent->isActive()
-			|| agent->mTraversalTask || !agent->getSector()) return;
+		if (!agent || id != getPlayerControlledAgent() || !agent->isActive() || !agent->getSector()) return;
+		auto const* stairSector = dynamic_cast<StairwellTransit const*>(agent->getSector());
+		bool const flatTask = stairSector && agent->mTraversalTask
+			&& agent->mTraversalTask->edge->getType() == EdgeType::Location;
+		if (agent->mTraversalTask && !flatTask) return;
 		auto const position = agent->getGlobalPosition();
+		// Holding Up while approaching a junction selects at departure; it must
+		// not accidentally exit before arrival. Walking away (or stopping) retains
+		// fresh Up's doorway meaning, even midway along a flat platform edge.
+		if (stairSector && agent->mPlayerStairPlatform && mPlayerMovementDirection && mPlayerStairUp)
+		{
+			auto stairs = stairSector->getStairwell();
+			auto const level = static_cast<uint32_t>(std::max(0.f, std::floor(position.y - stairs->getPosition().y)));
+			for (auto const& platform : stairs->getLandingPaths(level))
+			{
+				auto junction = stairs->getPosition() + platform[0], endpoint = stairs->getPosition() + platform[1];
+				if (std::abs(position.y - junction.y) <= PoseFitTolerance
+					&& position.x >= std::min(junction.x, endpoint.x) - PoseFitTolerance
+					&& position.x <= std::max(junction.x, endpoint.x) + PoseFitTolerance
+					&& (std::abs(position.x - junction.x) <= PoseFitTolerance
+						|| mPlayerMovementDirection * (junction.x - position.x) > 0.f)) return;
+			}
+		}
 		struct Candidate
 		{
-			std::shared_ptr<const DoorEdge> edge;
+			std::shared_ptr<const Edge> edge;
 			std::shared_ptr<const Vertex> source, destination;
+			std::optional<PoseSelection> pose;
 			float distance;
 			bool passable, openable;
 		};
@@ -53,7 +93,30 @@ namespace core
 		for (auto const& edge : getGraph()->getEdges())
 		{
 			auto ordinary = std::dynamic_pointer_cast<DoorEdge const>(edge);
-			if (!ordinary) continue;
+			if (!ordinary)
+			{
+				auto mount = std::dynamic_pointer_cast<StairwellMountEdge const>(edge);
+				if (!mount) continue;
+				auto source = edge->getVertex(0), destination = edge->getVertex(1);
+				if (source->getSector().get() != agent->getSector()) std::swap(source, destination);
+				if (source->getSector().get() != agent->getSector()
+					|| std::abs(position.y - source->getPosition().y) > PoseFitTolerance
+					|| agentForbidsEdge(agent, *edge, TraversalKind::Stairwell)
+					|| !canAgentAccessLocation(*destination->getSector(), *agent)) continue;
+				auto const envelope = agent->getPoseEnvelope(Pose::Standing);
+				auto const stairs = mount->getStairwell();
+				if (!envelope || !agent->poseFits(Pose::Standing, CORE_DOOR_HEIGHT)
+					|| position.x - envelope->x * .5f < stairs->getPosition().x + CORE_DOOR_X_INSET - PoseFitTolerance
+					|| position.x + envelope->x * .5f > stairs->getPosition().x + stairs->getSize().x - CORE_DOOR_X_INSET + PoseFitTolerance)
+					continue;
+				bool fit = true;
+				for (auto const& sector : {source->getSector(), destination->getSector()})
+					fit = fit && agent->poseFits(Pose::Standing, sector->getPosition().y + sector->getLevelsHigh() - 1
+						+ sector->getEffectiveTopLevelHeight() - position.y);
+				if (fit) candidates.push_back({edge, source, destination, PoseSelection{Pose::Standing, 1.f},
+					std::abs(position.x - source->getPosition().x), true, false});
+				continue;
+			}
 			auto door = ordinary->getDoor();
 			if (typeid(*door) != typeid(Door) || door->isLiftOwned() || door->isShuttleOwned()
 				|| !door->getFrontSector() || !door->getBackSector()
@@ -85,13 +148,15 @@ namespace core
 			bool const openable = door->getActivationMode() == DoorActivationMode::Manual
 				&& !door->isBroken() && !door->isOpen() && !door->isOpening()
 				&& agentCanOperateObjects(*agent) && agentSatisfiesDoorPermission(*door, *agent);
-			if (passable || openable) candidates.push_back({ordinary, source, destination,
+			if (passable || openable) candidates.push_back({ordinary, source, destination, pose,
 				std::abs(position.x - (door->getPosition().x + door->getSize().x * .5f)), passable, openable});
 		}
 		std::sort(candidates.begin(), candidates.end(), [](auto const& a, auto const& b) {
 			if (a.passable != b.passable) return a.passable > b.passable;
 			if (a.distance != b.distance) return a.distance < b.distance;
-			return a.edge->getTraversalResourceId() < b.edge->getTraversalResourceId();
+			if (a.edge->getTraversalResourceId() != b.edge->getTraversalResourceId())
+				return a.edge->getTraversalResourceId() < b.edge->getTraversalResourceId();
+			return a.edge->getId() < b.edge->getId();
 		});
 		for (auto const& candidate : candidates)
 		{
@@ -112,24 +177,166 @@ namespace core
 			task.destinationVertex = candidate.destination;
 			task.request = request;
 			task.permit = lookup.entity->getPermit();
-			task.crossingPose = candidate.edge->getDoor()->selectAgentCrossing(*agent, position.y, true);
+			task.crossingPose = candidate.pose;
 			task.traversalTicksRemaining = Door::crossingDurationTicks(task.crossingPose->speedRatio);
+			if (flatTask) agent->cancelTraversal();
 			finishFurnitureUse(id);
 			agent->mOccupiedUsablePoint = {};
 			agent->mRetainedActionPose = false;
 			agent->mPose = Pose::Standing;
+			if (candidate.edge->getType() == EdgeType::StairwellMount)
+			{
+				agent->mPlayerStairPlatform = true;
+				agent->mPlayerStairApproach = 0;
+			}
 			agent->mTraversalTask = std::move(task);
 			agent->mState = Agent::State::TraversingEdge;
 			return;
 		}
 		for (auto const& candidate : candidates)
-			if (candidate.openable) { candidate.edge->getDoor()->requestOpen(); return; }
+			if (candidate.openable)
+			{
+				static_cast<DoorEdge const&>(*candidate.edge).getDoor()->requestOpen();
+				return;
+			}
+	}
+
+	void World::advancePlayerStairwellAgent(Agent& agent, float timestep)
+	{
+		auto const* sector = dynamic_cast<StairwellTransit const*>(agent.getSector());
+		if (!sector) return;
+		if (getPlayerControlledAgent() != getAgentId(&agent))
+		{
+			if (agent.mTraversalTask) agent.update(timestep);
+			return;
+		}
+		if (!mPlayerMovementDirection) return;
+		if (agent.mState == Agent::State::AwaitingTraversalCommit) return;
+		auto const position = agent.getGlobalPosition();
+		if (!agent.mTraversalTask)
+		{
+			if (agentForbidsTraversal(&agent, TraversalKind::Stairwell)
+				|| !agent.poseFits(Pose::Standing, sector->getPosition().y + sector->getLevelsHigh() - 1
+					+ sector->getEffectiveTopLevelHeight() - position.y)) return;
+			// Up preserves X. On an integer landing, walking reaches the central
+			// stair mount explicitly; it never aligns the Agent as a side effect of Up.
+			auto const centreX = sector->getPosition().x + 1.f;
+			auto const platform = sector->getStairwell()->getLandingPaths(0).front();
+			auto const platformLength = std::abs(platform[1].x - platform[0].x);
+			if (std::abs(position.y - std::round(position.y)) <= PoseFitTolerance
+				&& std::abs(position.x - centreX) > platformLength + PoseFitTolerance)
+			{
+				auto envelope = agent.getPoseEnvelope(Pose::Standing);
+				auto const halfWidth = envelope->x * .5f;
+				if (envelope->x > sector->getSize().x - 2.f * CORE_DOOR_X_INSET) return;
+				auto target = position;
+				target.x = std::clamp(position.x + mPlayerMovementDirection * agent.getWalkSpeed() * timestep,
+					sector->getPosition().x + CORE_DOOR_X_INSET + halfWidth,
+					sector->getPosition().x + sector->getSize().x - CORE_DOOR_X_INSET - halfWidth);
+				if ((position.x - centreX) * (target.x - centreX) <= 0.f) target.x = centreX;
+				agent.setPosition({const_cast<StairwellTransit*>(sector), target - sector->getPosition()}, false);
+				if (target.x == centreX) agent.mPlayerStairApproach = mPlayerMovementDirection;
+				agent.mPose = Pose::Standing;
+				return;
+			}
+			std::shared_ptr<const Edge> selected;
+			std::shared_ptr<const Vertex> source, destination;
+			int const choice = int(mPlayerStairUp) - int(mPlayerStairDown);
+			bool junction = false;
+			for (auto const& edge : getGraph()->getEdges())
+				if (edge->getType() == EdgeType::Stairwell && edge->getVertex(0)->getSector().get() == sector)
+					for (uint32_t side = 0; side < 2; ++side)
+						junction = junction || position.distanceTo(edge->getVertex(side)->getPosition()) <= PoseFitTolerance;
+			bool const departure = junction && agent.mPlayerStairPlatform
+				&& (choice || agent.mPlayerStairApproach == mPlayerMovementDirection);
+			for (auto const& edge : getGraph()->getEdges())
+			{
+				if ((edge->getType() != EdgeType::Stairwell && edge->getType() != EdgeType::Location)
+					|| edge->getVertex(0)->getSector().get() != sector) continue;
+				for (uint32_t side = 0; side < 2; ++side)
+				{
+					auto from = edge->getVertex(side), to = edge->getVertex(1 - side);
+					auto a = from->getPosition(), b = to->getPosition();
+					auto delta = b - a;
+					auto const t = ((position.x - a.x) * delta.x + (position.y - a.y) * delta.y)
+						/ (delta.x * delta.x + delta.y * delta.y);
+					if (t < -PoseFitTolerance || t > 1.f + PoseFitTolerance
+						|| position.distanceTo(a + delta * std::clamp(t, 0.f, 1.f)) > PoseFitTolerance
+						|| mPlayerMovementDirection * (b.x - position.x) <= PoseFitTolerance) continue;
+					bool const flight = edge->getType() == EdgeType::Stairwell;
+					// A topology rebuild may retire a task on a continuous stair
+					// surface. Resume that same segment, not a new flight choice.
+					bool const resuming = t > PoseFitTolerance && t < 1.f - PoseFitTolerance;
+					if (flight && !resuming && (!departure || !choice || delta.y * choice <= 0.f)) continue;
+					if (!flight && departure) continue;
+					if (!selected || edge->getId() < selected->getId())
+					{
+						selected = edge; source = from; destination = to;
+					}
+				}
+			}
+			if (!selected) return;
+			agent.mPathStartPosition = position;
+			auto request = createTraversalRequest(agent, selected, source, destination);
+			allocateTraversalRequest(request, selected, destination);
+			auto lookup = lookupTraversalRequest(request);
+			if (!lookup || lookup.entity->getState() != TraversalRequestState::Granted)
+			{
+				cancelTraversal(request, {}); releaseTraversal(request, {});
+				return; // Wait in place without claiming or bypassing narrow-stair capacity.
+			}
+			Agent::TraversalTask task;
+			task.edge = selected; task.sourceVertex = source; task.destinationVertex = destination;
+			task.request = request; task.permit = lookup.entity->getPermit();
+			agent.mPlayerStairPlatform = selected->getType() == EdgeType::Location;
+			agent.mPlayerStairApproach = 0;
+			agent.mTraversalTask = std::move(task);
+			agent.mState = Agent::State::TraversingEdge;
+			agent.mPose = Pose::Standing;
+		}
+		auto const& task = *agent.mTraversalTask;
+		auto const forwardX = task.destinationVertex->getPosition().x - task.sourceVertex->getPosition().x;
+		bool const forward = mPlayerMovementDirection * forwardX > 0.f;
+		auto const target = forward ? task.destinationVertex : task.sourceVertex;
+		auto const rise = target->getPosition().y - position.y;
+		// A reversal in a narrow stairwell is safe only while alone on the span.
+		if (auto resource = mTraversalResources.find(task.edge->getTraversalResourceId()); resource && resource->mStairwell)
+		{
+			auto const direction = rise > 0.f ? TraversalDirection::Ascending : TraversalDirection::Descending;
+			if (resource->mActiveDirection != direction)
+			{
+				if (std::any_of(resource->mAdmissionReservations.begin(), resource->mAdmissionReservations.end(),
+					[&](auto owner) { return owner && owner != task.request; })
+					|| std::any_of(resource->mOccupants.begin(), resource->mOccupants.end(),
+						[&](auto owner) { return owner && owner != getAgentId(&agent); })) return;
+				resource->mActiveDirection = direction;
+			}
+		}
+		auto const speed = task.edge->getType() == EdgeType::Location
+			? agent.getWalkSpeed() : agent.getStationaryStairSpeed(rise > 0.f);
+		if (agent.moveToPosition(target->getPosition(), timestep, speed))
+		{
+			if (agent.mPlayerStairPlatform)
+				for (auto const& edge : getGraph()->getEdges())
+					if (edge->getType() == EdgeType::Stairwell
+						&& (edge->getVertex(0) == target || edge->getVertex(1) == target))
+						agent.mPlayerStairApproach = mPlayerMovementDirection;
+			if (forward) agent.mState = Agent::State::AwaitingTraversalCommit;
+			else { agent.cancelTraversal(); agent.mState = Agent::State::Idle; }
+		}
 	}
 
 	void World::advancePlayerControlledAgent(AgentId id, float timestep)
 	{
 		auto* agent = mAgents.find(id);
 		if (!agent || !agent->isActive() || !agent->isPlayerControlled()) return;
+		if (agent->getSector() && agent->getSector()->getType() == SectorType::Stairwell
+			&& (!agent->mTraversalTask || agent->mTraversalTask->edge->getType() == EdgeType::Stairwell
+				|| agent->mTraversalTask->edge->getType() == EdgeType::Location))
+		{
+			advancePlayerStairwellAgent(*agent, timestep);
+			return;
+		}
 		if (agent->mTraversalTask)
 		{
 			agent->update(timestep);

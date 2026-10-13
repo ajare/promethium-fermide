@@ -1260,7 +1260,7 @@ void renderShuttle(shared_ptr<const core::Shuttle> shuttle, uint32_t /* layer */
 }
 
 
-void renderStairwell(shared_ptr<const core::Stairwell> stairwell, uint32_t /* layer */, LayerRenderStyle /* style */, bool /* selected */, WorldDrawList* drawList)
+void renderStairwell(shared_ptr<const core::Stairwell> stairwell, uint32_t /* layer */, LayerRenderStyle style, bool /* selected */, WorldDrawList* drawList)
 {
 	core::Vector2 worldMin, worldMax;
 	stairwell->getCurrentShape(worldMin, worldMax);
@@ -1293,6 +1293,13 @@ void renderStairwell(shared_ptr<const core::Stairwell> stairwell, uint32_t /* la
 		pathPoints.push_back(toScreen(path[2]));
 		pathPoints.push_back(toScreen(path[3]));
 	}
+	for (uint32_t level = 0; level < stairwell->getLevelsHigh(); ++level)
+		for (auto const& platform : stairwell->getLandingPaths(level))
+		{
+			array<ImVec2, 2> points{toScreen(platform[0]), toScreen(platform[1])};
+			drawList->AddPolyline(points.data(), 2, ImColor(223, 223, 223), ImDrawFlags_None, 10.0f);
+			drawList->AddPolyline(points.data(), 2, ImColor(0, 0, 0), ImDrawFlags_None, 4.0f);
+		}
 	if (pathPoints.size() >= 2)
 	{
 		drawList->AddPolyline(pathPoints.data(), (int)pathPoints.size(),
@@ -1300,6 +1307,16 @@ void renderStairwell(shared_ptr<const core::Stairwell> stairwell, uint32_t /* la
 		drawList->AddPolyline(pathPoints.data(), (int)pathPoints.size(),
 			ImColor(0, 0, 0), ImDrawFlags_None, 4.0f);
 	}
+	// Back-facing exits are outlines on the Stairwell's viewed Layer, not
+	// recursive apertures into the adjacent fore Locations.
+	if (style == LayerRenderStyle::Solid)
+		for (uint32_t level = 0; level < stairwell->getLevelsHigh(); ++level)
+		{
+			auto low = toScreen({CORE_DOOR_X_INSET, float(level)});
+			auto high = toScreen({stairwell->getSize().x - CORE_DOOR_X_INSET,
+				float(level) + CORE_STAIRWELL_DOORWAY_HEIGHT});
+			drawList->AddRect({low.x, high.y}, {high.x, low.y}, ImColor(0, 0, 0));
+		}
 }
 
 

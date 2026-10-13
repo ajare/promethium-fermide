@@ -46,7 +46,10 @@ Assign the editor's built-in **Player controlled** behaviour to any Agent to
 control the lowest-ID eligible Agent in Play. Hold Left/Right to walk Standing;
 release to stop (both keys cancel). The camera follows that Agent and its Layer.
 Press Up to cross an aligned open ordinary Door between Layers, or otherwise
-open an eligible manual Door; press again once open to cross. Walls, low spaces,
+open an eligible manual Door; press again once open to cross. Up also enters or
+exits Stairwell landing doorways. Left/Right walks on visible side platforms;
+hold Up/Down at departure to choose ascent/descent, with matching horizontal
+input. Arrival walks onto the next platform rather than skipping its junction. Walls, low spaces,
 closed Bulkhead Doors and Floor gaps block movement. Buttons, transport boarding
 and automatic crouching/crawling are not supported. Without an eligible
 Agent, Player input is disabled and the fitted Layer-0 camera remains.

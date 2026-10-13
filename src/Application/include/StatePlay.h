@@ -12,7 +12,7 @@ namespace render { class WorldRenderer; }
 class StatePlay final : public applib::State {
   std::unique_ptr<render::WorldRenderer> mRenderer;
   core::World* mWorld{nullptr}; // Borrowed from Controller's MapResources.
-  bool mLeftHeld{false}, mRightHeld{false}, mUpHeld{false};
+  bool mLeftHeld{false}, mRightHeld{false}, mUpHeld{false}, mDownHeld{false};
 protected:
   void setup(wp::application::resourcesystem::ResourceManager*,
              mpp::RenderSystem*, mpp::ResourceManager*, void*) override;

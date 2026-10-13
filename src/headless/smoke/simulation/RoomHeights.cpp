@@ -137,7 +137,8 @@ namespace
 	// cross-sector Location edge commits at Room 3's Marker.
 	void loadedRoomHeights(smoke::Context const& context)
 	{
-		auto world = core::loadWorldDocument(context.fixture("resources/test-worlds/room-height-test-1.world.yaml"));
+		// Keep the saved-Path regression independent of the editable Launcher World.
+		auto world = core::loadWorldDocument(context.fixture("src/headless/fixtures/room-heights-active-path.world.yaml"));
 		require(world != nullptr, "fixture world failed to load");
 		auto* agent = world->lookupAgent(core::AgentId{1}).entity;
 		require(agent, "fixture agent missing");

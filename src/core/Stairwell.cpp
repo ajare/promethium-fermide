@@ -1,4 +1,7 @@
 #include <cassert>
+#include <algorithm>
+#include <cmath>
+#include <stdexcept>
 
 #include "core/Defines.h"
 #include "core/Stairwell.h"
@@ -61,11 +64,34 @@ namespace core
 
 	array<Vector2, 4> Stairwell::getLevelPath(uint32_t levelOffset) const
 	{
-		float const lowerX = mMountSide == CORE_SIDE_LEFT ? 1.666f : 0.334f;
-		float const upperX = mMountSide == CORE_SIDE_LEFT ? 0.334f : 1.666f;
+		float const margin = mStandingWidth * .5f;
+		float const length = std::min(.25f, (2.f - mStandingWidth) * .45f);
+		float const left = margin + length, right = 2.f - left;
+		float const lowerX = mMountSide == CORE_SIDE_LEFT ? right : left;
+		float const upperX = mMountSide == CORE_SIDE_LEFT ? left : right;
 		float const y = (float)levelOffset;
 		return { Vector2{ 1.0f, y }, Vector2{ lowerX, y + 0.25f },
 			Vector2{ upperX, y + 0.75f }, Vector2{ 1.0f, y + 1.0f } };
+	}
+
+	void Stairwell::configureStandingWidth(float width)
+	{
+		if (!std::isfinite(width) || width <= 0.f || width >= 2.f)
+			throw std::invalid_argument("Installed Standing width leaves no room for Stairwell platforms");
+		mStandingWidth = width;
+	}
+
+	std::vector<std::array<Vector2, 2>> Stairwell::getLandingPaths(uint32_t levelOffset) const
+	{
+		auto path = getLevelPath(levelOffset);
+		float const length = std::min(.25f, (2.f - mStandingWidth) * .45f);
+		std::vector<std::array<Vector2, 2>> result{
+			{path[0], {1.f - length, path[0].y}},
+			{path[0], {1.f + length, path[0].y}}};
+		if (levelOffset + 1 < mLevelsHigh)
+			for (uint32_t point : {1u, 2u})
+				result.push_back({path[point], {path[point].x + (path[point].x > 1.f ? length : -length), path[point].y}});
+		return result;
 	}
 
 	/***

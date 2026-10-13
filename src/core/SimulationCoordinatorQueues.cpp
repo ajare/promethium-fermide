@@ -529,6 +529,13 @@ namespace core
 			auto agent = request ? mWorld.mAgents.find(request->mOwner) : nullptr;
 			if (!request || !agent) { expiredPermits.push_back(permitId); continue; }
 			auto distance = agent->getGlobalPosition().distanceTo(request->mDestinationEndpoint);
+			// A player may deliberately stop or reverse on an admitted stair segment.
+			// Retain its capacity until it reaches a safe endpoint or is cancelled.
+			if (agent->isPlayerControlled() && agent->getSector()
+				&& agent->getSector()->getType() == SectorType::Stairwell
+				&& (request->mEdgeType == EdgeType::Stairwell || request->mEdgeType == EdgeType::Location)
+				&& agent->mTraversalTask && agent->mTraversalTask->permit == permitId)
+				permit->mExpiresAtTick = mWorld.mSimulationTick + mWorld.mTraversalWaitingPolicy.permitProgressTimeoutTicks;
 			if (distance + 0.001f < permit->mBestDestinationDistance)
 			{
 				permit->mBestDestinationDistance = distance;

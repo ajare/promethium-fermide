@@ -479,6 +479,9 @@ namespace core
 		std::map<uint32_t, DeviceCondition> mRememberedEscalatorConditions;
 
 		SectorPosition mPosition;
+		// Runtime platform approach, never an advance flight selection.
+		bool mPlayerStairPlatform{ true };
+		int mPlayerStairApproach{ 0 };
 
 		// Authored position and route are kept separate from transient locomotion.
 		// Simulation advances mPosition/mPath, while serialization and Reset use

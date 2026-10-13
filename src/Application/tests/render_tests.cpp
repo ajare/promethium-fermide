@@ -178,6 +178,45 @@ void checkPlayerCamera() {
           "No Player must restore Layer-0 camera rather than reveal a back-Layer Agent");
 }
 
+void checkStairwellDoorwayOutlines() {
+  auto world = std::make_shared<core::World>("Stairwell exits", 8, 2);
+  auto bottom = world->addRoom("Bottom", 0, 0, 0, 8, 1);
+  world->addRoom("Top", 0, 1, 0, 8, 1);
+  auto stairs = world->addStairwell(1, 0, 2, 2, CORE_SIDE_LEFT);
+  world->finishBuild(); world->pauseSimulation();
+  auto id = world->createAgent("Player", bottom, 0, 3.f);
+  require(world->setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}), "Cannot assign Stairwell camera player");
+  auto outlines = [](render::WorldDrawList const& draws) {
+    unsigned count = 0;
+    auto const& commands = draws.commands();
+    for (size_t i = 0; i + 3 < commands.size(); ++i) {
+      auto horizontal = std::get_if<render::WorldDrawList::Line>(&commands[i]);
+      auto vertical = std::get_if<render::WorldDrawList::Line>(&commands[i + 1]);
+      if (!horizontal || !vertical || horizontal->from.y != horizontal->to.y || vertical->from.x != vertical->to.x) continue;
+      float width = std::abs(horizontal->to.x - horizontal->from.x);
+      float height = std::abs(vertical->to.y - vertical->from.y);
+      if (height == 0 || std::abs(width / height - (2.f - 2.f * CORE_DOOR_X_INSET) * CORE_CELL_WIDTH_PIXELS
+          / (CORE_STAIRWELL_DOORWAY_HEIGHT * CORE_LEVEL_HEIGHT_PIXELS)) > .001f) continue;
+      bool rectangle = true;
+      for (size_t side = 0; side < 4; ++side) {
+        auto line = std::get_if<render::WorldDrawList::Line>(&commands[i + side]);
+        auto next = std::get_if<render::WorldDrawList::Line>(&commands[i + (side + 1) % 4]);
+        rectangle = rectangle && line && next && line->colour == render::packColour(0, 0, 0) && line->thickness == 1.f
+          && line->to.x == next->from.x && line->to.y == next->from.y;
+      }
+      if (rectangle) ++count;
+    }
+    return count;
+  };
+  require(outlines(render::drawWorld(world, 1280, 720)) == 0, "Fore-Layer apertures must not acquire back-facing exit outlines");
+  world->resumeSimulation(); world->requestPlayerDoorAction(); world->update(.2f);
+  require(world->lookupAgent(id).entity->getSector()->getIndex() == stairs, "Player must enter Stairwell to view its Layer");
+  auto draws = render::drawWorld(world, 1280, 720);
+  auto count = outlines(draws);
+  if (count != 2) throw std::runtime_error("Viewed Stairwell must outline every Level doorway: expected 2, got " + std::to_string(count));
+  checkCanvas(draws, 1280, 720);
+}
+
 void checkFurniture(std::filesystem::path const& directory, render::ObjectTileset const& atlas) {
   auto world = std::make_shared<core::World>("Application Furniture", 8, 2);
   auto room = world->addRoom("Front", 0, 0, 0, 8, 1);
@@ -241,6 +280,7 @@ int main(int argc, char** argv) {
     checkStagedMap(directory);
     checkNoOverlaysAndAgents();
     checkPlayerCamera();
+    checkStairwellDoorwayOutlines();
     checkFurniture(directory, atlas);
     checkNestedApertures();
     require(render::drawWorld(nullptr, 1280, 720).commands().empty(), "Null World must draw nothing");

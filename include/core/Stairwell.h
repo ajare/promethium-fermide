@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 #include "core/Object.h"
 #include "core/EntityId.h"
@@ -16,6 +17,7 @@ namespace core
 		uint32_t mLevelsHigh;
 
 		int mMountSide;
+		float mStandingWidth{ 0.4f };
 
 		TraversalResourceId mTraversalResource;
 
@@ -34,6 +36,9 @@ namespace core
 
 		// Local pathing/render geometry for one connection to the next level.
 		[[nodiscard]] std::array<Vector2, 4> getLevelPath(uint32_t levelOffset) const;
+		void configureStandingWidth(float width);
+		// Local junction/endpoint pairs, also consumed by both renderers.
+		[[nodiscard]] std::vector<std::array<Vector2, 2>> getLandingPaths(uint32_t levelOffset) const;
 
 		[[nodiscard]] TraversalResourceId getTraversalResourceId() const { return mTraversalResource; }
 

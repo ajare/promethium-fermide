@@ -2412,6 +2412,7 @@ namespace core
 					? mWorld->lookupTraversalResource(mTraversalTask->edge->getTraversalResourceId())
 					: EntityLookup<TraversalResource>{};
 				auto const commitsInPlace = mTraversalTask->edge->getType() == EdgeType::Door
+					|| (isPlayerControlled() && mTraversalTask->edge->getType() == EdgeType::StairwellMount)
 					|| (mTraversalTask->edge->getType() == EdgeType::Lift
 						&& resource && resource.entity->isLift()
 						&& !resource.entity->isOpenPlatformLift())

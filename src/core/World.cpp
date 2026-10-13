@@ -8753,7 +8753,31 @@ namespace core
 		definition->displayName = std::move(preflight.displayName);
 		definition->resourceName = std::move(resourceName);
 		definition->source = std::move(source);
-		mAgentTypes.emplace(definition->typeId, std::move(definition));
+		bool const hasStairs = any_of(mSectors.begin(), mSectors.end(), [](auto const& sector) {
+			return sector && sector->getType() == SectorType::Stairwell;
+		});
+		bool widenStairs = false;
+		if (hasStairs)
+			if (auto baseline = agentTypeDefinitionBaseline(*definition); baseline && baseline->supportsPose(Pose::Standing))
+			{
+				widenStairs = baseline->width > maximumInstalledStandingWidth();
+				if (baseline->width >= 2.f)
+					return reject("Agent Standing width leaves no room for Stairwell platforms");
+				if (widenStairs && mBuildFinished)
+				{
+					if (!mSimulationPaused) return reject("Pause before installing a type that changes Stairwell platforms");
+					for (auto const& [id, agent] : mAgents.entries())
+						if (agent && agent->getSector() && agent->getSector()->getType() == SectorType::Stairwell)
+							return reject("Cannot change Stairwell platform geometry while an Agent occupies it");
+				}
+			}
+		auto const typeId = definition->typeId;
+		mAgentTypes.emplace(typeId, std::move(definition));
+		if (widenStairs && mBuildFinished && !rebuildTraversalTopology())
+		{
+			mAgentTypes.erase(typeId);
+			return reject(mTopologyDiagnostic);
+		}
 		if (diagnostic) diagnostic->clear();
 		return true;
 	}

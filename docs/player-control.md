@@ -16,7 +16,7 @@ camera is used.
 - Release the key to stop. Holding both keys stops movement.
 - Pause, reset, suspension, and leaving Play clear transient movement input.
 - The camera centres on the controlled Agent at normal zoom and shows its Layer.
-- Left/Right movement stays on the current Layer and Level. Usable open boundaries
+- In Locations, Left/Right movement stays on the current Layer and Level. Usable open boundaries
   and fully open standalone Bulkhead Doors permit entry into adjacent Locations,
   subject to Standing fit and existing passage restrictions.
 - Press **Up** to cross an eligible fully open ordinary Door into its connected
@@ -34,12 +34,37 @@ camera is used.
 - Crossing uses normal Standing Door-context speed, admission lanes and safety
   leases. Left/Right and further Up presses are ignored while crossing. Pause
   freezes an admitted crossing; it finishes safely on resume.
+- Press **Up** inside a Stairwell landing doorway to enter the Stairwell sector,
+  or to exit into that Level's adjacent Location. Standing body fit, Stairwell
+  Mobility and destination Location permissions apply; Up preserves X and does
+  not align the Agent. Open Stairwell entry does not require Object usage capability.
+- Stairwells have visible horizontal side platforms at quarter-Level bends and
+  on both sides of Level doorway junctions. Branches target 0.25 World units;
+  bends move inward so vertices clear both walls by half the widest installed
+  Agent type's Standing width. Wider types count even when not placed. Installing
+  a type that changes existing platform geometry requires a paused, unoccupied
+  Stairwell; a type too wide for the two-cell sector is refused.
+- Left/Right walks on platforms at effective walking speed. At departure onto
+  a flight, hold **Up** to ascend or **Down** to descend. Selection is sampled at
+  departure, never stored in advance: neither or both keys stops at the junction.
+  If the chosen flight points against horizontal input, change Left/Right to match;
+  there is no automatic turn. During a departure attempt, Up selects rather than
+  exits the doorway; otherwise a fresh Up press keeps its doorway-exit meaning.
+- Flights use effective ascent/descent speed. On arrival, horizontal input walks
+  onto the side platform rather than automatically entering another flight.
+  Reverse toward the junction and hold the desired selection to depart again.
+  Reversing mid-flight walks back toward its source. Releasing keys stops exactly
+  where the Agent is, retaining admitted narrow-stair capacity until reaching an
+  endpoint. Reversal is refused while others share the narrow span. Flat branches
+  do not claim stair capacity. Pause freezes movement and clears all arrow input.
+  Off-centre doorway entry still preserves X and can walk explicitly to the mount.
 - Overlapping candidates prefer an admissible open doorway, then nearest centre,
   then stable traversal-resource identity. One press performs at most one action.
 - Solid walls, closed/opening Bulkhead Doors, low spaces and unsupported Floor
   edges stop the Agent's leading body edge. Input never operates Buttons, boards
-  transports, climbs, or automatically crouches/crawls. Only ordinary Doors between
-  Locations support Up; transport-owned Doors, Windows and BoothWindows do not.
+  transports, climbs Ladders or Staircases, or automatically crouches/crawls. Up
+  supports ordinary Doors between Locations and Stairwell landing doorways;
+  transport-owned Doors, Windows and BoothWindows do not.
 - An Agent initially in a space that cannot accommodate Standing remains
   stationary in its existing fitting pose; input does not force it through the
   ceiling.
@@ -68,9 +93,12 @@ work and does not add a new Agent type.
 
 `agent-playerControlBasics`, `agent-playerControlBoundaries`,
 `agent-playerControlBulkheads`, `agent-playerControlPersistence`,
-`agent-playerControlDoorways`, and `agent-playerControlDoorwayRestrictions` exercise
-walking, timed bidirectional Layer transitions, pause/reset, geometry, capability,
+`agent-playerControlDoorways`, `agent-playerControlDoorwayRestrictions`,
+`agent-playerControlStairwells`, `agent-playerControlStairwellRestrictions`, and
+`agent-playerControlStairwellPlatforms` exercise
+walking, timed bidirectional Layer transitions, mirrored zig-zag stair movement,
+ascent/descent speed, narrow capacity, pause/reset, geometry, capability,
 permissions, low clearance and Broken Doors through the World/coordinator seam. `agent-playerControlEditorWorkflow` covers the picker,
 undo/redo and clipboard. `pf_application` covers actual Play key injection, Up repeat suppression and
-suspension; `pf_application_render` covers camera following, Layer selection,
+suspension and held Up/Down platform departure; `pf_application_render` covers camera following, Layer selection,
 resize and the no-Player fallback.

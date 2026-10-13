@@ -929,6 +929,13 @@ namespace core
 							airlockJourney = true;
 			}
 			if (airlockJourney) continue;
+			// Player stairs are continuous, input-controlled movement. A plain pause
+			// freezes their admitted task and capacity rather than abandoning it.
+			if (agent->isPlayerControlled() && agent->mTraversalTask && hasCommittedMovement(*agent)
+				&& (agent->mTraversalTask->edge->getType() == EdgeType::Stairwell
+					|| agent->mTraversalTask->edge->getType() == EdgeType::StairwellMount
+					|| (agent->mTraversalTask->edge->getType() == EdgeType::Location
+						&& agent->getSector() && agent->getSector()->getType() == SectorType::Stairwell))) continue;
 			// Admitted standalone thresholds retain their physical safety commitment.
 			if (agent->mTraversalTask && hasCommittedMovement(*agent))
 				if (auto bulkhead = dynamic_pointer_cast<BulkheadDoorEdge const>(agent->mTraversalTask->edge);

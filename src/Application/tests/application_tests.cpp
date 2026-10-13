@@ -197,6 +197,54 @@ void checkPlayerDoorKeys(wp::application::State& play, core::World& world) {
   key(KeyEvent::Released);
 }
 
+void checkPlayerStairKeys(wp::application::State& play, core::World& world) {
+  using wp::application::Key;
+  using wp::application::KeyEvent;
+  core::World fixture("Keyboard platforms", 8, 2);
+  auto bottom = fixture.addRoom("Bottom", 0, 0, 0, 8, 1);
+  auto top = fixture.addRoom("Top", 0, 1, 0, 8, 1);
+  auto stairs = fixture.addStairwell(1, 0, 2, 2, CORE_SIDE_LEFT);
+  fixture.finishBuild(); fixture.pauseSimulation();
+  auto id = fixture.createAgent("Keyboard player", bottom, 0, 3.f);
+  require(fixture.setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}), "Cannot assign stair player");
+  auto writer = core::YamlSerializer::toString();
+  core::SerializationWorkData data; data.markSerializedUnmodified = false;
+  fixture.serialize(*writer, data); writer->serialize();
+  auto reader = core::YamlSerializer::fromString(writer->getSerializedString()); reader->deserialize();
+  world.pauseSimulation(); require(world.deserialize(*reader, data), "Cannot install keyboard stair fixture");
+  require(world.resumeSimulation(), "Cannot resume stair fixture");
+  auto key = [&](Key k, bool held) { play._injectKeyInput(held ? KeyEvent::Pressed : KeyEvent::Released, k, {}); };
+  auto y = [&] { return world.lookupAgent(id).entity->getGlobalPosition().y; };
+  auto at = [&](float expected, char const* message) { require(std::abs(y() - expected) < .0001f, message); };
+  key(Key::UpArrow, true); play._update(.2f);
+  require(world.lookupAgent(id).entity->getSector()->getIndex() == stairs, "App Up must enter Stairwell");
+  key(Key::UpArrow, false); key(Key::RightArrow, true); play._update(5.f); at(0.f, "No selection must stay on platform");
+  key(Key::RightArrow, false); key(Key::LeftArrow, true); play._update(5.f);
+  key(Key::UpArrow, true); play._update(.2f); at(0.f, "Wrong horizontal departure must not turn automatically");
+  require(world.lookupAgent(id).entity->getSector()->getIndex() == stairs, "Departure Up must not exit");
+  key(Key::LeftArrow, false); key(Key::RightArrow, true); play._update(5.f); at(.25f, "Up must select first ascent");
+  key(Key::RightArrow, false); key(Key::LeftArrow, true); play._update(5.f); at(.75f, "Held Up must select ascent at next departure");
+  key(Key::LeftArrow, false); key(Key::RightArrow, true); play._update(5.f); at(1.f, "Must arrive at Level platform");
+  key(Key::UpArrow, false); key(Key::RightArrow, false);
+  key(Key::LeftArrow, true); play._update(5.f); // Approach junction without selection.
+  key(Key::LeftArrow, false); key(Key::RightArrow, true); play._update(.1f); // Walk back out on the platform.
+  key(Key::UpArrow, true); play._update(.2f);
+  require(world.lookupAgent(id).entity->getSector()->getIndex() == top, "Fresh Up while walking away must still exit the doorway");
+  key(Key::UpArrow, false); key(Key::RightArrow, false); play._update(0.f);
+  key(Key::UpArrow, true); play._update(.2f); // Re-enter, preserving off-centre X.
+  key(Key::UpArrow, false); play._update(0.f);
+  key(Key::UpArrow, true); key(Key::LeftArrow, true); play._update(5.f);
+  require(world.lookupAgent(id).entity->getSector()->getIndex() == stairs, "Holding Up on approach must not exit prematurely");
+  at(1.f, "Selecting unavailable ascent at the top must stop entry");
+  key(Key::UpArrow, false);
+  key(Key::DownArrow, true); play._update(5.f); at(.75f, "App Down must select descent");
+  key(Key::UpArrow, true); key(Key::LeftArrow, false); key(Key::RightArrow, true); play._update(5.f);
+  at(.75f, "Both selection keys must stop at flight junction");
+  play._suspend(true, true, true); play._suspend(false, false, false);
+  key(Key::RightArrow, true); play._update(.2f); at(.75f, "Suspension must clear held Down and Up selection");
+  key(Key::RightArrow, false);
+}
+
 // Drive the actual factory-created states through the same exception/resume
 // contract as Launcher, without entering their graphics-dependent scenes.
 void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
@@ -252,6 +300,7 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
                 "Play must advance one second at normal speed");
         checkPlayerKeys(*child, *map->getWorld());
         checkPlayerDoorKeys(*child, *map->getWorld());
+        checkPlayerStairKeys(*child, *map->getWorld());
         auto const suspendTick = map->getWorld()->getSimulationTick();
         child->_suspend(true, true, true);
         child->_update(1.0f);

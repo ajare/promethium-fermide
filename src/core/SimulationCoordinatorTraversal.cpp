@@ -405,6 +405,7 @@ namespace core
 		// layer change; Lift and Shuttle rides preserve the passenger's buffered
 		// standing position after allocation has brought it into the exit band.
 		auto const commitsInPlace = request && (request->mEdgeType == EdgeType::Door
+			|| (agent.isPlayerControlled() && request->mEdgeType == EdgeType::StairwellMount)
 			|| (request->mEdgeType == EdgeType::Lift && traversalResource
 				&& traversalResource->mLift && !traversalResource->mOpenPlatformLift)
 			|| (request->mEdgeType == EdgeType::Shuttle && traversalResource

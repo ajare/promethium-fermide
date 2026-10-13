@@ -686,8 +686,10 @@ namespace core
 		std::unique_ptr<AgentBehaviourRuntimeAdapter> mAgentBehaviourRuntime;
 		// App-only transient input. Editor simulation never supplies this intent.
 		int mPlayerMovementDirection{ 0 };
+		bool mPlayerStairUp{ false }, mPlayerStairDown{ false };
 		AgentId mPlayerDoorAction{};
 		void performPlayerDoorAction();
+		void advancePlayerStairwellAgent(Agent& agent, float timestep);
 		void advancePlayerControlledAgent(AgentId agent, float timestep);
 
 		// Registered Agent-type definitions, keyed by stable type ID. The bundled
@@ -1842,6 +1844,8 @@ namespace core
 		AgentId getPlayerControlledAgent() const;
 		// Held input: -1 left, 0 idle, +1 right. Never authored or persisted.
 		void setPlayerMovementDirection(int direction);
+		void setPlayerStairSelection(bool up, bool down);
+		[[nodiscard]] float maximumInstalledStandingWidth() const;
 		// One Up keypress, consumed at the next allocation phase; never saved.
 		void requestPlayerDoorAction();
 		void clearPlayerInput();

@@ -27,7 +27,7 @@ void StatePlay::setup(wp::application::resourcesystem::ResourceManager* resource
 
 void StatePlay::teardown() {
   if (mWorld) mWorld->clearPlayerInput();
-  mLeftHeld = mRightHeld = mUpHeld = false;
+  mLeftHeld = mRightHeld = mUpHeld = mDownHeld = false;
   mRenderer.reset();
   mWorld = nullptr;
 }
@@ -39,20 +39,21 @@ void StatePlay::resumeImpl(void* args) {
   auto* map = resources ? resources->getMap() : nullptr;
   mWorld = map ? map->getWorld() : nullptr;
   if (!mWorld) throw std::runtime_error("Play requires the loaded World Map");
-  mLeftHeld = mRightHeld = mUpHeld = false;
+  mLeftHeld = mRightHeld = mUpHeld = mDownHeld = false;
   mWorld->clearPlayerInput();
   mWorld->setSimulationTimeScale(1.0);
   if (!mWorld->resumeSimulation()) throw std::runtime_error("Play cannot resume the World");
 }
 
 void StatePlay::suspendImpl(void*) {
-  mLeftHeld = mRightHeld = mUpHeld = false;
+  mLeftHeld = mRightHeld = mUpHeld = mDownHeld = false;
   if (mWorld) mWorld->clearPlayerInput();
 }
 
 void StatePlay::updateImpl(float elapsedSeconds) {
   if (mWorld) {
     mWorld->setPlayerMovementDirection(int(mRightHeld) - int(mLeftHeld));
+    mWorld->setPlayerStairSelection(mUpHeld, mDownHeld);
     mWorld->update(elapsedSeconds);
   }
 }
@@ -69,9 +70,11 @@ void StatePlay::injectKeyInputImpl(wp::application::KeyEvent event,
     if (pressed && !mUpHeld && mWorld) mWorld->requestPlayerDoorAction();
     mUpHeld = pressed;
   }
+  else if (key == wp::application::Key::DownArrow)
+    mDownHeld = event == wp::application::KeyEvent::Pressed;
   if (event == wp::application::KeyEvent::Pressed &&
       key == wp::application::Key::Escape) {
-    mLeftHeld = mRightHeld = mUpHeld = false;
+    mLeftHeld = mRightHeld = mUpHeld = mDownHeld = false;
     if (mWorld) mWorld->clearPlayerInput();
     // Controller resumes with Play's identity and runs the unload sequence.
     throw wp::application::ReturnFromStateException(&mTransitionData);

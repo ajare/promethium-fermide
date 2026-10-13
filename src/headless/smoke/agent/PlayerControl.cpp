@@ -6,6 +6,10 @@
 #include "core/YamlSerializer.h"
 #include "core/BulkheadDoorSectorObject.h"
 #include "core/DoorSectorObject.h"
+#include "core/StairwellTransit.h"
+#include "core/Stairwell.h"
+#include "core/AgentType.h"
+#include "core/Graph.h"
 #include <cmath>
 
 namespace
@@ -28,7 +32,8 @@ namespace
 		world.update(seconds);
 	}
 	void near(float actual, float expected, char const* message)
-	{ require(std::abs(actual - expected) < 0.0001f, message); }
+	{ require(std::abs(actual - expected) < 0.0001f,
+		std::string(message) + ": actual=" + std::to_string(actual) + ", expected=" + std::to_string(expected)); }
 
 	void basics()
 	{
@@ -294,6 +299,184 @@ namespace
 		run(false); run(true);
 	}
 
+	void stairwells()
+	{
+		for (int mountSide : {CORE_SIDE_LEFT, CORE_SIDE_RIGHT})
+		{
+			core::World world("Player Stairwell", 8, 3);
+			auto bottom = world.addRoom("Bottom", 0, 0, 0, 8, 1);
+			auto middle = world.addRoom("Middle", 0, 1, 0, 8, 1);
+			auto top = world.addRoom("Top", 0, 2, 0, 8, 1);
+			auto stairs = world.addStairwell(1, 0, 2, core::World::CreateStairwellOptions{3, mountSide,
+				mountSide == CORE_SIDE_RIGHT ? 1u : 0u});
+			world.finishBuild(); world.pauseSimulation();
+			auto id = world.createAgent("Player", bottom, 0, 3.f); assign(world, id);
+			auto y = [&] { return world.lookupAgent(id).entity->getGlobalPosition().y; };
+			auto sector = [&] { return world.lookupAgent(id).entity->getSector()->getIndex(); };
+			auto up = [&] { world.setPlayerStairSelection(false, false); walk(world, 0, 0.f); world.requestPlayerDoorAction(); world.update(.2f); };
+			auto drive = [&](int horizontal, int vertical, float seconds = 5.f) {
+				world.resumeSimulation(); world.setPlayerStairSelection(vertical > 0, vertical < 0);
+				walk(world, horizontal, seconds);
+			};
+			up(); require(sector() == stairs.sectorIndex, "Up must enter Stairwell sector");
+			near(x(world, id), 3.f, "Stairwell entry must preserve X");
+			if (stairs.traversalResource)
+			{
+				world.setTraversalResourceEnabled(stairs.traversalResource, false);
+				drive(-1, 1, .2f);
+				near(y(), 0.f, "Disabled narrow-stair resource must refuse new stair admission");
+				world.setTraversalResourceEnabled(stairs.traversalResource, true);
+			}
+			int const first = mountSide == CORE_SIDE_LEFT ? 1 : -1;
+			world.pauseSimulation();
+			require(world.setAgentIndividualStairSpeedModifier(id, 1.4f), "Stair speed modifier must apply");
+			drive(first, 1, .1f);
+			auto position = world.lookupAgent(id).entity->getGlobalPosition();
+			auto speed = world.lookupAgent(id).entity->getStationaryStairSpeed(true);
+			near(position.distanceTo(core::Vector2{3.f, 0.f}), speed * .1f,
+				"Stairs must use effective type-driven ascent speed along the slope");
+			require(y() > 0.f && y() < .25f, "Arrow must move diagonally on first flight");
+			walk(world, 0, 30.f);
+			near(y(), position.y, "Release must stop immediately without losing stair capacity");
+			require(world.lookupAgent(id).entity->hasActiveLocomotionTask(), "Stopped admitted stairs must not time out");
+			world.requestPlayerDoorAction(); world.update(.2f);
+			require(sector() == stairs.sectorIndex, "Up away from landing must not exit");
+			world.pauseSimulation(); world.update(1.f); world.resumeSimulation(); world.update(.1f);
+			near(y(), position.y, "Pause/resume must preserve exact in-flight position and clear input");
+			walk(world, -first, 5.f);
+			near(y(), 0.f, "Reversing an arrow mid-flight must return to the lower landing");
+			require(!world.lookupAgent(id).entity->hasActiveLocomotionTask(), "Returning to source must release capacity");
+			drive(first, 1); near(y(), .25f, "Ascent must reach the first bend platform");
+			drive(-first, 0); near(y(), .25f, "Approach without a selection must stop at the junction");
+			world.setPlayerStairSelection(true, true); walk(world, -first, .2f);
+			near(y(), .25f, "Both selection keys must refuse flight entry");
+			drive(-first, 1); near(y(), .75f, "Up must select ascent from the bend platform");
+			drive(first, 1); near(y(), 1.f, "Arrival must walk onto the Level platform, not skip the landing");
+			up(); require(sector() == middle, "Up at middle doorway must exit to its adjacent Location");
+			up(); require(sector() == stairs.sectorIndex, "Up must re-enter from a middle Level");
+			drive(-first, 0); // Return from the doorway side platform to its junction.
+			drive(-first, 1, .2f);
+			world.requestPlayerDoorAction(); world.update(.1f);
+			near(y(), 1.f, "A selection opposite horizontal input must stop, never automatically turn");
+			require(sector() == stairs.sectorIndex, "Departure Up must select instead of exiting the doorway");
+			drive(first, 1); near(y(), 1.25f, "Second flight must be manually navigable");
+			drive(-first, 1); drive(first, 1); near(y(), 2.f, "Top landing must stop movement");
+			up(); require(sector() == top, "Top exit must reach its actual landing Location");
+			up(); require(sector() == stairs.sectorIndex, "Top entry must be supported");
+			drive(-first, 0);
+			drive(-first, -1, .1f);
+			position = world.lookupAgent(id).entity->getGlobalPosition();
+			speed = world.lookupAgent(id).entity->getStationaryStairSpeed(false);
+			near(position.distanceTo(core::Vector2{3.f, 2.f}), speed * .1f,
+				"Stairs must use effective type-driven descent speed along the slope");
+			for (int level = 2; level > 0; --level)
+			{
+				drive(-first, -1); near(y(), level - .25f, "Descending upper segment must follow stair geometry");
+				drive(first, -1); near(y(), level - .75f, "Down must choose descent at the bend");
+				drive(-first, -1); near(y(), float(level - 1), "Descent must reach each Level platform");
+				drive(first, 0); // Approach the next departure junction without choosing yet.
+			}
+			up(); require(sector() == bottom, "Bottom exit must complete the round trip");
+			world.resetSimulation(); world.resumeSimulation(); world.update(.2f);
+			require(world.lookupAgent(id).entity->getSector()->getIndex() == bottom, "Reset must restore authored Location");
+		}
+	}
+
+	void stairwellPlatforms()
+	{
+		core::World world("Stairwell platforms", 8, 3);
+		for (uint32_t y = 0; y < 3; ++y) world.addRoom("Landing", 0, y, 0, 8, 1);
+		auto stairs = world.addStairwell(1, 0, 2, 3, CORE_SIDE_LEFT);
+		world.finishBuild(); world.pauseSimulation();
+		// Installed types count even when no Agent of that type has been placed.
+		auto definition = core::bundledHumanAgentType();
+		definition.source.replace(definition.source.find("type_id = \"Human\""), 17, "type_id = \"Wide\"");
+		definition.source.replace(definition.source.find("width = 0.4"), 11, "width = 1.2");
+		std::string diagnostic;
+		require(world.attachAgentType("wide.agent.lua", definition.source, &diagnostic), diagnostic);
+		near(world.maximumInstalledStandingWidth(), 1.2f, "Widest installed Standing type must determine wall clearance");
+		auto geometry = std::dynamic_pointer_cast<core::StairwellTransit const>(world.getSector(stairs))->getStairwell();
+		unsigned count = 0;
+		std::shared_ptr<const core::Vertex> destination;
+		for (uint32_t y = 0; y < 3; ++y)
+			for (auto const& platform : geometry->getLandingPaths(y))
+			{
+				++count;
+				near(platform[0].y, platform[1].y, "Platform must be horizontal");
+				near(platform[0].distanceTo(platform[1]), .25f, "Platform must have target quarter-unit length where it fits");
+				for (auto point : platform)
+					require(point.x >= .6f - core::PoseFitTolerance && point.x <= 1.4f + core::PoseFitTolerance,
+						"Platform vertices must fit the widest body between both walls");
+				bool found = false;
+				for (auto const& edge : world.getGraph()->getEdges())
+					if (edge->getType() == core::EdgeType::Location
+						&& edge->getVertex(0)->getSector()->getIndex() == stairs)
+						for (uint32_t side = 0; side < 2; ++side)
+							if (edge->getVertex(side)->getPosition().distanceTo(geometry->getPosition() + platform[0]) < core::PoseFitTolerance
+								&& edge->getVertex(1 - side)->getPosition().distanceTo(geometry->getPosition() + platform[1]) < core::PoseFitTolerance)
+							{
+								found = true;
+								if (platform[0].y == .25f) destination = edge->getVertex(1 - side);
+								require(edge->getVertex(1 - side)->getEdges().size() == 1,
+									"Platform endpoint must be a leaf, not inserted into autonomous through-routes");
+								require(!edge->getTraversalResourceId(), "Flat platform must not consume narrow-stair admission");
+							}
+				require(found, "Rendered platform must have the same graph edge endpoints");
+			}
+		require(count == 10, "Three-Level stairwell must have six doorway branches and four bend branches");
+		auto id = world.createAgent("Autonomous platform visitor", 0, 0, 3.f);
+		auto* agent = world.lookupAgent(id).entity;
+		auto path = world.getGraph()->calculatePath(agent, destination);
+		require(path && !path->nodes.empty(), "Autonomous Agent must be able to route onto a side platform");
+		agent->setPath(path, true); world.resumeSimulation(); world.update(10.f);
+		require(agent->getSector()->getIndex() == stairs, "Autonomous platform route must enter the Stairwell");
+		near(agent->getGlobalPosition().distanceTo(destination->getPosition()), 0.f,
+			"Autonomous Agent must physically reach the platform endpoint");
+		world.pauseSimulation();
+		definition.source.replace(definition.source.find("type_id = \"Wide\""), 16, "type_id = \"Wider\"");
+		definition.source.replace(definition.source.find("width = 1.2"), 11, "width = 1.4");
+		require(!world.attachAgentType("wider.agent.lua", definition.source, &diagnostic)
+			&& !world.hasAgentType("Wider"), "Occupied Stairwell geometry changes must be refused atomically");
+	}
+
+	void stairwellRestrictions()
+	{
+		core::World world("Restricted Player Stairwell", 8, 2);
+		world.addLayer();
+		auto bottom = world.addRoom("Bottom", 1, 0, 0, 8, 1);
+		auto top = world.addRoom("Top", 1, 1, 0, 8, 1);
+		auto stairs = world.addStairwell(2, 0, 2, 2, CORE_SIDE_LEFT);
+		world.finishBuild(); world.pauseSimulation();
+		auto id = world.createAgent("Player", bottom, 0, 2.15f); assign(world, id);
+		auto up = [&] { world.setPlayerStairSelection(false, false); walk(world, 0, 0.f); world.requestPlayerDoorAction(); world.update(.2f); };
+		up(); require(world.lookupAgent(id).entity->getSector()->getIndex() == bottom,
+			"A body outside the Stairwell doorway must not be auto-aligned or admitted");
+		walk(world, 1, .5f);
+		world.pauseSimulation(); world.setRoomHeightScale(bottom, .4f);
+		up(); require(world.lookupAgent(id).entity->getSector()->getIndex() == bottom,
+			"Low starting clearance must refuse Stairwell entry instead of automatically crawling");
+		world.pauseSimulation(); world.setRoomHeightScale(bottom, 1.f);
+		auto profile = world.lookupAgent(id).entity->getEffectiveMobilityProfile().value;
+		profile.set(core::TraversalKind::Stairwell, core::MobilityUse::CannotUse);
+		world.setAgentIndividualMobilityProfile(id, profile);
+		up(); require(world.lookupAgent(id).entity->getSector()->getIndex() == bottom,
+			"Forbidden Stairwell Mobility must refuse entry");
+		world.pauseSimulation(); profile.set(core::TraversalKind::Stairwell, core::MobilityUse::CanUse);
+		world.setAgentIndividualMobilityProfile(id, profile);
+		world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None);
+		auto permission = world.addAccessPermission("Upper landing");
+		world.setLocationPermissionRequirement(top, {permission});
+		up(); require(world.lookupAgent(id).entity->getSector()->getIndex() == stairs,
+			"None capability may enter an open deep-Layer Stairwell doorway");
+		world.setPlayerStairSelection(true, false);
+		walk(world, 1, 5.f); walk(world, -1, 5.f); walk(world, 1, 5.f);
+		up(); require(world.lookupAgent(id).entity->getSector()->getIndex() == stairs,
+			"Stairwell exit must respect destination Location permissions");
+		world.pauseSimulation(); world.grantAgentAccessPermission(id, permission);
+		up(); require(world.lookupAgent(id).entity->getSector()->getIndex() == top,
+			"Authorized deep-Layer exit must reach the Location immediately in front");
+	}
+
 	void persistenceAndPermissions()
 	{
 		core::World world("Portable Player", 10, 2);
@@ -342,5 +525,8 @@ void agent_smoke::registerPlayerControl(std::vector<smoke::Check>& checks)
 	checks.push_back({"playerControlBulkheads", [](smoke::Context const&) { bulkheads(); }});
 	checks.push_back({"playerControlDoorways", [](smoke::Context const&) { doorways(); }});
 	checks.push_back({"playerControlDoorwayRestrictions", [](smoke::Context const&) { doorwayRestrictions(); doorwaySelection(); }});
+	checks.push_back({"playerControlStairwellPlatforms", [](smoke::Context const&) { stairwellPlatforms(); }});
+	checks.push_back({"playerControlStairwells", [](smoke::Context const&) { stairwells(); }});
+	checks.push_back({"playerControlStairwellRestrictions", [](smoke::Context const&) { stairwellRestrictions(); }});
 	checks.push_back({"playerControlPersistence", [](smoke::Context const&) { persistenceAndPermissions(); }});
 }
