@@ -171,6 +171,7 @@ target_compile_definitions(pf-lua PRIVATE
     $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
 )
 set_target_properties(pf-lua PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
     C_STANDARD 11
     C_STANDARD_REQUIRED YES
     ARCHIVE_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}"
@@ -342,7 +343,9 @@ target_link_libraries(promethium-fermide-core
     PRIVATE pf-lua sol2::sol2
 )
 pf_apply_high_analysis(promethium-fermide-core)
+# The Application Map owns a World, so core is also linked into its shared library.
 set_target_properties(promethium-fermide-core PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
     ARCHIVE_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}"
     OUTPUT_NAME "promethium-fermide-core"
 )

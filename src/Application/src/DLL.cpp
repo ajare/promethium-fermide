@@ -1,23 +1,35 @@
 #include <memory>
 #include <vector>
+#include <type_traits>
+
+#include <willpower/application/resourcesystem/ResourceManager.h>
 
 #include "Application.h"
 #include "StatePlay.h"
 #include "StateController.h"
 #include "StateLifecycle.h"
+#include "Map.h"
+#include "MapWorldDefinitionFactory.h"
 
 namespace {
 
 template <class State>
 class StateFactory final : public wp::application::StateFactory {
   wp::Logger* mLogger;
+  wp::application::resourcesystem::ResourceManager* mResourceMgr;
 
 public:
-  StateFactory(char const* name, wp::Logger* logger)
-      : wp::application::StateFactory(name), mLogger(logger) {}
+  StateFactory(char const* name, wp::Logger* logger,
+               wp::application::resourcesystem::ResourceManager* resourceMgr = nullptr)
+      : wp::application::StateFactory(name), mLogger(logger), mResourceMgr(resourceMgr) {}
 
   wp::application::State* createState() override {
-    auto state = std::make_unique<State>();
+    std::unique_ptr<State> state;
+    if constexpr (std::is_same_v<State, pf::application::StateController>) {
+      state = std::make_unique<State>(mResourceMgr, mLogger);
+    } else {
+      state = std::make_unique<State>();
+    }
     state->setLogger(mLogger);
     return state.release();
   }
@@ -45,13 +57,17 @@ wp::application::StateFactory* dllGetNextStateFactory() {
 }
 
 void dllOnEntry(wp::Logger* logger,
-                wp::application::resourcesystem::ResourceManager*,
+                wp::application::resourcesystem::ResourceManager* resourceMgr,
                 wp::application::AudioSystem*) {
   using namespace pf::application;
+  if (resourceMgr) {
+    resourceMgr->addResourceFactory(new MapResourceFactory());
+    resourceMgr->addResourceDefinitionFactory(new MapWorldDefinitionFactory());
+  }
   factories.clear();
   nextFactory = 0;
   // Launcher uses the first registered factory as its initial state.
-  factories.push_back(std::make_unique<StateFactory<StateController>>("Controller", logger));
+  factories.push_back(std::make_unique<StateFactory<StateController>>("Controller", logger, resourceMgr));
   factories.push_back(std::make_unique<StateFactory<StateLoad>>("Load", logger));
   factories.push_back(std::make_unique<StateFactory<StateMapLoad>>("MapLoad", logger));
   factories.push_back(std::make_unique<StateFactory<StatePlay>>("Play", logger));

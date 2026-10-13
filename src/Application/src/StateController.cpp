@@ -4,7 +4,17 @@
 
 namespace pf::application {
 
-StateController::StateController() : applib::StateController("Load") {}
+StateController::StateController(
+    wp::application::resourcesystem::ResourceManager* resourceMgr, wp::Logger* logger)
+    : applib::StateController("Load") {
+  if (resourceMgr) mResources = std::make_unique<MapResources>(*resourceMgr, logger);
+  mTransitionData.userData = mResources.get();
+}
+
+void StateController::teardown() {
+  mResources.reset();
+  mTransitionData.userData = nullptr;
+}
 
 std::string StateController::getNextStateName(
     std::string const& previous, applib::StateTransitionData*) {
@@ -18,7 +28,8 @@ std::string StateController::getNextStateName(
 
 void StateController::updateTransitionData(
     std::string const&, std::string const&, applib::StateTransitionData*) {
-  // No resources, maps, or model data to transfer yet.
+  // The Controller-owned resource guard is shared through userData. No map
+  // renderer, collision simulation, or model data is needed by Play.
 }
 
 }  // namespace pf::application

@@ -1,2 +1,17 @@
-# No assets are needed for the empty Play scene.
-Resources: {}
+Resources:
+  Namespace:
+    name: World
+    Resource:
+      - type: TextFile
+        name: WorldFile
+        location: test-worlds/room-height-test-1.world.yaml
+      - type: Map
+        name: World
+        DependentResources:
+          DependentResource:
+            id: Yaml
+            ref: WorldFile
+        Definitions:
+          Definition:
+            factory: PromethiumFermide
+            Resource: Yaml

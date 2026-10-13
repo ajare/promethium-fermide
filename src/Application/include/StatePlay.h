@@ -10,6 +10,7 @@ protected:
   void setup(wp::application::resourcesystem::ResourceManager*,
              mpp::RenderSystem*, mpp::ResourceManager*, void*) override;
   void teardown() override;
+  void resumeImpl(void* args) override;
   void injectKeyInputImpl(wp::application::KeyEvent event,
                           wp::application::Key key,
                           wp::application::KeyModifiers modifiers) override;

@@ -4,14 +4,15 @@
 
 namespace pf::application {
 
-// AppLib's loading states perform resource/map work. These placeholders only
-// reuse its scene lifecycle and return to Controller on their first update.
+// Synchronous resource lifecycle steps reuse AppLib's scene lifecycle and
+// return to Controller after completing work on their first update.
 class StateLifecycle : public applib::State {
 protected:
   explicit StateLifecycle(std::string const& name);
   void setup(wp::application::resourcesystem::ResourceManager*,
              mpp::RenderSystem*, mpp::ResourceManager*, void*) override;
   void teardown() override;
+  void resumeImpl(void* args) override;
   void updateImpl(float) override;
   void renderImpl(mpp::RenderSystem*, mpp::ResourceManager*) override;
 };
