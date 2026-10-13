@@ -48,7 +48,9 @@ namespace core
 		auto const kind = mStaircase->isMoving()
 			? TraversalKind::Escalator : TraversalKind::Staircase;
 		if (agentForbidsEdge(agent.get(), *this, kind)) return false;
-		if (!mStaircase->isMoving()) return true;
+		// Direct Player input may oppose the belt; autonomous routing remains
+		// one-way in getDirectedTraversalFacts(). Mobility still applies above.
+		if (!mStaircase->isMoving() || (agent && agent->isPlayerControlled())) return true;
 		auto sourceVertex = getOtherVertex(targetVertex);
 		bool const movingUp = targetVertex->getPosition().y > sourceVertex->getPosition().y;
 		return movingUp == (mStaircase->getSpeed() > 0.0f);

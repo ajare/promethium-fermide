@@ -16,6 +16,19 @@
 
 namespace core
 {
+	namespace
+	{
+		// Signed speed along the flight: positive is ascent, regardless of its
+		// horizontal orientation. Moving steps carry even a non-walking Player.
+		float playerStaircaseSpeed(Staircase const& stairs, Agent const& agent, int horizontal)
+		{
+			auto const path = stairs.getPath();
+			int const direction = horizontal * (path[1].x > path[0].x ? 1 : -1);
+			if (stairs.isMoving()) return stairs.getSpeed() + direction * agent.getWalkSpeed();
+			return direction * agent.getStationaryStairSpeed(direction > 0);
+		}
+	}
+
 	AgentId World::getPlayerControlledAgent() const
 	{
 		for (auto const& [id, agent] : mAgents.entries())
@@ -220,7 +233,9 @@ namespace core
 			if (source->getSector().get() != agent.getSector()) std::swap(source, destination);
 			if (source->getSector().get() != agent.getSector()) continue;
 			auto const* transit = dynamic_cast<StaircaseTransit const*>(destination->getSector().get());
-			if (!transit || transit->getStaircase()->isEscalator()) continue;
+			if (!transit) continue;
+			auto const kind = transit->getStaircase()->isMoving()
+				? TraversalKind::Escalator : TraversalKind::Staircase;
 			auto const path = transit->getStaircase()->getPath();
 			bool const lower = std::abs(source->getPosition().y - transit->getPosition().y) <= PoseFitTolerance;
 			if ((choice > 0) != lower) continue;
@@ -228,7 +243,7 @@ namespace core
 			auto const gap = mPlayerMovementDirection * (source->getPosition().x - position.x);
 			if (mPlayerMovementDirection * delta.x <= 0.f || gap < -PoseFitTolerance
 				|| gap > nearest || std::abs(position.y - source->getPosition().y) > PoseFitTolerance
-				|| agentForbidsEdge(&agent, *edge, TraversalKind::Staircase)
+				|| agentForbidsEdge(&agent, *edge, kind)
 				|| !canAgentAccessLocation(*destination->getSector(), agent)
 				|| !agent.poseFits(Pose::Standing, source->getSector()->getPosition().y
 					+ source->getSector()->getLevelsHigh() - 1 + source->getSector()->getEffectiveTopLevelHeight() - position.y)
@@ -266,7 +281,7 @@ namespace core
 	void World::advancePlayerStaircaseAgent(Agent& agent, float timestep)
 	{
 		auto const* transit = dynamic_cast<StaircaseTransit const*>(agent.getSector());
-		if (!transit || transit->getStaircase()->isEscalator()) return;
+		if (!transit) return;
 		if (getPlayerControlledAgent() != getAgentId(&agent)) return;
 		if (agent.mState == Agent::State::AwaitingTraversalCommit) return;
 		if (agent.mTraversalTask)
@@ -277,6 +292,9 @@ namespace core
 			return;
 		}
 		auto const position = agent.getGlobalPosition();
+		auto const path = transit->getStaircase()->getPath();
+		auto const speed = playerStaircaseSpeed(*transit->getStaircase(), agent, mPlayerMovementDirection);
+		int const motion = (speed > 0.f ? 1 : speed < 0.f ? -1 : 0) * (path[1].x > path[0].x ? 1 : -1);
 		// Endpoints are mounts, not doorways or platforms. Dismount even with
 		// no input, including after retracing a flight to its original endpoint.
 		for (auto const& edge : getGraph()->getEdges())
@@ -286,12 +304,11 @@ namespace core
 			if (source->getSector().get() != transit) std::swap(source, destination);
 			if (source->getSector().get() != transit
 				|| position.distanceTo(source->getPosition()) > PoseFitTolerance) continue;
-			// Immediately after mounting, input points into the flight. At its
-			// other end (or after reversal), it points out and triggers dismount.
-			auto const path = transit->getStaircase()->getPath();
+			// Continue a fresh entry only while net motion points into the flight.
+			// Belt motion may overcome input and immediately carry a Player out.
 			bool const lower = std::abs(position.y - transit->getPosition().y) <= PoseFitTolerance;
 			auto const into = path[lower ? 1 : 0].x - path[lower ? 0 : 1].x;
-			if (!agent.mPlayerStaircaseEntry || mPlayerMovementDirection * into <= 0.f)
+			if (!agent.mPlayerStaircaseEntry || motion * into <= 0.f)
 			{
 				if (canAgentAccessLocation(*destination->getSector(), agent)
 					&& agent.poseFits(Pose::Standing, destination->getSector()->getPosition().y
@@ -302,15 +319,15 @@ namespace core
 					return;
 				}
 				// A refused exit must not prevent retracing the admitted stairs.
-				if (mPlayerMovementDirection * into <= 0.f) return;
+				if (motion * into <= 0.f) return;
 			}
 		}
-		if (!mPlayerMovementDirection) return;
+		if (!motion) return;
 		for (auto const& edge : getGraph()->getEdges())
 		{
 			if (edge->getType() != EdgeType::Staircase || edge->getVertex(0)->getSector().get() != transit) continue;
 			auto source = edge->getVertex(0), destination = edge->getVertex(1);
-			if (mPlayerMovementDirection * (destination->getPosition().x - source->getPosition().x) < 0.f)
+			if (motion * (destination->getPosition().x - source->getPosition().x) < 0.f)
 				std::swap(source, destination);
 			if (beginPlayerTraversal(agent, edge, source, destination))
 			{
@@ -405,11 +422,22 @@ namespace core
 
 	void World::advancePlayerStairSegment(Agent& agent, float timestep)
 	{
-		if (!mPlayerMovementDirection || agent.mState == Agent::State::AwaitingTraversalCommit) return;
+		if (agent.mState == Agent::State::AwaitingTraversalCommit) return;
 		auto const position = agent.getGlobalPosition();
 		auto const& task = *agent.mTraversalTask;
+		int motion = mPlayerMovementDirection;
+		float stairSpeed = 0.f;
+		if (task.edge->getType() == EdgeType::Staircase)
+		{
+			auto const& stairs = *static_cast<StaircaseTransit const*>(agent.getSector())->getStaircase();
+			auto const path = stairs.getPath();
+			auto const speed = playerStaircaseSpeed(stairs, agent, motion);
+			motion = (speed > 0.f ? 1 : speed < 0.f ? -1 : 0) * (path[1].x > path[0].x ? 1 : -1);
+			stairSpeed = std::abs(speed);
+		}
+		if (!motion) return;
 		auto const forwardX = task.destinationVertex->getPosition().x - task.sourceVertex->getPosition().x;
-		bool const forward = mPlayerMovementDirection * forwardX > 0.f;
+		bool const forward = motion * forwardX > 0.f;
 		auto const target = forward ? task.destinationVertex : task.sourceVertex;
 		auto const rise = target->getPosition().y - position.y;
 		// A reversal in a narrow stairwell is safe only while alone on the span.
@@ -425,8 +453,8 @@ namespace core
 				resource->mActiveDirection = direction;
 			}
 		}
-		auto const speed = task.edge->getType() == EdgeType::Location
-			? agent.getWalkSpeed() : agent.getStationaryStairSpeed(rise > 0.f);
+		auto const speed = task.edge->getType() == EdgeType::Location ? agent.getWalkSpeed()
+			: task.edge->getType() == EdgeType::Staircase ? stairSpeed : agent.getStationaryStairSpeed(rise > 0.f);
 		if (agent.moveToPosition(target->getPosition(), timestep, speed))
 		{
 			if (agent.getSector()->getType() == SectorType::Stairwell && agent.mPlayerStairPlatform)

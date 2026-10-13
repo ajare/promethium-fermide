@@ -13,7 +13,8 @@ eligible Agent, Player controls are disabled and the existing fitted Layer-0
 camera is used.
 
 - Hold Left or Right to walk immediately at effective walking speed.
-- Release the key to stop. Holding both keys stops movement.
+- Release the key to stop walking. Holding both keys stops walking; moving
+  Escalator steps still carry the Agent.
 - Pause, reset, suspension, and leaving Play clear transient movement input.
 - The camera centres on the controlled Agent at normal zoom and shows its Layer.
 - In Locations, Left/Right movement stays on the current Layer and Level. Usable open boundaries
@@ -58,7 +59,7 @@ camera is used.
   endpoint. Reversal is refused while others share the narrow span. Flat branches
   do not claim stair capacity. Pause freezes movement and clears all arrow input.
   Off-centre doorway entry still preserves X and can walk explicitly to the mount.
-- Stationary Staircases mount through their lower or upper flight endpoint, not
+- Staircases and Escalators mount through their lower or upper flight endpoint, not
   a doorway. Hold **Up** to ascend from below or **Down** to descend from above,
   together with Left/Right toward the flight. Selection is checked only within
   **0.25 World units** horizontally outside the endpoint, on its Level in its
@@ -66,14 +67,24 @@ camera is used.
   queued selection or automatic alignment: the Agent walks to the exact endpoint
   before entering. Eligible stair approach takes precedence over Up's ordinary
   Door action only within that zone.
-- On a Staircase, Left/Right follows the slope at effective directional stair
+- On a stationary Staircase, Left/Right follows the slope at effective directional stair
   speed. Release stops exactly in place; reverse input retraces the flight.
   Up/Down is not required once mounted. Reaching either endpoint automatically
   dismounts into its connected Location, subject to Standing fit and Location
   permissions. An open upper Room wall without Floor lands directly in the
   adjacent supported Location. Pause freezes the admitted task and clears input;
-  stationary Staircases do not require Object usage capability or Buttons.
-  Moving Escalators and Broken Escalators are not included in this control mode.
+  Staircases and Escalators do not require Object usage capability or Buttons.
+- On a moving Escalator, Left/Right adds effective walking speed in the selected
+  direction to the signed belt speed along the slope. Either endpoint can be
+  mounted, including against the belt; autonomous Agents still route one way.
+  Walking against the belt makes progress only when walking speed exceeds belt
+  speed, holds position when equal, and is carried backwards when slower.
+  Releasing Left/Right (or holding both) rides the belt to an automatic endpoint
+  exit. Broken Escalators behave as stationary Staircases, using directional
+  stair speed and stopping on release. Breaking/restoring preserves position;
+  resumed belt motion applies immediately. Moving Escalators use Escalator
+  Mobility; Broken ones use Staircase Mobility. Pause freezes both walking and
+  belt carriage, and resume with cleared keys rides a working belt.
 - Overlapping candidates prefer an admissible open doorway, then nearest centre,
   then stable traversal-resource identity. One press performs at most one action.
 - Solid walls, closed/opening Bulkhead Doors, low spaces and unsupported Floor
@@ -113,10 +124,11 @@ work and does not add a new Agent type.
 `agent-playerControlDoorways`, `agent-playerControlDoorwayRestrictions`,
 `agent-playerControlStairwells`, `agent-playerControlStairwellRestrictions`, and
 `agent-playerControlStairwellPlatforms`, `agent-playerControlStaircases`, and
-`agent-playerControlStaircaseRestrictions` exercise
+`agent-playerControlStaircaseRestrictions`, and `agent-playerControlEscalators` exercise
 walking, timed bidirectional Layer transitions, mirrored zig-zag stair movement,
 ascent/descent speed, narrow capacity, pause/reset, geometry, capability,
 permissions, low clearance and Broken Doors through the World/coordinator seam. `agent-playerControlEditorWorkflow` covers the picker,
 undo/redo and clipboard. `pf_application` covers actual Play key injection, Up repeat suppression and
-suspension, held Up/Down platform departure and Staircase mounting/dismounting; `pf_application_render` covers camera following, Layer selection,
+suspension, held Up/Down platform departure and Staircase/Escalator mounting,
+wrong-way walking, riding on release and automatic dismounting; `pf_application_render` covers camera following, Layer selection,
 resize and the no-Player fallback.

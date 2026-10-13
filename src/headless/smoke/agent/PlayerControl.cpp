@@ -547,20 +547,119 @@ namespace
 		}
 	}
 
+	void escalators()
+	{
+		for (int side : {CORE_SIDE_LEFT, CORE_SIDE_RIGHT})
+		for (float belt : {-.1f, .1f})
+		for (bool descending : {false, true})
+		{
+			core::World world("Player Escalator", 12, 2);
+			auto bottom = world.addRoom("Bottom", 0, 0, 0, 12, 1);
+			auto top = world.addCorridor(1, 0, 12);
+			auto stairs = world.addStaircase(1, 0, 4, {3, side, belt});
+			int const ascent = side == CORE_SIDE_RIGHT ? 1 : -1;
+			int const horizontal = descending ? -ascent : ascent;
+			float const mountX = descending ? (ascent > 0 ? 7.f : 4.f) : (ascent > 0 ? 4.f : 7.f);
+			world.finishBuild(); world.pauseSimulation();
+			auto id = world.createAgent("Player", descending ? top : bottom, 0, mountX - horizontal * .15f);
+			assign(world, id);
+			world.setAgentIndividualStairSpeedModifier(id, 1.2f);
+			auto normalId = world.createAgent("Autonomous", bottom, 0, 1.f);
+			auto normal = world.lookupAgent(normalId).entity;
+			auto player = world.lookupAgent(id).entity;
+			for (auto const& edge : world.getGraph()->getEdges())
+				if (edge->getType() == core::EdgeType::Staircase && edge->getVertex(0)->getSector()->getIndex() == stairs)
+				{
+					auto wrong = edge->getVertex(0);
+					if ((wrong->getPosition().y > edge->getVertex(1)->getPosition().y) == (belt > 0.f))
+						wrong = edge->getVertex(1);
+					require(!edge->isTraversable(wrong, std::shared_ptr<const core::Agent>(normal, [](auto*) {})),
+						"Autonomous traversal must remain one-way on a moving Escalator");
+					require(edge->isTraversable(wrong, std::shared_ptr<const core::Agent>(player, [](auto*) {})),
+						"Player traversal must admit the wrong direction");
+					core::RouteDecisionContext context{player, {}, {}, player->getSector()};
+					require(!edge->getDirectedTraversalFacts(wrong, context).feasible,
+						"Direct Player input must not change autonomous pathfinding direction facts");
+				}
+			auto position = [&] { return world.lookupAgent(id).entity->getGlobalPosition(); };
+			auto sector = [&] { return world.lookupAgent(id).entity->getSector()->getIndex(); };
+			auto drive = [&](int direction, float seconds) {
+				world.setPlayerMovementDirection(direction);
+				while (seconds > 0.f) { auto step = std::min(seconds, 1.f); world.update(step); seconds -= step; }
+			};
+			world.resumeSimulation(); world.setPlayerStairSelection(!descending, descending);
+			drive(horizontal, .6f);
+			require(sector() == stairs && position().y > 0.f && position().y < 1.f,
+				"Players must board either Escalator endpoint, including against its belt");
+			world.setPlayerStairSelection(false, false);
+			auto before = position();
+			drive(horizontal, .1f);
+			near(position().distanceTo(before), std::abs(belt + horizontal * ascent
+				* world.lookupAgent(id).entity->getWalkSpeed()) * .1f,
+				"Moving Escalator speed must combine signed walking and belt speeds");
+			before = position(); drive(0, .2f);
+			near(position().distanceTo(before), std::abs(belt) * .2f, "Release must ride the belt, not stop");
+			require((position().y > before.y) == (belt > 0.f), "Belt must carry in its authored direction");
+			before = position(); world.pauseSimulation(); world.update(.2f);
+			near(position().distanceTo(before), 0.f, "Pause must freeze Escalator passengers");
+			world.resumeSimulation(); world.update(.1f);
+			near(position().distanceTo(before), std::abs(belt) * .1f, "Resume with cleared keys must ride");
+			require(world.setEscalatorBroken(stairs, true), "Cannot break Player Escalator");
+			before = position(); drive(0, .2f);
+			near(position().distanceTo(before), 0.f, "Broken Escalator must stop on release");
+			before = position(); drive(horizontal, .1f);
+			near(position().distanceTo(before), world.lookupAgent(id).entity->getStationaryStairSpeed(!descending) * .1f,
+				"Broken Escalator must use effective directional stationary stair speed");
+			require(world.setEscalatorBroken(stairs, false), "Cannot restore Player Escalator");
+			before = position(); drive(-horizontal, .1f);
+			near(position().distanceTo(before), std::abs(belt - horizontal * ascent
+				* world.lookupAgent(id).entity->getWalkSpeed()) * .1f,
+				"Reversal after restore must retain position and use signed belt motion");
+			drive(horizontal, 12.f);
+			require(sector() == (descending ? bottom : top), "Players must finish either Escalator direction and dismount");
+		}
+		// Against a sufficiently fast belt, walking can hold position or lose
+		// ground. Exercise both outcomes from an interior admitted flight.
+		for (float factor : {1.f, 2.f})
+		{
+			core::World world("Player loses to belt", 12, 2);
+			auto bottom = world.addRoom("Bottom", 0, 0, 0, 12, 1);
+			auto top = world.addCorridor(1, 0, 12);
+			float const belt = core::bundledHumanBaseline().walkSpeed * factor;
+			auto stairs = world.addStaircase(1, 0, 4, {3, CORE_SIDE_RIGHT, belt});
+			world.finishBuild(); world.pauseSimulation();
+			auto id = world.createAgent("Player", bottom, 0, 3.85f); assign(world, id);
+			world.resumeSimulation(); world.setPlayerMovementDirection(1); world.setPlayerStairSelection(true, false);
+			world.update(.8f);
+			require(world.lookupAgent(id).entity->getSector()->getIndex() == stairs, "Cannot board slow belt fixture");
+			auto agent = world.lookupAgent(id).entity;
+			auto const targetSpeed = agent->getWalkSpeed();
+			auto before = agent->getGlobalPosition();
+			world.setPlayerStairSelection(false, false); world.setPlayerMovementDirection(-1); world.update(.2f);
+			near(agent->getGlobalPosition().distanceTo(before), (belt - targetSpeed) * .2f,
+				"Opposing input must stall or be carried backwards according to net speed");
+			world.setPlayerMovementDirection(0);
+			for (int second = 0; second < 40; ++second) world.update(1.f);
+			require(agent->getSector()->getIndex() == top, "Released Player must ride to an automatic endpoint exit");
+		}
+	}
+
 	void staircaseRestrictions()
 	{
-		for (int scenario = 0; scenario < 9; ++scenario)
+		for (int scenario = 0; scenario < 12; ++scenario)
 		{
 			core::World world("Staircase approach restrictions", 12, 2);
 			auto bottom = world.addRoom("Bottom", 0, 0, 0, 12, 1);
 			world.addCorridor(1, 0, 12);
-			world.addStaircase(1, 0, 4, {3, CORE_SIDE_RIGHT, scenario == 6 ? 1.f : 0.f});
+			auto stairs = world.addStaircase(1, 0, 4, {3, CORE_SIDE_RIGHT, scenario == 6 || scenario >= 9 ? .1f : 0.f});
 			world.finishBuild(); world.pauseSimulation();
+			if (scenario >= 10) world.setEscalatorInitiallyBroken(stairs, true);
 			auto id = world.createAgent("Player", bottom, 0, scenario == 0 ? 3.f : 3.85f); assign(world, id);
-			if (scenario == 5)
+			if (scenario == 5 || scenario == 6 || scenario >= 9)
 			{
 				auto profile = world.lookupAgent(id).entity->getEffectiveMobilityProfile().value;
-				profile.set(core::TraversalKind::Staircase, core::MobilityUse::CannotUse);
+				profile.set(scenario == 6 || scenario == 10 ? core::TraversalKind::Escalator : core::TraversalKind::Staircase,
+					core::MobilityUse::CannotUse);
 				world.setAgentIndividualMobilityProfile(id, profile);
 			}
 			if (scenario == 7) world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None);
@@ -569,14 +668,15 @@ namespace
 			world.setPlayerStairSelection(scenario != 3, scenario == 3 || scenario == 4);
 			world.setPlayerMovementDirection(scenario == 1 ? 0 : scenario == 2 ? -1 : 1);
 			world.update(scenario == 0 ? .1f : .6f);
-			require((world.lookupAgent(id).entity->getSector()->getIndex() != bottom) == (scenario == 7),
+			require((world.lookupAgent(id).entity->getSector()->getIndex() != bottom) == (scenario == 7 || scenario == 9 || scenario == 10),
 				"Only near, toward-flight, correct exclusive selection may mount; None must still permit stairs");
 		}
+		for (float belt : {0.f, .1f})
 		{
 			core::World world("Staircase exit authorization", 12, 2);
 			auto bottom = world.addRoom("Bottom", 0, 0, 0, 12, 1);
 			auto top = world.addCorridor(1, 0, 12);
-			auto stairs = world.addStaircase(1, 0, 4, {3, CORE_SIDE_RIGHT, 0.f});
+			auto stairs = world.addStaircase(1, 0, 4, {3, CORE_SIDE_RIGHT, belt});
 			world.finishBuild(); world.pauseSimulation();
 			auto permission = world.addAccessPermission("Upper access");
 			world.setLocationPermissionRequirement(top, {permission});
@@ -686,6 +786,7 @@ void agent_smoke::registerPlayerControl(std::vector<smoke::Check>& checks)
 	checks.push_back({"playerControlDoorways", [](smoke::Context const&) { doorways(); }});
 	checks.push_back({"playerControlDoorwayRestrictions", [](smoke::Context const&) { doorwayRestrictions(); doorwaySelection(); }});
 	checks.push_back({"playerControlStairwellPlatforms", [](smoke::Context const&) { stairwellPlatforms(); }});
+	checks.push_back({"playerControlEscalators", [](smoke::Context const&) { escalators(); }});
 	checks.push_back({"playerControlStaircases", [](smoke::Context const&) { staircases(); }});
 	checks.push_back({"playerControlStaircaseRestrictions", [](smoke::Context const&) { staircaseRestrictions(); }});
 	checks.push_back({"playerControlStairwells", [](smoke::Context const&) { stairwells(); }});

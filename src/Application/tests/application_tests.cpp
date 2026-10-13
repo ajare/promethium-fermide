@@ -248,11 +248,12 @@ void checkPlayerStairKeys(wp::application::State& play, core::World& world) {
 void checkPlayerStaircaseKeys(wp::application::State& play, core::World& world) {
   using wp::application::Key;
   using wp::application::KeyEvent;
+  for (float belt : {0.f, -.1f, .1f})
   for (bool descending : {false, true}) {
     core::World fixture("Keyboard Staircase", 12, 2);
     auto bottom = fixture.addRoom("Bottom", 0, 0, 0, 12, 1);
     auto top = fixture.addCorridor(1, 0, 12);
-    auto stairs = fixture.addStaircase(1, 0, 4, {3, CORE_SIDE_RIGHT, 0.f});
+    auto stairs = fixture.addStaircase(1, 0, 4, {3, CORE_SIDE_RIGHT, belt});
     fixture.finishBuild(); fixture.pauseSimulation();
     auto id = fixture.createAgent("Keyboard player", descending ? top : bottom, 0, descending ? 7.15f : 3.85f);
     require(fixture.setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}), "Cannot assign Staircase player");
@@ -270,8 +271,8 @@ void checkPlayerStaircaseKeys(wp::application::State& play, core::World& world) 
             "Actual Up/Down key input must mount the appropriate Staircase endpoint");
     auto stopped = world.lookupAgent(id).entity->getGlobalPosition();
     key(horizontal, false); key(vertical, false); play._update(.2f);
-    require(world.lookupAgent(id).entity->getGlobalPosition().distanceTo(stopped) < .0001f,
-            "Releasing horizontal input must stop on the Staircase");
+    require(std::abs(world.lookupAgent(id).entity->getGlobalPosition().distanceTo(stopped) - std::abs(belt) * .2f) < .0001f,
+            "Releasing horizontal input must stop on stationary stairs or ride moving Escalator steps");
     key(horizontal, true);
     for (int second = 0; second < 12; ++second) play._update(1.f);
     require(world.lookupAgent(id).entity->getSector()->getIndex() == (descending ? bottom : top),
