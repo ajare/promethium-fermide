@@ -184,6 +184,56 @@ namespace core
 		bool operator==(WasteEjectionSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationWasteEjections{16};
+	// The stable identity an installation registers with the shared
+	// availability contract (#413). Every capacity-bearing station
+	// installation that can be taken out of service or capacity-reduced
+	// exposes its id and a human-readable kind here; outage schedules
+	// target installations by this identity and validation accepts an
+	// outage only against a registered id, so an outage never silently
+	// aims at something that cannot honour it. The contract is shared:
+	// later generators and processors join it by registering their own
+	// identity rather than by any special-cased outage wiring.
+	struct StationInstallationIdentity
+	{
+		std::string id;
+		std::string kind; // e.g. "generator", "coolant loop", "chiller"
+		bool operator==(StationInstallationIdentity const&) const = default;
+	};
+	// A scheduled outage or capacity reduction of one registered
+	// installation (#413). An outage declares the fraction of the target
+	// installation's rated capacity that stays available during its
+	// window: 0 is a full outage (the installation produces, circulates
+	// and draws nothing through its rated capacity), 0.5 is a half-capacity
+	// reduction. Outside every window the installation holds its full
+	// declared availability. The factor is a hard ceiling on the
+	// installation's deliverable rated capacity, applied at the tick's
+	// capacity read: no output, circulation or heat continues through a
+	// capacity the outage has taken away, and a reduction bites the moment
+	// the window opens rather than ramping out of it. A recurrence of zero
+	// is a one-off outage; a positive recurrence repeats the same window
+	// every recurrenceSeconds and must be at least as long as the window,
+	// so a schedule's own windows never overlap. Overlapping outages on one
+	// installation take the deepest reduction (the minimum fraction), so
+	// the effective availability never depends on the order the schedules
+	// were declared. Restoration returns only the declared availability:
+	// it never replenishes fuel, consumables, buffers or biomass, so a
+	// machine that ran dry or a store that drained stays drained. The
+	// schedule reuses the shared scenario time base and the deterministic
+	// occurrence ordering established for resupply deliveries (#392):
+	// simulation time, then service priority (higher first), then
+	// declaration order.
+	struct InstallationOutageSettings
+	{
+		std::string id;
+		std::string installationId;   // stable identity of the target installation
+		double capacityFraction{0.0}; // rated capacity available during the outage, [0, 1)
+		double firstOccurrenceSeconds{0.0}; // the outage begins, >= 0
+		double durationSeconds{0.0};  // each outage window, > 0
+		double recurrenceSeconds{0.0};// 0 = one-off, else >= duration and >= one fixed tick
+		int priority{0};              // higher announced first among coincidents
+		bool operator==(InstallationOutageSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationInstallationOutages{16};
 	// Schedule boundary tolerance (#392). Authored times meet the fixed-tick
 	// grid in binary floating point and 1/60 is not exactly representable,
 	// so an occurrence scheduled exactly on a tick boundary can land a few
@@ -1438,6 +1488,10 @@ namespace core
 		std::vector<BatterySettings> batteries;
 		std::vector<ResourceDeliverySettings> deliveries;
 		std::vector<WasteEjectionSettings> wasteEjections;
+		// Authored scheduled outages and capacity reductions (#413) against
+		// the shared installation availability contract. Each targets a
+		// registered installation by its stable identity.
+		std::vector<InstallationOutageSettings> outages;
 		std::vector<ThermalReservoirSettings> thermalReservoirs;
 		std::vector<RadiatorSettings> radiators;
 		std::vector<CoolantLoopSettings> coolantLoops;
@@ -1459,6 +1513,14 @@ namespace core
 		std::vector<AlgaeCultureSettings> algaeCultures;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
+	// The installations registered with the shared availability contract
+	// for a given authored configuration (#413): in this slice the
+	// generators, coolant loops and chillers. Outage validation resolves
+	// an outage's installationId against this set; an outage naming an
+	// installation that has not registered is refused with a diagnostic
+	// rather than accepted and ignored.
+	std::vector<StationInstallationIdentity> stationInstallationIdentities(
+		StationSystemsSettings const& settings);
 	// Profile shape validation and deterministic evaluation: the level of
 	// the last segment started at or before the current phase of the
 	// repeating period, or the constant level when there is no period.
@@ -1654,6 +1716,39 @@ namespace core
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationWasteEjectionSnapshot const&) const = default;
 	};
+	// One authored installation outage as of the most recent tick (#413):
+	// what its schedule says, whether its window is open right now, how
+	// many occurrences have started and completed, and the effective
+	// availability the target installation currently holds under every
+	// outage aimed at it. The availability is the deepest reduction among
+	// the outage windows open this tick (the minimum capacity fraction),
+	// 1.0 when none is open; it is a pure function of World time, so the
+	// same tick sequence always reproduces the same availability. A
+	// restoration returns the installation to its declared availability
+	// without touching any inventory, so the snapshot never reports a
+	// restored machine as having regained fuel, consumables, buffers or
+	// biomass.
+	struct StationOutageSnapshot
+	{
+		std::string id;
+		std::string installationId;
+		std::string installationKind;
+		double capacityFraction{0.0};
+		double firstOccurrenceSeconds{0.0};
+		double durationSeconds{0.0};
+		double recurrenceSeconds{0.0}; // 0 = one-off
+		int priority{0};
+		bool active{false};                 // an outage window is open this tick
+		uint64_t occurrencesStarted{0};
+		uint64_t occurrencesCompleted{0};
+		double lastStartSeconds{0.0};
+		double lastRestoreSeconds{0.0};
+		bool exhausted{false};              // one-off already restored
+		bool hasNextOccurrence{false};
+		double nextOccurrenceSeconds{0.0};
+		double installationAvailability{1.0}; // target's effective factor now
+		bool operator==(StationOutageSnapshot const&) const = default;
+	};
 
 	// One solar array as of the most recent tick: installed capacity, the
 	// evaluated illumination and the generation it could deliver. A
@@ -1800,6 +1895,7 @@ namespace core
 		bool coolingAvailable{false};      // sink below the maximum sink temperature
 		bool coolingRequired{false};       // running, or decay heat booked this tick
 		bool disabled{false};              // zero installed capacity
+		double availabilityFactor{1.0};   // installed capacity available under outages (#413)
 		std::string blockReason;           // why a commanded start is not proceeding
 		double fuelEnergyKJ{0.0};          // cumulative fuel energy consumed
 		double electricalKJ{0.0};          // cumulative electrical delivered
@@ -2024,6 +2120,7 @@ namespace core
 		double chillerExtractionKW{0.0};
 		bool belowFreezeSetpoint{false};
 		bool disabled{false};              // zero coolant: no fluid, no service
+		double availabilityFactor{1.0};   // circulation capacity available under outages (#413)
 		double startingEnergyKJ{0.0};
 		double currentEnergyKJ{0.0};
 		double pumpWorkEnergyKJ{0.0};
@@ -2080,6 +2177,7 @@ namespace core
 		bool atChilledSetpoint{false};
 		bool sinkOverMaxCondensing{false};
 		bool disabled{false};            // zero rated capacity: no service
+		double availabilityFactor{1.0}; // cooling capacity available under outages (#413)
 		double extractedEnergyKJ{0.0};  // cumulative cold-side heat extracted
 		double workEnergyKJ{0.0};       // cumulative electrical work + auxiliaries
 		double condenserEnergyKJ{0.0};  // cumulative condenser heat rejected
@@ -3111,6 +3209,12 @@ namespace core
 		// totals. Ejected material appears in the balance ledgers as
 		// external loss.
 		std::vector<StationWasteEjectionSnapshot> wasteEjections;
+		// The installation outage picture (#413): per-outage schedule,
+		// whether its window is open, the started/completed occurrence
+		// counts and the target installation's effective availability.
+		// Availability is a pure function of World time, so the same tick
+		// sequence reproduces the same outage state on reset and replay.
+		std::vector<StationOutageSnapshot> outages;
 		StationPowerSnapshot power;
 		// The thermal picture (#395): reservoir temperatures, heat flows
 		// and limits, radiator rejection and the per-reservoir energy

@@ -894,7 +894,15 @@ namespace core
 		// respiration pathway ledgers, the harvest partition totals and
 		// the energy and heat totals stay runtime-only, so load and Reset
 		// reconstruct them from the authored starting conditions.
-		serializer.writeUint32("version", 89);
+		// Version 90 adds authored installation outage and capacity-
+		// reduction schedules (#413): a scenario change to one registered
+		// installation's available rated capacity at declared times, once
+		// or recurring. A pre-90 document carrying `outages` is refused
+		// rather than silently dropping the schedules. The window state,
+		// the started/completed occurrence counts and each installation's
+		// effective availability stay runtime-only, so load and Reset
+		// reconstruct them from the authored schedule and the World tick.
+		serializer.writeUint32("version", 90);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -1696,6 +1704,27 @@ namespace core
 					serializer.writeDouble("firstOccurrenceSeconds", ejection.firstOccurrenceSeconds);
 					serializer.writeDouble("recurrenceSeconds", ejection.recurrenceSeconds);
 					serializer.writeInt32("priority", ejection.priority);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.outages.empty())
+			{
+				// Authored schedules only; the window state, the started and
+				// completed occurrence counts and each installation's
+				// effective availability are runtime state reconstructed on
+				// load from the authored schedule and the World tick (#413).
+				serializer.beginArray("outages");
+				for (auto const& outage : mStationSystemsSettings.outages)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", outage.id);
+					serializer.writeString("installationId", outage.installationId);
+					serializer.writeDouble("capacityFraction", outage.capacityFraction);
+					serializer.writeDouble("firstOccurrenceSeconds", outage.firstOccurrenceSeconds);
+					serializer.writeDouble("durationSeconds", outage.durationSeconds);
+					serializer.writeDouble("recurrenceSeconds", outage.recurrenceSeconds);
+					serializer.writeInt32("priority", outage.priority);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -2584,7 +2613,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 89)
+		if (version < 1 || version > 90)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -3471,6 +3500,27 @@ namespace core
 					ejection.recurrenceSeconds = serializer.readDouble("recurrenceSeconds");
 					ejection.priority = serializer.readInt32("priority");
 					stationSettings.wasteEjections.push_back(std::move(ejection));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("outages"))
+			{
+				if (version < 90) throw SerializationException(
+					"Station installation outages require World schema 90");
+				serializer.beginArray("outages");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					InstallationOutageSettings outage;
+					outage.id = serializer.readString("id");
+					outage.installationId = serializer.readString("installationId");
+					outage.capacityFraction = serializer.readDouble("capacityFraction");
+					outage.firstOccurrenceSeconds = serializer.readDouble("firstOccurrenceSeconds");
+					outage.durationSeconds = serializer.readDouble("durationSeconds");
+					outage.recurrenceSeconds = serializer.readDouble("recurrenceSeconds");
+					outage.priority = serializer.readInt32("priority");
+					stationSettings.outages.push_back(std::move(outage));
 					serializer.endMap();
 				}
 				serializer.endArray();

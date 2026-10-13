@@ -88,6 +88,7 @@ namespace core
 			std::vector<FuelCellSettings> const* fuelCells;
 			std::vector<ThermalBufferSettings> const* thermalBuffers;
 			std::vector<WasteEjectionSettings> const* wasteEjections;
+			std::vector<InstallationOutageSettings> const* outages;
 			std::vector<SabatierReactorSettings> const* sabatierReactors;
 			std::vector<MethaneProcessorSettings> const* methaneProcessors;
 			std::vector<MicrobialProcessorSettings> const* microbialProcessors;
@@ -770,7 +771,24 @@ namespace core
 					lua_pushinteger(state, algae.priority); lua_setfield(state, -2, "priority");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 28, 1);
+				// Authored installation outage schedules cross the same
+				// boundary as plain immutable descriptors; the sandbox mirrors
+				// the same availability rule and audits it (#413).
+				lua_createtable(state, static_cast<int>(outages->size()), 0);
+				for (size_t index = 0; index < outages->size(); ++index)
+				{
+					auto const& outage = (*outages)[index];
+					lua_createtable(state, 0, 7);
+					lua_pushstring(state, outage.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, outage.installationId.c_str()); lua_setfield(state, -2, "installation");
+					lua_pushnumber(state, outage.capacityFraction); lua_setfield(state, -2, "capacityFraction");
+					lua_pushnumber(state, outage.firstOccurrenceSeconds); lua_setfield(state, -2, "firstSeconds");
+					lua_pushnumber(state, outage.durationSeconds); lua_setfield(state, -2, "durationSeconds");
+					lua_pushnumber(state, outage.recurrenceSeconds); lua_setfield(state, -2, "recurrenceSeconds");
+					lua_pushinteger(state, outage.priority); lua_setfield(state, -2, "priority");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 29, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -1103,6 +1121,60 @@ namespace core
 			- firstOccurrenceSeconds) / recurrenceSeconds);
 		if (!(steps > 0.0)) return 1;
 		return static_cast<uint64_t>(steps) + 1;
+	}
+	// Outage windows that have opened at or before the given simulation
+	// time (#413). A window k starts at firstOccurrenceSeconds + k x
+	// recurrenceSeconds (or just firstOccurrenceSeconds for a one-off) and
+	// runs for durationSeconds. The count is monotonic in elapsed time and
+	// uses the same boundary tolerance as the delivery schedule rule, so a
+	// window that opens exactly on a tick boundary is never missed. With a
+	// recurrence no shorter than the duration the windows are disjoint, so
+	// at most one window of a schedule is open at any instant.
+	uint64_t stationOutageOccurrencesStarted(double firstOccurrenceSeconds,
+		double /*durationSeconds*/, double recurrenceSeconds, double elapsedSeconds)
+	{
+		if (elapsedSeconds + StationScheduleTolerance < firstOccurrenceSeconds) return 0;
+		if (recurrenceSeconds <= 0.0) return 1;
+		auto const steps = std::floor((elapsedSeconds + StationScheduleTolerance
+			- firstOccurrenceSeconds) / recurrenceSeconds);
+		if (!(steps > 0.0)) return 1;
+		return static_cast<uint64_t>(steps) + 1;
+	}
+	// Outage windows that have closed (been restored) at or before the
+	// given simulation time (#413). Window k closes at its start plus the
+	// duration; the count is monotonic in elapsed time and uses the same
+	// tolerance, so a restoration landing exactly on a tick boundary is
+	// never missed and never counted twice. A window is restored only once
+	// its full duration has elapsed, so the installation keeps its reduced
+	// availability for exactly the authored window.
+	uint64_t stationOutageOccurrencesCompleted(double firstOccurrenceSeconds,
+		double durationSeconds, double recurrenceSeconds, double elapsedSeconds)
+	{
+		auto const firstRestore = firstOccurrenceSeconds + durationSeconds;
+		if (elapsedSeconds + StationScheduleTolerance < firstRestore) return 0;
+		if (recurrenceSeconds <= 0.0) return 1;
+		auto const steps = std::floor((elapsedSeconds + StationScheduleTolerance
+			- firstRestore) / recurrenceSeconds);
+		if (!(steps > 0.0)) return 1;
+		return static_cast<uint64_t>(steps) + 1;
+	}
+	// The installations registered with the shared availability contract
+	// (#413). In this slice the generators, coolant loops and chillers
+	// register their stable ids; an outage may target only a registered
+	// identity, so the contract is what an installation opts into rather
+	// than a special-cased outage lookup. Later capacity-bearing
+	// installations join by adding their identity here.
+	std::vector<StationInstallationIdentity> stationInstallationIdentities(
+		StationSystemsSettings const& settings)
+	{
+		std::vector<StationInstallationIdentity> identities;
+		for (auto const& generator : settings.generators)
+			identities.push_back({generator.id, "generator"});
+		for (auto const& loop : settings.coolantLoops)
+			identities.push_back({loop.id, "coolant loop"});
+		for (auto const& chiller : settings.chillers)
+			identities.push_back({chiller.id, "chiller"});
+		return identities;
 	}
 	bool validateStationSystemsSettings(StationSystemsSettings const& settings, std::string& diagnostic)
 	{
@@ -1818,6 +1890,61 @@ namespace core
 					< static_cast<double>(World::getFixedTimestep()))
 				return refuse(where + " recurrence must be zero or at least one World fixed tick ("
 					+ std::to_string(World::getFixedTimestep()) + " seconds)");
+		}
+		// Installation outage and capacity-reduction schedules (#413): a
+		// scenario change to one registered installation's available rated
+		// capacity at authored times. The outage must name an installation
+		// that has registered with the shared availability contract, so a
+		// typo or an unwired target is refused rather than silently doing
+		// nothing. The capacity fraction is the share of the rating that
+		// stays available during the window: 0 is a full outage, a value
+		// below 1 is a reduction; a fraction of 1 changes nothing and is
+		// refused so every fired occurrence is a real reduction. The
+		// window must be positive and, when recurring, no shorter than the
+		// window itself, so a schedule's own windows never overlap.
+		if (settings.outages.size() > MaxStationInstallationOutages)
+			return refuse("Station installation outages are limited to "
+				+ std::to_string(MaxStationInstallationOutages) + " entries");
+		auto const registeredInstallations = stationInstallationIdentities(settings);
+		std::set<std::string> outageIds;
+		for (auto const& outage : settings.outages)
+		{
+			auto const where = "Station installation outage '" + outage.id + "'";
+			if (outage.id.empty()) return refuse("Station installation outage id must not be empty");
+			if (outage.id.size() > MaxStationStoreIdLength)
+				return refuse("Station installation outage id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!outageIds.insert(outage.id).second) return refuse(where + " id is duplicated");
+			if (outage.installationId.empty())
+				return refuse(where + " installation id must not be empty");
+			if (outage.installationId.size() > MaxStationStoreIdLength)
+				return refuse(where + " installation id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (std::none_of(registeredInstallations.begin(), registeredInstallations.end(),
+				[&](StationInstallationIdentity const& installation) {
+					return installation.id == outage.installationId;
+				}))
+				return refuse(where + " targets unknown installation '" + outage.installationId
+					+ "'; only installations registered with the availability contract can be outaged");
+			if (!std::isfinite(outage.capacityFraction) || outage.capacityFraction < 0.0
+				|| outage.capacityFraction >= 1.0)
+				return refuse(where + " capacity fraction must be finite and from 0 up to but not including 1"
+					+ " (0 is a full outage; 1 would change nothing)");
+			if (!std::isfinite(outage.firstOccurrenceSeconds)
+				|| outage.firstOccurrenceSeconds < 0.0)
+				return refuse(where + " first occurrence must be finite and non-negative");
+			if (!std::isfinite(outage.durationSeconds) || outage.durationSeconds <= 0.0)
+				return refuse(where + " duration must be finite and positive");
+			if (!std::isfinite(outage.recurrenceSeconds) || outage.recurrenceSeconds < 0.0)
+				return refuse(where + " recurrence must be finite and non-negative (0 is a one-off)");
+			if (outage.recurrenceSeconds > 0.0
+				&& outage.recurrenceSeconds + StationScheduleTolerance
+					< static_cast<double>(World::getFixedTimestep()))
+				return refuse(where + " recurrence must be zero or at least one World fixed tick ("
+					+ std::to_string(World::getFixedTimestep()) + " seconds)");
+			if (outage.recurrenceSeconds > 0.0
+				&& outage.recurrenceSeconds + StationScheduleTolerance < outage.durationSeconds)
+				return refuse(where + " recurrence must be at least the outage duration so its windows never overlap");
 		}
 		// Compartment atmosphere contracts (#400): a fixed volume with a
 		// finite owned gas inventory, an authored effective thermal
@@ -3250,7 +3377,32 @@ namespace core
 			bool exhausted{false};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
-		// The authoritative ledger of one authored radiator (#395).
+		// The authoritative ledger of one authored installation outage
+		// (#413). The outage is a scenario schedule over World time, not a
+		// station process: its windows are a pure function of the elapsed
+		// simulation time, so the same tick sequence always reproduces the
+		// same active state, started/completed occurrence counts and the
+		// same restoration, whether the ticks arrive one by one or batched
+		// by an accelerated update. The ledger resolves the target
+		// installation's identity to its state so the tick pass can read
+		// the effective availability factor; restoration only lifts the
+		// ceiling and never touches any inventory.
+		struct OutageState
+		{
+			InstallationOutageSettings authored;
+			std::string installationKind;
+			// The target installation, resolved at construction. Exactly one
+			// of these indices is set according to the target kind.
+			enum class Target : std::uint8_t { Generator, CoolantLoop, Chiller };
+			Target target{Target::Generator};
+			size_t targetIndex{0};
+			uint64_t occurrencesStarted{0};
+			uint64_t occurrencesCompleted{0};
+			double lastStartSeconds{0.0};
+			double lastRestoreSeconds{0.0};
+			bool lastActive{false};
+			bool exhausted{false};
+		};
 		// Rejection is recomputed every tick from the host reservoir's
 		// emitting temperature; the booked value is the net radiative
 		// exchange after the reservoir's sink clamp.
@@ -3343,6 +3495,10 @@ namespace core
 			double extractedKJ{0.0};
 			bool lastBelowFreeze{false};
 			bool lastCirculating{false};
+			// The circulation capacity available under every outage aimed at
+			// this loop this tick (#413): 1.0 with no outage open, the
+			// deepest reduction fraction among the open windows otherwise.
+			double availabilityFactor{1.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
 		// The authoritative ledger of one authored chiller (#397). The
@@ -3375,6 +3531,9 @@ namespace core
 			double extractedKJ{0.0};
 			double workKJ{0.0};
 			double condenserKJ{0.0};
+			// The cooling capacity available under every outage aimed at
+			// this chiller this tick (#413).
+			double availabilityFactor{1.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
 		// The authoritative ledger of one authored thermal buffer (#398).
@@ -3442,6 +3601,10 @@ namespace core
 			double wasteHeatKJ{0.0};
 			double startupHeatKJ{0.0};
 			double decayHeatKJ{0.0};
+			// The electrical capacity available under every outage aimed at
+			// this generator this tick (#413): 1.0 with no outage open, the
+			// deepest reduction fraction among the open windows otherwise.
+			double availabilityFactor{1.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
 		// The authoritative ledger of one authored compartment atmosphere
@@ -4169,6 +4332,11 @@ namespace core
 		// same scenario-event pass as the deliveries so one ordering
 		// governs coincident arrivals and departures.
 		std::vector<WasteEjectionState> wasteEjections;
+		// Authored installation outage and capacity-reduction schedules
+		// (#413), resolved against the shared availability contract at
+		// construction so the tick pass can read each target's effective
+		// availability factor.
+		std::vector<OutageState> outages;
 		std::vector<ReservoirState> reservoirs;
 		std::vector<RadiatorState> radiators;
 		std::vector<LoopState> coolantLoops;
@@ -4743,6 +4911,77 @@ namespace core
 			};
 			double batterySuppliedKW{0.0};
 			double batteryShortfallKW{0.0};
+			// Installation availability factors are resolved from the outage
+			// schedules before any installation reads its rated capacity
+			// (#413). Each outage window is a pure function of the elapsed
+			// World time, so the factor a tick sees depends only on when the
+			// tick is, never on how the ticks were batched or on the order
+			// the outage schedules were declared. Overlapping windows on one
+			// installation take the deepest reduction (the minimum capacity
+			// fraction); an installation with no window open keeps its full
+			// declared availability of 1.0. The started/completed occurrence
+			// counts advance monotonically with time so every window's start
+			// and restoration is announced exactly once however many ticks an
+			// accelerated update batches together, and a restoration only
+			// lifts the ceiling - it never touches any inventory.
+			for (auto& generator : generators) generator.availabilityFactor = 1.0;
+			for (auto& loop : coolantLoops) loop.availabilityFactor = 1.0;
+			for (auto& chiller : chillers) chiller.availabilityFactor = 1.0;
+			for (auto& outage : outages)
+			{
+				auto const& schedule = outage.authored;
+				auto const startedDue = stationOutageOccurrencesStarted(
+					schedule.firstOccurrenceSeconds, schedule.durationSeconds,
+					schedule.recurrenceSeconds, elapsed);
+				auto const completedDue = stationOutageOccurrencesCompleted(
+					schedule.firstOccurrenceSeconds, schedule.durationSeconds,
+					schedule.recurrenceSeconds, elapsed);
+				// Announce each newly opened window and each newly closed
+				// (restored) window in occurrence order, so the event log
+				// brackets every outage even when several start and end
+				// between two sampled ticks.
+				for (uint64_t occurrence = outage.occurrencesStarted;
+					occurrence < startedDue; ++occurrence)
+				{
+					auto const when = schedule.recurrenceSeconds > 0.0
+						? schedule.firstOccurrenceSeconds
+							+ static_cast<double>(occurrence) * schedule.recurrenceSeconds
+						: schedule.firstOccurrenceSeconds;
+					outage.lastStartSeconds = when;
+					appendBoundedEvent(events, tick,
+						"Outage '" + schedule.id + "' on " + outage.installationKind + " '"
+						+ schedule.installationId + "' began at " + std::to_string(when)
+						+ " s: capacity reduced to " + std::to_string(schedule.capacityFraction));
+				}
+				for (uint64_t occurrence = outage.occurrencesCompleted;
+					occurrence < completedDue; ++occurrence)
+				{
+					auto const when = schedule.recurrenceSeconds > 0.0
+						? schedule.firstOccurrenceSeconds
+							+ static_cast<double>(occurrence) * schedule.recurrenceSeconds
+							+ schedule.durationSeconds
+						: schedule.firstOccurrenceSeconds + schedule.durationSeconds;
+					outage.lastRestoreSeconds = when;
+					appendBoundedEvent(events, tick,
+						"Outage '" + schedule.id + "' on " + outage.installationKind + " '"
+						+ schedule.installationId + "' restored full declared availability at "
+						+ std::to_string(when) + " s (no inventory replenished)");
+				}
+				outage.occurrencesStarted = startedDue;
+				outage.occurrencesCompleted = completedDue;
+				outage.lastActive = startedDue > completedDue;
+				outage.exhausted = schedule.recurrenceSeconds <= 0.0 && completedDue >= 1;
+				// Apply the reduction to the target's effective availability,
+				// deepest window wins so the result never depends on the
+				// declaration order of coincident outages.
+				if (!outage.lastActive) continue;
+				auto& factor = outage.target == OutageState::Target::Generator
+					? generators[outage.targetIndex].availabilityFactor
+					: outage.target == OutageState::Target::CoolantLoop
+						? coolantLoops[outage.targetIndex].availabilityFactor
+						: chillers[outage.targetIndex].availabilityFactor;
+				factor = std::min(factor, schedule.capacityFraction);
+			}
 			// Fuelled generators run ahead of the load allocation (#399):
 			// their electrical output joins the shared generation pool for
 			// this tick's loads, their startup cranking draws ride the same
@@ -4770,7 +5009,18 @@ namespace core
 			for (auto& generator : generators)
 			{
 				auto const disabled = generator.authored.ratedOutputKW <= 0.0;
-				auto const commanded = disabled ? 0.0 : generator.authored.commandedOutputKW;
+				// The availability factor from the outage contract (#413) is
+				// a hard ceiling on the deliverable rated capacity this tick:
+				// an outage that takes the whole rating away disables the
+				// machine outright (it cannot start, and a running machine
+				// trips to shutdown), while a partial reduction caps the
+				// output the machine can deliver. The ceiling bites the moment
+				// the window opens rather than ramping out of it.
+				auto const effectiveRatedKW = generator.authored.ratedOutputKW
+					* generator.availabilityFactor;
+				auto const capacityDisabled = effectiveRatedKW <= 0.0;
+				auto const commanded = disabled || capacityDisabled
+					? 0.0 : generator.authored.commandedOutputKW;
 				auto const dtSeconds = static_cast<double>(seconds);
 				auto const sinkTemperatureC = reservoirs[generator.sinkIndex].temperatureC;
 				// Cooling is qualified while the sink is below the maximum
@@ -4912,9 +5162,16 @@ namespace core
 						// no tick commands an instantaneous step the
 						// machine cannot physically make.
 						auto const maxStepKW = generator.authored.maxRampKWPerSecond * dtSeconds;
-						auto const targetKW = std::min(commanded, generator.authored.ratedOutputKW);
+						auto const targetKW = std::min(commanded, effectiveRatedKW);
 						generator.outputKW += std::max(-maxStepKW,
 							std::min(maxStepKW, targetKW - generator.outputKW));
+						// The outage ceiling is hard: a window that opens while
+						// the machine is above the reduced capacity clamps the
+						// output down at once, so no output continues through
+						// capacity the outage has taken away even for the ticks
+						// a ramp-down would otherwise take (#413).
+						if (generator.outputKW > effectiveRatedKW)
+							generator.outputKW = effectiveRatedKW;
 						// Fuel feasibility: the fuel drawable above the
 						// protected reserve caps the output this tick. A
 						// generator with no fuel left cannot run at all.
@@ -5542,12 +5799,27 @@ namespace core
 			{
 				auto& loop = coolantLoops[loopIndex];
 				auto const disabled = loop.coolantKg <= 0.0;
+				// The outage contract's availability factor (#413) caps the
+				// loop's circulation capacity this tick: the pump can only
+				// push the fraction of its rated flow the outage leaves
+				// available, so it draws only that fraction of its power and
+				// only that fraction of the rated flow moves. A full outage
+				// (factor 0) stops circulation, pump draw, exchanger
+				// conductance and every circulation-gated exchange together;
+				// the loop's coolant inventory and temperature are untouched,
+				// so restoration returns circulation without inventing fluid.
+				auto const effectiveFlowCapacityKgPerS = loop.authored.ratedFlowKgPerS
+					* loop.availabilityFactor;
+				auto const flowCapacityDisabled = effectiveFlowCapacityKgPerS <= 0.0;
 				auto const fillFraction = disabled
 					? 0.0 : std::min(1.0, loop.coolantKg / loop.authored.coolantCapacityKg);
 				// A dry loop cannot run a pump: no fluid means no draw and
-				// no flow, never an invented one.
+				// no flow, never an invented one. An outaged loop cannot push
+				// its full rated flow either, so its draw scales with the
+				// capacity the outage leaves.
 				auto const pumpDemandKW = disabled
-					? 0.0 : loop.authored.pumpPowerKW * fillFraction;
+					? 0.0
+					: loop.authored.pumpPowerKW * fillFraction * loop.availabilityFactor;
 				double pumpSuppliedKW = 0.0;
 				{
 					auto const fromGeneration = std::min(pumpDemandKW, availableGeneration);
@@ -5583,9 +5855,9 @@ namespace core
 				// exist (#558).
 				auto const pumpElectricalFraction = pumpDemandKW > 0.0
 					? pumpSuppliedKW / pumpDemandKW : 0.0;
-				auto const circulationFraction = disabled
-						|| loop.authored.ratedFlowKgPerS <= 0.0
-					? 0.0 : fillFraction * pumpElectricalFraction;
+				auto const circulationFraction = disabled || flowCapacityDisabled
+					? 0.0
+					: fillFraction * pumpElectricalFraction * loop.availabilityFactor;
 				loop.lastCirculationFraction = circulationFraction;
 				loop.lastFlowKgPerS = loop.authored.ratedFlowKgPerS * circulationFraction;
 				// Every watt the pump actually draws ends up as work
@@ -5700,14 +5972,25 @@ namespace core
 			for (auto& chiller : chillers)
 			{
 				auto const disabled = chiller.authored.ratedCoolingCapacityKW <= 0.0;
+				// The outage contract's availability factor (#413) caps the
+				// chiller's deliverable cooling capacity this tick: a full
+				// outage takes the whole machine out of service (no demand,
+				// no power draw, no extracted heat, no condenser heat), and a
+				// partial reduction caps the duty it can deliver. The cap is
+				// applied to the deliverable, so work, auxiliaries and the
+				// condenser booking all scale with the duty that actually
+				// moves and the chiller's energy ledger still closes.
+				auto const effectiveCoolingCapacityKW = chiller.authored.ratedCoolingCapacityKW
+					* chiller.availabilityFactor;
+				auto const capacityDisabled = effectiveCoolingCapacityKW <= 0.0;
 				auto const& loop = coolantLoops[chiller.loopIndex];
 				auto const& sink = reservoirs[chiller.sinkIndex];
-				chiller.lastAtSetpoint = !disabled
+				chiller.lastAtSetpoint = !disabled && !capacityDisabled
 					&& loop.temperatureC <= chiller.authored.chilledSetpointC + 1e-9;
-				chiller.lastSinkOver = !disabled
+				chiller.lastSinkOver = !disabled && !capacityDisabled
 					&& sink.temperatureC + 1e-9 >= chiller.authored.maxCondensingTemperatureC;
-				auto const coolingDemandKW = disabled || chiller.lastAtSetpoint
-					? 0.0 : chiller.authored.ratedCoolingCapacityKW;
+				auto const coolingDemandKW = disabled || capacityDisabled || chiller.lastAtSetpoint
+					? 0.0 : effectiveCoolingCapacityKW;
 				chiller.lastCoolingDemandKW = coolingDemandKW;
 				chiller.lastDeliverableKW = 0.0;
 				chiller.lastPowerDemandKW = 0.0;
@@ -5720,8 +6003,12 @@ namespace core
 				{
 					// Zero capacity disables the chiller outright; a cold
 					// side at its chilled setpoint needs no service this
-					// tick. Neither draws power nor moves heat.
-					chiller.lastAdmitted = !disabled && !chiller.lastSinkOver;
+					// tick. Neither draws power nor moves heat. A full
+					// outage also leaves no deliverable capacity: the
+					// machine is idle and reports why it is not admitted.
+					chiller.lastAdmitted = !disabled && !capacityDisabled && !chiller.lastSinkOver;
+					if (capacityDisabled && !disabled)
+						chiller.lastBlockReason = "a scheduled outage has taken the chiller's full rated cooling capacity out of service";
 					chiller.status = StationTransferStatus::Idle;
 					continue;
 				}
@@ -5764,7 +6051,7 @@ namespace core
 						loop.temperatureC - chiller.authored.chilledSetpointC)
 					+ (loop.lastPumpSuppliedKW + loop.lastHeaterSuppliedKW) * tickSeconds
 					+ loopExchangeKJ[chiller.loopIndex]);
-				auto const circulationCappedKW = chiller.authored.ratedCoolingCapacityKW
+				auto const circulationCappedKW = effectiveCoolingCapacityKW
 					* loop.lastCirculationFraction;
 				chiller.lastDeliverableKW = std::min(circulationCappedKW,
 					extractableKJ / tickSeconds);
@@ -11009,6 +11296,9 @@ namespace core
 		std::map<std::string, size_t> loopIndex;
 		for (size_t index = 0; index < mImpl->coolantLoops.size(); ++index)
 			loopIndex[mImpl->coolantLoops[index].authored.id] = index;
+		std::map<std::string, size_t> chillerIndex;
+		for (size_t index = 0; index < mImpl->chillers.size(); ++index)
+			chillerIndex[mImpl->chillers[index].authored.id] = index;
 		for (auto const& chiller : settings.chillers)
 		{
 			Impl::ChillerState state;
@@ -11416,6 +11706,41 @@ namespace core
 			state.declarationIndex = mImpl->wasteEjections.size();
 			mImpl->wasteEjections.push_back(std::move(state));
 		}
+		// Installation outage schedules start with no window open: the
+		// authored first occurrence is the first outage, and nothing is
+		// reduced before its time. Each outage resolves its target's stable
+		// identity to the installation state it caps, so the tick pass can
+		// read the effective availability factor without a per-tick name
+		// lookup. Reset and load reconstruct the authored beginning, so a
+		// replay restarts every outage schedule from its first window
+		// rather than resuming a partially elapsed one (#413).
+		std::map<std::string, size_t> generatorIndex;
+		for (size_t index = 0; index < mImpl->generators.size(); ++index)
+			generatorIndex[mImpl->generators[index].authored.id] = index;
+		for (auto const& outage : settings.outages)
+		{
+			Impl::OutageState state;
+			state.authored = outage;
+			if (generatorIndex.count(outage.installationId) != 0)
+			{
+				state.target = Impl::OutageState::Target::Generator;
+				state.targetIndex = generatorIndex[outage.installationId];
+				state.installationKind = "generator";
+			}
+			else if (loopIndex.count(outage.installationId) != 0)
+			{
+				state.target = Impl::OutageState::Target::CoolantLoop;
+				state.targetIndex = loopIndex[outage.installationId];
+				state.installationKind = "coolant loop";
+			}
+			else
+			{
+				state.target = Impl::OutageState::Target::Chiller;
+				state.targetIndex = chillerIndex[outage.installationId];
+				state.installationKind = "chiller";
+			}
+			mImpl->outages.push_back(std::move(state));
+		}
 		// The compound conservation boundary is fixed at run start from the
 		// authored starting inventory of every compound store (#391).
 		for (auto const& store : mImpl->stores)
@@ -11447,6 +11772,7 @@ namespace core
 				&settings.waterCollectors, &settings.waterTreatments,
 				&settings.electrolyzers, &settings.co2Captures, &settings.fuelCells,
 				&settings.thermalBuffers, &settings.wasteEjections,
+				&settings.outages,
 				&settings.sabatierReactors, &settings.methaneProcessors,
 				&settings.microbialProcessors, &settings.cropPopulations,
 				&settings.algaeCultures};
@@ -11795,6 +12121,7 @@ namespace core
 			generatorResult.coolingAvailable = generator.lastCoolingAvailable;
 			generatorResult.coolingRequired = generator.lastCoolingRequired;
 			generatorResult.disabled = generator.authored.ratedOutputKW <= 0.0;
+			generatorResult.availabilityFactor = generator.availabilityFactor;
 			generatorResult.blockReason = generator.lastBlockReason;
 			generatorResult.fuelEnergyKJ = generator.fuelEnergyKJ;
 			generatorResult.electricalKJ = generator.electricalKJ;
@@ -11915,6 +12242,7 @@ namespace core
 			loopResult.chillerExtractionKW = loop.lastChillerExtractionKW;
 			loopResult.belowFreezeSetpoint = loop.lastBelowFreeze;
 			loopResult.disabled = loop.coolantKg <= 0.0;
+			loopResult.availabilityFactor = loop.availabilityFactor;
 			loopResult.startingEnergyKJ = loop.authored.startingCoolantKg
 				* loop.authored.specificHeatKJPerKgK * loop.authored.startingTemperatureC;
 			loopResult.currentEnergyKJ = loop.coolantKg
@@ -11971,6 +12299,7 @@ namespace core
 			chillerResult.atChilledSetpoint = chiller.lastAtSetpoint;
 			chillerResult.sinkOverMaxCondensing = chiller.lastSinkOver;
 			chillerResult.disabled = chiller.authored.ratedCoolingCapacityKW <= 0.0;
+			chillerResult.availabilityFactor = chiller.availabilityFactor;
 			chillerResult.extractedEnergyKJ = chiller.extractedKJ;
 			chillerResult.workEnergyKJ = chiller.workKJ;
 			chillerResult.condenserEnergyKJ = chiller.condenserKJ;
@@ -12991,6 +13320,50 @@ namespace core
 				}
 			}
 			result.wasteEjections.push_back(std::move(ejectionResult));
+		}
+		// The outage snapshot reports each authored schedule beside its
+		// live window state and the target installation's effective
+		// availability, so the schedule, the outage and the restoration are
+		// all observable through the public snapshot (#413).
+		for (auto const& outage : mImpl->outages)
+		{
+			StationOutageSnapshot outageResult;
+			outageResult.id = outage.authored.id;
+			outageResult.installationId = outage.authored.installationId;
+			outageResult.installationKind = outage.installationKind;
+			outageResult.capacityFraction = outage.authored.capacityFraction;
+			outageResult.firstOccurrenceSeconds = outage.authored.firstOccurrenceSeconds;
+			outageResult.durationSeconds = outage.authored.durationSeconds;
+			outageResult.recurrenceSeconds = outage.authored.recurrenceSeconds;
+			outageResult.priority = outage.authored.priority;
+			outageResult.active = outage.lastActive;
+			outageResult.occurrencesStarted = outage.occurrencesStarted;
+			outageResult.occurrencesCompleted = outage.occurrencesCompleted;
+			outageResult.lastStartSeconds = outage.lastStartSeconds;
+			outageResult.lastRestoreSeconds = outage.lastRestoreSeconds;
+			outageResult.exhausted = outage.exhausted;
+			// The next window start, if the schedule still has one ahead.
+			if (!outage.exhausted)
+			{
+				auto const nextStart = outage.authored.recurrenceSeconds > 0.0
+					? outage.authored.firstOccurrenceSeconds
+						+ static_cast<double>(outage.occurrencesStarted) * outage.authored.recurrenceSeconds
+					: outage.authored.firstOccurrenceSeconds;
+				if (outage.occurrencesStarted == 0
+					|| outage.authored.recurrenceSeconds > 0.0)
+				{
+					outageResult.hasNextOccurrence = true;
+					outageResult.nextOccurrenceSeconds = nextStart;
+				}
+			}
+			// The target's effective availability right now, read from the
+			// installation the outage caps.
+			outageResult.installationAvailability = outage.target == Impl::OutageState::Target::Generator
+				? mImpl->generators[outage.targetIndex].availabilityFactor
+				: outage.target == Impl::OutageState::Target::CoolantLoop
+					? mImpl->coolantLoops[outage.targetIndex].availabilityFactor
+					: mImpl->chillers[outage.targetIndex].availabilityFactor;
+			result.outages.push_back(std::move(outageResult));
 		}
 		return result;
 	}

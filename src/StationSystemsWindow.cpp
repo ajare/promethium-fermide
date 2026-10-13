@@ -27,7 +27,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
 	ImGui::TextWrapped("Slice 5: authored finite Resource stores, bounded transfers, compound-resource conversions, solar generation, External equipment load supply, rechargeable batteries, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, and chillers supplying class-matched cold services. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Solar output follows installed capacity and the illumination/eclipse profile; zero capacity disables an array. External loads declare demand, operating profile, heat, thermal class, material exchanges, a protected critical floor, priority and allowed curtailment; allocated power never exceeds generation plus battery output and cooling-infeasible loads are not admitted. Batteries separate nameplate and usable energy: the reserve floor (nameplate minus usable) is never dischargeable, charge and discharge efficiencies book their losses, discharge covers deficits on the same allocation pool as generation, and charging takes only surplus. Thermal reservoirs integrate temperature from their effective capacity under absorbed and routed equipment heat; radiators reject heat by the Stefan-Boltzmann law at the emitting temperature against the authored sink, emissivity and view factor. A load's emitted heat is booked exactly once: routed into its class-compatible reservoir or exported directly, never both. Declared temperature limits are reported, never clamped. Coolant loops hold a finite, loop-specific coolant inventory segregated by hazard class (coolant is never potable or nutrient water); the pump circulates only the coolant the loop actually holds, so an underfilled loop flows less and a dry loop flows nothing, and the freeze-protection heater thermostats the loop up to its setpoint within its capacity. Pump work and heater heat enter the loop exactly once and reach the reservoir only through the circulation-gated heat-only exchanger; the loop draw rides the same electrical pool as external loads. Chillers supply a cold service of their declared class through a class-matched coolant-loop evaporator and reservoir condenser: the delivered duty is capped by the loop's actual circulation, gated at the chilled setpoint, and refused while the sink is at or above the maximum condensing temperature; work at the configured COP plus auxiliaries rides the same electrical pool, and condenser heat equals extracted heat plus the work and auxiliaries actually supplied, booked once. Fuelled generators convert a finite energy-unit fuel inventory into bus electrical output at the declared efficiency: output is bounded by the installed rating and the ramp limit, starting only completes once the startup energy has actually been drawn from the shared pool while the class-matched sink is below its maximum sink temperature, and after output stops the configured shutdown heat and its cooling requirement persist for the decay period; waste, startup and decay heat route exactly once into the sink and the fuel ledger closes over fuel = electrical + waste. Within a tick, generators and fuel-cell backup units produce first, then power allocates, then coolant loops and chillers run, then compartment atmospheres cycle, crews metabolise and compartments exchange, then thermal integrates, then transfers, then conversions. Compartment atmospheres model an ideal-gas mixture in a fixed volume: absolute and partial pressures derive from the gas inventory and temperature, humidity caps at Magnus saturation with the excess condensing and releasing its latent heat into the compartment, occupancy is an authored load assignment whose oxygen draw is capped by the inventory (CO2 and metabolic heat scale with what was actually consumed), leakage is a constant total-mass rate capped by the inventory, and scheduled airlock cycles remove authored mass with an explicit recovered-versus-lost split; every gram leaving a compartment is booked as leaked, recovered or lost, compartments never mix automatically, and declared pressure and gas-quality limits are reported, never clamped. Crews are an authored population with an activity profile, never derived from World Agents: metabolism draws food and water from compound stores and oxygen from the compartment, and returns CO2, moisture and metabolic heat to the compartment and urine and organic waste to their own finite compound stores. One uniform metabolic scale per tick - the scarcest supply or tightest waste headroom - throttles every pathway together, so absent material never generates nominal waste; requested versus actual is explicit per pathway, the authored coefficients must close over mass, constituents and energy, and the consumed mass the returns do not carry away is reported as explicit retained body mass. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s), %zu airlock cycle(s), %zu crew(s), %zu water collector(s), %zu water treatment(s), %zu electrolyzer(s), %zu CO2 capture machine(s), %zu fuel-cell backup unit(s), %zu thermal buffer(s), %zu terminal-waste ejection(s), %zu Sabatier reactor(s), %zu methane processor(s), %zu microbial processor(s), %zu crop population(s) and %zu algae culture(s)",
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s), %zu solar array(s), %zu external load(s), %zu battery(ies), %zu resupply delivery(ies), %zu thermal reservoir(s), %zu radiator(s), %zu coolant loop(s), %zu chiller(s), %zu generator(s), %zu atmosphere compartment(s), %zu airlock cycle(s), %zu crew(s), %zu water collector(s), %zu water treatment(s), %zu electrolyzer(s), %zu CO2 capture machine(s), %zu fuel-cell backup unit(s), %zu thermal buffer(s), %zu terminal-waste ejection(s), %zu Sabatier reactor(s), %zu methane processor(s), %zu microbial processor(s), %zu crop population(s), %zu algae culture(s) and %zu installation outage(s)",
 		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
 		authored.stores.size(), authored.transfers.size(), authored.conversions.size(),
 		authored.solarArrays.size(), authored.equipmentLoads.size(), authored.batteries.size(),
@@ -40,7 +40,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		authored.wasteEjections.size(),
 		authored.sabatierReactors.size(), authored.methaneProcessors.size(),
 		authored.microbialProcessors.size(), authored.cropPopulations.size(),
-		authored.algaeCultures.size());
+		authored.algaeCultures.size(), authored.outages.size());
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
@@ -949,6 +949,65 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			if (!taken) break;
 		}
 		mDraft.generators.push_back(std::move(generator));
+	}
+	ImGui::SeparatorText("Draft installation outages (#413; a scheduled capacity reduction of one registered installation - generator, coolant loop or chiller; the capacity fraction is the share of rated capacity left available during the window, [0,1); recurrence 0 is a one-off, a positive recurrence repeats the window and must be at least as long as it; overlapping outages on one installation take the deepest reduction; restoration only lifts the ceiling and never replenishes any inventory)");
+	for (size_t index = 0; index < mDraft.outages.size(); )
+	{
+		auto& outage = mDraft.outages[index];
+		auto const row = std::to_string(index);
+		bool removeOutage = false;
+		ImGui::PushItemWidth(220);
+		char outageIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(outageIdBuffer, outage.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Outage " + row + " id").c_str(),
+			outageIdBuffer, sizeof(outageIdBuffer)))
+			outage.id = outageIdBuffer;
+		char outageTargetBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(outageTargetBuffer, outage.installationId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Outage " + row + " installation id").c_str(),
+			outageTargetBuffer, sizeof(outageTargetBuffer)))
+			outage.installationId = outageTargetBuffer;
+		ImGui::InputDouble(("Outage " + row + " capacity fraction (0..1)").c_str(),
+			&outage.capacityFraction, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Outage " + row + " first occurrence seconds").c_str(),
+			&outage.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Outage " + row + " duration seconds").c_str(),
+			&outage.durationSeconds, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Outage " + row + " recurrence seconds (0 = one-off)").c_str(),
+			&outage.recurrenceSeconds, 0.0, 0.0, "%.3f");
+		ImGui::InputInt(("Outage " + row + " priority").c_str(), &outage.priority);
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove outage " + row).c_str()))
+			removeOutage = true;
+		ImGui::PopItemWidth();
+		if (removeOutage)
+			mDraft.outages.erase(mDraft.outages.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
+	if (mDraft.outages.size() < core::MaxStationInstallationOutages && ImGui::Button("Add outage"))
+	{
+		core::InstallationOutageSettings outage;
+		outage.capacityFraction = 0.5;
+		outage.firstOccurrenceSeconds = 60.0;
+		outage.durationSeconds = 30.0;
+		outage.recurrenceSeconds = 0.0;
+		// Default the target to the last-registered wired installation so a
+		// freshly drafted outage points at something that exists.
+		if (!mDraft.generators.empty())
+			outage.installationId = mDraft.generators.back().id;
+		else if (!mDraft.coolantLoops.empty())
+			outage.installationId = mDraft.coolantLoops.back().id;
+		else if (!mDraft.chillers.empty())
+			outage.installationId = mDraft.chillers.back().id;
+		for (size_t candidate = mDraft.outages.size() + 1;; ++candidate)
+		{
+			outage.id = "outage" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.outages.begin(), mDraft.outages.end(),
+				[&](core::InstallationOutageSettings const& existing) { return existing.id == outage.id; });
+			if (!taken) break;
+		}
+		mDraft.outages.push_back(std::move(outage));
 	}
 	ImGui::SeparatorText("Draft atmospheres (m3/kg/C/kPa; ideal-gas partial pressures; occupancy is an authored load assignment; vapour caps at saturation and condenses with latent heat; leak is a constant total-mass rate; limits are reported, never clamped)");
 	for (size_t index = 0; index < mDraft.atmospheres.size(); )
@@ -2773,6 +2832,28 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			ImGui::Text("  cooling REQUIRED but not qualified: shutdown heat persists without a qualified sink");
 		if (!generator.blockReason.empty())
 			ImGui::Text("  blocked: %s", generator.blockReason.c_str());
+	}
+	ImGui::SeparatorText("Installation outages (live; the window is open on the shared World time base, the target's effective availability is the deepest reduction among its open outages, and a restoration only lifts the ceiling - no inventory is replenished)");
+	if (snapshot.outages.empty()) ImGui::TextDisabled("No installation outages authored.");
+	for (auto const& outage : snapshot.outages)
+	{
+		auto const recurrence = outage.recurrenceSeconds > 0.0
+			? std::to_string(outage.recurrenceSeconds) + " s (recurring)"
+			: std::string("0 (one-off)");
+		ImGui::Text("%s on %s '%s': capacity fraction %.3f | first %.3f s, duration %.3f s, recurrence %s | priority %d",
+			outage.id.c_str(), outage.installationKind.c_str(), outage.installationId.c_str(),
+			outage.capacityFraction, outage.firstOccurrenceSeconds, outage.durationSeconds,
+			recurrence.c_str(), outage.priority);
+		ImGui::Text("  %s | started %llu, completed %llu | last start %.3f s, last restore %.3f s | target availability now %.3f",
+			outage.active ? "WINDOW OPEN" : "window closed",
+			static_cast<unsigned long long>(outage.occurrencesStarted),
+			static_cast<unsigned long long>(outage.occurrencesCompleted),
+			outage.lastStartSeconds, outage.lastRestoreSeconds,
+			outage.installationAvailability);
+		if (outage.exhausted)
+			ImGui::Text("  exhausted: the one-off outage has restored and will not recur");
+		else if (outage.hasNextOccurrence)
+			ImGui::Text("  next occurrence at %.3f s", outage.nextOccurrenceSeconds);
 	}
 	ImGui::SeparatorText("Atmospheres (live; ideal-gas absolute and partial pressures, humidity capped by saturation, occupancy draw capped by inventory, leakage and airlock losses booked by mass; limits reported, never clamped)");
 	if (snapshot.atmospheres.empty()) ImGui::TextDisabled("No atmosphere compartments authored.");

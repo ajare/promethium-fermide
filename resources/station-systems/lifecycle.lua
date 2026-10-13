@@ -242,7 +242,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews,
     waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers,
     wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations,
-    algaeCultures)
+    algaeCultures, outages)
     assert(type(name) == "string")
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
@@ -271,6 +271,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     assert(type(microbialProcessors) == "table", "microbial processor descriptors missing")
     assert(type(cropPopulations) == "table", "crop population descriptors missing")
     assert(type(algaeCultures) == "table", "algae culture descriptors missing")
+    -- Test harnesses that wrap this model may forward only the descriptor
+    -- arrays they exercise; an absent outage list simply means no outages.
+    outages = outages or {}
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
@@ -293,6 +296,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         algae_cultures = {}, algae_order = {},
         fuel_cells = {}, thermal_buffers = {},
         waste_ejections = {},
+        outages = {}, installation_availability = {},
     }
     local by_id = {}
     for index = 1, #stores do
@@ -1226,6 +1230,68 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             lastUnmet = 0,
             ejectedTotal = 0,
             unmetTotal = 0,
+            exhausted = false,
+        }
+    end
+    -- Installation outage and capacity-reduction schedules (#413): an
+    -- authored change to one registered installation's available rated
+    -- capacity at declared times, once or recurring. The mirror keeps the
+    -- same window rule the host runs: each window is a pure function of
+    -- the elapsed World time, so the availability factor the sandbox
+    -- audits is the same one the host applies, and overlapping windows on
+    -- one installation take the deepest reduction. The outage resolves its
+    -- target's stable identity to the generator/loop/chiller object it
+    -- caps; the per-tick pass reads object.installation_availability[id]
+    -- as the hard ceiling on that installation's deliverable capacity.
+    local installation_by_id = {}
+    for index = 1, #generators do
+        installation_by_id[generators[index].id] = object.generators[index]
+    end
+    for index = 1, #coolantLoops do
+        installation_by_id[coolantLoops[index].id] = object.coolant_loops[index]
+    end
+    for index = 1, #chillers do
+        installation_by_id[chillers[index].id] = object.chillers[index]
+    end
+    for index = 1, #outages do
+        local outage = outages[index]
+        assert(type(outage) == 'table', 'installation outage descriptor must be a table')
+        assert(type(outage.id) == 'string' and #outage.id > 0, 'installation outage needs an id')
+        assert(type(outage.installation) == 'string' and #outage.installation > 0,
+            'installation outage needs a target installation id')
+        local target = installation_by_id[outage.installation]
+        assert(target ~= nil, 'installation outage target installation is unknown')
+        assert(type(outage.capacityFraction) == 'number'
+            and outage.capacityFraction == outage.capacityFraction
+            and outage.capacityFraction >= 0 and outage.capacityFraction < 1,
+            'installation outage capacity fraction must be finite and from 0 up to but not including 1')
+        assert(type(outage.firstSeconds) == 'number'
+            and outage.firstSeconds == outage.firstSeconds
+            and outage.firstSeconds >= 0 and outage.firstSeconds < math.huge,
+            'installation outage first occurrence must be finite and non-negative')
+        assert(type(outage.durationSeconds) == 'number'
+            and outage.durationSeconds == outage.durationSeconds
+            and outage.durationSeconds > 0 and outage.durationSeconds < math.huge,
+            'installation outage duration must be finite and positive')
+        assert(type(outage.recurrenceSeconds) == 'number'
+            and outage.recurrenceSeconds == outage.recurrenceSeconds
+            and outage.recurrenceSeconds >= 0 and outage.recurrenceSeconds < math.huge,
+            'installation outage recurrence must be finite and non-negative')
+        assert(type(outage.priority) == 'number' and outage.priority == outage.priority
+            and outage.priority == math.tointeger(outage.priority),
+            'installation outage priority must be a finite integer')
+        object.outages[index] = {
+            id = outage.id,
+            installation = target,
+            installationId = outage.installation,
+            capacityFraction = outage.capacityFraction,
+            firstSeconds = outage.firstSeconds,
+            durationSeconds = outage.durationSeconds,
+            recurrenceSeconds = outage.recurrenceSeconds,
+            priority = outage.priority,
+            started = 0,
+            completed = 0,
+            active = false,
             exhausted = false,
         }
     end
@@ -2838,6 +2904,71 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         if not (steps > 0) then return 1 end
         return steps + 1
     end
+    -- Mirror of the host outage window rule (#413): the windows that have
+    -- opened and that have closed (been restored) at or before the given
+    -- simulation time. Both counts are monotonic in elapsed time and use
+    -- the same boundary tolerance, so the availability factor the sandbox
+    -- audits is the same one the host applies whether the ticks arrive one
+    -- by one or batched by an accelerated update. With a recurrence no
+    -- shorter than the duration the windows are disjoint, so at most one
+    -- window of a schedule is open at any instant.
+    local function outageWindowsStarted(firstSeconds, recurrenceSeconds, elapsed)
+        if elapsed + SCHEDULE_TOLERANCE < firstSeconds then return 0 end
+        if recurrenceSeconds <= 0 then return 1 end
+        local steps = math.floor((elapsed + SCHEDULE_TOLERANCE - firstSeconds)
+            / recurrenceSeconds)
+        if not (steps > 0) then return 1 end
+        return steps + 1
+    end
+    local function outageWindowsCompleted(firstSeconds, durationSeconds, recurrenceSeconds, elapsed)
+        local firstRestore = firstSeconds + durationSeconds
+        if elapsed + SCHEDULE_TOLERANCE < firstRestore then return 0 end
+        if recurrenceSeconds <= 0 then return 1 end
+        local steps = math.floor((elapsed + SCHEDULE_TOLERANCE - firstRestore)
+            / recurrenceSeconds)
+        if not (steps > 0) then return 1 end
+        return steps + 1
+    end
+    -- Resolve every installation's effective availability factor for this
+    -- tick from the outage schedules (#413). Each installation starts at
+    -- its full declared availability of 1.0; every outage window open this
+    -- tick caps it at the outage's capacity fraction, deepest reduction
+    -- wins so the result never depends on the order the schedules were
+    -- declared. The factor is stored on the installation object so the
+    -- generator/loop/chiller passes read it as the hard ceiling on their
+    -- deliverable rated capacity. Restoration only lifts the ceiling: no
+    -- inventory is touched, so a machine that ran dry stays dry.
+    local function applyOutages(self, elapsed)
+        -- Reset every installation to full declared availability, then
+        -- let the open outage windows cap the targets they aim at.
+        for index = 1, #self.outages do
+            local outage = self.outages[index]
+            outage.installation.availability = 1.0
+        end
+        for index = 1, #self.outages do
+            local outage = self.outages[index]
+            local started = outageWindowsStarted(outage.firstSeconds,
+                outage.recurrenceSeconds, elapsed)
+            local completed = outageWindowsCompleted(outage.firstSeconds,
+                outage.durationSeconds, outage.recurrenceSeconds, elapsed)
+            outage.started = started
+            outage.completed = completed
+            outage.active = started > completed
+            outage.exhausted = outage.recurrenceSeconds <= 0 and completed >= 1
+            if outage.active then
+                local target = outage.installation
+                local current = target.availability or 1.0
+                if outage.capacityFraction < current then
+                    target.availability = outage.capacityFraction
+                end
+            end
+        end
+    end
+    -- An installation with no outage aimed at it keeps its full declared
+    -- availability; the default is 1.0.
+    local function installationAvailability(installation)
+        return installation.availability or 1.0
+    end
     -- Mirror of the host delivery ledger: every occurrence due since the
     -- last tick is collected and applied in the declared scenario order
     -- (occurrence time ascending, priority descending, declaration order),
@@ -3531,7 +3662,14 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- ledger exactly.
         for _, gen in ipairs(self.generators) do
             local disabled = gen.ratedKW <= 0
-            local commanded = disabled and 0 or gen.commandedKW
+            -- The outage contract's availability factor (#413) is a hard
+            -- ceiling on the deliverable rated capacity this tick: a full
+            -- outage disables the machine outright and a partial
+            -- reduction caps its output. Mirrors the host ledger.
+            local availability = installationAvailability(gen)
+            local effectiveRatedKW = gen.ratedKW * availability
+            local capacityDisabled = effectiveRatedKW <= 0
+            local commanded = (disabled or capacityDisabled) and 0 or gen.commandedKW
             local sinkTemperature = gen.heatSink.temperature
             -- Cooling is qualified while the sink is below the maximum
             -- sink temperature: at or above it the interface cannot
@@ -3658,9 +3796,17 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     -- no tick commands an instantaneous step the machine
                     -- cannot physically make.
                     local maxStepKW = gen.rampKWPerSecond * fixed_seconds
-                    local targetKW = math.min(commanded, gen.ratedKW)
+                    local targetKW = math.min(commanded, effectiveRatedKW)
                     gen.outputKW = gen.outputKW
                         + math.max(-maxStepKW, math.min(maxStepKW, targetKW - gen.outputKW))
+                    -- The outage ceiling is hard: a window that opens
+                    -- while the machine is above the reduced capacity
+                    -- clamps the output down at once, so no output
+                    -- continues through capacity the outage has taken
+                    -- away even for the ticks a ramp-down would take.
+                    if gen.outputKW > effectiveRatedKW then
+                        gen.outputKW = effectiveRatedKW
+                    end
                     -- Fuel feasibility: the fuel drawable above the
                     -- protected reserve caps the output this tick. A
                     -- generator with no fuel left cannot run at all.
@@ -4049,10 +4195,25 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- circulation-gated exchanger. Loops run in declaration order.
         for _, loop in ipairs(self.coolant_loops) do
             local disabled = loop.coolant <= 0
+            -- The outage contract's availability factor (#413) caps the
+            -- loop's circulation capacity this tick: the pump can only
+            -- push the fraction of its rated flow the outage leaves
+            -- available, so it draws only that fraction of its power and
+            -- only that fraction of the rated flow moves. A full outage
+            -- stops circulation, pump draw, exchanger conductance and
+            -- every circulation-gated exchange together; the coolant
+            -- inventory and temperature are untouched, so restoration
+            -- returns circulation without inventing fluid.
+            local availability = installationAvailability(loop)
+            local effectiveFlowCapacity = loop.ratedFlow * availability
+            local flowCapacityDisabled = effectiveFlowCapacity <= 0
             local fill = disabled and 0 or math.min(1, loop.coolant / loop.capacity)
             -- A dry loop cannot run a pump: no fluid means no draw and
-            -- no flow, never an invented one.
-            local pumpDemand = disabled and 0 or loop.pumpKW * fill
+            -- no flow, never an invented one. An outaged loop cannot push
+            -- its full rated flow either, so its draw scales with the
+            -- capacity the outage leaves.
+            local pumpDemand = (disabled or flowCapacityDisabled) and 0
+                or loop.pumpKW * fill * availability
             local pumpSupplied = 0
             local pumpFromGeneration = math.min(pumpDemand, generation)
             pumpSupplied = pumpSupplied + pumpFromGeneration
@@ -4082,8 +4243,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             -- zero rather than a fraction of a flow that does not
             -- exist (#558).
             local pumpElectrical = pumpDemand > 0 and pumpSupplied / pumpDemand or 0
-            local circulation = (disabled or loop.ratedFlow <= 0) and 0
-                or fill * pumpElectrical
+            local circulation = (disabled or flowCapacityDisabled) and 0
+                or fill * pumpElectrical * availability
             -- What the exchanger is worth this tick. The exchange itself
             -- is not computed here: it is solved once per reservoir
             -- below, together with every other body coupled to that
@@ -4191,12 +4352,23 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local loop = chiller.coldLoop
             local sink = chiller.condenser
             local disabled = chiller.ratedKW <= 0
-            chiller.atSetpoint = not disabled
+            -- The outage contract's availability factor (#413) caps the
+            -- chiller's deliverable cooling capacity this tick: a full
+            -- outage takes the whole machine out of service (no demand,
+            -- no power draw, no extracted heat, no condenser heat), and a
+            -- partial reduction caps the duty it can deliver. The cap is
+            -- applied to the deliverable, so work, auxiliaries and the
+            -- condenser booking all scale with the duty that actually
+            -- moves and the chiller's energy ledger still closes.
+            local availability = installationAvailability(chiller)
+            local effectiveCoolingCapacity = chiller.ratedKW * availability
+            local capacityDisabled = effectiveCoolingCapacity <= 0
+            chiller.atSetpoint = (not disabled and not capacityDisabled)
                 and loop.temperature <= chiller.chilledSetpoint + 1e-9
-            chiller.sinkOver = not disabled
+            chiller.sinkOver = (not disabled and not capacityDisabled)
                 and sink.temperature + 1e-9 >= chiller.maxCondensing
-            local coolingDemand = (disabled or chiller.atSetpoint)
-                and 0 or chiller.ratedKW
+            local coolingDemand = (disabled or capacityDisabled or chiller.atSetpoint)
+                and 0 or effectiveCoolingCapacity
             chiller.lastDemand = coolingDemand
             chiller.lastCooling = 0
             chiller.lastDeliverable = 0
@@ -4204,7 +4376,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             chiller.lastPowerSupplied = 0
             chiller.lastCondenserKW = 0
             chiller.lastFraction = 0
-            chiller.admitted = not disabled and not chiller.sinkOver
+            chiller.admitted = not disabled and not capacityDisabled and not chiller.sinkOver
             if chiller.admitted and coolingDemand > 0 then
                 -- A nameplate rating is not a heat source (#560). Over
                 -- the tick the cold loop can give up only the heat its
@@ -4225,7 +4397,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     loopCapacityKJ * math.max(0, loop.temperature - chiller.chilledSetpoint)
                     + (loop.lastPumpSupplied + loop.lastHeaterSupplied) * fixed_seconds
                     + loop.lastExchange * fixed_seconds)
-                local circulationCapped = chiller.ratedKW * loop.lastCirculation
+                local circulationCapped = effectiveCoolingCapacity * loop.lastCirculation
                 local deliverable = math.min(circulationCapped,
                     extractableKJ / fixed_seconds)
                 chiller.lastDeliverable = deliverable
@@ -7584,6 +7756,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- this tick's equipment, transfers and conversions, matching the
         -- host ledger order.
         applyDeliveries(self, elapsed)
+        -- Installation outage availability is resolved before any
+        -- installation reads its rated capacity, mirroring the host
+        -- ledger order (#413).
+        applyOutages(self, elapsed)
         applyPower(self, elapsed, fixed_seconds)
         -- Compartments run after the loops/chillers and before thermal
         -- integration: the compartment exchange must land inside this

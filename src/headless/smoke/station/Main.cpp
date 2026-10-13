@@ -145,7 +145,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 89"), 11, "version: 65");
+		text.replace(text.find("version: 90"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -6872,8 +6872,8 @@ namespace
 			core::setStationSystemsSourceLoader([bundled] {
 				return std::string("local factory = (function()\n") + bundled
 					+ "\nend)()\n"
-					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
-					"return factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures, outages)\n"
+					"return factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures, outages)\n"
 					"end";
 			});
 			core::World probe("StartupAuditOverAllocationProbe", 2, 2);
@@ -14084,9 +14084,9 @@ void buffers(smoke::Context const&)
 			// than silently dropping the cultures.
 			{
 				auto stale = text;
-				size_t const position = stale.find("version: 89");
+				size_t const position = stale.find("version: 90");
 				require(position != std::string::npos, "the fixture document carries no version line");
-				stale.replace(position, std::string("version: 89").size(), "version: 88");
+				stale.replace(position, std::string("version: 90").size(), "version: 88");
 				require(stale.find("algaeCultures") != std::string::npos,
 					"the fixture document carries no algae cultures to test the guard with");
 				bool refused = false;
@@ -14134,6 +14134,310 @@ void buffers(smoke::Context const&)
 		}
 	}
 
+	// #413: scheduled outages and capacity reductions. An outage is a
+	// hard ceiling on one registered installation's deliverable rated
+	// capacity, opened and closed on the shared World time base. The
+	// ceiling bites the moment a window opens, overlapping windows take
+	// the deepest reduction, and a restoration only lifts the ceiling -
+	// it never replenishes any inventory. Everything is exercised through
+	// the World tick / snapshot / event seam, never the Lua internals.
+	void outages(smoke::Context const&)
+	{
+		auto const approx = [](double actual, double expected, double tolerance = 1e-6)
+		{ return std::abs(actual - expected) <= tolerance; };
+		auto sawEvent = [](core::World& world, std::string const& needle)
+		{
+			for (auto const& event : world.getStationSystemsEvents())
+				if (event.message.find(needle) != std::string::npos) return true;
+			return false;
+		};
+		// A generator that reaches full rated output well before any
+		// outage window opens, so the ceiling - not startup or the ramp -
+		// is what moves the output when the window opens.
+		auto fuelStore = []
+		{
+			core::ResourceStoreSettings settings;
+			settings.id = "diesel";
+			settings.unit = "kWh";
+			settings.capacity = 100000.0;
+			settings.startingQualified = 100000.0;
+			settings.protectedReserve = 0.0;
+			return settings;
+		};
+		auto sinkReservoir = []
+		{
+			core::ThermalReservoirSettings settings;
+			settings.id = "hot";
+			settings.thermalClass = "generation";
+			settings.heatCapacityKJPerK = 100000.0;
+			settings.startingTemperatureC = 20.0;
+			settings.minTemperatureC = -50.0;
+			settings.maxTemperatureC = 200.0;
+			return settings;
+		};
+		auto generatorSettings = []
+		{
+			core::GeneratorSettings settings;
+			settings.id = "gen";
+			settings.fuelStoreId = "diesel";
+			settings.thermalClass = "generation";
+			settings.heatSinkId = "hot";
+			settings.ratedOutputKW = 10.0;
+			settings.efficiency = 0.5;
+			settings.maxRampKWPerSecond = 100.0;
+			settings.commandedOutputKW = 10.0;
+			settings.startupPowerKW = 1.0;
+			settings.startupSeconds = 1.0;
+			settings.shutdownHeatKW = 0.0;
+			settings.shutdownSeconds = 0.0;
+			settings.maxSinkTemperatureC = 90.0;
+			return settings;
+		};
+		auto outage = [](std::string id, std::string target, double fraction,
+			double first, double duration, double recurrence = 0.0, int priority = 0)
+		{
+			core::InstallationOutageSettings settings;
+			settings.id = std::move(id);
+			settings.installationId = std::move(target);
+			settings.capacityFraction = fraction;
+			settings.firstOccurrenceSeconds = first;
+			settings.durationSeconds = duration;
+			settings.recurrenceSeconds = recurrence;
+			settings.priority = priority;
+			return settings;
+		};
+		auto configure = [&](core::World& world,
+			std::vector<core::InstallationOutageSettings> outageSettings,
+			std::vector<core::CoolantLoopSettings> loops = {},
+			std::vector<core::ChillerSettings> chillers = {})
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = {fuelStore()};
+			settings.thermalReservoirs = {sinkReservoir()};
+			settings.generators = {generatorSettings()};
+			core::ProfileSettings sun; sun.constantLevel = 1.0;
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
+			field.illumination = sun;
+			settings.solarArrays = {field};
+			settings.coolantLoops = std::move(loops);
+			settings.chillers = std::move(chillers);
+			settings.outages = std::move(outageSettings);
+			return world.configureStationSystems(settings, false, &diagnostic);
+		};
+		// Refused authored settings: the contract is validated at the
+		// crossing, never discovered mid-tick.
+		for (auto mutation : {"fraction-negative", "fraction-one", "fraction-above-one",
+			"unknown-installation", "zero-duration", "negative-first",
+			"recurrence-below-duration", "duplicate-id", "empty-id"})
+		{
+			std::vector<core::InstallationOutageSettings> outageSettings = {
+				outage("out1", "gen", 0.5, 10.0, 5.0)};
+			if (std::string_view(mutation) == "fraction-negative")
+				outageSettings[0].capacityFraction = -0.1;
+			else if (std::string_view(mutation) == "fraction-one")
+				outageSettings[0].capacityFraction = 1.0;
+			else if (std::string_view(mutation) == "fraction-above-one")
+				outageSettings[0].capacityFraction = 1.5;
+			else if (std::string_view(mutation) == "unknown-installation")
+				outageSettings[0].installationId = "ghost";
+			else if (std::string_view(mutation) == "zero-duration")
+				outageSettings[0].durationSeconds = 0.0;
+			else if (std::string_view(mutation) == "negative-first")
+				outageSettings[0].firstOccurrenceSeconds = -1.0;
+			else if (std::string_view(mutation) == "recurrence-below-duration")
+				outageSettings[0].recurrenceSeconds = 2.0;
+			else if (std::string_view(mutation) == "duplicate-id")
+				outageSettings.push_back(outage("out1", "gen", 0.25, 20.0, 5.0));
+			else if (std::string_view(mutation) == "empty-id")
+				outageSettings[0].id = "";
+			core::World world("OutageRefusal", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = {fuelStore()};
+			settings.thermalReservoirs = {sinkReservoir()};
+			settings.generators = {generatorSettings()};
+			settings.outages = std::move(outageSettings);
+			require(!world.configureStationSystems(settings, false, &diagnostic),
+				std::string("an invalid outage (").append(mutation).append(") was accepted").c_str());
+		}
+		// One-off outage: full output, capped while the window is open,
+		// restored after, with the start and restore announced once.
+		{
+			core::World world("OutageOneOff", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			// first at 20s, duration 10s -> window [20, 30).
+			require(configure(world, {outage("out1", "gen", 0.5, 20.0, 10.0)}),
+				"one-off outage scenario was rejected");
+			world.resumeSimulation();
+			// t = 12s: generator at full rated output, no outage yet.
+			require(world.advanceTicks(12 * 60), "one-off run failed before the outage");
+			auto const& before = world.getStationSystemsSnapshot();
+			require(approx(before.power.generators[0].outputKW, 10.0, 1e-3)
+				&& approx(before.power.generators[0].availabilityFactor, 1.0),
+				"generator was not at full rated output before the outage");
+			require(before.outages.size() == 1 && !before.outages[0].active
+				&& before.outages[0].occurrencesStarted == 0,
+				"the one-off outage was already active before its window");
+			// t = 25s: window open, output capped to half the rating.
+			require(world.advanceTicks(13 * 60), "one-off run failed into the outage");
+			auto const& during = world.getStationSystemsSnapshot();
+			require(during.outages[0].active
+				&& during.outages[0].occurrencesStarted == 1
+				&& during.outages[0].occurrencesCompleted == 0,
+				"the one-off outage window did not open as authored");
+			require(approx(during.power.generators[0].availabilityFactor, 0.5)
+				&& approx(during.power.generators[0].outputKW, 5.0, 1e-2),
+				"the outage did not cap the generator to its declared fraction");
+			require(sawEvent(world, "began at"),
+				"the outage start was not announced");
+			// t = 35s: window closed, ceiling lifted, output restored.
+			require(world.advanceTicks(10 * 60), "one-off run failed past the outage");
+			auto const& after = world.getStationSystemsSnapshot();
+			require(!after.outages[0].active
+				&& after.outages[0].occurrencesCompleted == 1
+				&& after.outages[0].exhausted,
+				"the one-off outage did not restore and exhaust as authored");
+			require(approx(after.power.generators[0].availabilityFactor, 1.0)
+				&& approx(after.power.generators[0].outputKW, 10.0, 1e-2),
+				"the generator output was not restored when the outage lifted");
+			require(sawEvent(world, "restored full declared availability"),
+				"the outage restoration was not announced");
+			require(sawEvent(world, "no inventory replenished"),
+				"the restoration event did not state that no inventory was replenished");
+		}
+		// Overlapping outages take the deepest reduction regardless of
+		// declaration order.
+		{
+			core::World world("OutageOverlap", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			// Both windows cover t = 25s: 0.5 and 0.25 -> effective 0.25.
+			require(configure(world, {
+				outage("outA", "gen", 0.5, 20.0, 10.0),
+				outage("outB", "gen", 0.25, 22.0, 8.0)}),
+				"overlapping outage scenario was rejected");
+			world.resumeSimulation();
+			require(world.advanceTicks(25 * 60), "overlap run failed");
+			auto const& snap = world.getStationSystemsSnapshot();
+			require(approx(snap.power.generators[0].availabilityFactor, 0.25)
+				&& approx(snap.power.generators[0].outputKW, 2.5, 1e-2),
+				"overlapping outages did not take the deepest reduction");
+		}
+		// Recurring outage: the same window repeats every recurrenceSeconds.
+		{
+			core::World world("OutageRecurring", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			// first 10s, duration 5s, recurrence 20s -> windows [10,15), [30,35).
+			require(configure(world, {outage("outR", "gen", 0.4, 10.0, 5.0, 20.0)}),
+				"recurring outage scenario was rejected");
+			world.resumeSimulation();
+			require(world.advanceTicks(12 * 60), "recurring run failed in window 1");
+			auto const& w1 = world.getStationSystemsSnapshot();
+			require(w1.outages[0].active && w1.outages[0].occurrencesStarted == 1
+				&& approx(w1.power.generators[0].outputKW, 4.0, 1e-2),
+				"the first recurring window did not bite as authored");
+			require(world.advanceTicks(13 * 60), "recurring run failed between windows");
+			auto const& gap = world.getStationSystemsSnapshot();
+			require(!gap.outages[0].active && !gap.outages[0].exhausted
+				&& approx(gap.power.generators[0].outputKW, 10.0, 1e-2),
+				"the recurring outage did not release between windows");
+			require(world.advanceTicks(7 * 60), "recurring run failed in window 2");
+			auto const& w2 = world.getStationSystemsSnapshot();
+			require(w2.outages[0].active && w2.outages[0].occurrencesStarted == 2
+				&& approx(w2.power.generators[0].outputKW, 4.0, 1e-2),
+				"the second recurring window did not bite as authored");
+		}
+		// A full outage (fraction 0) stops the machine outright and a
+		// restoration never invents fuel: the drained store stays drained.
+		{
+			core::World world("OutageFullNoReplenish", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			core::ResourceStoreSettings fuel;
+			fuel.id = "diesel"; fuel.unit = "kWh";
+			fuel.capacity = 50.0; fuel.startingQualified = 50.0; fuel.protectedReserve = 0.0;
+			settings.stores = {fuel};
+			settings.thermalReservoirs = {sinkReservoir()};
+			settings.generators = {generatorSettings()};
+			core::ProfileSettings sun; sun.constantLevel = 1.0;
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
+			field.illumination = sun;
+			settings.solarArrays = {field};
+			settings.outages = {outage("outFull", "gen", 0.0, 5.0, 5.0)};
+			require(world.configureStationSystems(settings, false, nullptr),
+				"full-outage scenario was rejected");
+			world.resumeSimulation();
+			require(world.advanceTicks(7 * 60), "full-outage run failed");
+			auto const& snap = world.getStationSystemsSnapshot();
+			require(snap.outages[0].active
+				&& approx(snap.power.generators[0].availabilityFactor, 0.0)
+				&& snap.power.generators[0].outputKW == 0.0,
+				"a full outage left deliverable capacity behind");
+			// The store drained while the generator ran before the outage;
+			// the restoration lifts the ceiling but cannot refill it.
+			require(snap.stores[0].currentQualified < 50.0,
+				"the generator never drew fuel before the outage");
+			auto const drained = snap.stores[0].currentQualified;
+			require(world.advanceTicks(8 * 60), "full-outage restore run failed");
+			auto const& restored = world.getStationSystemsSnapshot();
+			require(!restored.outages[0].active
+				&& restored.stores[0].currentQualified <= drained,
+				"the restoration replenished the drained fuel store");
+		}
+		// Coolant-loop and chiller installations carry the same ceiling on
+		// their circulation and cooling capacity.
+		{
+			core::CoolantLoopSettings loop;
+			loop.id = "loop";
+			loop.hazardClass = "normal";
+			loop.reservoirId = "hot";
+			loop.coolantCapacityKg = 10.0;
+			loop.startingCoolantKg = 10.0;
+			loop.specificHeatKJPerKgK = 4.0;
+			loop.ratedFlowKgPerS = 2.0;
+			loop.pumpPowerKW = 1.0;
+			loop.exchangerConductanceKWPerK = 5.0;
+			loop.freezeProtectionSetpointC = -100.0;
+			core::World world("OutageLoopChiller", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(configure(world, {outage("outLoop", "loop", 0.5, 5.0, 100.0)},
+				{loop}),
+				"loop outage scenario was rejected");
+			world.resumeSimulation();
+			require(world.advanceTicks(10 * 60), "loop outage run failed");
+			auto const& snap = world.getStationSystemsSnapshot();
+			require(snap.coolantLoops[0].availabilityFactor == 0.5
+				&& approx(snap.coolantLoops[0].flowKgPerS, 1.0, 1e-2),
+				"the loop outage did not halve circulation capacity");
+		}
+		// Determinism: two identically-authored worlds with outages agree.
+		{
+			core::World first("OutageDeterminism", 2, 2);
+			first.pauseSimulation(); first.finishBuild();
+			configure(first, {outage("out1", "gen", 0.5, 8.0, 6.0, 12.0)});
+			first.resumeSimulation();
+			first.advanceTicks(40 * 60);
+			core::World second("OutageDeterminism", 2, 2);
+			second.pauseSimulation(); second.finishBuild();
+			configure(second, {outage("out1", "gen", 0.5, 8.0, 6.0, 12.0)});
+			second.resumeSimulation();
+			second.advanceTicks(40 * 60);
+			require(first.getStationSystemsSnapshot().power.generators
+				== second.getStationSystemsSnapshot().power.generators,
+				"identically-authored outage worlds diverged in generator state");
+			require(first.getStationSystemsSnapshot().outages
+				== second.getStationSystemsSnapshot().outages,
+				"identically-authored outage worlds diverged in outage state");
+		}
+	}
+
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power},
@@ -14146,7 +14450,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"failures", failures}};
+		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"outages", outages}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }
