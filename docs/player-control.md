@@ -58,11 +58,28 @@ camera is used.
   endpoint. Reversal is refused while others share the narrow span. Flat branches
   do not claim stair capacity. Pause freezes movement and clears all arrow input.
   Off-centre doorway entry still preserves X and can walk explicitly to the mount.
+- Stationary Staircases mount through their lower or upper flight endpoint, not
+  a doorway. Hold **Up** to ascend from below or **Down** to descend from above,
+  together with Left/Right toward the flight. Selection is checked only within
+  **0.25 World units** horizontally outside the endpoint, on its Level in its
+  landing Location; neither or both selection keys refuse mounting. There is no
+  queued selection or automatic alignment: the Agent walks to the exact endpoint
+  before entering. Eligible stair approach takes precedence over Up's ordinary
+  Door action only within that zone.
+- On a Staircase, Left/Right follows the slope at effective directional stair
+  speed. Release stops exactly in place; reverse input retraces the flight.
+  Up/Down is not required once mounted. Reaching either endpoint automatically
+  dismounts into its connected Location, subject to Standing fit and Location
+  permissions. An open upper Room wall without Floor lands directly in the
+  adjacent supported Location. Pause freezes the admitted task and clears input;
+  stationary Staircases do not require Object usage capability or Buttons.
+  Moving Escalators and Broken Escalators are not included in this control mode.
 - Overlapping candidates prefer an admissible open doorway, then nearest centre,
   then stable traversal-resource identity. One press performs at most one action.
 - Solid walls, closed/opening Bulkhead Doors, low spaces and unsupported Floor
-  edges stop the Agent's leading body edge. Input never operates Buttons, boards
-  transports, climbs Ladders or Staircases, or automatically crouches/crawls. Up
+  edges stop the Agent's leading body edge, except at a selected open Staircase
+  endpoint where the flight supplies support. Input never operates Buttons, boards
+  transports, climbs Ladders, or automatically crouches/crawls. Up
   supports ordinary Doors between Locations and Stairwell landing doorways;
   transport-owned Doors, Windows and BoothWindows do not.
 - An Agent initially in a space that cannot accommodate Standing remains
@@ -95,10 +112,11 @@ work and does not add a new Agent type.
 `agent-playerControlBulkheads`, `agent-playerControlPersistence`,
 `agent-playerControlDoorways`, `agent-playerControlDoorwayRestrictions`,
 `agent-playerControlStairwells`, `agent-playerControlStairwellRestrictions`, and
-`agent-playerControlStairwellPlatforms` exercise
+`agent-playerControlStairwellPlatforms`, `agent-playerControlStaircases`, and
+`agent-playerControlStaircaseRestrictions` exercise
 walking, timed bidirectional Layer transitions, mirrored zig-zag stair movement,
 ascent/descent speed, narrow capacity, pause/reset, geometry, capability,
 permissions, low clearance and Broken Doors through the World/coordinator seam. `agent-playerControlEditorWorkflow` covers the picker,
 undo/redo and clipboard. `pf_application` covers actual Play key injection, Up repeat suppression and
-suspension and held Up/Down platform departure; `pf_application_render` covers camera following, Layer selection,
+suspension, held Up/Down platform departure and Staircase mounting/dismounting; `pf_application_render` covers camera following, Layer selection,
 resize and the no-Player fallback.

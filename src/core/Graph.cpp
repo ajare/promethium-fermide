@@ -1351,6 +1351,15 @@ namespace core
 			// Mount at the Staircase path endpoint rather than the endpoint cell's
 			// centre. Z-connected mount vertices must occupy the same global point.
 			auto const endpointX = (float)transit->getCellX() + point.x;
+			// An upper Room-wall endpoint can have no Floor in the Staircase's
+			// footprint. Its actual landing is the adjacent supported Location,
+			// not the unsupported Room cell on the other side of the open wall.
+			if (!lower && !mwWorld->getLayer(transit->getLayerIndex() - 1)->getCellDefinition(x, y).isTraversableOnFoot())
+			{
+				auto const adjacentX = transit->getRiseSide() == CORE_SIDE_RIGHT ? x + 1 : x - 1;
+				auto const& adjacent = mwWorld->getLayer(transit->getLayerIndex() - 1)->getCellDefinition(adjacentX, y);
+				sector = mwWorld->_getSector(adjacent.sectorIndex);
+			}
 			auto locationVertex = make_shared<StairwellLocationVertex>(sector,
 				endpointX - (float)sector->getCellX(), (float)(y - sector->getCellY()));
 			appendRowVertex(row, x, SlotTransit, locationVertex);

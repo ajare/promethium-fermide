@@ -480,6 +480,7 @@ namespace core
 
 		SectorPosition mPosition;
 		// Runtime platform approach, never an advance flight selection.
+		bool mPlayerStaircaseEntry{ false };
 		bool mPlayerStairPlatform{ true };
 		int mPlayerStairApproach{ 0 };
 

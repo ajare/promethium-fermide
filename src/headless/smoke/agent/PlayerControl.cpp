@@ -7,9 +7,12 @@
 #include "core/BulkheadDoorSectorObject.h"
 #include "core/DoorSectorObject.h"
 #include "core/StairwellTransit.h"
+#include "core/StaircaseTransit.h"
+#include "core/MobilityProfile.h"
 #include "core/Stairwell.h"
 #include "core/AgentType.h"
 #include "core/Graph.h"
+#include <algorithm>
 #include <cmath>
 
 namespace
@@ -477,6 +480,163 @@ namespace
 			"Authorized deep-Layer exit must reach the Location immediately in front");
 	}
 
+	void staircases()
+	{
+		for (int riseSide : {CORE_SIDE_LEFT, CORE_SIDE_RIGHT})
+		{
+			core::World world("Player Staircase", 12, 2);
+			auto bottom = world.addRoom("Bottom", 0, 0, 0, 12, 1);
+			auto top = world.addCorridor(1, 0, 12);
+			auto stairs = world.addStaircase(1, 0, 4, {3, riseSide, 0.f});
+			int const direction = riseSide == CORE_SIDE_RIGHT ? 1 : -1;
+			float const lowerX = direction > 0 ? 4.f : 7.f;
+			float const upperX = direction > 0 ? 7.f : 4.f;
+			world.finishBuild(); world.pauseSimulation();
+			auto id = world.createAgent("Player", bottom, 0, lowerX - direction * .15f); assign(world, id);
+			require(world.setAgentIndividualStairSpeedModifier(id, 1.2f), "Staircase speed modifier must apply");
+			auto position = [&] { return world.lookupAgent(id).entity->getGlobalPosition(); };
+			auto sector = [&] { return world.lookupAgent(id).entity->getSector()->getIndex(); };
+			auto drive = [&](int horizontal, int vertical, float seconds) {
+				world.resumeSimulation(); world.setPlayerStairSelection(vertical > 0, vertical < 0);
+				world.setPlayerMovementDirection(horizontal);
+				while (seconds > 0.f)
+				{
+					auto const step = std::min(seconds, 1.f);
+					world.update(step); seconds -= step;
+				}
+			};
+			drive(direction, 1, .01f);
+			require(sector() == bottom && x(world, id) != lowerX, "Near approach must walk, never snap to the endpoint");
+			drive(direction, 1, .6f);
+			require(sector() == stairs && position().y > 0.f && position().y < 1.f, "Up and approach must mount and ascend");
+			auto stopped = position();
+			drive(0, 0, 1.f);
+			for (int second = 0; second < 30; ++second) world.update(1.f);
+			near(position().distanceTo(stopped), 0.f, "Release must stop exactly on a Staircase");
+			require(world.lookupAgent(id).entity->hasActiveLocomotionTask(), "Stopped flight must retain its admitted task");
+			world.pauseSimulation(); world.resumeSimulation(); world.update(.1f);
+			near(position().distanceTo(stopped), 0.f, "Pause must retain flight position and clear keys");
+			drive(-direction, 0, .1f);
+			near(position().distanceTo(stopped), world.lookupAgent(id).entity->getStationaryStairSpeed(false) * .1f,
+				"Reversal must use effective descent speed");
+			drive(-direction, 0, 1.f);
+			require(sector() == bottom, "Returning to the source must automatically dismount");
+			// Return to the endpoint without changing Layer or automatically mounting.
+			drive(direction, 1, 12.f);
+			require(sector() == top, "Completing ascent must automatically enter the upper Location: sector="
+				+ std::to_string(sector()) + " x=" + std::to_string(x(world, id)) + " y=" + std::to_string(position().y));
+			world.setPlayerMovementDirection(0); world.update(.1f);
+			// Walk back into the upper endpoint's outside approach zone.
+			float const approachX = upperX + direction * .15f;
+			drive(approachX > x(world, id) ? 1 : -1, 0, std::abs(x(world, id) - approachX)
+				/ world.lookupAgent(id).entity->getWalkSpeed());
+			require(direction * (x(world, id) - upperX) > 0.f && std::abs(x(world, id) - upperX) <= .25f,
+				"Return walk must reach outside upper approach: x=" + std::to_string(x(world, id)));
+			drive(-direction, -1, .6f);
+			require(sector() == stairs && position().y < 1.f && position().y > 0.f, "Down and approach must mount from above: sector="
+				+ std::to_string(sector()) + " x=" + std::to_string(x(world, id)) + " y=" + std::to_string(position().y));
+			stopped = position();
+			drive(direction, 0, .1f);
+			near(position().distanceTo(stopped), world.lookupAgent(id).entity->getStationaryStairSpeed(true) * .1f,
+				"Reversing descent must use ascent speed");
+			drive(-direction, 0, 12.f);
+			require(sector() == bottom, "Descending must automatically dismount below");
+			world.resetSimulation(); world.resumeSimulation(); world.update(.1f);
+			near(position().y, 0.f, "Reset must restore authored Level");
+			near(x(world, id), lowerX - direction * .15f, "Reset must discard held stair input");
+		}
+	}
+
+	void staircaseRestrictions()
+	{
+		for (int scenario = 0; scenario < 9; ++scenario)
+		{
+			core::World world("Staircase approach restrictions", 12, 2);
+			auto bottom = world.addRoom("Bottom", 0, 0, 0, 12, 1);
+			world.addCorridor(1, 0, 12);
+			world.addStaircase(1, 0, 4, {3, CORE_SIDE_RIGHT, scenario == 6 ? 1.f : 0.f});
+			world.finishBuild(); world.pauseSimulation();
+			auto id = world.createAgent("Player", bottom, 0, scenario == 0 ? 3.f : 3.85f); assign(world, id);
+			if (scenario == 5)
+			{
+				auto profile = world.lookupAgent(id).entity->getEffectiveMobilityProfile().value;
+				profile.set(core::TraversalKind::Staircase, core::MobilityUse::CannotUse);
+				world.setAgentIndividualMobilityProfile(id, profile);
+			}
+			if (scenario == 7) world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None);
+			if (scenario == 8) world.setRoomHeightScale(bottom, .4f);
+			world.resumeSimulation();
+			world.setPlayerStairSelection(scenario != 3, scenario == 3 || scenario == 4);
+			world.setPlayerMovementDirection(scenario == 1 ? 0 : scenario == 2 ? -1 : 1);
+			world.update(scenario == 0 ? .1f : .6f);
+			require((world.lookupAgent(id).entity->getSector()->getIndex() != bottom) == (scenario == 7),
+				"Only near, toward-flight, correct exclusive selection may mount; None must still permit stairs");
+		}
+		{
+			core::World world("Staircase exit authorization", 12, 2);
+			auto bottom = world.addRoom("Bottom", 0, 0, 0, 12, 1);
+			auto top = world.addCorridor(1, 0, 12);
+			auto stairs = world.addStaircase(1, 0, 4, {3, CORE_SIDE_RIGHT, 0.f});
+			world.finishBuild(); world.pauseSimulation();
+			auto permission = world.addAccessPermission("Upper access");
+			world.setLocationPermissionRequirement(top, {permission});
+			auto id = world.createAgent("Player", bottom, 0, 3.85f); assign(world, id);
+			world.resumeSimulation(); world.setPlayerMovementDirection(1); world.setPlayerStairSelection(true, false);
+			for (int second = 0; second < 12; ++second) world.update(1.f);
+			require(world.lookupAgent(id).entity->getSector()->getIndex() == stairs,
+				"Automatic dismount must respect destination Location permissions");
+			near(world.lookupAgent(id).entity->getGlobalPosition().y, 1.f, "Refused exit must remain on the endpoint");
+			world.setPlayerMovementDirection(-1); world.update(.2f);
+			require(world.lookupAgent(id).entity->getGlobalPosition().y < 1.f,
+				"A refused exit must allow reversing back down the stairs");
+			world.pauseSimulation(); world.grantAgentAccessPermission(id, permission);
+			world.resumeSimulation(); world.setPlayerMovementDirection(1); world.update(1.f);
+			require(world.lookupAgent(id).entity->getSector()->getIndex() == top,
+				"Granted permission must allow automatic upper dismount: y="
+				+ std::to_string(world.lookupAgent(id).entity->getGlobalPosition().y));
+		}
+		for (int side : {CORE_SIDE_LEFT, CORE_SIDE_RIGHT})
+		{
+			bool const right = side == CORE_SIDE_RIGHT;
+			core::World world("Room wall Staircase", 12, 2);
+			auto room = world.addRoom("Stair Room", 0, 0, right ? 0 : 4, right ? 7 : 8, 2);
+			auto upper = world.addRoom("Upper Floor", 0, 1, right ? 7 : 0, right ? 5 : 4, 1);
+			world.removeLocationWall(room, 1, side);
+			auto stairs = world.addStaircase(1, 0, 4, {3, side, 0.f});
+			world.finishBuild(); world.pauseSimulation();
+			auto id = world.createAgent("Player", upper, 0, right ? .15f : 3.85f); assign(world, id);
+			world.resumeSimulation(); world.setPlayerMovementDirection(right ? -1 : 1);
+			world.setPlayerStairSelection(false, true); world.update(.6f);
+			require(world.lookupAgent(id).entity->getSector()->getIndex() == stairs,
+				"Open Room-wall endpoint must mount from its adjacent upper Floor");
+			for (int second = 0; second < 12; ++second) world.update(1.f);
+			require(world.lookupAgent(id).entity->getSector()->getIndex() == room,
+				"Room-wall descent must automatically dismount onto the lower Floor");
+			world.setPlayerMovementDirection(right ? 1 : -1); world.setPlayerStairSelection(true, false);
+			for (int second = 0; second < 25; ++second) world.update(1.f);
+			require(world.lookupAgent(id).entity->getSector()->getIndex() == upper,
+				"Room-wall ascent must dismount directly onto the supported adjacent upper Floor: x="
+				+ std::to_string(x(world, id)) + " y=" + std::to_string(world.lookupAgent(id).entity->getGlobalPosition().y)
+				+ " sector=" + std::to_string(world.lookupAgent(id).entity->getSector()->getIndex()));
+		}
+		for (bool nearAndToward : {false, true})
+		{
+			core::World world("Staircase versus Door", 12, 2); world.addLayer();
+			world.addRoom("Front", 0, 0, 0, 12, 1);
+			auto bottom = world.addRoom("Bottom", 1, 0, 0, 12, 1);
+			world.addCorridor(1, 1, 0, 12, 1);
+			world.addStaircase(2, 0, 4, {3, CORE_SIDE_RIGHT, 0.f});
+			core::World::CreateDoorOptions options; options.activationMode = core::DoorActivationMode::Manual;
+			auto result = world.addSectorDoor(0, 0, 3, options);
+			auto door = std::dynamic_pointer_cast<core::DoorSectorObject>(result.door.sector->getObject(result.door.index))->getDoor();
+			world.finishBuild(); world.pauseSimulation();
+			auto id = world.createAgent("Player", bottom, 0, nearAndToward ? 3.85f : 3.5f); assign(world, id);
+			world.resumeSimulation(); world.setPlayerMovementDirection(1); world.setPlayerStairSelection(true, false);
+			world.requestPlayerDoorAction(); world.update(.1f);
+			require(door->isClosed() == nearAndToward, "Only a near toward-flight stair selection may suppress Up's Door action");
+		}
+	}
+
 	void persistenceAndPermissions()
 	{
 		core::World world("Portable Player", 10, 2);
@@ -526,6 +686,8 @@ void agent_smoke::registerPlayerControl(std::vector<smoke::Check>& checks)
 	checks.push_back({"playerControlDoorways", [](smoke::Context const&) { doorways(); }});
 	checks.push_back({"playerControlDoorwayRestrictions", [](smoke::Context const&) { doorwayRestrictions(); doorwaySelection(); }});
 	checks.push_back({"playerControlStairwellPlatforms", [](smoke::Context const&) { stairwellPlatforms(); }});
+	checks.push_back({"playerControlStaircases", [](smoke::Context const&) { staircases(); }});
+	checks.push_back({"playerControlStaircaseRestrictions", [](smoke::Context const&) { staircaseRestrictions(); }});
 	checks.push_back({"playerControlStairwells", [](smoke::Context const&) { stairwells(); }});
 	checks.push_back({"playerControlStairwellRestrictions", [](smoke::Context const&) { stairwellRestrictions(); }});
 	checks.push_back({"playerControlPersistence", [](smoke::Context const&) { persistenceAndPermissions(); }});

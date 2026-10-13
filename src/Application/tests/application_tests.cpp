@@ -245,6 +245,41 @@ void checkPlayerStairKeys(wp::application::State& play, core::World& world) {
   key(Key::RightArrow, false);
 }
 
+void checkPlayerStaircaseKeys(wp::application::State& play, core::World& world) {
+  using wp::application::Key;
+  using wp::application::KeyEvent;
+  for (bool descending : {false, true}) {
+    core::World fixture("Keyboard Staircase", 12, 2);
+    auto bottom = fixture.addRoom("Bottom", 0, 0, 0, 12, 1);
+    auto top = fixture.addCorridor(1, 0, 12);
+    auto stairs = fixture.addStaircase(1, 0, 4, {3, CORE_SIDE_RIGHT, 0.f});
+    fixture.finishBuild(); fixture.pauseSimulation();
+    auto id = fixture.createAgent("Keyboard player", descending ? top : bottom, 0, descending ? 7.15f : 3.85f);
+    require(fixture.setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}), "Cannot assign Staircase player");
+    auto writer = core::YamlSerializer::toString();
+    core::SerializationWorkData data; data.markSerializedUnmodified = false;
+    fixture.serialize(*writer, data); writer->serialize();
+    auto reader = core::YamlSerializer::fromString(writer->getSerializedString()); reader->deserialize();
+    world.pauseSimulation(); require(world.deserialize(*reader, data), "Cannot install Staircase key fixture");
+    require(world.resumeSimulation(), "Cannot resume Staircase fixture");
+    auto key = [&](Key k, bool held) { play._injectKeyInput(held ? KeyEvent::Pressed : KeyEvent::Released, k, {}); };
+    auto horizontal = descending ? Key::LeftArrow : Key::RightArrow;
+    auto vertical = descending ? Key::DownArrow : Key::UpArrow;
+    key(horizontal, true); key(vertical, true); play._update(.6f);
+    require(world.lookupAgent(id).entity->getSector()->getIndex() == stairs,
+            "Actual Up/Down key input must mount the appropriate Staircase endpoint");
+    auto stopped = world.lookupAgent(id).entity->getGlobalPosition();
+    key(horizontal, false); key(vertical, false); play._update(.2f);
+    require(world.lookupAgent(id).entity->getGlobalPosition().distanceTo(stopped) < .0001f,
+            "Releasing horizontal input must stop on the Staircase");
+    key(horizontal, true);
+    for (int second = 0; second < 12; ++second) play._update(1.f);
+    require(world.lookupAgent(id).entity->getSector()->getIndex() == (descending ? bottom : top),
+            "App Staircase movement must automatically dismount without another vertical key press");
+    key(horizontal, false); play._update(0.f);
+  }
+}
+
 // Drive the actual factory-created states through the same exception/resume
 // contract as Launcher, without entering their graphics-dependent scenes.
 void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
@@ -301,6 +336,7 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
         checkPlayerKeys(*child, *map->getWorld());
         checkPlayerDoorKeys(*child, *map->getWorld());
         checkPlayerStairKeys(*child, *map->getWorld());
+        checkPlayerStaircaseKeys(*child, *map->getWorld());
         auto const suspendTick = map->getWorld()->getSimulationTick();
         child->_suspend(true, true, true);
         child->_update(1.0f);

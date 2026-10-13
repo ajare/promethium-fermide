@@ -49,7 +49,11 @@ Press Up to cross an aligned open ordinary Door between Layers, or otherwise
 open an eligible manual Door; press again once open to cross. Up also enters or
 exits Stairwell landing doorways. Left/Right walks on visible side platforms;
 hold Up/Down at departure to choose ascent/descent, with matching horizontal
-input. Arrival walks onto the next platform rather than skipping its junction. Walls, low spaces,
+input. Arrival walks onto the next platform rather than skipping its junction.
+For stationary Staircases, hold Up near the lower endpoint or Down near the upper
+endpoint while walking toward the flight (within 0.25 World units). Left/Right
+then follows the slope, with stop/reversal and automatic endpoint dismount.
+Walls, low spaces,
 closed Bulkhead Doors and Floor gaps block movement. Buttons, transport boarding
 and automatic crouching/crawling are not supported. Without an eligible
 Agent, Player input is disabled and the fitted Layer-0 camera remains.
