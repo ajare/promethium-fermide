@@ -18,7 +18,7 @@ camera is used.
 - Pause, reset, suspension, and leaving Play clear transient movement input.
 - The camera centres on the controlled Agent at normal zoom and shows its Layer.
 - In Locations, Left/Right movement stays on the current Layer and Level. Usable open boundaries
-  and fully open standalone Bulkhead Doors permit entry into adjacent Locations,
+  and standalone Bulkhead Doors whose moving leaf clears the Standing body permit entry into adjacent Locations,
   subject to Standing fit and existing passage restrictions.
 - Press **Up** to cross an eligible fully open ordinary Door into its connected
   Location on the adjacent Layer, in either direction. If no crossing can start,
@@ -134,7 +134,7 @@ camera is used.
   route preparation still requests extension, never a toggle.
 - Overlapping doorway candidates prefer an admissible open doorway, then nearest centre,
   then stable traversal-resource identity. One press performs at most one action.
-- Solid walls, closed/opening Bulkhead Doors, low spaces and unsupported Floor
+- Solid walls, Bulkhead Door leaves overlapping the Standing body, low spaces and unsupported Floor
   edges stop the Agent's leading body edge, except at a selected open Staircase
   endpoint where the flight supplies support. Input never automatically
   crouches/crawls. Up supports ordinary Doors between Locations, open enclosed
@@ -143,6 +143,33 @@ camera is used.
 - An Agent initially in a space that cannot accommodate Standing remains
   stationary in its existing fitting pose; input does not force it through the
   ceiling.
+
+## Manual Airlocks
+
+- A fresh **Up** press at an eligible outside Button requests its Airlock entrance
+  using ordinary physical reach, capability and authorization checks. Calling
+  never approaches, aligns or enters the Player.
+- Hold **Left/Right** toward the entrance to enter as soon as the moving Door's
+  physical bounding box clears the Standing body, even before full opening.
+  This Player-only collision rule also applies to standalone and other chamber
+  Bulkhead thresholds; autonomous Agents still wait for full opening.
+  Admission uses the
+  shared batch's capacity, reservations, active side and boarding deadline, and
+  validates Door/Buttons Mobility, permissions, Standing fit through both Doors
+  and a supported opposite landing. Older reserved entrants keep their turn.
+- Left/Right walks inside at effective walking speed, including during closure
+  and cycling. Doorway crossings use the Standing Door-context speed ratio.
+  Release stops exactly, retaining admitted capacity or a partial threshold
+  crossing; reverse through a partial threshold to cancel that crossing safely.
+  Cancelled entry selections do not refill the current batch's admission slots.
+- The existing interlock closes the entrance, cycles with both Doors closed, then
+  opens the committed opposite exit. Walk through that exit explicitly; there
+  is no automatic alignment or ejection. The entrance cannot bypass the cycle.
+  Autonomous Agents can share the batch and leave independently.
+- Pause freezes an admitted crossing or occupant. A stopped Player retains a
+  usable committed exit, including after landing permissions are tightened;
+  safe Standing clearance and Floor support still apply. Reset discards runtime
+  occupancy and restores the authored position.
 
 ## Manual transport riding
 

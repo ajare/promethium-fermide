@@ -54,6 +54,9 @@ namespace core
 
 		// Overridden from OpenableObject
 		void getCurrentShape(Vector2& minExtent, Vector2& maxExtent) const override;
+
+		// Player collision uses the live leaf, not the fully-open device state.
+		[[nodiscard]] bool admitsPlayerStandingPassage(Agent const& agent, float floorY) const;
 	};
 
 } // core

@@ -2,6 +2,7 @@
 #include <cassert>
 
 #include "core/Defines.h"
+#include "core/Agent.h"
 #include "core/BulkheadDoor.h"
 #include "core/BulkheadDoorVertex.h"
 #include "core/Sector.h"
@@ -130,5 +131,16 @@ namespace core
 		minExtent.y += getOpenPercentage() * CORE_CORRIDOR_HEIGHT;
 	}
 
+	bool BulkheadDoor::admitsPlayerStandingPassage(Agent const& agent, float floorY) const
+	{
+		if (!agent.isPlayerControlled()) return false;
+		auto envelope = agent.getPoseEnvelope(Pose::Standing);
+		if (!envelope || !admitsStandingHeight(envelope->y, floorY)) return false;
+		Vector2 min, max;
+		getCurrentShape(min, max);
+		constexpr float tolerance = 0.0001f;
+		return min.x >= max.x || min.y >= max.y
+			|| floorY + envelope->y <= min.y + tolerance || floorY >= max.y - tolerance;
+	}
 
 } // core

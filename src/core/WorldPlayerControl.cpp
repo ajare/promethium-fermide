@@ -4,6 +4,8 @@
 #include "core/ForceBridgeSectorObject.h"
 #include "core/Location.h"
 #include "core/DoorEdge.h"
+#include "core/BulkheadDoorEdge.h"
+#include "core/AirlockTransit.h"
 #include "core/Graph.h"
 #include "core/MobilityProfile.h"
 #include "core/StairwellMountEdge.h"
@@ -591,10 +593,126 @@ namespace core
 		}
 	}
 
+	bool World::advancePlayerAirlockAgent(Agent& agent, float timestep)
+	{
+		auto half = agent.getPoseEnvelope(Pose::Standing).value_or(Vector2{}).x * .5f;
+		auto position = agent.getGlobalPosition();
+		auto chamber = dynamic_cast<AirlockTransit const*>(agent.getSector());
+		bool crossing = false;
+		if (agent.mTraversalTask)
+		{
+			auto resource = mTraversalResources.find(agent.mTraversalTask->edge->getTraversalResourceId());
+			crossing = resource && resource->mAirlock;
+			if (!crossing) return false;
+		}
+		if (!crossing && !chamber)
+		{
+			auto source = agent.getSector();
+			if (agent.mPlayerLadderMount || !source || !isLocationLike(source->getType())
+				|| !agent.poseFits(Pose::Standing, source->getPosition().y + source->getLevelsHigh() - 1
+					+ source->getEffectiveTopLevelHeight() - position.y)) return false;
+		}
+		if (!crossing && mPlayerMovementDirection)
+		{
+			float next = position.x + mPlayerMovementDirection * agent.getWalkSpeed() * timestep;
+			for (auto const& edge : getGraph()->getEdges())
+			{
+				auto threshold = std::dynamic_pointer_cast<const BulkheadDoorEdge>(edge);
+				if (!threshold || !threshold->getDoor()->isAirlockOwned()) continue;
+				auto source = edge->getVertex(0), destination = edge->getVertex(1);
+				if (source->getSector().get() != agent.getSector()) std::swap(source, destination);
+				if (source->getSector().get() != agent.getSector()) continue;
+				auto door = threshold->getDoor();
+				int direction = destination->getPosition().x > source->getPosition().x ? 1 : -1;
+				float boundary = direction > 0 ? door->getPosition().x : door->getPosition().x + door->getSize().x;
+				if (direction != mPlayerMovementDirection || std::abs(position.y - door->getPosition().y) > PoseFitTolerance
+					|| direction * (next + direction * half - boundary) < -PoseFitTolerance) continue;
+				// Entry must be feasible through both thresholds; the coordinator
+				// owns capacity, deadline, permissions and committed exit checks.
+				auto pose = door->selectAgentCrossing(agent, position.y, true);
+				bool fit = door->admitsPlayerStandingPassage(agent, position.y) && pose && pose->pose == Pose::Standing;
+				for (auto const& sector : {source->getSector(), destination->getSector()})
+					fit = fit && agent.poseFits(Pose::Standing, sector->getPosition().y + sector->getLevelsHigh() - 1
+						+ sector->getEffectiveTopLevelHeight() - position.y);
+				if (destination->getSector()->getType() != SectorType::Airlock)
+					fit = fit && (chamber || canAgentAccessLocation(*destination->getSector(), agent))
+						&& playerTransportLandingSupported(*destination->getSector(),
+							{boundary + direction * (door->getSize().x + half), position.y}, half);
+				if (fit && beginPlayerTraversal(agent, edge, source, destination))
+				{
+					agent.mTraversalTask->crossingPose = pose;
+					crossing = true;
+				}
+				if (!crossing && !chamber)
+				{
+					// Chamber cells are not ordinary Locations: stop at the physical
+					// threshold, not the farther cell boundary, while admission is blocked.
+					float limit = boundary - direction * half;
+					position.x = direction > 0 ? std::min(next, std::max(position.x, limit))
+						: std::max(next, std::min(position.x, limit));
+					agent.setPosition({const_cast<Sector*>(agent.getSector()), position - agent.getSector()->getPosition()}, false);
+					return true;
+				}
+				break;
+			}
+		}
+		if (crossing)
+		{
+			auto& task = *agent.mTraversalTask;
+			auto door = std::static_pointer_cast<const BulkheadDoorEdge>(task.edge)->getDoor();
+			int direction = task.destinationVertex->getPosition().x > task.sourceVertex->getPosition().x ? 1 : -1;
+			float delta = mPlayerMovementDirection * agent.getWalkSpeed() * timestep
+				* (task.crossingPose ? task.crossingPose->speedRatio : 1.f);
+			float next = position.x + delta;
+			if (!door->admitsPlayerStandingPassage(agent, position.y))
+			{
+				Vector2 min, max;
+				door->getCurrentShape(min, max);
+				if (delta > 0 && position.x - half < max.x)
+					next = std::min(next, std::max(position.x, min.x - half));
+				else if (delta < 0 && position.x + half > min.x)
+					next = std::max(next, std::min(position.x, max.x + half));
+			}
+			position.x = next;
+			agent.setPosition({const_cast<Sector*>(agent.getSector()), position - agent.getSector()->getPosition()}, false);
+			float left = door->getPosition().x, right = left + door->getSize().x;
+			bool complete = direction > 0 ? position.x - half >= right : position.x + half <= left;
+			bool retraced = direction > 0 ? position.x + half <= left : position.x - half >= right;
+			if (complete)
+			{
+				if (commitTraversal(agent, task.request, task.permit, task.destinationVertex))
+				{
+					releaseTraversal(task.request, task.permit);
+					agent.mTraversalTask.reset(); agent.mTraversalLocalGoal.reset();
+					agent.mState = Agent::State::Idle;
+				}
+			}
+			else if (retraced && mPlayerMovementDirection == -direction)
+			{
+				agent.cancelTraversal();
+				agent.mState = Agent::State::Idle;
+			}
+			return true;
+		}
+		if (!chamber) return false;
+		// A stopped Player owns its slot and may walk during closure/cycling, but
+		// never crosses a closed entrance or an uncommitted exit.
+		float left = chamber->getDoor(0)->getPosition().x + chamber->getDoor(0)->getSize().x + half;
+		float right = chamber->getDoor(1)->getPosition().x - half;
+		if (left <= right && agent.poseFits(Pose::Standing, chamber->getEffectiveTopLevelHeight()))
+		{
+			position.x = std::clamp(position.x + mPlayerMovementDirection * agent.getWalkSpeed() * timestep, left, right);
+			agent.setPosition({const_cast<Sector*>(agent.getSector()), position - agent.getSector()->getPosition()}, false);
+			agent.mPose = Pose::Standing;
+		}
+		return true;
+	}
+
 	void World::advancePlayerControlledAgent(AgentId id, float timestep)
 	{
 		auto* agent = mAgents.find(id);
 		if (!agent || !agent->isActive() || !agent->isPlayerControlled()) return;
+		if (advancePlayerAirlockAgent(*agent, timestep)) return;
 		if (agent->mPlayerLadderMount)
 		{
 			advancePlayerLadderAgent(*agent, timestep);
@@ -682,8 +800,7 @@ namespace core
 					auto object = std::dynamic_pointer_cast<BulkheadDoorSectorObject>(
 						mSectors[cell.sectorIndex]->getObject(cell.bulkheadIndices[CORE_SIDE_RIGHT]));
 					auto door = object ? object->getDoor() : nullptr;
-					if (!door || door->isChamberOwned() || !door->admitsNewCrossings()
-						|| !door->admitsStandingHeight(agent->getStandingHeight(), position.y)
+					if (!door || door->isChamberOwned() || !door->admitsPlayerStandingPassage(*agent, position.y)
 						|| agentForbidsTraversal(agent, TraversalKind::Door))
 					{
 						if (door) barrier = side == CORE_SIDE_RIGHT ? door->getPosition().x

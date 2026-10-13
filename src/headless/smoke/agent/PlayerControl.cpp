@@ -140,17 +140,50 @@ namespace
 		walk(world, 1, 5.f);
 		near(x(world, id), 3.7f, "Closed Bulkhead must block the leading body edge at its physical surface");
 		require(!door->isOpen() && !door->isOpening(), "Player must not operate a manual Door");
+		world.pauseSimulation();
+		require(world.setDoorSpeedOverride(door->getTraversalResourceId(), .05f), "Cannot slow Bulkhead opening");
+		require(world.resumeSimulation(), "Cannot resume physical Bulkhead fixture");
 		door->acquireOpenLease();
 		require(door->open(), "Cannot externally open Bulkhead");
-		walk(world, 0, 6.1f);
-		require(door->isOpen(), "Bulkhead must finish opening before Player crosses");
-		walk(world, 1, 2.f);
+		world.setPlayerMovementDirection(1);
+		for (int tick = 0; tick < 2000 && x(world, id) < 4.31f; ++tick)
+		{
+			world.update(core::World::getFixedTimestep());
+			auto actor = world.lookupAgent(id).entity;
+			core::Vector2 min, max; door->getCurrentShape(min, max);
+			if (actor->getGlobalPosition().x + actor->getWidth() * .5f > min.x
+				&& actor->getGlobalPosition().x - actor->getWidth() * .5f < max.x)
+				require(actor->getGlobalPosition().y + actor->getStandingHeight() <= min.y + .0001f,
+					"Player must never intersect the moving Bulkhead bounding box");
+		}
+		require(door->isOpening(), "Player must clear the threshold before full opening when the bounding box permits");
 		require(x(world, id) > 4.f && world.lookupAgent(id).entity->getSector()->getIndex() != left,
-			"Fully open Bulkhead must allow same-Layer Player passage");
+			"Partially open Bulkhead must allow same-Layer Player passage");
 		walk(world, -1, 2.f);
 		require(x(world, id) < 4.f && world.lookupAgent(id).entity->getSector()->getIndex() == left,
 			"Open Bulkhead must allow reverse passage");
 		door->releaseOpenLease();
+		require(door->open(), "Cannot prepare closing Bulkhead fixture");
+		world.setPlayerMovementDirection(0);
+		for (int tick = 0; tick < 2400 && !door->isOpen(); ++tick)
+			world.update(core::World::getFixedTimestep());
+		require(door->isOpen() && door->close(), "Cannot start closing Bulkhead fixture");
+		world.setPlayerMovementDirection(1);
+		bool partialPassage = false;
+		for (int tick = 0; tick < 600 && x(world, id) < 4.31f; ++tick)
+		{
+			world.update(core::World::getFixedTimestep());
+			if (x(world, id) > 3.7f && x(world, id) < 4.3f)
+			{
+				partialPassage = partialPassage || !door->isOpen();
+				require(door->admitsPlayerStandingPassage(*world.lookupAgent(id).entity, 0.f),
+					"Closing leaf must not crush a Player already in its physical threshold");
+			}
+		}
+		require(x(world, id) > 4.3f && partialPassage, "A closing Bulkhead still admits Player while its leaf clears the body");
+		walk(world, 0, 5.f);
+		walk(world, -1, 2.f);
+		require(x(world, id) >= 4.3f - .0001f, "Closing leaf must block reverse motion once the bounding box overlaps Standing");
 	}
 
 	void doorways()

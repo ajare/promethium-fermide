@@ -62,6 +62,12 @@ This includes Room Ladders. When no higher-priority climb or doorway action appl
 a fresh Up press operates one physical Button within effective arm length and its
 Interaction point reach. Buttons require Arms capability, Buttons Mobility and
 Access permissions; they never auto-approach or repeat while Up is held.
+Airlock outside Buttons use Up to call; Left/Right manually enters the open
+entrance, walks inside and exits through the committed opposite Door after the
+normal interlock cycle. Player Bulkhead collision uses the moving leaf's bounding
+box, allowing passage before full opening as soon as the Standing body clears it;
+autonomous Agents retain their fully-open gate. Release stops, retaining capacity and crossing safety;
+there is no automatic alignment or ejection, even in shared autonomous batches.
 Open enclosed Lift/Shuttle Doors also use Up for manual boarding and exit;
 Platform lifts use ordinary Left/Right. While aboard an open stationary vehicle,
 Shift+Up/Down (Lift/Platform lift) or Shift+Left/Right (Shuttle) browses Stop short

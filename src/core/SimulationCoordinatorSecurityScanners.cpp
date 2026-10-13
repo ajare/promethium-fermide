@@ -263,9 +263,14 @@ namespace core
 		}
 		if (entry && (request->mCapacityPosition >= resource.mCapacity
 			|| resource.mOccupants[request->mCapacityPosition] || resource.mAdmissionReservations[request->mCapacityPosition] != id
-			|| chamber.mPhase != SecurityScannerPhase::Boarding)) return;
-		if (!entry && chamber.mPhase != SecurityScannerPhase::Exiting) return;
-		if (!chamber.mDoors[side]->isOpen() || !chamber.mDoors[1 - side]->isClosed() || resource.mCrossingOwners[0]) return;
+			|| (chamber.mPhase != SecurityScannerPhase::Boarding
+				&& !(actor->isPlayerControlled() && chamber.mPhase == SecurityScannerPhase::EntryOpening)))) return;
+		if (!entry && chamber.mPhase != SecurityScannerPhase::Exiting
+			&& !(actor->isPlayerControlled() && chamber.mPhase == SecurityScannerPhase::ExitOpening)) return;
+		bool passable = actor->isPlayerControlled()
+			? chamber.mDoors[side]->admitsPlayerStandingPassage(*actor, actor->getGlobalPosition().y)
+			: chamber.mDoors[side]->isOpen();
+		if (!passable || !chamber.mDoors[1 - side]->isClosed() || resource.mCrossingOwners[0]) return;
 		if (entry && agentForbidsTraversal(actor, TraversalKind::Door)) { denyTraversalRequest(id); return; }
 		actor->mTraversalLocalGoal.reset();
 		resource.mCrossingOwners[0] = id;

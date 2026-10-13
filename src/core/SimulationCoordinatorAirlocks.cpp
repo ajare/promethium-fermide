@@ -151,6 +151,51 @@ namespace core
 		int side = entry ? (request->mSourceSector == resource.mQueueLanes[0].sector ? 0 : 1)
 			: (request->mDestinationSector == resource.mQueueLanes[0].sector ? 0 : 1);
 		bool const occupied = std::any_of(resource.mOccupants.begin(), resource.mOccupants.end(), [](auto owner) { return (bool)owner; });
+		if (actor->isPlayerControlled())
+		{
+			// A Player must already be at a physically open threshold. Never queue,
+			// call, align, or supply an autonomous interior walking target here.
+			if (chamber.mActiveSide != side || chamber.mClosing || !chamber.mDoors[side]->admitsPlayerStandingPassage(*actor, actor->getGlobalPosition().y)
+				|| !chamber.mDoors[1 - side]->isClosed() || !chamber.isCycleComplete()
+				|| resource.mCrossingOwners[0]) return;
+			if (entry)
+			{
+				auto landing = chamber.getStop(1 - side).sector;
+				auto exitDoor = chamber.mDoors[1 - side];
+				auto entrancePose = chamber.mDoors[side]->selectAgentCrossing(*actor, actor->getGlobalPosition().y, true);
+				auto exitPose = exitDoor->selectAgentCrossing(*actor, chamber.getPosition().y, true);
+				if (!entrancePose || !exitPose || entrancePose->pose != Pose::Standing || exitPose->pose != Pose::Standing) return;
+				float half = actor->getPoseEnvelope(Pose::Standing).value_or(Vector2{}).x * .5f;
+				float exitX = side == 0 ? exitDoor->getPosition().x + exitDoor->getSize().x + half
+					: exitDoor->getPosition().x - half;
+				if (!landing || !actor->poseFits(Pose::Standing, landing->getPosition().y + landing->getLevelsHigh() - 1
+					+ landing->getEffectiveTopLevelHeight() - chamber.getPosition().y)
+					|| !mWorld.playerTransportLandingSupported(*landing, {exitX, chamber.getPosition().y}, half)) return;
+				if (!resource.mEnabled || !chamber.mBoardingWindowRemainingTicks
+					|| chamber.mBoardingMembers >= resource.mCapacity
+					|| (resource.mAirlockEntrySide >= 0 && resource.mAirlockEntrySide != side)
+					|| agentForbidsTraversal(actor, TraversalKind::Door) || agentForbidsButtons(actor)
+					|| !mWorld.canAgentEnterAirlock(request->mResource, request->mSourceSector, request->mOwner, true)) return;
+				for (auto waiting : resource.mQueueLanes[side].queue)
+					if (auto earlier = mWorld.mTraversalRequests.find(waiting); earlier
+						&& earlier->mState == TraversalRequestState::Pending
+						&& earlier->mCapacityPosition < resource.mCapacity) return;
+				auto slot = side == 0 ? resource.mCapacity - 1 - chamber.mBoardingMembers : chamber.mBoardingMembers;
+				if (resource.mOccupants[slot] || resource.mAdmissionReservations[slot]) return;
+				resource.mAdmissionReservations[slot] = id;
+				request->mCapacityPosition = slot;
+				resource.mAirlockEntrySide = side;
+				++chamber.mBoardingMembers;
+				if (chamber.mBoardingMembers == resource.mCapacity) chamber.mBoardingWindowRemainingTicks = 0;
+			}
+			else if (side != 1 - resource.mAirlockEntrySide
+				|| std::find(resource.mOccupants.begin(), resource.mOccupants.end(), request->mOwner) == resource.mOccupants.end()) return;
+			actor->mTraversalLocalGoal.reset();
+			resource.mCrossingOwners[0] = id;
+			request->mCrossingLane = 0;
+			grantTraversalRequest(id);
+			return;
+		}
 		if (entry)
 		{
 			// Entry commits the complete interlocked journey. Reject an impossible

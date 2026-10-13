@@ -529,10 +529,12 @@ namespace core
 			auto agent = request ? mWorld.mAgents.find(request->mOwner) : nullptr;
 			if (!request || !agent) { expiredPermits.push_back(permitId); continue; }
 			auto distance = agent->getGlobalPosition().distanceTo(request->mDestinationEndpoint);
-			// A player may deliberately stop or reverse on an admitted climbing segment.
-			// Retain its capacity until it reaches a safe endpoint or is cancelled.
+			auto resource = mWorld.mTraversalResources.find(request->mResource);
+			// Manual climbing and Airlock threshold crossings may deliberately stop
+			// or reverse. Keep their admitted boundary/capacity safe until completion.
 			if (agent->isPlayerControlled() && agent->getSector()
 				&& (request->mEdgeType == EdgeType::Ladder
+					|| (request->mEdgeType == EdgeType::BulkheadDoor && resource && resource->mAirlock)
 					|| (agent->getSector()->getType() == SectorType::Stairwell
 						&& (request->mEdgeType == EdgeType::Stairwell || request->mEdgeType == EdgeType::Location)))
 				&& agent->mTraversalTask && agent->mTraversalTask->permit == permitId)

@@ -407,6 +407,8 @@ namespace core
 		auto const commitsInPlace = request && (request->mEdgeType == EdgeType::Door
 			|| (agent.isPlayerControlled() && (request->mEdgeType == EdgeType::StairwellMount
 				|| (request->mEdgeType == EdgeType::LiftMount && traversalResource && traversalResource->mOpenPlatformLift)))
+			|| (agent.isPlayerControlled() && request->mEdgeType == EdgeType::BulkheadDoor
+				&& traversalResource && traversalResource->mAirlock)
 			|| (request->mEdgeType == EdgeType::Lift && traversalResource
 				&& traversalResource->mLift && !traversalResource->mOpenPlatformLift)
 			|| (request->mEdgeType == EdgeType::Shuttle && traversalResource
@@ -462,7 +464,10 @@ namespace core
 			auto& chamber = *resource.mSecurityScanner;
 			bool entry = destinationSector.get() == &chamber;
 			auto side = entry ? chamber.getEntrySide() : chamber.getExitSide();
-			if (!chamber.isTraversalAvailable() || !chamber.mDoors[side]->isOpen() || !chamber.mDoors[1 - side]->isClosed()) return false;
+			bool passable = agent.isPlayerControlled()
+				? chamber.mDoors[side]->admitsPlayerStandingPassage(agent, agent.getGlobalPosition().y)
+				: chamber.mDoors[side]->isOpen();
+			if (!chamber.isTraversalAvailable() || !passable || !chamber.mDoors[1 - side]->isClosed()) return false;
 			if (entry)
 			{
 				auto slot = request->mCapacityPosition;

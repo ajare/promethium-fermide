@@ -12,6 +12,7 @@
 #include <core/World.h>
 #include <core/Agent.h>
 #include <core/DoorSectorObject.h>
+#include <core/AirlockTransit.h>
 #include <core/YamlSerializer.h>
 #include <cmath>
 
@@ -328,6 +329,44 @@ void checkPlayerLadderKeys(wp::application::State& play, core::World& world) {
   }
 }
 
+void checkPlayerAirlockKeys(wp::application::State& play, core::World& world) {
+  using wp::application::Key; using wp::application::KeyEvent;
+  auto key = [&](Key k, bool pressed) { play._injectKeyInput(pressed ? KeyEvent::Pressed : KeyEvent::Released, k, {}); };
+  core::World fixture("Keyboard Airlock", 12, 2);
+  auto left = fixture.addRoom("Left", 0, 0, 0, 4, 1);
+  auto right = fixture.addRoom("Right", 0, 0, 6, 4, 1);
+  auto index = fixture.addAirlock(0, 0, 4, 2, 1.f);
+  auto original = std::dynamic_pointer_cast<const core::AirlockTransit>(fixture.getSector(index));
+  float x = fixture.lookupInteractionPoint(original->getControl(0)).entity->getPosition().x;
+  fixture.finishBuild(); fixture.pauseSimulation();
+  auto id = fixture.createAgent("Player", left, 0, x);
+  require(fixture.setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}), "Cannot assign Airlock keyboard Player");
+  auto writer = core::YamlSerializer::toString(); core::SerializationWorkData data; data.markSerializedUnmodified = false;
+  fixture.serialize(*writer, data); writer->serialize();
+  auto reader = core::YamlSerializer::fromString(writer->getSerializedString()); reader->deserialize();
+  world.pauseSimulation(); require(world.deserialize(*reader, data), "Cannot install keyboard Airlock"); world.resumeSimulation();
+  auto chamber = std::dynamic_pointer_cast<const core::AirlockTransit>(world.getSector(index));
+  auto actor = world.lookupAgent(id).entity;
+  auto step = [&] {
+    play._update(core::World::getFixedTimestep());
+    require(chamber->getDoor(0)->isClosed() || chamber->getDoor(1)->isClosed(), "Keyboard input must preserve Airlock interlock");
+  };
+  key(Key::UpArrow, true); step(); key(Key::UpArrow, false);
+  for (int i = 0; i < 1200 && !chamber->getDoor(0)->isOpen(); ++i) step();
+  require(actor->getSector()->getIndex() == left && std::abs(actor->getGlobalPosition().x - x) < .001f, "Calling Airlock must not automatically approach");
+  key(Key::RightArrow, true);
+  for (int i = 0; i < 600 && actor->getSector()->getIndex() != index; ++i) step();
+  key(Key::RightArrow, false);
+  require(actor->getSector()->getIndex() == index, "Actual Right must enter called Airlock");
+  auto stopped = actor->getGlobalPosition();
+  for (int i = 0; i < 4000 && !chamber->getDoor(1)->isOpen(); ++i) step();
+  require(chamber->getDoor(1)->isOpen() && actor->getGlobalPosition().distanceTo(stopped) < .001f, "Cycling must retain stopped Player and open opposite exit");
+  key(Key::RightArrow, true);
+  for (int i = 0; i < 1200 && actor->getSector()->getIndex() != right; ++i) step();
+  key(Key::RightArrow, false);
+  require(actor->getSector()->getIndex() == right && world.getSimulationSnapshot().airlocks.front().occupants.empty(), "Actual Right must manually exit and release Airlock capacity");
+}
+
 void checkPlayerTransportKeys(wp::application::State& play, core::World& world) {
   using wp::application::Key; using wp::application::KeyEvent;
   auto key = [&](Key k, bool pressed, bool shift = false) {
@@ -531,6 +570,7 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
         checkPlayerLadderKeys(*child, *map->getWorld());
         checkPlayerButtonKeys(*child, *map->getWorld());
         checkPlayerTransportKeys(*child, *map->getWorld());
+        checkPlayerAirlockKeys(*child, *map->getWorld());
         auto const suspendTick = map->getWorld()->getSimulationTick();
         child->_suspend(true, true, true);
         child->_update(1.0f);

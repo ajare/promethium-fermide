@@ -492,6 +492,23 @@ namespace core
 					presence = resource.mAutomaticPresenceObserved;
 				}
 			}
+			// Player same-Layer walking has no autonomous threshold task. Protect
+			// its physical body while under an already moving/open Bulkhead leaf;
+			// this is obstruction safety, not permission to open a closed Door.
+			if (!resource.mDoor->isClosed())
+				if (auto bulkhead = dynamic_pointer_cast<BulkheadDoor>(resource.mDoor))
+					for (int side = 0; side < CORE_NUM_SIDES; ++side)
+						if (auto sector = bulkhead->getSideSector(side))
+							for (auto actor : sector->getAgents())
+							{
+								if (!actor->isPlayerControlled()) continue;
+								auto position = actor->getGlobalPosition();
+								auto envelope = actor->getPoseEnvelope(Pose::Standing);
+								if (envelope && abs(position.y - bulkhead->getPosition().y) < .001f
+									&& position.x + envelope->x * .5f > bulkhead->getPosition().x + .0001f
+									&& position.x - envelope->x * .5f < bulkhead->getPosition().x + bulkhead->getSize().x - .0001f)
+									obstruction = true;
+							}
 			for (auto const& [sensor, observation] : resource.mSensorObservations)
 			{
 				(void)sensor;

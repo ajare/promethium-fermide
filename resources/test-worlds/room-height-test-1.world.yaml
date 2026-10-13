@@ -163,20 +163,57 @@ construction:
     x: 14
     cellsWide: 1
     levelsHigh: 6
-    stopOffsets: [0, 1, 2, 3, 4, 5]
+    stopOffsets: [0, 2, 3, 4, 5]
     capacity: 2
     minimumDwellSeconds: 0.75
     maximumBoardingSeconds: 5
     initialStop: 0
     stopShortNames:
       - LG
-      - G
       - 1
       - 2
       - 3
       - 4
     destinationPermissionRequirements:
       []
+  - type: corridor
+    layer: 0
+    y: 4
+    x: 7
+    cellsWide: 3
+    levelsHigh: 1
+  - type: airlock
+    layer: 0
+    y: 4
+    x: 10
+    cellsWide: 2
+    cycleSeconds: 3
+    leftWasOpen: false
+    rightWasOpen: false
+  - type: corridor
+    layer: 0
+    y: 4
+    x: 4
+    cellsWide: 3
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 4
+    x: 0
+    cellsWide: 2
+    levelsHigh: 1
+  - type: bulkheadDoor
+    layer: 0
+    y: 4
+    x: 7
+    side: left
+    foreControl: true
+    backControl: true
+    activationMode: remoteControlled
+    holdOpenSeconds: 5
+    crossingLanes: 1
+    automaticSensorDistance: 0.5
+    hasSpeedOverride: false
 agentGroups:
   []
 accessPermissions:
@@ -205,6 +242,6 @@ agents:
         revision: 1
         configuration:
           []
-    sector: 2
-    localX: 0.890625
+    sector: 11
+    localX: 1.5625
     localY: 0
