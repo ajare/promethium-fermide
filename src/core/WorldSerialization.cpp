@@ -907,7 +907,13 @@ namespace core
 		// dropped. The dispatch demand signal, target, committed and
 		// shortfall scalars and the alarms stay runtime-only, reconstructed
 		// on load from the authored mode and the World tick.
-		serializer.writeUint32("version", 91);
+		// Schema 92 adds the protected critical service flag on coolant
+		// loops and chillers (#416); a pre-92 document carrying
+		// `criticalService` is refused rather than silently dropped. The
+		// per-tick protected demand, supply, unmet minima and reasons stay
+		// runtime-only, reconstructed from the authored flags and the
+		// World tick.
+		serializer.writeUint32("version", 92);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -1134,6 +1140,12 @@ namespace core
 					serializer.writeDouble("ratedFlowKgPerS", loop.ratedFlowKgPerS);
 					serializer.writeDouble("exchangerConductanceKWPerK", loop.exchangerConductanceKWPerK);
 					serializer.writeDouble("heaterCapacityKW", loop.heaterCapacityKW);
+					// #416: the protected flag travels only when set, so a
+					// plain loop never carries a field older readers (and
+					// older-version guard tests) would trip over; a document
+					// that does carry it must be schema 92 or newer.
+					if (loop.criticalService)
+						serializer.writeBool("criticalService", true);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -1156,6 +1168,10 @@ namespace core
 					serializer.writeDouble("auxiliaryPowerKW", chiller.auxiliaryPowerKW);
 					serializer.writeDouble("chilledSetpointC", chiller.chilledSetpointC);
 					serializer.writeDouble("maxCondensingTemperatureC", chiller.maxCondensingTemperatureC);
+					// #416: the protected flag travels only when set; see
+					// the coolant loop note above.
+					if (chiller.criticalService)
+						serializer.writeBool("criticalService", true);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -2623,7 +2639,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 91)
+		if (version < 1 || version > 92)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2634,6 +2650,16 @@ namespace core
 			serializer.beginMap("stationSystems");
 			stationSettings.enabled = serializer.readBool("enabled");
 			stationSettings.observationIntervalSeconds = serializer.readFloat("observationIntervalSeconds");
+			// Guard ordering: the dispatch mode field is read before the
+			// cultures array, so a pre-89 document carrying algae cultures
+			// would otherwise be refused with the dispatch schema message
+			// and never name the feature it actually predates. Check the
+			// algae schema for algae-carrying documents up front so the
+			// refusal identifies the right guard (#416 test-hygiene fix
+			// for the pre-89 refusal broken by the #415 field order).
+			if (version < 89 && serializer.hasField("algaeCultures"))
+				throw SerializationException(
+					"Station algae cultures require World schema 89");
 			// #415: the dispatch controller mode. A pre-91 document
 			// carrying it is refused rather than silently dropped; an
 			// unknown mode string is refused as a malformed setting.
@@ -2902,6 +2928,15 @@ namespace core
 					loop.ratedFlowKgPerS = serializer.readDouble("ratedFlowKgPerS");
 					loop.exchangerConductanceKWPerK = serializer.readDouble("exchangerConductanceKWPerK");
 					loop.heaterCapacityKW = serializer.readDouble("heaterCapacityKW");
+					// #416: the protected critical service flag. A pre-92
+					// document carrying it is refused rather than silently
+					// dropped.
+					if (serializer.hasField("criticalService"))
+					{
+						if (version < 92) throw SerializationException(
+							"Protected station service flags require World schema 92");
+						loop.criticalService = serializer.readBool("criticalService");
+					}
 					stationSettings.coolantLoops.push_back(std::move(loop));
 					serializer.endMap();
 				}
@@ -2925,6 +2960,15 @@ namespace core
 					chiller.auxiliaryPowerKW = serializer.readDouble("auxiliaryPowerKW");
 					chiller.chilledSetpointC = serializer.readDouble("chilledSetpointC");
 					chiller.maxCondensingTemperatureC = serializer.readDouble("maxCondensingTemperatureC");
+					// #416: the protected critical service flag. A pre-92
+					// document carrying it is refused rather than silently
+					// dropped.
+					if (serializer.hasField("criticalService"))
+					{
+						if (version < 92) throw SerializationException(
+							"Protected station service flags require World schema 92");
+						chiller.criticalService = serializer.readBool("criticalService");
+					}
 					stationSettings.chillers.push_back(std::move(chiller));
 					serializer.endMap();
 				}

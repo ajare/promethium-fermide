@@ -214,7 +214,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 91", "version: 64");
+		replaceAll(legacy, "version: 92", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -231,14 +231,14 @@ namespace
 			"authored store fields missing or live inventory leaked");
 		bool refused = false;
 		auto staleStores = withField;
-		replaceAll(staleStores, "version: 91", "version: 65");
+		replaceAll(staleStores, "version: 92", "version: 65");
 		auto const staleStoresPath = directory / "stale-stores.world.yaml";
 		writeFile(staleStoresPath, staleStores);
 		try { (void)core::loadWorldDocument(staleStoresPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-66 document carrying resource stores was silently accepted");
 		auto staleTransfers = withField;
-		replaceAll(staleTransfers, "version: 91", "version: 66");
+		replaceAll(staleTransfers, "version: 92", "version: 66");
 		auto const staleTransfersPath = directory / "stale-transfers.world.yaml";
 		writeFile(staleTransfersPath, staleTransfers);
 		refused = false;
@@ -246,7 +246,7 @@ namespace
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-67 document carrying resource transfers was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 91", "version: 64");
+		replaceAll(stale, "version: 92", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
 		refused = false;
@@ -384,7 +384,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 91", "version: 67");
+			replaceAll(stale, "version: 92", "version: 67");
 			auto const stalePath = directory / "stale-compounds.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -493,7 +493,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 91", "version: 69");
+			replaceAll(stale, "version: 92", "version: 69");
 			auto const stalePath = directory / "stale-batteries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -615,7 +615,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 91", "version: 68");
+			replaceAll(stale, "version: 92", "version: 68");
 			auto const stalePath = directory / "stale-power.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -742,7 +742,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 91", "version: 70");
+			replaceAll(stale, "version: 92", "version: 70");
 			auto const stalePath = directory / "stale-deliveries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -858,7 +858,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 91", "version: 81");
+			replaceAll(stale, "version: 92", "version: 81");
 			auto const stalePath = directory / "stale-waste-ejections.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -995,7 +995,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 91", "version: 87");
+			replaceAll(stale, "version: 92", "version: 87");
 			auto const stalePath = directory / "stale-containment.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1123,7 +1123,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 91", "version: 71");
+			replaceAll(stale, "version: 92", "version: 71");
 			auto const stalePath = directory / "stale-thermal.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1261,7 +1261,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 91", "version: 80");
+			replaceAll(stale, "version: 92", "version: 80");
 			auto const stalePath = directory / "stale-buffer.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1402,7 +1402,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 91", "version: 72");
+			replaceAll(stale, "version: 92", "version: 72");
 			auto const stalePath = directory / "stale-coolant.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1565,7 +1565,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 91", "version: 73");
+			replaceAll(stale, "version: 92", "version: 73");
 			auto const stalePath = directory / "stale-chillers.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1713,7 +1713,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 91", "version: 74");
+			replaceAll(stale, "version: 92", "version: 74");
 			auto const stalePath = directory / "stale-generators.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1883,7 +1883,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 91", "version: 89");
+			replaceAll(stale, "version: 92", "version: 89");
 			auto const stalePath = directory / "stale-outages.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -2034,7 +2034,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 91", "version: 75");
+			replaceAll(stale, "version: 92", "version: 75");
 			auto const stalePath = directory / "stale-atmospheres.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -2205,7 +2205,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 91", "version: 76");
+			replaceAll(stale, "version: 92", "version: 76");
 			auto const stalePath = directory / "stale-crews.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -2395,7 +2395,7 @@ void waterFiles(smoke::Context const& context)
 	// A pre-78 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 91", "version: 77");
+		replaceAll(stale, "version: 92", "version: 77");
 		auto const stalePath = directory / "stale-water.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -2569,7 +2569,7 @@ void gasFiles(smoke::Context const& context)
 	// A pre-79 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 91", "version: 78");
+		replaceAll(stale, "version: 92", "version: 78");
 		auto const stalePath = directory / "stale-gas.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -2725,7 +2725,7 @@ void fuelCellFiles(smoke::Context const& context)
 	// A pre-80 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 91", "version: 79");
+		replaceAll(stale, "version: 92", "version: 79");
 		auto const stalePath = directory / "stale-fuelcells.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -2894,7 +2894,7 @@ void carbonRecoveryFiles(smoke::Context const& context)
 	// A pre-83 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 91", "version: 82");
+		replaceAll(stale, "version: 92", "version: 82");
 		auto const stalePath = directory / "stale-carbon.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -3103,7 +3103,7 @@ void nutrientRecoveryFiles(smoke::Context const& context)
 	// refused rather than silently re-defaulted.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 91", "version: 84");
+		replaceAll(stale, "version: 92", "version: 84");
 		auto const stalePath = directory / "stale-nutrient.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;

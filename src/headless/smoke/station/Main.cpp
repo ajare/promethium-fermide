@@ -145,7 +145,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 91"), 11, "version: 65");
+		text.replace(text.find("version: 92"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -11799,14 +11799,20 @@ void buffers(smoke::Context const&)
 			// store that the normal processor already declared (#408).
 			{
 				auto hStores = settings.stores;
-				hStores.push_back(compoundStore("h_waste", 100.0, 10.0, feedComposition));
-				hStores.push_back(plainStore("h_oxygen", 100.0, 10.0));
-				hStores.push_back(plainStore("h_water", 100.0, 10.0));
-				hStores.push_back(plainStore("h_media", 100.0, 10.0));
-				hStores.push_back(plainStore("h_nutrients", 100.0, 0.0));
-				hStores.push_back(plainStore("h_recoveredWater", 100.0, 0.0));
-				hStores.push_back(plainStore("h_co2", 100.0, 0.0));
-				hStores.push_back(plainStore("h_residue", 100.0, 0.0));
+				// The hazardous processor's chain stores must be authored
+				// hazardous-class: a process may only touch stores of its
+				// own hazard class (#412), so the fixture declares them
+				// as the hazardous-stream stores the test means them to be.
+				auto hazardousStore = [](core::ResourceStoreSettings store)
+				{ store.hazardClass = "hazardous"; return store; };
+				hStores.push_back(hazardousStore(compoundStore("h_waste", 100.0, 10.0, feedComposition)));
+				hStores.push_back(hazardousStore(plainStore("h_oxygen", 100.0, 10.0)));
+				hStores.push_back(hazardousStore(plainStore("h_water", 100.0, 10.0)));
+				hStores.push_back(hazardousStore(plainStore("h_media", 100.0, 10.0)));
+				hStores.push_back(hazardousStore(plainStore("h_nutrients", 100.0, 0.0)));
+				hStores.push_back(hazardousStore(plainStore("h_recoveredWater", 100.0, 0.0)));
+				hStores.push_back(hazardousStore(plainStore("h_co2", 100.0, 0.0)));
+				hStores.push_back(hazardousStore(plainStore("h_residue", 100.0, 0.0)));
 				core::StationSystemsSettings hazardSettings;
 				hazardSettings.enabled = true;
 				hazardSettings.stores = hStores;
@@ -14084,9 +14090,9 @@ void buffers(smoke::Context const&)
 			// than silently dropping the cultures.
 			{
 				auto stale = text;
-				size_t const position = stale.find("version: 91");
+				size_t const position = stale.find("version: 92");
 				require(position != std::string::npos, "the fixture document carries no version line");
-				stale.replace(position, std::string("version: 91").size(), "version: 88");
+				stale.replace(position, std::string("version: 92").size(), "version: 88");
 				require(stale.find("algaeCultures") != std::string::npos,
 					"the fixture document carries no algae cultures to test the guard with");
 				bool refused = false;
@@ -14733,13 +14739,13 @@ void dispatch(smoke::Context const&)
 			== core::StationDispatchMode::Automatic,
 			"automatic dispatch mode did not survive the round trip");
 		auto stale = text;
-		require(stale.find("version: 91") != std::string::npos,
+		require(stale.find("version: 92") != std::string::npos,
 			"the fixture document carries no version line");
 		require(stale.find("dispatchMode: automatic") != std::string::npos,
 			"the fixture document lost the dispatch mode before the guard test");
 		// A pre-91 document that still carries the dispatch mode is refused
 		// rather than silently dropping the controller setting.
-		stale = replaceAll(stale, "version: 91", "version: 90");
+		stale = replaceAll(stale, "version: 92", "version: 90");
 		bool refused = false;
 		try
 		{
@@ -14782,6 +14788,572 @@ void dispatch(smoke::Context const&)
 	}
 }
 
+// #416: protected cross-system service dependencies. Containment
+// circulation, biological essential circulation and authored critical
+// cooling are Critical station services: they are admitted from the
+// actual generation-and-battery pool ahead of every discretionary
+// external load, so shedding experiments or lighting never cuts the
+// support services protected loads depend on. What the pool cannot
+// deliver stays explicit unmet critical minimum with its reason;
+// generator shutdown-cooling stays visible even when the machine's
+// electrical output has stopped. Everything runs through the World
+// tick/snapshot/event seam with the bundled Lua sandbox auditing the
+// same rules inside each private instance.
+void protectedServices(smoke::Context const&)
+{
+	auto const closeTo = [](double actual, double expected, double tolerance = 1e-6)
+	{ return std::abs(actual - expected) <= tolerance; };
+	auto const sawEvent = [](core::World& world, std::string const& needle)
+	{
+		for (auto const& event : world.getStationSystemsEvents())
+			if (event.message.find(needle) != std::string::npos) return true;
+		return false;
+	};
+	auto const constantProfile = [](double level)
+	{
+		core::ProfileSettings profile;
+		profile.constantLevel = level;
+		return profile;
+	};
+	auto const runOrDiagnose = [](core::World& world, uint64_t ticks, char const* what)
+	{
+		if (world.advanceTicks(ticks)) return;
+		auto const diagnostics = world.getStationSystemsDiagnostics();
+		std::fprintf(stderr, "%s failed: %s\n", what,
+			diagnostics.empty() ? "(no Station diagnostic)" : diagnostics.back().message.c_str());
+		throw std::runtime_error(std::string(what) + " run failed");
+	};
+	auto cropComposition = []()
+	{
+		core::ResourceCompositionSettings composition;
+		composition.moisture = 0.0;
+		composition.nutrientNitrogen = 0.05;
+		composition.atmosphericNitrogen = 0.0;
+		composition.phosphorus = 0.02;
+		composition.potassium = 0.03;
+		composition.otherMinerals = 0.05;
+		composition.energyKJPerKgDry = 1700.0;
+		return composition;
+	};
+	auto massStore = [](std::string id, double capacity, double starting,
+		std::string hazard = "normal")
+	{
+		core::ResourceStoreSettings settings;
+		settings.id = std::move(id);
+		settings.unit = "kg";
+		settings.capacity = capacity;
+		settings.startingQualified = starting;
+		settings.hazardClass = std::move(hazard);
+		return settings;
+	};
+	auto habitat = []()
+	{
+		core::AtmosphereSettings settings;
+		settings.id = "habitat";
+		settings.hazardClass = "normal";
+		settings.volumeM3 = 100.0;
+		settings.startingOxygenKg = 40.0;
+		settings.startingNitrogenKg = 80.0;
+		settings.startingCarbonDioxideKg = 5.0;
+		settings.startingWaterVapourKg = 1.0;
+		settings.startingTemperatureC = 22.0;
+		settings.thermalCapacityKJPerK = 20000.0;
+		settings.minPressureKPa = 1.0;
+		settings.maxPressureKPa = 200.0;
+		return settings;
+	};
+	auto cropRig = [&](double lampKW, double circulationKW)
+	{
+		core::CropPopulationSettings settings;
+		settings.id = "canopy";
+		settings.atmosphereId = "habitat";
+		settings.waterStoreId = "irrigation";
+		settings.nitrogenStoreId = "fertN";
+		settings.phosphorusStoreId = "fertP";
+		settings.potassiumStoreId = "fertK";
+		settings.mineralsStoreId = "fertMin";
+		settings.composition = cropComposition();
+		settings.growingAreaM2 = 10.0;
+		settings.maxBiomassDensityKgPerM2 = 2.0;
+		settings.initialBiomassKg = 1.0;
+		settings.lampRatedKW = lampKW;
+		settings.illuminationProfile = constantProfile(1.0);
+		settings.circulationPowerKW = circulationKW;
+		settings.growthYieldKgPerKWh = 2.0;
+		settings.respirationPerHour = 0.5;
+		settings.minGrowingTemperatureC = 10.0;
+		settings.maxGrowingTemperatureC = 35.0;
+		return settings;
+	};
+	auto cropStores = [&]()
+	{
+		std::vector<core::ResourceStoreSettings> stores;
+		stores.push_back(massStore("irrigation", 200.0, 150.0));
+		stores.push_back(massStore("fertN", 10.0, 5.0));
+		stores.push_back(massStore("fertP", 10.0, 5.0));
+		stores.push_back(massStore("fertK", 10.0, 5.0));
+		stores.push_back(massStore("fertMin", 10.0, 5.0));
+		return stores;
+	};
+	auto discretionaryLoad = [&](std::string id, double demandKW, double maxCurtailment)
+	{
+		core::EquipmentLoadSettings settings;
+		settings.id = std::move(id);
+		settings.electricalDemandKW = demandKW;
+		settings.operatingProfile = constantProfile(1.0);
+		settings.heatOutputKW = 0.0;
+		settings.thermalClass = "low";
+		settings.coolingDisposition = core::StationCoolingDisposition::Exported;
+		settings.criticalFloorKW = 0.0;
+		settings.priority = 10;
+		settings.maxCurtailment = maxCurtailment;
+		return settings;
+	};
+	auto solarArray = [&](double capacityKW)
+	{
+		core::SolarArraySettings settings;
+		settings.id = "field";
+		settings.capacityKW = capacityKW;
+		settings.illumination = constantProfile(1.0);
+		return settings;
+	};
+	auto reservoir = [](std::string id, std::string thermalClass, double startingC)
+	{
+		core::ThermalReservoirSettings settings;
+		settings.id = std::move(id);
+		settings.thermalClass = std::move(thermalClass);
+		settings.heatCapacityKJPerK = 10000.0;
+		settings.startingTemperatureC = startingC;
+		settings.minTemperatureC = -50.0;
+		settings.maxTemperatureC = 200.0;
+		return settings;
+	};
+	auto hazardousLoop = [](std::string id, double pumpKW, double heaterKW, double startingC)
+	{
+		core::CoolantLoopSettings settings;
+		settings.id = std::move(id);
+		settings.hazardClass = "hazardous";
+		settings.reservoirId = "sink";
+		settings.coolantCapacityKg = 100.0;
+		settings.startingCoolantKg = 100.0;
+		settings.specificHeatKJPerKgK = 4.0;
+		settings.startingTemperatureC = startingC;
+		settings.freezeProtectionSetpointC = 5.0;
+		settings.pumpPowerKW = pumpKW;
+		settings.ratedFlowKgPerS = 1.0;
+		settings.exchangerConductanceKWPerK = 0.0;
+		settings.heaterCapacityKW = heaterKW;
+		return settings;
+	};
+	auto configure = [](core::World& world, core::StationSystemsSettings settings, char const* what)
+	{
+		std::string diagnostic;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 1.0f;
+		require(world.configureStationSystems(settings, false, &diagnostic),
+			(std::string(what) + " refused: " + diagnostic).c_str());
+	};
+
+	// Scenario 1: lighting curtailment with preserved circulation. The
+	// sun leaves less than the canopy's lamp plus the discretionary
+	// experiment wants; the essential circulation is admitted whole from
+	// the actual pool ahead of the experiment, and only the discretionary
+	// lamp is curtailed. Before the protection the experiment's grant
+	// could eat into the circulation draw; now it never can.
+	{
+		core::World world("ProtCrop", 2, 2);
+		world.pauseSimulation();
+		world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = cropStores();
+		settings.atmospheres = { habitat() };
+		settings.cropPopulations = { cropRig(4.0, 1.0) };
+		settings.solarArrays = { solarArray(4.5) };
+		settings.equipmentLoads = { discretionaryLoad("experiment", 4.0, 0.5) };
+		configure(world, settings, "lighting curtailment rig");
+		world.resumeSimulation();
+		runOrDiagnose(world, 10, "lighting curtailment");
+		auto const& snap = world.getStationSystemsSnapshot();
+		auto const& crop = snap.cropPopulations[0];
+		require(closeTo(crop.lastCirculationRequestedKW, 1.0),
+			"the canopy circulation demand changed");
+		require(closeTo(crop.lastCirculationSuppliedKW, 1.0),
+			"the discretionary experiment cut into the protected biological circulation");
+		require(crop.lastLightSuppliedKW + 1e-9 < crop.lastLightRequestedKW,
+			"the discretionary lamp was not curtailed although the pool was short");
+		require(closeTo(snap.power.loads[0].suppliedKW, 3.5),
+			"the discretionary load did not take exactly the pool the protected draw left");
+		require(closeTo(snap.power.protectedDemandKW, 1.0),
+			"the protected demand total is wrong");
+		require(closeTo(snap.power.protectedSuppliedKW, 1.0)
+			&& closeTo(snap.power.protectedUnmetKW, 0.0),
+			"the protected supply total is wrong");
+		require(!snap.power.protectedUnmet,
+			"the protected alarm raised with no unmet protected demand");
+	}
+
+	// Scenario 2: hazardous shortage. The hazardous containment loop's
+	// pump and freeze heater are protected by the loop's hazard class
+	// alone. With a pool that covers them the containment runs whole
+	// while the discretionary load is squeezed; with a pool below the
+	// protected minimum the shortfall stays explicit as unmet critical
+	// demand with the reason named and the event logged - never silently
+	// reclassified as permissible curtailment.
+	{
+		core::World world("ProtHaz", 2, 2);
+		world.pauseSimulation();
+		world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		settings.thermalReservoirs = { reservoir("sink", "low", 20.0) };
+		settings.coolantLoops = { hazardousLoop("hazLoop", 1.0, 0.5, 0.0) };
+		settings.solarArrays = { solarArray(3.0) };
+		settings.equipmentLoads = { discretionaryLoad("experiment", 3.0, 0.5) };
+		configure(world, settings, "hazardous shortage rig");
+		world.resumeSimulation();
+		runOrDiagnose(world, 10, "hazardous shortage");
+		auto const& snap = world.getStationSystemsSnapshot();
+		auto const& loop = snap.coolantLoops[0];
+		require(closeTo(loop.pumpSuppliedKW, 1.0) && closeTo(loop.heaterSuppliedKW, 0.5),
+			"the hazardous containment circulation was not protected ahead of the experiment");
+		require(closeTo(loop.circulationFraction, 1.0),
+			"the protected hazardous loop did not circulate fully");
+		require(closeTo(snap.power.protectedDemandKW, 1.5)
+			&& closeTo(snap.power.protectedSuppliedKW, 1.5),
+			"the containment protection totals are wrong");
+		require(!snap.power.protectedUnmet,
+			"the containment alarm raised while the pool covered the protected draw");
+	}
+	{
+		core::World world("ProtHazTight", 2, 2);
+		world.pauseSimulation();
+		world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		settings.thermalReservoirs = { reservoir("sink", "low", 20.0) };
+		settings.coolantLoops = { hazardousLoop("hazLoop", 1.0, 0.5, 0.0) };
+		settings.solarArrays = { solarArray(1.0) };
+		settings.equipmentLoads = { discretionaryLoad("experiment", 3.0, 0.5) };
+		configure(world, settings, "tight hazardous rig");
+		world.resumeSimulation();
+		runOrDiagnose(world, 10, "tight hazardous");
+		auto const& snap = world.getStationSystemsSnapshot();
+		auto const& loop = snap.coolantLoops[0];
+		require(closeTo(loop.pumpSuppliedKW, 1.0),
+			"the containment pump lost supply even though the pool covered it first");
+		require(closeTo(loop.heaterSuppliedKW, 0.0),
+			"the freeze heater drew beyond the pool the protected pass left");
+		require(snap.power.protectedUnmet,
+			"the protected shortfall alarm did not raise under the tight pool");
+		require(closeTo(snap.power.protectedUnmetKW, 0.5),
+			"the unmet protected critical minimum is not the freeze-heater remainder");
+		require(sawEvent(world, "Protected containment-circulation 'hazLoop' unmet"),
+			"the protected containment shortfall was not announced");
+		require(snap.power.protectedServices[0].reason.find("pool") != std::string::npos,
+			"the unmet protected service does not name the binding pool reason");
+		require(closeTo(snap.power.loads[0].suppliedKW, 0.0),
+			"the discretionary load took power ahead of the protected containment draw");
+	}
+
+	// Scenario 3: generator cooling shortfall and shutdown cooling.
+	// A generator whose sink is already at the maximum sink temperature
+	// cannot run at all - the cooling shortfall is explicit - while the
+	// biological circulation stays protected through it.
+	{
+		core::World world("ProtGenCold", 2, 2);
+		world.pauseSimulation();
+		world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = cropStores();
+		core::ResourceStoreSettings diesel;
+		diesel.id = "diesel";
+		diesel.unit = "kWh";
+		diesel.capacity = 100.0;
+		diesel.startingQualified = 50.0;
+		settings.stores.push_back(diesel);
+		settings.atmospheres = { habitat() };
+		settings.cropPopulations = { cropRig(1.0, 1.0) };
+		settings.thermalReservoirs = { reservoir("hot", "generation", 95.0) };
+		core::GeneratorSettings generator;
+		generator.id = "gen";
+		generator.fuelStoreId = "diesel";
+		generator.thermalClass = "generation";
+		generator.heatSinkId = "hot";
+		generator.ratedOutputKW = 5.0;
+		generator.efficiency = 0.5;
+		generator.maxRampKWPerSecond = 5.0;
+		generator.commandedOutputKW = 5.0;
+		generator.startupPowerKW = 0.0;
+		generator.startupSeconds = 0.0;
+		generator.shutdownHeatKW = 1.0;
+		generator.shutdownSeconds = 10.0;
+		generator.maxSinkTemperatureC = 90.0;
+		settings.generators = { generator };
+		settings.solarArrays = { solarArray(1.5) };
+		configure(world, settings, "generator cooling shortfall rig");
+		world.resumeSimulation();
+		runOrDiagnose(world, 10, "generator cooling shortfall");
+		auto const& snap = world.getStationSystemsSnapshot();
+		require(!snap.power.generators[0].coolingAvailable,
+			"the generator reported qualified cooling into an over-hot sink");
+		require(closeTo(snap.power.generators[0].outputKW, 0.0),
+			"the generator produced output without qualified cooling");
+		require(snap.power.generators[0].blockReason.find("cooling") != std::string::npos,
+			"the generator block reason does not name the cooling shortfall");
+		require(closeTo(snap.cropPopulations[0].lastCirculationSuppliedKW, 1.0),
+			"the biological circulation was not protected through the generator cooling shortfall");
+		require(!snap.power.protectedUnmet,
+			"the protected alarm raised while the pool covered the circulation");
+	}
+
+	// Scenario 3b: shutdown cooling stays a protected obligation after
+	// the electrical output stops. The generator burns out its fuel and
+	// trips to Shutdown; the decay heat keeps booking and the protected
+	// service account shows the standing shutdown-cooling obligation
+	// while output is zero - stopping generation never erases the heat.
+	{
+		core::World world("ProtGenShutdown", 2, 2);
+		world.pauseSimulation();
+		world.finishBuild();
+		core::StationSystemsSettings settings;
+		core::ResourceStoreSettings starveDiesel;
+		starveDiesel.id = "diesel";
+		starveDiesel.unit = "kWh";
+		starveDiesel.capacity = 100.0;
+		starveDiesel.startingQualified = 0.005;
+		settings.stores = { starveDiesel };
+		settings.thermalReservoirs = { reservoir("hot", "generation", 20.0) };
+		core::GeneratorSettings generator;
+		generator.id = "gen";
+		generator.fuelStoreId = "diesel";
+		generator.thermalClass = "generation";
+		generator.heatSinkId = "hot";
+		generator.ratedOutputKW = 5.0;
+		generator.efficiency = 0.5;
+		generator.maxRampKWPerSecond = 5.0;
+		generator.commandedOutputKW = 5.0;
+		generator.startupPowerKW = 0.0;
+		generator.startupSeconds = 0.0;
+		generator.shutdownHeatKW = 2.0;
+		generator.shutdownSeconds = 60.0;
+		generator.maxSinkTemperatureC = 90.0;
+		settings.generators = { generator };
+		settings.solarArrays = { solarArray(0.0) };
+		configure(world, settings, "shutdown cooling rig");
+		world.resumeSimulation();
+		runOrDiagnose(world, 240, "shutdown cooling");
+		auto const& snap = world.getStationSystemsSnapshot();
+		require(snap.power.generators[0].phase == core::StationGeneratorPhase::Shutdown,
+			"the fuel-starved generator did not enter Shutdown");
+		require(closeTo(snap.power.generators[0].outputKW, 0.0),
+			"the generator still reports electrical output after the fuel ran out");
+		require(snap.power.generators[0].coolingRequired,
+			"the shutdown obligation stopped with the electrical output");
+		bool sawShutdownCooling = false;
+		for (auto const& service : snap.power.protectedServices)
+		{
+			if (service.kind != "shutdown-cooling" || service.id != "gen") continue;
+			sawShutdownCooling = true;
+			require(service.requestedKW > 0.0
+				&& closeTo(service.unmetKW, 0.0, 1e-9),
+				"the shutdown-cooling protected account is not the booked decay heat");
+		}
+		require(sawShutdownCooling,
+			"the standing shutdown-cooling obligation is not exposed as a protected service");
+	}
+
+	// Scenario 4: microbial loss under coordinated operation. The
+	// microbial digester competes for the same pool as everything else
+	// and is not itself protected; under a tight pool its work is
+	// curtailed while the containment circulation ahead of it stays
+	// whole - the shortage lands on the discretionary process, never
+	// on the protected support services.
+	{
+		core::World world("ProtMicrobial", 2, 2);
+		world.pauseSimulation();
+		world.finishBuild();
+		core::ResourceCompositionSettings feedComposition;
+		feedComposition.moisture = 0.9;
+		feedComposition.nutrientNitrogen = 0.05;
+		feedComposition.atmosphericNitrogen = 0.02;
+		feedComposition.phosphorus = 0.02;
+		feedComposition.potassium = 0.02;
+		feedComposition.otherMinerals = 0.01;
+		feedComposition.energyKJPerKgDry = 8000.0;
+		core::ResourceStoreSettings feed;
+		feed.id = "h_waste";
+		feed.unit = "kg";
+		feed.capacity = 100.0;
+		feed.startingQualified = 50.0;
+		feed.hazardClass = "hazardous";
+		feed.composition = feedComposition;
+		core::StationSystemsSettings settings;
+		settings.stores = { feed,
+			massStore("h_oxygen", 100.0, 50.0, "hazardous"),
+			massStore("h_water", 100.0, 50.0, "hazardous"),
+			massStore("h_media", 100.0, 50.0, "hazardous"),
+			massStore("h_nutrients", 100.0, 0.0, "hazardous"),
+			massStore("h_recoveredWater", 100.0, 0.0, "hazardous"),
+			massStore("h_co2", 100.0, 0.0, "hazardous"),
+			massStore("h_residue", 100.0, 0.0, "hazardous"),
+			massStore("ballast", 10.0, 1.0) };
+		settings.thermalReservoirs = { reservoir("sink", "low", 20.0) };
+		settings.coolantLoops = { hazardousLoop("hazLoop", 1.0, 0.0, 20.0) };
+		core::MicrobialProcessorSettings digester;
+		digester.id = "digester";
+		digester.hazardClass = "hazardous";
+		digester.feedStoreId = "h_waste";
+		digester.oxygenStoreId = "h_oxygen";
+		digester.waterStoreId = "h_water";
+		digester.consumableStoreId = "h_media";
+		digester.nutrientStoreId = "h_nutrients";
+		digester.recoveredWaterStoreId = "h_recoveredWater";
+		digester.co2StoreId = "h_co2";
+		digester.residueStoreId = "h_residue";
+		digester.thermalClass = "low";
+		digester.heatSinkId = "sink";
+		digester.rateKgPerS = 0.001;
+		digester.specificEnergyKWhPerKgFeed = 2.0;
+		digester.oxygenPerKgFeedKg = 0.8;
+		digester.processWaterPerKgFeedKg = 0.5;
+		digester.consumablePerKgFeed = 0.01;
+		digester.co2PerKgFeedKg = 0.3;
+		digester.nitrogenRecovery = 0.8;
+		digester.phosphorusRecovery = 0.8;
+		digester.potassiumRecovery = 0.8;
+		digester.mineralsRecovery = 0.7;
+		digester.waterRecovery = 0.7;
+		digester.reactionHeatKJPerKgFeed = 600.0;
+		digester.minOperatingTemperatureC = 15.0;
+		digester.maxSinkTemperatureC = 45.0;
+		settings.microbialProcessors = { digester };
+		settings.solarArrays = { solarArray(7.0) };
+		configure(world, settings, "microbial coordination rig");
+		world.resumeSimulation();
+		runOrDiagnose(world, 10, "microbial coordination");
+		auto const& snap = world.getStationSystemsSnapshot();
+		require(closeTo(snap.coolantLoops[0].pumpSuppliedKW, 1.0),
+			"the containment circulation was not protected ahead of the digester");
+		auto const& processor = snap.microbialProcessors[0];
+		require(processor.lastPowerDemandKW > 1.0,
+			"the digester declared no meaningful electrical demand to be curtailed");
+		require(processor.lastPowerSuppliedKW + 1e-9 < processor.lastPowerDemandKW,
+			"the digester was not curtailed although the pool was short after the protected draw");
+		require(!snap.power.protectedUnmet,
+			"the protected alarm raised while the protected draw was fully supplied");
+	}
+
+	// Scenario 5: competing protected dependencies resolve
+	// deterministically by declaration order. The pool covers the first
+	// hazardous loop whole and part of the second; the second loop's
+	// remainder stays unmet critical demand and is announced, while the
+	// first loop's event log stays clean. Two identical runs agree.
+	auto competingRun = [&]() -> std::unique_ptr<core::World>
+	{
+		auto world = std::make_unique<core::World>("ProtCompete", 2, 2);
+		world->pauseSimulation();
+		world->finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		settings.thermalReservoirs = { reservoir("sink", "low", 20.0) };
+		settings.coolantLoops = { hazardousLoop("loopA", 2.0, 0.0, 20.0),
+			hazardousLoop("loopB", 2.0, 0.0, 20.0) };
+		settings.solarArrays = { solarArray(3.0) };
+		std::string diagnostic;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 1.0f;
+		if (!world->configureStationSystems(settings, false, &diagnostic))
+			throw std::runtime_error("competing protected rig refused: " + diagnostic);
+		world->resumeSimulation();
+		if (!world->advanceTicks(10))
+			throw std::runtime_error("competing protected run failed");
+		return world;
+	};
+	{
+		auto world = competingRun();
+		auto const& snap = world->getStationSystemsSnapshot();
+		require(closeTo(snap.coolantLoops[0].pumpSuppliedKW, 2.0),
+			"the first-declared protected loop did not get its full draw");
+		require(closeTo(snap.coolantLoops[1].pumpSuppliedKW, 1.0),
+			"the second protected loop did not get exactly the pool remainder");
+		require(snap.power.protectedUnmet && closeTo(snap.power.protectedUnmetKW, 1.0),
+			"the competing protected shortfall is not the second loop's unmet minimum");
+		require(sawEvent(*world, "Protected containment-circulation 'loopB' unmet"),
+			"the second loop's protected shortfall was not announced");
+		bool firstLoopAnnounced = false;
+		for (auto const& event : world->getStationSystemsEvents())
+			if (event.message.find("loopA' unmet") != std::string::npos) firstLoopAnnounced = true;
+		require(!firstLoopAnnounced,
+			"the fully supplied first loop was announced as unmet");
+		auto const firstUnmet = snap.power.protectedUnmetKW;
+		auto const second = competingRun();
+		require(closeTo(second->getStationSystemsSnapshot().power.protectedUnmetKW, firstUnmet),
+			"competing protected allocation was not deterministic");
+	}
+
+	// Scenario 6: authored persistence. The protected flags round-trip
+	// with the World document, and a pre-92 document carrying them is
+	// refused rather than silently dropping the protection.
+	{
+		core::World world("ProtPersist", 2, 2);
+		world.pauseSimulation();
+		world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		settings.thermalReservoirs = { reservoir("sink", "low", 20.0),
+			reservoir("hot", "low", 20.0) };
+		auto loop = hazardousLoop("hazLoop", 1.0, 0.0, 20.0);
+		loop.criticalService = true;
+		settings.coolantLoops = { loop };
+		core::ChillerSettings chiller;
+		chiller.id = "chiller";
+		chiller.thermalClass = "low";
+		chiller.coldLoopId = "hazLoop";
+		chiller.condenserReservoirId = "hot";
+		chiller.ratedCoolingCapacityKW = 5.0;
+		chiller.cop = 3.0;
+		chiller.auxiliaryPowerKW = 0.2;
+		chiller.chilledSetpointC = 5.0;
+		chiller.maxCondensingTemperatureC = 45.0;
+		chiller.criticalService = true;
+		settings.chillers = { chiller };
+		settings.solarArrays = { solarArray(10.0) };
+		configure(world, settings, "protected persistence rig");
+		auto const text = yaml(world);
+		require(text.find("criticalService: true") != std::string::npos,
+			"the protected service flag was not saved");
+		core::SerializationWorkData data;
+		auto reader = core::YamlSerializer::fromString(text);
+		reader->deserialize();
+		core::World loaded("ProtPersistLoaded", 2, 2);
+		loaded.deserialize(*reader, data);
+		require(loaded.getStationSystemsSettings() == world.getStationSystemsSettings(),
+			"protected service flags did not round-trip");
+		require(loaded.getStationSystemsSnapshot().worldTick == 0,
+			"the loaded world restored live station state instead of the authored start");
+		auto stale = text;
+		require(stale.find("version: 92") != std::string::npos,
+			"the fixture document carries no version line");
+		stale.replace(stale.find("version: 92"), std::string("version: 92").size(),
+			"version: 91");
+		bool refused = false;
+		try
+		{
+			auto staleReader = core::YamlSerializer::fromString(stale);
+			staleReader->deserialize();
+			core::World staleWorld("ProtPersistStale", 2, 2);
+			staleWorld.deserialize(*staleReader, data);
+		}
+		catch (std::exception const& error)
+		{
+			refused = true;
+			require(std::string(error.what()).find("schema 92") != std::string::npos,
+				"the pre-92 protected-flag refusal does not name the required schema");
+		}
+		require(refused, "a pre-92 document carrying protected service flags was silently accepted");
+	}
+}
+
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power},
@@ -14794,7 +15366,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"outages", outages}, {"failures", failures}, {"dispatch", dispatch}};
+		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"outages", outages}, {"failures", failures}, {"dispatch", dispatch}, {"protectedServices", protectedServices}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

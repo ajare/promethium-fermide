@@ -761,6 +761,14 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			&loop.exchangerConductanceKWPerK, 0.0, 0.0, "%.3f");
 		ImGui::InputDouble(("Coolant loop " + row + " heater capacity kW").c_str(),
 			&loop.heaterCapacityKW, 0.0, 0.0, "%.3f");
+		// #416: protected critical service flag. Hazardous loops are
+		// protected by their hazard class regardless; this flag protects a
+		// normal loop's circulation and freeze heating ahead of every
+		// discretionary external load.
+		ImGui::Checkbox(("Coolant loop " + row + " protected critical service"
+			+ (loop.hazardClass == "hazardous" ? " (hazardous loops are always protected)"
+				: " (circulation and freeze heat drawn ahead of discretionary loads)")).c_str(),
+			&loop.criticalService);
 		ImGui::SameLine();
 		if (ImGui::Button(("Remove coolant loop " + row).c_str()))
 			removeLoop = true;
@@ -831,6 +839,14 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			&chiller.chilledSetpointC, 0.0, 0.0, "%.3f");
 		ImGui::InputDouble(("Chiller " + row + " max condensing temperature C").c_str(),
 			&chiller.maxCondensingTemperatureC, 0.0, 0.0, "%.3f");
+		// #416: a protected critical-service chiller's work is credited
+		// from the actual pool ahead of every discretionary external load,
+		// sized from its real tick-start state, so shutdown-cooling and
+		// containment-thermal chillers keep running when the experiments or
+		// generation they serve stop.
+		ImGui::Checkbox(("Chiller " + row
+			+ " protected critical service (work credited ahead of discretionary loads)").c_str(),
+			&chiller.criticalService);
 		ImGui::SameLine();
 		if (ImGui::Button(("Remove chiller " + row).c_str()))
 			removeChiller = true;
@@ -2602,6 +2618,28 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		snapshot.power.dispatchCommittedKW, snapshot.power.dispatchShortfallKW,
 		snapshot.power.backupEngaged ? "ENGAGED" : "off",
 		snapshot.power.reserveExhausted ? "EXHAUSTED" : "ok");
+	// #416: the protected critical service admission for this tick.
+	// Containment circulation, biological circulation and authored
+	// critical cooling are drawn ahead of every discretionary external
+	// load from the actual pool; anything the pool cannot deliver stays
+	// visible here as unmet critical minimum, never reclassified as
+	// permissible curtailment. Shutdown-cooling entries show the standing
+	// decay-heat obligation that books even when generation output stops.
+	ImGui::SeparatorText("Protected critical services (#416; drawn ahead of discretionary loads from actual services, not nameplate totals)");
+	ImGui::Text("Protected totals: demand %.3f kW, supplied %.3f kW, unmet critical %.3f kW | alarm: %s",
+		snapshot.power.protectedDemandKW, snapshot.power.protectedSuppliedKW,
+		snapshot.power.protectedUnmetKW,
+		snapshot.power.protectedUnmet ? "UNMET CRITICAL MINIMA" : "ok");
+	if (snapshot.power.protectedServices.empty())
+		ImGui::TextDisabled("No protected service demand this tick (no hazardous/critical loops, biology or critical chillers operating).");
+	for (auto const& service : snapshot.power.protectedServices)
+	{
+		ImGui::Text("%s '%s': protected demand %.3f kW, supplied %.3f kW, unmet %.3f kW%s%s",
+			service.kind.c_str(), service.id.c_str(), service.requestedKW,
+			service.suppliedKW, service.unmetKW,
+			service.unmetKW > 1e-12 ? " | reason: " : "",
+			service.unmetKW > 1e-12 ? service.reason.c_str() : "");
+	}
 	ImGui::SeparatorText("Batteries (live; reserve = nameplate - usable is never dischargeable; discharge covers deficits on the same pool, charging takes only surplus)");
 	if (snapshot.power.batteries.empty()) ImGui::TextDisabled("No batteries authored.");
 	for (auto const& battery : snapshot.power.batteries)

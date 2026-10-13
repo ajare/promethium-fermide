@@ -716,6 +716,14 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             ratedFlow = loop.ratedFlowKgPerS,
             conductance = loop.exchangerConductanceKWPerK,
             heaterKW = loop.heaterCapacityKW,
+            criticalService = loop.criticalService == true,
+            -- #416: a hazardous loop is protected by its hazard class:
+            -- its circulation is a containment boundary. An authored
+            -- criticalService flag protects a normal loop's circulation
+            -- the same way. Protected circulation is drawn from the
+            -- actual pool ahead of every discretionary external load.
+            protectedService = (loop.criticalService == true)
+                or loop.hazardClass == 'hazardous',
             temperature = loop.startingTemperatureC,
             pumpWorkKJ = 0,
             heaterKJ = 0,
@@ -802,6 +810,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             auxKW = chiller.auxiliaryPowerKW,
             chilledSetpoint = chiller.chilledSetpointC,
             maxCondensing = chiller.maxCondensingTemperatureC,
+            criticalService = chiller.criticalService == true,
             lastDemand = 0,
             lastCooling = 0,
             lastDeliverable = 0,
@@ -4173,6 +4182,184 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- from the baseline too would book it twice and make a
         -- source-funded startup fail its own audit (#561).
         local availableGeneration = generation + startupFromGeneration
+        -- #416 mirror: protected critical service admission. Containment
+        -- circulation (hazardous coolant loops, protected by their hazard
+        -- class alone), authored critical coolant loops, biological
+        -- essential circulation (crop/algae circulation pumps) and
+        -- authored critical-service chiller work are Critical station
+        -- services: their electrical demand is drawn from the actual
+        -- generation-and-battery pool ahead of every discretionary
+        -- external load, so shedding experiments or lighting can never
+        -- cut the support services protected loads depend on. The draw
+        -- is conservative: only what the pool actually holds this tick -
+        -- never independent nameplate totals - and what the pool cannot
+        -- deliver stays explicit unmet critical demand with the binding
+        -- reason named. Deterministic order: containment loops by
+        -- declaration, then critical chillers by declaration, then crops
+        -- and algae by declaration; no protected machine funds itself,
+        -- and the credits taken here are what the later loop, chiller and
+        -- biology passes consume instead of re-drawing. Mirrors the host
+        -- ledger exactly.
+        local protected_services = {}
+        local protected_demand = 0
+        local protected_supplied = 0
+        local function drawProtected(needKW)
+            if needKW <= 0 then return 0 end
+            local fromGeneration = math.min(needKW, generation)
+            generation = generation - fromGeneration
+            local fromBattery = drawBatteries(self, needKW - fromGeneration, fixed_hours)
+            batterySupplied = batterySupplied + fromBattery
+            return fromGeneration + fromBattery
+        end
+        local function recordProtected(id, kind, requestedKW, suppliedKW, reason)
+            if requestedKW <= 0 then return end
+            protected_demand = protected_demand + requestedKW
+            protected_supplied = protected_supplied + suppliedKW
+            table.insert(protected_services, {
+                id = id, kind = kind, requested = requestedKW,
+                supplied = suppliedKW, unmet = math.max(0, requestedKW - suppliedKW),
+                reason = reason,
+            })
+        end
+        -- Containment and authored-critical coolant loops: the pump and
+        -- freeze-heater demand is computed exactly as the loop pass
+        -- computes it, drawn ahead of the external loads, and credited to
+        -- the loop so the loop pass consumes the credit rather than
+        -- drawing twice.
+        for _, loop in ipairs(self.coolant_loops) do
+            loop.protectedPumpSupplied = 0
+            loop.protectedHeaterSupplied = 0
+            if loop.protectedService then
+                local availability = installationAvailability(loop)
+                local disabled = loop.coolant <= 0
+                local effectiveFlowCapacity = loop.ratedFlow * availability
+                local flowCapacityDisabled = effectiveFlowCapacity <= 0
+                local fill = disabled and 0 or math.min(1, loop.coolant / loop.capacity)
+                local pumpDemand = (disabled or flowCapacityDisabled) and 0
+                    or loop.pumpKW * fill * availability
+                local heaterDemand = (not disabled and loop.temperature < loop.setpoint)
+                    and loop.heaterKW or 0
+                local requested = pumpDemand + heaterDemand
+                if requested > 0 then
+                    local supplied = drawProtected(requested)
+                    loop.protectedPumpSupplied = math.min(pumpDemand, supplied)
+                    loop.protectedHeaterSupplied = math.max(0,
+                        math.min(heaterDemand, supplied - loop.protectedPumpSupplied))
+                    recordProtected(loop.id, 'containment-circulation', requested, supplied,
+                        supplied + 1e-12 < requested
+                        and 'the shared electrical pool cannot supply the protected containment '
+                            .. 'circulation draw: the pumps and freeze heater run curtailed'
+                        or '')
+                end
+            end
+        end
+        -- Authored critical-service chillers: the credit is sized from
+        -- the machine's actual tick-start state, never the nameplate -
+        -- gated off at or below the chilled setpoint, refused while the
+        -- condenser sink is at or above the maximum condensing
+        -- temperature, and capped by the heat the cold loop actually
+        -- holds above the setpoint spread over the tick at the
+        -- circulation the loop could sustain.
+        for _, chiller in ipairs(self.chillers) do
+            chiller.protectedPowerSupplied = 0
+            if chiller.criticalService then
+                local loop = chiller.coldLoop
+                local sink = chiller.condenser
+                local disabled = chiller.ratedKW <= 0
+                local effectiveCapacity = chiller.ratedKW * installationAvailability(chiller)
+                local capacityDisabled = effectiveCapacity <= 0
+                local atSetpoint = (not disabled and not capacityDisabled)
+                    and loop.temperature <= chiller.chilledSetpoint + 1e-9
+                local sinkOver = (not disabled and not capacityDisabled)
+                    and sink.temperature + 1e-9 >= chiller.maxCondensing
+                if not disabled and not capacityDisabled and not atSetpoint and not sinkOver then
+                    local disabledLoop = loop.coolant <= 0
+                    local fill = disabledLoop and 0 or math.min(1, loop.coolant / loop.capacity)
+                    local circulationCapacity = disabledLoop and 0
+                        or fill * installationAvailability(loop)
+                    local thermalTermKW = math.max(0, loop.coolant * loop.cp
+                        * math.max(0, loop.temperature - chiller.chilledSetpoint)) / fixed_seconds
+                    local deliverable = math.min(effectiveCapacity * circulationCapacity,
+                        thermalTermKW)
+                    local requested = deliverable > 1e-12
+                        and deliverable / chiller.cop + chiller.auxKW or 0
+                    if requested > 0 then
+                        local supplied = drawProtected(requested)
+                        chiller.protectedPowerSupplied = supplied
+                        recordProtected(chiller.id, 'critical-cooling', requested, supplied,
+                            supplied + 1e-12 < requested
+                            and 'the shared electrical pool cannot supply the protected cooling '
+                                .. 'work: the chiller runs curtailed and the cold service falls short'
+                            or '')
+                    end
+                end
+            end
+        end
+        -- Biological essential circulation: the pumps that deliver gas,
+        -- water and nutrients across the canopy or through the culture
+        -- are drawn ahead of every discretionary external load, so a
+        -- lighting curtailment never starves the biology. The lamp stays
+        -- discretionary and is paid for in the biology pass below.
+        for _, crop in ipairs(self.crop_populations) do
+            crop.protectedCirculationSupplied = 0
+            if not crop.dead and crop.growingAreaM2 > 0 and crop.circulationPowerKW > 0 then
+                local supplied = drawProtected(crop.circulationPowerKW)
+                crop.protectedCirculationSupplied = supplied
+                recordProtected(crop.id, 'biological-circulation', crop.circulationPowerKW,
+                    supplied,
+                    supplied + 1e-12 < crop.circulationPowerKW
+                    and 'the shared electrical pool cannot supply the essential canopy '
+                        .. 'circulation: gas, water and nutrient exchange runs curtailed'
+                    or '')
+            end
+        end
+        for _, culture in ipairs(self.algae_cultures) do
+            culture.protectedCirculationSupplied = 0
+            if not culture.dead and culture.cultureVolumeL > 0
+                and culture.circulationPowerKW > 0 then
+                local supplied = drawProtected(culture.circulationPowerKW)
+                culture.protectedCirculationSupplied = supplied
+                recordProtected(culture.id, 'biological-circulation', culture.circulationPowerKW,
+                    supplied,
+                    supplied + 1e-12 < culture.circulationPowerKW
+                    and 'the shared electrical pool cannot supply the essential culture '
+                        .. 'circulation: the culture exchange runs curtailed'
+                    or '')
+            end
+        end
+        -- Shutdown cooling: a generator's decay-heat obligation is a
+        -- protected thermal service that books unconditionally even when
+        -- the machine's electrical output has stopped - stopping
+        -- generation never erases the heat. It contends for no electrical
+        -- pool; the entry makes the standing obligation visible beside
+        -- the electrical protections.
+        for _, gen in ipairs(self.generators) do
+            if gen.lastCoolingRequired and gen.phase == 'shutdown' and gen.lastDecayHeatKW > 0 then
+                table.insert(protected_services, {
+                    id = gen.id, kind = 'shutdown-cooling',
+                    requested = gen.lastDecayHeatKW, supplied = gen.lastDecayHeatKW,
+                    unmet = 0,
+                    reason = 'decay heat books unconditionally: removal adequacy is tracked by '
+                        .. 'the sink temperature alarms',
+                })
+            end
+        end
+        -- #416: the protected admission audit: totals finite and no
+        -- protected service supplied above its own protected demand.
+        assert(isFinite(protected_demand) and isFinite(protected_supplied),
+            'protected critical service totals are not finite')
+        for _, service in ipairs(protected_services) do
+            assert(isFinite(service.requested) and isFinite(service.supplied)
+                and isFinite(service.unmet),
+                "protected service '" .. service.id .. "' amounts are not finite")
+            assert(service.supplied <= service.requested
+                + BALANCE_TOLERANCE * math.max(1.0, service.requested),
+                "protected service '" .. service.id .. "' supplied above its protected demand")
+        end
+        self.protectedDemand = protected_demand
+        self.protectedSupplied = protected_supplied
+        self.protectedUnmet = math.max(0, protected_demand - protected_supplied)
+        self.protectedServices = protected_services
         local supplied = {}
         for _, index in ipairs(self.load_order) do
             local load = self.loads[index]
@@ -4322,12 +4509,20 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local pumpDemand = (disabled or flowCapacityDisabled) and 0
                 or loop.pumpKW * fill * availability
             local pumpSupplied = 0
-            local pumpFromGeneration = math.min(pumpDemand, generation)
-            pumpSupplied = pumpSupplied + pumpFromGeneration
-            generation = generation - pumpFromGeneration
-            local pumpFromBattery = drawBatteries(self, pumpDemand - pumpFromGeneration, fixed_hours)
-            pumpSupplied = pumpSupplied + pumpFromBattery
-            batterySupplied = batterySupplied + pumpFromBattery
+            if (loop.protectedPumpSupplied or 0) > 0 then
+                -- #416: a protected loop's pump draw was already taken
+                -- from the pool ahead of the discretionary external
+                -- loads; the loop consumes that credit here and never
+                -- draws the same watts twice.
+                pumpSupplied = loop.protectedPumpSupplied
+            else
+                local pumpFromGeneration = math.min(pumpDemand, generation)
+                pumpSupplied = pumpSupplied + pumpFromGeneration
+                generation = generation - pumpFromGeneration
+                local pumpFromBattery = drawBatteries(self, pumpDemand - pumpFromGeneration, fixed_hours)
+                pumpSupplied = pumpSupplied + pumpFromBattery
+                batterySupplied = batterySupplied + pumpFromBattery
+            end
             -- Freeze-protection thermostat: demand up to capacity while
             -- the loop is below its setpoint. A dry loop heats nothing.
             local heaterDemand = 0
@@ -4335,12 +4530,18 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 heaterDemand = loop.heaterKW
             end
             local heaterSupplied = 0
-            local heaterFromGeneration = math.min(heaterDemand, generation)
-            heaterSupplied = heaterSupplied + heaterFromGeneration
-            generation = generation - heaterFromGeneration
-            local heaterFromBattery = drawBatteries(self, heaterDemand - heaterFromGeneration, fixed_hours)
-            heaterSupplied = heaterSupplied + heaterFromBattery
-            batterySupplied = batterySupplied + heaterFromBattery
+            if (loop.protectedHeaterSupplied or 0) > 0 then
+                -- #416: the protected freeze-heater draw was taken
+                -- ahead of the discretionary loads; consume the credit.
+                heaterSupplied = loop.protectedHeaterSupplied
+            else
+                local heaterFromGeneration = math.min(heaterDemand, generation)
+                heaterSupplied = heaterSupplied + heaterFromGeneration
+                generation = generation - heaterFromGeneration
+                local heaterFromBattery = drawBatteries(self, heaterDemand - heaterFromGeneration, fixed_hours)
+                heaterSupplied = heaterSupplied + heaterFromBattery
+                batterySupplied = batterySupplied + heaterFromBattery
+            end
             -- Circulation is capped by the fluid present, the
             -- electricity supplied and the pump's rated flow: the
             -- fraction of rated flow that is actually moving. A zero
@@ -4511,11 +4712,19 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 if deliverable > 1e-12 then
                     local powerDemand = deliverable / chiller.cop + chiller.auxKW
                     chiller.lastPowerDemand = powerDemand
-                    local fromGeneration = math.min(powerDemand, generation)
+                    -- #416: a protected chiller consumes the credit taken
+                    -- ahead of the discretionary external loads first;
+                    -- only duty beyond the credit (heat that entered the
+                    -- cold loop during the tick) still competes in the
+                    -- general pool.
+                    local credit = chiller.protectedPowerSupplied or 0
+                    local fromCredit = math.min(powerDemand, credit)
+                    local remaining = powerDemand - fromCredit
+                    local fromGeneration = math.min(remaining, generation)
                     generation = generation - fromGeneration
                     local fromBattery = drawBatteries(self,
-                        powerDemand - fromGeneration, fixed_hours)
-                    local supplied = fromGeneration + fromBattery
+                        remaining - fromGeneration, fixed_hours)
+                    local supplied = fromCredit + fromGeneration + fromBattery
                     batterySupplied = batterySupplied + fromBattery
                     chiller.lastPowerSupplied = supplied
                     local fraction = supplied / powerDemand
@@ -5943,16 +6152,13 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 crop.lastIllumination = evaluateProfile(crop.illumination, elapsed)
                 crop.lastLightRequested = crop.lampRatedKW * crop.lastIllumination
                 crop.lastCirculationRequested = crop.circulationPowerKW
-                -- The essential circulation is paid for first: the
-                -- pumps draw from the same pool ahead of the
-                -- discretionary lamp demand.
-                local circulationFromGeneration = math.min(crop.lastCirculationRequested,
-                    generation)
-                generation = generation - circulationFromGeneration
-                local circulationFromBattery = drawBatteries(self,
-                    crop.lastCirculationRequested - circulationFromGeneration, fixed_hours)
-                crop.lastCirculationSupplied = circulationFromGeneration + circulationFromBattery
-                batterySupplied = batterySupplied + circulationFromBattery
+                -- #416: the essential circulation was already drawn from
+                -- the pool ahead of every discretionary external load in
+                -- the protected service pass; the canopy consumes that
+                -- credit and never draws the same watts twice, so
+                -- shedding lighting (or experiments) never starves the
+                -- circulation the biology depends on.
+                crop.lastCirculationSupplied = crop.protectedCirculationSupplied or 0
                 local lightFromGeneration = math.min(crop.lastLightRequested, generation)
                 generation = generation - lightFromGeneration
                 local lightFromBattery = drawBatteries(self,
@@ -6407,16 +6613,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 culture.lastIllumination = evaluateProfile(culture.illumination, elapsed)
                 culture.lastLightRequested = culture.lampRatedKW * culture.lastIllumination
                 culture.lastCirculationRequested = culture.circulationPowerKW
-                -- The essential circulation is paid for first: the
-                -- pumps draw from the same pool ahead of the
-                -- discretionary lamp demand.
-                local circulationFromGeneration = math.min(culture.lastCirculationRequested,
-                    generation)
-                generation = generation - circulationFromGeneration
-                local circulationFromBattery = drawBatteries(self,
-                    culture.lastCirculationRequested - circulationFromGeneration, fixed_hours)
-                culture.lastCirculationSupplied = circulationFromGeneration + circulationFromBattery
-                batterySupplied = batterySupplied + circulationFromBattery
+                -- #416: the essential culture circulation was already
+                -- drawn from the pool ahead of every discretionary
+                -- external load in the protected service pass; the
+                -- culture consumes that credit and never draws the same
+                -- watts twice.
+                culture.lastCirculationSupplied = culture.protectedCirculationSupplied or 0
                 local lightFromGeneration = math.min(culture.lastLightRequested, generation)
                 generation = generation - lightFromGeneration
                 local lightFromBattery = drawBatteries(self,

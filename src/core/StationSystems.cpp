@@ -312,7 +312,7 @@ namespace core
 				for (size_t index = 0; index < coolantLoops->size(); ++index)
 				{
 					auto const& loop = (*coolantLoops)[index];
-					lua_createtable(state, 0, 12);
+					lua_createtable(state, 0, 13);
 					lua_pushstring(state, loop.id.c_str()); lua_setfield(state, -2, "id");
 					lua_pushstring(state, loop.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
 					lua_pushstring(state, loop.reservoirId.c_str()); lua_setfield(state, -2, "reservoir");
@@ -325,6 +325,8 @@ namespace core
 					lua_pushnumber(state, loop.ratedFlowKgPerS); lua_setfield(state, -2, "ratedFlowKgPerS");
 					lua_pushnumber(state, loop.exchangerConductanceKWPerK); lua_setfield(state, -2, "exchangerConductanceKWPerK");
 					lua_pushnumber(state, loop.heaterCapacityKW); lua_setfield(state, -2, "heaterCapacityKW");
+					lua_pushboolean(state, loop.criticalService ? 1 : 0);
+					lua_setfield(state, -2, "criticalService");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
 				// Authored chiller descriptors cross the same boundary as
@@ -335,7 +337,7 @@ namespace core
 				for (size_t index = 0; index < chillers->size(); ++index)
 				{
 					auto const& chiller = (*chillers)[index];
-					lua_createtable(state, 0, 9);
+					lua_createtable(state, 0, 10);
 					lua_pushstring(state, chiller.id.c_str()); lua_setfield(state, -2, "id");
 					lua_pushstring(state, chiller.thermalClass.c_str()); lua_setfield(state, -2, "thermalClass");
 					lua_pushstring(state, chiller.coldLoopId.c_str()); lua_setfield(state, -2, "coldLoop");
@@ -345,6 +347,8 @@ namespace core
 					lua_pushnumber(state, chiller.auxiliaryPowerKW); lua_setfield(state, -2, "auxiliaryPowerKW");
 					lua_pushnumber(state, chiller.chilledSetpointC); lua_setfield(state, -2, "chilledSetpointC");
 					lua_pushnumber(state, chiller.maxCondensingTemperatureC); lua_setfield(state, -2, "maxCondensingTemperatureC");
+					lua_pushboolean(state, chiller.criticalService ? 1 : 0);
+					lua_setfield(state, -2, "criticalService");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
 				// Authored generator descriptors cross the same boundary as
@@ -4474,6 +4478,18 @@ namespace core
 		double lastDispatchShortfallKW{0.0};
 		bool lastBackupEngaged{false};
 		bool lastReserveExhausted{false};
+		// #416: the protected critical service admission state. The
+		// demand/supplied/unmet totals describe the current tick's
+		// electrical protection pass (containment circulation, biological
+		// circulation and authored critical cooling drawn ahead of
+		// discretionary loads); the per-service unmet flags edge-trigger
+		// the protection events. Shutdown-cooling obligations are listed
+		// as protected services but contend for no electrical pool.
+		double lastProtectedDemandKW{0.0};
+		double lastProtectedSuppliedKW{0.0};
+		double lastProtectedUnmetTotalKW{0.0};
+		std::map<std::string, bool> lastProtectedServiceUnmet;
+		std::vector<StationProtectedServiceSnapshot> lastProtectedServices;
 		std::array<std::unique_ptr<ScriptObject>, 4> objects;
 		StationSystemsSnapshot snapshot;
 		std::vector<StationSystemsEvent> events;
@@ -4532,6 +4548,15 @@ namespace core
 			auto const committedDispatchShortfallKW = lastDispatchShortfallKW;
 			auto const committedBackupEngaged = lastBackupEngaged;
 			auto const committedReserveExhausted = lastReserveExhausted;
+			// #416: the protected-service admission scalars and the
+			// per-service unmet flags cross the tick boundary, so a rolled-
+			// back tick restores them exactly and a failed protection pass
+			// never leaks a partial alarm state.
+			auto const committedProtectedDemandKW = lastProtectedDemandKW;
+			auto const committedProtectedSuppliedKW = lastProtectedSuppliedKW;
+			auto const committedProtectedUnmetTotalKW = lastProtectedUnmetTotalKW;
+			auto const committedProtectedServiceUnmet = lastProtectedServiceUnmet;
+			auto const committedProtectedServices = lastProtectedServices;
 			if (runLedger(tick, seconds, system, violation)) return true;
 			transfers = committedTransfers;
 			conversions = committedConversions;
@@ -4567,6 +4592,11 @@ namespace core
 			lastDispatchShortfallKW = committedDispatchShortfallKW;
 			lastBackupEngaged = committedBackupEngaged;
 			lastReserveExhausted = committedReserveExhausted;
+			lastProtectedDemandKW = committedProtectedDemandKW;
+			lastProtectedSuppliedKW = committedProtectedSuppliedKW;
+			lastProtectedUnmetTotalKW = committedProtectedUnmetTotalKW;
+			lastProtectedServiceUnmet = committedProtectedServiceUnmet;
+			lastProtectedServices = committedProtectedServices;
 			return false;
 		}
 		// Apply every authored transfer and conversion to a staged copy of
@@ -5709,6 +5739,192 @@ namespace core
 				}
 				load.lastMaterialReserved = true;
 			};
+			// #416: protected critical service admission. Containment
+			// circulation (hazardous coolant loops, protected by their hazard
+			// class alone), authored critical coolant loops, biological
+			// essential circulation (crop/algae circulation pumps) and
+			// authored critical-service chiller work are Critical station
+			// services: their electrical demand is drawn from the actual
+			// generation-and-battery pool ahead of every discretionary
+			// external load, so shedding experiments or lighting can never
+			// cut the support services protected loads depend on. The draw
+			// is conservative: only what the pool actually holds this tick -
+			// never independent nameplate totals - and what the pool cannot
+			// deliver stays explicit unmet critical demand with the binding
+			// reason named. Deterministic order: containment loops by
+			// declaration, then critical chillers by declaration, then crops
+			// and algae by declaration; no protected machine funds itself,
+			// and the credits taken here are what the later loop, chiller and
+			// biology passes consume instead of re-drawing from the pool.
+			std::vector<double> protectedLoopPumpKW(coolantLoops.size(), 0.0);
+			std::vector<double> protectedLoopHeaterKW(coolantLoops.size(), 0.0);
+			std::vector<double> protectedChillerPowerKW(chillers.size(), 0.0);
+			std::vector<double> protectedCropCirculationKW(cropPopulations.size(), 0.0);
+			std::vector<double> protectedAlgaeCirculationKW(algaeCultures.size(), 0.0);
+			std::vector<StationProtectedServiceSnapshot> protectedServices;
+			double protectedDemandKW{0.0};
+			double protectedSuppliedKW{0.0};
+			auto const drawProtected = [&](double needKW)
+			{
+				if (needKW <= 0.0) return 0.0;
+				auto const fromGeneration = std::min(needKW, availableGeneration);
+				availableGeneration -= fromGeneration;
+				auto const fromBattery = drawBatteries(needKW - fromGeneration);
+				batterySuppliedKW += fromBattery;
+				return fromGeneration + fromBattery;
+			};
+			auto const recordProtected = [&](std::string id, std::string kind,
+				double requestedKW, double suppliedKW, std::string reason)
+			{
+				if (requestedKW <= 0.0) return;
+				protectedServices.push_back({std::move(id), std::move(kind), requestedKW,
+					suppliedKW, std::max(0.0, requestedKW - suppliedKW), std::move(reason)});
+				protectedDemandKW += requestedKW;
+				protectedSuppliedKW += suppliedKW;
+			};
+			// Containment and authored-critical coolant loops: the pump and
+			// freeze-heater demand is computed exactly as the loop pass
+			// computes it, drawn ahead of the external loads, and credited
+			// to the loop so the loop pass consumes the credit rather than
+			// drawing twice. A hazardous loop is protected by its hazard
+			// class: its circulation is a containment boundary, so a
+			// shortage never stops the pumps that keep the hazardous coolant
+			// moving and freeze-protected.
+			for (size_t loopIndex = 0; loopIndex < coolantLoops.size(); ++loopIndex)
+			{
+				auto const& loop = coolantLoops[loopIndex];
+				auto const protectedLoop = loop.authored.criticalService
+					|| loop.authored.hazardClass == "hazardous";
+				if (!protectedLoop) continue;
+				auto const disabled = loop.coolantKg <= 0.0;
+				auto const effectiveFlowCapacityKgPerS = loop.authored.ratedFlowKgPerS
+					* loop.availabilityFactor;
+				auto const flowCapacityDisabled = effectiveFlowCapacityKgPerS <= 0.0;
+				auto const fillFraction = disabled
+					? 0.0 : std::min(1.0, loop.coolantKg / loop.authored.coolantCapacityKg);
+				auto const pumpDemandKW = disabled || flowCapacityDisabled
+					? 0.0
+					: loop.authored.pumpPowerKW * fillFraction * loop.availabilityFactor;
+				auto const heaterDemandKW = !disabled
+					&& loop.temperatureC < loop.authored.freezeProtectionSetpointC
+					? loop.authored.heaterCapacityKW : 0.0;
+				auto const requestedKW = pumpDemandKW + heaterDemandKW;
+				if (requestedKW <= 0.0) continue;
+				auto const suppliedKW = drawProtected(requestedKW);
+				protectedLoopPumpKW[loopIndex] = std::min(pumpDemandKW, suppliedKW);
+				protectedLoopHeaterKW[loopIndex] = std::max(0.0,
+					std::min(heaterDemandKW, suppliedKW - protectedLoopPumpKW[loopIndex]));
+				recordProtected(loop.authored.id, "containment-circulation", requestedKW,
+					suppliedKW, suppliedKW + 1e-12 < requestedKW
+						? "the shared electrical pool cannot supply the protected containment "
+							"circulation draw: the pumps and freeze heater run curtailed"
+						: std::string{});
+			}
+			// Authored critical-service chillers: the credit is sized from
+			// the machine's actual tick-start state, never the nameplate -
+			// gated off at or below the chilled setpoint, refused while the
+			// condenser sink is at or above the maximum condensing
+			// temperature, and capped by the heat the cold loop actually
+			// holds above the setpoint spread over the tick at the
+			// circulation the loop could sustain. The later chiller pass
+			// consumes the credit first; any duty beyond it (heat that
+			// entered the loop during the tick) competes in the general pool.
+			for (size_t chillerIndex = 0; chillerIndex < chillers.size(); ++chillerIndex)
+			{
+				auto const& chiller = chillers[chillerIndex];
+				if (!chiller.authored.criticalService) continue;
+				auto const& loop = coolantLoops[chiller.loopIndex];
+				auto const& sink = reservoirs[chiller.sinkIndex];
+				auto const disabled = chiller.authored.ratedCoolingCapacityKW <= 0.0;
+				auto const effectiveCoolingCapacityKW =
+					chiller.authored.ratedCoolingCapacityKW * chiller.availabilityFactor;
+				auto const capacityDisabled = effectiveCoolingCapacityKW <= 0.0;
+				auto const atSetpoint = (not disabled and not capacityDisabled)
+					&& loop.temperatureC <= chiller.authored.chilledSetpointC + 1e-9;
+				auto const sinkOver = (not disabled and not capacityDisabled)
+					&& sink.temperatureC + 1e-9 >= chiller.authored.maxCondensingTemperatureC;
+				if (disabled || capacityDisabled || atSetpoint || sinkOver) continue;
+				auto const disabledLoop = loop.coolantKg <= 0.0;
+				auto const fillFraction = disabledLoop
+					? 0.0 : std::min(1.0, loop.coolantKg / loop.authored.coolantCapacityKg);
+				auto const circulationCapacity = disabledLoop ? 0.0
+					: fillFraction * loop.availabilityFactor;
+				auto const thermalTermKW = std::max(0.0,
+					loop.coolantKg * loop.authored.specificHeatKJPerKgK
+					* std::max(0.0, loop.temperatureC - chiller.authored.chilledSetpointC))
+					/ static_cast<double>(seconds);
+				auto const deliverableKW = std::min(effectiveCoolingCapacityKW
+					* circulationCapacity, thermalTermKW);
+				auto const requestedKW = deliverableKW <= 1e-12 ? 0.0
+					: deliverableKW / chiller.authored.cop + chiller.authored.auxiliaryPowerKW;
+				if (requestedKW <= 0.0) continue;
+				auto const suppliedKW = drawProtected(requestedKW);
+				protectedChillerPowerKW[chillerIndex] = suppliedKW;
+				recordProtected(chiller.authored.id, "critical-cooling", requestedKW,
+					suppliedKW, suppliedKW + 1e-12 < requestedKW
+						? "the shared electrical pool cannot supply the protected cooling work: "
+							"the chiller runs curtailed and the cold service falls short"
+						: std::string{});
+			}
+			// Biological essential circulation: the pumps that deliver gas,
+			// water and nutrients across the canopy or through the culture
+			// are drawn ahead of every discretionary external load, so a
+			// lighting curtailment never starves the biology. The lamp stays
+			// discretionary and is paid for in the biology pass below.
+			for (size_t cropIndex = 0; cropIndex < cropPopulations.size(); ++cropIndex)
+			{
+				auto const& crop = cropPopulations[cropIndex];
+				if (crop.dead || crop.authored.growingAreaM2 <= 0.0) continue;
+				auto const requestedKW = crop.authored.circulationPowerKW;
+				if (requestedKW <= 0.0) continue;
+				auto const suppliedKW = drawProtected(requestedKW);
+				protectedCropCirculationKW[cropIndex] = suppliedKW;
+				recordProtected(crop.authored.id, "biological-circulation", requestedKW,
+					suppliedKW, suppliedKW + 1e-12 < requestedKW
+						? "the shared electrical pool cannot supply the essential canopy "
+							"circulation: gas, water and nutrient exchange runs curtailed"
+						: std::string{});
+			}
+			for (size_t cultureIndex = 0; cultureIndex < algaeCultures.size(); ++cultureIndex)
+			{
+				auto const& culture = algaeCultures[cultureIndex];
+				if (culture.dead || culture.authored.cultureVolumeL <= 0.0) continue;
+				auto const requestedKW = culture.authored.circulationPowerKW;
+				if (requestedKW <= 0.0) continue;
+				auto const suppliedKW = drawProtected(requestedKW);
+				protectedAlgaeCirculationKW[cultureIndex] = suppliedKW;
+				recordProtected(culture.authored.id, "biological-circulation", requestedKW,
+					suppliedKW, suppliedKW + 1e-12 < requestedKW
+						? "the shared electrical pool cannot supply the essential culture "
+							"circulation: the culture exchange runs curtailed"
+						: std::string{});
+			}
+			// Shutdown cooling: a generator's decay-heat obligation is a
+			// protected thermal service that books unconditionally even
+			// when the machine's electrical output has stopped - stopping
+			// generation never erases the heat. It contends for no
+			// electrical pool; the entry makes the standing obligation
+			// visible beside the electrical protections, and removal
+			// adequacy is tracked by the sink's own temperature alarms.
+			for (auto const& generator : generators)
+			{
+				if (!generator.lastCoolingRequired) continue;
+				if (generator.phase != StationGeneratorPhase::Shutdown) continue;
+				if (generator.lastDecayHeatKW <= 0.0) continue;
+				protectedServices.push_back({generator.authored.id, "shutdown-cooling",
+					generator.lastDecayHeatKW, generator.lastDecayHeatKW, 0.0,
+					"decay heat books unconditionally: removal adequacy is tracked by "
+					"the sink temperature alarms"});
+			}
+			if (!std::isfinite(protectedDemandKW) || !std::isfinite(protectedSuppliedKW))
+			{
+				system = "Power allocation";
+				return violation = "protected critical service totals are not finite", false;
+			}
+			lastProtectedDemandKW = protectedDemandKW;
+			lastProtectedSuppliedKW = protectedSuppliedKW;
+			lastProtectedUnmetTotalKW = std::max(0.0, protectedDemandKW - protectedSuppliedKW);
+			lastProtectedServices = protectedServices;
 			// Pass 1: protected critical floors allocate ahead of every
 			// discretionary request, in the declared priority order. A
 			// floor that generation cannot meet is offered to the batteries
@@ -5993,6 +6209,15 @@ namespace core
 					? 0.0
 					: loop.authored.pumpPowerKW * fillFraction * loop.availabilityFactor;
 				double pumpSuppliedKW = 0.0;
+				if (protectedLoopPumpKW[loopIndex] > 0.0)
+				{
+					// #416: a protected loop's pump draw was already taken
+					// from the pool ahead of the discretionary external
+					// loads; the loop consumes that credit here and never
+					// draws the same watts twice.
+					pumpSuppliedKW = protectedLoopPumpKW[loopIndex];
+				}
+				else
 				{
 					auto const fromGeneration = std::min(pumpDemandKW, availableGeneration);
 					pumpSuppliedKW += fromGeneration;
@@ -6007,6 +6232,13 @@ namespace core
 				if (!disabled && loop.temperatureC < loop.authored.freezeProtectionSetpointC)
 					heaterDemandKW = loop.authored.heaterCapacityKW;
 				double heaterSuppliedKW = 0.0;
+				if (protectedLoopHeaterKW[loopIndex] > 0.0)
+				{
+					// #416: the protected freeze-heater draw was taken
+					// ahead of the discretionary loads; consume the credit.
+					heaterSuppliedKW = protectedLoopHeaterKW[loopIndex];
+				}
+				else
 				{
 					auto const fromGeneration = std::min(heaterDemandKW, availableGeneration);
 					heaterSuppliedKW += fromGeneration;
@@ -6141,8 +6373,9 @@ namespace core
 			// condenser booking equals extracted heat plus the work and
 			// auxiliaries actually supplied at one consistent boundary.
 			double totalChillerPowerKW{0.0};
-			for (auto& chiller : chillers)
+			for (size_t chillerIndex = 0; chillerIndex < chillers.size(); ++chillerIndex)
 			{
+				auto& chiller = chillers[chillerIndex];
 				auto const disabled = chiller.authored.ratedCoolingCapacityKW <= 0.0;
 				// The outage contract's availability factor (#413) caps the
 				// chiller's deliverable cooling capacity this tick: a full
@@ -6244,11 +6477,20 @@ namespace core
 				}
 				chiller.lastPowerDemandKW = chiller.lastDeliverableKW / chiller.authored.cop
 					+ chiller.authored.auxiliaryPowerKW;
-				auto const fromGeneration = std::min(chiller.lastPowerDemandKW, availableGeneration);
+				// #416: a protected chiller consumes the credit taken ahead
+				// of the discretionary external loads first; only duty beyond
+				// the credit (heat that entered the cold loop during the tick)
+				// still competes in the general pool.
+				double creditKW = protectedChillerPowerKW[chillerIndex];
+				double remainingDemandKW = chiller.lastPowerDemandKW;
+				double const fromCreditKW = std::min(remainingDemandKW, creditKW);
+				remainingDemandKW -= fromCreditKW;
+				creditKW -= fromCreditKW;
+				auto const fromGeneration = std::min(remainingDemandKW, availableGeneration);
 				availableGeneration -= fromGeneration;
-				auto const ask = chiller.lastPowerDemandKW - fromGeneration;
+				auto const ask = remainingDemandKW - fromGeneration;
 				auto const fromBattery = drawBatteries(ask);
-				auto const suppliedKW = fromGeneration + fromBattery;
+				auto const suppliedKW = fromCreditKW + fromGeneration + fromBattery;
 				batterySuppliedKW += fromBattery;
 				batteryShortfallKW += ask - fromBattery;
 				chiller.lastPowerSuppliedKW = suppliedKW;
@@ -7777,13 +8019,13 @@ namespace core
 				// the canopy draw from the same pool ahead of the
 				// discretionary lamp demand, so shedding lighting never
 				// starves the circulation the biology depends on.
-				auto const circulationFromGeneration = std::min(crop.lastCirculationRequestedKW,
-					availableGeneration);
-				availableGeneration -= circulationFromGeneration;
-				auto const circulationFromBattery = drawBatteries(
-					crop.lastCirculationRequestedKW - circulationFromGeneration);
-				crop.lastCirculationSuppliedKW = circulationFromGeneration + circulationFromBattery;
-				batterySuppliedKW += circulationFromBattery;
+				// #416: the essential circulation was already drawn from
+				// the pool ahead of every discretionary external load in the
+				// protected service pass; the canopy consumes that credit and
+				// never draws the same watts twice, so shedding lighting (or
+				// experiments) never starves the circulation the biology
+				// depends on.
+				crop.lastCirculationSuppliedKW = protectedCropCirculationKW[orderIndex];
 				batteryShortfallKW += crop.lastCirculationRequestedKW - crop.lastCirculationSuppliedKW;
 				auto const lightFromGeneration = std::min(crop.lastLightRequestedKW, availableGeneration);
 				availableGeneration -= lightFromGeneration;
@@ -8270,16 +8512,11 @@ namespace core
 				culture.lastIllumination = evaluateStationProfile(culture.authored.illuminationProfile, elapsed);
 				culture.lastLightRequestedKW = culture.authored.lampRatedKW * culture.lastIllumination;
 				culture.lastCirculationRequestedKW = culture.authored.circulationPowerKW;
-				// The essential circulation is paid for first: the pumps
-				// that keep the culture mixed draw from the same pool ahead
-				// of the discretionary lamp demand.
-				auto const circulationFromGeneration = std::min(culture.lastCirculationRequestedKW,
-					availableGeneration);
-				availableGeneration -= circulationFromGeneration;
-				auto const circulationFromBattery = drawBatteries(
-					culture.lastCirculationRequestedKW - circulationFromGeneration);
-				culture.lastCirculationSuppliedKW = circulationFromGeneration + circulationFromBattery;
-				batterySuppliedKW += circulationFromBattery;
+				// #416: the essential culture circulation was already drawn
+				// from the pool ahead of every discretionary external load in
+				// the protected service pass; the culture consumes that credit
+				// and never draws the same watts twice.
+				culture.lastCirculationSuppliedKW = protectedAlgaeCirculationKW[orderIndex];
 				batteryShortfallKW += culture.lastCirculationRequestedKW - culture.lastCirculationSuppliedKW;
 				auto const lightFromGeneration = std::min(culture.lastLightRequestedKW, availableGeneration);
 				availableGeneration -= lightFromGeneration;
@@ -11001,6 +11238,32 @@ namespace core
 						? "Electrical reserve exhausted: a battery bank sits at its protected reserve floor"
 						: std::string("Electrical reserve recovered: every battery bank is above its reserve floor"));
 			}
+			// #416: protected critical service shortfalls are announced on
+			// their transitions. A protected service that cannot be fully
+			// honoured keeps its deficit visible as unmet critical demand -
+			// never reclassified as permissible curtailment - and the event
+			// names the service, the unmet amount and the binding reason.
+			{
+				std::map<std::string, bool> protectedNow;
+				for (auto const& service : protectedServices)
+				{
+					auto const key = service.kind + '/' + service.id;
+					auto const unmet = service.unmetKW > 1e-12;
+					protectedNow[key] = unmet;
+					auto const previous = lastProtectedServiceUnmet.find(key);
+					auto const wasUnmet = previous != lastProtectedServiceUnmet.end()
+						&& previous->second;
+					if (unmet == wasUnmet) continue;
+					appendBoundedEvent(events, tick, unmet
+						? "Protected " + service.kind + " '" + service.id + "' unmet: "
+							+ std::to_string(service.unmetKW)
+							+ " kW of a protected " + std::to_string(service.requestedKW)
+							+ " kW demand - " + service.reason
+						: "Protected " + service.kind + " '" + service.id
+							+ "' restored: the pool covers the protected demand again");
+				}
+				lastProtectedServiceUnmet = std::move(protectedNow);
+			}
 			// Thermal limit crossings are announced so the event log
 			// records overheats and overcools without flooding every tick
 			// (#395).
@@ -12339,6 +12602,12 @@ namespace core
 		result.power.dispatchShortfallKW = mImpl->lastDispatchShortfallKW;
 		result.power.backupEngaged = mImpl->lastBackupEngaged;
 		result.power.reserveExhausted = mImpl->lastReserveExhausted;
+		// #416: the protected critical service admission for this tick.
+		result.power.protectedDemandKW = mImpl->lastProtectedDemandKW;
+		result.power.protectedSuppliedKW = mImpl->lastProtectedSuppliedKW;
+		result.power.protectedUnmetKW = mImpl->lastProtectedUnmetTotalKW;
+		result.power.protectedUnmet = mImpl->lastProtectedUnmetTotalKW > 1e-12;
+		result.power.protectedServices = mImpl->lastProtectedServices;
 		// Coolant loop electrical service rode the same pool as external
 		// loads; publish the totals so the window can show the loop draw
 		// beside the load draw (#396).

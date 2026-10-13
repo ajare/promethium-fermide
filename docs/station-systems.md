@@ -1,4 +1,4 @@
-# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, terminal-waste storage and scheduled ejection, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, chilled thermal services, fuelled generators, compartment atmospheres with airlock cycles, crew metabolic returns, water recovery with qualification, oxygen production with finite CO2 capture, finite thermal buffers that ride through cooling deficits, and hazardous treatment and containment boundaries (#386–#391, #393–#404, #406, #412)
+# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, terminal-waste storage and scheduled ejection, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, chilled thermal services, fuelled generators, compartment atmospheres with airlock cycles, crew metabolic returns, water recovery with qualification, oxygen production with finite CO2 capture, finite thermal buffers that ride through cooling deficits, and hazardous treatment and containment boundaries, protected cross-system service dependencies (#386–#391, #393–#404, #406, #412, #416)
 
 Station systems are opt-in per World and disabled in existing documents. Open
 **View > Station Systems** or use the
@@ -1625,6 +1625,56 @@ diagnostic and no mutation, applies repaired drafts through the
 reset-confirmed flow, and the live view reports the three quality gates
 and the clearance ledger.
 
+### Protected cross-system service dependencies (#416)
+
+Operations are admitted or curtailed without cutting the essential
+support services that protected loads depend on. A set of Critical
+station services is drawn from the actual generation-and-battery pool
+ahead of every discretionary external load: containment circulation
+(every hazardous coolant loop's pump and freeze heater, protected by
+the loop's hazard class alone), biological essential circulation
+every crop and algae population declares, and authored critical-service
+chiller work (`criticalService` on coolant loops and chillers, the
+flag persisted with the World document at schema 92 and refused on
+pre-92 documents rather than silently dropped). The admission is
+conservative: the protected draw is what the pool actually holds this
+tick - never independent nameplate totals - and the protected chiller
+credit is sized from the machine's real tick-start state (gated off at
+the chilled setpoint, refused while the condenser sink is over, capped
+by the heat the cold loop actually holds above the setpoint at the
+circulation it could sustain). The credits taken ahead are what the
+later loop, chiller and biology passes consume, so no watt is drawn
+twice and no protected machine funds itself.
+
+Competing protected dependencies resolve deterministically: containment
+loops by declaration, then critical chillers by declaration, then
+crops and algae by declaration; the first-declared service takes its
+draw from the actual pool and later services get only the remainder.
+What the pool cannot deliver stays explicit unmet critical minimum -
+per-service requested/supplied/unmet with the binding reason, station
+totals and a protected-unmet alarm on the snapshot, and edge-triggered
+events naming the service that fell short or recovered. A protected
+minimum is never silently reclassified as permissible curtailment, and
+the discretionary demand that got ahead of nothing lands only on the
+unprotected processes behind it.
+
+Shutdown cooling stays protected even when the machine's electrical
+output stops: a generator's decay-heat obligation books
+unconditionally through the Shutdown phase and is exposed as a
+protected `shutdown-cooling` service account beside the electrical
+protections - stopping generation never erases the heat, and removal
+adequacy stays tracked by the sink's own temperature alarms. Critical
+sensing and control demand is not separately modelled (monitoring
+reads direct model state, not sensor hardware), so there is no such
+load to protect; the protection covers the services that exist.
+
+The separate Station Systems window drafts the protected flags on
+loops and chillers and shows the live protected-service accounts,
+totals and alarm beside the dispatch status. The bundled Lua lifecycle
+mirror runs the same protected pass, credits and audits inside every
+private sandbox, so the scripted path and the host ledger agree tick
+for tick.
+
 ## Explicit scope limit
 
 This slice implements lifecycle, authored finite store configuration,
@@ -1635,7 +1685,10 @@ authored scheduled resupply with refused-quantity accounting,
 thermal reservoirs with environment-dependent radiator rejection and
 exactly-once equipment heat routing, coolant loops with finite
 loop-specific inventories, inventory- and power-capped circulation and
-freeze-protection heating, fuelled generators with finite
+freeze-protection heating, protected cross-system service dependencies
+that admit containment and biological circulation and authored critical
+cooling from actual services ahead of discretionary loads, fuelled
+generators with finite
 energy-unit fuel inventories, ramp-limited dispatchable output,
 startup-energy gating and persistent shutdown decay heat, and
 fixed-volume compartment atmospheres with ideal-gas pressure

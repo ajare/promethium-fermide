@@ -502,6 +502,14 @@ namespace core
 		double ratedFlowKgPerS{0.0};         // rated circulation flow, >= 0
 		double exchangerConductanceKWPerK{0.0}; // full-circulation conductance, >= 0
 		double heaterCapacityKW{0.0};        // freeze-heater capacity, >= 0
+		// #416: declares this loop's circulation and freeze-protection
+		// demand a protected Critical station service: it is admitted from
+		// the actual generation-and-battery pool ahead of every
+		// discretionary external load, so shedding experiments or lighting
+		// never cuts the circulation the service depends on. Hazardous
+		// loops are protected regardless of this flag: their hazard class
+		// already makes them a containment boundary (#412).
+		bool criticalService{false};
 		bool operator==(CoolantLoopSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationCoolantLoops{8};
@@ -537,6 +545,16 @@ namespace core
 		double auxiliaryPowerKW{0.0};     // running auxiliaries, >= 0
 		double chilledSetpointC{5.0};     // no extraction at or below this cold-side temperature
 		double maxCondensingTemperatureC{45.0}; // no rejection into a sink at or above this
+		// #416: declares this chiller's electrical work a protected
+		// Critical station service (shutdown-cooling and containment
+		// thermal control): a credit for its deliverable draw is taken
+		// from the actual pool ahead of every discretionary external load,
+		// so the machine keeps running when the experiments or generation
+		// it serves stop. The credit is sized from the machine's actual
+		// tick-start state - gated off at the chilled setpoint, refused
+		// while the condenser sink is over, capped by the heat the cold
+		// loop actually holds above the setpoint - never by the nameplate.
+		bool criticalService{false};
 		bool operator==(ChillerSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationChillers{8};
@@ -1946,6 +1964,28 @@ namespace core
 	// shortages are explicit results, never silent clamping. Battery
 	// discharge and charge ride the same allocation pool as generation —
 	// they are never a second power budget.
+	// One protected Critical station service account for the tick (#416):
+	// the protected demand the service presented to the shared pool, what
+	// the pool actually delivered, the unmet remainder (which stays
+	// explicit unmet critical demand and is never reclassified as
+	// permissible curtailment) and the reason the protection could not be
+	// fully honoured. Kind is one of "containment-circulation" (hazardous
+	// coolant loop pump and freeze heater), "biological-circulation"
+	// (crop/algae essential circulation pumps), "critical-cooling"
+	// (authored critical-service chiller work) or "shutdown-cooling"
+	// (a generator's decay-heat obligation, which books unconditionally
+	// even when the machine's electrical output has stopped).
+	struct StationProtectedServiceSnapshot
+	{
+		std::string id;
+		std::string kind;
+		double requestedKW{0.0};
+		double suppliedKW{0.0};
+		double unmetKW{0.0};
+		std::string reason;
+		bool operator==(StationProtectedServiceSnapshot const&) const = default;
+	};
+
 	struct StationPowerSnapshot
 	{
 		double availableGenerationKW{0.0};
@@ -2008,6 +2048,20 @@ namespace core
 		double fuelCellWasteHeatKW{0.0};
 		double generatorWasteHeatKW{0.0};
 		double generatorDecayHeatKW{0.0};
+		// #416: the protected critical service admission for this tick.
+		// Protected services - containment circulation, biological
+		// circulation, authored critical cooling and generator shutdown
+		// cooling - draw ahead of every discretionary external load from
+		// the actual generation-and-battery pool, never from nameplate
+		// totals. protectedDemandKW is the protected demand presented to
+		// the pool, protectedSuppliedKW what the pool delivered, and
+		// protectedUnmetKW the unmet critical minimum that stays visible
+		// with its reason; protectedUnmet is the station-level alarm.
+		double protectedDemandKW{0.0};
+		double protectedSuppliedKW{0.0};
+		double protectedUnmetKW{0.0};
+		bool protectedUnmet{false};
+		std::vector<StationProtectedServiceSnapshot> protectedServices;
 		std::vector<StationSolarSourceSnapshot> sources;
 		std::vector<StationEquipmentLoadSnapshot> loads;
 		std::vector<StationBatterySnapshot> batteries;
