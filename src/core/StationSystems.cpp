@@ -5263,8 +5263,28 @@ namespace core
 			for (auto& generator : generators) generator.availabilityFactor = 1.0;
 			for (auto& loop : coolantLoops) loop.availabilityFactor = 1.0;
 			for (auto& chiller : chillers) chiller.availabilityFactor = 1.0;
-			for (auto& outage : outages)
+			// Newly due outage starts and restorations are staged across all
+			// schedules and announced in the declared scenario event order
+			// (#577): occurrence simulation time ascending, then service
+			// priority descending, then declaration order - the same rule
+			// that governs resupply deliveries and terminal ejections (#392).
+			// The occurrence counters still advance per schedule, so every
+			// window's start and restoration is staged exactly once however
+			// many ticks an accelerated update batches together. When one
+			// schedule's restoration lands on the same instant as its own
+			// next start (recurrence == duration) the closing window is
+			// announced restored before the opening window begins, so the
+			// event log reads in causal order.
+			struct DueOutageEvent
 			{
+				StationScenarioEventKey key;
+				bool isRestore{false};
+				std::string message;
+			};
+			std::vector<DueOutageEvent> dueOutages;
+			for (size_t index = 0; index < outages.size(); ++index)
+			{
+				auto& outage = outages[index];
 				auto const& schedule = outage.authored;
 				auto const startedDue = stationOutageOccurrencesStarted(
 					schedule.firstOccurrenceSeconds, schedule.durationSeconds,
@@ -5272,9 +5292,9 @@ namespace core
 				auto const completedDue = stationOutageOccurrencesCompleted(
 					schedule.firstOccurrenceSeconds, schedule.durationSeconds,
 					schedule.recurrenceSeconds, elapsed);
-				// Announce each newly opened window and each newly closed
-				// (restored) window in occurrence order, so the event log
-				// brackets every outage even when several start and end
+				// Stage each newly opened window and each newly closed
+				// (restored) window with its occurrence time, so the event
+				// log brackets every outage even when several start and end
 				// between two sampled ticks.
 				for (uint64_t occurrence = outage.occurrencesStarted;
 					occurrence < startedDue; ++occurrence)
@@ -5284,10 +5304,10 @@ namespace core
 							+ static_cast<double>(occurrence) * schedule.recurrenceSeconds
 						: schedule.firstOccurrenceSeconds;
 					outage.lastStartSeconds = when;
-					appendBoundedEvent(events, tick,
+					dueOutages.push_back({{when, schedule.priority, index}, false,
 						"Outage '" + schedule.id + "' on " + outage.installationKind + " '"
 						+ schedule.installationId + "' began at " + std::to_string(when)
-						+ " s: capacity reduced to " + std::to_string(schedule.capacityFraction));
+						+ " s: capacity reduced to " + std::to_string(schedule.capacityFraction)});
 				}
 				for (uint64_t occurrence = outage.occurrencesCompleted;
 					occurrence < completedDue; ++occurrence)
@@ -5298,25 +5318,39 @@ namespace core
 							+ schedule.durationSeconds
 						: schedule.firstOccurrenceSeconds + schedule.durationSeconds;
 					outage.lastRestoreSeconds = when;
-					appendBoundedEvent(events, tick,
+					dueOutages.push_back({{when, schedule.priority, index}, true,
 						"Outage '" + schedule.id + "' on " + outage.installationKind + " '"
 						+ schedule.installationId + "' restored full declared availability at "
-						+ std::to_string(when) + " s (no inventory replenished)");
+						+ std::to_string(when) + " s (no inventory replenished)"});
 				}
 				outage.occurrencesStarted = startedDue;
 				outage.occurrencesCompleted = completedDue;
 				outage.lastActive = startedDue > completedDue;
 				outage.exhausted = schedule.recurrenceSeconds <= 0.0 && completedDue >= 1;
-				// Apply the reduction to the target's effective availability,
-				// deepest window wins so the result never depends on the
-				// declaration order of coincident outages.
+			}
+			std::sort(dueOutages.begin(), dueOutages.end(),
+				[](DueOutageEvent const& a, DueOutageEvent const& b)
+				{
+					if (a.key < b.key) return true;
+					if (b.key < a.key) return false;
+					// Same schedule, same instant: the closing window's
+					// restoration precedes the opening window's start.
+					return a.isRestore && !b.isRestore;
+				});
+			for (auto const& event : dueOutages)
+				appendBoundedEvent(events, tick, event.message);
+			// Apply the reduction to each active outage's target, deepest
+			// window wins so the result never depends on the declaration
+			// order of coincident outages.
+			for (auto& outage : outages)
+			{
 				if (!outage.lastActive) continue;
 				auto& factor = outage.target == OutageState::Target::Generator
 					? generators[outage.targetIndex].availabilityFactor
 					: outage.target == OutageState::Target::CoolantLoop
 						? coolantLoops[outage.targetIndex].availabilityFactor
 						: chillers[outage.targetIndex].availabilityFactor;
-				factor = std::min(factor, schedule.capacityFraction);
+				factor = std::min(factor, outage.authored.capacityFraction);
 			}
 			// Fuelled generators run ahead of the load allocation (#399):
 			// their electrical output joins the shared generation pool for

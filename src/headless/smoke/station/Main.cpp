@@ -15531,6 +15531,14 @@ void buffers(smoke::Context const&)
 				if (event.message.find(needle) != std::string::npos) return true;
 			return false;
 		};
+		auto outageMessages = [](core::World& world)
+		{
+			std::vector<std::string> messages;
+			for (auto const& event : world.getStationSystemsEvents())
+				if (event.message.rfind("Outage '", 0) == 0)
+					messages.push_back(event.message);
+			return messages;
+		};
 		// A generator that reaches full rated output well before any
 		// outage window opens, so the ceiling - not startup or the ramp -
 		// is what moves the output when the window opens.
@@ -15707,6 +15715,171 @@ void buffers(smoke::Context const&)
 			require(approx(snap.power.generators[0].availabilityFactor, 0.25)
 				&& approx(snap.power.generators[0].outputKW, 2.5, 1e-2),
 				"overlapping outages did not take the deepest reduction");
+		}
+		// #577: newly due outage starts and restorations are announced in
+		// the declared scenario event order - occurrence simulation time
+		// ascending, then service priority descending, then declaration
+		// order - the same rule that governs deliveries and ejections
+		// (#392). The deepest-wins availability, exactly-once occurrence
+		// counts and no-replenishment semantics are unchanged.
+		// Coincident starts: the higher-priority schedule is announced
+		// first regardless of declaration order.
+		{
+			core::World world("OutagePriorityOrder", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(configure(world, {
+				outage("low", "gen", 0.5, 0.0, 10.0, 0.0, 0),
+				outage("high", "gen", 0.5, 0.0, 10.0, 0.0, 100)}),
+				"the coincident-priority outage scenario was rejected");
+			world.resumeSimulation();
+			require(world.advanceTicks(1), "coincident-priority run failed");
+			auto const messages = outageMessages(world);
+			require(messages.size() == 2
+				&& messages[0].find("'high'") != std::string::npos
+				&& messages[0].find("began") != std::string::npos
+				&& messages[1].find("'low'") != std::string::npos
+				&& messages[1].find("began") != std::string::npos,
+				"coincident outage starts were not announced higher-priority-first");
+		}
+		// Coincident starts with equal priority: the stable declaration
+		// tie-break keeps the first-declared schedule first.
+		{
+			core::World world("OutageEqualPriorityOrder", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(configure(world, {
+				outage("declFirst", "gen", 0.5, 0.0, 10.0, 0.0, 5),
+				outage("declSecond", "gen", 0.5, 0.0, 10.0, 0.0, 5)}),
+				"the equal-priority outage scenario was rejected");
+			world.resumeSimulation();
+			require(world.advanceTicks(1), "equal-priority run failed");
+			auto const messages = outageMessages(world);
+			require(messages.size() == 2
+				&& messages[0].find("'declFirst'") != std::string::npos
+				&& messages[1].find("'declSecond'") != std::string::npos,
+				"equal-priority coincident starts did not keep declaration order");
+		}
+		// Unequal sub-tick event times that come due inside the same fixed
+		// tick: the earlier occurrence is announced first even when the
+		// later occurrence has the higher priority.
+		{
+			core::World world("OutageSubTickOrder", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(configure(world, {
+				outage("early_low", "gen", 0.5, 10.008, 5.0, 0.0, 0),
+				outage("late_high", "gen", 0.5, 10.012, 5.0, 0.0, 100)}),
+				"the sub-tick ordering outage scenario was rejected");
+			world.resumeSimulation();
+			// t = 10.0s: neither sub-tick occurrence is due yet.
+			require(world.advanceTicks(600), "sub-tick run failed before the events");
+			require(outageMessages(world).empty(),
+				"a sub-tick outage event fired before its occurrence time");
+			// One more tick carries both 10.008s and 10.012s into the same
+			// sampled tick; the earlier time wins over the higher priority.
+			require(world.advanceTicks(1), "sub-tick run failed into the events");
+			auto const messages = outageMessages(world);
+			require(messages.size() == 2
+				&& messages[0].find("'early_low'") != std::string::npos
+				&& messages[1].find("'late_high'") != std::string::npos,
+				"same-tick outage events were not ordered by occurrence time over priority");
+		}
+		// Same-boundary start/restore inside one schedule (recurrence ==
+		// duration): the closing window's restoration is announced before
+		// the opening window's start, so the log reads in causal order.
+		{
+			core::World world("OutageSameBoundaryOrder", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(configure(world, {
+				outage("cont", "gen", 0.5, 10.0, 10.0, 10.0, 0)}),
+				"the contiguous-window outage scenario was rejected");
+			world.resumeSimulation();
+			require(world.advanceTicks(1200), "contiguous-window run failed");
+			auto const messages = outageMessages(world);
+			require(messages.size() == 3
+				&& messages[0].find("began at 10.000000") != std::string::npos
+				&& messages[1].find("restored") != std::string::npos
+				&& messages[1].find("at 20.000000") != std::string::npos
+				&& messages[2].find("began at 20.000000") != std::string::npos,
+				"a same-boundary restore was not announced before the next window's start");
+			auto const& snap = world.getStationSystemsSnapshot().outages;
+			require(snap.size() == 1 && snap[0].occurrencesStarted == 2
+				&& snap[0].occurrencesCompleted == 1 && snap[0].active,
+				"the contiguous-window occurrence counts were not exactly-once");
+		}
+		// Cross-schedule same-boundary start/restore: priority orders the
+		// announcements across event kinds - the higher-priority start is
+		// announced before the lower-priority restoration.
+		{
+			core::World world("OutageCrossBoundaryPriority", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(configure(world, {
+				outage("restorer", "gen", 0.5, 0.0, 10.0, 0.0, 0),
+				outage("starter", "gen", 0.5, 10.0, 10.0, 0.0, 100)}),
+				"the cross-boundary priority outage scenario was rejected");
+			world.resumeSimulation();
+			require(world.advanceTicks(600), "cross-boundary priority run failed");
+			auto const messages = outageMessages(world);
+			require(messages.size() == 3
+				&& messages[0].find("'restorer'") != std::string::npos
+				&& messages[0].find("began") != std::string::npos
+				&& messages[1].find("'starter'") != std::string::npos
+				&& messages[1].find("began") != std::string::npos
+				&& messages[2].find("'restorer'") != std::string::npos
+				&& messages[2].find("restored") != std::string::npos,
+				"coincident start/restore from different schedules ignored priority");
+		}
+		// Batched versus stepped replay: the same scenario announces the
+		// same ordered event log and the same exactly-once occurrence
+		// counts whether the ticks arrive in one accelerated update or
+		// one at a time.
+		{
+			auto scenario = [&]
+			{
+				// a: windows [5,10), [15,20), [25,30), [35,40) prio 1;
+				// b: windows [10,15), [20,25), [30,35) prio 2. Every
+				// boundary at 10..35s is a coincident start/restore pair
+				// ordered by priority.
+				return std::vector<core::InstallationOutageSettings>{
+					outage("a", "gen", 0.5, 5.0, 5.0, 10.0, 1),
+					outage("b", "gen", 0.25, 10.0, 5.0, 10.0, 2)};
+			};
+			core::World batched("OutageBatchedOrder", 2, 2);
+			batched.pauseSimulation(); batched.finishBuild();
+			require(configure(batched, scenario()),
+				"the batched-order outage scenario was rejected");
+			batched.resumeSimulation();
+			require(batched.advanceTicks(35 * 60), "batched-order run failed");
+			core::World stepped("OutageSteppedOrder", 2, 2);
+			stepped.pauseSimulation(); stepped.finishBuild();
+			require(configure(stepped, scenario()),
+				"the stepped-order outage scenario was rejected");
+			stepped.resumeSimulation();
+			for (int tick = 0; tick < 35 * 60; ++tick)
+				require(stepped.advanceTicks(1), "stepped-order run failed");
+			auto const batchedMessages = outageMessages(batched);
+			auto const steppedMessages = outageMessages(stepped);
+			require(batchedMessages == steppedMessages,
+				"batched and stepped runs announced outage events in different orders");
+			// 13 occurrences: a starts at 5/15/25/35 and restores at
+			// 10/20/30; b starts at 10/20/30 and restores at 15/25/35.
+			require(batchedMessages.size() == 13,
+				"the batched run did not announce every outage occurrence exactly once");
+			require(batchedMessages.back().find("'a'") != std::string::npos
+				&& batchedMessages.back().find("began") != std::string::npos
+				&& batchedMessages[batchedMessages.size() - 2].find("'b'") != std::string::npos
+				&& batchedMessages[batchedMessages.size() - 2].find("restored") != std::string::npos,
+				"the coincident t=35s restore/start pair was not priority-ordered");
+			auto const& batchedSnap = batched.getStationSystemsSnapshot().outages;
+			auto const& steppedSnap = stepped.getStationSystemsSnapshot().outages;
+			require(batchedSnap == steppedSnap
+				&& batchedSnap[0].occurrencesStarted == 4
+				&& batchedSnap[0].occurrencesCompleted == 3
+				&& batchedSnap[1].occurrencesStarted == 3
+				&& batchedSnap[1].occurrencesCompleted == 3,
+				"occurrence counts differed between the batched and stepped runs");
+			require(batchedSnap[0].active && !batchedSnap[1].active
+				&& batchedSnap[1].exhausted == false
+				&& batchedSnap[0].exhausted == false,
+				"the batched run's final window state differs from the authored schedule");
 		}
 		// Recurring outage: the same window repeats every recurrenceSeconds.
 		{
