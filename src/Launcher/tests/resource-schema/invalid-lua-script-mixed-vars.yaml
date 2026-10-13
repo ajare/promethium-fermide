@@ -1,0 +1,21 @@
+Resources:
+  Resource:
+    type: LuaScript
+    name: MixedVariables
+    location: script.lua
+    Definitions:
+      Definition:
+        Vars:
+          Var:
+            name: count
+            type: integer
+            min: 0
+            max: 10
+            default: 2
+        Params:
+          Param:
+            name: scale
+            type: number
+            min: 0.5
+            max: 2.0
+            default: 1.0

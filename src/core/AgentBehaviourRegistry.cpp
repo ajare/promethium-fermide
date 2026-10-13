@@ -619,6 +619,7 @@ namespace core
 			for (auto const& [agentId, agent] : world->mAgents.entries())
 			{
 				if (!agent || !agent->getBehaviourAssignment()) continue;
+				if (agent->isPlayerControlled()) continue;
 				auto const& assignment = *agent->getBehaviourAssignment();
 				auto const* next = replacement.lookupAgentBehaviour(
 					assignment.behaviour);
@@ -943,7 +944,7 @@ namespace core
 			if (!prepared.assignments.empty()) world->modify();
 			world->mAgentBehaviourDependencyDiagnostic.clear();
 			for (auto const& [agentId, agent] : world->mAgents.entries())
-				if (agent && agent->getBehaviourAssignment())
+				if (agent && agent->getBehaviourAssignment() && !agent->isPlayerControlled())
 					world->mSimulationCoordinator
 						.clearAgentMovementForBehaviourEdit(agentId);
 		}
@@ -1084,8 +1085,8 @@ namespace core
 		if (!definitionEditsAreAllowed(&diagnostic))
 			throw std::invalid_argument(diagnostic);
 		if (mPackageDirectory) requireModuleFile(sourceModulePath, *mPackageDirectory);
-		if (mBehaviours.exhausted())
-			throw std::overflow_error("This registry has issued every Agent behaviour ID");
+		if (mBehaviours.exhausted() || mBehaviours.nextId() == PlayerControlledBehaviour.value)
+			throw std::overflow_error("This registry has issued every non-reserved Agent behaviour ID");
 
 		auto const id = mBehaviours.tryAdd(AgentBehaviour::create(
 			name, sourceModulePath, std::move(schema)));
@@ -1382,7 +1383,8 @@ namespace core
 			}
 			serializer.endMap();
 
-			if (!id) throw SerializationException("Serialized Agent behaviour ID cannot be zero");
+			if (!id || id == PlayerControlledBehaviour)
+				throw SerializationException("Serialized registry Agent behaviour ID cannot be zero or a reserved built-in");
 			if (revision == 0)
 				throw SerializationException("Serialized Agent behaviour revision cannot be zero");
 			std::string diagnostic;

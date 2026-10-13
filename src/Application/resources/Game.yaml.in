@@ -1,0 +1,18 @@
+Configuration:
+  Video:
+    Width: 1280
+    Height: 720
+    Fullscreen: false
+    VSync: true
+  Audio:
+    Enabled: false
+  Game:
+    DLL:
+      path: ./@PF_APPLICATION_LIBRARY@
+    ResourceLocations:
+      ResourceLocation:
+        type: Directory
+        path: ./
+        definition: Resources.yaml
+    Debug:
+      InGame: disabled

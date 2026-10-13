@@ -151,7 +151,8 @@ struct AgentClipboardPayload
 	std::optional<bool> individualRemoteAccessPanels;
 	std::optional<bool> individualRemoteBoothWindowShutters;
 
-	// Behaviour IDs are meaningful only under this assignment's registry UUID.
+	// Registry Behaviour IDs require this assignment's registry UUID. The
+	// immutable Player controlled built-in instead uses an empty UUID.
 	// Marker configuration values have already been replaced by names.
 	std::optional<AgentClipboardBehaviourAssignment> behaviour;
 

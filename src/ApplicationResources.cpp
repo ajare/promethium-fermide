@@ -1,4 +1,5 @@
 #include "ApplicationResources.h"
+#include "Map.h"
 
 #include <filesystem>
 #include <stdexcept>
@@ -199,6 +200,7 @@ void WorldResource::destroy()
 
 void registerApplicationResourceTypes(resources::ResourceManager& manager)
 {
+	pf::application::registerMapResourceTypes(manager);
 	manager.addResourceFactory(new Factory<LuaScriptResource>("LuaScript"));
 	manager.addResourceFactory(new Factory<AgentTypeResource>("AgentType"));
 	manager.addResourceFactory(new Factory<AgentTagRegistryResource>(

@@ -1,0 +1,14 @@
+Resources:
+  Resource:
+    type: LuaScript
+    name: LegacyScript
+    location: script.lua
+    Definitions:
+      Definition:
+        Params:
+          Param:
+            name: scale
+            type: number
+            min: 0.5
+            max: 2.0
+            default: 1.0

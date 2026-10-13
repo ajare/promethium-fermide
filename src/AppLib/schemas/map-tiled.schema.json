@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ajare.github.io/boolean-world/schemas/resource-manifest/v1/map-tiled.schema.json",
+  "title": "Map Tiled Definition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["factory"],
+  "properties": {
+    "factory": { "enum": ["Tiled"] }
+  }
+}

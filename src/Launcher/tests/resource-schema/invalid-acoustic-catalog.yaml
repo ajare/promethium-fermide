@@ -1,0 +1,12 @@
+Resources:
+  Resource:
+    type: AcousticCatalog
+    name: Invalid
+    DependentResources:
+      DependentResource:
+        id: Yaml
+        ref: Source
+    Definitions:
+      Definition:
+        Resource: Yaml
+        unexpected: true

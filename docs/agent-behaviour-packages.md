@@ -16,6 +16,10 @@ Host APIs v1/v2 are rejected, not compatibility modes. The decision and its
 relationship to the earlier runtime design are recorded in
 [ADR 0021](adr/0021-run-installed-agent-behaviours-as-coroutines.md).
 
+The immutable **Player controlled** behaviour is available separately from these
+packages, without a registry or Lua module. See [Player control](player-control.md).
+Its reserved host ID cannot be used by a registry definition.
+
 ## Manifest version 1
 
 The manifest is a root YAML map (there is no enclosing `agentBehaviourRegistry`

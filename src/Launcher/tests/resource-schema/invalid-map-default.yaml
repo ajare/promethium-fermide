@@ -1,0 +1,11 @@
+Resources:
+  Resource:
+    type: Map
+    name: Invalid
+    DependentResources:
+      DependentResource:
+        id: Yaml
+        ref: Source
+    Definitions:
+      Definition:
+        Resource: Yaml

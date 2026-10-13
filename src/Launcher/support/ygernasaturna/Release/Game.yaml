@@ -1,0 +1,83 @@
+Configuration:
+  Video:
+    Width: 1600
+    Height: 900
+    Fullscreen: false
+    VSync: true
+    RenderScale: quarter
+    AA: fxaa
+    AmbientOcclusion: gtao-depth
+    RenderTextureFilter: linear
+    HorizontalMaterials: 2d
+    WaterReflections:
+      Technique: planar
+      PlanarResolution: half
+    PlayerTorch:
+      Radius: 192
+      Falloff: 64
+    Shadows:
+      Enabled: true
+      FaceResolution: 1024
+      Range: 192
+      NearPlane: 0.25
+      ConstantBias: 0.0008
+      NormalBias: 0.0025
+      Filter: pcf
+      FilterRadius: 1
+      FadeStart: 0.9
+  Audio:
+    Enabled: true
+    Channels: 1024
+    Sync: false
+    Output: Speakers
+    QualityPreset: Medium
+    QualityMayBeModifiedLive: true
+    Occlusion: true
+    Transmission: true
+    Reflections: true
+    AirAbsorption: true
+    QualityPresets:
+      Preset:
+        - Name: Low
+          RayCount: 2048
+          BounceCount: 2
+          ImpulseResponseDuration: 0.5
+          AmbisonicOrder: 1
+          ReflectionSourceCap: 2
+          SimulationUpdateRate: 5
+        - Name: Medium
+          RayCount: 4096
+          BounceCount: 4
+          ImpulseResponseDuration: 1.0
+          AmbisonicOrder: 1
+          ReflectionSourceCap: 4
+          SimulationUpdateRate: 10
+        - Name: High
+          RayCount: 8192
+          BounceCount: 8
+          ImpulseResponseDuration: 2.0
+          AmbisonicOrder: 2
+          ReflectionSourceCap: 8
+          SimulationUpdateRate: 15
+  Input:
+    MouseSensitivity: 0.6
+  Game:
+    WorldDataGeneration:
+      Mode: Asynchronous
+      StartInterval: 5
+      AlwaysUpdateVertices: false
+      AllowCommitIfVisible: false
+    DLL:
+      path: ./libBooleanWorld.so
+    ResourceLocations:
+      ResourceLocation:
+        type: Directory
+        path: ../../../../src/BooleanWorld/app/resources/
+        definition: Resources.yaml
+    Debug:
+      InGame: enabled
+    Arguments:
+      # Leave blank (or leave out) for default engine value
+      Argument:
+        name: ThreadedLoading
+        value: false

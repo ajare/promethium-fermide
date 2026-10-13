@@ -349,6 +349,10 @@ _Avoid_: Physical fit, pose capability
 A reusable state-machine definition that may direct many Agents. Each assigned Agent runs an independent instance of the behaviour.
 _Avoid_: Agent group, Agent tag
 
+**Player-controlled Agent**:
+An Agent assigned the Player controlled behaviour, eligible for direct human control rather than autonomous destination choice. It remains an Agent of its existing Agent type, not a separate physical identity.
+_Avoid_: Player Agent type, Human when describing the control role
+
 **Agent behaviour configuration**:
 Authored data supplied to one Agent's behaviour instance according to its Agent behaviour schema. Agents using the same Agent behaviour may have different configurations, such as different schedules.
 _Avoid_: Behaviour state, which is the instance's changing runtime state

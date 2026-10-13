@@ -1,0 +1,14 @@
+Resources:
+  Resource:
+    type: LuaScript
+    name: NewNumberVariable
+    location: script.lua
+    Definitions:
+      Definition:
+        Vars:
+          Var:
+            name: scale
+            type: number
+            min: 0.5
+            max: 2.0
+            default: 1.0

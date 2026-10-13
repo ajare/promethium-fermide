@@ -1,0 +1,112 @@
+Resources:
+  Resource:
+    - type: TextFile
+      name: YamlSource
+      location: catalog.yaml
+    - type: TextFile
+      name: LuaSource
+      location: script.lua
+    - type: XmlFile
+      name: TiledSource
+      location: map.tmx
+    - type: Image
+      name: TileImage
+      location: tiles.png
+    - type: ImageSet
+      name: Tiles
+      DependentResources:
+        DependentResource:
+          id: Image
+          ref: TileImage
+      Definitions:
+        Definition:
+          Images:
+            Image:
+              name: Tile
+              x: 0
+              y: 0
+              width: 1
+              height: 1
+    - type: Map
+      name: TiledMap
+      DependentResources:
+        DependentResource:
+          - id: File
+            ref: TiledSource
+          - id: TilesImageSet
+            ref: Tiles
+      Definitions:
+        Definition:
+          factory: Tiled
+    - type: Map
+      name: BooleanWorldMap
+      DependentResources:
+        DependentResource:
+          id: Yaml
+          ref: YamlSource
+      Definitions:
+        Definition:
+          factory: BooleanWorld
+          Resource: Yaml
+    - type: ProtoEntity
+      name: Entity
+      Definitions:
+        Definition:
+          Properties:
+            Physical:
+              Collision: false
+    - type: LuaScript
+      name: Script
+      DependentResources:
+        DependentResource:
+          id: Source
+          ref: LuaSource
+      Definitions:
+        Definition:
+          Vars:
+            Var:
+              - name: text
+                type: string
+                default: value
+                Choices:
+                  Choice: value
+              - name: count
+                type: integer
+                min: 0
+                max: 10
+                default: 2
+              - name: scale
+                type: float
+                min: 0.5
+                max: 2.0
+                default: 1.0
+              - name: enabled
+                type: boolean
+                default: "true"
+    - type: ProcMaterial
+      name: Materials
+      DependentResources:
+        DependentResource:
+          id: Yaml
+          ref: YamlSource
+      Definitions:
+        Definition:
+          Resource: Yaml
+    - type: EmbossingCatalog
+      name: Embossing
+      DependentResources:
+        DependentResource:
+          id: Yaml
+          ref: YamlSource
+      Definitions:
+        Definition:
+          Resource: Yaml
+    - type: AcousticCatalog
+      name: Acoustics
+      DependentResources:
+        DependentResource:
+          id: Yaml
+          ref: YamlSource
+      Definitions:
+        Definition:
+          Resource: Yaml

@@ -171,6 +171,7 @@ target_compile_definitions(pf-lua PRIVATE
     $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
 )
 set_target_properties(pf-lua PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
     C_STANDARD 11
     C_STANDARD_REQUIRED YES
     ARCHIVE_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}"
@@ -342,7 +343,9 @@ target_link_libraries(promethium-fermide-core
     PRIVATE pf-lua sol2::sol2
 )
 pf_apply_high_analysis(promethium-fermide-core)
+# The Application Map owns a World, so core is also linked into its shared library.
 set_target_properties(promethium-fermide-core PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
     ARCHIVE_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}"
     OUTPUT_NAME "promethium-fermide-core"
 )
@@ -428,6 +431,7 @@ endforeach()
 
 # Managed Agent resources have a CPU-only import seam shared with headless editor checks.
 add_library(pf-agent-resources STATIC src/ApplicationAgentTypes.cpp)
+set_target_properties(pf-agent-resources PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(pf-agent-resources PUBLIC promethium-fermide-core Willpower.Application)
 target_compile_features(pf-agent-resources PUBLIC cxx_std_20)
 if(MSVC)
@@ -581,7 +585,7 @@ if(PF_BUILD_GUI)
     target_link_libraries(editor PRIVATE
         pf-render pf-metrics pf-agent-editing pf-agent-resources libglew_static nfd::nfd
         spdlog::spdlog SDL2::SDL2-static OpenGL::GL
-        Willpower.Application ext::mpp-helper
+        Willpower.Application ext::mpp-helper PromethiumFermide
     )
     if(WIN32)
         target_link_libraries(editor PRIVATE SDL2::SDL2main)
@@ -596,7 +600,7 @@ if(PF_BUILD_GUI)
     add_custom_target(pf-sector-assets ALL
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/resources"
-            "$<TARGET_FILE_DIR:editor>"
+            "${PF_OUTPUT_DIR}"
         VERBATIM
     )
     add_dependencies(editor pf-sector-assets)
@@ -610,6 +614,17 @@ if(PF_BUILD_GUI)
 endif()
 
 include(CTest)
+
+# Shared application framework and graphical launcher use Willpower's existing
+# dependency targets rather than a separate dependency build.
+include("${CMAKE_CURRENT_SOURCE_DIR}/ext/willpower/cmake/Helpers.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/ext/willpower/cmake/ResourceSchemas.cmake")
+add_subdirectory(src/AppLib)
+if(PF_BUILD_GUI)
+    add_subdirectory(src/Launcher)
+    add_subdirectory(src/Application)
+endif()
+
 # Compatibility remains runnable with BUILD_TESTING=OFF. Direct module targets
 # never depend on the compatibility target, other modules, or standalone tools.
 if(BUILD_TESTING)

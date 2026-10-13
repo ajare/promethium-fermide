@@ -160,6 +160,7 @@ pf_add_smoke_module(pf-smoke-agent
     SOURCES
         agent/Main.cpp
         agent/Identity.cpp
+        agent/PlayerControl.cpp
         agent/Activation.cpp
         agent/Group.cpp
         agent/GroupAssignment.cpp
@@ -180,6 +181,14 @@ pf_add_smoke_module(pf-smoke-agent
     LABELS core
     TIMEOUT 30
 )
+
+add_test(NAME agent-playerControlEditorWorkflow COMMAND pf-smoke-editor --check playerControlEditorWorkflow)
+set_tests_properties(agent-playerControlEditorWorkflow PROPERTIES LABELS "agent;editor;functional;validation-fast" TIMEOUT 30)
+
+foreach(check playerControlBasics playerControlBoundaries playerControlBulkheads playerControlPersistence)
+    add_test(NAME agent-${check} COMMAND pf-smoke-agent --check ${check})
+    set_tests_properties(agent-${check} PROPERTIES LABELS "agent;functional;validation-fast" TIMEOUT 30)
+endforeach()
 
 # Explicit diagnostic invocations retain the smoke runner's ordinary CLI output
 # contract while providing the labelled traces required by ticket #476.
@@ -526,6 +535,7 @@ pf_add_smoke_module(pf-smoke-editor
         agent/GroupTopologyEditor.cpp
         agent/GroupClipboardEditor.cpp
         agent/AgentTypeEditor.cpp
+        agent/PlayerControlEditor.cpp
         agent/ColourEditor.cpp
         agent/WalkSpeedEditor.cpp
         agent/HeightEditor.cpp
