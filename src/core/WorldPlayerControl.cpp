@@ -8,6 +8,9 @@
 #include "core/StairwellMountEdge.h"
 #include "core/StairwellTransit.h"
 #include "core/StaircaseTransit.h"
+#include "core/LadderMountEdge.h"
+#include "core/LadderEdge.h"
+#include "core/LadderVertex.h"
 #include "core/SectorEdge.h"
 
 #include <algorithm>
@@ -77,9 +80,9 @@ namespace core
 		bool const flatTask = stairSector && agent->mTraversalTask
 			&& agent->mTraversalTask->edge->getType() == EdgeType::Location;
 		if (agent->mTraversalTask && !flatTask) return;
-		// Held stair selection is contextual: near an endpoint and walking into
-		// its flight, Up must not simultaneously activate a neighbouring Door.
-		if (playerStaircaseApproach(*agent)) return;
+		// Held climb selection is contextual: approaching a stair or Ladder
+		// endpoint must not simultaneously activate a neighbouring Door.
+		if (agent->mPlayerLadderMount || playerLadderApproach(*agent) || playerStaircaseApproach(*agent)) return;
 		auto const position = agent->getGlobalPosition();
 		// Holding Up while approaching a junction selects at departure; it must
 		// not accidentally exit before arrival. Walking away (or stopping) retains
@@ -254,6 +257,98 @@ namespace core
 		return selected;
 	}
 
+	std::shared_ptr<const Edge> World::playerLadderApproach(Agent const& agent) const
+	{
+		int const choice = int(mPlayerStairUp) - int(mPlayerStairDown);
+		if (!choice || !mPlayerMovementDirection || agent.mTraversalTask || agent.mPlayerLadderMount) return {};
+		auto const position = agent.getGlobalPosition();
+		std::shared_ptr<const Edge> selected;
+		float nearest = .25f + PoseFitTolerance;
+		for (auto const& edge : getGraph()->getEdges())
+		{
+			auto mount = std::dynamic_pointer_cast<LadderMountEdge const>(edge);
+			if (!mount || mount->getLadder()->isExtensible()) continue;
+			auto source = edge->getVertex(0), destination = edge->getVertex(1);
+			if (!std::dynamic_pointer_cast<LadderVertex const>(destination)) std::swap(source, destination);
+			if (source->getSector().get() != agent.getSector()) continue;
+			auto const gap = mPlayerMovementDirection * (source->getPosition().x - position.x);
+			if (gap < -PoseFitTolerance || gap > nearest
+				|| std::abs(position.y - source->getPosition().y) > PoseFitTolerance
+				|| agentForbidsEdge(&agent, *edge, TraversalKind::Ladder)
+				|| !canAgentAccessLocation(*destination->getSector(), agent)) continue;
+			bool fits = true, flight = false;
+			for (auto const& sector : {source->getSector(), destination->getSector()})
+				fits = fits && agent.poseFits(Pose::Standing, sector->getPosition().y + sector->getLevelsHigh() - 1
+					+ sector->getEffectiveTopLevelHeight() - position.y);
+			for (auto const& climb : destination->getEdges())
+				if (climb->getType() == EdgeType::Ladder
+					&& choice * (climb->getOtherVertex(destination)->getPosition().y - position.y) > PoseFitTolerance)
+				{
+					auto target = climb->getOtherVertex(destination);
+					flight = agent.poseFits(Pose::Standing, target->getSector()->getPosition().y
+						+ target->getSector()->getLevelsHigh() - 1 + target->getSector()->getEffectiveTopLevelHeight()
+						- target->getPosition().y);
+				}
+			if (!fits || !flight || agent.getWidth() > destination->getSector()->getSize().x) continue;
+			if (!selected || gap < nearest || (gap == nearest && edge->getId() < selected->getId()))
+			{ selected = edge; nearest = gap; }
+		}
+		return selected;
+	}
+
+	void World::advancePlayerLadderAgent(Agent& agent, float timestep)
+	{
+		if (agent.mState == Agent::State::AwaitingTraversalCommit) return;
+		if (agent.mTraversalTask)
+		{
+			if (agent.mTraversalTask->edge->getType() == EdgeType::Ladder)
+				advancePlayerStairSegment(agent, timestep);
+			else agent.update(timestep);
+			return;
+		}
+		auto const ladder = static_cast<LadderMountEdge const&>(*agent.mPlayerLadderMount).getLadder();
+		auto const position = agent.getGlobalPosition();
+		int const choice = int(mPlayerStairUp) - int(mPlayerStairDown);
+		for (auto const& edge : getGraph()->getEdges())
+		{
+			auto mount = std::dynamic_pointer_cast<LadderMountEdge const>(edge);
+			if (!mount || mount->getLadder() != ladder) continue;
+			auto source = edge->getVertex(1), destination = edge->getVertex(0);
+			if (!std::dynamic_pointer_cast<LadderVertex const>(source)) std::swap(source, destination);
+			if (position.distanceTo(source->getPosition()) > PoseFitTolerance) continue;
+			bool const lower = std::abs(source->getPosition().y - (ladder->getPosition().y - CORE_LADDER_HEIGHT_OFF_GROUND)) <= PoseFitTolerance;
+			if (!agent.mPlayerLadderEntry || choice * (lower ? 1 : -1) <= 0)
+			{
+				auto const sector = destination->getSector();
+				if (canAgentAccessLocation(*sector, agent) && agent.poseFits(Pose::Standing,
+					sector->getPosition().y + sector->getLevelsHigh() - 1
+					+ sector->getEffectiveTopLevelHeight() - position.y)
+					&& beginPlayerTraversal(agent, edge, source, destination))
+				{
+					agent.mPlayerLadderMount.reset();
+					return;
+				}
+				if (choice * (lower ? 1 : -1) <= 0) return;
+			}
+		}
+		if (!choice) return;
+		for (auto const& edge : getGraph()->getEdges())
+		{
+			auto climb = std::dynamic_pointer_cast<LadderEdge const>(edge);
+			if (!climb || climb->getTraversalResourceId() != ladder->getTraversalResourceId()) continue;
+			auto source = edge->getVertex(0), destination = edge->getVertex(1);
+			if (position.distanceTo(source->getPosition()) > PoseFitTolerance) std::swap(source, destination);
+			if (position.distanceTo(source->getPosition()) > PoseFitTolerance
+				|| choice * (destination->getPosition().y - position.y) <= 0.f) continue;
+			if (beginPlayerTraversal(agent, edge, source, destination))
+			{
+				agent.mPlayerLadderEntry = false;
+				advancePlayerStairSegment(agent, timestep);
+			}
+			return;
+		}
+	}
+
 	bool World::beginPlayerTraversal(Agent& agent, std::shared_ptr<const Edge> const& edge,
 		std::shared_ptr<const Vertex> const& source, std::shared_ptr<const Vertex> const& destination)
 	{
@@ -425,7 +520,8 @@ namespace core
 		if (agent.mState == Agent::State::AwaitingTraversalCommit) return;
 		auto const position = agent.getGlobalPosition();
 		auto const& task = *agent.mTraversalTask;
-		int motion = mPlayerMovementDirection;
+		bool const ladder = task.edge->getType() == EdgeType::Ladder;
+		int motion = ladder ? int(mPlayerStairUp) - int(mPlayerStairDown) : mPlayerMovementDirection;
 		float stairSpeed = 0.f;
 		if (task.edge->getType() == EdgeType::Staircase)
 		{
@@ -436,12 +532,12 @@ namespace core
 			stairSpeed = std::abs(speed);
 		}
 		if (!motion) return;
-		auto const forwardX = task.destinationVertex->getPosition().x - task.sourceVertex->getPosition().x;
-		bool const forward = motion * forwardX > 0.f;
+		auto const delta = task.destinationVertex->getPosition() - task.sourceVertex->getPosition();
+		bool const forward = motion * (ladder ? delta.y : delta.x) > 0.f;
 		auto const target = forward ? task.destinationVertex : task.sourceVertex;
 		auto const rise = target->getPosition().y - position.y;
-		// A reversal in a narrow stairwell is safe only while alone on the span.
-		if (auto resource = mTraversalResources.find(task.edge->getTraversalResourceId()); resource && resource->mStairwell)
+		// Reversal on a direction-constrained climbing span is safe only while alone.
+		if (auto resource = mTraversalResources.find(task.edge->getTraversalResourceId()); resource && (resource->mStairwell || resource->mLadder))
 		{
 			auto const direction = rise > 0.f ? TraversalDirection::Ascending : TraversalDirection::Descending;
 			if (resource->mActiveDirection != direction)
@@ -453,7 +549,7 @@ namespace core
 				resource->mActiveDirection = direction;
 			}
 		}
-		auto const speed = task.edge->getType() == EdgeType::Location ? agent.getWalkSpeed()
+		auto const speed = ladder ? agent.getClimbSpeed() : task.edge->getType() == EdgeType::Location ? agent.getWalkSpeed()
 			: task.edge->getType() == EdgeType::Staircase ? stairSpeed : agent.getStationaryStairSpeed(rise > 0.f);
 		if (agent.moveToPosition(target->getPosition(), timestep, speed))
 		{
@@ -471,6 +567,11 @@ namespace core
 	{
 		auto* agent = mAgents.find(id);
 		if (!agent || !agent->isActive() || !agent->isPlayerControlled()) return;
+		if (agent->mPlayerLadderMount)
+		{
+			advancePlayerLadderAgent(*agent, timestep);
+			return;
+		}
 		if (agent->getSector() && agent->getSector()->getType() == SectorType::Staircase)
 		{
 			advancePlayerStaircaseAgent(*agent, timestep);
@@ -557,7 +658,14 @@ namespace core
 		int const direction = mPlayerMovementDirection;
 		float const halfWidth = agent->getWidth() * 0.5f;
 		float targetX = position.x + direction * agent->getWalkSpeed() * timestep;
-		auto const stairMount = playerStaircaseApproach(*agent);
+		auto stairMount = playerStaircaseApproach(*agent);
+		auto const ladderMount = playerLadderApproach(*agent);
+		if (ladderMount && (!stairMount
+			|| std::abs(ladderMount->getVertex(0)->getPosition().x - position.x)
+				< std::abs(stairMount->getVertex(0)->getPosition().x - position.x)
+			|| (std::abs(ladderMount->getVertex(0)->getPosition().x - position.x)
+				== std::abs(stairMount->getVertex(0)->getPosition().x - position.x)
+				&& ladderMount->getId() < stairMount->getId()))) stairMount = ladderMount;
 		std::shared_ptr<const Vertex> stairSource, stairDestination;
 		if (stairMount)
 		{
@@ -578,7 +686,7 @@ namespace core
 			// At a selected open Room-wall mount the flight supplies support
 			// beyond the landing Floor. Let the body overhang only that endpoint;
 			// its centre still walks exactly to the mount before changing Sector.
-			if (!next && stairMount && current == source
+			if (!next && stairMount && stairMount->getType() == EdgeType::StaircaseMount && current == source
 				&& std::abs(boundary - stairSource->getPosition().x) <= PoseFitTolerance
 				&& source->getEndType(level - source->getCellY(), direction > 0 ? CORE_SIDE_RIGHT : CORE_SIDE_LEFT)
 					== SectorEndType::None) break;
@@ -599,7 +707,11 @@ namespace core
 			// The normal Floor sweep above remains authoritative while approaching.
 			agent->setPosition({source, Vector2{targetX, position.y} - source->getPosition()}, false);
 			if (beginPlayerTraversal(*agent, stairMount, stairSource, stairDestination))
-				agent->mPlayerStaircaseEntry = true;
+			{
+				if (stairMount->getType() == EdgeType::LadderMount)
+				{ agent->mPlayerLadderMount = stairMount; agent->mPlayerLadderEntry = true; }
+				else agent->mPlayerStaircaseEntry = true;
+			}
 			return;
 		}
 		if (targetX == position.x) return;

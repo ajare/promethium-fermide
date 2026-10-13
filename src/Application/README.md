@@ -55,6 +55,10 @@ upper endpoint while walking toward the flight (within 0.25 World units).
 Left/Right follows the slope with reversal and automatic endpoint dismount.
 Moving Escalators add belt motion to walking, including walking against the belt;
 release rides the steps. Broken Escalators stop and behave as stationary stairs.
+Fixed Ladders mount while walking toward their centre with Up from below or Down
+from above, within 0.25 World units. Once mounted, Up/Down climbs, release stops,
+and opposite input reverses while alone; endpoint arrivals automatically dismount.
+This includes Room Ladders. Extensible Ladders remain unsupported.
 Walls, low spaces,
 closed Bulkhead Doors and Floor gaps block movement. Buttons, transport boarding
 and automatic crouching/crawling are not supported. Without an eligible

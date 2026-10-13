@@ -1721,6 +1721,8 @@ namespace core
 	{
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		cancelTraversal();
+		mPlayerLadderMount.reset();
+		mPlayerLadderEntry = false;
 		mEarlyDoorPressResource = {};
 		mEarlyDoorPressInteraction = {};
 		mEarlyDoorPressAttempted = false;

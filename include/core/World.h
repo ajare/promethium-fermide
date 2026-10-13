@@ -690,6 +690,8 @@ namespace core
 		AgentId mPlayerDoorAction{};
 		void performPlayerDoorAction();
 		std::shared_ptr<const Edge> playerStaircaseApproach(Agent const& agent) const;
+		std::shared_ptr<const Edge> playerLadderApproach(Agent const& agent) const;
+		void advancePlayerLadderAgent(Agent& agent, float timestep);
 		bool beginPlayerTraversal(Agent& agent, std::shared_ptr<const Edge> const& edge,
 			std::shared_ptr<const Vertex> const& source, std::shared_ptr<const Vertex> const& destination);
 		void advancePlayerStairSegment(Agent& agent, float timestep);

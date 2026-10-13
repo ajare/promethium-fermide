@@ -85,13 +85,33 @@ camera is used.
   resumed belt motion applies immediately. Moving Escalators use Escalator
   Mobility; Broken ones use Staircase Mobility. Pause freezes both walking and
   belt carriage, and resume with cleared keys rides a working belt.
+- Fixed, non-extensible Ladders use contextual endpoint mounting. On the landing
+  Level, walk toward the mount while holding **Up** from below or **Down** from
+  above, within **0.25 World units** of its centre. Either horizontal approach
+  side works; neither or both vertical keys refuses mounting. The Agent walks
+  to the exact mount before entering, with no snapping or automatic alignment.
+  Eligible Ladder approach suppresses Up's Door action. This supports both
+  Ladders inside multi-Level Rooms and Ladder Transits behind their landings.
+- Once mounted, hold **Up/Down** to climb at effective climb speed, without
+  Left/Right. Release or hold both vertical keys to stop exactly; opposite
+  vertical input reverses. Horizontal input does not move a mounted climber.
+  Reversal is refused while another climber shares the span. Stopping retains
+  admitted Ladder capacity, including for Room Ladders, until a safe endpoint.
+  Reaching either connected endpoint automatically dismounts; intermediate
+  Levels without a mount are not exits. Standing clearance, Ladder Mobility,
+  resource admission and landing Location permissions remain authoritative.
+  A refused exit allows retracing the Ladder. Pause freezes the admitted task
+  and clears input; Reset restores the authored landing and discards mounted
+  state. Fixed Ladders require neither Object usage capability nor Buttons.
+  Extensible Ladders and their controls remain outside Player control.
 - Overlapping candidates prefer an admissible open doorway, then nearest centre,
   then stable traversal-resource identity. One press performs at most one action.
 - Solid walls, closed/opening Bulkhead Doors, low spaces and unsupported Floor
   edges stop the Agent's leading body edge, except at a selected open Staircase
   endpoint where the flight supplies support. Input never operates Buttons, boards
-  transports, climbs Ladders, or automatically crouches/crawls. Up
-  supports ordinary Doors between Locations and Stairwell landing doorways;
+  transports, uses extensible Ladders, or automatically crouches/crawls. Up
+  supports ordinary Doors between Locations, Stairwell landing doorways, and
+  contextual fixed Ladder entry/climbing;
   transport-owned Doors, Windows and BoothWindows do not.
 - An Agent initially in a space that cannot accommodate Standing remains
   stationary in its existing fitting pose; input does not force it through the
@@ -124,11 +144,14 @@ work and does not add a new Agent type.
 `agent-playerControlDoorways`, `agent-playerControlDoorwayRestrictions`,
 `agent-playerControlStairwells`, `agent-playerControlStairwellRestrictions`, and
 `agent-playerControlStairwellPlatforms`, `agent-playerControlStaircases`, and
-`agent-playerControlStaircaseRestrictions`, and `agent-playerControlEscalators` exercise
+`agent-playerControlStaircaseRestrictions`, `agent-playerControlEscalators`,
+`agent-playerControlLadders`, `agent-playerControlLadderRestrictions`, and
+`agent-playerControlLadderSharedCapacity` exercise
 walking, timed bidirectional Layer transitions, mirrored zig-zag stair movement,
 ascent/descent speed, narrow capacity, pause/reset, geometry, capability,
 permissions, low clearance and Broken Doors through the World/coordinator seam. `agent-playerControlEditorWorkflow` covers the picker,
 undo/redo and clipboard. `pf_application` covers actual Play key injection, Up repeat suppression and
 suspension, held Up/Down platform departure and Staircase/Escalator mounting,
-wrong-way walking, riding on release and automatic dismounting; `pf_application_render` covers camera following, Layer selection,
+wrong-way walking, riding on release, fixed Ladder entry/climbing/reversal,
+vertical-key cancellation and automatic dismounting; `pf_application_render` covers camera following, Layer selection,
 resize and the no-Player fallback.

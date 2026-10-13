@@ -8,6 +8,7 @@
 #include "core/DoorSectorObject.h"
 #include "core/StairwellTransit.h"
 #include "core/StaircaseTransit.h"
+#include "core/LadderMountEdge.h"
 #include "core/MobilityProfile.h"
 #include "core/Stairwell.h"
 #include "core/AgentType.h"
@@ -547,6 +548,162 @@ namespace
 		}
 	}
 
+	void ladders()
+	{
+		for (bool embedded : {false, true})
+		for (bool descending : {false, true})
+		for (int approach : {-1, 1})
+		{
+			core::World world("Player fixed Ladder", 12, 3);
+			auto bottom = world.addRoom("Bottom", 0, 0, 0, 12, embedded ? 3 : 1);
+			auto top = embedded ? bottom : world.addCorridor(2, 0, 12);
+			if (embedded) world.addSectorWalkway(bottom, 2, 4);
+			if (embedded) world.addSectorLadder(bottom, 0, 4, {3, false, true});
+			else world.addLadder(1, 0, 4, {3, false, true});
+			world.finishBuild(); world.pauseSimulation();
+			auto id = world.createAgent("Player", descending ? top : bottom,
+				embedded && descending ? 2 : 0, 4.5f - approach * .15f); assign(world, id);
+			world.setAgentIndividualLadderSpeedModifier(id, 1.4f);
+			world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None);
+			auto agent = world.lookupAgent(id).entity;
+			auto position = [&] { return world.lookupAgent(id).entity->getGlobalPosition(); };
+			auto drive = [&](int horizontal, int vertical, float seconds) {
+				world.setPlayerMovementDirection(horizontal); world.setPlayerStairSelection(vertical > 0, vertical < 0);
+				while (seconds > 0.f) { auto step = std::min(seconds, 1.f); world.update(step); seconds -= step; }
+			};
+			int const vertical = descending ? -1 : 1;
+			world.resumeSimulation(); drive(approach, vertical, .01f);
+			require(position().x != 4.5f, "Ladder approach must walk to the mount, not snap");
+			near(position().y, descending ? 2.f : 0.f, "Approach must not climb before reaching the mount");
+			drive(approach, vertical, .6f);
+			require(position().y > 0.f && position().y < 2.f && agent->hasActiveLocomotionTask(),
+				"Either fixed Ladder endpoint must mount and climb, including Room Ladders");
+			near(position().x, 4.5f, "Mounted Ladder must climb on its actual vertical centreline");
+			auto before = position(); drive(0, vertical, .1f);
+			near(position().distanceTo(before), agent->getClimbSpeed() * .1f, "Up/Down must use effective climb speed");
+			before = position(); drive(1, 0, 1.f);
+			for (int second = 0; second < 35; ++second) world.update(1.f);
+			near(position().distanceTo(before), 0.f, "Release must stop even with horizontal input and retain Ladder capacity");
+			require(agent->hasActiveLocomotionTask(), "Stopped Player Ladder task must not time out");
+			world.setPlayerStairSelection(true, true); world.update(.2f);
+			near(position().distanceTo(before), 0.f, "Both vertical keys must stop climbing");
+			world.pauseSimulation(); world.resumeSimulation(); world.update(.1f);
+			near(position().distanceTo(before), 0.f, "Pause/resume must preserve exact Ladder position and clear keys");
+			drive(0, -vertical, .1f);
+			near(position().distanceTo(before), agent->getClimbSpeed() * .1f, "Opposite vertical input must reverse the climb");
+			drive(0, -vertical, 3.f);
+			near(position().y, descending ? 2.f : 0.f, "Returning to the source must dismount safely");
+			require(agent->getSector()->getIndex() == (descending ? top : bottom) && !agent->hasActiveLocomotionTask(),
+				"Source return must release Ladder admission and restore the landing");
+			drive(approach, vertical, 12.f);
+			near(position().y, descending ? 0.f : 2.f, "A complete climb must reach the other endpoint");
+			require(agent->getSector()->getIndex() == (descending ? bottom : top), "Arrival must automatically dismount into the landing");
+			world.resetSimulation(); world.resumeSimulation(); world.update(.1f);
+			near(position().y, descending ? 2.f : 0.f, "Reset must restore the authored landing");
+			near(position().x, 4.5f - approach * .15f, "Reset must discard mounted state and held keys");
+		}
+	}
+
+	void ladderRestrictions()
+	{
+		for (int scenario = 0; scenario < 9; ++scenario)
+		{
+			core::World world("Ladder restrictions", 12, 2);
+			auto bottom = world.addRoom("Bottom", 0, 0, 0, 12, 1);
+			world.addCorridor(1, 0, 12);
+			auto result = world.addLadder(1, 0, 4, {2, scenario == 5, true});
+			world.finishBuild(); world.pauseSimulation();
+			auto id = world.createAgent("Player", bottom, 0, scenario == 0 ? 3.5f : 4.35f); assign(world, id);
+			if (scenario == 6)
+			{
+				auto mobility = world.lookupAgent(id).entity->getEffectiveMobilityProfile().value;
+				mobility.set(core::TraversalKind::Ladder, core::MobilityUse::CannotUse);
+				world.setAgentIndividualMobilityProfile(id, mobility);
+			}
+			if (scenario == 7) world.setRoomHeightScale(bottom, .4f);
+			if (scenario == 8) world.setTraversalResourceEnabled(result.traversalResource, false);
+			world.resumeSimulation(); world.setPlayerMovementDirection(scenario == 1 ? 0 : scenario == 2 ? -1 : 1);
+			world.setPlayerStairSelection(scenario != 3, scenario == 3 || scenario == 4);
+			world.update(scenario == 0 ? .1f : .6f);
+			require(world.lookupAgent(id).entity->getSector()->getIndex() == bottom,
+				"Far, stopped, away, wrong/ambiguous, extensible, forbidden, low and disabled mounts must refuse entry");
+		}
+		for (bool low : {false, true})
+		{
+			core::World world("Ladder exit authorization", 12, 2);
+			auto bottom = world.addRoom("Bottom", 0, 0, 0, 12, 1);
+			auto top = world.addRoom("Top", 0, 1, 0, 12, 1);
+			world.addLadder(1, 0, 4, {2, false, true});
+			world.finishBuild(); world.pauseSimulation();
+			if (low) world.setRoomHeightScale(top, .4f);
+			else
+			{
+				auto permission = world.addAccessPermission("Upper landing");
+				world.setLocationPermissionRequirement(top, {permission});
+			}
+			auto id = world.createAgent("Player", bottom, 0, 4.35f); assign(world, id);
+			world.resumeSimulation(); world.setPlayerMovementDirection(1); world.setPlayerStairSelection(true, false);
+			for (int second = 0; second < 8; ++second) world.update(1.f);
+			auto agent = world.lookupAgent(id).entity;
+			require(agent->getSector()->getType() == core::SectorType::Ladder, "Refused Ladder exit must stay on the Ladder");
+			near(agent->getGlobalPosition().y, 1.f, "Refused exit must remain at the supported endpoint");
+			world.setPlayerMovementDirection(0); world.setPlayerStairSelection(false, true); world.update(.1f);
+			require(agent->getGlobalPosition().y < 1.f, "Refused exit must permit retracing the Ladder");
+			for (int second = 0; second < 8; ++second) world.update(1.f);
+			require(agent->getSector()->getIndex() == bottom, "Unauthorized destination must not trap the Player");
+		}
+		for (bool nearMount : {false, true})
+		{
+			core::World world("Ladder versus Door", 12, 2); world.addLayer();
+			auto fore = world.addRoom("Fore", 0, 0, 0, 12, 1);
+			auto bottom = world.addRoom("Bottom", 1, 0, 0, 12, 1);
+			world.addCorridor(1, 1, 0, 12, 1);
+			world.addLadder(2, 0, 4, {2, false, true});
+			core::World::CreateDoorOptions options; options.activationMode = core::DoorActivationMode::Manual;
+			auto result = world.addSectorDoor(fore, 0, 4, options);
+			auto door = std::dynamic_pointer_cast<core::DoorSectorObject>(result.door.sector->getObject(result.door.index))->getDoor();
+			world.finishBuild(); world.pauseSimulation();
+			auto id = world.createAgent("Player", bottom, 0, nearMount ? 4.35f : 4.15f); assign(world, id);
+			world.resumeSimulation(); world.setPlayerMovementDirection(1); world.setPlayerStairSelection(true, false);
+			world.requestPlayerDoorAction(); world.update(.1f);
+			require(door->isClosed() == nearMount, "Only an eligible nearby Ladder approach may suppress Up's Door action");
+		}
+	}
+
+	void ladderSharedCapacity()
+	{
+		core::World world("Player Ladder sharing", 12, 3);
+		auto bottom = world.addRoom("Bottom", 0, 0, 0, 12, 1);
+		auto top = world.addCorridor(2, 0, 12);
+		world.addSectorMarker(top, 0, 4.5f);
+		world.addLadder(1, 0, 4, {3, false, true});
+		world.finishBuild(); world.pauseSimulation();
+		auto id = world.createAgent("Player", bottom, 0, 4.35f); assign(world, id);
+		auto otherId = world.createAgent("Other climber", bottom, 0, 4.5f);
+		world.resumeSimulation(); world.setPlayerMovementDirection(1); world.setPlayerStairSelection(true, false);
+		for (int second = 0; second < 4; ++second) world.update(1.f);
+		auto player = world.lookupAgent(id).entity;
+		require(player->getGlobalPosition().y > .8f && player->getGlobalPosition().y < 2.f,
+			"Player must clear entry spacing before admitting another climber");
+		world.setPlayerStairSelection(false, false);
+		auto other = world.lookupAgent(otherId).entity;
+		require(world.moveAgentToMarker(otherId, world.getMarkerIds().front()).accepted(), "Cannot route other climber");
+		for (int step = 0; step < 80 && other->getSector()->getType() != core::SectorType::Ladder; ++step)
+			world.update(.1f);
+		require(other->getSector()->getType() == core::SectorType::Ladder,
+			"A same-direction climber must be admitted after entry spacing clears");
+		auto before = player->getGlobalPosition();
+		world.setPlayerStairSelection(false, true); world.update(.2f);
+		near(player->getGlobalPosition().distanceTo(before), 0.f, "Reversal must be refused while another climber shares the Ladder");
+		world.setPlayerStairSelection(false, false);
+		for (int second = 0; second < 15; ++second) world.update(1.f);
+		require(other->getSector()->getIndex() == top, "Other climber must finish through ordinary traversal admission");
+		world.setPlayerStairSelection(false, true); world.update(.2f);
+		require(player->getGlobalPosition().y < before.y, "Reversal must resume once the Player is alone");
+		for (int second = 0; second < 8; ++second) world.update(1.f);
+		require(player->getSector()->getIndex() == bottom, "Sole climber reversal must safely dismount");
+	}
+
 	void escalators()
 	{
 		for (int side : {CORE_SIDE_LEFT, CORE_SIDE_RIGHT})
@@ -786,6 +943,9 @@ void agent_smoke::registerPlayerControl(std::vector<smoke::Check>& checks)
 	checks.push_back({"playerControlDoorways", [](smoke::Context const&) { doorways(); }});
 	checks.push_back({"playerControlDoorwayRestrictions", [](smoke::Context const&) { doorwayRestrictions(); doorwaySelection(); }});
 	checks.push_back({"playerControlStairwellPlatforms", [](smoke::Context const&) { stairwellPlatforms(); }});
+	checks.push_back({"playerControlLadders", [](smoke::Context const&) { ladders(); }});
+	checks.push_back({"playerControlLadderSharedCapacity", [](smoke::Context const&) { ladderSharedCapacity(); }});
+	checks.push_back({"playerControlLadderRestrictions", [](smoke::Context const&) { ladderRestrictions(); }});
 	checks.push_back({"playerControlEscalators", [](smoke::Context const&) { escalators(); }});
 	checks.push_back({"playerControlStaircases", [](smoke::Context const&) { staircases(); }});
 	checks.push_back({"playerControlStaircaseRestrictions", [](smoke::Context const&) { staircaseRestrictions(); }});

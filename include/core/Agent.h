@@ -479,6 +479,10 @@ namespace core
 		std::map<uint32_t, DeviceCondition> mRememberedEscalatorConditions;
 
 		SectorPosition mPosition;
+		// Mounted fixed Ladder identity also distinguishes Room Ladders, whose
+		// mount does not change Sector. Never authored or serialized.
+		std::shared_ptr<const Edge> mPlayerLadderMount;
+		bool mPlayerLadderEntry{ false };
 		// Runtime platform approach, never an advance flight selection.
 		bool mPlayerStaircaseEntry{ false };
 		bool mPlayerStairPlatform{ true };

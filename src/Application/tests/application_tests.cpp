@@ -281,6 +281,52 @@ void checkPlayerStaircaseKeys(wp::application::State& play, core::World& world) 
   }
 }
 
+void checkPlayerLadderKeys(wp::application::State& play, core::World& world) {
+  using wp::application::Key;
+  using wp::application::KeyEvent;
+  for (bool embedded : {false, true})
+  for (bool descending : {false, true}) {
+    core::World fixture("Keyboard Ladder", 12, 3);
+    auto bottom = fixture.addRoom("Bottom", 0, 0, 0, 12, embedded ? 3 : 1);
+    auto top = embedded ? bottom : fixture.addCorridor(2, 0, 12);
+    if (embedded) fixture.addSectorWalkway(bottom, 2, 4);
+    if (embedded) fixture.addSectorLadder(bottom, 0, 4, {3, false, true});
+    else fixture.addLadder(1, 0, 4, {3, false, true});
+    fixture.finishBuild(); fixture.pauseSimulation();
+    auto id = fixture.createAgent("Keyboard player", descending ? top : bottom,
+                                  embedded && descending ? 2 : 0, 4.35f);
+    require(fixture.setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}), "Cannot assign Ladder player");
+    auto writer = core::YamlSerializer::toString();
+    core::SerializationWorkData data; data.markSerializedUnmodified = false;
+    fixture.serialize(*writer, data); writer->serialize();
+    auto reader = core::YamlSerializer::fromString(writer->getSerializedString()); reader->deserialize();
+    world.pauseSimulation(); require(world.deserialize(*reader, data), "Cannot install Ladder key fixture");
+    require(world.resumeSimulation(), "Cannot resume Ladder fixture");
+    auto key = [&](Key k, bool held) { play._injectKeyInput(held ? KeyEvent::Pressed : KeyEvent::Released, k, {}); };
+    auto vertical = descending ? Key::DownArrow : Key::UpArrow;
+    auto opposite = descending ? Key::UpArrow : Key::DownArrow;
+    auto position = [&] { return world.lookupAgent(id).entity->getGlobalPosition(); };
+    key(Key::RightArrow, true); key(vertical, true); play._update(.6f);
+    require(position().y > 0.f && position().y < 2.f, "Actual Up/Down input must mount fixed Ladders");
+    key(Key::RightArrow, false);
+    auto before = position(); play._update(.2f);
+    require(std::abs(position().distanceTo(before) - world.lookupAgent(id).entity->getClimbSpeed() * .2f) < .0001f,
+            "Climbing must use vertical input without requiring Left/Right");
+    key(vertical, false); before = position(); play._update(.2f);
+    require(position().distanceTo(before) < .0001f, "Released Up/Down must stop exactly on the Ladder");
+    key(vertical, true); key(opposite, true); play._update(.2f);
+    require(position().distanceTo(before) < .0001f, "Both actual vertical keys must cancel climbing");
+    key(vertical, false); play._update(.1f);
+    require((position().y > before.y) == descending, "Opposite actual vertical key must reverse the climb");
+    key(opposite, false); key(vertical, true);
+    for (int second = 0; second < 12; ++second) play._update(1.f);
+    require(world.lookupAgent(id).entity->getSector()->getIndex() == (descending ? bottom : top)
+              && std::abs(position().y - (descending ? 0.f : 2.f)) < .0001f,
+            "App Ladder arrival must automatically dismount into its supported landing");
+    key(vertical, false); play._update(0.f);
+  }
+}
+
 // Drive the actual factory-created states through the same exception/resume
 // contract as Launcher, without entering their graphics-dependent scenes.
 void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
@@ -338,6 +384,7 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
         checkPlayerDoorKeys(*child, *map->getWorld());
         checkPlayerStairKeys(*child, *map->getWorld());
         checkPlayerStaircaseKeys(*child, *map->getWorld());
+        checkPlayerLadderKeys(*child, *map->getWorld());
         auto const suspendTick = map->getWorld()->getSimulationTick();
         child->_suspend(true, true, true);
         child->_update(1.0f);
