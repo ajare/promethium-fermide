@@ -123,6 +123,15 @@ construction:
     x: 0
     cellsWide: 3
     levelsHigh: 1
+  - type: room
+    name: Room 5
+    layer: 1
+    y: 4
+    x: 0
+    cellsWide: 5
+    levelsHigh: 1
+    topLevelHeight: 0.9
+    hasHeightScale: false
   - type: stairwell
     layer: 1
     y: 1
@@ -137,7 +146,7 @@ construction:
     x: 3
     cellsWide: 4
     riseSide: right
-    speed: 0.5
+    speed: 0.20000002
   - type: ladder
     layer: 1
     y: 1
@@ -164,6 +173,32 @@ construction:
       - 3
       - 4
     destinationPermissionRequirements:
+      []
+  - type: chamber
+    subtype: securityScanner
+    layer: 0
+    y: 4
+    x: 10
+    cellsWide: 2
+    levelsHigh: 1
+    leftToRight: false
+    capacity: 1
+    preDelaySeconds: 1
+    scanSeconds: 2
+    postPauseSeconds: 1
+    sensorDistance: 0.5
+    leftWasOpen: false
+    rightWasOpen: false
+  - type: dumbwaiter
+    id: 1
+    layer: 1
+    y: 2
+    x: 9
+    initialStop: 0
+    travelSeconds: 2
+    lowerLandingPermissionRequirement:
+      []
+    upperLandingPermissionRequirement:
       []
   - type: marker
     sectorIndex: 2
@@ -207,30 +242,6 @@ construction:
     crossingLanes: 1
     automaticSensorDistance: 0.5
     hasSpeedOverride: false
-  - type: chamber
-    subtype: securityScanner
-    layer: 0
-    y: 4
-    x: 10
-    cellsWide: 2
-    levelsHigh: 1
-    leftToRight: false
-    capacity: 1
-    preDelaySeconds: 1
-    scanSeconds: 2
-    postPauseSeconds: 1
-    sensorDistance: 0.5
-    leftWasOpen: false
-    rightWasOpen: false
-  - type: room
-    name: Room 5
-    layer: 1
-    y: 4
-    x: 0
-    cellsWide: 5
-    levelsHigh: 1
-    topLevelHeight: 0.9
-    hasHeightScale: false
   - type: door
     layer: 0
     y: 4
@@ -253,17 +264,6 @@ construction:
     levelsHigh: 1
     initialState: closed
     panelPermissionRequirement:
-      []
-  - type: dumbwaiter
-    id: 1
-    layer: 1
-    y: 2
-    x: 9
-    initialStop: 0
-    travelSeconds: 2
-    lowerLandingPermissionRequirement:
-      []
-    upperLandingPermissionRequirement:
       []
   - type: accessPanel
     sectorIndex: 6
@@ -302,6 +302,6 @@ agents:
         revision: 1
         configuration:
           []
-    sector: 0
-    localX: 4.734375
+    sector: 11
+    localX: 1.0625
     localY: 0

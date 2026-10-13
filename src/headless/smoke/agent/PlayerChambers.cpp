@@ -14,6 +14,7 @@ struct Scene {
  core::AgentId id;
  std::shared_ptr<const core::ChamberTransit> chamber;
  int direction;
+ bool crawledUnderStandingHeight{false};
  Scene(core::ChamberSubtype subtype, bool reverse, uint32_t width, bool wrongSide = false) : direction((reverse != wrongSide) ? -1 : 1) {
   left = world.addRoom("Left", 0, 0, 0, 4, 1);
   right = world.addRoom("Right", 0, 0, 4 + width, 4, 1);
@@ -32,11 +33,13 @@ struct Scene {
  void step() {
   world.update(core::World::getFixedTimestep());
   require(chamber->getDoor(0)->isClosed() || chamber->getDoor(1)->isClosed(), "Chamber interlock must hold during manual movement");
-  auto pos = actor()->getGlobalPosition(); auto envelope = actor()->getPoseEnvelope(core::Pose::Standing).value();
+  auto pos = actor()->getGlobalPosition(); auto envelope = actor()->getPoseEnvelope(actor()->getPose()).value();
   for (int side : {0, 1}) {
    core::Vector2 min, max; chamber->getDoor(side)->getCurrentShape(min, max);
-   if (pos.x + envelope.x * .5f > min.x + .0001f && pos.x - envelope.x * .5f < max.x - .0001f)
+   if (pos.x + envelope.x * .5f > min.x + .0001f && pos.x - envelope.x * .5f < max.x - .0001f) {
+    crawledUnderStandingHeight = crawledUnderStandingHeight || (actor()->getPose() == core::Pose::Crawling && pos.y + actor()->getStandingHeight() > min.y);
     require(pos.y + envelope.y <= min.y + .0001f, "Player must not intersect Chamber Door bounding box");
+   }
   }
  }
  void wait(int ticks) { for (int i = 0; i < ticks; ++i) step(); }
@@ -87,6 +90,29 @@ void journey(core::ChamberSubtype subtype, bool reverse, uint32_t width) {
  scene.exit(); scene.world.resetSimulation(); scene.refresh();
  require(scene.actor()->getSector()->getIndex() == scene.source && scene.snapshot().occupants.empty()
    && scene.snapshot().reservations.empty() && scene.snapshot().crossings.empty(), "Reset must restore authored position and clear Chamber ownership");
+}
+void crawlJourney(core::ChamberSubtype subtype, bool reverse) {
+ Scene scene(subtype, reverse, 1); scene.world.setPlayerStairSelection(false, true);
+ scene.move(scene.direction); bool checkedExpansion = false;
+ for (int i = 0; i < 1800 && scene.actor()->getSector()->getIndex() != scene.index; ++i) {
+  scene.step(); core::Vector2 min, max; scene.chamber->getDoor(scene.chamber->getEntrySide())->getCurrentShape(min, max);
+  auto pos = scene.actor()->getGlobalPosition(); auto envelope = scene.actor()->getPoseEnvelope(scene.actor()->getPose());
+  if (!checkedExpansion && !scene.snapshot().crossings.empty() && min.y < pos.y + scene.actor()->getStandingHeight() - .05f
+    && pos.x + envelope->x * .5f > min.x && pos.x - envelope->x * .5f < max.x) {
+   scene.move(0); scene.world.setPlayerStairSelection(false, false); scene.step();
+   require(scene.actor()->getPose() == core::Pose::Crawling, "Down release mid-crossing must not stand into a Bulkhead leaf");
+   scene.world.setPlayerStairSelection(false, true); scene.move(scene.direction); checkedExpansion = true;
+  }
+ }
+ scene.move(0); require(checkedExpansion && scene.actor()->getSector()->getIndex() == scene.index
+   && scene.snapshot().occupants.size() == 1 && scene.actor()->getPose() == core::Pose::Crawling,
+   "Chamber entry must retain explicit Crawling pose and safely reject mid-crossing expansion");
+ scene.wait(1); require(scene.actor()->getPose() == core::Pose::Crouching, "Stopped admitted crawler must crouch when interior clearance permits");
+ scene.exit();
+ require(scene.actor()->getPose() == core::Pose::Crawling && scene.crawledUnderStandingHeight,
+   "Scanner/Decontamination thresholds must admit explicit Crawling beneath a leaf that still blocks Standing");
+ scene.world.setPlayerStairSelection(false, false); scene.wait(1);
+ require(scene.actor()->getPose() == core::Pose::Standing, "Completed crawler must safely stand on landing after releasing Down");
 }
 void partialCrossing(core::ChamberSubtype subtype) {
  Scene scene(subtype, false, 2);
@@ -188,6 +214,7 @@ void registerPlayerChambers(std::vector<smoke::Check>& checks) {
   for (auto subtype : {core::ChamberSubtype::SecurityScanner, core::ChamberSubtype::Decontamination}) {
    for (bool reverse : {false, true}) for (uint32_t width : {1u, 2u, 5u}) journey(subtype, reverse, width);
    partialCrossing(subtype); restrictions(subtype); walkingDuringProcessing(subtype); directionCapacityAndReset(subtype);
+   crawlJourney(subtype, false); crawlJourney(subtype, true);
   }
   sharedBatch();
  }});

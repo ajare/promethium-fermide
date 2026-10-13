@@ -288,6 +288,11 @@ namespace core
 			auto const path = transit->getStaircase()->getPath();
 			bool const lower = std::abs(source->getPosition().y - transit->getPosition().y) <= PoseFitTolerance;
 			if ((choice > 0) != lower) continue;
+			// Entry must make positive progress onto the flight. An opposing belt
+			// may still carry an already-admitted Player backward, but must not
+			// admit one whose walking speed cannot overcome it (including equality).
+			if (transit->getStaircase()->isMoving()
+				&& choice * playerStaircaseSpeed(*transit->getStaircase(), agent, mPlayerMovementDirection) <= 0.f) continue;
 			auto const delta = path[lower ? 1 : 0] - path[lower ? 0 : 1];
 			auto const gap = mPlayerMovementDirection * (source->getPosition().x - position.x);
 			if (mPlayerMovementDirection * delta.x <= 0.f || gap < -PoseFitTolerance
@@ -398,6 +403,10 @@ namespace core
 	bool World::beginPlayerTraversal(Agent& agent, std::shared_ptr<const Edge> const& edge,
 		std::shared_ptr<const Vertex> const& source, std::shared_ptr<const Vertex> const& destination)
 	{
+		auto threshold = std::dynamic_pointer_cast<const BulkheadDoorEdge>(edge);
+		auto crossingPose = threshold ? threshold->getDoor()->selectPlayerCrossing(agent, agent.getGlobalPosition().y)
+			: std::optional<PoseSelection>{};
+		if (threshold && !crossingPose) return false;
 		agent.mPathStartPosition = agent.getGlobalPosition();
 		auto request = createTraversalRequest(agent, edge, source, destination);
 		allocateTraversalRequest(request, edge, destination);
@@ -412,11 +421,14 @@ namespace core
 		task.request = request; task.permit = lookup.entity->getPermit();
 		finishFurnitureUse(getAgentId(&agent));
 		agent.mOccupiedUsablePoint = {};
-		agent.mPlayerPose.reset();
+		task.crossingPose = crossingPose;
+		// Retain a lowered threshold pose until a safe post-crossing expansion,
+		// including an environmental starting pose without held Down input.
+		agent.mPlayerPose = threshold ? std::optional<Pose>{crossingPose->pose} : std::nullopt;
 		agent.mRetainedActionPose = false;
 		agent.mTraversalTask = std::move(task);
 		agent.mState = Agent::State::TraversingEdge;
-		agent.mPose = Pose::Standing;
+		agent.mPose = crossingPose ? crossingPose->pose : Pose::Standing;
 		return true;
 	}
 
@@ -612,7 +624,7 @@ namespace core
 
 	bool World::advancePlayerChamberAgent(Agent& agent, float timestep)
 	{
-		auto half = agent.getPoseEnvelope(Pose::Standing).value_or(Vector2{}).x * .5f;
+		auto half = agent.getWidth() * .5f;
 		auto position = agent.getGlobalPosition();
 		auto airlock = dynamic_cast<AirlockTransit const*>(agent.getSector());
 		auto scanner = dynamic_cast<ChamberTransit const*>(agent.getSector());
@@ -625,16 +637,28 @@ namespace core
 			crossing = resource && (resource->mAirlock || resource->mSecurityScanner);
 			if (!crossing) return false;
 		}
+		if (crossing)
+		{
+			auto const& task = *agent.mTraversalTask;
+			float height = std::numeric_limits<float>::infinity();
+			for (auto sector : {task.sourceVertex->getSector(), task.destinationVertex->getSector()})
+				height = std::min(height, sector->getPosition().y + sector->getLevelsHigh() - 1
+					+ sector->getEffectiveTopLevelHeight() - position.y);
+			updatePlayerPose(agent, height, -std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity());
+		}
+		else if (chamber) updatePlayerPose(agent, chamber->getEffectiveTopLevelHeight(),
+			chamberDoor(0)->getPosition().x + chamberDoor(0)->getSize().x, chamberDoor(1)->getPosition().x);
+		half = agent.getWidth() * .5f;
 		if (!crossing && !chamber)
 		{
 			auto source = agent.getSector();
 			if (agent.mPlayerLadderMount || !source || !isLocationLike(source->getType())
-				|| !agent.poseFits(Pose::Standing, source->getPosition().y + source->getLevelsHigh() - 1
+				|| !agent.poseFits(agent.getPose(), source->getPosition().y + source->getLevelsHigh() - 1
 					+ source->getEffectiveTopLevelHeight() - position.y)) return false;
 		}
 		if (!crossing && mPlayerMovementDirection)
 		{
-			float next = position.x + mPlayerMovementDirection * agent.getWalkSpeed() * timestep;
+			float next = position.x + mPlayerMovementDirection * agent.getRoomMovementSpeed() * timestep;
 			for (auto const& edge : getGraph()->getEdges())
 			{
 				auto threshold = std::dynamic_pointer_cast<const BulkheadDoorEdge>(edge);
@@ -649,10 +673,10 @@ namespace core
 					|| direction * (next + direction * half - boundary) < -PoseFitTolerance) continue;
 				// Entry must be feasible through both thresholds; the coordinator
 				// owns capacity, deadline, permissions and committed exit checks.
-				auto pose = door->selectAgentCrossing(agent, position.y, true);
-				bool fit = door->admitsPlayerStandingPassage(agent, position.y) && pose && pose->pose == Pose::Standing;
+				auto pose = door->selectPlayerCrossing(agent, position.y);
+				bool fit = door->admitsPlayerPassage(agent, position.y) && pose.has_value();
 				for (auto const& sector : {source->getSector(), destination->getSector()})
-					fit = fit && agent.poseFits(Pose::Standing, sector->getPosition().y + sector->getLevelsHigh() - 1
+					fit = fit && agent.poseFits(agent.getPose(), sector->getPosition().y + sector->getLevelsHigh() - 1
 						+ sector->getEffectiveTopLevelHeight() - position.y);
 				if (isLocationLike(destination->getSector()->getType()))
 					fit = fit && (chamber || canAgentAccessLocation(*destination->getSector(), agent))
@@ -684,7 +708,7 @@ namespace core
 			float delta = mPlayerMovementDirection * agent.getWalkSpeed() * timestep
 				* (task.crossingPose ? task.crossingPose->speedRatio : 1.f);
 			float next = position.x + delta;
-			if (!door->admitsPlayerStandingPassage(agent, position.y))
+			if (!door->admitsPlayerPassage(agent, position.y))
 			{
 				Vector2 min, max;
 				door->getCurrentShape(min, max);
@@ -731,7 +755,9 @@ namespace core
 
 	void World::updatePlayerPose(Agent& agent, float height, float left, float right)
 	{
-		if (agent.mTraversalTask || agent.mPlayerLadderMount || agent.mFurnitureUse) return;
+		auto threshold = agent.mTraversalTask ? std::dynamic_pointer_cast<const BulkheadDoorEdge>(agent.mTraversalTask->edge)
+			: std::shared_ptr<const BulkheadDoorEdge>{};
+		if ((agent.mTraversalTask && !threshold) || agent.mPlayerLadderMount || agent.mFurnitureUse) return;
 		if (!mPlayerStairDown && !agent.mPlayerPose) return;
 		Pose desired = mPlayerStairDown ? (mPlayerMovementDirection ? Pose::Crawling : Pose::Crouching)
 			: Pose::Standing;
@@ -740,7 +766,19 @@ namespace core
 		if (!envelope || !agent.poseFits(desired, height)
 			|| position.x - envelope->x * .5f < left - PoseFitTolerance
 			|| position.x + envelope->x * .5f > right + PoseFitTolerance) return;
-		if (isLocationLike(agent.getSector()->getType()))
+		std::optional<float> crossingSpeed;
+		if (threshold)
+		{
+			crossingSpeed = agent.getPhysicalBaseline().automaticSpeedRatio(AutomaticPoseContext::DoorCrossing, desired);
+			if (!crossingSpeed || !threshold->getDoor()->admitsStandingHeight(envelope->y, position.y)) return;
+			Vector2 min, max; threshold->getDoor()->getCurrentShape(min, max);
+			if (min.x < max.x && min.y < max.y
+				&& position.x - envelope->x * .5f < max.x - PoseFitTolerance
+				&& position.x + envelope->x * .5f > min.x + PoseFitTolerance
+				&& position.y < max.y - PoseFitTolerance
+				&& position.y + envelope->y > min.y + PoseFitTolerance) return;
+		}
+		if (threshold || isLocationLike(agent.getSector()->getType()))
 		{
 			int y = (int)std::round(position.y);
 			if (std::abs(position.y - y) > PoseFitTolerance || y < 0 || y >= (int)getLevelsHigh()) return;
@@ -751,14 +789,26 @@ namespace core
 			for (int x = first; x <= last; ++x)
 			{
 				auto const& cell = layer->getCellDefinition(x, y);
-				if (!cell.isTraversableOnFoot() || cell.sectorIndex >= mSectors.size()) return;
+				if (cell.sectorIndex >= mSectors.size()) return;
 				auto const& sector = *mSectors[cell.sectorIndex];
-				if (!isLocationLike(sector.getType()) || !agent.poseFits(desired, sector.getPosition().y
+				bool ownedSide = threshold && (&sector == agent.mTraversalTask->sourceVertex->getSector().get()
+					|| &sector == agent.mTraversalTask->destinationVertex->getSector().get());
+				auto airlock = ownedSide ? dynamic_cast<AirlockTransit const*>(&sector) : nullptr;
+				auto scanner = ownedSide ? dynamic_cast<ChamberTransit const*>(&sector) : nullptr;
+				bool chamberFloor = (airlock || scanner) && y == (int)sector.getCellY();
+				if ((!cell.isTraversableOnFoot() && !chamberFloor)
+					|| (!isLocationLike(sector.getType()) && !chamberFloor) || !agent.poseFits(desired, sector.getPosition().y
 					+ sector.getLevelsHigh() - 1 + sector.getEffectiveTopLevelHeight() - position.y)) return;
-				if (&sector != agent.getSector() && sector.getType() == SectorType::Location
+				if (&sector != agent.getSector() && !ownedSide && sector.getType() == SectorType::Location
 					&& (static_cast<Location const&>(sector).getPermissionRequirement() & ~effectiveAccessGrants(agent)).any()) return;
+				if (airlock || scanner)
+				{
+					auto entry = airlock ? airlock->getDoor(0) : scanner->getDoor(0);
+					auto exit = airlock ? airlock->getDoor(1) : scanner->getDoor(1);
+					if (envelope->x > exit->getPosition().x - entry->getPosition().x - entry->getSize().x + PoseFitTolerance) return;
+				}
 				for (int side : {CORE_SIDE_LEFT, CORE_SIDE_RIGHT})
-					if (sector.getEndType(y - sector.getCellY(), side) == SectorEndType::Wall
+					if (isLocationLike(sector.getType()) && sector.getEndType(y - sector.getCellY(), side) == SectorEndType::Wall
 						&& (side == CORE_SIDE_LEFT ? position.x - envelope->x * .5f < sector.getPosition().x - PoseFitTolerance
 							: position.x + envelope->x * .5f > sector.getPosition().x + sector.getSize().x + PoseFitTolerance)) return;
 				for (uint32_t i = 0; i < sector.getNumObjects(); ++i)
@@ -773,6 +823,7 @@ namespace core
 					}
 			}
 		}
+		if (threshold) agent.mTraversalTask->crossingPose = PoseSelection{desired, *crossingSpeed};
 		agent.mRetainedActionPose = false;
 		agent.mPose = desired;
 		if (mPlayerStairDown) agent.mPlayerPose = desired;
@@ -783,6 +834,10 @@ namespace core
 	{
 		auto* agent = mAgents.find(id);
 		if (!agent || !agent->isActive() || !agent->isPlayerControlled()) return;
+		if (auto source = agent->getSector(); source && isLocationLike(source->getType()) && !agent->mTraversalTask)
+			updatePlayerPose(*agent, source->getPosition().y + source->getLevelsHigh() - 1
+				+ source->getEffectiveTopLevelHeight() - agent->getGlobalPosition().y,
+				-std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity());
 		if (advancePlayerChamberAgent(*agent, timestep)) return;
 		if (agent->mPlayerLadderMount)
 		{
@@ -811,9 +866,6 @@ namespace core
 		auto* source = agent->getSector();
 		if (!source || !isLocationLike(source->getType())) return;
 		auto position = agent->getGlobalPosition();
-		updatePlayerPose(*agent, source->getPosition().y + source->getLevelsHigh() - 1
-			+ source->getEffectiveTopLevelHeight() - position.y,
-			-std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity());
 		if (!mPlayerMovementDirection) return;
 		auto const level = static_cast<int>(std::round(position.y));
 		if (level < 0 || level >= static_cast<int>(getLevelsHigh())
@@ -873,7 +925,7 @@ namespace core
 					auto object = std::dynamic_pointer_cast<BulkheadDoorSectorObject>(
 						mSectors[cell.sectorIndex]->getObject(cell.bulkheadIndices[CORE_SIDE_RIGHT]));
 					auto door = object ? object->getDoor() : nullptr;
-					if (!door || door->isChamberOwned() || !door->admitsPlayerStandingPassage(*agent, position.y)
+					if (!door || door->isChamberOwned() || !door->admitsPlayerPassage(*agent, position.y)
 						|| agentForbidsTraversal(agent, TraversalKind::Door))
 					{
 						if (door) barrier = side == CORE_SIDE_RIGHT ? door->getPosition().x

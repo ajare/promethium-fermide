@@ -440,7 +440,8 @@ void checkPlayerBoothWindowKeys(wp::application::State& play, core::World& world
 void checkPlayerChamberKeys(wp::application::State& play, core::World& world) {
   using wp::application::Key; using wp::application::KeyEvent;
   auto key = [&](Key k, bool pressed) { play._injectKeyInput(pressed ? KeyEvent::Pressed : KeyEvent::Released, k, {}); };
-  for (auto subtype : {core::ChamberSubtype::SecurityScanner, core::ChamberSubtype::Decontamination}) {
+  for (auto subtype : {core::ChamberSubtype::SecurityScanner, core::ChamberSubtype::Decontamination})
+  for (bool crawl : {false, true}) {
     core::World fixture("Keyboard Chamber", 12, 2);
     auto left = fixture.addRoom("Left", 0, 0, 0, 4, 1);
     auto right = fixture.addRoom("Right", 0, 0, 6, 4, 1);
@@ -458,11 +459,19 @@ void checkPlayerChamberKeys(wp::application::State& play, core::World& world) {
     auto step = [&] {
       play._update(core::World::getFixedTimestep());
       require(chamber->getDoor(0)->isClosed() || chamber->getDoor(1)->isClosed(), "Keyboard Chamber movement must preserve interlock");
+      auto envelope = actor->getPoseEnvelope(actor->getPose()); auto pos = actor->getGlobalPosition();
+      for (int side : {0, 1}) {
+        core::Vector2 min, max; chamber->getDoor(side)->getCurrentShape(min, max);
+        if (pos.x + envelope->x * .5f > min.x + .0001f && pos.x - envelope->x * .5f < max.x - .0001f)
+          require(pos.y + envelope->y <= min.y + .0001f, "Keyboard Player's actual pose must not overlap Bulkhead leaf");
+      }
     };
+    if (crawl) key(Key::DownArrow, true);
     key(Key::RightArrow, true);
     for (int i = 0; i < 1800 && actor->getSector()->getIndex() != index; ++i) step();
     key(Key::RightArrow, false);
     require(actor->getSector()->getIndex() == index, "Actual Right must enter sensor-operated Chamber without Up");
+    if (crawl) require(actor->getPose() == core::Pose::Crawling, "Actual Down+Right must preserve Crawling through Chamber entry");
     auto stopped = actor->getGlobalPosition(); for (int i = 0; i < 60; ++i) step();
     require(actor->getGlobalPosition().distanceTo(stopped) < .001f, "Release must stop Chamber Player without slot alignment");
     if (subtype == core::ChamberSubtype::SecurityScanner) {
@@ -480,6 +489,10 @@ void checkPlayerChamberKeys(wp::application::State& play, core::World& world) {
     key(Key::RightArrow, false);
     require(actor->getSector()->getIndex() == right && world.getSimulationSnapshot().securityScanners.front().occupants.empty(),
       "Actual Right must manually leave both Chamber subtypes");
+    if (crawl) {
+      require(actor->getPose() == core::Pose::Crawling, "Actual Down+Right must preserve Crawling through Chamber exit");
+      key(Key::DownArrow, false); step(); require(actor->getPose() == core::Pose::Standing, "Actual Down release must safely restore Standing after exit");
+    }
   }
 }
 

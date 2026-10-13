@@ -56,7 +56,7 @@ void journey(bool reverse, uint32_t width) {
  require(actor->getSector()->getIndex() == target, "Player must manually exit through opposite open Door: width=" + std::to_string(width) + ", reverse=" + std::to_string(reverse) + ", x=" + std::to_string(actor->getGlobalPosition().x) + ", doorX=" + std::to_string(chamber->getDoor(reverse ? 0 : 1)->getPosition().x) + ", doorW=" + std::to_string(chamber->getDoor(reverse ? 0 : 1)->getSize().x));
  require(world.getSimulationSnapshot().airlocks.front().occupants.empty(), "Manual exit must release capacity");
 }
-void partialOpening(bool reverse) {
+void partialOpening(bool reverse, bool crawl = false) {
  core::World world("Physical Airlock Doors", 12, 2);
  auto left = world.addRoom("Left", 0, 0, 0, 4, 1);
  auto right = world.addRoom("Right", 0, 0, 5, 4, 1);
@@ -71,29 +71,35 @@ void partialOpening(bool reverse) {
  require(world.setAgentIndividualHeightModifier(id, .8f), "Cannot shorten partial-opening Player fixture");
  world.resumeSimulation();
  auto actor = world.lookupAgent(id).entity;
+ bool crawledUnderStandingHeight = false;
+ if (crawl) world.setPlayerStairSelection(false, true);
  auto step = [&] {
   world.update(core::World::getFixedTimestep());
   require(chamber->getDoor(0)->isClosed() || chamber->getDoor(1)->isClosed(), "Partial passage must retain Airlock interlock");
   for (auto side : {0, 1}) {
    core::Vector2 min, max; chamber->getDoor(side)->getCurrentShape(min, max);
-   auto pos = actor->getGlobalPosition(); float half = actor->getPoseEnvelope(core::Pose::Standing)->x * .5f;
-   if (pos.x + half > min.x + .0001f && pos.x - half < max.x - .0001f)
-    require(pos.y + actor->getStandingHeight() <= min.y + .0001f,
+   auto pos = actor->getGlobalPosition(); auto envelope = actor->getPoseEnvelope(actor->getPose()); float half = envelope->x * .5f;
+   if (pos.x + half > min.x + .0001f && pos.x - half < max.x - .0001f) {
+    crawledUnderStandingHeight = crawledUnderStandingHeight || (actor->getPose() == core::Pose::Crawling && min.y < pos.y + actor->getStandingHeight());
+    require(pos.y + envelope->y <= min.y + .0001f,
       "Player must never intersect a partially open Airlock Door bounding box: reverse=" + std::to_string(reverse)
       + ", x=" + std::to_string(pos.x) + ", height=" + std::to_string(actor->getStandingHeight())
       + ", leaf=" + std::to_string(min.y) + ", side=" + std::to_string(side));
+   }
   }
  };
  world.requestPlayerDoorAction(); world.setPlayerMovementDirection(reverse ? -1 : 1);
  for (int i = 0; i < 2400 && actor->getSector()->getIndex() != index; ++i) step();
- require(actor->getSector()->getIndex() == index && chamber->getDoor(reverse ? 1 : 0)->isOpening(),
+ require(actor->getSector()->getIndex() == index && (crawl || chamber->getDoor(reverse ? 1 : 0)->isOpening()),
    "Player must complete Airlock entry before full opening when its bounding box clears: x=" + std::to_string(actor->getGlobalPosition().x)
    + ", sector=" + std::to_string(actor->getSector()->getIndex()) + ", pct=" + std::to_string(chamber->getDoor(reverse ? 1 : 0)->getOpenPercentage()));
  for (int i = 0; i < 4800 && actor->getSector()->getIndex() != target; ++i) step();
  world.setPlayerMovementDirection(0);
- require(actor->getSector()->getIndex() == target && chamber->getDoor(reverse ? 0 : 1)->isOpening(),
+ require(actor->getSector()->getIndex() == target && (crawl || chamber->getDoor(reverse ? 0 : 1)->isOpening()),
    "Player must complete committed exit before full opening without bypassing the cycle");
  require(world.getSimulationSnapshot().airlocks.front().occupants.empty(), "Partial-open exit must release shared capacity");
+ if (crawl) require(crawledUnderStandingHeight && actor->getPose() == core::Pose::Crawling,
+   "Player must retain explicit Crawling and pass under a leaf too low for Standing");
 }
 void restrictionsAndRetracing() {
  for (int scenario = 0; scenario < 5; ++scenario) {
@@ -198,7 +204,7 @@ namespace agent_smoke {
 void registerPlayerAirlocks(std::vector<smoke::Check>& checks) {
  checks.push_back({"playerControlAirlocks", [](smoke::Context const&) {
   for (uint32_t width : {1u, 2u, 5u}) for (bool reverse : {false, true}) journey(reverse, width);
-  partialOpening(false); partialOpening(true);
+  partialOpening(false); partialOpening(true); partialOpening(false, true); partialOpening(true, true);
   restrictionsAndRetracing(); sharedBatch();
  }});
 }

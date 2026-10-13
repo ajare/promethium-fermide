@@ -465,7 +465,7 @@ namespace core
 			bool entry = destinationSector.get() == &chamber;
 			auto side = entry ? chamber.getEntrySide() : chamber.getExitSide();
 			bool passable = agent.isPlayerControlled()
-				? chamber.mDoors[side]->admitsPlayerStandingPassage(agent, agent.getGlobalPosition().y)
+				? chamber.mDoors[side]->admitsPlayerPassage(agent, agent.getGlobalPosition().y)
 				: chamber.mDoors[side]->isOpen();
 			if (!chamber.isTraversalAvailable() || !passable || !chamber.mDoors[1 - side]->isClosed()) return false;
 			if (entry)

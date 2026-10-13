@@ -273,17 +273,18 @@ namespace core
 			// target or future journey. Existing eligible queue members retain priority.
 			bool boarding = chamber.mPhase == SecurityScannerPhase::EntryOpening || chamber.mPhase == SecurityScannerPhase::Boarding;
 			if (!resource.mEnabled || !boarding || resource.mCrossingOwners[0]
-				|| !chamber.mDoors[side]->admitsPlayerStandingPassage(*actor, actor->getGlobalPosition().y)
+				|| !chamber.mDoors[side]->admitsPlayerPassage(*actor, actor->getGlobalPosition().y)
 				|| !chamber.mDoors[1 - side]->isClosed()
 				|| (chamber.getSubtype() == ChamberSubtype::Decontamination && !chamber.mBoardingWindowRemainingTicks)
 				|| agentForbidsTraversal(actor, TraversalKind::Door)) return;
-			auto entrancePose = chamber.mDoors[side]->selectAgentCrossing(*actor, actor->getGlobalPosition().y, true);
-			auto exitPose = chamber.mDoors[1 - side]->selectAgentCrossing(*actor, chamber.getPosition().y, true);
+			auto entrancePose = chamber.mDoors[side]->selectPlayerCrossing(*actor, actor->getGlobalPosition().y);
+			auto exitPose = chamber.mDoors[1 - side]->selectPlayerCrossing(*actor, chamber.getPosition().y);
 			auto landing = chamber.getStop(chamber.getExitSide()).sector;
-			float half = actor->getPoseEnvelope(Pose::Standing).value_or(Vector2{}).x * .5f;
+			float half = actor->getWidth() * .5f;
 			auto exitDoor = chamber.mDoors[1 - side];
 			float exitX = chamber.isLeftToRight() ? exitDoor->getPosition().x + exitDoor->getSize().x + half : exitDoor->getPosition().x - half;
-			if (!entrancePose || !exitPose || entrancePose->pose != Pose::Standing || exitPose->pose != Pose::Standing
+			if (!entrancePose || !exitPose || actor->getWidth() > chamber.mDoors[1]->getPosition().x
+				- chamber.mDoors[0]->getPosition().x - chamber.mDoors[0]->getSize().x + .0001f
 				|| !landing || !mWorld.playerTransportLandingSupported(*landing, {exitX, chamber.getPosition().y}, half)) return;
 			for (auto waiting : resource.mQueueLanes[side].queue)
 			{
@@ -313,7 +314,7 @@ namespace core
 		if (!entry && chamber.mPhase != SecurityScannerPhase::Exiting
 			&& !(actor->isPlayerControlled() && chamber.mPhase == SecurityScannerPhase::ExitOpening)) return;
 		bool passable = actor->isPlayerControlled()
-			? chamber.mDoors[side]->admitsPlayerStandingPassage(*actor, actor->getGlobalPosition().y)
+			? chamber.mDoors[side]->admitsPlayerPassage(*actor, actor->getGlobalPosition().y)
 			: chamber.mDoors[side]->isOpen();
 		if (!passable || !chamber.mDoors[1 - side]->isClosed() || resource.mCrossingOwners[0]) return;
 		if (entry && agentForbidsTraversal(actor, TraversalKind::Door)) { denyTraversalRequest(id); return; }

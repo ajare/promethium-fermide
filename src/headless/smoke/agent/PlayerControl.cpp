@@ -176,7 +176,7 @@ namespace
 			if (x(world, id) > 3.7f && x(world, id) < 4.3f)
 			{
 				partialPassage = partialPassage || !door->isOpen();
-				require(door->admitsPlayerStandingPassage(*world.lookupAgent(id).entity, 0.f),
+				require(door->admitsPlayerPassage(*world.lookupAgent(id).entity, 0.f),
 					"Closing leaf must not crush a Player already in its physical threshold");
 			}
 		}
@@ -739,6 +739,40 @@ namespace
 
 	void escalators()
 	{
+		for (int side : {CORE_SIDE_LEFT, CORE_SIDE_RIGHT})
+		for (bool descending : {false, true})
+		for (bool opposed : {false, true})
+		for (float factor : {.5f, 1.f, 2.f})
+		for (bool broken : {false, true})
+		{
+			core::World world("Player Escalator entry speed", 12, 2);
+			auto bottom = world.addRoom("Bottom", 0, 0, 0, 12, 1);
+			auto top = world.addCorridor(1, 0, 12);
+			float const effectiveWalkSpeed = core::bundledHumanBaseline().walkSpeed * .8f;
+			float const belt = (descending ? -1.f : 1.f) * (opposed ? -1.f : 1.f) * effectiveWalkSpeed * factor;
+			auto stairs = world.addStaircase(1, 0, 4, {3, side, belt});
+			int const ascent = side == CORE_SIDE_RIGHT ? 1 : -1;
+			int const horizontal = descending ? -ascent : ascent;
+			float const mountX = descending ? (ascent > 0 ? 7.f : 4.f) : (ascent > 0 ? 4.f : 7.f);
+			world.finishBuild(); world.pauseSimulation();
+			if (broken) require(world.setEscalatorInitiallyBroken(stairs, true), "Cannot break entry fixture Escalator");
+			auto start = descending ? top : bottom;
+			auto id = world.createAgent("Player", start, 0, mountX - horizontal * .15f); assign(world, id);
+			require(world.setAgentIndividualWalkSpeedModifier(id, .8f), "Cannot set entry walking speed modifier");
+			world.resumeSimulation(); world.setPlayerStairSelection(!descending, descending);
+			world.setPlayerMovementDirection(horizontal); world.update(1.2f);
+			auto actor = world.lookupAgent(id).entity;
+			bool const blocked = !broken && opposed && factor >= 1.f;
+			require(actor->getSector()->getIndex() == (blocked ? start : stairs),
+				"Opposing equal/faster belt must refuse entry; slower, same-direction and Broken belts must admit it");
+			if (blocked)
+			{
+				near(actor->getGlobalPosition().y, descending ? 1.f : 0.f, "Rejected entry must stay on the landing Floor");
+				for (auto const& event : world.getSimulationEvents())
+					require(event.type != core::SimulationEventType::TraversalRequestAdded,
+						"Rejected Escalator entry must not allocate traversal ownership");
+			}
+		}
 		for (int side : {CORE_SIDE_LEFT, CORE_SIDE_RIGHT})
 		for (float belt : {-.1f, .1f})
 		for (bool descending : {false, true})

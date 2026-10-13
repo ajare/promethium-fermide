@@ -155,20 +155,21 @@ namespace core
 		{
 			// A Player must already be at a physically open threshold. Never queue,
 			// call, align, or supply an autonomous interior walking target here.
-			if (chamber.mActiveSide != side || chamber.mClosing || !chamber.mDoors[side]->admitsPlayerStandingPassage(*actor, actor->getGlobalPosition().y)
+			if (chamber.mActiveSide != side || chamber.mClosing || !chamber.mDoors[side]->admitsPlayerPassage(*actor, actor->getGlobalPosition().y)
 				|| !chamber.mDoors[1 - side]->isClosed() || !chamber.isCycleComplete()
 				|| resource.mCrossingOwners[0]) return;
 			if (entry)
 			{
 				auto landing = chamber.getStop(1 - side).sector;
 				auto exitDoor = chamber.mDoors[1 - side];
-				auto entrancePose = chamber.mDoors[side]->selectAgentCrossing(*actor, actor->getGlobalPosition().y, true);
-				auto exitPose = exitDoor->selectAgentCrossing(*actor, chamber.getPosition().y, true);
-				if (!entrancePose || !exitPose || entrancePose->pose != Pose::Standing || exitPose->pose != Pose::Standing) return;
-				float half = actor->getPoseEnvelope(Pose::Standing).value_or(Vector2{}).x * .5f;
+				auto entrancePose = chamber.mDoors[side]->selectPlayerCrossing(*actor, actor->getGlobalPosition().y);
+				auto exitPose = exitDoor->selectPlayerCrossing(*actor, chamber.getPosition().y);
+				if (!entrancePose || !exitPose || actor->getWidth() > chamber.mDoors[1]->getPosition().x
+					- chamber.mDoors[0]->getPosition().x - chamber.mDoors[0]->getSize().x + .0001f) return;
+				float half = actor->getWidth() * .5f;
 				float exitX = side == 0 ? exitDoor->getPosition().x + exitDoor->getSize().x + half
 					: exitDoor->getPosition().x - half;
-				if (!landing || !actor->poseFits(Pose::Standing, landing->getPosition().y + landing->getLevelsHigh() - 1
+				if (!landing || !actor->poseFits(actor->getPose(), landing->getPosition().y + landing->getLevelsHigh() - 1
 					+ landing->getEffectiveTopLevelHeight() - chamber.getPosition().y)
 					|| !mWorld.playerTransportLandingSupported(*landing, {exitX, chamber.getPosition().y}, half)) return;
 				if (!resource.mEnabled || !chamber.mBoardingWindowRemainingTicks

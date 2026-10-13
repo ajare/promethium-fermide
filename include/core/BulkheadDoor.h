@@ -56,7 +56,9 @@ namespace core
 		void getCurrentShape(Vector2& minExtent, Vector2& maxExtent) const override;
 
 		// Player collision uses the live leaf, not the fully-open device state.
-		[[nodiscard]] bool admitsPlayerStandingPassage(Agent const& agent, float floorY) const;
+		[[nodiscard]] bool admitsPlayerPassage(Agent const& agent, float floorY) const;
+		// Static aperture and declared Door-context speed for the current pose.
+		[[nodiscard]] std::optional<PoseSelection> selectPlayerCrossing(Agent const& agent, float floorY) const;
 	};
 
 } // core

@@ -168,6 +168,7 @@ pf_add_smoke_module(pf-smoke-agent
         agent/PlayerBoothWindows.cpp
         agent/PlayerAccessPanels.cpp
         agent/PlayerPoses.cpp
+        agent/PlayerBulkheadPoses.cpp
         agent/Activation.cpp
         agent/Group.cpp
         agent/GroupAssignment.cpp
@@ -198,7 +199,7 @@ foreach(check playerControlBasics playerControlBoundaries playerControlBulkheads
         playerControlStaircases playerControlStaircaseRestrictions playerControlEscalators
         playerControlLadders playerControlLadderRestrictions playerControlLadderSharedCapacity
         playerControlButtons playerControlButtonPriority playerControlExtensibleLadders
-        playerControlManualTransports playerControlLiftCalledLanding playerControlAirlocks playerControlChambers playerControlBoothWindows playerControlAccessPanels playerControlPoses)
+        playerControlManualTransports playerControlLiftCalledLanding playerControlAirlocks playerControlChambers playerControlBoothWindows playerControlAccessPanels playerControlPoses playerControlBulkheadPoses)
     add_test(NAME agent-${check} COMMAND pf-smoke-agent --check ${check})
     set_tests_properties(agent-${check} PROPERTIES LABELS "agent;functional;validation-fast" TIMEOUT 30)
 endforeach()

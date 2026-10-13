@@ -18,8 +18,8 @@ camera is used.
 - Pause, reset, suspension, and leaving Play clear transient movement input.
 - The camera centres on the controlled Agent at normal zoom and shows its Layer.
 - In Locations, Left/Right movement stays on the current Layer and Level. Usable open boundaries
-  and standalone Bulkhead Doors whose moving leaf clears the Standing body permit entry into adjacent Locations,
-  subject to Standing fit and existing passage restrictions.
+  and standalone Bulkhead Doors whose moving leaf clears the current pose's body permit entry into adjacent Locations,
+  subject to pose fit and existing passage restrictions.
 - Press **Up** to cross an eligible fully open ordinary Door into its connected
   Location on the adjacent Layer, in either direction. If no crossing can start,
   Up instead opens an eligible manual Door. Press again after it finishes opening
@@ -76,9 +76,12 @@ camera is used.
   Staircases and Escalators do not require Object usage capability or Buttons.
 - On a moving Escalator, Left/Right adds effective walking speed in the selected
   direction to the signed belt speed along the slope. Either endpoint can be
-  mounted, including against the belt; autonomous Agents still route one way.
-  Walking against the belt makes progress only when walking speed exceeds belt
-  speed, holds position when equal, and is carried backwards when slower.
+  mounted against the belt only when effective walking speed strictly exceeds
+  belt speed; equal or faster opposing belts refuse new Player entry without
+  allocating a traversal. Boarding with the belt remains allowed; autonomous
+  Agents still route one way. Once admitted, walking against the belt makes
+  progress when faster, holds position when equal, and is carried backwards when
+  slower. The entry restriction does not eject or alter existing passengers.
   Releasing Left/Right (or holding both) rides the belt to an automatic endpoint
   exit. Broken Escalators behave as stationary Staircases, using directional
   stair speed and stopping on release. Breaking/restoring preserves position;
@@ -134,7 +137,7 @@ camera is used.
   route preparation still requests extension, never a toggle.
 - Overlapping doorway candidates prefer an admissible open doorway, then nearest centre,
   then stable traversal-resource identity. One press performs at most one action.
-- Solid walls, Bulkhead Door leaves overlapping the Standing body, low spaces and unsupported Floor
+- Solid walls, Bulkhead Door leaves overlapping the current pose's body, low spaces and unsupported Floor
   edges stop the Agent's leading body edge, except at a selected open Staircase
   endpoint where the flight supplies support. Input never automatically
   crouches/crawls. Up supports ordinary Doors between Locations, open enclosed
@@ -155,8 +158,10 @@ camera is used.
   type's declared Room movement speed ratio, envelope and normal Floor/wall/
   Location permission checks. Input never snaps the Agent or creates support.
 - Flat vehicle and Chamber interiors also support these poses and keep their
-  existing physical bounds. Door/device crossings retain their existing Standing
-  admission and crossing rules; posture input does not bypass them. Ladder/stair
+  existing physical bounds. Bulkhead thresholds retain the current pose and use
+  its declared Door-context speed; safe pose changes are allowed mid-crossing.
+  Ordinary Doors and transport thresholds still require Standing. Posture input
+  never bypasses admission or interlocks. Ladder/stair
   descent keeps priority and crossing/climbing owns its pose.
 - Shift+cursor remains destination browsing, not posture input. Pausing freezes
   posture and clears held input; Reset and behaviour handoff release runtime
@@ -203,15 +208,15 @@ camera is used.
   using ordinary physical reach, capability and authorization checks. Calling
   never approaches, aligns or enters the Player.
 - Hold **Left/Right** toward the entrance to enter as soon as the moving Door's
-  physical bounding box clears the Standing body, even before full opening.
+  physical bounding box clears the current supported pose's body, even before full opening.
   This Player-only collision rule also applies to standalone and other chamber
   Bulkhead thresholds; autonomous Agents still wait for full opening.
   Admission uses the
   shared batch's capacity, reservations, active side and boarding deadline, and
-  validates Door/Buttons Mobility, permissions, Standing fit through both Doors
+  validates Door/Buttons Mobility, permissions, current-pose fit through both Doors
   and a supported opposite landing. Older reserved entrants keep their turn.
 - Left/Right walks inside at effective walking speed, including during closure
-  and cycling. Doorway crossings use the Standing Door-context speed ratio.
+  and cycling. Doorway crossings use the current pose's declared Door-context speed ratio.
   Release stops exactly, retaining admitted capacity or a partial threshold
   crossing; reverse through a partial threshold to cancel that crossing safely.
   Cancelled entry selections do not refill the current batch's admission slots.
@@ -221,18 +226,18 @@ camera is used.
   Autonomous Agents can share the batch and leave independently.
 - Pause freezes an admitted crossing or occupant. A stopped Player retains a
   usable committed exit, including after landing permissions are tightened;
-  safe Standing clearance and Floor support still apply. Reset discards runtime
+  safe current-pose clearance and Floor support still apply. Reset discards runtime
   occupancy and restores the authored position.
 
 ## Manual Security Scanners and Decontamination Chambers
 
 - Hold **Left/Right** toward the authored entrance. Its sensor opens the Door;
   no Up press, Button, Arms capability or automatic approach is required.
-  Walk through once the live Bulkhead leaf clears the Standing body, even before
+  Walk through once the live Bulkhead leaf clears the current pose's body, even before
   full opening. Wrong-side entry is refused.
 - Entry claims shared capacity and commits the authored opposite exit. Older
   eligible queued entrants retain priority. Door Mobility, destination permissions,
-  Standing fit through both thresholds and supported exit Floor remain mandatory.
+  Current-pose fit through both thresholds and supported exit Floor remain mandatory.
   Security Scanners admit one occupant; Decontamination capacity equals cell width
   and retains the existing boarding deadline and autonomous batching rules.
 - Left/Right walks inside, including during processing. Release stops and opposite

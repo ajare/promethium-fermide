@@ -57,8 +57,9 @@ input. Arrival walks onto the next platform rather than skipping its junction.
 For Staircases and Escalators, hold Up near the lower endpoint or Down near the
 upper endpoint while walking toward the flight (within 0.25 World units).
 Left/Right follows the slope with reversal and automatic endpoint dismount.
-Moving Escalators add belt motion to walking, including walking against the belt;
-release rides the steps. Broken Escalators stop and behave as stationary stairs.
+Moving Escalators add belt motion to walking. Boarding against the belt requires
+strictly greater effective walking speed; an equal or faster opposing belt refuses
+entry. Already-admitted passengers can still reverse against it; release rides the steps. Broken Escalators stop and behave as stationary stairs.
 Fixed and fully extended extensible Ladders mount while walking toward their centre with Up from below or Down
 from above, within 0.25 World units. Once mounted, Up/Down climbs, release stops,
 and opposite input reverses while alone; endpoint arrivals automatically dismount.
@@ -76,7 +77,8 @@ Arms and Buttons Mobility gates and without auto-approach or held-key repetition
 Airlock outside Buttons use Up to call; Left/Right manually enters the open
 entrance, walks inside and exits through the committed opposite Door after the
 normal interlock cycle. Player Bulkhead collision uses the moving leaf's bounding
-box, allowing passage before full opening as soon as the Standing body clears it;
+box against the Agent's current supported pose, allowing crouched/crawling passage
+before full opening when that envelope clears the leaf;
 autonomous Agents retain their fully-open gate. Release stops, retaining capacity and crossing safety;
 there is no automatic alignment or ejection, even in shared autonomous batches.
 Security Scanner and Decontamination Chamber sensors open their directional
@@ -92,7 +94,9 @@ no selector is available. Requests survive leaving; Player passengers never
 align to slots or disembark automatically. Extensible
 Ladders can be deployed via their Buttons before climbing. Walls, low spaces,
 closed Bulkhead Doors and Floor gaps block movement. Low spaces require explicit
-supported posture input; Door/device crossings retain existing Standing admission.
+supported posture input. Bulkhead thresholds preserve the current pose and its
+Door-context speed, without changing authority or interlocks. Other Door/transport
+crossings retain existing Standing admission.
 Without an eligible
 Agent, Player input is disabled and the fitted Layer-0 camera remains.
 See [Player control](../../docs/player-control.md) for authoring and validation.

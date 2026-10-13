@@ -503,7 +503,7 @@ namespace core
 							{
 								if (!actor->isPlayerControlled()) continue;
 								auto position = actor->getGlobalPosition();
-								auto envelope = actor->getPoseEnvelope(Pose::Standing);
+								auto envelope = actor->getPoseEnvelope(actor->getPose());
 								if (envelope && abs(position.y - bulkhead->getPosition().y) < .001f
 									&& position.x + envelope->x * .5f > bulkhead->getPosition().x + .0001f
 									&& position.x - envelope->x * .5f < bulkhead->getPosition().x + bulkhead->getSize().x - .0001f)

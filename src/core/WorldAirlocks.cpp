@@ -158,7 +158,7 @@ namespace core
 		// authorization/adherence independent of the ability to operate.
 		return locallyObserved && (authorized || !actor->getEffectivePermissionAdherence().value)
 			&& chamber.mActiveSide == side && !chamber.mClosing
-			&& (actor->isPlayerControlled() ? chamber.mDoors[side]->admitsPlayerStandingPassage(*actor, actor->getGlobalPosition().y)
+			&& (actor->isPlayerControlled() ? chamber.mDoors[side]->admitsPlayerPassage(*actor, actor->getGlobalPosition().y)
 				: chamber.mDoors[side]->isOpen()) && chamber.mDoors[1 - side]->isClosed()
 			&& chamber.isCycleComplete() && resource->mAirlockEntrySide == side;
 	}
