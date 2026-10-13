@@ -16454,7 +16454,7 @@ void dispatch(smoke::Context const&)
 	// reported zero shortfall. Here the backup carries the load and
 	// the crank, the generator starts, ramps, and takes the load back.
 	{
-		auto bootstrapRig = []
+		auto bootstrapRig = [&]
 		{
 			Rig rig;
 			rig.mode = core::StationDispatchMode::Automatic;
@@ -16485,7 +16485,8 @@ void dispatch(smoke::Context const&)
 		world.finishBuild();
 		run(world, bootstrapRig(), 120);
 		{
-			auto const& power = world.getStationSystemsSnapshot().power;
+			auto const& snap = world.getStationSystemsSnapshot();
+			auto const& power = snap.power;
 			require(power.generators[0].phase == core::StationGeneratorPhase::Starting,
 				"the backup-funded start never began without a battery");
 			require(power.generators[0].dispatchCommandKW > 0.0,
@@ -16494,8 +16495,8 @@ void dispatch(smoke::Context const&)
 				"a cranking generator reported output it cannot deliver");
 			require(power.generatorStartupDrawKW > 0.9 && power.generatorStartupDrawKW < 1.1,
 				"the crank did not draw its startup power from the backup-funded pool");
-			require(power.fuelCells[0].lastOutputKW > 6.9
-				&& power.fuelCells[0].lastOutputKW < 7.1,
+			require(snap.fuelCells[0].lastOutputKW > 6.9
+				&& snap.fuelCells[0].lastOutputKW < 7.1,
 				"the backup did not carry the load plus the startup support");
 			require(approx(power.dispatchCommittedKW, power.dispatchTargetKW, 1e-9),
 				"the bootstrap committed did not match the funded target");
@@ -16508,12 +16509,13 @@ void dispatch(smoke::Context const&)
 		// and the backup stands down.
 		require(world.advanceTicks(600), "bootstrap run failed after startup");
 		{
-			auto const& power = world.getStationSystemsSnapshot().power;
+			auto const& snap = world.getStationSystemsSnapshot();
+			auto const& power = snap.power;
 			require(power.generators[0].phase == core::StationGeneratorPhase::Running,
 				"the backup-funded generator never reached Running");
 			require(power.generators[0].outputKW > 5.9,
 				"the generator did not ramp up to carry the load");
-			require(power.fuelCells[0].lastOutputKW < 1e-9,
+			require(snap.fuelCells[0].lastOutputKW < 1e-9,
 				"the backup kept burning after the generator took the load");
 			require(approx(power.dispatchShortfallKW, 0.0, 1e-9),
 				"steady-state bootstrap reported a shortfall");
@@ -16522,15 +16524,16 @@ void dispatch(smoke::Context const&)
 		}
 		// Determinism: the bootstrap path adds no run-to-run variance.
 		{
-			auto const probe = [](Rig rig)
+			auto const probe = [&](Rig rig)
 			{
 				core::World world("Dispatch", 2, 2);
 				world.pauseSimulation();
 				world.finishBuild();
 				run(world, std::move(rig), 500);
-				auto const& power = world.getStationSystemsSnapshot().power;
+				auto const& snap = world.getStationSystemsSnapshot();
+				auto const& power = snap.power;
 				return std::array{power.generators[0].outputKW,
-					power.fuelCells[0].lastOutputKW,
+					snap.fuelCells[0].lastOutputKW,
 					power.dispatchCommittedKW, power.dispatchShortfallKW};
 			};
 			require(probe(bootstrapRig()) == probe(bootstrapRig()),
@@ -16598,12 +16601,13 @@ void dispatch(smoke::Context const&)
 		// 0.1 kW/s ramp, so the generator sits near 2 kW of its 10 kW
 		// rating while the backup carries the rest.
 		run(world, std::move(rig), 1560);
-		auto const& power = world.getStationSystemsSnapshot().power;
+		auto const& snap = world.getStationSystemsSnapshot();
+		auto const& power = snap.power;
 		require(power.generators[0].phase == core::StationGeneratorPhase::Running,
 			"the slow-ramp generator never reached Running");
 		require(power.generators[0].outputKW > 1.5 && power.generators[0].outputKW < 2.5,
 			"the slow ramp did not hold to its ramp-limited output");
-		require(approx(power.generators[0].outputKW + power.fuelCells[0].lastOutputKW, 6.0, 1e-6),
+		require(approx(power.generators[0].outputKW + snap.fuelCells[0].lastOutputKW, 6.0, 1e-6),
 			"the backup did not carry exactly the ramp-limited difference");
 		require(approx(power.dispatchCommittedKW, 6.0, 1e-6),
 			"the committed account did not match what the sources deliver");
@@ -16672,14 +16676,15 @@ void dispatch(smoke::Context const&)
 				!= std::string::npos)
 				sawMidCrankTrip = true;
 		}
-		auto const& power = world.getStationSystemsSnapshot().power;
+		auto const& snap = world.getStationSystemsSnapshot();
+		auto const& power = snap.power;
 		require(sawMidCrankTrip,
 			"the mid-crank cooling trip was never reported as the block reason");
 		require(power.generators[0].phase == core::StationGeneratorPhase::Stopped,
 			"a generator whose cooling failed mid-crank did not fall back to Stopped");
 		require(approx(power.generators[0].outputKW, 0.0, 1e-12),
 			"a trip mid-crank reported generator output");
-		require(power.fuelCells[0].lastOutputKW > 5.9 && power.fuelCells[0].lastOutputKW < 6.1,
+		require(snap.fuelCells[0].lastOutputKW > 5.9 && snap.fuelCells[0].lastOutputKW < 6.1,
 			"the backup did not carry the load alone after the start failed");
 		require(approx(power.dispatchShortfallKW, 0.0, 1e-9),
 			"the failed-start run reported a shortfall the backup covers");
@@ -17258,6 +17263,232 @@ void protectedServices(smoke::Context const&)
 		auto const second = competingRun();
 		require(closeTo(second->getStationSystemsSnapshot().power.protectedUnmetKW, firstUnmet),
 			"competing protected allocation was not deterministic");
+	}
+
+	// Scenario 5b: critical chiller circulation dependency (#579).
+	// A critical-service chiller on an ordinary, unprotected coolant loop
+	// depends on that loop's pump for any cooling it can deliver, so the
+	// protected pass funds the pump ahead of the chiller's own work and
+	// ahead of every discretionary load, and sizes the cooling credit by
+	// the circulation the pool actually powers - never by the loop's
+	// fill and outage capacity alone. The loop needs no manual
+	// criticalService flag for its circulation to be protected, and a
+	// pump the pool cannot power leaves the cooling that could not be
+	// delivered explicit as unmet critical service naming the
+	// circulation as the binding dependency.
+	auto normalLoop = [](std::string id, double pumpKW, double ratedFlowKgPerS)
+	{
+		core::CoolantLoopSettings settings;
+		settings.id = std::move(id);
+		settings.hazardClass = "normal";
+		settings.reservoirId = "sink";
+		settings.coolantCapacityKg = 1.0;
+		settings.startingCoolantKg = 1.0;
+		settings.specificHeatKJPerKgK = 1.0;
+		settings.startingTemperatureC = 20.0;
+		settings.freezeProtectionSetpointC = 5.0;
+		settings.pumpPowerKW = pumpKW;
+		settings.ratedFlowKgPerS = ratedFlowKgPerS;
+		settings.exchangerConductanceKWPerK = 0.0;
+		settings.heaterCapacityKW = 0.0;
+		return settings;
+	};
+	auto criticalChiller = [](std::string id, std::string loopId)
+	{
+		core::ChillerSettings settings;
+		settings.id = std::move(id);
+		settings.thermalClass = "low";
+		settings.coldLoopId = std::move(loopId);
+		settings.condenserReservoirId = "hot";
+		settings.ratedCoolingCapacityKW = 2.0;
+		settings.cop = 1.0;
+		settings.auxiliaryPowerKW = 0.0;
+		settings.chilledSetpointC = 5.0;
+		settings.maxCondensingTemperatureC = 45.0;
+		settings.criticalService = true;
+		return settings;
+	};
+	auto dependencyRun = [&](double solarKW, double ratedFlowKgPerS,
+		bool fullLoopOutage = false)
+	{
+		auto world = std::make_unique<core::World>("ProtChiller", 2, 2);
+		world->pauseSimulation();
+		world->finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		settings.thermalReservoirs = { reservoir("sink", "low", 20.0),
+			reservoir("hot", "low", 20.0) };
+		settings.coolantLoops = { normalLoop("loop", 1.0, ratedFlowKgPerS) };
+		settings.chillers = { criticalChiller("chiller", "loop") };
+		settings.solarArrays = { solarArray(solarKW) };
+		settings.equipmentLoads = { discretionaryLoad("experiment", 1.0, 1.0) };
+		if (fullLoopOutage)
+		{
+			core::InstallationOutageSettings outage;
+			outage.id = "loopOut";
+			outage.installationId = "loop";
+			outage.capacityFraction = 0.0;
+			outage.firstOccurrenceSeconds = 0.0;
+			outage.durationSeconds = 10.0;
+			settings.outages = { outage };
+		}
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 1.0f;
+		std::string diagnostic;
+		if (!world->configureStationSystems(settings, false, &diagnostic))
+			throw std::runtime_error("chiller dependency rig refused: " + diagnostic);
+		world->resumeSimulation();
+		runOrDiagnose(*world, 1, "chiller dependency run");
+		return world;
+	};
+	auto findProtectedService = [](core::StationSystemsSnapshot const& snap,
+		std::string const& id, std::string const& kind) -> core::StationProtectedServiceSnapshot const*
+	{
+		for (auto const& service : snap.power.protectedServices)
+			if (service.id == id && service.kind == kind) return &service;
+		return nullptr;
+	};
+	// A tight but partially usable pool: the pump is funded whole first,
+	// the chiller converts what the pool leaves into real cooling, and the
+	// remainder of the protected cooling demand stays unmet with the
+	// pool named as the binding constraint. The competing discretionary
+	// load gets nothing ahead of the protected bundle.
+	{
+		auto world = dependencyRun(2.0, 1.0);
+		auto const& snap = world->getStationSystemsSnapshot();
+		require(closeTo(snap.coolantLoops[0].pumpSuppliedKW, 1.0),
+			"the unprotected loop's pump was not protected as the critical chiller's dependency");
+		require(closeTo(snap.coolantLoops[0].circulationFraction, 1.0),
+			"the dependency-protected loop did not circulate fully");
+		require(closeTo(snap.chillers[0].powerDemandKW, 2.0)
+			&& closeTo(snap.chillers[0].powerSuppliedKW, 1.0),
+			"the chiller did not consume exactly the pool the protected pump draw left");
+		require(closeTo(snap.chillers[0].coolingKW, 1.0),
+			"the chiller's delivered cooling does not match the work actually powered");
+		require(closeTo(snap.power.protectedDemandKW, 3.0)
+			&& closeTo(snap.power.protectedSuppliedKW, 2.0)
+			&& closeTo(snap.power.protectedUnmetKW, 1.0),
+			"the protected bundle totals do not account for pump plus curtailed cooling work");
+		require(snap.power.protectedUnmet,
+			"the protected alarm did not raise with unmet critical cooling");
+		auto const* pumpService = findProtectedService(snap, "loop",
+			"critical-cooling-circulation");
+		require(pumpService != nullptr
+			&& closeTo(pumpService->requestedKW, 1.0)
+			&& closeTo(pumpService->suppliedKW, 1.0),
+			"the chiller's circulation dependency is not exposed as a protected service");
+		auto const* coolingService = findProtectedService(snap, "chiller",
+			"critical-cooling");
+		require(coolingService != nullptr
+			&& closeTo(coolingService->requestedKW, 2.0)
+			&& closeTo(coolingService->suppliedKW, 1.0)
+			&& closeTo(coolingService->unmetKW, 1.0),
+			"the curtailed protected cooling demand is not exposed with its unmet remainder");
+		require(coolingService != nullptr
+			&& coolingService->reason.find("pool") != std::string::npos,
+			"the curtailed cooling does not name the binding pool");
+		require(sawEvent(*world, "Protected critical-cooling 'chiller' unmet"),
+			"the unmet protected cooling was not announced");
+		require(closeTo(snap.power.loads[0].suppliedKW, 0.0),
+			"the discretionary load took power ahead of the protected chiller bundle");
+	}
+	// A pool that cannot even fully power the pump: the circulation
+	// itself is the binding dependency, the cooling the unpowered
+	// circulation cannot deliver stays explicit unmet critical service,
+	// and no pool power is wasted on work the chiller cannot use.
+	{
+		auto world = dependencyRun(0.5, 1.0);
+		auto const& snap = world->getStationSystemsSnapshot();
+		require(closeTo(snap.coolantLoops[0].pumpSuppliedKW, 0.5),
+			"the dependency pump draw did not take the whole pool first");
+		require(closeTo(snap.chillers[0].coolingKW, 0.0)
+			&& closeTo(snap.chillers[0].powerSuppliedKW, 0.0),
+			"cooling work was funded beyond the circulation the pool could power");
+		auto const* pumpService = findProtectedService(snap, "loop",
+			"critical-cooling-circulation");
+		require(pumpService != nullptr
+			&& closeTo(pumpService->requestedKW, 1.0)
+			&& closeTo(pumpService->suppliedKW, 0.5)
+			&& closeTo(pumpService->unmetKW, 0.5),
+			"the curtailed dependency pump draw is not exposed with its unmet remainder");
+		auto const* coolingService = findProtectedService(snap, "chiller",
+			"critical-cooling");
+		require(coolingService != nullptr
+			&& closeTo(coolingService->requestedKW, 2.0)
+			&& closeTo(coolingService->suppliedKW, 0.0)
+			&& closeTo(coolingService->unmetKW, 2.0),
+			"the cooling blocked by unpowered circulation is not explicit unmet critical service");
+		require(coolingService != nullptr
+			&& coolingService->reason.find("circulation") != std::string::npos,
+			"the binding circulation dependency is not named in the unmet cooling reason");
+		require(sawEvent(*world, "Protected critical-cooling-circulation 'loop' unmet"),
+			"the curtailed dependency pump draw was not announced");
+		require(sawEvent(*world, "Protected critical-cooling 'chiller' unmet"),
+			"the circulation-blocked cooling was not announced");
+		require(closeTo(snap.power.protectedDemandKW, 3.0)
+			&& closeTo(snap.power.protectedSuppliedKW, 0.5)
+			&& closeTo(snap.power.protectedUnmetKW, 2.5),
+			"the protected totals do not expose the circulation-blocked shortfall");
+	}
+	// A zero-rated-flow loop is a zero-circulation machine: the pump may
+	// still run and dissipate as the loop pass powers it (#558), but no
+	// coolant moves, so no protected power is drawn for a draw that buys
+	// no circulation, and the whole cooling demand stays unmet naming the
+	// missing circulation.
+	{
+		auto world = dependencyRun(2.0, 0.0);
+		auto const& snap = world->getStationSystemsSnapshot();
+		require(closeTo(snap.coolantLoops[0].circulationFraction, 0.0),
+			"a zero-rated-flow loop reported circulation it cannot move");
+		require(closeTo(snap.power.loads[0].suppliedKW, 1.0),
+			"the discretionary load did not take the pool the unprotectable zero-flow pump left");
+		require(findProtectedService(snap, "loop", "critical-cooling-circulation") == nullptr,
+			"a zero-flow loop's circulation draw was protected although it buys no circulation");
+		auto const* coolingService = findProtectedService(snap, "chiller",
+			"critical-cooling");
+		require(coolingService != nullptr
+			&& closeTo(coolingService->requestedKW, 2.0)
+			&& closeTo(coolingService->suppliedKW, 0.0)
+			&& closeTo(coolingService->unmetKW, 2.0),
+			"zero-flow cooling was not explicit unmet critical service");
+		require(coolingService != nullptr
+			&& coolingService->reason.find("circulation") != std::string::npos,
+			"the zero-flow unmet cooling does not name the circulation dependency");
+		require(closeTo(snap.chillers[0].coolingKW, 0.0),
+			"cooling was delivered on a zero-flow loop");
+	}
+	// A full outage of the cold loop leaves no deliverable capacity and
+	// no circulation dependency to fund: the chiller draws no protected
+	// power, delivers no cooling, and its own service account names the
+	// missing circulation as the refusal.
+	{
+		auto world = dependencyRun(2.0, 1.0, true);
+		auto const& snap = world->getStationSystemsSnapshot();
+		require(closeTo(snap.coolantLoops[0].pumpSuppliedKW, 0.0),
+			"the outaged loop's pump drew power");
+		require(findProtectedService(snap, "loop", "critical-cooling-circulation") == nullptr
+			&& findProtectedService(snap, "chiller", "critical-cooling") == nullptr,
+			"a fully outaged chiller bundle presented protected demand");
+		require(closeTo(snap.chillers[0].coolingKW, 0.0)
+			&& closeTo(snap.chillers[0].powerSuppliedKW, 0.0),
+			"the outaged-loop chiller drew power or delivered cooling");
+		require(snap.chillers[0].blockReason.find("circulation") != std::string::npos,
+			"the outaged-loop chiller refusal does not name the missing circulation");
+	}
+	// Determinism: two identical runs of the tight-pool dependency rig
+	// agree on every protected and delivered scalar.
+	{
+		auto const first = dependencyRun(2.0, 1.0);
+		auto const second = dependencyRun(2.0, 1.0);
+		auto const& a = first->getStationSystemsSnapshot();
+		auto const& b = second->getStationSystemsSnapshot();
+		require(closeTo(a.power.protectedDemandKW, b.power.protectedDemandKW)
+			&& closeTo(a.power.protectedSuppliedKW, b.power.protectedSuppliedKW)
+			&& closeTo(a.power.protectedUnmetKW, b.power.protectedUnmetKW)
+			&& closeTo(a.coolantLoops[0].pumpSuppliedKW, b.coolantLoops[0].pumpSuppliedKW)
+			&& closeTo(a.chillers[0].coolingKW, b.chillers[0].coolingKW)
+			&& closeTo(a.chillers[0].powerSuppliedKW, b.chillers[0].powerSuppliedKW),
+			"the protected chiller dependency allocation was not deterministic");
 	}
 
 	// Scenario 6: authored persistence. The protected flags round-trip

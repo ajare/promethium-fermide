@@ -4541,7 +4541,24 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- condenser sink is at or above the maximum condensing
         -- temperature, and capped by the heat the cold loop actually
         -- holds above the setpoint spread over the tick at the
-        -- circulation the loop could sustain.
+        -- circulation the loop can actually sustain.
+        -- #579: cooling without powered circulation is not a service.
+        -- A chiller's deliverable depends on its cold loop's pump being
+        -- powered, so the dependency is resolved conservatively before
+        -- any cooling work is funded: the loop's pump demand is drawn
+        -- ahead of the chiller's own work - and ahead of every
+        -- discretionary load - and credited to the loop so the loop pass
+        -- consumes it instead of re-drawing the same watts. A loop the
+        -- containment pass already protects is not drawn again; its
+        -- existing pump credit is what the deliverable is measured
+        -- against. The cooling credit is then scaled by the fraction of
+        -- the pump the pool actually powered, never by the loop's fill
+        -- and outage capacity alone: a pump the pool cannot power leaves
+        -- the cooling it could not deliver explicit as unmet critical
+        -- service naming the circulation as the binding dependency, and
+        -- the work the unpowered circulation cannot use is never drawn
+        -- from the pool to be wasted. Mirrors the host ledger exactly.
+        local chiller_circulation_resolved = {}
         for _, chiller in ipairs(self.chillers) do
             chiller.protectedPowerSupplied = 0
             if chiller.criticalService then
@@ -4556,23 +4573,71 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     and sink.temperature + 1e-9 >= chiller.maxCondensing
                 if not disabled and not capacityDisabled and not atSetpoint and not sinkOver then
                     local disabledLoop = loop.coolant <= 0
+                    local loopAvailability = installationAvailability(loop)
+                    local loopFlowCapacity = loop.ratedFlow * loopAvailability
+                    local loopFlowDisabled = loopFlowCapacity <= 0
                     local fill = disabledLoop and 0 or math.min(1, loop.coolant / loop.capacity)
-                    local circulationCapacity = disabledLoop and 0
-                        or fill * installationAvailability(loop)
+                    -- The circulation the chiller depends on, sized
+                    -- exactly as the containment pass sizes a protected
+                    -- loop's pump: a dry loop or a zero-rated-flow loop
+                    -- asks for nothing because it can move nothing.
+                    local pumpDemand = (disabledLoop or loopFlowDisabled) and 0
+                        or loop.pumpKW * fill * loopAvailability
+                    -- The loop's pump is funded once: a protected loop's
+                    -- draw was already taken by the containment pass
+                    -- above; a normal loop's draw is taken here as the
+                    -- chiller's support dependency, so a critical
+                    -- chiller on an ordinary loop gets its circulation
+                    -- protected without the loop also having to be
+                    -- authored critical.
+                    if not chiller_circulation_resolved[loop] then
+                        if not loop.protectedService and pumpDemand > 0 then
+                            local pumpSupplied = drawProtected(pumpDemand)
+                            loop.protectedPumpSupplied = pumpSupplied
+                            recordProtected(loop.id, 'critical-cooling-circulation',
+                                pumpDemand, pumpSupplied,
+                                pumpSupplied + 1e-12 < pumpDemand
+                                and 'the shared electrical pool cannot supply the circulation the '
+                                    .. 'protected chiller depends on: the cold loop pump runs curtailed'
+                                or '')
+                        end
+                        chiller_circulation_resolved[loop] = true
+                    end
+                    local pumpSupplied = loop.protectedPumpSupplied or 0
+                    -- The fraction of the cold loop's circulation the
+                    -- pool actually powers this tick. A loop with no pump
+                    -- demand has no powered circulation: a dry, zero-flow
+                    -- or fully-outaged loop circulates nothing however
+                    -- much cooling its nameplate could deliver, so the
+                    -- deliverable - and the credit - go to zero with it.
+                    local circulationFraction = pumpDemand > 0
+                        and math.min(1, pumpSupplied / pumpDemand) or 0
                     local thermalTermKW = math.max(0, loop.coolant * loop.cp
                         * math.max(0, loop.temperature - chiller.chilledSetpoint)) / fixed_seconds
-                    local deliverable = math.min(effectiveCapacity * circulationCapacity,
+                    local potential = math.min(effectiveCapacity * fill * loopAvailability,
                         thermalTermKW)
-                    local requested = deliverable > 1e-12
+                    local deliverable = potential * circulationFraction
+                    local requested = potential > 1e-12
+                        and potential / chiller.cop + chiller.auxKW or 0
+                    -- Only the work the powered circulation can actually
+                    -- use is drawn from the pool; the remainder of the
+                    -- potential stays explicit unmet critical service
+                    -- instead of buying power the chiller cannot convert
+                    -- into cooling.
+                    local usableWork = deliverable > 1e-12
                         and deliverable / chiller.cop + chiller.auxKW or 0
                     if requested > 0 then
-                        local supplied = drawProtected(requested)
+                        local supplied = drawProtected(usableWork)
                         chiller.protectedPowerSupplied = supplied
                         recordProtected(chiller.id, 'critical-cooling', requested, supplied,
-                            supplied + 1e-12 < requested
-                            and 'the shared electrical pool cannot supply the protected cooling '
-                                .. 'work: the chiller runs curtailed and the cold service falls short'
-                            or '')
+                            circulationFraction + 1e-12 < 1
+                            and "the protected chiller's cold-loop circulation is unpowered or "
+                                .. 'curtailed: cooling service is limited by the circulation the '
+                                .. 'pool could power'
+                            or (supplied + 1e-12 < requested
+                                and 'the shared electrical pool cannot supply the protected cooling '
+                                    .. 'work: the chiller runs curtailed and the cold service falls short'
+                                or ''))
                     end
                 end
             end

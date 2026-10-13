@@ -6128,9 +6128,26 @@ namespace core
 			// condenser sink is at or above the maximum condensing
 			// temperature, and capped by the heat the cold loop actually
 			// holds above the setpoint spread over the tick at the
-			// circulation the loop could sustain. The later chiller pass
-			// consumes the credit first; any duty beyond it (heat that
+			// circulation the loop can actually sustain. The later chiller
+			// pass consumes the credit first; any duty beyond it (heat that
 			// entered the loop during the tick) competes in the general pool.
+			// #579: cooling without powered circulation is not a service.
+			// A chiller's deliverable depends on its cold loop's pump being
+			// powered, so the dependency is resolved conservatively before
+			// any cooling work is funded: the loop's pump demand is drawn
+			// ahead of the chiller's own work - and ahead of every
+			// discretionary load - and credited to the loop so the loop pass
+			// consumes it instead of re-drawing the same watts. A loop the
+			// containment pass already protects is not drawn again; its
+			// existing pump credit is what the deliverable is measured
+			// against. The cooling credit is then scaled by the fraction of
+			// the pump the pool actually powered, never by the loop's fill
+			// and outage capacity alone: a pump the pool cannot power leaves
+			// the cooling it could not deliver explicit as unmet critical
+			// service naming the circulation as the binding dependency, and
+			// the work the unpowered circulation cannot use is never drawn
+			// from the pool to be wasted.
+			std::vector<char> chillerCirculationResolved(coolantLoops.size(), 0);
 			for (size_t chillerIndex = 0; chillerIndex < chillers.size(); ++chillerIndex)
 			{
 				auto const& chiller = chillers[chillerIndex];
@@ -6147,26 +6164,77 @@ namespace core
 					&& sink.temperatureC + 1e-9 >= chiller.authored.maxCondensingTemperatureC;
 				if (disabled || capacityDisabled || atSetpoint || sinkOver) continue;
 				auto const disabledLoop = loop.coolantKg <= 0.0;
+				auto const loopFlowCapacityKgPerS = loop.authored.ratedFlowKgPerS
+					* loop.availabilityFactor;
+				auto const loopFlowDisabled = loopFlowCapacityKgPerS <= 0.0;
 				auto const fillFraction = disabledLoop
 					? 0.0 : std::min(1.0, loop.coolantKg / loop.authored.coolantCapacityKg);
-				auto const circulationCapacity = disabledLoop ? 0.0
-					: fillFraction * loop.availabilityFactor;
+				// The circulation the chiller depends on, sized exactly as
+				// the containment pass sizes a protected loop's pump: a dry
+				// loop or a zero-rated-flow loop asks for nothing because it
+				// can move nothing.
+				auto const loopPumpDemandKW = disabledLoop || loopFlowDisabled
+					? 0.0
+					: loop.authored.pumpPowerKW * fillFraction * loop.availabilityFactor;
+				// The loop's pump is funded once: a protected loop's draw was
+				// already taken by the containment pass above; a normal
+				// loop's draw is taken here as the chiller's support
+				// dependency, so a critical chiller on an ordinary loop gets
+				// its circulation protected without the loop also having to
+				// be authored critical.
+				if (!chillerCirculationResolved[chiller.loopIndex])
+				{
+					if (!loop.authored.criticalService
+						&& loop.authored.hazardClass != "hazardous"
+						&& loopPumpDemandKW > 0.0)
+					{
+						auto const pumpSuppliedKW = drawProtected(loopPumpDemandKW);
+						protectedLoopPumpKW[chiller.loopIndex] = pumpSuppliedKW;
+						recordProtected(loop.authored.id, "critical-cooling-circulation",
+							loopPumpDemandKW, pumpSuppliedKW,
+							pumpSuppliedKW + 1e-12 < loopPumpDemandKW
+								? "the shared electrical pool cannot supply the circulation the "
+									"protected chiller depends on: the cold loop pump runs curtailed"
+								: std::string{});
+					}
+					chillerCirculationResolved[chiller.loopIndex] = 1;
+				}
+				auto const loopPumpSuppliedKW = protectedLoopPumpKW[chiller.loopIndex];
+				// The fraction of the cold loop's circulation the pool
+				// actually powers this tick. A loop with no pump demand has
+				// no powered circulation: a dry, zero-flow or fully-outaged
+				// loop circulates nothing however much cooling its nameplate
+				// could deliver, so the deliverable - and the credit - go
+				// to zero with it.
+				auto const circulationFraction = loopPumpDemandKW > 0.0
+					? std::min(1.0, loopPumpSuppliedKW / loopPumpDemandKW) : 0.0;
 				auto const thermalTermKW = std::max(0.0,
 					loop.coolantKg * loop.authored.specificHeatKJPerKgK
 					* std::max(0.0, loop.temperatureC - chiller.authored.chilledSetpointC))
 					/ static_cast<double>(seconds);
-				auto const deliverableKW = std::min(effectiveCoolingCapacityKW
-					* circulationCapacity, thermalTermKW);
-				auto const requestedKW = deliverableKW <= 1e-12 ? 0.0
+				auto const potentialKW = std::min(effectiveCoolingCapacityKW
+					* fillFraction * loop.availabilityFactor, thermalTermKW);
+				auto const deliverableKW = potentialKW * circulationFraction;
+				auto const requestedKW = potentialKW <= 1e-12 ? 0.0
+					: potentialKW / chiller.authored.cop + chiller.authored.auxiliaryPowerKW;
+				auto const usableWorkKW = deliverableKW <= 1e-12 ? 0.0
 					: deliverableKW / chiller.authored.cop + chiller.authored.auxiliaryPowerKW;
 				if (requestedKW <= 0.0) continue;
-				auto const suppliedKW = drawProtected(requestedKW);
+				// Only the work the powered circulation can actually use is
+				// drawn from the pool; the remainder of the potential stays
+				// explicit unmet critical service instead of buying power
+				// the chiller cannot convert into cooling.
+				auto const suppliedKW = drawProtected(usableWorkKW);
 				protectedChillerPowerKW[chillerIndex] = suppliedKW;
 				recordProtected(chiller.authored.id, "critical-cooling", requestedKW,
-					suppliedKW, suppliedKW + 1e-12 < requestedKW
-						? "the shared electrical pool cannot supply the protected cooling work: "
-							"the chiller runs curtailed and the cold service falls short"
-						: std::string{});
+					suppliedKW, circulationFraction + 1e-12 < 1.0
+						? "the protected chiller's cold-loop circulation is unpowered or "
+							"curtailed: cooling service is limited by the circulation the "
+							"pool could power"
+						: suppliedKW + 1e-12 < requestedKW
+							? "the shared electrical pool cannot supply the protected cooling work: "
+								"the chiller runs curtailed and the cold service falls short"
+							: std::string{});
 			}
 			// Biological essential circulation: the pumps that deliver gas,
 			// water and nutrients across the canopy or through the culture
