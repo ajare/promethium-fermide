@@ -9,6 +9,7 @@ int main(int argc, char** argv)
 	agent_smoke::registerPlayerAirlocks(checks);
 	agent_smoke::registerPlayerChambers(checks);
 	agent_smoke::registerPlayerBoothWindows(checks);
+	agent_smoke::registerPlayerAccessPanels(checks);
 	agent_smoke::registerGroup(checks);
 	agent_smoke::registerGroupAssignment(checks);
 	agent_smoke::registerGroupCount(checks);

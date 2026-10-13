@@ -265,6 +265,15 @@ construction:
       []
     upperLandingPermissionRequirement:
       []
+  - type: accessPanel
+    sectorIndex: 6
+    levelOffset: 0
+    xOffset: 2
+    panelType: empty
+    width: 0.5
+    height: 0.25
+    yOffset: 0.25
+    hasSpeedOverride: false
 agentGroups:
   []
 accessPermissions:

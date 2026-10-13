@@ -66,6 +66,9 @@ The same lowest-priority fresh Up action toggles a standalone BoothWindow throug
 its owned back-side shutter control, with physical Arms reach and permission
 checks. Front-side operation and BoothWindow traversal remain unavailable;
 Dumbwaiter-owned shutters retain their normal landing-button interlocks.
+A fresh Up also opens/closes an Access panel in front of the Player through its
+state-appropriate owned control, with the same physical reach, owning Location/Level,
+Arms and Buttons Mobility gates and without auto-approach or held-key repetition.
 Airlock outside Buttons use Up to call; Left/Right manually enters the open
 entrance, walks inside and exits through the committed opposite Door after the
 normal interlock cycle. Player Bulkhead collision uses the moving leaf's bounding

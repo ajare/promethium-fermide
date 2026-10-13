@@ -8,6 +8,7 @@
 #include "core/AirlockTransit.h"
 #include "core/ChamberTransit.h"
 #include "core/Window.h"
+#include "core/AccessPanel.h"
 #include "core/Graph.h"
 #include "core/MobilityProfile.h"
 #include "core/StairwellMountEdge.h"
@@ -231,7 +232,7 @@ namespace core
 				static_cast<DoorEdge const&>(*candidate.edge).getDoor()->requestOpen();
 				return;
 			}
-		// Physical Buttons and owned back-side BoothWindow panels are the last
+		// Physical Buttons and owned BoothWindow/Access panel controls are the last
 		// meaning of Up. Use physical reach, never remote range or auto-approach.
 		if (agent->getObjectUsage() != ObjectUsage::Arms || agentForbidsButtons(agent)) return;
 		InteractionPointId selected;
@@ -242,11 +243,16 @@ namespace core
 			auto booth = lookupBoothWindow(point->mBoothWindowOwner);
 			bool boothPanel = booth && !booth->getDumbwaiterOwner() && booth->getPanel() == pointId
 				&& booth->getBackSector().get() == agent->getSector();
-			if ((!placement && !boothPanel) || std::abs(position.y - point->getPosition().y) > PoseFitTolerance
+			bool accessPanelControl = false;
+			if (auto panel = lookupAccessPanel(point->mAccessPanelOwner))
+				for (auto action : panel->getActions())
+					if (panel->getControl(action) == pointId && canRequestAccessPanel(panel->getId(), action, id))
+						accessPanelControl = true;
+			if ((!placement && !boothPanel && !accessPanelControl) || std::abs(position.y - point->getPosition().y) > PoseFitTolerance
 				|| !agentCanOperateInteraction(pointId, *agent, true)
 				|| !missingInteractionPermissions(*point, *agent).empty()
 				|| isControlTargetBroken(pointId)) continue;
-			if (!boothPanel)
+			if (!boothPanel && !accessPanelControl)
 			{
 				auto button = std::dynamic_pointer_cast<Button>(mSectors[placement->sectorIndex]
 					->getObject(placement->objectIndex)->_getObject());

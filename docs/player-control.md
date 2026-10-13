@@ -144,6 +144,22 @@ camera is used.
   stationary in its existing fitting pose; input does not force it through the
   ceiling.
 
+## Access panels
+
+- A fresh **Up** press in front of an Access panel uses its existing owned
+  **Open** or **Close** control, according to the panel's current available actions.
+  The Player must be in the owning Location on the control's Level, within physical
+  arm reach, with Arms capability and Buttons Mobility.
+- Access panels share physical Buttons and BoothWindow controls' lowest Up
+  priority, after contextual climbing and Doors. Nearest eligible approach point
+  wins, then stable Interaction point ID. No automatic approach or alignment is
+  performed; holding Up and keyboard repeat do not toggle again.
+- Normal Interaction admission, queues and animation remain authoritative. Busy
+  accepted requests are not duplicated; another fresh press after completion
+  toggles the panel again. Unactivated requests revalidate physical reach and
+  available actions; accepted operations finish despite later capability loss.
+  Pause freezes animation and Reset restores the closed state.
+
 ## BoothWindow shutters
 
 - A fresh **Up** press within reach of a standalone BoothWindow's owned **back-side

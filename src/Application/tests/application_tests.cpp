@@ -15,6 +15,7 @@
 #include <core/AirlockTransit.h>
 #include <core/ChamberTransit.h>
 #include <core/WindowSectorObject.h>
+#include <core/AccessPanel.h>
 #include <core/YamlSerializer.h>
 #include <cmath>
 
@@ -328,6 +329,40 @@ void checkPlayerLadderKeys(wp::application::State& play, core::World& world) {
               && std::abs(position().y - (descending ? 0.f : 2.f)) < .0001f,
             "App Ladder arrival must automatically dismount into its supported landing");
     key(vertical, false); play._update(0.f);
+  }
+}
+
+void checkPlayerAccessPanelKeys(wp::application::State& play, core::World& world) {
+  using wp::application::Key; using wp::application::KeyEvent;
+  auto key = [&](bool pressed) { play._injectKeyInput(pressed ? KeyEvent::Pressed : KeyEvent::Released, Key::UpArrow, {}); };
+  for (bool inFront : {false, true}) {
+    core::World fixture("Keyboard Access panel", 12, 2);
+    auto room = fixture.addRoom("Host", 0, 0, 0, 8, 1);
+    auto other = fixture.addRoom("Other Layer", 1, 0, 0, 8, 1);
+    fixture.addAccessPanel(room, 0, 3); fixture.finishBuild(); fixture.pauseSimulation();
+    auto id = fixture.createAgent("Player", inFront ? room : other, 0, 3.5f);
+    require(fixture.setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}), "Cannot assign keyboard panel Player");
+    auto writer = core::YamlSerializer::toString(); core::SerializationWorkData data; data.markSerializedUnmodified = false;
+    fixture.serialize(*writer, data); writer->serialize();
+    auto reader = core::YamlSerializer::fromString(writer->getSerializedString()); reader->deserialize();
+    world.pauseSimulation(); require(world.deserialize(*reader, data), "Cannot install keyboard Access panel"); world.resumeSimulation();
+    std::shared_ptr<const core::AccessPanel> panel;
+    for (uint32_t i = 0; i < world.getSector(room)->getNumObjects(); ++i)
+      if (auto object = std::dynamic_pointer_cast<const core::AccessPanelSectorObject>(world.getSector(room)->getObject(i))) panel = object->getPanel();
+    require(bool(panel), "Missing keyboard Access panel");
+    auto step = [&] { play._update(core::World::getFixedTimestep()); };
+    key(true); step(); for (int i = 0; i < 10; ++i) { key(true); step(); }
+    for (int i = 0; i < 70; ++i) step(); key(false);
+    require(panel->getState() == (inFront ? core::AccessPanel::State::Open : core::AccessPanel::State::Closed),
+      "Actual Up must open panel only in its owning Location; held/repeated input must not close it");
+    size_t requests = 0;
+    for (auto const& event : world.getSimulationEvents())
+      if (event.type == core::SimulationEventType::InteractionRequestAdded && event.interactionRequest.actor == id) ++requests;
+    require(requests == (inFront ? 1u : 0u), "Actual repeated Up must issue exactly one eligible panel action");
+    key(true); step(); key(false); for (int i = 0; i < 70; ++i) step();
+    auto actor = world.lookupAgent(id).entity;
+    require(panel->getState() == core::AccessPanel::State::Closed && actor->getSector()->getIndex() == (inFront ? room : other)
+      && std::abs(actor->getGlobalPosition().x - 3.5f) < .001f, "Fresh Up must close panel without auto-approach or alignment");
   }
 }
 
@@ -659,6 +694,7 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
         checkPlayerAirlockKeys(*child, *map->getWorld());
         checkPlayerChamberKeys(*child, *map->getWorld());
         checkPlayerBoothWindowKeys(*child, *map->getWorld());
+        checkPlayerAccessPanelKeys(*child, *map->getWorld());
         auto const suspendTick = map->getWorld()->getSimulationTick();
         child->_suspend(true, true, true);
         child->_update(1.0f);

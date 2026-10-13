@@ -12,6 +12,7 @@ namespace agent_smoke
 	void registerPlayerAirlocks(std::vector<smoke::Check>& checks);
 	void registerPlayerChambers(std::vector<smoke::Check>& checks);
 	void registerPlayerBoothWindows(std::vector<smoke::Check>& checks);
+	void registerPlayerAccessPanels(std::vector<smoke::Check>& checks);
 	void registerPlayerControlEditor(std::vector<smoke::Check>& checks);
 	void registerGroup(std::vector<smoke::Check>& checks);
 	void registerGroupAssignment(std::vector<smoke::Check>& checks);
