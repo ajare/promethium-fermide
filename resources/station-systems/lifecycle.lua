@@ -242,8 +242,16 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews,
     waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers,
     wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations,
-    algaeCultures, outages)
+    algaeCultures, outages, dispatchMode)
     assert(type(name) == "string")
+    -- #415: the dispatch controller mode crosses as a plain immutable
+    -- string; the sandbox mirrors the same controller and refuses any
+    -- other value, so a corrupt crossing fails contained like any other
+    -- bad descriptor. A missing mode (older wrapper factories that do
+    -- not pass it) defaults to manual, matching the host default.
+    dispatchMode = dispatchMode or 'manual'
+    assert(dispatchMode == 'manual' or dispatchMode == 'automatic',
+        'dispatch mode must be manual or automatic, got: ' .. tostring(dispatchMode))
     assert(type(stores) == "table", "resource store descriptors missing")
     assert(type(transfers) == "table", "resource transfer descriptors missing")
     assert(type(conversions) == "table", "resource conversion descriptors missing")
@@ -297,6 +305,21 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         fuel_cells = {}, thermal_buffers = {},
         waste_ejections = {},
         outages = {}, installation_availability = {},
+        -- #415: the dispatch controller's own state. The demand signal is
+        -- the station-wide electrical request the last committed tick
+        -- presented to the shared pool; the dispatcher commands the
+        -- dispatchable sources against it minus this tick's solar. The
+        -- target/committed/shortfall scalars and the two alarms describe
+        -- the current tick. In Manual mode every one of these stays
+        -- zero/false: the dispatcher is inert and the authored commands
+        -- rule. Mirrors the host ledger.
+        dispatch_automatic = dispatchMode == 'automatic',
+        last_dispatch_demand = 0,
+        dispatch_target = 0,
+        dispatch_committed = 0,
+        dispatch_shortfall = 0,
+        backup_engaged = false,
+        reserve_exhausted = false,
     }
     local by_id = {}
     for index = 1, #stores do
@@ -990,6 +1013,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             wasteHeatKJ = 0,
             startupHeatKJ = 0,
             decayHeatKJ = 0,
+            -- #415: the command the dispatch controller issued for this
+            -- generator this tick (0 in Manual mode).
+            dispatchCommand = 0,
         }
     end
     for index = 1, #loads do
@@ -1969,6 +1995,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             hydrogenConsumedKg = 0, oxygenConsumedKg = 0, waterProducedKg = 0,
             chemicalEnergyKJ = 0, electricalKJ = 0, wasteHeatKJ = 0,
             enduranceSeconds = 0,
+            -- #415: the command the dispatch controller issued for this
+            -- cell this tick (0 in Manual mode).
+            dispatchCommand = 0,
         }
     end
     -- Carbon recovery contracts (#405). The sandbox mirrors the host's
@@ -3644,6 +3673,76 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             battery.last_charge = 0
             battery.last_discharge = 0
         end
+        -- #415 mirror: automatic electrical dispatch. When the controller
+        -- is Automatic it commands the dispatchable sources against the
+        -- net load the sun leaves behind: the station-wide electrical
+        -- demand of the last committed tick minus this tick's solar.
+        -- Generators first, fuel-cell backups second, each capped by what
+        -- the machine can physically deliver this tick - installed rating
+        -- under outages, fuel or reactants actually drawable above the
+        -- protected reserves, and qualified cooling - so dispatch never
+        -- fabricates sustained supply. A source that cannot run this tick
+        -- is passed over, never reserved. Mirrors the host ledger exactly.
+        local dispatch_target = self.dispatch_automatic
+            and math.max(0, self.last_dispatch_demand - generation) or 0
+        local dispatch_remaining = dispatch_target
+        for _, gen in ipairs(self.generators) do
+            gen.dispatchCommand = 0
+            if self.dispatch_automatic then
+                local availability = installationAvailability(gen)
+                local effective_rated = gen.ratedKW * availability
+                if effective_rated > 0 then
+                    local cooling = gen.heatSink.temperature + 1e-9 < gen.maxSinkTemperatureC
+                    local kwh_per_unit = energyUnitsToKWh(gen.fuelStore.unit)
+                    local drawable_kwh = math.max(0, gen.fuelStore.qualified
+                        - gen.fuelStore.protected_reserve) * kwh_per_unit
+                    if cooling and drawable_kwh > 0 then
+                        local fuel_cap = drawable_kwh * gen.efficiency / fixed_hours
+                        local cap = math.min(effective_rated, fuel_cap)
+                        local command = math.min(cap, dispatch_remaining)
+                        if command > 0 then
+                            gen.dispatchCommand = command
+                            dispatch_remaining = dispatch_remaining - command
+                        end
+                    end
+                end
+            end
+        end
+        local backup_engaged = false
+        for _, cell in ipairs(self.fuel_cells) do
+            cell.dispatchCommand = 0
+            if self.dispatch_automatic and cell.ratedOutputKW > 0 then
+                local cooling = cell.sink.temperature + 1e-9 < cell.maxSinkTemperatureC
+                if cooling then
+                    local o2_per_h2 = FUEL_CELL_O2_KG_PER_H2_KG
+                    local elec_kj_per_kg_h2 = cell.efficiency
+                        * ELECTROLYSIS_H2_CHEMICAL_KJ_PER_KG
+                    local h2_drawable = math.max(0, toKg(cell.hydrogen.unit,
+                        cell.hydrogen.qualified - cell.hydrogen.protected_reserve))
+                    local o2_drawable = math.max(0, toKg(cell.oxygen.unit,
+                        cell.oxygen.qualified - cell.oxygen.protected_reserve))
+                    local water_headroom = math.max(0, toKg(cell.water.unit,
+                        cell.water.capacity - (cell.water.qualified + cell.water.unqualified)))
+                    local cap = cell.ratedOutputKW
+                    cap = math.min(cap, h2_drawable * elec_kj_per_kg_h2 / fixed_seconds)
+                    cap = math.min(cap, (o2_drawable / o2_per_h2) * elec_kj_per_kg_h2 / fixed_seconds)
+                    cap = math.min(cap, (water_headroom / (1.0 + o2_per_h2))
+                        * elec_kj_per_kg_h2 / fixed_seconds)
+                    if cap > 0 then
+                        local command = math.min(cap, dispatch_remaining)
+                        if command > 0 then
+                            cell.dispatchCommand = command
+                            backup_engaged = true
+                            dispatch_remaining = dispatch_remaining - command
+                        end
+                    end
+                end
+            end
+        end
+        self.dispatch_target = dispatch_target
+        self.dispatch_committed = dispatch_target - dispatch_remaining
+        self.dispatch_shortfall = dispatch_remaining
+        self.backup_engaged = backup_engaged
         local batterySupplied = 0
         -- #561: the cranking slice taken out of the generation pool is
         -- tracked here so the audit baseline below is the pool as it was
@@ -3669,7 +3768,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local availability = installationAvailability(gen)
             local effectiveRatedKW = gen.ratedKW * availability
             local capacityDisabled = effectiveRatedKW <= 0
-            local commanded = (disabled or capacityDisabled) and 0 or gen.commandedKW
+            -- #415: under automatic dispatch the dispatcher's command for
+            -- this tick replaces the authored setpoint; the machine still
+            -- enforces its own startup, ramp, fuel and cooling physics.
+            local commanded = (disabled or capacityDisabled) and 0
+                or (self.dispatch_automatic and gen.dispatchCommand or gen.commandedKW)
             local sinkTemperature = gen.heatSink.temperature
             -- Cooling is qualified while the sink is below the maximum
             -- sink temperature: at or above it the interface cannot
@@ -3910,7 +4013,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- Mirrors the host ledger exactly.
         for _, cell in ipairs(self.fuel_cells) do
             local disabled = cell.ratedOutputKW <= 0
-            local commanded = disabled and 0 or cell.commandedOutputKW
+            -- #415: under automatic dispatch the dispatcher's command for
+            -- this tick replaces the authored setpoint; the cell still
+            -- enforces its reactant, cooling and product-headroom limits.
+            local commanded = disabled and 0
+                or (self.dispatch_automatic and cell.dispatchCommand or cell.commandedOutputKW)
             local o2_per_h2 = FUEL_CELL_O2_KG_PER_H2_KG
             local elec_kj_per_kg_h2 = cell.efficiency * ELECTROLYSIS_H2_CHEMICAL_KJ_PER_KG
             local hydrogen = cell.hydrogen
@@ -6942,6 +7049,65 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         assert(isFinite(availableGeneration), 'remaining generation pool is not finite')
         assert(isFinite(totalSupplied), 'total supplied power is not finite')
         assert(isFinite(batterySupplied), 'total battery supplied power is not finite')
+        -- #415 mirror: the station-wide electrical demand signal for the
+        -- next tick's dispatch: every electrical request this tick
+        -- presented to the shared pool - admitted external load requests
+        -- capped by their material feasibility, coolant pump and
+        -- freeze-heater demands, chiller work, water treatment,
+        -- electrolysis, CO2 capture, Sabatier, methane processing and
+        -- microbial digestion work, and the crop and algae lamp and
+        -- circulation demands. Supply-independent: what was asked, not
+        -- what was granted. Generator startup cranking is excluded: a
+        -- control transient, not a service demand. Mirrors the host.
+        local dispatch_demand = 0
+        for _, load in ipairs(self.loads) do
+            if load.admitted and not load.materialRefused then
+                dispatch_demand = dispatch_demand + load.cappedRequest
+            end
+        end
+        for _, loop in ipairs(self.coolant_loops) do
+            dispatch_demand = dispatch_demand + loop.lastPumpDemand + loop.lastHeaterDemand
+        end
+        for _, chiller in ipairs(self.chillers) do
+            dispatch_demand = dispatch_demand + chiller.lastPowerDemand
+        end
+        for _, treatment in ipairs(self.water_treatments) do
+            dispatch_demand = dispatch_demand + treatment.lastPowerDemand
+        end
+        for _, cell in ipairs(self.electrolyzers) do
+            dispatch_demand = dispatch_demand + cell.lastPowerDemand
+        end
+        for _, capture in ipairs(self.co2_captures) do
+            dispatch_demand = dispatch_demand + capture.lastPowerDemand
+        end
+        for _, reactor in ipairs(self.sabatier_reactors) do
+            dispatch_demand = dispatch_demand + reactor.lastPowerDemand
+        end
+        for _, processor in ipairs(self.methane_processors) do
+            dispatch_demand = dispatch_demand + processor.lastPowerDemand
+        end
+        for _, processor in ipairs(self.microbial_processors) do
+            dispatch_demand = dispatch_demand + processor.lastPowerDemand
+        end
+        for _, crop in ipairs(self.crop_populations) do
+            dispatch_demand = dispatch_demand + crop.lastLightRequested + crop.lastCirculationRequested
+        end
+        for _, culture in ipairs(self.algae_cultures) do
+            dispatch_demand = dispatch_demand + culture.lastLightRequested
+                + culture.lastCirculationRequested
+        end
+        assert(isFinite(dispatch_demand), 'dispatch demand signal is not finite')
+        self.last_dispatch_demand = dispatch_demand
+        -- The reserve-exhausted alarm: a bank that has fallen to its
+        -- protected reserve floor while the station runs.
+        local reserve_exhausted = false
+        for _, battery in ipairs(self.batteries) do
+            if not batteryDisabled(battery) and battery.stored
+                <= batteryReserve(battery) + 1e-12 then
+                reserve_exhausted = true
+            end
+        end
+        self.reserve_exhausted = reserve_exhausted
     end
     -- Mirror of the host thermal ledger (#395): explicit Euler on the
     -- fixed World tick. Each reservoir accumulates its authored absorbed

@@ -145,7 +145,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 90"), 11, "version: 65");
+		text.replace(text.find("version: 91"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -14084,9 +14084,9 @@ void buffers(smoke::Context const&)
 			// than silently dropping the cultures.
 			{
 				auto stale = text;
-				size_t const position = stale.find("version: 90");
+				size_t const position = stale.find("version: 91");
 				require(position != std::string::npos, "the fixture document carries no version line");
-				stale.replace(position, std::string("version: 90").size(), "version: 88");
+				stale.replace(position, std::string("version: 91").size(), "version: 88");
 				require(stale.find("algaeCultures") != std::string::npos,
 					"the fixture document carries no algae cultures to test the guard with");
 				bool refused = false;
@@ -14438,6 +14438,350 @@ void buffers(smoke::Context const&)
 		}
 	}
 
+void dispatch(smoke::Context const&)
+{
+	// #415: the dispatcher closes the loop the operator used to close by
+	// hand. In automatic mode the station commands its own generators and
+	// fuel-cell backups against the real demand signal, honouring startup,
+	// ramp, fuel-above-reserve and cooling limits, so an eclipse is bridged
+	// by the battery and then carried by started generation while the
+	// declared reserves are never spent to meet ordinary load. Manual mode
+	// keeps the pre-#415 contract: the operator's setpoints are the only
+	// commands and the dispatcher never moves a source.
+	auto const approx = [](double actual, double expected, double tolerance = 1e-6)
+	{ return std::abs(actual - expected) <= tolerance; };
+	auto const replaceAll = [](std::string text, std::string const& from, std::string const& to)
+	{
+		for (size_t pos = text.find(from); pos != std::string::npos; pos = text.find(from, pos + to.size()))
+			text.replace(pos, from.size(), to);
+		return text;
+	};
+	auto sawEvent = [](core::World& world, std::string const& needle)
+	{
+		for (auto const& event : world.getStationSystemsEvents())
+			if (event.message.find(needle) != std::string::npos) return true;
+		return false;
+	};
+	auto sinkReservoir = [](double capacityKJPerK, double startingC)
+	{
+		core::ThermalReservoirSettings settings;
+		settings.id = "hot";
+		settings.thermalClass = "generation";
+		settings.heatCapacityKJPerK = capacityKJPerK;
+		settings.startingTemperatureC = startingC;
+		settings.minTemperatureC = -50.0;
+		settings.maxTemperatureC = 200.0;
+		return settings;
+	};
+	auto fuelStore = [](std::string id, std::string unit, double capacity,
+		double starting, double reserve)
+	{
+		core::ResourceStoreSettings settings;
+		settings.id = std::move(id);
+		settings.unit = std::move(unit);
+		settings.capacity = capacity;
+		settings.startingQualified = starting;
+		settings.protectedReserve = reserve;
+		return settings;
+	};
+	auto generatorSettings = [](double ratedKW)
+	{
+		core::GeneratorSettings settings;
+		settings.id = "gen";
+		settings.fuelStoreId = "diesel";
+		settings.thermalClass = "generation";
+		settings.heatSinkId = "hot";
+		settings.ratedOutputKW = ratedKW;
+		settings.efficiency = 0.5;
+		settings.maxRampKWPerSecond = 5.0;
+		settings.commandedOutputKW = 0.0;
+		settings.startupPowerKW = 1.0;
+		settings.startupSeconds = 6.0;
+		settings.shutdownHeatKW = 1.0;
+		settings.shutdownSeconds = 10.0;
+		settings.maxSinkTemperatureC = 90.0;
+		return settings;
+	};
+	auto battery = [](double nameplateKWh, double usableKWh, double startingKWh,
+		double maxDischargeKW)
+	{
+		core::BatterySettings settings;
+		settings.id = "bank";
+		settings.nameplateKWh = nameplateKWh;
+		settings.usableKWh = usableKWh;
+		settings.startingStoredKWh = startingKWh;
+		settings.maxChargeKW = 10.0;
+		settings.maxDischargeKW = maxDischargeKW;
+		settings.chargeEfficiency = 1.0;
+		settings.dischargeEfficiency = 1.0;
+		return settings;
+	};
+	auto criticalLoad = [](double demandKW)
+	{
+		core::EquipmentLoadSettings settings;
+		settings.id = "critical";
+		settings.electricalDemandKW = demandKW;
+		settings.operatingProfile = constantProfile(1.0);
+		settings.heatOutputKW = 0.0;
+		settings.thermalClass = "low";
+		settings.coolingDisposition = core::StationCoolingDisposition::Exported;
+		settings.criticalFloorKW = demandKW;
+		settings.priority = 100;
+		settings.maxCurtailment = 0.0;
+		return settings;
+	};
+	auto solarAt = [](double fraction)
+	{
+		core::SolarArraySettings settings;
+		settings.id = "array";
+		settings.capacityKW = 12.0;
+		settings.illumination = constantProfile(fraction);
+		return settings;
+	};
+	struct Rig
+	{
+		std::vector<core::ResourceStoreSettings> stores;
+		std::vector<core::ThermalReservoirSettings> reservoirs;
+		std::vector<core::GeneratorSettings> generators;
+		std::vector<core::BatterySettings> batteries;
+		std::vector<core::SolarArraySettings> solar;
+		std::vector<core::EquipmentLoadSettings> loads;
+		std::vector<core::FuelCellSettings> cells;
+		core::StationDispatchMode mode{core::StationDispatchMode::Manual};
+	};
+	auto run = [](core::World& world, Rig rig, int ticks)
+	{
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 1.0f;
+		settings.dispatchMode = rig.mode;
+		settings.stores = std::move(rig.stores);
+		settings.thermalReservoirs = std::move(rig.reservoirs);
+		settings.generators = std::move(rig.generators);
+		settings.batteries = std::move(rig.batteries);
+		settings.solarArrays = std::move(rig.solar);
+		settings.equipmentLoads = std::move(rig.loads);
+		settings.fuelCells = std::move(rig.cells);
+		std::string diagnostic;
+		require(world.configureStationSystems(settings, false, &diagnostic),
+			("automatic dispatch rig refused: " + diagnostic).c_str());
+		world.resumeSimulation();
+		require(world.advanceTicks(ticks), "automatic dispatch run failed");
+	};
+	auto fullRig = [&](core::StationDispatchMode mode, double diesel, double dieselReserve)
+	{
+		Rig rig;
+		rig.mode = mode;
+		rig.stores = {fuelStore("diesel", "kWh", 1000.0, diesel, dieselReserve),
+			{"water", "kg", 1000.0, 500.0, 0.0}};
+		rig.reservoirs = {sinkReservoir(100000.0, 20.0)};
+		rig.generators = {generatorSettings(10.0)};
+		rig.batteries = {battery(12.0, 10.0, 12.0, 10.0)};
+		rig.loads = {criticalLoad(6.0)};
+		return rig;
+	};
+	auto makeWorld = [](char const* name)
+	{
+		return std::make_unique<core::World>(name, 2, 2);
+	};
+
+	// Manual mode keeps the operator in charge: with the generator set to
+	// zero and the sun gone, the battery alone carries the critical load
+	// and drains; the dispatcher never starts the generator. 100 s of
+	// eclipse at 6 kW drains ~1/6 kWh from the bank.
+	{
+		core::World world("Dispatch", 2, 2);
+		world.pauseSimulation();
+		world.finishBuild();
+		Rig rig = fullRig(core::StationDispatchMode::Manual, 1000.0, 0.0);
+		rig.solar = {solarAt(0.0)};
+		run(world, std::move(rig), 6000);
+		auto const& power = world.getStationSystemsSnapshot().power;
+		require(power.dispatchMode == core::StationDispatchMode::Manual,
+			"manual mode not reported in the snapshot");
+		require(approx(power.generators[0].outputKW, 0.0),
+			"manual mode let the dispatcher start the generator");
+		require(power.batteries[0].storedKWh < 11.9,
+			"manual eclipse did not drain the battery carrying the load");
+		require(approx(power.totalUnmetKW, 0.0, 1e-9),
+			"manual mode left the critical load unmet while the battery could carry it");
+		require(!power.reserveExhausted,
+			"manual mode raised the automatic reserve alarm");
+	}
+
+	// Automatic mode bridges the eclipse with the battery and then starts
+	// the generator against the deficit; once the generator carries the
+	// load the battery stops draining and holds far above the manual drain.
+	{
+		core::World world("Dispatch", 2, 2);
+		world.pauseSimulation();
+		world.finishBuild();
+		Rig rig = fullRig(core::StationDispatchMode::Automatic, 1000.0, 0.0);
+		rig.solar = {solarAt(0.0)};
+		run(world, std::move(rig), 6000);
+		auto const& power = world.getStationSystemsSnapshot().power;
+		require(power.dispatchMode == core::StationDispatchMode::Automatic,
+			"automatic mode not reported in the snapshot");
+		require(power.generators[0].dispatchCommandKW > 0.0,
+			"automatic mode issued no dispatch command to the generator");
+		require(power.generators[0].outputKW > 5.9,
+			"automatic generator did not ramp up to carry the load");
+		require(approx(power.totalUnmetKW, 0.0, 1e-9),
+			"automatic dispatch left the critical load unmet once the generator was online");
+		// The battery bridged startup and ramp, then held: it is well above
+		// the manual-mode drain and only slightly below its starting charge.
+		require(power.batteries[0].storedKWh > 11.9
+			&& power.batteries[0].storedKWh < 12.0,
+			"automatic battery did not bridge and then hold the load");
+		require(approx(power.batteryDischargeKW, 0.0, 1e-9),
+			"automatic battery still discharging once the generator carried the load");
+		require(sawEvent(world, "Dispatch brought generator"),
+			"automatic generator start was not recorded as a dispatch action");
+		require(!power.reserveExhausted,
+			"reserve alarm raised while the generator could still carry the load");
+	}
+
+	// Automatic mode with the drawable fuel exhausted: the dispatcher
+	// cannot draw the protected reserve for ordinary load, so the generator
+	// never runs, the battery rides the load down to its own protected
+	// reserve floor, and the reserve-exhausted alarm is raised rather
+	// than the protected fuel reserve being silently spent.
+	{
+		core::World world("Dispatch", 2, 2);
+		world.pauseSimulation();
+		world.finishBuild();
+		Rig rig = fullRig(core::StationDispatchMode::Automatic, 5.0, 5.0);
+		// A small bank power-capped to carry the load: 0.5 kWh cyclable
+		// above its 2 kWh reserve floor. The load is fully curtable so it
+		// keeps drawing as the bank's deliverable tapers, letting the bank
+		// actually reach its protected floor rather than strand a residual.
+		rig.batteries = {battery(2.5, 0.5, 2.5, 10.0)};
+		rig.loads[0].maxCurtailment = 1.0;
+		rig.solar = {solarAt(0.0)};
+		run(world, std::move(rig), 24000);
+		auto const& power = world.getStationSystemsSnapshot().power;
+		require(power.reserveExhausted,
+			"running the drawable fuel dry did not raise the reserve alarm");
+		require(power.totalUnmetKW > 1e-6,
+			"reserve exhaustion left no unmet demand while the load still needed power");
+		require(sawEvent(world, "Electrical reserve exhausted"),
+			"reserve exhaustion was not recorded as an alarm");
+		auto const& diesel = world.getStationSystemsSnapshot().stores[0];
+		require(diesel.currentQualified + diesel.currentUnqualified >= 5.0 - 1e-9,
+			"automatic dispatch spent the protected fuel reserve");
+	}
+
+	// Automatic mode with the generator out of fuel: the fuel-cell backup
+	// engages so the critical load is still carried when the primary
+	// source cannot run.
+	{
+		Rig rig;
+		rig.mode = core::StationDispatchMode::Automatic;
+		rig.stores = {fuelStore("diesel", "kWh", 1000.0, 0.0, 0.0),
+			fuelStore("h2", "kg", 100.0, 100.0, 0.0),
+			fuelStore("o2", "kg", 800.0, 800.0, 0.0),
+			{"water", "kg", 1000.0, 0.0, 0.0}};
+		rig.reservoirs = {sinkReservoir(100000.0, 20.0)};
+		rig.generators = {generatorSettings(10.0)};
+		rig.batteries = {battery(12.0, 10.0, 12.0, 10.0)};
+		rig.loads = {criticalLoad(4.0)};
+		core::FuelCellSettings cell;
+		cell.id = "cell";
+		cell.hazardClass = "normal";
+		cell.hydrogenStoreId = "h2";
+		cell.oxygenStoreId = "o2";
+		cell.waterStoreId = "water";
+		cell.thermalClass = "generation";
+		cell.heatSinkId = "hot";
+		cell.ratedOutputKW = 6.0;
+		cell.efficiency = 0.6;
+		cell.commandedOutputKW = 0.0;
+		cell.maxSinkTemperatureC = 80.0;
+		rig.cells = {cell};
+		rig.solar = {solarAt(0.0)};
+		core::World world("Dispatch", 2, 2);
+		world.pauseSimulation();
+		world.finishBuild();
+		run(world, std::move(rig), 120);
+		auto const& power = world.getStationSystemsSnapshot().power;
+		require(power.backupEngaged,
+			"fuel-cell backup did not engage with the generator out of fuel");
+		require(world.getStationSystemsSnapshot().fuelCells[0].lastOutputKW > 1e-6,
+			"fuel-cell backup engaged but produced no power");
+		require(sawEvent(world, "Backup generation engaged"),
+			"backup engagement was not recorded as an alarm");
+	}
+
+	// The dispatch mode persists and round-trips; a document without the
+	// dispatch mode field is refused rather than silently defaulting.
+	{
+		core::World world("Dispatch", 2, 2);
+		world.pauseSimulation();
+		world.finishBuild();
+		Rig rig = fullRig(core::StationDispatchMode::Automatic, 1000.0, 0.0);
+		rig.solar = {solarAt(0.5)};
+		run(world, std::move(rig), 10);
+		auto const text = yaml(world);
+		require(text.find("dispatchMode: automatic") != std::string::npos,
+			"automatic dispatch mode was not saved");
+		core::SerializationWorkData data;
+		auto reader = core::YamlSerializer::fromString(text);
+		reader->deserialize();
+		core::World loaded("Loaded", 2, 2);
+		loaded.deserialize(*reader, data);
+		require(loaded.getStationSystemsSnapshot().power.dispatchMode
+			== core::StationDispatchMode::Automatic,
+			"automatic dispatch mode did not survive the round trip");
+		auto stale = text;
+		require(stale.find("version: 91") != std::string::npos,
+			"the fixture document carries no version line");
+		require(stale.find("dispatchMode: automatic") != std::string::npos,
+			"the fixture document lost the dispatch mode before the guard test");
+		// A pre-91 document that still carries the dispatch mode is refused
+		// rather than silently dropping the controller setting.
+		stale = replaceAll(stale, "version: 91", "version: 90");
+		bool refused = false;
+		try
+		{
+			auto staleReader = core::YamlSerializer::fromString(stale);
+			staleReader->deserialize();
+			core::World staleWorld("Stale", 2, 2);
+			staleWorld.deserialize(*staleReader, data);
+		}
+		catch (std::exception const&)
+		{
+			refused = true;
+		}
+		require(refused, "a pre-91 document carrying the dispatch mode was silently accepted");
+	}
+
+	// Determinism: the same rig advanced the same way produces the same
+	// dispatch outputs, so the controller adds no run-to-run variance.
+	{
+		auto const first = [&]
+		{
+			core::World world("Dispatch", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			Rig rig = fullRig(core::StationDispatchMode::Automatic, 1000.0, 0.0);
+			rig.solar = {solarAt(0.0)};
+			run(world, std::move(rig), 40);
+			return world.getStationSystemsSnapshot().power.generators[0].outputKW;
+		}();
+		auto const second = [&]
+		{
+			core::World world("Dispatch", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			Rig rig = fullRig(core::StationDispatchMode::Automatic, 1000.0, 0.0);
+			rig.solar = {solarAt(0.0)};
+			run(world, std::move(rig), 40);
+			return world.getStationSystemsSnapshot().power.generators[0].outputKW;
+		}();
+		require(approx(first, second), "automatic dispatch was not deterministic");
+	}
+}
+
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power},
@@ -14450,7 +14794,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"outages", outages}, {"failures", failures}};
+		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"outages", outages}, {"failures", failures}, {"dispatch", dispatch}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

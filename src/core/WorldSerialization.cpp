@@ -902,12 +902,22 @@ namespace core
 		// the started/completed occurrence counts and each installation's
 		// effective availability stay runtime-only, so load and Reset
 		// reconstruct them from the authored schedule and the World tick.
-		serializer.writeUint32("version", 90);
+		// Schema 91 adds the dispatch controller mode (#415); a pre-91
+		// document carrying `dispatchMode` is refused rather than silently
+		// dropped. The dispatch demand signal, target, committed and
+		// shortfall scalars and the alarms stay runtime-only, reconstructed
+		// on load from the authored mode and the World tick.
+		serializer.writeUint32("version", 91);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
 			serializer.writeBool("enabled", mStationSystemsSettings.enabled);
 			serializer.writeFloat("observationIntervalSeconds", mStationSystemsSettings.observationIntervalSeconds);
+			// #415: the dispatch controller mode is authored settings; the
+			// controller's runtime scalars and alarms never travel.
+			serializer.writeString("dispatchMode",
+				mStationSystemsSettings.dispatchMode == StationDispatchMode::Automatic
+					? "automatic" : "manual");
 			if (!mStationSystemsSettings.stores.empty())
 			{
 				// Only authored starting conditions travel; current inventory is
@@ -2613,7 +2623,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 90)
+		if (version < 1 || version > 91)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2624,6 +2634,18 @@ namespace core
 			serializer.beginMap("stationSystems");
 			stationSettings.enabled = serializer.readBool("enabled");
 			stationSettings.observationIntervalSeconds = serializer.readFloat("observationIntervalSeconds");
+			// #415: the dispatch controller mode. A pre-91 document
+			// carrying it is refused rather than silently dropped; an
+			// unknown mode string is refused as a malformed setting.
+			if (serializer.hasField("dispatchMode"))
+			{
+				if (version < 91) throw SerializationException(
+					"Station dispatch controller requires World schema 91");
+				auto const mode = serializer.readString("dispatchMode");
+				if (mode == "manual") stationSettings.dispatchMode = StationDispatchMode::Manual;
+				else if (mode == "automatic") stationSettings.dispatchMode = StationDispatchMode::Automatic;
+				else throw SerializationException("Unknown Station dispatch mode: " + mode);
+			}
 			if (serializer.hasField("stores"))
 			{
 				if (version < 66) throw SerializationException("Station resource stores require World schema 66");

@@ -1476,6 +1476,28 @@ namespace core
 	inline constexpr std::array<char const*, 2> StationThermalBufferAccessModes{
 		"circulation", "passive"};
 
+	// The electrical dispatch controller mode (#415). Manual: every
+	// dispatchable source runs at its authored commanded output - the
+	// pre-#415 behaviour, unchanged. Automatic: the dispatcher commands the
+	// generators first and the fuel-cell backups second, each World tick,
+	// to cover the station-wide electrical demand the sun leaves behind,
+	// so batteries bridge transients instead of funding sustained
+	// deficits. Commands are capped by what each machine can physically
+	// deliver this tick - installed rating, outage availability, fuel and
+	// reactants actually drawable above the protected reserves, and
+	// qualified cooling - so dispatch never fabricates sustained supply:
+	// what cannot be covered stays explicit as dispatch shortfall beside
+	// the unmet critical demand the allocation already publishes. The
+	// dispatcher runs on the World tick and reads the previous committed
+	// tick's demand signal: no parallel configuration and no new clock.
+	enum class StationDispatchMode : std::uint8_t
+	{
+		Manual,
+		Automatic,
+	};
+	inline constexpr std::array<char const*, 2> StationDispatchModeNames{
+		"manual", "automatic"};
+
 	struct StationSystemsSettings
 	{
 		bool enabled{false};
@@ -1511,6 +1533,11 @@ namespace core
 		std::vector<ThermalBufferSettings> thermalBuffers;
 		std::vector<CropPopulationSettings> cropPopulations;
 		std::vector<AlgaeCultureSettings> algaeCultures;
+		// The dispatch controller mode (#415); Manual keeps the authored
+		// per-source commanded outputs authoritative. Declared last so the
+		// existing positional aggregate-initialization of the leading
+		// settings fields in tests and callers is unchanged.
+		StationDispatchMode dispatchMode{StationDispatchMode::Manual};
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// The installations registered with the shared availability contract
@@ -1896,6 +1923,12 @@ namespace core
 		bool coolingRequired{false};       // running, or decay heat booked this tick
 		bool disabled{false};              // zero installed capacity
 		double availabilityFactor{1.0};   // installed capacity available under outages (#413)
+		// #415: the command the dispatch controller issued this tick, and
+		// whether the running command came from the dispatcher rather than
+		// the authored setpoint. In Manual mode the dispatch command is 0
+		// and dispatchCommanded is false.
+		double dispatchCommandKW{0.0};
+		bool dispatchCommanded{false};
 		std::string blockReason;           // why a commanded start is not proceeding
 		double fuelEnergyKJ{0.0};          // cumulative fuel energy consumed
 		double electricalKJ{0.0};          // cumulative electrical delivered
@@ -1925,6 +1958,26 @@ namespace core
 		double batteryDischargeKW{0.0};   // power delivered from batteries this tick
 		double batteryChargeKW{0.0};      // bus power taken by charging this tick
 		double batteryShortfallKW{0.0};   // routed to batteries but not delivered
+		// #415: the dispatch controller's own account for this tick. The
+		// mode is the authored controller setting; dispatchDemandKW is the
+		// station-wide electrical request the last committed tick presented
+		// to the shared pool; dispatchTargetKW is the net load after this
+		// tick's solar that dispatchable sources are commanded against;
+		// dispatchCommittedKW is the total command actually issued within
+		// the sources' physical limits; dispatchShortfallKW is the part of
+		// the target no available source could take - published, never
+		// fabricated. backupEngaged reports that a fuel-cell backup is
+		// under dispatch command, and reserveExhausted reports that a
+		// battery bank has fallen to its protected reserve floor while the
+		// station is running. In Manual mode the target/committed/shortfall
+		// and backup alarm stay zero/false: the dispatcher is inert.
+		StationDispatchMode dispatchMode{StationDispatchMode::Manual};
+		double dispatchDemandKW{0.0};
+		double dispatchTargetKW{0.0};
+		double dispatchCommittedKW{0.0};
+		double dispatchShortfallKW{0.0};
+		bool backupEngaged{false};
+		bool reserveExhausted{false};
 		// Coolant loop electrical service this tick (#396): pump and
 		// freeze-heater power actually drawn from the same allocation
 		// pool as external loads — never a second budget.
@@ -2672,6 +2725,12 @@ namespace core
 		double ratedOutputKW{0.0};
 		double efficiency{0.0};
 		double commandedOutputKW{0.0};
+		// #415: the command the dispatch controller issued this tick, and
+		// whether the running command came from the dispatcher rather than
+		// the authored setpoint. In Manual mode the dispatch command is 0
+		// and dispatchCommanded is false.
+		double dispatchCommandKW{0.0};
+		bool dispatchCommanded{false};
 		double maxSinkTemperatureC{0.0};
 		double lastOutputKW{0.0};        // electrical output delivered to the pool this tick
 		double lastHydrogenKg{0.0};     // H2 consumed this tick

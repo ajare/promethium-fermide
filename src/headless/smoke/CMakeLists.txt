@@ -85,7 +85,7 @@ foreach(check lifecycle batching eventBound persistence stores transfers compoun
         batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
-        deliveries wasteEjections thermal coolant chillers generators outages buffers atmospheres crews water containment gas crops failures fileRoundTrip writeFailure legacyFiles structuralReplay
+        deliveries wasteEjections thermal coolant chillers generators outages buffers atmospheres crews water containment gas crops failures dispatch fileRoundTrip writeFailure legacyFiles structuralReplay
         compoundFiles powerFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles outageFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
@@ -93,6 +93,8 @@ endforeach()
 # The #547 analytical hour-scale crossings run multi-hour simulated runs.
 set_tests_properties(station-batteriesEclipse PROPERTIES TIMEOUT 180)
 set_tests_properties(station-batteriesCharging PROPERTIES TIMEOUT 120)
+# #415 dispatch reserve-exhaustion runs a multi-thousand-tick battery drain.
+set_tests_properties(station-dispatch PROPERTIES TIMEOUT 180)
 foreach(hourScale batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesLimited batteriesLosses batteriesDischarging)
     set_tests_properties(station-${hourScale} PROPERTIES TIMEOUT 90)

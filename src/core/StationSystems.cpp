@@ -94,6 +94,11 @@ namespace core
 			std::vector<MicrobialProcessorSettings> const* microbialProcessors;
 			std::vector<CropPopulationSettings> const* cropPopulations;
 			std::vector<AlgaeCultureSettings> const* algaeCultures;
+			char const* dispatchMode{"manual"};
+			static char const* settingsDispatchModeName(StationDispatchMode mode)
+			{
+				return mode == StationDispatchMode::Automatic ? "automatic" : "manual";
+			}
 			static void pushProfile(lua_State* state, ProfileSettings const& profile)
 			{
 				lua_createtable(state, 0, 3);
@@ -788,7 +793,11 @@ namespace core
 					lua_pushinteger(state, outage.priority); lua_setfield(state, -2, "priority");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 29, 1);
+				// The dispatch controller mode (#415) crosses as a plain
+				// immutable string; the sandbox mirrors the same controller
+				// and refuses any other value.
+				lua_pushstring(state, dispatchMode);
+				lua_call(state, 30, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -3605,6 +3614,12 @@ namespace core
 			// this generator this tick (#413): 1.0 with no outage open, the
 			// deepest reduction fraction among the open windows otherwise.
 			double availabilityFactor{1.0};
+			// #415: the command the dispatch controller issued for this
+			// generator this tick (0 in Manual mode), and the command the
+			// machine actually ran against - the authored setpoint in Manual
+			// mode, the dispatch command in Automatic mode.
+			double dispatchCommandKW{0.0};
+			double lastCommandedKW{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
 		// The authoritative ledger of one authored compartment atmosphere
@@ -3971,6 +3986,12 @@ namespace core
 			double electricalKJ{0.0};
 			double wasteHeatKJ{0.0};
 			double enduranceSeconds{0.0};
+			// #415: the command the dispatch controller issued for this
+			// cell this tick (0 in Manual mode), and the command the cell
+			// actually ran against - the authored setpoint in Manual mode,
+			// the dispatch command in Automatic mode.
+			double dispatchCommandKW{0.0};
+			double lastCommandedKW{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
 		// The authoritative ledger of one authored Sabatier reactor
@@ -4439,6 +4460,20 @@ namespace core
 		// could not deliver (#394). Tracked at allocation level so the bank
 		// shortfall never double-counts per-battery routing.
 		double lastBatteryShortfallKW{0.0};
+		// #415: the dispatch controller's own state. The demand signal is
+		// the station-wide electrical request the last committed tick
+		// presented to the shared pool; the dispatcher commands the
+		// dispatchable sources against it minus this tick's solar. The
+		// target/committed/shortfall scalars and the two alarms describe the
+		// current tick; the previous flags edge-trigger the dispatch events.
+		// In Manual mode every one of these stays zero/false: the
+		// dispatcher is inert and the authored commands rule.
+		double lastDispatchDemandKW{0.0};
+		double lastDispatchTargetKW{0.0};
+		double lastDispatchCommittedKW{0.0};
+		double lastDispatchShortfallKW{0.0};
+		bool lastBackupEngaged{false};
+		bool lastReserveExhausted{false};
 		std::array<std::unique_ptr<ScriptObject>, 4> objects;
 		StationSystemsSnapshot snapshot;
 		std::vector<StationSystemsEvent> events;
@@ -4487,6 +4522,16 @@ namespace core
 			auto const committedAlgaeCultures = algaeCultures;
 			auto const committedAvailableGenerationKW = lastAvailableGenerationKW;
 			auto const committedBatteryShortfallKW = lastBatteryShortfallKW;
+			// #415: the dispatch demand signal crosses the tick boundary, so
+			// a rolled-back tick must restore it exactly; the per-tick target,
+			// committed, shortfall and alarm scalars are restored too so a
+			// failed dispatch never leaks a partial controller state.
+			auto const committedDispatchDemandKW = lastDispatchDemandKW;
+			auto const committedDispatchTargetKW = lastDispatchTargetKW;
+			auto const committedDispatchCommittedKW = lastDispatchCommittedKW;
+			auto const committedDispatchShortfallKW = lastDispatchShortfallKW;
+			auto const committedBackupEngaged = lastBackupEngaged;
+			auto const committedReserveExhausted = lastReserveExhausted;
 			if (runLedger(tick, seconds, system, violation)) return true;
 			transfers = committedTransfers;
 			conversions = committedConversions;
@@ -4516,6 +4561,12 @@ namespace core
 			algaeCultures = committedAlgaeCultures;
 			lastAvailableGenerationKW = committedAvailableGenerationKW;
 			lastBatteryShortfallKW = committedBatteryShortfallKW;
+			lastDispatchDemandKW = committedDispatchDemandKW;
+			lastDispatchTargetKW = committedDispatchTargetKW;
+			lastDispatchCommittedKW = committedDispatchCommittedKW;
+			lastDispatchShortfallKW = committedDispatchShortfallKW;
+			lastBackupEngaged = committedBackupEngaged;
+			lastReserveExhausted = committedReserveExhausted;
 			return false;
 		}
 		// Apply every authored transfer and conversion to a staged copy of
@@ -4580,6 +4631,21 @@ namespace core
 			std::vector<StationGeneratorPhase> previousGeneratorPhase;
 			previousGeneratorPhase.reserve(generators.size());
 			for (auto const& generator : generators) previousGeneratorPhase.push_back(generator.phase);
+			// #415: the dispatch controller's edge-detection state: which
+			// sources stood under dispatch command last tick, and whether the
+			// shortfall, the backup and the reserve alarm stood raised, so
+			// the events below announce each transition exactly once.
+			std::vector<bool> previousGeneratorDispatchOnline;
+			previousGeneratorDispatchOnline.reserve(generators.size());
+			for (auto const& generator : generators)
+				previousGeneratorDispatchOnline.push_back(generator.dispatchCommandKW > 0.0);
+			std::vector<bool> previousFuelCellDispatchOnline;
+			previousFuelCellDispatchOnline.reserve(fuelCells.size());
+			for (auto const& cell : fuelCells)
+				previousFuelCellDispatchOnline.push_back(cell.dispatchCommandKW > 0.0);
+			auto const previousDispatchShortfall = lastDispatchShortfallKW;
+			auto const previousBackupEngaged = lastBackupEngaged;
+			auto const previousReserveExhausted = lastReserveExhausted;
 			std::vector<bool> previousAbovePressure;
 			previousAbovePressure.reserve(atmospheres.size());
 			for (auto const& atmosphere : atmospheres) previousAbovePressure.push_back(atmosphere.lastAbovePressure);
@@ -5006,6 +5072,98 @@ namespace core
 				if (unit == "Wh") return 1.0 / 1000.0;
 				return 1.0;
 			};
+			// #415: automatic electrical dispatch. When the controller is
+			// Automatic it commands the dispatchable sources against the net
+			// load the sun leaves behind: the station-wide electrical demand
+			// of the last committed tick minus this tick's solar. Generators
+			// are commanded first and fuel-cell backups second, so the
+			// life-support reactant stores are spent only when the fuelled
+			// fleet cannot cover the load. Every command is capped by what
+			// the machine can physically deliver this tick - the installed
+			// rating under outages, the fuel or reactants actually drawable
+			// above the protected reserves, and qualified cooling - so
+			// dispatch never fabricates sustained supply: what no available
+			// source can take stays explicit as the dispatch shortfall,
+			// beside the unmet critical demand the allocation publishes.
+			// A source that cannot run this tick is passed over, never
+			// reserved: the target flows on to the next source that can.
+			// In Manual mode the controller is inert and every source keeps
+			// its authored commanded output.
+			auto const dispatchAutomatic = settings.dispatchMode == StationDispatchMode::Automatic;
+			auto const dispatchTargetKW = dispatchAutomatic
+				? std::max(0.0, lastDispatchDemandKW - availableGeneration)
+				: 0.0;
+			auto dispatchRemainingKW = dispatchTargetKW;
+			for (auto& generator : generators)
+			{
+				generator.dispatchCommandKW = 0.0;
+				if (!dispatchAutomatic) continue;
+				auto const effectiveRatedKW = generator.authored.ratedOutputKW
+					* generator.availabilityFactor;
+				if (effectiveRatedKW <= 0.0) continue;
+				auto const sinkTemperatureC = reservoirs[generator.sinkIndex].temperatureC;
+				auto const coolingAvailable = sinkTemperatureC + 1e-9
+					< generator.authored.maxSinkTemperatureC;
+				if (!coolingAvailable) continue;
+				auto const kwhPerUnit = energyUnitsToKWh(stores[generator.fuelStoreIndex].authored.unit);
+				auto const drawableKWh = std::max(0.0,
+					qualified[generator.fuelStoreIndex] - stores[generator.fuelStoreIndex].authored.protectedReserve)
+					* kwhPerUnit;
+				if (drawableKWh <= 0.0) continue;
+				// The fuel cap is the output the drawable fuel can pay for at
+				// this tick's rate: a machine with nothing drawable above the
+				// protected reserve cannot run and is passed over, so the
+				// target never reserves capacity that does not exist.
+				auto const fuelCapKW = drawableKWh * generator.authored.efficiency / hours;
+				auto const capKW = std::min(effectiveRatedKW, fuelCapKW);
+				auto const commandKW = std::min(capKW, dispatchRemainingKW);
+				if (commandKW <= 0.0) continue;
+				generator.dispatchCommandKW = commandKW;
+				dispatchRemainingKW -= commandKW;
+			}
+			bool backupEngaged{false};
+			for (auto& cell : fuelCells)
+			{
+				cell.dispatchCommandKW = 0.0;
+				if (!dispatchAutomatic) continue;
+				if (cell.authored.ratedOutputKW <= 0.0) continue;
+				auto const sinkTemperatureC = reservoirs[cell.sinkIndex].temperatureC;
+				if (sinkTemperatureC + 1e-9 >= cell.authored.maxSinkTemperatureC) continue;
+				auto const o2PerH2 = StationFuelCellOxygenMassPerHydrogenKg;
+				auto const elecKJPerKgH2 = cell.authored.efficiency
+					* StationElectrolysisChemicalEnergyHydrogenKJPerKg;
+				auto const& hydrogen = stores[cell.hydrogenStoreIndex].authored;
+				auto const& oxygen = stores[cell.oxygenStoreIndex].authored;
+				auto const& water = stores[cell.waterStoreIndex].authored;
+				auto const h2DrawableKg = std::max(0.0, massToKg(hydrogen.unit,
+					qualified[cell.hydrogenStoreIndex] - hydrogen.protectedReserve));
+				auto const o2DrawableKg = std::max(0.0, massToKg(oxygen.unit,
+					qualified[cell.oxygenStoreIndex] - oxygen.protectedReserve));
+				auto const waterHeadroomKg = std::max(0.0, massToKg(water.unit,
+					water.capacity - (qualified[cell.waterStoreIndex]
+						+ unqualified[cell.waterStoreIndex])));
+				// Every finite axis caps the backup the same way: the largest
+				// output the reactants and the product-water headroom can
+				// sustain this tick. A cell with nothing drawable above its
+				// protected reserves is passed over - protected breathing
+				// oxygen never becomes dispatchable capacity.
+				auto capKW = cell.authored.ratedOutputKW;
+				capKW = std::min(capKW, h2DrawableKg * elecKJPerKgH2 / static_cast<double>(seconds));
+				capKW = std::min(capKW, (o2DrawableKg / o2PerH2) * elecKJPerKgH2
+					/ static_cast<double>(seconds));
+				capKW = std::min(capKW, (waterHeadroomKg / (1.0 + o2PerH2)) * elecKJPerKgH2
+					/ static_cast<double>(seconds));
+				if (capKW <= 0.0) continue;
+				auto const commandKW = std::min(capKW, dispatchRemainingKW);
+				if (commandKW <= 0.0) continue;
+				cell.dispatchCommandKW = commandKW;
+				backupEngaged = true;
+				dispatchRemainingKW -= commandKW;
+			}
+			lastDispatchTargetKW = dispatchTargetKW;
+			lastDispatchCommittedKW = dispatchTargetKW - dispatchRemainingKW;
+			lastDispatchShortfallKW = dispatchRemainingKW;
+			lastBackupEngaged = backupEngaged;
 			for (auto& generator : generators)
 			{
 				auto const disabled = generator.authored.ratedOutputKW <= 0.0;
@@ -5019,8 +5177,15 @@ namespace core
 				auto const effectiveRatedKW = generator.authored.ratedOutputKW
 					* generator.availabilityFactor;
 				auto const capacityDisabled = effectiveRatedKW <= 0.0;
+				// #415: under automatic dispatch the dispatcher's command for
+				// this tick replaces the authored setpoint; the machine itself
+				// still enforces its startup, ramp, fuel and cooling physics,
+				// so the command can never buy supply the machine cannot make.
 				auto const commanded = disabled || capacityDisabled
-					? 0.0 : generator.authored.commandedOutputKW;
+					? 0.0 : (dispatchAutomatic
+						? generator.dispatchCommandKW
+						: generator.authored.commandedOutputKW);
+				generator.lastCommandedKW = commanded;
 				auto const dtSeconds = static_cast<double>(seconds);
 				auto const sinkTemperatureC = reservoirs[generator.sinkIndex].temperatureC;
 				// Cooling is qualified while the sink is below the maximum
@@ -5301,7 +5466,14 @@ namespace core
 			for (auto& cell : fuelCells)
 			{
 				auto const disabled = cell.authored.ratedOutputKW <= 0.0;
-				auto const commanded = disabled ? 0.0 : cell.authored.commandedOutputKW;
+				// #415: under automatic dispatch the dispatcher's command for
+				// this tick replaces the authored setpoint; the cell still
+				// enforces its reactant, cooling and product-headroom limits.
+				auto const commanded = disabled
+					? 0.0 : (dispatchAutomatic
+						? cell.dispatchCommandKW
+						: cell.authored.commandedOutputKW);
+				cell.lastCommandedKW = commanded;
 				auto const dtSeconds = static_cast<double>(seconds);
 				auto const o2PerH2 = StationFuelCellOxygenMassPerHydrogenKg;
 				auto const elecKJPerKgH2 = cell.authored.efficiency
@@ -9264,6 +9436,49 @@ namespace core
 			}
 			lastAvailableGenerationKW = availableGeneration;
 			lastBatteryShortfallKW = batteryShortfallKW;
+			// #415: the station-wide electrical demand signal for the next
+			// tick's dispatch: every electrical request this tick presented
+			// to the shared pool - admitted external load requests capped by
+			// their material feasibility (a load that cannot run on its
+			// declared feed never drives fuel burn), coolant pump and
+			// freeze-heater demands, chiller work, water treatment,
+			// electrolysis, CO2 capture, Sabatier, methane processing and
+			// microbial digestion work, and the crop and algae lamp and
+			// circulation demands. The signal is supply-independent - what
+			// was asked, not what was granted - so the dispatcher chases
+			// real need rather than its own last answer. Generator startup
+			// cranking is excluded: it is a control transient, not a service
+			// demand.
+			double dispatchDemandKW{0.0};
+			for (auto const& load : loads)
+				if (load.lastAdmitted && !load.lastMaterialRefused)
+					dispatchDemandKW += load.lastCappedRequestKW;
+			for (auto const& loop : coolantLoops)
+				dispatchDemandKW += loop.lastPumpDemandKW + loop.lastHeaterDemandKW;
+			for (auto const& chiller : chillers) dispatchDemandKW += chiller.lastPowerDemandKW;
+			for (auto const& treatment : waterTreatments) dispatchDemandKW += treatment.lastPowerDemandKW;
+			for (auto const& cell : electrolyzers) dispatchDemandKW += cell.lastPowerDemandKW;
+			for (auto const& capture : co2Captures) dispatchDemandKW += capture.lastPowerDemandKW;
+			for (auto const& reactor : sabatierReactors) dispatchDemandKW += reactor.lastPowerDemandKW;
+			for (auto const& processor : methaneProcessors) dispatchDemandKW += processor.lastPowerDemandKW;
+			for (auto const& processor : microbialProcessors) dispatchDemandKW += processor.lastPowerDemandKW;
+			for (auto const& crop : cropPopulations)
+				dispatchDemandKW += crop.lastLightRequestedKW + crop.lastCirculationRequestedKW;
+			for (auto const& culture : algaeCultures)
+				dispatchDemandKW += culture.lastLightRequestedKW + culture.lastCirculationRequestedKW;
+			if (!std::isfinite(dispatchDemandKW))
+			{
+				system = "Power allocation";
+				return violation = "dispatch demand signal is not finite", false;
+			}
+			lastDispatchDemandKW = dispatchDemandKW;
+			// The reserve-exhausted alarm: a bank that has fallen to its
+			// protected reserve floor while the station runs. The floor is
+			// never dischargeable (#394); the alarm reports that the
+			// bridging capacity above it is gone.
+			lastReserveExhausted = std::any_of(batteries.begin(), batteries.end(),
+				[batteryDisabled](BatteryState const& battery)
+				{ return !batteryDisabled(battery) && battery.lastAtReserve; });
 			for (auto const index : transferOrder)
 			{
 				auto& transfer = transfers[index];
@@ -10737,6 +10952,55 @@ namespace core
 							+ "' fully charged: stored energy reached nameplate capacity"
 						: "Battery '" + battery.authored.id + "' left full charge");
 			}
+			// #415: dispatch actions are recorded on their transitions: a
+			// source brought online or released by the controller, the
+			// fuel-cell backup engaged or stood down, and the dispatch
+			// shortfall opening or clearing. A shortfall is an operational
+			// shortage - published, never a software failure and never
+			// relabelled as permissible curtailment.
+			if (dispatchAutomatic)
+			{
+				for (size_t index = 0; index < generators.size(); ++index)
+				{
+					auto const& generator = generators[index];
+					auto const online = generator.dispatchCommandKW > 0.0;
+					if (online == previousGeneratorDispatchOnline[index]) continue;
+					appendBoundedEvent(events, tick, online
+						? "Dispatch brought generator '" + generator.authored.id + "' online at "
+							+ std::to_string(generator.dispatchCommandKW)
+							+ " kW against a net load of " + std::to_string(lastDispatchTargetKW) + " kW"
+						: std::string("Dispatch released generator '") + generator.authored.id
+							+ "': the net load no longer requires it");
+				}
+				for (size_t index = 0; index < fuelCells.size(); ++index)
+				{
+					auto const& cell = fuelCells[index];
+					auto const online = cell.dispatchCommandKW > 0.0;
+					if (online == previousFuelCellDispatchOnline[index]) continue;
+					appendBoundedEvent(events, tick, online
+						? "Dispatch engaged fuel-cell backup '" + cell.authored.id + "' at "
+							+ std::to_string(cell.dispatchCommandKW)
+							+ " kW: the fuelled fleet cannot cover the net load alone"
+						: std::string("Dispatch stood down fuel-cell backup '") + cell.authored.id
+							+ "': the fuelled fleet covers the net load");
+				}
+				auto const shortfallNow = lastDispatchShortfallKW > 1e-12;
+				auto const shortfallBefore = previousDispatchShortfall > 1e-12;
+				if (shortfallNow != shortfallBefore)
+					appendBoundedEvent(events, tick, shortfallNow
+						? "Dispatch shortfall: " + std::to_string(lastDispatchShortfallKW)
+							+ " kW of station demand cannot be met by any available dispatchable source"
+							+ " (fuel, cooling or capacity limits)"
+						: std::string("Dispatch shortfall cleared: dispatchable sources cover the net load"));
+				if (lastBackupEngaged != previousBackupEngaged)
+					appendBoundedEvent(events, tick, lastBackupEngaged
+						? "Backup generation engaged: a fuel-cell backup stands under dispatch command"
+						: std::string("Backup generation stood down: no fuel-cell backup is under dispatch command"));
+				if (lastReserveExhausted != previousReserveExhausted)
+					appendBoundedEvent(events, tick, lastReserveExhausted
+						? "Electrical reserve exhausted: a battery bank sits at its protected reserve floor"
+						: std::string("Electrical reserve recovered: every battery bank is above its reserve floor"));
+			}
 			// Thermal limit crossings are announced so the event log
 			// records overheats and overcools without flooding every tick
 			// (#395).
@@ -11775,7 +12039,8 @@ namespace core
 				&settings.outages,
 				&settings.sabatierReactors, &settings.methaneProcessors,
 				&settings.microbialProcessors, &settings.cropPopulations,
-				&settings.algaeCultures};
+				&settings.algaeCultures,
+				Construction::settingsDispatchModeName(settings.dispatchMode)};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -12066,6 +12331,14 @@ namespace core
 		result.power.batteryDischargeKW = totalBatteryDischarge;
 		result.power.batteryChargeKW = totalBatteryCharge;
 		result.power.batteryShortfallKW = mImpl->lastBatteryShortfallKW;
+		// #415: the dispatch controller's own account for this tick.
+		result.power.dispatchMode = mImpl->settings.dispatchMode;
+		result.power.dispatchDemandKW = mImpl->lastDispatchDemandKW;
+		result.power.dispatchTargetKW = mImpl->lastDispatchTargetKW;
+		result.power.dispatchCommittedKW = mImpl->lastDispatchCommittedKW;
+		result.power.dispatchShortfallKW = mImpl->lastDispatchShortfallKW;
+		result.power.backupEngaged = mImpl->lastBackupEngaged;
+		result.power.reserveExhausted = mImpl->lastReserveExhausted;
 		// Coolant loop electrical service rode the same pool as external
 		// loads; publish the totals so the window can show the loop draw
 		// beside the load draw (#396).
@@ -12101,7 +12374,15 @@ namespace core
 			generatorResult.ratedOutputKW = generator.authored.ratedOutputKW;
 			generatorResult.efficiency = generator.authored.efficiency;
 			generatorResult.maxRampKWPerSecond = generator.authored.maxRampKWPerSecond;
-			generatorResult.commandedOutputKW = generator.authored.commandedOutputKW;
+			// #415: under automatic dispatch the effective command is the
+			// dispatcher's, not the authored setpoint; publish it as the
+			// commanded output and flag the source as dispatch-commanded.
+			generatorResult.commandedOutputKW = mImpl->settings.dispatchMode
+				== core::StationDispatchMode::Automatic
+				? generator.lastCommandedKW : generator.authored.commandedOutputKW;
+			generatorResult.dispatchCommandKW = generator.dispatchCommandKW;
+			generatorResult.dispatchCommanded = mImpl->settings.dispatchMode
+				== core::StationDispatchMode::Automatic;
 			generatorResult.startupPowerKW = generator.authored.startupPowerKW;
 			generatorResult.startupSeconds = generator.authored.startupSeconds;
 			generatorResult.shutdownHeatKW = generator.authored.shutdownHeatKW;
@@ -12758,7 +13039,14 @@ namespace core
 			cellResult.heatSinkId = cell.authored.heatSinkId;
 			cellResult.ratedOutputKW = cell.authored.ratedOutputKW;
 			cellResult.efficiency = cell.authored.efficiency;
-			cellResult.commandedOutputKW = cell.authored.commandedOutputKW;
+			// #415: under automatic dispatch the effective command is the
+			// dispatcher's, not the authored setpoint.
+			cellResult.commandedOutputKW = mImpl->settings.dispatchMode
+				== core::StationDispatchMode::Automatic
+				? cell.lastCommandedKW : cell.authored.commandedOutputKW;
+			cellResult.dispatchCommandKW = cell.dispatchCommandKW;
+			cellResult.dispatchCommanded = mImpl->settings.dispatchMode
+				== core::StationDispatchMode::Automatic;
 			cellResult.maxSinkTemperatureC = cell.authored.maxSinkTemperatureC;
 			cellResult.lastOutputKW = cell.lastOutputKW;
 			cellResult.lastHydrogenKg = cell.lastHydrogenKg;
