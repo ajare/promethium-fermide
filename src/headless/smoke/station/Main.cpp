@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <stdexcept>
 
@@ -15900,6 +15901,273 @@ void buffers(smoke::Context const&)
 			require(first.getStationSystemsSnapshot().outages
 				== second.getStationSystemsSnapshot().outages,
 				"identically-authored outage worlds diverged in outage state");
+		}
+		// #576: installation ids are unique across the whole shared
+		// registered namespace. The outage contract carries only an
+		// installationId, never a kind, so a generator, coolant loop and
+		// chiller sharing an id could not say which machine the outage
+		// caps - resolution would silently pick whichever kind it
+		// consults first. Every cross-kind pairing is refused at the
+		// crossing, with or without an outage naming the ambiguous id,
+		// and the refusal is transactional: a rejected draft leaves the
+		// previously authored scenario untouched.
+		auto chillerOnto = [](std::string id, std::string coldLoopId,
+			std::string condenserId)
+		{
+			core::ChillerSettings settings;
+			settings.id = std::move(id);
+			settings.thermalClass = "low";
+			settings.coldLoopId = std::move(coldLoopId);
+			settings.condenserReservoirId = std::move(condenserId);
+			settings.ratedCoolingCapacityKW = 2.0;
+			settings.cop = 1.0;
+			settings.chilledSetpointC = 5.0;
+			settings.maxCondensingTemperatureC = 45.0;
+			return settings;
+		};
+		// One generator, one coolant loop and one chiller; the coldLoopRef
+		// is the loop id the chiller references so a renamed loop keeps
+		// its internal references consistent and only the namespace
+		// collision remains as the reason a variant is refused.
+		auto kindsSettings = [&](std::string generatorId, std::string loopId,
+			std::string chillerId, std::string coldLoopRef,
+			std::vector<core::InstallationOutageSettings> outageSettings)
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = {fuelStore()};
+			settings.thermalReservoirs = {sinkReservoir(), coldReservoir("cold"),
+				coldReservoir("sinklow")};
+			core::GeneratorSettings generator = generatorSettings();
+			generator.id = std::move(generatorId);
+			settings.generators = {std::move(generator)};
+			settings.coolantLoops = {chillerLoop(std::move(loopId), "cold")};
+			settings.chillers = {chillerOnto(std::move(chillerId),
+				std::move(coldLoopRef), "sinklow")};
+			core::ProfileSettings sun; sun.constantLevel = 1.0;
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
+			field.illumination = sun;
+			settings.solarArrays = {field};
+			settings.outages = std::move(outageSettings);
+			return settings;
+		};
+		// Each cross-kind pairing is refused as ambiguous, whether or not
+		// an outage names the colliding id: the namespace itself is the
+		// contract, not just the references into it.
+		for (auto pairing : {"generator+loop", "generator+chiller", "loop+chiller"})
+		{
+			std::string diagnostic;
+			core::World world("OutageKindCollision", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto const settings = std::string(pairing) == "generator+loop"
+				? kindsSettings("dup", "dup", "chill", "dup", {})
+				: std::string(pairing) == "generator+chiller"
+					? kindsSettings("dup", "loop", "dup", "loop", {})
+					: kindsSettings("gen", "dup", "dup", "dup", {});
+			require(!world.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("ambiguous") != std::string::npos,
+				("the " + std::string(pairing)
+					+ " installation id collision was not refused as ambiguous").c_str());
+			require(!world.getStationSystemsSettings().enabled,
+				("the " + std::string(pairing)
+					+ " collision draft was partially applied").c_str());
+			// The same collision named by an outage is refused the same way:
+			// the ambiguity never reaches a silent first-kind resolution.
+			auto named = settings;
+			named.outages = {outage("off", "dup", 0.0, 5.0, 10.0)};
+			require(!world.configureStationSystems(named, false, &diagnostic)
+				&& diagnostic.find("ambiguous") != std::string::npos,
+				("an outage naming the " + std::string(pairing)
+					+ " collision was not refused as ambiguous").c_str());
+		}
+		// Transactional refusal: a colliding draft over a running
+		// scenario leaves the authored settings and the live World
+		// exactly as they were.
+		{
+			std::string diagnostic;
+			core::World world("OutageNamespaceTransactional", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(world.configureStationSystems(
+				kindsSettings("gen", "loop", "chill", "loop", {}), false, &diagnostic),
+				diagnostic.c_str());
+			auto const authored = world.getStationSystemsSettings();
+			require(!world.configureStationSystems(
+				kindsSettings("loop", "loop", "chill", "loop", {}), false, &diagnostic),
+				"the colliding draft over an authored scenario was accepted");
+			require(world.getStationSystemsSettings() == authored,
+				"the refused collision draft mutated the authored Station settings");
+			world.resumeSimulation();
+			require(world.advanceTicks(60),
+				"the World did not keep running the authored scenario after the refused draft");
+		}
+		// Distinct ids across the three kinds register successfully and
+		// each outage caps its own kind and only its own kind; reset and
+		// replay reproduce the same per-kind targets tick for tick.
+		{
+			std::string diagnostic;
+			core::World world("OutageDistinctKinds", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(world.configureStationSystems(kindsSettings("gen", "loop",
+				"chill", "loop", {
+					outage("gen_off", "gen", 0.0, 5.0, 10.0),
+					outage("loop_half", "loop", 0.5, 5.0, 10.0),
+					outage("chill_off", "chill", 0.0, 5.0, 10.0)}), false, &diagnostic),
+				diagnostic.c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(4 * 60), "distinct-kinds run failed before the window");
+			auto const before = world.getStationSystemsSnapshot();
+			require(approx(before.power.generators[0].availabilityFactor, 1.0)
+				&& approx(before.coolantLoops[0].availabilityFactor, 1.0)
+				&& approx(before.chillers[0].availabilityFactor, 1.0)
+				&& approx(before.power.generators[0].outputKW, 10.0, 1e-2),
+				"the distinct-id kinds were not all at full service before the window");
+			require(world.advanceTicks(2 * 60), "distinct-kinds run failed into the window");
+			auto const during = world.getStationSystemsSnapshot();
+			require(during.outages.size() == 3, "the three outages were not all tracked");
+			require(during.outages[0].active
+				&& during.outages[0].installationKind == "generator"
+				&& during.outages[0].installationId == "gen",
+				"the generator outage did not report the generator it names");
+			require(during.outages[1].active
+				&& during.outages[1].installationKind == "coolant loop"
+				&& during.outages[1].installationId == "loop",
+				"the loop outage did not report the coolant loop it names");
+			require(during.outages[2].active
+				&& during.outages[2].installationKind == "chiller"
+				&& during.outages[2].installationId == "chill",
+				"the chiller outage did not report the chiller it names");
+			require(approx(during.power.generators[0].availabilityFactor, 0.0)
+				&& during.power.generators[0].outputKW == 0.0,
+				"the generator outage did not take the generator out of service");
+			require(during.coolantLoops[0].availabilityFactor == 0.5,
+				"the loop outage did not cap the loop to half availability");
+			require(approx(during.chillers[0].availabilityFactor, 0.0)
+				&& during.chillers[0].coolingKW == 0.0,
+				"the chiller outage did not take the chiller out of service");
+			require(world.advanceTicks(14 * 60), "distinct-kinds run failed past the window");
+			auto const restored = world.getStationSystemsSnapshot();
+			require(!restored.outages[0].active && !restored.outages[1].active
+				&& !restored.outages[2].active
+				&& approx(restored.power.generators[0].availabilityFactor, 1.0)
+				&& approx(restored.coolantLoops[0].availabilityFactor, 1.0)
+				&& approx(restored.chillers[0].availabilityFactor, 1.0)
+				&& approx(restored.power.generators[0].outputKW, 10.0, 1e-2),
+				"the distinct-id kinds did not all return to full service after restoration");
+			world.pauseSimulation(); world.resetSimulation();
+			auto const fresh = world.getStationSystemsSnapshot();
+			require(fresh.outages[0].occurrencesStarted == 0
+				&& fresh.outages[1].occurrencesStarted == 0
+				&& fresh.outages[2].occurrencesStarted == 0
+				&& approx(fresh.power.generators[0].availabilityFactor, 1.0)
+				&& approx(fresh.coolantLoops[0].availabilityFactor, 1.0)
+				&& approx(fresh.chillers[0].availabilityFactor, 1.0),
+				"reset did not restore full declared availability on all three kinds");
+			world.resumeSimulation();
+			require(world.advanceTicks(6 * 60), "distinct-kinds reset replay failed");
+			auto const replay = world.getStationSystemsSnapshot();
+			require(replay.power.generators == during.power.generators
+				&& replay.coolantLoops == during.coolantLoops
+				&& replay.chillers == during.chillers
+				&& replay.outages == during.outages,
+				"the reset replay did not hit the same distinct-id kinds");
+		}
+		// File seam: a saved document whose loop has been renamed onto the
+		// generator's id is refused at load, not silently resolved.
+		{
+			namespace filesystem = std::filesystem;
+			auto const replaceAll = [](std::string text, std::string const& from,
+				std::string const& to)
+			{
+				for (size_t pos = text.find(from); pos != std::string::npos;
+					pos = text.find(from, pos + to.size()))
+					text.replace(pos, from.size(), to);
+				return text;
+			};
+			auto const directory = context.temporaryRoot() / "station-outage-namespace";
+			filesystem::create_directories(directory);
+			std::string diagnostic;
+			core::World original("OutageCollisionFile", 2, 2);
+			original.pauseSimulation(); original.finishBuild();
+			require(original.configureStationSystems(
+				kindsSettings("gen", "coolloop", "chill", "coolloop", {}), false, &diagnostic),
+				diagnostic.c_str());
+			original.resumeSimulation();
+			require(original.advanceTicks(60), "collision-file original run failed");
+			auto writer = core::YamlSerializer::toString();
+			core::SerializationWorkData data;
+			original.serialize(*writer, data);
+			writer->serialize();
+			auto const tampered = replaceAll(writer->getSerializedString(), "coolloop", "gen");
+			auto const tamperedPath = directory / "ambiguous-installation.world.yaml";
+			std::ofstream out(tamperedPath, std::ios::binary);
+			out << tampered;
+			out.close();
+			bool refused = false;
+			std::string loadError;
+			try { (void)core::loadWorldDocument(tamperedPath); }
+			catch (std::exception const& error) { refused = true; loadError = error.what(); }
+			require(refused && loadError.find("ambiguous") != std::string::npos,
+				"a document carrying a cross-kind installation id collision loaded silently");
+		}
+		// Host/Lua seam: the sandbox mirror refuses an installation id
+		// registered by two kinds instead of silently keeping whichever
+		// it registered last, and with distinct ids it resolves each
+		// outage to the object of the kind it names, capping the same
+		// availability the host ledger shows.
+		{
+			SourceScope scope;
+			auto const bundled = core::bundledStationSystemsSource();
+			core::setStationSystemsSourceLoader([bundled] {
+				return "local factory = (function()\n" + bundled + "\nend)()\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures, outages, dispatchMode)\n"
+					"local tamperedGenerator = {}\n"
+					"for k, v in pairs(generators[1]) do tamperedGenerator[k] = v end\n"
+					"tamperedGenerator.id = coolantLoops[1].id\n"
+					"local collided = { tamperedGenerator }\n"
+					"local ok, err = pcall(factory, name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, collided, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures, outages, dispatchMode)\n"
+					"assert(not ok, 'sandbox accepted a generator sharing the coolant loop id')\n"
+					"assert(type(err) == 'string' and string.find(err, 'ambiguous', 1, true) ~= nil, 'sandbox rejected the collision for the wrong reason: ' .. tostring(err))\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures, outages, dispatchMode)\n"
+					"assert(#model.outages == 3, 'sandbox did not receive the three outage schedules')\n"
+					"assert(model.outages[1].installation == model.generators[1], 'sandbox resolved the generator outage to the wrong object')\n"
+					"assert(model.outages[2].installation == model.coolant_loops[1], 'sandbox resolved the loop outage to the wrong object')\n"
+					"assert(model.outages[3].installation == model.chillers[1], 'sandbox resolved the chiller outage to the wrong object')\n"
+					"local original = model.advance\n"
+					"function model.advance(self, world_tick, fixed_seconds)\n"
+					"local result = original(self, world_tick, fixed_seconds)\n"
+					"local gen, loop, chiller = self.generators[1], self.coolant_loops[1], self.chillers[1]\n"
+					"if world_tick >= 300 and world_tick < 900 then\n"
+					"assert(math.abs((gen.availability or 1.0) - 0.0) < 1e-12, 'sandbox did not cap the generator')\n"
+					"assert(math.abs((loop.availability or 1.0) - 0.5) < 1e-12, 'sandbox did not cap the loop to half')\n"
+					"assert(math.abs((chiller.availability or 1.0) - 0.0) < 1e-12, 'sandbox did not cap the chiller')\n"
+					"else\n"
+					"assert(math.abs((gen.availability or 1.0) - 1.0) < 1e-12\n"
+					"and math.abs((loop.availability or 1.0) - 1.0) < 1e-12\n"
+					"and math.abs((chiller.availability or 1.0) - 1.0) < 1e-12, 'sandbox availability not restored outside the window')\n"
+					"end\n"
+					"return result\n"
+					"end\n"
+					"return model\n"
+					"end";
+			});
+			std::string diagnostic;
+			core::World world("OutageDistinctKindsSandbox", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(world.configureStationSystems(kindsSettings("gen", "loop",
+				"chill", "loop", {
+					outage("gen_off", "gen", 0.0, 5.0, 10.0),
+					outage("loop_half", "loop", 0.5, 5.0, 10.0),
+					outage("chill_off", "chill", 0.0, 5.0, 10.0)}), false, &diagnostic),
+				"the sandbox distinct-kinds outage scenario was rejected");
+			world.resumeSimulation();
+			require(world.advanceTicks(20 * 60),
+				"bundled Lua distinct-kinds outage mirror failed its in-sandbox assertions");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(approx(snap.power.generators[0].availabilityFactor, 1.0)
+				&& approx(snap.coolantLoops[0].availabilityFactor, 1.0)
+				&& approx(snap.chillers[0].availabilityFactor, 1.0),
+				"the host ledger disagrees with what the sandbox asserted after restoration");
 		}
 	}
 

@@ -1399,14 +1399,24 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     -- caps; the per-tick pass reads object.installation_availability[id]
     -- as the hard ceiling on that installation's deliverable capacity.
     local installation_by_id = {}
+    -- #576: the outage contract names its target by installation id alone,
+    -- so the registered namespace must be unambiguous. A generator, coolant
+    -- loop or chiller sharing an id would leave the mirror silently keeping
+    -- whichever kind it registered last; assert instead, mirroring the
+    -- host's refusal of cross-kind collisions.
+    local function register_installation(id, target, kind)
+        assert(installation_by_id[id] == nil,
+            'installation id ' .. tostring(id) .. ' is ambiguous across installation kinds (second: ' .. kind .. ')')
+        installation_by_id[id] = target
+    end
     for index = 1, #generators do
-        installation_by_id[generators[index].id] = object.generators[index]
+        register_installation(generators[index].id, object.generators[index], 'generator')
     end
     for index = 1, #coolantLoops do
-        installation_by_id[coolantLoops[index].id] = object.coolant_loops[index]
+        register_installation(coolantLoops[index].id, object.coolant_loops[index], 'coolant loop')
     end
     for index = 1, #chillers do
-        installation_by_id[chillers[index].id] = object.chillers[index]
+        register_installation(chillers[index].id, object.chillers[index], 'chiller')
     end
     for index = 1, #outages do
         local outage = outages[index]

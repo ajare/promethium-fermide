@@ -1295,7 +1295,11 @@ namespace core
 	// register their stable ids; an outage may target only a registered
 	// identity, so the contract is what an installation opts into rather
 	// than a special-cased outage lookup. Later capacity-bearing
-	// installations join by adding their identity here.
+	// installations join by adding their identity here. Because the
+	// outage contract carries only an installationId and no kind (#576),
+	// this namespace is required to be unambiguous: ids must be unique
+	// across all registered kinds, which validateStationSystemsSettings
+	// enforces, so every registered id names exactly one machine.
 	std::vector<StationInstallationIdentity> stationInstallationIdentities(
 		StationSystemsSettings const& settings)
 	{
@@ -2038,6 +2042,24 @@ namespace core
 			return refuse("Station installation outages are limited to "
 				+ std::to_string(MaxStationInstallationOutages) + " entries");
 		auto const registeredInstallations = stationInstallationIdentities(settings);
+		// The shared installation namespace must be unambiguous (#576):
+		// an outage names its target by installationId alone, so two
+		// installations of different kinds sharing an id would leave the
+		// contract unable to say which machine it caps - and resolution
+		// would silently pick whichever kind it consults first. Refuse
+		// the collision at the crossing, transactionally, so no file or
+		// editor draft carrying it can ever be applied.
+		std::map<std::string, std::string> installedKindById;
+		for (auto const& installation : registeredInstallations)
+		{
+			auto const [existing, inserted] = installedKindById.emplace(
+				installation.id, installation.kind);
+			if (!inserted)
+				return refuse("Station installation id '" + installation.id
+					+ "' is ambiguous: registered as both a " + existing->second
+					+ " and a " + installation.kind
+					+ "; installation ids must be unique across generators, coolant loops and chillers");
+		}
 		std::set<std::string> outageIds;
 		for (auto const& outage : settings.outages)
 		{
@@ -12618,7 +12640,19 @@ namespace core
 		{
 			Impl::OutageState state;
 			state.authored = outage;
-			if (generatorIndex.count(outage.installationId) != 0)
+			// The target must resolve to exactly one registered installation
+			// (#576). Validation already refuses a cross-kind id collision,
+			// so a hit in more than one kind here means the namespace broke
+			// somewhere - refuse loudly rather than silently choosing the
+			// first kind consulted.
+			auto const generatorHits = generatorIndex.count(outage.installationId);
+			auto const loopHits = loopIndex.count(outage.installationId);
+			auto const chillerHits = chillerIndex.count(outage.installationId);
+			if (generatorHits + loopHits + chillerHits > 1)
+				throw SerializationException("Station installation outage '"
+					+ outage.id + "' targets installation id '" + outage.installationId
+					+ "' that is ambiguous across generator, coolant loop and chiller registrations");
+			if (generatorHits != 0)
 			{
 				state.target = Impl::OutageState::Target::Generator;
 				state.targetIndex = generatorIndex[outage.installationId];
