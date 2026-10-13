@@ -12180,15 +12180,18 @@ namespace core
 		std::map<std::string, size_t> loopIndex;
 		for (size_t index = 0; index < mImpl->coolantLoops.size(); ++index)
 			loopIndex[mImpl->coolantLoops[index].authored.id] = index;
+		// The chiller id-to-index lookup is filled as the authored chillers
+		// register, so an outage resolves the chiller it names instead of
+		// default-inserting index 0 into a map that was built before any
+		// chiller existed and came up empty (#575).
 		std::map<std::string, size_t> chillerIndex;
-		for (size_t index = 0; index < mImpl->chillers.size(); ++index)
-			chillerIndex[mImpl->chillers[index].authored.id] = index;
 		for (auto const& chiller : settings.chillers)
 		{
 			Impl::ChillerState state;
 			state.authored = chiller;
 			state.loopIndex = loopIndex[chiller.coldLoopId];
 			state.sinkIndex = reservoirIndex[chiller.condenserReservoirId];
+			chillerIndex[chiller.id] = mImpl->chillers.size();
 			mImpl->chillers.push_back(std::move(state));
 		}
 		// Thermal buffers start holding their authored starting energy with
@@ -12627,12 +12630,20 @@ namespace core
 				state.targetIndex = loopIndex[outage.installationId];
 				state.installationKind = "coolant loop";
 			}
-			else
+			else if (chillerIndex.count(outage.installationId) != 0)
 			{
 				state.target = Impl::OutageState::Target::Chiller;
 				state.targetIndex = chillerIndex[outage.installationId];
 				state.installationKind = "chiller";
 			}
+			else
+				// Validation admits only registered installations, so an
+				// unresolved id here means the resolution itself broke;
+				// refuse loudly rather than silently cap the wrong
+				// machine through a default-inserted index (#575).
+				throw SerializationException("Station installation outage '"
+					+ outage.id + "' targets installation '" + outage.installationId
+					+ "' that resolved to no registered generator, coolant loop or chiller");
 			mImpl->outages.push_back(std::move(state));
 		}
 		// The compound conservation boundary is fixed at run start from the

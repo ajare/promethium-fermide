@@ -1,10 +1,12 @@
 #include "Smoke.h"
 #include "Documents.h"
 #include "core/World.h"
+#include "core/AgentTagRegistryDocument.h"
 #include "core/YamlSerializer.h"
 #include "core/BinarySerializer.h"
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <limits>
 #include <stdexcept>
 
@@ -15391,7 +15393,7 @@ void buffers(smoke::Context const&)
 	// the deepest reduction, and a restoration only lifts the ceiling -
 	// it never replenishes any inventory. Everything is exercised through
 	// the World tick / snapshot / event seam, never the Lua internals.
-	void outages(smoke::Context const&)
+	void outages(smoke::Context const& context)
 	{
 		auto const approx = [](double actual, double expected, double tolerance = 1e-6)
 		{ return std::abs(actual - expected) <= tolerance; };
@@ -15666,6 +15668,219 @@ void buffers(smoke::Context const&)
 			require(snap.coolantLoops[0].availabilityFactor == 0.5
 				&& approx(snap.coolantLoops[0].flowKgPerS, 1.0, 1e-2),
 				"the loop outage did not halve circulation capacity");
+		}
+		// #575: an outage names its chiller by stable installation id.
+		// With two chillers on distinct coolant loops, outaging the
+		// second-named chiller must take the second out of service and
+		// leave the first untouched - never default to whichever chiller
+		// happens to sit at index 0.
+		auto coldReservoir = [](std::string id)
+		{
+			core::ThermalReservoirSettings settings;
+			settings.id = std::move(id);
+			settings.thermalClass = "low";
+			settings.heatCapacityKJPerK = 10000.0;
+			settings.startingTemperatureC = 20.0;
+			settings.minTemperatureC = -50.0;
+			settings.maxTemperatureC = 200.0;
+			return settings;
+		};
+		auto chillerLoop = [](std::string id, std::string reservoirId)
+		{
+			core::CoolantLoopSettings settings;
+			settings.id = std::move(id);
+			settings.hazardClass = "normal";
+			settings.reservoirId = std::move(reservoirId);
+			settings.coolantCapacityKg = 10.0;
+			settings.startingCoolantKg = 10.0;
+			settings.specificHeatKJPerKgK = 4.0;
+			settings.startingTemperatureC = 20.0;
+			settings.freezeProtectionSetpointC = -100.0;
+			settings.pumpPowerKW = 0.5;
+			settings.ratedFlowKgPerS = 2.0;
+			settings.exchangerConductanceKWPerK = 5.0;
+			return settings;
+		};
+		auto chiller = [](std::string id, std::string coldLoopId)
+		{
+			core::ChillerSettings settings;
+			settings.id = std::move(id);
+			settings.thermalClass = "low";
+			settings.coldLoopId = std::move(coldLoopId);
+			settings.condenserReservoirId = "hot";
+			settings.ratedCoolingCapacityKW = 2.0;
+			settings.cop = 1.0;
+			settings.chilledSetpointC = 5.0;
+			settings.maxCondensingTemperatureC = 45.0;
+			return settings;
+		};
+		auto configureChillers = [&](core::World& world,
+			std::vector<core::InstallationOutageSettings> outageSettings)
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.thermalReservoirs = {coldReservoir("cold1"),
+				coldReservoir("cold2"), coldReservoir("hot")};
+			settings.coolantLoops = {chillerLoop("loop1", "cold1"),
+				chillerLoop("loop2", "cold2")};
+			settings.chillers = {chiller("first", "loop1"), chiller("second", "loop2")};
+			core::ProfileSettings sun; sun.constantLevel = 1.0;
+			core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
+			field.illumination = sun;
+			settings.solarArrays = {field};
+			settings.outages = std::move(outageSettings);
+			return world.configureStationSystems(settings, false, &diagnostic);
+		};
+		// Full outage of the second-named chiller: the named machine
+		// leaves service while the other keeps cooling at its full rating.
+		{
+			core::World world("OutageNamedChiller", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(configureChillers(world, {outage("second_off", "second", 0.0, 5.0, 10.0)}),
+				"the named-chiller full-outage scenario was rejected");
+			world.resumeSimulation();
+			require(world.advanceTicks(4 * 60), "named-chiller run failed before the outage");
+			auto const before = world.getStationSystemsSnapshot();
+			require(before.chillers[0].availabilityFactor == 1.0
+				&& before.chillers[1].availabilityFactor == 1.0
+				&& approx(before.chillers[0].coolingKW, 2.0, 1e-2)
+				&& approx(before.chillers[1].coolingKW, 2.0, 1e-2),
+				"both chillers were not at full service before the outage window");
+			require(world.advanceTicks(2 * 60), "named-chiller run failed into the outage");
+			auto const during = world.getStationSystemsSnapshot();
+			require(during.outages[0].active && during.outages[0].installationKind == "chiller"
+				&& during.outages[0].installationId == "second",
+				"the outage did not report the chiller it names as its target");
+			require(during.chillers[1].availabilityFactor == 0.0
+				&& during.chillers[1].coolingKW == 0.0 && !during.chillers[1].admitted,
+				"the full outage did not take the named chiller out of service");
+			require(during.chillers[0].availabilityFactor == 1.0
+				&& approx(during.chillers[0].coolingKW, 2.0, 1e-2),
+				"the outage touched the non-target chiller instead of the named one");
+			require(sawEvent(world, "chiller 'second'"),
+				"the outage event did not name the targeted chiller");
+			require(world.advanceTicks(9 * 60), "named-chiller run failed past the outage");
+			auto const restored = world.getStationSystemsSnapshot();
+			require(!restored.outages[0].active && restored.outages[0].exhausted
+				&& restored.chillers[1].availabilityFactor == 1.0
+				&& approx(restored.chillers[1].coolingKW, 2.0, 1e-2),
+				"the named chiller did not return to service when the outage restored");
+			// Reset restarts the authored schedule from its beginning; the
+			// replay outages the same named chiller in the same window.
+			world.pauseSimulation(); world.resetSimulation();
+			auto const fresh = world.getStationSystemsSnapshot();
+			require(fresh.outages[0].occurrencesStarted == 0
+				&& fresh.chillers[0].availabilityFactor == 1.0
+				&& fresh.chillers[1].availabilityFactor == 1.0,
+				"reset did not restore full declared availability on both chillers");
+			world.resumeSimulation();
+			require(world.advanceTicks(6 * 60), "named-chiller reset replay failed");
+			require(world.getStationSystemsSnapshot().chillers == during.chillers
+				&& world.getStationSystemsSnapshot().outages == during.outages,
+				"the reset replay did not outage the same named chiller");
+		}
+		// Partial outage: the named chiller keeps half its rated duty and
+		// the other chiller is untouched.
+		{
+			core::World world("OutagePartialChiller", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(configureChillers(world, {outage("second_half", "second", 0.5, 5.0, 10.0)}),
+				"the named-chiller partial-outage scenario was rejected");
+			world.resumeSimulation();
+			require(world.advanceTicks(6 * 60), "partial named-chiller run failed into the outage");
+			auto const during = world.getStationSystemsSnapshot();
+			require(during.outages[0].active
+				&& during.outages[0].installationKind == "chiller"
+				&& during.outages[0].installationId == "second",
+				"the partial outage did not report the chiller it names as its target");
+			require(during.chillers[1].availabilityFactor == 0.5
+				&& approx(during.chillers[1].coolingKW, 1.0, 1e-2),
+				"the partial outage did not cap the named chiller to half its rated duty");
+			require(during.chillers[0].availabilityFactor == 1.0
+				&& approx(during.chillers[0].coolingKW, 2.0, 1e-2),
+				"the partial outage disturbed the non-target chiller");
+			require(world.advanceTicks(9 * 60), "partial named-chiller run failed past the outage");
+			auto const restored = world.getStationSystemsSnapshot();
+			require(!restored.outages[0].active
+				&& restored.chillers[1].availabilityFactor == 1.0
+				&& approx(restored.chillers[1].coolingKW, 2.0, 1e-2),
+				"the named chiller did not regain its full rated duty after restoration");
+		}
+		// Load: the document round trip reconstructs the same authored
+		// scenario, and the reopened World outages the same named chiller
+		// tick-for-tick.
+		{
+			namespace filesystem = std::filesystem;
+			auto const path = context.temporaryRoot() / "named-chiller.world.yaml";
+			core::World original("OutageNamedChillerLoad", 2, 2);
+			original.pauseSimulation(); original.finishBuild();
+			require(configureChillers(original, {outage("second_off", "second", 0.0, 5.0, 10.0)}),
+				"the load-round-trip named-chiller scenario was rejected");
+			original.resumeSimulation();
+			require(original.advanceTicks(6 * 60), "load-round-trip original run failed");
+			auto const expected = original.getStationSystemsSnapshot();
+			require(expected.chillers[1].availabilityFactor == 0.0
+				&& expected.chillers[0].availabilityFactor == 1.0,
+				"the original run did not outage the named chiller before saving");
+			original.saveTo(path.string());
+			auto const reopened = core::loadWorldDocument(path);
+			require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+				"the outage settings did not survive the document round trip");
+			reopened->resumeSimulation();
+			require(reopened->advanceTicks(6 * 60), "reopened named-chiller run failed");
+			require(reopened->getStationSystemsSnapshot().chillers == expected.chillers
+				&& reopened->getStationSystemsSnapshot().outages == expected.outages,
+				"the reopened World did not outage the same named chiller as the original");
+		}
+		// Host/Lua observable agreement: the sandbox resolves the outage
+		// target by stable installation id, and its per-chiller view -
+		// which object is capped and which keeps cooling - matches the
+		// host snapshot for the same ticks.
+		{
+			SourceScope scope;
+			auto const bundled = core::bundledStationSystemsSource();
+			core::setStationSystemsSourceLoader([bundled] {
+				return "local factory = (function()\n" + bundled + "\nend)()\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures, outages, dispatchMode)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures, outages, dispatchMode)\n"
+					"assert(#model.outages == 1, 'sandbox did not receive the outage schedule')\n"
+					"assert(model.outages[1].installation == model.chillers[2], 'sandbox resolved the outage to the wrong chiller object')\n"
+					"assert(model.outages[1].installationId == 'second', 'sandbox lost the named installation id')\n"
+					"local original = model.advance\n"
+					"function model.advance(self, world_tick, fixed_seconds)\n"
+					"local result = original(self, world_tick, fixed_seconds)\n"
+					"local first, second = self.chillers[1], self.chillers[2]\n"
+					"if world_tick >= 300 and world_tick < 900 then\n"
+					"assert(math.abs((second.availability or 1.0) - 0.0) < 1e-12, 'sandbox did not cap the named chiller')\n"
+					"assert(math.abs((first.availability or 1.0) - 1.0) < 1e-12, 'sandbox capped the wrong chiller')\n"
+					"assert(second.lastCooling == 0, 'sandbox named chiller still cooling during the outage')\n"
+					"assert(first.lastCooling > 0, 'sandbox non-target chiller lost service during the outage')\n"
+					"else\n"
+					"assert(math.abs((first.availability or 1.0) - 1.0) < 1e-12\n"
+					"and math.abs((second.availability or 1.0) - 1.0) < 1e-12, 'sandbox availability not restored outside the window')\n"
+					"end\n"
+					"return result\n"
+					"end\n"
+					"return model\n"
+					"end";
+			});
+			core::World world("OutageNamedChillerSandbox", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(configureChillers(world, {outage("second_off", "second", 0.0, 5.0, 10.0)}),
+				"the sandbox named-chiller outage scenario was rejected");
+			world.resumeSimulation();
+			require(world.advanceTicks(20 * 60),
+				"bundled Lua named-chiller outage mirror failed its in-sandbox assertions");
+			// The host ledger over the same ticks agrees with what the
+			// sandbox asserted for the same named chiller.
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.chillers[0].availabilityFactor == 1.0
+				&& snap.chillers[0].coolingKW > 0.0
+				&& snap.chillers[1].availabilityFactor == 1.0
+				&& snap.chillers[1].coolingKW > 0.0,
+				"host and sandbox disagree on the restored named chiller after the window");
 		}
 		// Determinism: two identically-authored worlds with outages agree.
 		{
