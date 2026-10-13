@@ -3905,9 +3905,36 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- protected reserves, and qualified cooling - so dispatch never
         -- fabricates sustained supply. A source that cannot run this tick
         -- is passed over, never reserved. Mirrors the host ledger exactly.
-        local dispatch_target = self.dispatch_automatic
+        -- #578: a command is not capacity. The dispatcher still commands
+        -- a generator toward the level it should hold, but only the
+        -- output the machine can actually put on the bus this tick is
+        -- booked against the target: a stopped machine serves nothing
+        -- while it cranks, a starting machine serves nothing, a machine
+        -- in shutdown decay serves nothing, and a running machine is
+        -- bounded by the ramp step it can climb from its current output.
+        -- The residual flows on to the backup instead of being reserved
+        -- by a machine that will deliver zero, and the prorated cranking
+        -- draw of a legitimate start rides the target as demand of its
+        -- own, so an available backup funds the start rather than the
+        -- stopped machine deadlocking forever with nothing to crank on.
+        -- A start is still never self-funded: the stopped machine's own
+        -- output is not in the pool that starts it.
+        local dispatch_load_target = self.dispatch_automatic
             and math.max(0, self.last_dispatch_demand - generation) or 0
-        local dispatch_remaining = dispatch_target
+        -- The cranking draw a machine owes the pool this tick: the same
+        -- prorated purchase the phase machine makes - never more than
+        -- the authored startup power, never more than the startup energy
+        -- still owed (#562).
+        local function startup_draw_for(gen, required_kj)
+            if required_kj <= 0 then return 0 end
+            local remaining_kj = math.max(0, required_kj - gen.startupReceivedKJ)
+            if fixed_seconds > 0 then
+                return math.min(gen.startupPowerKW, remaining_kj / fixed_seconds)
+            end
+            return gen.startupPowerKW
+        end
+        local dispatch_startup_support = 0
+        local dispatch_remaining = dispatch_load_target
         for _, gen in ipairs(self.generators) do
             gen.dispatchCommand = 0
             if self.dispatch_automatic then
@@ -3921,15 +3948,49 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     if cooling and drawable_kwh > 0 then
                         local fuel_cap = drawable_kwh * gen.efficiency / fixed_hours
                         local cap = math.min(effective_rated, fuel_cap)
+                        local startup_required = gen.startupPowerKW * gen.startupSeconds
+                        -- A machine already cranking owes the pool its
+                        -- startup draw whether or not it is still
+                        -- commanded: the crank runs on at zero output.
+                        if gen.phase == 'starting' then
+                            dispatch_startup_support = dispatch_startup_support
+                                + startup_draw_for(gen, startup_required)
+                        end
                         local command = math.min(cap, dispatch_remaining)
                         if command > 0 then
                             gen.dispatchCommand = command
-                            dispatch_remaining = dispatch_remaining - command
+                            if gen.phase == 'running' then
+                                -- Only a running machine serves load
+                                -- this tick, and only within the ramp
+                                -- step it can climb from its current
+                                -- output. What it cannot reach is not
+                                -- booked: it flows on to the backup.
+                                local deliverable = math.min(command,
+                                    gen.outputKW + gen.rampKWPerSecond * fixed_seconds)
+                                if deliverable < 0 then deliverable = 0 end
+                                dispatch_remaining = dispatch_remaining - deliverable
+                            elseif gen.phase == 'stopped' then
+                                -- The command starts the machine: it
+                                -- will crank at zero output this tick,
+                                -- so its startup draw rides the target
+                                -- for the backup to fund.
+                                dispatch_startup_support = dispatch_startup_support
+                                    + startup_draw_for(gen, startup_required)
+                            end
+                            -- A machine in shutdown decay is commanded
+                            -- but serves nothing this tick; its residual
+                            -- flows on untouched.
                         end
                     end
                 end
             end
         end
+        -- The cranking demand rides the target beside the load: the
+        -- backup is commanded for the load the primary fleet cannot
+        -- serve this tick plus the startup energy a legitimate start
+        -- still needs, and never for generation that is merely
+        -- commanded but cannot deliver.
+        dispatch_remaining = dispatch_remaining + dispatch_startup_support
         local backup_engaged = false
         for _, cell in ipairs(self.fuel_cells) do
             cell.dispatchCommand = 0
@@ -3961,8 +4022,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 end
             end
         end
-        self.dispatch_target = dispatch_target
-        self.dispatch_committed = dispatch_target - dispatch_remaining
+        self.dispatch_target = dispatch_load_target + dispatch_startup_support
+        self.dispatch_committed = self.dispatch_target - dispatch_remaining
         self.dispatch_shortfall = dispatch_remaining
         self.backup_engaged = backup_engaged
         local batterySupplied = 0
@@ -3971,6 +4032,182 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- originally available - solar plus generator output - rather
         -- than the pool already eaten into by the very crank it audits.
         local startupFromGeneration = 0
+
+        -- Fuel-cell backup (#406) runs on the supply side alongside the
+        -- generators - and, since #578, ahead of the generator phase
+        -- machine: the backup's output joins the shared pool before the
+        -- generators run, so an available backup can fund a legitimate
+        -- primary start's cranking draw instead of the stopped machine
+        -- finding an empty pool. The start is still never self-funded -
+        -- only the backup's delivered output is in the pool, never the
+        -- stopped machine's own. Its electrical output joins the shared
+        -- generation pool the loads allocate against, its waste heat
+        -- lands in the class-matched sink booked exactly once, and its
+        -- reactants are drawn only from its own dedicated stores above
+        -- their protected reserves - the cell can never reach protected
+        -- breathing oxygen because it can only ever see its own oxygen
+        -- store, which is refilled only through controlled surplus
+        -- transfers that themselves preserve the supplying reserve.
+        -- Output is bounded by the installed rating, the dispatch
+        -- setpoint, the hydrogen and oxygen actually drawable, and the
+        -- product water store's remaining headroom. Cooling is required:
+        -- a sink at or above the maximum sink temperature refuses the
+        -- cell whole. Mirrors the host ledger exactly.
+        for _, cell in ipairs(self.fuel_cells) do
+            local disabled = cell.ratedOutputKW <= 0
+            -- #415: under automatic dispatch the dispatcher's command for
+            -- this tick replaces the authored setpoint; the cell still
+            -- enforces its reactant, cooling and product-headroom limits.
+            local commanded = disabled and 0
+                or (self.dispatch_automatic and cell.dispatchCommand or cell.commandedOutputKW)
+            local o2_per_h2 = FUEL_CELL_O2_KG_PER_H2_KG
+            local elec_kj_per_kg_h2 = cell.efficiency * ELECTROLYSIS_H2_CHEMICAL_KJ_PER_KG
+            local hydrogen = cell.hydrogen
+            local oxygen = cell.oxygen
+            local water = cell.water
+            cell.lastOutputKW = 0
+            cell.lastHydrogenKg = 0
+            cell.lastOxygenKg = 0
+            cell.lastWaterKg = 0
+            cell.lastWasteHeatKW = 0
+            cell.lastUnmetOutputKW = 0
+            cell.lastLimiter = ''
+            cell.lastBlockReason = ''
+            -- The backup clock: usable reactants are the qualified
+            -- contents drawable above each store's own protected
+            -- reserve, balanced stoichiometrically, converted to the
+            -- electrical energy this cell's efficiency can extract and
+            -- divided by the reference output - the cell's actual
+            -- output this tick, or its installed rating when the cell
+            -- is not running. Protected oxygen never counts toward it.
+            local function publishEndurance()
+                local remainingH2Kg = math.max(0, toKg(hydrogen.unit,
+                    hydrogen.qualified - hydrogen.protected_reserve))
+                local remainingO2Kg = math.max(0, toKg(oxygen.unit,
+                    oxygen.qualified - oxygen.protected_reserve))
+                local usableH2Kg = math.min(remainingH2Kg, remainingO2Kg / o2_per_h2)
+                local referenceKW = cell.lastOutputKW > 0 and cell.lastOutputKW
+                    or cell.ratedOutputKW
+                cell.enduranceSeconds = referenceKW > 0
+                    and usableH2Kg * elec_kj_per_kg_h2 / referenceKW or 0
+            end
+            cell.coolingAvailable = not disabled
+                and cell.sink.temperature + 1e-9 < cell.maxSinkTemperatureC
+            if disabled then
+                publishEndurance()
+            elseif not cell.coolingAvailable then
+                cell.lastBlockReason =
+                    'cooling is not qualified: sink at or above the maximum sink temperature'
+                cell.lastUnmetOutputKW = commanded
+                publishEndurance()
+            elseif commanded <= 0 then
+                publishEndurance()
+            else
+                local h2_drawable_kg = math.max(0, toKg(hydrogen.unit,
+                    hydrogen.qualified - hydrogen.protected_reserve))
+                local o2_drawable_kg = math.max(0, toKg(oxygen.unit,
+                    oxygen.qualified - oxygen.protected_reserve))
+                local water_headroom_kg = math.max(0, toKg(water.unit,
+                    water.capacity - (water.qualified + water.unqualified)))
+                local by_h2_kw = h2_drawable_kg * elec_kj_per_kg_h2 / fixed_seconds
+                local by_o2_kw = (o2_drawable_kg / o2_per_h2)
+                    * elec_kj_per_kg_h2 / fixed_seconds
+                local by_water_kw = (water_headroom_kg / (1.0 + o2_per_h2))
+                    * elec_kj_per_kg_h2 / fixed_seconds
+                local scale = 1.0
+                local limiter = ''
+                local function constrain(capKW, reason)
+                    if capKW >= scale * commanded then return end
+                    scale = capKW / commanded
+                    limiter = reason
+                end
+                constrain(by_h2_kw, "hydrogen store '" .. hydrogen.id
+                    .. "' has nothing drawable above its protected reserve")
+                constrain(by_o2_kw, "oxygen store '" .. oxygen.id
+                    .. "' has nothing drawable above its protected reserve")
+                constrain(by_water_kw, "product water store '" .. water.id
+                    .. "' is full: the water has nowhere to go")
+                if scale < 0 then scale = 0 end
+                if scale > 1 then scale = 1 end
+                cell.lastLimiter = limiter
+                local outputKW = commanded * scale
+                if outputKW <= 1e-15 then
+                    -- Nothing can burn this tick: the cell is refused
+                    -- whole, consumes nothing and delivers nothing, and
+                    -- the whole commanded output stays visible as unmet
+                    -- service.
+                    cell.lastUnmetOutputKW = commanded
+                    cell.lastBlockReason = limiter
+                    publishEndurance()
+                else
+                    -- Derive the reaction from the capped output: the
+                    -- reaction stoichiometry fixes the oxygen against
+                    -- the hydrogen, product water is the sum of the
+                    -- reactants actually consumed, and the delivered
+                    -- output is recomputed from the hydrogen that
+                    -- actually moved - the pool never receives more
+                    -- than the reactants paid for. Each flow is
+                    -- clamped to its own drawable or headroom so a
+                    -- one-ulp roundoff can never overshoot (#556).
+                    local h2Kg = math.min(outputKW * fixed_seconds
+                        / elec_kj_per_kg_h2, h2_drawable_kg)
+                    local o2Kg = math.min(h2Kg * o2_per_h2, o2_drawable_kg)
+                    h2Kg = math.min(h2Kg, o2Kg / o2_per_h2)
+                    local waterKg = h2Kg + o2Kg
+                    local chemicalKJ = h2Kg * ELECTROLYSIS_H2_CHEMICAL_KJ_PER_KG
+                    outputKW = cell.efficiency * chemicalKJ / fixed_seconds
+                    local electricalKJ = outputKW * fixed_seconds
+                    local wasteKJ = chemicalKJ - electricalKJ
+                    local h2Units = math.min(fromKg(hydrogen.unit, h2Kg),
+                        math.max(0, hydrogen.qualified - hydrogen.protected_reserve))
+                    local h2ActualKg = toKg(hydrogen.unit, h2Units)
+                    local o2Units = math.min(fromKg(oxygen.unit, o2Kg),
+                        math.max(0, oxygen.qualified - oxygen.protected_reserve))
+                    local o2ActualKg = toKg(oxygen.unit, o2Units)
+                    local waterUnits = math.min(fromKg(water.unit, waterKg),
+                        math.max(0, water.capacity
+                            - (water.qualified + water.unqualified)))
+                    local waterActualKg = toKg(water.unit, waterUnits)
+                    hydrogen.qualified = hydrogen.qualified - h2Units
+                    self.unit_loss[hydrogen.unit] =
+                        (self.unit_loss[hydrogen.unit] or 0) + h2Units
+                    oxygen.qualified = oxygen.qualified - o2Units
+                    self.unit_loss[oxygen.unit] =
+                        (self.unit_loss[oxygen.unit] or 0) + o2Units
+                    water.qualified = water.qualified + waterUnits
+                    self.unit_loss[water.unit] =
+                        (self.unit_loss[water.unit] or 0) - waterUnits
+                    -- Energy: the reactants' chemical energy left as
+                    -- electricity into the shared pool or as waste heat
+                    -- into the sink - booked once, never a third
+                    -- destination.
+                    cell.sink.fuelCellHeat = (cell.sink.fuelCellHeat or 0)
+                        + wasteKJ / fixed_seconds
+                    generation = generation + outputKW
+                    cell.lastOutputKW = outputKW
+                    cell.lastHydrogenKg = h2ActualKg
+                    cell.lastOxygenKg = o2ActualKg
+                    cell.lastWaterKg = waterActualKg
+                    cell.lastWasteHeatKW = wasteKJ / fixed_seconds
+                    cell.lastUnmetOutputKW = math.max(0, commanded - outputKW)
+                    cell.hydrogenConsumedKg = cell.hydrogenConsumedKg + h2ActualKg
+                    cell.oxygenConsumedKg = cell.oxygenConsumedKg + o2ActualKg
+                    cell.waterProducedKg = cell.waterProducedKg + waterActualKg
+                    cell.chemicalEnergyKJ = cell.chemicalEnergyKJ + chemicalKJ
+                    cell.electricalKJ = cell.electricalKJ + electricalKJ
+                    cell.wasteHeatKJ = cell.wasteHeatKJ + wasteKJ
+                    publishEndurance()
+                end
+            end
+            assert(isFinite(cell.lastOutputKW) and isFinite(cell.lastHydrogenKg)
+                and isFinite(cell.lastOxygenKg) and isFinite(cell.lastWaterKg)
+                and isFinite(cell.lastWasteHeatKW) and isFinite(cell.lastUnmetOutputKW)
+                and isFinite(cell.hydrogenConsumedKg) and isFinite(cell.oxygenConsumedKg)
+                and isFinite(cell.waterProducedKg) and isFinite(cell.chemicalEnergyKJ)
+                and isFinite(cell.electricalKJ) and isFinite(cell.wasteHeatKJ)
+                and isFinite(cell.enduranceSeconds),
+                "fuel cell '" .. cell.id .. "' result is not finite")
+        end
         -- Fuelled generators run ahead of the load allocation (#399):
         -- their electrical output joins the shared generation pool for
         -- this tick's loads, their startup cranking draws ride the same
@@ -4219,181 +4456,13 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             -- ends in - and while the machine is running (#563).
             gen.lastCoolingRequired = gen.phase == 'running' or decayedThisTick
         end
-        -- Fuel-cell backup (#406) runs on the supply side alongside the
-        -- generators: its electrical output joins the shared generation
-        -- pool the loads allocate against, its waste heat lands in the
-        -- class-matched sink booked exactly once, and its reactants are
-        -- drawn only from its own dedicated stores above their protected
-        -- reserves - the cell can never reach protected breathing
-        -- oxygen because it can only ever see its own oxygen store,
-        -- which is refilled only through controlled surplus transfers
-        -- that themselves preserve the supplying reserve. Output is
-        -- bounded by the installed rating, the dispatch setpoint, the
-        -- hydrogen and oxygen actually drawable, and the product water
-        -- store's remaining headroom. Cooling is required: a sink at or
-        -- above the maximum sink temperature refuses the cell whole.
-        -- Mirrors the host ledger exactly.
-        for _, cell in ipairs(self.fuel_cells) do
-            local disabled = cell.ratedOutputKW <= 0
-            -- #415: under automatic dispatch the dispatcher's command for
-            -- this tick replaces the authored setpoint; the cell still
-            -- enforces its reactant, cooling and product-headroom limits.
-            local commanded = disabled and 0
-                or (self.dispatch_automatic and cell.dispatchCommand or cell.commandedOutputKW)
-            local o2_per_h2 = FUEL_CELL_O2_KG_PER_H2_KG
-            local elec_kj_per_kg_h2 = cell.efficiency * ELECTROLYSIS_H2_CHEMICAL_KJ_PER_KG
-            local hydrogen = cell.hydrogen
-            local oxygen = cell.oxygen
-            local water = cell.water
-            cell.lastOutputKW = 0
-            cell.lastHydrogenKg = 0
-            cell.lastOxygenKg = 0
-            cell.lastWaterKg = 0
-            cell.lastWasteHeatKW = 0
-            cell.lastUnmetOutputKW = 0
-            cell.lastLimiter = ''
-            cell.lastBlockReason = ''
-            -- The backup clock: usable reactants are the qualified
-            -- contents drawable above each store's own protected
-            -- reserve, balanced stoichiometrically, converted to the
-            -- electrical energy this cell's efficiency can extract and
-            -- divided by the reference output - the cell's actual
-            -- output this tick, or its installed rating when the cell
-            -- is not running. Protected oxygen never counts toward it.
-            local function publishEndurance()
-                local remainingH2Kg = math.max(0, toKg(hydrogen.unit,
-                    hydrogen.qualified - hydrogen.protected_reserve))
-                local remainingO2Kg = math.max(0, toKg(oxygen.unit,
-                    oxygen.qualified - oxygen.protected_reserve))
-                local usableH2Kg = math.min(remainingH2Kg, remainingO2Kg / o2_per_h2)
-                local referenceKW = cell.lastOutputKW > 0 and cell.lastOutputKW
-                    or cell.ratedOutputKW
-                cell.enduranceSeconds = referenceKW > 0
-                    and usableH2Kg * elec_kj_per_kg_h2 / referenceKW or 0
-            end
-            cell.coolingAvailable = not disabled
-                and cell.sink.temperature + 1e-9 < cell.maxSinkTemperatureC
-            if disabled then
-                publishEndurance()
-            elseif not cell.coolingAvailable then
-                cell.lastBlockReason =
-                    'cooling is not qualified: sink at or above the maximum sink temperature'
-                cell.lastUnmetOutputKW = commanded
-                publishEndurance()
-            elseif commanded <= 0 then
-                publishEndurance()
-            else
-                local h2_drawable_kg = math.max(0, toKg(hydrogen.unit,
-                    hydrogen.qualified - hydrogen.protected_reserve))
-                local o2_drawable_kg = math.max(0, toKg(oxygen.unit,
-                    oxygen.qualified - oxygen.protected_reserve))
-                local water_headroom_kg = math.max(0, toKg(water.unit,
-                    water.capacity - (water.qualified + water.unqualified)))
-                local by_h2_kw = h2_drawable_kg * elec_kj_per_kg_h2 / fixed_seconds
-                local by_o2_kw = (o2_drawable_kg / o2_per_h2)
-                    * elec_kj_per_kg_h2 / fixed_seconds
-                local by_water_kw = (water_headroom_kg / (1.0 + o2_per_h2))
-                    * elec_kj_per_kg_h2 / fixed_seconds
-                local scale = 1.0
-                local limiter = ''
-                local function constrain(capKW, reason)
-                    if capKW >= scale * commanded then return end
-                    scale = capKW / commanded
-                    limiter = reason
-                end
-                constrain(by_h2_kw, "hydrogen store '" .. hydrogen.id
-                    .. "' has nothing drawable above its protected reserve")
-                constrain(by_o2_kw, "oxygen store '" .. oxygen.id
-                    .. "' has nothing drawable above its protected reserve")
-                constrain(by_water_kw, "product water store '" .. water.id
-                    .. "' is full: the water has nowhere to go")
-                if scale < 0 then scale = 0 end
-                if scale > 1 then scale = 1 end
-                cell.lastLimiter = limiter
-                local outputKW = commanded * scale
-                if outputKW <= 1e-15 then
-                    -- Nothing can burn this tick: the cell is refused
-                    -- whole, consumes nothing and delivers nothing, and
-                    -- the whole commanded output stays visible as unmet
-                    -- service.
-                    cell.lastUnmetOutputKW = commanded
-                    cell.lastBlockReason = limiter
-                    publishEndurance()
-                else
-                    -- Derive the reaction from the capped output: the
-                    -- reaction stoichiometry fixes the oxygen against
-                    -- the hydrogen, product water is the sum of the
-                    -- reactants actually consumed, and the delivered
-                    -- output is recomputed from the hydrogen that
-                    -- actually moved - the pool never receives more
-                    -- than the reactants paid for. Each flow is
-                    -- clamped to its own drawable or headroom so a
-                    -- one-ulp roundoff can never overshoot (#556).
-                    local h2Kg = math.min(outputKW * fixed_seconds
-                        / elec_kj_per_kg_h2, h2_drawable_kg)
-                    local o2Kg = math.min(h2Kg * o2_per_h2, o2_drawable_kg)
-                    h2Kg = math.min(h2Kg, o2Kg / o2_per_h2)
-                    local waterKg = h2Kg + o2Kg
-                    local chemicalKJ = h2Kg * ELECTROLYSIS_H2_CHEMICAL_KJ_PER_KG
-                    outputKW = cell.efficiency * chemicalKJ / fixed_seconds
-                    local electricalKJ = outputKW * fixed_seconds
-                    local wasteKJ = chemicalKJ - electricalKJ
-                    local h2Units = math.min(fromKg(hydrogen.unit, h2Kg),
-                        math.max(0, hydrogen.qualified - hydrogen.protected_reserve))
-                    local h2ActualKg = toKg(hydrogen.unit, h2Units)
-                    local o2Units = math.min(fromKg(oxygen.unit, o2Kg),
-                        math.max(0, oxygen.qualified - oxygen.protected_reserve))
-                    local o2ActualKg = toKg(oxygen.unit, o2Units)
-                    local waterUnits = math.min(fromKg(water.unit, waterKg),
-                        math.max(0, water.capacity
-                            - (water.qualified + water.unqualified)))
-                    local waterActualKg = toKg(water.unit, waterUnits)
-                    hydrogen.qualified = hydrogen.qualified - h2Units
-                    self.unit_loss[hydrogen.unit] =
-                        (self.unit_loss[hydrogen.unit] or 0) + h2Units
-                    oxygen.qualified = oxygen.qualified - o2Units
-                    self.unit_loss[oxygen.unit] =
-                        (self.unit_loss[oxygen.unit] or 0) + o2Units
-                    water.qualified = water.qualified + waterUnits
-                    self.unit_loss[water.unit] =
-                        (self.unit_loss[water.unit] or 0) - waterUnits
-                    -- Energy: the reactants' chemical energy left as
-                    -- electricity into the shared pool or as waste heat
-                    -- into the sink - booked once, never a third
-                    -- destination.
-                    cell.sink.fuelCellHeat = (cell.sink.fuelCellHeat or 0)
-                        + wasteKJ / fixed_seconds
-                    generation = generation + outputKW
-                    cell.lastOutputKW = outputKW
-                    cell.lastHydrogenKg = h2ActualKg
-                    cell.lastOxygenKg = o2ActualKg
-                    cell.lastWaterKg = waterActualKg
-                    cell.lastWasteHeatKW = wasteKJ / fixed_seconds
-                    cell.lastUnmetOutputKW = math.max(0, commanded - outputKW)
-                    cell.hydrogenConsumedKg = cell.hydrogenConsumedKg + h2ActualKg
-                    cell.oxygenConsumedKg = cell.oxygenConsumedKg + o2ActualKg
-                    cell.waterProducedKg = cell.waterProducedKg + waterActualKg
-                    cell.chemicalEnergyKJ = cell.chemicalEnergyKJ + chemicalKJ
-                    cell.electricalKJ = cell.electricalKJ + electricalKJ
-                    cell.wasteHeatKJ = cell.wasteHeatKJ + wasteKJ
-                    publishEndurance()
-                end
-            end
-            assert(isFinite(cell.lastOutputKW) and isFinite(cell.lastHydrogenKg)
-                and isFinite(cell.lastOxygenKg) and isFinite(cell.lastWaterKg)
-                and isFinite(cell.lastWasteHeatKW) and isFinite(cell.lastUnmetOutputKW)
-                and isFinite(cell.hydrogenConsumedKg) and isFinite(cell.oxygenConsumedKg)
-                and isFinite(cell.waterProducedKg) and isFinite(cell.chemicalEnergyKJ)
-                and isFinite(cell.electricalKJ) and isFinite(cell.wasteHeatKJ)
-                and isFinite(cell.enduranceSeconds),
-                "fuel cell '" .. cell.id .. "' result is not finite")
-        end
         -- The audit baseline is the source pool as it was originally
-        -- available this tick - solar plus generator output - before the
-        -- cranking draws took their slice. The crank is counted exactly
-        -- once, on the demand side in totalSupplied; leaving it subtracted
-        -- from the baseline too would book it twice and make a
-        -- source-funded startup fail its own audit (#561).
+        -- available this tick - solar, backup output and generator
+        -- output - before the cranking draws took their slice. The crank
+        -- is counted exactly once, on the demand side in totalSupplied;
+        -- leaving it subtracted from the baseline too would book it
+        -- twice and make a source-funded startup fail its own audit
+        -- (#561).
         local availableGeneration = generation + startupFromGeneration
         -- #416 mirror: protected critical service admission. Containment
         -- circulation (hazardous coolant loops, protected by their hazard

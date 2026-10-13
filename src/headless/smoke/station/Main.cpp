@@ -16445,6 +16445,248 @@ void dispatch(smoke::Context const&)
 			"backup engagement was not recorded as an alarm");
 	}
 
+	// #578: no-battery bootstrapping. A stopped generator that needs
+	// cranking no longer reserves the dispatch target it cannot serve:
+	// the residual load reaches the fuel-cell backup, and the backup
+	// funds the legitimate start. With no battery and no sun the old
+	// controller let the generator's phantom reservation starve the
+	// backup: the critical load stayed unmet forever while dispatch
+	// reported zero shortfall. Here the backup carries the load and
+	// the crank, the generator starts, ramps, and takes the load back.
+	{
+		auto bootstrapRig = []
+		{
+			Rig rig;
+			rig.mode = core::StationDispatchMode::Automatic;
+			rig.stores = {fuelStore("diesel", "kWh", 1000.0, 100.0, 0.0),
+				fuelStore("h2", "kg", 100.0, 100.0, 0.0),
+				fuelStore("o2", "kg", 800.0, 800.0, 0.0),
+				{"water", "kg", 1000.0, 0.0, 0.0}};
+			rig.reservoirs = {sinkReservoir(100000.0, 20.0)};
+			rig.generators = {generatorSettings(10.0)};
+			rig.loads = {criticalLoad(6.0)};
+			core::FuelCellSettings cell;
+			cell.id = "cell";
+			cell.hazardClass = "normal";
+			cell.hydrogenStoreId = "h2";
+			cell.oxygenStoreId = "o2";
+			cell.waterStoreId = "water";
+			cell.thermalClass = "generation";
+			cell.heatSinkId = "hot";
+			cell.ratedOutputKW = 10.0;
+			cell.efficiency = 0.6;
+			cell.commandedOutputKW = 0.0;
+			cell.maxSinkTemperatureC = 150.0;
+			rig.cells = {cell};
+			return rig;
+		};
+		core::World world("Dispatch", 2, 2);
+		world.pauseSimulation();
+		world.finishBuild();
+		run(world, bootstrapRig(), 120);
+		{
+			auto const& power = world.getStationSystemsSnapshot().power;
+			require(power.generators[0].phase == core::StationGeneratorPhase::Starting,
+				"the backup-funded start never began without a battery");
+			require(power.generators[0].dispatchCommandKW > 0.0,
+				"the dispatcher never commanded the stopped generator to start");
+			require(power.generators[0].outputKW <= 1e-12,
+				"a cranking generator reported output it cannot deliver");
+			require(power.generatorStartupDrawKW > 0.9 && power.generatorStartupDrawKW < 1.1,
+				"the crank did not draw its startup power from the backup-funded pool");
+			require(power.fuelCells[0].lastOutputKW > 6.9
+				&& power.fuelCells[0].lastOutputKW < 7.1,
+				"the backup did not carry the load plus the startup support");
+			require(approx(power.dispatchCommittedKW, power.dispatchTargetKW, 1e-9),
+				"the bootstrap committed did not match the funded target");
+			require(approx(power.dispatchShortfallKW, 0.0, 1e-9),
+				"the backup-funded bootstrap reported a shortfall");
+			require(approx(power.unmetCriticalKW, 0.0, 1e-9),
+				"the critical load went unmet while the backup could carry it");
+		}
+		// Past startup and the ramp: the generator takes the load back
+		// and the backup stands down.
+		require(world.advanceTicks(600), "bootstrap run failed after startup");
+		{
+			auto const& power = world.getStationSystemsSnapshot().power;
+			require(power.generators[0].phase == core::StationGeneratorPhase::Running,
+				"the backup-funded generator never reached Running");
+			require(power.generators[0].outputKW > 5.9,
+				"the generator did not ramp up to carry the load");
+			require(power.fuelCells[0].lastOutputKW < 1e-9,
+				"the backup kept burning after the generator took the load");
+			require(approx(power.dispatchShortfallKW, 0.0, 1e-9),
+				"steady-state bootstrap reported a shortfall");
+			require(approx(power.unmetCriticalKW, 0.0, 1e-9),
+				"the load went unmet once the generator carried it");
+		}
+		// Determinism: the bootstrap path adds no run-to-run variance.
+		{
+			auto const probe = [](Rig rig)
+			{
+				core::World world("Dispatch", 2, 2);
+				world.pauseSimulation();
+				world.finishBuild();
+				run(world, std::move(rig), 500);
+				auto const& power = world.getStationSystemsSnapshot().power;
+				return std::array{power.generators[0].outputKW,
+					power.fuelCells[0].lastOutputKW,
+					power.dispatchCommittedKW, power.dispatchShortfallKW};
+			};
+			require(probe(bootstrapRig()) == probe(bootstrapRig()),
+				"the no-battery bootstrap was not deterministic");
+		}
+	}
+
+	// #578: with no backup and nothing to crank on, the stopped
+	// generator's unavailable capacity is never reported as a covered
+	// target: the shortfall stays explicit beside the unmet load. The
+	// old controller booked the full command as committed and reported
+	// zero shortfall while the machine delivered nothing.
+	{
+		core::World world("Dispatch", 2, 2);
+		world.pauseSimulation();
+		world.finishBuild();
+		Rig rig = fullRig(core::StationDispatchMode::Automatic, 1000.0, 0.0);
+		rig.batteries.clear();
+		rig.solar = {solarAt(0.0)};
+		run(world, std::move(rig), 120);
+		auto const& power = world.getStationSystemsSnapshot().power;
+		require(power.generators[0].phase == core::StationGeneratorPhase::Stopped,
+			"a generator with no cranking source somehow left Stopped");
+		require(approx(power.dispatchCommittedKW, 0.0, 1e-9),
+			"unavailable generator capacity was booked as committed");
+		require(power.dispatchShortfallKW > 1e-9,
+			"the dispatch shortfall hid the capacity no source could serve");
+		require(power.unmetCriticalKW > 1e-9,
+			"the unmet critical load vanished from the account");
+	}
+
+	// #578: a slow ramp never books as capacity before it arrives.
+	// The backup carries the difference tick by tick while the
+	// generator climbs its ramp, and the committed account tracks what
+	// the sources actually deliver, not what the generator will reach.
+	{
+		Rig rig;
+		rig.mode = core::StationDispatchMode::Automatic;
+		rig.stores = {fuelStore("diesel", "kWh", 1000.0, 100.0, 0.0),
+			fuelStore("h2", "kg", 100.0, 100.0, 0.0),
+			fuelStore("o2", "kg", 800.0, 800.0, 0.0),
+			{"water", "kg", 1000.0, 0.0, 0.0}};
+		rig.reservoirs = {sinkReservoir(100000.0, 20.0)};
+		auto slow = generatorSettings(10.0);
+		slow.maxRampKWPerSecond = 0.1;
+		rig.generators = {slow};
+		rig.loads = {criticalLoad(6.0)};
+		core::FuelCellSettings cell;
+		cell.id = "cell";
+		cell.hazardClass = "normal";
+		cell.hydrogenStoreId = "h2";
+		cell.oxygenStoreId = "o2";
+		cell.waterStoreId = "water";
+		cell.thermalClass = "generation";
+		cell.heatSinkId = "hot";
+		cell.ratedOutputKW = 10.0;
+		cell.efficiency = 0.6;
+		cell.commandedOutputKW = 0.0;
+		cell.maxSinkTemperatureC = 150.0;
+		rig.cells = {cell};
+		core::World world("Dispatch", 2, 2);
+		world.pauseSimulation();
+		world.finishBuild();
+		// 1560 ticks at 60 Hz is 26 s: 6 s of crank plus 20 s of
+		// 0.1 kW/s ramp, so the generator sits near 2 kW of its 10 kW
+		// rating while the backup carries the rest.
+		run(world, std::move(rig), 1560);
+		auto const& power = world.getStationSystemsSnapshot().power;
+		require(power.generators[0].phase == core::StationGeneratorPhase::Running,
+			"the slow-ramp generator never reached Running");
+		require(power.generators[0].outputKW > 1.5 && power.generators[0].outputKW < 2.5,
+			"the slow ramp did not hold to its ramp-limited output");
+		require(approx(power.generators[0].outputKW + power.fuelCells[0].lastOutputKW, 6.0, 1e-6),
+			"the backup did not carry exactly the ramp-limited difference");
+		require(approx(power.dispatchCommittedKW, 6.0, 1e-6),
+			"the committed account did not match what the sources deliver");
+		require(approx(power.dispatchShortfallKW, 0.0, 1e-9),
+			"the slow-ramp run reported a shortfall the backup could cover");
+		require(approx(power.unmetCriticalKW, 0.0, 1e-9),
+			"the load went unmet while the backup covered the ramp gap");
+	}
+
+	// #578: a source trip during startup. The sink starts just below
+	// the generator's maximum and the cranking heat itself pushes the
+	// cooling out of qualification mid-crank: the start fails whole,
+	// the generator stays stopped, and the backup keeps carrying the
+	// load on its own sink with no unmet demand and no phantom
+	// committed capacity.
+	{
+		Rig rig;
+		rig.mode = core::StationDispatchMode::Automatic;
+		rig.stores = {fuelStore("diesel", "kWh", 1000.0, 100.0, 0.0),
+			fuelStore("h2", "kg", 100.0, 100.0, 0.0),
+			fuelStore("o2", "kg", 800.0, 800.0, 0.0),
+			{"water", "kg", 1000.0, 0.0, 0.0}};
+		core::ThermalReservoirSettings hot;
+		hot.id = "hot";
+		hot.thermalClass = "generation";
+		hot.heatCapacityKJPerK = 10.0;
+		hot.startingTemperatureC = 89.9;
+		hot.minTemperatureC = -50.0;
+		hot.maxTemperatureC = 200.0;
+		core::ThermalReservoirSettings fcSink;
+		fcSink.id = "fcSink";
+		fcSink.thermalClass = "generation";
+		fcSink.heatCapacityKJPerK = 100000.0;
+		fcSink.startingTemperatureC = 20.0;
+		fcSink.minTemperatureC = -50.0;
+		fcSink.maxTemperatureC = 200.0;
+		rig.reservoirs = {hot, fcSink};
+		rig.generators = {generatorSettings(10.0)};
+		rig.loads = {criticalLoad(6.0)};
+		core::FuelCellSettings cell;
+		cell.id = "cell";
+		cell.hazardClass = "normal";
+		cell.hydrogenStoreId = "h2";
+		cell.oxygenStoreId = "o2";
+		cell.waterStoreId = "water";
+		cell.thermalClass = "generation";
+		cell.heatSinkId = "fcSink";
+		cell.ratedOutputKW = 10.0;
+		cell.efficiency = 0.6;
+		cell.commandedOutputKW = 0.0;
+		cell.maxSinkTemperatureC = 150.0;
+		rig.cells = {cell};
+		core::World world("Dispatch", 2, 2);
+		world.pauseSimulation();
+		world.finishBuild();
+		// The 1 kW crank into a 10 kJ/K sink warms it 0.1 K/s: the
+		// 0.1 K headroom is gone within a second and the start fails
+		// mid-crank before the 6 s of startup energy can complete.
+		run(world, std::move(rig), 2);
+		bool sawMidCrankTrip = false;
+		for (int tick = 0; tick < 238; ++tick)
+		{
+			require(world.advanceTicks(1), "trip run failed");
+			auto const& p = world.getStationSystemsSnapshot().power;
+			if (p.generators[0].blockReason.find("cooling lost during startup")
+				!= std::string::npos)
+				sawMidCrankTrip = true;
+		}
+		auto const& power = world.getStationSystemsSnapshot().power;
+		require(sawMidCrankTrip,
+			"the mid-crank cooling trip was never reported as the block reason");
+		require(power.generators[0].phase == core::StationGeneratorPhase::Stopped,
+			"a generator whose cooling failed mid-crank did not fall back to Stopped");
+		require(approx(power.generators[0].outputKW, 0.0, 1e-12),
+			"a trip mid-crank reported generator output");
+		require(power.fuelCells[0].lastOutputKW > 5.9 && power.fuelCells[0].lastOutputKW < 6.1,
+			"the backup did not carry the load alone after the start failed");
+		require(approx(power.dispatchShortfallKW, 0.0, 1e-9),
+			"the failed-start run reported a shortfall the backup covers");
+		require(approx(power.unmetCriticalKW, 0.0, 1e-9),
+			"the load went unmet after the start failed while the backup could carry it");
+	}
+
 	// The dispatch mode persists and round-trips; a document without the
 	// dispatch mode field is refused rather than silently defaulting.
 	{

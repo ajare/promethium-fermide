@@ -2027,9 +2027,13 @@ namespace core
 		// mode is the authored controller setting; dispatchDemandKW is the
 		// station-wide electrical request the last committed tick presented
 		// to the shared pool; dispatchTargetKW is the net load after this
-		// tick's solar that dispatchable sources are commanded against;
-		// dispatchCommittedKW is the total command actually issued within
-		// the sources' physical limits; dispatchShortfallKW is the part of
+		// tick's solar that dispatchable sources are commanded against,
+		// plus the startup cranking draw a legitimate generator start
+		// still owes this tick (#578); dispatchCommittedKW is the capacity
+		// actually deliverable this tick that the command booked within the
+		// sources' physical limits - a stopped, starting, ramping or shut-
+		// down machine contributes nothing it cannot serve (#578);
+		// dispatchShortfallKW is the part of
 		// the target no available source could take - published, never
 		// fabricated. backupEngaged reports that a fuel-cell backup is
 		// under dispatch command, and reserveExhausted reports that a

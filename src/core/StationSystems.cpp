@@ -5350,11 +5350,43 @@ namespace core
 			// reserved: the target flows on to the next source that can.
 			// In Manual mode the controller is inert and every source keeps
 			// its authored commanded output.
+			// #578: a command is not capacity. The dispatcher still commands
+			// a generator toward the level it should hold, but only the
+			// output the machine can actually put on the bus this tick is
+			// booked against the target: a stopped machine serves nothing
+			// while it cranks, a starting machine serves nothing, a machine
+			// in shutdown decay serves nothing, and a running machine is
+			// bounded by the ramp step it can climb from its current output.
+			// The residual - the load the primary fleet cannot serve this
+			// tick - flows on to the backup instead of being reserved by a
+			// machine that will deliver zero, and the prorated cranking draw
+			// of a legitimate start rides the target as demand of its own,
+			// so an available backup funds the start rather than the
+			// stopped machine deadlocking forever with nothing to crank on.
+			// A start is still never self-funded: the stopped machine's own
+			// output is not in the pool that starts it.
 			auto const dispatchAutomatic = settings.dispatchMode == StationDispatchMode::Automatic;
-			auto const dispatchTargetKW = dispatchAutomatic
+			auto const dispatchLoadTargetKW = dispatchAutomatic
 				? std::max(0.0, lastDispatchDemandKW - availableGeneration)
 				: 0.0;
-			auto dispatchRemainingKW = dispatchTargetKW;
+			auto const dispatchDtSeconds = static_cast<double>(seconds);
+			// The cranking draw a machine owes the pool this tick: the same
+			// prorated purchase the phase machine makes - never more than
+			// the authored startup power, never more than the startup energy
+			// still owed (#562).
+			auto const startupDrawForKW = [dispatchDtSeconds](
+				GeneratorState const& generator, double requiredKJ)
+			{
+				if (requiredKJ <= 0.0) return 0.0;
+				auto const remainingKJ = std::max(0.0,
+					requiredKJ - generator.startupReceivedKJ);
+				return dispatchDtSeconds > 0.0
+					? std::min(generator.authored.startupPowerKW,
+						remainingKJ / dispatchDtSeconds)
+					: generator.authored.startupPowerKW;
+			};
+			double dispatchStartupSupportKW{0.0};
+			auto dispatchRemainingKW = dispatchLoadTargetKW;
 			for (auto& generator : generators)
 			{
 				generator.dispatchCommandKW = 0.0;
@@ -5377,11 +5409,44 @@ namespace core
 				// target never reserves capacity that does not exist.
 				auto const fuelCapKW = drawableKWh * generator.authored.efficiency / hours;
 				auto const capKW = std::min(effectiveRatedKW, fuelCapKW);
+				auto const startupRequiredKJ = generator.authored.startupPowerKW
+					* generator.authored.startupSeconds;
+				// A machine already cranking owes the pool its startup draw
+				// whether or not it is still commanded - the crank runs on at
+				// zero output, and the load must not be left blind to it.
+				if (generator.phase == StationGeneratorPhase::Starting)
+					dispatchStartupSupportKW += startupDrawForKW(generator, startupRequiredKJ);
 				auto const commandKW = std::min(capKW, dispatchRemainingKW);
 				if (commandKW <= 0.0) continue;
 				generator.dispatchCommandKW = commandKW;
-				dispatchRemainingKW -= commandKW;
+				if (generator.phase == StationGeneratorPhase::Running)
+				{
+					// Only a running machine serves load this tick, and only
+					// within the ramp step it can climb from its current
+					// output. What it cannot reach this tick is not booked
+					// against the target: it flows on to the backup.
+					auto const deliverableKW = std::min(commandKW,
+						generator.outputKW
+							+ generator.authored.maxRampKWPerSecond * dispatchDtSeconds);
+					dispatchRemainingKW -= std::max(0.0, deliverableKW);
+				}
+				else if (generator.phase == StationGeneratorPhase::Stopped)
+				{
+					// The command starts the machine: it will crank at zero
+					// output this tick, so its startup draw rides the target
+					// for the backup to fund beside the load it cannot yet
+					// serve.
+					dispatchStartupSupportKW += startupDrawForKW(generator, startupRequiredKJ);
+				}
+				// A machine in shutdown decay is commanded but serves
+				// nothing this tick; its residual flows on untouched.
 			}
+			// The cranking demand rides the target beside the load: the
+			// backup is commanded for the load the primary fleet cannot
+			// serve this tick plus the startup energy a legitimate start
+			// still needs, and never for generation that is merely
+			// commanded but cannot deliver.
+			dispatchRemainingKW += dispatchStartupSupportKW;
 			bool backupEngaged{false};
 			for (auto& cell : fuelCells)
 			{
@@ -5421,10 +5486,205 @@ namespace core
 				backupEngaged = true;
 				dispatchRemainingKW -= commandKW;
 			}
-			lastDispatchTargetKW = dispatchTargetKW;
-			lastDispatchCommittedKW = dispatchTargetKW - dispatchRemainingKW;
+			lastDispatchTargetKW = dispatchLoadTargetKW + dispatchStartupSupportKW;
+			lastDispatchCommittedKW = lastDispatchTargetKW - dispatchRemainingKW;
 			lastDispatchShortfallKW = dispatchRemainingKW;
 			lastBackupEngaged = backupEngaged;
+			// Fuel-cell backup (#406) runs on the supply side alongside the
+			// generators - and, since #578, ahead of the generator phase
+			// machine: the backup's output joins the shared pool before the
+			// generators run, so an available backup can fund a legitimate
+			// primary start's cranking draw instead of the stopped machine
+			// finding an empty pool. The start is still never self-funded -
+			// only the backup's delivered output is in the pool, never the
+			// stopped machine's own. Its electrical output joins the shared
+			// generation pool the loads allocate against, its waste heat
+			// lands in the class-matched sink booked exactly once, and its
+			// reactants are drawn only from its own dedicated stores above
+			// their protected reserves - the cell can never reach protected
+			// breathing oxygen because it can only ever see its own oxygen
+			// store, which is refilled only through controlled surplus
+			// transfers that themselves preserve the supplying reserve.
+			// Output is bounded by the installed rating, the dispatch
+			// setpoint, the hydrogen and oxygen actually drawable, and the
+			// product water store's remaining headroom: a backed-up water
+			// destination caps production rather than vanishing product
+			// mass. Cooling is required: a sink at or above the maximum sink
+			// temperature refuses the cell whole - heat with nowhere to go
+			// is heat that cannot be made. Cells run in declaration order.
+			std::vector<double> fuelCellHeatByReservoir(reservoirs.size(), 0.0);
+			double totalFuelCellOutputKW{0.0}, totalFuelCellWasteKW{0.0};
+			for (auto& cell : fuelCells)
+			{
+				auto const disabled = cell.authored.ratedOutputKW <= 0.0;
+				// #415: under automatic dispatch the dispatcher's command for
+				// this tick replaces the authored setpoint; the cell still
+				// enforces its reactant, cooling and product-headroom limits.
+				auto const commanded = disabled
+					? 0.0 : (dispatchAutomatic
+						? cell.dispatchCommandKW
+						: cell.authored.commandedOutputKW);
+				cell.lastCommandedKW = commanded;
+				auto const dtSeconds = static_cast<double>(seconds);
+				auto const o2PerH2 = StationFuelCellOxygenMassPerHydrogenKg;
+				auto const elecKJPerKgH2 = cell.authored.efficiency
+					* StationElectrolysisChemicalEnergyHydrogenKJPerKg;
+				auto const& hydrogen = stores[cell.hydrogenStoreIndex].authored;
+				auto const& oxygen = stores[cell.oxygenStoreIndex].authored;
+				auto const& water = stores[cell.waterStoreIndex].authored;
+				cell.lastOutputKW = 0.0;
+				cell.lastHydrogenKg = 0.0;
+				cell.lastOxygenKg = 0.0;
+				cell.lastWaterKg = 0.0;
+				cell.lastWasteHeatKW = 0.0;
+				cell.lastUnmetOutputKW = 0.0;
+				cell.lastLimiter.clear();
+				cell.lastBlockReason.clear();
+				// The backup clock: usable reactants are the qualified
+				// contents drawable above each store's own protected
+				// reserve, balanced stoichiometrically, converted to the
+				// electrical energy this cell's efficiency can extract and
+				// divided by the reference output - the cell's actual
+				// output this tick, or its installed rating when the cell
+				// is not running. Protected oxygen never counts toward it.
+				auto const publishEndurance = [&]()
+				{
+					auto const remainingH2Kg = std::max(0.0, massToKg(hydrogen.unit,
+						qualified[cell.hydrogenStoreIndex] - hydrogen.protectedReserve));
+					auto const remainingO2Kg = std::max(0.0, massToKg(oxygen.unit,
+						qualified[cell.oxygenStoreIndex] - oxygen.protectedReserve));
+					auto const usableH2Kg = std::min(remainingH2Kg, remainingO2Kg / o2PerH2);
+					auto const referenceKW = cell.lastOutputKW > 0.0
+						? cell.lastOutputKW : cell.authored.ratedOutputKW;
+					cell.enduranceSeconds = referenceKW > 0.0
+						? usableH2Kg * elecKJPerKgH2 / referenceKW : 0.0;
+				};
+				auto const& sink = reservoirs[cell.sinkIndex];
+				cell.lastCoolingAvailable = !disabled
+					&& sink.temperatureC + 1e-9 < cell.authored.maxSinkTemperatureC;
+				if (disabled)
+				{
+					publishEndurance();
+					cell.status = StationTransferStatus::Idle;
+					continue;
+				}
+				if (!cell.lastCoolingAvailable)
+				{
+					cell.lastBlockReason = "cooling is not qualified: sink at or above the maximum sink temperature";
+					cell.lastUnmetOutputKW = commanded;
+					publishEndurance();
+					cell.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				if (commanded <= 0.0)
+				{
+					publishEndurance();
+					cell.status = StationTransferStatus::Idle;
+					continue;
+				}
+				// Every finite axis caps the output the same way: the
+				// largest output the axis can sustain this tick. The
+				// binding one names itself; nothing is silently clamped.
+				auto const h2DrawableKg = std::max(0.0, massToKg(hydrogen.unit,
+					qualified[cell.hydrogenStoreIndex] - hydrogen.protectedReserve));
+				auto const o2DrawableKg = std::max(0.0, massToKg(oxygen.unit,
+					qualified[cell.oxygenStoreIndex] - oxygen.protectedReserve));
+				auto const waterHeadroomKg = std::max(0.0, massToKg(water.unit,
+					water.capacity - (qualified[cell.waterStoreIndex]
+						+ unqualified[cell.waterStoreIndex])));
+				auto const byH2KW = h2DrawableKg * elecKJPerKgH2 / dtSeconds;
+				auto const byO2KW = (o2DrawableKg / o2PerH2) * elecKJPerKgH2 / dtSeconds;
+				auto const byWaterKW = (waterHeadroomKg / (1.0 + o2PerH2))
+					* elecKJPerKgH2 / dtSeconds;
+				double scale = 1.0;
+				std::string limiter;
+				auto const constrain = [&](double capKW, std::string const& reason)
+				{
+					if (capKW >= scale * commanded) return;
+					scale = capKW / commanded;
+					limiter = reason;
+				};
+				constrain(byH2KW, "hydrogen store '" + hydrogen.id
+					+ "' has nothing drawable above its protected reserve");
+				constrain(byO2KW, "oxygen store '" + oxygen.id
+					+ "' has nothing drawable above its protected reserve");
+				constrain(byWaterKW, "product water store '" + water.id
+					+ "' is full: the water has nowhere to go");
+				scale = std::max(0.0, std::min(1.0, scale));
+				cell.lastLimiter = limiter;
+				auto outputKW = commanded * scale;
+				if (outputKW <= 1e-15)
+				{
+					// Nothing can burn this tick: the cell is refused whole,
+					// consumes nothing and delivers nothing, and the whole
+					// commanded output stays visible as unmet service.
+					cell.lastUnmetOutputKW = commanded;
+					cell.lastBlockReason = limiter;
+					publishEndurance();
+					cell.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				// Derive the reaction from the capped output: hydrogen is
+				// the energy-carrying reactant, oxygen rides the declared
+				// stoichiometric ratio, and product water is the sum of
+				// the reactants actually consumed, so the mass ledger
+				// closes by construction. Each flow is clamped to its own
+				// drawable or headroom so a one-ulp roundoff can never
+				// overshoot (#556), and the delivered output is recomputed
+				// from the hydrogen that actually moved - the pool never
+				// receives more than the reactants paid for.
+				auto h2Kg = std::min(outputKW * dtSeconds / elecKJPerKgH2, h2DrawableKg);
+				auto o2Kg = std::min(h2Kg * o2PerH2, o2DrawableKg);
+				h2Kg = std::min(h2Kg, o2Kg / o2PerH2);
+				auto const waterKg = h2Kg + o2Kg;
+				auto const chemicalKJ = h2Kg
+					* StationElectrolysisChemicalEnergyHydrogenKJPerKg;
+				outputKW = cell.authored.efficiency * chemicalKJ / dtSeconds;
+				auto const electricalKJ = outputKW * dtSeconds;
+				auto const wasteKJ = chemicalKJ - electricalKJ;
+				auto const h2Units = std::min(kgToMass(hydrogen.unit, h2Kg),
+					std::max(0.0, qualified[cell.hydrogenStoreIndex] - hydrogen.protectedReserve));
+				auto const h2ActualKg = massToKg(hydrogen.unit, h2Units);
+				auto const o2Units = std::min(kgToMass(oxygen.unit, o2Kg),
+					std::max(0.0, qualified[cell.oxygenStoreIndex] - oxygen.protectedReserve));
+				auto const o2ActualKg = massToKg(oxygen.unit, o2Units);
+				auto const waterUnits = std::min(kgToMass(water.unit, waterKg),
+					std::max(0.0, water.capacity
+						- (qualified[cell.waterStoreIndex] + unqualified[cell.waterStoreIndex])));
+				auto const waterActualKg = massToKg(water.unit, waterUnits);
+				qualified[cell.hydrogenStoreIndex] -= h2Units;
+				flowOut[cell.hydrogenStoreIndex] += h2Units;
+				stagedUnitLoss[hydrogen.unit] += h2Units;
+				qualified[cell.oxygenStoreIndex] -= o2Units;
+				flowOut[cell.oxygenStoreIndex] += o2Units;
+				stagedUnitLoss[oxygen.unit] += o2Units;
+				qualified[cell.waterStoreIndex] += waterUnits;
+				flowIn[cell.waterStoreIndex] += waterUnits;
+				stagedUnitLoss[water.unit] -= waterUnits;
+				// Energy: the reactants' chemical energy left as
+				// electricity into the shared pool or as waste heat into
+				// the sink - booked once, never a third destination.
+				fuelCellHeatByReservoir[cell.sinkIndex] += wasteKJ / dtSeconds;
+				availableGeneration += outputKW;
+				cell.lastOutputKW = outputKW;
+				cell.lastHydrogenKg = h2ActualKg;
+				cell.lastOxygenKg = o2ActualKg;
+				cell.lastWaterKg = waterActualKg;
+				cell.lastWasteHeatKW = wasteKJ / dtSeconds;
+				cell.lastUnmetOutputKW = std::max(0.0, commanded - outputKW);
+				cell.hydrogenConsumedKg += h2ActualKg;
+				cell.oxygenConsumedKg += o2ActualKg;
+				cell.waterProducedKg += waterActualKg;
+				cell.chemicalEnergyKJ += chemicalKJ;
+				cell.electricalKJ += electricalKJ;
+				cell.wasteHeatKJ += wasteKJ;
+				totalFuelCellOutputKW += outputKW;
+				totalFuelCellWasteKW += wasteKJ / dtSeconds;
+				publishEndurance();
+				if (outputKW + 1e-12 >= commanded)
+					cell.status = StationTransferStatus::Full;
+				else cell.status = StationTransferStatus::Partial;
+			}
 			for (auto& generator : generators)
 			{
 				auto const disabled = generator.authored.ratedOutputKW <= 0.0;
@@ -5705,195 +5965,6 @@ namespace core
 				else if (generator.outputKW > 1e-12)
 					generator.status = StationTransferStatus::Partial;
 				else generator.status = StationTransferStatus::Rejected;
-			}
-			// Fuel-cell backup (#406) runs on the supply side alongside the
-			// generators: its electrical output joins the shared generation
-			// pool the loads allocate against, its waste heat lands in the
-			// class-matched sink booked exactly once, and its reactants are
-			// drawn only from its own dedicated stores above their protected
-			// reserves - the cell can never reach protected breathing oxygen
-			// because it can only ever see its own oxygen store, which is
-			// refilled only through controlled surplus transfers that
-			// themselves preserve the supplying reserve. Output is bounded
-			// by the installed rating, the dispatch setpoint, the hydrogen
-			// and oxygen actually drawable, and the product water store's
-			// remaining headroom: a backed-up water destination caps
-			// production rather than vanishing product mass. Cooling is
-			// required: a sink at or above the maximum sink temperature
-			// refuses the cell whole - heat with nowhere to go is heat that
-			// cannot be made. Cells run in declaration order.
-			std::vector<double> fuelCellHeatByReservoir(reservoirs.size(), 0.0);
-			double totalFuelCellOutputKW{0.0}, totalFuelCellWasteKW{0.0};
-			for (auto& cell : fuelCells)
-			{
-				auto const disabled = cell.authored.ratedOutputKW <= 0.0;
-				// #415: under automatic dispatch the dispatcher's command for
-				// this tick replaces the authored setpoint; the cell still
-				// enforces its reactant, cooling and product-headroom limits.
-				auto const commanded = disabled
-					? 0.0 : (dispatchAutomatic
-						? cell.dispatchCommandKW
-						: cell.authored.commandedOutputKW);
-				cell.lastCommandedKW = commanded;
-				auto const dtSeconds = static_cast<double>(seconds);
-				auto const o2PerH2 = StationFuelCellOxygenMassPerHydrogenKg;
-				auto const elecKJPerKgH2 = cell.authored.efficiency
-					* StationElectrolysisChemicalEnergyHydrogenKJPerKg;
-				auto const& hydrogen = stores[cell.hydrogenStoreIndex].authored;
-				auto const& oxygen = stores[cell.oxygenStoreIndex].authored;
-				auto const& water = stores[cell.waterStoreIndex].authored;
-				cell.lastOutputKW = 0.0;
-				cell.lastHydrogenKg = 0.0;
-				cell.lastOxygenKg = 0.0;
-				cell.lastWaterKg = 0.0;
-				cell.lastWasteHeatKW = 0.0;
-				cell.lastUnmetOutputKW = 0.0;
-				cell.lastLimiter.clear();
-				cell.lastBlockReason.clear();
-				// The backup clock: usable reactants are the qualified
-				// contents drawable above each store's own protected
-				// reserve, balanced stoichiometrically, converted to the
-				// electrical energy this cell's efficiency can extract and
-				// divided by the reference output - the cell's actual
-				// output this tick, or its installed rating when the cell
-				// is not running. Protected oxygen never counts toward it.
-				auto const publishEndurance = [&]()
-				{
-					auto const remainingH2Kg = std::max(0.0, massToKg(hydrogen.unit,
-						qualified[cell.hydrogenStoreIndex] - hydrogen.protectedReserve));
-					auto const remainingO2Kg = std::max(0.0, massToKg(oxygen.unit,
-						qualified[cell.oxygenStoreIndex] - oxygen.protectedReserve));
-					auto const usableH2Kg = std::min(remainingH2Kg, remainingO2Kg / o2PerH2);
-					auto const referenceKW = cell.lastOutputKW > 0.0
-						? cell.lastOutputKW : cell.authored.ratedOutputKW;
-					cell.enduranceSeconds = referenceKW > 0.0
-						? usableH2Kg * elecKJPerKgH2 / referenceKW : 0.0;
-				};
-				auto const& sink = reservoirs[cell.sinkIndex];
-				cell.lastCoolingAvailable = !disabled
-					&& sink.temperatureC + 1e-9 < cell.authored.maxSinkTemperatureC;
-				if (disabled)
-				{
-					publishEndurance();
-					cell.status = StationTransferStatus::Idle;
-					continue;
-				}
-				if (!cell.lastCoolingAvailable)
-				{
-					cell.lastBlockReason = "cooling is not qualified: sink at or above the maximum sink temperature";
-					cell.lastUnmetOutputKW = commanded;
-					publishEndurance();
-					cell.status = StationTransferStatus::Rejected;
-					continue;
-				}
-				if (commanded <= 0.0)
-				{
-					publishEndurance();
-					cell.status = StationTransferStatus::Idle;
-					continue;
-				}
-				// Every finite axis caps the output the same way: the
-				// largest output the axis can sustain this tick. The
-				// binding one names itself; nothing is silently clamped.
-				auto const h2DrawableKg = std::max(0.0, massToKg(hydrogen.unit,
-					qualified[cell.hydrogenStoreIndex] - hydrogen.protectedReserve));
-				auto const o2DrawableKg = std::max(0.0, massToKg(oxygen.unit,
-					qualified[cell.oxygenStoreIndex] - oxygen.protectedReserve));
-				auto const waterHeadroomKg = std::max(0.0, massToKg(water.unit,
-					water.capacity - (qualified[cell.waterStoreIndex]
-						+ unqualified[cell.waterStoreIndex])));
-				auto const byH2KW = h2DrawableKg * elecKJPerKgH2 / dtSeconds;
-				auto const byO2KW = (o2DrawableKg / o2PerH2) * elecKJPerKgH2 / dtSeconds;
-				auto const byWaterKW = (waterHeadroomKg / (1.0 + o2PerH2))
-					* elecKJPerKgH2 / dtSeconds;
-				double scale = 1.0;
-				std::string limiter;
-				auto const constrain = [&](double capKW, std::string const& reason)
-				{
-					if (capKW >= scale * commanded) return;
-					scale = capKW / commanded;
-					limiter = reason;
-				};
-				constrain(byH2KW, "hydrogen store '" + hydrogen.id
-					+ "' has nothing drawable above its protected reserve");
-				constrain(byO2KW, "oxygen store '" + oxygen.id
-					+ "' has nothing drawable above its protected reserve");
-				constrain(byWaterKW, "product water store '" + water.id
-					+ "' is full: the water has nowhere to go");
-				scale = std::max(0.0, std::min(1.0, scale));
-				cell.lastLimiter = limiter;
-				auto outputKW = commanded * scale;
-				if (outputKW <= 1e-15)
-				{
-					// Nothing can burn this tick: the cell is refused whole,
-					// consumes nothing and delivers nothing, and the whole
-					// commanded output stays visible as unmet service.
-					cell.lastUnmetOutputKW = commanded;
-					cell.lastBlockReason = limiter;
-					publishEndurance();
-					cell.status = StationTransferStatus::Rejected;
-					continue;
-				}
-				// Derive the reaction from the capped output: hydrogen is
-				// the energy-carrying reactant, oxygen rides the declared
-				// stoichiometric ratio, and product water is the sum of
-				// the reactants actually consumed, so the mass ledger
-				// closes by construction. Each flow is clamped to its own
-				// drawable or headroom so a one-ulp roundoff can never
-				// overshoot (#556), and the delivered output is recomputed
-				// from the hydrogen that actually moved - the pool never
-				// receives more than the reactants paid for.
-				auto h2Kg = std::min(outputKW * dtSeconds / elecKJPerKgH2, h2DrawableKg);
-				auto o2Kg = std::min(h2Kg * o2PerH2, o2DrawableKg);
-				h2Kg = std::min(h2Kg, o2Kg / o2PerH2);
-				auto const waterKg = h2Kg + o2Kg;
-				auto const chemicalKJ = h2Kg
-					* StationElectrolysisChemicalEnergyHydrogenKJPerKg;
-				outputKW = cell.authored.efficiency * chemicalKJ / dtSeconds;
-				auto const electricalKJ = outputKW * dtSeconds;
-				auto const wasteKJ = chemicalKJ - electricalKJ;
-				auto const h2Units = std::min(kgToMass(hydrogen.unit, h2Kg),
-					std::max(0.0, qualified[cell.hydrogenStoreIndex] - hydrogen.protectedReserve));
-				auto const h2ActualKg = massToKg(hydrogen.unit, h2Units);
-				auto const o2Units = std::min(kgToMass(oxygen.unit, o2Kg),
-					std::max(0.0, qualified[cell.oxygenStoreIndex] - oxygen.protectedReserve));
-				auto const o2ActualKg = massToKg(oxygen.unit, o2Units);
-				auto const waterUnits = std::min(kgToMass(water.unit, waterKg),
-					std::max(0.0, water.capacity
-						- (qualified[cell.waterStoreIndex] + unqualified[cell.waterStoreIndex])));
-				auto const waterActualKg = massToKg(water.unit, waterUnits);
-				qualified[cell.hydrogenStoreIndex] -= h2Units;
-				flowOut[cell.hydrogenStoreIndex] += h2Units;
-				stagedUnitLoss[hydrogen.unit] += h2Units;
-				qualified[cell.oxygenStoreIndex] -= o2Units;
-				flowOut[cell.oxygenStoreIndex] += o2Units;
-				stagedUnitLoss[oxygen.unit] += o2Units;
-				qualified[cell.waterStoreIndex] += waterUnits;
-				flowIn[cell.waterStoreIndex] += waterUnits;
-				stagedUnitLoss[water.unit] -= waterUnits;
-				// Energy: the reactants' chemical energy left as
-				// electricity into the shared pool or as waste heat into
-				// the sink - booked once, never a third destination.
-				fuelCellHeatByReservoir[cell.sinkIndex] += wasteKJ / dtSeconds;
-				availableGeneration += outputKW;
-				cell.lastOutputKW = outputKW;
-				cell.lastHydrogenKg = h2ActualKg;
-				cell.lastOxygenKg = o2ActualKg;
-				cell.lastWaterKg = waterActualKg;
-				cell.lastWasteHeatKW = wasteKJ / dtSeconds;
-				cell.lastUnmetOutputKW = std::max(0.0, commanded - outputKW);
-				cell.hydrogenConsumedKg += h2ActualKg;
-				cell.oxygenConsumedKg += o2ActualKg;
-				cell.waterProducedKg += waterActualKg;
-				cell.chemicalEnergyKJ += chemicalKJ;
-				cell.electricalKJ += electricalKJ;
-				cell.wasteHeatKJ += wasteKJ;
-				totalFuelCellOutputKW += outputKW;
-				totalFuelCellWasteKW += wasteKJ / dtSeconds;
-				publishEndurance();
-				if (outputKW + 1e-12 >= commanded)
-					cell.status = StationTransferStatus::Full;
-				else cell.status = StationTransferStatus::Partial;
 			}
 			// #554: declared material exchanges are operation dependencies.
 			// The material-feasible operating fraction is the largest fraction
