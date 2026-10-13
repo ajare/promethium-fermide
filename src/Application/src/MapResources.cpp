@@ -1,6 +1,7 @@
 #include <stdexcept>
 
 #include <willpower/application/resourcesystem/ResourceManager.h>
+#include <willpower/application/resourcesystem/ImageSetResource.h>
 
 #include "Map.h"
 #include "MapResources.h"
@@ -24,7 +25,7 @@ void MapResources::scan() {
   mManager.scanLocations();
 }
 
-void MapResources::load() {
+void MapResources::load(std::function<void()> postFunction) {
   if (mMap) return;
   auto map = std::dynamic_pointer_cast<Map>(mManager.getResource("World", "World"));
   if (!map) throw std::runtime_error("World/World must be an Application Map");
@@ -36,13 +37,42 @@ void MapResources::load() {
     mManager.loadResource(mMap);
     if (!mMap->getWorld() || !mManager.isResourceLoaded(mMap))
       throw std::runtime_error("World/World did not finish loading");
+    if (postFunction) postFunction();
   } catch (...) {
     unload();
     throw;
   }
 }
 
+void MapResources::loadAtlases() {
+  if (!mMap || !mManager.isResourceLoaded(mMap))
+    throw std::runtime_error("Atlas post work requires a loaded Map");
+  constexpr std::array names{"SectorAtlas", "ObjectAtlas"};
+  for (std::size_t index = 0; index < names.size(); ++index) {
+    if (mAtlases[index]) continue;
+    auto atlas = std::dynamic_pointer_cast<wp::application::resourcesystem::ImageSetResource>(
+        mManager.getResource(names[index]));
+    if (!atlas) throw std::runtime_error("Application atlas must be an ImageSet");
+    atlas->getImage(); // Validate cleanup's dependency before acquisition.
+    mManager.acquireResource(atlas);
+    mAtlases[index] = atlas;
+    mManager.createResource(atlas);
+    mManager.loadResource(atlas);
+    if (!mManager.isResourceLoaded(atlas) || !mManager.isResourceLoaded(atlas->getImage()))
+      throw std::runtime_error("Application atlas did not finish loading");
+  }
+}
+
 void MapResources::unload() {
+  for (auto it = mAtlases.rbegin(); it != mAtlases.rend(); ++it) {
+    if (!*it) continue;
+    auto atlas = std::static_pointer_cast<wp::application::resourcesystem::ImageSetResource>(
+        std::move(*it));
+    auto image = atlas->getImage();
+    mManager.releaseResource(atlas);
+    if (!mManager.isResourceLoaded(atlas)) mManager.destroyResources({atlas});
+    if (!mManager.isResourceLoaded(image)) mManager.destroyResources({image});
+  }
   if (!mMap) return;
   auto map = std::move(mMap); // Release our acquisition exactly once.
   auto source = map->getDependentResource("World");

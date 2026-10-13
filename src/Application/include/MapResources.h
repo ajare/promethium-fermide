@@ -1,6 +1,9 @@
 #pragma once
 
+#include <array>
+#include <functional>
 #include <memory>
+#include <willpower/application/resourcesystem/Resource.h>
 
 #include "Application.h"
 
@@ -13,6 +16,7 @@ class PF_APPLICATION_API MapResources final {
   wp::application::resourcesystem::ResourceManager& mManager;
   wp::Logger* mLogger;
   std::shared_ptr<Map> mMap;
+  std::array<wp::application::resourcesystem::ResourcePtr, 2> mAtlases;
 
 public:
   explicit MapResources(wp::application::resourcesystem::ResourceManager& manager,
@@ -24,7 +28,10 @@ public:
   Map* getMap() const { return mMap.get(); }
 
   void scan();
-  void load();
+  // Run graphics-dependent post work after the World has finished loading.
+  // Any post-work failure rolls back the entire MapLoad acquisition.
+  void load(std::function<void()> postFunction = {});
+  void loadAtlases();
   void unload();
 };
 

@@ -183,8 +183,10 @@ public:
             for (auto const& set : {mSectorSet, mObjectSet}) {
                 if (!std::dynamic_pointer_cast<resources::ImageSetResource>(set))
                     throw std::runtime_error("Application atlas must be an ImageSet");
-                mResources.createResource(set);
-                mResources.loadResource(set);
+                if (!mResources.isResourceLoaded(set) ||
+                    !mResources.isResourceLoaded(
+                        std::static_pointer_cast<resources::ImageSetResource>(set)->getImage()))
+                    throw std::runtime_error("Application atlases must be loaded by MapLoad");
             }
             installAtlasDefinitions();
         } catch (...) { cleanup(); throw; }

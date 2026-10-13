@@ -7,17 +7,102 @@
 #include <applib/StateTransitionData.h>
 #include <willpower/application/StateExceptions.h>
 #include <willpower/application/resourcesystem/ResourceManager.h>
+#include <willpower/application/resourcesystem/ImageResource.h>
+#include <willpower/application/resourcesystem/ImageSetResource.h>
 #include <core/World.h>
 #include <core/Agent.h>
 #include <cmath>
 
 #include "Application.h"
 #include "Map.h"
+#include "MapResources.h"
+#include "StateLifecycle.h"
 #include "DirectoryResourceLocation.h"
 
 namespace {
 void require(bool condition, char const* message) {
   if (!condition) throw std::runtime_error(message);
+}
+
+// Preserve the production ImageSet/dependency path, replacing only GPU upload.
+class HeadlessAtlasImage final : public wp::application::resourcesystem::ImageResource {
+  wp::application::resourcesystem::ResourceManager& mManager;
+  bool& mFail;
+  using Resource::parseData;
+  void create(wp::application::resourcesystem::DataStreamPtr data,
+              wp::application::resourcesystem::ResourceManager*) override {
+    parseData(data); // Decode the real PNG; no definition is needed for this test resource.
+  }
+  bool load(mpp::RenderSystem*, mpp::ResourceManager*) override {
+    auto map = std::dynamic_pointer_cast<pf::application::Map>(mManager.getResource("World", "World"));
+    require(map && map->getWorld() && mManager.isResourceLoaded(map),
+            "Atlas post work must run after Map loading completes");
+    if (mFail && getName() == "ObjectAtlasImage")
+      throw std::runtime_error("Injected atlas upload failure");
+    return true;
+  }
+  bool unload(mpp::RenderSystem*, mpp::ResourceManager*) override { return true; }
+public:
+  HeadlessAtlasImage(std::string const& name,
+                     wp::application::resourcesystem::ResourceManager& manager, bool& fail,
+                     wp::application::resourcesystem::ResourceLocation* location)
+      : ImageResource(name, "", name == "SectorAtlasImage"
+            ? "textures/sector-atlas-draft.png" : "textures/objects.png", {}, location),
+        mManager(manager), mFail(fail) {}
+};
+
+void checkAtlases(wp::application::resourcesystem::ResourceManager& manager, bool loaded) {
+  for (auto name : {"SectorAtlas", "ObjectAtlas"}) {
+    auto set = std::dynamic_pointer_cast<wp::application::resourcesystem::ImageSetResource>(
+        manager.getResource(name));
+    // Other manifest resources retain ObjectAtlas dependencies even when not
+    // used by this World; MapUnload must respect those acquisitions.
+    if (!loaded && std::string_view(name) == "ObjectAtlas") {
+      require(set && manager.isResourceLoaded(set) == manager.isResourceLoaded(set->getImage()),
+              "Shared Object atlas and image must retain consistent loaded state");
+      continue;
+    }
+    require(set && manager.isResourceLoaded(set) == loaded &&
+                manager.isResourceCreated(set) == loaded &&
+                manager.isResourceLoaded(set->getImage()) == loaded &&
+                manager.isResourceCreated(set->getImage()) == loaded,
+            "Atlas resources and images must follow MapLoad/MapUnload lifetime");
+  }
+}
+
+void checkAtlasFailure(wp::application::resourcesystem::ResourceManager& manager, bool& fail) {
+  pf::application::MapResources resources(manager);
+  resources.scan();
+  applib::StateTransitionData arguments;
+  arguments.userData = &resources;
+  pf::application::StateMapLoad state;
+  state._resume(&arguments);
+  fail = true;
+  bool rejected = false;
+  try { state._update(0.f); }
+  catch (wp::application::ReturnFromStateException const&) {
+    throw std::runtime_error("Failed post work must not transition to Play");
+  }
+  catch (std::runtime_error const&) { rejected = true; }
+  require(rejected && !resources.getMap(), "Failed atlas post work must roll back MapLoad");
+  auto map = manager.getResource("World", "World");
+  require(!manager.isResourceCreated(map) && !manager.isResourceLoaded(map) &&
+              !manager.isResourceCreated(map->getDependentResource("World")),
+          "Failed atlas post work must destroy Map and World data");
+  checkAtlases(manager, false);
+  auto objects = manager.getResource("ObjectAtlas");
+  require(!manager.isResourceCreated(objects) && !manager.isResourceLoaded(objects) &&
+              !manager.isResourceCreated(objects->getDependentResource("Image")),
+          "Failed Object atlas upload must destroy partially created atlas data");
+  fail = false;
+  bool returned = false;
+  try { state._update(0.f); }
+  catch (wp::application::ReturnFromStateException const&) { returned = true; }
+  require(returned && resources.getMap(), "MapLoad must permit retry after post-work failure");
+  checkAtlases(manager, true);
+  resources.unload();
+  resources.unload();
+  checkAtlases(manager, false);
 }
 
 void requireNoMap(applib::StateTransitionData const& data) {
@@ -113,6 +198,7 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
       if (child->getName() == "Play") {
         require(map && manager.isResourceLoaded(map) && map->getWorld(),
                 "Map must remain loaded throughout Play");
+        checkAtlases(manager, true);
         auto const tick = map->getWorld()->getSimulationTick();
         require(!map->getWorld()->isSimulationPaused() &&
                     map->getWorld()->getSimulationTimeScale() == 1.0,
@@ -133,6 +219,7 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
           require(worldLifetime.expired() && !map->getWorld() &&
                       !manager.isResourceLoaded(map) && !manager.isResourceCreated(map),
                   "Early Controller destruction must release and destroy the Map");
+          checkAtlases(manager, false);
           return;
         }
         child->_injectKeyInput(wp::application::KeyEvent::Released,
@@ -157,9 +244,11 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
     if (child->getName() == "Load") {
       map = std::dynamic_pointer_cast<pf::application::Map>(manager.getResource("World", "World"));
       require(map && !map->getWorld(), "Load must scan but not create the Map");
+      checkAtlases(manager, false);
     } else if (child->getName() == "MapLoad") {
       require(map->getWorld() && manager.isResourceLoaded(map),
               "MapLoad must create and load the World resource");
+      checkAtlases(manager, true);
       require(map->getWorld()->getSimulationTick() == 0,
               "Loading must not advance the simulation");
       // Play must override a paused/non-normal runtime configuration on entry.
@@ -172,6 +261,7 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
                   !manager.isResourceLoaded(map) && !manager.isResourceCreated(map) &&
                   !manager.isResourceLoaded(source) && !manager.isResourceCreated(source),
               "Unloading must release both Map and its source data");
+      checkAtlases(manager, false);
     }
   }
 
@@ -210,12 +300,17 @@ int main(int argc, char** argv) {
       wp::Logger logger;
       wp::application::resourcesystem::ResourceManager manager(nullptr, nullptr, nullptr, &logger);
       dllOnEntry(&logger, &manager, nullptr);
+      DirectoryResourceLocation* location = nullptr;
       manager.addResourceLocationFactory("Directory",
-          [&logger](std::string const& path, std::string const& definition)
+          [&logger, &location](std::string const& path, std::string const& definition)
               -> wp::application::resourcesystem::ResourceLocation* {
-            return new DirectoryResourceLocation(&logger, path, definition);
+            location = new DirectoryResourceLocation(&logger, path, definition);
+            return location;
           });
       manager.addResourceLocation("Directory", argv[1], "Resources.yaml");
+      bool failAtlas = false;
+      for (auto name : {"SectorAtlasImage", "ObjectAtlasImage"})
+        manager.addResource(std::make_shared<HeadlessAtlasImage>(name, manager, failAtlas, location));
       std::array<wp::application::StateFactory*, 6> factories{};
       for (std::size_t index = 0; index < names.size(); ++index) {
         factories[index] = dllGetNextStateFactory();
@@ -224,6 +319,7 @@ int main(int argc, char** argv) {
       }
       require(!dllGetNextStateFactory(), "Only six state factories expected");
       require(!dllGetNextStateFactory(), "Enumeration must stay exhausted");
+      checkAtlasFailure(manager, failAtlas);
       checkFlow(factories, manager);
       checkFlow(factories, manager); // Recreate destroyed data with the same manager.
       checkFlow(factories, manager, true);

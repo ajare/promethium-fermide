@@ -10,15 +10,18 @@ There is no map-transition state. The lifecycle steps run synchronously on their
 first update and return to Controller:
 
 - Load scans the application resource manifest.
-- MapLoad acquires, creates, and loads `World/World` and its World resource dependency.
+- MapLoad acquires, creates, and loads `World/World` and its World resource dependency,
+  then runs a post function to acquire, create, and load the Sector/Object atlas
+  ImageSets and their images on the application thread before returning to Controller.
 - Play keeps the Map alive, starts its simulation at normal (1×) speed, and
   updates and renders its World.
-- MapUnload releases the Map, clears its resource binding, and destroys the Map
-  and World resource data when no other consumer holds them.
+- MapUnload releases the atlases and their images, releases the Map, clears its
+  resource binding, and destroys resource data when no other consumer holds them.
 - Unload performs idempotent final cleanup.
 
 Controller owns a `MapResources` guard, borrowed by children through transition
-`userData`, so a loading failure or early application exit also releases the Map.
+`userData`, so a loading or post-function failure or early application exit also
+releases the Map and any acquired atlases.
 It is destroyed before Launcher's resource manager. A subsequent run recreates
 and deserializes the World rather than retaining stale created data.
 
@@ -34,8 +37,9 @@ frame time in seconds; suspended states do not advance it.
 The renderer borrows Launcher's MPP services and uses the resource-managed
 `SectorAtlas` and `ObjectAtlas` ImageSets from the same `Resources.yaml`. GPU
 batches are retained by compatible pipeline and submitted in command order with
-native aperture scissors. Play releases its batches and atlas acquisitions before
-MapUnload. Rendering has not been extracted into a module shared with the editor:
+native aperture scissors. The renderer requires atlases already loaded by MapLoad;
+it never creates or loads resources. Play releases its batches and borrowed atlas
+acquisitions before MapUnload releases the guard's atlas acquisitions. Rendering has not been extracted into a module shared with the editor:
 the two implementations are intentionally independent so they can diverge.
 
 Assign the editor's built-in **Player controlled** behaviour to any Agent to

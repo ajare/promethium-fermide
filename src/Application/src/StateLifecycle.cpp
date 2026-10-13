@@ -25,7 +25,9 @@ void StateLifecycle::updateImpl(float) {
   auto* resources = static_cast<MapResources*>(mTransitionData.userData);
   if (!resources) throw std::runtime_error("Missing application resource lifecycle");
   if (getName() == "Load") resources->scan();
-  else if (getName() == "MapLoad") resources->load();
+  else if (getName() == "MapLoad") {
+    resources->load([resources] { resources->loadAtlases(); });
+  }
   else if (getName() == "MapUnload" || getName() == "Unload") resources->unload();
   throw wp::application::ReturnFromStateException(&mTransitionData);
 }
