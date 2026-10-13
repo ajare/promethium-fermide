@@ -4995,6 +4995,25 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     concentrate.capacity - (concentrate.qualified + concentrate.unqualified))
                 local drawableConsumable = math.max(0,
                     consumable.qualified - consumable.protected_reserve)
+                -- #574: the release-clearance kit may be the same store
+                -- as the treatment consumable. One kilogram of a shared
+                -- kit cannot pay both roles twice, so the tick reserves
+                -- the combined draw - the treatment dose plus the
+                -- clearance dose the treated output will demand at this
+                -- scale - and the clearance test below runs against the
+                -- inventory remaining after the treatment draw. A kit
+                -- that covers each role alone but not their sum
+                -- throttles the process to the scale it can pay for
+                -- whole; it is never overdrawn into a negative
+                -- inventory, and the protected reserve stays untouched
+                -- because the reservation is made above it.
+                local sharedKit = treatment.clearance ~= nil
+                    and treatment.clearance == treatment.consumable
+                local kitDemand = treatment.consumablePerKg * fullKg
+                if sharedKit then
+                    kitDemand = kitDemand
+                        + treatment.clearancePerKg * fullKg * treatment.recoveryRatio
+                end
                 local scale = 1.0
                 local limiter = ''
                 local function constrain(available, required, reason)
@@ -5015,8 +5034,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     fromKg(concentrate.unit, fullKg * (1 - treatment.recoveryRatio)),
                     "concentrate store '" .. concentrate.id
                         .. "' is full: the retained stream has nowhere to go")
-                constrain(drawableConsumable, treatment.consumablePerKg * fullKg,
-                    "treatment consumable store '" .. consumable.id .. "' is exhausted")
+                if sharedKit then
+                    constrain(drawableConsumable, kitDemand,
+                        "shared treatment-consumable and release-clearance store '"
+                            .. consumable.id
+                            .. "' cannot cover the combined treatment and clearance draw")
+                else
+                    constrain(drawableConsumable, kitDemand,
+                        "treatment consumable store '" .. consumable.id .. "' is exhausted")
+                end
                 if scale < 0 then scale = 0 end
                 if scale > 1 then scale = 1 end
                 treatment.lastScale = scale
@@ -5052,6 +5078,18 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             concentrateHeadroom)
                         local concentrateKg = toKg(concentrate.unit, concentrateUnits)
                         source.qualified = source.qualified - processedUnits
+                        -- The treatment consumable is drawn before the
+                        -- clearance test is evaluated (#574): when the
+                        -- kit is one store shared by both roles, the
+                        -- test must see the inventory that remains
+                        -- after treatment, never the stock the
+                        -- treatment draw is already spending.
+                        treatment.lastConsumableRequested =
+                            treatment.consumablePerKg * processedKg
+                        local consumableUsed = math.min(treatment.lastConsumableRequested,
+                            drawableConsumable)
+                        consumable.qualified = consumable.qualified - consumableUsed
+                        treatment.lastConsumableUsed = consumableUsed
                         -- Quality is three distinct gates (#412):
                         -- filtration ran with the process, the full rated
                         -- energy dose is the treatment evidence, and the
@@ -5088,11 +5126,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         -- on the unqualified side of its store and stays
                         -- accounted until a disposal capability exists.
                         concentrate.unqualified = concentrate.unqualified + concentrateUnits
-                        treatment.lastConsumableRequested = treatment.consumablePerKg * processedKg
-                        local consumableUsed = math.min(treatment.lastConsumableRequested,
-                            drawableConsumable)
-                        consumable.qualified = consumable.qualified - consumableUsed
-                        treatment.lastConsumableUsed = consumableUsed
                         -- The clearance test is spent only when it runs
                         -- and passes; a held batch consumed nothing, so
                         -- the kit stays available for the next tick.

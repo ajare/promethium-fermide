@@ -9503,6 +9503,125 @@ namespace
 			require(findStore(snap, "hazClearance").currentQualified == 5.0,
 				"the clearance store moved without a test running");
 		}
+		// Shared treatment/clearance kit (#574): the release-clearance
+		// store may be the same store as the treatment consumable - one
+		// kit that both runs and clears the process. The tick reserves
+		// the combined draw and tests clearance against the inventory
+		// remaining after treatment, so a kit that covers each role
+		// alone but not their sum throttles the process to the scale
+		// it can pay for whole instead of overdrawing the shared stock
+		// into a terminal failure. The alias is a valid configuration;
+		// no valid shortage may go negative, and the protected reserve
+		// is never spent.
+		auto sharedKitStores = [&](double kitStarting, double kitReserve)
+		{
+			auto stores = hazStores(0.0);
+			for (auto& entry : stores)
+				if (entry.id == "hazConsumable")
+				{
+					entry.startingQualified = kitStarting;
+					entry.protectedReserve = kitReserve;
+				}
+			return stores;
+		};
+		{
+			// Shared stock above the combined demand: the treatment runs
+			// at full rated scale, both roles are paid from the shared
+			// kit, and each draw stays separately accounted.
+			core::World world("SharedKitCovered", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(hazConfigure(world, sharedKitStores(1.0, 0.0),
+				{ hazTreatment("plant", "hazConsumable", 0.002) },
+				{ }, 20.0).first,
+				"the shared treatment/clearance kit alias was refused at configuration");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "shared-kit-covered run failed");
+			auto const elapsed = 60.0 * dt;
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& plant = snap.waterTreatments[0];
+			auto const processed = 0.005 * elapsed;
+			auto const treated = processed * 0.8;
+			require(plant.qualityAccepted && plant.releaseCleared
+				&& approx(plant.acceptedKg, treated) && approx(plant.heldKg, 0.0),
+				"the shared kit did not release the treated output at full scale");
+			require(approx(plant.consumablesUsed, processed * 0.01),
+				"the treatment-role draw did not track the processed mass");
+			require(approx(plant.clearanceUsedTotal, treated * 0.002),
+				"the clearance-role draw did not track the released mass");
+			require(approx(findStore(snap, "hazConsumable").currentQualified,
+				1.0 - processed * 0.01 - treated * 0.002),
+				"the shared kit was not drawn by exactly the two roles' sum");
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
+		}
+		{
+			// Shared stock below the combined demand: the kit covers each
+			// role's full-scale draw alone but not their sum. The process
+			// throttles to the scale the shared kit can pay for whole,
+			// releases that output, drains the drawable kit exactly, and
+			// then refuses - never overdrawing into a negative inventory
+			// or a terminal conservation failure. These are the reviewed
+			// ticket's reproducer numbers.
+			core::World world("SharedKitThrottled", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto treatment = hazTreatment("plant", "hazConsumable", 1.0);
+			treatment.throughputKgPerS = 1.0;
+			treatment.recoveryRatio = 1.0;
+			treatment.specificEnergyKWhPerKg = 0.0;
+			treatment.consumablePerKg = 1.0;
+			require(hazConfigure(world, sharedKitStores(0.02, 0.0),
+				{ treatment }, { }, 20.0).first,
+				"the throttled shared-kit setup was refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "shared-kit-throttled run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& plant = snap.waterTreatments[0];
+			require(approx(plant.acceptedKg, 0.01) && approx(plant.heldKg, 0.0),
+				"the throttled shared-kit run did not release exactly the paid-for output");
+			require(approx(plant.consumablesUsed, 0.01)
+				&& approx(plant.clearanceUsedTotal, 0.01),
+				"the two roles' draws did not each account for the paid-for mass");
+			require(findStore(snap, "hazConsumable").currentQualified >= 0.0
+				&& approx(findStore(snap, "hazConsumable").currentQualified, 0.0),
+				"the shared kit was overdrawn below zero");
+			require(plant.scale == 0.0
+				&& plant.limiter.find("shared treatment-consumable and release-clearance store")
+					!= std::string::npos,
+				"the exhausted shared kit is not reported as the limiter");
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
+		}
+		{
+			// The protected reserve is never spent: the reservation is
+			// made above it, so the process drains only the drawable
+			// share and the reserve stays whole behind it.
+			core::World world("SharedKitReserve", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto treatment = hazTreatment("plant", "hazConsumable", 1.0);
+			treatment.throughputKgPerS = 1.0;
+			treatment.recoveryRatio = 1.0;
+			treatment.specificEnergyKWhPerKg = 0.0;
+			treatment.consumablePerKg = 1.0;
+			require(hazConfigure(world, sharedKitStores(0.02, 0.01),
+				{ treatment }, { }, 20.0).first,
+				"the reserve-protected shared-kit setup was refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "reserve-protected shared-kit run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& plant = snap.waterTreatments[0];
+			require(approx(plant.acceptedKg, 0.005) && approx(plant.heldKg, 0.0),
+				"the reserve-protected run did not release the drawable-paid output");
+			require(approx(plant.consumablesUsed + plant.clearanceUsedTotal, 0.01),
+				"the combined draw exceeded the drawable share above the reserve");
+			require(findStore(snap, "hazConsumable").currentQualified >= 0.01 - 1e-9
+				&& approx(findStore(snap, "hazConsumable").currentQualified, 0.01),
+				"the protected reserve was not preserved intact behind the draw");
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
+		}
 		// Heat-only interfaces: a hazardous coolant loop exchanges heat
 		// with its reservoir and its freeze heater runs, but the loop's
 		// coolant inventory never changes and no Resource store is ever
