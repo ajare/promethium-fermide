@@ -7,6 +7,7 @@
 #include <optional>
 
 #include "DrawTypes.h"
+#include "PlayerTransportSelectorDrawing.h"
 
 
 #include "core/Defines.h"
@@ -1660,6 +1661,13 @@ void renderWorld(shared_ptr<const core::World> world, WorldDrawList* drawList)
 		}
 	}
 
+	if (auto selector = world->getPlayerTransportSelector())
+	{
+		auto anchor = selector->anchor; transformPosition(anchor);
+		pf::drawPlayerTransportSelector(*selector, anchor.x, anchor.y,
+			[&](float x0, float y0, float x1, float y1, uint32_t colour) { drawList->AddRectFilled({x0,y0}, {x1,y1}, colour); },
+			[&](float x0, float y0, float x1, float y1, uint32_t colour) { drawList->AddRect({x0,y0}, {x1,y1}, colour); });
+	}
 	drawList->PopClipRect();
 }
 

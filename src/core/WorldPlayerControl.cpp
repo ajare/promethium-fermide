@@ -13,6 +13,9 @@
 #include "core/LadderEdge.h"
 #include "core/LadderVertex.h"
 #include "core/SectorEdge.h"
+#include "core/LiftMountEdge.h"
+#include "core/Lift.h"
+#include "core/Shuttle.h"
 
 #include <algorithm>
 #include <cmath>
@@ -139,17 +142,19 @@ namespace core
 				continue;
 			}
 			auto door = ordinary->getDoor();
-			if (typeid(*door) != typeid(Door) || door->isLiftOwned() || door->isShuttleOwned()
-				|| !door->getFrontSector() || !door->getBackSector()
-				|| !isLocationLike(door->getFrontSector()->getType())
-				|| !isLocationLike(door->getBackSector()->getType())) continue;
+			bool const transport = door->isLiftOwned() || door->isShuttleOwned();
+			if (typeid(*door) != typeid(Door) || !door->getFrontSector() || !door->getBackSector()
+				|| (!transport && (!isLocationLike(door->getFrontSector()->getType())
+					|| !isLocationLike(door->getBackSector()->getType())))) continue;
 			auto source = edge->getVertex(0), destination = edge->getVertex(1);
 			if (source->getSector().get() != agent->getSector()) std::swap(source, destination);
 			if (source->getSector().get() != agent->getSector()
 				|| std::abs(position.y - door->getPosition().y) > PoseFitTolerance
 				|| position.x < door->getPosition().x
 				|| position.x > door->getPosition().x + door->getSize().x
-				|| agentForbidsEdge(agent, *edge, TraversalKind::Door)) continue;
+				|| agentForbidsEdge(agent, *edge, transport
+					? (door->isLiftOwned() ? TraversalKind::Lift : TraversalKind::Shuttle)
+					: TraversalKind::Door)) continue;
 			auto resource = mTraversalResources.find(door->getTraversalResourceId());
 			if (!resource || !resource->mEnabled) continue;
 			auto const halfWidth = agent->getPoseEnvelope(Pose::Standing).value_or(Vector2{}).x * .5f;
@@ -163,10 +168,12 @@ namespace core
 				&& position.x - halfWidth >= door->getPosition().x - PoseFitTolerance
 				&& position.x + halfWidth <= door->getPosition().x + door->getSize().x + PoseFitTolerance
 				&& canAgentAccessLocation(*destination->getSector(), *agent)
+				&& (!transport || !isLocationLike(destination->getSector()->getType())
+					|| playerTransportLandingSupported(*destination->getSector(), position, halfWidth))
 				&& agentAdheresToDoorPermission(door->getTraversalResourceId(),
 					SectorId{uint64_t(agent->getSector()->getIndex()) + 1}, id);
 			// Player geometry replaces distance, not capability or authorization.
-			bool const openable = door->getActivationMode() == DoorActivationMode::Manual
+			bool const openable = !transport && door->getActivationMode() == DoorActivationMode::Manual
 				&& !door->isBroken() && !door->isOpen() && !door->isOpening()
 				&& agentCanOperateObjects(*agent) && agentSatisfiesDoorPermission(*door, *agent);
 			if (passable || openable) candidates.push_back({ordinary, source, destination, pose,
@@ -611,6 +618,7 @@ namespace core
 			return;
 		}
 		agent->mState = Agent::State::Idle;
+		if (advancePlayerTransportAgent(*agent, timestep)) return;
 		if (!mPlayerMovementDirection) return;
 		auto* source = agent->getSector();
 		if (!source || !isLocationLike(source->getType())) return;
@@ -757,5 +765,265 @@ namespace core
 		}
 		else agent->setPosition({source, position - source->getPosition()}, false);
 		agent->mPose = Pose::Standing;
+	}
+
+	bool World::playerTransportLandingSupported(Sector const& sector, Vector2 position, float halfWidth) const
+	{
+		int y = (int)std::round(position.y);
+		int first = (int)std::floor(position.x - halfWidth + PoseFitTolerance);
+		int last = (int)std::floor(position.x + halfWidth - PoseFitTolerance);
+		if (y < 0 || y >= (int)getLevelsHigh() || first < 0 || last >= (int)getCellsWide()) return false;
+		auto layer = getLayer(sector.getLayerIndex());
+		for (int x = first; x <= last; ++x)
+		{
+			auto const& cell = layer->getCellDefinition(x, y);
+			if (cell.sectorIndex != sector.getIndex() || !cell.isTraversableOnFoot()) return false;
+			if (cell.floorType == CellFloorType::ForceBridge)
+			{
+				auto bridge = std::dynamic_pointer_cast<ForceBridgeSectorObject>(sector.getObject(cell.floorIndex));
+				if (!bridge || !bridge->getForceBridge()->admitsNewTraversals()) return false;
+				auto resource = mTraversalResources.find(bridge->getForceBridge()->getTraversalResourceId());
+				if (resource && !resource->mEnabled) return false;
+			}
+		}
+		return true;
+	}
+
+	std::optional<World::PlayerTransportSelector> World::getPlayerTransportSelector() const
+	{
+		if (isSimulationPaused()) return {};
+		auto id = getPlayerControlledAgent();
+		auto actor = mAgents.find(id);
+		if (!actor || !actor->isActive() || actor->mTraversalTask || mPlayerPlatformCrossing) return {};
+		for (auto const& [resourceId, ptr] : mTraversalResources.entries())
+		{
+			auto const& vehicle = *ptr;
+			auto occupant = std::find(vehicle.mOccupants.begin(), vehicle.mOccupants.end(), id);
+			if ((!vehicle.mLift && !vehicle.mShuttle) || occupant == vehicle.mOccupants.end()
+				|| !vehicle.mEnabled || vehicle.mLiftMoving
+				|| (vehicle.mLift && vehicle.mLift->isBroken()) || (vehicle.mShuttle && vehicle.mShuttle->isBroken())
+				|| vehicle.mLiftStopPhase != LiftStopPhase::Boarding
+				|| mSimulationTick >= vehicle.mLiftBoardingCutoffTick) continue;
+			auto carriage = vehicle.mShuttle ? (uint32_t)std::distance(vehicle.mOccupants.begin(), occupant)
+				/ vehicle.mShuttleCapacityPerCarriage : 0u;
+			auto landingAt = [&](uint32_t stop) -> TraversalResource const*
+			{
+				if (!vehicle.mShuttle) return mTraversalResources.find(vehicle.mLiftStops[stop].landingResource);
+				for (auto const& door : vehicle.mShuttleDoors)
+					if (door.stopIndex == stop && door.carriageIndex == carriage)
+						if (auto landing = mTraversalResources.find(door.landingResource)) return landing;
+				return nullptr;
+			};
+			auto current = vehicle.mLiftCurrentStop;
+			auto landing = landingAt(current);
+			if (!vehicle.mOpenPlatformLift && (!landing || !landing->mDoor || !landing->mDoor->isOpen()
+				|| (!vehicle.mShuttle && !vehicle.mLiftCarDoorOpen))) continue;
+			PlayerTransportSelector result;
+			result.resource = resourceId; result.horizontal = (bool)vehicle.mShuttle;
+			result.anchor = actor->getGlobalPosition();
+			if (vehicle.mShuttle)
+			{
+				result.anchor.x = vehicle.mLiftPosition + carriage * (vehicle.mShuttle->getCarWidth() + 1.f)
+					+ vehicle.mShuttle->getCarWidth() * .5f;
+				result.anchor.y += vehicle.mShuttle->getSize().y + .2f;
+			}
+			else
+			{
+				auto control = mInteractionPoints.find(vehicle.mLiftStops[current].callControl);
+				if (!control && landing && !landing->mControls.empty()) control = mInteractionPoints.find(landing->mControls.front());
+				result.anchor = control ? control->mPosition : vehicle.mLift->getPosition();
+				result.anchor.y += .3f;
+			}
+			for (uint32_t stop = 0; stop < vehicle.mLiftStops.size(); ++stop)
+			{
+				bool pending = vehicle.mPlayerStopRequests.contains(stop) || !vehicle.mLiftStopRequestOwners[stop].empty();
+				DeviceCommand command;
+				command.type = vehicle.mShuttle ? DeviceCommandType::SelectShuttleDestination : DeviceCommandType::SelectLiftDestination;
+				command.traversalResource = resourceId; command.stopIndex = stop;
+				bool eligible = missingLiftDestinationPermissions(command, id).empty()
+					&& agentAdheresToLiftDestinationPermission(resourceId, stop, id)
+					&& ((!agentForbidsButtons(actor) && actor->getObjectUsage() == ObjectUsage::Arms) || pending
+						|| agentCanRemotelySelectLiftDestination(resourceId, *actor, false));
+				auto stopLanding = landingAt(stop);
+				auto locationId = stopLanding && vehicle.mShuttle
+					? SectorId{(uint64_t)stopLanding->mDoor->getFrontSector()->getIndex() + 1}
+					: vehicle.mLiftStops[stop].locationSector;
+				if (!locationId || locationId.value > mSectors.size()) eligible = false;
+				else
+				{
+					auto location = mSectors[(size_t)locationId.value - 1].get();
+					float y = vehicle.mShuttle ? actor->getGlobalPosition().y : vehicle.mLiftStops[stop].globalPosition;
+					float x = stopLanding && stopLanding->mDoor ? stopLanding->mDoor->getPosition().x + stopLanding->mDoor->getSize().x * .5f
+						: (stop < vehicle.mQueueLanes.size() ? vehicle.mQueueLanes[stop].origin.x : vehicle.mLift->getPosition().x - .5f);
+					eligible = eligible && playerTransportLandingSupported(*location, {x, y}, actor->getWidth() * .5f)
+						&& canAgentAccessLocation(*location, *actor)
+						&& actor->poseFits(Pose::Standing, location->getPosition().y + location->getLevelsHigh() - 1
+							+ location->getEffectiveTopLevelHeight() - y);
+				}
+				if (vehicle.mShuttle && !stopLanding) eligible = false;
+				if (stop != current && !eligible) continue;
+				result.stops.push_back({stop, getTransportStopShortName(resourceId, stop), stop == current, pending});
+			}
+			result.focus = vehicle.mPlayerStopFocus;
+			if (std::none_of(result.stops.begin(), result.stops.end(), [&](auto const& stop) { return !stop.current && stop.index == result.focus; }))
+			{
+				result.focus = ~0u;
+				float best = std::numeric_limits<float>::max();
+				for (auto const& stop : result.stops) if (!stop.current)
+				{
+					auto distance = std::abs(vehicle.mLiftStops[stop.index].globalPosition - vehicle.mLiftPosition);
+					if (distance < best) { best = distance; result.focus = stop.index; }
+				}
+			}
+			return result;
+		}
+		return {};
+	}
+
+	void World::browsePlayerTransportStop(int direction, bool horizontal)
+	{
+		auto selector = getPlayerTransportSelector();
+		if (!selector || selector->horizontal != horizontal || !direction) return;
+		std::vector<uint32_t> eligible;
+		for (auto const& stop : selector->stops) if (!stop.current) eligible.push_back(stop.index);
+		auto focus = std::find(eligible.begin(), eligible.end(), selector->focus);
+		if (focus == eligible.end()) return;
+		auto index = std::clamp((int)std::distance(eligible.begin(), focus) + (direction > 0 ? 1 : -1), 0, (int)eligible.size() - 1);
+		mTraversalResources.find(selector->resource)->mPlayerStopFocus = eligible[index];
+		invalidateSimulationSnapshot();
+	}
+
+	void World::confirmPlayerTransportStop()
+	{
+		auto selector = getPlayerTransportSelector();
+		if (!selector || selector->focus == ~0u) return;
+		auto resource = mTraversalResources.find(selector->resource);
+		resource->mPlayerStopFocus = selector->focus;
+		if (resource->mLiftStopRequestOwners[selector->focus].empty())
+			resource->mPlayerStopRequests.try_emplace(selector->focus, mSimulationTick);
+		invalidateSimulationSnapshot();
+	}
+
+	bool World::tryPlayerPlatformMount(Agent& agent)
+	{
+		auto id = getAgentId(&agent);
+		if (mPlayerPlatformCrossing && (mPlayerPlatformCrossing->owner != id
+			|| !mTraversalRequests.find(mPlayerPlatformCrossing->request)
+			|| mTraversalRequests.find(mPlayerPlatformCrossing->request)->mState != TraversalRequestState::Granted)) mPlayerPlatformCrossing.reset();
+		for (auto const& [resourceId, ptr] : mTraversalResources.entries())
+		{
+			auto& vehicle = *ptr;
+			if (!vehicle.mOpenPlatformLift || vehicle.mLiftSector.value != agent.getSector()->getIndex() + 1) continue;
+			auto occupant = std::find(vehicle.mOccupants.begin(), vehicle.mOccupants.end(), id);
+			bool aboard = occupant != vehicle.mOccupants.end();
+			bool crossing = mPlayerPlatformCrossing && mPlayerPlatformCrossing->resource == resourceId;
+			if (!aboard && !crossing && (!mPlayerMovementDirection || vehicle.mLiftMoving
+				|| std::abs(agent.getGlobalPosition().y - vehicle.mLiftPosition) > PoseFitTolerance)) continue;
+			auto position = agent.getGlobalPosition();
+			float left = vehicle.mLift->getPosition().x, right = left + vehicle.mLift->getSize().x;
+			float half = agent.getPoseEnvelope(Pose::Standing).value_or(Vector2{}).x * .5f;
+			float next = position.x + mPlayerMovementDirection * agent.getWalkSpeed() * getFixedTimestep();
+			bool inside = next - half >= left && next + half <= right;
+			if (!aboard && !crossing && (next + half <= left || next - half >= right)) continue;
+			if (half * 2.f > right - left || !agent.poseFits(Pose::Standing,
+				agent.getSector()->getPosition().y + agent.getSector()->getLevelsHigh() - 1
+					+ agent.getSector()->getEffectiveTopLevelHeight() - position.y)) return true;
+			bool boundary = crossing || (!aboard || !inside);
+			if (boundary && !crossing)
+			{
+				// A real supported landing and a free virtual boundary are required;
+				// neither a closed moving platform nor a missing Floor can be crossed.
+				if (vehicle.mLiftMoving || (vehicle.mLiftStopPhase != LiftStopPhase::Boarding
+					&& vehicle.mLiftStopPhase != LiftStopPhase::Opening
+					&& vehicle.mLiftStopPhase != LiftStopPhase::Disembarking)
+					|| agentForbidsTraversal(&agent, TraversalKind::PlatformLift)) return true;
+				int x = position.x < (left + right) * .5f ? (int)std::floor(left - .001f) : (int)std::ceil(right);
+				int y = (int)std::round(vehicle.mLiftPosition);
+				if (x < 0 || x >= (int)getCellsWide() || y < 0 || y >= (int)getLevelsHigh()) return true;
+				if (!playerTransportLandingSupported(*agent.getSector(), {x + .5f, (float)y}, half)) return true;
+				std::shared_ptr<const Edge> edge;
+				std::shared_ptr<const Vertex> source, destination;
+				for (auto const& candidate : getGraph()->getEdges())
+					if (candidate->getType() == EdgeType::LiftMount && candidate->getTraversalResourceId() == resourceId
+						&& std::abs(candidate->getVertex(0)->getPosition().y - position.y) <= PoseFitTolerance)
+					{
+						edge = candidate; source = edge->getVertex(0); destination = edge->getVertex(1);
+						if ((bool)source->getObject() != !aboard) std::swap(source, destination);
+						break;
+					}
+				if (!edge || !agent.poseFits(Pose::Standing, agent.getSector()->getPosition().y
+					+ agent.getSector()->getLevelsHigh() - 1 + agent.getSector()->getEffectiveTopLevelHeight() - position.y)) return true;
+				agent.mPathStartPosition = position;
+				auto requestId = createTraversalRequest(agent, edge, source, destination);
+				auto request = mTraversalRequests.find(requestId);
+				request->mSourceEndpoint = request->mDestinationEndpoint = position;
+				allocateTraversalRequest(requestId, edge, destination);
+				if (request->mState != TraversalRequestState::Granted)
+				{
+					cancelTraversal(requestId, {}); releaseTraversal(requestId, {}); return true;
+				}
+				mPlayerPlatformCrossing = PlayerPlatformCrossing{resourceId, requestId, request->mPermit,
+					destination, id, request->mCapacityPosition, !aboard};
+				crossing = true;
+			}
+			if (!crossing)
+			{
+				position.x = std::clamp(next, left + half, right - half);
+				agent.setPosition({const_cast<Sector*>(agent.getSector()), position - agent.getSector()->getPosition()}, false);
+				return true;
+			}
+			position.x = next;
+			agent.setPosition({const_cast<Sector*>(agent.getSector()), position - agent.getSector()->getPosition()}, false);
+			bool outside = position.x + half <= left || position.x - half >= right;
+			inside = position.x - half >= left && position.x + half <= right;
+			if (inside || outside)
+			{
+				auto transfer = *mPlayerPlatformCrossing;
+				if (inside == transfer.entering)
+				{
+					if (commitTraversal(agent, transfer.request, transfer.permit, transfer.destination))
+					{
+						if (transfer.entering)
+						{
+							vehicle.mAdmissionReservations[transfer.capacity] = {};
+							vehicle.mOccupants[transfer.capacity] = id;
+						}
+						else mSimulationCoordinator.releaseAgentFromResource(vehicle, id);
+					}
+				}
+				else cancelTraversal(transfer.request, transfer.permit); // Manually retraced the boundary.
+				releaseTraversal(transfer.request, transfer.permit);
+				mPlayerPlatformCrossing.reset();
+			}
+			return true;
+		}
+		return false;
+	}
+
+	bool World::advancePlayerTransportAgent(Agent& agent, float timestep)
+	{
+		auto id = getAgentId(&agent);
+		for (auto const& [resourceId, ptr] : mTraversalResources.entries())
+		{
+			auto& vehicle = *ptr;
+			auto occupant = std::find(vehicle.mOccupants.begin(), vehicle.mOccupants.end(), id);
+			if ((!vehicle.mLift && !vehicle.mShuttle) || occupant == vehicle.mOccupants.end()) continue;
+			if (vehicle.mOpenPlatformLift) break; // The open boundary is handled with ordinary horizontal input below.
+			float left = vehicle.mLift ? vehicle.mLift->getPosition().x : vehicle.mLiftPosition;
+			float width = vehicle.mLift ? vehicle.mLift->getSize().x : (float)vehicle.mShuttle->getCarWidth();
+			if (vehicle.mShuttle) left += ((uint32_t)std::distance(vehicle.mOccupants.begin(), occupant)
+				/ vehicle.mShuttleCapacityPerCarriage) * (width + 1.f);
+			auto envelope = agent.getPoseEnvelope(Pose::Standing);
+			auto half = envelope.value_or(Vector2{}).x * .5f;
+			float height = vehicle.mLift ? vehicle.mLift->getSize().y : vehicle.mShuttle->getSize().y;
+			if (!envelope || width < 2.f * half || !agent.poseFits(Pose::Standing, height)) return true;
+			auto position = agent.getGlobalPosition();
+			position.x = std::clamp(position.x + mPlayerMovementDirection * agent.getWalkSpeed() * timestep,
+				left + half, left + width - half);
+			agent.setPosition({const_cast<Sector*>(agent.getSector()), position - agent.getSector()->getPosition()}, false);
+			agent.mPose = Pose::Standing;
+			return true;
+		}
+		return tryPlayerPlatformMount(agent);
 	}
 }

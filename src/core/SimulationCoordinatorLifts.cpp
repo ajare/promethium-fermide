@@ -249,10 +249,12 @@ namespace core
 
 	uint32_t SimulationCoordinator::chooseNextLiftStop(TraversalResource& resource) const
 	{
+		if (!resource.mEnabled && !resource.mLiftDraining) return ~0u;
 		auto requested = [&](uint32_t stop)
 		{
-			return stop < resource.mLiftStopRequestOwners.size()
-				&& !resource.mLiftStopRequestOwners[stop].empty();
+			return (resource.mEnabled && resource.mPlayerStopRequests.contains(stop))
+				|| (stop < resource.mLiftStopRequestOwners.size()
+					&& !resource.mLiftStopRequestOwners[stop].empty());
 		};
 		auto position = resource.mLiftPosition;
 		auto nearestInDirection = [&](TraversalDirection direction)
@@ -274,7 +276,7 @@ namespace core
 							? TraversalDirection::Ascending : TraversalDirection::Descending;
 						return desired == direction;
 					});
-				if (!hasCompatibleOwner) continue;
+				if (!hasCompatibleOwner && !resource.mPlayerStopRequests.contains(stop)) continue;
 				auto delta = resource.mLiftStops[stop].globalPosition - position;
 				if ((direction == TraversalDirection::Ascending && delta <= 0.0f)
 					|| (direction == TraversalDirection::Descending && delta >= 0.0f)) continue;
@@ -314,14 +316,18 @@ namespace core
 			auto oldest = min_element(resource.mLiftStopRequestTicks[stop].begin(),
 				resource.mLiftStopRequestTicks[stop].end(), [](auto const& left, auto const& right)
 				{ return left.second != right.second ? left.second < right.second : left.first < right.first; });
-			if (oldest == resource.mLiftStopRequestTicks[stop].end()) continue;
+			uint64_t tick = oldest == resource.mLiftStopRequestTicks[stop].end()
+				? numeric_limits<uint64_t>::max() : oldest->second;
+			if (auto manual = resource.mPlayerStopRequests.find(stop); manual != resource.mPlayerStopRequests.end())
+				tick = min(tick, manual->second);
+			if (tick == numeric_limits<uint64_t>::max()) continue;
 			auto distance = abs(resource.mLiftStops[stop].globalPosition - position);
-			if (selected == ~0u || oldest->second < selectedTick
-				|| (oldest->second == selectedTick && (distance < selectedDistance
+			if (selected == ~0u || tick < selectedTick
+				|| (tick == selectedTick && (distance < selectedDistance
 					|| (distance == selectedDistance && stop < selected))))
 			{
 				selected = stop;
-				selectedTick = oldest->second;
+				selectedTick = tick;
 				selectedDistance = distance;
 			}
 		}
@@ -355,10 +361,12 @@ namespace core
 		// Reverse at this stop only after LOOK has exhausted demand ahead.
 		for (uint32_t stop = 0; stop < resource.mLiftStops.size(); ++stop)
 		{
-			if (stop == originStop || resource.mLiftStopRequestOwners[stop].empty()) continue;
+			if (stop == originStop || (resource.mLiftStopRequestOwners[stop].empty()
+				&& !resource.mPlayerStopRequests.contains(stop))) continue;
 			auto delta = resource.mLiftStops[stop].globalPosition - resource.mLiftPosition;
 			if ((resource.mLiftDirection == TraversalDirection::Ascending && delta <= 0.0f)
 				|| (resource.mLiftDirection == TraversalDirection::Descending && delta >= 0.0f)) continue;
+			if (resource.mPlayerStopRequests.contains(stop)) return false;
 			for (auto owner : resource.mLiftStopRequestOwners[stop])
 			{
 				if (resource.mLiftPassengerDestinations.contains(owner)) return false;
@@ -459,6 +467,7 @@ namespace core
 		vector<AgentId> gone;
 		for (auto passenger : resource.mLiftExitAtSafeStop)
 		{
+			if (auto actor = mWorld.mAgents.find(passenger); actor && actor->isPlayerControlled()) continue;
 			if (resource.mOpenPlatformLift)
 			{
 				for (auto& occupant : resource.mOccupants) if (occupant == passenger) occupant = {};
@@ -608,6 +617,13 @@ namespace core
 		mWorld.invalidateSimulationSnapshot();
 		auto request = mWorld.mTraversalRequests.find(requestId);
 		if (!request || request->mState != TraversalRequestState::Pending) return;
+		if (auto actor = mWorld.mAgents.find(request->mOwner); actor && actor->isPlayerControlled())
+		{
+			auto vehicle = edgeResource.mLiftCoordinator
+				? mWorld.mTraversalResources.find(edgeResource.mLiftCoordinator) : &edgeResource;
+			if (vehicle) allocatePlayerTransportCrossing(requestId, edgeResource, *vehicle);
+			return;
+		}
 		if (edgeResource.mOpenPlatformLift)
 		{
 			allocateOpenPlatformLiftTraversal(requestId, edgeResource);
@@ -688,6 +704,55 @@ namespace core
 			return;
 		}
 		denyTraversalRequest(requestId);
+	}
+
+	// Manual crossings do not create a journey, call, alignment goal or selector turn.
+	void SimulationCoordinator::allocatePlayerTransportCrossing(TraversalRequestId id,
+		TraversalResource& landing, TraversalResource& vehicle)
+	{
+		auto request = mWorld.mTraversalRequests.find(id);
+		auto actor = request ? mWorld.mAgents.find(request->mOwner) : nullptr;
+		if (!actor || vehicle.mLiftMoving || vehicle.mLiftCurrentStop >= vehicle.mLiftStops.size()) return;
+		bool aboard = find(vehicle.mOccupants.begin(), vehicle.mOccupants.end(), request->mOwner)
+			!= vehicle.mOccupants.end();
+		if (!aboard && (!vehicle.mEnabled || (vehicle.mLift && vehicle.mLift->isBroken())
+			|| (vehicle.mShuttle && vehicle.mShuttle->isBroken())
+			|| vehicle.mLiftStopPhase != LiftStopPhase::Boarding
+			|| mWorld.mSimulationTick >= vehicle.mLiftBoardingCutoffTick)) return;
+		if (!vehicle.mOpenPlatformLift && (!landing.mDoor || !landing.mDoor->admitsNewCrossings()
+			|| landing.mLiftStopIndex != vehicle.mLiftCurrentStop
+			|| (!vehicle.mShuttle && !vehicle.mLiftCarDoorOpen))) return;
+		if (!aboard && !mWorld.agentAdheresToTransportLandingPermission(request->mResource,
+			request->mSourceSector, request->mSourceEndpoint, request->mOwner)) return;
+		auto& lanes = vehicle.mOpenPlatformLift ? vehicle.mVirtualBoundaryOwners : landing.mCrossingOwners;
+		auto lane = find(lanes.begin(), lanes.end(), TraversalRequestId{});
+		if (lane == lanes.end()) return;
+		if (!aboard)
+		{
+			uint32_t first = 0, count = vehicle.mCapacity;
+			if (vehicle.mShuttle)
+			{
+				auto door = find_if(vehicle.mShuttleDoors.begin(), vehicle.mShuttleDoors.end(),
+					[&](auto const& value) { return value.landingResource == request->mResource; });
+				if (door == vehicle.mShuttleDoors.end()) return;
+				request->mShuttleCarriage = door->carriageIndex;
+				auto const& carriage = vehicle.mShuttleCarriages[door->carriageIndex];
+				first = carriage.firstCapacityPosition; count = carriage.capacity;
+			}
+			for (uint32_t i = first; i < first + count; ++i)
+				if (auto passenger = mWorld.mAgents.find(vehicle.mOccupants[i]))
+					if (abs(passenger->getGlobalPosition().x - actor->getGlobalPosition().x)
+						< (passenger->getWidth() + actor->getWidth()) * .5f) return;
+			uint32_t slot = ~0u;
+			for (uint32_t i = first; i < first + count; ++i)
+				if (!vehicle.mOccupants[i] && !vehicle.mAdmissionReservations[i]) { slot = i; break; }
+			if (slot == ~0u) return;
+			request->mCapacityPosition = slot;
+			vehicle.mAdmissionReservations[slot] = id;
+		}
+		request->mCrossingLane = (uint32_t)distance(lanes.begin(), lane);
+		*lane = id;
+		grantTraversalRequest(id);
 	}
 
 	// Boarding allocation. The Agent stands outside the car and asks to enter it at
@@ -964,6 +1029,12 @@ namespace core
 				auto passenger = mWorld.mAgents.find(passengerId);
 				auto target = carriage.passengerTargets.find(passengerId);
 				if (!passenger || target == carriage.passengerTargets.end()) return;
+				if (passenger->isPlayerControlled())
+				{
+					if (abs(passenger->getGlobalPosition().x - request->mSourceEndpoint.x)
+						< passenger->getWidth() * .5f + actor->getWidth() * .5f + CORE_SHUTTLE_OCCUPANT_CLEARANCE) return;
+					continue;
+				}
 				auto globalTarget = transit->getPosition() + target->second;
 				globalTarget.x += coordinator.mLiftPosition - transit->getPosition().x;
 				if (passenger->getGlobalPosition().distanceTo(globalTarget) > 0.001f) return;
@@ -1050,7 +1121,8 @@ namespace core
 		auto actor = mWorld.mAgents.find(request->mOwner);
 		auto journeyStop = actor ? findAgentLiftDestination(*actor, coordinator) : ~0u;
 		if (journeyStop >= coordinator.mLiftStops.size()) { denyTraversalRequest(requestId); return; }
-		if (!coordinator.mLiftStopRequestOwners[journeyStop].empty())
+		if (!coordinator.mLiftStopRequestOwners[journeyStop].empty()
+			|| coordinator.mPlayerStopRequests.contains(journeyStop))
 		{
 			addLiftStopRequest(coordinator, journeyStop, request->mOwner);
 			coordinator.mLiftPassengerDestinations[request->mOwner] = journeyStop;

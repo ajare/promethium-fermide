@@ -136,14 +136,52 @@ camera is used.
   then stable traversal-resource identity. One press performs at most one action.
 - Solid walls, closed/opening Bulkhead Doors, low spaces and unsupported Floor
   edges stop the Agent's leading body edge, except at a selected open Staircase
-  endpoint where the flight supplies support. Input never boards
-  transports or automatically crouches/crawls. Up
-  supports ordinary Doors between Locations, Stairwell landing doorways, and
-  contextual Ladder entry/climbing and physical Button interaction;
-  transport-owned Doors, Windows and BoothWindows do not.
+  endpoint where the flight supplies support. Input never automatically
+  crouches/crawls. Up supports ordinary Doors between Locations, open enclosed
+  Lift/Shuttle Doors, Stairwell landing doorways, contextual Ladder entry/climbing
+  and physical Button interaction. Windows and BoothWindows do not admit entry.
 - An Agent initially in a space that cannot accommodate Standing remains
   stationary in its existing fitting pose; input does not force it through the
   ceiling.
+
+## Manual transport riding
+
+- Up crosses an aligned, fully open enclosed Lift or Shuttle Door in either
+  direction, without alignment or approach automation. Left/Right crosses a
+  stopped Platform lift's supported open boundary. Capacity, crossing reservations,
+  Mobility, Standing fit and landing permissions still apply.
+- Left/Right walks within the occupied vehicle, including during travel. Movement
+  remains bounded by the car or occupied Shuttle carriage. Leaving requires a
+  stationary, safe open landing and explicit Player input.
+- After entry completes, the Stop selector appears during the open boarding
+  window before cutoff, and disappears during crossings, closure, movement,
+  pause and Broken operation. For Player Lift/Shuttle visits the window starts
+  once the landing Doors are fully open and remains available until the configured
+  boarding cutoff; opening animation does not consume it. Reopened windows retain
+  their original cutoff. Shift+Up/Down browses Lift and Platform lift Stops;
+  Shift+Left/Right browses Shuttle Stops. Each fresh press advances once, clamps
+  at the ends and skips unavailable destinations. Shift+cursor never also walks
+  or climbs, even when no selector is available. Space confirms.
+- Selection requests a service visit, not a passenger journey. Requests are
+  idempotent, may coexist, survive leaving, and clear when served. Player passengers
+  never automatically move to a slot or disembark. With no selection, the normal
+  vehicle cycle continues; it does not wait for Player input.
+- Fixed-size short-name labels are windowed around focus. Overflow dots and a
+  separate current label retain context on long lists. White is normal, green is
+  current (taking precedence over pending), amber is pending for any passenger,
+  and a cyan outline marks focus. Reopening restores the last eligible browsed
+  Stop, otherwise the nearest eligible non-current Stop.
+
+## Play debug mode
+
+F11 toggles a runtime-only debug mode, initially off. While enabled, pressing a
+physical Lift Button selects that enclosed or Platform lift for a live MPP
+built-in-font readout next to the vehicle. It displays fractional Level with
+float round-trip precision, service phase, current/target Stops, dwell and boarding
+timers, simulation tick/start/cutoff values, occupancy/reservations and Door/admission
+state. The readout keeps updating during travel. Another Lift Button changes the
+selected Lift; disabling debug clears it. Key repeat does not repeatedly toggle
+F11. Observing debug data neither consumes simulation events nor operates devices.
 
 ## Editing the World used by Launcher
 
@@ -175,7 +213,8 @@ work and does not add a new Agent type.
 `agent-playerControlStaircaseRestrictions`, `agent-playerControlEscalators`,
 `agent-playerControlLadders`, `agent-playerControlLadderRestrictions`, and
 `agent-playerControlLadderSharedCapacity`, `agent-playerControlButtons`,
-`agent-playerControlButtonPriority`, and `agent-playerControlExtensibleLadders` exercise
+`agent-playerControlButtonPriority`, `agent-playerControlExtensibleLadders`, and
+`agent-playerControlManualTransports` exercise
 walking, timed bidirectional Layer transitions, mirrored zig-zag stair movement,
 ascent/descent speed, narrow capacity, pause/reset, geometry, capability,
 permissions, low clearance and Broken Doors through the World/coordinator seam. `agent-playerControlEditorWorkflow` covers the picker,
@@ -183,5 +222,6 @@ undo/redo and clipboard. `pf_application` covers actual Play key injection, Up r
 suspension, held Up/Down platform departure and Staircase/Escalator mounting,
 wrong-way walking, riding on release, fixed Ladder entry/climbing/reversal,
 vertical-key cancellation, automatic dismounting, arm-length Button interaction,
-repeat suppression and extension-then-climbing; `pf_application_render` covers camera following, Layer selection,
+repeat suppression, extension-then-climbing, manual Lift entry and Shift/Space
+selector controls; `pf_application_render` covers selector windowing/colours, camera following, Layer selection,
 resize and the no-Player fallback.

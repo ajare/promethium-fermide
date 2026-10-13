@@ -983,7 +983,12 @@ namespace core
 						// The operation may be shared by several waiting passengers. Each
 						// keeps independent ownership even though the physical call coalesces.
 						for (auto requester : operation->mRequesters)
-							addLiftStopRequest(*resource, operation->mCommand.stopIndex, requester);
+						{
+							auto actor = mWorld.mAgents.find(requester);
+							if (actor && actor->isPlayerControlled())
+								resource->mPlayerStopRequests.try_emplace(operation->mCommand.stopIndex, mWorld.mSimulationTick);
+							else addLiftStopRequest(*resource, operation->mCommand.stopIndex, requester);
+						}
 						if (resource->mLiftStopPhase == LiftStopPhase::Idle)
 							resource->mLiftStopPhase = LiftStopPhase::Closing;
 					}

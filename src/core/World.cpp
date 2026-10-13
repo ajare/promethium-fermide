@@ -2722,6 +2722,10 @@ namespace core
 
 	void World::validateLiftOptions(string const& caller, CreateLiftOptions const& options) const
 	{
+		if (options.stopOffsets.size() > 1000 || (!options.stopShortNames.empty()
+			&& (options.stopShortNames.size() != options.stopOffsets.size()
+				|| !all_of(options.stopShortNames.begin(), options.stopShortNames.end(), isValidTransportStopShortName))))
+			throw WorldException(this, caller + ": Stop short names require 1–3 characters A–Z or 0–9, parallel to at most 1000 Stops");
 		for (float speed : options.doorSpeeds)
 			if (!std::isfinite(speed) || speed < 0.0f) throw WorldException(this, caller + ": Invalid landing Door speed");
 		if (options.cellsWide == 0)
@@ -2777,6 +2781,10 @@ namespace core
 
 	void World::validateShuttleOptions(string const& caller, CreateShuttleOptions const& options) const
 	{
+		if (options.stopOffsets.size() > 1000 || (!options.stopShortNames.empty()
+			&& (options.stopShortNames.size() != options.stopOffsets.size()
+				|| !all_of(options.stopShortNames.begin(), options.stopShortNames.end(), isValidTransportStopShortName))))
+			throw WorldException(this, caller + ": Stop short names require 1–3 characters A–Z or 0–9, parallel to at most 1000 Stops");
 		for (float speed : options.doorSpeeds)
 			if (!std::isfinite(speed) || speed < 0.0f) throw WorldException(this, caller + ": Invalid landing Door speed");
 		if (options.numCars == 0)
@@ -4342,6 +4350,7 @@ namespace core
 		record.e = levelsHigh; record.g = options.initialStop;
 		record.x = options.minimumDwellSeconds; record.y = options.maximumBoardingSeconds;
 		record.values = options.stopOffsets;
+		record.stopShortNames = options.stopShortNames;
 		// The per-stop Door styles are authored Lift data, not just initial Door
 		// state: record them so save/load and later rebuilds replay them, the
 		// way the Shuttle path records its doorOpenStyles.
@@ -4636,6 +4645,7 @@ namespace core
 		record.h = options.doorMask; record.p = options.allowPartialLandings;
 		record.x = options.minimumDwellSeconds; record.y = options.maximumBoardingSeconds;
 		record.values = options.stopOffsets;
+		record.stopShortNames = options.stopShortNames;
 		record.overrides = options.doorOpenStyles;
 		record.transportDoorSpeeds = options.doorSpeeds;
 		for (auto const& requirement : options.landingControlPermissionRequirements)
@@ -5089,7 +5099,7 @@ namespace core
 				{
 					options = { record.d, record.e, record.values, record.f, record.g,
 						record.x, record.y, record.p, record.h ? record.h : (1u << 1),
-						record.overrides, {}, record.initiallyBroken, record.transportDoorSpeeds };
+						record.overrides, {}, record.initiallyBroken, record.transportDoorSpeeds, record.stopShortNames };
 					return true;
 				}
 			}
@@ -8016,6 +8026,7 @@ namespace core
 		record.d = options.cellsWide; record.e = options.capacity;
 		record.z = options.platformStopDurationSeconds;
 		record.values = options.stopOffsets;
+		record.stopShortNames = options.stopShortNames;
 		for (auto const& requirement : options.landingControlPermissionRequirements)
 		{
 			record.landingControlPermissionRequirements.emplace_back();
@@ -11085,6 +11096,47 @@ namespace core
 		return nullptr;
 	}
 
+	bool World::isValidTransportStopShortName(string_view name)
+	{
+		return !name.empty() && name.size() <= 3 && all_of(name.begin(), name.end(), [](char c)
+			{ return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'); });
+	}
+
+	string World::getTransportStopShortName(uint32_t sectorIndex, uint32_t stopIndex, uint32_t objectIndex) const
+	{
+		auto record = findLiftDestinationRecord(sectorIndex, objectIndex);
+		if (!record || stopIndex >= record->values.size()) throw invalid_argument("Unknown transport destination Stop");
+		return record->stopShortNames.empty() ? to_string(stopIndex) : record->stopShortNames.at(stopIndex);
+	}
+
+	string World::getTransportStopShortName(TraversalResourceId resourceId, uint32_t stopIndex) const
+	{
+		auto resource = mTraversalResources.find(resourceId);
+		auto record = resource ? findLiftDestinationRecord(*resource) : nullptr;
+		if (!record || stopIndex >= record->values.size()) throw invalid_argument("Unknown transport destination Stop");
+		return record->stopShortNames.empty() ? to_string(stopIndex) : record->stopShortNames.at(stopIndex);
+	}
+
+	bool World::setTransportStopShortName(uint32_t sectorIndex, uint32_t stopIndex,
+		string const& name, string* diagnostic, uint32_t objectIndex)
+	{
+		auto reject = [&](string text) { if (diagnostic) *diagnostic = std::move(text); return false; };
+		if (!mSimulationPaused) return reject("Stop short names can only be edited while the simulation is paused");
+		if (!isValidTransportStopShortName(name)) return reject("Use 1–3 uppercase alphanumeric characters (A–Z, 0–9)");
+		auto record = findLiftDestinationRecord(sectorIndex, objectIndex);
+		if (!record || stopIndex >= record->values.size()) return reject("Unknown transport destination Stop");
+		if (getTransportStopShortName(sectorIndex, stopIndex, objectIndex) != name)
+		{
+			auto& names = mConstructionRecords[record - mConstructionRecords.data()].stopShortNames;
+			if (names.empty())
+				for (size_t i = 0; i < record->values.size(); ++i) names.push_back(to_string(i));
+			names[stopIndex] = name;
+			modify();
+		}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	vector<uint32_t> World::getLiftDestinationLevels(uint32_t sectorIndex, uint32_t objectIndex) const
 	{
 		auto record = findLiftDestinationRecord(sectorIndex, objectIndex);
@@ -12044,7 +12096,7 @@ namespace core
 			}
 		}
 		return local && stop < resource->mLiftStopRequestOwners.size()
-			&& (!resource->mLiftStopRequestOwners[stop].empty()
+			&& (!resource->mLiftStopRequestOwners[stop].empty() || resource->mPlayerStopRequests.contains(stop)
 				|| (!resource->mLiftMoving && resource->mLiftCurrentStop == stop));
 	}
 
@@ -13103,6 +13155,7 @@ namespace core
 			|| !found.entity->mAdmissionQueue.empty() || !found.entity->mOpenLeases.empty()
 			|| !found.entity->mExtensionRequestLeases.empty()
 			|| !found.entity->mExtensionOccupantLeases.empty()
+			|| !found.entity->mPlayerStopRequests.empty()
 			|| any_of(found.entity->mQueueLanes.begin(), found.entity->mQueueLanes.end(),
 				[](auto const& lane) { return !lane.queue.empty(); })
 			|| any_of(found.entity->mLiftStopRequestOwners.begin(), found.entity->mLiftStopRequestOwners.end(),

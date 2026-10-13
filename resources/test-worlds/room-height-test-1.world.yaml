@@ -1,15 +1,18 @@
-version: 64
+version: 65
 nextDumbwaiterId: 1
 nextFurnitureId: 1
 name: Untitled
 randomSeed: 0
 cellsWide: 16
-levelsHigh: 3
+levelsHigh: 6
 layers: 2
 levelNames:
   - Level 0
   - Level 1
   - Level 2
+  - Level 3
+  - Level 4
+  - Level 5
 layerNames:
   - Layer 0
   - Layer 1
@@ -38,17 +41,10 @@ construction:
     layer: 0
     y: 1
     x: 10
-    cellsWide: 4
+    cellsWide: 5
     levelsHigh: 1
     topLevelHeight: 0.9
     hasHeightScale: false
-  - type: marker
-    sectorIndex: 2
-    levelIndex: 0
-    xOffset: 2.640625
-    id: 1
-    name: Marker 1
-    properties: 0
   - type: removeWall
     sectorIndex: 1
     levelIndex: 0
@@ -66,6 +62,54 @@ construction:
     levelsHigh: 1
     topLevelHeight: 0.9
     hasHeightScale: false
+  - type: corridor
+    layer: 0
+    y: 2
+    x: 0
+    cellsWide: 6
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 3
+    x: 2
+    cellsWide: 9
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 2
+    x: 11
+    cellsWide: 4
+    levelsHigh: 1
+  - type: stairwell
+    layer: 1
+    y: 1
+    x: 0
+    levelsHigh: 2
+    mountSide: left
+    directionalCapacity: 0
+    directionalBatchLimit: 4
+  - type: staircase
+    layer: 1
+    y: 2
+    x: 3
+    cellsWide: 4
+    riseSide: right
+    speed: 0.5
+  - type: ladder
+    layer: 1
+    y: 1
+    x: 12
+    levelsHigh: 2
+    extensible: true
+    startExtended: false
+    directionalBatchLimit: 4
+  - type: marker
+    sectorIndex: 2
+    levelIndex: 0
+    xOffset: 2.640625
+    id: 1
+    name: Marker 1
+    properties: 0
   - type: objectTombstone
     sectorIndex: 0
   - type: objectTombstone
@@ -76,28 +120,63 @@ construction:
     x: 2
     width: 1
     height: regular
-    foreControl: false
-    backControl: false
-    activationMode: manual
+    foreControl: true
+    backControl: true
+    activationMode: remoteControlled
     holdOpenSeconds: 5
     crossingLanes: 0
     openStyle: openUp
     hasSpeedOverride: false
     hasHeightScale: false
+    preButtonActivation: manual
+  - type: objectTombstone
+    sectorIndex: 2
+  - type: objectTombstone
+    sectorIndex: 2
   - type: corridor
     layer: 0
-    y: 2
-    x: 0
-    cellsWide: 6
+    y: 3
+    x: 12
+    cellsWide: 4
     levelsHigh: 1
-  - type: stairwell
+  - type: corridor
+    layer: 0
+    y: 4
+    x: 12
+    cellsWide: 4
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 5
+    x: 12
+    cellsWide: 4
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 0
+    x: 12
+    cellsWide: 4
+    levelsHigh: 1
+  - type: lift
     layer: 1
-    y: 1
-    x: 0
-    levelsHigh: 2
-    mountSide: left
-    directionalCapacity: 0
-    directionalBatchLimit: 4
+    y: 0
+    x: 14
+    cellsWide: 1
+    levelsHigh: 6
+    stopOffsets: [0, 1, 2, 3, 4, 5]
+    capacity: 2
+    minimumDwellSeconds: 0.75
+    maximumBoardingSeconds: 5
+    initialStop: 0
+    stopShortNames:
+      - LG
+      - G
+      - 1
+      - 2
+      - 3
+      - 4
+    destinationPermissionRequirements:
+      []
 agentGroups:
   []
 accessPermissions:
@@ -126,6 +205,6 @@ agents:
         revision: 1
         configuration:
           []
-    sector: 0
-    localX: 4.0625
+    sector: 2
+    localX: 0.890625
     localY: 0

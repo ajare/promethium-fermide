@@ -261,6 +261,12 @@ namespace core
 		};
 		auto writeDestinationRequirements = [&]
 		{
+			if (!record.stopShortNames.empty())
+			{
+				serializer.beginArray("stopShortNames");
+				for (auto const& name : record.stopShortNames) serializer.writeString("", name);
+				serializer.endArray();
+			}
 			serializer.beginArray("destinationPermissionRequirements");
 			for (auto const& requirement : record.destinationPermissionRequirements)
 			{
@@ -703,7 +709,8 @@ namespace core
 		// Version 62 adds independent individual Object usage overrides.
 		// Version 63 adds independently inherited Remote Access panels overrides.
 		// Version 64 adds independently inherited Remote BoothWindow shutters overrides.
-		serializer.writeUint32("version", 64);
+		// Version 65 adds authored transport Stop short names.
+		serializer.writeUint32("version", 65);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		// Derived physical Buttons add landing object slots compared with the
 		// original Dumbwaiter layout. Remember that layout for stable-ID replay.
@@ -1021,6 +1028,20 @@ namespace core
 		};
 		auto readDestinationRequirements = [&]
 		{
+			if (serializer.hasField("stopShortNames"))
+			{
+				if (version < 65) throw SerializationException("Stop short names require World schema version 65 or later");
+				serializer.beginArray("stopShortNames");
+				while (serializer.nextArrayItem())
+				{
+					auto name = serializer.readString("");
+					if (!isValidTransportStopShortName(name)) throw SerializationException("Invalid transport Stop short name: use 1–3 characters A–Z or 0–9");
+					record.stopShortNames.push_back(std::move(name));
+				}
+				serializer.endArray();
+				if (!record.stopShortNames.empty() && record.stopShortNames.size() != record.values.size())
+					throw SerializationException("Stop short names must be parallel to transport Stops");
+			}
 			if (version < 30 || !serializer.hasField("destinationPermissionRequirements")) return;
 			serializer.beginArray("destinationPermissionRequirements");
 			while (serializer.nextArrayItem())
@@ -1586,7 +1607,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 64)
+		if (version < 1 || version > 65)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2982,6 +3003,7 @@ namespace core
 		mTraversalResources = {};
 		mTraversalRequests = {};
 		mTraversalPermits = {};
+		mPlayerPlatformCrossing.reset();
 		mSectors.clear();
 		mFurniture.clear();
 		mConstructionRecords.clear();
@@ -3100,7 +3122,7 @@ namespace core
 		case ConstructionType::Lift:
 		{
 			CreateLiftOptions options{ record.c, record.values, record.d, record.x, record.y,
-				record.g, record.e, CORE_PLATFORM_LIFT_STOP_DURATION, record.overrides, {}, record.initiallyBroken, record.transportDoorSpeeds };
+				record.g, record.e, CORE_PLATFORM_LIFT_STOP_DURATION, record.overrides, {}, record.initiallyBroken, record.transportDoorSpeeds, record.stopShortNames };
 			for (auto const& requirement : record.landingControlPermissionRequirements)
 			{
 				options.landingControlPermissionRequirements.emplace_back();
@@ -3141,7 +3163,7 @@ namespace core
 		case ConstructionType::Shuttle:
 		{
 			CreateShuttleOptions options{ record.d, record.e, record.values, record.f,
-				record.g, record.x, record.y, record.p, record.h ? record.h : (1u << 1), record.overrides, {}, record.initiallyBroken, record.transportDoorSpeeds };
+				record.g, record.x, record.y, record.p, record.h ? record.h : (1u << 1), record.overrides, {}, record.initiallyBroken, record.transportDoorSpeeds, record.stopShortNames };
 			for (auto const& requirement : record.landingControlPermissionRequirements)
 			{
 				options.landingControlPermissionRequirements.emplace_back();
@@ -3242,7 +3264,7 @@ namespace core
 		case ConstructionType::PlatformLift:
 		{
 			CreateLiftOptions options{ record.d, record.values, record.e, record.x,
-				record.y, 0, 0, record.z, {}, {}, record.initiallyBroken };
+				record.y, 0, 0, record.z, {}, {}, record.initiallyBroken, {}, record.stopShortNames };
 			for (auto const& requirement : record.landingControlPermissionRequirements)
 			{
 				options.landingControlPermissionRequirements.emplace_back();
@@ -3442,6 +3464,12 @@ namespace core
 			auto const oldOffsets = found->values;
 			auto const oldStyles = found->overrides;
 			auto const oldSpeeds = found->transportDoorSpeeds;
+			auto const oldNames = found->stopShortNames;
+			if (!oldNames.empty())
+			{
+				found->stopShortNames.clear();
+				for (size_t i = 0; i < plan.stopOffsets.size(); ++i) found->stopShortNames.push_back(to_string(i));
+			}
 			auto const oldRequirements = found->destinationPermissionRequirements;
 			found->destinationPermissionRequirements.assign(plan.stopOffsets.size(), {});
 			for (size_t i = 0; i < plan.stopOffsets.size(); ++i)
@@ -3460,6 +3488,7 @@ namespace core
 					{
 						if (j < oldStyles.size()) found->overrides[i] = oldStyles[j];
 						if (j < oldSpeeds.size()) found->transportDoorSpeeds[i] = oldSpeeds[j];
+						if (j < oldNames.size()) found->stopShortNames[i] = oldNames[j];
 						break;
 					}
 				}
@@ -4634,6 +4663,12 @@ namespace core
 			// newly added carriage or door position therefore hold no override,
 			// and the Doors generated there use the Shuttle's OpenUp default.
 			auto const oldOffsets = found->values;
+			auto const oldNames = found->stopShortNames;
+			if (!oldNames.empty())
+			{
+				found->stopShortNames.clear();
+				for (size_t i = 0; i < plan.stopOffsets.size(); ++i) found->stopShortNames.push_back(to_string(i));
+			}
 			auto const oldRequirements = found->destinationPermissionRequirements;
 			found->destinationPermissionRequirements.assign(plan.stopOffsets.size(), {});
 			auto const oldStyles = found->overrides;
@@ -4670,6 +4705,7 @@ namespace core
 					if (same) { source = j; break; }
 				}
 				if (source >= oldOffsets.size()) continue;
+				if (source < oldNames.size()) found->stopShortNames[i] = oldNames[source];
 				if (source < oldRequirements.size())
 					found->destinationPermissionRequirements[i] = oldRequirements[source];
 				for (uint32_t car = 0; car < cars; ++car)
@@ -5960,6 +5996,7 @@ namespace core
 							source.destinationPermissionRequirements.push_back(originalRequirements[index]);
 						}
 					}
+					source.retainStopShortNames(stops);
 					source.values = std::move(stops);
 				}
 				else if (source.type == ConstructionType::Shuttle)
@@ -6005,7 +6042,7 @@ namespace core
 						return da == db ? a < b : da < db;
 					});
 					source.f = (uint32_t)distance(stops.begin(), nearest);
-					source.retainDestinationRequirements(stops);
+					source.retainStopMetadata(stops);
 					source.values = std::move(stops);
 				}
 				else if (source.type == ConstructionType::PlatformLift)
@@ -6036,7 +6073,7 @@ namespace core
 						}
 						continue;
 					}
-					source.retainDestinationRequirements(supported);
+					source.retainStopMetadata(supported);
 					source.values = std::move(supported);
 				}
 				else if (source.type == ConstructionType::Stairwell)
@@ -6563,7 +6600,7 @@ namespace core
 				diagnostic = "No eligible Walkway exists above this PlatformLift position";
 				return false;
 			}
-			found->retainDestinationRequirements({ 0, lowest });
+			found->retainStopMetadata({ 0, lowest });
 			found->values = { 0, lowest };
 			found->b = 0;
 			found->c = plan.x - room->getCellX();
@@ -6769,7 +6806,7 @@ namespace core
 					auto updated = record;
 					auto stops = updated.values;
 					stops.erase(remove(stops.begin(), stops.end(), sourceLevel), stops.end());
-					updated.retainDestinationRequirements(stops);
+					updated.retainStopMetadata(stops);
 					updated.values = std::move(stops);
 					reconciled.push_back(std::move(updated));
 					ConstructionRecord tombstone{ ConstructionType::ObjectTombstone };
@@ -7335,6 +7372,7 @@ namespace core
 		if (found == mConstructionRecords.end()) return false;
 		options.cellsWide = found->d;
 		options.stopOffsets = found->values;
+		options.stopShortNames = found->stopShortNames;
 		options.capacity = found->e;
 		options.minimumDwellSeconds = found->x;
 		options.maximumBoardingSeconds = found->y;
@@ -7350,8 +7388,22 @@ namespace core
 		return true;
 	}
 
-	void World::ConstructionRecord::retainDestinationRequirements(vector<uint32_t> const& stops)
+	void World::ConstructionRecord::retainStopShortNames(vector<uint32_t> const& stops)
 	{
+		if (stopShortNames.empty()) return;
+		vector<string> retained;
+		for (size_t i = 0; i < stops.size(); ++i)
+		{
+			auto found = find(values.begin(), values.end(), stops[i]);
+			retained.push_back(found == values.end() ? to_string(i)
+				: stopShortNames.at(distance(values.begin(), found)));
+		}
+		stopShortNames = std::move(retained);
+	}
+
+	void World::ConstructionRecord::retainStopMetadata(vector<uint32_t> const& stops)
+	{
+		retainStopShortNames(stops);
 		if (destinationPermissionRequirements.empty()) return;
 		vector<vector<uint32_t>> retained(stops.size());
 		for (size_t i = 0; i < stops.size(); ++i)
@@ -7398,7 +7450,7 @@ namespace core
 			auto stops = plan.options.stopOffsets;
 			sort(stops.begin(), stops.end());
 			stops.erase(unique(stops.begin(), stops.end()), stops.end());
-			found->retainDestinationRequirements(stops);
+			found->retainStopMetadata(stops);
 			found->values = std::move(stops);
 			found->landingControlPermissionRequirements.clear();
 			for (auto const& requirement : plan.options.landingControlPermissionRequirements)
@@ -7640,7 +7692,7 @@ namespace core
 				auto updated = record;
 				auto stops = updated.values;
 				stops.erase(remove(stops.begin(), stops.end(), supportLevel), stops.end());
-				updated.retainDestinationRequirements(stops);
+				updated.retainStopMetadata(stops);
 				updated.values = std::move(stops);
 				platformUpdates.emplace(recordIndex, std::move(updated));
 			}

@@ -405,7 +405,8 @@ namespace core
 		// layer change; Lift and Shuttle rides preserve the passenger's buffered
 		// standing position after allocation has brought it into the exit band.
 		auto const commitsInPlace = request && (request->mEdgeType == EdgeType::Door
-			|| (agent.isPlayerControlled() && request->mEdgeType == EdgeType::StairwellMount)
+			|| (agent.isPlayerControlled() && (request->mEdgeType == EdgeType::StairwellMount
+				|| (request->mEdgeType == EdgeType::LiftMount && traversalResource && traversalResource->mOpenPlatformLift)))
 			|| (request->mEdgeType == EdgeType::Lift && traversalResource
 				&& traversalResource->mLift && !traversalResource->mOpenPlatformLift)
 			|| (request->mEdgeType == EdgeType::Shuttle && traversalResource
@@ -593,7 +594,7 @@ namespace core
 					}
 					auto target = destinationSector->getPosition() + local;
 					target.x += lift->mLiftPosition - destinationSector->getPosition().x;
-					agent.mTraversalLocalGoal = target;
+					if (!agent.isPlayerControlled()) agent.mTraversalLocalGoal = target;
 				}
 				else
 				{
@@ -601,7 +602,7 @@ namespace core
 					// entry position and walk to the separated interior slot normally rather
 					// than snapping there as soon as the Agent enters the Lift.
 					local.y += lift->mLiftPosition - destinationSector->getPosition().y;
-					agent.mTraversalLocalGoal = destinationSector->getPosition() + local;
+					if (!agent.isPlayerControlled()) agent.mTraversalLocalGoal = destinationSector->getPosition() + local;
 				}
 			}
 			else if (request->mSourceSector == lift->mLiftSector

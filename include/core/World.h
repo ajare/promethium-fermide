@@ -246,6 +246,8 @@ namespace core
 			bool initiallyBroken{ false };
 			// Per-stop speed, zero inherits the default.
 			std::vector<float> doorSpeeds{};
+			// Optional complete Stop-order list; omission defaults to "0", "1", ...
+			std::vector<std::string> stopShortNames{};
 		};
 
 		struct CreateLiftResult
@@ -290,6 +292,7 @@ namespace core
 			bool initiallyBroken{ false };
 			// Same grid as doorOpenStyles; zero inherits the default.
 			std::vector<float> doorSpeeds{};
+			std::vector<std::string> stopShortNames{};
 		};
 
 		struct CreateShuttleResult
@@ -698,6 +701,20 @@ namespace core
 		void advancePlayerStaircaseAgent(Agent& agent, float timestep);
 		void advancePlayerStairwellAgent(Agent& agent, float timestep);
 		void advancePlayerControlledAgent(AgentId agent, float timestep);
+		bool advancePlayerTransportAgent(Agent& agent, float timestep);
+		bool tryPlayerPlatformMount(Agent& agent);
+		bool playerTransportLandingSupported(Sector const& sector, Vector2 position, float halfWidth) const;
+		struct PlayerPlatformCrossing
+		{
+			TraversalResourceId resource;
+			TraversalRequestId request;
+			TraversalPermitId permit;
+			std::shared_ptr<const Vertex> destination;
+			AgentId owner;
+			uint32_t capacity;
+			bool entering;
+		};
+		std::optional<PlayerPlatformCrossing> mPlayerPlatformCrossing;
 
 		// Registered Agent-type definitions, keyed by stable type ID. The bundled
 		// Human is registered at construction; additional types are attached
@@ -1069,9 +1086,12 @@ namespace core
 			std::vector<std::vector<uint32_t>> landingControlPermissionRequirements{};
 			// Lift, Platform lift, and Shuttle requirements, parallel to values (Stops).
 			std::vector<std::vector<uint32_t>> destinationPermissionRequirements{};
+			// Authored transport Stop labels, parallel to values; empty uses indices.
+			std::vector<std::string> stopShortNames{};
+			void retainStopShortNames(std::vector<uint32_t> const& stops);
 			// Room/Corridor: all-of passage requirement, independent of controls.
 			std::vector<uint32_t> locationPermissionRequirement{};
-			void retainDestinationRequirements(std::vector<uint32_t> const& stops);
+			void retainStopMetadata(std::vector<uint32_t> const& stops);
 			// Marker / RemoveMarker: stable World-local identity. Marker also
 			// uses name above and c for its MarkerProperties bitfield. Zero identity
 			// occurs only while migrating versions 1-10.
@@ -1855,6 +1875,18 @@ namespace core
 		[[nodiscard]] float maximumInstalledStandingWidth() const;
 		// One Up keypress, consumed at the next allocation phase; never saved.
 		void requestPlayerDoorAction();
+		struct PlayerTransportSelector
+		{
+			struct Stop { uint32_t index; std::string name; bool current, pending; };
+			TraversalResourceId resource;
+			Vector2 anchor;
+			bool horizontal{ false };
+			uint32_t focus{ ~0u };
+			std::vector<Stop> stops;
+		};
+		std::optional<PlayerTransportSelector> getPlayerTransportSelector() const;
+		void browsePlayerTransportStop(int direction, bool horizontal);
+		void confirmPlayerTransportStop();
 		void clearPlayerInput();
 		// Runtime failures are value diagnostics and are not authored or persisted.
 		// Inspecting or consuming them does not consume the public simulation event
@@ -2909,6 +2941,13 @@ namespace core
 		// Shared transport destination API (historical Lift names). Omit objectIndex
 		// for a Lift or Shuttle; specify the Room object for a Platform lift.
 		// Positions are absolute Levels for Lifts and absolute x positions for Shuttles.
+		// Stop labels are authored metadata, independent of routing and admission.
+		static bool isValidTransportStopShortName(std::string_view name);
+		std::string getTransportStopShortName(uint32_t sectorIndex, uint32_t stopIndex,
+			uint32_t objectIndex = ~0u) const;
+		std::string getTransportStopShortName(TraversalResourceId resource, uint32_t stopIndex) const;
+		bool setTransportStopShortName(uint32_t sectorIndex, uint32_t stopIndex,
+			std::string const& name, std::string* diagnostic = nullptr, uint32_t objectIndex = ~0u);
 		std::vector<uint32_t> getLiftDestinationLevels(uint32_t sectorIndex, uint32_t objectIndex = ~0u) const;
 		std::vector<AccessPermissionId> getLiftDestinationPermissionRequirement(
 			uint32_t sectorIndex, uint32_t stopIndex, uint32_t objectIndex = ~0u) const;
@@ -3222,6 +3261,8 @@ namespace core
 		}
 		static constexpr uint32_t getMaxTicksPerUpdate() { return 600; }
 
+		// Non-consuming view for presentation/diagnostic observers. Invalidated by mutation.
+		std::vector<SimulationEvent> const& getSimulationEvents() const { return mEvents; }
 		std::vector<SimulationEvent> consumeSimulationEvents();
 	};
 

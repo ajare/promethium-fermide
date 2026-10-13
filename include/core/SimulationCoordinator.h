@@ -349,6 +349,8 @@ namespace core
 		// resource. `edgeResource` is the resource the request was made on: the
 		// journey itself, or the landing door whose coordinator link is followed.
 		void allocateLiftTraversal(TraversalRequestId requestId, TraversalResource& edgeResource);
+		void allocatePlayerTransportCrossing(TraversalRequestId requestId,
+			TraversalResource& landing, TraversalResource& vehicle);
 
 		// ------------------------------------------------------------------
 		// Lift boarding branch (ADR 0004 stage 3)

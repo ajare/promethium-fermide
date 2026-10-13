@@ -132,6 +132,7 @@ namespace
 		renderLiftDestinationPermissions(world, sector, object);
 		std::string text = ImGui::GetCurrentContext()->LogBuffer.c_str();
 		require(text.find("Destination permissions") != std::string::npos
+			&& text.find("Short name") != std::string::npos
 			&& text.find("Accepted shared journeys") != std::string::npos
 			&& text.find("Intermediate feature") == std::string::npos
 			&& text.find("Dynamic authorization is not yet complete") == std::string::npos

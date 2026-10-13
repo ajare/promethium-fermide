@@ -9,6 +9,7 @@
 #include <core/World.h>
 #include <core/Agent.h>
 #include <core/Window.h>
+#include "PlayerTransportSelectorDrawing.h"
 #include <willpower/application/resourcesystem/ResourceManager.h>
 #include <willpower/common/Logger.h>
 #include "ApplicationResources.h"
@@ -283,6 +284,27 @@ void checkNestedApertures() {
 }
 }
 
+void checkPlayerSelectorDrawing() {
+  core::World::PlayerTransportSelector selector;
+  selector.focus = 18;
+  for (uint32_t stop = 0; stop < 30; ++stop) selector.stops.push_back({stop, std::to_string(stop), stop == 0, stop == 0 || stop == 18});
+  for (bool horizontal : {false, true}) {
+    selector.horizontal = horizontal;
+    int labels = 0, focus = 0, green = 0, amber = 0, white = 0;
+    pf::drawPlayerTransportSelector(selector, 100.f, 300.f,
+      [&](float x0, float y0, float x1, float y1, uint32_t colour) {
+        require(x1 > x0 && y1 > y0, "Selector must emit nondegenerate fixed-size geometry");
+        if (colour == 0xe0282020u) { ++labels; require(x1 - x0 == 34.f && y1 - y0 == 18.f, "Labels must stay readable at fixed pixel size"); }
+        if (colour == 0xff60e060u) ++green;
+        if (colour == 0xff40bfffu) ++amber;
+        if (colour == 0xffffffffu) ++white;
+      },
+      [&](float, float, float, float, uint32_t colour) { require(colour == 0xffffff00u, "Focus must be cyan"); ++focus; });
+    require(labels == 8 && focus == 1 && green > 0 && amber > 0 && white > 0,
+      "Windowed selector must show current outside window, pending, focus and normal labels");
+  }
+}
+
 int main(int argc, char** argv) {
   try {
     require(argc == 2, "Expected the repository resource directory");
@@ -293,6 +315,7 @@ int main(int argc, char** argv) {
     checkStagedMap(directory);
     checkNoOverlaysAndAgents();
     checkPlayerCamera();
+    checkPlayerSelectorDrawing();
     checkStairwellDoorwayOutlines();
     checkFurniture(directory, atlas);
     checkNestedApertures();

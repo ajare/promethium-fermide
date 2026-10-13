@@ -7,6 +7,7 @@ namespace editor_smoke
 {
 	void registerAccessPanels(std::vector<smoke::Check>& checks);
 	void registerBoothWindows(std::vector<smoke::Check>& checks);
+	void registerTransportStopNames(std::vector<smoke::Check>& checks);
 	void registerAirlocks(std::vector<smoke::Check>& checks);
 	void registerSecurityScanners(std::vector<smoke::Check>& checks);
 	void registerBackground(std::vector<smoke::Check>& checks);

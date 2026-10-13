@@ -3853,6 +3853,8 @@ namespace
 				<< YAML::Key << "capacity" << YAML::Value << options.capacity
 				<< YAML::Key << "stopDurationSeconds" << YAML::Value
 				<< options.platformStopDurationSeconds
+				<< YAML::Key << "stopOffsets" << YAML::Value << options.stopOffsets
+				<< YAML::Key << "stopShortNames" << YAML::Value << options.stopShortNames
 				<< YAML::EndMap;
 		}
 		else if (gSelectedSectorObject->getObjectType() == core::SectorObjectType::Ladder)
@@ -4042,6 +4044,15 @@ namespace
 				// window is the closest equivalent to the new fixed stop duration.
 				definition.platformLift.platformStopDurationSeconds = requiredYaml<float>(
 					object, "maximumBoardingSeconds");
+			if (object["stopShortNames"])
+			{
+				definition.platformLift.stopOffsets = requiredYaml<vector<uint32_t>>(object, "stopOffsets");
+				definition.platformLift.stopShortNames = requiredYaml<vector<string>>(object, "stopShortNames");
+				auto const& names = definition.platformLift.stopShortNames;
+				if (!names.empty() && (names.size() != definition.platformLift.stopOffsets.size()
+					|| !all_of(names.begin(), names.end(), core::World::isValidTransportStopShortName)))
+					throw runtime_error("PlatformLift Stop short names must match Stops and use 1–3 characters A–Z or 0–9");
+			}
 			if (!core::isFiniteTiming(definition.platformLift.platformStopDurationSeconds))
 				throw runtime_error("PlatformLift stopDurationSeconds must be finite and non-negative");
 		}
@@ -4357,9 +4368,19 @@ namespace
 					throw runtime_error("PlatformLifts can only be placed in Rooms");
 				auto xOffset = x - room->getCellX();
 				bool valid = false;
+				auto const originalStops = definition.platformLift.stopOffsets;
+				auto const originalNames = definition.platformLift.stopShortNames;
 				for (auto const& candidate : world->getPlatformLiftStopCandidates(room->getIndex(), xOffset))
 				{
 					definition.platformLift.stopOffsets = { 0, candidate.levelOffset };
+					definition.platformLift.stopShortNames.clear();
+					if (!originalNames.empty())
+						for (size_t stop = 0; stop < definition.platformLift.stopOffsets.size(); ++stop)
+						{
+							auto found = find(originalStops.begin(), originalStops.end(), definition.platformLift.stopOffsets[stop]);
+							definition.platformLift.stopShortNames.push_back(found == originalStops.end() ? to_string(stop)
+								: originalNames.at(distance(originalStops.begin(), found)));
+						}
 					if (world->canAddPlatformLift(room->getIndex(), xOffset,
 						definition.platformLift, &diagnostic)) { valid = true; break; }
 				}
@@ -6279,6 +6300,8 @@ void renderPlatformLiftPanel(shared_ptr<core::World> const& world,
 	}
 	// The separate condition control may change while this settings draft stays open.
 	draft.initiallyBroken = platformLift->isInitiallyBroken();
+	// Stop labels are edited separately and retained by structural Stop identity.
+	draft.stopShortNames.clear();
 	ImGui::Separator();
 	ImGui::TextUnformatted("Connected levels");
 	bool ground = true;

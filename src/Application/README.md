@@ -61,12 +61,27 @@ and opposite input reverses while alone; endpoint arrivals automatically dismoun
 This includes Room Ladders. When no higher-priority climb or doorway action applies,
 a fresh Up press operates one physical Button within effective arm length and its
 Interaction point reach. Buttons require Arms capability, Buttons Mobility and
-Access permissions; they never auto-approach or repeat while Up is held. Extensible
+Access permissions; they never auto-approach or repeat while Up is held.
+Open enclosed Lift/Shuttle Doors also use Up for manual boarding and exit;
+Platform lifts use ordinary Left/Right. While aboard an open stationary vehicle,
+Shift+Up/Down (Lift/Platform lift) or Shift+Left/Right (Shuttle) browses Stop short
+names, and Space requests a visit. Shift+cursor suppresses locomotion even when
+no selector is available. Requests survive leaving; Player passengers never
+align to slots or disembark automatically. Extensible
 Ladders can be deployed via their Buttons before climbing. Walls, low spaces,
-closed Bulkhead Doors and Floor gaps block movement. Transport boarding
-and automatic crouching/crawling are not supported. Without an eligible
+closed Bulkhead Doors and Floor gaps block movement. Automatic
+crouching/crawling is not supported. Without an eligible
 Agent, Player input is disabled and the fitted Layer-0 camera remains.
 See [Player control](../../docs/player-control.md) for authoring and validation.
+
+F11 toggles Play debug mode (off by default; key repeat does not toggle again).
+While enabled, press a physical enclosed/Platform Lift Button to select its live
+readout next to the car, using MPP's built-in font. The panel shows full-precision
+fractional Level, service phase, current/target Stops, dwell elapsed/minimum/time
+left, boarding duration/cutoff, simulation ticks, occupancy/reservations and
+Door/admission state. The selected Lift stays monitored until another Lift Button
+is pressed or debug is disabled. Debug is runtime-only and does not consume
+simulation events or change device operation.
 
 Press Escape to return to Controller, run MapUnload and Unload, and exit Launcher
 normally.

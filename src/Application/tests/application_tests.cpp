@@ -19,6 +19,7 @@
 #include "Map.h"
 #include "MapResources.h"
 #include "StateLifecycle.h"
+#include "StatePlay.h"
 #include "DirectoryResourceLocation.h"
 
 namespace {
@@ -327,6 +328,79 @@ void checkPlayerLadderKeys(wp::application::State& play, core::World& world) {
   }
 }
 
+void checkPlayerTransportKeys(wp::application::State& play, core::World& world) {
+  using wp::application::Key; using wp::application::KeyEvent;
+  auto key = [&](Key k, bool pressed, bool shift = false) {
+    play._injectKeyInput(pressed ? KeyEvent::Pressed : KeyEvent::Released, k,
+      shift ? wp::application::KeyModifiers::Shift : wp::application::KeyModifiers::None);
+  };
+  core::World fixture("Keyboard Lift", 8, 6);
+  auto room = fixture.addRoom("Origin", 0, 0, 0, 8, 1);
+  fixture.addRoom("Middle", 0, 2, 0, 8, 1); fixture.addRoom("Top", 0, 4, 0, 8, 1);
+  core::World::CreateLiftOptions options; options.cellsWide = 2; options.stopOffsets = {0, 2, 4};
+  options.minimumDwellSeconds = 10.f; options.maximumBoardingSeconds = 20.f;
+  auto made = fixture.addLift(1, 0, 2, options);
+  auto control = made.doors[0].controls[0].interactionPoint;
+  float x = fixture.lookupInteractionPoint(control).entity->getPosition().x;
+  fixture.finishBuild(); fixture.pauseSimulation();
+  auto id = fixture.createAgent("Player", room, 0, x);
+  require(fixture.setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}), "Cannot assign keyboard Lift Player");
+  auto writer = core::YamlSerializer::toString(); core::SerializationWorkData data; data.markSerializedUnmodified = false;
+  fixture.serialize(*writer, data); writer->serialize();
+  auto reader = core::YamlSerializer::fromString(writer->getSerializedString()); reader->deserialize();
+  world.pauseSimulation(); require(world.deserialize(*reader, data), "Cannot install keyboard Lift"); world.resumeSimulation();
+  auto actor = world.lookupAgent(id).entity;
+  auto& playState = static_cast<pf::application::StatePlay&>(play);
+  require(!playState.isDebugModeEnabled(), "Play debug must default off");
+  key(Key::F11, true); key(Key::F11, true);
+  require(playState.isDebugModeEnabled() && !playState.getDebugLift(), "F11 repeats must not undo the debug toggle or select an unpressed Lift");
+  key(Key::F11, false);
+  key(Key::RightArrow, true, true); play._update(.2f);
+  require(std::abs(actor->getGlobalPosition().x - x) < .001f, "Shift+cursor must suppress walking outside selector");
+  key(Key::RightArrow, false); key(Key::Space, true); key(Key::Space, false);
+  key(Key::UpArrow, true); play._update(1.f); key(Key::UpArrow, false);
+  require(playState.getDebugLift() == made.traversalResource, "An actual Lift Button press must select that Lift for debug readout");
+  require(!world.getSimulationEvents().empty(), "Debug observation must not consume simulation events");
+  auto door = std::dynamic_pointer_cast<core::DoorSectorObject>(world.getSector(made.doors[0].door.sector->getIndex())->getObject(made.doors[0].door.index))->getDoor();
+  float centre = door->getPosition().x + door->getSize().x * .5f;
+  auto direction = x < centre ? Key::RightArrow : Key::LeftArrow;
+  key(direction, true);
+  for (int i = 0; i < 120 && std::abs(actor->getGlobalPosition().x - centre) > .05f; ++i) play._update(core::World::getFixedTimestep());
+  key(direction, false);
+  for (int i = 0; i < 120 && !door->isOpen(); ++i) play._update(core::World::getFixedTimestep());
+  key(Key::UpArrow, true); play._update(1.f); key(Key::UpArrow, false);
+  auto selector = world.getPlayerTransportSelector(); require(selector && selector->focus == 1, "Actual Up must board and expose Lift selector");
+  auto position = actor->getGlobalPosition();
+  key(Key::UpArrow, true, true); key(Key::UpArrow, true, true); play._update(.1f);
+  selector = world.getPlayerTransportSelector(); require(selector && selector->focus == 2, "Fresh Shift+Up must browse only once");
+  require(actor->getGlobalPosition().distanceTo(position) < .001f, "Browsing must not move or exit Player");
+  key(Key::UpArrow, false, true); key(Key::Space, true); key(Key::Space, true); key(Key::Space, false);
+  selector = world.getPlayerTransportSelector();
+  require(selector && selector->stops.back().pending, "Actual Space must request focused Stop without closing selector");
+  key(Key::DownArrow, true, true); key(Key::DownArrow, false, true);
+  require(world.getPlayerTransportSelector()->focus == 1, "Shift+Down must browse in physical order");
+  auto readout = pf::application::liftDebugReadout(world, playState.getDebugLift());
+  require(readout && readout->lines[1].starts_with("Level: ") && readout->lines[5].starts_with("Dwell min/left: ")
+      && readout->lines[7].starts_with("Cutoff left: "), "Debug readout must expose position and both dwell/boarding timers");
+  bool sawFractionalLevel = false;
+  for (int second = 0; second < 30 && !sawFractionalLevel; ++second) {
+    play._update(1.f);
+    auto snapshot = world.getSimulationSnapshot();
+    for (auto const& resource : snapshot.traversalResources)
+      if (resource.id == made.traversalResource && resource.liftMoving) {
+        auto before = pf::application::liftDebugReadout(world, playState.getDebugLift());
+        play._update(core::World::getFixedTimestep());
+        auto after = pf::application::liftDebugReadout(world, playState.getDebugLift());
+        require(before && after && before->lines[1] != after->lines[1], "Debug must show live fractional position, not the pressed Stop or an integer Level");
+        sawFractionalLevel = true;
+        break;
+      }
+  }
+  require(sawFractionalLevel, "Debug fixture must exercise a moving Lift");
+  key(Key::F11, true); key(Key::F11, false);
+  require(!playState.isDebugModeEnabled() && !playState.getDebugLift(), "A fresh F11 must disable and clear debug overlays");
+}
+
 void checkPlayerButtonKeys(wp::application::State& play, core::World& world) {
   using wp::application::Key;
   using wp::application::KeyEvent;
@@ -456,6 +530,7 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
         checkPlayerStaircaseKeys(*child, *map->getWorld());
         checkPlayerLadderKeys(*child, *map->getWorld());
         checkPlayerButtonKeys(*child, *map->getWorld());
+        checkPlayerTransportKeys(*child, *map->getWorld());
         auto const suspendTick = map->getWorld()->getSimulationTick();
         child->_suspend(true, true, true);
         child->_update(1.0f);

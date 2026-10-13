@@ -162,6 +162,7 @@ pf_add_smoke_module(pf-smoke-agent
         agent/Identity.cpp
         agent/PlayerControl.cpp
         agent/PlayerButtons.cpp
+        agent/PlayerTransports.cpp
         agent/Activation.cpp
         agent/Group.cpp
         agent/GroupAssignment.cpp
@@ -191,7 +192,8 @@ foreach(check playerControlBasics playerControlBoundaries playerControlBulkheads
         playerControlStairwells playerControlStairwellRestrictions playerControlStairwellPlatforms
         playerControlStaircases playerControlStaircaseRestrictions playerControlEscalators
         playerControlLadders playerControlLadderRestrictions playerControlLadderSharedCapacity
-        playerControlButtons playerControlButtonPriority playerControlExtensibleLadders)
+        playerControlButtons playerControlButtonPriority playerControlExtensibleLadders
+        playerControlManualTransports playerControlLiftCalledLanding)
     add_test(NAME agent-${check} COMMAND pf-smoke-agent --check ${check})
     set_tests_properties(agent-${check} PROPERTIES LABELS "agent;functional;validation-fast" TIMEOUT 30)
 endforeach()
@@ -462,7 +464,7 @@ pf_add_smoke_module(pf-smoke-persistence
         persistence/BrokenLifts.cpp
         persistence/BrokenPlatformLifts.cpp
         persistence/BrokenShuttles.cpp
-        persistence/LiftDocuments.cpp
+        persistence/LiftDocuments.cpp persistence/TransportStopNames.cpp
         persistence/ShuttleDocuments.cpp
         persistence/DeepLayerReplay.cpp
         persistence/Restoration.cpp
@@ -531,7 +533,7 @@ set_tests_properties(smoke-harness-contract PROPERTIES LABELS "harness;core" TIM
 pf_add_smoke_module(pf-smoke-editor
     NAME editor
     SOURCES
-        editor/ScaledDoors.cpp editor/RoomHeightScale.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
+        editor/ScaledDoors.cpp editor/RoomHeightScale.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/TransportStopNames.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
         agent/ActivationEditor.cpp
         agent/GroupEditor.cpp
         agent/GroupAssignmentEditor.cpp
@@ -634,3 +636,10 @@ if(BUILD_TESTING)
     endforeach()
     set_tests_properties(smoke-metrics-contract PROPERTIES PROCESSORS 8)
 endif()
+
+add_test(NAME transport-stop-names-persistence COMMAND pf-smoke-persistence --check transportStopShortNames)
+add_test(NAME transport-stop-names-editor COMMAND pf-smoke-editor --check transportStopNames/editorHistory)
+set_tests_properties(transport-stop-names-persistence PROPERTIES
+    LABELS "core;persistence;functional;smoke;validation-fast" TIMEOUT 30)
+set_tests_properties(transport-stop-names-editor PROPERTIES
+    LABELS "editor;functional;smoke;validation-fast" TIMEOUT 30)

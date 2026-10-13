@@ -380,6 +380,10 @@ namespace core
 		std::map<AgentId, LiftTripIntent> mLiftTripIntents;
 		std::vector<std::set<AgentId>> mLiftStopRequestOwners;
 		std::vector<std::map<AgentId, uint64_t>> mLiftStopRequestTicks;
+		// Service requests, deliberately independent of passenger journey ownership.
+		std::map<uint32_t, uint64_t> mPlayerStopRequests;
+		uint32_t mPlayerStopFocus{ ~0u };
+		bool mPlayerBoardingWindow{ false };
 		std::vector<TraversalRequestId> mLiftConfirmationQueue;
 		TraversalRequestId mLiftActiveConfirmation;
 		// Shuttle motion and scheduling remain vehicle-wide. These records partition

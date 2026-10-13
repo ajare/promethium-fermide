@@ -177,6 +177,8 @@ namespace core
 		bool liftCarDoorOpen{ false };
 		LiftStopPhase liftStopPhase{ LiftStopPhase::Idle };
 		uint64_t liftServiceStartedTick{ 0 };
+		uint64_t liftMinimumDwellTicks{ 0 };
+		uint64_t liftMaximumBoardingTicks{ 0 };
 		uint64_t liftBoardingCutoffTick{ 0 };
 		bool liftAcceptingBoarders{ false };
 		bool liftDraining{ false };
