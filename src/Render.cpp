@@ -1307,13 +1307,14 @@ void renderStairwell(shared_ptr<const core::Stairwell> stairwell, uint32_t /* la
 		drawList->AddPolyline(pathPoints.data(), (int)pathPoints.size(),
 			ImColor(0, 0, 0), ImDrawFlags_None, 4.0f);
 	}
-	// Back-facing exits are outlines on the Stairwell's viewed Layer, not
-	// recursive apertures into the adjacent fore Locations.
-	if (style == LayerRenderStyle::Solid)
+	// Outline each permanently open doorway both from inside the Stairwell
+	// and through the landing aperture. The aperture pass already clips each
+	// box to its landing; these frames never reveal the fore Layer recursively.
+	if (isDrawnSolid(style))
 		for (uint32_t level = 0; level < stairwell->getLevelsHigh(); ++level)
 		{
-			auto low = toScreen({CORE_DOOR_X_INSET, float(level)});
-			auto high = toScreen({stairwell->getSize().x - CORE_DOOR_X_INSET,
+			auto low = toScreen({1.f - CORE_STAIRWELL_PASSAGE_WIDTH * .5f, float(level)});
+			auto high = toScreen({1.f + CORE_STAIRWELL_PASSAGE_WIDTH * .5f,
 				float(level) + CORE_STAIRWELL_DOORWAY_HEIGHT});
 			drawList->AddRect({low.x, high.y}, {high.x, low.y}, ImColor(0, 0, 0));
 		}

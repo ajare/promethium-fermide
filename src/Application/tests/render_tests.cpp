@@ -195,7 +195,7 @@ void checkStairwellDoorwayOutlines() {
       if (!horizontal || !vertical || horizontal->from.y != horizontal->to.y || vertical->from.x != vertical->to.x) continue;
       float width = std::abs(horizontal->to.x - horizontal->from.x);
       float height = std::abs(vertical->to.y - vertical->from.y);
-      if (height == 0 || std::abs(width / height - (2.f - 2.f * CORE_DOOR_X_INSET) * CORE_CELL_WIDTH_PIXELS
+      if (height == 0 || std::abs(width / height - CORE_STAIRWELL_PASSAGE_WIDTH * CORE_CELL_WIDTH_PIXELS
           / (CORE_STAIRWELL_DOORWAY_HEIGHT * CORE_LEVEL_HEIGHT_PIXELS)) > .001f) continue;
       bool rectangle = true;
       for (size_t side = 0; side < 4; ++side) {
@@ -204,11 +204,24 @@ void checkStairwellDoorwayOutlines() {
         rectangle = rectangle && line && next && line->colour == render::packColour(0, 0, 0) && line->thickness == 1.f
           && line->to.x == next->from.x && line->to.y == next->from.y;
       }
-      if (rectangle) ++count;
+      if (rectangle) {
+        // Emitted geometry outside its aperture clip is not a visible doorway.
+        for (size_t side = 0; side < 4; ++side) {
+          auto const& line = std::get<render::WorldDrawList::Line>(commands[i + side]);
+          rectangle = rectangle && line.from.x >= line.clip.minimum.x - .001f
+            && line.from.x <= line.clip.maximum.x + .001f
+            && line.from.y >= line.clip.minimum.y - .001f
+            && line.from.y <= line.clip.maximum.y + .001f;
+        }
+        if (rectangle) ++count;
+      }
     }
     return count;
   };
-  require(outlines(render::drawWorld(world, 1280, 720)) == 0, "Fore-Layer apertures must not acquire back-facing exit outlines");
+  auto landingCount = outlines(render::drawWorld(world, 1280, 720));
+  if (landingCount != 2) throw std::runtime_error(
+          "Open Stairwell doorways must have visible boxes when viewed through landing apertures: expected 2, got "
+          + std::to_string(landingCount));
   world->resumeSimulation(); world->requestPlayerDoorAction(); world->update(.2f);
   require(world->lookupAgent(id).entity->getSector()->getIndex() == stairs, "Player must enter Stairwell to view its Layer");
   auto draws = render::drawWorld(world, 1280, 720);

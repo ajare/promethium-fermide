@@ -10,6 +10,8 @@
 #include "core/Exceptions.h"
 #include "Render.h"
 #include "UI.h"
+#include "UISettings.h"
+#include "WorldDrawList.h"
 
 #include "core/Graph.h"
 #include "core/World.h"
@@ -28,6 +30,8 @@
 #include "core/YamlSerializer.h"
 
 #include "Checks.h"
+
+extern UISettings gUISettings;
 
 namespace
 {
@@ -281,6 +285,47 @@ namespace
 		}
 	}
 
+	void stairwellDoorwayBoxes()
+	{
+		auto world = std::make_shared<core::World>("Stairwell doorway boxes", 8, 2);
+		world->addRoom("Bottom", 0, 0, 0, 8, 1);
+		world->addRoom("Top", 0, 1, 0, 8, 1);
+		world->addStairwell(1, 0, 2, 2, CORE_SIDE_LEFT);
+		world->finishBuild();
+		gUISettings.worldViewportX = gUISettings.worldViewportY = 0.f;
+		gUISettings.worldViewportWidth = 1280.f; gUISettings.worldViewportHeight = 720.f;
+		gUISettings.worldZoom = 1.f; gUISettings.xOffset = gUISettings.yOffset = 0.f;
+		gUISettings.renderNextLayerWireframe = false;
+		for (int layer : {0, 1})
+		{
+			gUISettings.visibleLayer = layer;
+			WorldDrawList draws(WorldDrawList::ClipRectangle{{0, 0}, {1280, 720}});
+			renderWorld(world, &draws);
+			for (int level : {0, 1})
+			{
+				float const left = (3.f - CORE_STAIRWELL_PASSAGE_WIDTH * .5f) * CORE_CELL_WIDTH_PIXELS;
+				float const right = (3.f + CORE_STAIRWELL_PASSAGE_WIDTH * .5f) * CORE_CELL_WIDTH_PIXELS;
+				float const top = 720.f - (level + CORE_STAIRWELL_DOORWAY_HEIGHT) * CORE_LEVEL_HEIGHT_PIXELS;
+				float const bottom = 720.f - level * CORE_LEVEL_HEIGHT_PIXELS;
+				std::array<ImVec2, 4> corners{{{left, top}, {right, top}, {right, bottom}, {left, bottom}}};
+				unsigned sides = 0;
+				for (auto const& command : draws.commands())
+					if (auto line = std::get_if<WorldDrawList::Line>(&command);
+						line && line->colour == IM_COL32_BLACK && line->thickness == 1.f)
+						for (unsigned side = 0; side < 4; ++side)
+						{
+							auto from = corners[side], to = corners[(side + 1) % 4];
+							if (std::abs(line->from.x - from.x) < .001f && std::abs(line->from.y - from.y) < .001f
+								&& std::abs(line->to.x - to.x) < .001f && std::abs(line->to.y - to.y) < .001f
+								&& from.x >= line->clip.minimum.x - .001f && from.x <= line->clip.maximum.x + .001f
+								&& from.y >= line->clip.minimum.y - .001f && from.y <= line->clip.maximum.y + .001f)
+								sides |= 1u << side;
+						}
+				require(sides == 15, "Stairwell doorway must draw all four visible box sides in landing and shaft views");
+			}
+		}
+	}
+
 	void stairwellSectorsAreCanvasSelectableRendering()
 	{
 		require(isCanvasSelectableSectorType(core::SectorType::Stairwell),
@@ -338,6 +383,7 @@ namespace render_smoke
 	{
 		checks.push_back({ "onlyTheSelectedLayerIsDrawn", isolated<[](smoke::Context const&) { onlyTheSelectedLayerIsDrawn(); }> });
 		checks.push_back({ "transitsOnTheLayerBehindAreOnlyDrawnThroughApertures", isolated<[](smoke::Context const&) { transitsOnTheLayerBehindAreOnlyDrawnThroughApertures(); }> });
+		checks.push_back({ "stairwellDoorwayBoxes", isolated<[](smoke::Context const&) { stairwellDoorwayBoxes(); }> });
 		checks.push_back({ "stairwellSectorsAreCanvasSelectableRendering", isolated<[](smoke::Context const&) { stairwellSectorsAreCanvasSelectableRendering(); }> });
 		checks.push_back({ "staircasesConnectAdjacentCorridorsAndRoundTripRendering", isolated<[](smoke::Context const&) { staircasesConnectAdjacentCorridorsAndRoundTripRendering(); }> });
 		checks.push_back({ "laddersCanBeValidatedEditedAndDeletedRendering", isolated<[](smoke::Context const&) { laddersCanBeValidatedEditedAndDeletedRendering(); }> });
