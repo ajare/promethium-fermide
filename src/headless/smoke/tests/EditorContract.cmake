@@ -269,6 +269,7 @@ set(editor_names
     station/batteryWorkflow
     station/deliveryWorkflow
     station/wasteEjectionWorkflow
+    station/containmentWorkflow
     station/thermalWorkflow
     station/coolantWorkflow
     station/chillerWorkflow

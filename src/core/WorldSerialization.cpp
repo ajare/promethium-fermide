@@ -870,7 +870,20 @@ namespace core
 		// so existing Worlds grow exactly as before; the harvest,
 		// starvation-death and loss ledgers stay runtime-only, so load
 		// and Reset reconstruct them from the authored conditions.
-		serializer.writeUint32("version", 87);
+		// Version 88 adds the hazardous containment boundary (#412):
+		// every Resource store carries an authored hazard class (default
+		// "normal"), and hazardous-class water treatments declare a
+		// release-clearance consumable store and per-kg test rate so
+		// treated hazardous material is released only on a passed test.
+		// Cross-class transfers and conversions are refused at validation;
+		// the class boundary, not a pressure target or a runtime policy,
+		// is what establishes containment. A pre-88 document carrying a
+		// store `hazardClass` or treatment `clearanceStoreId` /
+		// `clearancePerKg` is refused rather than silently defaulted.
+		// The clearance state, holds and clearance ledgers stay runtime-
+		// only, so load and Reset reconstruct them from the authored
+		// starting conditions.
+		serializer.writeUint32("version", 88);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -890,6 +903,7 @@ namespace core
 					serializer.writeDouble("startingQualified", store.startingQualified);
 					serializer.writeDouble("startingUnqualified", store.startingUnqualified);
 					serializer.writeDouble("protectedReserve", store.protectedReserve);
+					serializer.writeString("hazardClass", store.hazardClass);
 					if (store.composition)
 					{
 						// Authored composition only; constituent ledgers and
@@ -1280,6 +1294,8 @@ namespace core
 					serializer.writeDouble("recoveryRatio", treatment.recoveryRatio);
 					serializer.writeDouble("specificEnergyKWhPerKg", treatment.specificEnergyKWhPerKg);
 					serializer.writeDouble("consumablePerKg", treatment.consumablePerKg);
+					serializer.writeString("clearanceStoreId", treatment.clearanceStoreId);
+					serializer.writeDouble("clearancePerKg", treatment.clearancePerKg);
 					serializer.writeInt32("priority", treatment.priority);
 					serializer.endMap();
 				}
@@ -2496,7 +2512,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 87)
+		if (version < 1 || version > 88)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2525,6 +2541,12 @@ namespace core
 						if (version < 67) throw SerializationException(
 							"Station protected reserves require World schema 67");
 						store.protectedReserve = serializer.readDouble("protectedReserve");
+					}
+					if (serializer.hasField("hazardClass"))
+					{
+						if (version < 88) throw SerializationException(
+							"Station store hazard classes require World schema 88");
+						store.hazardClass = serializer.readString("hazardClass");
 					}
 					if (serializer.hasField("composition"))
 					{
@@ -2953,6 +2975,18 @@ namespace core
 					treatment.recoveryRatio = serializer.readDouble("recoveryRatio");
 					treatment.specificEnergyKWhPerKg = serializer.readDouble("specificEnergyKWhPerKg");
 					treatment.consumablePerKg = serializer.readDouble("consumablePerKg");
+					if (serializer.hasField("clearanceStoreId"))
+					{
+						if (version < 88) throw SerializationException(
+							"Station release-clearance contracts require World schema 88");
+						treatment.clearanceStoreId = serializer.readString("clearanceStoreId");
+					}
+					if (serializer.hasField("clearancePerKg"))
+					{
+						if (version < 88) throw SerializationException(
+							"Station release-clearance contracts require World schema 88");
+						treatment.clearancePerKg = serializer.readDouble("clearancePerKg");
+					}
 					treatment.priority = serializer.readInt32("priority");
 					stationSettings.waterTreatments.push_back(std::move(treatment));
 					serializer.endMap();

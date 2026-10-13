@@ -62,6 +62,11 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		std::strncpy(unitBuffer, store.unit.c_str(), sizeof(unitBuffer) - 1);
 		if (ImGui::InputText(("Store " + row + " unit").c_str(), unitBuffer, sizeof(unitBuffer)))
 			store.unit = unitBuffer;
+		char storeHazardBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(storeHazardBuffer, store.hazardClass.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Store " + row + " hazard class").c_str(),
+			storeHazardBuffer, sizeof(storeHazardBuffer)))
+			store.hazardClass = storeHazardBuffer;
 		ImGui::InputDouble(("Store " + row + " capacity").c_str(), &store.capacity, 0.0, 0.0, "%.3f");
 		ImGui::InputDouble(("Store " + row + " starting usable").c_str(), &store.startingQualified, 0.0, 0.0, "%.3f");
 		ImGui::InputDouble(("Store " + row + " starting held").c_str(), &store.startingUnqualified, 0.0, 0.0, "%.3f");
@@ -1327,7 +1332,14 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		if (ImGui::InputText(("Treatment " + row + " consumable store").c_str(),
 			treatmentConsumableBuffer, sizeof(treatmentConsumableBuffer)))
 			treatment.consumableStoreId = treatmentConsumableBuffer;
+		char treatmentClearanceBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(treatmentClearanceBuffer, treatment.clearanceStoreId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Treatment " + row + " release-clearance store").c_str(),
+			treatmentClearanceBuffer, sizeof(treatmentClearanceBuffer)))
+			treatment.clearanceStoreId = treatmentClearanceBuffer;
 		ImGui::PushItemWidth(140.0f);
+		ImGui::InputDouble(("Treatment " + row + " clearance per kg").c_str(),
+			&treatment.clearancePerKg, 0.0, 0.0, "%.6f");
 		ImGui::InputDouble(("Treatment " + row + " throughput kg/s").c_str(),
 			&treatment.throughputKgPerS, 0.0, 0.0, "%.6f");
 		ImGui::InputDouble(("Treatment " + row + " recovery ratio").c_str(),
@@ -2228,8 +2240,9 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	if (snapshot.stores.empty()) ImGui::TextDisabled("No Resource stores authored.");
 	for (auto const& store : snapshot.stores)
 	{
-		ImGui::Text("%s (%s): usable %.3f, held %.3f of capacity %.3f | initial usable %.3f, initial held %.3f | protected %.3f | last tick in %.3f, out %.3f",
-			store.id.c_str(), store.unit.c_str(), store.currentQualified, store.currentUnqualified,
+		ImGui::Text("%s (%s) [%s]: usable %.3f, held %.3f of capacity %.3f | initial usable %.3f, initial held %.3f | protected %.3f | last tick in %.3f, out %.3f",
+			store.id.c_str(), store.unit.c_str(), store.hazardClass.c_str(),
+			store.currentQualified, store.currentUnqualified,
 			store.capacity, store.startingQualified, store.startingUnqualified,
 			store.protectedReserve, store.lastTickIn, store.lastTickOut);
 		if (store.composition)
@@ -2747,10 +2760,20 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		ImGui::Text("  quality: %s%s",
 			treatment.qualityAccepted ? "treated output accepted" : "treated output HELD UNQUALIFIED",
 			treatment.holdReason.empty() ? "" : (std::string(" - ") + treatment.holdReason).c_str());
-		ImGui::Text("  cumulative: processed %.4f kg | treated %.4f kg (accepted %.4f, held %.4f) | concentrate retained %.4f kg | energy %.2f/%.2f kJ | consumables %.4f",
+		ImGui::Text("  gates (#412): filtration %s | treatment evidence %s | release clearance %s%s",
+			treatment.filtrationCompleted ? "ran" : "not run",
+			treatment.treatmentEvidenced ? "complete (full dose)" : "incomplete",
+			treatment.releaseCleared ? "CLEARED" : "not cleared",
+			treatment.clearanceStoreId.empty() ? " (no clearance contract: normal class)"
+				: (std::string(" | clearance ") + std::to_string(treatment.lastClearanceUsed)
+					+ "/" + std::to_string(treatment.lastClearanceRequested)
+					+ " from '" + treatment.clearanceStoreId + "'").c_str());
+		if (!treatment.clearanceStoreId.empty() && treatment.lastClearanceUnmet > 1e-12)
+			ImGui::Text("  unmet containment demand: %.6f clearance units short this tick", treatment.lastClearanceUnmet);
+		ImGui::Text("  cumulative: processed %.4f kg | treated %.4f kg (accepted %.4f, held %.4f) | concentrate retained %.4f kg | energy %.2f/%.2f kJ | consumables %.4f | clearance used %.4f",
 			treatment.processedKg, treatment.treatedKg, treatment.acceptedKg, treatment.heldKg,
 			treatment.concentrateKg, treatment.energySuppliedKJ, treatment.energyOwedKJ,
-			treatment.consumablesUsed);
+			treatment.consumablesUsed, treatment.clearanceUsedTotal);
 		if (treatment.disabled)
 			ImGui::Text("  zero throughput: no processing");
 	}

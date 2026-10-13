@@ -310,6 +310,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         assert(type(protected) == "number" and protected == protected and protected >= 0
             and protected <= store.qualified,
             "protected reserve must be finite, non-negative and within starting usable inventory")
+        -- The authored hazard class (#412): a corrupt crossing that names
+        -- an unknown class fails contained here, exactly like any other
+        -- bad descriptor.
+        local hazardClass = store.hazardClass or 'normal'
+        assert(hazardClass == 'normal' or hazardClass == 'hazardous',
+            "resource store hazard class must be 'normal' or 'hazardous'")
         local composition
         if store.composition ~= nil then
             assert(type(store.composition) == "table", "resource composition must be a table")
@@ -341,6 +347,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         object.stores[index] = {
             id = store.id,
             unit = store.unit,
+            hazardClass = hazardClass,
             capacity = store.capacity,
             qualified = store.qualified,
             unqualified = store.unqualified,
@@ -365,6 +372,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         assert(source ~= destination, "transfer source and destination must differ")
         assert(transfer.unit == source.unit and transfer.unit == destination.unit,
             "transfer unit must match both stores")
+        -- A generic transfer never crosses the hazard-class boundary
+        -- (#412): hazardous contents are a protected reserve of their
+        -- own class. The host refuses this at configuration; the sandbox
+        -- re-checks so a corrupt crossing fails contained here too.
+        assert(source.hazardClass == destination.hazardClass,
+            "transfer crosses the hazard-class boundary: hazardous and normal material may not share a generic transfer")
         assert(type(transfer.rate) == "number" and transfer.rate == transfer.rate
             and transfer.rate > 0 and transfer.rate < math.huge,
             "transfer rate must be finite and positive")
@@ -403,6 +416,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             and #conversion.outputs <= 4, "resource conversion needs 1 to 4 outputs")
         local seen = {}
         local inflow, outflow = {}, {}
+        -- One conversion stays inside one hazard class (#412).
+        local endpointClass = nil
         local function readFlow(flow, kind, totals)
             assert(type(flow) == "table", "conversion flow must be a table")
             local store = by_id[flow.store]
@@ -410,6 +425,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             assert(not seen[flow.store], "conversion store used more than once")
             assert(store.composition ~= nil,
                 "conversion stores require a declared composition")
+            if endpointClass == nil then
+                endpointClass = store.hazardClass
+            else
+                assert(store.hazardClass == endpointClass,
+                    "conversion crosses the hazard-class boundary: one conversion may only transform material within a single hazard class")
+            end
             local rate = kind == 'input' and flow.rate or flow.yield
             assert(type(rate) == "number" and rate == rate and rate > 0 and rate < math.huge,
                 "conversion " .. kind .. " rate must be finite and positive")
@@ -1511,6 +1532,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     local function declareWaterStore(storeId, role, hazardClass, allowCompound)
         local store = by_id[storeId]
         assert(store ~= nil, 'water ' .. role .. " store '" .. tostring(storeId) .. "' is unknown")
+        assert(store.hazardClass == hazardClass,
+            'water ' .. role .. " store '" .. store.id .. "' is authored "
+                .. store.hazardClass .. '-class but this is a ' .. hazardClass
+                .. '-class water process: a process may only touch stores of its own hazard class')
         assert(store.unit == 'g' or store.unit == 'kg',
             'water ' .. role .. " store '" .. store.id
                 .. "' must be a mass unit; water recovery is mass-denominated")
@@ -1606,11 +1631,38 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         end
         local consumable = declareWaterStore(treatment.consumableStore, 'consumable',
             treatment.hazardClass, true)
+        -- Release clearance (#412): a hazardous-class treatment must
+        -- declare its clearance contract; a normal-class one must not.
+        -- The sandbox mirrors the host's refusal so a corrupt crossing
+        -- fails contained at construction like any other bad descriptor.
+        local clearance = nil
+        if treatment.hazardClass == 'hazardous' then
+            assert(type(treatment.clearanceStore) == 'string'
+                and #treatment.clearanceStore > 0,
+                'hazardous water treatment must declare a release-clearance consumable store: treated hazardous material is released only on a passed clearance test')
+            assert(type(treatment.clearancePerKg) == 'number'
+                and treatment.clearancePerKg == treatment.clearancePerKg
+                and treatment.clearancePerKg > 0 and treatment.clearancePerKg < math.huge,
+                'hazardous water treatment release clearance per kg must be finite and positive')
+            for stream = 1, 3 do
+                assert(streamIds[stream] ~= treatment.clearanceStore,
+                    'water treatment release-clearance store must be distinct from the source, treated and concentrate stores')
+            end
+            clearance = declareWaterStore(treatment.clearanceStore,
+                'release-clearance consumable', treatment.hazardClass, true)
+        else
+            assert(treatment.clearanceStore == nil or #treatment.clearanceStore == 0,
+                'normal-class water treatment cannot configure release-clearance testing')
+            assert((treatment.clearancePerKg or 0) == 0,
+                'normal-class water treatment cannot configure release clearance per kg')
+        end
         object.water_treatments[index] = {
             id = treatment.id,
             hazardClass = treatment.hazardClass,
             source = streams[1], treated = streams[2], concentrate = streams[3],
             consumable = consumable,
+            clearance = clearance,
+            clearancePerKg = treatment.clearancePerKg or 0,
             throughputKgPerS = treatment.throughputKgPerS,
             recoveryRatio = treatment.recoveryRatio,
             specificEnergyKWhPerKg = treatment.specificEnergyKWhPerKg,
@@ -1621,6 +1673,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             lastPowerDemand = 0, lastPowerSupplied = 0,
             lastConsumableRequested = 0, lastConsumableUsed = 0,
             qualityAccepted = false, lastHoldReason = '',
+            filtrationCompleted = false, treatmentEvidenced = false,
+            releaseCleared = false,
+            lastClearanceRequested = 0, lastClearanceUsed = 0,
+            lastClearanceUnmet = 0, clearanceUsedTotal = 0,
             processedTotal = 0, treatedTotal = 0, acceptedTotal = 0,
             heldTotal = 0, concentrateTotal = 0,
             energySuppliedKJ = 0, energyOwedKJ = 0, consumablesUsedTotal = 0,
@@ -1648,6 +1704,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     local function declareGasStore(storeId, role, hazardClass, allowCompound)
         local store = by_id[storeId]
         assert(store ~= nil, 'gas ' .. role .. " store '" .. tostring(storeId) .. "' is unknown")
+        assert(store.hazardClass == hazardClass,
+            'gas ' .. role .. " store '" .. store.id .. "' is authored "
+                .. store.hazardClass .. '-class but this is a ' .. hazardClass
+                .. '-class gas process: a process may only touch stores of its own hazard class')
         assert(store.unit == 'g' or store.unit == 'kg',
             'gas ' .. role .. " store '" .. store.id
                 .. "' must be a mass unit; gas handling is mass-denominated")
@@ -1967,6 +2027,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     local function declareMicrobialStore(storeId, role, hazardClass, requireCompound)
         local store = by_id[storeId]
         assert(store ~= nil, 'nutrient ' .. role .. " store '" .. tostring(storeId) .. "' is unknown")
+        assert(store.hazardClass == hazardClass,
+            'nutrient ' .. role .. " store '" .. store.id .. "' is authored "
+                .. store.hazardClass .. '-class but this is a ' .. hazardClass
+                .. '-class nutrient process: a process may only touch stores of its own hazard class')
         assert(store.unit == 'g' or store.unit == 'kg',
             'nutrient ' .. role .. " store '" .. store.id
                 .. "' must be a mass unit; nutrient recovery is mass-denominated")
@@ -3979,6 +4043,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             treatment.lastConsumableUsed = 0
             treatment.qualityAccepted = false
             treatment.lastHoldReason = ''
+            treatment.filtrationCompleted = false
+            treatment.treatmentEvidenced = false
+            treatment.releaseCleared = false
+            treatment.lastClearanceRequested = 0
+            treatment.lastClearanceUsed = 0
+            treatment.lastClearanceUnmet = 0
             if treatment.throughputKgPerS > 0 then
                 local fullKg = treatment.throughputKgPerS * fixed_seconds
                 local drawableSource = math.max(0,
@@ -4046,16 +4116,35 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             concentrateHeadroom)
                         local concentrateKg = toKg(concentrate.unit, concentrateUnits)
                         source.qualified = source.qualified - processedUnits
-                        -- Quality: the full rated energy dose is what
-                        -- qualifies. A curtailed dose runs the machine but
-                        -- does not finish the water, so the output is held
-                        -- unqualified rather than passed through.
+                        -- Quality is three distinct gates (#412):
+                        -- filtration ran with the process, the full rated
+                        -- energy dose is the treatment evidence, and the
+                        -- release clearance test is what releases
+                        -- hazardous treated material. The test is all-or-
+                        -- nothing per tick; a held batch consumed nothing.
                         local curtailed = supplied + 1e-12 < powerDemand
-                        treatment.qualityAccepted = not curtailed
+                        local clearanceDemand = treatment.clearance ~= nil
+                            and treatment.clearancePerKg * treatedKg or 0
+                        local drawableClearance = treatment.clearance ~= nil
+                            and math.max(0, treatment.clearance.qualified
+                                - treatment.clearance.protected_reserve) or 0
+                        local clearanceSatisfied = clearanceDemand <= 1e-12
+                            or drawableClearance + 1e-12 >= clearanceDemand
+                        local released = not curtailed and clearanceSatisfied
+                        treatment.filtrationCompleted = treatedKg > 0 or concentrateKg > 0
+                        treatment.treatmentEvidenced = not curtailed
+                            and treatment.filtrationCompleted
+                        treatment.releaseCleared = released and treatment.filtrationCompleted
+                        treatment.qualityAccepted = released
                         if curtailed then
                             treated.unqualified = treated.unqualified + treatedUnits
                             treatment.lastHoldReason = 'treatment energy curtailed: '
                                 .. 'the treated output is held unqualified'
+                        elseif not clearanceSatisfied then
+                            treated.unqualified = treated.unqualified + treatedUnits
+                            treatment.lastHoldReason = 'release clearance unavailable: '
+                                .. 'the clearance test consumable cannot cover the treated '
+                                .. 'output; the material is held until it can be cleared'
                         else
                             treated.qualified = treated.qualified + treatedUnits
                         end
@@ -4068,6 +4157,33 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             drawableConsumable)
                         consumable.qualified = consumable.qualified - consumableUsed
                         treatment.lastConsumableUsed = consumableUsed
+                        -- The clearance test is spent only when it runs
+                        -- and passes; a held batch consumed nothing, so
+                        -- the kit stays available for the next tick.
+                        if not curtailed then
+                            treatment.lastClearanceRequested = clearanceDemand
+                            if released and clearanceDemand > 0 then
+                                treatment.clearance.qualified =
+                                    treatment.clearance.qualified - clearanceDemand
+                                treatment.lastClearanceUsed = clearanceDemand
+                                treatment.clearanceUsedTotal =
+                                    treatment.clearanceUsedTotal + clearanceDemand
+                                self.unit_loss[treatment.clearance.unit] =
+                                    (self.unit_loss[treatment.clearance.unit] or 0)
+                                        + clearanceDemand
+                                if treatment.clearance.composition then
+                                    local net = {}
+                                    addConstituents(net, treatment.clearance.composition,
+                                        toKg(treatment.clearance.unit, clearanceDemand), -1)
+                                    for constituent, change in pairs(net) do
+                                        self.constituent_loss[constituent] =
+                                            (self.constituent_loss[constituent] or 0) - change
+                                    end
+                                end
+                            end
+                            treatment.lastClearanceUnmet = treatment.lastClearanceRequested
+                                - treatment.lastClearanceUsed
+                        end
                         -- Unit and constituent boundaries: the source gave
                         -- the processed mass up, the treated and
                         -- concentrate stores took their shares on, and the
@@ -4095,10 +4211,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         treatment.processedTotal = treatment.processedTotal + processedKg
                         treatment.treatedTotal = treatment.treatedTotal + treatedKg
                         treatment.concentrateTotal = treatment.concentrateTotal + concentrateKg
-                        if curtailed then
-                            treatment.heldTotal = treatment.heldTotal + treatedKg
-                        else
+                        if released then
                             treatment.acceptedTotal = treatment.acceptedTotal + treatedKg
+                        else
+                            treatment.heldTotal = treatment.heldTotal + treatedKg
                         end
                         treatment.energySuppliedKJ = treatment.energySuppliedKJ
                             + supplied * fixed_seconds
@@ -4114,6 +4230,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 and isFinite(treatment.lastPowerDemand) and isFinite(treatment.lastPowerSupplied)
                 and isFinite(treatment.lastConsumableRequested)
                 and isFinite(treatment.lastConsumableUsed)
+                and isFinite(treatment.lastClearanceRequested)
+                and isFinite(treatment.lastClearanceUsed)
+                and isFinite(treatment.lastClearanceUnmet)
+                and isFinite(treatment.clearanceUsedTotal)
                 and isFinite(treatment.processedTotal) and isFinite(treatment.treatedTotal)
                 and isFinite(treatment.acceptedTotal) and isFinite(treatment.heldTotal)
                 and isFinite(treatment.concentrateTotal)

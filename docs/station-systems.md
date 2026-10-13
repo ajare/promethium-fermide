@@ -1,4 +1,4 @@
-# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, terminal-waste storage and scheduled ejection, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, chilled thermal services, fuelled generators, compartment atmospheres with airlock cycles, crew metabolic returns, water recovery with qualification, oxygen production with finite CO2 capture, and finite thermal buffers that ride through cooling deficits (#386–#391, #393–#404, #406)
+# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, terminal-waste storage and scheduled ejection, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, chilled thermal services, fuelled generators, compartment atmospheres with airlock cycles, crew metabolic returns, water recovery with qualification, oxygen production with finite CO2 capture, finite thermal buffers that ride through cooling deficits, and hazardous treatment and containment boundaries (#386–#391, #393–#404, #406, #412)
 
 Station systems are opt-in per World and disabled in existing documents. Open
 **View > Station Systems** or use the
@@ -1528,6 +1528,102 @@ the real Station Systems window drafts, validates, refuses and
 applies ejection edits through the reset-confirmed flow, and the
 live view reports the ejected/unmet split and the retained held
 waste.
+
+### Hazardous treatment and containment boundaries (#412)
+
+Hazardous material is kept separate from the normal inventory by an
+authored boundary that is enforced at configuration, not policed at
+runtime. Every Resource store now carries a hazard class — `normal` (the
+default) or `hazardous` — and that class is what makes a hazardous store a
+protected reserve of its own kind.
+
+**The class boundary is refused, not filtered.** A generic transfer whose
+source and destination carry different classes is refused at validation:
+an accidentally-wired transfer can never siphon hazardous material into
+the potable inventory, and it can never dilute hazardous containment with
+normal material. The same rule binds conversions — every endpoint of one
+conversion shares a single class — and every process: a process may only
+touch stores of its own hazard class, so a normal-class treatment cannot
+draw from a hazardous store and a hazardous cell cannot deliver into a
+normal compartment. Recovery of hazardous material runs inside the
+hazardous class, between stores of that class only. A pressure target, a
+setpoint or a runtime policy never establishes containment: the declared
+class boundary does, and a compartment sitting exactly on its pressure
+setpoint is no less hazardous than one that has drifted.
+
+**Filtration, treatment evidence and release clearance are three distinct
+gates.** A hazardous-class water treatment must declare a release-
+clearance contract: a clearance consumable store and a positive test dose
+per kilogram treated. Filtration runs with the process; the treatment
+evidence is the full rated energy dose; and the release clearance is the
+passed test, drawn from the clearance store above its protected reserve.
+Only when the full dose and a passed test coincide is the treated output
+released as qualified. A curtailed dose fails the evidence gate before the
+test ever runs, and a full dose whose clearance consumable cannot cover the
+output is unknown clearance — both hold the material unqualified with a
+stated reason. The test is all-or-nothing per tick: a partial kit does not
+clear a partial batch, and a held batch consumes no clearance consumable,
+so the kit stays available rather than being burned on a test that never
+happened. Generic recovery transfers only ever pick up qualified (released)
+material, so the hold cannot be bypassed: when the clearance consumable is
+gone the treated store fills with held stock that no transfer can reach,
+while the released material ahead of it keeps flowing to the hazardous
+reserve. The unmet containment demand is exposed on the snapshot beside the
+cleared/held split and the cumulative clearance ledger.
+
+A normal-class treatment cannot configure clearance testing at all —
+release clearance is the hazardous containment boundary, not a normal-
+water filter — and a hazardous treatment with no clearance contract has no
+release authority and is refused at configuration.
+
+**Heat-only interfaces never move mass.** A coolant loop exchanges heat
+with its coupled reservoir through the circulation-gated exchanger and
+nothing else: the loop's finite coolant inventory is unchanged by the
+exchange, no Resource store is touched, and a hazardous loop's coolant
+never crosses into normal inventory, a reservoir, or another loop. Heat
+rides the interface; mass never does.
+
+**Disposal-ready hazardous waste stays segregated.** Each ejection
+contract removes only its own store's qualified (disposal-ready)
+contents; the held stock stays behind, and one class's ejection never
+touches the other class's store.
+
+World schema 88 persists the store hazard class and the treatment's
+release-clearance contract; a pre-88 document carrying `hazardClass` on a
+store or `clearanceStoreId`/`clearancePerKg` on a treatment is refused
+rather than silently defaulted. The clearance state, the cleared/held
+split, the clearance ledger and the quality gates stay runtime-only: Load
+and Reset reconstruct them from the authored starting conditions.
+
+Containment acceptance coverage: refused configurations (unknown store
+hazard class; cross-class transfer in either direction; cross-class
+conversion; a normal-class treatment drawing from a hazardous store; a
+hazardous treatment with no clearance contract or a zero clearance dose;
+a clearance store that is also a recovery stream; a normal-class treatment
+configuring clearance) with no World mutation; cleared recovery (a full-
+dose, cleared hazardous treatment releases qualified material, the
+clearance consumable tracks the released mass, the same-class recovery
+transfer moves it to the hazardous reserve, and the normal inventory is
+never touched); unknown clearance holds (once the kit is gone the output
+is held with a stated reason, the unmet containment demand is exposed, the
+generic transfer moves only the previously released material and the held
+stock stays behind unreachable, and the reserve carries nothing
+unqualified); failed evidence (a curtailed dose holds the whole output and
+burns no clearance consumable); heat-only interfaces (the loop's coolant
+inventory and every Resource store are unchanged while the heater and pump
+run and the loop-reservoir heat exchange happens); waste segregation (each
+ejection removes only its own store's qualified contents and the held
+stock stays behind); the bundled Lua sandbox mirroring the same clearance
+rule and agreeing with the host ledger for the same scenario; and
+deterministic replay after Reset. File coverage: schema-88 round trips
+through both document formats with only authored fields persisted, live
+containment state never leaking, the scenario reproducible from the
+document, and pre-88 documents carrying the new fields refused. Editor
+coverage: the real Station Systems window drafts the store hazard class and
+the treatment clearance contract, refuses invalid drafts with a visible
+diagnostic and no mutation, applies repaired drafts through the
+reset-confirmed flow, and the live view reports the three quality gates
+and the clearance ledger.
 
 ## Explicit scope limit
 

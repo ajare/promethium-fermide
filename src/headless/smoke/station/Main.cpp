@@ -145,7 +145,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 87"), 11, "version: 65");
+		text.replace(text.find("version: 88"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -8677,6 +8677,14 @@ namespace
 			settings.recoveryRatio = 0.8;
 			settings.specificEnergyKWhPerKg = 0.5;
 			settings.consumablePerKg = 0.01;
+			// A hazardous-class treatment carries the release-clearance
+			// contract (#412): treated hazardous material is released only
+			// on a passed clearance test.
+			if (hazard == "hazardous")
+			{
+				settings.clearanceStoreId = "clearance";
+				settings.clearancePerKg = 0.002;
+			}
 			return settings;
 		};
 		auto waterStores = [&]()
@@ -8686,6 +8694,7 @@ namespace
 			stores.push_back(plainStore("treated", 100.0, 0.0));
 			stores.push_back(plainStore("concentrate", 100.0, 0.0));
 			stores.push_back(plainStore("consumable", 100.0, 10.0));
+			stores.push_back(plainStore("clearance", 100.0, 5.0));
 			return stores;
 		};
 		auto findStore = [](core::StationSystemsSnapshot const& snap, std::string const& id)
@@ -8778,7 +8787,7 @@ namespace
 			settings.stores = waterStores();
 			settings.waterTreatments = { treatment("plant", "hazardous") };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("may not share a store") != std::string::npos,
+				&& diagnostic.find("own hazard class") != std::string::npos,
 				"a raw water store shared by normal and hazardous processes was accepted");
 			settings.waterTreatments = { treatment("plant", "normal") };
 			settings.waterTreatments[0].recoveryRatio = 0.0;
@@ -9124,6 +9133,517 @@ namespace
 		}
 	}
 
+	// Hazardous treatment and containment boundaries (#412): stores carry
+	// an authored hazard class and every generic pathway is refused at
+	// configuration before it can cross it; a hazardous treatment's
+	// treated output is released only on a passed release-clearance test,
+	// and unknown or failed clearance holds the material where generic
+	// recovery cannot reach it. Heat-only interfaces move heat and never
+	// mass. The tests run through the World tick/snapshot seam.
+	void containment(smoke::Context const&)
+	{
+		auto const dt = static_cast<double>(core::World::getFixedTimestep());
+		auto approx = [](double actual, double expected)
+		{
+			auto const tolerance = 1e-6 * std::max(1.0, std::abs(expected));
+			return std::abs(actual - expected) <= tolerance;
+		};
+		auto storeWithClass = [](std::string const& id, std::string const& hazard,
+			double capacity, double qualified, double held = 0.0,
+			double protectedReserve = 0.0)
+		{
+			core::ResourceStoreSettings settings;
+			settings.id = id;
+			settings.unit = "kg";
+			settings.hazardClass = hazard;
+			settings.capacity = capacity;
+			settings.startingQualified = qualified;
+			settings.startingUnqualified = held;
+			settings.protectedReserve = protectedReserve;
+			return settings;
+		};
+		auto findStore = [](core::StationSystemsSnapshot const& snap, std::string const& id)
+		{
+			for (auto const& entry : snap.stores)
+				if (entry.id == id) return entry;
+			return core::StationSystemsStoreSnapshot{};
+		};
+		auto hazTreatment = [](std::string const& id, std::string const& clearanceStore,
+			double clearancePerKg)
+		{
+			core::WaterTreatmentSettings settings;
+			settings.id = id;
+			settings.hazardClass = "hazardous";
+			settings.sourceStoreId = "hazRaw";
+			settings.treatedStoreId = "hazTreated";
+			settings.concentrateStoreId = "hazConcentrate";
+			settings.consumableStoreId = "hazConsumable";
+			settings.throughputKgPerS = 0.005;
+			settings.recoveryRatio = 0.8;
+			settings.specificEnergyKWhPerKg = 0.5;
+			settings.consumablePerKg = 0.01;
+			settings.clearanceStoreId = clearanceStore;
+			settings.clearancePerKg = clearancePerKg;
+			return settings;
+		};
+		auto hazStores = [&](double clearanceStarting)
+		{
+			std::vector<core::ResourceStoreSettings> stores;
+			stores.push_back(storeWithClass("potable", "normal", 100.0, 50.0));
+			stores.push_back(storeWithClass("normTreated", "normal", 100.0, 0.0));
+			stores.push_back(storeWithClass("normConcentrate", "normal", 100.0, 0.0));
+			stores.push_back(storeWithClass("normConsumable", "normal", 100.0, 10.0));
+			stores.push_back(storeWithClass("hazRaw", "hazardous", 200.0, 100.0));
+			stores.push_back(storeWithClass("hazTreated", "hazardous", 100.0, 0.0));
+			stores.push_back(storeWithClass("hazConcentrate", "hazardous", 100.0, 0.0));
+			stores.push_back(storeWithClass("hazConsumable", "hazardous", 100.0, 10.0));
+			stores.push_back(storeWithClass("hazClearance", "hazardous", 100.0, clearanceStarting));
+			stores.push_back(storeWithClass("hazReserve", "hazardous", 100.0, 0.0));
+			return stores;
+		};
+		auto hazConfigure = [&](core::World& world,
+			std::vector<core::ResourceStoreSettings> stores,
+			std::vector<core::WaterTreatmentSettings> treatments,
+			std::vector<core::ResourceTransferSettings> transfers,
+			double solarKW)
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = std::move(stores);
+			settings.waterTreatments = std::move(treatments);
+			settings.transfers = std::move(transfers);
+			if (solarKW > 0.0)
+			{
+				core::SolarArraySettings field;
+				field.id = "field";
+				field.capacityKW = solarKW;
+				settings.solarArrays = { field };
+			}
+			auto const ok = world.configureStationSystems(settings, false, &diagnostic);
+			return std::make_pair(ok, diagnostic);
+		};
+		// Refused configurations: nothing that crosses a hazard-class
+		// boundary, bypasses a clearance contract or misdeclares a class
+		// reaches runtime, and a refusal never mutates the World.
+		{
+			core::World world("ContainmentRefused", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			std::string diagnostic;
+			{
+				auto settings = core::StationSystemsSettings{};
+				settings.enabled = true;
+				settings.stores = hazStores(5.0);
+				settings.stores[0].hazardClass = "radioactive";
+				require(!core::validateStationSystemsSettings(settings, diagnostic)
+					&& diagnostic.find("unknown hazard class") != std::string::npos,
+					"a store with an undeclared hazard class was accepted");
+			}
+			{
+				auto settings = core::StationSystemsSettings{};
+				settings.enabled = true;
+				settings.stores = hazStores(5.0);
+				core::ResourceTransferSettings cross;
+				cross.id = "cross";
+				cross.sourceId = "potable";
+				cross.destinationId = "hazReserve";
+				cross.unit = "kg";
+				cross.ratePerSecond = 0.001;
+				settings.transfers = { cross };
+				require(!core::validateStationSystemsSettings(settings, diagnostic)
+					&& diagnostic.find("hazard-class boundary") != std::string::npos,
+					"a generic transfer from normal into hazardous material was accepted");
+				settings.transfers = { };
+				cross.sourceId = "hazReserve";
+				cross.destinationId = "potable";
+				settings.transfers = { cross };
+				require(!core::validateStationSystemsSettings(settings, diagnostic)
+					&& diagnostic.find("hazard-class boundary") != std::string::npos,
+					"a generic recovery from a hazardous store into the normal inventory was accepted");
+			}
+			{
+				// A conversion may not transmute hazardous material into
+				// normal inventory either: every endpoint shares one class.
+				auto settings = core::StationSystemsSettings{};
+				settings.enabled = true;
+				settings.stores = hazStores(5.0);
+				core::ResourceCompositionSettings composition;
+				composition.moisture = 0.5;
+				for (auto& entry : settings.stores)
+				{
+					if (entry.id == "hazRaw" || entry.id == "potable")
+						entry.composition = composition;
+				}
+				core::ResourceConversionSettings cross;
+				cross.id = "launder";
+				cross.inputs.push_back({ "hazRaw", 0.001 });
+				cross.outputs.push_back({ "potable", 0.0005 });
+				settings.conversions = { cross };
+				require(!core::validateStationSystemsSettings(settings, diagnostic)
+					&& diagnostic.find("hazard-class boundary") != std::string::npos,
+					"a conversion crossing the hazard-class boundary was accepted");
+			}
+			{
+				// A normal-class treatment may not draw from a hazardous
+				// store: the store's authored class binds every process.
+				auto settings = core::StationSystemsSettings{};
+				settings.enabled = true;
+				settings.stores = hazStores(5.0);
+				core::WaterTreatmentSettings normal;
+				normal.id = "potablePlant";
+				normal.hazardClass = "normal";
+				normal.sourceStoreId = "hazRaw";
+				normal.treatedStoreId = "potable";
+				normal.concentrateStoreId = "hazConcentrate";
+				normal.consumableStoreId = "hazConsumable";
+				normal.throughputKgPerS = 0.001;
+				settings.waterTreatments = { normal };
+				require(!core::validateStationSystemsSettings(settings, diagnostic)
+					&& diagnostic.find("own hazard class") != std::string::npos,
+					"a normal-class treatment drawing from a hazardous store was accepted");
+			}
+			{
+				// A hazardous treatment without a clearance contract has
+				// no release authority and is refused.
+				auto settings = core::StationSystemsSettings{};
+				settings.enabled = true;
+				settings.stores = hazStores(5.0);
+				settings.waterTreatments = { hazTreatment("plant", "", 0.002) };
+				require(!core::validateStationSystemsSettings(settings, diagnostic)
+					&& diagnostic.find("release-clearance") != std::string::npos,
+					"a hazardous treatment with no clearance contract was accepted");
+				settings.waterTreatments = { hazTreatment("plant", "hazClearance", 0.0) };
+				require(!core::validateStationSystemsSettings(settings, diagnostic)
+					&& diagnostic.find("clearance per kg") != std::string::npos,
+					"a hazardous treatment with a zero clearance dose was accepted");
+				// The clearance test is a supplied consumable, not a
+				// re-labelled share of the stream it tests.
+				settings.waterTreatments = { hazTreatment("plant", "hazTreated", 0.002) };
+				require(!core::validateStationSystemsSettings(settings, diagnostic)
+					&& diagnostic.find("same store") != std::string::npos,
+					"a clearance store that is also a recovery stream was accepted");
+				// Release clearance is the hazardous boundary; a normal
+				// treatment cannot configure it.
+				core::WaterTreatmentSettings normal;
+				normal.id = "normalPlant";
+				normal.hazardClass = "normal";
+				normal.sourceStoreId = "potable";
+				normal.treatedStoreId = "normTreated";
+				normal.concentrateStoreId = "normConcentrate";
+				normal.consumableStoreId = "normConsumable";
+				normal.throughputKgPerS = 0.001;
+				normal.clearanceStoreId = "hazClearance";
+				normal.clearancePerKg = 0.001;
+				settings.waterTreatments = { normal };
+				require(!core::validateStationSystemsSettings(settings, diagnostic)
+					&& diagnostic.find("does not apply to normal") != std::string::npos,
+					"a normal-class treatment configuring release clearance was accepted");
+			}
+			require(!world.getStationSystemsSnapshot().enabled && world.getSimulationTick() == 0,
+				"a refused containment configuration mutated the World");
+		}
+		// Cleared recovery: a hazardous treatment with a full power dose
+		// and a passed clearance test releases qualified material, the
+		// clearance consumable is spent per released kilogram, and a
+		// same-class recovery transfer moves it into the hazardous
+		// reserve while the normal inventory never sees any of it.
+		{
+			core::World world("ClearedRecovery", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::ResourceTransferSettings recover;
+			recover.id = "recover";
+			recover.sourceId = "hazTreated";
+			recover.destinationId = "hazReserve";
+			recover.unit = "kg";
+			recover.ratePerSecond = 0.002;
+			require(hazConfigure(world, hazStores(5.0),
+				{ hazTreatment("plant", "hazClearance", 0.002) },
+				{ recover }, 20.0).first, "cleared recovery setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "cleared recovery run failed");
+			auto const elapsed = 60.0 * dt;
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.waterTreatments.size() == 1, "treatment missing from snapshot");
+			auto const& plant = snap.waterTreatments[0];
+			require(plant.filtrationCompleted && plant.treatmentEvidenced
+				&& plant.releaseCleared && plant.qualityAccepted,
+				"a full-dose, cleared hazardous treatment is not reported as released");
+			auto const treated = 0.005 * elapsed * 0.8;
+			require(approx(plant.acceptedKg, treated) && approx(plant.heldKg, 0.0),
+				"cleared hazardous output was not fully accepted");
+			require(approx(plant.clearanceUsedTotal, treated * 0.002),
+				"the clearance consumable did not track the released mass");
+			require(approx(findStore(snap, "hazClearance").currentQualified, 5.0 - treated * 0.002),
+				"the clearance store was not drawn by the passed tests");
+			require(plant.lastClearanceUnmet == 0.0,
+				"a cleared treatment reports unmet containment demand");
+			// The same-class recovery transfer moved qualified material.
+			// The treatment runs before the transfer in the tick order, so
+			// the transfer moves its full rate from the first tick on.
+			require(approx(snap.transfers[0].lastCompleted, 0.002 * dt)
+				&& snap.transfers[0].status == core::StationTransferStatus::Full,
+				"the hazardous-class recovery transfer did not run");
+			require(approx(findStore(snap, "hazReserve").currentQualified,
+				0.002 * elapsed),
+				"the hazardous reserve did not receive the recovered material");
+			require(findStore(snap, "hazReserve").hazardClass == "hazardous"
+				&& findStore(snap, "potable").hazardClass == "normal",
+				"the store hazard classes are not exposed on the snapshot");
+			// The normal inventory never saw a gram of the hazardous stream.
+			auto const potable = findStore(snap, "potable");
+			require(approx(potable.currentQualified, 50.0)
+				&& potable.lastTickIn == 0.0 && potable.lastTickOut == 0.0,
+				"the normal inventory was touched by the hazardous chain");
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
+		}
+		// Unknown clearance holds: once the clearance consumable is gone
+		// the treatment keeps running but its output is held unqualified
+		// with the shortfall visible, and the generic recovery transfer
+		// can only ever move the previously released material - the held
+		// stock stays behind, unreachable.
+		{
+			core::World world("ClearanceExhausted", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			// Enough clearance for roughly half the run's treated output.
+			core::ResourceTransferSettings recover;
+			recover.id = "recover";
+			recover.sourceId = "hazTreated";
+			recover.destinationId = "hazReserve";
+			recover.unit = "kg";
+			recover.ratePerSecond = 0.0005;
+			require(hazConfigure(world, hazStores(0.001),
+				{ hazTreatment("plant", "hazClearance", 0.5) },
+				{ recover }, 20.0).first, "clearance-exhausted setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(120), "clearance-exhausted run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& plant = snap.waterTreatments[0];
+			require(plant.acceptedKg > 0.0, "nothing was cleared while the kit lasted");
+			require(plant.heldKg > 0.0, "the exhausted clearance did not hold any output");
+			require(!plant.releaseCleared && !plant.qualityAccepted,
+				"output was released after the clearance consumable ran out");
+			require(plant.holdReason.find("release clearance unavailable") != std::string::npos,
+				"the clearance hold carries no stated reason");
+			require(plant.lastClearanceUnmet > 0.0,
+				"the unmet containment demand is not exposed");
+			require(plant.clearanceUsedTotal <= 0.001 + 1e-9
+				&& plant.clearanceUsedTotal > 0.0005
+				&& findStore(snap, "hazClearance").currentQualified < 3.4e-5,
+				"the clearance store was not drained to below one test dose by the tests that did run");
+			require(approx(plant.clearanceUsedTotal, plant.acceptedKg * 0.5),
+				"clearance spent does not match the released mass");
+			// The generic transfer moved only qualified (released)
+			// material; the held stock stays in the treated store and the
+			// reserve holds nothing unqualified.
+			auto const treatedStore = findStore(snap, "hazTreated");
+			auto const reserve = findStore(snap, "hazReserve");
+			require(treatedStore.currentUnqualified > 0.0,
+				"the held hazardous stock did not stay behind");
+			require(reserve.currentUnqualified == 0.0,
+				"the recovery transfer carried unqualified material into the reserve");
+			require(reserve.currentQualified <= plant.acceptedKg,
+				"the reserve holds more than was ever released");
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
+		}
+		// Failed evidence: a curtailed power dose fails the treatment
+		// evidence gate before the clearance test ever runs - nothing is
+		// cleared, nothing is tested, and the whole output is held.
+		{
+			core::World world("EvidenceFailed", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(hazConfigure(world, hazStores(5.0),
+				{ hazTreatment("plant", "hazClearance", 0.002) },
+				{ }, 1.0).first, "evidence-failed setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "evidence-failed run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& plant = snap.waterTreatments[0];
+			require(plant.filtrationCompleted, "the process ran without a filtration pass");
+			require(!plant.treatmentEvidenced && !plant.releaseCleared,
+				"a curtailed dose was reported as evidenced or cleared");
+			require(plant.holdReason.find("energy curtailed") != std::string::npos,
+				"the evidence failure carries no stated hold reason");
+			require(plant.lastClearanceUsed == 0.0 && plant.clearanceUsedTotal == 0.0,
+				"clearance consumable was burned on a batch that never reached the test");
+			require(approx(plant.heldKg, plant.treatedKg)
+				&& approx(plant.acceptedKg, 0.0),
+				"the unevidenced output was not held whole");
+			require(findStore(snap, "hazClearance").currentQualified == 5.0,
+				"the clearance store moved without a test running");
+		}
+		// Heat-only interfaces: a hazardous coolant loop exchanges heat
+		// with its reservoir and its freeze heater runs, but the loop's
+		// coolant inventory never changes and no Resource store is ever
+		// touched - heat rides the interface, mass never does.
+		{
+			core::World world("HeatOnly", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = hazStores(5.0);
+			core::ThermalReservoirSettings sink;
+			sink.id = "sink";
+			sink.thermalClass = "moderate";
+			sink.heatCapacityKJPerK = 10000.0;
+			sink.startingTemperatureC = 10.0;
+			sink.minTemperatureC = -50.0;
+			sink.maxTemperatureC = 200.0;
+			settings.thermalReservoirs = { sink };
+			core::CoolantLoopSettings loop;
+			loop.id = "hazLoop";
+			loop.hazardClass = "hazardous";
+			loop.reservoirId = "sink";
+			loop.coolantCapacityKg = 50.0;
+			loop.startingCoolantKg = 40.0;
+			loop.specificHeatKJPerKgK = 4.0;
+			loop.startingTemperatureC = 0.0;
+			loop.freezeProtectionSetpointC = 5.0;
+			loop.pumpPowerKW = 0.1;
+			loop.ratedFlowKgPerS = 5.0;
+			loop.exchangerConductanceKWPerK = 1.0;
+			loop.heaterCapacityKW = 1.0;
+			settings.coolantLoops = { loop };
+			core::SolarArraySettings field;
+			field.id = "field";
+			field.capacityKW = 5.0;
+			settings.solarArrays = { field };
+			std::string diagnostic;
+			require(world.configureStationSystems(settings, false, &diagnostic),
+				("heat-only setup refused: " + diagnostic).c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(120), "heat-only run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.coolantLoops.size() == 1, "loop missing from snapshot");
+			auto const& live = snap.coolantLoops[0];
+			require(live.hazardClass == "hazardous", "loop hazard class not exposed");
+			require(approx(live.coolantKg, 40.0),
+				"the heat-only interface changed the loop's coolant inventory");
+			require(live.heaterSuppliedKW > 0.0 && live.pumpSuppliedKW > 0.0,
+				"the freeze-protection heater or pump did not run");
+			require(live.loopTemperatureC > 0.0,
+				"the heater did not warm the loop");
+			for (auto const& entry : snap.stores)
+				require(entry.lastTickIn == 0.0 && entry.lastTickOut == 0.0
+					&& approx(entry.currentQualified, entry.startingQualified)
+					&& approx(entry.currentUnqualified, entry.startingUnqualified),
+					("the heat-only interface moved mass through store '" + entry.id + "'").c_str());
+			require(snap.thermal.reservoirs[0].loopEnergyKJ != 0.0,
+				"the loop-reservoir heat exchange did not happen at all");
+		}
+		// Disposal-ready hazardous waste stays segregated: each ejection
+		// contract removes only its own store's qualified contents, the
+		// held stock stays behind, and one class's ejection never touches
+		// the other class's store.
+		{
+			core::World world("WasteSegregation", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = {
+				storeWithClass("normWaste", "normal", 100.0, 10.0, 5.0),
+				storeWithClass("hazWaste", "hazardous", 100.0, 10.0, 5.0) };
+			core::WasteEjectionSettings ejectNorm;
+			ejectNorm.id = "ejectNorm";
+			ejectNorm.storeId = "normWaste";
+			ejectNorm.unit = "kg";
+			ejectNorm.quantity = 4.0;
+			ejectNorm.firstOccurrenceSeconds = 0.5;
+			core::WasteEjectionSettings ejectHaz;
+			ejectHaz.id = "ejectHaz";
+			ejectHaz.storeId = "hazWaste";
+			ejectHaz.unit = "kg";
+			ejectHaz.quantity = 4.0;
+			ejectHaz.firstOccurrenceSeconds = 0.5;
+			settings.wasteEjections = { ejectNorm, ejectHaz };
+			std::string diagnostic;
+			require(world.configureStationSystems(settings, false, &diagnostic),
+				("waste segregation setup refused: " + diagnostic).c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "waste segregation run failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.wasteEjections.size() == 2, "ejection contracts missing");
+			for (auto const& ejection : snap.wasteEjections)
+				require(approx(ejection.ejectedTotal, 4.0) && ejection.unmetTotal == 0.0,
+					("ejection '" + ejection.id + "' did not remove its scheduled quantity").c_str());
+			auto const normal = findStore(snap, "normWaste");
+			auto const hazardous = findStore(snap, "hazWaste");
+			require(approx(normal.currentQualified, 6.0) && approx(normal.currentUnqualified, 5.0),
+				"the normal ejection touched the wrong pool or the wrong store");
+			require(approx(hazardous.currentQualified, 6.0)
+				&& approx(hazardous.currentUnqualified, 5.0),
+				"the hazardous ejection touched the wrong pool or the wrong store");
+			require(hazardous.hazardClass == "hazardous",
+				"the hazardous waste store class is not exposed");
+		}
+		// The bundled Lua sandbox mirrors the same clearance rule: the
+		// model's own released mass and spent clearance agree with the
+		// host ledger for the same scenario, tick for tick.
+		{
+			auto const bundled = core::bundledStationSystemsSource();
+			core::setStationSystemsSourceLoader([bundled] {
+				return "local factory = (function()\n" + bundled + "\nend)()\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+					"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations)\n"
+					"local original = model.advance\n"
+					"function model.advance(self, tick, seconds)\n"
+					"local result = original(self, tick, seconds)\n"
+					"local t = self.water_treatments[1]\n"
+					"assert(math.abs(t.clearanceUsedTotal - t.acceptedTotal * t.clearancePerKg) < 1e-9, 'sandbox clearance did not track released mass')\n"
+					"assert(not t.releaseCleared or t.treatmentEvidenced, 'sandbox released without treatment evidence')\n"
+					"assert(not t.treatmentEvidenced or t.filtrationCompleted, 'sandbox evidence without filtration')\n"
+					"assert(t.acceptedTotal + t.heldTotal >= t.treatedTotal - 1e-9, 'sandbox quality ledger open')\n"
+					"return result\n"
+					"end\n"
+					"return model\n"
+					"end";
+			});
+			core::World sandbox("ContainmentSandbox", 2, 2);
+			sandbox.pauseSimulation(); sandbox.finishBuild();
+			require(hazConfigure(sandbox, hazStores(0.001),
+				{ hazTreatment("plant", "hazClearance", 0.5) },
+				{ }, 20.0).first, "sandbox containment setup refused");
+			sandbox.resumeSimulation();
+			require(sandbox.advanceTicks(120),
+				"Bundled Lua clearance model failed its in-sandbox assertions");
+			auto const snap = sandbox.getStationSystemsSnapshot();
+			require(snap.healthy && snap.waterTreatments[0].heldKg > 0.0
+				&& approx(snap.waterTreatments[0].clearanceUsedTotal,
+					snap.waterTreatments[0].acceptedKg * 0.5),
+				"host and sandbox clearance ledgers disagree for the same scenario");
+			core::setStationSystemsSourceLoader({});
+		}
+		// Deterministic replay: the same authored scenario reset and run
+		// again produces the same cleared/held split and the same store
+		// state - the clearance ledger is reconstructed, not inherited.
+		{
+			core::World world("ContainmentReplay", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(hazConfigure(world, hazStores(0.001),
+				{ hazTreatment("plant", "hazClearance", 0.5) },
+				{ }, 20.0).first, "replay containment setup refused");
+			world.resumeSimulation();
+			require(world.advanceTicks(90), "replay containment run failed");
+			auto const first = world.getStationSystemsSnapshot();
+			world.pauseSimulation();
+			world.resetSimulation();
+			world.resumeSimulation();
+			require(world.advanceTicks(90), "replay containment rerun failed");
+			auto const second = world.getStationSystemsSnapshot();
+			require(first.waterTreatments == second.waterTreatments,
+				"the clearance ledgers did not replay identically after reset");
+			require(first.stores == second.stores,
+				"the store state did not replay identically after reset");
+			require(first.waterTreatments[0].heldKg > 0.0,
+				"the replay scenario did not even exercise the clearance hold");
+		}
+	}
 	// Oxygen production and CO2 capture (#404): the electrolyzer's split
 	// closes on mass and on energy, the cooling gate and the energy-
 	// feasibility cap bound production instead of gifting products, a
@@ -9322,7 +9842,7 @@ namespace
 			settings.electrolyzers = { electrolyzer("hcell", "hazardous") };
 			settings.electrolyzers[0].hydrogenStoreId = "captured";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("may not share a store") != std::string::npos,
+				&& diagnostic.find("own hazard class") != std::string::npos,
 				"a shared gas store across hazard classes was accepted");
 			std::vector<core::ElectrolyzerSettings> tooMany;
 			for (size_t index = 0; index <= core::MaxStationElectrolyzers; ++index)
@@ -9767,7 +10287,7 @@ namespace
 			// is refused: the two streams may not mix in one store.
 			settings.fuelCells = { fuelCell("cell", "normal"), fuelCell("hcell", "hazardous") };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("may not share a store") != std::string::npos,
+				&& diagnostic.find("own hazard class") != std::string::npos,
 				"a shared gas store across hazard classes was accepted");
 			std::vector<core::FuelCellSettings> tooMany;
 			for (size_t index = 0; index <= core::MaxStationFuelCells; ++index)
@@ -10620,7 +11140,7 @@ void buffers(smoke::Context const&)
 				"a thermal class mismatch against the reactor's heat sink was accepted");
 			settings.sabatierReactors = { reactor("sab", "normal"), reactor("sab2", "hazardous") };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("may not share a store") != std::string::npos,
+				&& diagnostic.find("own hazard class") != std::string::npos,
 				"a hazardous reactor sharing the normal-class CO2 store was accepted");
 			settings.sabatierReactors = { reactor("sab", "normal") };
 			settings.sabatierReactors[0].maxSinkTemperatureC = -300.0;
@@ -10640,7 +11160,7 @@ void buffers(smoke::Context const&)
 				"a processor with an unknown carbon store was accepted");
 			settings.methaneProcessors = { processor("pyrolysis", "normal"), processor("pyrolysis2", "hazardous") };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("may not share a store") != std::string::npos,
+				&& diagnostic.find("own hazard class") != std::string::npos,
 				"a hazardous processor sharing the normal-class methane store was accepted");
 			std::vector<core::SabatierReactorSettings> tooMany;
 			for (size_t index = 0; index <= core::MaxStationSabatierReactors; ++index)
@@ -11216,7 +11736,7 @@ void buffers(smoke::Context const&)
 			settings.microbialProcessors = { processor("digester", "normal"),
 				processor("digester2", "hazardous") };
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("may not share a store") != std::string::npos,
+				&& diagnostic.find("own hazard class") != std::string::npos,
 				"a hazardous processor sharing the normal-class waste feed was accepted");
 			settings.microbialProcessors = { processor("digester", "normal") };
 			settings.microbialProcessors[0].heatSinkId = "ghost";
@@ -12904,7 +13424,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"failures", failures}};
+		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

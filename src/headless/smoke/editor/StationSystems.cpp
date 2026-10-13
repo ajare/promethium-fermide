@@ -37,9 +37,9 @@ namespace
 			ctx->SetRef("Station Systems");
 			// The separate window shows units, usable versus held inventory,
 			// capacity and initial versus current state.
-			REQ(driver.contains("o2 (kg): usable 800.000, held 100.000 of capacity 1000.000 | initial usable 800.000, initial held 100.000"),
+			REQ(driver.contains("o2 (kg) [normal]: usable 800.000, held 100.000 of capacity 1000.000 | initial usable 800.000, initial held 100.000"),
 				"Store live display missing identity, units, usable/held or capacity");
-			REQ(driver.contains("water (L): usable 0.000, held 250.000 of capacity 500.000 | initial usable 0.000, initial held 250.000"),
+			REQ(driver.contains("water (L) [normal]: usable 0.000, held 250.000 of capacity 500.000 | initial usable 0.000, initial held 250.000"),
 				"Empty-usable store display wrong");
 			REQ(driver.contains("2 resource store(s)"), "Authored store count missing");
 			// Author one more store through the real controls, then edit it.
@@ -67,17 +67,33 @@ namespace
 			ctx->ItemClick("Apply settings");
 			REQ(world->getStationSystemsSettings().stores[2].capacity == 75.0
 				&& history.undoCount() == 3, "Recovery capacity edit did not apply");
+			// The authored hazard class (#412) is editable through the real
+			// controls and reaches the live store table.
+			driver.typeValue(ctx, "Store 2 hazard class", "hazardous");
+			ctx->ItemClick("Apply settings");
+			REQ(world->getStationSystemsSettings().stores[2].hazardClass == "hazardous",
+				"Store hazard class edit did not apply");
+			// An unknown hazard class is refused with a diagnostic and no
+			// mutation of the authored settings.
+			driver.typeValue(ctx, "Store 2 hazard class", "toxic");
+			ctx->ItemClick("Apply settings");
+			ctx->Sleep(1);
+			REQ(driver.contains("unknown hazard class 'toxic'"),
+				"Unknown store hazard class diagnostic not shown");
+			REQ(world->getStationSystemsSettings().stores[2].hazardClass == "hazardous"
+				&& history.undoCount() == 4,
+				"Invalid store hazard class draft mutated the authored settings");
 			driver.click(ctx, "Remove store 2");
 			driver.click(ctx, "Apply settings");
 			REQ(world->getStationSystemsSettings().stores.size() == 2
 				&& world->getStationSystemsSnapshot().stores.size() == 2
-				&& history.undoCount() == 4, "Removed store did not apply");
+				&& history.undoCount() == 5, "Removed store did not apply");
 			// Running keeps the live display and never edits the authored document.
 			world->markSaved();
 			world->resumeSimulation();
 			REQ(world->advanceTicks(60), "Store editor run failed");
 			ctx->Sleep(1);
-			REQ(driver.contains("o2 (kg): usable 800.000")
+			REQ(driver.contains("o2 (kg) [normal]: usable 800.000")
 				&& !world->isModified(), "Run changed the display source or dirtied the document");
 			// Undo restores the authored store set without resurrecting live state.
 			world->pauseSimulation();
@@ -229,7 +245,7 @@ namespace
 			driver.run("station", "transferWorkflow", [&](ImGuiTestContext* ctx)
 			{
 				ctx->SetRef("Station Systems");
-			REQ(driver.contains("src (kg): usable 100.000, held 0.000 of capacity 100.000 | initial usable 100.000, initial held 0.000 | protected 20.000"), "Protected reserve not shown in the live store table");
+			REQ(driver.contains("src (kg) [normal]: usable 100.000, held 0.000 of capacity 100.000 | initial usable 100.000, initial held 0.000 | protected 20.000"), "Protected reserve not shown in the live store table");
 			REQ(driver.contains("pump: src -> dst (kg) idle | requested 0.000, completed 0.000, unmet 0.000 (rate 60.000/s, priority 0)"), "Authored transfer not shown in the live transfer table");
 			// Run until the destination fills: the window shows the rejection and
 			// the conserved boundary balance.
@@ -304,7 +320,7 @@ namespace
 			ctx->SetRef("Station Systems");
 			// The live view shows the declared composition on the dry-mass
 			// basis and the constituent balance ledger.
-			REQ(driver.contains("food (kg): usable 50.000")
+			REQ(driver.contains("food (kg) [normal]: usable 50.000")
 				&& driver.contains("compound (dry-mass basis): moisture 0.8000 | nutrient N 0.0500, atmospheric N 0.0000, P 0.0100, K 0.0200, other minerals 0.0200 | 17000.0 kJ/kg dry"),
 				"Compound store display missing composition terms");
 			REQ(driver.contains("Constituent balances")
@@ -810,7 +826,7 @@ namespace
 			ctx->Sleep(1);
 			REQ(driver.contains("pulse -> tank (kg): refused | last at 5.000 s: 0.000 of 12.000 accepted, 12.000 rejected | total accepted 20.000, rejected 16.000 | 3 occurrence(s)"),
 				"Live delivery accepted/refused accounting not displayed");
-			REQ(driver.contains("tank (kg): usable 30.000, held 0.000 of capacity 30.000"),
+			REQ(driver.contains("tank (kg) [normal]: usable 30.000, held 0.000 of capacity 30.000"),
 				"Live destination saturation not displayed");
 			REQ(driver.contains("next arrival at 7.000 s"),
 				"Next arrival not advanced past the fired occurrences");
@@ -919,7 +935,7 @@ namespace
 			ctx->Sleep(1);
 			REQ(driver.contains("haul <- dump (kg): nothing-ejectable | last at 5.000 s: 0.000 of 5.000 ejected, 5.000 not ejectable | total ejected 8.000, unmet 7.000 | 3 occurrence(s)"),
 				"Live ejection ejected/unmet accounting not displayed");
-			REQ(driver.contains("dump (kg): usable 0.000, held 5.000 of capacity 60.000"),
+			REQ(driver.contains("dump (kg) [normal]: usable 0.000, held 5.000 of capacity 60.000"),
 				"Held waste not displayed as retained in the store");
 			REQ(driver.contains("next ejection at 7.000 s"),
 				"Next ejection not advanced past the fired occurrences");
@@ -962,6 +978,128 @@ namespace
 		});
 		#undef REQ
 		require(driver.passed(), "Waste ejection workflow failed on the Test Engine");
+	}
+
+	// #412: the store hazard class and the hazardous treatment's
+	// release-clearance contract are drafted, validated and applied
+	// through the real Station Systems window controls, and the live
+	// view reports the three quality gates and the clearance ledger.
+	void containmentWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO();
+		io.DisplaySize = {1200, 1700};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Containment editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		auto hazStore = [](std::string const& id, double capacity, double qualified)
+		{
+			core::ResourceStoreSettings settings;
+			settings.id = id;
+			settings.unit = "kg";
+			settings.hazardClass = "hazardous";
+			settings.capacity = capacity;
+			settings.startingQualified = qualified;
+			return settings;
+		};
+		core::StationSystemsSettings initial;
+		initial.enabled = true;
+		initial.observationIntervalSeconds = 2.0f;
+		initial.stores = {
+			hazStore("hazRaw", 200.0, 100.0),
+			hazStore("hazTreated", 100.0, 0.0),
+			hazStore("hazConcentrate", 100.0, 0.0),
+			hazStore("hazConsumable", 100.0, 10.0),
+			hazStore("hazClearance", 100.0, 5.0) };
+		core::WaterTreatmentSettings plant;
+		plant.id = "plant";
+		plant.hazardClass = "hazardous";
+		plant.sourceStoreId = "hazRaw";
+		plant.treatedStoreId = "hazTreated";
+		plant.concentrateStoreId = "hazConcentrate";
+		plant.consumableStoreId = "hazConsumable";
+		plant.clearanceStoreId = "hazClearance";
+		plant.clearancePerKg = 0.002;
+		plant.throughputKgPerS = 0.005;
+		plant.recoveryRatio = 0.8;
+		plant.specificEnergyKWhPerKg = 0.5;
+		plant.consumablePerKg = 0.01;
+		initial.waterTreatments = { plant };
+		core::SolarArraySettings field;
+		field.id = "field";
+		field.capacityKW = 20.0;
+		initial.solarArrays = { field };
+		require(world->configureStationSystems(initial, false, &diagnostic), diagnostic.c_str());
+		window.visible = true;
+		headless::TestEngineDriver driver([&]
+		{
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 1650});
+			window.render(world, history);
+		});
+		driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+
+		driver.run("station", "containmentWorkflow", [&](ImGuiTestContext* ctx)
+		{
+			ctx->SetRef("Station Systems");
+			// The store hazard class is shown in the live store table.
+			REQ(driver.contains("hazRaw (kg) [hazardous]"),
+				"Hazardous store class not shown in the live store table");
+			// Run the cleared scenario: the live treatment view reports the
+			// three gates cleared and the clearance ledger.
+			world->markSaved();
+			world->resumeSimulation();
+			if (!world->advanceTicks(60))
+			{ REQ(false, "Containment editor run failed"); }
+			world->pauseSimulation();
+			ctx->Sleep(1);
+			REQ(driver.contains("release clearance CLEARED"),
+				"Cleared release state not shown in the live treatment view");
+			REQ(driver.contains("treatment evidence complete"),
+				"Treatment evidence state not shown");
+			REQ(!world->isModified(), "Containment ticking dirtied the authored document");
+			// A hazardous treatment drafted with a clearance store that
+			// does not exist is refused with a visible diagnostic and no
+			// mutation.
+			driver.typeValue(ctx, "Treatment 0 release-clearance store", "nowhere");
+			ctx->ItemClick("Apply settings");
+			ctx->Sleep(1);
+			ctx->ItemClick("Confirm World reset");
+			ctx->Sleep(1);
+			REQ(driver.contains("release-clearance consumable store 'nowhere' does not exist"),
+				"Unknown clearance store diagnostic not shown");
+			REQ(world->getStationSystemsSettings().waterTreatments[0].clearanceStoreId == "hazClearance"
+				&& history.undoCount() == 0 && world->getSimulationTick() == 60,
+				"Invalid clearance draft mutated the authored settings");
+			// Repair the draft; the confirmed reset applies it and the live
+			// view restarts the scenario from the authored beginning.
+			driver.typeValue(ctx, "Treatment 0 release-clearance store", "hazClearance");
+			ctx->ItemInputValue("Treatment 0 clearance per kg", "0.003");
+			ctx->ItemClick("Apply settings");
+			ctx->Sleep(1);
+			REQ(driver.contains("Confirm?"),
+				"Clearance edit bypassed the World reset confirmation");
+			ctx->ItemClick("Confirm World reset");
+			REQ(world->getStationSystemsSettings().waterTreatments[0].clearancePerKg == 0.003
+				&& history.undoCount() == 1 && world->getSimulationTick() == 0,
+				"Repaired clearance draft did not apply through the reset-confirmed flow");
+			// A hazardous treatment drafted with a zero clearance dose is
+			// refused.
+			ctx->ItemInputValue("Treatment 0 clearance per kg", "0");
+			ctx->ItemClick("Apply settings");
+			ctx->Sleep(1);
+			REQ(driver.contains("clearance per kg must be finite and positive"),
+				"Zero clearance dose was accepted");
+			ctx->ItemClick("Cancel edits");
+			REQ(world->getStationSystemsSettings().waterTreatments[0].clearancePerKg == 0.003,
+				"Cancelled clearance edit did not restore the authored contract");
+		});
+		#undef REQ
+		require(driver.passed(), "Containment workflow failed on the Test Engine");
 	}
 
 	// #395: thermal reservoirs and radiators are drafted, validated and
@@ -1940,6 +2078,7 @@ void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 	checks.push_back({"station/batteryWorkflow", batteryWorkflow});
 	checks.push_back({"station/deliveryWorkflow", deliveryWorkflow});
 	checks.push_back({"station/wasteEjectionWorkflow", wasteEjectionWorkflow});
+	checks.push_back({"station/containmentWorkflow", containmentWorkflow});
 	checks.push_back({"station/thermalWorkflow", thermalWorkflow});
 	checks.push_back({"station/coolantWorkflow", coolantWorkflow});
 	checks.push_back({"station/chillerWorkflow", chillerWorkflow});

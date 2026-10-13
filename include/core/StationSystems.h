@@ -51,12 +51,26 @@ namespace core
 		bool operator==(ResourceCompositionSettings const&) const = default;
 	};
 
+	// Declared resource hazard classes (#412). Normal and hazardous material
+	// are segregated services: a store carries its own authored class, and
+	// every process, transfer or conversion that touches the store must
+	// carry the store's own class. Crossing the class boundary is refused at
+	// configuration - an accidental cross-transfer between a hazardous and
+	// a normal store never reaches runtime, because containment is
+	// established by the declared class boundary, not by any runtime
+	// policing of the material itself.
+	inline constexpr std::array<char const*, 2> StationResourceHazardClasses{
+		"normal", "hazardous"};
 	// A capacity-limited inventory of a declared material. Starting inventory
 	// is authored; current inventory is runtime state and never lives here.
 	// Qualified contents are usable; unqualified contents are held awaiting a
 	// treatment or clearance that later slices provide. The protected reserve
 	// is the portion of usable contents withheld from discretionary transfers
 	// (#390); it never restricts the authored starting inventory itself.
+	// The authored hazard class (#412) makes a hazardous store a protected
+	// hazardous reserve: only same-class processes and same-class transfers
+	// may touch it, so hazardous material never shares a generic recovery
+	// path with the normal inventory.
 	struct ResourceStoreSettings
 	{
 		std::string id;
@@ -68,6 +82,10 @@ namespace core
 		// A declared constituent composition makes this a compound Resource
 		// store (#391); absent stores hold a plain single-quantity material.
 		std::optional<ResourceCompositionSettings> composition;
+		// The store's hazard class (#412): "normal" (default) or
+		// "hazardous". Every process, transfer and conversion endpoint that
+		// touches the store must carry the store's own class.
+		std::string hazardClass{"normal"};
 		bool operator==(ResourceStoreSettings const&) const = default;
 	};
 
@@ -779,6 +797,18 @@ namespace core
 	// concentrate, and the concentrate stays accounted as retained material
 	// pending a disposal capability. Every water-process store is a plain
 	// mass store: this slice does not model compound water streams.
+	// A hazardous-class treatment additionally carries a release-clearance
+	// contract (#412): treated hazardous material is released only on a
+	// passed clearance test, drawn from a declared clearance consumable
+	// store at a declared quantity per kilogram treated. Filtration, the
+	// treatment energy evidence and the release clearance are three
+	// distinct gates: filtration runs with the process, the evidence is
+	// the full rated energy dose, and the clearance is the passed test.
+	// A curtailed dose (failed evidence) or an unavailable clearance
+	// consumable (unknown clearance) holds the treated output unqualified;
+	// only a full dose with a passed test releases it. A normal-class
+	// treatment cannot configure clearance testing - release clearance is
+	// the hazardous containment boundary, not a normal-water filter.
 	struct WaterTreatmentSettings
 	{
 		std::string id;
@@ -791,6 +821,12 @@ namespace core
 		double recoveryRatio{0.85};        // treated / processed, in (0, 1]
 		double specificEnergyKWhPerKg{0.5}; // electricity per kg processed
 		double consumablePerKg{0.01};      // consumable units per kg processed
+		// Release-clearance consumable (#412): required for a hazardous-class
+		// treatment, forbidden for a normal-class one. Each treated kilogram
+		// consumes clearancePerKg units from this store to pass its release
+		// clearance test; without the test the material is not released.
+		std::string clearanceStoreId;
+		double clearancePerKg{0.0};        // clearance units per kg treated, > 0 for hazardous
 		int priority{0};
 		bool operator==(WaterTreatmentSettings const&) const = default;
 	};
@@ -1369,6 +1405,10 @@ namespace core
 		// The declared composition when the store holds a compound Resource
 		// material (#391); absent for plain single-quantity stores.
 		std::optional<ResourceCompositionSettings> composition;
+		// The store's authored hazard class (#412): its qualified contents
+		// are a protected reserve of that class, reachable only by
+		// same-class processes and same-class transfers.
+		std::string hazardClass;
 		bool operator==(StationSystemsStoreSnapshot const&) const = default;
 	};
 
@@ -2310,6 +2350,21 @@ namespace core
 		double lastConsumableUnmet{0.0};
 		bool qualityAccepted{false};
 		std::string holdReason; // why the output is held unqualified (empty: none)
+		// The three distinct quality gates (#412): filtration ran, the
+		// treatment energy evidence is complete, and the release clearance
+		// test passed. For a normal-class treatment the clearance gate is
+		// the evidence itself; for a hazardous-class treatment the output
+		// is released only when the full dose and a passed clearance test
+		// coincide. Unknown or failed clearance holds the material.
+		bool filtrationCompleted{false};
+		bool treatmentEvidenced{false};
+		bool releaseCleared{false};
+		std::string clearanceStoreId;      // release-clearance consumable store
+		double clearancePerKg{0.0};      // clearance units per kg treated
+		double lastClearanceRequested{0.0};
+		double lastClearanceUsed{0.0};
+		double lastClearanceUnmet{0.0};   // clearance the held output still needs
+		double clearanceUsedTotal{0.0};
 		bool disabled{false};   // zero throughput: no processing
 		double processedKg{0.0};
 		double treatedKg{0.0};

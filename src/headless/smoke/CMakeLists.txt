@@ -85,8 +85,8 @@ foreach(check lifecycle batching eventBound persistence stores transfers compoun
         batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
-        deliveries wasteEjections thermal coolant chillers generators buffers atmospheres crews water gas crops failures fileRoundTrip writeFailure legacyFiles structuralReplay
-        compoundFiles powerFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles atmosphereFiles crewFiles waterFiles gasFiles)
+        deliveries wasteEjections thermal coolant chillers generators buffers atmospheres crews water containment gas crops failures fileRoundTrip writeFailure legacyFiles structuralReplay
+        compoundFiles powerFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()
@@ -626,6 +626,8 @@ add_test(NAME station-editor-deliveries COMMAND pf-smoke-editor --check station/
 set_tests_properties(station-editor-deliveries PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-waste-ejections COMMAND pf-smoke-editor --check station/wasteEjectionWorkflow)
 set_tests_properties(station-editor-waste-ejections PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+add_test(NAME station-editor-containment COMMAND pf-smoke-editor --check station/containmentWorkflow)
+set_tests_properties(station-editor-containment PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-thermal COMMAND pf-smoke-editor --check station/thermalWorkflow)
 set_tests_properties(station-editor-thermal PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-coolant COMMAND pf-smoke-editor --check station/coolantWorkflow)

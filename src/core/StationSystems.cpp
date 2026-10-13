@@ -113,9 +113,10 @@ namespace core
 				for (size_t index = 0; index < stores->size(); ++index)
 				{
 					auto const& store = (*stores)[index];
-					lua_createtable(state, 0, store.composition ? 7 : 6);
+					lua_createtable(state, 0, store.composition ? 8 : 7);
 					lua_pushstring(state, store.id.c_str()); lua_setfield(state, -2, "id");
 					lua_pushstring(state, store.unit.c_str()); lua_setfield(state, -2, "unit");
+					lua_pushstring(state, store.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
 					lua_pushnumber(state, store.capacity); lua_setfield(state, -2, "capacity");
 					lua_pushnumber(state, store.startingQualified); lua_setfield(state, -2, "qualified");
 					lua_pushnumber(state, store.startingUnqualified); lua_setfield(state, -2, "unqualified");
@@ -456,17 +457,19 @@ namespace core
 				for (size_t index = 0; index < waterTreatments->size(); ++index)
 				{
 					auto const& treatment = (*waterTreatments)[index];
-					lua_createtable(state, 0, 11);
+					lua_createtable(state, 0, 13);
 					lua_pushstring(state, treatment.id.c_str()); lua_setfield(state, -2, "id");
 					lua_pushstring(state, treatment.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
 					lua_pushstring(state, treatment.sourceStoreId.c_str()); lua_setfield(state, -2, "sourceStore");
 					lua_pushstring(state, treatment.treatedStoreId.c_str()); lua_setfield(state, -2, "treatedStore");
 					lua_pushstring(state, treatment.concentrateStoreId.c_str()); lua_setfield(state, -2, "concentrateStore");
 					lua_pushstring(state, treatment.consumableStoreId.c_str()); lua_setfield(state, -2, "consumableStore");
+					lua_pushstring(state, treatment.clearanceStoreId.c_str()); lua_setfield(state, -2, "clearanceStore");
 					lua_pushnumber(state, treatment.throughputKgPerS); lua_setfield(state, -2, "throughputKgPerS");
 					lua_pushnumber(state, treatment.recoveryRatio); lua_setfield(state, -2, "recoveryRatio");
 					lua_pushnumber(state, treatment.specificEnergyKWhPerKg); lua_setfield(state, -2, "specificEnergyKWhPerKg");
 					lua_pushnumber(state, treatment.consumablePerKg); lua_setfield(state, -2, "consumablePerKg");
+					lua_pushnumber(state, treatment.clearancePerKg); lua_setfield(state, -2, "clearancePerKg");
 					lua_pushinteger(state, treatment.priority); lua_setfield(state, -2, "priority");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
@@ -1078,6 +1081,11 @@ namespace core
 				return refuse(where + " protected reserve must be finite and non-negative");
 			if (store.protectedReserve > store.startingQualified)
 				return refuse(where + " protected reserve exceeds starting usable inventory");
+			if (std::find(StationResourceHazardClasses.begin(),
+				StationResourceHazardClasses.end(),
+				store.hazardClass) == StationResourceHazardClasses.end())
+				return refuse(where + " has unknown hazard class '" + store.hazardClass
+					+ "'; declared classes are: normal, hazardous");
 			if (store.composition)
 			{
 				auto const& composition = *store.composition;
@@ -1145,6 +1153,17 @@ namespace core
 					|| !compositionsClose(*source->composition, *destination->composition))
 					return refuse(where + " crosses a compound-material boundary; transfers between stores with different declared compositions require an explicit conversion");
 			}
+			// A generic transfer never crosses the hazard-class boundary
+			// (#412): a hazardous store's contents are a protected reserve
+			// of their own class, and an accidentally-wired transfer cannot
+			// siphon hazardous material into the normal inventory or dilute
+			// hazardous containment with normal material. Recovery of
+			// hazardous material runs inside the hazardous class, between
+			// stores of that class only.
+			if (source->hazardClass != destination->hazardClass)
+				return refuse(where + " crosses the hazard-class boundary ('"
+					+ source->hazardClass + "' -> '" + destination->hazardClass
+					+ "'); hazardous and normal material may not share a generic transfer");
 		}
 		if (settings.conversions.size() > MaxStationResourceConversions)
 			return refuse("Station resource conversions are limited to "
@@ -1166,6 +1185,12 @@ namespace core
 					+ std::to_string(MaxStationConversionFlows) + " outputs");
 			std::set<std::string> endpoints;
 			ConstituentLedger inflow, outflow;
+			// A conversion never crosses the hazard-class boundary either
+			// (#412): every endpoint of one conversion carries the same
+			// class, so a declared process can never transmute hazardous
+			// material into normal inventory or feed normal material into a
+			// hazardous chain.
+			std::string endpointClass;
 			auto const addFlow = [&](std::string const& storeId, double rate, bool input)
 			{
 				auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
@@ -1181,6 +1206,12 @@ namespace core
 				if (!std::isfinite(rate) || rate <= 0.0)
 					return refuse(where + " " + (input ? "input rate" : "output yield")
 						+ " for store '" + storeId + "' must be finite and positive");
+				if (endpointClass.empty())
+					endpointClass = it->hazardClass;
+				else if (it->hazardClass != endpointClass)
+					return refuse(where + " crosses the hazard-class boundary at store '" + storeId
+						+ "' ('" + it->hazardClass + "' vs '" + endpointClass
+						+ "'); one conversion may only transform material within a single hazard class");
 				addComposition(input ? inflow : outflow, *it->composition,
 					massToKg(it->unit, rate), 1.0);
 				return true;
@@ -1988,6 +2019,10 @@ namespace core
 			if (found->composition && !allowCompound)
 				return refuse(where + " " + role + " store '" + storeId
 					+ "' declares a composition; recovered water streams are plain mass stores, so no dry constituent can be created from pure condensate");
+			if (found->hazardClass != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is authored "
+					+ found->hazardClass + "-class but this is a " + hazardClass
+					+ "-class water process; a process may only touch stores of its own hazard class");
 			auto const existing = waterStoreClass.find(storeId);
 			if (existing == waterStoreClass.end())
 				waterStoreClass.emplace(storeId, hazardClass);
@@ -2082,6 +2117,30 @@ namespace core
 			if (!declareWaterStore(treatment.consumableStoreId, "consumable", where,
 				treatment.hazardClass, true))
 				return false;
+			// Release clearance (#412): a hazardous-class treatment must
+			// declare the clearance contract - treated hazardous material is
+			// released only on a passed clearance test, so a treatment with
+			// no clearance authority cannot release anything. A normal-class
+			// treatment cannot configure clearance testing: release
+			// clearance is the hazardous containment boundary, not a
+			// normal-water filter, and a normal store is not a containment
+			// boundary that anything needs clearing into.
+			if (treatment.hazardClass == "hazardous")
+			{
+				if (treatment.clearanceStoreId.empty())
+					return refuse(where + " is hazardous-class but declares no release-clearance consumable store: hazardous treated material is released only on a passed clearance test");
+				if (!std::isfinite(treatment.clearancePerKg) || treatment.clearancePerKg <= 0.0)
+					return refuse(where + " release clearance per kg must be finite and positive for a hazardous-class treatment");
+				for (auto const& streamId : streamIds)
+					if (streamId == treatment.clearanceStoreId)
+						return refuse(where + " release-clearance store is the same store '" + streamId
+							+ "' as a recovery stream; the clearance test consumable is a supplied consumable, not part of the water stream it tests");
+				if (!declareWaterStore(treatment.clearanceStoreId, "release-clearance consumable", where,
+					treatment.hazardClass, true))
+					return false;
+			}
+			else if (!treatment.clearanceStoreId.empty() || treatment.clearancePerKg != 0.0)
+				return refuse(where + " is normal-class but configures release-clearance testing; release clearance is the hazardous-class containment boundary and does not apply to normal water treatment");
 		}
 		// Oxygen production and CO2 capture contracts (#404). An
 		// electrolyzer splits qualified water into oxygen and hydrogen: the
@@ -2125,6 +2184,10 @@ namespace core
 			if (found->composition && !allowCompound)
 				return refuse(where + " " + role + " store '" + storeId
 					+ "' declares a composition; handled gas streams are plain mass stores, so no dry constituent can be created from pure gas");
+			if (found->hazardClass != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is authored "
+					+ found->hazardClass + "-class but this is a " + hazardClass
+					+ "-class gas process; a process may only touch stores of its own hazard class");
 			auto const existing = gasStoreClass.find(storeId);
 			if (existing == gasStoreClass.end())
 				gasStoreClass.emplace(storeId, hazardClass);
@@ -2163,16 +2226,10 @@ namespace core
 				return refuse(where + " maximum sink temperature must be finite and above absolute zero");
 			if (electrolyzer.oxygenStoreId.empty() == electrolyzer.atmosphereId.empty())
 				return refuse(where + " must configure exactly one oxygen destination: a qualified gas store or one compartment atmosphere");
-			if (!declareWaterStore(electrolyzer.waterStoreId, "feed water", where,
-				electrolyzer.hazardClass, false))
-				return false;
-			if (!electrolyzer.oxygenStoreId.empty()
-				&& !declareGasStore(electrolyzer.oxygenStoreId, "oxygen", where,
-					electrolyzer.hazardClass, false))
-				return false;
-			if (!declareGasStore(electrolyzer.hydrogenStoreId, "hydrogen", where,
-				electrolyzer.hazardClass, false))
-				return false;
+			// The compartment boundary is checked before the stores so a
+			// hazardous cell pointed at a normal compartment names the
+			// compartment as the refusal reason (#412): the atmosphere it
+			// delivers into is the containment boundary, not the feed store.
 			if (!electrolyzer.atmosphereId.empty())
 			{
 				auto const compartment = std::find_if(settings.atmospheres.begin(),
@@ -2186,6 +2243,16 @@ namespace core
 						+ "' hazard class '" + compartment->hazardClass
 						+ "'; oxygen may only be delivered to a compartment of the cell's own class");
 			}
+			if (!declareWaterStore(electrolyzer.waterStoreId, "feed water", where,
+				electrolyzer.hazardClass, false))
+				return false;
+			if (!electrolyzer.oxygenStoreId.empty()
+				&& !declareGasStore(electrolyzer.oxygenStoreId, "oxygen", where,
+					electrolyzer.hazardClass, false))
+				return false;
+			if (!declareGasStore(electrolyzer.hydrogenStoreId, "hydrogen", where,
+				electrolyzer.hazardClass, false))
+				return false;
 			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
 				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
 				{ return reservoir.id == electrolyzer.heatSinkId; });
@@ -2446,6 +2513,10 @@ namespace core
 			if (!requireCompound && found->composition)
 				return refuse(where + " " + role + " store '" + storeId
 					+ "' declares a composition; recovered product streams land as plain mass, so a compound destination would create tracked constituents out of nothing");
+			if (found->hazardClass != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is authored "
+					+ found->hazardClass + "-class but this is a " + hazardClass
+					+ "-class nutrient process; a process may only touch stores of its own hazard class");
 			auto const existing = microbialStoreClass.find(storeId);
 			if (existing == microbialStoreClass.end())
 				microbialStoreClass.emplace(storeId, hazardClass);
@@ -3380,6 +3451,7 @@ namespace core
 			size_t treatedIndex{0};
 			size_t concentrateIndex{0};
 			size_t consumableIndex{0};
+			size_t clearanceIndex{0};
 			size_t declarationIndex{0};
 			double lastScale{0.0};
 			std::string lastLimiter;
@@ -3392,6 +3464,17 @@ namespace core
 			double lastConsumableUsed{0.0};
 			bool lastQualityAccepted{false};
 			std::string lastHoldReason;
+			// The three quality gates (#412): filtration ran with the
+			// process, the full rated energy dose is the treatment evidence,
+			// and the release clearance test is what releases hazardous
+			// treated material. Unknown or failed clearance holds it.
+			bool lastFiltrationCompleted{false};
+			bool lastTreatmentEvidenced{false};
+			bool lastReleaseCleared{false};
+			double lastClearanceRequested{0.0};
+			double lastClearanceUsed{0.0};
+			double lastClearanceUnmet{0.0};
+			double clearanceUsedTotal{0.0};
 			double processedTotalKg{0.0};
 			double treatedTotalKg{0.0};
 			double acceptedTotalKg{0.0};
@@ -5419,6 +5502,12 @@ namespace core
 				treatment.lastConsumableUsed = 0.0;
 				treatment.lastQualityAccepted = false;
 				treatment.lastHoldReason.clear();
+				treatment.lastFiltrationCompleted = false;
+				treatment.lastTreatmentEvidenced = false;
+				treatment.lastReleaseCleared = false;
+				treatment.lastClearanceRequested = 0.0;
+				treatment.lastClearanceUsed = 0.0;
+				treatment.lastClearanceUnmet = 0.0;
 				if (treatment.authored.throughputKgPerS <= 0.0)
 				{
 					treatment.status = StationTransferStatus::Idle;
@@ -5506,15 +5595,40 @@ namespace core
 				auto const concentrateKg = massToKg(concentrate.authored.unit, concentrateUnits);
 				qualified[treatment.sourceIndex] -= processedUnits;
 				flowOut[treatment.sourceIndex] += processedUnits;
-				// Quality: the full rated energy dose is what qualifies. A
-				// curtailed dose runs the machine but does not finish the
-				// water, so the output is held unqualified rather than passed
-				// through on a partial treatment.
+				// Quality is three distinct gates (#412), not one boolean:
+				// filtration ran with the process, the full rated energy dose
+				// is the treatment evidence, and for a hazardous-class
+				// treatment the release clearance test is what releases the
+				// treated material. The test is all-or-nothing per tick: a
+				// partial kit does not clear a partial batch. A curtailed
+				// dose fails the evidence gate before the test runs; a full
+				// dose whose clearance consumable cannot cover the output is
+				// unknown clearance and holds the material - generic recovery
+				// transfers only ever pick up qualified (released) material,
+				// so the hold cannot be bypassed.
 				auto const curtailed = suppliedKW + 1e-12 < treatment.lastPowerDemandKW;
-				treatment.lastQualityAccepted = !curtailed;
+				auto const hazardous = treatment.authored.hazardClass == "hazardous";
+				auto const clearanceDemandUnits = hazardous
+					? treatment.authored.clearancePerKg * treatedKg : 0.0;
+				auto const drawableClearanceUnits = hazardous
+					? std::max(0.0, qualified[treatment.clearanceIndex]
+						- stores[treatment.clearanceIndex].authored.protectedReserve)
+					: 0.0;
+				auto const clearanceSatisfied = clearanceDemandUnits <= 1e-12
+					|| drawableClearanceUnits + 1e-12 >= clearanceDemandUnits;
+				auto const released = !curtailed && clearanceSatisfied;
+				treatment.lastFiltrationCompleted = treatedKg > 0.0 || concentrateKg > 0.0;
+				treatment.lastTreatmentEvidenced = !curtailed && treatment.lastFiltrationCompleted;
+				treatment.lastReleaseCleared = released && treatment.lastFiltrationCompleted;
+				treatment.lastQualityAccepted = released;
 				if (curtailed)
 				{
 					treatment.lastHoldReason = "treatment energy curtailed: the treated output is held unqualified";
+					unqualified[treatment.treatedIndex] += treatedUnits;
+				}
+				else if (!clearanceSatisfied)
+				{
+					treatment.lastHoldReason = "release clearance unavailable: the clearance test consumable cannot cover the treated output; the material is held until it can be cleared";
 					unqualified[treatment.treatedIndex] += treatedUnits;
 				}
 				else qualified[treatment.treatedIndex] += treatedUnits;
@@ -5530,6 +5644,33 @@ namespace core
 				qualified[treatment.consumableIndex] -= consumableUsed;
 				flowOut[treatment.consumableIndex] += consumableUsed;
 				treatment.lastConsumableUsed = consumableUsed;
+				// The clearance test is spent only when it actually runs and
+				// passes: a held batch consumed nothing, so the kit stays
+				// available for the next tick rather than being burned on a
+				// test that never happened.
+				if (!curtailed)
+				{
+					treatment.lastClearanceRequested = clearanceDemandUnits;
+					if (released && clearanceDemandUnits > 0.0)
+					{
+						auto const& clearanceStore = stores[treatment.clearanceIndex].authored;
+						qualified[treatment.clearanceIndex] -= clearanceDemandUnits;
+						flowOut[treatment.clearanceIndex] += clearanceDemandUnits;
+						stagedUnitLoss[clearanceStore.unit] += clearanceDemandUnits;
+						if (clearanceStore.composition)
+						{
+							ConstituentLedger netChange;
+							addComposition(netChange, *clearanceStore.composition,
+								massToKg(clearanceStore.unit, clearanceDemandUnits), -1.0);
+							for (auto const& entry : netChange)
+								stagedLoss[entry.first] -= entry.second;
+						}
+						treatment.lastClearanceUsed = clearanceDemandUnits;
+						treatment.clearanceUsedTotal += clearanceDemandUnits;
+					}
+					treatment.lastClearanceUnmet = treatment.lastClearanceRequested
+						- treatment.lastClearanceUsed;
+				}
 				// Per-unit boundary: the source gave the processed mass up,
 				// the treated and concentrate stores took their shares on, and
 				// the consumable was used out of existence by the process.
@@ -5551,14 +5692,14 @@ namespace core
 				treatment.processedTotalKg += processedKg;
 				treatment.treatedTotalKg += treatedKg;
 				treatment.concentrateTotalKg += concentrateKg;
-				if (curtailed) treatment.heldTotalKg += treatedKg;
-				else treatment.acceptedTotalKg += treatedKg;
+				if (released) treatment.acceptedTotalKg += treatedKg;
+				else treatment.heldTotalKg += treatedKg;
 				treatment.energySuppliedKJ += suppliedKW * tickSeconds;
 				treatment.energyOwedKJ += treatment.lastPowerDemandKW * tickSeconds;
 				treatment.consumablesUsedTotal += consumableUsed;
 				treatment.lastCurtailed = curtailed;
 				totalWaterTreatmentPowerKW += suppliedKW;
-				if (!curtailed) treatment.status = StationTransferStatus::Full;
+				if (released) treatment.status = StationTransferStatus::Full;
 				else treatment.status = StationTransferStatus::Partial;
 			}
 			// Water collectors (#402) run after the treatments and before
@@ -8854,6 +8995,26 @@ namespace core
 				if (!treatment.lastQualityAccepted && treatment.lastProcessedKg > 0.0
 					&& treatment.lastHoldReason.empty())
 					return violation = where + "held treated output without a stated hold reason", false;
+				// The three quality gates (#412) are ordered: release
+				// clearance implies treatment evidence, and treatment
+				// evidence implies filtration. The clearance test is
+				// all-or-nothing: nothing is ever partially cleared, and a
+				// released batch consumed exactly its declared test dose.
+				if (!requireFinite(treatment.lastClearanceRequested, where + "last clearance requested")) return false;
+				if (!requireFinite(treatment.lastClearanceUsed, where + "last clearance used")) return false;
+				if (!requireFinite(treatment.lastClearanceUnmet, where + "last clearance unmet")) return false;
+				if (!requireFinite(treatment.clearanceUsedTotal, where + "cumulative clearance used")) return false;
+				if (treatment.lastReleaseCleared && !treatment.lastTreatmentEvidenced)
+					return violation = where + "released material without treatment evidence", false;
+				if (treatment.lastTreatmentEvidenced && !treatment.lastFiltrationCompleted)
+					return violation = where + "claims treatment evidence without a completed filtration pass", false;
+				auto const clearanceBound = StationBalanceTolerance
+					* std::max(1.0, treatment.lastClearanceRequested);
+				if (treatment.lastClearanceUsed > treatment.lastClearanceRequested + clearanceBound)
+					return violation = where + "spent more clearance consumable than the treated output calls for", false;
+				if (treatment.authored.hazardClass == "hazardous" && treatment.lastReleaseCleared
+					&& treatment.lastClearanceUsed + clearanceBound < treatment.lastClearanceRequested)
+					return violation = where + "released hazardous material on an incomplete clearance test", false;
 			}
 			// The oxygen-production audit (#404): the split closes on mass -
 			// every kilogram split is oxygen plus hydrogen, never a third
@@ -10052,6 +10213,10 @@ namespace core
 			state.treatedIndex = storeIndex[treatment.treatedStoreId];
 			state.concentrateIndex = storeIndex[treatment.concentrateStoreId];
 			state.consumableIndex = storeIndex[treatment.consumableStoreId];
+			// Only a hazardous-class treatment has a clearance store; the
+			// normal class never draws the unused index.
+			if (!treatment.clearanceStoreId.empty())
+				state.clearanceIndex = storeIndex[treatment.clearanceStoreId];
 			state.declarationIndex = mImpl->waterTreatments.size();
 			mImpl->waterTreatments.push_back(std::move(state));
 		}
@@ -10468,7 +10633,8 @@ namespace core
 				store.authored.capacity, store.authored.startingQualified,
 				store.authored.startingUnqualified, store.authored.protectedReserve,
 				store.currentQualified, store.currentUnqualified,
-				store.lastTickIn, store.lastTickOut, store.authored.composition});
+				store.lastTickIn, store.lastTickOut, store.authored.composition,
+				store.authored.hazardClass});
 			currentTotals[store.authored.unit] += store.currentQualified + store.currentUnqualified;
 			if (store.authored.composition)
 				addComposition(currentConstituents, *store.authored.composition,
@@ -11174,6 +11340,15 @@ namespace core
 				- treatment.lastConsumableUsed;
 			treatmentResult.qualityAccepted = treatment.lastQualityAccepted;
 			treatmentResult.holdReason = treatment.lastHoldReason;
+			treatmentResult.filtrationCompleted = treatment.lastFiltrationCompleted;
+			treatmentResult.treatmentEvidenced = treatment.lastTreatmentEvidenced;
+			treatmentResult.releaseCleared = treatment.lastReleaseCleared;
+			treatmentResult.clearanceStoreId = treatment.authored.clearanceStoreId;
+			treatmentResult.clearancePerKg = treatment.authored.clearancePerKg;
+			treatmentResult.lastClearanceRequested = treatment.lastClearanceRequested;
+			treatmentResult.lastClearanceUsed = treatment.lastClearanceUsed;
+			treatmentResult.lastClearanceUnmet = treatment.lastClearanceUnmet;
+			treatmentResult.clearanceUsedTotal = treatment.clearanceUsedTotal;
 			treatmentResult.disabled = treatment.authored.throughputKgPerS <= 0.0;
 			treatmentResult.processedKg = treatment.processedTotalKg;
 			treatmentResult.treatedKg = treatment.treatedTotalKg;
