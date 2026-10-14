@@ -19296,6 +19296,148 @@ void recovery(smoke::Context const& context)
 		require(surgeEnergy <= 2.0 * 0.05 + 1e-9,
 			"the restart delivered more surge energy than was authored");
 	}
+
+	// Shared rig for the #589 scenarios: no solar, no battery, one
+	// fuelled generator with zero startup time and power behind a cool
+	// sink, and automatic dispatch. The only thing that can put power on
+	// the bus is a generator the dispatcher chose to start.
+	struct DispatchRig
+	{
+		core::StationSystemsSettings settings;
+	};
+	auto makeDispatchRig = [&]()
+	{
+		DispatchRig rig;
+		auto& settings = rig.settings;
+		core::ResourceStoreSettings fuel;
+		fuel.id = "fuel"; fuel.unit = "kWh";
+		fuel.capacity = 100.0; fuel.startingQualified = 100.0;
+		settings.stores = { fuel };
+		settings.dispatchMode = core::StationDispatchMode::Automatic;
+		settings.thermalReservoirs = { reservoir("sink", "low", 20.0, 200.0) };
+		core::GeneratorSettings gen;
+		gen.id = "gen"; gen.fuelStoreId = "fuel"; gen.thermalClass = "low";
+		gen.heatSinkId = "sink"; gen.ratedOutputKW = 10.0; gen.efficiency = 0.5;
+		gen.maxRampKWPerSecond = 1000.0; gen.startupPowerKW = 0.0;
+		gen.startupSeconds = 0.0; gen.maxSinkTemperatureC = 90.0;
+		settings.generators = { gen };
+		return rig;
+	};
+	auto storeSnap = [](core::World& world, std::string const& id) -> core::StationSystemsStoreSnapshot
+	{
+		for (auto const& s : world.getStationSystemsSnapshot().stores)
+			if (s.id == id) return s;
+		throw std::runtime_error("store not found: " + id);
+	};
+
+	// Scenario K (#589): the ticket's deadlock. With no solar and no
+	// battery, a shed load drove no dispatch demand, so the dispatcher
+	// never commanded the generator, the spare pool never appeared, and
+	// the load stayed Shed forever with fuel still in the tank - a
+	// circular wait between the restart gate and the dispatcher. Now
+	// the shed load's pending restart feeds the dispatch signal, the
+	// generator comes online to fund the restart, and the load returns
+	// to full service.
+	{
+		core::World world("RecK", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		auto rig = makeDispatchRig();
+		rig.settings.equipmentLoads = { recoveryLoad("rig", 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0) };
+		configure(world, rig.settings, "recovery K rig");
+		world.resumeSimulation();
+		bool sawShed = false;
+		bool sawPendingDemand = false;
+		for (uint64_t tick = 1; tick <= 120; ++tick) // t = 2s
+		{
+			runOrDiagnose(world, 1, "recovery K");
+			auto const& snap = world.getStationSystemsSnapshot();
+			auto const& l = loadSnap(world, "rig");
+			if (l.recoveryStage == core::StationLoadRecoveryStage::Shed)
+			{
+				sawShed = true;
+				if (snap.power.dispatchDemandKW > 1e-9) sawPendingDemand = true;
+			}
+		}
+		require(sawShed, "the load never shed against the empty pool");
+		require(sawPendingDemand,
+			"the shed load's pending restart never reached the dispatch signal");
+		auto const& snap = world.getStationSystemsSnapshot();
+		auto const& l = loadSnap(world, "rig");
+		require(l.recoveryStage == core::StationLoadRecoveryStage::Active,
+			"the load never restarted under automatic dispatch");
+		require(closeTo(l.suppliedKW, 1.0), "the restarted load is not fully supplied");
+		require(snap.power.generators[0].outputKW >= 1.0 - 1e-9,
+			"the generator never came online for the waiting restart");
+		require(storeSnap(world, "fuel").currentQualified < 100.0,
+			"the generator served the load without drawing fuel");
+	}
+
+	// Scenario L (#589): the surge of a restart in flight keeps the
+	// source online. A load with a declared startup surge restarted by
+	// automatic dispatch must be able to pay its whole surge budget
+	// without the dispatch signal dropping mid-restart and sending the
+	// load back to Shed - the surge rides the signal until it is paid,
+	// then the station settles back to the load's normal demand.
+	{
+		core::World world("RecL", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		auto rig = makeDispatchRig();
+		// demand 1, min 1, dwell 0, hysteresis 0, surge 1 kW for 0.5s.
+		rig.settings.equipmentLoads = { recoveryLoad("driller", 1.0, 0.0, 0.0, 0.0, 1.0, 0.5, 0.0) };
+		configure(world, rig.settings, "recovery L rig");
+		world.resumeSimulation();
+		double surgeEnergy = 0.0;
+		bool sawSurge = false;
+		for (uint64_t tick = 1; tick <= 1200; ++tick) // t = 20s
+		{
+			runOrDiagnose(world, 1, "recovery L");
+			auto const& l = loadSnap(world, "driller");
+			require(!(l.recoveryStage == core::StationLoadRecoveryStage::Shed
+					&& l.suppliedKW > 1e-9),
+				"a failed restart published supplied service while returning to Shed");
+			if (l.recoverySurgeKW > 1e-9) sawSurge = true;
+			surgeEnergy += l.recoverySurgeKW * core::World::getFixedTimestep();
+		}
+		require(sawSurge, "the automatic-dispatch restart never drew its surge");
+		auto const& l = loadSnap(world, "driller");
+		require(l.recoveryStage == core::StationLoadRecoveryStage::Active,
+			"the surge restart never settled to Active under automatic dispatch");
+		require(closeTo(l.suppliedKW, 1.0), "the settled load is not fully supplied");
+		require(surgeEnergy <= 1.0 * 0.5 + 1e-9,
+			"the restart delivered more surge energy than was authored");
+	}
+
+	// Scenario M (#589): a shed load whose declared feed cannot sustain
+	// it never drives fuel burn. Same rig as K, but the load consumes
+	// from an empty store: the restart is barred by the feed itself,
+	// so its need never reaches the dispatcher, the generator stays
+	// stopped, and not one unit of fuel is burned for equipment that
+	// cannot run.
+	{
+		core::World world("RecM", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		auto rig = makeDispatchRig();
+		rig.settings.stores.push_back(massStore("brine", 10.0, 0.0));
+		auto starved = recoveryLoad("starved", 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+		core::EquipmentMaterialExchangeSettings feed;
+		feed.storeId = "brine"; feed.ratePerSecond = 0.01; feed.consumes = true;
+		starved.materialExchanges = { feed };
+		rig.settings.equipmentLoads = { starved };
+		configure(world, rig.settings, "recovery M rig");
+		world.resumeSimulation();
+		runOrDiagnose(world, 120, "recovery M"); // t = 2s
+		auto const& snap = world.getStationSystemsSnapshot();
+		auto const& l = loadSnap(world, "starved");
+		require(l.recoveryStage == core::StationLoadRecoveryStage::Shed,
+			"a feed-starved load restarted despite its infeasible feed");
+		require(l.suppliedKW <= 1e-9, "a shed load drew power");
+		require(snap.power.dispatchDemandKW <= 1e-9,
+			"a feed-starved shed load drove the dispatch signal");
+		require(snap.power.generators[0].outputKW <= 1e-9,
+			"the generator ran for equipment its feed cannot sustain");
+		require(closeTo(storeSnap(world, "fuel").currentQualified, 100.0),
+			"fuel was burned for a load that cannot run on its declared feed");
+	}
 }
 
 	// #418: bounded trends and incident history. Trend series are sampled

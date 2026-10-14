@@ -7213,10 +7213,12 @@ namespace core
 				// not offered to the pool at all. Its demand is still
 				// reported (lastRequestedKW) so the window shows what it
 				// wants, but it is not admitted, produces no heat and drives
-				// no dispatch demand. The recovery gate at the end of the
-				// tick decides whether it restarts next tick. Only purely
-				// discretionary loads are ever Shed, so no protected floor is
-				// affected by the skip.
+				// no allocation demand. Once its dwell has elapsed the
+				// recovery gate at the end of the tick feeds its pending
+				// restart need into the dispatch signal (#589), so
+				// automatic dispatch can bring sources online to fund the
+				// restart. Only purely discretionary loads are ever Shed, so
+				// no protected floor is affected by the skip.
 				if (load.recoveryStage == StationLoadRecoveryStage::Shed)
 				{
 					load.lastAdmitted = false;
@@ -11272,6 +11274,22 @@ namespace core
 			// order, so several restarts never surge together.
 			bool restartSlotOpen{true};
 			double pendingRestartHeadroomKW{0.0};
+			// #589: the restart demand of Shed loads that are eligible to
+			// come back but are held only because the pools cannot carry the
+			// restart yet. A Shed load draws nothing, so with automatic
+			// dispatch the dispatcher never saw a reason to command a
+			// generator for it, the spare pool never appeared, and the load
+			// stayed Shed forever: a circular wait between the restart gate
+			// and the dispatcher. Feeding the pending restart need into the
+			// dispatch signal lets automatic dispatch bring sources online
+			// to fund a waiting restart instead of requiring the restart
+			// pool to appear independently. The feed grants no service: the
+			// load still draws nothing while Shed, still waits out its dwell,
+			// and a restart barred by a non-pool prerequisite - a saturated
+			// heat sink or a feed that cannot sustain the minimum operable
+			// level - is never fed, so no fuel is burned for equipment that
+			// cannot run.
+			double pendingRecoveryDispatchKW{0.0};
 			for (auto const index : loadOrder)
 			{
 				auto& load = loads[index];
@@ -11288,9 +11306,31 @@ namespace core
 				// Past dwell: this load is eligible to restart soon, so hold
 				// its restart need out of battery charging below.
 				pendingRestartHeadroomKW = std::max(pendingRestartHeadroomKW, restartNeed);
-				if (!restartSlotOpen) continue;
 				auto const headroom = load.lastRequestedKW
 					* (1.0 + load.authored.recoveryHysteresisFraction);
+				// #589: is this restart barred only by the pools? A
+				// saturated heat sink or a declared feed that cannot sustain
+				// the minimum operable level bars the restart itself, so its
+				// need never reaches the dispatcher.
+				bool restartFeasible{true};
+				if (load.authored.heatOutputKW > 0.0 && load.hasHeatSink)
+				{
+					auto const& sink = reservoirs[load.heatSinkIndex];
+					if (sink.temperatureC + 1e-9 >= sink.authored.maxTemperatureC)
+						restartFeasible = false;
+				}
+				if (restartFeasible)
+				{
+					std::string materialLimiter;
+					auto const material = materialFeasible(load, materialLimiter);
+					auto const minOperating = load.lastRequestedKW
+						* (1.0 - load.authored.maxCurtailment);
+					if (load.lastRequestedKW * material + 1e-12 < minOperating)
+						restartFeasible = false;
+				}
+				if (restartFeasible)
+					pendingRecoveryDispatchKW += std::max(headroom, restartNeed);
+				if (!restartSlotOpen) continue;
 				auto const poolKW = availableGeneration + batteryDeliverableKW();
 				if (poolKW + 1e-12 < headroom)
 				{
@@ -11331,6 +11371,15 @@ namespace core
 				{
 					recoveryPending = true;
 					recoveringCount += 1;
+					// #589: a Restoring load's still-owed startup surge is
+					// pending recovery demand too. Its normal request is
+					// already in the dispatch signal as admitted load, but
+					// the surge on top of it must keep the sources online
+					// until the surge budget is paid, or the restart would
+					// fall back to Shed the tick after it started.
+					if (load.lastRequestedKW > 0.0 && load.surgeRemainingSeconds > 0.0
+						&& load.lastAdmitted && !load.lastMaterialRefused)
+						pendingRecoveryDispatchKW += load.authored.restartSurgePowerKW;
 				}
 			}
 			lastRecoveryPending = recoveryPending;
@@ -11410,6 +11459,12 @@ namespace core
 			// cranking is excluded: it is a control transient, not a service
 			// demand.
 			double dispatchDemandKW{0.0};
+			// #589: eligible pending recovery demand rides the same signal.
+			// A Shed load past its dwell whose only bar is the pools, and a
+			// Restoring load with a surge still owed, are real demand the
+			// dispatcher must see, or automatic dispatch never starts the
+			// sources the restart needs to stop waiting for.
+			dispatchDemandKW += pendingRecoveryDispatchKW;
 			for (auto const& load : loads)
 				if (load.lastAdmitted && !load.lastMaterialRefused)
 					dispatchDemandKW += load.lastCappedRequestKW;
