@@ -282,6 +282,7 @@ set(editor_names
     station/coupledLiveViewWorkflow
     station/trendsWorkflow
     station/enduranceWorkflow
+    station/forecastWorkflow
 )
 
 if(DEFINED LANE)

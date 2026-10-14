@@ -1806,6 +1806,118 @@ namespace core
 		bool operator==(StationEnduranceSnapshot const&) const = default;
 	};
 
+	// The projection outcome of one Resource store under the scenario
+	// forecast (#420). Where the endurance estimate (#419) extends the
+	// OBSERVED current rate, the forecast extends the estimate to the
+	// CONFIGURED demand/production profiles and the authored future
+	// delivery schedule under explicitly bounded model assumptions: a
+	// fixed simulated-time horizon, a fixed integration segment cap, and
+	// the declared rates continuing exactly as authored. "Sustained"
+	// means the projected drawable inventory stays above zero through the
+	// whole projected window; "shortfall" means the projection reaches
+	// drawable-zero inside the window - the store runs out before any
+	// accepted arrival can prevent it - with the onset time and the
+	// limiting service reported beside it.
+	enum class StationForecastBasis : std::uint8_t
+	{
+		Unknown,   // no forecast has been computed for this store
+		Sustained, // projected drawable stays above zero through the window
+		Shortfall, // projected drawable reaches zero inside the window
+	};
+	inline constexpr std::array<char const*, 3> StationForecastBasisNames{
+		"unknown", "sustained", "shortfall"};
+	// Documented forecast bounds (#420): the projection runs over a fixed
+	// simulated-time horizon and integrates at most this many event-driven
+	// segments. A schedule dense enough to need more segments truncates at
+	// the cap and reports it; the forecast is never an unbounded
+	// computation. The forecast mutates no live inventory, advances no
+	// World clock and consumes no deterministic stream: it is a pure
+	// bounded projection of the committed state forward.
+	inline constexpr double StationForecastHorizonSeconds{86400.0};
+	inline constexpr std::uint32_t StationForecastMaxSegments{4096};
+	// One projected resupply arrival of one store (#420): what the
+	// schedule brings, what the store's projected headroom actually
+	// accepts (accepted delivery quantity - what cannot fit is refused at
+	// the boundary, never overflowed), the projected drawable inventory
+	// at the moment of arrival, and whether the arrival lands while the
+	// store is still above drawable-zero (a rescue) or only after it has
+	// already run short.
+	struct StationForecastArrival
+	{
+		std::string deliveryId;
+		std::string storeId;
+		double arrivalSeconds{0.0};
+		double scheduledQuantity{0.0};
+		double acceptedQuantity{0.0};
+		double rejectedQuantity{0.0};
+		double projectedDrawableBefore{0.0};
+		double projectedPhysicalBefore{0.0};
+		bool arrivesQualified{true};
+		bool rescuesStore{false}; // lands while the store is still drawable-positive
+		bool operator==(StationForecastArrival const&) const = default;
+	};
+	// The scenario forecast of one Resource store (#420): the projected
+	// trajectory summary, the shortfall (if any) with its onset and the
+	// limiting service that drives it, the projected arrivals with
+	// capacity-capped accepted quantities, and the uncertainty flags for
+	// recovery the forecast deliberately does NOT count: biology-derived
+	// recovery (crop, algae, microbial) is a provisional model
+	// assumption and is never presented as guaranteed recovery, and
+	// process-chain production (treatment, electrolysis, conversion,
+	// capture, fuel-cell product) is outside the projected scope.
+	struct StationForecastEntry
+	{
+		std::string storeId;
+		std::string unit; // the store's declared unit; every quantity is in it
+		double asOfSeconds{0.0};
+		double drawableAtStart{0.0};
+		double physicalAtStart{0.0};
+		StationForecastBasis basis{StationForecastBasis::Unknown};
+		double netRateAtStart{0.0}; // projected net rate over the first segment
+		bool hasShortfall{false};
+		double shortfallOnsetSeconds{0.0}; // when drawable reaches zero; 0 = none
+		double projectedDrawableAtHorizon{0.0}; // at horizon end or truncation
+		// The binding outflow at the projected depletion: the largest
+		// modelled outflow of the store in the segment that drives it to
+		// zero. Empty when no depletion is projected.
+		std::string limitingServiceId;
+		std::string limitingServiceKind; // "transfer" / "crew" / "equipment"
+		// Total outflow the projection could not cover inside the window:
+		// draws blocked at drawable-zero plus arrivals refused for lack of
+		// headroom never disappear - they are reported here as explicit
+		// uncovered demand, never silently dropped.
+		double unmetOutflowTotal{0.0};
+		std::vector<StationForecastArrival> arrivals;
+		// Uncertainty labels: recovery pathways that could replenish this
+		// store but are NOT counted in the guaranteed projection.
+		bool biologyRecoveryPossible{false};
+		bool processProductionPossible{false};
+		// Conservation of the projected exchanges: the residual of
+		// (projected physical) - (start physical + accepted arrivals +
+		// inflow moved - outflow moved). It must stay within the declared
+		// balance tolerance scaled by the store size; a larger residual is
+		// a forecast defect, never silent creation or loss of material.
+		double conservationResidual{0.0};
+		bool operator==(StationForecastEntry const&) const = default;
+	};
+	// The station-wide scenario forecast (#420): every Resource store's
+	// projection under one declared scenario, with the scenario and
+	// uncertainty labels carried so no projection can be read as a
+	// guarantee, and the segment/truncation accounting so the boundedness
+	// of the computation is itself observable.
+	struct StationForecastSnapshot
+	{
+		bool available{false};
+		double asOfSeconds{0.0};
+		double horizonSeconds{0.0};
+		std::uint32_t segmentsComputed{0};
+		bool truncated{false};
+		std::string scenarioLabel;
+		std::string uncertaintyLabel;
+		std::vector<StationForecastEntry> stores;
+		bool operator==(StationForecastSnapshot const&) const = default;
+	};
+
 	// Per-transfer observable outcome: what was requested, what moved, and the
 	// unmet remainder. Unmet material is never deleted; it simply did not move.
 	struct StationTransferSnapshot
@@ -3772,7 +3884,16 @@ namespace core
 		// the estimate, and the soonest next-delivery context. Derived
 		// runtime observability: never persisted, cleared by Reset/load like
 		// every other runtime state.
-		std::vector<StationEnduranceSnapshot> endurance;
+			std::vector<StationEnduranceSnapshot> endurance;
+		// The scenario forecast (#420): the bounded forward projection of
+		// every Resource store under the declared-profile scenario -
+		// authored demand/production profiles and scheduled deliveries -
+		// with projected inventory at resupply, shortfall onset and
+		// limiting service, and scenario/uncertainty labels. Derived
+		// runtime observability computed from the committed state: it never
+		// mutates live inventories, advances the World or consumes a
+		// deterministic stream, and it is never persisted.
+		StationForecastSnapshot forecast;
 		double balanceTolerance{StationBalanceTolerance};
 		bool operator==(StationSystemsSnapshot const&) const = default;
 	};

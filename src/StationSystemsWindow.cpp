@@ -3685,6 +3685,64 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		}
 	}
 	ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
+	if (ImGui::CollapsingHeader("Scenario forecast (bounded projection: the declared-profile scenario continues authored demand/production profiles and scheduled deliveries to a fixed horizon; projected shortfalls and inventory at resupply are scenario results under those assumptions, never guarantees - biology and process-chain recovery are flagged and never counted)"))
+	{
+		// #420: read-only scenario forecast per Resource store. The
+		// projection is computed from the committed state at the
+		// snapshot instant over the declared horizon and segment cap;
+		// rendering never ticks, mutates or re-runs anything.
+		auto const& forecast = snapshot.forecast;
+		if (!forecast.available)
+			ImGui::TextDisabled("No scenario forecast: Station systems are disabled.");
+		else
+		{
+			ImGui::TextWrapped("Scenario: %s", forecast.scenarioLabel.c_str());
+			ImGui::TextWrapped("Uncertainty: %s", forecast.uncertaintyLabel.c_str());
+			ImGui::Text("Projected from t=%.1f s over a %.0f s horizon (%u segments%s)",
+				forecast.asOfSeconds, forecast.horizonSeconds, forecast.segmentsComputed,
+				forecast.truncated ? " - TRUNCATED at the segment cap: the projection stopped early and covers less than the full horizon" : "");
+			if (forecast.stores.empty())
+				ImGui::TextDisabled("No Resource stores authored.");
+			for (auto const& entry : forecast.stores)
+			{
+				auto const basisIndex = std::min(static_cast<size_t>(entry.basis),
+					core::StationForecastBasisNames.size() - 1);
+				ImGui::Text("store '%s' (%s): drawable %.3f of physical %.3f | projected net %+.6f %s/s | [%s]",
+					entry.storeId.c_str(), entry.unit.c_str(),
+					entry.drawableAtStart, entry.physicalAtStart,
+					entry.netRateAtStart, entry.unit.c_str(),
+					core::StationForecastBasisNames[basisIndex]);
+				if (entry.hasShortfall)
+				{
+					ImGui::Text("  PROJECTED SHORTFALL: drawable inventory reaches zero at t=%.1f s",
+						entry.shortfallOnsetSeconds);
+					if (!entry.limitingServiceId.empty())
+						ImGui::Text("    limiting service: %s '%s'",
+							entry.limitingServiceKind.c_str(), entry.limitingServiceId.c_str());
+					if (entry.unmetOutflowTotal > 0.0)
+						ImGui::Text("    uncovered outflow while short: %.3f %s (demand that could not be drawn, reported not deleted)",
+							entry.unmetOutflowTotal, entry.unit.c_str());
+				}
+				else
+					ImGui::Text("  no shortfall projected inside the horizon; drawable at horizon end: %.3f %s",
+						entry.projectedDrawableAtHorizon, entry.unit.c_str());
+				for (auto const& arrival : entry.arrivals)
+					ImGui::Text("  resupply '%s' at t=%.1f s: %.3f %s scheduled, %.3f accepted / %.3f refused (capacity) | projected drawable at arrival: %.3f %s (%s)",
+						arrival.deliveryId.c_str(), arrival.arrivalSeconds,
+						arrival.scheduledQuantity, entry.unit.c_str(),
+						arrival.acceptedQuantity, arrival.rejectedQuantity,
+						arrival.projectedDrawableBefore, entry.unit.c_str(),
+						arrival.rescuesStore
+							? (arrival.arrivesQualified ? "lands before depletion, usable" : "lands before depletion, held awaiting clearance")
+							: "lands only after the projected shortfall");
+				if (entry.biologyRecoveryPossible)
+					ImGui::TextWrapped("  UNCERTAIN: crop/algae/microbial recovery could replenish this store; provisional biology is not counted as guaranteed recovery");
+				if (entry.processProductionPossible)
+					ImGui::Text("  NOT PROJECTED: process-chain production (treatment/electrolysis/conversion/capture) could add to this store but is outside the forecast scope");
+			}
+		}
+	}
+	ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
 	if (ImGui::CollapsingHeader("Resource/service trends (bounded)"))
 	{
 		// #418: read-only presentation of the bounded trend series. The

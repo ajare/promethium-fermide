@@ -95,6 +95,10 @@ foreach(check lifecycle batching eventBound persistence stores transfers compoun
         # zero-coefficient regression coverage runs in CI.
         harvest algae nutrientConservation bioContainment bioHazardFiles bioCapacityFiles
         microbialConditionRecovery
+        # #420: the bounded scenario forecast - projected inventory at
+        # resupply, shortfall onset and limiting service, capped accepted
+        # arrivals, uncertainty labels and the segment-cap bound.
+        forecast
         # #592: the nutrient-recovery contract checks (configure/tick/
         # snapshot refusals and the file load seam) were reachable through
         # the binary but never registered here, so their hazard-
@@ -670,6 +674,9 @@ add_test(NAME station-editor-coupled-live-view COMMAND pf-smoke-editor --check s
 set_tests_properties(station-editor-coupled-live-view PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-trends COMMAND pf-smoke-editor --check station/trendsWorkflow)
 set_tests_properties(station-editor-trends PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+# #420: the bounded scenario forecast observed through the separate window.
+add_test(NAME station-editor-forecast COMMAND pf-smoke-editor --check station/forecastWorkflow)
+set_tests_properties(station-editor-forecast PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 
 pf_add_smoke_contract(NAME smoke-editor-contract COMMAND ${CMAKE_COMMAND}
     "-DEDITOR=$<TARGET_FILE:pf-smoke-editor>"

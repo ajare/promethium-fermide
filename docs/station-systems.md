@@ -1,4 +1,4 @@
-# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, terminal-waste storage and scheduled ejection, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, chilled thermal services, fuelled generators, compartment atmospheres with airlock cycles, crew metabolic returns, water recovery with qualification, oxygen production with finite CO2 capture, finite thermal buffers that ride through cooling deficits, and hazardous treatment and containment boundaries, protected cross-system service dependencies (#386–#391, #393–#404, #406, #412, #416)
+# Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, terminal-waste storage and scheduled ejection, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, chilled thermal services, fuelled generators, compartment atmospheres with airlock cycles, crew metabolic returns, water recovery with qualification, oxygen production with finite CO2 capture, finite thermal buffers that ride through cooling deficits, and hazardous treatment and containment boundaries, protected cross-system service dependencies (#386–#391, #393–#404, #406, #412, #416) and bounded scenario forecasting of resource balance and resupply needs (#420)
 
 Station systems are opt-in per World and disabled in existing documents. Open
 **View > Station Systems** or use the
@@ -1764,6 +1764,102 @@ drafts jobs and requirements (add/remove, consumed checkboxes, waste
 store), refuses invalid drafts with visible diagnostics, and shows the
 live phase, isolation, reservations and spend beside the other
 station readouts.
+
+## Scenario forecast (#420)
+
+Where the endurance explanation (#419) extends the OBSERVED current
+rate, the scenario forecast extends the estimate to the CONFIGURED
+demand/production profiles and the authored future delivery schedule.
+It answers, per Resource store: what the drawable inventory is
+projected to be when the next resupply lands, whether the store runs
+out before then, which service drives it there, and how much of the
+schedule the store's capacity can actually accept. The forecast is
+derived runtime observability: it is computed from the committed
+snapshot state inside `snapshot()` as a pure function, mutates no
+live inventory, advances no World clock, consumes no deterministic
+stream, touches no Lua sandbox state, and is never persisted - Reset
+and load re-derive it from the initial state like every other
+observability.
+
+The projection is a declared-profile scenario carried with explicit
+labels. It continues the authored transfer rates, crew activity
+profile and equipment operating profiles unchanged to the horizon;
+scheduled deliveries land as authored and are accepted only as far
+as the store's projected headroom reaches (what cannot fit is
+refused at the boundary and reported, never overflowed); scheduled
+ejections remove only what the store is projected to hold qualified
+above its protected reserve. Every entry publishes the scenario label
+and the uncertainty label beside its numbers so no projection can be
+read as a guarantee.
+
+The integration is event-driven and bounded. It steps over the
+authored schedule occurrences and profile segment breakpoints inside
+the horizon, splitting further at projected drawable-zero and
+headroom crossings so zero-hits and fill-ups land exactly; between
+events every declared rate is constant and each store's trajectory is
+linear. The horizon is the fixed `StationForecastHorizonSeconds` and
+the whole computation is capped at `StationForecastMaxSegments`
+event-driven segments: a schedule dense enough to need more
+truncates at the cap and reports `truncated`, so the forecast is
+never an unbounded computation regardless of recurrence density.
+
+Coupled availability is projected with the same rules the live ledger
+applies at the starvation boundary: a transfer stops delivering when
+its source store is projected dry (and its demand is then reported as
+uncovered), crew metabolism runs whole or not at all - with any
+input store projected dry the crew draws nothing and returns
+nothing, so waste streams freeze at the last fed moment - and an
+equipment load's whole material-exchange set stops when any consuming
+feed is projected dry or any producing destination is projected full.
+A delivery due at the same instant the store would run dry rescues
+it, matching the live tick order where arrivals run ahead of the
+tick's drains.
+
+Uncertainty is explicit and never optimistic. Biology-derived
+recovery - crop harvest, algae harvest and microbial nutrient/water
+recovery - is a provisional model assumption and is never counted as
+guaranteed recovery: stores those pathways could replenish are
+flagged `biologyRecoveryPossible` while the guaranteed projection
+excludes those inflows entirely. Process-chain production (water
+treatment output, electrolysis products, authored conversions, CO2
+capture, fuel-cell product water, Sabatier and methane-processing
+products) is likewise not projected; destination stores carry
+`processProductionPossible` so the gap is visible rather than
+implied.
+
+Approximation limits, documented as promised: the forecast projects
+store inventories only - atmosphere compartments, thermal state,
+coolant loops and the electrical power pool are not re-derived, so
+equipment exchanges are projected at their profile-scaled rates
+without the live power-pool admission and curtailment, and crew
+oxygen draw is assumed satisfiable by the compartment. The
+provisional-biology and process-chain exclusions mean a flagged store
+may fare better in the live run than the guaranteed projection says,
+never worse through hidden help. The scenario assumes declared
+profiles continue unchanged: mid-horizon configuration edits, outage
+schedules and maintenance isolation are not folded into the
+projection. The projection is a linear relaxation of the coupled
+model: it reproduces the starvation-boundary couplings exactly but
+not the mid-range allocation throttles (e.g. the fractional
+material-cap of #554 between zero and full), so intermediate rates
+can differ from the live tick-by-tick outcome while the onset times,
+capacity refusals and conservation stay within the declared
+tolerance. Every entry carries a `conservationResidual` over
+projected physical = start + accepted arrivals + inflow moved -
+outflow moved; the residual stays within the balance tolerance and a
+larger value is a forecast defect, never silent creation or loss of
+material.
+
+The separate Station Systems window renders the forecast read-only:
+the scenario and uncertainty labels, the as-of time and horizon with
+the segment count and truncation warning, and per store the drawable
+and physical start state, the projected net rate, the basis
+(sustained/shortfall), the shortfall onset with the limiting service
+and uncovered outflow, each projected arrival with scheduled versus
+accepted/refused quantity and the projected inventory at arrival
+(landing before or after the shortfall), and the biology/process
+uncertainty flags. Rendering never ticks, mutates or dirties the
+document.
 
 ## Explicit scope limit
 

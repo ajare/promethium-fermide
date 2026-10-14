@@ -20859,6 +20859,634 @@ void recovery(smoke::Context const& context)
 		}
 	}
 
+	// #420: the bounded scenario forecast. The static estimate is
+	// extended from the observed current rate to the configured
+	// demand/production profiles and the authored future delivery
+	// schedule: projected inventory at resupply, shortfall onset with
+	// the limiting service, capacity-capped accepted delivery
+	// quantities, and scenario/uncertainty labels that never present
+	// biology as guaranteed recovery. The forecast mutates no live
+	// inventory, advances no World clock, consumes no deterministic
+	// stream, and is bounded by the declared horizon and segment cap.
+	void forecast(smoke::Context const& context)
+	{
+		auto const approx = [](double actual, double expected, double tolerance = 1e-6)
+		{ return std::abs(actual - expected) <= tolerance; };
+		auto const runOrDiagnose = [](core::World& world, uint64_t ticks, char const* what)
+		{
+			if (world.advanceTicks(ticks)) return;
+			auto const diagnostics = world.getStationSystemsDiagnostics();
+			std::fprintf(stderr, "%s failed: %s\n", what,
+				diagnostics.empty() ? "(no Station diagnostic)" : diagnostics.back().message.c_str());
+			throw std::runtime_error(std::string(what) + " run failed");
+		};
+		auto const findForecast = [](std::vector<core::StationForecastEntry> const& entries,
+			std::string const& id) -> core::StationForecastEntry const*
+		{
+			for (auto const& entry : entries)
+				if (entry.storeId == id) return &entry;
+			return nullptr;
+		};
+		std::string diagnostic;
+		// Scenario A: a known analytic profile with a timely one-off
+		// resupply. A 2 kg/s drain on 180 drawable at t=10 is rescued at
+		// t=50 by a 400 kg arrival (projected 100 drawable remaining at
+		// the arrival), then runs out at t=300 with the transfer named as
+		// the limiting service and the uncovered drain reported.
+		{
+			core::World world("ForecastTimely", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 10.0f;
+			core::ResourceStoreSettings water;
+			water.id = "water"; water.unit = "kg";
+			water.capacity = 1000.0; water.startingQualified = 300.0;
+			water.protectedReserve = 100.0;
+			core::ResourceStoreSettings tank;
+			tank.id = "tank"; tank.unit = "kg";
+			tank.capacity = 10000.0; tank.startingQualified = 100.0;
+			settings.stores = { water, tank };
+			core::ResourceTransferSettings pump;
+			pump.id = "pump"; pump.sourceId = "water"; pump.destinationId = "tank";
+			pump.unit = "kg"; pump.ratePerSecond = 2.0; pump.priority = 5;
+			settings.transfers = { pump };
+			core::ResourceDeliverySettings tanker;
+			tanker.id = "tanker"; tanker.storeId = "water"; tanker.unit = "kg";
+			tanker.quantity = 400.0; tanker.firstOccurrenceSeconds = 50.0;
+			settings.deliveries = { tanker };
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			world.resumeSimulation();
+			runOrDiagnose(world, 600, "forecast timely resupply"); // t = 10 s
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.forecast.available,
+				"the scenario forecast is not available for an enabled Station");
+			require(approx(snap.forecast.asOfSeconds, 10.0),
+				"the forecast is not as of the snapshot's simulation time");
+			require(approx(snap.forecast.horizonSeconds, core::StationForecastHorizonSeconds),
+				"the forecast horizon is not the declared bound");
+			require(!snap.forecast.truncated, "a sparse schedule truncated the forecast");
+			require(snap.forecast.scenarioLabel.find("declared-profile scenario") == 0,
+				"the forecast carries no scenario label");
+			require(snap.forecast.uncertaintyLabel.find("provisional biology") == 0,
+				"the forecast carries no uncertainty label");
+			auto const* entry = findForecast(snap.forecast.stores, "water");
+			require(entry != nullptr, "no forecast entry for the drained store");
+			require(entry->unit == "kg", "the forecast entry lost the store's declared unit");
+			require(approx(entry->drawableAtStart, 180.0, 1e-4)
+				&& approx(entry->physicalAtStart, 280.0, 1e-4),
+				"the forecast start state does not match the committed inventory");
+			require(approx(entry->netRateAtStart, -2.0),
+				"the projected net rate does not match the authored drain");
+			require(entry->basis == core::StationForecastBasis::Shortfall
+				&& entry->hasShortfall,
+				"a store that runs out inside the horizon did not forecast a shortfall");
+			require(approx(entry->shortfallOnsetSeconds, 300.0, 1e-5),
+				"the projected depletion onset is not drawable-after-arrival / rate");
+			require(entry->limitingServiceId == "pump"
+				&& entry->limitingServiceKind == "transfer",
+				"the limiting service is not the binding transfer");
+			require(approx(entry->projectedDrawableAtHorizon, 0.0),
+				"a depleted store did not project zero drawable at the horizon");
+			require(entry->arrivals.size() == 1, "the authored arrival is missing");
+			if (entry->arrivals.size() == 1)
+			{
+				auto const& arrival = entry->arrivals[0];
+				require(arrival.deliveryId == "tanker" && arrival.storeId == "water",
+					"the projected arrival lost its identity");
+				require(approx(arrival.arrivalSeconds, 50.0),
+					"the projected arrival is not on the authored schedule");
+				require(approx(arrival.projectedDrawableBefore, 100.0, 1e-5),
+					"the projected inventory at resupply is wrong");
+				require(approx(arrival.acceptedQuantity, 400.0)
+					&& approx(arrival.rejectedQuantity, 0.0),
+					"a delivery that fits was not fully accepted");
+				require(arrival.arrivesQualified && arrival.rescuesStore,
+					"a timely qualified arrival did not read as a rescue");
+			}
+			require(approx(entry->unmetOutflowTotal,
+				2.0 * (10.0 + core::StationForecastHorizonSeconds - 300.0), 1e-3),
+				"the uncovered drain after depletion is not reported");
+			require(std::abs(entry->conservationResidual)
+				<= core::StationBalanceTolerance * 1e6,
+				"the projected exchanges do not conserve for the drained store");
+			auto const* tankEntry = findForecast(snap.forecast.stores, "tank");
+			require(tankEntry != nullptr
+				&& tankEntry->basis == core::StationForecastBasis::Sustained
+				&& approx(tankEntry->netRateAtStart, 2.0)
+				&& approx(tankEntry->projectedDrawableAtHorizon, 700.0, 1e-3),
+				"the receiving store did not project as sustained with the delivered total");
+			// The forecast mutated nothing: the live store snapshot is
+			// unchanged by projection, and a second projection from the
+			// same state is identical.
+			auto const before = snap.stores;
+			auto const again = world.getStationSystemsSnapshot();
+			require(again.stores == before,
+				"computing the forecast mutated the live store inventory");
+			require(again.forecast == snap.forecast,
+				"the forecast is not a deterministic function of the committed state");
+			require(world.getSimulationTick() == snap.worldTick,
+				"computing the forecast advanced the World");
+			require(world.getStationSystemsDiagnostics().empty(),
+				"the forecast produced a Station diagnostic");
+			// Determinism across two identical worlds: the same scenario
+			// projects identically, so no hidden stream was consumed.
+			core::World twin("ForecastTimelyTwin", 2, 2);
+			twin.pauseSimulation(); twin.finishBuild();
+			require(twin.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			twin.resumeSimulation();
+			runOrDiagnose(twin, 600, "forecast twin run");
+			require(twin.getStationSystemsSnapshot().forecast == snap.forecast,
+				"two identical scenario runs projected differently");
+			// Persistence: the forecast is derived, never stored. A reset
+			// re-derives it from the initial state, and a saved and
+			// reopened World - which starts from that same initial state -
+			// re-derives the identical projection.
+			world.pauseSimulation();
+			world.resetSimulation();
+			auto const reset = world.getStationSystemsSnapshot().forecast;
+			require(reset.asOfSeconds == 0.0
+				&& approx(reset.stores.size(), 2.0)
+				&& approx(findForecast(reset.stores, "water")->drawableAtStart, 200.0, 1e-4)
+				&& approx(findForecast(reset.stores, "water")->shortfallOnsetSeconds, 300.0, 1e-5),
+				"reset did not re-derive the forecast from the initial state");
+			auto const path = context.temporaryRoot() / "forecast-roundtrip.world.yaml";
+			world.saveTo(path.string());
+			auto const reopened = core::loadWorldDocument(path);
+			require(reopened != nullptr, "the forecast document failed to reopen");
+			require(reopened->getStationSystemsSettings() == settings,
+				"the station settings did not survive the forecast round trip");
+			require(reopened->getStationSystemsSnapshot().forecast == reset,
+				"the reopened forecast is not re-derived identically from the initial state");
+			require(reopened->getStationSystemsSnapshot().forecast.available,
+				"the reopened forecast is not available");
+		}
+		// Scenario B: delayed resupply. The arrival lands after the
+		// projected depletion: the shortfall onset stands, the arrival is
+		// not a rescue, and the drain blocked between depletion and
+		// arrival is reported as uncovered demand.
+		{
+			core::World world("ForecastDelayed", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 10.0f;
+			core::ResourceStoreSettings water;
+			water.id = "water"; water.unit = "kg";
+			water.capacity = 1000.0; water.startingQualified = 300.0;
+			water.protectedReserve = 100.0;
+			core::ResourceStoreSettings tank;
+			tank.id = "tank"; tank.unit = "kg";
+			tank.capacity = 10000.0; tank.startingQualified = 0.0;
+			settings.stores = { water, tank };
+			core::ResourceTransferSettings pump;
+			pump.id = "pump"; pump.sourceId = "water"; pump.destinationId = "tank";
+			pump.unit = "kg"; pump.ratePerSecond = 2.0; pump.priority = 5;
+			settings.transfers = { pump };
+			core::ResourceDeliverySettings tanker;
+			tanker.id = "tanker"; tanker.storeId = "water"; tanker.unit = "kg";
+			tanker.quantity = 400.0; tanker.firstOccurrenceSeconds = 150.0;
+			settings.deliveries = { tanker };
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			world.resumeSimulation();
+			runOrDiagnose(world, 600, "forecast delayed resupply"); // t = 10 s
+			auto const* entry = findForecast(world.getStationSystemsSnapshot().forecast.stores, "water");
+			require(entry != nullptr && entry->hasShortfall,
+				"a delayed resupply did not forecast a shortfall");
+			require(approx(entry->shortfallOnsetSeconds, 100.0, 1e-5),
+				"the depletion onset ignored the delayed arrival");
+			require(entry->arrivals.size() == 1 && !entry->arrivals[0].rescuesStore,
+				"an arrival after depletion read as a rescue");
+			require(approx(entry->arrivals[0].projectedDrawableBefore, 0.0),
+				"the projected inventory at a late arrival is not zero");
+			require(approx(entry->arrivals[0].acceptedQuantity, 400.0),
+				"a late arrival that fits was not accepted");
+			// Blocked 100..150 plus blocked again after the second drain
+			// ends at 350: the uncovered drain is the whole blocked span.
+			require(approx(entry->unmetOutflowTotal,
+				2.0 * (50.0 + (10.0 + core::StationForecastHorizonSeconds - 350.0)), 1e-3),
+				"the blocked drain around the delayed arrival is not fully reported");
+			require(std::abs(entry->conservationResidual)
+				<= core::StationBalanceTolerance * 1e6,
+				"the delayed-resupply projection does not conserve");
+		}
+		// Scenario C: accepted delivery quantity is capped by the store's
+		// projected capacity; what cannot fit is refused at the boundary
+		// and reported, never overflowed.
+		{
+			core::World world("ForecastCapacity", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			core::ResourceStoreSettings water;
+			water.id = "water"; water.unit = "kg";
+			water.capacity = 400.0; water.startingQualified = 300.0;
+			water.protectedReserve = 100.0;
+			core::ResourceStoreSettings tank;
+			tank.id = "tank"; tank.unit = "kg";
+			tank.capacity = 10000.0; tank.startingQualified = 0.0;
+			settings.stores = { water, tank };
+			core::ResourceTransferSettings pump;
+			pump.id = "pump"; pump.sourceId = "water"; pump.destinationId = "tank";
+			pump.unit = "kg"; pump.ratePerSecond = 2.0; pump.priority = 5;
+			settings.transfers = { pump };
+			core::ResourceDeliverySettings tanker;
+			tanker.id = "tanker"; tanker.storeId = "water"; tanker.unit = "kg";
+			tanker.quantity = 900.0; tanker.firstOccurrenceSeconds = 50.0;
+			settings.deliveries = { tanker };
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			auto const* entry = findForecast(world.getStationSystemsSnapshot().forecast.stores, "water");
+			require(entry != nullptr && entry->arrivals.size() == 1,
+				"the capacity-capped arrival is missing");
+			require(approx(entry->arrivals[0].acceptedQuantity, 200.0),
+				"the accepted quantity is not the projected headroom");
+			require(approx(entry->arrivals[0].rejectedQuantity, 700.0),
+				"the refused quantity is not reported");
+			require(approx(entry->shortfallOnsetSeconds, 200.0, 1e-5),
+				"the depletion after the capped arrival is wrong");
+			require(std::abs(entry->conservationResidual)
+				<= core::StationBalanceTolerance * 1e6,
+				"the capped-arrival projection does not conserve");
+		}
+		// Scenario D: a configured crew with a stepped activity profile.
+		// The food draw follows the profile, the food store runs out
+		// inside the horizon with the crew named as the limiting service,
+		// and - matching the live whole-metabolism rule - the urine and
+		// organic-waste returns stop together with the draw, so the waste
+		// stores freeze at the value the last fed moment produced.
+		{
+			core::World world("ForecastCrew", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::ResourceCompositionSettings foodComposition;
+			foodComposition.moisture = 0.8;
+			foodComposition.nutrientNitrogen = 0.05;
+			foodComposition.phosphorus = 0.01;
+			foodComposition.potassium = 0.02;
+			foodComposition.otherMinerals = 0.02;
+			foodComposition.energyKJPerKgDry = 17000.0;
+			core::ResourceCompositionSettings waterComposition;
+			waterComposition.moisture = 0.999;
+			waterComposition.otherMinerals = 0.001;
+			core::ResourceCompositionSettings urineComposition;
+			urineComposition.moisture = 0.95;
+			urineComposition.nutrientNitrogen = 0.1;
+			urineComposition.phosphorus = 0.02;
+			urineComposition.potassium = 0.05;
+			urineComposition.otherMinerals = 0.05;
+			urineComposition.energyKJPerKgDry = 500.0;
+			core::ResourceCompositionSettings wasteComposition;
+			wasteComposition.moisture = 0.5;
+			wasteComposition.energyKJPerKgDry = 10000.0;
+			auto store = [](std::string const& id, double capacity, double starting,
+				std::optional<core::ResourceCompositionSettings> composition)
+			{
+				core::ResourceStoreSettings settings;
+				settings.id = id; settings.unit = "kg";
+				settings.capacity = capacity; settings.startingQualified = starting;
+				settings.composition = std::move(composition);
+				return settings;
+			};
+			core::AtmosphereSettings habitat;
+			habitat.id = "habitat"; habitat.hazardClass = "normal";
+			habitat.volumeM3 = 100.0;
+			habitat.startingOxygenKg = 20.0; habitat.startingNitrogenKg = 80.0;
+			habitat.startingTemperatureC = 20.0;
+			habitat.thermalCapacityKJPerK = 10000.0;
+			habitat.minPressureKPa = 1.0; habitat.maxPressureKPa = 200.0;
+			core::CrewSettings crew;
+			crew.id = "crew"; crew.atmosphereId = "habitat";
+			crew.crewCount = 100;
+			crew.activityProfile.periodSeconds = 100.0;
+			crew.activityProfile.segments = {{0.0, 0.5}, {50.0, 1.0}};
+			crew.foodStoreId = "food"; crew.waterStoreId = "water";
+			crew.urineStoreId = "urine"; crew.organicWasteStoreId = "organicWaste";
+			crew.foodPerCrewPerS = 0.001; crew.waterPerCrewPerS = 0.002;
+			crew.oxygenPerCrewKgPerS = 0.001; crew.co2PerCrewKgPerS = 0.0011;
+			crew.moisturePerCrewKgPerS = 0.0005;
+			crew.urinePerCrewPerS = 0.0015; crew.organicWastePerCrewPerS = 0.0002;
+			crew.metabolicHeatPerCrewKW = 0.1;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {
+				store("food", 100000.0, 101.0, foodComposition),
+				store("water", 100000.0, 1000.0, waterComposition),
+				store("urine", 100000.0, 1.0, urineComposition),
+				store("organicWaste", 100000.0, 1.0, wasteComposition) };
+			settings.atmospheres = { habitat };
+			settings.crews = { crew };
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			// The projection is read at t=0 from the initial state.
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const* food = findForecast(snap.forecast.stores, "food");
+			require(food != nullptr, "no forecast entry for the crew food store");
+			require(approx(food->netRateAtStart, -0.05),
+				"the initial food draw is not crew x rate x half-activity");
+			require(food->basis == core::StationForecastBasis::Shortfall,
+				"the stepping crew draw did not forecast a food shortfall");
+			// 13 full periods burn 97.5 kg, the next half-activity leg
+			// burns 2.5, and the full-activity leg burns the last 1.0 kg
+			// 10 s in: onset 1360 s.
+			require(approx(food->shortfallOnsetSeconds, 1360.0, 1e-4),
+				"the profiled food depletion onset is wrong");
+			require(food->limitingServiceId == "crew"
+				&& food->limitingServiceKind == "crew",
+				"the limiting service is not the crew");
+			auto const* urine = findForecast(snap.forecast.stores, "urine");
+			require(urine != nullptr
+				&& urine->basis == core::StationForecastBasis::Sustained
+				&& approx(urine->projectedDrawableAtHorizon, 152.5, 1e-3),
+				"the urine return did not freeze at the last fed moment");
+			auto const* waste = findForecast(snap.forecast.stores, "organicWaste");
+			require(waste != nullptr
+				&& approx(waste->projectedDrawableAtHorizon, 21.2, 1e-3),
+				"the organic-waste return did not freeze at the last fed moment");
+			auto const* water = findForecast(snap.forecast.stores, "water");
+			require(water != nullptr && water->basis == core::StationForecastBasis::Sustained
+				&& approx(water->projectedDrawableAtHorizon, 798.0, 1e-3),
+				"the crew water draw over the profiled window is wrong");
+			for (auto const& entry : snap.forecast.stores)
+				require(std::abs(entry.conservationResidual)
+					<= core::StationBalanceTolerance * 1e6,
+					"the crew-profile projection does not conserve");
+			// The live run stays healthy: the forecast is pure observability
+			// and the Lua audit is undisturbed.
+			world.resumeSimulation();
+			runOrDiagnose(world, 600, "forecast crew live run");
+			require(world.getStationSystemsSnapshot().healthy,
+				"the crew forecast scenario made the Station unhealthy");
+			require(world.getStationSystemsDiagnostics().empty(),
+				"the crew forecast scenario produced a diagnostic");
+		}
+		// Scenario E: uncertainty labels. A store that a crop harvest and
+		// a water treatment could replenish is flagged: the possible
+		// recovery is visible but is NOT counted as guaranteed, so the
+		// projection of the destination stores stays exactly what the
+		// declared non-biology flows say.
+		{
+			core::World world("ForecastUncertainty", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::ResourceCompositionSettings cropComposition;
+			cropComposition.moisture = 0.0;
+			cropComposition.nutrientNitrogen = 0.05;
+			cropComposition.atmosphericNitrogen = 0.0;
+			cropComposition.phosphorus = 0.02;
+			cropComposition.potassium = 0.03;
+			cropComposition.otherMinerals = 0.05;
+			cropComposition.energyKJPerKgDry = 1700.0;
+			auto plain = [](std::string const& id, double capacity, double starting)
+			{
+				core::ResourceStoreSettings settings;
+				settings.id = id; settings.unit = "kg";
+				settings.capacity = capacity; settings.startingQualified = starting;
+				return settings;
+			};
+			core::AtmosphereSettings habitat;
+			habitat.id = "habitat"; habitat.hazardClass = "normal";
+			habitat.volumeM3 = 100.0;
+			habitat.startingOxygenKg = 40.0; habitat.startingNitrogenKg = 80.0;
+			habitat.startingCarbonDioxideKg = 5.0; habitat.startingWaterVapourKg = 1.0;
+			habitat.startingTemperatureC = 22.0;
+			habitat.thermalCapacityKJPerK = 20000.0;
+			habitat.minPressureKPa = 1.0; habitat.maxPressureKPa = 200.0;
+			core::CropPopulationSettings canopy;
+			canopy.id = "canopy"; canopy.atmosphereId = "habitat";
+			canopy.waterStoreId = "irrigation";
+			canopy.nitrogenStoreId = "fertN"; canopy.phosphorusStoreId = "fertP";
+			canopy.potassiumStoreId = "fertK"; canopy.mineralsStoreId = "fertMin";
+			canopy.composition = cropComposition;
+			canopy.growingAreaM2 = 10.0; canopy.maxBiomassDensityKgPerM2 = 2.0;
+			canopy.initialBiomassKg = 1.0;
+			canopy.lampRatedKW = 3.6; canopy.illuminationProfile.constantLevel = 1.0;
+			canopy.circulationPowerKW = 0.1;
+			canopy.growthYieldKgPerKWh = 2.0; canopy.respirationPerHour = 0.5;
+			canopy.transpirationKgPerKgGrowth = 5.0;
+			canopy.minGrowingTemperatureC = 10.0; canopy.maxGrowingTemperatureC = 35.0;
+			canopy.foodStoreId = "food"; canopy.wasteStoreId = "residue";
+			canopy.edibleFraction = 0.5; canopy.harvestTriggerKg = 5.0;
+			canopy.harvestFraction = 1.0;
+			core::WaterTreatmentSettings treatment;
+			treatment.id = "polish"; treatment.hazardClass = "normal";
+			treatment.sourceStoreId = "raw"; treatment.treatedStoreId = "treated";
+			treatment.concentrateStoreId = "concentrate";
+			treatment.consumableStoreId = "consumable";
+			treatment.throughputKgPerS = 0.005; treatment.recoveryRatio = 0.8;
+			treatment.specificEnergyKWhPerKg = 0.5; treatment.consumablePerKg = 0.01;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {
+				plain("irrigation", 200.0, 150.0), plain("fertN", 10.0, 5.0),
+				plain("fertP", 10.0, 5.0), plain("fertK", 10.0, 5.0),
+				plain("fertMin", 10.0, 5.0),
+				plain("food", 1000.0, 100.0), plain("residue", 1000.0, 1.0),
+				plain("raw", 1000.0, 100.0), plain("treated", 1000.0, 1.0),
+				plain("concentrate", 1000.0, 0.0), plain("consumable", 100.0, 10.0) };
+			settings.atmospheres = { habitat };
+			settings.cropPopulations = { canopy };
+			settings.waterTreatments = { treatment };
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const* food = findForecast(snap.forecast.stores, "food");
+			require(food != nullptr && food->biologyRecoveryPossible,
+				"a crop-destined store is not flagged for uncertain biology recovery");
+			require(food->basis == core::StationForecastBasis::Sustained
+				&& approx(food->netRateAtStart, 0.0)
+				&& food->arrivals.empty(),
+				"the uncertain harvest was counted into the guaranteed projection");
+			auto const* residue = findForecast(snap.forecast.stores, "residue");
+			require(residue != nullptr && residue->biologyRecoveryPossible,
+				"the crop waste destination is not flagged for uncertain biology");
+			auto const* treated = findForecast(snap.forecast.stores, "treated");
+			require(treated != nullptr && treated->processProductionPossible,
+				"a treatment-destined store is not flagged for unprojected process production");
+			require(!treated->biologyRecoveryPossible
+				&& treated->basis == core::StationForecastBasis::Sustained,
+				"the treatment destination carries the wrong uncertainty mix");
+			world.resumeSimulation();
+			runOrDiagnose(world, 600, "forecast uncertainty live run");
+			require(world.getStationSystemsSnapshot().healthy,
+				"the uncertainty forecast scenario made the Station unhealthy");
+		}
+		// Scenario F: the computation is bounded. A one-second
+		// recurrence across the whole horizon cannot make the forecast
+		// run forever: collection stops at the declared segment cap and
+		// the truncation is reported.
+		{
+			core::World world("ForecastBounded", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			core::ResourceStoreSettings ballast;
+			ballast.id = "ballast"; ballast.unit = "kg";
+			ballast.capacity = 1.0e12; ballast.startingQualified = 1.0;
+			settings.stores = { ballast };
+			core::ResourceDeliverySettings drip;
+			drip.id = "drip"; drip.storeId = "ballast"; drip.unit = "kg";
+			drip.quantity = 1.0; drip.firstOccurrenceSeconds = 1.0;
+			drip.recurrenceSeconds = 1.0;
+			settings.deliveries = { drip };
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.forecast.truncated,
+				"a schedule denser than the segment cap did not truncate the forecast");
+			require(snap.forecast.segmentsComputed <= core::StationForecastMaxSegments,
+				"the forecast computed more segments than the declared cap");
+			auto const* entry = findForecast(snap.forecast.stores, "ballast");
+			require(entry != nullptr && entry->basis == core::StationForecastBasis::Sustained,
+				"the truncated projection lost the store entry");
+			require(!entry->arrivals.empty(),
+				"the truncated projection dropped every already-collected arrival");
+		}
+		// Scenario G: a store that starts depleted reads as a shortfall
+		// from the forecast instant, never as sustained supply.
+		{
+			core::World world("ForecastDepletedStart", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			core::ResourceStoreSettings dry;
+			dry.id = "dry"; dry.unit = "kg";
+			dry.capacity = 100.0; dry.startingQualified = 0.0;
+			core::ResourceStoreSettings held;
+			held.id = "held"; held.unit = "kg";
+			held.capacity = 100.0; held.startingQualified = 50.0;
+			held.protectedReserve = 50.0;
+			settings.stores = { dry, held };
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const* dryEntry = findForecast(snap.forecast.stores, "dry");
+			auto const* heldEntry = findForecast(snap.forecast.stores, "held");
+			require(dryEntry != nullptr && dryEntry->hasShortfall
+				&& approx(dryEntry->shortfallOnsetSeconds, snap.forecast.asOfSeconds),
+				"a store with nothing drawable did not forecast an immediate shortfall");
+			require(heldEntry != nullptr && heldEntry->hasShortfall
+				&& approx(heldEntry->drawableAtStart, 0.0),
+				"a store fully inside its protected reserve did not forecast a shortfall");
+		}
+		// Scenario H: destination backpressure. A transfer into a store
+		// that fills inside the horizon stops at the fill-up: the source
+		// keeps the material it never got to send, and neither store is
+		// a shortage - the capacity limit is the account.
+		{
+			core::World world("ForecastBackpressure", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			core::ResourceStoreSettings src;
+			src.id = "src"; src.unit = "kg";
+			src.capacity = 1000.0; src.startingQualified = 200.0;
+			core::ResourceStoreSettings dst;
+			dst.id = "dst"; dst.unit = "kg";
+			dst.capacity = 100.0; dst.startingQualified = 90.0;
+			settings.stores = { src, dst };
+			core::ResourceTransferSettings feed;
+			feed.id = "feed"; feed.sourceId = "src"; feed.destinationId = "dst";
+			feed.unit = "kg"; feed.ratePerSecond = 1.0; feed.priority = 1;
+			settings.transfers = { feed };
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const* srcEntry = findForecast(snap.forecast.stores, "src");
+			auto const* dstEntry = findForecast(snap.forecast.stores, "dst");
+			require(srcEntry != nullptr && srcEntry->basis == core::StationForecastBasis::Sustained
+				&& approx(srcEntry->projectedDrawableAtHorizon, 190.0, 1e-3),
+				"the source did not keep the material the full destination back-pressured");
+			require(approx(srcEntry->unmetOutflowTotal, 0.0),
+				"destination backpressure was misreported as a source shortage");
+			require(dstEntry != nullptr && dstEntry->basis == core::StationForecastBasis::Sustained
+				&& approx(dstEntry->projectedDrawableAtHorizon, 100.0, 1e-3),
+				"the backpressured destination did not project exactly full");
+			require(std::abs(srcEntry->conservationResidual)
+				<= core::StationBalanceTolerance * 1e6
+				&& std::abs(dstEntry->conservationResidual)
+				<= core::StationBalanceTolerance * 1e6,
+				"the backpressure projection does not conserve");
+		}
+		// Scenario I: a full waste destination back-pressures the whole
+		// crew metabolism. Once the urine store fills the crew draws no
+		// food or water and returns nothing - the live whole-metabolism
+		// rule (#401) - and the held-back food draw is reported as
+		// uncovered demand.
+		{
+			core::World world("ForecastWasteFull", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::ResourceCompositionSettings foodComposition;
+			foodComposition.moisture = 0.8;
+			foodComposition.nutrientNitrogen = 0.05;
+			foodComposition.phosphorus = 0.01;
+			foodComposition.potassium = 0.02;
+			foodComposition.otherMinerals = 0.02;
+			foodComposition.energyKJPerKgDry = 17000.0;
+			core::ResourceCompositionSettings waterComposition;
+			waterComposition.moisture = 0.999;
+			waterComposition.otherMinerals = 0.001;
+			core::ResourceCompositionSettings urineComposition;
+			urineComposition.moisture = 0.95;
+			urineComposition.nutrientNitrogen = 0.1;
+			urineComposition.phosphorus = 0.02;
+			urineComposition.potassium = 0.05;
+			urineComposition.otherMinerals = 0.05;
+			urineComposition.energyKJPerKgDry = 500.0;
+			core::ResourceCompositionSettings wasteComposition;
+			wasteComposition.moisture = 0.5;
+			wasteComposition.energyKJPerKgDry = 10000.0;
+			auto store = [](std::string const& id, double capacity, double starting,
+				std::optional<core::ResourceCompositionSettings> composition)
+			{
+				core::ResourceStoreSettings settings;
+				settings.id = id; settings.unit = "kg";
+				settings.capacity = capacity; settings.startingQualified = starting;
+				settings.composition = std::move(composition);
+				return settings;
+			};
+			core::AtmosphereSettings habitat;
+			habitat.id = "habitat"; habitat.hazardClass = "normal";
+			habitat.volumeM3 = 100.0;
+			habitat.startingOxygenKg = 20.0; habitat.startingNitrogenKg = 80.0;
+			habitat.startingTemperatureC = 20.0;
+			habitat.thermalCapacityKJPerK = 10000.0;
+			habitat.minPressureKPa = 1.0; habitat.maxPressureKPa = 200.0;
+			core::CrewSettings crew;
+			crew.id = "crew"; crew.atmosphereId = "habitat";
+			crew.crewCount = 100;
+			crew.activityProfile.constantLevel = 1.0;
+			crew.foodStoreId = "food"; crew.waterStoreId = "water";
+			crew.urineStoreId = "urine"; crew.organicWasteStoreId = "organicWaste";
+			crew.foodPerCrewPerS = 0.001; crew.waterPerCrewPerS = 0.002;
+			crew.oxygenPerCrewKgPerS = 0.001; crew.co2PerCrewKgPerS = 0.0011;
+			crew.moisturePerCrewKgPerS = 0.0005;
+			crew.urinePerCrewPerS = 0.0015; crew.organicWastePerCrewPerS = 0.0002;
+			crew.metabolicHeatPerCrewKW = 0.1;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {
+				store("food", 100000.0, 100.0, foodComposition),
+				store("water", 100000.0, 1000.0, waterComposition),
+				store("urine", 3.0, 0.0, urineComposition),
+				store("organicWaste", 100000.0, 1.0, wasteComposition) };
+			settings.atmospheres = { habitat };
+			settings.crews = { crew };
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			auto const snap = world.getStationSystemsSnapshot();
+			// Urine fills 3 kg at 0.15 kg/s after 20 s; the crew then
+			// stops whole: food stays at 100 - 0.1 x 20 = 98 and the
+			// held-back draw is uncovered demand.
+			auto const* food = findForecast(snap.forecast.stores, "food");
+			require(food != nullptr && food->basis == core::StationForecastBasis::Sustained
+				&& approx(food->projectedDrawableAtHorizon, 98.0, 1e-2),
+				"the full waste destination did not stop the crew food draw");
+			require(approx(food->unmetOutflowTotal,
+				0.1 * (core::StationForecastHorizonSeconds - 20.0), 1e-1),
+				"the held-back crew draw is not reported as uncovered demand");
+			auto const* urine = findForecast(snap.forecast.stores, "urine");
+			require(urine != nullptr
+				&& approx(urine->projectedDrawableAtHorizon, 3.0, 1e-2),
+				"the urine store did not project exactly to its capacity");
+			auto const* water = findForecast(snap.forecast.stores, "water");
+			require(water != nullptr
+				&& approx(water->projectedDrawableAtHorizon, 996.0, 1e-2),
+				"the crew water draw did not stop with the metabolism");
+		}
+	}
+
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power},
@@ -20871,7 +21499,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"nutrientConservation", nutrientConservation}, {"bioContainment", bioContainment}, {"outages", outages}, {"maintenance", maintenance}, {"failures", failures}, {"dispatch", dispatch}, {"protectedServices", protectedServices}, {"recovery", recovery}, {"trends", trends}, {"endurance", endurance}};
+		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"nutrientConservation", nutrientConservation}, {"bioContainment", bioContainment}, {"outages", outages}, {"maintenance", maintenance}, {"failures", failures}, {"dispatch", dispatch}, {"protectedServices", protectedServices}, {"recovery", recovery}, {"trends", trends}, {"endurance", endurance}, {"forecast", forecast}};
 	registerStationDocumentChecks(checks);
 	registerCoupledStationChecks(checks);
 	return smoke::main("station", checks, argc, argv);

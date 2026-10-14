@@ -2722,6 +2722,103 @@ void cropWorkflow(smoke::Context const&)
 		#undef REQ
 		require(driver.passed(), "Maintenance workflow failed on the Test Engine");
 	}
+	// #420: the separate Station Systems window shows the bounded
+	// scenario forecast - projected shortfall with its onset and the
+	// limiting service, the projected inventory at resupply with the
+	// capacity-capped accepted quantity, and the scenario/uncertainty
+	// labels - without rendering ever ticking, mutating or dirtying the
+	// document.
+	void forecastWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO();
+		io.DisplaySize = {1200.0f, 3200.0f};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		StationSystemsWindow window;
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 5.0f;
+		core::ResourceStoreSettings water;
+		water.id = "water"; water.unit = "kg";
+		water.capacity = 1000.0; water.startingQualified = 300.0;
+		water.protectedReserve = 100.0;
+		core::ResourceStoreSettings tank;
+		tank.id = "tank"; tank.unit = "kg";
+		tank.capacity = 10000.0; tank.startingQualified = 100.0;
+		settings.stores = { water, tank };
+		core::ResourceTransferSettings pump;
+		pump.id = "pump"; pump.sourceId = "water"; pump.destinationId = "tank";
+		pump.unit = "kg"; pump.ratePerSecond = 2.0; pump.priority = 5;
+		settings.transfers = { pump };
+		core::ResourceDeliverySettings tanker;
+		tanker.id = "tanker"; tanker.storeId = "water"; tanker.unit = "kg";
+		tanker.quantity = 400.0; tanker.firstOccurrenceSeconds = 50.0;
+		settings.deliveries = { tanker };
+		auto world = std::make_shared<core::World>("Forecast editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		require(world->configureStationSystems(settings, false, &diagnostic),
+			diagnostic.c_str());
+		world->resumeSimulation();
+		require(world->advanceTicks(600), "forecast editor pre-run failed"); // t = 10 s
+		world->markSaved(); // the configure edit is expected dirt; rendering must add none
+		headless::TestEngineDriver driver([&]
+		{
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1150, 3100});
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "forecastWorkflow", [&](ImGuiTestContext* ctx)
+		{
+			ctx->SetRef("Station Systems");
+				REQ(driver.contains("Active World: Forecast editor"),
+				"station window missing the forecast World");
+				// The scenario and uncertainty labels render so no projection
+			// can be read as a guarantee.
+			REQ(driver.contains("Scenario: declared-profile scenario"),
+				"the forecast scenario label is missing");
+			REQ(driver.contains("Uncertainty: provisional biology"),
+				"the forecast uncertainty label is missing");
+			// The depleting store: shortfall basis, onset, limiting
+			// service and the uncovered drain all render.
+			REQ(driver.contains("store 'water' (kg)")
+				&& driver.contains("[shortfall]"),
+				"the forecast shortfall line is missing or mislabelled");
+			REQ(driver.contains("PROJECTED SHORTFALL: drawable inventory reaches zero at t=300.0 s"),
+				"the projected shortfall onset is missing from the forecast view");
+			REQ(driver.contains("limiting service: transfer 'pump'"),
+				"the limiting service is missing from the forecast view");
+			// The timely resupply: projected inventory at arrival with the
+			// accepted quantity and the rescue reading.
+			REQ(driver.contains("resupply 'tanker' at t=50.0 s")
+				&& driver.contains("400.000 kg scheduled, 400.000 accepted / 0.000 refused")
+				&& driver.contains("projected drawable at arrival: 100.000 kg")
+				&& driver.contains("lands before depletion, usable"),
+				"the projected resupply detail is missing or wrong");
+			// The receiving store projects sustained.
+			REQ(driver.contains("store 'tank' (kg)")
+				&& driver.contains("no shortfall projected inside the horizon"),
+				"the receiving store did not project as sustained");
+			REQ(!world->isModified(), "rendering the forecast view dirtied the document");
+				// Visibility toggling never mutates: hide, tick, show again -
+			// the projection re-derives from the advanced World state only.
+			window.visible = false;
+			ctx->Sleep(2);
+				require(world->advanceTicks(2400), "forecast run during hidden window failed"); // t = 50 s
+				window.visible = true;
+			ctx->Sleep(2);
+			REQ(driver.contains("Projected from t=50.0 s"),
+				"the forecast did not re-derive from the advanced World state");
+			REQ(!world->isModified(), "re-showing the forecast view dirtied the document");
+		});
+		#undef REQ
+		require(driver.passed(), "forecast workflow failed on the Test Engine");
+	}
+
 	void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"station/windowWorkflow", workflow});
@@ -2746,4 +2843,5 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/coupledLiveViewWorkflow", coupledLiveViewWorkflow});
 	checks.push_back({"station/trendsWorkflow", trendsWorkflow});
 	checks.push_back({"station/enduranceWorkflow", enduranceWorkflow});
+	checks.push_back({"station/forecastWorkflow", forecastWorkflow});
 }

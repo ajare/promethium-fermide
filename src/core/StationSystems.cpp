@@ -5190,6 +5190,585 @@ namespace core
 			}
 		}
 
+		// #420: the bounded scenario forecast. A pure forward projection
+		// of the committed store state over a fixed simulated-time horizon
+		// under the declared-profile scenario: authored transfers, crew
+		// metabolism and equipment material exchanges continue at their
+		// configured profile-scaled rates, scheduled deliveries arrive and
+		// are accepted only as far as the store's projected headroom
+		// reaches, and scheduled ejections remove only what the store is
+		// projected to hold qualified above its protected reserve. Biology
+		// recovery (crop, algae, microbial) and process-chain production
+		// are deliberately never counted as guaranteed recovery: stores
+		// they could replenish are flagged instead, so uncertain biology
+		// cannot read as a promised rescue. The integration is event-driven
+		// over the authored schedule occurrences and profile breakpoints,
+		// split further at projected drawable-zero and headroom crossings
+		// so zero-hits and fill-ups land exactly, and it is capped at
+		// StationForecastMaxSegments segments: a schedule dense enough to
+		// need more truncates and reports it rather than running forever.
+		// Nothing here mutates live inventory, advances the World clock,
+		// consumes a deterministic stream or touches the sandbox: the
+		// projection reads the committed state and the authored settings
+		// and writes only its own local copy.
+		StationForecastSnapshot computeForecast(double asOfSeconds) const
+		{
+			StationForecastSnapshot result;
+			result.horizonSeconds = StationForecastHorizonSeconds;
+			result.asOfSeconds = asOfSeconds;
+			result.scenarioLabel =
+				"declared-profile scenario: authored transfer, crew and equipment demand profiles continue unchanged; "
+				"scheduled deliveries land as authored with capacity-capped acceptance; ejections remove only projected "
+				"drawable contents; biology and process-chain recovery are never counted as guaranteed supply";
+			result.uncertaintyLabel =
+				"provisional biology: crop, algae and microbial recovery pathways are tunable model assumptions, not "
+				"validated biology, and are flagged and excluded from the guaranteed projection; process-chain production "
+				"(treatment, electrolysis, conversion, capture) is not projected";
+			if (!settings.enabled) return result;
+			result.available = true;
+			auto const horizonEnd = asOfSeconds + StationForecastHorizonSeconds;
+			// The projection runs on a local copy of the store inventory:
+			// the live committed state is read, never written.
+			struct Projected
+			{
+				double qualified{0.0};
+				double unqualified{0.0};
+				double inflowMoved{0.0};
+				double outflowMoved{0.0};
+				double acceptedQualified{0.0};
+				double acceptedUnqualified{0.0};
+				double unmetOutflow{0.0};
+				bool depleted{false};
+				double depletionOnset{0.0};
+				std::string limiterId;
+				std::string limiterKind;
+			};
+			std::vector<Projected> projected(stores.size());
+			for (size_t index = 0; index < stores.size(); ++index)
+			{
+				projected[index].qualified = stores[index].currentQualified;
+				projected[index].unqualified = stores[index].currentUnqualified;
+			}
+			auto const drawableOf = [&](size_t index)
+			{
+				return std::max(0.0, projected[index].qualified
+					- stores[index].authored.protectedReserve);
+			};
+			auto const headroomOf = [&](size_t index)
+			{
+				return std::max(0.0, stores[index].authored.capacity
+					- (projected[index].qualified + projected[index].unqualified));
+			};
+			// A relative epsilon on the dry/full boundaries: a residual
+			// below the balance tolerance scaled by the store's own
+			// physical magnitude reads as empty/full, so floating-point
+			// ulps left by an exact crossing cannot spin the loop through
+			// tiny segments toward the cap.
+			auto const isDry = [&](size_t index)
+			{
+				return drawableOf(index) <= StationBalanceTolerance
+					* std::max(1.0, projected[index].qualified
+						+ projected[index].unqualified);
+			};
+			auto const isFull = [&](size_t index)
+			{
+				return headroomOf(index) <= StationBalanceTolerance
+					* std::max(1.0, projected[index].qualified
+						+ projected[index].unqualified);
+			};
+			for (size_t index = 0; index < stores.size(); ++index)
+				if (isDry(index))
+				{
+					projected[index].depleted = true;
+					projected[index].depletionOnset = asOfSeconds;
+				}
+			// Collect the authored event times inside the horizon.
+			// Deliveries and ejections share the scenario event ordering
+			// (#392): occurrence time, then service priority descending,
+			// then declaration order, with arrivals ahead of ejections at
+			// equal time and priority - the same rule the live ledger
+			// applies. Profile segment starts become breakpoints at which
+			// the demand levels step.
+			struct TimedEvent
+			{
+				StationScenarioEventKey key;
+				bool isDelivery{true};
+				size_t configIndex{0};
+			};
+			std::vector<TimedEvent> events;
+			std::vector<double> breakpoints;
+			bool truncated = false;
+			auto const withinBudget = [&]()
+			{
+				return events.size() + breakpoints.size() <= StationForecastMaxSegments;
+			};
+			auto const collectOccurrences = [&](double first, double recurrence,
+				auto&& emit)
+			{
+				if (recurrence <= 0.0)
+				{
+					if (first > asOfSeconds + StationScheduleTolerance) emit(first);
+					return;
+				}
+				double start = 0.0;
+				if (first <= asOfSeconds + StationScheduleTolerance)
+					start = std::ceil((asOfSeconds + StationScheduleTolerance - first)
+						/ recurrence);
+				for (double k = start; ; ++k)
+				{
+					auto const occurrence = first + k * recurrence;
+					if (occurrence > horizonEnd + StationScheduleTolerance) break;
+					emit(occurrence);
+					if (!withinBudget())
+					{
+						truncated = true;
+						break;
+					}
+				}
+			};
+			for (size_t index = 0; index < deliveries.size() && !truncated; ++index)
+			{
+				auto const& authored = deliveries[index].authored;
+				auto const declaration = deliveries[index].declarationIndex;
+				collectOccurrences(authored.firstOccurrenceSeconds,
+					authored.recurrenceSeconds, [&](double occurrence)
+					{
+						events.push_back({{occurrence, authored.priority,
+							declaration}, true, index});
+					});
+			}
+			for (size_t index = 0; index < wasteEjections.size() && !truncated; ++index)
+			{
+				auto const& authored = wasteEjections[index].authored;
+				auto const declaration = wasteEjections[index].declarationIndex;
+				collectOccurrences(authored.firstOccurrenceSeconds,
+					authored.recurrenceSeconds, [&](double occurrence)
+					{
+						events.push_back({{occurrence, authored.priority,
+							declaration}, false, index});
+					});
+			}
+			auto const collectProfileBreakpoints = [&](ProfileSettings const& profile)
+			{
+				if (profile.periodSeconds <= 0.0) return;
+				for (auto const& segment : profile.segments)
+				{
+					double start = 0.0;
+					if (segment.startSeconds <= asOfSeconds + StationScheduleTolerance)
+						start = std::ceil((asOfSeconds + StationScheduleTolerance
+							- segment.startSeconds) / profile.periodSeconds);
+					for (double k = start; ; ++k)
+					{
+						auto const when = segment.startSeconds + k * profile.periodSeconds;
+						if (when > horizonEnd + StationScheduleTolerance) break;
+						breakpoints.push_back(when);
+						if (!withinBudget())
+						{
+							truncated = true;
+							return;
+						}
+					}
+				}
+			};
+			for (auto const& crew : crews)
+			{
+				collectProfileBreakpoints(crew.authored.activityProfile);
+				if (truncated) break;
+			}
+			if (!truncated)
+				for (auto const& load : loads)
+				{
+					collectProfileBreakpoints(load.authored.operatingProfile);
+					if (truncated) break;
+				}
+			std::sort(events.begin(), events.end(),
+				[](TimedEvent const& left, TimedEvent const& right)
+				{
+					if (left.key < right.key) return true;
+					if (right.key < left.key) return false;
+					// Equal time, priority and declaration slot: arrivals run
+					// before ejections, matching the live scenario order.
+					return left.isDelivery && !right.isDelivery;
+				});
+			std::sort(breakpoints.begin(), breakpoints.end());
+			breakpoints.erase(std::unique(breakpoints.begin(), breakpoints.end()),
+				breakpoints.end());
+			// The per-segment rate solve: between events every declared
+			// rate is constant, so each store's projected trajectory is
+			// linear and crossings are exact.
+			std::vector<double> net(stores.size(), 0.0);
+			std::vector<double> maxOutflow(stores.size(), 0.0);
+			std::vector<std::string> limiterId(stores.size());
+			std::vector<std::string> limiterKind(stores.size());
+			struct BlockedFlow
+			{
+				size_t storeIndex{0};
+				double rate{0.0};
+			};
+			std::vector<BlockedFlow> blocked;
+			auto const computeRates = [&](double at)
+			{
+				std::fill(net.begin(), net.end(), 0.0);
+				std::fill(maxOutflow.begin(), maxOutflow.end(), 0.0);
+				std::fill(limiterId.begin(), limiterId.end(), std::string());
+				std::fill(limiterKind.begin(), limiterKind.end(), std::string());
+				blocked.clear();
+				auto const addOutflow = [&](size_t storeIndex, double rate,
+					std::string const& id, char const* kind)
+				{
+					net[storeIndex] -= rate;
+					if (rate > maxOutflow[storeIndex])
+					{
+						maxOutflow[storeIndex] = rate;
+						limiterId[storeIndex] = id;
+						limiterKind[storeIndex] = kind;
+					}
+				};
+				for (auto const& transfer : transfers)
+				{
+					if (transfer.authored.ratePerSecond <= 0.0) continue;
+					if (isDry(transfer.sourceIndex))
+					{
+						// The source is projected dry: the transfer service
+						// is unavailable and its demand stays uncovered.
+						blocked.push_back({transfer.sourceIndex,
+							transfer.authored.ratePerSecond});
+						continue;
+					}
+					if (isFull(transfer.destinationIndex))
+					{
+						// The destination is projected full: the transfer is
+						// back-pressured and moves nothing; the source keeps
+						// its material, so this is not a source shortage.
+						continue;
+					}
+					net[transfer.sourceIndex] -= transfer.authored.ratePerSecond;
+					net[transfer.destinationIndex] += transfer.authored.ratePerSecond;
+					if (transfer.authored.ratePerSecond > maxOutflow[transfer.sourceIndex])
+					{
+						maxOutflow[transfer.sourceIndex] = transfer.authored.ratePerSecond;
+						limiterId[transfer.sourceIndex] = transfer.authored.id;
+						limiterKind[transfer.sourceIndex] = "transfer";
+					}
+				}
+				for (auto const& crew : crews)
+				{
+					if (crew.authored.crewCount <= 0) continue;
+					auto const level = evaluateStationProfile(
+						crew.authored.activityProfile, at);
+					if (level <= 0.0) continue;
+					auto const scale = static_cast<double>(crew.authored.crewCount) * level;
+					auto const foodDraw = crew.authored.foodPerCrewPerS * scale;
+					auto const waterDraw = crew.authored.waterPerCrewPerS * scale;
+					// Crew metabolism runs whole or not at all: with any
+					// input projected dry OR any waste destination
+					// projected full the crew draws nothing and returns
+					// nothing - absent material never generates nominal
+					// waste and a full destination back-pressures the whole
+					// metabolism, matching the live uniform-scale rule (#401).
+					if (isDry(crew.foodStoreIndex)
+						|| isDry(crew.waterStoreIndex)
+						|| isFull(crew.urineStoreIndex)
+						|| isFull(crew.organicWasteStoreIndex))
+					{
+						if (foodDraw > 0.0)
+							blocked.push_back({crew.foodStoreIndex, foodDraw});
+						if (waterDraw > 0.0)
+							blocked.push_back({crew.waterStoreIndex, waterDraw});
+						continue;
+					}
+					addOutflow(crew.foodStoreIndex, foodDraw, crew.authored.id, "crew");
+					addOutflow(crew.waterStoreIndex, waterDraw, crew.authored.id, "crew");
+					net[crew.urineStoreIndex] += crew.authored.urinePerCrewPerS * scale;
+					net[crew.organicWasteStoreIndex]
+						+= crew.authored.organicWastePerCrewPerS * scale;
+				}
+				for (auto const& load : loads)
+				{
+					if (load.exchanges.empty()) continue;
+					auto const level = evaluateStationProfile(
+						load.authored.operatingProfile, at);
+					if (level <= 0.0) continue;
+					bool feasible = true;
+					for (auto const& exchange : load.exchanges)
+					{
+						if (exchange.ratePerSecond <= 0.0) continue;
+						if (exchange.consumes)
+						{
+							if (isDry(exchange.storeIndex)) feasible = false;
+						}
+						else if (isFull(exchange.storeIndex)) feasible = false;
+					}
+					if (!feasible)
+					{
+						// #554 whole-load starvation: the load's material
+						// exchanges are one operating dependency; with any
+						// feed projected dry or any destination projected
+						// full the whole exchange set stops, and every
+						// consuming exchange's demand stays uncovered.
+						for (auto const& exchange : load.exchanges)
+							if (exchange.consumes && exchange.ratePerSecond > 0.0)
+								blocked.push_back({exchange.storeIndex,
+									exchange.ratePerSecond * level});
+						continue;
+					}
+					for (auto const& exchange : load.exchanges)
+					{
+						if (exchange.ratePerSecond <= 0.0) continue;
+						auto const rate = exchange.ratePerSecond * level;
+						if (exchange.consumes)
+							addOutflow(exchange.storeIndex, rate, load.authored.id,
+								"equipment");
+						else
+							net[exchange.storeIndex] += rate;
+					}
+				}
+			};
+			std::vector<std::vector<StationForecastArrival>> arrivalsByStore(
+				stores.size());
+			double time = asOfSeconds;
+			size_t eventIndex = 0;
+			size_t breakpointIndex = 0;
+			std::uint32_t segments = 0;
+			std::vector<double> netAtStart(stores.size(), 0.0);
+			bool firstSegment = true;
+			while (time < horizonEnd)
+			{
+				if (segments >= StationForecastMaxSegments)
+				{
+					truncated = true;
+					break;
+				}
+				double nextTime = horizonEnd;
+				if (breakpointIndex < breakpoints.size()
+					&& breakpoints[breakpointIndex] < nextTime)
+					nextTime = breakpoints[breakpointIndex];
+				if (eventIndex < events.size()
+					&& events[eventIndex].key.occurrenceSeconds < nextTime)
+					nextTime = events[eventIndex].key.occurrenceSeconds;
+				computeRates(time);
+				if (firstSegment)
+				{
+					netAtStart = net;
+					firstSegment = false;
+				}
+				// Split the segment at the earliest projected crossing: a
+				// store running out or a store filling up.
+				double cut = nextTime;
+				for (size_t index = 0; index < stores.size(); ++index)
+				{
+					if (net[index] < 0.0)
+					{
+						auto const drawable = drawableOf(index);
+						if (!isDry(index))
+						{
+							auto const crossing = time + drawable / -net[index];
+							if (crossing < cut) cut = crossing;
+						}
+					}
+					else if (net[index] > 0.0)
+					{
+						auto const headroom = headroomOf(index);
+						if (!isFull(index))
+						{
+							auto const crossing = time + headroom / net[index];
+							if (crossing < cut) cut = crossing;
+						}
+					}
+				}
+				if (cut < time) cut = time;
+				auto const duration = cut - time;
+				if (duration > 0.0)
+				{
+					++segments;
+					for (size_t index = 0; index < stores.size(); ++index)
+					{
+						auto const before = projected[index].qualified;
+						projected[index].qualified += net[index] * duration;
+						auto const reserve = stores[index].authored.protectedReserve;
+						if (net[index] < 0.0 && projected[index].qualified < reserve)
+						{
+							// The segment overran the drawable: only what was
+							// drawable moved; the remainder is uncovered
+							// demand, never negative inventory.
+							projected[index].unmetOutflow += reserve
+								- projected[index].qualified;
+							projected[index].qualified = reserve;
+						}
+						auto const delta = projected[index].qualified - before;
+						if (delta > 0.0) projected[index].inflowMoved += delta;
+						else projected[index].outflowMoved += -delta;
+					}
+					for (auto const& flow : blocked)
+						projected[flow.storeIndex].unmetOutflow += flow.rate * duration;
+					time = cut;
+				}
+				else if (nextTime > time) time = nextTime;
+				else break;
+				// Apply every event that has come due at this instant:
+				// arrivals first, then ejections, in the shared scenario
+				// ordering (#392/#403).
+				while (eventIndex < events.size()
+					&& events[eventIndex].key.occurrenceSeconds
+						<= time + StationScheduleTolerance)
+				{
+					auto const& event = events[eventIndex];
+					if (event.isDelivery)
+					{
+						auto const& deliveryState = deliveries[event.configIndex];
+						auto const& delivery = deliveryState.authored;
+						auto const storeIndex = deliveryState.storeIndex;
+						auto& store = projected[storeIndex];
+						auto const drawableBefore = drawableOf(storeIndex);
+						auto const physicalBefore = store.qualified + store.unqualified;
+						auto const accepted = std::min(delivery.quantity,
+							headroomOf(storeIndex));
+						if (delivery.arrivesQualified)
+						{
+							store.qualified += accepted;
+							store.acceptedQualified += accepted;
+						}
+						else
+						{
+							store.unqualified += accepted;
+							store.acceptedUnqualified += accepted;
+						}
+						StationForecastArrival arrival;
+						arrival.deliveryId = delivery.id;
+						arrival.storeId = delivery.storeId;
+						arrival.arrivalSeconds = event.key.occurrenceSeconds;
+						arrival.scheduledQuantity = delivery.quantity;
+						arrival.acceptedQuantity = accepted;
+						arrival.rejectedQuantity = delivery.quantity - accepted;
+						arrival.projectedDrawableBefore = drawableBefore;
+						arrival.projectedPhysicalBefore = physicalBefore;
+						arrival.arrivesQualified = delivery.arrivesQualified;
+						arrival.rescuesStore = drawableBefore > 0.0;
+						arrivalsByStore[storeIndex].push_back(std::move(arrival));
+					}
+					else
+					{
+						auto const& ejectionState = wasteEjections[event.configIndex];
+						auto const& ejection = ejectionState.authored;
+						auto const storeIndex = ejectionState.storeIndex;
+						auto& store = projected[storeIndex];
+						auto const ejected = std::min(ejection.quantity,
+							drawableOf(storeIndex));
+						store.qualified -= ejected;
+						store.outflowMoved += ejected;
+						// What the store could not eject is uncovered
+						// disposal demand, reported, never dropped.
+						store.unmetOutflow += ejection.quantity - ejected;
+					}
+					++eventIndex;
+				}
+				while (breakpointIndex < breakpoints.size()
+					&& breakpoints[breakpointIndex] <= time + StationScheduleTolerance)
+					++breakpointIndex;
+				// Mark depletion only after the instant's arrivals landed:
+				// a delivery due at the same second the store would run dry
+				// rescues it, matching the live tick order where arrivals
+				// run ahead of this tick's drains.
+				for (size_t index = 0; index < stores.size(); ++index)
+					if (!projected[index].depleted && isDry(index)
+						&& duration > 0.0)
+					{
+						projected[index].depleted = true;
+						projected[index].depletionOnset = time;
+						projected[index].limiterId = limiterId[index];
+						projected[index].limiterKind = limiterKind[index];
+					}
+			}
+			// Uncertainty flags: recovery the scenario deliberately does
+			// not count as guaranteed.
+			std::set<std::string> biologyRecoveryStores;
+			for (auto const& crop : settings.cropPopulations)
+			{
+				biologyRecoveryStores.insert(crop.foodStoreId);
+				biologyRecoveryStores.insert(crop.wasteStoreId);
+			}
+			for (auto const& culture : settings.algaeCultures)
+			{
+				biologyRecoveryStores.insert(culture.foodStoreId);
+				biologyRecoveryStores.insert(culture.recoveryStoreId);
+				biologyRecoveryStores.insert(culture.wasteStoreId);
+			}
+			for (auto const& processor : settings.microbialProcessors)
+			{
+				biologyRecoveryStores.insert(processor.nutrientStoreId);
+				biologyRecoveryStores.insert(processor.recoveredWaterStoreId);
+				biologyRecoveryStores.insert(processor.residueStoreId);
+			}
+			std::set<std::string> processProductionStores;
+			for (auto const& conversion : settings.conversions)
+				for (auto const& output : conversion.outputs)
+					processProductionStores.insert(output.storeId);
+			for (auto const& collector : settings.waterCollectors)
+				processProductionStores.insert(collector.destStoreId);
+			for (auto const& treatment : settings.waterTreatments)
+				processProductionStores.insert(treatment.treatedStoreId);
+			for (auto const& cell : settings.electrolyzers)
+			{
+				processProductionStores.insert(cell.oxygenStoreId);
+				processProductionStores.insert(cell.hydrogenStoreId);
+			}
+			for (auto const& capture : settings.co2Captures)
+				processProductionStores.insert(capture.captureStoreId);
+			for (auto const& cell : settings.fuelCells)
+				processProductionStores.insert(cell.waterStoreId);
+			for (auto const& reactor : settings.sabatierReactors)
+			{
+				processProductionStores.insert(reactor.methaneStoreId);
+				processProductionStores.insert(reactor.waterStoreId);
+			}
+			for (auto const& processor : settings.methaneProcessors)
+			{
+				processProductionStores.insert(processor.hydrogenStoreId);
+				processProductionStores.insert(processor.carbonStoreId);
+			}
+			for (size_t index = 0; index < stores.size(); ++index)
+			{
+				auto const& store = stores[index];
+				StationForecastEntry entry;
+				entry.storeId = store.authored.id;
+				entry.unit = store.authored.unit;
+				entry.asOfSeconds = asOfSeconds;
+				entry.drawableAtStart = std::max(0.0,
+					store.currentQualified - store.authored.protectedReserve);
+				entry.physicalAtStart = store.currentQualified + store.currentUnqualified;
+				entry.netRateAtStart = netAtStart[index];
+				entry.basis = projected[index].depleted
+					? StationForecastBasis::Shortfall
+					: StationForecastBasis::Sustained;
+				entry.hasShortfall = projected[index].depleted;
+				entry.shortfallOnsetSeconds = projected[index].depleted
+					? projected[index].depletionOnset : 0.0;
+				entry.limitingServiceId = projected[index].limiterId;
+				entry.limitingServiceKind = projected[index].limiterKind;
+				entry.projectedDrawableAtHorizon = drawableOf(index);
+				entry.unmetOutflowTotal = projected[index].unmetOutflow;
+				entry.arrivals = std::move(arrivalsByStore[index]);
+				entry.biologyRecoveryPossible
+					= biologyRecoveryStores.count(store.authored.id) > 0;
+				entry.processProductionPossible
+					= processProductionStores.count(store.authored.id) > 0;
+				// Conservation of the projected exchanges: the projected
+				// physical total must equal the start plus accepted
+				// arrivals plus inflow moved minus outflow moved, within
+				// the declared balance tolerance scaled by the store size.
+				auto const projectedPhysical
+					= projected[index].qualified + projected[index].unqualified;
+				entry.conservationResidual = (projectedPhysical - entry.physicalAtStart)
+					- (projected[index].inflowMoved + projected[index].acceptedQualified
+						+ projected[index].acceptedUnqualified)
+					+ projected[index].outflowMoved;
+				result.stores.push_back(std::move(entry));
+			}
+			result.segmentsComputed = segments;
+			result.truncated = truncated;
+			return result;
+		}
+
 		// Run the ledger for one tick and roll it back whole unless every
 		// audit passed (#555). The ledger mutates the live transfer,
 		// conversion, load, solar and battery state while it runs, so a
@@ -16216,6 +16795,11 @@ namespace core
 				result.endurance.push_back(std::move(entry));
 			}
 		}
+		// #420: the bounded scenario forecast, computed from the state
+		// this snapshot reads. A pure forward projection: it mutates no
+		// live inventory, advances no clock, consumes no deterministic
+		// stream, and is capped in horizon and segments.
+		result.forecast = mImpl->computeForecast(result.elapsedSeconds);
 		return result;
 	}
 	std::vector<StationSystemsEvent> const& StationSystemsRuntime::events() const { return mImpl->events; }
