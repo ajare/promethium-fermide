@@ -19544,6 +19544,152 @@ void recovery(smoke::Context const& context)
 			"the restart delivered more surge energy than was authored");
 	}
 
+	// Scenario K (#591): a sub-tick surge is prorated, not rounded up to
+	// full ticks, and the battery funding it loses only the authored
+	// energy. A 1 kW surge authored for 0.02 s is barely longer than one
+	// fixed tick (1/60 s): the old code always bought the full 1 kW and
+	// only then subtracted a full dt, drawing 0.0333 kJ against the
+	// 0.02 kJ contract - a 66.7% overdraw the battery actually paid,
+	// and far worse below a tick. The last tick of a surge now pays only
+	// the energy left in the declared budget: the surge power is
+	// prorated by window/tick, the total delivered energy never exceeds
+	// power x seconds, and the battery's discharge ledger matches it
+	// exactly. A 0.01 s surge - shorter than one tick - must be paid in
+	// a single prorated tick, and every trace replays identically after
+	// a reset.
+	{
+		struct SurgeRun
+		{
+			std::vector<double> trace;
+			double energy{0.0};
+			int surgeTicks{0};
+		};
+		auto runSurgeRig = [&](core::World& world, double surgeSeconds)
+		{
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.stores = { massStore("ballast", 10.0, 1.0) };
+			// 2 kW of solar covers the load's own 2 kW demand exactly once
+			// the sun rises at t=5; the startup surge on top of it has to
+			// come out of the battery.
+			settings.solarArrays = { solar(2.0, stepProfile(200.0, {{0.0, 0.0}, {5.0, 1.0}})) };
+			settings.equipmentLoads = { recoveryLoad("surger", 2.0, 0.0, 0.0, 0.0, 1.0, surgeSeconds, 0.0) };
+			core::BatterySettings cell;
+			cell.id = "cell"; cell.nameplateKWh = 1.0; cell.usableKWh = 1.0;
+			cell.startingStoredKWh = 0.5; cell.maxDischargeKW = 1.0; cell.maxChargeKW = 0.0;
+			settings.batteries = { cell };
+			configure(world, settings, "recovery K rig");
+			world.resumeSimulation();
+		};
+		auto driveSurge = [&](core::World& world, int ticks)
+		{
+			SurgeRun run;
+			for (int tick = 1; tick <= ticks; ++tick)
+			{
+				runOrDiagnose(world, 1, "recovery K");
+				auto const& l = loadSnap(world, "surger");
+				run.trace.push_back(l.recoverySurgeKW);
+				run.energy += l.recoverySurgeKW * core::World::getFixedTimestep();
+				if (l.recoverySurgeKW > 1e-9) run.surgeTicks += 1;
+			}
+			return run;
+		};
+		// The battery funded the whole surge and nothing else: the energy
+		// it lost from storage equals the surge energy delivered to the
+		// load, so no overdraw is ever paid by the reserve.
+		auto checkBattery = [&](core::World& world, double surgeEnergy, char const* what)
+		{
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& bat = snap.power.batteries[0];
+			require(closeTo(bat.dischargedKWh, surgeEnergy / 3600.0, 1e-9),
+				(std::string(what) + ": the battery lost energy the surge never delivered").c_str());
+			require(closeTo(bat.storedKWh, 0.5 - surgeEnergy / 3600.0, 1e-9),
+				(std::string(what) + ": the battery's remaining charge does not match the surge draw").c_str());
+		};
+		auto checkReplay = [&](SurgeRun const& first, SurgeRun const& replay)
+		{
+			require(first.trace.size() == replay.trace.size(),
+				"the surge replay trace length changed after reset");
+			for (size_t i = 0; i < first.trace.size() && i < replay.trace.size(); ++i)
+				require(closeTo(first.trace[i], replay.trace[i], 1e-12),
+					"the surge proration is not deterministic across a reset/replay");
+			require(closeTo(first.energy, replay.energy, 1e-12),
+				"the surge energy is not deterministic across a reset/replay");
+		};
+		// Sub-tick surge: a 0.01 s budget is shorter than one tick and
+		// is paid whole in a single prorated tick, never as a full-tick
+		// purchase.
+		{
+			core::World world("RecK-short", 2, 2);
+			runSurgeRig(world, 0.01);
+			auto const first = driveSurge(world, 330); // t = 5.5s, past release + full surge
+			require(first.surgeTicks == 1,
+				"a sub-tick surge was not paid in a single prorated tick");
+			require(closeTo(first.energy, 1.0 * 0.01, 1e-6),
+				"the sub-tick surge delivered a different energy than was authored");
+			for (auto const kw : first.trace)
+				if (kw > 1e-9)
+					require(closeTo(kw, 1.0 * 0.01 / core::World::getFixedTimestep(), 1e-6),
+						"the sub-tick surge was not prorated to the remaining window");
+			require(loadSnap(world, "surger").recoveryStage == core::StationLoadRecoveryStage::Active,
+				"the sub-tick surge did not settle the load to Active");
+			checkBattery(world, first.energy, "sub-tick surge");
+			world.resetSimulation(); world.resumeSimulation();
+			auto const replay = driveSurge(world, 330);
+			checkReplay(first, replay);
+			checkBattery(world, replay.energy, "sub-tick surge replay");
+		}
+		// Ticket-shaped partial tail: a 0.02 s surge is one full tick at
+		// the declared 1 kW plus one partial tick at the prorated
+		// remainder - never a second full-tick purchase.
+		{
+			core::World world("RecK-ticket", 2, 2);
+			runSurgeRig(world, 0.02);
+			auto const first = driveSurge(world, 330);
+			require(first.surgeTicks == 2,
+				"a 0.02 s surge did not draw exactly one full tick and one partial tick");
+			require(closeTo(first.energy, 1.0 * 0.02, 1e-6),
+				"the partial-tick surge delivered a different energy than was authored");
+			std::vector<double> drawn;
+			for (auto const kw : first.trace)
+				if (kw > 1e-9) drawn.push_back(kw);
+			require(drawn.size() == 2
+				&& closeTo(drawn[0], 1.0, 1e-6)
+				&& closeTo(drawn[1], 0.2, 1e-6),
+				"the partial final tick of the surge was not prorated to the remainder");
+			checkBattery(world, first.energy, "ticket-shaped surge");
+			world.resetSimulation(); world.resumeSimulation();
+			auto const replay = driveSurge(world, 330);
+			checkReplay(first, replay);
+			checkBattery(world, replay.energy, "ticket-shaped surge replay");
+		}
+		// Multi-tick partial tail: a 0.055 s surge is three full ticks at
+		// 1 kW plus one partial tick at the prorated remainder.
+		{
+			core::World world("RecK-partial", 2, 2);
+			runSurgeRig(world, 0.055);
+			auto const first = driveSurge(world, 330);
+			require(first.surgeTicks == 4,
+				"a 0.055 s surge did not draw three full ticks and one partial tick");
+			require(closeTo(first.energy, 1.0 * 0.055, 1e-6),
+				"the partial-tick surge delivered a different energy than was authored");
+			std::vector<double> drawn;
+			for (auto const kw : first.trace)
+				if (kw > 1e-9) drawn.push_back(kw);
+			require(drawn.size() == 4
+				&& closeTo(drawn[0], 1.0, 1e-6)
+				&& closeTo(drawn[1], 1.0, 1e-6)
+				&& closeTo(drawn[2], 1.0, 1e-6)
+				&& closeTo(drawn[3], 0.3, 1e-6),
+				"the partial final tick of the surge was not prorated to the remainder");
+			checkBattery(world, first.energy, "multi-tick partial-tail surge");
+			world.resetSimulation(); world.resumeSimulation();
+			auto const replay = driveSurge(world, 330);
+			checkReplay(first, replay);
+			checkBattery(world, replay.energy, "multi-tick partial-tail surge replay");
+		}
+	}
+
 	// Shared rig for the #589 scenarios: no solar, no battery, one
 	// fuelled generator with zero startup time and power behind a cool
 	// sink, and automatic dispatch. The only thing that can put power on
