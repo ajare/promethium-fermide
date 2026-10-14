@@ -60,19 +60,24 @@ public:
 };
 
 void checkAtlases(wp::application::resourcesystem::ResourceManager& manager, bool loaded) {
-  for (auto name : {"SectorAtlas", "ObjectAtlas", "AgentAtlas"}) {
+  for (auto name : {"SectorAtlas", "ObjectAtlas", "AgentAtlas", "FurnitureAtlas"}) {
     auto set = std::dynamic_pointer_cast<wp::application::resourcesystem::ImageSetResource>(
         manager.getResource(name));
-    // Other manifest resources retain ObjectAtlas dependencies even when not
-    // used by this World; MapUnload must respect those acquisitions.
+    // Other catalogues retain FurnitureAtlas dependencies even when not used
+    // by this World; MapUnload respects those independent acquisitions.
     if (!loaded && std::string_view(name) == "AgentAtlas") {
       require(set && !manager.isResourceLoaded(set) && !manager.isResourceCreated(set),
               "Agent atlas must unload independently of the shared Object image");
       continue;
     }
     if (!loaded && std::string_view(name) == "ObjectAtlas") {
-      require(set && manager.isResourceLoaded(set) == manager.isResourceLoaded(set->getImage()),
-              "A loaded Object atlas must retain its shared image");
+      require(set && !manager.isResourceLoaded(set) && !manager.isResourceCreated(set),
+              "Object atlas must unload independently of retained Furniture artwork");
+      continue;
+    }
+    if (!loaded && std::string_view(name) == "FurnitureAtlas") {
+      require(set && (!manager.isResourceLoaded(set) || manager.isResourceLoaded(set->getImage())),
+              "A retained Furniture atlas must retain its shared image");
       continue;
     }
     require(set && manager.isResourceLoaded(set) == loaded &&
@@ -872,6 +877,23 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
 
 void checkSelectedSectorAtlases(wp::application::resourcesystem::ResourceManager& manager) {
   using namespace wp::application::resourcesystem;
+  for (auto const* name : {"FurnitureAtlas", "ObjectAtlas", "StationAtlas", "MissingFurniture", "WorldFile"}) {
+    pf::application::MapResources resources(manager);
+    resources.load();
+    auto map = std::dynamic_pointer_cast<pf::application::Map>(manager.getResource("World", "World"));
+    require(map->getWorld()->furnitureImageSetResourceName() == "FurnitureAtlas", "Map must default Furniture artwork");
+    map->getWorld()->setFurnitureImageSetResourceName(name);
+    resources.loadAtlases();
+    require(map->getWorld()->furnitureImageSetResourceName() == name, "Map loading lost Furniture artwork name");
+    if (std::string_view(name) == "FurnitureAtlas") {
+      auto atlas = std::dynamic_pointer_cast<ImageSetResource>(manager.getResource(name));
+      auto objects = std::dynamic_pointer_cast<ImageSetResource>(manager.getResource("ObjectAtlas"));
+      require(atlas && manager.isResourceLoaded(atlas) && manager.isResourceLoaded(atlas->getImage())
+          && atlas->getImage() == objects->getImage() && atlas->getImageDefinitions().size() == 7,
+          "FurnitureAtlas must load all seven tiles using the shared Object image");
+    }
+    resources.unload();
+  }
   for (auto const* name : {"AgentAtlas", "StationAtlas", "MissingAgents", "WorldFile"}) {
     pf::application::MapResources resources(manager);
     resources.load();

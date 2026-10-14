@@ -40,4 +40,10 @@ int main()
 	require(slots.acquire(Kind::ObjectTriangles) == object);
 	require(slots.acquire(Kind::Lines) == line);
 	require(slots.acquire(Kind::Lines) == extraLine && slots.size() == 7);
+	auto agent = slots.acquire(Kind::AgentTriangles);
+	auto furniture = slots.acquire(Kind::FurnitureTriangles);
+	require(agent != furniture && furniture != object && slots.size() == 9);
+	slots.beginFrame();
+	require(slots.acquire(Kind::FurnitureTriangles) == furniture);
+	require(slots.acquire(Kind::AgentTriangles) == agent && slots.size() == 9);
 }

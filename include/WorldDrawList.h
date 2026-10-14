@@ -19,6 +19,7 @@ public:
 		SectorAtlas,
 		ObjectAtlas,
 		AgentAtlas,
+		FurnitureAtlas,
 		FontAtlas
 	};
 

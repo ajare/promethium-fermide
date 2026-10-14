@@ -8,6 +8,7 @@ namespace pf::application::render {
 namespace {
 ObjectTileset active;
 ObjectTileset agents;
+ObjectTileset furniture;
 }
 void setObjectTileset(ObjectTileset tileset)
 {
@@ -29,6 +30,25 @@ bool drawAgentSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b, Pack
     Vec2 uv0{(r.x + .5f) / agents.width, (r.y + .5f) / agents.height};
     Vec2 uv1{(r.x + r.width - .5f) / agents.width, (r.y + r.height - .5f) / agents.height};
     list->AddImage(WorldDrawList::Texture::AgentAtlas, a, b, uv0, uv1, tint);
+    return true;
+}
+void setFurnitureTileset(ObjectTileset tileset) { furniture = std::move(tileset); }
+void clearFurnitureTileset() { furniture = {}; }
+std::optional<Vec2> furnitureSpriteSize(char const* name)
+{
+    auto const found = furniture.sprites.find(name);
+    if (furniture.width <= 0 || furniture.height <= 0 || found == furniture.sprites.end()) return std::nullopt;
+    return Vec2{float(found->second.region.width), float(found->second.region.height)};
+}
+bool drawFurnitureSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b)
+{
+    if (!furnitureSpriteSize(name)) return false;
+    auto const& r = furniture.sprites.at(name).region;
+    Vec2 minimum{std::min(a.x, b.x), std::min(a.y, b.y)};
+    Vec2 maximum{std::max(a.x, b.x), std::max(a.y, b.y)};
+    list->AddImage(WorldDrawList::Texture::FurnitureAtlas, minimum, maximum,
+        {(r.x + .5f) / furniture.width, (r.y + .5f) / furniture.height},
+        {(r.x + r.width - .5f) / furniture.width, (r.y + r.height - .5f) / furniture.height});
     return true;
 }
 bool hasObjectTileset() { return active.width > 0 && active.height > 0; }

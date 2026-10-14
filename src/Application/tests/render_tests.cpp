@@ -73,6 +73,18 @@ render::ObjectTileset installAtlases(std::filesystem::path const& directory) {
         image["width"].as<int>(), image["height"].as<int>()}, true});
   }
   require(agents.sprites.size() == 8, "AgentAtlas must contain all eight extracted tiles");
+  render::ObjectTileset furniture;
+  furniture.width = objectsSize.first; furniture.height = objectsSize.second;
+  for (auto image : resource("FurnitureAtlas")["Definitions"]["Definition"]["Images"]["Image"]) {
+    auto name = image["name"].as<std::string>();
+    auto const& alias = objects.sprites.at(name).region;
+    require(alias.x == image["x"].as<int>() && alias.y == image["y"].as<int>()
+        && alias.width == image["width"].as<int>() && alias.height == image["height"].as<int>(),
+        "Furniture compatibility alias must preserve its rectangle");
+    furniture.sprites.emplace(name, render::ObjectSprite{alias, false});
+  }
+  require(furniture.sprites.size() == 7, "FurnitureAtlas must include chairs, desks, sofas and beds");
+  render::setFurnitureTileset(std::move(furniture));
   render::setAgentTileset(std::move(agents));
   render::setSectorTileset(std::move(sectors));
   render::setObjectTileset(objects);
@@ -252,17 +264,51 @@ void checkFurniture(std::filesystem::path const& directory, render::ObjectTilese
   world->placeFurniture(back, "chair", 2.25f, 0, "Hidden chair");
   world->finishBuild(); world->pauseSimulation();
   auto draws = render::drawWorld(world, 1280, 720);
-  require(textured(draws, render::WorldDrawList::Texture::ObjectAtlas) == 4,
+  require(textured(draws, render::WorldDrawList::Texture::FurnitureAtlas) == 4,
           "Only the front chair should draw, including foreground restoration");
   auto const& chair = atlas.sprites.at("chair").region;
   for (auto const& command : draws.commands())
     if (auto triangle = std::get_if<render::WorldDrawList::Triangle>(&command);
-        triangle && triangle->texture == render::WorldDrawList::Texture::ObjectAtlas)
+        triangle && triangle->texture == render::WorldDrawList::Texture::FurnitureAtlas)
       for (auto uv : triangle->texcoords)
         require(uv.x >= float(chair.x) / atlas.width && uv.x <= float(chair.x + chair.width) / atlas.width &&
                     uv.y >= float(chair.y) / atlas.height && uv.y <= float(chair.y + chair.height) / atlas.height,
                 "Furniture usable-point Markers must not draw over its artwork");
   checkCanvas(draws, 1280, 720);
+  auto graph = world->getGraph();
+  auto markers = world->getMarkerIds();
+  auto assertFallback = [&] {
+    auto missing = render::drawWorld(world, 1280, 720);
+    require(textured(missing, render::WorldDrawList::Texture::FurnitureAtlas) == 0,
+        "Missing Furniture artwork must not fall back to ObjectAtlas");
+    std::size_t magenta{};
+    for (auto const& command : missing.commands())
+      if (auto triangle = std::get_if<render::WorldDrawList::Triangle>(&command);
+          triangle && triangle->texture == render::WorldDrawList::Texture::None
+          && triangle->colour == render::packColour(255, 0, 255, 255)) ++magenta;
+    require(magenta == 4, "Missing Furniture tiles must render cell-sized magenta rectangles");
+    require(world->getGraph() == graph && world->getMarkerIds() == markers,
+        "Artwork selection changed physical Furniture layout");
+  };
+  render::clearFurnitureTileset();
+  assertFallback();
+  render::ObjectTileset custom;
+  custom.width = 600; custom.height = 256;
+  custom.sprites.emplace("other", render::ObjectSprite{{0, 0, 11, 13}, false});
+  render::setFurnitureTileset(custom);
+  assertFallback();
+  custom.sprites.emplace("chair", render::ObjectSprite{{8, 63, 71, 193}, false});
+  render::setFurnitureTileset(custom);
+  auto changed = render::drawWorld(world, 1280, 720);
+  require(textured(changed, render::WorldDrawList::Texture::FurnitureAtlas) == 4,
+      "Alternate Furniture tile proportions must remain usable");
+  for (auto const& command : changed.commands())
+    if (auto triangle = std::get_if<render::WorldDrawList::Triangle>(&command);
+        triangle && triangle->texture == render::WorldDrawList::Texture::FurnitureAtlas)
+      for (auto uv : triangle->texcoords)
+        require(uv.x >= 8.f / 600 && uv.x <= 79.f / 600 && uv.y >= 63.f / 256 && uv.y <= 256.f / 256,
+            "Selected Furniture atlas UVs were not applied");
+  installAtlases(directory);
 }
 void checkNestedApertures() {
   auto world = std::make_shared<core::World>("Application apertures", 6, 2);

@@ -712,9 +712,11 @@ namespace core
 		// Version 66 adds the World's sector ImageSet resource name.
 		// Version 65 adds authored transport Stop short names.
 		// Version 67 adds the World's Agent ImageSet resource name.
-		serializer.writeUint32("version", 67);
+		// Version 68 adds the World's Furniture ImageSet resource name.
+		serializer.writeUint32("version", 68);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
+		serializer.writeString("furnitureImageSet", mFurnitureImageSetResourceName);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		// Derived physical Buttons add landing object slots compared with the
 		// original Dumbwaiter layout. Remember that layout for stable-ID replay.
@@ -1611,7 +1613,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 67)
+		if (version < 1 || version > 68)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1625,6 +1627,7 @@ namespace core
 		std::shared_ptr<const FurnitureCatalogue> furnitureCatalogue;
 		auto sectorImageSetName = serializer.readString("sectorImageSet", true, "SectorAtlas");
 		auto agentImageSetName = serializer.readString("agentImageSet", true, "AgentAtlas");
+		auto furnitureImageSetName = serializer.readString("furnitureImageSet", true, "FurnitureAtlas");
 		std::string furnitureResourceName;
 		// Schemas 43-49 were emitted independently by the Furniture and
 		// Chamber/Dumbwaiter branches, so either identity field may be absent.
@@ -2322,6 +2325,7 @@ namespace core
 			candidate.mFurnitureCatalogueResourceName = furnitureResourceName;
 			candidate.mSectorImageSetResourceName = sectorImageSetName;
 			candidate.mAgentImageSetResourceName = agentImageSetName;
+			candidate.mFurnitureImageSetResourceName = furnitureImageSetName;
 			candidate.mDeserializingConstruction = true;
 			for (auto& record : records)
 			{
@@ -2404,6 +2408,7 @@ namespace core
 		mFurnitureCatalogueResourceName = std::move(furnitureResourceName);
 		mSectorImageSetResourceName = std::move(sectorImageSetName);
 		mAgentImageSetResourceName = std::move(agentImageSetName);
+		mFurnitureImageSetResourceName = std::move(furnitureImageSetName);
 		mActionRegistry = std::move(actionRegistry);
 		mActionRegistryFilename = std::move(actionFilename);
 		mMarkerActions = std::move(markerActions);
@@ -3079,6 +3084,7 @@ namespace core
 		candidate->mFurnitureCatalogueResourceName = mFurnitureCatalogueResourceName;
 		candidate->mSectorImageSetResourceName = mSectorImageSetResourceName;
 		candidate->mAgentImageSetResourceName = mAgentImageSetResourceName;
+		candidate->mFurnitureImageSetResourceName = mFurnitureImageSetResourceName;
 		candidate->mActionRegistry = mActionRegistry;
 		candidate->mActionRegistryFilename = mActionRegistryFilename;
 		candidate->mMarkerActions = mMarkerActions;

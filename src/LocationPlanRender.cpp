@@ -1,5 +1,6 @@
 #include "LocationPlan.h"
 #include "AgentPathForRendering.h"
+#include "ObjectTileset.h"
 #include <string>
 #include <algorithm>
 #include <set>
@@ -110,6 +111,15 @@ void renderLocationPlanPreview(WorldDrawList& commands, core::Sector const& loca
 	ImVec2 min{left + (x + definition.minX) * cellWidth, bottom - (float(depth) + 1) * rowHeight};
 	ImVec2 max{left + (x + definition.maxX) * cellWidth, bottom - float(depth) * rowHeight};
 	commands.PushClipRect({left, top}, {right, bottom}, true);
+	float tileHeight = rowHeight / float(definition.maxY - definition.minY);
+	for (auto const& tile : definition.tiles)
+	{
+		ImVec2 a{left + (x + tile.x) * cellWidth,
+			min.y + (definition.maxY - tile.y - 1) * tileHeight};
+		ImVec2 b{a.x + cellWidth, a.y + tileHeight};
+		if (!drawFurnitureSprite(tile.image.c_str(), &commands, a, b))
+			commands.AddRectFilled(a, b, IM_COL32(255, 0, 255, 255));
+	}
 	commands.AddRectFilled(min, max, valid ? IM_COL32(80, 200, 120, 65) : IM_COL32(244, 67, 54, 65));
 	commands.AddRect(min, max, valid ? IM_COL32(80, 200, 120, 255) : IM_COL32(244, 67, 54, 255), 0, 0, 2);
 	commands.PushClipRect(min, max, true);

@@ -129,7 +129,7 @@ namespace
 				->configuration.at("count")) == 9, "Redo did not restore configuration edit");
 
 		auto yaml = serialize(*current);
-		require(yaml.find("version: 67") != std::string::npos
+		require(yaml.find("version: 68") != std::string::npos
 			&& yaml.find("type: marker") != std::string::npos,
 			"Version-14 typed assignment was not persisted");
 		auto reopened = deserialize(yaml, fixture.registry);

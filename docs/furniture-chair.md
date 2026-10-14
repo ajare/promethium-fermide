@@ -33,9 +33,12 @@ use normal document history.
 
 `resources/test-worlds/chair.furniture.lua` describes the format. Catalogue UUID,
 definition key and usable-point key are reference identities, not display labels.
-Artwork names an existing `ObjectAtlas` Image-set region; the application resource
-manager resolves it and owns its atlas. The geometric placeholder chair is a full
-World-tile region in `resources/Resources.yaml`. No Furniture TileSet is created.
+Artwork names a region in the World's selected `furnitureImageSet`, defaulting to
+`FurnitureAtlas`; the application resource manager owns its atlas. The placeholder
+chair's current rectangle is preserved in `resources/Resources.yaml` and shared with
+`ObjectAtlas` as a compatibility alias. Regions fill one World cell regardless of
+pixel dimensions; missing artwork renders magenta without changing geometry.
+No Furniture TileSet resource is created.
 The GUI registers user-selected catalogues dynamically as FurnitureCatalogue
 resources; headless document tools use the same parser without graphics resources.
 
@@ -157,7 +160,7 @@ ordinary movement, not a new Furniture behaviour API.
 ## Multi-tile layouts (#350)
 
 `resources/test-worlds/layouts.furniture.lua` contains a two-seat sofa and a
-sparse three-by-two layout. Every `tiles` entry names an `ObjectAtlas` Image-set
+sparse three-by-two layout. Every `tiles` entry names a World-selected Furniture Image-set
 region of exactly one World tile (64 × 160 pixels), at integer `x`/`y` offsets.
 Offsets may extend horizontally either side of the instance origin; artwork may
 extend upward, but never below the supporting Floor. Transparent pixels and

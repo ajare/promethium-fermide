@@ -46,6 +46,15 @@ namespace
 			&& world->sectorImageSetResourceName() == "StationAtlas", "Agent artwork undo changed sector artwork");
 		require(artworkHistory.redo(captureDocumentSnapshot(world, artworkHistory), restore)
 			&& world->agentImageSetResourceName() == "CustomAgents", "Agent artwork redo lost the selection");
+		auto furnitureBefore = captureDocumentSnapshot(world, artworkHistory);
+		world->setFurnitureImageSetResourceName("CustomFurniture");
+		commitDocumentEdit(std::move(furnitureBefore), artworkHistory);
+		require(artworkHistory.undo(captureDocumentSnapshot(world, artworkHistory), restore)
+			&& world->furnitureImageSetResourceName() == "FurnitureAtlas"
+			&& world->agentImageSetResourceName() == "CustomAgents"
+			&& world->sectorImageSetResourceName() == "StationAtlas", "Furniture artwork undo changed other artwork");
+		require(artworkHistory.redo(captureDocumentSnapshot(world, artworkHistory), restore)
+			&& world->furnitureImageSetResourceName() == "CustomFurniture", "Furniture artwork redo lost the selection");
 		DocumentHistory worldHistory;
 		DocumentHistory registryHistory;
 

@@ -24,6 +24,7 @@
 #include "core/Staircase.h"
 #include "core/StaircaseTransit.h"
 #include "core/YamlSerializer.h"
+#include "core/BinarySerializer.h"
 #include <yaml-cpp/yaml.h>
 
 #include "WorldChecks.h"
@@ -39,6 +40,8 @@ namespace persistence
 		original.setSectorImageSetResourceName("StationAtlas");
 		require(original.agentImageSetResourceName() == "AgentAtlas", "New Worlds must default to AgentAtlas");
 		original.setAgentImageSetResourceName("CustomAgents");
+		require(original.furnitureImageSetResourceName() == "FurnitureAtlas", "New Worlds must default to FurnitureAtlas");
+		original.setFurnitureImageSetResourceName("CustomFurniture");
 		require(original.isModified(), "Selecting sector artwork must modify the World");
 		auto const fore = original.addRoom("Fore room", 0, 0, 0, 7, 2);
 		original.addRoom("Back room", 1, 0, 0, 7, 2);
@@ -70,7 +73,7 @@ namespace persistence
 		original.serialize(*writer, workData);
 		writer->serialize();
 		auto const yaml = writer->getSerializedString();
-		require(yaml.find("version: 67") != std::string::npos
+		require(yaml.find("version: 68") != std::string::npos
 			&& yaml.find("layers: 2") != std::string::npos
 			&& yaml.find("layerNames:") != std::string::npos
 			&& yaml.find("- Layer 0") != std::string::npos
@@ -96,6 +99,27 @@ namespace persistence
 		require(loaded.deserialize(*reader, workData), "World deserialization failed");
 		require(loaded.sectorImageSetResourceName() == "StationAtlas", "Sector ImageSet did not round-trip");
 		require(loaded.agentImageSetResourceName() == "CustomAgents", "Agent ImageSet did not round-trip");
+		require(loaded.furnitureImageSetResourceName() == "CustomFurniture", "Furniture ImageSet did not round-trip");
+		auto binaryWriter = core::BinarySerializer::toString();
+		original.serialize(*binaryWriter, workData); binaryWriter->serialize();
+		auto binaryReader = core::BinarySerializer::fromString(binaryWriter->getSerializedString());
+		binaryReader->deserialize();
+		core::World binaryLoaded("Binary artwork", 2, 2);
+		require(binaryLoaded.deserialize(*binaryReader, workData)
+			&& binaryLoaded.furnitureImageSetResourceName() == "CustomFurniture"
+			&& binaryLoaded.agentImageSetResourceName() == "CustomAgents"
+			&& binaryLoaded.sectorImageSetResourceName() == "StationAtlas", "Binary artwork selection did not round-trip");
+		for (bool missing : {false, true}) {
+			auto document = YAML::Load(yaml);
+			if (missing) document.remove("furnitureImageSet");
+			else document["furnitureImageSet"] = "UnavailableFurniture";
+			auto artworkReader = core::YamlSerializer::fromString(YAML::Dump(document));
+			artworkReader->deserialize();
+			core::World artworkLoaded("Furniture artwork", 2, 2);
+			require(artworkLoaded.deserialize(*artworkReader, workData), "Furniture artwork document failed to load");
+			require(artworkLoaded.furnitureImageSetResourceName() == (missing ? "FurnitureAtlas" : "UnavailableFurniture"),
+				"Absent Furniture artwork did not default or unavailable name was lost");
+		}
 		for (bool missing : {false, true}) {
 			auto document = YAML::Load(yaml);
 			if (missing) document.remove("agentImageSet");
@@ -189,7 +213,7 @@ namespace persistence
 				legacyYaml.replace(at, from.size(), to);
 			}
 		};
-		replaceAll("version: 67", "version: 14");
+		replaceAll("version: 68", "version: 14");
 		if (auto field = legacyYaml.find("destinationMarker:"); field != std::string::npos)
 		{
 			auto begin = legacyYaml.rfind('\n', field) + 1;

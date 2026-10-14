@@ -94,6 +94,23 @@ Resources:
               - { name: "human-crouching", x: "185", y: "142", width: "85", height: "114" }
               - { name: "human-crawling", x: "277", y: "169", width: "142", height: "87" }
     - type: "ImageSet"
+      name: "FurnitureAtlas"
+      DependentResources:
+        DependentResource:
+          id: "Image"
+          ref: "ObjectAtlasImage"
+      Definitions:
+        Definition:
+          Images:
+            Image:
+              - { name: "chair", x: "256", y: "160", width: "64", height: "160" }
+              - { name: "sofa-left", x: "0", y: "480", width: "64", height: "160" }
+              - { name: "sofa-right", x: "64", y: "480", width: "64", height: "160" }
+              - { name: "desk-left", x: "128", y: "480", width: "64", height: "160" }
+              - { name: "desk-right", x: "192", y: "480", width: "64", height: "160" }
+              - { name: "bed-left", x: "0", y: "640", width: "64", height: "160" }
+              - { name: "bed-right", x: "64", y: "640", width: "64", height: "160" }
+    - type: "ImageSet"
       name: "ObjectAtlas"
       DependentResources:
         DependentResource:
@@ -132,7 +149,7 @@ Resources:
       DependentResources:
         DependentResource:
           id: "Artwork"
-          ref: "ObjectAtlas"
+          ref: "FurnitureAtlas"
     - type: "World"
       name: "FurnitureDemo"
       location: "test-worlds/furniture.world.yaml"
@@ -146,7 +163,7 @@ Resources:
       DependentResources:
         DependentResource:
           id: "Artwork"
-          ref: "ObjectAtlas"
+          ref: "FurnitureAtlas"
     - type: "World"
       name: "FurnitureIntegrationDemo"
       location: "test-worlds/furniture-integration.world.yaml"
@@ -160,14 +177,14 @@ Resources:
       DependentResources:
         DependentResource:
           id: "Artwork"
-          ref: "ObjectAtlas"
+          ref: "FurnitureAtlas"
     - type: "FurnitureCatalogue"
       name: "DeskCatalogue"
       location: "test-worlds/desk.furniture.lua"
       DependentResources:
         DependentResource:
           id: "Artwork"
-          ref: "ObjectAtlas"
+          ref: "FurnitureAtlas"
     - type: "AgentTagRegistry"
       name: "TestAgentTags"
       location: "test-worlds/test.tags.yaml"

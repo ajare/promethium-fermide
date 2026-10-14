@@ -1810,8 +1810,8 @@ void renderSectorDepthContent(shared_ptr<const core::Sector> sector, WorldDrawLi
 			core::Vector2 top{ sector->getCellX() + instance.x + tile.x, sector->getCellY() + instance.y + tile.y + 1 };
 			core::Vector2 bottom{ top.x + 1, top.y - 1 };
 			transformPosition(top); transformPosition(bottom);
-			if (!drawObjectSprite(tile.image.c_str(), drawList, { top.x, top.y }, { bottom.x, bottom.y }))
-				throw std::runtime_error("Missing Furniture Image-set region: " + tile.image);
+			if (!drawFurnitureSprite(tile.image.c_str(), drawList, { top.x, top.y }, { bottom.x, bottom.y }))
+				drawList->AddRectFilled({top.x, top.y}, {bottom.x, bottom.y}, IM_COL32(255, 0, 255, 255));
 		}
 	}
 }

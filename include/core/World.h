@@ -613,6 +613,7 @@ namespace core
 		std::string mFurnitureCatalogueResourceName;
 		std::string mSectorImageSetResourceName{"SectorAtlas"};
 		std::string mAgentImageSetResourceName{"AgentAtlas"};
+		std::string mFurnitureImageSetResourceName{"FurnitureAtlas"};
 		std::vector<FurnitureInstance> mFurniture;
 		uint64_t mNextFurnitureId{ 1 };
 		struct MovementGoal
@@ -3210,6 +3211,13 @@ namespace core
 		{
 			if (name == mAgentImageSetResourceName) return;
 			mAgentImageSetResourceName = std::move(name);
+			modify();
+		}
+		std::string const& furnitureImageSetResourceName() const { return mFurnitureImageSetResourceName; }
+		void setFurnitureImageSetResourceName(std::string name)
+		{
+			if (name == mFurnitureImageSetResourceName) return;
+			mFurnitureImageSetResourceName = std::move(name);
 			modify();
 		}
 		auto const& furniture() const { return mFurniture; }

@@ -206,8 +206,20 @@ public:
                 std::cerr << "Agent ImageSet unavailable: " << error.what() << '\n';
             }
             if (!mAgentSet) std::cerr << "Agent ImageSet unavailable: " << mAgentName << '\n';
+            mFurnitureName = mWorld->furnitureImageSetResourceName();
+            try {
+                auto candidate = mResources.getResource(mFurnitureName);
+                if (std::dynamic_pointer_cast<resources::ImageSetResource>(candidate)
+                    && mResources.isResourceLoaded(candidate)) {
+                    mResources.acquireResource(candidate);
+                    mFurnitureSet = candidate;
+                }
+            } catch (std::exception const& error) {
+                std::cerr << "Furniture ImageSet unavailable: " << error.what() << '\n';
+            }
+            if (!mFurnitureSet) std::cerr << "Furniture ImageSet unavailable: " << mFurnitureName << '\n';
             mObjectSet = mResources.acquireResource("ObjectAtlas");
-            for (auto const& set : {mSectorSet, mObjectSet, mAgentSet}) {
+            for (auto const& set : {mSectorSet, mObjectSet, mAgentSet, mFurnitureSet}) {
                 if (!set) continue;
                 if (!std::dynamic_pointer_cast<resources::ImageSetResource>(set))
                     throw std::runtime_error("Application atlas must be an ImageSet");
@@ -266,6 +278,35 @@ public:
             }
             installAtlasDefinitions();
         }
+        if (mFurnitureName != mWorld->furnitureImageSetResourceName()) {
+            mFurnitureName = mWorld->furnitureImageSetResourceName();
+            for (auto& slot : mSlots) remove(slot);
+            mSlots.clear(); mSlotAllocator = {};
+            if (mFurnitureSet) mResources.releaseResource(mFurnitureSet);
+            mFurnitureSet.reset();
+            resources::ResourcePtr candidate;
+            try {
+                candidate = mResources.getResource(mFurnitureName);
+                if (!std::dynamic_pointer_cast<resources::ImageSetResource>(candidate))
+                    throw std::runtime_error("Selected Furniture resource is not an ImageSet");
+                mResources.acquireResource(candidate);
+                mResources.createResource(candidate);
+                mResources.loadResource(candidate);
+                mFurnitureSet = candidate;
+            } catch (std::exception const& error) {
+                if (candidate && std::dynamic_pointer_cast<resources::ImageSetResource>(candidate))
+                    mResources.releaseResource(candidate);
+                std::cerr << "Furniture ImageSet unavailable: " << error.what() << '\n';
+            }
+            installAtlasDefinitions();
+        }
+        if (mFurnitureSet && mWorld->furnitureCatalogue())
+            for (auto const& [key, definition] : mWorld->furnitureCatalogue()->definitions())
+                for (auto const& tile : definition.tiles)
+                    if (!furnitureSpriteSize(tile.image.c_str())
+                        && mMissingFurnitureTiles.insert(mFurnitureName + "/" + tile.image).second)
+                        std::cerr << "Furniture ImageSet " << mFurnitureName << " lacks tile " << tile.image
+                                  << "; rendering in magenta\n";
         auto const width = mRenderSystem->getWindowWidth();
         auto const height = mRenderSystem->getWindowHeight();
         if (!width || !height) return;
@@ -312,8 +353,8 @@ private:
     void cleanup() noexcept {
         for (auto& slot : mSlots) remove(slot);
         mSlots.clear();
-        clearSectorTileset(); clearObjectTileset(); clearAgentTileset();
-        for (auto& set : {&mAgentSet, &mObjectSet, &mSectorSet}) {
+        clearSectorTileset(); clearObjectTileset(); clearAgentTileset(); clearFurnitureTileset();
+        for (auto& set : {&mFurnitureSet, &mAgentSet, &mObjectSet, &mSectorSet}) {
             if (!*set) continue;
             try {
                 auto atlas = std::dynamic_pointer_cast<resources::ImageSetResource>(*set);
@@ -331,7 +372,8 @@ private:
         if (kind == WorldDrawList::Texture::None) return {};
         auto set = std::static_pointer_cast<resources::ImageSetResource>(
             kind == WorldDrawList::Texture::SectorAtlas ? mSectorSet
-                : kind == WorldDrawList::Texture::AgentAtlas ? mAgentSet : mObjectSet);
+                : kind == WorldDrawList::Texture::AgentAtlas ? mAgentSet
+                : kind == WorldDrawList::Texture::FurnitureAtlas ? mFurnitureSet : mObjectSet);
         return set->getImage()->getMppResource();
     }
 		void installAtlasDefinitions()
@@ -380,6 +422,15 @@ private:
                         int(definition.width), int(definition.height)}, true});
             }
             setAgentTileset(std::move(agentTiles));
+            ObjectTileset furnitureTiles;
+            if (auto furniture = std::dynamic_pointer_cast<resources::ImageSetResource>(mFurnitureSet)) {
+                auto image = std::dynamic_pointer_cast<resources::ImageResource>(furniture->getImage());
+                furnitureTiles.width = image->getWidth(); furnitureTiles.height = image->getHeight();
+                for (auto const& [name, definition] : furniture->getImageDefinitions())
+                    furnitureTiles.sprites.emplace(name, ObjectSprite{{int(definition.x), int(definition.y),
+                        int(definition.width), int(definition.height)}, false});
+            }
+            setFurnitureTileset(std::move(furnitureTiles));
 		}
 		static std::vector<Segment> buildSegments(WorldDrawList const& commandList)
 		{
@@ -446,6 +497,8 @@ private:
 					kind = Kind::ObjectTriangles;
 				else if (segment.texture == WorldDrawList::Texture::AgentAtlas)
 					kind = Kind::AgentTriangles;
+				else if (segment.texture == WorldDrawList::Texture::FurnitureAtlas)
+					kind = Kind::FurnitureTriangles;
 				auto const slotIndex = mSlotAllocator.acquire(kind);
 				mSegmentSlots[index] = slotIndex;
 				if (slotIndex >= mSlots.size()) mSlots.emplace_back();
@@ -534,9 +587,9 @@ private:
     mpp::ResourceManager* mRenderResources;
     mpp::ScenePtr mScene;
     std::shared_ptr<const core::World> mWorld;
-    resources::ResourcePtr mSectorSet, mObjectSet, mAgentSet;
-    std::string mSectorName, mAgentName;
-    std::set<std::string> mMissingAgentTiles;
+    resources::ResourcePtr mSectorSet, mObjectSet, mAgentSet, mFurnitureSet;
+    std::string mSectorName, mAgentName, mFurnitureName;
+    std::set<std::string> mMissingAgentTiles, mMissingFurnitureTiles;
     WorldRenderSlotAllocator mSlotAllocator;
     std::vector<Slot> mSlots;
     std::vector<std::size_t> mSegmentSlots;

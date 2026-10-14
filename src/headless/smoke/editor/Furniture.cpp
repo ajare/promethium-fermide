@@ -5,6 +5,7 @@
 #include "FurniturePanel.h"
 #include "LocationPlan.h"
 #include "PaletteLayout.h"
+#include "ObjectTileset.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
 #include "core/YamlSerializer.h"
@@ -627,6 +628,23 @@ namespace
 		LocationPlan plan; require(plan.open(world, world->getSector(room), 4), "Cannot open placement plan");
 		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
 		io.DisplaySize = {1600, 1000}; io.Fonts->AddFontDefault(); io.Fonts->Build();
+		for (bool available : {false, true})
+		{
+			ObjectTileset artwork; artwork.width = 600; artwork.height = 256;
+			if (available) artwork.sprites.emplace("chair", ObjectSprite{{8,63,71,193}, false});
+			setFurnitureTileset(std::move(artwork), reinterpret_cast<ImTextureID>(1));
+			ImGui::NewFrame();
+			WorldDrawList row({{0,0},{1600,1000}});
+			plan.renderPaletteRow(world, row, {20,430}, false);
+			unsigned triangles = 0;
+			for (auto const& command : row.commands())
+				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+					triangle && (available ? triangle->texture == WorldDrawList::Texture::FurnitureAtlas
+						: triangle->texture == WorldDrawList::Texture::None && triangle->colour == IM_COL32(255,0,255,255))) ++triangles;
+			require(triangles == 2, "Furniture palette ignored selected artwork/fallback");
+			ImGui::EndFrame();
+		}
+		clearFurnitureTileset();
 		ImVec2 tray{20, 430}, viewport{}, viewportSize{};
 		std::vector<std::string> rowLabels, depths;
 		unsigned previews = 0, invalidPreviews = 0;

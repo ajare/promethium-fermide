@@ -19,7 +19,7 @@ public:
 		None,
 		SectorAtlas,
 		ObjectAtlas,
-		AgentAtlas
+		AgentAtlas, FurnitureAtlas
 	};
 
 	struct ClipRectangle

@@ -8150,6 +8150,28 @@ void renderWorldPanel(shared_ptr<core::World> world)
 		auto diagnostic = selectWorldSectorImageSet(world->sectorImageSetResourceName());
 		if (!diagnostic.empty()) ImGui::TextWrapped("Sector ImageSet unavailable: %s", diagnostic.c_str());
 	}
+	if (ImGui::CollapsingHeader("Furniture artwork"))
+	{
+		auto const& selected = world->furnitureImageSetResourceName();
+		if (ImGui::BeginCombo("Furniture ImageSet", selected.c_str()))
+		{
+			for (auto const& name : applicationResourceNames("ImageSet"))
+				if (ImGui::Selectable(name.c_str(), name == selected))
+				{
+					auto before = captureDocumentSnapshot(world);
+					world->setFurnitureImageSetResourceName(name);
+					commitDocumentEdit(std::move(before));
+				}
+			ImGui::EndCombo();
+		}
+		auto diagnostic = selectWorldFurnitureImageSet(selected);
+		if (!diagnostic.empty()) ImGui::TextWrapped("Furniture ImageSet unavailable: %s", diagnostic.c_str());
+		else if (auto catalogue = world->furnitureCatalogue())
+			for (auto const& [key, definition] : catalogue->definitions())
+				for (auto const& tile : definition.tiles)
+					if (!furnitureSpriteSize(tile.image.c_str()))
+						ImGui::TextWrapped("Furniture ImageSet lacks %s; rendering in magenta.", tile.image.c_str());
+	}
 	if (ImGui::CollapsingHeader("Agent artwork"))
 	{
 		auto const& selected = world->agentImageSetResourceName();
@@ -9756,6 +9778,7 @@ void renderUI(shared_ptr<core::World>& world, shared_ptr<core::Agent> pathingAge
 
 	selectWorldSectorImageSet(world->sectorImageSetResourceName());
 	selectWorldAgentImageSet(world->agentImageSetResourceName());
+	selectWorldFurnitureImageSet(world->furnitureImageSetResourceName());
 	auto const graph = world->getGraph();
 	renderStatusBar(world);
 	renderControlsWindow(world, graph, pathingAgent);

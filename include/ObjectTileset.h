@@ -17,6 +17,10 @@ void clearAgentTileset();
 std::optional<ImVec2> agentSpriteSize(char const* name);
 bool drawAgentSprite(char const* name, WorldDrawList* list, ImVec2 a, ImVec2 b,
     ImU32 tint = IM_COL32_WHITE);
+void setFurnitureTileset(ObjectTileset tileset, ImTextureID texture);
+void clearFurnitureTileset();
+std::optional<ImVec2> furnitureSpriteSize(char const* name);
+bool drawFurnitureSprite(char const* name, WorldDrawList* list, ImVec2 a, ImVec2 b);
 bool hasObjectTileset();
 std::optional<ImVec2> objectSpriteSize(char const* name);
 // Destination is the object's physical screen bounds, not its padded storage cell.

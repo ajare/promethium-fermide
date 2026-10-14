@@ -49,7 +49,7 @@ void MapResources::loadAtlases() {
   if (!mMap || !mManager.isResourceLoaded(mMap))
     throw std::runtime_error("Atlas post work requires a loaded Map");
   std::array names{mMap->getWorld()->sectorImageSetResourceName(), std::string{"ObjectAtlas"},
-      mMap->getWorld()->agentImageSetResourceName()};
+      mMap->getWorld()->agentImageSetResourceName(), mMap->getWorld()->furnitureImageSetResourceName()};
   for (std::size_t index = 0; index < names.size(); ++index) {
     if (mAtlases[index]) continue;
     std::shared_ptr<wp::application::resourcesystem::ImageSetResource> atlas;

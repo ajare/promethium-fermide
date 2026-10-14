@@ -16,7 +16,6 @@
 #include "core/SerializationWorkData.h"
 #include "core/World.h"
 #include "core/Furniture.h"
-#include <willpower/application/resourcesystem/ImageSetResource.h>
 #include "core/YamlSerializer.h"
 
 namespace resources = wp::application::resourcesystem;
@@ -110,22 +109,9 @@ FurnitureCatalogueResource::FurnitureCatalogueResource(std::string const& name,
 
 void FurnitureCatalogueResource::create(resources::DataStreamPtr, resources::ResourceManager*)
 {
-	auto catalogue = core::FurnitureCatalogue::readFile(sourcePath(*this));
-	for (auto const& [key, definition] : catalogue->definitions())
-	{
-		auto set = hasDependentResource("Artwork")
-			? std::dynamic_pointer_cast<resources::ImageSetResource>(getDependentResource("Artwork")) : nullptr;
-		for (auto const& tile : definition.tiles)
-		{
-			if (!set || set->getName() != tile.imageSet || !set->getImageDefinitions().contains(tile.image))
-				throw resources::ResourceException(this, "Missing Furniture Image-set region for " + key
-					+ ": " + tile.imageSet + "/" + tile.image);
-			auto const& region = set->getImageDefinitions().at(tile.image);
-			if (region.width != CORE_CELL_WIDTH_PIXELS || region.height != CORE_LEVEL_HEIGHT_PIXELS)
-				throw resources::ResourceException(this, "Furniture artwork must be a World-tile-sized Image-set region: " + tile.image);
-		}
-	}
-	mCatalogue = std::move(catalogue);
+	// Geometry and scripts are catalogue-owned; artwork availability is a
+	// recoverable renderer concern resolved through the World's ImageSet.
+	mCatalogue = core::FurnitureCatalogue::readFile(sourcePath(*this));
 }
 void FurnitureCatalogueResource::destroy() { mCatalogue.reset(); }
 

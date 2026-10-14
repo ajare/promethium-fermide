@@ -16,7 +16,7 @@ class PF_APPLICATION_API MapResources final {
   wp::application::resourcesystem::ResourceManager& mManager;
   wp::Logger* mLogger;
   std::shared_ptr<Map> mMap;
-  std::array<wp::application::resourcesystem::ResourcePtr, 3> mAtlases;
+  std::array<wp::application::resourcesystem::ResourcePtr, 4> mAtlases;
 
 public:
   explicit MapResources(wp::application::resourcesystem::ResourceManager& manager,

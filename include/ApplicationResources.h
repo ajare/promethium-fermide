@@ -99,7 +99,6 @@ public:
 		std::string const& source, std::map<std::string, std::string> const& tags,
 		wp::application::resourcesystem::ResourceLocation* location);
 	std::shared_ptr<const core::FurnitureCatalogue> const& catalogue() const { return mCatalogue; }
-	void setArtwork(wp::application::resourcesystem::ResourcePtr artwork) { addDependentResource("Artwork", std::move(artwork)); }
 private:
 	void create(wp::application::resourcesystem::DataStreamPtr data,
 		wp::application::resourcesystem::ResourceManager* manager) override;

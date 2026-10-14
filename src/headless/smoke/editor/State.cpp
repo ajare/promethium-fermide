@@ -33,6 +33,7 @@ namespace
 		(void)core::consumeLogMessages();
 		clearObjectTileset();
 		clearAgentTileset();
+		clearFurnitureTileset();
 		clearSectorTileset();
 	}
 }
