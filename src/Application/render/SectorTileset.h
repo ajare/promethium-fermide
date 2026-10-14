@@ -18,7 +18,7 @@ struct SectorTileset
 PF_APPLICATION_API void setSectorTileset(SectorTileset tileset);
 PF_APPLICATION_API void clearSectorTileset();
 bool drawSectorTileSurface(std::string const& kind, WorldDrawList* drawList,
-    Vec2 minimum, Vec2 maximum, PackedColourValue tint);
+    Vec2 minimum, Vec2 maximum, PackedColourValue tint, float zoom = 1.0f);
 bool drawSectorTileBoundary(char const* kind, WorldDrawList* drawList,
     Vec2 minimum, Vec2 maximum);
 

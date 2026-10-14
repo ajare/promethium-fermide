@@ -1,4 +1,5 @@
 #include "WorldRenderer.h"
+#include <core/World.h>
 #include "WorldRenderSlotAllocator.h"
 #include "SectorTileset.h"
 #include "ObjectTileset.h"
@@ -178,9 +179,22 @@ public:
         : mResources(resources), mRenderSystem(&renderSystem),
           mRenderResources(&renderResources), mScene(std::move(scene)), mWorld(std::move(world)) {
         try {
-            mSectorSet = mResources.acquireResource("SectorAtlas");
+            mSectorName = mWorld->sectorImageSetResourceName();
+            try {
+                auto candidate = mResources.getResource(mSectorName);
+                if (std::dynamic_pointer_cast<resources::ImageSetResource>(candidate)
+                    && mResources.isResourceLoaded(candidate)) {
+                    mResources.acquireResource(candidate);
+                    mSectorSet = candidate;
+                }
+            } catch (std::exception const& error) {
+                std::cerr << "Sector ImageSet unavailable: " << error.what() << '\n';
+            }
+            if (!mSectorSet)
+                std::cerr << "Sector ImageSet unavailable: " << mSectorName << '\n';
             mObjectSet = mResources.acquireResource("ObjectAtlas");
             for (auto const& set : {mSectorSet, mObjectSet}) {
+                if (!set) continue;
                 if (!std::dynamic_pointer_cast<resources::ImageSetResource>(set))
                     throw std::runtime_error("Application atlas must be an ImageSet");
                 if (!mResources.isResourceLoaded(set) ||
@@ -193,6 +207,29 @@ public:
     }
     ~Impl() { cleanup(); }
     void render() {
+        if (mSectorName != mWorld->sectorImageSetResourceName()) {
+            mSectorName = mWorld->sectorImageSetResourceName();
+            for (auto& slot : mSlots) remove(slot);
+            mSlots.clear();
+            mSlotAllocator = {};
+            if (mSectorSet) mResources.releaseResource(mSectorSet);
+            mSectorSet.reset();
+            resources::ResourcePtr candidate;
+            try {
+                candidate = mResources.getResource(mSectorName);
+                if (!std::dynamic_pointer_cast<resources::ImageSetResource>(candidate))
+                    throw std::runtime_error("Selected sector resource is not an ImageSet");
+                mResources.acquireResource(candidate);
+                mResources.createResource(candidate);
+                mResources.loadResource(candidate);
+                mSectorSet = candidate;
+            } catch (std::exception const& error) {
+                if (candidate && std::dynamic_pointer_cast<resources::ImageSetResource>(candidate))
+                    mResources.releaseResource(candidate);
+                std::cerr << "Sector ImageSet unavailable: " << error.what() << '\n';
+            }
+            installAtlasDefinitions();
+        }
         auto const width = mRenderSystem->getWindowWidth();
         auto const height = mRenderSystem->getWindowHeight();
         if (!width || !height) return;
@@ -254,18 +291,21 @@ private:
 		void installAtlasDefinitions()
 		{
 			auto sector = std::dynamic_pointer_cast<resources::ImageSetResource>(mSectorSet);
-			auto sectorImage = std::dynamic_pointer_cast<resources::ImageResource>(sector->getImage());
 			SectorTileset sectorTiles;
-			sectorTiles.width = sectorImage->getWidth();
-			sectorTiles.height = sectorImage->getHeight();
-			for (auto const& [name, definition] : sector->getImageDefinitions())
+			if (sector)
 			{
-				SectorTileRegion region{ static_cast<int>(definition.x),
-					static_cast<int>(definition.y), static_cast<int>(definition.width),
-					static_cast<int>(definition.height) };
-				if (name.rfind("boundary-", 0) == 0)
-					sectorTiles.boundaries.emplace(name.substr(9), region);
-				else sectorTiles.surfaces.emplace(name, region);
+				auto sectorImage = std::dynamic_pointer_cast<resources::ImageResource>(sector->getImage());
+				sectorTiles.width = sectorImage->getWidth();
+				sectorTiles.height = sectorImage->getHeight();
+				for (auto const& [name, definition] : sector->getImageDefinitions())
+				{
+					SectorTileRegion region{ static_cast<int>(definition.x),
+						static_cast<int>(definition.y), static_cast<int>(definition.width),
+						static_cast<int>(definition.height) };
+					if (name.rfind("boundary-", 0) == 0)
+						sectorTiles.boundaries.emplace(name.substr(9), region);
+					else sectorTiles.surfaces.emplace(name, region);
+				}
 			}
 			setSectorTileset(std::move(sectorTiles));
 
@@ -438,6 +478,7 @@ private:
     mpp::ScenePtr mScene;
     std::shared_ptr<const core::World> mWorld;
     resources::ResourcePtr mSectorSet, mObjectSet;
+    std::string mSectorName;
     WorldRenderSlotAllocator mSlotAllocator;
     std::vector<Slot> mSlots;
     std::vector<std::size_t> mSegmentSlots;

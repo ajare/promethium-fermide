@@ -305,12 +305,47 @@ void checkPlayerSelectorDrawing() {
   }
 }
 
+void checkSectorTileScaling() {
+  render::SectorTileset tiles;
+  tiles.width = 512; tiles.height = 320;
+  tiles.surfaces.emplace("corridor", render::SectorTileRegion{0, 0, 128, 320});
+  render::setSectorTileset(tiles);
+  render::WorldDrawList commands({{0, 0}, {1000, 1000}});
+  require(render::drawSectorTileSurface("corridor", &commands, {0, 0}, {256, 240}, render::White, 2.f),
+      "Station corridor must render");
+  require(textured(commands, render::WorldDrawList::Texture::SectorAtlas) == 4,
+      "Two World cells must each render a tile at zoom 2 independent of source size");
+  auto const& triangle = std::get<render::WorldDrawList::Triangle>(commands.commands().front());
+  float maxX{}, maxY{}, maxUvY{};
+  for (int i = 0; i < 3; ++i) {
+    maxX = std::max(maxX, triangle.positions[i].x);
+    maxY = std::max(maxY, triangle.positions[i].y);
+    maxUvY = std::max(maxUvY, triangle.texcoords[i].y);
+  }
+  require(maxX == 128.f && maxY == 240.f && maxUvY < .76f && maxUvY > .74f,
+      "Tile must fill 1x1 World units and crop a partial-height cell");
+  render::WorldDrawList missing({{0, 0}, {1000, 1000}});
+  require(render::drawSectorTileSurface("room", &missing, {0, 0}, {64, 160}, render::White),
+      "Missing tile must emit fallback geometry");
+  auto const& fallback = std::get<render::WorldDrawList::Triangle>(missing.commands().front());
+  require(fallback.texture == render::WorldDrawList::Texture::None
+      && fallback.colour == render::packColour(255, 0, 255), "Missing tile must be opaque magenta");
+  require(!render::drawSectorTileBoundary("floor", &missing, {0, 0}, {64, 2}),
+      "Missing boundary must request plain-line fallback");
+  render::setSectorTileset({});
+  render::WorldDrawList unavailable({{0, 0}, {1000, 1000}});
+  require(render::drawSectorTileSurface("corridor", &unavailable, {0, 0}, {64, 160}, render::White),
+      "Unavailable ImageSet must emit fallback geometry");
+  render::clearSectorTileset();
+}
+
 int main(int argc, char** argv) {
   try {
     require(argc == 2, "Expected the repository resource directory");
     auto directory = std::filesystem::path(argv[1]);
     // The same source manifest supplies the CPU-only artwork rectangles; no
     // graphics context, texture upload, auxiliary manifest or ImGui is needed.
+    checkSectorTileScaling();
     auto atlas = installAtlases(directory);
     checkStagedMap(directory);
     checkNoOverlaysAndAgents();

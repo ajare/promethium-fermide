@@ -3,6 +3,9 @@
 // Independent editor history, dirty-state, and saved-state checks for #127.
 
 #include "DocumentHistory.h"
+#include "DocumentEdit.h"
+#include "core/World.h"
+#include "core/YamlSerializer.h"
 
 #include <stdexcept>
 #include <string>
@@ -16,6 +19,25 @@ namespace
 
 	void independentHistoriesDoNotLeakCommandsOrState()
 	{
+		auto world = std::make_shared<core::World>("Artwork history", 4, 2);
+		DocumentHistory artworkHistory;
+		artworkHistory.markSaved();
+		auto before = captureDocumentSnapshot(world, artworkHistory);
+		world->setSectorImageSetResourceName("StationAtlas");
+		commitDocumentEdit(std::move(before), artworkHistory);
+		require(artworkHistory.isModified(), "Artwork selection must dirty document history");
+		auto restore = [&](DocumentSnapshot const& snapshot) {
+			auto reader = core::YamlSerializer::fromString(snapshot.yaml);
+			reader->deserialize();
+			core::SerializationWorkData data;
+			return world->deserialize(*reader, data);
+		};
+		require(artworkHistory.undo(captureDocumentSnapshot(world, artworkHistory), restore)
+			&& world->sectorImageSetResourceName() == "SectorAtlas" && !artworkHistory.isModified(),
+			"Artwork undo must restore the saved default");
+		require(artworkHistory.redo(captureDocumentSnapshot(world, artworkHistory), restore)
+			&& world->sectorImageSetResourceName() == "StationAtlas" && artworkHistory.isModified(),
+			"Artwork redo must restore the selected ImageSet");
 		DocumentHistory worldHistory;
 		DocumentHistory registryHistory;
 

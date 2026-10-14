@@ -1274,7 +1274,7 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		default: break;
 		}
 		if (!drawSectorTileSurface(kind, drawList, {bounds0.x, bounds1.y},
-			{bounds1.x, bounds0.y}, colour))
+			{bounds1.x, bounds0.y}, colour, gRenderSettings.worldZoom))
 			drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, colour);
 	}
 

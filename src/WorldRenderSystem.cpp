@@ -362,6 +362,10 @@ namespace
 		resources::ResourcePtr requireImageSet(std::string const& name)
 		{
 			auto resource = mResources->acquireResource(name);
+			if (!std::dynamic_pointer_cast<resources::ImageSetResource>(resource)) {
+				mResources->releaseResource(resource);
+				throw std::runtime_error(name + " is not an ImageSet resource");
+			}
 			try
 			{
 				mResources->createResource(resource);
@@ -372,26 +376,27 @@ namespace
 				mResources->releaseResource(resource);
 				throw;
 			}
-			if (!std::dynamic_pointer_cast<resources::ImageSetResource>(resource))
-				throw std::runtime_error(name + " is not an ImageSet resource");
 			return resource;
 		}
 
 		void installAtlasDefinitions()
 		{
 			auto sector = std::dynamic_pointer_cast<resources::ImageSetResource>(mSectorSet);
-			auto sectorImage = std::dynamic_pointer_cast<resources::ImageResource>(sector->getImage());
 			SectorTileset sectorTiles;
-			sectorTiles.width = sectorImage->getWidth();
-			sectorTiles.height = sectorImage->getHeight();
-			for (auto const& [name, definition] : sector->getImageDefinitions())
+			if (sector)
 			{
-				SectorTileRegion region{ static_cast<int>(definition.x),
-					static_cast<int>(definition.y), static_cast<int>(definition.width),
-					static_cast<int>(definition.height) };
-				if (name.rfind("boundary-", 0) == 0)
-					sectorTiles.boundaries.emplace(name.substr(9), region);
-				else sectorTiles.surfaces.emplace(name, region);
+				auto sectorImage = std::dynamic_pointer_cast<resources::ImageResource>(sector->getImage());
+				sectorTiles.width = sectorImage->getWidth();
+				sectorTiles.height = sectorImage->getHeight();
+				for (auto const& [name, definition] : sector->getImageDefinitions())
+				{
+					SectorTileRegion region{ static_cast<int>(definition.x),
+						static_cast<int>(definition.y), static_cast<int>(definition.width),
+						static_cast<int>(definition.height) };
+					if (name.rfind("boundary-", 0) == 0)
+						sectorTiles.boundaries.emplace(name.substr(9), region);
+					else sectorTiles.surfaces.emplace(name, region);
+				}
 			}
 			setSectorTileset(std::move(sectorTiles), reinterpret_cast<ImTextureID>(1));
 
@@ -414,6 +419,22 @@ namespace
 		}
 
 	public:
+		std::string selectSectorImageSet(std::string const& name)
+		{
+			if (name == mSectorSetName) return mSectorDiagnostic;
+			mSectorSetName = name;
+			for (auto& slot : mSlots) remove(slot);
+			mSlots.clear();
+			mSlotAllocator = {};
+			mSectorDiagnostic.clear();
+			if (mSectorSet) mResources->releaseResource(mSectorSet);
+			mSectorSet.reset();
+			try { mSectorSet = requireImageSet(name); }
+			catch (std::exception const& error) { mSectorDiagnostic = error.what(); }
+			installAtlasDefinitions();
+			return mSectorDiagnostic;
+		}
+
 		std::vector<std::string> resourceNames(std::string const& type)
 		{
 			std::vector<std::string> names;
@@ -646,6 +667,8 @@ namespace
 		std::unique_ptr<resources::ResourceManager> mResources;
 		std::shared_ptr<ManifestCatalogResolver> mCatalogResolver;
 		resources::ResourcePtr mSectorSet;
+		std::string mSectorSetName{"SectorAtlas"};
+		std::string mSectorDiagnostic;
 		resources::ResourcePtr mObjectSet;
 		// Every valid, loaded Agent type Resource, keyed by Resource name. The
 		// bundled Human and all manifest-registered types are loaded at startup
@@ -693,6 +716,12 @@ std::uint32_t renderWorldCommands(WorldDrawList const& commands,
 {
 	if (!gSystem) throw std::runtime_error("The World render system is not initialised");
 	return gSystem->render(commands, canvasPosition, canvasSize, canvas);
+}
+
+std::string selectWorldSectorImageSet(std::string const& name)
+{
+	if (!gSystem) return {};
+	return gSystem->selectSectorImageSet(name);
 }
 
 std::vector<std::string> applicationResourceNames(std::string const& type)

@@ -18,7 +18,7 @@ struct SectorTileset
 void setSectorTileset(SectorTileset tileset, ImTextureID texture);
 void clearSectorTileset();
 bool drawSectorTileSurface(std::string const& kind, WorldDrawList* drawList,
-    ImVec2 minimum, ImVec2 maximum, ImU32 tint);
+    ImVec2 minimum, ImVec2 maximum, ImU32 tint, float zoom = 1.0f);
 bool drawSectorTileBoundary(char const* kind, WorldDrawList* drawList,
     ImVec2 minimum, ImVec2 maximum);
 

@@ -1,4 +1,5 @@
 #include <stdexcept>
+#include <core/World.h>
 
 #include <willpower/application/resourcesystem/ResourceManager.h>
 #include <willpower/application/resourcesystem/ImageSetResource.h>
@@ -47,19 +48,31 @@ void MapResources::load(std::function<void()> postFunction) {
 void MapResources::loadAtlases() {
   if (!mMap || !mManager.isResourceLoaded(mMap))
     throw std::runtime_error("Atlas post work requires a loaded Map");
-  constexpr std::array names{"SectorAtlas", "ObjectAtlas"};
+  std::array names{mMap->getWorld()->sectorImageSetResourceName(), std::string{"ObjectAtlas"}};
   for (std::size_t index = 0; index < names.size(); ++index) {
     if (mAtlases[index]) continue;
-    auto atlas = std::dynamic_pointer_cast<wp::application::resourcesystem::ImageSetResource>(
-        mManager.getResource(names[index]));
-    if (!atlas) throw std::runtime_error("Application atlas must be an ImageSet");
+    std::shared_ptr<wp::application::resourcesystem::ImageSetResource> atlas;
+    try {
+      atlas = std::dynamic_pointer_cast<wp::application::resourcesystem::ImageSetResource>(
+          mManager.getResource(names[index]));
+    } catch (std::exception const&) { if (index != 0) throw; }
+    if (!atlas) {
+      if (index == 0) continue; // Explicit invalid artwork is recoverable.
+      throw std::runtime_error("Application atlas must be an ImageSet");
+    }
     atlas->getImage(); // Validate cleanup's dependency before acquisition.
     mManager.acquireResource(atlas);
     mAtlases[index] = atlas;
-    mManager.createResource(atlas);
-    mManager.loadResource(atlas);
-    if (!mManager.isResourceLoaded(atlas) || !mManager.isResourceLoaded(atlas->getImage()))
-      throw std::runtime_error("Application atlas did not finish loading");
+    try {
+      mManager.createResource(atlas);
+      mManager.loadResource(atlas);
+      if (!mManager.isResourceLoaded(atlas) || !mManager.isResourceLoaded(atlas->getImage()))
+        throw std::runtime_error("Application atlas did not finish loading");
+    } catch (std::exception const&) {
+      if (index != 0) throw;
+      mManager.releaseResource(atlas);
+      mAtlases[index].reset();
+    }
   }
 }
 

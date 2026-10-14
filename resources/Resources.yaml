@@ -30,6 +30,23 @@ Resources:
               - { name: "boundary-left", x: "8", y: "179", width: "9", height: "65" }
               - { name: "boundary-right", x: "127", y: "179", width: "9", height: "65" }
     - type: "Image"
+      name: "StationAtlasImage"
+      location: "textures/station-128x320.png"
+      Option:
+        - { name: "filtering", value: "none" }
+        - { name: "uv-style", value: "atlas" }
+    - type: "ImageSet"
+      name: "StationAtlas"
+      DependentResources:
+        DependentResource:
+          id: "Image"
+          ref: "StationAtlasImage"
+      Definitions:
+        Definition:
+          Images:
+            Image:
+              - { name: "corridor", x: "0", y: "0", width: "128", height: "320" }
+    - type: "Image"
       name: "ObjectAtlasImage"
       location: "textures/objects.png"
       Option:

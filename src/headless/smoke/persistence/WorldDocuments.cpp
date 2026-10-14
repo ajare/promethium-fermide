@@ -34,6 +34,9 @@ namespace persistence
 	void worldRoundTripsAuthoredStateAndAgents(smoke::Context const&)
 	{
 		core::World original("Serializable world", 8, 3);
+		require(original.sectorImageSetResourceName() == "SectorAtlas", "New World artwork must default to SectorAtlas");
+		original.setSectorImageSetResourceName("StationAtlas");
+		require(original.isModified(), "Selecting sector artwork must modify the World");
 		auto const fore = original.addRoom("Fore room", 0, 0, 0, 7, 2);
 		original.addRoom("Back room", 1, 0, 0, 7, 2);
 		core::World::CreateDoorOptions doorOptions;
@@ -64,7 +67,7 @@ namespace persistence
 		original.serialize(*writer, workData);
 		writer->serialize();
 		auto const yaml = writer->getSerializedString();
-		require(yaml.find("version: 65") != std::string::npos
+		require(yaml.find("version: 66") != std::string::npos
 			&& yaml.find("layers: 2") != std::string::npos
 			&& yaml.find("layerNames:") != std::string::npos
 			&& yaml.find("- Layer 0") != std::string::npos
@@ -88,6 +91,23 @@ namespace persistence
 		auto reader = core::YamlSerializer::fromString(yaml);
 		reader->deserialize();
 		require(loaded.deserialize(*reader, workData), "World deserialization failed");
+		require(loaded.sectorImageSetResourceName() == "StationAtlas", "Sector ImageSet did not round-trip");
+		for (bool missing : {false, true})
+		{
+			auto artworkYaml = yaml;
+			auto field = artworkYaml.find("sectorImageSet:");
+			require(field != std::string::npos, "World omitted sector artwork resource name");
+			auto begin = artworkYaml.rfind('\n', field) + 1;
+			auto end = artworkYaml.find('\n', field);
+			if (missing) artworkYaml.erase(begin, end - begin + 1);
+			else artworkYaml.replace(field, end - field, "sectorImageSet: UnavailableArtwork");
+			auto artworkReader = core::YamlSerializer::fromString(artworkYaml);
+			artworkReader->deserialize();
+			core::World artworkLoaded("Artwork", 2, 2);
+			require(artworkLoaded.deserialize(*artworkReader, workData), "Artwork document failed to load");
+			require(artworkLoaded.sectorImageSetResourceName() == (missing ? "SectorAtlas" : "UnavailableArtwork"),
+				"Absent artwork did not default or unavailable resource name was lost");
+		}
 		require(loaded.getName() == original.getName()
 			&& loaded.getCellsWide() == original.getCellsWide()
 			&& loaded.getLevelsHigh() == original.getLevelsHigh()
@@ -154,7 +174,7 @@ namespace persistence
 				legacyYaml.replace(at, from.size(), to);
 			}
 		};
-		replaceAll("version: 65", "version: 14");
+		replaceAll("version: 66", "version: 14");
 		if (auto field = legacyYaml.find("destinationMarker:"); field != std::string::npos)
 		{
 			auto begin = legacyYaml.rfind('\n', field) + 1;

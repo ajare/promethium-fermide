@@ -611,6 +611,7 @@ namespace core
 		std::shared_ptr<const FurnitureCatalogue> mFurnitureCatalogue;
 		// The catalogue is an application Resource (ADR 0010) resolved by name.
 		std::string mFurnitureCatalogueResourceName;
+		std::string mSectorImageSetResourceName{"SectorAtlas"};
 		std::vector<FurnitureInstance> mFurniture;
 		uint64_t mNextFurnitureId{ 1 };
 		struct MovementGoal
@@ -3196,6 +3197,13 @@ namespace core
 			std::shared_ptr<const FurnitureCatalogue> catalogue);
 		auto const& furnitureCatalogue() const { return mFurnitureCatalogue; }
 		std::string const& furnitureCatalogueResourceName() const { return mFurnitureCatalogueResourceName; }
+		std::string const& sectorImageSetResourceName() const { return mSectorImageSetResourceName; }
+		void setSectorImageSetResourceName(std::string name)
+		{
+			if (name == mSectorImageSetResourceName) return;
+			mSectorImageSetResourceName = std::move(name);
+			modify();
+		}
 		auto const& furniture() const { return mFurniture; }
 		bool isFurnitureMarker(MarkerId id) const;
 		AgentId usablePointOccupant(MarkerId id) const;

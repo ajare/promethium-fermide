@@ -54,7 +54,8 @@ public:
                      wp::application::resourcesystem::ResourceManager& manager, bool& fail,
                      wp::application::resourcesystem::ResourceLocation* location)
       : ImageResource(name, "", name == "SectorAtlasImage"
-            ? "textures/sector-atlas-draft.png" : "textures/objects.png", {}, location),
+            ? "textures/sector-atlas-draft.png" : name == "StationAtlasImage"
+                ? "textures/station-128x320.png" : "textures/objects.png", {}, location),
         mManager(manager), mFail(fail) {}
 };
 
@@ -864,6 +865,30 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
 }
 }
 
+void checkSelectedSectorAtlases(wp::application::resourcesystem::ResourceManager& manager) {
+  using namespace wp::application::resourcesystem;
+  for (auto const* name : {"StationAtlas", "MissingAtlas", "WorldFile"}) {
+    pf::application::MapResources resources(manager);
+    resources.load();
+    auto map = std::dynamic_pointer_cast<pf::application::Map>(manager.getResource("World", "World"));
+    map->getWorld()->setSectorImageSetResourceName(name);
+    resources.loadAtlases(); // Missing or wrong-type artwork must not refuse the World.
+    require(map->getWorld()->sectorImageSetResourceName() == name,
+        "Map atlas loading must preserve the authored resource name");
+    if (std::string_view(name) == "StationAtlas") {
+      auto atlas = std::dynamic_pointer_cast<ImageSetResource>(manager.getResource(name));
+      require(atlas && manager.isResourceLoaded(atlas) && manager.isResourceLoaded(atlas->getImage()),
+          "MapLoad must load the selected Station ImageSet and its real PNG dependency");
+      auto const& definitions = atlas->getImageDefinitions();
+      auto const& corridor = definitions.at("corridor");
+      require(definitions.size() == 1 && corridor.x == 0 && corridor.y == 0
+          && corridor.width == 128 && corridor.height == 320,
+          "StationAtlas must define only the first corridor variation");
+    }
+    resources.unload();
+  }
+}
+
 int main(int argc, char** argv) {
   try {
     require(argc == 2, "Expected the repository resource directory");
@@ -888,7 +913,7 @@ int main(int argc, char** argv) {
           });
       manager.addResourceLocation("Directory", argv[1], "Resources.yaml");
       bool failAtlas = false;
-      for (auto name : {"SectorAtlasImage", "ObjectAtlasImage"})
+      for (auto name : {"SectorAtlasImage", "ObjectAtlasImage", "StationAtlasImage"})
         manager.addResource(std::make_shared<HeadlessAtlasImage>(name, manager, failAtlas, location));
       std::array<wp::application::StateFactory*, 6> factories{};
       for (std::size_t index = 0; index < names.size(); ++index) {
@@ -902,6 +927,7 @@ int main(int argc, char** argv) {
       checkFlow(factories, manager);
       checkFlow(factories, manager); // Recreate destroyed data with the same manager.
       checkFlow(factories, manager, true);
+      checkSelectedSectorAtlases(manager);
       dllOnExit();
       require(!dllGetNextStateFactory(), "No factory after exit");
       dllOnExit();

@@ -8139,6 +8139,23 @@ void renderWorldPanel(shared_ptr<core::World> world)
 		renderAgentView(world);
 	}
 
+	if (ImGui::CollapsingHeader("Sector artwork"))
+	{
+		auto const& selected = world->sectorImageSetResourceName();
+		if (ImGui::BeginCombo("ImageSet", selected.c_str()))
+		{
+			for (auto const& name : applicationResourceNames("ImageSet"))
+				if (ImGui::Selectable(name.c_str(), name == selected))
+				{
+					auto before = captureDocumentSnapshot(world);
+					world->setSectorImageSetResourceName(name);
+					commitDocumentEdit(std::move(before));
+				}
+			ImGui::EndCombo();
+		}
+		auto diagnostic = selectWorldSectorImageSet(world->sectorImageSetResourceName());
+		if (!diagnostic.empty()) ImGui::TextWrapped("Sector ImageSet unavailable: %s", diagnostic.c_str());
+	}
 	renderFurniturePanel(world, gWorldFilepath,
 		[] { return applicationResourceNames("FurnitureCatalogue"); });
 	renderSelectedObjectPanel(world);
@@ -9709,6 +9726,7 @@ void renderUI(shared_ptr<core::World>& world, shared_ptr<core::Agent> pathingAge
 		return;
 	}
 
+	selectWorldSectorImageSet(world->sectorImageSetResourceName());
 	auto const graph = world->getGraph();
 	renderStatusBar(world);
 	renderControlsWindow(world, graph, pathingAgent);
