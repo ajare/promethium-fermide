@@ -278,6 +278,7 @@ set(editor_names
     station/microbialConditionWorkflow
     station/cropWorkflow
     station/algaeWorkflow
+    station/coupledLiveViewWorkflow
 )
 
 if(DEFINED LANE)

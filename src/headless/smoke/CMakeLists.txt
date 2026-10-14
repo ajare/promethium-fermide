@@ -75,7 +75,7 @@ endfunction()
 
 pf_add_smoke_module(pf-smoke-station
     NAME station
-    SOURCES station/Main.cpp station/Documents.cpp
+    SOURCES station/Main.cpp station/Documents.cpp station/Coupled.cpp
     LIBRARIES promethium-fermide-core
     LABELS "core;station"
     TIMEOUT 600
@@ -94,7 +94,9 @@ foreach(check lifecycle batching eventBound persistence stores transfers compoun
         # #570 registers the microbial condition/recovery gate so its
         # zero-coefficient regression coverage runs in CI.
         harvest algae nutrientConservation bioContainment bioHazardFiles bioCapacityFiles
-        microbialConditionRecovery)
+        microbialConditionRecovery
+        # #421: coupled microbial and carbon-loop operation in one World.
+        coupledNominal coupledStress)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()
@@ -103,6 +105,10 @@ set_tests_properties(station-batteriesEclipse PROPERTIES TIMEOUT 180)
 set_tests_properties(station-batteriesCharging PROPERTIES TIMEOUT 120)
 # #415 dispatch reserve-exhaustion runs a multi-thousand-tick battery drain.
 set_tests_properties(station-dispatch PROPERTIES TIMEOUT 180)
+# #421 the coupled stress scenarios run multi-hundred-second simulated
+# runs across several coupled Worlds in one check.
+set_tests_properties(station-coupledStress PROPERTIES TIMEOUT 180)
+set_tests_properties(station-coupledNominal PROPERTIES TIMEOUT 120)
 foreach(hourScale batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesLimited batteriesLosses batteriesDischarging)
     set_tests_properties(station-${hourScale} PROPERTIES TIMEOUT 90)
@@ -650,6 +656,10 @@ add_test(NAME station-editor-crops COMMAND pf-smoke-editor --check station/cropW
 set_tests_properties(station-editor-crops PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-algae COMMAND pf-smoke-editor --check station/algaeWorkflow)
 set_tests_properties(station-editor-algae PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+# #421: the coupled rig's live limiting processes must be observable in
+# the separate Station Systems window.
+add_test(NAME station-editor-coupled-live-view COMMAND pf-smoke-editor --check station/coupledLiveViewWorkflow)
+set_tests_properties(station-editor-coupled-live-view PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 
 pf_add_smoke_contract(NAME smoke-editor-contract COMMAND ${CMAKE_COMMAND}
     "-DEDITOR=$<TARGET_FILE:pf-smoke-editor>"

@@ -8775,10 +8775,14 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     .. "' hydrogen/oxygen/water reaction ledger does not close")
             local energyResidual = cell.chemicalEnergyKJ - cell.electricalKJ
                 - cell.wasteHeatKJ
-            assert(math.abs(energyResidual) <= bound,
+            -- The kJ ledger accumulates float roundoff at the energy
+            -- scale, not the mass scale: the bound must be relative to
+            -- the energy magnitudes booked (#421).
+            local energyBound = BALANCE_TOLERANCE * math.max(1, cell.chemicalEnergyKJ)
+            assert(math.abs(energyResidual) <= energyBound,
                 "fuel cell '" .. cell.id
                     .. "' chemical/electrical/waste energy ledger does not close")
-            assert(cell.electricalKJ <= cell.chemicalEnergyKJ + bound,
+            assert(cell.electricalKJ <= cell.chemicalEnergyKJ + energyBound,
                 "fuel cell '" .. cell.id
                     .. "' delivered more electrical energy than the reactants' chemical energy")
             assert(cell.lastOutputKW <= cell.ratedOutputKW + BALANCE_TOLERANCE,
@@ -8831,7 +8835,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     .. "' feed/oxygen/water/nutrient/water/CO2/residue digestion ledger does not close")
             local energyResidual = proc.energySuppliedKJ + proc.reactionHeatKJ
                 - proc.heatRoutedKJ
-            assert(math.abs(energyResidual) <= bound,
+            local energyLedgerBound = BALANCE_TOLERANCE * math.max(1,
+                proc.energySuppliedKJ + proc.reactionHeatKJ)
+            assert(math.abs(energyResidual) <= energyLedgerBound,
                 "microbial processor '" .. proc.id
                     .. "' supplied/released/routed energy ledger does not close")
             local composition = proc.feed.composition
@@ -8986,7 +8992,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local energyResidual = crop.lightEnergyKJ + crop.circulationEnergyKJ
                 + crop.respirationHeatKJ - crop.chemicalEnergyFixedKJ
                 - crop.heatIntoCompartmentKJ
-            assert(math.abs(energyResidual) <= bound,
+            local energyLedgerBound = BALANCE_TOLERANCE * math.max(1,
+                crop.lightEnergyKJ + crop.circulationEnergyKJ + crop.respirationHeatKJ)
+            assert(math.abs(energyResidual) <= energyLedgerBound,
                 "crop population '" .. crop.id
                     .. "' delivered/fixed/respired/heat energy ledger does not close")
             local energyCapBound = BALANCE_TOLERANCE * math.max(1, crop.lightEnergyKJ)

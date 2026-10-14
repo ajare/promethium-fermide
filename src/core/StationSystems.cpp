@@ -11583,10 +11583,16 @@ namespace core
 						+ "water/oxygen/hydrogen split does not close within tolerance", false;
 				auto const energyResidual = cell.energySuppliedKJ
 					- cell.chemicalEnergyKJ - cell.heatRoutedKJ;
-				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > massBound)
+				// The kJ ledger accumulates float roundoff at the energy
+				// scale, not the mass scale: the bound must be relative to
+				// the energy magnitudes booked, as every other energy ledger
+				// is (#421).
+				auto const energyBound = StationBalanceTolerance
+					* std::max(1.0, cell.energySuppliedKJ);
+				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > energyBound)
 					return violation = where
 						+ "supplied/chemical/heat energy ledger does not close within tolerance", false;
-				if (cell.chemicalEnergyKJ > cell.energySuppliedKJ + massBound)
+				if (cell.chemicalEnergyKJ > cell.energySuppliedKJ + energyBound)
 					return violation = where
 						+ "booked more chemical energy than the electrical dose supplied", false;
 				if (cell.lastSplitKg > cell.lastRequestedKg + massBound)
@@ -11654,10 +11660,12 @@ namespace core
 						+ "hydrogen/oxygen/water reaction ledger does not close within tolerance", false;
 				auto const energyResidual = cell.chemicalEnergyKJ
 					- cell.electricalKJ - cell.wasteHeatKJ;
-				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > massBound)
+				auto const energyBound = StationBalanceTolerance
+					* std::max(1.0, cell.chemicalEnergyKJ);
+				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > energyBound)
 					return violation = where
 						+ "chemical/electrical/waste energy ledger does not close within tolerance", false;
-				if (cell.electricalKJ > cell.chemicalEnergyKJ + massBound)
+				if (cell.electricalKJ > cell.chemicalEnergyKJ + energyBound)
 					return violation = where
 						+ "delivered more electrical energy than the reactants' chemical energy", false;
 				if (cell.lastOutputKW > cell.authored.ratedOutputKW + StationBalanceTolerance)
@@ -11700,7 +11708,9 @@ namespace core
 						+ "CO2/hydrogen/methane/water conversion ledger does not close within tolerance", false;
 				auto const energyResidual = reactor.energySuppliedKJ + reactor.reactionHeatKJ
 					- reactor.heatRoutedKJ;
-				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > massBound)
+				auto const energyBound = StationBalanceTolerance
+					* std::max(1.0, reactor.energySuppliedKJ + reactor.reactionHeatKJ);
+				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > energyBound)
 					return violation = where
 						+ "supplied/released/routed energy ledger does not close within tolerance", false;
 			}
@@ -11732,10 +11742,12 @@ namespace core
 						+ "methane/hydrogen/carbon split ledger does not close within tolerance", false;
 				auto const energyResidual = processor.energySuppliedKJ
 					- processor.reactionHeatKJ - processor.heatRoutedKJ;
-				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > massBound)
+				auto const energyBound = StationBalanceTolerance
+					* std::max(1.0, processor.energySuppliedKJ);
+				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > energyBound)
 					return violation = where
 						+ "supplied/absorbed/routed energy ledger does not close within tolerance", false;
-				if (processor.reactionHeatKJ > processor.energySuppliedKJ + massBound)
+				if (processor.reactionHeatKJ > processor.energySuppliedKJ + energyBound)
 					return violation = where
 						+ "absorbed more reaction heat than the electrical dose supplied", false;
 			}
@@ -11808,7 +11820,9 @@ namespace core
 						+ "feed/oxygen/water/nutrient/water/CO2/residue digestion ledger does not close within tolerance", false;
 				auto const energyResidual = processor.energySuppliedKJ + processor.reactionHeatKJ
 					- processor.heatRoutedKJ;
-				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > massBound)
+				auto const energyLedgerBound = StationBalanceTolerance
+					* std::max(1.0, processor.energySuppliedKJ + processor.reactionHeatKJ);
+				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > energyLedgerBound)
 					return violation = where
 						+ "supplied/released/routed energy ledger does not close within tolerance", false;
 				auto const& composition = *stores[processor.feedStoreIndex].authored.composition;
@@ -11938,7 +11952,10 @@ namespace core
 				auto const energyResidual = crop.lightEnergyKJ + crop.circulationEnergyKJ
 					+ crop.respirationHeatKJ - crop.chemicalEnergyFixedKJ
 					- crop.heatIntoCompartmentKJ;
-				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > massBound)
+				auto const energyLedgerBound = StationBalanceTolerance
+					* std::max(1.0, crop.lightEnergyKJ + crop.circulationEnergyKJ
+						+ crop.respirationHeatKJ);
+				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > energyLedgerBound)
 					return violation = where
 						+ "delivered/fixed/respired/heat energy ledger does not close within tolerance", false;
 				auto const energyCapBound = StationBalanceTolerance
@@ -12049,7 +12066,10 @@ namespace core
 				auto const energyResidual = culture.lightEnergyKJ + culture.circulationEnergyKJ
 					+ culture.respirationHeatKJ - culture.chemicalEnergyFixedKJ
 					- culture.heatIntoCompartmentKJ;
-				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > massBound)
+				auto const energyLedgerBound = StationBalanceTolerance
+					* std::max(1.0, culture.lightEnergyKJ + culture.circulationEnergyKJ
+						+ culture.respirationHeatKJ);
+				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > energyLedgerBound)
 					return violation = where
 						+ "delivered/fixed/respired/heat energy ledger does not close within tolerance", false;
 				auto const energyCapBound = StationBalanceTolerance

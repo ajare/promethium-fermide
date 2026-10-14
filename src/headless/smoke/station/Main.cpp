@@ -1,5 +1,6 @@
 #include "Smoke.h"
 #include "Documents.h"
+#include "Coupled.h"
 #include "core/World.h"
 #include "core/AgentTagRegistryDocument.h"
 #include "core/YamlSerializer.h"
@@ -18451,5 +18452,6 @@ int main(int argc, char** argv)
 		{"batteriesQuick", batteriesQuick},
 		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"nutrientConservation", nutrientConservation}, {"bioContainment", bioContainment}, {"outages", outages}, {"failures", failures}, {"dispatch", dispatch}, {"protectedServices", protectedServices}, {"recovery", recovery}};
 	registerStationDocumentChecks(checks);
+	registerCoupledStationChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

@@ -3,6 +3,7 @@
 #include "State.h"
 #include "StationSystemsWindow.h"
 #include "DocumentEdit.h"
+#include "../CoupledRig.h"
 #include "core/World.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
@@ -1950,6 +1951,65 @@ void bufferWorkflow(smoke::Context const&)
 		#undef REQ
 		require(driver.passed(), "Microbial condition workflow failed on the Test Engine");
 	}
+// #421: the coupled rig's live picture is observable in the separate
+// Station Systems window. The rig is run with the hydrogen feed drained
+// and the electrolyzer off, so the Sabatier stage carries a named
+// limiter, and the window must surface the coupled subsystems and the
+// limiting process beside their live numbers.
+void coupledLiveViewWorkflow(smoke::Context const&)
+{
+	using smoke::require;
+	headless::ScopedImGuiContext context;
+	auto& io = ImGui::GetIO();
+	io.DisplaySize = {1200.0f, 6400.0f};
+	io.Fonts->AddFontDefault(); io.Fonts->Build();
+	DocumentHistory history;
+	StationSystemsWindow window;
+	auto world = std::make_shared<core::World>("Coupled live view", 2, 2);
+	world->pauseSimulation(); world->finishBuild();
+	auto rig = coupled_rig::nominal();
+	for (auto& store : rig.stores)
+		if (store.id == "h2") store.startingQualified = 0.0;
+	rig.electrolyzers.front().rateKgPerS = 0.0;
+	std::string diagnostic;
+	require(world->configureStationSystems(rig, false, &diagnostic), diagnostic.c_str());
+	world->resumeSimulation();
+	require(world->advanceTicks(600), "the coupled live-view station did not tick");
+	auto const& snap = world->getStationSystemsSnapshot();
+	require(snap.healthy
+		&& !snap.sabatierReactors.empty()
+		&& snap.sabatierReactors.front().blockReason.find("hydrogen feed store 'h2'")
+			!= std::string::npos,
+		"the coupled fixture did not reach the hydrogen-starved state");
+	headless::TestEngineDriver driver([&]
+	{
+		ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1150, 6300});
+		window.render(world, history);
+	});
+	window.visible = true;
+	driver.frame(); driver.frame();
+	#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+	driver.run("station", "coupledLiveView", [&](ImGuiTestContext* ctx)
+	{
+		ctx->SetRef("Station Systems");
+		REQ(driver.contains("Active World: Coupled live view"),
+			"station window missing the coupled World");
+		REQ(driver.contains("Sabatier reactors")
+			&& driver.contains("hydrogen feed store 'h2' has nothing drawable"),
+			"window did not surface the Sabatier limiting process");
+		REQ(driver.contains("Methane processors"),
+			"window missing the methane processing stage");
+		REQ(driver.contains("Microbial processors"),
+			"window missing the microbial nutrient stage");
+		REQ(driver.contains("Crop populations") && driver.contains("Algae cultures"),
+			"window missing the coupled biology stages");
+		REQ(driver.contains("CO2 capture"),
+			"window missing the CO2 capture stage");
+	});
+	#undef REQ
+	require(driver.passed(), "coupled live view failed on the Test Engine");
+}
+
 void cropWorkflow(smoke::Context const&)
 	{
 		using smoke::require;
@@ -2284,4 +2344,5 @@ void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 	checks.push_back({"station/microbialConditionWorkflow", microbialConditionWorkflow});
 	checks.push_back({"station/cropWorkflow", cropWorkflow});
 	checks.push_back({"station/algaeWorkflow", algaeWorkflow});
+	checks.push_back({"station/coupledLiveViewWorkflow", coupledLiveViewWorkflow});
 }
