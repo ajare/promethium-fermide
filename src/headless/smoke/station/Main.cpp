@@ -19685,6 +19685,238 @@ void recovery(smoke::Context const& context)
 		require(closeTo(storeSnap(world, "fuel").currentQualified, 100.0),
 			"fuel was burned for a load that cannot run on its declared feed");
 	}
+
+	// Scenario N (#590): a battery-funded surge is booked through the
+	// same station-wide aggregate accounting as every other consumer.
+	// A 2 kW load behind 2 kW of sun can pay its normal service from
+	// generation but nothing of its 1 kW surge: the whole surge is
+	// battery delivery. The station-wide discharge must show that
+	// surge exactly once, the station-wide shortfall must agree with
+	// the single bank's own shortfall on every tick (the ticket's bug
+	// hid a bank shortfall behind a zero aggregate), and the bank's
+	// energy ledger must close over the surge with no phantom draw.
+	// The rig is then reset and replayed to prove the battery surge
+	// state is deterministic.
+	{
+		core::World world("RecN", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		settings.solarArrays = { solar(2.0, stepProfile(100.0, {{0.0, 0.0}, {5.0, 1.0}})) };
+		// demand 2, min 2, dwell 0, hysteresis 0, surge 1 kW for 0.05s.
+		settings.equipmentLoads = { recoveryLoad("surger", 2.0, 0.0, 0.0, 0.0, 1.0, 0.05, 0.0) };
+		core::BatterySettings bank;
+		bank.id = "bank"; bank.nameplateKWh = 1.0; bank.usableKWh = 1.0;
+		bank.startingStoredKWh = 0.5; bank.maxDischargeKW = 1.0; bank.maxChargeKW = 0.0;
+		settings.batteries = { bank };
+		configure(world, settings, "recovery N rig");
+		world.resumeSimulation();
+		double surgeEnergy = 0.0;
+		bool sawBatterySurge = false;
+		for (uint64_t tick = 1; tick <= 480; ++tick) // t = 8s, past the restart
+		{
+			runOrDiagnose(world, 1, "recovery N");
+			auto const& snap = world.getStationSystemsSnapshot();
+			auto const& l = loadSnap(world, "surger");
+			// One bank: the station-wide shortfall is exactly the bank's,
+			// every tick, funded or not.
+			require(std::abs(snap.power.batteryShortfallKW
+					- snap.power.batteries[0].lastDischargeShortfallKW) <= 1e-9,
+				"the station-wide battery shortfall disagreed with the bank's surge shortfall");
+			require(snap.power.totalSuppliedKW + 1e-9
+				>= l.suppliedKW + l.recoverySurgeKW,
+				"the supplied total did not count the battery-funded surge");
+			if (l.recoverySurgeKW > 1e-9)
+			{
+				// Generation is fully spent on the normal service, so the
+				// whole surge is battery delivery and shows in the
+				// station-wide discharge exactly once.
+				require(std::abs(snap.power.batteryDischargeKW - l.recoverySurgeKW) <= 1e-9,
+					"the battery-funded surge was not booked into the station-wide discharge");
+				require(l.suppliedKW >= 2.0 - 1e-9,
+					"the battery-funded surge starved the load's normal service");
+				sawBatterySurge = true;
+			}
+			surgeEnergy += l.recoverySurgeKW * core::World::getFixedTimestep();
+		}
+		require(sawBatterySurge, "the surge was never battery-funded");
+		require(closeTo(surgeEnergy, 1.0 * 0.05, 1e-9),
+			"the battery-funded surge did not deliver its authored energy");
+		{
+			auto const& snap = world.getStationSystemsSnapshot();
+			auto const surgeEnergyKWh = surgeEnergy / 3600.0;
+			require(closeTo(snap.power.batteries[0].deliveredKWh, surgeEnergyKWh, 1e-9),
+				"the bank's delivered ledger does not match the surge energy booked");
+			require(closeTo(snap.power.batteries[0].storedKWh, 0.5 - surgeEnergyKWh, 1e-9),
+				"the bank's stored energy does not close over the surge with no phantom draw");
+		}
+		// Deterministic reset/replay (#590): the same authored rig
+		// replayed from a reset reproduces the battery surge ledger
+		// exactly - host and bundled model agree tick for tick.
+		auto const before = world.getStationSystemsSnapshot();
+		world.pauseSimulation(); world.resetSimulation(); world.resumeSimulation();
+		runOrDiagnose(world, 480, "recovery N replay");
+		require(world.getStationSystemsSnapshot() == before,
+			"the battery-funded surge did not replay deterministically after reset");
+	}
+
+	// Scenario O (#590): a surge paid partly by generation and partly
+	// by the battery. 2.5 kW of sun covers the 2 kW normal service and
+	// half of the 1 kW surge; the battery delivers the other half. The
+	// split battery delivery is booked into the station-wide discharge
+	// and the shortfall keeps agreeing with the single bank - now at a
+	// nonzero delivery with zero unserved remainder.
+	{
+		core::World world("RecO", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		settings.solarArrays = { solar(2.5, stepProfile(100.0, {{0.0, 0.0}, {5.0, 1.0}})) };
+		// demand 2, min 2, dwell 0, hysteresis 0, surge 1 kW for 0.05s.
+		settings.equipmentLoads = { recoveryLoad("mixer", 2.0, 0.0, 0.0, 0.0, 1.0, 0.05, 0.0) };
+		core::BatterySettings bank;
+		bank.id = "bank"; bank.nameplateKWh = 1.0; bank.usableKWh = 1.0;
+		bank.startingStoredKWh = 0.5; bank.maxDischargeKW = 1.0; bank.maxChargeKW = 0.0;
+		settings.batteries = { bank };
+		configure(world, settings, "recovery O rig");
+		world.resumeSimulation();
+		bool sawSplitSurge = false;
+		for (uint64_t tick = 1; tick <= 480; ++tick) // t = 8s, past the restart
+		{
+			runOrDiagnose(world, 1, "recovery O");
+			auto const& snap = world.getStationSystemsSnapshot();
+			auto const& l = loadSnap(world, "mixer");
+			require(std::abs(snap.power.batteryShortfallKW
+					- snap.power.batteries[0].lastDischargeShortfallKW) <= 1e-9,
+				"the station-wide battery shortfall disagreed with the bank's during the split surge");
+			require(snap.power.totalSuppliedKW + 1e-9
+				>= l.suppliedKW + l.recoverySurgeKW,
+				"the supplied total did not count the split-funded surge");
+			if (l.recoverySurgeKW > 0.9)
+			{
+				// Full-surge ticks: generation carries 0.5 kW of the surge
+				// and the battery the other half, exactly once. The last,
+				// prorated tick of the surge budget carries the same split
+				// against its shortened slice.
+				auto const expectedBatteryShare = std::max(0.0, l.recoverySurgeKW - 0.5);
+				require(std::abs(snap.power.batteryDischargeKW - expectedBatteryShare) <= 1e-6,
+					"the battery's half of the split surge was not booked exactly once");
+				require(std::abs(l.suppliedKW - 2.0) <= 1e-9,
+					"the split surge disturbed the load's normal service");
+				sawSplitSurge = true;
+			}
+			else if (l.recoverySurgeKW > 1e-9)
+			{
+				// The prorated tail fits inside generation's leftover, so
+				// the battery never delivers more than its half-share.
+				auto const expectedBatteryShare = std::max(0.0, l.recoverySurgeKW - 0.5);
+				require(std::abs(snap.power.batteryDischargeKW - expectedBatteryShare) <= 1e-6,
+					"the battery delivered beyond its share of the surge tail");
+			}
+		}
+		require(sawSplitSurge, "the surge never ran split between generation and battery");
+	}
+
+	// Scenario P (#590): multiple banks route one surge in declaration
+	// order and the station-wide totals count every watt exactly once.
+	// The banks together carry only 1.5 kW - below the 2 kW minimum -
+	// so the dark half sheds the load, and the restart surge of 1 kW
+	// routes across them: the small bank can take only 0.4 kW and the
+	// big bank carries the rest. The station-wide discharge is the sum
+	// of the two banks' delivery, and the station-wide shortfall stays
+	// zero: the small bank's routed-but-later-served remainder is its
+	// own per-bank diagnostic and never leaks into the station
+	// shortage readout as a double count.
+	{
+		core::World world("RecP", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		settings.solarArrays = { solar(2.0, stepProfile(100.0, {{0.0, 0.0}, {5.0, 1.0}})) };
+		// demand 2, min 2, dwell 0, hysteresis 0, surge 1 kW for 0.05s.
+		settings.equipmentLoads = { recoveryLoad("rig", 2.0, 0.0, 0.0, 0.0, 1.0, 0.05, 0.0) };
+		core::BatterySettings small;
+		small.id = "small"; small.nameplateKWh = 1.0; small.usableKWh = 1.0;
+		small.startingStoredKWh = 0.5; small.maxDischargeKW = 0.4; small.maxChargeKW = 0.0;
+		core::BatterySettings big;
+		big.id = "big"; big.nameplateKWh = 1.0; big.usableKWh = 1.0;
+		big.startingStoredKWh = 0.5; big.maxDischargeKW = 1.1; big.maxChargeKW = 0.0;
+		settings.batteries = { small, big };
+		configure(world, settings, "recovery P rig");
+		world.resumeSimulation();
+		bool sawMultiBankSurge = false;
+		for (uint64_t tick = 1; tick <= 480; ++tick) // t = 8s, past the restart
+		{
+			runOrDiagnose(world, 1, "recovery P");
+			auto const& snap = world.getStationSystemsSnapshot();
+			auto const& l = loadSnap(world, "rig");
+			require(snap.power.totalSuppliedKW + 1e-9
+				>= l.suppliedKW + l.recoverySurgeKW,
+				"the supplied total did not count the multi-bank surge");
+			if (l.recoverySurgeKW > 1e-9)
+			{
+				// The whole surge is battery delivery and the station-wide
+				// discharge is the two banks' delivery counted once.
+				require(std::abs(snap.power.batteryDischargeKW - l.recoverySurgeKW) <= 1e-9,
+					"the multi-bank surge was not booked into the station-wide discharge exactly once");
+				require(std::abs(snap.power.batteryDischargeKW
+						- (snap.power.batteries[0].lastDischargeKW
+							+ snap.power.batteries[1].lastDischargeKW)) <= 1e-9,
+					"the station-wide discharge is not the sum of the banks' delivery");
+				// Declaration-order routing: the small bank takes the surge
+				// first, up to its power limit.
+				auto const expectedSmall = std::min(l.recoverySurgeKW, 0.4);
+				require(std::abs(snap.power.batteries[0].lastDischargeKW - expectedSmall) <= 1e-9,
+					"the surge did not route through the banks in declaration order");
+				// Nothing went unserved, so the station-wide shortfall is
+				// zero - it never accumulates the small bank's routed
+				// remainder that the big bank went on to deliver.
+				require(snap.power.batteryShortfallKW <= 1e-9,
+					"a served routed remainder double-counted into the station battery shortfall");
+				sawMultiBankSurge = true;
+			}
+		}
+		require(sawMultiBankSurge, "the surge never routed across multiple banks");
+	}
+
+	// Scenario Q (#590): the ticket's probe through the public seam. A
+	// 1 kW load with a 1 kW surge behind exactly 1 kW of sun and a
+	// battery that can discharge nothing: the restart is unfundable
+	// every tick. Nothing is routed to the battery and nothing is
+	// refused, so the station-wide shortfall and the bank's own
+	// shortfall agree at zero - the aggregate can never hide a
+	// routed-but-unserved surge from the station readout, and the
+	// refused restart never publishes service.
+	{
+		core::World world("RecQ", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		settings.solarArrays = { solar(1.0, stepProfile(100.0, {{0.0, 0.0}, {5.0, 1.0}})) };
+		// demand 1, min 1, dwell 0, hysteresis 0, surge 1 kW for 0.02s.
+		settings.equipmentLoads = { recoveryLoad("starter", 1.0, 0.0, 0.0, 0.0, 1.0, 0.02, 0.0) };
+		core::BatterySettings dead;
+		dead.id = "dead"; dead.nameplateKWh = 1.0; dead.usableKWh = 1.0;
+		dead.startingStoredKWh = 0.5; dead.maxDischargeKW = 0.0; dead.maxChargeKW = 0.0;
+		settings.batteries = { dead };
+		configure(world, settings, "recovery Q rig");
+		world.resumeSimulation();
+		for (uint64_t tick = 1; tick <= 600; ++tick) // t = 10s of refused restarts
+		{
+			runOrDiagnose(world, 1, "recovery Q");
+			auto const& snap = world.getStationSystemsSnapshot();
+			auto const& l = loadSnap(world, "starter");
+			require(std::abs(snap.power.batteryShortfallKW
+					- snap.power.batteries[0].lastDischargeShortfallKW) <= 1e-9,
+				"the station-wide battery shortfall hid the bank's shortfall on the failed surge");
+			require(l.suppliedKW <= 1e-9, "the unfundable restart published normal service");
+			require(l.recoverySurgeKW <= 1e-9, "the unfundable restart drew surge power");
+			require(snap.power.batteryDischargeKW <= 1e-9,
+				"the failed surge discharged the battery it could not pay with");
+		}
+		require(loadSnap(world, "starter").recoveryStage != core::StationLoadRecoveryStage::Active,
+			"an unfundable surge restart settled to Active without ever paying its surge");
+	}
 }
 
 	// #418: bounded trends and incident history. Trend series are sampled
