@@ -3614,6 +3614,77 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			static_cast<unsigned long long>(diagnostic.worldTick), diagnostic.system.c_str(), kind, diagnostic.message.c_str());
 	}
 	ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
+	if (ImGui::CollapsingHeader("Resource endurance (observed; the estimate is the explicit static current-rate assumption: the net rate observed over the last declared observation interval is assumed to continue - no future profiles or consumption changes are forecast; near-zero, changing or uncertain rates are reported as no-change/unstable/bounded, never as an infinite countdown)"))
+	{
+		// #419: read-only endurance explanation per Resource store and
+		// battery. The inventory split distinguishes the physical total,
+		// the usable/qualified contents and the protected reserve; the
+		// rate is observed on the existing cadence; the next authored
+		// delivery is shown as context, not as a rescue. Rendering never
+		// ticks or mutates anything.
+		if (snapshot.endurance.empty())
+			ImGui::TextDisabled("No Resource stores or batteries authored.");
+		for (auto const& entry : snapshot.endurance)
+		{
+			auto const basisIndex = std::min(static_cast<size_t>(entry.basis),
+				core::StationEnduranceBasisNames.size() - 1);
+			auto const stabilityIndex = std::min(static_cast<size_t>(entry.stability),
+				core::StationRateStabilityNames.size() - 1);
+			ImGui::Text("%s '%s' (%s): physical %.3f = usable %.3f + held %.3f | protected reserve %.3f | drawable above reserve %.3f | [%s, rate %s]",
+				entry.kind.c_str(), entry.id.c_str(), entry.unit.c_str(),
+				entry.physicalTotal, entry.usableQualified,
+				entry.physicalTotal - entry.usableQualified,
+				entry.protectedReserve, entry.drawableUsable,
+				core::StationEnduranceBasisNames[basisIndex],
+				core::StationRateStabilityNames[stabilityIndex]);
+			switch (entry.basis)
+			{
+			case core::StationEnduranceBasis::Unknown:
+				ImGui::Text("  no completed observation window yet: no rate and no estimate - never an infinite countdown");
+				break;
+			case core::StationEnduranceBasis::Depleted:
+				ImGui::Text("  no drawable inventory above the protected reserve: endurance 0 s");
+				break;
+			case core::StationEnduranceBasis::NoNetChange:
+				ImGui::Text("  no net depletion observed over the %.1f s window ending t=%.1f s: no countdown",
+					entry.observationWindowSeconds, entry.observedUntilSeconds);
+				break;
+			case core::StationEnduranceBasis::Growing:
+				ImGui::Text("  drawable inventory growing at %.6f %s/s (window ending t=%.1f s): no depletion countdown",
+					entry.observedNetRatePerSecond, entry.unit.c_str(), entry.observedUntilSeconds);
+				break;
+			case core::StationEnduranceBasis::Depleting:
+				if (entry.stability == core::StationRateStability::Unstable
+					&& entry.boundMaxSeconds <= 0.0)
+					ImGui::Text("  UNSTABLE rate: bounded at least %.1f s at the fastest observed drain (%.6f %s/s, window ending t=%.1f s); no upper bound claimed - the previous window was not draining",
+						entry.boundMinSeconds, entry.observedNetRatePerSecond,
+						entry.unit.c_str(), entry.observedUntilSeconds);
+				else if (entry.stability == core::StationRateStability::Unstable)
+					ImGui::Text("  UNSTABLE rate: bounded %.1f s (fastest observed drain) .. %.1f s (slowest observed drain); the estimate shown is the conservative lower bound, window ending t=%.1f s",
+						entry.boundMinSeconds, entry.boundMaxSeconds, entry.observedUntilSeconds);
+				else if (entry.stability == core::StationRateStability::Unknown)
+					ImGui::Text("  est %.1f s at the observed static rate (%.6f %s/s over the %.1f s window ending t=%.1f s); single observation: no stability claim yet",
+						entry.estimateSeconds, entry.observedNetRatePerSecond,
+						entry.unit.c_str(), entry.observationWindowSeconds, entry.observedUntilSeconds);
+				else
+					ImGui::Text("  est %.1f s at the observed static rate (%.6f %s/s over the %.1f s window ending t=%.1f s; stable across consecutive windows)",
+						entry.estimateSeconds, entry.observedNetRatePerSecond,
+						entry.unit.c_str(), entry.observationWindowSeconds, entry.observedUntilSeconds);
+				break;
+			}
+			if (entry.kind == "battery" && entry.maxDrawPowerKW > 0.0)
+				ImGui::Text("  power constraint: max discharge %.3f kW bounds how fast this energy can be drawn; the endurance uses the observed energy rate, never the power rating",
+					entry.maxDrawPowerKW);
+			if (entry.hasNextDelivery)
+				ImGui::Text("  next delivery: %.3f %s at t=%.1f s (%s)",
+					entry.nextDeliveryQuantity, entry.unit.c_str(),
+					entry.nextDeliverySeconds,
+					entry.nextDeliveryArrivesQualified ? "arrives usable" : "arrives held awaiting clearance");
+			else if (entry.kind == "store")
+				ImGui::Text("  no authored delivery pending for this store");
+		}
+	}
+	ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
 	if (ImGui::CollapsingHeader("Resource/service trends (bounded)"))
 	{
 		// #418: read-only presentation of the bounded trend series. The

@@ -281,6 +281,7 @@ set(editor_names
     station/maintenanceWorkflow
     station/coupledLiveViewWorkflow
     station/trendsWorkflow
+    station/enduranceWorkflow
 )
 
 if(DEFINED LANE)

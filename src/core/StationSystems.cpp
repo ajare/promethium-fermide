@@ -5058,6 +5058,97 @@ namespace core
 				appendTrendSample(trendSeries, "transfer", transfer.id, transfer.unit, base, retention,
 					tick, elapsed, transfer.lastRequested, transfer.lastCompleted);
 		}
+		// #419: the endurance observation windows. One window per Resource
+		// store and per battery, advanced only at the existing observation
+		// cadence from the committed ledger - no second clock, no per-tick
+		// history. Each completed window yields the net drawable rate over
+		// its actual elapsed simulation time; consecutive windows are
+		// compared for stability so a changing or sign-flipping rate is
+		// reported as unstable instead of dressed up as a precise
+		// countdown. Pure observability: nothing here feeds back into the
+		// ledger or the sandbox, and Reset/load reconstruct from scratch.
+		struct EnduranceWindow
+		{
+			double windowStartDrawable{0.0};   // drawable at the previous boundary
+			double windowStartSeconds{0.0};    // sim time of the previous boundary
+			bool hasObservation{false};        // at least one window has completed
+			double lastRate{0.0};             // last completed window's rate
+			bool lastDepleting{false};        // last rate was a real drain (past the deadband)
+			bool hasPrevWindow{false};        // a window before the last one completed
+			double prevWindowRate{0.0};       // the window before the last one's rate
+			bool prevWindowDepleting{false};  // that window's rate was a real drain
+			int lastRateClass{0};             // -1 depleting, 0 no-change, +1 growing (past the deadband)
+			double lastWindowSeconds{0.0};    // last window's actual elapsed sim time
+			double observedUntilSeconds{0.0}; // sim time the estimate is as of
+			StationRateStability stability{StationRateStability::Unknown};
+		};
+		std::vector<EnduranceWindow> storeEndurance;   // parallel to stores
+		std::vector<EnduranceWindow> batteryEndurance; // parallel to batteries
+		// Advance one endurance window with the drawable inventory observed
+		// at the current boundary. The deadband scales with the drawable at
+		// the window start, so a store-sized trickle is no-net-change while
+		// a real drain of any size on a small store still reads as one.
+		static void advanceEnduranceWindow(EnduranceWindow& window,
+			double drawableNow, double elapsedSeconds)
+		{
+			auto const windowSeconds = elapsedSeconds - window.windowStartSeconds;
+			auto const deadband = StationEnduranceDeadbandTolerance
+				* std::max(1.0, std::abs(window.windowStartDrawable));
+			auto const rate = windowSeconds > 0.0
+				? (drawableNow - window.windowStartDrawable) / windowSeconds : 0.0;
+			if (windowSeconds > 0.0)
+			{
+				if (!window.hasObservation)
+					window.stability = StationRateStability::Unknown;
+				else
+				{
+					auto const prev = window.lastRate;
+					auto const larger = std::max(std::abs(prev), std::abs(rate));
+					if (larger <= deadband)
+						window.stability = StationRateStability::Stable;
+					else if ((prev < -deadband) != (rate < -deadband)
+						|| (prev > deadband) != (rate > deadband))
+						window.stability = StationRateStability::Unstable;
+					else if (std::abs(rate - prev)
+						> StationEnduranceStabilityFraction * larger)
+						window.stability = StationRateStability::Unstable;
+					else
+						window.stability = StationRateStability::Stable;
+				}
+				// Shift the observation history: the window that just closed
+				// becomes "last", and the one before it becomes the prior
+				// window the bounds are read against.
+				window.hasPrevWindow = window.hasObservation;
+				window.prevWindowRate = window.lastRate;
+				window.prevWindowDepleting = window.lastDepleting;
+				window.hasObservation = true;
+				window.lastRate = rate;
+				window.lastDepleting = rate < -deadband;
+				window.lastRateClass = rate < -deadband ? -1 : (rate > deadband ? 1 : 0);
+				window.lastWindowSeconds = windowSeconds;
+				window.observedUntilSeconds = elapsedSeconds;
+			}
+			window.windowStartDrawable = drawableNow;
+			window.windowStartSeconds = elapsedSeconds;
+		}
+		void updateEndurance(uint64_t tick)
+		{
+			auto const elapsed = static_cast<double>(tick) * World::getFixedTimestep();
+			for (size_t index = 0; index < stores.size() && index < storeEndurance.size(); ++index)
+			{
+				auto const& store = stores[index];
+				auto const drawable = std::max(0.0,
+					store.currentQualified - store.authored.protectedReserve);
+				advanceEnduranceWindow(storeEndurance[index], drawable, elapsed);
+			}
+			for (size_t index = 0; index < batteries.size() && index < batteryEndurance.size(); ++index)
+			{
+				auto const& battery = batteries[index];
+				auto const reserve = battery.authored.nameplateKWh - battery.authored.usableKWh;
+				auto const drawable = std::max(0.0, battery.stored - reserve);
+				advanceEnduranceWindow(batteryEndurance[index], drawable, elapsed);
+			}
+		}
 
 		// Run the ledger for one tick and roll it back whole unless every
 		// audit passed (#555). The ledger mutates the live transfer,
@@ -13452,6 +13543,13 @@ namespace core
 		{
 			mImpl->stores.push_back({store, store.startingQualified, store.startingUnqualified, 0.0, 0.0});
 			mImpl->startingTotals[store.unit] += store.startingQualified + store.startingUnqualified;
+			// #419: the endurance window starts anchored at the authored t = 0
+			// drawable, so the first observation window measures from the
+			// authored beginning. Runtime-only: Reset/load reconstruct.
+			Impl::EnduranceWindow enduranceWindow;
+			enduranceWindow.windowStartDrawable = std::max(0.0,
+				store.startingQualified - store.protectedReserve);
+			mImpl->storeEndurance.push_back(enduranceWindow);
 		}
 		std::map<std::string, size_t> storeIndex;
 		for (size_t index = 0; index < mImpl->stores.size(); ++index)
@@ -13920,6 +14018,13 @@ namespace core
 				state.lastSaturated = state.stored >= battery.nameplateKWh - 1e-12;
 			}
 			mImpl->batteries.push_back(std::move(state));
+			// #419: the battery's endurance window tracks drawable energy -
+			// stored above the reserve floor - never the nameplate total and
+			// never the discharge power rating.
+			Impl::EnduranceWindow enduranceWindow;
+			enduranceWindow.windowStartDrawable = std::max(0.0,
+				battery.startingStoredKWh - (battery.nameplateKWh - battery.usableKWh));
+			mImpl->batteryEndurance.push_back(enduranceWindow);
 		}
 		// Delivery schedules start unfired: the authored first occurrence is
 		// the next arrival, and nothing is brought in before its time. Reset
@@ -14243,6 +14348,9 @@ namespace core
 			// cadence from the just-committed snapshot - no second clock,
 			// no per-tick history, and only successful ticks are sampled.
 			mImpl->recordTrends(tick, snapshot());
+			// #419: endurance windows advance on the same declared
+			// observation interval, from the same committed ledger.
+			mImpl->updateEndurance(tick);
 		}
 		return true;
 	}
@@ -15831,6 +15939,105 @@ namespace core
 						? StationTransferStatus::Rejected
 						: StationTransferStatus::Idle;
 			result.maintenanceJobs.push_back(std::move(jobResult));
+		}
+		// #419: the per-resource endurance explanation. The inventory split
+		// is the live committed state; the rate, stability and bounds come
+		// from the windows observed at the declared observation cadence.
+		// The estimate applies the explicit static current-rate assumption
+		// to the current drawable inventory: it forecasts no future
+		// profiles, no consumption changes and nothing beyond the next
+		// authored delivery, which is shown as context, not as a rescue.
+		{
+			auto const nextDeliveryFor = [&result](std::string const& storeId)
+				-> StationDeliverySnapshot const*
+			{
+				StationDeliverySnapshot const* best = nullptr;
+				for (auto const& delivery : result.deliveries)
+					if (delivery.storeId == storeId && delivery.hasNextOccurrence
+						&& (!best || delivery.nextOccurrenceSeconds < best->nextOccurrenceSeconds))
+						best = &delivery;
+				return best;
+			};
+			auto const fillEstimate = [](StationEnduranceSnapshot& entry,
+				Impl::EnduranceWindow const& window, double drawable)
+			{
+				entry.drawableUsable = drawable;
+				if (drawable <= 0.0)
+				{
+					entry.basis = StationEnduranceBasis::Depleted;
+					return;
+				}
+				if (!window.hasObservation) return; // Unknown: no completed window yet
+				entry.observedNetRatePerSecond = window.lastRate;
+				entry.observationWindowSeconds = window.lastWindowSeconds;
+				entry.observedUntilSeconds = window.observedUntilSeconds;
+				entry.stability = window.stability;
+				if (window.lastRateClass == 0)
+				{
+					entry.basis = StationEnduranceBasis::NoNetChange;
+					return;
+				}
+				if (window.lastRateClass > 0)
+				{
+					entry.basis = StationEnduranceBasis::Growing;
+					return;
+				}
+				entry.basis = StationEnduranceBasis::Depleting;
+				// Bounds from every real drain among the current and the
+				// previous window: the fastest drain gives the conservative
+				// lower bound, the slowest the upper bound. When the other
+				// window was not draining no upper bound is claimed (0),
+				// rather than inventing one from a rate that never existed.
+				auto const current = std::abs(window.lastRate);
+				if (window.hasPrevWindow && window.prevWindowDepleting)
+				{
+					auto const other = std::abs(window.prevWindowRate);
+					entry.boundMinSeconds = drawable / std::max(current, other);
+					entry.boundMaxSeconds = drawable / std::min(current, other);
+				}
+				else
+				{
+					entry.boundMinSeconds = drawable / current;
+					entry.boundMaxSeconds = 0.0; // no upper bound claimed
+				}
+				entry.estimateSeconds = entry.boundMinSeconds;
+			};
+			for (size_t index = 0; index < mImpl->stores.size(); ++index)
+			{
+				auto const& store = mImpl->stores[index];
+				StationEnduranceSnapshot entry;
+				entry.kind = "store";
+				entry.id = store.authored.id;
+				entry.unit = store.authored.unit;
+				entry.physicalTotal = store.currentQualified + store.currentUnqualified;
+				entry.usableQualified = store.currentQualified;
+				entry.protectedReserve = store.authored.protectedReserve;
+				fillEstimate(entry, mImpl->storeEndurance[index], std::max(0.0,
+					store.currentQualified - store.authored.protectedReserve));
+				if (auto const* delivery = nextDeliveryFor(store.authored.id))
+				{
+					entry.hasNextDelivery = true;
+					entry.nextDeliverySeconds = delivery->nextOccurrenceSeconds;
+					entry.nextDeliveryQuantity = delivery->quantity;
+					entry.nextDeliveryArrivesQualified = delivery->arrivesQualified;
+				}
+				result.endurance.push_back(std::move(entry));
+			}
+			for (size_t index = 0; index < mImpl->batteries.size(); ++index)
+			{
+				auto const& battery = mImpl->batteries[index];
+				StationEnduranceSnapshot entry;
+				entry.kind = "battery";
+				entry.id = battery.authored.id;
+				entry.unit = "kWh";
+				entry.physicalTotal = battery.authored.nameplateKWh;
+				entry.usableQualified = battery.authored.usableKWh;
+				entry.protectedReserve = battery.authored.nameplateKWh - battery.authored.usableKWh;
+				entry.maxDrawPowerKW = battery.authored.maxDischargeKW;
+				fillEstimate(entry, mImpl->batteryEndurance[index], std::max(0.0,
+					battery.stored - (battery.authored.nameplateKWh - battery.authored.usableKWh)));
+				result.endurance.push_back(std::move(entry));
+			}
 		}
 		return result;
 	}

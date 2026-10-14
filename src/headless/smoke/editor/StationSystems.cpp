@@ -2155,6 +2155,120 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 		require(driver.passed(), "trends workflow failed on the Test Engine");
 	}
 
+	// #419: the separate Station Systems window shows the per-resource
+	// endurance explanation - inventory split, observed rate, basis and
+	// stability, bounds and next-delivery context - without rendering
+	// ever ticking or dirtying the document.
+	void enduranceWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO();
+		io.DisplaySize = {1200.0f, 3200.0f};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto const makeRig = []()
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 5.0f;
+			core::ResourceStoreSettings water;
+			water.id = "water"; water.unit = "kg";
+			water.capacity = 1000.0; water.startingQualified = 600.0;
+			water.protectedReserve = 100.0;
+			core::ResourceStoreSettings tank;
+			tank.id = "tank"; tank.unit = "kg";
+			tank.capacity = 10000.0; tank.startingQualified = 0.0;
+			settings.stores = { water, tank };
+			core::ResourceTransferSettings pump;
+			pump.id = "pump"; pump.sourceId = "water"; pump.destinationId = "tank";
+			pump.unit = "kg"; pump.ratePerSecond = 2.0; pump.priority = 5;
+			settings.transfers = { pump };
+			core::ResourceDeliverySettings resupply;
+			resupply.id = "tanker"; resupply.storeId = "water"; resupply.unit = "kg";
+			resupply.quantity = 100.0; resupply.firstOccurrenceSeconds = 300.0;
+			resupply.recurrenceSeconds = 100.0;
+			settings.deliveries = { resupply };
+			core::BatterySettings bank;
+			bank.id = "bank"; bank.nameplateKWh = 10.0; bank.usableKWh = 8.0;
+			bank.startingStoredKWh = 10.0;
+			bank.maxChargeKW = 5.0; bank.maxDischargeKW = 3.6;
+			settings.batteries = { bank };
+			core::SolarArraySettings night;
+			night.id = "night"; night.capacityKW = 10.0;
+			core::ProfileSettings dark; dark.constantLevel = 0.0;
+			night.illumination = dark;
+			settings.solarArrays = { night };
+			core::EquipmentLoadSettings load;
+			load.id = "life"; load.electricalDemandKW = 1.8;
+			core::ProfileSettings on; on.constantLevel = 1.0;
+			load.operatingProfile = on;
+			load.heatOutputKW = 0.0; load.thermalClass = "low";
+			load.coolingDisposition = core::StationCoolingDisposition::Exported;
+			load.criticalFloorKW = 0.0; load.priority = 10; load.maxCurtailment = 1.0;
+			settings.equipmentLoads = { load };
+			return settings;
+		};
+		auto world = std::make_shared<core::World>("Endurance editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		require(world->configureStationSystems(makeRig(), false, &diagnostic),
+			diagnostic.c_str());
+		world->resumeSimulation();
+		require(world->advanceTicks(900), "endurance editor pre-run failed"); // t = 15 s
+		world->markSaved(); // the configure edit is expected dirt; rendering must add none
+		headless::TestEngineDriver driver([&]
+		{
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1150, 3100});
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "enduranceWorkflow", [&](ImGuiTestContext* ctx)
+		{
+			ctx->SetRef("Station Systems");
+			REQ(driver.contains("Active World: Endurance editor"),
+				"station window missing the endurance World");
+			// The depleting store: split, basis and stability, estimate and
+			// the next-delivery context all render.
+			REQ(driver.contains("store 'water' (kg)")
+				&& driver.contains("protected reserve 100.000")
+				&& driver.contains("[depleting, rate stable]"),
+				"depleting store endurance line missing or mislabelled");
+			REQ(driver.contains("est ") && driver.contains("at the observed static rate"),
+				"static current-rate estimate missing from the endurance view");
+			REQ(driver.contains("next delivery: 100.000 kg at t=300.0 s (arrives usable)"),
+				"next-delivery context missing from the endurance view");
+			// The receiving store reads as growing, never as a countdown.
+			REQ(driver.contains("store 'tank' (kg)")
+				&& driver.contains("growing"),
+				"receiving store endurance did not read as growing");
+			// The battery: energy split, energy-rate estimate and the
+			// explicit energy/power distinction render.
+			REQ(driver.contains("battery 'bank' (kWh)")
+				&& driver.contains("protected reserve 2.000"),
+				"battery endurance line missing or its reserve split mislabelled");
+			REQ(driver.contains("power constraint: max discharge 3.600 kW"),
+				"battery energy/power distinction missing from the endurance view");
+			REQ(!world->isModified(), "rendering the endurance view dirtied the document");
+			// Visibility toggling never mutates: hide, tick, show again -
+			// the estimates advanced with the World ticks only.
+			window.visible = false;
+			ctx->Sleep(2);
+			require(world->advanceTicks(300), "endurance run during hidden window failed");
+			window.visible = true;
+			ctx->Sleep(2);
+			REQ(driver.contains("store 'water' (kg)")
+				&& driver.contains("[depleting, rate stable]"),
+				"endurance lines vanished after toggling window visibility");
+			REQ(!world->isModified(), "toggling the endurance view dirtied the document");
+		});
+		#undef REQ
+		require(driver.passed(), "endurance workflow failed on the Test Engine");
+	}
+
 void cropWorkflow(smoke::Context const&)
 	{
 		using smoke::require;
@@ -2631,4 +2745,5 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/maintenanceWorkflow", maintenanceWorkflow});
 	checks.push_back({"station/coupledLiveViewWorkflow", coupledLiveViewWorkflow});
 	checks.push_back({"station/trendsWorkflow", trendsWorkflow});
+	checks.push_back({"station/enduranceWorkflow", enduranceWorkflow});
 }

@@ -1722,6 +1722,90 @@ namespace core
 		bool operator==(StationSystemsStoreSnapshot const&) const = default;
 	};
 
+	// The endurance basis of one resource (#419): what the observed net
+	// rate over the declared observation interval says about the drawable
+	// inventory. This is an explanation of the current drawable supply, not
+	// a survival countdown: it assumes the net rate observed over the last
+	// completed observation window continues unchanged (a static
+	// current-rate assumption) and forecasts no future profiles, deliveries
+	// or consumption changes.
+	enum class StationEnduranceBasis : std::uint8_t
+	{
+		Unknown,     // no completed observation window yet: nothing is known
+		Depleted,    // no drawable qualified inventory above the protected reserve
+		NoNetChange, // observed net rate within the deadband: no depletion countdown
+		Growing,     // drawable inventory increasing: no depletion countdown
+		Depleting,   // drawable inventory decreasing: bounded endurance estimate
+	};
+	inline constexpr std::array<char const*, 5> StationEnduranceBasisNames{
+		"unknown", "depleted", "no-net-change", "growing", "depleting"};
+	// How consistently the net rate held across consecutive observation
+	// windows. A single completed window is one data point: it carries a
+	// bounded estimate but no stability claim (Unknown). A rate that flipped
+	// sign or moved materially between consecutive windows is Unstable, so
+	// the endurance is reported as a bound, never as a precise countdown.
+	enum class StationRateStability : std::uint8_t
+	{
+		Unknown,
+		Stable,
+		Unstable,
+	};
+	inline constexpr std::array<char const*, 3> StationRateStabilityNames{
+		"unknown", "stable", "unstable"};
+	// Documented deadband for near-zero net rates (#419): a net rate within
+	// this tolerance, scaled by the drawable inventory at the window start
+	// (rate_deadband = tolerance x max(1, drawable at window start)), is
+	// reported as no-net-change rather than as an endurance number large
+	// enough to read as infinite. Reuses the boundary tolerance idiom.
+	inline constexpr double StationEnduranceDeadbandTolerance{StationBalanceTolerance};
+	// Documented stability threshold (#419): a net rate that moved by more
+	// than this fraction of the larger of the two consecutive window rates
+	// (or flipped sign) is an unstable rate; the endurance is then a bound.
+	inline constexpr double StationEnduranceStabilityFraction{0.5};
+	// The endurance explanation for one resource (#419): the inventory
+	// split (physical total = qualified + unqualified; drawable = the
+	// qualified portion above the protected reserve), the net rate observed
+	// over the declared observation interval, the basis and stability of
+	// the estimate, and the soonest authored next delivery into the same
+	// store as context. Estimates are derived observability sampled at the
+	// existing observation cadence - no second clock, no per-tick history -
+	// and rest on the explicit static current-rate assumption: the observed
+	// net rate is assumed to continue; no future profile, delivery timing
+	// or consumption change is forecast. For a battery the same shape
+	// applies to energy: physical = nameplate, usable = the cyclable slice,
+	// reserve = nameplate - usable, drawable = stored above the reserve
+	// floor; the discharge power rating is reported as a constraint on how
+	// fast the endurance can be drawn and is never used as the endurance
+	// rate itself.
+	struct StationEnduranceSnapshot
+	{
+		std::string kind; // "store" or "battery"
+		std::string id;
+		std::string unit; // the store's declared unit; "kWh" for batteries
+		double physicalTotal{0.0};     // qualified + unqualified (battery: nameplate)
+		double usableQualified{0.0};   // qualified contents (battery: cyclable slice)
+		double protectedReserve{0.0};  // withheld from discretionary use
+		double drawableUsable{0.0};   // usable above the protected reserve
+		StationEnduranceBasis basis{StationEnduranceBasis::Unknown};
+		StationRateStability stability{StationRateStability::Unknown};
+		double observedNetRatePerSecond{0.0}; // drawable delta per simulated second
+		double observationWindowSeconds{0.0}; // actual sim time of the observed window
+		double observedUntilSeconds{0.0};     // sim time the estimate is as of
+		double estimateSeconds{0.0};         // static current-rate estimate (conservative bound when unstable)
+		double boundMinSeconds{0.0};        // fastest observed drain bound
+		double boundMaxSeconds{0.0};        // slowest observed drain bound; 0 = no upper bound claimed
+		// Battery-only power constraint: the max discharge power rating in
+		// kW. Energy and power are distinct: the endurance estimate uses the
+		// observed energy rate, never this rating. 0 = not applicable (stores).
+		double maxDrawPowerKW{0.0};
+		// Soonest authored delivery into this store, as context (#392).
+		bool hasNextDelivery{false};
+		double nextDeliverySeconds{0.0};
+		double nextDeliveryQuantity{0.0};
+		bool nextDeliveryArrivesQualified{true};
+		bool operator==(StationEnduranceSnapshot const&) const = default;
+	};
+
 	// Per-transfer observable outcome: what was requested, what moved, and the
 	// unmet remainder. Unmet material is never deleted; it simply did not move.
 	struct StationTransferSnapshot
@@ -3682,6 +3766,13 @@ namespace core
 		// (#403).
 		bool hasNextWasteEjection{false};
 		double nextWasteEjectionSeconds{0.0};
+		// The per-resource endurance explanation (#419): for every Resource
+		// store and every battery, the inventory split, the net rate observed
+		// over the declared observation interval, the basis and stability of
+		// the estimate, and the soonest next-delivery context. Derived
+		// runtime observability: never persisted, cleared by Reset/load like
+		// every other runtime state.
+		std::vector<StationEnduranceSnapshot> endurance;
 		double balanceTolerance{StationBalanceTolerance};
 		bool operator==(StationSystemsSnapshot const&) const = default;
 	};
