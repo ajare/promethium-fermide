@@ -362,7 +362,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews,
     waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers,
     wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations,
-    algaeCultures, outages, dispatchMode)
+    algaeCultures, outages, dispatchMode, maintenance)
     assert(type(name) == "string")
     -- #415: the dispatch controller mode crosses as a plain immutable
     -- string; the sandbox mirrors the same controller and refuses any
@@ -402,6 +402,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     -- Test harnesses that wrap this model may forward only the descriptor
     -- arrays they exercise; an absent outage list simply means no outages.
     outages = outages or {}
+    -- Likewise an absent maintenance list simply means no scheduled work.
+    maintenance = maintenance or {}
     local object = {
         ticks = 0, stores = {}, transfers = {}, order = {},
         conversions = {}, conversion_order = {},
@@ -427,6 +429,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         fuel_cells = {}, thermal_buffers = {},
         waste_ejections = {},
         outages = {}, installation_availability = {},
+        maintenance = {}, maintenance_order = {},
         -- #415: the dispatch controller's own state. The demand signal is
         -- the station-wide electrical request the last committed tick
         -- presented to the shared pool; the dispatcher commands the
@@ -444,6 +447,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         reserve_exhausted = false,
     }
     local by_id = {}
+    -- #414: the sandbox's deterministic iteration forbids table keys in
+    -- pairs, so maintenance reservation ledgers key stores by index;
+    -- this map records each store id's array position.
+    local store_index_by_id = {}
     for index = 1, #stores do
         local store = stores[index]
         assert(type(store) == "table", "resource store descriptor must be a table")
@@ -507,6 +514,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             composition = composition,
         }
         by_id[store.id] = object.stores[index]
+        store_index_by_id[store.id] = index
         local total = object.starting_totals[store.unit] or 0
         object.starting_totals[store.unit] = total + store.qualified + store.unqualified
         if composition then
@@ -1496,6 +1504,131 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             exhausted = false,
         }
     end
+    -- Resource-constrained maintenance jobs (#414): scheduled timed
+    -- work whose completion must be paid for with declared tools,
+    -- spare parts and consumables. The sandbox mirrors the host's
+    -- reservation state machine: a job reserves every prerequisite
+    -- from the stores' qualified inventory above what higher-precedence
+    -- work already holds, isolates its target installation while the
+    -- work runs, and at completion moves the consumed quantity from
+    -- each source into the waste store while returning the reusable
+    -- tools. A reservation that can no longer be held interrupts the
+    -- job with its progress discarded - nothing is spent, so nothing
+    -- is double-spent either way. The mirror re-audits every spend
+    -- against its own finite inventories so a corrupt crossing or
+    -- model drift fails contained like any other script failure.
+    for index = 1, #maintenance do
+        local job = maintenance[index]
+        assert(type(job) == 'table', 'maintenance job descriptor must be a table')
+        assert(type(job.id) == 'string' and #job.id > 0, 'maintenance job needs an id')
+        assert(type(job.installation) == 'string' and #job.installation > 0,
+            'maintenance job needs a target installation id')
+        local target = installation_by_id[job.installation]
+        assert(target ~= nil, 'maintenance job target installation is unknown')
+        assert(type(job.firstSeconds) == 'number'
+            and job.firstSeconds == job.firstSeconds
+            and job.firstSeconds >= 0 and job.firstSeconds < math.huge,
+            'maintenance first occurrence must be finite and non-negative')
+        assert(type(job.durationSeconds) == 'number'
+            and job.durationSeconds == job.durationSeconds
+            and job.durationSeconds > 0 and job.durationSeconds < math.huge,
+            'maintenance duration must be finite and positive')
+        assert(type(job.recurrenceSeconds) == 'number'
+            and job.recurrenceSeconds == job.recurrenceSeconds
+            and job.recurrenceSeconds >= 0 and job.recurrenceSeconds < math.huge,
+            'maintenance recurrence must be finite and non-negative')
+        assert(job.recurrenceSeconds <= 0
+            or job.recurrenceSeconds + 1e-9 >= job.durationSeconds,
+            'maintenance recurrence must be at least the duration so windows never overlap')
+        assert(type(job.priority) == 'number' and job.priority == job.priority
+            and job.priority == math.tointeger(job.priority),
+            'maintenance priority must be a finite integer')
+        assert(type(job.requirements) == 'table' and #job.requirements >= 1,
+            'maintenance needs at least one declared requirement')
+        local requirements = {}
+        local anyConsumed = false
+        for requirementIndex = 1, #job.requirements do
+            local requirement = job.requirements[requirementIndex]
+            assert(type(requirement) == 'table', 'maintenance requirement must be a table')
+            local store = by_id[requirement.store]
+            assert(store ~= nil, 'maintenance requirement store is unknown')
+            assert(type(requirement.quantity) == 'number'
+                and requirement.quantity == requirement.quantity
+                and requirement.quantity > 0 and requirement.quantity < math.huge,
+                'maintenance requirement quantity must be finite and positive')
+            local consumed = requirement.consumed == true
+            if consumed then
+                anyConsumed = true
+                -- The consumed stream lands in the declared waste
+                -- store: same unit, same declared composition, same
+                -- hazard class - the same boundaries a generic
+                -- transfer must respect (#390, #412).
+                local waste = job.wasteStore ~= nil and job.wasteStore ~= ''
+                    and by_id[job.wasteStore] or nil
+                assert(waste ~= nil,
+                    'a consuming maintenance requirement needs a declared waste store')
+                assert(store.unit == waste.unit,
+                    'maintenance consumed material unit does not match the waste store')
+                assert(store.hazardClass == waste.hazardClass,
+                    'maintenance consumed material crosses the hazard-class boundary')
+                if store.composition ~= nil or waste.composition ~= nil then
+                    assert(store.composition ~= nil and waste.composition ~= nil
+                        and math.abs(store.composition.moisture - waste.composition.moisture) <= BALANCE_TOLERANCE
+                        and math.abs(store.composition.nutrientNitrogen - waste.composition.nutrientNitrogen) <= BALANCE_TOLERANCE
+                        and math.abs(store.composition.atmosphericNitrogen - waste.composition.atmosphericNitrogen) <= BALANCE_TOLERANCE
+                        and math.abs(store.composition.phosphorus - waste.composition.phosphorus) <= BALANCE_TOLERANCE
+                        and math.abs(store.composition.potassium - waste.composition.potassium) <= BALANCE_TOLERANCE
+                        and math.abs(store.composition.otherMinerals - waste.composition.otherMinerals) <= BALANCE_TOLERANCE
+                        and math.abs(store.composition.energyKJPerKgDry - waste.composition.energyKJPerKgDry) <= BALANCE_TOLERANCE,
+                        'maintenance consumed material crosses a compound-material boundary')
+                end
+            end
+            requirements[requirementIndex] = {
+                store = store,
+                storeIndex = store_index_by_id[requirement.store],
+                quantity = requirement.quantity,
+                consumed = consumed,
+                reserved = 0,
+            }
+        end
+        local wasteStore
+        local wasteStoreIndex = nil
+        if job.wasteStore ~= nil and job.wasteStore ~= '' then
+            wasteStore = by_id[job.wasteStore]
+            wasteStoreIndex = store_index_by_id[job.wasteStore]
+            assert(wasteStore ~= nil, 'maintenance waste store is unknown')
+        end
+        assert(anyConsumed == (wasteStore ~= nil),
+            'a maintenance job declares a waste store exactly when it consumes material')
+        object.maintenance[index] = {
+            id = job.id,
+            installation = target,
+            installationId = job.installation,
+            firstSeconds = job.firstSeconds,
+            durationSeconds = job.durationSeconds,
+            recurrenceSeconds = job.recurrenceSeconds,
+            priority = job.priority,
+            wasteStore = wasteStore,
+            wasteStoreIndex = wasteStoreIndex,
+            requirements = requirements,
+            phase = 'idle',
+            progress = 0,
+            occurrence = 0,
+            started = 0,
+            completed = 0,
+            missed = 0,
+            exhausted = false,
+        }
+    end
+    -- Maintenance jobs compete for the same tools, parts and waste
+    -- headroom, so the mirror runs them in the declared deterministic
+    -- order: priority descending, declaration order ascending.
+    for index = 1, #object.maintenance do
+        object.maintenance_order[#object.maintenance_order + 1] = index
+    end
+    table.sort(object.maintenance_order, function(left, right)
+        return object.maintenance[left].priority > object.maintenance[right].priority
+    end)
     -- Compartment atmospheres (#400): a finite compartment-owned gas
     -- inventory in a fixed volume, integrated on an authored effective
     -- thermal capacity (air plus bonded structure) and optionally
@@ -3265,6 +3398,219 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     -- availability; the default is 1.0.
     local function installationAvailability(installation)
         return installation.availability or 1.0
+    end
+    -- Mirror of the host maintenance ledger (#414): the same
+    -- three-phase reservation pass. Phase 1 restores reservation
+    -- integrity - if a store can no longer cover the total material
+    -- held by Active jobs, the lowest-precedence job holding it is
+    -- interrupted and its progress discarded, so nothing completes
+    -- against material that got away. Phase 2 accrues progress and
+    -- completes jobs, moving consumed material from each source into
+    -- the waste store and returning reusable tools, with the finite
+    -- limits audited at the spend so a corrupt model state fails
+    -- contained. Phase 3 attempts starts in the declared order
+    -- against the inventory the higher-precedence reservations have
+    -- not taken. An Active job holds its target installation at zero
+    -- availability on top of any outage ceiling.
+    local function maintenanceOccurrenceTime(job, occurrence)
+        if job.recurrenceSeconds > 0 then
+            return job.firstSeconds + occurrence * job.recurrenceSeconds
+        end
+        return job.firstSeconds
+    end
+    local function maintenanceHasOccurrence(job, occurrence)
+        return job.recurrenceSeconds > 0 or occurrence == 0
+    end
+    local function reservationCovers(available, needed)
+        return available + BALANCE_TOLERANCE * math.max(1, needed) >= needed
+    end
+    local function applyMaintenance(self, elapsed, dt)
+        if #self.maintenance == 0 then return end
+        -- Phase 1: reservation integrity. Ledgers key stores by index
+        -- so every scan walks the store array in a fixed order - the
+        -- sandbox never iterates table-keyed state.
+        while true do
+            local totalReserved = {}
+            local totalWasteClaim = {}
+            for _, job in ipairs(self.maintenance) do
+                if job.phase == 'active' then
+                    for _, requirement in ipairs(job.requirements) do
+                        totalReserved[requirement.storeIndex] =
+                            (totalReserved[requirement.storeIndex] or 0) + requirement.reserved
+                    end
+                    if job.wasteStoreIndex ~= nil then
+                        local claim = 0
+                        for _, requirement in ipairs(job.requirements) do
+                            if requirement.consumed then claim = claim + requirement.reserved end
+                        end
+                        totalWasteClaim[job.wasteStoreIndex] =
+                            (totalWasteClaim[job.wasteStoreIndex] or 0) + claim
+                    end
+                end
+            end
+            local violatedIndex, violatedWaste = nil, false
+            for storeIndex = 1, #self.stores do
+                local reserved = totalReserved[storeIndex]
+                if reserved ~= nil
+                    and not reservationCovers(self.stores[storeIndex].qualified, reserved) then
+                    violatedIndex = storeIndex
+                    break
+                end
+            end
+            if violatedIndex == nil then
+                for storeIndex = 1, #self.stores do
+                    local claim = totalWasteClaim[storeIndex]
+                    if claim ~= nil then
+                        local store = self.stores[storeIndex]
+                        local headroom = store.capacity - store.qualified - store.unqualified
+                        if not reservationCovers(headroom, claim) then
+                            violatedIndex = storeIndex
+                            violatedWaste = true
+                            break
+                        end
+                    end
+                end
+            end
+            if violatedIndex == nil then break end
+            local released = false
+            for orderIndex = #self.maintenance_order, 1, -1 do
+                local job = self.maintenance[self.maintenance_order[orderIndex]]
+                if job.phase == 'active' then
+                    local holds = false
+                    if violatedWaste then
+                        holds = job.wasteStoreIndex == violatedIndex
+                    else
+                        for _, requirement in ipairs(job.requirements) do
+                            if requirement.storeIndex == violatedIndex
+                                and requirement.reserved > 0 then holds = true end
+                        end
+                    end
+                    if holds then
+                        for _, requirement in ipairs(job.requirements) do
+                            requirement.reserved = 0
+                        end
+                        job.phase = 'blocked'
+                        job.progress = 0
+                        released = true
+                        break
+                    end
+                end
+            end
+            if not released then break end
+        end
+        -- Phase 2: progress and completion. Completions release their
+        -- reservations before start attempts, so a returned tool is
+        -- available to waiting work in the same tick.
+        for _, jobIndex in ipairs(self.maintenance_order) do
+            local job = self.maintenance[jobIndex]
+            if job.phase == 'active' then
+                job.progress = job.progress + dt
+                if job.progress + BALANCE_TOLERANCE >= job.durationSeconds then
+                    job.progress = job.durationSeconds
+                    for _, requirement in ipairs(job.requirements) do
+                        if requirement.consumed then
+                            local spent = requirement.reserved
+                            assert(spent <= requirement.store.qualified
+                                + BALANCE_TOLERANCE * math.max(1, spent),
+                                'maintenance spend exceeds the source store inventory')
+                            requirement.store.qualified = requirement.store.qualified - spent
+                            local waste = job.wasteStore
+                            assert(waste ~= nil,
+                                'consuming maintenance job has no waste store')
+                            assert(waste.qualified + spent
+                                <= waste.capacity + BALANCE_TOLERANCE * math.max(1, spent),
+                                'maintenance waste booking exceeds the waste store capacity')
+                            waste.qualified = waste.qualified + spent
+                        end
+                        requirement.reserved = 0
+                    end
+                    job.phase = 'completed'
+                    job.completed = job.completed + 1
+                    job.occurrence = job.occurrence + 1
+                    while maintenanceHasOccurrence(job, job.occurrence)
+                        and maintenanceOccurrenceTime(job, job.occurrence) + 1e-9 < elapsed do
+                        job.missed = job.missed + 1
+                        job.occurrence = job.occurrence + 1
+                    end
+                    if not maintenanceHasOccurrence(job, job.occurrence) then
+                        job.exhausted = true
+                    end
+                end
+            end
+        end
+        -- Phase 3: start attempts in the declared order.
+        local reservedByStore = {}
+        for _, job in ipairs(self.maintenance) do
+            if job.phase == 'active' then
+                for _, requirement in ipairs(job.requirements) do
+                    reservedByStore[requirement.storeIndex] =
+                        (reservedByStore[requirement.storeIndex] or 0) + requirement.reserved
+                end
+            end
+        end
+        for _, jobIndex in ipairs(self.maintenance_order) do
+            local job = self.maintenance[jobIndex]
+            -- Jobs that are active were advanced in phase 2; only idle,
+            -- completed and blocked jobs attempt a start.
+            if not job.exhausted and job.phase ~= 'active' then
+                local canAttempt = true
+                if job.phase == 'idle' or job.phase == 'completed' then
+                    canAttempt = maintenanceHasOccurrence(job, job.occurrence)
+                        and elapsed >= maintenanceOccurrenceTime(job, job.occurrence)
+                elseif job.phase == 'blocked' then
+                    if elapsed >= maintenanceOccurrenceTime(job, job.occurrence)
+                        + job.durationSeconds then
+                        job.missed = job.missed + 1
+                        job.occurrence = job.occurrence + 1
+                        job.progress = 0
+                        job.phase = 'idle'
+                        if not maintenanceHasOccurrence(job, job.occurrence) then
+                            job.exhausted = true
+                        end
+                        canAttempt = false
+                    end
+                end
+                if canAttempt then
+                    local feasible = true
+                    local consumedTotal = 0
+                    for _, requirement in ipairs(job.requirements) do
+                        local drawable = requirement.store.qualified
+                            - (reservedByStore[requirement.storeIndex] or 0)
+                        if not reservationCovers(drawable, requirement.quantity) then
+                            feasible = false
+                            break
+                        end
+                        if requirement.consumed then
+                            consumedTotal = consumedTotal + requirement.quantity
+                        end
+                    end
+                    if feasible and job.wasteStore ~= nil then
+                        local headroom = job.wasteStore.capacity
+                            - job.wasteStore.qualified - job.wasteStore.unqualified
+                        if not reservationCovers(headroom, consumedTotal) then feasible = false end
+                    end
+                    if not feasible then
+                        job.phase = 'blocked'
+                    else
+                        for _, requirement in ipairs(job.requirements) do
+                            requirement.reserved = requirement.quantity
+                            reservedByStore[requirement.storeIndex] =
+                                (reservedByStore[requirement.storeIndex] or 0) + requirement.reserved
+                        end
+                        job.phase = 'active'
+                        job.progress = 0
+                        job.started = job.started + 1
+                    end
+                end
+            end
+        end
+        -- Isolation: an Active job holds its target installation at
+        -- zero availability on top of any outage ceiling.
+        for _, job in ipairs(self.maintenance) do
+            if job.phase == 'active' then
+                job.installation.availability = 0.0
+            end
+        end
     end
     -- Mirror of the host delivery ledger: every occurrence due since the
     -- last tick is collected and applied in the declared scenario order
@@ -9032,6 +9378,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- installation reads its rated capacity, mirroring the host
         -- ledger order (#413).
         applyOutages(self, elapsed)
+        -- Maintenance reservations, completion spend and installation
+        -- isolation run right behind the outage pass, mirroring the
+        -- host ledger order (#414).
+        applyMaintenance(self, elapsed, fixed_seconds)
         applyPower(self, elapsed, fixed_seconds)
         -- Compartments run after the loops/chillers and before thermal
         -- integration: the compartment exchange must land inside this

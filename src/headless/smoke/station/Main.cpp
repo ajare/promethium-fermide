@@ -149,7 +149,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 93"), 11, "version: 65");
+		text.replace(text.find("version: 94"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -15199,9 +15199,9 @@ void buffers(smoke::Context const&)
 			// than silently dropping the cultures.
 			{
 				auto stale = text;
-				size_t const position = stale.find("version: 93");
+				size_t const position = stale.find("version: 94");
 				require(position != std::string::npos, "the fixture document carries no version line");
-				stale.replace(position, std::string("version: 93").size(), "version: 88");
+				stale.replace(position, std::string("version: 94").size(), "version: 88");
 				require(stale.find("algaeCultures") != std::string::npos,
 					"the fixture document carries no algae cultures to test the guard with");
 				bool refused = false;
@@ -17133,13 +17133,13 @@ void dispatch(smoke::Context const&)
 			== core::StationDispatchMode::Automatic,
 			"automatic dispatch mode did not survive the round trip");
 		auto stale = text;
-		require(stale.find("version: 93") != std::string::npos,
+		require(stale.find("version: 94") != std::string::npos,
 			"the fixture document carries no version line");
 		require(stale.find("dispatchMode: automatic") != std::string::npos,
 			"the fixture document lost the dispatch mode before the guard test");
 		// A pre-91 document that still carries the dispatch mode is refused
 		// rather than silently dropping the controller setting.
-		stale = replaceAll(stale, "version: 93", "version: 90");
+		stale = replaceAll(stale, "version: 94", "version: 90");
 		bool refused = false;
 		try
 		{
@@ -18152,9 +18152,9 @@ void protectedServices(smoke::Context const&)
 		require(loaded.getStationSystemsSnapshot().worldTick == 0,
 			"the loaded world restored live station state instead of the authored start");
 		auto stale = text;
-		require(stale.find("version: 93") != std::string::npos,
+		require(stale.find("version: 94") != std::string::npos,
 			"the fixture document carries no version line");
-		stale.replace(stale.find("version: 93"), std::string("version: 93").size(),
+		stale.replace(stale.find("version: 94"), std::string("version: 94").size(),
 			"version: 91");
 		bool refused = false;
 		try
@@ -18171,6 +18171,504 @@ void protectedServices(smoke::Context const&)
 				"the pre-92 protected-flag refusal does not name the required schema");
 		}
 		require(refused, "a pre-92 document carrying protected service flags was silently accepted");
+	}
+}
+
+// #414: resource-constrained maintenance. A scheduled timed job on a
+// registered installation completes only by paying with declared tools,
+// spare parts and consumables: reusable tools are reserved and returned,
+// consumed parts leave their source and land in the declared waste
+// store, the installation is isolated while the work runs, and absent
+// prerequisites never let the job complete for free. Reservation is
+// exclusive in the declared deterministic order, so overlapping work
+// cannot double-spend a unit of material; a reservation that cannot be
+// held interrupts the job with its progress discarded. Everything is
+// exercised through the World tick / snapshot / event seam with no
+// Agent assignments.
+void maintenance(smoke::Context const&)
+{
+	auto const approx = [](double actual, double expected, double tolerance = 1e-6)
+	{ return std::abs(actual - expected) <= tolerance; };
+	auto sawEvent = [](core::World& world, std::string const& needle)
+	{
+		for (auto const& event : world.getStationSystemsEvents())
+			if (event.message.find(needle) != std::string::npos) return true;
+		return false;
+	};
+	auto store = [](std::string id, std::string unit, double capacity, double qualified)
+	{
+		core::ResourceStoreSettings settings;
+		settings.id = std::move(id);
+		settings.unit = std::move(unit);
+		settings.capacity = capacity;
+		settings.startingQualified = qualified;
+		return settings;
+	};
+	auto sinkReservoir = []
+	{
+		core::ThermalReservoirSettings settings;
+		settings.id = "hot";
+		settings.thermalClass = "generation";
+		settings.heatCapacityKJPerK = 100000.0;
+		settings.startingTemperatureC = 20.0;
+		settings.minTemperatureC = -50.0;
+		settings.maxTemperatureC = 200.0;
+		return settings;
+	};
+	auto generator = [](std::string id)
+	{
+		core::GeneratorSettings settings;
+		settings.id = std::move(id);
+		settings.fuelStoreId = "diesel";
+		settings.thermalClass = "generation";
+		settings.heatSinkId = "hot";
+		settings.ratedOutputKW = 10.0;
+		settings.efficiency = 0.5;
+		settings.maxRampKWPerSecond = 100.0;
+		settings.commandedOutputKW = 10.0;
+		settings.startupPowerKW = 1.0;
+		settings.startupSeconds = 1.0;
+		settings.shutdownHeatKW = 0.0;
+		settings.shutdownSeconds = 0.0;
+		settings.maxSinkTemperatureC = 90.0;
+		return settings;
+	};
+	auto requirement = [](std::string storeId, double quantity, bool consumed)
+	{
+		core::MaintenanceRequirementSettings settings;
+		settings.storeId = std::move(storeId);
+		settings.quantity = quantity;
+		settings.consumed = consumed;
+		return settings;
+	};
+	auto job = [](std::string id, std::string installation, double first,
+		double duration, std::vector<core::MaintenanceRequirementSettings> requirements,
+		std::string wasteStoreId = {}, double recurrence = 0.0, int priority = 0)
+	{
+		core::MaintenanceJobSettings settings;
+		settings.id = std::move(id);
+		settings.installationId = std::move(installation);
+		settings.firstOccurrenceSeconds = first;
+		settings.durationSeconds = duration;
+		settings.recurrenceSeconds = recurrence;
+		settings.priority = priority;
+		settings.requirements = std::move(requirements);
+		settings.wasteStoreId = std::move(wasteStoreId);
+		return settings;
+	};
+	// The shared scenario: a fuelled generator, a reusable tool store,
+	// a spare-parts store and a waste store, all in kg. The generator
+	// reaches full rated output long before any maintenance window, so
+	// the isolation - not startup or the ramp - is what moves its
+	// output when a job runs.
+	auto baseSettings = [&]
+	{
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 1.0f;
+		settings.stores = {
+			store("diesel", "kWh", 100000.0, 100000.0),
+			store("tools", "kg", 100.0, 10.0),
+			store("parts", "kg", 100.0, 8.0),
+			store("waste", "kg", 10.0, 0.0)};
+		settings.thermalReservoirs = {sinkReservoir()};
+		settings.generators = {generator("gen")};
+		core::ProfileSettings sun; sun.constantLevel = 1.0;
+		core::SolarArraySettings field; field.id = "field"; field.capacityKW = 100.0;
+		field.illumination = sun;
+		settings.solarArrays = {field};
+		return settings;
+	};
+	auto configure = [&](core::World& world, core::StationSystemsSettings settings)
+	{
+		std::string diagnostic;
+		auto const ok = world.configureStationSystems(settings, false, &diagnostic);
+		if (!ok) return false;
+		world.resumeSimulation();
+		return true;
+	};
+	// Refused authored settings: the prerequisite contract is validated
+	// at the crossing, never discovered mid-tick.
+	for (auto mutation : {"unknown-installation", "unknown-requirement-store",
+		"empty-requirements", "consume-without-waste", "waste-without-consume",
+		"waste-unit-mismatch", "waste-own-source", "unknown-waste-store",
+		"duplicate-requirement-store", "zero-duration", "zero-quantity",
+		"recurrence-below-duration", "duplicate-id", "empty-id"})
+	{
+		auto settings = baseSettings();
+		settings.maintenanceJobs = {job("maint", "gen", 10.0, 5.0,
+			{requirement("tools", 2.0, false), requirement("parts", 1.0, true)},
+			"waste")};
+		if (std::string_view(mutation) == "unknown-installation")
+			settings.maintenanceJobs[0].installationId = "ghost";
+		else if (std::string_view(mutation) == "unknown-requirement-store")
+			settings.maintenanceJobs[0].requirements[0].storeId = "nope";
+		else if (std::string_view(mutation) == "empty-requirements")
+			settings.maintenanceJobs[0].requirements.clear();
+		else if (std::string_view(mutation) == "consume-without-waste")
+			settings.maintenanceJobs[0].wasteStoreId.clear();
+		else if (std::string_view(mutation) == "waste-without-consume")
+			settings.maintenanceJobs[0].requirements = {requirement("tools", 2.0, false)};
+		else if (std::string_view(mutation) == "waste-unit-mismatch")
+			settings.stores[3] = store("waste", "L", 10.0, 0.0);
+		else if (std::string_view(mutation) == "waste-own-source")
+			settings.maintenanceJobs[0].requirements[1].storeId = "waste";
+		else if (std::string_view(mutation) == "unknown-waste-store")
+			settings.maintenanceJobs[0].wasteStoreId = "nope";
+		else if (std::string_view(mutation) == "duplicate-requirement-store")
+			settings.maintenanceJobs[0].requirements.push_back(requirement("tools", 1.0, false));
+		else if (std::string_view(mutation) == "zero-duration")
+			settings.maintenanceJobs[0].durationSeconds = 0.0;
+		else if (std::string_view(mutation) == "zero-quantity")
+			settings.maintenanceJobs[0].requirements[0].quantity = 0.0;
+		else if (std::string_view(mutation) == "recurrence-below-duration")
+			settings.maintenanceJobs[0].recurrenceSeconds = 2.0;
+		else if (std::string_view(mutation) == "duplicate-id")
+			settings.maintenanceJobs.push_back(job("maint", "gen", 20.0, 5.0,
+				{requirement("parts", 1.0, true)}, "waste"));
+		else if (std::string_view(mutation) == "empty-id")
+			settings.maintenanceJobs[0].id = "";
+		core::World world("MaintenanceRefusal", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		std::string diagnostic;
+		require(!world.configureStationSystems(settings, false, &diagnostic),
+			std::string("an invalid maintenance job (").append(mutation).append(") was accepted").c_str());
+	}
+	// Nominal one-off maintenance: the job reserves its tool and part at
+	// the window, isolates the generator for its duration, then spends
+	// the part into the waste store, returns the tool and restores the
+	// machine - without replenishing anything.
+	{
+		auto settings = baseSettings();
+		settings.maintenanceJobs = {job("maint", "gen", 20.0, 10.0,
+			{requirement("tools", 5.0, false), requirement("parts", 2.0, true)},
+			"waste")};
+		core::World world("MaintenanceNominal", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		require(configure(world, settings), "nominal maintenance scenario was rejected");
+		// t = 12s: idle, generator at full rated output.
+		require(world.advanceTicks(12 * 60), "nominal run failed before the job");
+		auto const& before = world.getStationSystemsSnapshot();
+		require(before.maintenanceJobs.size() == 1
+			&& before.maintenanceJobs[0].phase == core::StationMaintenancePhase::Idle
+			&& before.maintenanceJobs[0].occurrencesStarted == 0,
+			"the maintenance job was busy before its window");
+		require(approx(before.power.generators[0].availabilityFactor, 1.0)
+			&& approx(before.power.generators[0].outputKW, 10.0, 1e-2),
+			"the generator was not at full output before maintenance");
+		// t = 25s: work in progress - the generator is isolated, the
+		// tool and part are reserved (still in their stores, but held).
+		if (!world.advanceTicks(13 * 60))
+		{
+			auto const& diags = world.getStationSystemsDiagnostics();
+			std::string msg = diags.empty() ? std::string("no diagnostic") : diags.back().message;
+			require(false, ("nominal run failed into the job: " + msg).c_str());
+		}
+		auto const& during = world.getStationSystemsSnapshot();
+		require(during.maintenanceJobs[0].phase == core::StationMaintenancePhase::Active
+			&& during.maintenanceJobs[0].isolated
+			&& during.maintenanceJobs[0].occurrencesStarted == 1,
+			("the maintenance job did not start and isolate as authored: phase="
+				+ std::to_string((int)during.maintenanceJobs[0].phase)
+				+ " isolated=" + std::to_string((int)during.maintenanceJobs[0].isolated)
+				+ " started=" + std::to_string(during.maintenanceJobs[0].occurrencesStarted)
+				+ " reason=" + during.maintenanceJobs[0].blockReason).c_str());
+		require(approx(during.maintenanceJobs[0].progressSeconds, 5.0, 0.05)
+			&& approx(during.maintenanceJobs[0].remainingSeconds, 5.0, 0.05),
+			"maintenance progress is not tracking the fixed tick");
+		require(approx(during.power.generators[0].availabilityFactor, 0.0)
+			&& approx(during.power.generators[0].outputKW, 0.0, 1e-3),
+			"the maintained generator was not isolated");
+		require(during.maintenanceJobs[0].requirements[0].reserved
+			&& during.maintenanceJobs[0].requirements[1].reserved,
+			"the live reservation is not visible on the requirements");
+		require(approx(during.stores[1].currentQualified, 10.0)
+			&& approx(during.stores[2].currentQualified, 8.0),
+			"reserved material left its store before completion");
+		require(sawEvent(world, "started at") && sawEvent(world, "installation isolated"),
+			"the maintenance start was not announced");
+		// t = 31s: completed - the part is spent into the waste store,
+		// the tool is returned, the generator runs again, and nothing
+		// was replenished.
+		require(world.advanceTicks(11 * 60), "nominal run failed past completion");
+		auto const& after = world.getStationSystemsSnapshot();
+		require(after.maintenanceJobs[0].phase == core::StationMaintenancePhase::Completed
+			&& !after.maintenanceJobs[0].isolated
+			&& after.maintenanceJobs[0].occurrencesCompleted == 1
+			&& after.maintenanceJobs[0].exhausted,
+			"the one-off maintenance did not complete and exhaust as authored");
+		require(approx(after.power.generators[0].availabilityFactor, 1.0)
+			&& approx(after.power.generators[0].outputKW, 10.0, 1e-2),
+			"the generator was not restored after maintenance");
+		require(approx(after.stores[1].currentQualified, 10.0),
+			"the reusable tool store changed - tools must be returned, not consumed");
+		require(approx(after.stores[2].currentQualified, 6.0),
+			"the consumed part was not deducted from its store");
+		require(approx(after.stores[3].currentQualified, 2.0),
+			"the used material did not land in the waste store");
+		require(after.maintenanceJobs[0].requirements[0].lastConsumed == 0.0
+			&& approx(after.maintenanceJobs[0].requirements[1].lastConsumed, 2.0),
+			"the per-requirement spend is wrong (tool must show zero consumed)");
+		require(sawEvent(world, "completed at")
+			&& sawEvent(world, "reusable tools returned")
+			&& sawEvent(world, "no supplies replenished"),
+			"the maintenance completion was not announced with its accounting");
+		// Conservation: the kg boundary closes - the part moved from
+		// parts to waste, nothing was created or deleted.
+		for (auto const& balance : after.balances)
+			if (balance.unit == "kg")
+				require(approx(balance.residual, 0.0, 1e-6),
+					"the maintenance kg boundary did not close");
+	}
+	// Missing prerequisites prevent free completion: with no parts in
+	// stock the job stays Blocked naming the binding store, the
+	// generator keeps running (no work, no isolation), and the window
+	// closes as a missed occurrence.
+	{
+		auto settings = baseSettings();
+		settings.stores[2] = store("parts", "kg", 100.0, 0.0);
+		settings.maintenanceJobs = {job("maint", "gen", 10.0, 5.0,
+			{requirement("tools", 2.0, false), requirement("parts", 1.0, true)},
+			"waste")};
+		core::World world("MaintenanceMissingParts", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		require(configure(world, settings), "missing-parts scenario was rejected");
+		require(world.advanceTicks(12 * 60), "missing-parts run failed");
+		auto const& snap = world.getStationSystemsSnapshot();
+		require(snap.maintenanceJobs[0].phase == core::StationMaintenancePhase::Blocked
+			&& snap.maintenanceJobs[0].blockReason.find("parts") != std::string::npos
+			&& snap.maintenanceJobs[0].occurrencesStarted == 0,
+			"the job did not block on the missing part store");
+		require(!snap.maintenanceJobs[0].isolated
+			&& approx(snap.power.generators[0].outputKW, 10.0, 1e-2),
+			"a blocked job isolated the installation without working");
+		require(sawEvent(world, "blocked at")
+			&& sawEvent(world, "part/consumable store 'parts' cannot cover"),
+			"the blocking reason was not announced");
+		// t = 16s: the window closed with the work never started.
+		require(world.advanceTicks(4 * 60), "missing-parts run failed past the window");
+		auto const& missed = world.getStationSystemsSnapshot();
+		require(missed.maintenanceJobs[0].occurrencesMissed == 1
+			&& missed.maintenanceJobs[0].occurrencesCompleted == 0
+			&& missed.maintenanceJobs[0].exhausted,
+			"the unstarted window was not reported as missed and exhausted");
+		require(approx(missed.stores[3].currentQualified, 0.0),
+			"a missed job booked waste it never spent");
+		require(sawEvent(world, "missed its window"),
+			"the missed occurrence was not announced");
+	}
+	// Interruption: a transfer drains the reserved part store below the
+	// reservation mid-job. The job is interrupted with its progress
+	// discarded and nothing spent; a delivery refills the store and the
+	// job re-reserves and runs the full duration from the restart.
+	{
+		auto settings = baseSettings();
+		settings.stores[2] = store("parts", "kg", 100.0, 10.0);
+		settings.stores.push_back(store("bilge", "kg", 1000.0, 0.0));
+		core::ResourceTransferSettings drain;
+		drain.id = "drain";
+		drain.sourceId = "parts";
+		drain.destinationId = "bilge";
+		drain.unit = "kg";
+		drain.ratePerSecond = 0.5;
+		drain.priority = 0;
+		settings.transfers = {drain};
+		settings.maintenanceJobs = {job("maint", "gen", 10.0, 10.0,
+			{requirement("tools", 2.0, false), requirement("parts", 2.0, true)},
+			"waste")};
+		core::ResourceDeliverySettings refill;
+		refill.id = "refill";
+		refill.storeId = "parts";
+		refill.unit = "kg";
+		refill.quantity = 20.0;
+		refill.firstOccurrenceSeconds = 19.0;
+		refill.recurrenceSeconds = 0.0;
+		settings.deliveries = {refill};
+		core::World world("MaintenanceInterrupt", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		require(configure(world, settings), "interruption scenario was rejected");
+		// t = 11s: the job started at 10s with 5 kg drawable; the
+		// drain has been pulling 0.5 kg/s since the run began.
+		require(world.advanceTicks(11 * 60), "interruption run failed into the job");
+		require(world.getStationSystemsSnapshot().maintenanceJobs[0].phase
+			== core::StationMaintenancePhase::Active,
+			"the job did not start before the drain reached its reservation");
+		// t = 17s: parts = 10 - 8.5 = 1.5 < 2 reserved -> interrupted.
+		require(world.advanceTicks(6 * 60), "interruption run failed into the interrupt");
+		auto const& cut = world.getStationSystemsSnapshot();
+		require(cut.maintenanceJobs[0].phase == core::StationMaintenancePhase::Blocked,
+			"the lost reservation did not block the job");
+		require(approx(cut.maintenanceJobs[0].progressSeconds, 0.0),
+			"the interrupted job kept progress it did not finish");
+		require(approx(cut.stores[3].currentQualified, 0.0),
+			"the interrupted job spent material anyway");
+		require(sawEvent(world, "interrupted at")
+			&& sawEvent(world, "progress discarded"),
+			"the interruption was not announced with its discarded progress");
+		// t = 20s: the refill landed at 19s; the job re-reserves and
+		// is running again inside its window.
+		require(world.advanceTicks(3 * 60), "interruption run failed into the restart");
+		auto const& restarted = world.getStationSystemsSnapshot();
+		require(restarted.maintenanceJobs[0].phase == core::StationMaintenancePhase::Active
+			&& restarted.maintenanceJobs[0].occurrencesStarted == 2,
+			"the job did not restart after the refill");
+		require(approx(restarted.maintenanceJobs[0].progressSeconds, 1.0, 0.05),
+			"the restarted job did not begin the full duration afresh");
+		// t = 29s: the full duration ran from the restart; the spend
+		// lands once, into waste, and the tool comes back.
+		require(world.advanceTicks(10 * 60), "interruption run failed past completion");
+		auto const& done = world.getStationSystemsSnapshot();
+		require(done.maintenanceJobs[0].phase == core::StationMaintenancePhase::Completed
+			&& done.maintenanceJobs[0].occurrencesCompleted == 1
+			&& done.maintenanceJobs[0].occurrencesMissed == 0,
+			"the restarted job did not complete exactly once");
+		require(approx(done.stores[3].currentQualified, 2.0),
+			"the restarted job's spend did not land in the waste store");
+		require(approx(done.stores[1].currentQualified, 10.0),
+			"the reusable tool was not returned after the restart");
+	}
+	// Simultaneous jobs cannot double-spend a shared tool: the
+	// higher-priority job holds the only copy, the lower one blocks
+	// naming the tool store, and starts the moment the tool is returned.
+	{
+		auto settings = baseSettings();
+		settings.generators.push_back(generator("gen2"));
+		settings.stores[1] = store("tools", "kg", 100.0, 4.0);
+		settings.stores.push_back(store("partsB", "kg", 100.0, 5.0));
+		settings.maintenanceJobs = {
+			job("high", "gen", 10.0, 10.0,
+				{requirement("tools", 4.0, false), requirement("parts", 1.0, true)},
+				"waste", 0.0, 10),
+			job("low", "gen2", 10.0, 15.0,
+				{requirement("tools", 4.0, false), requirement("partsB", 1.0, true)},
+				"waste", 0.0, 1)};
+		core::World world("MaintenanceContention", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		require(configure(world, settings), "contention scenario was rejected");
+		// t = 12s: the higher-priority job holds the tools; the lower
+		// one is blocked naming the tool store, and gen2 keeps running.
+		require(world.advanceTicks(12 * 60), "contention run failed into contention");
+		auto const& snap = world.getStationSystemsSnapshot();
+		require(snap.maintenanceJobs[0].phase == core::StationMaintenancePhase::Active
+			&& snap.maintenanceJobs[1].phase == core::StationMaintenancePhase::Blocked,
+			"the priority order did not decide who holds the shared tool");
+		require(snap.maintenanceJobs[1].blockReason.find("tools") != std::string::npos,
+			"the blocked job did not name the contended tool store");
+		require(!snap.maintenanceJobs[1].isolated
+			&& approx(snap.power.generators[1].outputKW, 10.0, 1e-2),
+			"a blocked job isolated the second installation");
+		// t = 24s: the high job completed at 20s and returned the
+		// tool; the low job holds it now and gen is back on line
+		// (given its restart crank and ramp room).
+		require(world.advanceTicks(12 * 60), "contention run failed past the handoff");
+		auto const& handed = world.getStationSystemsSnapshot();
+		require(handed.maintenanceJobs[0].occurrencesCompleted == 1
+			&& handed.maintenanceJobs[1].phase == core::StationMaintenancePhase::Active
+			&& handed.maintenanceJobs[1].isolated,
+			"the returned tool did not pass to the waiting job");
+		require(approx(handed.power.generators[0].outputKW, 10.0, 1e-2)
+			&& approx(handed.power.generators[1].outputKW, 0.0, 1e-3),
+			"the isolation did not move with the work");
+		// t = 36s: the low job completes too; total spend is exactly
+		// the two authored kilograms, both in the waste store.
+		require(world.advanceTicks(12 * 60), "contention run failed past the second completion");
+		auto const& done = world.getStationSystemsSnapshot();
+		require(done.maintenanceJobs[1].occurrencesCompleted == 1
+			&& done.maintenanceJobs[1].phase == core::StationMaintenancePhase::Completed,
+			"the second job did not complete");
+		require(approx(done.stores[3].currentQualified, 2.0),
+			"the two jobs together spent something other than their authored 2 kg");
+		require(approx(done.stores[1].currentQualified, 4.0),
+			"the shared tool was consumed instead of returned");
+	}
+	// Determinism: the same authored scenario replayed from Reset
+	// reproduces the snapshot and the maintenance event history exactly.
+	{
+		auto settings = baseSettings();
+		settings.stores[2] = store("parts", "kg", 100.0, 10.0);
+		settings.stores.push_back(store("bilge", "kg", 1000.0, 0.0));
+		core::ResourceTransferSettings drain;
+		drain.id = "drain";
+		drain.sourceId = "parts";
+		drain.destinationId = "bilge";
+		drain.unit = "kg";
+		drain.ratePerSecond = 0.5;
+		settings.transfers = {drain};
+		settings.maintenanceJobs = {job("maint", "gen", 10.0, 10.0,
+			{requirement("tools", 2.0, false), requirement("parts", 2.0, true)},
+			"waste", 20.0, 3)};
+		core::World first("MaintenanceReplayA", 2, 2);
+		first.pauseSimulation(); first.finishBuild();
+		require(configure(first, settings), "replay scenario A was rejected");
+		require(first.advanceTicks(40 * 60), "replay run A failed");
+		core::World second("MaintenanceReplayB", 2, 2);
+		second.pauseSimulation(); second.finishBuild();
+		require(configure(second, settings), "replay scenario B was rejected");
+		require(second.advanceTicks(40 * 60), "replay run B failed");
+		require(first.getStationSystemsSnapshot().maintenanceJobs
+			== second.getStationSystemsSnapshot().maintenanceJobs,
+			"the recurring maintenance replay diverged");
+		auto maintenanceEvents = [](core::World& world)
+		{
+			std::vector<std::string> messages;
+			for (auto const& event : world.getStationSystemsEvents())
+				if (event.message.rfind("Maintenance '", 0) == 0)
+					messages.push_back(event.message);
+			return messages;
+		};
+		require(maintenanceEvents(first) == maintenanceEvents(second),
+			"the maintenance event history is not reproducible");
+		require(!maintenanceEvents(first).empty(),
+			"the recurring scenario produced no maintenance events at all");
+	}
+	// Host/Lua seam: the sandbox mirror receives the maintenance
+	// descriptors, resolves the target installation to the generator
+	// object it names, and its own reservation ledger spends exactly
+	// what the host ledger spends - the sandbox asserts its store
+	// movement in place, so a corrupt crossing or model drift fails
+	// contained like any other script failure.
+	{
+		SourceScope scope;
+		auto const bundled = core::bundledStationSystemsSource();
+		core::setStationSystemsSourceLoader([bundled] {
+			return std::string("local factory = (function()\n") + bundled + "\nend)()\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures, outages, dispatchMode, maintenance)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures, outages, dispatchMode, maintenance)\n"
+				"assert(#model.maintenance == 1, 'sandbox did not receive the maintenance schedule')\n"
+				"local job = model.maintenance[1]\n"
+				"assert(job.installation == model.generators[1], 'sandbox resolved the maintenance target to the wrong object')\n"
+				"assert(#job.requirements == 2, 'sandbox lost a maintenance requirement')\n"
+				"assert(job.requirements[1].consumed == false, 'sandbox flipped the reusable tool to consumed')\n"
+				"assert(job.requirements[2].consumed == true, 'sandbox flipped the consumed part to reusable')\n"
+				"local original = model.advance\n"
+				"function model.advance(self, world_tick, fixed_seconds)\n"
+				"local result = original(self, world_tick, fixed_seconds)\n"
+				"local elapsed = world_tick * fixed_seconds\n"
+				"if elapsed >= 30.0 then\n"
+				"assert(math.abs(self.stores[3].qualified - 6.0) < 1e-9, 'sandbox parts spend disagrees with the authored 2 kg')\n"
+				"assert(math.abs(self.stores[4].qualified - 2.0) < 1e-9, 'sandbox waste booking disagrees with the spent material')\n"
+				"assert(math.abs(self.stores[2].qualified - 10.0) < 1e-9, 'sandbox consumed the reusable tool store')\n"
+				"assert(self.maintenance[1].completed == 1, 'sandbox maintenance did not complete once')\n"
+				"end\n"
+				"return result\n"
+				"end\n"
+				"return model\n"
+				"end";
+		});
+		auto settings = baseSettings();
+		settings.maintenanceJobs = {job("maint", "gen", 20.0, 10.0,
+			{requirement("tools", 5.0, false), requirement("parts", 2.0, true)},
+			"waste")};
+		core::World world("MaintenanceSandboxCrossing", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		require(configure(world, settings), "sandbox crossing scenario was rejected");
+		require(world.advanceTicks(35 * 60),
+			"bundled Lua maintenance mirror failed its in-sandbox assertions");
+		auto const snap = world.getStationSystemsSnapshot();
+		require(snap.healthy
+			&& approx(snap.stores[2].currentQualified, 6.0)
+			&& approx(snap.stores[3].currentQualified, 2.0),
+			"the host ledger disagrees with what the sandbox asserted");
 	}
 }
 
@@ -18450,7 +18948,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"nutrientConservation", nutrientConservation}, {"bioContainment", bioContainment}, {"outages", outages}, {"failures", failures}, {"dispatch", dispatch}, {"protectedServices", protectedServices}, {"recovery", recovery}};
+		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"nutrientConservation", nutrientConservation}, {"bioContainment", bioContainment}, {"outages", outages}, {"maintenance", maintenance}, {"failures", failures}, {"dispatch", dispatch}, {"protectedServices", protectedServices}, {"recovery", recovery}};
 	registerStationDocumentChecks(checks);
 	registerCoupledStationChecks(checks);
 	return smoke::main("station", checks, argc, argv);

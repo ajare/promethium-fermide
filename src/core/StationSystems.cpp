@@ -98,6 +98,7 @@ namespace core
 			std::vector<CropPopulationSettings> const* cropPopulations;
 			std::vector<AlgaeCultureSettings> const* algaeCultures;
 			char const* dispatchMode{"manual"};
+			std::vector<MaintenanceJobSettings> const* maintenanceJobs{};
 			static char const* settingsDispatchModeName(StationDispatchMode mode)
 			{
 				return mode == StationDispatchMode::Automatic ? "automatic" : "manual";
@@ -808,7 +809,37 @@ namespace core
 				// immutable string; the sandbox mirrors the same controller
 				// and refuses any other value.
 				lua_pushstring(state, dispatchMode);
-				lua_call(state, 30, 1);
+				// Authored maintenance job schedules cross the same boundary
+				// as plain immutable descriptors; the sandbox mirrors the
+				// same reservation, isolation and spend rules (#414).
+				lua_createtable(state, maintenanceJobs ? static_cast<int>(maintenanceJobs->size()) : 0, 0);
+				for (size_t index = 0; maintenanceJobs
+					&& index < maintenanceJobs->size(); ++index)
+				{
+					auto const& job = (*maintenanceJobs)[index];
+					lua_createtable(state, 0, 7);
+					lua_pushstring(state, job.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, job.installationId.c_str()); lua_setfield(state, -2, "installation");
+					lua_pushnumber(state, job.firstOccurrenceSeconds); lua_setfield(state, -2, "firstSeconds");
+					lua_pushnumber(state, job.durationSeconds); lua_setfield(state, -2, "durationSeconds");
+					lua_pushnumber(state, job.recurrenceSeconds); lua_setfield(state, -2, "recurrenceSeconds");
+					lua_pushinteger(state, job.priority); lua_setfield(state, -2, "priority");
+					lua_pushstring(state, job.wasteStoreId.c_str()); lua_setfield(state, -2, "wasteStore");
+					lua_createtable(state, static_cast<int>(job.requirements.size()), 0);
+					for (size_t requirementIndex = 0;
+						requirementIndex < job.requirements.size(); ++requirementIndex)
+					{
+						auto const& requirement = job.requirements[requirementIndex];
+						lua_createtable(state, 0, 3);
+						lua_pushstring(state, requirement.storeId.c_str()); lua_setfield(state, -2, "store");
+						lua_pushnumber(state, requirement.quantity); lua_setfield(state, -2, "quantity");
+						lua_pushboolean(state, requirement.consumed ? 1 : 0); lua_setfield(state, -2, "consumed");
+						lua_rawseti(state, -2, static_cast<int>(requirementIndex) + 1);
+					}
+					lua_setfield(state, -2, "requirements");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 31, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -2119,6 +2150,113 @@ namespace core
 			if (outage.recurrenceSeconds > 0.0
 				&& outage.recurrenceSeconds + StationScheduleTolerance < outage.durationSeconds)
 				return refuse(where + " recurrence must be at least the outage duration so its windows never overlap");
+		}
+		// Authored scheduled maintenance jobs (#414): timed work whose
+		// completion must be paid for with declared tools, spare parts and
+		// consumables. The target must be a registered installation, every
+		// requirement must name an existing store with a positive finite
+		// quantity, and the consumed stream must land in a declared waste
+		// store that can actually hold it: same unit (cross-unit movement
+		// is conversion, not maintenance), same declared composition (a
+		// compound boundary is never crossed silently) and the same hazard
+		// class (containment is enforced at configuration, never policed
+		// at runtime). A reusable tool may come from anywhere - it is
+		// returned, not moved - but a consumed requirement may not draw
+		// from the waste store itself, and a waste store with nothing to
+		// fill it is refused rather than carried as dead configuration.
+		if (settings.maintenanceJobs.size() > MaxStationMaintenanceJobs)
+			return refuse("Station maintenance jobs are limited to "
+				+ std::to_string(MaxStationMaintenanceJobs) + " entries");
+		std::set<std::string> maintenanceIds;
+		for (auto const& job : settings.maintenanceJobs)
+		{
+			auto const where = "Station maintenance job '" + job.id + "'";
+			if (job.id.empty()) return refuse("Station maintenance job id must not be empty");
+			if (job.id.size() > MaxStationStoreIdLength)
+				return refuse("Station maintenance job id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!maintenanceIds.insert(job.id).second) return refuse(where + " id is duplicated");
+			if (job.installationId.empty())
+				return refuse(where + " installation id must not be empty");
+			if (job.installationId.size() > MaxStationStoreIdLength)
+				return refuse(where + " installation id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (std::none_of(registeredInstallations.begin(), registeredInstallations.end(),
+				[&](StationInstallationIdentity const& installation) {
+					return installation.id == job.installationId;
+				}))
+				return refuse(where + " targets unknown installation '" + job.installationId
+					+ "'; only installations registered with the availability contract can be maintained");
+			if (!std::isfinite(job.firstOccurrenceSeconds)
+				|| job.firstOccurrenceSeconds < 0.0)
+				return refuse(where + " first occurrence must be finite and non-negative");
+			if (!std::isfinite(job.durationSeconds) || job.durationSeconds <= 0.0)
+				return refuse(where + " duration must be finite and positive");
+			if (!std::isfinite(job.recurrenceSeconds) || job.recurrenceSeconds < 0.0)
+				return refuse(where + " recurrence must be finite and non-negative (0 is a one-off)");
+			if (job.recurrenceSeconds > 0.0
+				&& job.recurrenceSeconds + StationScheduleTolerance
+					< static_cast<double>(World::getFixedTimestep()))
+				return refuse(where + " recurrence must be zero or at least one World fixed tick ("
+					+ std::to_string(World::getFixedTimestep()) + " seconds)");
+			if (job.recurrenceSeconds > 0.0
+				&& job.recurrenceSeconds + StationScheduleTolerance < job.durationSeconds)
+				return refuse(where + " recurrence must be at least the maintenance duration so its windows never overlap");
+			if (job.requirements.empty())
+				return refuse(where + " needs at least one declared tool/part/consumable requirement; maintenance without prerequisites would complete for free");
+			if (job.requirements.size() > MaxStationMaintenanceRequirements)
+				return refuse(where + " requirements are limited to "
+					+ std::to_string(MaxStationMaintenanceRequirements) + " entries");
+			auto const findStore = [&](std::string const& id) -> ResourceStoreSettings const*
+			{
+				auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
+						[&](ResourceStoreSettings const& store) { return store.id == id; });
+				return it == settings.stores.end() ? nullptr : &*it;
+			};
+			ResourceStoreSettings const* waste = nullptr;
+			if (!job.wasteStoreId.empty())
+			{
+				waste = findStore(job.wasteStoreId);
+				if (!waste)
+					return refuse(where + " references unknown waste store '" + job.wasteStoreId + "'");
+			}
+			bool anyConsumed = false;
+			std::set<std::string> requirementStores;
+			for (auto const& requirement : job.requirements)
+			{
+				auto const item = where + " requirement '" + requirement.storeId + "'";
+				if (requirement.storeId.empty())
+					return refuse(where + " requirement store id must not be empty");
+				if (!requirementStores.insert(requirement.storeId).second)
+					return refuse(item + " is duplicated within the job");
+				auto const* source = findStore(requirement.storeId);
+				if (!source) return refuse(item + " references unknown store");
+				if (!std::isfinite(requirement.quantity) || requirement.quantity <= 0.0)
+					return refuse(item + " quantity must be finite and positive");
+				if (!requirement.consumed) continue;
+				anyConsumed = true;
+				if (!waste)
+					return refuse(where + " consumes from " + item
+						+ " but declares no waste store; removed parts and used material must be booked into appropriate waste");
+				if (requirement.storeId == job.wasteStoreId)
+					return refuse(item + " is consumed into itself; the waste store may not also be its own source");
+				if (source->unit != waste->unit)
+					return refuse(item + " unit '" + source->unit
+						+ "' does not match the waste store unit '" + waste->unit + "'");
+				if (source->composition || waste->composition)
+				{
+					if (!source->composition || !waste->composition
+						|| !compositionsClose(*source->composition, *waste->composition))
+						return refuse(item
+							+ " crosses a compound-material boundary into the waste store; consumed material may only land in a store with the same declared composition");
+				}
+				if (source->hazardClass != waste->hazardClass)
+					return refuse(item + " crosses the hazard-class boundary ('"
+						+ source->hazardClass + "' -> '" + waste->hazardClass
+						+ "'); consumed material may not cross the containment boundary");
+			}
+			if (!anyConsumed && !job.wasteStoreId.empty())
+				return refuse(where + " declares a waste store but consumes nothing; the waste store would never receive material");
 		}
 		// Compartment atmosphere contracts (#400): a fixed volume with a
 		// finite owned gas inventory, an authored effective thermal
@@ -4646,6 +4784,52 @@ namespace core
 		// construction so the tick pass can read each target's effective
 		// availability factor.
 		std::vector<OutageState> outages;
+		// Authored scheduled maintenance jobs (#414). Each job resolves
+		// its target installation and its requirement/waste stores at
+		// construction; the tick pass runs the reservation state machine
+		// in the declared deterministic order (priority descending,
+		// declaration order), so overlapping work never double-spends a
+		// unit of tool or part.
+		struct MaintenanceState
+		{
+			MaintenanceJobSettings authored;
+			std::string installationKind;
+			// The target installation, resolved at construction. Exactly
+			// one kind matches, as for outages (#576).
+			enum class Target : std::uint8_t { Generator, CoolantLoop, Chiller };
+			Target target{Target::Generator};
+			size_t targetIndex{0};
+			// One entry per authored requirement: the resolved store index
+			// and the amount this job's live reservation currently holds
+			// from that store (0 when nothing is reserved).
+			struct RequirementState
+			{
+				size_t storeIndex{0};
+				double reserved{0.0};
+				double lastConsumed{0.0};
+			};
+			std::vector<RequirementState> requirements;
+			// The waste store index, or SIZE_MAX when the job consumes
+			// nothing (reusable-only job).
+			size_t wasteStoreIndex{SIZE_MAX};
+			StationMaintenancePhase phase{StationMaintenancePhase::Idle};
+			double progressSeconds{0.0};
+			std::string blockReason;
+			// Index of the occurrence currently being worked (0-based).
+			uint64_t occurrence{0};
+			uint64_t occurrencesStarted{0};
+			uint64_t occurrencesCompleted{0};
+			uint64_t occurrencesMissed{0};
+			double lastStartSeconds{0.0};
+			double lastCompleteSeconds{0.0};
+			bool exhausted{false};
+			bool lastIsolated{false};
+		};
+		std::vector<MaintenanceState> maintenanceJobs;
+		// Maintenance jobs compete for the same stores and tools, so the
+		// reservation pass runs them in the declared deterministic order:
+		// priority descending, declaration order ascending.
+		std::vector<size_t> maintenanceOrder;
 		std::vector<ReservoirState> reservoirs;
 		std::vector<RadiatorState> radiators;
 		std::vector<LoopState> coolantLoops;
@@ -4808,6 +4992,7 @@ namespace core
 			auto const committedBatteries = batteries;
 			auto const committedDeliveries = deliveries;
 			auto const committedWasteEjections = wasteEjections;
+			auto const committedMaintenanceJobs = maintenanceJobs;
 			auto const committedReservoirs = reservoirs;
 			auto const committedRadiators = radiators;
 			auto const committedCoolantLoops = coolantLoops;
@@ -4859,6 +5044,7 @@ namespace core
 			batteries = committedBatteries;
 			deliveries = committedDeliveries;
 			wasteEjections = committedWasteEjections;
+			maintenanceJobs = committedMaintenanceJobs;
 			reservoirs = committedReservoirs;
 			radiators = committedRadiators;
 			coolantLoops = committedCoolantLoops;
@@ -5417,6 +5603,343 @@ namespace core
 						? coolantLoops[outage.targetIndex].availabilityFactor
 						: chillers[outage.targetIndex].availabilityFactor;
 				factor = std::min(factor, outage.authored.capacityFraction);
+			}
+			// Resource-constrained maintenance (#414) runs right behind
+			// the outage pass: an Active job holds its target installation
+			// at zero availability on top of any outage ceiling, and its
+			// reservation is evaluated against the same staged inventory
+			// every other process draws from this tick. Jobs run in the
+			// declared deterministic order (priority descending,
+			// declaration order), so when two jobs need the same tool or
+			// part the higher-precedence job holds it and the lower one
+			// waits - a unit of material is never spent twice.
+			//
+			// The tick runs three ordered phases:
+			//  1. Reservation integrity. Every reservation an Active job
+			//     holds must still be covered by this tick's staged
+			//     inventory and waste headroom. Where another process
+			//     drew the reserved material away, the lowest-precedence
+			//     job holding that store is interrupted first: its
+			//     reservation is released and its progress discarded.
+			//     Nothing was spent, so nothing needs refunding, and the
+			//     material that got away stays with whoever took it -
+			//     no double-spend either way.
+			//  2. Progress and completion. An Active job accrues the
+			//     fixed tick against its duration. A job that completes
+			//     releases its reservation before any start attempt, so
+			//     the tools it returns are available to waiting work in
+			//     the same tick. Completion spends for real: consumed
+			//     parts and consumables leave their sources and land in
+			//     the waste store as qualified, disposal-ready material;
+			//     reusable tools are simply returned - the same tools,
+			//     not replenished ones.
+			//  3. Start attempts. A job whose window is open reserves
+			//     every prerequisite from the qualified inventory that
+			//     higher-precedence work has not already taken. No
+			//     reservation, no work: the job is Blocked with the
+			//     binding prerequisite named, and nothing completes for
+			//     free. A window that closes before the job ever started
+			//     is a missed occurrence, reported and never back-filled.
+			if (!maintenanceJobs.empty())
+			{
+				auto const occurrenceTime = [](MaintenanceState const& job, uint64_t occurrence)
+				{
+					return job.authored.recurrenceSeconds > 0.0
+						? job.authored.firstOccurrenceSeconds
+							+ static_cast<double>(occurrence) * job.authored.recurrenceSeconds
+						: job.authored.firstOccurrenceSeconds;
+				};
+				auto const hasOccurrence = [](MaintenanceState const& job, uint64_t occurrence)
+				{
+					return job.authored.recurrenceSeconds > 0.0 || occurrence == 0;
+				};
+				// A reservation covers its need when the drawable
+				// inventory reaches the quantity within the declared
+				// balance tolerance: float noise at the boundary is
+				// never a spurious block, and a genuine shortage still is.
+				auto const covers = [](double available, double needed)
+				{
+					return available + StationBalanceTolerance * std::max(1.0, needed) >= needed;
+				};
+				auto const interruptJob = [&](MaintenanceState& job, std::string const& reason)
+				{
+					for (auto& requirement : job.requirements) requirement.reserved = 0.0;
+					job.phase = StationMaintenancePhase::Blocked;
+					job.progressSeconds = 0.0;
+					job.blockReason = "interrupted: " + reason;
+					appendBoundedEvent(events, tick,
+						"Maintenance '" + job.authored.id + "' on " + job.installationKind
+						+ " '" + job.authored.installationId + "' interrupted at "
+						+ std::to_string(elapsed) + " s: " + reason
+						+ "; progress discarded, reservation released");
+				};
+				// Phase 1: reservation integrity. Interrupt the
+				// lowest-precedence Active job holding any store that
+				// can no longer cover the total reservation on it,
+				// until every held reservation is covered again.
+				for (;;)
+				{
+					std::map<size_t, double> totalReserved;
+					std::map<size_t, double> totalWasteClaim;
+					for (auto const& job : maintenanceJobs)
+					{
+						if (job.phase != StationMaintenancePhase::Active) continue;
+						for (auto const& requirement : job.requirements)
+							totalReserved[requirement.storeIndex] += requirement.reserved;
+						if (job.wasteStoreIndex == SIZE_MAX) continue;
+						for (size_t requirementIndex = 0;
+							requirementIndex < job.requirements.size(); ++requirementIndex)
+							if (job.authored.requirements[requirementIndex].consumed)
+								totalWasteClaim[job.wasteStoreIndex] += job.requirements[requirementIndex].reserved;
+					}
+					std::string violatedStore;
+					bool violatedWaste = false;
+					size_t violatedStoreIndex = SIZE_MAX;
+					for (auto const& [storeIndex, reserved] : totalReserved)
+					{
+						if (covers(qualified[storeIndex], reserved)) continue;
+						violatedStore = stores[storeIndex].authored.id;
+						violatedStoreIndex = storeIndex;
+						break;
+					}
+					if (violatedStore.empty())
+					{
+						for (auto const& [storeIndex, claim] : totalWasteClaim)
+						{
+							auto const headroom = stores[storeIndex].authored.capacity
+								- qualified[storeIndex] - unqualified[storeIndex];
+							if (covers(headroom, claim)) continue;
+							violatedStore = stores[storeIndex].authored.id;
+							violatedStoreIndex = storeIndex;
+							violatedWaste = true;
+							break;
+						}
+					}
+					if (violatedStore.empty()) break;
+					// Lowest precedence first: walk the declared order
+					// backwards and interrupt the last job holding the
+					// violated store, so the most important work keeps
+					// its reservation as long as the inventory lasts.
+					bool released = false;
+					for (auto orderIt = maintenanceOrder.rbegin();
+						orderIt != maintenanceOrder.rend() && !released; ++orderIt)
+					{
+						auto& job = maintenanceJobs[*orderIt];
+						if (job.phase != StationMaintenancePhase::Active) continue;
+						bool holds = violatedWaste
+							? job.wasteStoreIndex == violatedStoreIndex
+							: std::any_of(job.requirements.begin(), job.requirements.end(),
+								[&](MaintenanceState::RequirementState const& requirement)
+								{ return requirement.storeIndex == violatedStoreIndex
+									&& requirement.reserved > 0.0; });
+						if (!holds) continue;
+						interruptJob(job, violatedWaste
+							? "waste store '" + violatedStore
+								+ "' lost the headroom for the reserved consumed material"
+							: "store '" + violatedStore
+								+ "' fell below the total reserved material");
+						released = true;
+					}
+					if (!released) break;
+				}
+				// Phase 2: progress and completion. Completions release
+				// their reservations before start attempts run, so a
+				// returned tool is available to waiting work this tick.
+				for (auto const index : maintenanceOrder)
+				{
+					auto& job = maintenanceJobs[index];
+					if (job.phase != StationMaintenancePhase::Active) continue;
+					job.progressSeconds += static_cast<double>(seconds);
+					if (job.progressSeconds + StationBalanceTolerance
+						< job.authored.durationSeconds)
+						continue;
+					job.progressSeconds = job.authored.durationSeconds;
+					double consumedTotal = 0.0;
+					for (size_t requirementIndex = 0;
+						requirementIndex < job.requirements.size(); ++requirementIndex)
+					{
+						auto& requirement = job.requirements[requirementIndex];
+						if (!job.authored.requirements[requirementIndex].consumed)
+						{
+							// Reusable tool: returned, never consumed.
+							requirement.lastConsumed = 0.0;
+							requirement.reserved = 0.0;
+							continue;
+						}
+						auto const spent = requirement.reserved;
+						qualified[requirement.storeIndex] -= spent;
+						flowOut[requirement.storeIndex] += spent;
+						qualified[job.wasteStoreIndex] += spent;
+						flowIn[job.wasteStoreIndex] += spent;
+						consumedTotal += spent;
+						requirement.lastConsumed = spent;
+						requirement.reserved = 0.0;
+					}
+					job.phase = StationMaintenancePhase::Completed;
+					++job.occurrencesCompleted;
+					job.lastCompleteSeconds = elapsed;
+					job.blockReason.clear();
+					appendBoundedEvent(events, tick,
+						"Maintenance '" + job.authored.id + "' on " + job.installationKind
+						+ " '" + job.authored.installationId + "' completed at "
+						+ std::to_string(elapsed)
+						+ " s: " + std::to_string(consumedTotal)
+						+ " unit(s) of consumed material booked into waste store '"
+						+ (job.wasteStoreIndex == SIZE_MAX ? std::string("none")
+							: stores[job.wasteStoreIndex].authored.id)
+						+ "', reusable tools returned, installation restored (no supplies replenished)");
+					// Advance past this occurrence; any occurrence whose
+					// window opened while this one was still running is
+					// missed - a late job never back-fills the schedule.
+					++job.occurrence;
+					while (hasOccurrence(job, job.occurrence)
+						&& occurrenceTime(job, job.occurrence) + StationScheduleTolerance < elapsed)
+					{
+						++job.occurrencesMissed;
+						appendBoundedEvent(events, tick,
+							"Maintenance '" + job.authored.id + "' on " + job.installationKind
+							+ " '" + job.authored.installationId + "' missed the window at "
+							+ std::to_string(occurrenceTime(job, job.occurrence))
+							+ " s while earlier work was still running");
+						++job.occurrence;
+					}
+					if (!hasOccurrence(job, job.occurrence)) job.exhausted = true;
+				}
+				// Phase 3: start attempts in the declared order. The
+				// running reservation total carries the material held
+				// by every job that already reserved this tick, so a
+				// later job never aims at kilograms a higher-precedence
+				// job has taken.
+				std::map<size_t, double> reservedByStore;
+				for (auto const& job : maintenanceJobs)
+				{
+					if (job.phase != StationMaintenancePhase::Active) continue;
+					for (auto const& requirement : job.requirements)
+						reservedByStore[requirement.storeIndex] += requirement.reserved;
+				}
+				for (auto const index : maintenanceOrder)
+				{
+					auto& job = maintenanceJobs[index];
+					if (job.exhausted) continue;
+					// Jobs that are Active were advanced in phase 2; only
+					// idle, completed and blocked jobs attempt a start.
+					if (job.phase == StationMaintenancePhase::Active) continue;
+					if (job.phase == StationMaintenancePhase::Idle
+						|| job.phase == StationMaintenancePhase::Completed)
+					{
+						if (!hasOccurrence(job, job.occurrence)
+							|| elapsed < occurrenceTime(job, job.occurrence))
+							continue;
+					}
+					else if (job.phase == StationMaintenancePhase::Blocked)
+					{
+						// The window closed with the work never started:
+						// the occurrence is missed, reported, and never
+						// made up later - a schedule that slipped is
+						// not a schedule that ran.
+						if (elapsed >= occurrenceTime(job, job.occurrence)
+							+ job.authored.durationSeconds)
+						{
+							++job.occurrencesMissed;
+							appendBoundedEvent(events, tick,
+								"Maintenance '" + job.authored.id + "' on "
+								+ job.installationKind + " '" + job.authored.installationId
+								+ "' missed its window at " + std::to_string(elapsed)
+								+ " s: " + job.blockReason);
+							++job.occurrence;
+							job.progressSeconds = 0.0;
+							if (!hasOccurrence(job, job.occurrence))
+							{
+								job.exhausted = true;
+								job.phase = StationMaintenancePhase::Idle;
+								continue;
+							}
+							job.phase = StationMaintenancePhase::Idle;
+							continue;
+						}
+					}
+					std::string blockReason;
+					double consumedTotal = 0.0;
+					for (size_t requirementIndex = 0;
+						requirementIndex < job.requirements.size(); ++requirementIndex)
+					{
+						auto const& requirement = job.requirements[requirementIndex];
+						auto const& source = stores[requirement.storeIndex].authored;
+						auto const drawable = qualified[requirement.storeIndex]
+							- reservedByStore[requirement.storeIndex];
+						if (!covers(drawable, job.authored.requirements[requirementIndex].quantity))
+						{
+							blockReason = std::string(job.authored.requirements[requirementIndex].consumed
+								? "part/consumable store '" : "tool store '")
+								+ source.id + "' cannot cover "
+								+ std::to_string(job.authored.requirements[requirementIndex].quantity)
+								+ " " + source.unit + " (drawable "
+								+ std::to_string(std::max(0.0, drawable)) + ")";
+							break;
+						}
+						if (job.authored.requirements[requirementIndex].consumed)
+							consumedTotal += job.authored.requirements[requirementIndex].quantity;
+					}
+					if (blockReason.empty() && job.wasteStoreIndex != SIZE_MAX)
+					{
+						auto const& waste = stores[job.wasteStoreIndex].authored;
+						auto const headroom = waste.capacity
+							- qualified[job.wasteStoreIndex] - unqualified[job.wasteStoreIndex];
+						if (!covers(headroom, consumedTotal))
+							blockReason = "waste store '" + waste.id
+								+ "' lacks headroom for the consumed material ("
+								+ std::to_string(consumedTotal) + " " + waste.unit
+								+ " needed, " + std::to_string(std::max(0.0, headroom)) + " free)";
+					}
+					if (!blockReason.empty())
+					{
+						if (job.phase != StationMaintenancePhase::Blocked)
+							appendBoundedEvent(events, tick,
+								"Maintenance '" + job.authored.id + "' on " + job.installationKind
+								+ " '" + job.authored.installationId + "' blocked at "
+								+ std::to_string(elapsed) + " s: " + blockReason);
+						job.phase = StationMaintenancePhase::Blocked;
+						job.blockReason = std::move(blockReason);
+						continue;
+					}
+					// Reserved: the work starts now, the installation
+					// goes off service, and every prerequisite is held
+					// ahead of the lower-precedence jobs still to come.
+					for (size_t requirementIndex = 0;
+						requirementIndex < job.requirements.size(); ++requirementIndex)
+					{
+						job.requirements[requirementIndex].reserved
+							= job.authored.requirements[requirementIndex].quantity;
+						reservedByStore[job.requirements[requirementIndex].storeIndex]
+							+= job.requirements[requirementIndex].reserved;
+					}
+					job.phase = StationMaintenancePhase::Active;
+					job.progressSeconds = 0.0;
+					job.blockReason.clear();
+					++job.occurrencesStarted;
+					job.lastStartSeconds = elapsed;
+					appendBoundedEvent(events, tick,
+						"Maintenance '" + job.authored.id + "' on " + job.installationKind
+						+ " '" + job.authored.installationId + "' started at "
+						+ std::to_string(elapsed)
+						+ " s: prerequisites reserved, installation isolated for "
+						+ std::to_string(job.authored.durationSeconds) + " s of work");
+				}
+				// Isolation: an Active maintenance job holds its target
+				// installation at zero availability on top of any
+				// outage ceiling - work and rated service never happen
+				// at the same time on the same machine.
+				for (auto& job : maintenanceJobs)
+				{
+					job.lastIsolated = job.phase == StationMaintenancePhase::Active;
+					if (!job.lastIsolated) continue;
+					auto& factor = job.target == MaintenanceState::Target::Generator
+						? generators[job.targetIndex].availabilityFactor
+						: job.target == MaintenanceState::Target::CoolantLoop
+							? coolantLoops[job.targetIndex].availabilityFactor
+							: chillers[job.targetIndex].availabilityFactor;
+					factor = std::min(factor, 0.0);
+				}
 			}
 			// Fuelled generators run ahead of the load allocation (#399):
 			// their electrical output joins the shared generation pool for
@@ -13389,6 +13912,81 @@ namespace core
 					+ "' that resolved to no registered generator, coolant loop or chiller");
 			mImpl->outages.push_back(std::move(state));
 		}
+		// Maintenance job schedules start idle with their first window
+		// still ahead (#414). Each job resolves its target installation
+		// the same way outages do - exactly one registered kind must
+		// match - and its requirement and waste stores to indices into
+		// the live store ledger, so the tick pass never does name
+		// lookups. Reset and load reconstruct this starting state, so a
+		// replay restarts every maintenance schedule from its authored
+		// beginning rather than resuming a half-spent one.
+		for (auto const& job : settings.maintenanceJobs)
+		{
+			Impl::MaintenanceState state;
+			state.authored = job;
+			auto const generatorHits = generatorIndex.count(job.installationId);
+			auto const loopHits = loopIndex.count(job.installationId);
+			auto const chillerHits = chillerIndex.count(job.installationId);
+			if (generatorHits + loopHits + chillerHits > 1)
+				throw SerializationException("Station maintenance job '"
+					+ job.id + "' targets installation id '" + job.installationId
+					+ "' that is ambiguous across generator, coolant loop and chiller registrations");
+			if (generatorHits != 0)
+			{
+				state.target = Impl::MaintenanceState::Target::Generator;
+				state.targetIndex = generatorIndex[job.installationId];
+				state.installationKind = "generator";
+			}
+			else if (loopHits != 0)
+			{
+				state.target = Impl::MaintenanceState::Target::CoolantLoop;
+				state.targetIndex = loopIndex[job.installationId];
+				state.installationKind = "coolant loop";
+			}
+			else if (chillerHits != 0)
+			{
+				state.target = Impl::MaintenanceState::Target::Chiller;
+				state.targetIndex = chillerIndex[job.installationId];
+				state.installationKind = "chiller";
+			}
+			else
+				throw SerializationException("Station maintenance job '"
+					+ job.id + "' targets installation '" + job.installationId
+					+ "' that resolved to no registered generator, coolant loop or chiller");
+			for (auto const& requirement : job.requirements)
+			{
+				auto const it = storeIndex.find(requirement.storeId);
+				if (it == storeIndex.end())
+					throw SerializationException("Station maintenance job '"
+						+ job.id + "' requirement store '" + requirement.storeId
+						+ "' resolved to no configured store");
+				Impl::MaintenanceState::RequirementState requirementState;
+				requirementState.storeIndex = it->second;
+				state.requirements.push_back(requirementState);
+			}
+			if (!job.wasteStoreId.empty())
+			{
+				auto const it = storeIndex.find(job.wasteStoreId);
+				if (it == storeIndex.end())
+					throw SerializationException("Station maintenance job '"
+						+ job.id + "' waste store '" + job.wasteStoreId
+						+ "' resolved to no configured store");
+				state.wasteStoreIndex = it->second;
+			}
+			mImpl->maintenanceJobs.push_back(std::move(state));
+		}
+		// Maintenance jobs compete for the same tools, parts and waste
+		// headroom, so the reservation pass runs them in the declared
+		// deterministic order: priority descending, declaration order
+		// ascending (#414).
+		mImpl->maintenanceOrder.resize(mImpl->maintenanceJobs.size());
+		std::iota(mImpl->maintenanceOrder.begin(), mImpl->maintenanceOrder.end(), 0);
+		std::stable_sort(mImpl->maintenanceOrder.begin(), mImpl->maintenanceOrder.end(),
+			[&](size_t left, size_t right)
+			{
+				return mImpl->maintenanceJobs[left].authored.priority
+					> mImpl->maintenanceJobs[right].authored.priority;
+			});
 		// The compound conservation boundary is fixed at run start from the
 		// authored starting inventory of every compound store (#391).
 		for (auto const& store : mImpl->stores)
@@ -13424,7 +14022,8 @@ namespace core
 				&settings.sabatierReactors, &settings.methaneProcessors,
 				&settings.microbialProcessors, &settings.cropPopulations,
 				&settings.algaeCultures,
-				Construction::settingsDispatchModeName(settings.dispatchMode)};
+				Construction::settingsDispatchModeName(settings.dispatchMode),
+				&settings.maintenanceJobs};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -13522,6 +14121,7 @@ namespace core
 		if (!mImpl->transferOrder.empty() || !mImpl->conversionOrder.empty()
 			|| !mImpl->loads.empty() || !mImpl->solarArrays.empty() || !mImpl->batteries.empty()
 			|| !mImpl->deliveries.empty() || !mImpl->wasteEjections.empty()
+			|| !mImpl->maintenanceJobs.empty()
 			|| !mImpl->reservoirs.empty()
 			|| !mImpl->coolantLoops.empty() || !mImpl->chillers.empty()
 			|| !mImpl->generators.empty() || !mImpl->atmospheres.empty()
@@ -15074,6 +15674,69 @@ namespace core
 					? mImpl->coolantLoops[outage.targetIndex].availabilityFactor
 					: mImpl->chillers[outage.targetIndex].availabilityFactor;
 			result.outages.push_back(std::move(outageResult));
+		}
+		// The maintenance snapshot reports the authored contract beside
+		// the live phase, progress and blocking reason, the reservation
+		// and actual spend of every requirement, and the occurrence
+		// history (#414). The target's effective availability is read
+		// from the installation the job isolates, so an operator sees
+		// the isolation bite the same number the outage contract uses.
+		for (auto const& job : mImpl->maintenanceJobs)
+		{
+			StationMaintenanceSnapshot jobResult;
+			jobResult.id = job.authored.id;
+			jobResult.installationId = job.authored.installationId;
+			jobResult.installationKind = job.installationKind;
+			jobResult.firstOccurrenceSeconds = job.authored.firstOccurrenceSeconds;
+			jobResult.durationSeconds = job.authored.durationSeconds;
+			jobResult.recurrenceSeconds = job.authored.recurrenceSeconds;
+			jobResult.priority = job.authored.priority;
+			jobResult.wasteStoreId = job.authored.wasteStoreId;
+			jobResult.phase = job.phase;
+			jobResult.isolated = job.lastIsolated;
+			jobResult.progressSeconds = job.progressSeconds;
+			jobResult.remainingSeconds = job.phase == StationMaintenancePhase::Active
+				? std::max(0.0, job.authored.durationSeconds - job.progressSeconds) : 0.0;
+			jobResult.blockReason = job.blockReason;
+			for (size_t requirementIndex = 0;
+				requirementIndex < job.requirements.size(); ++requirementIndex)
+			{
+				auto const& requirement = job.requirements[requirementIndex];
+				auto const& authored = job.authored.requirements[requirementIndex];
+				StationMaintenanceRequirementSnapshot requirementResult;
+				requirementResult.storeId = requirement.storeIndex == SIZE_MAX
+					? authored.storeId : mImpl->stores[requirement.storeIndex].authored.id;
+				requirementResult.unit = requirement.storeIndex == SIZE_MAX
+					? std::string() : mImpl->stores[requirement.storeIndex].authored.unit;
+				requirementResult.quantity = authored.quantity;
+				requirementResult.consumed = authored.consumed;
+				requirementResult.reserved = requirement.reserved > 0.0;
+				requirementResult.lastConsumed = requirement.lastConsumed;
+				jobResult.requirements.push_back(std::move(requirementResult));
+			}
+			jobResult.occurrencesStarted = job.occurrencesStarted;
+			jobResult.occurrencesCompleted = job.occurrencesCompleted;
+			jobResult.occurrencesMissed = job.occurrencesMissed;
+			jobResult.lastStartSeconds = job.lastStartSeconds;
+			jobResult.lastCompleteSeconds = job.lastCompleteSeconds;
+			jobResult.exhausted = job.exhausted;
+			if (!job.exhausted
+				&& (job.authored.recurrenceSeconds > 0.0 || job.occurrence == 0))
+			{
+				jobResult.hasNextOccurrence = true;
+				jobResult.nextOccurrenceSeconds = job.authored.recurrenceSeconds > 0.0
+					? job.authored.firstOccurrenceSeconds
+						+ static_cast<double>(job.occurrence) * job.authored.recurrenceSeconds
+					: job.authored.firstOccurrenceSeconds;
+			}
+			jobResult.status = job.phase == StationMaintenancePhase::Active
+				? StationTransferStatus::Partial
+				: job.phase == StationMaintenancePhase::Completed
+					? StationTransferStatus::Full
+					: job.phase == StationMaintenancePhase::Blocked
+						? StationTransferStatus::Rejected
+						: StationTransferStatus::Idle;
+			result.maintenanceJobs.push_back(std::move(jobResult));
 		}
 		return result;
 	}

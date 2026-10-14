@@ -214,7 +214,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 93", "version: 64");
+		replaceAll(legacy, "version: 94", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -231,14 +231,14 @@ namespace
 			"authored store fields missing or live inventory leaked");
 		bool refused = false;
 		auto staleStores = withField;
-		replaceAll(staleStores, "version: 93", "version: 65");
+		replaceAll(staleStores, "version: 94", "version: 65");
 		auto const staleStoresPath = directory / "stale-stores.world.yaml";
 		writeFile(staleStoresPath, staleStores);
 		try { (void)core::loadWorldDocument(staleStoresPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-66 document carrying resource stores was silently accepted");
 		auto staleTransfers = withField;
-		replaceAll(staleTransfers, "version: 93", "version: 66");
+		replaceAll(staleTransfers, "version: 94", "version: 66");
 		auto const staleTransfersPath = directory / "stale-transfers.world.yaml";
 		writeFile(staleTransfersPath, staleTransfers);
 		refused = false;
@@ -246,7 +246,7 @@ namespace
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-67 document carrying resource transfers was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 93", "version: 64");
+		replaceAll(stale, "version: 94", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
 		refused = false;
@@ -384,7 +384,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 93", "version: 67");
+			replaceAll(stale, "version: 94", "version: 67");
 			auto const stalePath = directory / "stale-compounds.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -493,7 +493,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 93", "version: 69");
+			replaceAll(stale, "version: 94", "version: 69");
 			auto const stalePath = directory / "stale-batteries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -615,7 +615,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 93", "version: 68");
+			replaceAll(stale, "version: 94", "version: 68");
 			auto const stalePath = directory / "stale-power.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -742,7 +742,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 93", "version: 70");
+			replaceAll(stale, "version: 94", "version: 70");
 			auto const stalePath = directory / "stale-deliveries.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -858,7 +858,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 93", "version: 81");
+			replaceAll(stale, "version: 94", "version: 81");
 			auto const stalePath = directory / "stale-waste-ejections.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -995,7 +995,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 93", "version: 87");
+			replaceAll(stale, "version: 94", "version: 87");
 			auto const stalePath = directory / "stale-containment.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1123,7 +1123,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 93", "version: 71");
+			replaceAll(stale, "version: 94", "version: 71");
 			auto const stalePath = directory / "stale-thermal.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1261,7 +1261,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 93", "version: 80");
+			replaceAll(stale, "version: 94", "version: 80");
 			auto const stalePath = directory / "stale-buffer.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1402,7 +1402,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 93", "version: 72");
+			replaceAll(stale, "version: 94", "version: 72");
 			auto const stalePath = directory / "stale-coolant.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1565,7 +1565,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 93", "version: 73");
+			replaceAll(stale, "version: 94", "version: 73");
 			auto const stalePath = directory / "stale-chillers.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1713,7 +1713,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 93", "version: 74");
+			replaceAll(stale, "version: 94", "version: 74");
 			auto const stalePath = directory / "stale-generators.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1883,7 +1883,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 93", "version: 89");
+			replaceAll(stale, "version: 94", "version: 89");
 			auto const stalePath = directory / "stale-outages.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -1921,6 +1921,192 @@ namespace
 			try { (void)core::loadWorldDocument(malformedPath); }
 			catch (std::exception const&) { refused = true; }
 			require(refused, "a recurrence shorter than the outage window was accepted from a file");
+		}
+	}
+
+	// #414: resource-constrained maintenance persists as the authored
+	// schedule and requirement set only. The reservation state, phase,
+	// progress, occurrence counts and spend are runtime state that is
+	// reconstructed on load from the authored schedule and the World
+	// tick, never written to the document. The reopened World replays
+	// the closed scenario - same snapshots, same maintenance events -
+	// and pre-94 documents or malformed requirement values are refused.
+	void maintenanceFiles(smoke::Context const& context)
+	{
+		namespace filesystem = std::filesystem;
+		auto const directory = context.temporaryRoot() / "station-maintenance";
+		filesystem::create_directories(directory);
+		core::ResourceStoreSettings diesel;
+		diesel.id = "diesel";
+		diesel.unit = "kWh";
+		diesel.capacity = 100000.0;
+		diesel.startingQualified = 100000.0;
+		core::ResourceStoreSettings tools;
+		tools.id = "tools";
+		tools.unit = "kg";
+		tools.capacity = 100.0;
+		tools.startingQualified = 10.0;
+		core::ResourceStoreSettings parts;
+		parts.id = "parts";
+		parts.unit = "kg";
+		parts.capacity = 100.0;
+		parts.startingQualified = 8.0;
+		core::ResourceStoreSettings waste;
+		waste.id = "waste";
+		waste.unit = "kg";
+		waste.capacity = 20.0;
+		waste.startingQualified = 0.0;
+		core::ThermalReservoirSettings sink;
+		sink.id = "hot";
+		sink.thermalClass = "generation";
+		sink.heatCapacityKJPerK = 100000.0;
+		sink.startingTemperatureC = 20.0;
+		sink.minTemperatureC = -50.0;
+		sink.maxTemperatureC = 200.0;
+		core::GeneratorSettings generator;
+		generator.id = "gen";
+		generator.fuelStoreId = "diesel";
+		generator.thermalClass = "generation";
+		generator.heatSinkId = "hot";
+		generator.ratedOutputKW = 10.0;
+		generator.efficiency = 0.5;
+		generator.maxRampKWPerSecond = 100.0;
+		generator.commandedOutputKW = 10.0;
+		generator.startupPowerKW = 1.0;
+		generator.startupSeconds = 1.0;
+		generator.maxSinkTemperatureC = 90.0;
+		core::ProfileSettings sun; sun.constantLevel = 1.0;
+		core::SolarArraySettings field;
+		field.id = "field";
+		field.capacityKW = 100.0;
+		field.illumination = sun;
+		core::MaintenanceJobSettings recurring;
+		recurring.id = "service";
+		recurring.installationId = "gen";
+		recurring.firstOccurrenceSeconds = 10.0;
+		recurring.durationSeconds = 8.0;
+		recurring.recurrenceSeconds = 30.0;
+		recurring.priority = 2;
+		recurring.wasteStoreId = "waste";
+		core::MaintenanceRequirementSettings toolRequirement;
+		toolRequirement.storeId = "tools";
+		toolRequirement.quantity = 3.0;
+		toolRequirement.consumed = false;
+		core::MaintenanceRequirementSettings partRequirement;
+		partRequirement.storeId = "parts";
+		partRequirement.quantity = 1.5;
+		partRequirement.consumed = true;
+		recurring.requirements.push_back(toolRequirement);
+		recurring.requirements.push_back(partRequirement);
+		core::MaintenanceJobSettings oneOff;
+		oneOff.id = "overhaul";
+		oneOff.installationId = "gen";
+		oneOff.firstOccurrenceSeconds = 50.0;
+		oneOff.durationSeconds = 6.0;
+		oneOff.recurrenceSeconds = 0.0;
+		oneOff.priority = 5;
+		oneOff.wasteStoreId = "waste";
+		oneOff.requirements.push_back(partRequirement);
+		core::World original("Maintenance Round Trip", 2, 2);
+		original.pauseSimulation();
+		original.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 1.0f;
+		settings.stores = {diesel, tools, parts, waste};
+		settings.thermalReservoirs = {sink};
+		settings.generators = {generator};
+		settings.solarArrays = {field};
+		settings.maintenanceJobs = {recurring, oneOff};
+		std::string diagnostic;
+		require(original.configureStationSystems(settings, false, &diagnostic),
+			"Maintenance settings edit failed: " + diagnostic);
+		original.resumeSimulation();
+		require(original.advanceTicks(25 * 60), "Maintenance original run failed");
+		auto const expected = original.getStationSystemsSnapshot();
+		require(expected.maintenanceJobs.size() == 2
+			&& expected.maintenanceJobs[0].occurrencesStarted >= 1,
+			"Maintenance scenario produced the wrong observable state");
+		for (auto const* suffix : {".world.yaml", ".world"})
+		{
+			auto const path = directory / (std::string("maintenance") + suffix);
+			original.saveTo(path.string());
+			auto const document = readFile(path);
+			require(document.find("maintenanceJobs") != std::string::npos
+				&& document.find("installationId") != std::string::npos
+				&& document.find("firstOccurrenceSeconds") != std::string::npos
+				&& document.find("durationSeconds") != std::string::npos
+				&& document.find("recurrenceSeconds") != std::string::npos
+				&& document.find("wasteStoreId") != std::string::npos
+				&& document.find("requirements") != std::string::npos
+				&& document.find("consumed") != std::string::npos,
+				"authored maintenance fields missing from the document");
+			for (auto const* liveState : {"progressSeconds", "occurrencesStarted",
+				"occurrencesCompleted", "occurrencesMissed", "lastStartSeconds",
+				"lastCompleteSeconds", "isolated", "blockReason", "reserved",
+				"lastConsumed", "exhausted", "hasNextOccurrence", "phase"})
+				require(document.find(liveState) == std::string::npos,
+					std::string("live maintenance state leaked into the document: ") + liveState);
+			require(document.find("service") != std::string::npos
+				&& document.find("overhaul") != std::string::npos,
+				"the authored maintenance ids are missing from the document");
+			auto const reopened = core::loadWorldDocument(path);
+			require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+				"maintenance settings did not survive the file round trip");
+			require(reopened->getStationSystemsSnapshot().maintenanceJobs.size() == 2
+				&& reopened->getStationSystemsSnapshot().maintenanceJobs[0].occurrencesStarted == 0
+				&& reopened->getStationSystemsSnapshot().maintenanceJobs[0].phase
+					== core::StationMaintenancePhase::Idle,
+				"reopened World did not reconstruct the authored maintenance starting state");
+			reopened->resumeSimulation();
+			require(reopened->advanceTicks(25 * 60), "Maintenance reopened run failed");
+			require(reopened->getStationSystemsSnapshot() == expected,
+				"maintenance scenario is not reproducible from the document");
+			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
+				"maintenance event history is not reproducible from the document");
+		}
+		// A pre-94 document carrying the new fields is refused.
+		auto const withField = serializeYaml(original);
+		{
+			auto stale = withField;
+			replaceAll(stale, "version: 94", "version: 93");
+			auto const stalePath = directory / "stale-maintenance.world.yaml";
+			writeFile(stalePath, stale);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(stalePath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a pre-94 document carrying maintenance jobs was silently accepted");
+		}
+		// Malformed maintenance values in a file are rejected.
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "installationId: gen", "installationId: ghost");
+			auto const malformedPath = directory / "malformed-maintenance-installation.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a maintenance job on an unknown installation was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "recurrenceSeconds: 30", "recurrenceSeconds: 4");
+			auto const malformedPath = directory / "malformed-maintenance-recurrence.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a recurrence shorter than the maintenance window was accepted from a file");
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "wasteStoreId: waste", "wasteStoreId: nowhere");
+			auto const malformedPath = directory / "malformed-maintenance-waste.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a maintenance job on an unknown waste store was accepted from a file");
 		}
 	}
 
@@ -2034,7 +2220,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 93", "version: 75");
+			replaceAll(stale, "version: 94", "version: 75");
 			auto const stalePath = directory / "stale-atmospheres.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -2205,7 +2391,7 @@ namespace
 		auto const withField = serializeYaml(original);
 		{
 			auto stale = withField;
-			replaceAll(stale, "version: 93", "version: 76");
+			replaceAll(stale, "version: 94", "version: 76");
 			auto const stalePath = directory / "stale-crews.world.yaml";
 			writeFile(stalePath, stale);
 			bool refused = false;
@@ -2395,7 +2581,7 @@ void waterFiles(smoke::Context const& context)
 	// A pre-78 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 93", "version: 77");
+		replaceAll(stale, "version: 94", "version: 77");
 		auto const stalePath = directory / "stale-water.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -2569,7 +2755,7 @@ void gasFiles(smoke::Context const& context)
 	// A pre-79 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 93", "version: 78");
+		replaceAll(stale, "version: 94", "version: 78");
 		auto const stalePath = directory / "stale-gas.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -2725,7 +2911,7 @@ void fuelCellFiles(smoke::Context const& context)
 	// A pre-80 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 93", "version: 79");
+		replaceAll(stale, "version: 94", "version: 79");
 		auto const stalePath = directory / "stale-fuelcells.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -2894,7 +3080,7 @@ void carbonRecoveryFiles(smoke::Context const& context)
 	// A pre-83 document carrying the new fields is refused.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 93", "version: 82");
+		replaceAll(stale, "version: 94", "version: 82");
 		auto const stalePath = directory / "stale-carbon.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -3103,7 +3289,7 @@ void nutrientRecoveryFiles(smoke::Context const& context)
 	// refused rather than silently re-defaulted.
 	{
 		auto stale = withField;
-		replaceAll(stale, "version: 93", "version: 84");
+		replaceAll(stale, "version: 94", "version: 84");
 		auto const stalePath = directory / "stale-nutrient.world.yaml";
 		writeFile(stalePath, stale);
 		bool refused = false;
@@ -3584,6 +3770,7 @@ void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"chillerFiles", chillerFiles});
 	checks.push_back({"generatorFiles", generatorFiles});
 	checks.push_back({"outageFiles", outageFiles});
+	checks.push_back({"maintenanceFiles", maintenanceFiles});
 	checks.push_back({"atmosphereFiles", atmosphereFiles});
 	checks.push_back({"crewFiles", crewFiles});
 	checks.push_back({"bioHazardFiles", bioHazardFiles});

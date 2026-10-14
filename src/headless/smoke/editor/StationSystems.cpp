@@ -2324,7 +2324,146 @@ void cropWorkflow(smoke::Context const&)
 		#undef REQ
 		require(driver.passed(), "Algae workflow failed on the Test Engine");
 	}
-void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
+	// #414: the real Station Systems window drafts, validates, refuses
+	// and applies resource-constrained maintenance edits, and the live
+	// view reports the phase, isolation, reservation and spend through
+	// the headless ImGui seam.
+	void maintenanceWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO();
+		io.DisplaySize = {1200, 1700};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Maintenance editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		core::StationSystemsSettings initial;
+		initial.enabled = true;
+		initial.observationIntervalSeconds = 1.0f;
+		core::ResourceStoreSettings tools;
+		tools.id = "tools";
+		tools.unit = "kg";
+		tools.capacity = 50.0;
+		tools.startingQualified = 10.0;
+		core::ResourceStoreSettings parts;
+		parts.id = "parts";
+		parts.unit = "kg";
+		parts.capacity = 50.0;
+		parts.startingQualified = 5.0;
+		core::ResourceStoreSettings waste;
+		waste.id = "waste";
+		waste.unit = "kg";
+		waste.capacity = 20.0;
+		waste.startingQualified = 0.0;
+		core::ResourceStoreSettings diesel;
+		diesel.id = "diesel";
+		diesel.unit = "kWh";
+		diesel.capacity = 1000.0;
+		diesel.startingQualified = 1000.0;
+		core::ThermalReservoirSettings hot;
+		hot.id = "hot";
+		hot.thermalClass = "generation";
+		hot.heatCapacityKJPerK = 10000.0;
+		hot.startingTemperatureC = 20.0;
+		hot.minTemperatureC = -50.0;
+		hot.maxTemperatureC = 200.0;
+		core::GeneratorSettings gen;
+		gen.id = "gen";
+		gen.fuelStoreId = "diesel";
+		gen.thermalClass = "generation";
+		gen.heatSinkId = "hot";
+		gen.ratedOutputKW = 10.0;
+		gen.efficiency = 0.5;
+		gen.maxRampKWPerSecond = 100.0;
+		gen.commandedOutputKW = 10.0;
+		gen.startupPowerKW = 1.0;
+		gen.startupSeconds = 1.0;
+		gen.maxSinkTemperatureC = 90.0;
+		initial.stores = {tools, parts, waste, diesel};
+		initial.thermalReservoirs = {hot};
+		initial.generators = {gen};
+		require(world->configureStationSystems(initial, false, &diagnostic), diagnostic.c_str());
+		headless::TestEngineDriver driver([&]
+		{
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 1650});
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+
+		driver.run("station", "maintenanceWorkflow", [&](ImGuiTestContext* ctx)
+		{
+			ctx->SetRef("Station Systems");
+			REQ(driver.contains("0 maintenance job(s)"),
+				"Authored maintenance count missing from the window");
+			// Draft a job through the real controls. The freshly added
+			// job points at the existing generator and store.
+			driver.click(ctx, "Add maintenance job");
+			REQ(driver.contains("Draft differs from the authored start conditions"),
+				"Added maintenance draft not reported as a change");
+			driver.typeValue(ctx, "Maintenance job 0 first occurrence seconds", "5");
+			driver.typeValue(ctx, "Maintenance job 0 duration seconds", "4");
+			driver.typeValue(ctx, "Maintenance job 0 waste store id", "waste");
+			driver.typeValue(ctx, "Maintenance requirement 0.0 store id", "tools");
+			driver.typeValue(ctx, "Maintenance requirement 0.0 quantity", "2");
+			driver.click(ctx, "Add requirement to maintenance job 0");
+			driver.typeValue(ctx, "Maintenance requirement 0.1 store id", "parts");
+			driver.typeValue(ctx, "Maintenance requirement 0.1 quantity", "1");
+			driver.click(ctx, "Maintenance requirement 0.1 consumed (unchecked = reusable tool)");
+			// An invalid draft - unknown installation - is refused with a
+			// visible diagnostic and never reaches the authored settings.
+			driver.typeValue(ctx, "Maintenance job 0 installation id", "ghost");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			REQ(driver.contains("targets unknown installation 'ghost'"),
+				"Unknown-installation maintenance draft diagnostic not shown");
+			REQ(world->getStationSystemsSettings().maintenanceJobs.empty()
+				&& history.undoCount() == 0,
+				"Invalid maintenance draft mutated the authored settings");
+			// Repair the draft and apply through the document seam.
+			driver.typeValue(ctx, "Maintenance job 0 installation id", "gen");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			REQ(world->getStationSystemsSettings().maintenanceJobs.size() == 1
+				&& world->getStationSystemsSettings().maintenanceJobs[0].requirements.size() == 2
+				&& world->getStationSystemsSettings().maintenanceJobs[0].wasteStoreId == "waste"
+				&& history.undoCount() == 1,
+				"Repaired maintenance draft did not apply");
+			// Run through the window: the job starts, isolates the
+			// generator, completes, and the live view reports the spend.
+			world->markSaved();
+			world->resumeSimulation();
+			REQ(world->advanceTicks(8 * 60), "Maintenance editor run failed mid-job");
+			ctx->Sleep(1);
+			REQ(driver.contains("maint1 on generator 'gen': active [ISOLATED]"),
+				"Active isolated maintenance not shown in the live view");
+			REQ(driver.contains("tools 2.000000 kg reusable: reserved")
+				&& driver.contains("parts 1.000000 kg consumed: reserved"),
+				"Live reservation state not displayed");
+			REQ(world->advanceTicks(8 * 60), "Maintenance editor run failed past completion");
+			ctx->Sleep(1);
+			REQ(driver.contains("maint1 on generator 'gen': completed")
+				&& !driver.contains("maint1 on generator 'gen': active"),
+				"Completed maintenance not shown in the live view");
+			REQ(driver.contains("last spent 1.000000")
+				&& driver.contains("waste (kg) [normal]: usable 1.000"),
+				"Completed spend into the waste store not displayed");
+			REQ(!world->isModified(), "Maintenance ticking dirtied the authored document");
+			// Removing the job applies through the same seam.
+			world->pauseSimulation();
+			driver.click(ctx, "Remove maintenance job 0");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(world->getStationSystemsSettings().maintenanceJobs.empty()
+				&& history.undoCount() == 2,
+				"Removed maintenance job did not apply");
+		});
+		#undef REQ
+		require(driver.passed(), "Maintenance workflow failed on the Test Engine");
+	}
+	void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"station/windowWorkflow", workflow});
 	checks.push_back({"station/removalWorkflow", removalWorkflow});
@@ -2344,5 +2483,6 @@ void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 	checks.push_back({"station/microbialConditionWorkflow", microbialConditionWorkflow});
 	checks.push_back({"station/cropWorkflow", cropWorkflow});
 	checks.push_back({"station/algaeWorkflow", algaeWorkflow});
+	checks.push_back({"station/maintenanceWorkflow", maintenanceWorkflow});
 	checks.push_back({"station/coupledLiveViewWorkflow", coupledLiveViewWorkflow});
 }

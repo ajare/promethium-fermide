@@ -1675,6 +1675,61 @@ mirror runs the same protected pass, credits and audits inside every
 private sandbox, so the scripted path and the host ledger agree tick
 for tick.
 
+### Resource-constrained maintenance (#414)
+
+Scheduled timed work whose completion must be paid for with declared
+tools, spare parts and consumables. A maintenance job names a registered
+installation (chiller, coolant loop or generator), a first occurrence,
+a per-occurrence duration, a recurrence (0 for a one-off; a positive
+recurrence must be at least the duration so windows never overlap), a
+priority, its requirements, and a waste store where removed material
+lands. Every requirement declares a source store, a quantity, and
+whether it is consumed (a part or consumable) or reusable (a tool).
+
+Reservation is all-or-nothing per occurrence: work starts only when
+every requirement can be reserved from qualified inventory at once,
+and it never starts partially. Reusable tools stay reserved for the
+whole job and are returned unchanged on completion or interruption -
+the store is held, not diminished. Consumed requirements are reserved
+up front and actually spent at completion: the material moves from the
+source store into the declared waste store with the same unit, declared
+composition and hazard class (the waste store must accept exactly what
+was spent), so a spent part shows up as booked waste rather than vanishing.
+
+While a job is Active its target installation is isolated: its
+availability reads zero, so a generator under maintenance produces
+nothing and the isolation is visible on the snapshot. If a reservation
+is broken mid-work - inventory drawn away by a resupply edge or a
+store change - the occurrence is interrupted, not faked: reusable
+reservations return immediately, the job drops to blocked with the
+binding reason, and the occurrence is counted as missed rather than
+completed. Absent prerequisites never allow free completion.
+
+Each fixed tick runs the job set in three deterministic phases:
+reservation integrity and interruption first (so a broken commitment
+releases stores before anything else competes), then progress and
+completion with the spend into the waste store, then start attempts in
+priority order (higher priority reserves first among coincident
+windows; ties fall back to declaration order). Occurrences use the
+shared schedule-tolerance grid, so a due window is never missed or
+counted twice across the floating-point boundary.
+
+The snapshot exposes every job: phase (idle, blocked, active,
+completed), progress against duration, the current block reason, the
+isolation flag, per-requirement reservation state and last-spent
+amounts, and the started/completed/missed occurrence counters with the
+next window time. The bundled Lua lifecycle mirror receives the same
+maintenance descriptors, resolves the installation to its sandbox
+object, and runs the same reserve-spend-return ledger inside the
+sandbox, so the scripted path and the host ledger agree tick for tick.
+The job list persists with the World document at schema 94; pre-94
+documents are refused rather than silently dropped, and malformed job
+blocks refuse with a diagnostic. The separate Station Systems window
+drafts jobs and requirements (add/remove, consumed checkboxes, waste
+store), refuses invalid drafts with visible diagnostics, and shows the
+live phase, isolation, reservations and spend beside the other
+station readouts.
+
 ## Explicit scope limit
 
 This slice implements lifecycle, authored finite store configuration,

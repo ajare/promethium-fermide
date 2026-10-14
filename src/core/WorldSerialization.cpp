@@ -919,7 +919,14 @@ namespace core
 		// `recoveryHysteresisFraction`, `restartSurgePowerKW` or
 		// `restartSurgeSeconds` is refused rather than silently dropped.
 		// The recovery stage, surge drawn and hold reasons stay runtime-only.
-		serializer.writeUint32("version", 93);
+		// Schema 94 adds the authored resource-constrained maintenance
+		// jobs (#414): the schedule, the target installation, the
+		// declared tool/part/consumable requirements and the waste store.
+		// A pre-94 document carrying `maintenanceJobs` is refused rather
+		// than silently dropped. The reservation state, progress, phase,
+		// occurrence counts and spend stay runtime-only, reconstructed on
+		// load from the authored schedule and the World tick.
+		serializer.writeUint32("version", 94);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -1768,6 +1775,36 @@ namespace core
 					serializer.writeDouble("durationSeconds", outage.durationSeconds);
 					serializer.writeDouble("recurrenceSeconds", outage.recurrenceSeconds);
 					serializer.writeInt32("priority", outage.priority);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.maintenanceJobs.empty())
+			{
+				// Authored schedules and requirements only; the reservation
+				// state, progress, phase and spend are runtime state
+				// reconstructed on load from the authored schedule (#414).
+				serializer.beginArray("maintenanceJobs");
+				for (auto const& job : mStationSystemsSettings.maintenanceJobs)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", job.id);
+					serializer.writeString("installationId", job.installationId);
+					serializer.writeDouble("firstOccurrenceSeconds", job.firstOccurrenceSeconds);
+					serializer.writeDouble("durationSeconds", job.durationSeconds);
+					serializer.writeDouble("recurrenceSeconds", job.recurrenceSeconds);
+					serializer.writeInt32("priority", job.priority);
+					serializer.writeString("wasteStoreId", job.wasteStoreId);
+					serializer.beginArray("requirements");
+					for (auto const& requirement : job.requirements)
+					{
+						serializer.beginMap("");
+						serializer.writeString("storeId", requirement.storeId);
+						serializer.writeDouble("quantity", requirement.quantity);
+						serializer.writeBool("consumed", requirement.consumed);
+						serializer.endMap();
+					}
+					serializer.endArray();
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -2656,7 +2693,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 93)
+		if (version < 1 || version > 94)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -3616,6 +3653,42 @@ namespace core
 					outage.recurrenceSeconds = serializer.readDouble("recurrenceSeconds");
 					outage.priority = serializer.readInt32("priority");
 					stationSettings.outages.push_back(std::move(outage));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("maintenanceJobs"))
+			{
+				if (version < 94) throw SerializationException(
+					"Station maintenance jobs require World schema 94");
+				serializer.beginArray("maintenanceJobs");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					MaintenanceJobSettings job;
+					job.id = serializer.readString("id");
+					job.installationId = serializer.readString("installationId");
+					job.firstOccurrenceSeconds = serializer.readDouble("firstOccurrenceSeconds");
+					job.durationSeconds = serializer.readDouble("durationSeconds");
+					job.recurrenceSeconds = serializer.readDouble("recurrenceSeconds");
+					job.priority = serializer.readInt32("priority");
+					job.wasteStoreId = serializer.readString("wasteStoreId");
+					if (serializer.hasField("requirements"))
+					{
+						serializer.beginArray("requirements");
+						while (serializer.nextArrayItem())
+						{
+							serializer.beginMap("");
+							MaintenanceRequirementSettings requirement;
+							requirement.storeId = serializer.readString("storeId");
+							requirement.quantity = serializer.readDouble("quantity");
+							requirement.consumed = serializer.readBool("consumed");
+							job.requirements.push_back(std::move(requirement));
+							serializer.endMap();
+						}
+						serializer.endArray();
+					}
+					stationSettings.maintenanceJobs.push_back(std::move(job));
 					serializer.endMap();
 				}
 				serializer.endArray();

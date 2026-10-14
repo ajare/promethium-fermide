@@ -85,8 +85,8 @@ foreach(check lifecycle batching eventBound persistence stores transfers compoun
         batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
-        deliveries wasteEjections thermal coolant chillers generators outages buffers atmospheres crews water containment gas crops failures dispatch protectedServices recovery fileRoundTrip writeFailure legacyFiles structuralReplay
-        compoundFiles powerFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles outageFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles
+        deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres crews water containment gas crops failures dispatch protectedServices recovery fileRoundTrip writeFailure legacyFiles structuralReplay
+        compoundFiles powerFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles outageFiles maintenanceFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles
         # #571: harvest, algae and the nutrient-conservation closure were
         # reachable through the binary but never registered here, so they
         # ran in no CI pass. The nutrient ledger needs to actually run to
@@ -656,6 +656,9 @@ add_test(NAME station-editor-crops COMMAND pf-smoke-editor --check station/cropW
 set_tests_properties(station-editor-crops PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-algae COMMAND pf-smoke-editor --check station/algaeWorkflow)
 set_tests_properties(station-editor-algae PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+# #414: resource-constrained maintenance authored through the real window.
+add_test(NAME station-editor-maintenance COMMAND pf-smoke-editor --check station/maintenanceWorkflow)
+set_tests_properties(station-editor-maintenance PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 # #421: the coupled rig's live limiting processes must be observable in
 # the separate Station Systems window.
 add_test(NAME station-editor-coupled-live-view COMMAND pf-smoke-editor --check station/coupledLiveViewWorkflow)

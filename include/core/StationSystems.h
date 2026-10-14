@@ -234,6 +234,69 @@ namespace core
 		bool operator==(InstallationOutageSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationInstallationOutages{16};
+	// One inventory requirement of a scheduled maintenance job (#414).
+	// Every requirement names an existing Resource store and a quantity in
+	// that store's own unit. A reusable tool (consumed false) is reserved
+	// from the store's qualified inventory for the duration of the work
+	// and returned unchanged when the job completes or is interrupted -
+	// it is never consumed unless it is configured as consumed. A
+	// consumed requirement (spare part or consumable) is held against the
+	// reservation while the work runs and leaves the source store at
+	// completion, booked into the job's declared waste store as the
+	// removed parts/used material. Absent prerequisites never allow the
+	// job to complete for free: the work simply does not run until the
+	// material is there to be spent.
+	struct MaintenanceRequirementSettings
+	{
+		std::string storeId;          // tool/part/consumable source store
+		double quantity{0.0};       // store units per occurrence, > 0
+		bool consumed{false};       // false: reusable tool, reserved and returned
+		bool operator==(MaintenanceRequirementSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationMaintenanceRequirements{8};
+	// A scheduled timed maintenance job on one registered installation
+	// (#414). The schedule reuses the shared scenario time base and the
+	// deterministic occurrence ordering established for resupply
+	// deliveries (#392): the window opens at firstOccurrenceSeconds and
+	// repeats every recurrenceSeconds (0 = one-off; a positive
+	// recurrence must be at least the duration so windows never
+	// overlap). The window gates the start: the job attempts to begin
+	// once its window is open, and beginning requires reserving every
+	// declared requirement from the source stores' qualified inventory
+	// plus headroom in the waste store for the whole consumed quantity.
+	// While the work is Active the target installation is isolated -
+	// its availability is held at zero, deeper than any outage ceiling -
+	// so it produces, circulates and draws nothing through its rated
+	// capacity. Completion requires the full duration to have run with
+	// the reservation held: consumed requirements are then deducted from
+	// their sources and booked into the waste store as qualified
+	// (disposal-ready) material, and reusable tools are returned.
+	// Reservation is exclusive across jobs: processed in the declared
+	// deterministic order (priority descending, declaration order), a
+	// unit of material reserved by one job is never available to
+	// another, so overlapping work cannot double-spend parts or tools.
+	// If a reservation can no longer be held - another station process
+	// drew the reserved material away, or the waste headroom vanished -
+	// the job is interrupted: the reservation is released, the
+	// progress is discarded, and the job must run the full duration
+	// again from a fresh reservation. A job whose window closes before
+	// it ever started has missed that occurrence; it never completes
+	// without spending. Restoration after completion only lifts the
+	// isolation: no store is replenished, the consumed parts stay
+	// spent and the tools are simply the same tools returned.
+	struct MaintenanceJobSettings
+	{
+		std::string id;
+		std::string installationId;   // stable identity of the target installation
+		double firstOccurrenceSeconds{0.0}; // the first window opens, >= 0
+		double durationSeconds{0.0};  // work time per occurrence, > 0
+		double recurrenceSeconds{0.0};// 0 = one-off, else >= duration and >= one fixed tick
+		int priority{0};              // higher reserves first among coincidents
+		std::vector<MaintenanceRequirementSettings> requirements;
+		std::string wasteStoreId;     // where removed parts/used material lands
+		bool operator==(MaintenanceJobSettings const&) const = default;
+	};
+	inline constexpr size_t MaxStationMaintenanceJobs{16};
 	// Schedule boundary tolerance (#392). Authored times meet the fixed-tick
 	// grid in binary floating point and 1/60 is not exactly representable,
 	// so an occurrence scheduled exactly on a tick boundary can land a few
@@ -1604,6 +1667,11 @@ namespace core
 		// existing positional aggregate-initialization of the leading
 		// settings fields in tests and callers is unchanged.
 		StationDispatchMode dispatchMode{StationDispatchMode::Manual};
+		// Authored scheduled maintenance jobs (#414) against the shared
+		// installation availability contract. Declared after the leading
+		// settings so positional initialization of earlier fields is
+		// unchanged.
+		std::vector<MaintenanceJobSettings> maintenanceJobs;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// The installations registered with the shared availability contract
@@ -1841,6 +1909,72 @@ namespace core
 		double nextOccurrenceSeconds{0.0};
 		double installationAvailability{1.0}; // target's effective factor now
 		bool operator==(StationOutageSnapshot const&) const = default;
+	};
+	// The lifecycle phase of one authored maintenance job (#414).
+	// Idle: no occurrence is currently being worked. Blocked: an
+	// occurrence is waiting for prerequisites that cannot currently be
+	// reserved (missing tools/parts, no waste headroom) - the work is
+	// not running and the installation is not isolated. Active: the
+	// prerequisites are reserved and the work is progressing; the
+	// installation is isolated. Completed: the most recent occurrence
+	// finished and spent its resources; the job returns to Idle for its
+	// next occurrence or exhausts after a one-off.
+	enum class StationMaintenancePhase : std::uint8_t
+	{
+		Idle,
+		Blocked,
+		Active,
+		Completed,
+	};
+	inline constexpr std::array<char const*, 4> StationMaintenancePhaseNames{
+		"idle", "blocked", "active", "completed"};
+	// One maintenance requirement as of the most recent tick (#414):
+	// what the job needs from which store, whether it is a reusable tool
+	// or a consumed part/consumable, whether the reservation currently
+	// holds it, and what the last completed occurrence actually spent.
+	struct StationMaintenanceRequirementSnapshot
+	{
+		std::string storeId;
+		std::string unit;
+		double quantity{0.0};
+		bool consumed{false};
+		bool reserved{false};   // held by this job's live reservation this tick
+		double lastConsumed{0.0}; // spent by the most recent completion
+		bool operator==(StationMaintenanceRequirementSnapshot const&) const = default;
+	};
+	// One authored maintenance job as of the most recent tick (#414):
+	// the schedule, the current phase with progress and the blocking
+	// reason while Blocked, the per-requirement reservation and spend,
+	// the isolation state of the target installation, and the
+	// occurrence history. Everything is observable through the
+	// snapshot/event seam without any Agent assignment: maintenance is
+	// a scheduled station process, not a task handed to anyone.
+	struct StationMaintenanceSnapshot
+	{
+		std::string id;
+		std::string installationId;
+		std::string installationKind;
+		double firstOccurrenceSeconds{0.0};
+		double durationSeconds{0.0};
+		double recurrenceSeconds{0.0}; // 0 = one-off
+		int priority{0};
+		std::string wasteStoreId;
+		StationMaintenancePhase phase{StationMaintenancePhase::Idle};
+		bool isolated{false};           // target held out of service this tick
+		double progressSeconds{0.0};   // work completed toward the occurrence
+		double remainingSeconds{0.0};  // duration still owed
+		std::string blockReason;        // why Blocked or why last interrupted
+		std::vector<StationMaintenanceRequirementSnapshot> requirements;
+		uint64_t occurrencesStarted{0};
+		uint64_t occurrencesCompleted{0};
+		uint64_t occurrencesMissed{0};  // windows that closed unstarted
+		double lastStartSeconds{0.0};
+		double lastCompleteSeconds{0.0};
+		bool exhausted{false};          // one-off already finished
+		bool hasNextOccurrence{false};
+		double nextOccurrenceSeconds{0.0};
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationMaintenanceSnapshot const&) const = default;
 	};
 
 	// One solar array as of the most recent tick: installed capacity, the
@@ -3454,6 +3588,13 @@ namespace core
 		// Availability is a pure function of World time, so the same tick
 		// sequence reproduces the same outage state on reset and replay.
 		std::vector<StationOutageSnapshot> outages;
+		// The maintenance picture (#414): per-job schedule, phase,
+		// progress and blocking reason, the reservation and actual spend
+		// of every requirement, the target installation's isolation
+		// state and the occurrence history. Consumed material appears
+		// on the waste store; reusable tools never leave the inventory
+		// ledger.
+		std::vector<StationMaintenanceSnapshot> maintenanceJobs;
 		StationPowerSnapshot power;
 		// The thermal picture (#395): reservoir temperatures, heat flows
 		// and limits, radiator rejection and the per-reservoir energy
