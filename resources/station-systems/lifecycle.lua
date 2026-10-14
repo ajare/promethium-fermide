@@ -5297,6 +5297,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 end
             end
         end
+        -- #588: a Restoring load's pending startup surge is part of the
+        -- restart claim and is funded here, before the load's normal
+        -- service, heat and material exchanges commit. Mirrors the host
+        -- ledger.
+        local recoverySurgeTotal = 0
         for _, index in ipairs(self.load_order) do
             local load = self.loads[index]
             if load.admitted and load.requested > 0 and not load.materialRefused then
@@ -5319,6 +5324,82 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 if not load.materialRefused then
                     local remaining = load.cappedRequest - supplied[index]
                     if remaining > 0 then
+                        -- #588: the surge slice still owed this tick. A
+                        -- Restoring load must pay its whole startup surge
+                        -- together with its operable demand before any
+                        -- normal service commits: the pools have to
+                        -- carry the minimum operable supply plus the
+                        -- full surge, or the equipment never starts -
+                        -- no power, no heat, no material - and the load
+                        -- returns to Shed to wait out its declared
+                        -- dwell again. The check runs against the pools
+                        -- as they stand at allocation time, so a supply
+                        -- change between the gate's release and this
+                        -- tick is caught before anything commits. The
+                        -- last tick of a surge pays only the energy
+                        -- left in the declared budget, so a surge
+                        -- duration that does not divide evenly by the
+                        -- timestep never delivers more surge energy
+                        -- than was authored.
+                        local surgeWindow = 0
+                        if load.recoveryStage == 'restoring' then
+                            surgeWindow = math.min(fixed_seconds, load.surgeRemaining)
+                        end
+                        local surgeKW = 0
+                        if surgeWindow >= fixed_seconds then
+                            surgeKW = load.restartSurgePowerKW
+                        elseif surgeWindow > 0 then
+                            surgeKW = load.restartSurgePowerKW * surgeWindow / fixed_seconds
+                        end
+                        if surgeKW > 0 then
+                            local poolKW = generation + batteryDeliverableKW(self, fixed_hours)
+                            if poolKW + 1e-12 < minOperating + surgeKW then
+                                load.recoveryStage = 'shed'
+                                load.shedSince = elapsed
+                                load.surgeRemaining = 0
+                                load.lastSurge = 0
+                                if poolKW + 1e-12 < minOperating then
+                                    load.recoveryHold =
+                                        "restart failed: the pool could not sustain the load's own demand"
+                                else
+                                    load.recoveryHold =
+                                        'restart failed: the pool could not cover the startup surge'
+                                end
+                                if load.shortfall == '' then
+                                    load.shortfall = 'below the minimum operable supply level'
+                                end
+                            else
+                                -- Funded: the normal grant leaves the
+                                -- surge its share of the pool, and both
+                                -- draw generation first, then the
+                                -- batteries, so stored energy is still
+                                -- preserved.
+                                local normalGrant = math.min(remaining, poolKW - surgeKW)
+                                local normalFromGeneration = math.min(normalGrant, generation)
+                                generation = generation - normalFromGeneration
+                                local normalFromBattery = drawBatteries(self,
+                                    normalGrant - normalFromGeneration, fixed_hours)
+                                supplied[index] = supplied[index]
+                                    + normalFromGeneration + normalFromBattery
+                                batterySupplied = batterySupplied + normalFromBattery
+                                if not load.materialReserved then
+                                    reserveMaterial(load, load.materialFraction, fixed_seconds)
+                                end
+                                local surgeFromGeneration = math.min(surgeKW, generation)
+                                generation = generation - surgeFromGeneration
+                                local surgeFromBattery = drawBatteries(self,
+                                    surgeKW - surgeFromGeneration, fixed_hours)
+                                batterySupplied = batterySupplied + surgeFromBattery
+                                load.lastSurge = surgeFromGeneration + surgeFromBattery
+                                recoverySurgeTotal = recoverySurgeTotal + load.lastSurge
+                                load.surgeRemaining = load.surgeRemaining - surgeWindow
+                                if load.surgeRemaining <= 0 then
+                                    load.surgeRemaining = 0
+                                    load.recoveryStage = 'active'
+                                    load.recoveryHold = ''
+                                end
+                            end
+                        else
                         local fromGeneration = math.min(remaining, generation)
                         local afterGeneration = remaining - fromGeneration
                         local batteryAsk = math.min(afterGeneration,
@@ -5338,6 +5419,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             end
                         elseif load.shortfall == '' then
                             load.shortfall = 'below the minimum operable supply level'
+                        end
                         end
                     end
                 end
@@ -8101,56 +8183,40 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         end
         -- #417 recovery machine, mirroring the host ledger. Runs after
         -- every service has drawn and the surplus is known, before battery
-        -- charging, so a restart surge is funded from real spare capacity
-        -- and the charging pass never competes the recovery for it. Only
-        -- purely discretionary loads (criticalFloorKW <= 0) are recovery-
-        -- managed; a load with a protected floor is restored by the
-        -- protected pass and always reports 'active'.
-        local recoverySurgeTotal = 0
+        -- charging, so the charging pass never competes the recovery for
+        -- it. Only purely discretionary loads (criticalFloorKW <= 0) are
+        -- recovery-managed; a load with a protected floor is restored by
+        -- the protected pass and always reports 'active'. The startup
+        -- surge itself is funded and drawn with the load's normal grant
+        -- in the allocation pass above (#588), so a restart never
+        -- commits service it cannot pay for.
         local recoveringCount = 0
         local recoveryPending = false
-        -- (A) Startup surge: a Restoring load draws its declared surge on
-        -- top of the normal demand it was allocated, from the remaining
-        -- firm generation and battery pool. The surge is a hard restart
-        -- requirement: if the pool cannot cover it the restart is
-        -- abandoned rather than run half-started.
+        -- (A) Startup surge follow-up. A Restoring load whose surge was
+        -- funded and drawn in the allocation pass above is done here.
+        -- This pass only picks up Restoring loads the allocation pass did
+        -- not fund: a load whose own supply fell below its minimum
+        -- operable level abandons the restart and waits out its dwell
+        -- again, and a load with no surge left to pay settles to Active.
+        -- A load whose demand dropped to zero keeps its restart pending
+        -- until there is something to restart into - it draws nothing
+        -- while it waits.
         for _, index in ipairs(self.load_order) do
             local load = self.loads[index]
             if load.criticalFloorKW <= 0 and load.recoveryStage == 'restoring' then
-                local minOperating = load.requested * (1 - load.maxCurtailment)
-                if (supplied[index] or 0) + 1e-12 < minOperating then
-                    load.recoveryStage = 'shed'
-                    load.shedSince = elapsed
-                    load.surgeRemaining = 0
-                    load.lastSurge = 0
-                    load.recoveryHold =
-                        "restart failed: the pool could not sustain the load's own demand"
-                elseif load.surgeRemaining <= 0 then
-                    load.recoveryStage = 'active'
-                    load.lastSurge = 0
-                    load.recoveryHold = ''
-                else
-                    local surge = load.restartSurgePowerKW
-                    local fromGeneration = math.min(surge, generation)
-                    generation = generation - fromGeneration
-                    local ask = surge - fromGeneration
-                    local fromBattery = drawBatteries(self, ask, fixed_hours)
-                    local drawn = fromGeneration + fromBattery
-                    load.lastSurge = drawn
-                    recoverySurgeTotal = recoverySurgeTotal + drawn
-                    if drawn + 1e-12 >= surge then
-                        load.surgeRemaining = load.surgeRemaining - fixed_seconds
-                        if load.surgeRemaining <= 0 then
-                            load.surgeRemaining = 0
-                            load.recoveryStage = 'active'
-                            load.recoveryHold = ''
-                        end
-                    else
+                if load.lastSurge <= 0 then
+                    local minOperating = load.requested * (1 - load.maxCurtailment)
+                    if (supplied[index] or 0) + 1e-12 < minOperating then
                         load.recoveryStage = 'shed'
                         load.shedSince = elapsed
                         load.surgeRemaining = 0
+                        load.lastSurge = 0
                         load.recoveryHold =
-                            'restart failed: the pool could not cover the startup surge'
+                            "restart failed: the pool could not sustain the load's own demand"
+                    elseif load.surgeRemaining <= 0 then
+                        load.recoveryStage = 'active'
+                        load.lastSurge = 0
+                        load.recoveryHold = ''
                     end
                 end
             end
@@ -8327,7 +8393,13 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- the loop is never a second power budget. Shortages are valid;
         -- an over-allocation is a software failure and fails contained.
         local totalSupplied = 0
-        for index = 1, #self.loads do totalSupplied = totalSupplied + (supplied[index] or 0) end
+        -- #588: the startup surge is real power delivered to the
+        -- equipment, so it counts in the supplied total alongside the
+        -- normal service.
+        for index = 1, #self.loads do
+            totalSupplied = totalSupplied + (supplied[index] or 0)
+                + (self.loads[index].lastSurge or 0)
+        end
         for _, loop in ipairs(self.coolant_loops) do
             totalSupplied = totalSupplied + loop.lastPumpSupplied + loop.lastHeaterSupplied
         end

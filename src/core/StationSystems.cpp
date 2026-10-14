@@ -3793,14 +3793,16 @@ namespace core
 			bool lastCriticalUnmet{false};
 			StationTransferStatus status{StationTransferStatus::Idle};
 			// #417 recovery machine state. recoveryStage is the stage the
-			// allocation passes ran against this tick (a Shed load is skipped,
-			// a Restoring load is allocated its normal demand and draws its
-			// surge at the end of the tick). shedSinceElapsed is the elapsed
-			// time the load entered Shed; surgeRemainingSeconds is the surge
-			// budget still owed while Restoring; lastSurgeKW is the surge
-			// actually drawn this tick; lastRecoveryHoldReason explains why a
-			// Shed load is held from restarting. Only purely discretionary
-			// loads (criticalFloorKW <= 0) are recovery-managed; every other
+			// allocation passes ran against this tick (a Shed load is
+			// skipped; a Restoring load funds its normal demand together
+			// with its startup surge in the discretionary allocation pass,
+			// #588, so nothing commits unless the whole restart is
+			// payable). shedSinceElapsed is the elapsed time the load
+			// entered Shed; surgeRemainingSeconds is the surge budget still
+			// owed while Restoring; lastSurgeKW is the surge actually drawn
+			// this tick; lastRecoveryHoldReason explains why a Shed load is
+			// held from restarting. Only purely discretionary loads
+			// (criticalFloorKW <= 0) are recovery-managed; every other
 			// load stays Active with these at their defaults.
 			StationLoadRecoveryStage recoveryStage{StationLoadRecoveryStage::Active};
 			double shedSinceElapsed{0.0};
@@ -7289,6 +7291,12 @@ namespace core
 			// load takes nothing this tick, leaving both pools for loads
 			// that can use them. Generation is taken before battery
 			// energy, so stored energy is preserved rather than wasted.
+			// #588: a Restoring load's pending startup surge is part of the
+			// restart claim and is funded here, before the load's normal
+			// service, heat and material exchanges commit. See the surge
+			// block below for the funding rule.
+			auto const dtSeconds = static_cast<double>(seconds);
+			double recoverySurgeTotalKW{0.0};
 			for (auto const index : loadOrder)
 			{
 				auto& load = loads[index];
@@ -7315,6 +7323,70 @@ namespace core
 				}
 				auto const remaining = load.lastCappedRequestKW - supplied[index];
 				if (remaining <= 0.0) continue;
+				// #588: the surge slice still owed this tick. A Restoring
+				// load must pay its whole startup surge together with its
+				// operable demand before any normal service commits: the
+				// pools have to carry the minimum operable supply plus the
+				// full surge, or the equipment never starts - no power, no
+				// heat, no material - and the load returns to Shed to wait
+				// out its declared dwell again. The check runs against the
+				// pools as they stand at allocation time, so a supply change
+				// between the gate's release and this tick is caught before
+				// anything commits. The last tick of a surge pays only the
+				// energy left in the declared budget, so a surge duration
+				// that does not divide evenly by the timestep never
+				// delivers more surge energy than was authored.
+				auto const surgeWindowSeconds = load.recoveryStage
+					== StationLoadRecoveryStage::Restoring
+					? std::min(dtSeconds, load.surgeRemainingSeconds) : 0.0;
+				auto const surgeKW = surgeWindowSeconds >= dtSeconds
+					? load.authored.restartSurgePowerKW
+					: load.authored.restartSurgePowerKW * surgeWindowSeconds / dtSeconds;
+				if (surgeKW > 0.0)
+				{
+					auto const poolKW = availableGeneration + batteryDeliverableKW();
+					if (poolKW + 1e-12 < minOperating + surgeKW)
+					{
+						load.recoveryStage = StationLoadRecoveryStage::Shed;
+						load.shedSinceElapsed = elapsed;
+						load.surgeRemainingSeconds = 0.0;
+						load.lastSurgeKW = 0.0;
+						load.lastRecoveryHoldReason = poolKW + 1e-12 < minOperating
+							? "restart failed: the pool could not sustain the load's own demand"
+							: "restart failed: the pool could not cover the startup surge";
+						if (load.lastShortfallReason.empty())
+							load.lastShortfallReason = "below the minimum operable supply level";
+						continue;
+					}
+					// Funded: the normal grant leaves the surge its share of
+					// the pool, and both draw generation first, then the
+					// batteries, so stored energy is still preserved.
+					auto const normalGrant = std::min(remaining, poolKW - surgeKW);
+					auto const normalFromGeneration = std::min(normalGrant, availableGeneration);
+					supplied[index] += normalFromGeneration;
+					availableGeneration -= normalFromGeneration;
+					auto const normalFromBattery = drawBatteries(normalGrant - normalFromGeneration);
+					supplied[index] += normalFromBattery;
+					batterySuppliedKW += normalFromBattery;
+					batteryShortfallKW += normalGrant - normalFromGeneration - normalFromBattery;
+					if (!load.lastMaterialReserved)
+						reserveMaterial(load, load.lastMaterialFraction);
+					auto const surgeFromGeneration = std::min(surgeKW, availableGeneration);
+					availableGeneration -= surgeFromGeneration;
+					auto const surgeFromBattery = drawBatteries(surgeKW - surgeFromGeneration);
+					batterySuppliedKW += surgeFromBattery;
+					batteryShortfallKW += surgeKW - surgeFromGeneration - surgeFromBattery;
+					load.lastSurgeKW = surgeFromGeneration + surgeFromBattery;
+					recoverySurgeTotalKW += load.lastSurgeKW;
+					load.surgeRemainingSeconds -= surgeWindowSeconds;
+					if (load.surgeRemainingSeconds <= 0.0)
+					{
+						load.surgeRemainingSeconds = 0.0;
+						load.recoveryStage = StationLoadRecoveryStage::Active;
+						load.lastRecoveryHoldReason.clear();
+					}
+					continue;
+				}
 				auto const fromGeneration = std::min(remaining, availableGeneration);
 				auto const afterGeneration = remaining - fromGeneration;
 				auto const batteryAsk = std::min(afterGeneration, batteryDeliverableKW());
@@ -11129,30 +11201,32 @@ namespace core
 				}
 			}
 			// #417 recovery machine. Runs after every service has drawn and
-			// the surplus is known, before battery charging, so a restart
-			// surge is funded from real spare capacity and the charging pass
-			// never competes the recovery for it. Only purely discretionary
-			// loads (criticalFloorKW <= 0) are recovery-managed; a load with
-			// a protected floor is restored by the protected pass and always
-			// reports Active. The stage set here takes effect next tick: a
-			// load released to Restoring is allocated its normal demand next
-			// tick and draws its surge here the tick after that, so recovery
-			// is staged rather than instantaneous.
-			auto const dtSeconds = static_cast<double>(seconds);
-			double recoverySurgeTotalKW{0.0};
+			// the surplus is known, before battery charging, so the charging
+			// pass never competes the recovery for it. Only purely
+			// discretionary loads (criticalFloorKW <= 0) are recovery-
+			// managed; a load with a protected floor is restored by the
+			// protected pass and always reports Active. The stage set here
+			// takes effect next tick, so recovery is staged rather than
+			// instantaneous. The startup surge itself is funded and drawn
+			// with the load's normal grant in the allocation pass above
+			// (#588), so a restart never commits service it cannot pay for.
 			int recoveringCount{0};
 			bool recoveryPending{false};
-			// (A) Startup surge. A Restoring load draws its declared surge
-			// on top of the normal demand it was allocated, from the
-			// remaining firm generation and battery pool. The surge is a
-			// hard restart requirement: if the pool cannot cover it the
-			// restart is abandoned rather than run half-started, and the
-			// load returns to Shed to wait out its dwell again.
+			// (A) Startup surge follow-up. A Restoring load whose surge was
+			// funded and drawn in the allocation pass above is done here.
+			// This pass only picks up Restoring loads the allocation pass
+			// did not fund: a load whose own supply fell below its minimum
+			// operable level abandons the restart and waits out its dwell
+			// again, and a load with no surge left to pay settles to
+			// Active. A load whose demand dropped to zero keeps its restart
+			// pending until there is something to restart into - it draws
+			// nothing while it waits.
 			for (auto const index : loadOrder)
 			{
 				auto& load = loads[index];
 				if (load.authored.criticalFloorKW > 0.0) continue;
 				if (load.recoveryStage != StationLoadRecoveryStage::Restoring) continue;
+				if (load.lastSurgeKW > 0.0) continue;
 				auto const minOperating = load.lastRequestedKW * (1.0 - load.authored.maxCurtailment);
 				if (load.lastSuppliedKW + 1e-12 < minOperating)
 				{
@@ -11169,33 +11243,6 @@ namespace core
 					load.recoveryStage = StationLoadRecoveryStage::Active;
 					load.lastSurgeKW = 0.0;
 					load.lastRecoveryHoldReason.clear();
-					continue;
-				}
-				auto const surge = load.authored.restartSurgePowerKW;
-				auto const fromGeneration = std::min(surge, availableGeneration);
-				availableGeneration -= fromGeneration;
-				auto const ask = surge - fromGeneration;
-				auto const fromBattery = drawBatteries(ask);
-				auto const drawn = fromGeneration + fromBattery;
-				load.lastSurgeKW = drawn;
-				recoverySurgeTotalKW += drawn;
-				if (drawn + 1e-12 >= surge)
-				{
-					load.surgeRemainingSeconds -= dtSeconds;
-					if (load.surgeRemainingSeconds <= 0.0)
-					{
-						load.surgeRemainingSeconds = 0.0;
-						load.recoveryStage = StationLoadRecoveryStage::Active;
-						load.lastRecoveryHoldReason.clear();
-					}
-				}
-				else
-				{
-					load.recoveryStage = StationLoadRecoveryStage::Shed;
-					load.shedSinceElapsed = elapsed;
-					load.surgeRemainingSeconds = 0.0;
-					load.lastRecoveryHoldReason =
-						"restart failed: the pool could not cover the startup surge";
 				}
 			}
 			// (B) An Active load that could not reach its minimum operable
@@ -14477,7 +14524,8 @@ namespace core
 		for (auto const& array : mImpl->solarArrays)
 			result.power.sources.push_back({array.authored.id, array.authored.capacityKW,
 				array.lastIllumination, array.lastAvailableKW, array.lastDisabled});
-		double totalRequested = 0.0, totalSupplied = 0.0, totalUnmetCritical = 0.0, totalHeat = 0.0;
+		double totalRequested = 0.0, totalSupplied = 0.0, totalUnmet = 0.0,
+			totalUnmetCritical = 0.0, totalHeat = 0.0;
 		double totalAvailable = 0.0;
 		for (auto const index : mImpl->loadOrder)
 		{
@@ -14515,7 +14563,12 @@ namespace core
 					mImpl->stores[exchange.storeIndex].authored.unit,
 					exchange.lastRequested, exchange.lastCompleted, exchange.lastUnmet});
 			totalRequested += load.lastRequestedKW;
-			totalSupplied += load.lastSuppliedKW;
+			// #588: the startup surge is real power delivered to the
+			// equipment, so it counts in the supplied total alongside the
+			// normal service. Unmet demand stays the shortfall of the
+			// normal service - the surge is extra, never a discount.
+			totalSupplied += load.lastSuppliedKW + load.lastSurgeKW;
+			totalUnmet += load.lastUnmetKW;
 			totalUnmetCritical += load.lastUnmetCriticalKW;
 			totalHeat += load.lastHeatExportedKW;
 			result.power.loads.push_back(std::move(loadResult));
@@ -14524,7 +14577,7 @@ namespace core
 		result.power.availableGenerationKW = totalAvailable;
 		result.power.totalRequestedKW = totalRequested;
 		result.power.totalSuppliedKW = totalSupplied;
-		result.power.totalUnmetKW = totalRequested - totalSupplied;
+		result.power.totalUnmetKW = totalUnmet;
 		result.power.unmetCriticalKW = totalUnmetCritical;
 		result.power.surplusKW = mImpl->lastAvailableGenerationKW;
 		result.power.exportedHeatKW = totalHeat;

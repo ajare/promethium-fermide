@@ -19123,6 +19123,179 @@ void recovery(smoke::Context const& context)
 		require(loadSnap(*reopened, "rig").recoveryStage == core::StationLoadRecoveryStage::Active,
 			"the reopened World did not reproduce the same recovery stage as the original");
 	}
+
+	// Scenario G (#588): a restart whose surge cannot be paid never runs
+	// the equipment. A non-heat-producing 1 kW load with a required 1 kW
+	// surge, zero dwell and zero hysteresis, and a battery that can
+	// discharge nothing, sits behind exactly 1 kW of solar: the gate
+	// releases it every tick because the pool covers its demand, but the
+	// allocation pass refuses the restart because the surge is
+	// unfundable. The load must never publish supplied service while it
+	// is held Shed, must never consume a watt, and must never leave a
+	// phantom battery discharge shortfall behind from a surge draw that
+	// was never committed.
+	{
+		core::World world("RecG", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		settings.solarArrays = { solar(1.0, stepProfile(100.0, {{0.0, 0.0}, {5.0, 1.0}})) };
+		settings.equipmentLoads = { recoveryLoad("starter", 1.0, 0.0, 0.0, 0.0, 1.0, 0.02, 0.0) };
+		core::BatterySettings dead;
+		dead.id = "dead"; dead.nameplateKWh = 1.0; dead.usableKWh = 1.0;
+		dead.startingStoredKWh = 0.5; dead.maxDischargeKW = 0.0; dead.maxChargeKW = 0.0;
+		settings.batteries = { dead };
+		configure(world, settings, "recovery G rig");
+		world.resumeSimulation();
+		for (uint64_t tick = 1; tick <= 1500; ++tick) // t = 25s, past the release point
+		{
+			if (!world.advanceTick())
+			{
+				auto const diagnostics = world.getStationSystemsDiagnostics();
+				throw std::runtime_error(std::string("recovery G tick failed: ")
+					+ (diagnostics.empty() ? "(none)" : diagnostics.back().message));
+			}
+			auto const& l = loadSnap(world, "starter");
+			require(!(l.suppliedKW > 1e-9
+					&& l.recoveryStage == core::StationLoadRecoveryStage::Shed),
+				"a failed restart published supplied service while returning to Shed");
+			require(l.suppliedKW <= 1e-9,
+				"an unfundable restart drew normal power it could not pair with its surge");
+			require(l.recoverySurgeKW <= 1e-9,
+				"an unfundable restart drew surge power");
+			require(world.getStationSystemsSnapshot().power.batteries[0].lastDischargeShortfallKW
+				<= 1e-9,
+				"the refused surge left a battery discharge shortfall it never committed");
+		}
+	}
+
+	// Scenario H (#588): a funded surge is real service. The whole
+	// operable demand plus the surge is paid from generation and the
+	// battery together, the supplied total counts the surge beside the
+	// normal service, and the total surge energy never exceeds the
+	// authored power x seconds budget - the last tick of a surge that
+	// does not divide evenly by the timestep pays only what is left.
+	{
+		core::World world("RecH", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		settings.solarArrays = { solar(3.0, stepProfile(100.0, {{0.0, 0.0}, {5.0, 1.0}})) };
+		// demand 2, min 2, dwell 0, hysteresis 0, surge 1 kW for 0.05s.
+		settings.equipmentLoads = { recoveryLoad("pumper", 2.0, 0.0, 0.0, 0.0, 1.0, 0.05, 0.0) };
+		configure(world, settings, "recovery H rig");
+		world.resumeSimulation();
+		double surgeEnergy = 0.0;
+		double const authoredSurgeEnergy = 1.0 * 0.05;
+		bool sawSurge = false;
+		bool sawActive = false;
+		for (uint64_t tick = 1; tick <= 1200; ++tick) // t = 20s
+		{
+			runOrDiagnose(world, 1, "recovery H");
+			auto const& snap = world.getStationSystemsSnapshot();
+			auto const& l = loadSnap(world, "pumper");
+			require(snap.power.totalSuppliedKW + 1e-9
+				>= l.suppliedKW + l.recoverySurgeKW,
+				"the supplied total did not count the startup surge");
+			surgeEnergy += l.recoverySurgeKW * core::World::getFixedTimestep();
+			if (l.recoverySurgeKW > 1e-9) sawSurge = true;
+			if (l.recoveryStage == core::StationLoadRecoveryStage::Active) sawActive = true;
+		}
+		require(sawSurge, "the funded restart never drew its surge");
+		require(sawActive, "the funded restart never settled to Active");
+		require(surgeEnergy <= authoredSurgeEnergy + 1e-9,
+			"the restart delivered more surge energy than was authored");
+	}
+
+	// Scenario I (#588): supply changes between the gate's release and
+	// the restart's execution. The gate releases on a full pool; the
+	// sun drops before the next tick allocates, and the allocation pass
+	// refuses the restart before any service commits. The failed attempt
+	// restarts the declared dwell: the load cannot try again until the
+	// full dwell has elapsed behind the restored supply.
+	{
+		core::World world("RecI", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		// Step profile: dark until t=10, full sun at t=10 (the gate
+		// releases), a collapse one tick later (the restart is refused
+		// before execution), and restored sun at t=17 (restart once the
+		// re-armed dwell has elapsed).
+		settings.solarArrays = { solar(3.0, stepProfile(200.0,
+			{{0.0, 0.0}, {9.999, 0.0}, {10.0, 1.0}, {10.001, 0.05},
+				{17.0, 0.05}, {17.001, 1.0}})) };
+		// demand 1, min 1, dwell 5, hysteresis 0, surge 1 kW for 0.5s.
+		settings.equipmentLoads = { recoveryLoad("thwarted", 1.0, 0.0, 5.0, 0.0, 1.0, 0.5, 0.0) };
+		configure(world, settings, "recovery I rig");
+		world.resumeSimulation();
+		runOrDiagnose(world, 600, "recovery I to release"); // t = 10s, gate releases
+		require(loadSnap(world, "thwarted").recoveryStage == core::StationLoadRecoveryStage::Restoring,
+			"the load was not released to Restoring on the full pool");
+		runOrDiagnose(world, 1, "recovery I collapse"); // t = 10.0167s, supply collapsed
+		{
+			auto const& l = loadSnap(world, "thwarted");
+			require(l.recoveryStage == core::StationLoadRecoveryStage::Shed,
+				"the restart ran although the supply collapsed before execution");
+			require(l.suppliedKW <= 1e-9,
+				"the collapsed restart consumed operating power");
+			require(l.recoverySurgeKW <= 1e-9,
+				"the collapsed restart drew surge power");
+			// The failed attempt re-armed the full five-second dwell.
+			require(l.recoverySecondsRemaining > 4.9,
+				"the failed restart did not restart the declared dwell");
+		}
+		runOrDiagnose(world, 600, "recovery I restored"); // t = 20s, sun restored, dwell elapsed
+		require(loadSnap(world, "thwarted").recoveryStage == core::StationLoadRecoveryStage::Active,
+			"the load did not restart once the supply and the full dwell were behind it");
+	}
+
+	// Scenario J (#588): a funded restart that cannot have its full
+	// normal demand keeps the surge whole. The claim is the normal demand
+	// plus the surge; the surge is a hard requirement, so when the pool
+	// is tight the normal service is curtailed to its minimum operable
+	// level and the surge still draws in full - the two are funded as
+	// one unit and never exceed the pool.
+	{
+		core::World world("RecJ", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		settings.solarArrays = { solar(5.0, stepProfile(100.0, {{0.0, 0.0}, {5.0, 1.0}})) };
+		// demand 4, maxCurtailment 0.5 (min 2), dwell 0, hysteresis 0,
+		// surge 2 kW for 0.05s. The pool of 5 kW funds normal 3 + surge 2.
+		settings.equipmentLoads = { recoveryLoad("drill", 4.0, 0.5, 0.0, 0.0, 2.0, 0.05, 0.0) };
+		configure(world, settings, "recovery J rig");
+		world.resumeSimulation();
+		double surgeEnergy = 0.0;
+		bool sawCurtailedSurge = false;
+		bool sawActive = false;
+		for (uint64_t tick = 1; tick <= 480; ++tick) // t = 8s
+		{
+			runOrDiagnose(world, 1, "recovery J");
+			auto const& snap = world.getStationSystemsSnapshot();
+			auto const& l = loadSnap(world, "drill");
+			require(l.suppliedKW + l.recoverySurgeKW <= 5.0 + 1e-9,
+				"the restart claim drew more than the pool could carry");
+			require(snap.power.totalSuppliedKW + 1e-9
+				>= l.suppliedKW + l.recoverySurgeKW,
+				"the supplied total did not count the startup surge");
+			if (l.recoverySurgeKW > 1e-9)
+			{
+				require(l.suppliedKW >= 2.0 - 1e-9,
+					"the funded restart curtailed normal service below its minimum operable level");
+				require(l.suppliedKW <= 3.0 + 1e-6,
+					"the funded restart took normal service the surge still needed");
+				sawCurtailedSurge = true;
+			}
+			surgeEnergy += l.recoverySurgeKW * core::World::getFixedTimestep();
+			if (l.recoveryStage == core::StationLoadRecoveryStage::Active) sawActive = true;
+		}
+		require(sawCurtailedSurge, "the restart never ran with a curtailed normal and a full surge");
+		require(sawActive, "the restart never settled to Active");
+		require(surgeEnergy <= 2.0 * 0.05 + 1e-9,
+			"the restart delivered more surge energy than was authored");
+	}
 }
 
 	// #418: bounded trends and incident history. Trend series are sampled
