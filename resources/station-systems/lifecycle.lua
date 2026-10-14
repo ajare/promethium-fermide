@@ -3596,23 +3596,30 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             -- Jobs that are active were advanced in phase 2; only idle,
             -- completed and blocked jobs attempt a start.
             if not job.exhausted and job.phase ~= 'active' then
-                local canAttempt = true
-                if job.phase == 'idle' or job.phase == 'completed' then
-                    canAttempt = maintenanceHasOccurrence(job, job.occurrence)
-                        and elapsed >= maintenanceOccurrenceTime(job, job.occurrence)
-                elseif job.phase == 'blocked' then
-                    if elapsed >= maintenanceOccurrenceTime(job, job.occurrence)
-                        + job.durationSeconds then
-                        job.missed = job.missed + 1
-                        job.occurrence = job.occurrence + 1
-                        job.progress = 0
-                        job.phase = 'idle'
-                        if not maintenanceHasOccurrence(job, job.occurrence) then
-                            job.exhausted = true
-                        end
-                        canAttempt = false
+                -- One window policy for every non-Active phase (#587):
+                -- an occurrence whose window closed before the job ever
+                -- started is recorded missed and skipped, never back-
+                -- filled, whether the job sat idle, completed an earlier
+                -- run or was blocked without its prerequisites. The
+                -- deadline is the authored window, not the tick grid,
+                -- and every window already closed at this tick's time is
+                -- skipped in this pass. Only a window that is still open
+                -- admits a start attempt.
+                while maintenanceHasOccurrence(job, job.occurrence)
+                    and elapsed >= maintenanceOccurrenceTime(job, job.occurrence)
+                        + job.durationSeconds do
+                    job.missed = job.missed + 1
+                    job.occurrence = job.occurrence + 1
+                    job.progress = 0
+                    job.phase = 'idle'
+                    if not maintenanceHasOccurrence(job, job.occurrence) then
+                        job.exhausted = true
+                        break
                     end
                 end
+                local canAttempt = not job.exhausted
+                    and maintenanceHasOccurrence(job, job.occurrence)
+                    and elapsed >= maintenanceOccurrenceTime(job, job.occurrence)
                 if canAttempt then
                     local feasible = true
                     local consumedTotal = 0

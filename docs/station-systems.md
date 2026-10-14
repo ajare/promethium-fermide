@@ -1736,6 +1736,19 @@ windows; ties fall back to declaration order). Occurrences use the
 shared schedule-tolerance grid, so a due window is never missed or
 counted twice across the floating-point boundary.
 
+One window/deadline policy governs every phase (#587): an occurrence
+whose window has already closed by the current tick - closed meaning
+tick time has reached the occurrence time plus the authored duration -
+is recorded missed, reported, and never back-filled, whether the job
+sat idle, completed an earlier run, or was blocked without its
+prerequisites. Every window already closed at the current tick is
+skipped in the same pass, so a late pass never replays an old window
+as startable. A start is admitted only while the window is still open,
+including mid-window. Durations are not quantized to the tick grid: a
+sub-tick window that no fixed tick can land inside is simply missed
+when it closes, exactly like any window that closed while the job was
+idle or blocked.
+
 The snapshot exposes every job: phase (idle, blocked, active,
 completed), progress against duration, the current block reason, the
 isolation flag, per-requirement reservation state and last-spent

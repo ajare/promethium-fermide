@@ -18972,6 +18972,140 @@ void maintenance(smoke::Context const&)
 			&& approx(snap.stores[3].currentQualified, 2.0),
 			"the host ledger disagrees with what the sandbox asserted");
 	}
+	// #587: one consistent fixed-tick window policy. A never-started
+	// job whose declared window has already closed is recorded missed,
+	// not back-filled - the Idle path applies the same deadline the
+	// Blocked path always enforced. A sub-tick window that no fixed
+	// tick can open is missed the same way, while a window a tick can
+	// reach mid-window still starts.
+	{
+		// The probe shape: a one-off with first occurrence 0.001 s
+		// and duration 0.001 s. Its whole window [0.001, 0.002] has
+		// closed before the first fixed tick at ~0.016667 s, with
+		// every prerequisite in stock - the closed window alone is
+		// what keeps it from ever running.
+		auto expiredSettings = [&]
+		{
+			auto settings = baseSettings();
+			settings.maintenanceJobs = {job("expired", "gen", 0.001, 0.001,
+				{requirement("tools", 2.0, false), requirement("parts", 1.0, true)},
+				"waste")};
+			return settings;
+		};
+		core::World world("MaintenanceExpiredWindow", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		require(configure(world, expiredSettings()),
+			"expired-window scenario was rejected");
+		require(world.advanceTicks(1), "expired-window first tick failed");
+		auto const& snap = world.getStationSystemsSnapshot();
+		require(snap.healthy, "the expired-window run was not healthy");
+		require(snap.maintenanceJobs[0].occurrencesStarted == 0
+			&& snap.maintenanceJobs[0].occurrencesCompleted == 0
+			&& snap.maintenanceJobs[0].occurrencesMissed == 1
+			&& snap.maintenanceJobs[0].exhausted
+			&& snap.maintenanceJobs[0].phase == core::StationMaintenancePhase::Idle
+			&& !snap.maintenanceJobs[0].isolated,
+			"the closed one-off window was back-filled instead of recorded missed");
+		require(approx(snap.stores[2].currentQualified, 8.0)
+			&& approx(snap.stores[3].currentQualified, 0.0),
+			"the missed job reserved or spent material it never worked with");
+		require(sawEvent(world, "missed its window"),
+			"the missed occurrence was not announced");
+		// The missed one-off never wakes up: a minute of later ticks
+		// changes nothing - no late back-fill start.
+		require(world.advanceTicks(60), "expired-window run failed past the first second");
+		auto const& later = world.getStationSystemsSnapshot();
+		require(later.maintenanceJobs[0].occurrencesStarted == 0
+			&& later.maintenanceJobs[0].occurrencesMissed == 1
+			&& !later.maintenanceJobs[0].isolated
+			&& approx(later.power.generators[0].availabilityFactor, 1.0),
+			"a closed one-off window was replayed as startable later");
+		// Determinism: a fresh World with the same settings reproduces
+		// the missed counters and the maintenance event history.
+		core::World replay("MaintenanceExpiredWindowReplay", 2, 2);
+		replay.pauseSimulation(); replay.finishBuild();
+		require(configure(replay, expiredSettings()),
+			"expired-window replay scenario was rejected");
+		require(replay.advanceTicks(61), "expired-window replay run failed");
+		require(replay.getStationSystemsSnapshot().maintenanceJobs
+			== world.getStationSystemsSnapshot().maintenanceJobs,
+			"the expired-window replay diverged from the original run");
+		auto maintenanceEvents = [](core::World& w)
+		{
+			std::vector<std::string> messages;
+			for (auto const& event : w.getStationSystemsEvents())
+				if (event.message.rfind("Maintenance '", 0) == 0)
+					messages.push_back(event.message);
+			return messages;
+		};
+		require(maintenanceEvents(world) == maintenanceEvents(replay),
+			"the expired-window event history is not reproducible");
+	}
+	// #587: a recurring job whose every window is sub-tick misses each
+	// window as it closes and never starts, while a job whose window a
+	// tick can reach mid-window still starts inside it.
+	{
+		auto tightSettings = [&]
+		{
+			auto settings = baseSettings();
+			settings.maintenanceJobs = {job("tight", "gen", 0.001, 0.001,
+				{requirement("parts", 1.0, true)}, "waste", 10.0)};
+			return settings;
+		};
+		core::World world("MaintenanceSubTickWindows", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		require(configure(world, tightSettings()),
+			"sub-tick-window scenario was rejected");
+		// t = ~5.0167 s: only the first window [0.001, 0.002] has
+		// closed unstarted; the next opens at 10.001.
+		require(world.advanceTicks(301), "sub-tick-window run failed into window 1");
+		auto const& snap = world.getStationSystemsSnapshot();
+		require(snap.healthy, "the sub-tick-window run was not healthy");
+		require(snap.maintenanceJobs[0].occurrencesMissed == 1
+			&& snap.maintenanceJobs[0].occurrencesStarted == 0
+			&& !snap.maintenanceJobs[0].exhausted
+			&& snap.maintenanceJobs[0].phase == core::StationMaintenancePhase::Idle
+			&& !snap.maintenanceJobs[0].isolated,
+			"a closed recurring window was back-filled instead of recorded missed");
+		require(approx(snap.stores[2].currentQualified, 8.0)
+			&& approx(snap.stores[3].currentQualified, 0.0),
+			"the missed recurring job reserved or spent material anyway");
+		// t = ~10.0167 s: the second window [10.001, 10.002] has
+		// closed too - one missed count per closed window.
+		require(world.advanceTicks(300), "sub-tick-window run failed into window 2");
+		auto const& next = world.getStationSystemsSnapshot();
+		require(next.maintenanceJobs[0].occurrencesMissed == 2
+			&& next.maintenanceJobs[0].occurrencesStarted == 0,
+			"the recurring closed-window catch-up did not record every missed window");
+		// Determinism: the same recurring miss replays identically.
+		core::World replay("MaintenanceSubTickWindowsReplay", 2, 2);
+		replay.pauseSimulation(); replay.finishBuild();
+		require(configure(replay, tightSettings()),
+			"sub-tick-window replay scenario was rejected");
+		require(replay.advanceTicks(601), "sub-tick-window replay run failed");
+		require(replay.getStationSystemsSnapshot().maintenanceJobs
+			== world.getStationSystemsSnapshot().maintenanceJobs,
+			"the sub-tick-window replay diverged from the original run");
+		// The policy is not over-restrictive: a window wide enough for
+		// a tick to land inside it still starts mid-window. Same first
+		// occurrence, a duration that keeps the window open past the
+		// first tick.
+		auto wideSettings = tightSettings();
+		wideSettings.maintenanceJobs[0].id = "wide";
+		wideSettings.maintenanceJobs[0].durationSeconds = 5.0;
+		wideSettings.maintenanceJobs[0].recurrenceSeconds = 0.0;
+		core::World midWindow("MaintenanceMidWindowStart", 2, 2);
+		midWindow.pauseSimulation(); midWindow.finishBuild();
+		require(configure(midWindow, wideSettings),
+			"mid-window-start scenario was rejected");
+		require(midWindow.advanceTicks(1), "mid-window-start first tick failed");
+		auto const& started = midWindow.getStationSystemsSnapshot();
+		require(started.maintenanceJobs[0].phase == core::StationMaintenancePhase::Active
+			&& started.maintenanceJobs[0].occurrencesStarted == 1
+			&& started.maintenanceJobs[0].occurrencesMissed == 0
+			&& started.maintenanceJobs[0].isolated,
+			"an open window was not startable mid-window - the deadline policy over-restricts");
+	}
 }
 
 // #417: service recovery staging. A purely discretionary load that

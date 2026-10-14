@@ -6060,40 +6060,48 @@ namespace core
 					// Jobs that are Active were advanced in phase 2; only
 					// idle, completed and blocked jobs attempt a start.
 					if (job.phase == StationMaintenancePhase::Active) continue;
-					if (job.phase == StationMaintenancePhase::Idle
-						|| job.phase == StationMaintenancePhase::Completed)
-					{
-						if (!hasOccurrence(job, job.occurrence)
-							|| elapsed < occurrenceTime(job, job.occurrence))
-							continue;
-					}
-					else if (job.phase == StationMaintenancePhase::Blocked)
-					{
-						// The window closed with the work never started:
-						// the occurrence is missed, reported, and never
-						// made up later - a schedule that slipped is
-						// not a schedule that ran.
-						if (elapsed >= occurrenceTime(job, job.occurrence)
+					// One window policy for every non-Active phase (#587):
+					// an occurrence whose window closed before the job ever
+					// started is recorded missed, reported, and never back-
+					// filled - whether the job sat Idle, Completed an earlier
+					// run, or was Blocked without its prerequisites. The
+					// deadline is the authored window, not the tick grid: a
+					// sub-tick window that no fixed tick could open is missed
+					// the same way, and every window already closed at this
+					// tick's time is skipped in this pass so a late pass never
+					// replays an old window as startable. Only a window that
+					// is still open admits a start attempt.
+					std::string missedReason = job.blockReason;
+					while (hasOccurrence(job, job.occurrence)
+						&& elapsed >= occurrenceTime(job, job.occurrence)
 							+ job.authored.durationSeconds)
+					{
+						++job.occurrencesMissed;
+						appendBoundedEvent(events, tick, "maintenance",
+							"Maintenance '" + job.authored.id + "' on "
+							+ job.installationKind + " '" + job.authored.installationId
+							+ "' missed its window at "
+							+ std::to_string(occurrenceTime(job, job.occurrence))
+							+ " s: " + (missedReason.empty()
+								? std::string("the window closed before the job started")
+								: missedReason));
+						++job.occurrence;
+						job.progressSeconds = 0.0;
+						job.blockReason.clear();
+						missedReason.clear();
+						job.phase = StationMaintenancePhase::Idle;
+						if (!hasOccurrence(job, job.occurrence))
 						{
-							++job.occurrencesMissed;
-							appendBoundedEvent(events, tick, "maintenance",
-								"Maintenance '" + job.authored.id + "' on "
-								+ job.installationKind + " '" + job.authored.installationId
-								+ "' missed its window at " + std::to_string(elapsed)
-								+ " s: " + job.blockReason);
-							++job.occurrence;
-							job.progressSeconds = 0.0;
-							if (!hasOccurrence(job, job.occurrence))
-							{
-								job.exhausted = true;
-								job.phase = StationMaintenancePhase::Idle;
-								continue;
-							}
-							job.phase = StationMaintenancePhase::Idle;
-							continue;
+							job.exhausted = true;
+							break;
 						}
 					}
+					if (job.exhausted) continue;
+					// The current occurrence's window has not opened yet:
+					// nothing to attempt this tick.
+					if (!hasOccurrence(job, job.occurrence)
+						|| elapsed < occurrenceTime(job, job.occurrence))
+						continue;
 					std::string blockReason;
 					double consumedTotal = 0.0;
 					for (size_t requirementIndex = 0;
