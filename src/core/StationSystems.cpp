@@ -6010,13 +6010,29 @@ namespace core
 				// running reservation total carries the material held
 				// by every job that already reserved this tick, so a
 				// later job never aims at kilograms a higher-precedence
-				// job has taken.
+				// job has taken. The waste side needs the same ledger
+				// (#586): a job that completes later still owes its
+				// consumed material to its waste store, so the pending
+				// waste claim of every Active job - plus every job that
+				// starts ahead in this pass - is subtracted from the
+				// headroom before a start is granted. Without it two
+				// jobs each reserving into the same tight waste store
+				// both start, only for the lower one to be interrupted
+				// and restarted against the very headroom it can never
+				// get, cycling its installation off service for nothing.
 				std::map<size_t, double> reservedByStore;
+				std::map<size_t, double> wasteClaimByStore;
 				for (auto const& job : maintenanceJobs)
 				{
 					if (job.phase != StationMaintenancePhase::Active) continue;
 					for (auto const& requirement : job.requirements)
 						reservedByStore[requirement.storeIndex] += requirement.reserved;
+					if (job.wasteStoreIndex == SIZE_MAX) continue;
+					for (size_t requirementIndex = 0;
+						requirementIndex < job.requirements.size(); ++requirementIndex)
+						if (job.authored.requirements[requirementIndex].consumed)
+							wasteClaimByStore[job.wasteStoreIndex]
+								+= job.requirements[requirementIndex].reserved;
 				}
 				for (auto const index : maintenanceOrder)
 				{
@@ -6084,8 +6100,13 @@ namespace core
 					if (blockReason.empty() && job.wasteStoreIndex != SIZE_MAX)
 					{
 						auto const& waste = stores[job.wasteStoreIndex].authored;
+						// Free space is what the store can still take once
+						// every other job's pending waste claim is held out
+						// (#586): the claim lands on completion, but the
+						// space is committed the moment the job starts.
 						auto const headroom = waste.capacity
-							- qualified[job.wasteStoreIndex] - unqualified[job.wasteStoreIndex];
+							- qualified[job.wasteStoreIndex] - unqualified[job.wasteStoreIndex]
+							- wasteClaimByStore[job.wasteStoreIndex];
 						if (!covers(headroom, consumedTotal))
 							blockReason = "waste store '" + waste.id
 								+ "' lacks headroom for the consumed material ("
@@ -6114,6 +6135,8 @@ namespace core
 						reservedByStore[job.requirements[requirementIndex].storeIndex]
 							+= job.requirements[requirementIndex].reserved;
 					}
+					if (job.wasteStoreIndex != SIZE_MAX && consumedTotal > 0.0)
+						wasteClaimByStore[job.wasteStoreIndex] += consumedTotal;
 					job.phase = StationMaintenancePhase::Active;
 					job.progressSeconds = 0.0;
 					job.blockReason.clear();

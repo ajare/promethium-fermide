@@ -18660,6 +18660,116 @@ void maintenance(smoke::Context const&)
 		require(approx(done.stores[1].currentQualified, 4.0),
 			"the shared tool was consumed instead of returned");
 	}
+	// #586: two jobs with independent 1 kg part stores both reserve
+	// into the same empty 1 kg waste store. Only the higher-precedence
+	// job that fits the remaining waste headroom starts: the lower one
+	// is blocked at the start check naming the waste store, keeps its
+	// installation online, and never burns progress or off-service
+	// cycles against headroom it can never commit into. When the waste
+	// store frees up while its window is still open, the job commits.
+	{
+		auto wasteHeadroomSettings = [&]
+		{
+			auto settings = baseSettings();
+			settings.generators.push_back(generator("gen2"));
+			settings.stores[2] = store("parts", "kg", 1.0, 1.0);
+			settings.stores[3] = store("waste", "kg", 1.0, 0.0);
+			settings.stores.push_back(store("partsB", "kg", 1.0, 1.0));
+			settings.maintenanceJobs = {
+				job("high", "gen", 10.0, 10.0,
+					{requirement("parts", 1.0, true)}, "waste", 0.0, 10),
+				job("low", "gen2", 10.0, 20.0,
+					{requirement("partsB", 1.0, true)}, "waste", 0.0, 1)};
+			core::WasteEjectionSettings clear;
+			clear.id = "clear";
+			clear.storeId = "waste";
+			clear.unit = "kg";
+			clear.quantity = 1.0;
+			clear.firstOccurrenceSeconds = 25.0;
+			settings.wasteEjections = {clear};
+			return settings;
+		};
+		core::World world("MaintenanceWasteHeadroom", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		require(configure(world, wasteHeadroomSettings()),
+			"waste headroom contention scenario was rejected");
+		// t = 12s: 'high' holds the only 1 kg of waste headroom.
+		// 'low' is blocked at the start check naming the waste store,
+		// never isolated, and gen2 stays at full output.
+		require(world.advanceTicks(12 * 60), "waste headroom run failed into contention");
+		auto const& snap = world.getStationSystemsSnapshot();
+		require(snap.maintenanceJobs[0].phase == core::StationMaintenancePhase::Active
+			&& snap.maintenanceJobs[0].isolated,
+			"the higher-precedence job did not start into the shared waste headroom");
+		require(snap.maintenanceJobs[1].phase == core::StationMaintenancePhase::Blocked
+			&& !snap.maintenanceJobs[1].isolated
+			&& snap.maintenanceJobs[1].occurrencesStarted == 0,
+			"the lower-precedence job started against waste headroom it could not commit");
+		require(snap.maintenanceJobs[1].blockReason.find("waste") != std::string::npos,
+			"the blocked job did not name the contended waste store");
+		require(approx(snap.power.generators[1].outputKW, 10.0, 1e-2),
+			"the blocked job took the second installation off service");
+		// t = 24s: 'high' completed at 20s and filled the waste
+		// store; 'low' never started, was never interrupted, and gen2
+		// never left service.
+		require(world.advanceTicks(12 * 60),
+			"waste headroom run failed past the first completion");
+		auto const& full = world.getStationSystemsSnapshot();
+		require(full.maintenanceJobs[0].occurrencesCompleted == 1
+			&& approx(full.stores[3].currentQualified, 1.0),
+			"the higher-precedence spend did not fill the shared waste store");
+		require(full.maintenanceJobs[1].occurrencesStarted == 0
+			&& full.maintenanceJobs[1].phase == core::StationMaintenancePhase::Blocked
+			&& !full.maintenanceJobs[1].isolated,
+			"the lower-precedence job cycled into service against a full waste store");
+		for (auto const& event : world.getStationSystemsEvents())
+			require(event.message.find("Maintenance 'low'") == std::string::npos
+				|| event.message.find("interrupted") == std::string::npos,
+				"the lower-precedence job was interrupted instead of never started");
+		// t = 27s: the ejection at 25s cleared the waste store;
+		// 'low' is still inside its [10, 30] window, so it commits
+		// now and gen2 goes off service for the real work.
+		require(world.advanceTicks(3 * 60), "waste headroom run failed into the late start");
+		auto const& late = world.getStationSystemsSnapshot();
+		require(late.maintenanceJobs[1].phase == core::StationMaintenancePhase::Active
+			&& late.maintenanceJobs[1].isolated
+			&& late.maintenanceJobs[1].occurrencesStarted == 1,
+			"the waiting job did not commit once the waste headroom freed up");
+		// t = 48s: 'low' completes its full 20 s duration and books
+		// its kilogram back into the cleared waste store.
+		require(world.advanceTicks(21 * 60),
+			"waste headroom run failed past the late completion");
+		auto const& done = world.getStationSystemsSnapshot();
+		require(done.maintenanceJobs[1].phase == core::StationMaintenancePhase::Completed
+			&& done.maintenanceJobs[1].occurrencesCompleted == 1
+			&& done.maintenanceJobs[1].occurrencesMissed == 0
+			&& approx(done.stores[3].currentQualified, 1.0)
+			&& approx(done.stores[4].currentQualified, 0.0),
+			"the late-started job did not complete its full duration as authored");
+		// Determinism (#586): the same waste-headroom contention
+		// replayed in a fresh World reproduces the maintenance
+		// snapshots and the event history exactly.
+		core::World replay("MaintenanceWasteHeadroomReplay", 2, 2);
+		replay.pauseSimulation(); replay.finishBuild();
+		require(configure(replay, wasteHeadroomSettings()),
+			"waste headroom replay scenario was rejected");
+		require(replay.advanceTicks(48 * 60), "waste headroom replay run failed");
+		require(world.getStationSystemsSnapshot().maintenanceJobs
+			== replay.getStationSystemsSnapshot().maintenanceJobs,
+			"the waste headroom contention replay diverged");
+		auto maintenanceEvents = [](core::World& w)
+		{
+			std::vector<std::string> messages;
+			for (auto const& event : w.getStationSystemsEvents())
+				if (event.message.rfind("Maintenance '", 0) == 0)
+					messages.push_back(event.message);
+			return messages;
+		};
+		require(maintenanceEvents(world) == maintenanceEvents(replay),
+			"the waste headroom event history is not reproducible");
+		require(!maintenanceEvents(world).empty(),
+			"the waste headroom scenario produced no maintenance events at all");
+	}
 	// Determinism: the same authored scenario replayed from Reset
 	// reproduces the snapshot and the maintenance event history exactly.
 	{

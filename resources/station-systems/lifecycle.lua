@@ -3553,13 +3553,26 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 end
             end
         end
-        -- Phase 3: start attempts in the declared order.
+        -- Phase 3: start attempts in the declared order. The waste
+        -- side carries the same pending-claim ledger as the host
+        -- (#586): every Active job's reserved consumed material is
+        -- still owed to its waste store, so a later job only starts
+        -- against the headroom the earlier claims have not taken.
         local reservedByStore = {}
+        local wasteClaimByStore = {}
         for _, job in ipairs(self.maintenance) do
             if job.phase == 'active' then
                 for _, requirement in ipairs(job.requirements) do
                     reservedByStore[requirement.storeIndex] =
                         (reservedByStore[requirement.storeIndex] or 0) + requirement.reserved
+                end
+                if job.wasteStoreIndex ~= nil then
+                    local claim = 0
+                    for _, requirement in ipairs(job.requirements) do
+                        if requirement.consumed then claim = claim + requirement.reserved end
+                    end
+                    wasteClaimByStore[job.wasteStoreIndex] =
+                        (wasteClaimByStore[job.wasteStoreIndex] or 0) + claim
                 end
             end
         end
@@ -3602,6 +3615,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     if feasible and job.wasteStore ~= nil then
                         local headroom = job.wasteStore.capacity
                             - job.wasteStore.qualified - job.wasteStore.unqualified
+                            - (wasteClaimByStore[job.wasteStoreIndex] or 0)
                         if not reservationCovers(headroom, consumedTotal) then feasible = false end
                     end
                     if not feasible then
@@ -3611,6 +3625,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             requirement.reserved = requirement.quantity
                             reservedByStore[requirement.storeIndex] =
                                 (reservedByStore[requirement.storeIndex] or 0) + requirement.reserved
+                        end
+                        if job.wasteStoreIndex ~= nil and consumedTotal > 0 then
+                            wasteClaimByStore[job.wasteStoreIndex] =
+                                (wasteClaimByStore[job.wasteStoreIndex] or 0) + consumedTotal
                         end
                         job.phase = 'active'
                         job.progress = 0
