@@ -736,8 +736,15 @@ namespace core
 	void SimulationCoordinator::tryGrantDoorQueue(TraversalResource& resource)
 	{
 		mWorld.invalidateSimulationSnapshot();
+		bool const playerPassage = resource.mDoor && !resource.mDoor->admitsNewCrossings()
+			&& !resource.mDoor->isIndependentlyBroken() && any_of(resource.mQueueLanes.begin(), resource.mQueueLanes.end(),
+			[&](auto const& lane) { return any_of(lane.queue.begin(), lane.queue.end(), [&](auto requestId) {
+				auto request = mWorld.mTraversalRequests.find(requestId);
+				auto actor = request ? mWorld.mAgents.find(request->mOwner) : nullptr;
+				return actor && resource.mDoor->admitsPlayerCrossing(*actor, actor->getGlobalPosition().y);
+			}); });
 		if (!resource.mEnabled || (!resource.mDoor && !resource.mForceBridge)
-			|| (resource.mDoor && !resource.mDoor->admitsNewCrossings() && !resource.mDoor->isIndependentlyBroken())
+			|| (resource.mDoor && !resource.mDoor->admitsNewCrossings() && !resource.mDoor->isIndependentlyBroken() && !playerPassage)
 			|| (resource.mForceBridge && !resource.mForceBridge->admitsNewTraversals()))
 		{
 			return;
@@ -768,6 +775,8 @@ namespace core
 				if (!request || request->mState != TraversalRequestState::Pending) continue;
 				auto actor = mWorld.mAgents.find(request->mOwner);
 				if (!actor) continue;
+				if (!actor->isPlayerControlled() && !resource.mDoor->admitsNewCrossings()
+					&& !resource.mDoor->isIndependentlyBroken()) continue;
 				if (resource.mDoor->admitsAgentTraversal(*actor, actor->getGlobalPosition().y)
 					&& (!resource.mDoor->isIndependentlyBroken()
 						|| resource.mDoor->admitsBrokenPassage(*actor, actor->getGlobalPosition().y))) continue;
@@ -841,13 +850,21 @@ namespace core
 				{
 					continue;
 				}
+				if (resource.mDoor && !resource.mDoor->admitsNewCrossings())
+				{
+					bool ready = agent->isPlayerControlled()
+						? resource.mDoor->admitsPlayerCrossing(*agent, agent->getGlobalPosition().y)
+						: resource.mDoor->isIndependentlyBroken()
+							&& resource.mDoor->admitsBrokenPassage(*agent, agent->getGlobalPosition().y);
+					if (!ready) continue;
+				}
 				if (useCrossingBand)
 				{
-					// Player Up uses the complete Standing body inside the aperture,
+					// Player Up uses the complete current-pose body inside the aperture,
 					// not the historical fixed-width autonomous arrival band.
 					auto const width = agent->isPlayerControlled()
 						? std::max(0.f, (resource.mDoor->getSize().x
-							- agent->getPoseEnvelope(Pose::Standing).value_or(Vector2{}).x) * .5f)
+							- agent->getWidth()) * .5f)
 						: crossingWidth;
 					if (!isWithinDoorCrossingBand(agent->getGlobalPosition(), lane.origin, width))
 					{

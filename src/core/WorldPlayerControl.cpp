@@ -177,12 +177,13 @@ namespace core
 			auto resource = mTraversalResources.find(door->getTraversalResourceId());
 			if (!resource || !resource->mEnabled) continue;
 			auto const halfWidth = agent->getWidth() * .5f;
-			auto const pose = door->selectAgentCrossing(*agent, position.y, true);
+			auto const pose = door->selectAgentCrossing(*agent, position.y, true,
+				transport ? std::nullopt : std::optional<float>{door->getOpenPercentage()});
 			auto const currentPoseRoom = [&](Sector const& sector) {
 				return agent->poseFits(agent->getPose(), sector.getPosition().y + sector.getLevelsHigh() - 1
 					+ sector.getEffectiveTopLevelHeight() - position.y);
 			};
-			bool const passable = door->admitsNewCrossings() && pose
+			bool const passable = (transport ? door->admitsNewCrossings() : door->admitsPlayerCrossing(*agent, position.y)) && pose
 				&& currentPoseRoom(*source->getSector()) && currentPoseRoom(*destination->getSector())
 				&& position.x - halfWidth >= door->getPosition().x - PoseFitTolerance
 				&& position.x + halfWidth <= door->getPosition().x + door->getSize().x + PoseFitTolerance

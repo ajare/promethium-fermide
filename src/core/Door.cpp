@@ -144,6 +144,32 @@ namespace core
 			!= DoorCrossingMode::None;
 	}
 
+	bool Door::admitsPlayerCrossing(Agent const& agent, float approachFloorY) const
+	{
+		if (!agent.isPlayerControlled() || typeid(*this) != typeid(Door)
+			|| isLiftOwned() || isShuttleOwned() || isChamberOwned()) return false;
+		auto pose = selectAgentCrossing(agent, approachFloorY, true, getOpenPercentage());
+		auto envelope = pose ? agent.getPoseEnvelope(pose->pose) : std::optional<Vector2>{};
+		if (!envelope) return false;
+		float left = getPosition().x, right = left + getSize().x;
+		switch (mOpenStyle)
+		{
+		case OpenStyle::OpenUp: break; // selectAgentCrossing checks live vertical clearance.
+		case OpenStyle::OpenLeft: left = right - getSize().x * getOpenPercentage(); break;
+		case OpenStyle::OpenRight: right = left + getSize().x * getOpenPercentage(); break;
+		case OpenStyle::OpenApart:
+		{
+			auto centre = (left + right) * .5f;
+			auto half = getSize().x * getOpenPercentage() * .5f;
+			left = centre - half; right = centre + half;
+			break;
+		}
+		}
+		auto const x = agent.getGlobalPosition().x;
+		return x - envelope->x * .5f >= left - ClearanceTolerance
+			&& x + envelope->x * .5f <= right + ClearanceTolerance;
+	}
+
 	uint32_t Door::getCellsWide() const { return mCellsWide; }
 	void Door::setHeight(Height height)
 	{

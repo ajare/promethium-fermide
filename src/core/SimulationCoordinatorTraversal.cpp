@@ -230,12 +230,19 @@ namespace core
 			{
 				return; // deactivation cleanup denies waiters after active lanes drain
 			}
-			if (resource->mDoor->admitsNewCrossings()
+			bool const playerPassage = actor && resource->mDoor->admitsPlayerCrossing(*actor, actor->getGlobalPosition().y);
+			if ((resource->mDoor->admitsNewCrossings() || playerPassage)
 				&& !mWorld.agentAdheresToDoorPermission(request->mResource,
 					request->mSourceSector, request->mOwner))
 			{
 				denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
 				return;
+			}
+			if (playerPassage && (resource->mDoorActivationMode != DoorActivationMode::Unavailable
+				|| (resource->mDoor->isBreakable() && resource->mDoor->isOpen())))
+			{
+				tryGrantDoorQueue(*resource);
+				return; // Physical passage is not a request to operate or finish opening.
 			}
 			if (resource->mDoor->isBroken())
 			{

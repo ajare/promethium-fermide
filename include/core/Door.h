@@ -153,6 +153,9 @@ namespace core
 		bool isIndependentlyBroken() const { return mBreakable && mBroken; }
 		float getBrokenOpenPercentage() const { return mBrokenOpenPercentage; }
 		bool admitsNewCrossings() const { return mBroken ? mOpenPct >= 1.0f : isOpen(); }
+		// Direct Player passage uses the live clear aperture; transport-owned
+		// thresholds and autonomous crossings retain their existing state gates.
+		bool admitsPlayerCrossing(Agent const& agent, float approachFloorY) const;
 		std::optional<DeviceCondition> knownCondition(Agent const* agent,
 			Sector const* observationSector) const;
 		bool open() override;

@@ -20,10 +20,16 @@ camera is used.
 - In Locations, Left/Right movement stays on the current Layer and Level. Usable open boundaries
   and standalone Bulkhead Doors whose moving leaf clears the current pose's body permit entry into adjacent Locations,
   subject to pose fit and existing passage restrictions.
-- Press **Up** to cross an eligible fully open ordinary Door into its connected
+- Press **Up** to cross an eligible ordinary Door whose live aperture clears the current pose into its connected
   Location on the adjacent Layer, in either direction. If no crossing can start,
-  Up instead opens an eligible manual Door. Press again after it finishes opening
-  to cross; holding Up or keyboard repeat never queues another action.
+  Up instead opens an eligible manual Door. Press again once the leaf clears the
+  body to cross; holding Up or keyboard repeat never queues another action.
+  OpenUp Doors can admit Crawling before Crouching or Standing fits. Sliding
+  Doors require the entire body inside their actual left/right/central gap,
+  not merely a sufficiently large opening somewhere else. Opening, Closing and
+  independently Broken apertures use the same physical check. Transport Doors
+  retain their existing full-open boarding and vehicle interlocks; autonomous
+  healthy Doors still wait for full opening.
 - The Agent must be on the Door's Level in one of its connected Locations. Opening
   requires its centre inside the Door's physical X-bounds; crossing requires its
   entire current-pose body inside the aperture. There is no automatic alignment.
@@ -347,4 +353,7 @@ Stairwell bodies and pose-adjusted opposing Escalator admission. Manual transpor
 checks include crawling through Lift/Shuttle and Platform boundaries and posture
 changes on moving Platforms between integer Levels. Keyboard coverage verifies
 C posture on both stair directions and both Ladder kinds; Down alone no longer
-changes posture.
+changes posture. Regular Door regressions cover early Crawling passage, all four
+opening styles in both directions, opening/closing/Broken leaves, None capability,
+retained crossing posture on C release, real keyboard repeat suppression and
+opposite-side autonomous waiters retaining their full-open admission gate.

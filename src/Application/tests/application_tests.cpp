@@ -202,6 +202,35 @@ void checkPlayerDoorKeys(wp::application::State& play, core::World& world) {
   key(KeyEvent::Released);
 }
 
+void checkPlayerPartialDoorKeys(wp::application::State& play, core::World& world) {
+  using wp::application::Key; using wp::application::KeyEvent;
+  core::World fixture("Keyboard partially raised Door", 8, 2);
+  auto front = fixture.addRoom("Front", 0, 0, 0, 8, 1);
+  auto back = fixture.addRoom("Back", 1, 0, 0, 8, 1);
+  core::World::CreateDoorOptions options; options.speedOverride = .05f; options.holdOpenSeconds = 30.f;
+  auto created = fixture.addSectorDoor(0, 0, 2, options);
+  fixture.finishBuild(); fixture.pauseSimulation();
+  auto id = fixture.createAgent("Player", front, 0, 2.5f);
+  require(fixture.setAgentBehaviourAssignment(id, core::PlayerControlledBehaviour, 1, {}), "Cannot assign partial Door Player");
+  auto writer = core::YamlSerializer::toString(); core::SerializationWorkData data; data.markSerializedUnmodified = false;
+  fixture.serialize(*writer, data); writer->serialize();
+  auto reader = core::YamlSerializer::fromString(writer->getSerializedString()); reader->deserialize();
+  world.pauseSimulation(); require(world.deserialize(*reader, data), "Cannot install partial Door keyboard fixture"); world.resumeSimulation();
+  auto door = std::dynamic_pointer_cast<core::DoorSectorObject>(world.getSector(front)->getObject(created.door.index))->getDoor();
+  auto key = [&](Key k, bool held) { play._injectKeyInput(held ? KeyEvent::Pressed : KeyEvent::Released, k, {}); };
+  key(Key::C, true); key(Key::UpArrow, true); play._update(core::World::getFixedTimestep());
+  auto actor = world.lookupAgent(id).entity;
+  while (door->getOpenPercentage() * door->getSize().y < actor->getStandingHeight() * .3f + .01f)
+    play._update(core::World::getFixedTimestep());
+  key(Key::RightArrow, true); key(Key::UpArrow, true); play._update(core::World::getFixedTimestep());
+  require(!actor->hasActiveLocomotionTask(), "Repeated Up must not cross even after a Crawling gap becomes clear");
+  key(Key::UpArrow, false); key(Key::UpArrow, true); play._update(core::World::getFixedTimestep());
+  require(actor->hasActiveLocomotionTask() && actor->getPose() == core::Pose::Crawling,
+          "Actual fresh Up with C+Right must cross beneath the partially raised leaf");
+  key(Key::UpArrow, false); key(Key::RightArrow, false); key(Key::C, false); play._update(.4f);
+  require(actor->getSector()->getIndex() == back && door->isOpening(), "Keyboard crossing must complete before full opening");
+}
+
 void checkPlayerStairKeys(wp::application::State& play, core::World& world) {
   using wp::application::Key;
   using wp::application::KeyEvent;
@@ -746,6 +775,7 @@ void checkFlow(std::array<wp::application::StateFactory*, 6> const& factories,
                 "Play must advance one second at normal speed");
         checkPlayerKeys(*child, *map->getWorld());
         checkPlayerDoorKeys(*child, *map->getWorld());
+        checkPlayerPartialDoorKeys(*child, *map->getWorld());
         checkPlayerStairKeys(*child, *map->getWorld());
         checkPlayerStaircaseKeys(*child, *map->getWorld());
         checkPlayerLadderKeys(*child, *map->getWorld());

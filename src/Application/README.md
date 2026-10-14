@@ -49,8 +49,11 @@ or C plus Left/Right to Crawl, only if the Agent declares the requested pose.
 Releasing C restores Standing only where the whole body fits; otherwise the
 lowered pose is retained until safe. Motion uses declared pose/context speeds.
 Down selects Ladder/stair descent only, independently of posture. The camera follows that Agent and its Layer.
-Press Up to cross an aligned open ordinary Door between Layers, or otherwise
-open an eligible manual Door; press again once open to cross. Up also enters or
+Press Up to cross an aligned ordinary Door between Layers once its live aperture
+clears the current body, or otherwise open an eligible manual Door; press again
+once the leaf clears the pose to cross. OpenUp Doors admit Crawling beneath a
+partially raised leaf; sliding Doors check the body's position within the actual
+gap. Autonomous full-open timing and transport boarding interlocks are unchanged. Up also enters or
 exits Stairwell landing doorways. Left/Right walks on visible side platforms;
 hold Up/Down at departure to choose ascent/descent, with matching horizontal
 input. Arrival walks onto the next platform rather than skipping its junction.

@@ -6,6 +6,7 @@
 #include "core/YamlSerializer.h"
 #include "core/BulkheadDoorSectorObject.h"
 #include "core/DoorSectorObject.h"
+#include "core/DoorEdge.h"
 #include "core/StairwellTransit.h"
 #include "core/StaircaseTransit.h"
 #include "core/LadderMountEdge.h"
@@ -224,6 +225,151 @@ namespace
 		world.requestPlayerDoorAction(); world.resetSimulation(); world.resumeSimulation(); world.update(.2f);
 		require(world.lookupAgent(id).entity->getSector()->getIndex() == front && !door->isOpening(),
 			"Reset must discard pending Up and restore authored position");
+	}
+
+	void partialDoorways()
+	{
+		core::World world("Crawling beneath an opening Door", 8, 2);
+		auto front = world.addRoom("Front", 0, 0, 0, 8, 1);
+		auto back = world.addRoom("Back", 1, 0, 0, 8, 1);
+		core::World::CreateDoorOptions options; options.holdOpenSeconds = 30.f;
+		auto created = world.addSectorDoor(0, 0, 2, options);
+		auto door = std::dynamic_pointer_cast<core::DoorSectorObject>(created.door.sector->getObject(created.door.index))->getDoor();
+		world.finishBuild(); world.pauseSimulation();
+		auto id = world.createAgent("Player", front, 0, 2.5f); assign(world, id);
+		auto npcId = world.createAgent("Autonomous", back, 0, 2.5f);
+		require(world.setDoorSpeedOverride(created.traversalResource, .05f), "Cannot slow regular Door");
+		world.resumeSimulation(); world.setPlayerCrouch(true); world.setPlayerMovementDirection(1);
+		world.update(core::World::getFixedTimestep());
+		auto actor = world.lookupAgent(id).entity;
+		require(actor->getPose() == core::Pose::Crawling, "Fixture must select actual Crawling");
+		world.requestPlayerDoorAction(); world.update(core::World::getFixedTimestep());
+		world.setPlayerMovementDirection(0);
+		while (door->getOpenPercentage() * door->getSize().y < actor->getStandingHeight() * .3f + .01f)
+			world.update(core::World::getFixedTimestep());
+		require(door->isOpening() && door->getOpenPercentage() * door->getSize().y < actor->getStandingHeight(),
+			"Fixture must clear Crawling but not Standing before full opening");
+		auto npc = world.lookupAgent(npcId).entity;
+		for (auto const& edge : world.getGraph()->getEdges())
+			if (auto threshold = std::dynamic_pointer_cast<const core::DoorEdge>(edge); threshold && threshold->getDoor() == door)
+			{
+				auto target = edge->getVertex(0);
+				if (target->getSector()->getIndex() != front) target = edge->getVertex(1);
+				auto path = world.getGraph()->calculatePath(npc, target);
+				require(bool(path), "Cannot route opposite-side autonomous Door waiter");
+				npc->setPath(path, true);
+			}
+		world.update(.1f);
+		world.setPlayerMovementDirection(1);
+		world.requestPlayerDoorAction(); world.update(core::World::getFixedTimestep());
+		require(actor->hasActiveLocomotionTask() && actor->getPose() == core::Pose::Crawling,
+			"Fresh Up must admit Crawling beneath a partially raised regular Door");
+		world.setPlayerMovementDirection(0); world.update(.4f);
+		require(actor->getSector()->getIndex() == back && door->isOpening(),
+			"Crawling must finish crossing while the regular Door is still opening");
+		bool npcWaiting = false;
+		for (auto const& request : world.getSimulationSnapshot().traversalRequests)
+			if (request.owner == npcId && request.state == core::TraversalRequestState::Pending) npcWaiting = true;
+		require(npcWaiting && npc->getSector()->getIndex() == back,
+			"Player partial passage must not grant autonomous waiters before full opening");
+		npc->clearPath();
+	}
+
+	void partialDoorMatrix()
+	{
+		for (auto style : {core::Door::OpenStyle::OpenUp, core::Door::OpenStyle::OpenLeft,
+			core::Door::OpenStyle::OpenRight, core::Door::OpenStyle::OpenApart})
+		for (bool reverse : {false, true})
+		for (int phase : {0, 1, 2}) // Opening, independently Broken, Closing.
+		{
+			core::World world("Regular Door physical aperture", 8, 2);
+			auto front = world.addRoom("Front", 0, 0, 0, 8, 1);
+			auto back = world.addRoom("Back", 1, 0, 0, 8, 1);
+			core::World::CreateDoorOptions options; options.openStyle = style;
+			options.holdOpenSeconds = 30.f; options.speedOverride = .05f;
+			auto created = world.addSectorDoor(0, 0, 2, options);
+			auto door = std::dynamic_pointer_cast<core::DoorSectorObject>(created.door.sector->getObject(created.door.index))->getDoor();
+			float x = style == core::Door::OpenStyle::OpenLeft ? 2.65f
+				: style == core::Door::OpenStyle::OpenRight ? 2.35f : 2.5f;
+			world.finishBuild(); world.pauseSimulation();
+			auto id = world.createAgent("Player", reverse ? back : front, 0, x); assign(world, id);
+			require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None), "Cannot remove Door operating capability");
+			world.resumeSimulation(); world.setPlayerCrouch(true);
+			require(door->open(), "Cannot externally open regular Door");
+			world.update(.1f); world.requestPlayerDoorAction(); world.update(core::World::getFixedTimestep());
+			auto actor = world.lookupAgent(id).entity;
+			require(!actor->hasActiveLocomotionTask(), "Too-small live aperture must refuse passage without queueing");
+			float target = style == core::Door::OpenStyle::OpenUp ? .35f : .7f;
+			if (phase == 2)
+			{
+				while (!door->isOpen()) world.update(core::World::getFixedTimestep());
+				require(door->close(), "Cannot start regular Door closure");
+				while (door->getOpenPercentage() > target) world.update(core::World::getFixedTimestep());
+			}
+			else while (door->getOpenPercentage() < target) world.update(core::World::getFixedTimestep());
+			if (phase == 1) require(world.setDoorBroken(created.traversalResource, true), "Cannot freeze partial regular Door");
+			if (style != core::Door::OpenStyle::OpenUp)
+			{
+				int away = style == core::Door::OpenStyle::OpenLeft ? -1 : 1;
+				float duration = style == core::Door::OpenStyle::OpenApart ? .3f : .6f;
+				world.setPlayerMovementDirection(away); world.update(duration);
+				world.requestPlayerDoorAction(); world.update(core::World::getFixedTimestep());
+				require(!actor->hasActiveLocomotionTask(), "A large enough sliding gap elsewhere must not admit a body still overlapping the leaf");
+				world.setPlayerMovementDirection(-away); world.update(duration + core::World::getFixedTimestep());
+			}
+			if (style == core::Door::OpenStyle::OpenUp)
+			{
+				world.requestPlayerDoorAction(); world.update(core::World::getFixedTimestep());
+				require(!actor->hasActiveLocomotionTask(), "Crouching must not cross a gap only Crawling clears");
+			}
+			world.setPlayerMovementDirection(1); world.requestPlayerDoorAction(); world.update(core::World::getFixedTimestep());
+			require(actor->hasActiveLocomotionTask() && actor->getPose() == core::Pose::Crawling,
+				"A fitting Crawling body must cross the actual partial opening: style=" + std::to_string(int(style))
+				+ " reverse=" + std::to_string(reverse) + " phase=" + std::to_string(phase)
+				+ " pct=" + std::to_string(door->getOpenPercentage()) + " x=" + std::to_string(actor->getGlobalPosition().x)
+				+ " pose=" + std::to_string(int(actor->getPose())) + " h=" + std::to_string(actor->getHeight())
+				+ " doorh=" + std::to_string(door->getSize().y)
+				+ " physical=" + std::to_string(door->admitsPlayerCrossing(*actor, actor->getGlobalPosition().y))
+				+ " requests=" + std::to_string(world.getSimulationSnapshot().traversalRequests.size()));
+			auto admittedX = actor->getGlobalPosition().x;
+			world.setPlayerCrouch(false); world.setPlayerMovementDirection(0);
+			world.update(core::World::getFixedTimestep());
+			require(actor->getPose() == core::Pose::Crawling, "C release must not expand an admitted timed crossing into its leaf");
+			world.update(.4f);
+			require(actor->getSector()->getIndex() == (reverse ? front : back) && !actor->hasActiveLocomotionTask(),
+				"Partial regular Door crossing must commit and release normally");
+			near(actor->getGlobalPosition().x, admittedX, "Partial regular Door passage must never align X");
+			require(door->getOpenPercentage() < 1.f, "Crossing must complete before full opening");
+		}
+	}
+
+	void narrowCrawlingDoor()
+	{
+		core::World world("Pose-width Door arrival", 8, 2);
+		auto front = world.addRoom("Front", 0, 0, 0, 8, 1);
+		auto back = world.addRoom("Back", 1, 0, 0, 8, 1);
+		auto definition = core::bundledHumanAgentType();
+		auto at = definition.source.find("type_id = \"Human\"");
+		definition.source.replace(at, std::string("type_id = \"Human\"").size(), "type_id = \"NarrowCrawler\"");
+		auto from = std::string("crawling = { image_tile = \"human-crawling\", height_ratio = 0.3 }");
+		at = definition.source.find(from); require(at != std::string::npos, "Missing Crawling declaration");
+		definition.source.replace(at, from.size(), "crawling = { image_tile = \"human-crawling\", height_ratio = 0.3, width_ratio = 0.5 }");
+		std::string diagnostic; require(world.attachAgentType("narrow-crawler.agent.lua", definition.source, &diagnostic), diagnostic);
+		core::World::CreateDoorOptions options; options.openStyle = core::Door::OpenStyle::OpenLeft;
+		options.speedOverride = .05f; options.holdOpenSeconds = 30.f;
+		auto created = world.addSectorDoor(0, 0, 2, options);
+		auto door = std::dynamic_pointer_cast<core::DoorSectorObject>(created.door.sector->getObject(created.door.index))->getDoor();
+		world.finishBuild(); world.pauseSimulation();
+		auto id = world.createAgent("NarrowCrawler", "Player", front, 0, 2.75f); assign(world, id);
+		world.resumeSimulation(); world.setPlayerCrouch(true); require(door->open(), "Cannot open narrow body fixture");
+		while (door->getOpenPercentage() < .7f) world.update(core::World::getFixedTimestep());
+		world.setPlayerMovementDirection(1); world.requestPlayerDoorAction(); world.update(core::World::getFixedTimestep());
+		auto actor = world.lookupAgent(id).entity;
+		require(actor->hasActiveLocomotionTask() && std::abs(actor->getWidth() - .2f) < .0001f,
+			"Physical Door admission must use actual Crawling width, not the Standing arrival band");
+		world.setPlayerMovementDirection(0); world.update(.4f);
+		require(actor->getSector()->getIndex() == back && door->isOpening(), "Narrow current-pose passage must complete before full opening");
+		near(actor->getGlobalPosition().x, 2.75f, "Narrow Crawling entry must preserve X");
 	}
 
 	void doorwayRestrictions()
@@ -1017,7 +1163,7 @@ void agent_smoke::registerPlayerControl(std::vector<smoke::Check>& checks)
 	checks.push_back({"playerControlBasics", [](smoke::Context const&) { basics(); }});
 	checks.push_back({"playerControlBoundaries", [](smoke::Context const&) { boundaries(); }});
 	checks.push_back({"playerControlBulkheads", [](smoke::Context const&) { bulkheads(); }});
-	checks.push_back({"playerControlDoorways", [](smoke::Context const&) { doorways(); }});
+	checks.push_back({"playerControlDoorways", [](smoke::Context const&) { doorways(); partialDoorways(); partialDoorMatrix(); narrowCrawlingDoor(); }});
 	checks.push_back({"playerControlDoorwayRestrictions", [](smoke::Context const&) { doorwayRestrictions(); doorwaySelection(); }});
 	checks.push_back({"playerControlStairwellPlatforms", [](smoke::Context const&) { stairwellPlatforms(); }});
 	checks.push_back({"playerControlLadders", [](smoke::Context const&) { ladders(); }});
