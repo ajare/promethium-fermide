@@ -2179,6 +2179,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             oxygen = declareGasStore(cell.oxygenStore, 'oxygen', cell.hazardClass, false)
         end
         local hydrogen = declareGasStore(cell.hydrogenStore, 'hydrogen', cell.hazardClass, false)
+        -- Aliased stream roles are refused (#585), mirroring the host: the
+        -- two products are chemically distinct, and the tick sizes each
+        -- product against its own store's headroom before either is added,
+        -- so one store named for both products has its headroom spent
+        -- twice and is overfilled.
+        assert(oxygen == nil or oxygen ~= hydrogen,
+            'electrolyzer may not name the same store for both the oxygen and the hydrogen product: the two products are chemically distinct streams and may not share one store, whose headroom the split would spend twice')
+        assert(feed ~= hydrogen and (oxygen == nil or feed ~= oxygen),
+            'electrolyzer may not name the same store for the feed water and a gas product: the machine cannot treat one store as both the water it draws and the gas it produces')
         local compartment = nil
         if cell.atmosphere ~= nil and #cell.atmosphere > 0 then
             compartment = atmosphere_by_id[cell.atmosphere]
@@ -2294,6 +2303,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             cell.hazardClass, false)
         local oxygen = declareGasStore(cell.oxygenStore, 'oxygen reactant',
             cell.hazardClass, false)
+        -- The same aliased-role rule the electrolyzer carries (#585):
+        -- the cell draws each reactant from its own store's drawable
+        -- stock, so one store named for both reactants spends the same
+        -- stock twice against a stoichiometry that expects two.
+        assert(hydrogen ~= oxygen,
+            'fuel cell may not name the same store for both the hydrogen and the oxygen reactant: the cell draws both reactants independently and may not spend one store\'s stock as both')
         local water = declareWaterStore(cell.waterStore, 'product water',
             cell.hazardClass, false)
         local sink = reservoir_by_id[cell.heatSink]

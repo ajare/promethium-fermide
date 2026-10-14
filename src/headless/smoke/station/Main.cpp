@@ -10009,6 +10009,72 @@ namespace
 			require(!bad.getStationSystemsSnapshot().enabled && bad.getSimulationTick() == 0,
 				"a refused gas configuration mutated the World");
 		}
+		// Aliased product stores (#585) through the public World
+		// configuration/tick/snapshot seam: a cell that names one store for
+		// both oxygen and hydrogen used to be accepted, and the first tick
+		// then sized each product against the same headroom, added both, and
+		// broke the finite-capacity audit - a terminal failure that paused
+		// the World with the tick at zero. The alias is refused at
+		// configuration instead, and the World never reaches the tick that
+		// could overfill the store.
+		{
+			core::World world("GasAliasedProducts", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			std::vector<core::ResourceStoreSettings> stores;
+			stores.push_back(plainStore("water", 1.0, 1.0));
+			stores.push_back(plainStore("gas", 0.001, 0.0));
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = stores;
+			settings.atmospheres = { compartment(1.0) };
+			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
+			settings.electrolyzers = { electrolyzer("split", "normal") };
+			settings.electrolyzers[0].oxygenStoreId = "gas";
+			settings.electrolyzers[0].hydrogenStoreId = "gas";
+			settings.electrolyzers[0].rateKgPerS = 1.0;
+			core::SolarArraySettings field;
+			field.id = "field";
+			field.capacityKW = 20000.0;
+			settings.solarArrays = { field };
+			std::string diagnostic;
+			require(!world.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("both the oxygen and the hydrogen product") != std::string::npos,
+				"an electrolyzer aliasing its oxygen and hydrogen product stores was accepted");
+			require(!world.getStationSystemsSnapshot().enabled
+				&& world.getSimulationTick() == 0 && world.getStationSystemsDiagnostics().empty(),
+				"the refused aliased-product configuration mutated the World");
+			// The same alias through the feed side: one store named as both
+			// the water drawn and a gas produced is refused too.
+			settings.electrolyzers = { electrolyzer("split", "normal") };
+			settings.electrolyzers[0].waterStoreId = "h2";
+			require(!world.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("feed water and a gas product") != std::string::npos,
+				"an electrolyzer aliasing its feed water store with its hydrogen product store was accepted");
+			settings.electrolyzers = { electrolyzer("split", "normal") };
+			settings.electrolyzers[0].waterStoreId = "o2";
+			require(!world.configureStationSystems(settings, false, &diagnostic)
+				&& diagnostic.find("feed water and a gas product") != std::string::npos,
+				"an electrolyzer aliasing its feed water store with its oxygen product store was accepted");
+			// A cell that delivers oxygen straight into a compartment has no
+			// oxygen store to alias, so the distinct-store rule does not
+			// refuse it; the tick it then runs must stay clean.
+			settings.electrolyzers = { electrolyzer("split", "normal") };
+			settings.electrolyzers[0].oxygenStoreId = "";
+			settings.electrolyzers[0].atmosphereId = "habitat";
+			settings.electrolyzers[0].hydrogenStoreId = "gas";
+			settings.electrolyzers[0].rateKgPerS = 0.0001;
+			require(world.configureStationSystems(settings, false, &diagnostic),
+				("a compartment-delivering cell with a distinct hydrogen store was refused: " + diagnostic).c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(5), "the compartment-delivering cell run failed");
+			require(world.getStationSystemsDiagnostics().empty(),
+				"the compartment-delivering cell raised a runtime diagnostic");
+			require(approx(findStore(world.getStationSystemsSnapshot(), "gas").currentQualified,
+				0.0001 * (1.0 - o2Ratio) * 5.0 * dt)
+					&& findStore(world.getStationSystemsSnapshot(), "gas").currentQualified < 0.001,
+				"the distinct hydrogen store did not fill as expected or breached its capacity");
+		}
 		// Nominal electrolysis to stores: the split closes on mass, the
 		// energy closes over supplied = chemical + heat, the protected
 		// reserve is never touched, and the sink carries the process heat.
@@ -10450,6 +10516,19 @@ namespace
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("limited to") != std::string::npos,
 				"more than the declared fuel-cell budget was accepted");
+			// Aliased reactant stores (#585), the analogous gas-process
+			// pattern: the cell draws each reactant from its own store's
+			// drawable stock, so one store named for both spends that stock
+			// twice against a stoichiometry that expects two.
+			settings = core::StationSystemsSettings{};
+			settings.enabled = true;
+			settings.stores = baseStores();
+			settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
+			settings.fuelCells = { fuelCell("cell", "normal") };
+			settings.fuelCells[0].oxygenStoreId = "h2";
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("both the hydrogen and the oxygen reactant") != std::string::npos,
+				"a fuel cell aliasing its hydrogen and oxygen reactant stores was accepted");
 			require(!bad.getStationSystemsSnapshot().enabled && bad.getSimulationTick() == 0,
 				"a refused fuel-cell configuration mutated the World");
 		}

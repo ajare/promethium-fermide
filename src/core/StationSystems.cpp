@@ -2827,6 +2827,20 @@ namespace core
 						+ "' hazard class '" + compartment->hazardClass
 						+ "'; oxygen may only be delivered to a compartment of the cell's own class");
 			}
+			// Aliased stream roles are refused (#585): the two products are
+			// chemically distinct, and the tick sizes each product against
+			// its own store's headroom before either is added. Pointing both
+			// at one store spends the same headroom twice and overfills it -
+			// authored configuration turning a finite physical limit into a
+			// terminal runtime failure - so the alias never reaches the tick.
+			if (!electrolyzer.oxygenStoreId.empty()
+				&& electrolyzer.oxygenStoreId == electrolyzer.hydrogenStoreId)
+				return refuse(where + " names the same store '" + electrolyzer.oxygenStoreId
+					+ "' for both the oxygen and the hydrogen product: the two products are chemically distinct streams and may not share one store, whose headroom the split would spend twice");
+			if (electrolyzer.waterStoreId == electrolyzer.hydrogenStoreId
+				|| (!electrolyzer.oxygenStoreId.empty()
+					&& electrolyzer.waterStoreId == electrolyzer.oxygenStoreId))
+				return refuse(where + " names the same store for the feed water and a gas product: the machine cannot treat one store as both the water it draws and the gas it produces");
 			if (!declareWaterStore(electrolyzer.waterStoreId, "feed water", where,
 				electrolyzer.hazardClass, false))
 				return false;
@@ -2923,6 +2937,13 @@ namespace core
 			if (!std::isfinite(cell.maxSinkTemperatureC)
 				|| cell.maxSinkTemperatureC <= -StationCelsiusOffset)
 				return refuse(where + " maximum sink temperature must be finite and above absolute zero");
+			// The same aliased-role rule the electrolyzer carries (#585):
+			// the cell draws each reactant from its own store's drawable
+			// stock, so one store named for both reactants spends the same
+			// stock twice against a stoichiometry that expects two.
+			if (cell.hydrogenStoreId == cell.oxygenStoreId)
+				return refuse(where + " names the same store '" + cell.hydrogenStoreId
+					+ "' for both the hydrogen and the oxygen reactant: the cell draws both reactants independently and may not spend one store's stock as both");
 			if (!declareGasStore(cell.hydrogenStoreId, "hydrogen reactant", where,
 				cell.hazardClass, false))
 				return false;

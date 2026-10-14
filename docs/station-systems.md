@@ -1299,6 +1299,21 @@ and a capture machine must match the compartment it scrubs, so a
 hazardous atmosphere's carbon stays on the hazardous side — and stores
 shared across classes are refused at configuration.
 
+**Stream roles must name distinct stores (#585).** The tick sizes each
+product against its own store's headroom *before either is added*, so a
+single store named for two roles has the same headroom spent twice: the
+authored configuration turns a finite physical limit into a terminal
+runtime failure and pauses the World with the tick at zero. The
+electrolyzer therefore refuses one store named for both the oxygen and
+the hydrogen product, and one store named for both the feed water and
+either gas product; the fuel cell refuses the analogous pattern of one
+store named for both the hydrogen and the oxygen reactant, where the
+cell would spend one store's drawable stock as both. The refusal is a
+configuration refusal, not a runtime one: it happens before the World
+is touched, so the overfilling tick never runs. Cross-machine sharing is
+untouched — a fuel cell may burn the hydrogen its electrolyzer produced,
+and the closed loop that makes is the point of the contracts.
+
 Within the tick, electrolyzers and capture machines run after the water
 collectors and before the coolant loop's second pass: they compete for
 the same generation-and-battery pool, and the electrolysis process heat
@@ -1330,8 +1345,14 @@ below the retained chemical energy; a sink-temperature bound below
 absolute zero; a hazard class that does not match the delivery
 compartment or the scrubbed compartment; a thermal class that mismatches
 the heat-sink reservoir; a consumable demand with no consumable store; a
-gas store shared between normal and hazardous processes; over-budget
-contract counts) with no World mutation; nominal electrolysis where the
+gas store shared between normal and hazardous processes; one store
+aliased across the cell's own stream roles — oxygen and hydrogen
+products, or feed water and either gas product (#585); over-budget
+contract counts) with no World mutation; the aliased-product case
+probed through the public configure/tick/snapshot seam so the
+overfilling tick is shown never to run, while a cell that delivers
+oxygen into a compartment and hydrogen into a distinct store still runs
+clean against the same tiny store; nominal electrolysis where the
 split follows the declared stoichiometry, the supplied/chemical/heat
 energy ledger closes, the protected reserve is untouched, the process
 heat lands in the sink and the per-unit boundary closes; the cooling gate
@@ -1424,7 +1445,8 @@ Fuel-cell acceptance coverage: refused configurations (an unknown
 hydrogen, oxygen, water or heat-sink store; an efficiency outside
 (0, 1]; a commanded output above the installed rating; a thermal
 class that mismatches the heat-sink reservoir; a gas store shared
-between normal and hazardous processes; an over-budget cell count)
+between normal and hazardous processes; one store aliased across the
+cell's two reactant roles (#585); an over-budget cell count)
 with no World mutation; nominal backup where the load is served from
 the cell's own output, the reactant mass ledger closes against the
 declared stoichiometry, the energy ledger closes against the LHV and
