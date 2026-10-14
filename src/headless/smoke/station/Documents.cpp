@@ -3147,6 +3147,18 @@ void nutrientRecoveryFiles(smoke::Context const& context)
 	namespace filesystem = std::filesystem;
 	auto const directory = context.temporaryRoot() / "station-nutrient";
 	filesystem::create_directories(directory);
+	// Replace the first occurrence of `from` that appears after `anchor`
+	// - blocks are serialised id-first, so anchoring on the id pins the
+	// edit to the intended entry (#592).
+	auto replaceOnceAfter = [](std::string& text, std::string const& anchor,
+		std::string const& from, std::string const& to)
+	{
+		auto const at = text.find(anchor);
+		require(at != std::string::npos, ("missing anchor: " + anchor).c_str());
+		auto const hit = text.find(from, at);
+		require(hit != std::string::npos, ("missing field after anchor: " + from).c_str());
+		text.replace(hit, from.size(), to);
+	};
 	auto plainStore = [](std::string const& id, double capacity, double starting,
 		double protectedReserve = 0.0)
 	{
@@ -3364,6 +3376,35 @@ void nutrientRecoveryFiles(smoke::Context const& context)
 		try { (void)core::loadWorldDocument(malformedPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a zero stock units per condition point with a declared stock store was accepted from a file");
+	}
+	// #592: a document that flips the processor's consumable (media)
+	// store to hazardous-class while the processor stays normal is
+	// refused on load: the consumable is a consumed input and may not
+	// cross the hazard boundary into a normal biological pathway.
+	{
+		auto malformed = withField;
+		replaceOnceAfter(malformed, "id: media",
+			"hazardClass: normal", "hazardClass: hazardous");
+		auto const malformedPath = directory / "cross-class-media.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a hazardous media store drawn by a normal microbial processor was accepted from a file");
+	}
+	// #592: the same bypass through the replacement biological stock
+	// store - a hazardous-class stock store drawn by the normal
+	// processor - is refused on load.
+	{
+		auto malformed = withField;
+		replaceOnceAfter(malformed, "id: stock",
+			"hazardClass: normal", "hazardClass: hazardous");
+		auto const malformedPath = directory / "cross-class-stock.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a hazardous replacement stock store drawn by a normal microbial processor was accepted from a file");
 	}
 }
 

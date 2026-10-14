@@ -12024,8 +12024,10 @@ void buffers(smoke::Context const&)
 				&& diagnostic.find("stock units per condition point must be finite and non-negative")
 					!= std::string::npos,
 				"a negative stock units per condition point was accepted");
-			// A hazardous processor may not share the normal-class stock
-			// store that the normal processor already declared (#408).
+			// A hazardous processor may not draw the normal-class stock
+			// store the normal processor uses: the direct authored-class
+			// check (#592) now refuses it before the cross-processor
+			// sharing check is even reached.
 			{
 				auto hStores = settings.stores;
 				// The hazardous processor's chain stores must be authored
@@ -12060,9 +12062,62 @@ void buffers(smoke::Context const&)
 				hazardous.stockStoreId = "stock";
 				hazardSettings.microbialProcessors = { normal, hazardous };
 				require(!core::validateStationSystemsSettings(hazardSettings, diagnostic)
-					&& diagnostic.find("replacement biological stock store 'stock' is already used by a normal-class nutrient process")
+					&& diagnostic.find("replacement biological stock store 'stock' is authored normal-class but this is a hazardous-class nutrient process")
 						!= std::string::npos,
-					"a hazardous processor sharing the normal-class replacement stock store was accepted");
+					"a hazardous processor drawing the normal-class replacement stock store was accepted");
+			}
+			// #592: the consumable and replacement-stock roles are consumed
+			// inputs like the feed: each store's authored hazard class must
+			// match the processor's own class, in both directions, whether
+			// or not another processor also claims the store id.
+			{
+				core::StationSystemsSettings probe;
+				probe.enabled = true;
+				probe.stores = nutrientStores();
+				probe.stores.push_back(plainStore("stock", 100.0, 10.0));
+				probe.thermalReservoirs = { reservoir("sink", "low", 20.0) };
+				probe.microbialProcessors = { processor("digester", "normal") };
+				probe.microbialProcessors[0].stockStoreId = "stock";
+				probe.microbialProcessors[0].stockUnitsPerConditionPoint = 1.0;
+				// A normal processor may not draw hazardous-class media.
+				probe.stores[3].hazardClass = "hazardous";
+				require(!core::validateStationSystemsSettings(probe, diagnostic)
+					&& diagnostic.find("consumable store 'media' is authored hazardous-class but this is a normal-class nutrient process")
+						!= std::string::npos,
+					"a normal processor drawing hazardous-class media was accepted");
+				// With the media fixed, the same processor may not draw
+				// hazardous-class replacement stock instead.
+				probe.stores[3].hazardClass = "normal";
+				probe.stores.back().hazardClass = "hazardous";
+				require(!core::validateStationSystemsSettings(probe, diagnostic)
+					&& diagnostic.find("replacement biological stock store 'stock' is authored hazardous-class but this is a normal-class nutrient process")
+						!= std::string::npos,
+					"a normal processor drawing hazardous-class replacement stock was accepted");
+				probe.stores.back().hazardClass = "normal";
+				// The reverse direction: a hazardous processor may not draw
+				// normal-class media from an otherwise hazardous chain...
+				for (auto& entry : probe.stores)
+					entry.hazardClass = "hazardous";
+				probe.microbialProcessors = { processor("digester", "hazardous") };
+				probe.microbialProcessors[0].stockStoreId = "stock";
+				probe.microbialProcessors[0].stockUnitsPerConditionPoint = 1.0;
+				probe.stores[3].hazardClass = "normal";
+				require(!core::validateStationSystemsSettings(probe, diagnostic)
+					&& diagnostic.find("consumable store 'media' is authored normal-class but this is a hazardous-class nutrient process")
+						!= std::string::npos,
+					"a hazardous processor drawing normal-class media was accepted");
+				// ...nor normal-class replacement stock.
+				probe.stores[3].hazardClass = "hazardous";
+				probe.stores.back().hazardClass = "normal";
+				require(!core::validateStationSystemsSettings(probe, diagnostic)
+					&& diagnostic.find("replacement biological stock store 'stock' is authored normal-class but this is a hazardous-class nutrient process")
+						!= std::string::npos,
+					"a hazardous processor drawing normal-class replacement stock was accepted");
+				// The fully class-matched hazardous chain is accepted: the
+				// check refuses mismatches, not hazardous processors.
+				probe.stores.back().hazardClass = "hazardous";
+				require(core::validateStationSystemsSettings(probe, diagnostic),
+					("the fully hazardous-class chain was refused: " + diagnostic).c_str());
 			}
 			settings.microbialProcessors = { processor("digester", "normal") };
 			settings.microbialProcessors[0].thermalClass = "warm";
@@ -12082,6 +12137,64 @@ void buffers(smoke::Context const&)
 				"more than the declared microbial processor budget was accepted");
 			require(!bad.getStationSystemsSnapshot().enabled && bad.getSimulationTick() == 0,
 				"a refused nutrient-recovery configuration mutated the World");
+		}
+		// #592 actual-tick regression through the public configure/tick/
+		// snapshot seam: the reviewed probe configuration - a normal
+		// processor with hazardous-class media and replacement stock while
+		// every other stream is normal - is refused, the World stays
+		// unconfigured, and ticking consumes nothing.
+		{
+			core::World world("MicrobialHazardBypass", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto stores = nutrientStores();
+			stores.push_back(plainStore("stock", 100.0, 10.0));
+			stores[3].hazardClass = "hazardous";
+			stores.back().hazardClass = "hazardous";
+			auto probe = processor("digester", "normal");
+			probe.stockStoreId = "stock";
+			probe.stockUnitsPerConditionPoint = 1.0;
+			require(!nutrientConfigure(world, stores, { probe }, 0.0).first,
+				"the hazardous media/stock bypass was accepted through the public seam");
+			world.resumeSimulation();
+			require(world.advanceTicks(1),
+				"ticking the World after the refused hazardous media/stock configuration failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(!snap.enabled && snap.stores.empty() && snap.microbialProcessors.empty(),
+				"the refused hazardous media/stock configuration still ran and could consume hazardous material");
+		}
+		// The mirrored positive case: the same rig with every store authored
+		// hazardous-class and a hazardous processor ticks and consumes its
+		// hazardous media and replacement stock normally - the #592 check
+		// refuses mismatches, not legitimate hazardous operation.
+		{
+			core::World world("MicrobialHazardNominal", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto stores = nutrientStores();
+			stores.push_back(plainStore("stock", 100.0, 10.0));
+			for (auto& entry : stores)
+				entry.hazardClass = "hazardous";
+			auto probe = processor("digester", "hazardous");
+			probe.stockStoreId = "stock";
+			probe.stockUnitsPerConditionPoint = 1.0;
+			// Start below full condition so recovery draws replacement
+			// stock within the run (#408 coefficients).
+			probe.initialCondition = 0.5;
+			probe.recoveryPerHour = 1.0;
+			require(nutrientConfigure(world, stores, { probe }, 100.0).first,
+				"the fully hazardous-class rig was refused through the public seam");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "the fully hazardous-class rig failed to tick");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.enabled && snap.microbialProcessors.size() == 1,
+				"the fully hazardous-class rig did not run");
+			auto const media = findStore(snap, "media");
+			auto const stock = findStore(snap, "stock");
+			require(media.currentQualified < 10.0 && media.currentQualified > 0.0,
+				"the hazardous processor did not draw its hazardous-class media");
+			require(stock.currentQualified < 10.0 && stock.currentQualified > 0.0,
+				"the hazardous processor did not draw its hazardous-class replacement stock while recovering");
+			require(snap.microbialProcessors[0].condition > 0.5,
+				"the hazardous processor did not recover condition from its hazardous stock");
 		}
 		// Nominal digestion: the recovery follows the declared yields, the
 		// per-constituent recovery is funded by the feed's bound nutrients,

@@ -3227,6 +3227,17 @@ namespace core
 				if (found == settings.stores.end())
 					return refuse(where + " consumable store '" + processor.consumableStoreId
 						+ "' does not exist");
+				// #592: the consumable is a consumed input like the feed: its
+				// authored hazard class must match the processor's own class,
+				// not merely stay consistent with other processors' claims on
+				// the same store id. A normal processor may not draw
+				// hazardous-class media, and a hazardous processor may not
+				// draw normal-class media.
+				if (found->hazardClass != processor.hazardClass)
+					return refuse(where + " consumable store '" + processor.consumableStoreId
+						+ "' is authored " + found->hazardClass
+						+ "-class but this is a " + processor.hazardClass
+						+ "-class nutrient process; a process may only touch stores of its own hazard class");
 				auto const existing = microbialStoreClass.find(processor.consumableStoreId);
 				if (existing == microbialStoreClass.end())
 					microbialStoreClass.emplace(processor.consumableStoreId, processor.hazardClass);
@@ -3248,7 +3259,8 @@ namespace core
 				processor.hazardClass, false))
 				return false;
 			// The replacement biological stock store (#408) is an optional
-			// consumed input like the consumable: it must exist and stay
+			// consumed input like the consumable: it must exist, carry the
+			// processor's own authored hazard class (#592), and stay
 			// hazard-class segregated from the rest of the nutrient chain.
 			if (!processor.stockStoreId.empty())
 			{
@@ -3257,6 +3269,11 @@ namespace core
 				if (found == settings.stores.end())
 					return refuse(where + " replacement biological stock store '"
 						+ processor.stockStoreId + "' does not exist");
+				if (found->hazardClass != processor.hazardClass)
+					return refuse(where + " replacement biological stock store '"
+						+ processor.stockStoreId + "' is authored " + found->hazardClass
+						+ "-class but this is a " + processor.hazardClass
+						+ "-class nutrient process; a process may only touch stores of its own hazard class");
 				auto const existing = microbialStoreClass.find(processor.stockStoreId);
 				if (existing == microbialStoreClass.end())
 					microbialStoreClass.emplace(processor.stockStoreId, processor.hazardClass);

@@ -2589,6 +2589,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             processor.hazardClass, false)
         local consumable = by_id[processor.consumableStore]
         assert(consumable ~= nil, 'microbial processor consumable store is unknown')
+        -- #592: the consumable is a consumed input like the feed: its
+        -- authored hazard class must match the processor's own class, in
+        -- both directions, not merely stay consistent with other
+        -- processors' claims on the same store id.
+        assert(consumable.hazardClass == processor.hazardClass,
+            'microbial processor consumable store ' .. consumable.id
+                .. ' is authored ' .. consumable.hazardClass
+                .. '-class but this is a ' .. processor.hazardClass
+                .. '-class nutrient process: a process may only touch stores of its own hazard class')
         local consumableExisting = microbialStoreClass[consumable.id]
         if consumableExisting == nil then
             microbialStoreClass[consumable.id] = processor.hazardClass
@@ -2608,12 +2617,18 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         local residue = declareMicrobialStore(processor.residueStore, 'residue',
             processor.hazardClass, false)
         -- The replacement biological stock store (#408) is an optional
-        -- consumed input like the consumable: it must exist and stay
+        -- consumed input like the consumable: it must exist, carry the
+        -- processor's own authored hazard class (#592), and stay
         -- hazard-class segregated from the rest of the nutrient chain.
         local stock = nil
         if processor.stockStore ~= nil and processor.stockStore ~= '' then
             stock = by_id[processor.stockStore]
             assert(stock ~= nil, 'microbial processor replacement biological stock store is unknown')
+            assert(stock.hazardClass == processor.hazardClass,
+                'microbial processor replacement biological stock store ' .. stock.id
+                    .. ' is authored ' .. stock.hazardClass
+                    .. '-class but this is a ' .. processor.hazardClass
+                    .. '-class nutrient process: a process may only touch stores of its own hazard class')
             local stockExisting = microbialStoreClass[stock.id]
             if stockExisting == nil then
                 microbialStoreClass[stock.id] = processor.hazardClass

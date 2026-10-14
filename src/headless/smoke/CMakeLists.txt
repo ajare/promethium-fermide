@@ -95,6 +95,11 @@ foreach(check lifecycle batching eventBound persistence stores transfers compoun
         # zero-coefficient regression coverage runs in CI.
         harvest algae nutrientConservation bioContainment bioHazardFiles bioCapacityFiles
         microbialConditionRecovery
+        # #592: the nutrient-recovery contract checks (configure/tick/
+        # snapshot refusals and the file load seam) were reachable through
+        # the binary but never registered here, so their hazard-
+        # segregation regressions ran in no CI pass.
+        nutrientRecovery nutrientRecoveryFiles
         # #421: coupled microbial and carbon-loop operation in one World.
         coupledNominal coupledStress)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
