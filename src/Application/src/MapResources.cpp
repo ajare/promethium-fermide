@@ -48,16 +48,17 @@ void MapResources::load(std::function<void()> postFunction) {
 void MapResources::loadAtlases() {
   if (!mMap || !mManager.isResourceLoaded(mMap))
     throw std::runtime_error("Atlas post work requires a loaded Map");
-  std::array names{mMap->getWorld()->sectorImageSetResourceName(), std::string{"ObjectAtlas"}};
+  std::array names{mMap->getWorld()->sectorImageSetResourceName(), std::string{"ObjectAtlas"},
+      mMap->getWorld()->agentImageSetResourceName()};
   for (std::size_t index = 0; index < names.size(); ++index) {
     if (mAtlases[index]) continue;
     std::shared_ptr<wp::application::resourcesystem::ImageSetResource> atlas;
     try {
       atlas = std::dynamic_pointer_cast<wp::application::resourcesystem::ImageSetResource>(
           mManager.getResource(names[index]));
-    } catch (std::exception const&) { if (index != 0) throw; }
+    } catch (std::exception const&) { if (index == 1) throw; }
     if (!atlas) {
-      if (index == 0) continue; // Explicit invalid artwork is recoverable.
+      if (index != 1) continue; // Explicit invalid artwork is recoverable.
       throw std::runtime_error("Application atlas must be an ImageSet");
     }
     atlas->getImage(); // Validate cleanup's dependency before acquisition.
@@ -69,7 +70,7 @@ void MapResources::loadAtlases() {
       if (!mManager.isResourceLoaded(atlas) || !mManager.isResourceLoaded(atlas->getImage()))
         throw std::runtime_error("Application atlas did not finish loading");
     } catch (std::exception const&) {
-      if (index != 0) throw;
+      if (index == 1) throw;
       mManager.releaseResource(atlas);
       mAtlases[index].reset();
     }

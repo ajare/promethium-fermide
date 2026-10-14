@@ -11,6 +11,12 @@ struct ObjectTileset
 };
 void setObjectTileset(ObjectTileset tileset, ImTextureID texture);
 void clearObjectTileset();
+// Agent artwork is independently selected, even when it shares the image.
+void setAgentTileset(ObjectTileset tileset, ImTextureID texture);
+void clearAgentTileset();
+std::optional<ImVec2> agentSpriteSize(char const* name);
+bool drawAgentSprite(char const* name, WorldDrawList* list, ImVec2 a, ImVec2 b,
+    ImU32 tint = IM_COL32_WHITE);
 bool hasObjectTileset();
 std::optional<ImVec2> objectSpriteSize(char const* name);
 // Destination is the object's physical screen bounds, not its padded storage cell.

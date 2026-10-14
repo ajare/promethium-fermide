@@ -1672,41 +1672,24 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 	transformPosition(pos1);
 
 	auto const colour = agentRenderColour(*agent, gSelectedAgent == agent);
-	ImFont* font = gAgentIconFont ? gAgentIconFont : ImGui::GetFont();
-	float sourceSize = font->FontSize;
-	auto sourceBounds = font->CalcTextSizeA(sourceSize, FLT_MAX, 0.0f, ICON_FA_MALE);
 	float availableWidth = pos1.x - pos0.x;
-	// The authored modifier is visual height, not physical width. Establish the
-	// ordinary icon's fit against its unmodified bounds, then scale that icon
-	// uniformly by Height so a narrow glyph still visibly changes size instead
-	// of remaining pinned to the unchanged width constraint.
-	auto const heightModifier = agent->getEffectiveHeightModifier().value;
-	float standardAvailableHeight = agent->getPhysicalBaseline().standingHeight
-		* CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom;
-	float standardAvailableWidth = agent->getPhysicalBaseline().width * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom;
-	float scale = min(standardAvailableWidth / max(sourceBounds.x, 1.0f),
-		standardAvailableHeight / max(sourceBounds.y, 1.0f)) * heightModifier;
-	float fontSize = sourceSize * scale;
-	auto iconSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, ICON_FA_MALE);
-	// Fit the declared artwork, not the Human fallback glyph. A low wheeled
-	// Agent must retain its own aspect ratio rather than become a tall icon.
-	// Other poses use native dimensions at the same Standing artwork scale.
-	auto const tileSize = objectSpriteSize(agent->getPoseImageTile().c_str());
-	auto const standingTileSize = objectSpriteSize(
+	auto const tileSize = agentSpriteSize(agent->getPoseImageTile().c_str());
+	auto const standingTileSize = agentSpriteSize(
 		agent->getPhysicalBaseline().poses.at(core::Pose::Standing).imageTile.c_str());
 	if (tileSize && standingTileSize)
 	{
-		auto const artworkScale = min(standardAvailableWidth / standingTileSize->x,
-			standardAvailableHeight / standingTileSize->y) * heightModifier;
-		iconSize = {tileSize->x * artworkScale, tileSize->y * artworkScale};
+		float const standardHeight = agent->getPhysicalBaseline().standingHeight
+			* CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom;
+		float const standardWidth = agent->getPhysicalBaseline().width
+			* CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom;
+		auto const scale = min(standardWidth / standingTileSize->x, standardHeight / standingTileSize->y)
+			* agent->getEffectiveHeightModifier().value;
+		ImVec2 size{tileSize->x * scale, tileSize->y * scale};
+		ImVec2 minimum{(pos0.x + pos1.x - size.x) * .5f, pos0.y - size.y};
+		drawAgentSprite(agent->getPoseImageTile().c_str(), drawList, minimum,
+			{minimum.x + size.x, minimum.y + size.y}, colour);
 	}
-	ImVec2 iconPosition{
-		(pos0.x + pos1.x - iconSize.x) * 0.5f,
-		pos0.y - iconSize.y
-	};
-	if (!drawObjectSprite(agent->getPoseImageTile().c_str(), drawList, iconPosition,
-		{iconPosition.x + iconSize.x, iconPosition.y + iconSize.y}, colour))
-		drawList->AddText(font, fontSize, iconPosition, colour, ICON_FA_MALE);
+	else drawList->AddRectFilled({pos0.x, pos1.y}, {pos1.x, pos0.y}, IM_COL32(255, 0, 255, 255));
 
 	auto const planning = agent->getState() == core::Agent::State::RoutePlanning;
 	if (!gUISettings.renderAgentDebug) return;

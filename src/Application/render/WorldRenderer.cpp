@@ -1,5 +1,7 @@
 #include "WorldRenderer.h"
 #include <core/World.h>
+#include <core/Agent.h>
+#include <set>
 #include "WorldRenderSlotAllocator.h"
 #include "SectorTileset.h"
 #include "ObjectTileset.h"
@@ -192,8 +194,20 @@ public:
             }
             if (!mSectorSet)
                 std::cerr << "Sector ImageSet unavailable: " << mSectorName << '\n';
+            mAgentName = mWorld->agentImageSetResourceName();
+            try {
+                auto candidate = mResources.getResource(mAgentName);
+                if (std::dynamic_pointer_cast<resources::ImageSetResource>(candidate)
+                    && mResources.isResourceLoaded(candidate)) {
+                    mResources.acquireResource(candidate);
+                    mAgentSet = candidate;
+                }
+            } catch (std::exception const& error) {
+                std::cerr << "Agent ImageSet unavailable: " << error.what() << '\n';
+            }
+            if (!mAgentSet) std::cerr << "Agent ImageSet unavailable: " << mAgentName << '\n';
             mObjectSet = mResources.acquireResource("ObjectAtlas");
-            for (auto const& set : {mSectorSet, mObjectSet}) {
+            for (auto const& set : {mSectorSet, mObjectSet, mAgentSet}) {
                 if (!set) continue;
                 if (!std::dynamic_pointer_cast<resources::ImageSetResource>(set))
                     throw std::runtime_error("Application atlas must be an ImageSet");
@@ -230,9 +244,40 @@ public:
             }
             installAtlasDefinitions();
         }
+        if (mAgentName != mWorld->agentImageSetResourceName()) {
+            mAgentName = mWorld->agentImageSetResourceName();
+            for (auto& slot : mSlots) remove(slot);
+            mSlots.clear(); mSlotAllocator = {};
+            if (mAgentSet) mResources.releaseResource(mAgentSet);
+            mAgentSet.reset();
+            resources::ResourcePtr candidate;
+            try {
+                candidate = mResources.getResource(mAgentName);
+                if (!std::dynamic_pointer_cast<resources::ImageSetResource>(candidate))
+                    throw std::runtime_error("Selected Agent resource is not an ImageSet");
+                mResources.acquireResource(candidate);
+                mResources.createResource(candidate);
+                mResources.loadResource(candidate);
+                mAgentSet = candidate;
+            } catch (std::exception const& error) {
+                if (candidate && std::dynamic_pointer_cast<resources::ImageSetResource>(candidate))
+                    mResources.releaseResource(candidate);
+                std::cerr << "Agent ImageSet unavailable: " << error.what() << '\n';
+            }
+            installAtlasDefinitions();
+        }
         auto const width = mRenderSystem->getWindowWidth();
         auto const height = mRenderSystem->getWindowHeight();
         if (!width || !height) return;
+        if (mAgentSet) for (auto const& snapshot : mWorld->getSimulationSnapshotView().agents) {
+            auto agent = mWorld->lookupAgent(snapshot.id).entity;
+            if (!agent) continue;
+            for (auto const& tile : {agent->getPoseImageTile(),
+                     agent->getPhysicalBaseline().poses.at(core::Pose::Standing).imageTile})
+                if (!agentSpriteSize(tile.c_str()) && mMissingAgentTiles.insert(mAgentName + "/" + tile).second)
+                    std::cerr << "Agent ImageSet " << mAgentName << " lacks required tile " << tile
+                              << "; rendering physical bounds in magenta\n";
+        }
         auto commands = drawWorld(mWorld, static_cast<float>(width), static_cast<float>(height));
         auto segments = buildSegments(commands);
         prepareSlots(segments, {0, 0});
@@ -267,8 +312,8 @@ private:
     void cleanup() noexcept {
         for (auto& slot : mSlots) remove(slot);
         mSlots.clear();
-        clearSectorTileset(); clearObjectTileset();
-        for (auto& set : {&mObjectSet, &mSectorSet}) {
+        clearSectorTileset(); clearObjectTileset(); clearAgentTileset();
+        for (auto& set : {&mAgentSet, &mObjectSet, &mSectorSet}) {
             if (!*set) continue;
             try {
                 auto atlas = std::dynamic_pointer_cast<resources::ImageSetResource>(*set);
@@ -285,7 +330,8 @@ private:
     mpp::ResourcePtr texture(WorldDrawList::Texture kind) {
         if (kind == WorldDrawList::Texture::None) return {};
         auto set = std::static_pointer_cast<resources::ImageSetResource>(
-            kind == WorldDrawList::Texture::SectorAtlas ? mSectorSet : mObjectSet);
+            kind == WorldDrawList::Texture::SectorAtlas ? mSectorSet
+                : kind == WorldDrawList::Texture::AgentAtlas ? mAgentSet : mObjectSet);
         return set->getImage()->getMppResource();
     }
 		void installAtlasDefinitions()
@@ -325,6 +371,15 @@ private:
 				objectTiles.sprites.emplace(name, ObjectSprite{ region, tintable });
 			}
 			setObjectTileset(std::move(objectTiles));
+            ObjectTileset agentTiles;
+            if (auto agents = std::dynamic_pointer_cast<resources::ImageSetResource>(mAgentSet)) {
+                auto image = std::dynamic_pointer_cast<resources::ImageResource>(agents->getImage());
+                agentTiles.width = image->getWidth(); agentTiles.height = image->getHeight();
+                for (auto const& [name, definition] : agents->getImageDefinitions())
+                    agentTiles.sprites.emplace(name, ObjectSprite{{int(definition.x), int(definition.y),
+                        int(definition.width), int(definition.height)}, true});
+            }
+            setAgentTileset(std::move(agentTiles));
 		}
 		static std::vector<Segment> buildSegments(WorldDrawList const& commandList)
 		{
@@ -389,6 +444,8 @@ private:
 					kind = Kind::SectorTriangles;
 				else if (segment.texture == WorldDrawList::Texture::ObjectAtlas)
 					kind = Kind::ObjectTriangles;
+				else if (segment.texture == WorldDrawList::Texture::AgentAtlas)
+					kind = Kind::AgentTriangles;
 				auto const slotIndex = mSlotAllocator.acquire(kind);
 				mSegmentSlots[index] = slotIndex;
 				if (slotIndex >= mSlots.size()) mSlots.emplace_back();
@@ -477,8 +534,9 @@ private:
     mpp::ResourceManager* mRenderResources;
     mpp::ScenePtr mScene;
     std::shared_ptr<const core::World> mWorld;
-    resources::ResourcePtr mSectorSet, mObjectSet;
-    std::string mSectorName;
+    resources::ResourcePtr mSectorSet, mObjectSet, mAgentSet;
+    std::string mSectorName, mAgentName;
+    std::set<std::string> mMissingAgentTiles;
     WorldRenderSlotAllocator mSlotAllocator;
     std::vector<Slot> mSlots;
     std::vector<std::size_t> mSegmentSlots;

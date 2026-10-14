@@ -2,6 +2,7 @@
 
 #include "AgentTagAssignmentPanel.h"
 #include "Render.h"
+#include "ObjectTileset.h"
 #include "TagsPanel.h"
 #include "UISettings.h"
 
@@ -193,6 +194,14 @@ namespace
 
 	void effectiveInspectionAndRealRenderingUseInheritedFallbackAndGold()
 	{
+		struct ArtworkScope {
+			ArtworkScope() {
+				ObjectTileset tiles; tiles.width = 26; tiles.height = 72;
+				tiles.sprites.emplace("human-standing", ObjectSprite{{0, 0, 26, 72}, true});
+				setAgentTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
+			}
+			~ArtworkScope() { clearAgentTileset(); }
+		} artwork;
 		ColourFixture fixture;
 		auto const coloured = fixture.world->lookupAgent(fixture.coloured).entity;
 		auto const fallback = fixture.world->lookupAgent(fixture.fallback).entity;

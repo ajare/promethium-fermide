@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <core/World.h>
 #include <core/Agent.h>
+#include "../../headless/smoke/support/AgentPoseTestAccess.h"
 #include <core/Window.h>
 #include "PlayerTransportSelectorDrawing.h"
 #include <willpower/application/resourcesystem/ResourceManager.h>
@@ -63,6 +64,16 @@ render::ObjectTileset installAtlases(std::filesystem::path const& directory) {
     objects.sprites.emplace(name, render::ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(),
         image["width"].as<int>(), image["height"].as<int>()}, tintable});
   }
+  render::ObjectTileset agents;
+  agents.width = objectsSize.first; agents.height = objectsSize.second;
+  for (auto image : resource("AgentAtlas")["Definitions"]["Definition"]["Images"]["Image"]) {
+    auto name = image["name"].as<std::string>();
+    require(!objects.sprites.contains(name), "Agent tiles must be removed from ObjectAtlas");
+    agents.sprites.emplace(name, render::ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(),
+        image["width"].as<int>(), image["height"].as<int>()}, true});
+  }
+  require(agents.sprites.size() == 8, "AgentAtlas must contain all eight extracted tiles");
+  render::setAgentTileset(std::move(agents));
   render::setSectorTileset(std::move(sectors));
   render::setObjectTileset(objects);
   return objects;
@@ -131,11 +142,11 @@ void checkNoOverlaysAndAgents() {
   auto agent = world->lookupAgent(id).entity;
   require(agent != nullptr, "Agent fixture creation failed");
   auto visible = render::drawWorld(world, 1280, 720);
-  auto const sprites = textured(visible, render::WorldDrawList::Texture::ObjectAtlas);
+  auto const sprites = textured(visible, render::WorldDrawList::Texture::AgentAtlas);
   require(sprites >= 2, "Front-Layer Agent must draw pose artwork without an ImGui font/context");
   world->createAgent("Occluded", back, 0, 1.5f);
   auto occluded = render::drawWorld(world, 1280, 720);
-  require(textured(occluded, render::WorldDrawList::Texture::ObjectAtlas) == sprites,
+  require(textured(occluded, render::WorldDrawList::Texture::AgentAtlas) == sprites,
           "Agent on a Layer without an aperture must remain hidden");
   require(occluded.commands().size() == visible.commands().size(),
           "Back Layer must not contribute a wireframe or debug overlay");
@@ -157,7 +168,7 @@ void checkPlayerCamera() {
     bool found = false;
     for (auto const& command : draws.commands())
       if (auto triangle = std::get_if<render::WorldDrawList::Triangle>(&command);
-          triangle && triangle->texture == render::WorldDrawList::Texture::ObjectAtlas) {
+          triangle && triangle->texture == render::WorldDrawList::Texture::AgentAtlas) {
         found = true;
         for (auto position : triangle->positions) {
           low = std::min(low, position.x); high = std::max(high, position.x);
@@ -175,7 +186,7 @@ void checkPlayerCamera() {
   centred(draws, 320); checkCanvas(draws, 320, 200);
   require(world->getSimulationTick() == tick, "Following must not update simulation");
   world->pauseSimulation(); world->clearAgentBehaviourAssignment(id);
-  require(textured(render::drawWorld(world, 640, 360), render::WorldDrawList::Texture::ObjectAtlas) == 0,
+  require(textured(render::drawWorld(world, 640, 360), render::WorldDrawList::Texture::AgentAtlas) == 0,
           "No Player must restore Layer-0 camera rather than reveal a back-Layer Agent");
 }
 
@@ -339,6 +350,42 @@ void checkSectorTileScaling() {
   render::clearSectorTileset();
 }
 
+void checkAgentArtworkFallback() {
+  auto near = [](float a, float b) { return std::abs(a - b) < .001f; };
+  auto world = std::make_shared<core::World>("Agent artwork", 8, 2);
+  world->addRoom("Room", 0, 0, 0, 8, 2); world->finishBuild(); world->pauseSimulation();
+  auto id = world->createAgent("Actor", 0, 0, 3.5f);
+  auto* agent = world->lookupAgent(id).entity;
+  core::AgentPoseTestAccess::set(*agent, core::Pose::Sitting);
+  auto const physical = agent->getBounds().getSize();
+  for (int present = 0; present < 4; ++present) {
+    render::ObjectTileset tiles; tiles.width = 128; tiles.height = 128;
+    if (present & 1) tiles.sprites.emplace("human-standing", render::ObjectSprite{{0, 0, 26, 72}, true});
+    if (present & 2) tiles.sprites.emplace("human-sitting", render::ObjectSprite{{32, 0, 26, 43}, true});
+    render::setAgentTileset(std::move(tiles));
+    auto list = render::drawWorld(world, 1024, 720);
+    unsigned missing = 0;
+    float left = 1e6f, right = -1e6f, top = 1e6f, bottom = -1e6f;
+    for (auto const& command : list.commands())
+      if (auto triangle = std::get_if<render::WorldDrawList::Triangle>(&command);
+          triangle && triangle->texture == render::WorldDrawList::Texture::None
+          && triangle->colour == render::packColour(255, 0, 255, 255)) {
+        ++missing;
+        for (auto p : triangle->positions) {
+          left = std::min(left, p.x); right = std::max(right, p.x);
+          top = std::min(top, p.y); bottom = std::max(bottom, p.y);
+        }
+      }
+    if (present == 3) require(missing == 0 && textured(list, render::WorldDrawList::Texture::AgentAtlas) == 4,
+        "Complete Agent artwork must use its independent texture channel");
+    else require(missing == 4 && near(right - left, agent->getWidth() * 64.f)
+        && near(bottom - top, agent->getHeight() * 160.f),
+        "Absent Agent atlas, pose or Standing tile must draw magenta physical bounds");
+    auto const after = agent->getBounds().getSize();
+    require(near(after.x, physical.x) && near(after.y, physical.y), "Agent artwork changed simulation geometry");
+  }
+}
+
 int main(int argc, char** argv) {
   try {
     require(argc == 2, "Expected the repository resource directory");
@@ -354,11 +401,12 @@ int main(int argc, char** argv) {
     checkStairwellDoorwayOutlines();
     checkFurniture(directory, atlas);
     checkNestedApertures();
+    checkAgentArtworkFallback();
     require(render::drawWorld(nullptr, 1280, 720).commands().empty(), "Null World must draw nothing");
     auto empty = std::make_shared<core::World>("Empty", 4, 2);
     require(render::drawWorld(empty, 1280, 720).commands().empty(), "Empty World must draw nothing");
     require(render::drawWorld(empty, 0, 0).commands().empty(), "Minimized window must draw nothing");
-    render::clearObjectTileset(); render::clearSectorTileset();
+    render::clearObjectTileset(); render::clearSectorTileset(); render::clearAgentTileset();
     return 0;
   } catch (std::exception const& error) {
     std::cerr << error.what() << '\n';

@@ -24,6 +24,7 @@
 #include "core/Staircase.h"
 #include "core/StaircaseTransit.h"
 #include "core/YamlSerializer.h"
+#include <yaml-cpp/yaml.h>
 
 #include "WorldChecks.h"
 
@@ -36,6 +37,8 @@ namespace persistence
 		core::World original("Serializable world", 8, 3);
 		require(original.sectorImageSetResourceName() == "SectorAtlas", "New World artwork must default to SectorAtlas");
 		original.setSectorImageSetResourceName("StationAtlas");
+		require(original.agentImageSetResourceName() == "AgentAtlas", "New Worlds must default to AgentAtlas");
+		original.setAgentImageSetResourceName("CustomAgents");
 		require(original.isModified(), "Selecting sector artwork must modify the World");
 		auto const fore = original.addRoom("Fore room", 0, 0, 0, 7, 2);
 		original.addRoom("Back room", 1, 0, 0, 7, 2);
@@ -67,7 +70,7 @@ namespace persistence
 		original.serialize(*writer, workData);
 		writer->serialize();
 		auto const yaml = writer->getSerializedString();
-		require(yaml.find("version: 66") != std::string::npos
+		require(yaml.find("version: 67") != std::string::npos
 			&& yaml.find("layers: 2") != std::string::npos
 			&& yaml.find("layerNames:") != std::string::npos
 			&& yaml.find("- Layer 0") != std::string::npos
@@ -92,6 +95,18 @@ namespace persistence
 		reader->deserialize();
 		require(loaded.deserialize(*reader, workData), "World deserialization failed");
 		require(loaded.sectorImageSetResourceName() == "StationAtlas", "Sector ImageSet did not round-trip");
+		require(loaded.agentImageSetResourceName() == "CustomAgents", "Agent ImageSet did not round-trip");
+		for (bool missing : {false, true}) {
+			auto document = YAML::Load(yaml);
+			if (missing) document.remove("agentImageSet");
+			else document["agentImageSet"] = "UnavailableAgents";
+			auto artworkReader = core::YamlSerializer::fromString(YAML::Dump(document));
+			artworkReader->deserialize();
+			core::World artworkLoaded("Agent artwork", 2, 2);
+			require(artworkLoaded.deserialize(*artworkReader, workData), "Agent artwork document failed to load");
+			require(artworkLoaded.agentImageSetResourceName() == (missing ? "AgentAtlas" : "UnavailableAgents"),
+				"Absent Agent artwork did not default or invalid name was lost");
+		}
 		for (bool missing : {false, true})
 		{
 			auto artworkYaml = yaml;
@@ -174,7 +189,7 @@ namespace persistence
 				legacyYaml.replace(at, from.size(), to);
 			}
 		};
-		replaceAll("version: 66", "version: 14");
+		replaceAll("version: 67", "version: 14");
 		if (auto field = legacyYaml.find("destinationMarker:"); field != std::string::npos)
 		{
 			auto begin = legacyYaml.rfind('\n', field) + 1;

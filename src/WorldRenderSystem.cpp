@@ -245,6 +245,7 @@ namespace
 
 			mSectorSet = requireImageSet("SectorAtlas");
 			mObjectSet = requireImageSet("ObjectAtlas");
+			mAgentSet = requireImageSet("AgentAtlas");
 			installAtlasDefinitions();
 
 			mAgentTypes = std::make_unique<ApplicationAgentTypes>(*mResources);
@@ -299,9 +300,11 @@ namespace
 			mFontAtlas.reset();
 			if (mSectorSet) mResources->releaseResource(mSectorSet);
 			if (mObjectSet) mResources->releaseResource(mObjectSet);
+			if (mAgentSet) mResources->releaseResource(mAgentSet);
 			mAgentTypes.reset();
 			clearSectorTileset();
 			clearObjectTileset();
+			clearAgentTileset();
 			mResources.reset();
 			if (mRenderSystem) mRenderSystem->destroyCoreResources();
 			mRenderResources.reset();
@@ -416,6 +419,16 @@ namespace
 				objectTiles.sprites.emplace(name, ObjectSprite{ region, tintable });
 			}
 			setObjectTileset(std::move(objectTiles), reinterpret_cast<ImTextureID>(1));
+			ObjectTileset agentTiles;
+			if (auto agents = std::dynamic_pointer_cast<resources::ImageSetResource>(mAgentSet))
+			{
+				auto image = std::dynamic_pointer_cast<resources::ImageResource>(agents->getImage());
+				agentTiles.width = image->getWidth(); agentTiles.height = image->getHeight();
+				for (auto const& [name, definition] : agents->getImageDefinitions())
+					agentTiles.sprites.emplace(name, ObjectSprite{{int(definition.x), int(definition.y),
+						int(definition.width), int(definition.height)}, true});
+			}
+			setAgentTileset(std::move(agentTiles), reinterpret_cast<ImTextureID>(1));
 		}
 
 	public:
@@ -433,6 +446,21 @@ namespace
 			catch (std::exception const& error) { mSectorDiagnostic = error.what(); }
 			installAtlasDefinitions();
 			return mSectorDiagnostic;
+		}
+
+		std::string selectAgentImageSet(std::string const& name)
+		{
+			if (name == mAgentSetName) return mAgentDiagnostic;
+			mAgentSetName = name;
+			for (auto& slot : mSlots) remove(slot);
+			mSlots.clear(); mSlotAllocator = {};
+			mAgentDiagnostic.clear();
+			if (mAgentSet) mResources->releaseResource(mAgentSet);
+			mAgentSet.reset();
+			try { mAgentSet = requireImageSet(name); }
+			catch (std::exception const& error) { mAgentDiagnostic = error.what(); }
+			installAtlasDefinitions();
+			return mAgentDiagnostic;
 		}
 
 		std::vector<std::string> resourceNames(std::string const& type)
@@ -477,7 +505,8 @@ namespace
 				return std::static_pointer_cast<mpp::RenderTexture>(mFontAtlas);
 			}
 			auto set = std::dynamic_pointer_cast<resources::ImageSetResource>(
-				textureKind == WorldDrawList::Texture::SectorAtlas ? mSectorSet : mObjectSet);
+				textureKind == WorldDrawList::Texture::SectorAtlas ? mSectorSet
+					: textureKind == WorldDrawList::Texture::AgentAtlas ? mAgentSet : mObjectSet);
 			return set->getImage()->getMppResource();
 		}
 
@@ -561,6 +590,8 @@ namespace
 					kind = Kind::SectorTriangles;
 				else if (segment.texture == WorldDrawList::Texture::ObjectAtlas)
 					kind = Kind::ObjectTriangles;
+				else if (segment.texture == WorldDrawList::Texture::AgentAtlas)
+					kind = Kind::AgentTriangles;
 				else if (segment.texture == WorldDrawList::Texture::FontAtlas)
 					kind = Kind::FontTriangles;
 				auto const slotIndex = mSlotAllocator.acquire(kind);
@@ -669,6 +700,9 @@ namespace
 		resources::ResourcePtr mSectorSet;
 		std::string mSectorSetName{"SectorAtlas"};
 		std::string mSectorDiagnostic;
+		resources::ResourcePtr mAgentSet;
+		std::string mAgentSetName{"AgentAtlas"};
+		std::string mAgentDiagnostic;
 		resources::ResourcePtr mObjectSet;
 		// Every valid, loaded Agent type Resource, keyed by Resource name. The
 		// bundled Human and all manifest-registered types are loaded at startup
@@ -722,6 +756,12 @@ std::string selectWorldSectorImageSet(std::string const& name)
 {
 	if (!gSystem) return {};
 	return gSystem->selectSectorImageSet(name);
+}
+
+std::string selectWorldAgentImageSet(std::string const& name)
+{
+	if (!gSystem) return {};
+	return gSystem->selectAgentImageSet(name);
 }
 
 std::vector<std::string> applicationResourceNames(std::string const& type)

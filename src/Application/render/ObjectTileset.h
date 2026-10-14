@@ -11,6 +11,11 @@ struct ObjectTileset
 };
 PF_APPLICATION_API void setObjectTileset(ObjectTileset tileset);
 PF_APPLICATION_API void clearObjectTileset();
+PF_APPLICATION_API void setAgentTileset(ObjectTileset tileset);
+PF_APPLICATION_API void clearAgentTileset();
+std::optional<Vec2> agentSpriteSize(char const* name);
+bool drawAgentSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b,
+    PackedColourValue tint = White);
 bool hasObjectTileset();
 std::optional<Vec2> objectSpriteSize(char const* name);
 // Destination is the object's physical screen bounds, not its padded storage cell.

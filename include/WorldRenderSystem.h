@@ -28,6 +28,7 @@ std::uint32_t renderWorldCommands(WorldDrawList const& commands,
 // Install the selected sector artwork before recording canvas commands.
 // An invalid resource installs magenta fallback and returns a diagnostic.
 std::string selectWorldSectorImageSet(std::string const& name);
+std::string selectWorldAgentImageSet(std::string const& name);
 
 // Application Resource inventory used by the World panel's catalogue
 // selectors. Returns the declared Resource names of one type, alphabetically.

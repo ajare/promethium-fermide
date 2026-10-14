@@ -7,12 +7,30 @@
 namespace pf::application::render {
 namespace {
 ObjectTileset active;
+ObjectTileset agents;
 }
 void setObjectTileset(ObjectTileset tileset)
 {
     active = std::move(tileset);
 }
 void clearObjectTileset() { active = {}; }
+void setAgentTileset(ObjectTileset tileset) { agents = std::move(tileset); }
+void clearAgentTileset() { agents = {}; }
+std::optional<Vec2> agentSpriteSize(char const* name)
+{
+    auto const found = agents.sprites.find(name);
+    if (agents.width <= 0 || agents.height <= 0 || found == agents.sprites.end()) return std::nullopt;
+    return Vec2{float(found->second.region.width), float(found->second.region.height)};
+}
+bool drawAgentSprite(char const* name, WorldDrawList* list, Vec2 a, Vec2 b, PackedColourValue tint)
+{
+    if (!agentSpriteSize(name)) return false;
+    auto const& r = agents.sprites.at(name).region;
+    Vec2 uv0{(r.x + .5f) / agents.width, (r.y + .5f) / agents.height};
+    Vec2 uv1{(r.x + r.width - .5f) / agents.width, (r.y + r.height - .5f) / agents.height};
+    list->AddImage(WorldDrawList::Texture::AgentAtlas, a, b, uv0, uv1, tint);
+    return true;
+}
 bool hasObjectTileset() { return active.width > 0 && active.height > 0; }
 std::optional<Vec2> objectSpriteSize(char const* name)
 {

@@ -10,7 +10,7 @@
 class WorldRenderSlotAllocator
 {
 public:
-	enum class Kind { SolidTriangles, SectorTriangles, ObjectTriangles, FontTriangles, Lines, Count };
+	enum class Kind { SolidTriangles, SectorTriangles, ObjectTriangles, AgentTriangles, FontTriangles, Lines, Count };
 
 	void beginFrame() { mUsed.fill(0); }
 

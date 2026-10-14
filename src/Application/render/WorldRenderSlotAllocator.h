@@ -12,7 +12,7 @@ namespace pf::application::render {
 class WorldRenderSlotAllocator
 {
 public:
-	enum class Kind { SolidTriangles, SectorTriangles, ObjectTriangles, Lines, Count };
+	enum class Kind { SolidTriangles, SectorTriangles, ObjectTriangles, AgentTriangles, Lines, Count };
 
 	void beginFrame() { mUsed.fill(0); }
 

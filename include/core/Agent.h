@@ -268,7 +268,7 @@ namespace core
 		float stairDescentSpeed;
 		// Only declared poses exist. Standing uses the type's base dimensions;
 		// other poses carry validated dimension ratios. Every pose declares
-		// an ObjectAtlas image tile, frozen with the rest of the definition.
+		// an Agent ImageSet tile name, frozen with the rest of the definition.
 		std::map<Pose, AgentPoseDefinition> poses;
 		std::vector<AutomaticPoseChoice> roomMovement;
 		std::vector<AutomaticPoseChoice> doorCrossing;

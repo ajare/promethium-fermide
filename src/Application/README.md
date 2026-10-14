@@ -34,15 +34,18 @@ and diagnostic readouts are omitted. Physical controls and processing effects
 remain part of the World artwork. Play advances the simulation using elapsed
 frame time in seconds; suspended states do not advance it.
 
-The renderer borrows Launcher's MPP services and uses the resource-managed
-the World's `sectorImageSet` (default `SectorAtlas`) and `ObjectAtlas` ImageSets
-from the same `Resources.yaml`. Each sector tile fills 1x1 World units, with
+The renderer borrows Launcher's MPP services and uses the World's resource-managed
+`sectorImageSet` (default `SectorAtlas`), `agentImageSet` (default `AgentAtlas`),
+and fixed `ObjectAtlas` ImageSets from the same `Resources.yaml`.
+`AgentAtlas` shares `ObjectAtlasImage` without changing Agent geometry or pose tile names.
+Missing Agent ImageSets, current-pose tiles or Standing tiles render opaque magenta
+physical-bound rectangles rather than substituting artwork. Each sector tile fills 1x1 World units, with
 partial cells cropped, independent of source pixel dimensions. Missing surface
 tiles or unavailable sector ImageSets render magenta; missing boundary artwork
 uses plain black lines. `StationAtlas` currently defines only `corridor`.
 GPU batches are retained by compatible pipeline and submitted in command order
 with native aperture scissors. Initial atlases are loaded by MapLoad; a live
-sector artwork selection change rebuilds the affected batches and loads the new
+sector or Agent artwork selection change rebuilds the affected batches and loads the new
 ImageSet on the application thread. Play releases its batches and borrowed atlas
 acquisitions before MapUnload releases the guard's atlas acquisitions. Rendering has not been extracted into a module shared with the editor:
 the two implementations are intentionally independent so they can diverge.

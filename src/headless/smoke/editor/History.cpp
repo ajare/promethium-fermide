@@ -38,6 +38,14 @@ namespace
 		require(artworkHistory.redo(captureDocumentSnapshot(world, artworkHistory), restore)
 			&& world->sectorImageSetResourceName() == "StationAtlas" && artworkHistory.isModified(),
 			"Artwork redo must restore the selected ImageSet");
+		auto agentBefore = captureDocumentSnapshot(world, artworkHistory);
+		world->setAgentImageSetResourceName("CustomAgents");
+		commitDocumentEdit(std::move(agentBefore), artworkHistory);
+		require(artworkHistory.undo(captureDocumentSnapshot(world, artworkHistory), restore)
+			&& world->agentImageSetResourceName() == "AgentAtlas"
+			&& world->sectorImageSetResourceName() == "StationAtlas", "Agent artwork undo changed sector artwork");
+		require(artworkHistory.redo(captureDocumentSnapshot(world, artworkHistory), restore)
+			&& world->agentImageSetResourceName() == "CustomAgents", "Agent artwork redo lost the selection");
 		DocumentHistory worldHistory;
 		DocumentHistory registryHistory;
 

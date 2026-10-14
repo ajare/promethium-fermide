@@ -612,6 +612,7 @@ namespace core
 		// The catalogue is an application Resource (ADR 0010) resolved by name.
 		std::string mFurnitureCatalogueResourceName;
 		std::string mSectorImageSetResourceName{"SectorAtlas"};
+		std::string mAgentImageSetResourceName{"AgentAtlas"};
 		std::vector<FurnitureInstance> mFurniture;
 		uint64_t mNextFurnitureId{ 1 };
 		struct MovementGoal
@@ -3202,6 +3203,13 @@ namespace core
 		{
 			if (name == mSectorImageSetResourceName) return;
 			mSectorImageSetResourceName = std::move(name);
+			modify();
+		}
+		std::string const& agentImageSetResourceName() const { return mAgentImageSetResourceName; }
+		void setAgentImageSetResourceName(std::string name)
+		{
+			if (name == mAgentImageSetResourceName) return;
+			mAgentImageSetResourceName = std::move(name);
 			modify();
 		}
 		auto const& furniture() const { return mFurniture; }

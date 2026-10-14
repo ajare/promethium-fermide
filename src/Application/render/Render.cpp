@@ -1160,14 +1160,17 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
     low.x += agent->getPoseRenderXOffset(); high.x += agent->getPoseRenderXOffset();
     low.y += agent->getPoseRenderYOffset(); high.y += agent->getPoseRenderYOffset();
     transformPosition(low); transformPosition(high);
-    auto size = objectSpriteSize(agent->getPoseImageTile().c_str());
-    auto standing = objectSpriteSize(agent->getPhysicalBaseline().poses.at(core::Pose::Standing).imageTile.c_str());
-    if (!size || !standing) throw std::runtime_error("Missing Agent pose artwork");
+    auto size = agentSpriteSize(agent->getPoseImageTile().c_str());
+    auto standing = agentSpriteSize(agent->getPhysicalBaseline().poses.at(core::Pose::Standing).imageTile.c_str());
+    if (!size || !standing) {
+        drawList->AddRectFilled({low.x, high.y}, {high.x, low.y}, packColour(255, 0, 255));
+        return;
+    }
     auto const scale = std::min(agent->getPhysicalBaseline().width * CORE_CELL_WIDTH_PIXELS / standing->x,
         agent->getPhysicalBaseline().standingHeight * CORE_LEVEL_HEIGHT_PIXELS / standing->y)
         * agent->getEffectiveHeightModifier().value * gRenderSettings.worldZoom;
     Vec2 minimum{(low.x + high.x - size->x * scale) * 0.5f, low.y - size->y * scale};
-    drawObjectSprite(agent->getPoseImageTile().c_str(), drawList, minimum,
+    drawAgentSprite(agent->getPoseImageTile().c_str(), drawList, minimum,
         {minimum.x + size->x * scale, minimum.y + size->y * scale}, agentRenderColour(*agent));
 }
 

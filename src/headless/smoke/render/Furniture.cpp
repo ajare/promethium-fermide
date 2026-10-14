@@ -40,7 +40,7 @@ namespace
 			auto name = resource["name"].as<std::string>();
 			if (name == "FurnitureIntegrationDemo") demoDependency = resource["DependentResources"]["DependentResource"]["ref"].as<std::string>() == "FurnitureIntegrationCatalogue";
 			if (name == "FurnitureIntegrationCatalogue") catalogueDependency = resource["DependentResources"]["DependentResource"]["ref"].as<std::string>() == "ObjectAtlas";
-			if (name == "ObjectAtlas")
+			if (name == "ObjectAtlas" || name == "AgentAtlas")
 				for (auto image : resource["Definitions"]["Definition"]["Images"]["Image"])
 					tiles.sprites.emplace(image["name"].as<std::string>(), ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(), image["width"].as<int>(), image["height"].as<int>()}, false});
 		}
@@ -55,6 +55,7 @@ namespace
 					"Required sample artwork must resolve a full World tile");
 			}
 		auto const human = tiles.sprites.at(core::bundledHumanBaseline().poses.at(core::Pose::Standing).imageTile);
+		setAgentTileset(tiles, reinterpret_cast<ImTextureID>(1));
 		setObjectTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
 		RenderWorldScope scope(world);
 		for (auto style : {LayerRenderStyle::Solid, LayerRenderStyle::Aperture, LayerRenderStyle::Wireframe, LayerRenderStyle::Hidden})
@@ -66,7 +67,7 @@ namespace
 			unsigned deskCount = 0, sofaCount = 0, frontCount = 0, backCount = 0;
 			for (size_t i = 0; i < drawing.commands().size(); ++i)
 				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&drawing.commands()[i]);
-					triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
+					triangle && (triangle->texture == WorldDrawList::Texture::ObjectAtlas || triangle->texture == WorldDrawList::Texture::AgentAtlas))
 				{
 					auto uv = triangle->texcoords[0];
 					if (uv.y >= 480.f / 640 && !spriteTriangle(*triangle, human, 320, 640))
@@ -94,7 +95,7 @@ namespace
 				&& backLast < deskFirst && deskLast < frontFirst,
 				"Bundled demo did not render retained Agents behind/in front of the desk");
 		}
-		clearObjectTileset(); ImGui::EndFrame();
+		clearObjectTileset(); clearAgentTileset(); ImGui::EndFrame();
 	}
 
 	void chairCommandsImpl(smoke::Context const&, bool);
@@ -112,11 +113,12 @@ namespace
 		auto manifest = YAML::LoadFile(context.fixture("resources/Resources.yaml").string());
 		ObjectTileset tiles; tiles.width = 320; tiles.height = 480;
 		for (auto resource : manifest["Resources"]["Resource"])
-			if (resource["name"].as<std::string>() == "ObjectAtlas")
+			if (resource["name"].as<std::string>() == "ObjectAtlas" || resource["name"].as<std::string>() == "AgentAtlas")
 				for (auto image : resource["Definitions"]["Definition"]["Images"]["Image"])
 						tiles.sprites.emplace(image["name"].as<std::string>(), ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(), image["width"].as<int>(), image["height"].as<int>()}, false});
 		require(tiles.sprites.contains("chair"), "Required chair Image-set artwork is missing");
 		auto const human = tiles.sprites.at(core::bundledHumanBaseline().poses.at(core::Pose::Standing).imageTile);
+		setAgentTileset(tiles, reinterpret_cast<ImTextureID>(1));
 		setObjectTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
 		auto world = std::make_shared<core::World>("Chair rendering", 8, 2);
 		auto room = world->addRoom("Room", 0, 0, 0, 8, 1);
@@ -133,7 +135,7 @@ namespace
 			unsigned triangles = 0;
 			for (auto const& command : drawing.commands())
 				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-					triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas
+					triangle && (triangle->texture == WorldDrawList::Texture::ObjectAtlas || triangle->texture == WorldDrawList::Texture::AgentAtlas)
 					&& triangle->texcoords[0].x >= 256.0f / 320 && triangle->texcoords[0].y <= 320.0f / 480)
 				{
 					++triangles;
@@ -149,7 +151,7 @@ namespace
 				unsigned markerTriangles = 0;
 				for (size_t i = 0; i < drawing.commands().size(); ++i)
 					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&drawing.commands()[i]);
-						triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
+						triangle && (triangle->texture == WorldDrawList::Texture::ObjectAtlas || triangle->texture == WorldDrawList::Texture::AgentAtlas))
 					{
 						auto u = std::min({triangle->texcoords[0].x, triangle->texcoords[1].x, triangle->texcoords[2].x});
 						auto v = std::min({triangle->texcoords[0].y, triangle->texcoords[1].y, triangle->texcoords[2].y});
@@ -174,7 +176,7 @@ namespace
 			unsigned markerTriangles = 0, chairTriangles = 0;
 			for (auto const& command : drawing.commands())
 				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-					triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
+					triangle && (triangle->texture == WorldDrawList::Texture::ObjectAtlas || triangle->texture == WorldDrawList::Texture::AgentAtlas))
 				{
 					auto u = std::min({triangle->texcoords[0].x, triangle->texcoords[1].x, triangle->texcoords[2].x});
 					auto v = std::min({triangle->texcoords[0].y, triangle->texcoords[1].y, triangle->texcoords[2].y});
@@ -207,7 +209,7 @@ namespace
 			std::map<std::pair<float, float>, unsigned> tilesDrawn;
 			for (auto const& command : drawing.commands())
 				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-					triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas
+					triangle && (triangle->texture == WorldDrawList::Texture::ObjectAtlas || triangle->texture == WorldDrawList::Texture::AgentAtlas)
 					&& triangle->texcoords[0].x >= 256.0f / 320 && triangle->texcoords[0].y <= 320.0f / 480)
 				{
 					require(triangle->clip.minimum.x == clip.minimum.x && triangle->clip.maximum.x == clip.maximum.x
@@ -283,7 +285,7 @@ namespace
 				unsigned deskTriangles = 0, deepTriangles = 0, agentTriangles = 0;
 				for (size_t i = 0; i < drawing.commands().size(); ++i)
 					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&drawing.commands()[i]);
-						triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
+						triangle && (triangle->texture == WorldDrawList::Texture::ObjectAtlas || triangle->texture == WorldDrawList::Texture::AgentAtlas))
 					{
 						if (triangle->texcoords[0].x >= 256.f / 320)
 						{
@@ -331,7 +333,7 @@ namespace
 				size_t deskLast = 0, agentFirst = drawing.commands().size();
 				for (size_t i = 0; i < drawing.commands().size(); ++i)
 					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&drawing.commands()[i]);
-						triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
+						triangle && (triangle->texture == WorldDrawList::Texture::ObjectAtlas || triangle->texture == WorldDrawList::Texture::AgentAtlas))
 					{
 						if (triangle->texcoords[0].x >= 256.f / 320) deskLast = i;
 						else if (spriteTriangle(*triangle, human, 320, 480))
@@ -351,7 +353,7 @@ namespace
 			size_t artworkLast = 0, walkerFirst = edited.commands().size();
 			for (size_t i = 0; i < edited.commands().size(); ++i)
 				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&edited.commands()[i]);
-					triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
+					triangle && (triangle->texture == WorldDrawList::Texture::ObjectAtlas || triangle->texture == WorldDrawList::Texture::AgentAtlas))
 				{
 					if (triangle->texcoords[0].x >= 256.f / 320) artworkLast = i;
 					else if (spriteTriangle(*triangle, human, 320, 480))
@@ -396,7 +398,7 @@ namespace
 				unsigned deskTriangles = 0, chairTriangles = 0, agentTriangles = 0;
 				for (size_t i = 0; i < drawing.commands().size(); ++i)
 					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&drawing.commands()[i]);
-						triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
+						triangle && (triangle->texture == WorldDrawList::Texture::ObjectAtlas || triangle->texture == WorldDrawList::Texture::AgentAtlas))
 					{
 						if (triangle->texcoords[0].x >= 256.f / 320)
 						{
@@ -453,7 +455,7 @@ namespace
 			unsigned triangles = 0;
 			for (auto const& command : drawing.commands())
 				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
-					triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas
+					triangle && (triangle->texture == WorldDrawList::Texture::ObjectAtlas || triangle->texture == WorldDrawList::Texture::AgentAtlas)
 					&& triangle->texcoords[0].x >= 256.f / 320 && triangle->texcoords[0].y <= 320.f / 480)
 				{
 					++triangles;
@@ -462,7 +464,7 @@ namespace
 				}
 			require(triangles == 4, "Lua desk did not render both artwork tiles");
 		}
-		clearObjectTileset(); ImGui::EndFrame();
+		clearObjectTileset(); clearAgentTileset(); ImGui::EndFrame();
 	}
 }
 namespace

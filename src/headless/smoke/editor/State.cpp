@@ -32,6 +32,7 @@ namespace
 		core::setTransactionalWriteFailureAfterBytesForTesting(0);
 		(void)core::consumeLogMessages();
 		clearObjectTileset();
+		clearAgentTileset();
 		clearSectorTileset();
 	}
 }

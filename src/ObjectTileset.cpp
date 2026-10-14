@@ -7,6 +7,8 @@
 namespace {
 ObjectTileset active;
 ImTextureID textureId{};
+ObjectTileset agents;
+ImTextureID agentTextureId{};
 }
 ObjectTileset ObjectTileset::load(std::filesystem::path const& path)
 {
@@ -50,6 +52,27 @@ void setObjectTileset(ObjectTileset tileset, ImTextureID texture)
     active = std::move(tileset); textureId = texture;
 }
 void clearObjectTileset() { textureId = {}; active = {}; }
+void setAgentTileset(ObjectTileset tileset, ImTextureID texture)
+{
+    agents = std::move(tileset); agentTextureId = texture;
+}
+void clearAgentTileset() { agents = {}; agentTextureId = {}; }
+std::optional<ImVec2> agentSpriteSize(char const* name)
+{
+    auto const found = agents.sprites.find(name);
+    if (!agentTextureId || agents.width <= 0 || agents.height <= 0 || found == agents.sprites.end())
+        return std::nullopt;
+    return ImVec2{float(found->second.region.width), float(found->second.region.height)};
+}
+bool drawAgentSprite(char const* name, WorldDrawList* list, ImVec2 a, ImVec2 b, ImU32 tint)
+{
+    if (!agentSpriteSize(name)) return false;
+    auto const& r = agents.sprites.at(name).region;
+    ImVec2 uv0{(r.x + .5f) / agents.width, (r.y + .5f) / agents.height};
+    ImVec2 uv1{(r.x + r.width - .5f) / agents.width, (r.y + r.height - .5f) / agents.height};
+    list->AddImage(WorldDrawList::Texture::AgentAtlas, a, b, uv0, uv1, tint);
+    return true;
+}
 bool hasObjectTileset() { return textureId != ImTextureID{}; }
 std::optional<ImVec2> objectSpriteSize(char const* name)
 {

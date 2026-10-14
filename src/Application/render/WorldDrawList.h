@@ -18,7 +18,8 @@ public:
 	{
 		None,
 		SectorAtlas,
-		ObjectAtlas
+		ObjectAtlas,
+		AgentAtlas
 	};
 
 	struct ClipRectangle
