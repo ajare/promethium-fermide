@@ -280,6 +280,7 @@ set(editor_names
     station/algaeWorkflow
     station/maintenanceWorkflow
     station/coupledLiveViewWorkflow
+    station/trendsWorkflow
 )
 
 if(DEFINED LANE)

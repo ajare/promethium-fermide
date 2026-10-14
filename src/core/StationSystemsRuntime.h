@@ -14,6 +14,7 @@ namespace core
 		bool advance(uint64_t worldTick, float fixedSeconds);
 		StationSystemsSnapshot snapshot() const;
 		std::vector<StationSystemsEvent> const& events() const;
+		std::vector<StationTrendSeries> const& trends() const;
 		std::vector<StationSystemsDiagnostic> const& diagnostics() const;
 	private:
 		struct Impl;

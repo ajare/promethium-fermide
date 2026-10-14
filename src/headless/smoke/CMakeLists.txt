@@ -85,7 +85,7 @@ foreach(check lifecycle batching eventBound persistence stores transfers compoun
         batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
-        deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres crews water containment gas crops failures dispatch protectedServices recovery fileRoundTrip writeFailure legacyFiles structuralReplay
+        deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres crews water containment gas crops failures dispatch protectedServices recovery trends fileRoundTrip writeFailure legacyFiles structuralReplay
         compoundFiles powerFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles outageFiles maintenanceFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles
         # #571: harvest, algae and the nutrient-conservation closure were
         # reachable through the binary but never registered here, so they
@@ -663,6 +663,8 @@ set_tests_properties(station-editor-maintenance PROPERTIES LABELS "smoke;functio
 # the separate Station Systems window.
 add_test(NAME station-editor-coupled-live-view COMMAND pf-smoke-editor --check station/coupledLiveViewWorkflow)
 set_tests_properties(station-editor-coupled-live-view PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+add_test(NAME station-editor-trends COMMAND pf-smoke-editor --check station/trendsWorkflow)
+set_tests_properties(station-editor-trends PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 
 pf_add_smoke_contract(NAME smoke-editor-contract COMMAND ${CMAKE_COMMAND}
     "-DEDITOR=$<TARGET_FILE:pf-smoke-editor>"

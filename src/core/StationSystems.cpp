@@ -16,17 +16,82 @@ namespace core
 		StationSystemsSourceLoader sourceLoader;
 		constexpr size_t EventLimit = 256;
 		constexpr size_t DiagnosticByteLimit = 2048;
+		// #418: the per-series sample budget for bounded trends. Storage
+		// never exceeds this many samples per series no matter how long or
+		// how fast the World runs; overflow coarsens the history instead
+		// of growing it.
+		constexpr size_t TrendSampleLimit = 256;
 		// Every public event producer appends through this one bounded
 		// helper (#551): the history never retains more than the newest
 		// EventLimit entries, evicting oldest-first, so a tick that
 		// announces several transitions at once cannot push the history
 		// past the bound, and later appends keep evicting no matter how
 		// the vector grew. Declaration order within a tick is preserved.
+		// The category (#418) names the subsystem family on the stable
+		// presentation contract so incidents render without message parsing.
 		void appendBoundedEvent(std::vector<StationSystemsEvent>& events,
-			uint64_t tick, std::string message)
+			uint64_t tick, std::string category, std::string message)
 		{
 			while (events.size() >= EventLimit) events.erase(events.begin());
-			events.push_back({tick, std::move(message)});
+			events.push_back({tick, std::move(message), std::move(category)});
+		}
+		// #418: one bounded trend append. The series never retains more
+		// than TrendSampleLimit samples: on overflow every adjacent pair
+		// is merged into one averaged sample, halving the count and
+		// doubling the effective simulation-time stride, so a long run
+		// under accelerated World time coarsens its history instead of
+		// growing it. Samples older than the authored retention are then
+		// dropped outright, so the retained window never exceeds the
+		// authored seconds either. Both operations mark the series
+		// truncated: the presentation shows the gap rather than imply
+		// complete history. Deterministic and read-only with respect to
+		// the simulated state - trends never feed back into the ledger.
+		void appendTrendSample(std::vector<StationTrendSeries>& series,
+			std::string const& subsystem, std::string const& id,
+			std::string const& unit, double baseIntervalSeconds,
+			double retentionSeconds,
+			uint64_t tick, double elapsedSeconds, double requested, double actual)
+		{
+			auto found = std::ranges::find(series, std::make_pair(subsystem, id),
+				[](StationTrendSeries const& entry)
+				{ return std::make_pair(entry.subsystem, entry.id); });
+			if (found == series.end())
+			{
+				StationTrendSeries fresh;
+				fresh.subsystem = subsystem;
+				fresh.id = id;
+				fresh.unit = unit;
+				fresh.sampleIntervalSeconds = baseIntervalSeconds;
+				series.push_back(std::move(fresh));
+				found = prev(series.end());
+			}
+			auto& target = *found;
+			if (target.samples.size() >= TrendSampleLimit)
+			{
+				std::vector<StationTrendSample> merged;
+				merged.reserve(TrendSampleLimit / 2 + 1);
+				size_t index = 0;
+				for (; index + 1 < target.samples.size(); index += 2)
+				{
+					auto const& first = target.samples[index];
+					auto const& second = target.samples[index + 1];
+					merged.push_back({second.worldTick, second.elapsedSeconds,
+						(first.requested + second.requested) / 2.0,
+						(first.actual + second.actual) / 2.0});
+				}
+				if (index < target.samples.size()) merged.push_back(target.samples[index]);
+				target.samples = std::move(merged);
+				++target.downsampleLevel;
+				target.sampleIntervalSeconds *= 2.0;
+				target.truncated = true;
+			}
+			target.samples.push_back({tick, elapsedSeconds, requested, actual});
+			while (target.samples.size() > 1
+				&& elapsedSeconds - target.samples.front().elapsedSeconds > retentionSeconds)
+			{
+				target.samples.erase(target.samples.begin());
+				target.truncated = true;
+			}
 		}
 		// Borrow the Lua error only long enough to copy a bounded string. Never
 		// coerce arbitrary error objects outside a protected allocation boundary.
@@ -1353,6 +1418,9 @@ namespace core
 		if (!std::isfinite(settings.observationIntervalSeconds)
 			|| settings.observationIntervalSeconds < 0.1f || settings.observationIntervalSeconds > 60.0f)
 			return refuse("Station observation interval must be finite, from 0.1 to 60 seconds");
+		if (!std::isfinite(settings.trendRetentionSeconds)
+			|| settings.trendRetentionSeconds < 1.0f || settings.trendRetentionSeconds > 86400.0f)
+			return refuse("Station trend retention must be finite, from 1 to 86400 seconds");
 		if (settings.stores.size() > MaxStationResourceStores)
 			return refuse("Station resource stores are limited to "
 				+ std::to_string(MaxStationResourceStores) + " entries");
@@ -4969,6 +5037,27 @@ namespace core
 		StationSystemsSnapshot snapshot;
 		std::vector<StationSystemsEvent> events;
 		std::vector<StationSystemsDiagnostic> diagnostics;
+		// #418: the bounded trend series. Sampled only at the existing
+		// observation cadence from the committed snapshot, so no per-tick
+		// history accrues and accelerated World time coarsens the series
+		// (pairwise merge) rather than growing it; the authored retention
+		// caps the retained simulation-time window. Pure observability:
+		// nothing here feeds back into the ledger or the sandbox.
+		std::vector<StationTrendSeries> trendSeries;
+		void recordTrends(uint64_t tick, StationSystemsSnapshot const& snap)
+		{
+			auto const elapsed = static_cast<double>(tick) * World::getFixedTimestep();
+			auto const base = static_cast<double>(settings.observationIntervalSeconds);
+			auto const retention = static_cast<double>(settings.trendRetentionSeconds);
+			appendTrendSample(trendSeries, "power", "", "kW", base, retention,
+				tick, elapsed, snap.power.totalRequestedKW, snap.power.totalSuppliedKW);
+			for (auto const& load : snap.power.loads)
+				appendTrendSample(trendSeries, "equipment-load", load.id, "kW", base, retention,
+					tick, elapsed, load.requestedKW, load.suppliedKW);
+			for (auto const& transfer : snap.transfers)
+				appendTrendSample(trendSeries, "transfer", transfer.id, transfer.unit, base, retention,
+					tick, elapsed, transfer.lastRequested, transfer.lastCompleted);
+		}
 
 		// Run the ledger for one tick and roll it back whole unless every
 		// audit passed (#555). The ledger mutates the live transfer,
@@ -5590,7 +5679,7 @@ namespace core
 					return a.isRestore && !b.isRestore;
 				});
 			for (auto const& event : dueOutages)
-				appendBoundedEvent(events, tick, event.message);
+				appendBoundedEvent(events, tick, "outage", event.message);
 			// Apply the reduction to each active outage's target, deepest
 			// window wins so the result never depends on the declaration
 			// order of coincident outages.
@@ -5667,7 +5756,7 @@ namespace core
 					job.phase = StationMaintenancePhase::Blocked;
 					job.progressSeconds = 0.0;
 					job.blockReason = "interrupted: " + reason;
-					appendBoundedEvent(events, tick,
+					appendBoundedEvent(events, tick, "maintenance",
 						"Maintenance '" + job.authored.id + "' on " + job.installationKind
 						+ " '" + job.authored.installationId + "' interrupted at "
 						+ std::to_string(elapsed) + " s: " + reason
@@ -5779,7 +5868,7 @@ namespace core
 					++job.occurrencesCompleted;
 					job.lastCompleteSeconds = elapsed;
 					job.blockReason.clear();
-					appendBoundedEvent(events, tick,
+					appendBoundedEvent(events, tick, "maintenance",
 						"Maintenance '" + job.authored.id + "' on " + job.installationKind
 						+ " '" + job.authored.installationId + "' completed at "
 						+ std::to_string(elapsed)
@@ -5796,7 +5885,7 @@ namespace core
 						&& occurrenceTime(job, job.occurrence) + StationScheduleTolerance < elapsed)
 					{
 						++job.occurrencesMissed;
-						appendBoundedEvent(events, tick,
+						appendBoundedEvent(events, tick, "maintenance",
 							"Maintenance '" + job.authored.id + "' on " + job.installationKind
 							+ " '" + job.authored.installationId + "' missed the window at "
 							+ std::to_string(occurrenceTime(job, job.occurrence))
@@ -5841,7 +5930,7 @@ namespace core
 							+ job.authored.durationSeconds)
 						{
 							++job.occurrencesMissed;
-							appendBoundedEvent(events, tick,
+							appendBoundedEvent(events, tick, "maintenance",
 								"Maintenance '" + job.authored.id + "' on "
 								+ job.installationKind + " '" + job.authored.installationId
 								+ "' missed its window at " + std::to_string(elapsed)
@@ -5894,7 +5983,7 @@ namespace core
 					if (!blockReason.empty())
 					{
 						if (job.phase != StationMaintenancePhase::Blocked)
-							appendBoundedEvent(events, tick,
+							appendBoundedEvent(events, tick, "maintenance",
 								"Maintenance '" + job.authored.id + "' on " + job.installationKind
 								+ " '" + job.authored.installationId + "' blocked at "
 								+ std::to_string(elapsed) + " s: " + blockReason);
@@ -5918,7 +6007,7 @@ namespace core
 					job.blockReason.clear();
 					++job.occurrencesStarted;
 					job.lastStartSeconds = elapsed;
-					appendBoundedEvent(events, tick,
+					appendBoundedEvent(events, tick, "maintenance",
 						"Maintenance '" + job.authored.id + "' on " + job.installationKind
 						+ " '" + job.authored.installationId + "' started at "
 						+ std::to_string(elapsed)
@@ -12708,14 +12797,14 @@ namespace core
 				if (transfer.status == previousStatus[index]) continue;
 				if (transfer.status == StationTransferStatus::Full)
 				{
-					appendBoundedEvent(events, tick, "Transfer '" + transfer.authored.id + "' supplying fully");
+					appendBoundedEvent(events, tick, "transfer", "Transfer '" + transfer.authored.id + "' supplying fully");
 					continue;
 				}
 				auto const& reason = stallReason[index];
 				auto const message = transfer.status == StationTransferStatus::Rejected
 					? std::string("Transfer '") + transfer.authored.id + "' rejected: " + reason
 					: std::string("Transfer '") + transfer.authored.id + "' partial: " + reason;
-				appendBoundedEvent(events, tick, message);
+				appendBoundedEvent(events, tick, "transfer", message);
 			}
 			for (auto const index : conversionOrder)
 			{
@@ -12723,14 +12812,14 @@ namespace core
 				if (conversion.status == previousConversionStatus[index]) continue;
 				if (conversion.status == StationTransferStatus::Full)
 				{
-					appendBoundedEvent(events, tick, "Conversion '" + conversion.authored.id
+					appendBoundedEvent(events, tick, "conversion", "Conversion '" + conversion.authored.id
 						+ "' running at full throughput");
 					continue;
 				}
 				auto const message = conversion.status == StationTransferStatus::Rejected
 					? std::string("Conversion '") + conversion.authored.id + "' rejected: " + conversion.stallReason
 					: std::string("Conversion '") + conversion.authored.id + "' partial: " + conversion.stallReason;
-				appendBoundedEvent(events, tick, message);
+				appendBoundedEvent(events, tick, "conversion", message);
 			}
 			// Solar and external load transitions are announced so the event
 			// log records eclipse changes, curtailment and unmet critical
@@ -12741,20 +12830,20 @@ namespace core
 				if (load.status != previousLoadStatus[index])
 				{
 					if (load.status == StationTransferStatus::Full)
-						appendBoundedEvent(events, tick, "Load '" + load.authored.id + "' supplying fully");
+						appendBoundedEvent(events, tick, "load", "Load '" + load.authored.id + "' supplying fully");
 					else if (load.status == StationTransferStatus::Rejected)
-						appendBoundedEvent(events, tick, "Load '" + load.authored.id + "' rejected: "
+						appendBoundedEvent(events, tick, "load", "Load '" + load.authored.id + "' rejected: "
 							+ (!load.lastAdmitted ? load.lastBlockReason
 								: (load.lastShortfallReason.empty()
 									? std::string("electrical supply is unavailable")
 									: load.lastShortfallReason)));
 					else
-						appendBoundedEvent(events, tick, "Load '" + load.authored.id + "' curtailed: supplied "
+						appendBoundedEvent(events, tick, "load", "Load '" + load.authored.id + "' curtailed: supplied "
 							+ std::to_string(load.lastSuppliedKW) + " of "
 							+ std::to_string(load.lastRequestedKW) + " kW");
 				}
 				if (load.lastCriticalUnmet != previousCriticalUnmet[index])
-					appendBoundedEvent(events, tick, load.lastCriticalUnmet
+					appendBoundedEvent(events, tick, "load", load.lastCriticalUnmet
 						? "Load '" + load.authored.id + "' critical floor unmet: short "
 							+ std::to_string(load.lastUnmetCriticalKW) + " kW"
 						: std::string("Load '") + load.authored.id + "' critical floor restored");
@@ -12763,7 +12852,7 @@ namespace core
 			{
 				auto const& array = solarArrays[index];
 				if (array.lastEclipse == previousEclipse[index] || array.lastDisabled) continue;
-				appendBoundedEvent(events, tick, array.lastEclipse
+				appendBoundedEvent(events, tick, "solar", array.lastEclipse
 					? "Solar array '" + array.authored.id + "' entered eclipse"
 					: "Solar array '" + array.authored.id + "' returned to sunlight");
 			}
@@ -12777,25 +12866,25 @@ namespace core
 				if (battery.status != previousBatteryStatus[index])
 				{
 					if (battery.status == StationTransferStatus::Full)
-						appendBoundedEvent(events, tick, "Battery '" + battery.authored.id
+						appendBoundedEvent(events, tick, "battery", "Battery '" + battery.authored.id
 							+ "' discharging to cover the deficit");
 					else if (battery.status == StationTransferStatus::Partial)
-						appendBoundedEvent(events, tick, "Battery '" + battery.authored.id
+						appendBoundedEvent(events, tick, "battery", "Battery '" + battery.authored.id
 							+ "' discharge limited: supplied " + std::to_string(battery.lastDischargeKW)
 							+ " of " + std::to_string(battery.lastDischargeRequestedKW) + " kW");
 					else if (battery.status == StationTransferStatus::Rejected)
-						appendBoundedEvent(events, tick, "Battery '" + battery.authored.id
+						appendBoundedEvent(events, tick, "battery", "Battery '" + battery.authored.id
 							+ "' cannot discharge: " + (battery.lastAtReserve
 								? std::string("usable energy is at the reserve floor")
 								: std::string("no discharge power capability is available")));
 				}
 				if (battery.lastAtReserve != previousBatteryReserve[index])
-					appendBoundedEvent(events, tick, battery.lastAtReserve
+					appendBoundedEvent(events, tick, "battery", battery.lastAtReserve
 						? "Battery '" + battery.authored.id
 							+ "' exhausted: usable energy depleted to the reserve floor"
 						: "Battery '" + battery.authored.id + "' recovered above the reserve floor");
 				if (battery.lastSaturated != previousBatterySaturated[index])
-					appendBoundedEvent(events, tick, battery.lastSaturated
+					appendBoundedEvent(events, tick, "battery", battery.lastSaturated
 						? "Battery '" + battery.authored.id
 							+ "' fully charged: stored energy reached nameplate capacity"
 						: "Battery '" + battery.authored.id + "' left full charge");
@@ -12813,7 +12902,7 @@ namespace core
 					auto const& generator = generators[index];
 					auto const online = generator.dispatchCommandKW > 0.0;
 					if (online == previousGeneratorDispatchOnline[index]) continue;
-					appendBoundedEvent(events, tick, online
+					appendBoundedEvent(events, tick, "dispatch", online
 						? "Dispatch brought generator '" + generator.authored.id + "' online at "
 							+ std::to_string(generator.dispatchCommandKW)
 							+ " kW against a net load of " + std::to_string(lastDispatchTargetKW) + " kW"
@@ -12825,7 +12914,7 @@ namespace core
 					auto const& cell = fuelCells[index];
 					auto const online = cell.dispatchCommandKW > 0.0;
 					if (online == previousFuelCellDispatchOnline[index]) continue;
-					appendBoundedEvent(events, tick, online
+					appendBoundedEvent(events, tick, "dispatch", online
 						? "Dispatch engaged fuel-cell backup '" + cell.authored.id + "' at "
 							+ std::to_string(cell.dispatchCommandKW)
 							+ " kW: the fuelled fleet cannot cover the net load alone"
@@ -12835,17 +12924,17 @@ namespace core
 				auto const shortfallNow = lastDispatchShortfallKW > 1e-12;
 				auto const shortfallBefore = previousDispatchShortfall > 1e-12;
 				if (shortfallNow != shortfallBefore)
-					appendBoundedEvent(events, tick, shortfallNow
+					appendBoundedEvent(events, tick, "dispatch", shortfallNow
 						? "Dispatch shortfall: " + std::to_string(lastDispatchShortfallKW)
 							+ " kW of station demand cannot be met by any available dispatchable source"
 							+ " (fuel, cooling or capacity limits)"
 						: std::string("Dispatch shortfall cleared: dispatchable sources cover the net load"));
 				if (lastBackupEngaged != previousBackupEngaged)
-					appendBoundedEvent(events, tick, lastBackupEngaged
+					appendBoundedEvent(events, tick, "dispatch", lastBackupEngaged
 						? "Backup generation engaged: a fuel-cell backup stands under dispatch command"
 						: std::string("Backup generation stood down: no fuel-cell backup is under dispatch command"));
 				if (lastReserveExhausted != previousReserveExhausted)
-					appendBoundedEvent(events, tick, lastReserveExhausted
+					appendBoundedEvent(events, tick, "dispatch", lastReserveExhausted
 						? "Electrical reserve exhausted: a battery bank sits at its protected reserve floor"
 						: std::string("Electrical reserve recovered: every battery bank is above its reserve floor"));
 			}
@@ -12865,7 +12954,7 @@ namespace core
 					auto const wasUnmet = previous != lastProtectedServiceUnmet.end()
 						&& previous->second;
 					if (unmet == wasUnmet) continue;
-					appendBoundedEvent(events, tick, unmet
+					appendBoundedEvent(events, tick, "dispatch", unmet
 						? "Protected " + service.kind + " '" + service.id + "' unmet: "
 							+ std::to_string(service.unmetKW)
 							+ " kW of a protected " + std::to_string(service.requestedKW)
@@ -12882,14 +12971,14 @@ namespace core
 			{
 				auto const& reservoir = reservoirs[index];
 				if (reservoir.lastAboveLimit != previousAboveLimit[index])
-					appendBoundedEvent(events, tick, reservoir.lastAboveLimit
+					appendBoundedEvent(events, tick, "thermal", reservoir.lastAboveLimit
 						? "Thermal reservoir '" + reservoir.authored.id
 							+ "' above its declared maximum: " + std::to_string(reservoir.temperatureC)
 							+ " > " + std::to_string(reservoir.authored.maxTemperatureC) + " C"
 						: std::string("Thermal reservoir '") + reservoir.authored.id
 							+ "' back within its maximum limit");
 				if (reservoir.lastBelowLimit != previousBelowLimit[index])
-					appendBoundedEvent(events, tick, reservoir.lastBelowLimit
+					appendBoundedEvent(events, tick, "thermal", reservoir.lastBelowLimit
 						? "Thermal reservoir '" + reservoir.authored.id
 							+ "' below its declared minimum: " + std::to_string(reservoir.temperatureC)
 							+ " < " + std::to_string(reservoir.authored.minTemperatureC) + " C"
@@ -12907,21 +12996,21 @@ namespace core
 				if (loop.status != previousLoopStatus[index])
 				{
 					if (loop.status == StationTransferStatus::Rejected)
-						appendBoundedEvent(events, tick, "Coolant loop '" + loop.authored.id
+						appendBoundedEvent(events, tick, "coolant", "Coolant loop '" + loop.authored.id
 							+ "' service refused: no electrical supply is available for its pump or heater");
 					else if (loop.status == StationTransferStatus::Full
 						&& previousLoopStatus[index] == StationTransferStatus::Rejected)
-						appendBoundedEvent(events, tick, "Coolant loop '" + loop.authored.id
+						appendBoundedEvent(events, tick, "coolant", "Coolant loop '" + loop.authored.id
 							+ "' service restored: pump and freeze heater fully supplied");
 				}
 				if (loop.lastCirculating != previousCirculating[index])
-					appendBoundedEvent(events, tick, loop.lastCirculating
+					appendBoundedEvent(events, tick, "coolant", loop.lastCirculating
 						? "Coolant loop '" + loop.authored.id + "' circulating: "
 							+ std::to_string(loop.lastFlowKgPerS) + " kg/s of coolant flowing"
 						: "Coolant loop '" + loop.authored.id
 							+ "' circulation lost: no coolant flow is being delivered");
 				if (loop.lastBelowFreeze != previousBelowFreeze[index])
-					appendBoundedEvent(events, tick, loop.lastBelowFreeze
+					appendBoundedEvent(events, tick, "coolant", loop.lastBelowFreeze
 						? "Coolant loop '" + loop.authored.id + "' below its freeze-protection setpoint: "
 							+ std::to_string(loop.temperatureC) + " < "
 							+ std::to_string(loop.authored.freezeProtectionSetpointC)
@@ -12940,27 +13029,27 @@ namespace core
 				if (chiller.status != previousChillerStatus[index])
 				{
 					if (chiller.status == StationTransferStatus::Rejected)
-						appendBoundedEvent(events, tick, "Chiller '" + chiller.authored.id
+						appendBoundedEvent(events, tick, "chiller", "Chiller '" + chiller.authored.id
 							+ "' service refused: " + (chiller.lastBlockReason.empty()
 								? std::string("no electrical supply is available for its work or auxiliaries")
 								: chiller.lastBlockReason));
 					else if (chiller.status == StationTransferStatus::Full
 						&& previousChillerStatus[index] == StationTransferStatus::Rejected)
-						appendBoundedEvent(events, tick, "Chiller '" + chiller.authored.id
+						appendBoundedEvent(events, tick, "chiller", "Chiller '" + chiller.authored.id
 							+ "' service restored: cold service supplied in full");
 					else if (chiller.status == StationTransferStatus::Partial)
-						appendBoundedEvent(events, tick, "Chiller '" + chiller.authored.id
+						appendBoundedEvent(events, tick, "chiller", "Chiller '" + chiller.authored.id
 							+ "' curtailed: supplied " + std::to_string(chiller.lastCoolingKW)
 							+ " of " + std::to_string(chiller.lastCoolingDemandKW) + " kW cold service");
 				}
 				if (chiller.lastAtSetpoint != previousChillerAtSetpoint[index])
-					appendBoundedEvent(events, tick, chiller.lastAtSetpoint
+					appendBoundedEvent(events, tick, "chiller", chiller.lastAtSetpoint
 						? "Chiller '" + chiller.authored.id
 							+ "' cold side at its chilled setpoint: no extraction demanded"
 						: std::string("Chiller '") + chiller.authored.id
 							+ "' cold side above its chilled setpoint: cooling demand returned");
 				if (chiller.lastSinkOver != previousChillerSinkOver[index])
-					appendBoundedEvent(events, tick, chiller.lastSinkOver
+					appendBoundedEvent(events, tick, "chiller", chiller.lastSinkOver
 						? "Chiller '" + chiller.authored.id
 							+ "' condenser sink over its maximum condensing temperature: "
 							+ std::to_string(reservoirs[chiller.sinkIndex].temperatureC) + " >= "
@@ -12981,27 +13070,27 @@ namespace core
 				{
 				case StationGeneratorPhase::Stopped:
 					if (previous == StationGeneratorPhase::Starting)
-						appendBoundedEvent(events, tick, "Generator '" + generator.authored.id
+						appendBoundedEvent(events, tick, "generator", "Generator '" + generator.authored.id
 							+ " startup failed: " + (generator.lastBlockReason.empty()
 								? std::string("the start could not be completed")
 								: generator.lastBlockReason));
 					else if (previous == StationGeneratorPhase::Shutdown)
-						appendBoundedEvent(events, tick, "Generator '" + generator.authored.id
+						appendBoundedEvent(events, tick, "generator", "Generator '" + generator.authored.id
 							+ " shutdown complete: decay heat dissipated after "
 							+ std::to_string(generator.authored.shutdownSeconds) + " s");
 					break;
 				case StationGeneratorPhase::Starting:
-					appendBoundedEvent(events, tick, "Generator '" + generator.authored.id
+					appendBoundedEvent(events, tick, "generator", "Generator '" + generator.authored.id
 						+ " starting: cranking at " + std::to_string(generator.authored.startupPowerKW)
 						+ " kW for " + std::to_string(generator.authored.startupSeconds) + " s");
 					break;
 				case StationGeneratorPhase::Running:
-					appendBoundedEvent(events, tick, "Generator '" + generator.authored.id
+					appendBoundedEvent(events, tick, "generator", "Generator '" + generator.authored.id
 						+ " startup complete: running, commanded "
 						+ std::to_string(generator.authored.commandedOutputKW) + " kW");
 					break;
 				case StationGeneratorPhase::Shutdown:
-					appendBoundedEvent(events, tick, "Generator '" + generator.authored.id
+					appendBoundedEvent(events, tick, "generator", "Generator '" + generator.authored.id
 						+ " shutting down: " + (generator.lastBlockReason.empty()
 							? std::string("commanded off") : generator.lastBlockReason)
 						+ "; shutdown heat " + std::to_string(generator.authored.shutdownHeatKW)
@@ -13019,18 +13108,18 @@ namespace core
 			{
 				auto const& compartment = atmospheres[index];
 				if (compartment.lastAbovePressure != previousAbovePressure[index])
-					appendBoundedEvent(events, tick, "Atmosphere '" + compartment.authored.id
+					appendBoundedEvent(events, tick, "atmosphere", "Atmosphere '" + compartment.authored.id
 						+ " above its declared maximum pressure: "
 						+ std::to_string(compartment.authored.maxPressureKPa) + " kPa limit");
 				if (compartment.lastBelowPressure != previousBelowPressure[index])
-					appendBoundedEvent(events, tick, compartment.lastBelowPressure
+					appendBoundedEvent(events, tick, "atmosphere", compartment.lastBelowPressure
 						? "Atmosphere '" + compartment.authored.id
 							+ " below its declared minimum pressure: "
 							+ std::to_string(compartment.authored.minPressureKPa) + " kPa limit"
 						: std::string("Atmosphere '") + compartment.authored.id
 							+ " back above its minimum pressure limit");
 				if (compartment.lastLowOxygen != previousLowOxygen[index])
-					appendBoundedEvent(events, tick, compartment.lastLowOxygen
+					appendBoundedEvent(events, tick, "atmosphere", compartment.lastLowOxygen
 						? "Atmosphere '" + compartment.authored.id
 							+ " oxygen partial pressure below its life-support minimum: "
 							+ std::to_string(compartment.authored.minOxygenPartialPressureKPa)
@@ -13038,7 +13127,7 @@ namespace core
 						: std::string("Atmosphere '") + compartment.authored.id
 							+ " oxygen back above its life-support minimum");
 				if (compartment.lastHighCo2 != previousHighCo2[index])
-					appendBoundedEvent(events, tick, compartment.lastHighCo2
+					appendBoundedEvent(events, tick, "atmosphere", compartment.lastHighCo2
 						? "Atmosphere '" + compartment.authored.id
 							+ " carbon dioxide partial pressure above its air-quality maximum: "
 							+ std::to_string(compartment.authored.maxCarbonDioxidePartialPressureKPa)
@@ -13046,7 +13135,7 @@ namespace core
 						: std::string("Atmosphere '") + compartment.authored.id
 							+ " carbon dioxide back below its air-quality maximum");
 				if (compartment.lastCondensing != previousCondensing[index])
-					appendBoundedEvent(events, tick, compartment.lastCondensing
+					appendBoundedEvent(events, tick, "atmosphere", compartment.lastCondensing
 						? "Atmosphere '" + compartment.authored.id
 							+ " at saturation: excess vapour condensing, "
 							+ std::to_string(compartment.lastVapourCondensedKg)
@@ -13064,10 +13153,10 @@ namespace core
 				auto const label = "Airlock cycle '" + cycle.authored.id + "' at "
 					+ std::to_string(cycle.lastOccurrenceSeconds) + " s: ";
 				if (cycle.status == StationTransferStatus::Rejected)
-					appendBoundedEvent(events, tick, label + "refused: compartment '"
+					appendBoundedEvent(events, tick, "airlock", label + "refused: compartment '"
 						+ cycle.authored.atmosphereId + "' holds no gas to cycle");
 				else if (cycle.status == StationTransferStatus::Partial)
-					appendBoundedEvent(events, tick, label + "partially cycled "
+					appendBoundedEvent(events, tick, "airlock", label + "partially cycled "
 						+ std::to_string(cycle.lastRemovedKg) + " of "
 						+ std::to_string(cycle.authored.gasMassKg) + " kg from '"
 						+ cycle.authored.atmosphereId + "' (recovered "
@@ -13075,7 +13164,7 @@ namespace core
 						+ std::to_string(cycle.lastLostKg) + " kg); compartment "
 						"inventory could not supply the full cycle");
 				else
-					appendBoundedEvent(events, tick, label + "cycled "
+					appendBoundedEvent(events, tick, "airlock", label + "cycled "
 						+ std::to_string(cycle.lastRemovedKg) + " kg from '"
 						+ cycle.authored.atmosphereId + "' (recovered "
 						+ std::to_string(cycle.lastRecoveredKg) + " kg, lost "
@@ -13090,7 +13179,7 @@ namespace core
 			{
 				auto const& crew = crews[index];
 				if (crew.lastUnmet == previousCrewUnmet[index]) continue;
-				appendBoundedEvent(events, tick, crew.lastUnmet
+				appendBoundedEvent(events, tick, "crew", crew.lastUnmet
 					? "Crew '" + crew.authored.id + "' metabolic demand unmet: "
 						+ crew.lastLimiter
 					: std::string("Crew '") + crew.authored.id
@@ -13107,12 +13196,12 @@ namespace core
 				if (cell.status == previousElectrolyzerStatus[index]) continue;
 				if (cell.status == StationTransferStatus::Full)
 				{
-					appendBoundedEvent(events, tick, "Electrolyzer '" + cell.authored.id
+					appendBoundedEvent(events, tick, "electrolyzer", "Electrolyzer '" + cell.authored.id
 						+ "' splitting at full rate");
 					continue;
 				}
 				auto const reason = !cell.lastBlockReason.empty() ? cell.lastBlockReason : cell.lastLimiter;
-				appendBoundedEvent(events, tick, cell.status == StationTransferStatus::Rejected
+				appendBoundedEvent(events, tick, "electrolyzer", cell.status == StationTransferStatus::Rejected
 					? "Electrolyzer '" + cell.authored.id + "' rejected: " + reason
 					: "Electrolyzer '" + cell.authored.id + "' partial: " + reason);
 			}
@@ -13122,13 +13211,13 @@ namespace core
 				if (capture.status == previousCo2CaptureStatus[index]) continue;
 				if (capture.status == StationTransferStatus::Full)
 				{
-					appendBoundedEvent(events, tick, "CO2 capture '" + capture.authored.id
+					appendBoundedEvent(events, tick, "co2-capture", "CO2 capture '" + capture.authored.id
 						+ "' capturing at full rate");
 					continue;
 				}
 				auto const reason = !capture.lastBlockReason.empty()
 					? capture.lastBlockReason : capture.lastLimiter;
-				appendBoundedEvent(events, tick, capture.status == StationTransferStatus::Rejected
+				appendBoundedEvent(events, tick, "co2-capture", capture.status == StationTransferStatus::Rejected
 					? "CO2 capture '" + capture.authored.id + "' rejected: " + reason
 					: "CO2 capture '" + capture.authored.id + "' partial: " + reason);
 			}
@@ -13138,13 +13227,13 @@ namespace core
 				if (cell.status == previousFuelCellStatus[index]) continue;
 				if (cell.status == StationTransferStatus::Full)
 				{
-					appendBoundedEvent(events, tick, "Fuel cell '" + cell.authored.id
+					appendBoundedEvent(events, tick, "fuel-cell", "Fuel cell '" + cell.authored.id
 						+ "' delivering at commanded output");
 					continue;
 				}
 				auto const reason = !cell.lastBlockReason.empty()
 					? cell.lastBlockReason : cell.lastLimiter;
-				appendBoundedEvent(events, tick, cell.status == StationTransferStatus::Rejected
+				appendBoundedEvent(events, tick, "fuel-cell", cell.status == StationTransferStatus::Rejected
 					? "Fuel cell '" + cell.authored.id + "' rejected: " + reason
 					: "Fuel cell '" + cell.authored.id + "' partial: " + reason);
 			}
@@ -13154,13 +13243,13 @@ namespace core
 				if (reactor.status == previousSabatierStatus[index]) continue;
 				if (reactor.status == StationTransferStatus::Full)
 				{
-					appendBoundedEvent(events, tick, "Sabatier reactor '" + reactor.authored.id
+					appendBoundedEvent(events, tick, "sabatier", "Sabatier reactor '" + reactor.authored.id
 						+ "' converting at full rate");
 					continue;
 				}
 				auto const reason = !reactor.lastBlockReason.empty()
 					? reactor.lastBlockReason : reactor.lastLimiter;
-				appendBoundedEvent(events, tick, reactor.status == StationTransferStatus::Rejected
+				appendBoundedEvent(events, tick, "sabatier", reactor.status == StationTransferStatus::Rejected
 					? "Sabatier reactor '" + reactor.authored.id + "' rejected: " + reason
 					: "Sabatier reactor '" + reactor.authored.id + "' partial: " + reason);
 			}
@@ -13170,13 +13259,13 @@ namespace core
 				if (processor.status == previousMethaneProcessorStatus[index]) continue;
 				if (processor.status == StationTransferStatus::Full)
 				{
-					appendBoundedEvent(events, tick, "Methane processor '" + processor.authored.id
+					appendBoundedEvent(events, tick, "methane", "Methane processor '" + processor.authored.id
 						+ "' processing at full rate");
 					continue;
 				}
 				auto const reason = !processor.lastBlockReason.empty()
 					? processor.lastBlockReason : processor.lastLimiter;
-				appendBoundedEvent(events, tick, processor.status == StationTransferStatus::Rejected
+				appendBoundedEvent(events, tick, "methane", processor.status == StationTransferStatus::Rejected
 					? "Methane processor '" + processor.authored.id + "' rejected: " + reason
 					: "Methane processor '" + processor.authored.id + "' partial: " + reason);
 			}
@@ -13186,13 +13275,13 @@ namespace core
 				if (processor.status == previousMicrobialProcessorStatus[index]) continue;
 				if (processor.status == StationTransferStatus::Full)
 				{
-					appendBoundedEvent(events, tick, "Microbial processor '" + processor.authored.id
+					appendBoundedEvent(events, tick, "microbial", "Microbial processor '" + processor.authored.id
 						+ "' digesting at full rate");
 					continue;
 				}
 				auto const reason = !processor.lastBlockReason.empty()
 					? processor.lastBlockReason : processor.lastLimiter;
-				appendBoundedEvent(events, tick, processor.status == StationTransferStatus::Rejected
+				appendBoundedEvent(events, tick, "microbial", processor.status == StationTransferStatus::Rejected
 					? "Microbial processor '" + processor.authored.id + "' rejected: " + reason
 					: "Microbial processor '" + processor.authored.id + "' partial: " + reason);
 			}
@@ -13206,13 +13295,13 @@ namespace core
 				if (crop.status == previousCropStatus[index]) continue;
 				if (crop.status == StationTransferStatus::Full)
 				{
-					appendBoundedEvent(events, tick, "Crop population '" + crop.authored.id
+					appendBoundedEvent(events, tick, "crop", "Crop population '" + crop.authored.id
 						+ "' growing at full potential");
 					continue;
 				}
 				auto const reason = !crop.lastBlockReason.empty()
 					? crop.lastBlockReason : crop.lastGrowthLimiter;
-				appendBoundedEvent(events, tick, crop.status == StationTransferStatus::Rejected
+				appendBoundedEvent(events, tick, "crop", crop.status == StationTransferStatus::Rejected
 					? "Crop population '" + crop.authored.id + "' growth stopped: " + reason
 					: "Crop population '" + crop.authored.id + "' growth limited: " + reason);
 			}
@@ -13225,7 +13314,7 @@ namespace core
 				auto const& crop = cropPopulations[index];
 				if (crop.dead && !previousCropDead[index])
 				{
-					appendBoundedEvent(events, tick, "Crop population '" + crop.authored.id
+					appendBoundedEvent(events, tick, "crop", "Crop population '" + crop.authored.id
 						+ "' died: the living organic content was respired away under adverse conditions; "
 						+ std::to_string(crop.lastDeadResidueToWasteKg)
 						+ " kg dead residue routed to the waste store and "
@@ -13237,11 +13326,11 @@ namespace core
 					: crop.lastHarvestedKg > 0.0 ? 1.0 : 0.0;
 				if (harvestState == previousCropHarvestState[index]) continue;
 				if (harvestState == 2.0)
-					appendBoundedEvent(events, tick, "Crop population '" + crop.authored.id
+					appendBoundedEvent(events, tick, "crop", "Crop population '" + crop.authored.id
 						+ "' harvest constrained: " + std::to_string(crop.lastHarvestConstrainedKg)
 						+ " kg of the declared harvest could not be placed because the food and waste destinations are full; the remainder stays living");
 				else if (harvestState == 1.0)
-					appendBoundedEvent(events, tick, "Crop population '" + crop.authored.id
+					appendBoundedEvent(events, tick, "crop", "Crop population '" + crop.authored.id
 						+ "' harvested " + std::to_string(crop.lastHarvestedKg)
 						+ " kg of living dry biomass: " + std::to_string(crop.lastFoodAddedKg)
 						+ " kg to the food store '" + crop.authored.foodStoreId + "' and "
@@ -13259,13 +13348,13 @@ namespace core
 				if (culture.status == previousAlgaeStatus[index]) continue;
 				if (culture.status == StationTransferStatus::Full)
 				{
-					appendBoundedEvent(events, tick, "Algae culture '" + culture.authored.id
+					appendBoundedEvent(events, tick, "algae", "Algae culture '" + culture.authored.id
 						+ "' growing at full potential");
 					continue;
 				}
 				auto const reason = !culture.lastBlockReason.empty()
 					? culture.lastBlockReason : culture.lastGrowthLimiter;
-				appendBoundedEvent(events, tick, culture.status == StationTransferStatus::Rejected
+				appendBoundedEvent(events, tick, "algae", culture.status == StationTransferStatus::Rejected
 					? "Algae culture '" + culture.authored.id + "' growth stopped: " + reason
 					: "Algae culture '" + culture.authored.id + "' growth limited: " + reason);
 			}
@@ -13274,7 +13363,7 @@ namespace core
 				auto const& culture = algaeCultures[index];
 				if (culture.dead && !previousAlgaeDead[index])
 				{
-					appendBoundedEvent(events, tick, "Algae culture '" + culture.authored.id
+					appendBoundedEvent(events, tick, "algae", "Algae culture '" + culture.authored.id
 						+ "' died: the living organic content was respired away under adverse conditions; "
 						+ std::to_string(culture.lastDeadResidueToWasteKg)
 						+ " kg dead residue routed to the waste store and "
@@ -13286,11 +13375,11 @@ namespace core
 					: culture.lastHarvestedKg > 0.0 ? 1.0 : 0.0;
 				if (harvestState == previousAlgaeHarvestState[index]) continue;
 				if (harvestState == 2.0)
-					appendBoundedEvent(events, tick, "Algae culture '" + culture.authored.id
+					appendBoundedEvent(events, tick, "algae", "Algae culture '" + culture.authored.id
 						+ "' harvest constrained: " + std::to_string(culture.lastHarvestConstrainedKg)
 						+ " kg of the declared harvest could not be placed because the food, recovery and waste destinations are full; the remainder stays living");
 				else if (harvestState == 1.0)
-					appendBoundedEvent(events, tick, "Algae culture '" + culture.authored.id
+					appendBoundedEvent(events, tick, "algae", "Algae culture '" + culture.authored.id
 						+ "' harvested " + std::to_string(culture.lastHarvestedKg)
 						+ " kg of living dry biomass: " + std::to_string(culture.lastFoodAddedKg)
 						+ " kg to the food store '" + culture.authored.foodStoreId + "', "
@@ -13313,17 +13402,17 @@ namespace core
 				auto const label = "Delivery '" + delivery.authored.id + "' at "
 					+ std::to_string(delivery.lastOccurrenceSeconds) + " s: ";
 				if (delivery.status == StationTransferStatus::Full)
-					appendBoundedEvent(events, tick, label + "accepted "
+					appendBoundedEvent(events, tick, "delivery", label + "accepted "
 						+ std::to_string(delivery.lastAccepted) + " " + delivery.authored.unit
 						+ " into '" + delivery.authored.storeId + "'");
 				else if (delivery.status == StationTransferStatus::Partial)
-					appendBoundedEvent(events, tick, label + "partially accepted "
+					appendBoundedEvent(events, tick, "delivery", label + "partially accepted "
 						+ std::to_string(delivery.lastAccepted) + " of "
 						+ std::to_string(delivery.lastScheduled) + " " + delivery.authored.unit
 						+ "; " + std::to_string(delivery.lastRejected)
 						+ " refused, destination '" + delivery.authored.storeId + "' is at capacity");
 				else
-					appendBoundedEvent(events, tick, label + "refused "
+					appendBoundedEvent(events, tick, "delivery", label + "refused "
 						+ std::to_string(delivery.lastRejected) + " " + delivery.authored.unit
 						+ ": destination '" + delivery.authored.storeId + "' is at capacity");
 			}
@@ -13337,18 +13426,18 @@ namespace core
 				auto const label = "Waste ejection '" + ejection.authored.id + "' at "
 					+ std::to_string(ejection.lastOccurrenceSeconds) + " s: ";
 				if (ejection.status == StationTransferStatus::Full)
-					appendBoundedEvent(events, tick, label + "ejected "
+					appendBoundedEvent(events, tick, "waste-ejection", label + "ejected "
 						+ std::to_string(ejection.lastEjected) + " " + ejection.authored.unit
 						+ " from '" + ejection.authored.storeId + "' as external loss");
 				else if (ejection.status == StationTransferStatus::Partial)
-					appendBoundedEvent(events, tick, label + "ejected "
+					appendBoundedEvent(events, tick, "waste-ejection", label + "ejected "
 						+ std::to_string(ejection.lastEjected) + " of "
 						+ std::to_string(ejection.lastScheduled) + " " + ejection.authored.unit
 						+ " from '" + ejection.authored.storeId + "' as external loss; "
 						+ std::to_string(ejection.lastUnmet)
 						+ " not ejectable: no more disposal-ready material held");
 				else
-					appendBoundedEvent(events, tick, label + "nothing ejected from '"
+					appendBoundedEvent(events, tick, "waste-ejection", label + "nothing ejected from '"
 						+ ejection.authored.storeId + "': no disposal-ready material held");
 			}
 			return true;
@@ -14036,7 +14125,7 @@ namespace core
 			lua_settop(object->state.get(), 0);
 			mImpl->objects[i] = std::move(object);
 		}
-		appendBoundedEvent(mImpl->events, 0, "Station systems initialized with "
+		appendBoundedEvent(mImpl->events, 0, "station", "Station systems initialized with "
 			+ std::to_string(settings.stores.size()) + " resource store(s), "
 			+ std::to_string(settings.transfers.size()) + " transfer(s), "
 			+ std::to_string(settings.conversions.size()) + " conversion(s), "
@@ -14148,7 +14237,12 @@ namespace core
 		auto interval = static_cast<uint64_t>(std::ceil(mImpl->settings.observationIntervalSeconds / World::getFixedTimestep()));
 		if (tick % interval == 0)
 		{
-			appendBoundedEvent(mImpl->events, tick, "All four Station systems completed the World tick");
+			appendBoundedEvent(mImpl->events, tick, "observation",
+				"All four Station systems completed the World tick");
+			// #418: trends are sampled on the same existing observation
+			// cadence from the just-committed snapshot - no second clock,
+			// no per-tick history, and only successful ticks are sampled.
+			mImpl->recordTrends(tick, snapshot());
 		}
 		return true;
 	}
@@ -15741,5 +15835,6 @@ namespace core
 		return result;
 	}
 	std::vector<StationSystemsEvent> const& StationSystemsRuntime::events() const { return mImpl->events; }
+	std::vector<StationTrendSeries> const& StationSystemsRuntime::trends() const { return mImpl->trendSeries; }
 	std::vector<StationSystemsDiagnostic> const& StationSystemsRuntime::diagnostics() const { return mImpl->diagnostics; }
 }

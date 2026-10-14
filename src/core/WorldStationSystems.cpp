@@ -34,6 +34,10 @@ namespace core
 	{
 		return mStationSystemsRuntime ? mStationSystemsRuntime->events() : std::vector<StationSystemsEvent>{};
 	}
+	std::vector<StationTrendSeries> World::getStationSystemsTrends() const
+	{
+		return mStationSystemsRuntime ? mStationSystemsRuntime->trends() : std::vector<StationTrendSeries>{};
+	}
 	std::vector<StationSystemsDiagnostic> World::getStationSystemsDiagnostics() const
 	{
 		return mStationSystemsRuntime ? mStationSystemsRuntime->diagnostics() : std::vector<StationSystemsDiagnostic>{};

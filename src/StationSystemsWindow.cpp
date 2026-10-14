@@ -44,10 +44,18 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		authored.microbialProcessors.size(), authored.cropPopulations.size(),
 		authored.algaeCultures.size(), authored.outages.size(),
 		authored.maintenanceJobs.size());
+	// #418: the authored trend retention, in simulation seconds.
+	ImGui::Text("Trend retention: %.0f s (bounded per-series samples, downsampled on long runs)",
+		authored.trendRetentionSeconds);
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
 	ImGui::InputFloat("Observation interval (seconds)", &mDraft.observationIntervalSeconds, 0.1f, 1.0f, "%.2f");
+	// #418: the authored trend retention. Trends are sampled on the same
+	// observation cadence (no second clock) and this bounds the retained
+	// simulation-time window; the per-series sample budget is fixed, so
+	// long or accelerated runs downsample rather than grow storage.
+	ImGui::InputFloat("Trend retention (seconds)", &mDraft.trendRetentionSeconds, 60.0f, 600.0f, "%.0f");
 	// #415: the dispatch controller mode. Manual keeps the authored per-source
 	// commanded outputs authoritative; Automatic lets the dispatcher command
 	// generators and fuel-cell backups each tick to cover the net load the sun
@@ -3605,8 +3613,86 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		ImGui::TextWrapped("Software failure at tick %llu in %s [%s]: %s",
 			static_cast<unsigned long long>(diagnostic.worldTick), diagnostic.system.c_str(), kind, diagnostic.message.c_str());
 	}
-	if (ImGui::CollapsingHeader("Event history (last 256)"))
+	ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
+	if (ImGui::CollapsingHeader("Resource/service trends (bounded)"))
+	{
+		// #418: read-only presentation of the bounded trend series. The
+		// series carry units, simulation timestamps, requested versus
+		// actual values and subsystem identity; truncation and the
+		// effective stride are shown so the plot never implies a
+		// complete history. Rendering never ticks or mutates anything.
+		auto const trends = world->getStationSystemsTrends();
+		if (trends.empty())
+			ImGui::TextDisabled("No trend samples yet: trends are sampled at the observation cadence while the World runs.");
+		ImGui::TextDisabled("Legend: grey = requested, green = actual (units per series)");
+		for (auto const& series : trends)
+		{
+			ImGui::Text("%s %s (%s)", series.subsystem.c_str(),
+				series.id.empty() ? "(station-wide)" : ("'" + series.id + "'").c_str(),
+				series.unit.c_str());
+			if (series.samples.empty())
+			{
+				ImGui::Text("  no samples yet");
+				continue;
+			}
+			ImGui::Text("  %zu sample(s), effective stride %.2f s, window t=%.1f s .. t=%.1f s",
+				series.samples.size(), series.sampleIntervalSeconds,
+				series.samples.front().elapsedSeconds, series.samples.back().elapsedSeconds);
+			if (series.downsampleLevel > 0)
+				ImGui::Text("  downsampled x%u (level %u): adjacent samples were merged pairwise to stay within the storage bound",
+					1u << series.downsampleLevel, series.downsampleLevel);
+			if (series.truncated)
+				ImGui::Text("  TRUNCATED: history before t=%.1f s was merged or dropped; this is not the complete run history",
+					series.samples.front().elapsedSeconds);
+			auto const width = std::max(64.0f, ImGui::GetContentRegionAvail().x);
+			auto const height = 48.0f;
+			auto const origin = ImGui::GetCursorScreenPos();
+			ImGui::Dummy({width, height});
+			auto* draw = ImGui::GetWindowDrawList();
+			draw->AddRect(origin, {origin.x + width, origin.y + height}, IM_COL32(90, 90, 90, 255));
+			double minimum = series.samples.front().requested;
+			double maximum = series.samples.front().requested;
+			for (auto const& sample : series.samples)
+			{
+				minimum = std::min({minimum, sample.requested, sample.actual});
+				maximum = std::max({maximum, sample.requested, sample.actual});
+			}
+			auto const span = maximum - minimum < 1e-12 ? 1.0 : maximum - minimum;
+			auto const count = series.samples.size();
+			auto const px = [width, count](size_t index)
+			{
+				return count == 1 ? width * 0.5f
+					: width * static_cast<float>(index) / static_cast<float>(count - 1);
+			};
+			auto const py = [height, minimum, span](double value)
+			{
+				return height - 2.0f - static_cast<float>((value - minimum) / span) * (height - 4.0f);
+			};
+			for (size_t index = 1; index < count; ++index)
+			{
+				draw->AddLine({origin.x + px(index - 1), origin.y + py(series.samples[index - 1].requested)},
+					{origin.x + px(index), origin.y + py(series.samples[index].requested)},
+					IM_COL32(170, 170, 170, 255));
+				draw->AddLine({origin.x + px(index - 1), origin.y + py(series.samples[index - 1].actual)},
+					{origin.x + px(index), origin.y + py(series.samples[index].actual)},
+					IM_COL32(80, 200, 120, 255));
+			}
+			if (count == 1)
+			{
+				draw->AddCircleFilled({origin.x + px(0), origin.y + py(series.samples[0].requested)},
+					2.0f, IM_COL32(170, 170, 170, 255));
+				draw->AddCircleFilled({origin.x + px(0), origin.y + py(series.samples[0].actual)},
+					2.0f, IM_COL32(80, 200, 120, 255));
+			}
+		}
+	}
+	ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
+	if (ImGui::CollapsingHeader("Incident history (bounded: newest 256 events; older events are discarded)"))
 		for (auto const& event : world->getStationSystemsEvents())
-			ImGui::TextWrapped("Tick %llu: %s", static_cast<unsigned long long>(event.worldTick), event.message.c_str());
+			ImGui::TextWrapped("Tick %llu (t=%.1f s) [%s]: %s",
+				static_cast<unsigned long long>(event.worldTick),
+				static_cast<double>(event.worldTick) * static_cast<double>(core::World::getFixedTimestep()),
+				event.category.empty() ? "station" : event.category.c_str(),
+				event.message.c_str());
 	ImGui::End();
 }

@@ -149,7 +149,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 94"), 11, "version: 65");
+		text.replace(text.find("version: 95"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -15199,9 +15199,9 @@ void buffers(smoke::Context const&)
 			// than silently dropping the cultures.
 			{
 				auto stale = text;
-				size_t const position = stale.find("version: 94");
+				size_t const position = stale.find("version: 95");
 				require(position != std::string::npos, "the fixture document carries no version line");
-				stale.replace(position, std::string("version: 94").size(), "version: 88");
+				stale.replace(position, std::string("version: 95").size(), "version: 88");
 				require(stale.find("algaeCultures") != std::string::npos,
 					"the fixture document carries no algae cultures to test the guard with");
 				bool refused = false;
@@ -17133,13 +17133,13 @@ void dispatch(smoke::Context const&)
 			== core::StationDispatchMode::Automatic,
 			"automatic dispatch mode did not survive the round trip");
 		auto stale = text;
-		require(stale.find("version: 94") != std::string::npos,
+		require(stale.find("version: 95") != std::string::npos,
 			"the fixture document carries no version line");
 		require(stale.find("dispatchMode: automatic") != std::string::npos,
 			"the fixture document lost the dispatch mode before the guard test");
 		// A pre-91 document that still carries the dispatch mode is refused
 		// rather than silently dropping the controller setting.
-		stale = replaceAll(stale, "version: 94", "version: 90");
+		stale = replaceAll(stale, "version: 95", "version: 90");
 		bool refused = false;
 		try
 		{
@@ -18152,9 +18152,9 @@ void protectedServices(smoke::Context const&)
 		require(loaded.getStationSystemsSnapshot().worldTick == 0,
 			"the loaded world restored live station state instead of the authored start");
 		auto stale = text;
-		require(stale.find("version: 94") != std::string::npos,
+		require(stale.find("version: 95") != std::string::npos,
 			"the fixture document carries no version line");
-		stale.replace(stale.find("version: 94"), std::string("version: 94").size(),
+		stale.replace(stale.find("version: 95"), std::string("version: 95").size(),
 			"version: 91");
 		bool refused = false;
 		try
@@ -18936,6 +18936,347 @@ void recovery(smoke::Context const& context)
 	}
 }
 
+	// #418: bounded trends and incident history. Trend series are sampled
+	// from the committed ledger at the existing observation cadence - no
+	// second clock, no per-tick history - with a fixed per-series sample
+	// budget (pairwise-merge downsampling on overflow) and an authored
+	// retention cap in simulation seconds. Events carry a stable
+	// presentation category so later features' incident types render
+	// through the same contract. Reading trends never mutates state.
+	void trends(smoke::Context const& context)
+	{
+		auto const approx = [](double actual, double expected, double tolerance = 1e-9)
+		{ return std::abs(actual - expected) <= tolerance; };
+		auto const constantProfile = [](double level)
+		{ core::ProfileSettings p; p.constantLevel = level; return p; };
+		auto const replaceAll = [](std::string text, std::string const& from, std::string const& to)
+		{
+			for (size_t pos = text.find(from); pos != std::string::npos; pos = text.find(from, pos + to.size()))
+				text.replace(pos, from.size(), to);
+			return text;
+		};
+		auto const runOrDiagnose = [](core::World& world, uint64_t ticks, char const* what)
+		{
+			if (world.advanceTicks(ticks)) return;
+			auto const diagnostics = world.getStationSystemsDiagnostics();
+			std::fprintf(stderr, "%s failed: %s\n", what,
+				diagnostics.empty() ? "(no Station diagnostic)" : diagnostics.back().message.c_str());
+			throw std::runtime_error(std::string(what) + " run failed");
+		};
+		auto const findSeries = [](std::vector<core::StationTrendSeries> const& trends,
+			std::string const& subsystem, std::string const& id) -> core::StationTrendSeries const*
+		{
+			for (auto const& series : trends)
+				if (series.subsystem == subsystem && series.id == id) return &series;
+			return nullptr;
+		};
+		// Steady-state rig: a 10 kW sun, a 6 kW constant load fully
+		// supplied, and a 1 kg/s transfer with room at both ends. Every
+		// sampled value is a known constant, so merge or retention
+		// arithmetic errors show up as value drift, not just count drift.
+		auto const rigSettings = [&]()
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			core::ResourceStoreSettings source;
+			source.id = "source"; source.unit = "kg";
+			source.capacity = 10000.0; source.startingQualified = 8000.0;
+			core::ResourceStoreSettings sink;
+			sink.id = "sink"; sink.unit = "kg";
+			sink.capacity = 10000.0; sink.startingQualified = 0.0;
+			settings.stores = { source, sink };
+			core::ResourceTransferSettings pump;
+			pump.id = "pump"; pump.sourceId = "source"; pump.destinationId = "sink";
+			pump.unit = "kg"; pump.ratePerSecond = 1.0; pump.priority = 5;
+			settings.transfers = { pump };
+			core::SolarArraySettings sun;
+			sun.id = "sun"; sun.capacityKW = 10.0; sun.illumination = constantProfile(1.0);
+			settings.solarArrays = { sun };
+			core::EquipmentLoadSettings load;
+			load.id = "shop"; load.electricalDemandKW = 6.0;
+			load.operatingProfile = constantProfile(1.0);
+			load.heatOutputKW = 0.0; load.thermalClass = "low";
+			load.coolingDisposition = core::StationCoolingDisposition::Exported;
+			load.criticalFloorKW = 0.0; load.priority = 10; load.maxCurtailment = 1.0;
+			settings.equipmentLoads = { load };
+			return settings;
+		};
+		std::string diagnostic;
+		// Scenario A: sampling cadence. With a 60 s observation interval
+		// and a 60 s run, each series holds exactly one sample at the
+		// observation boundary - never one per tick - carrying units,
+		// simulation timestamps, requested versus actual and identity.
+		{
+			core::World world("TrendCadence", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto settings = rigSettings();
+			settings.observationIntervalSeconds = 60.0f;
+			settings.trendRetentionSeconds = 3600.0f;
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			world.resumeSimulation();
+			runOrDiagnose(world, 3600, "trend cadence"); // t = 60 s: one boundary
+			auto const trends = world.getStationSystemsTrends();
+			require(trends.size() == 3,
+				"expected exactly the power, equipment-load and transfer trend series");
+			for (auto const& series : trends)
+			{
+				require(series.samples.size() == 1,
+					"trend series sampled more than once within one observation window");
+				require(series.samples[0].worldTick == 3600,
+					"trend sample is not at the observation-boundary tick");
+				require(series.downsampleLevel == 0 && !series.truncated,
+					"a fresh series reports downsampling or truncation");
+				require(approx(series.sampleIntervalSeconds, 60.0),
+					"series stride does not match the authored observation cadence");
+			}
+			auto const* power = findSeries(trends, "power", "");
+			require(power != nullptr && power->unit == "kW",
+				"station-wide power trend series missing or mislabelled");
+			require(approx(power->samples[0].requested, 6.0)
+				&& approx(power->samples[0].actual, 6.0),
+				"the power trend did not record requested versus actual supply");
+			auto const* transfer = findSeries(trends, "transfer", "pump");
+			require(transfer != nullptr && transfer->unit == "kg",
+				"transfer trend identity or unit missing");
+			// The snapshot's transfer requested/completed are per-tick
+			// amounts (rate x fixed step); the trend mirrors that exactly.
+			auto const perTick = 1.0 * static_cast<double>(core::World::getFixedTimestep());
+			require(approx(transfer->samples[0].requested, perTick)
+				&& approx(transfer->samples[0].actual, perTick),
+				"the transfer trend did not record requested versus completed flow");
+			auto const* load = findSeries(trends, "equipment-load", "shop");
+			require(load != nullptr && load->unit == "kW" && load->id == "shop",
+				"equipment load trend identity or unit missing");
+		}
+		// Scenario B: a long run under the fixed sample budget. 1300 raw
+		// samples per series must downsample (pairwise merge, stride x2
+		// per level) instead of growing storage, keep the newest sample,
+		// keep gaps within the retained stride, and - because the rig is
+		// steady - keep every merged value exactly constant.
+		{
+			core::World world("TrendLongRun", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto settings = rigSettings();
+			settings.trendRetentionSeconds = 86400.0f; // retention never binds here
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			world.resumeSimulation();
+			runOrDiagnose(world, 78000, "trend long run"); // t = 1300 s, 1300 raw samples
+			auto const trends = world.getStationSystemsTrends();
+			require(trends.size() == 3, "long run lost a trend series");
+			for (auto const& series : trends)
+			{
+				require(series.samples.size() <= 256,
+					"trend series exceeded the 256-sample storage bound");
+				require(series.downsampleLevel >= 1,
+					"a 1300-sample run did not downsample under the storage bound");
+				require(series.truncated,
+					"a downsampled series does not report truncation");
+				require(approx(series.sampleIntervalSeconds,
+					std::pow(2.0, static_cast<double>(series.downsampleLevel))),
+					"effective stride is not the base cadence times 2^level");
+				require(series.samples.back().worldTick == 78000,
+					"the series lost the newest sample");
+				for (size_t index = 1; index < series.samples.size(); ++index)
+				{
+					auto const gap = series.samples[index].worldTick - series.samples[index - 1].worldTick;
+					require(gap >= 60 && gap <= static_cast<uint64_t>(
+						60.0 * series.sampleIntervalSeconds + 0.5),
+						"downsampled series has a gap outside the retained stride");
+				}
+				for (auto const& sample : series.samples)
+					require(approx(sample.requested, sample.actual),
+						"a fully supplied series merged into unequal requested/actual values");
+				}
+			auto const* power = findSeries(trends, "power", "");
+			require(power != nullptr && approx(power->samples.back().requested, 6.0)
+				&& approx(power->samples.back().actual, 6.0),
+				"the downsampled power trend drifted from the steady 6 kW");
+		}
+		// Scenario C: the authored retention caps the retained window in
+		// simulation seconds. A 60 s retention over a 200 s run keeps at
+		// most the last minute of samples and marks the series truncated.
+		{
+			core::World world("TrendRetention", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto settings = rigSettings();
+			settings.trendRetentionSeconds = 60.0f;
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			world.resumeSimulation();
+			runOrDiagnose(world, 12000, "trend retention"); // t = 200 s
+			auto const trends = world.getStationSystemsTrends();
+			for (auto const& series : trends)
+			{
+				require(series.downsampleLevel == 0,
+					"the retention window forced a downsample it did not need");
+				require(series.truncated,
+					"retention dropping old samples did not mark the series truncated");
+				require(series.samples.back().elapsedSeconds
+					- series.samples.front().elapsedSeconds <= 60.0 + 1e-9,
+					"the retained window exceeds the authored retention");
+				require(series.samples.size() <= 62 && series.samples.size() >= 2,
+					"retention kept a sample count outside the window it declares");
+			}
+		}
+		// Scenario D: observation never mutates. Two identical rigs run
+		// the same ticks; one has its trends, snapshot and event history
+		// read repeatedly during the run, the other is never read until
+		// the end. Both must finish identical - visibility/plotting and
+		// UI update frequency cannot change simulated results.
+		{
+			core::World quiet("TrendQuiet", 2, 2);
+			quiet.pauseSimulation(); quiet.finishBuild();
+			require(quiet.configureStationSystems(rigSettings(), false, &diagnostic), diagnostic.c_str());
+			core::World noisy("TrendNoisy", 2, 2);
+			noisy.pauseSimulation(); noisy.finishBuild();
+			require(noisy.configureStationSystems(rigSettings(), false, &diagnostic), diagnostic.c_str());
+			quiet.resumeSimulation(); noisy.resumeSimulation();
+			for (uint64_t leg = 0; leg < 8; ++leg)
+			{
+				runOrDiagnose(quiet, 50, "trend quiet twin");
+				runOrDiagnose(noisy, 50, "trend noisy twin");
+				(void)noisy.getStationSystemsTrends();
+				(void)noisy.getStationSystemsSnapshot();
+				(void)noisy.getStationSystemsEvents();
+			}
+			require(quiet.getStationSystemsSnapshot() == noisy.getStationSystemsSnapshot(),
+				"reading trends/snapshots changed the simulated result");
+			require(quiet.getStationSystemsTrends() == noisy.getStationSystemsTrends(),
+				"reading trends changed the trend history");
+			require(!quiet.getStationSystemsTrends().empty(),
+				"the twin run produced no trends at all");
+		}
+		// Scenario E: Reset reconstructs. After a reset the trend history
+		// is gone - nothing leaks across the boundary - and a fresh run
+		// rebuilds the series from tick zero with no truncation.
+		{
+			core::World world("TrendReset", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			require(world.configureStationSystems(rigSettings(), false, &diagnostic), diagnostic.c_str());
+			world.resumeSimulation();
+			runOrDiagnose(world, 6000, "trend reset pre-run"); // t = 100 s
+			require(!world.getStationSystemsTrends().empty(),
+				"the pre-reset run produced no trends");
+			world.resetSimulation();
+			require(world.getStationSystemsTrends().empty(),
+				"reset left trend history behind");
+			require(world.getStationSystemsSnapshot().worldTick == 0,
+				"reset did not return the World to tick zero");
+			runOrDiagnose(world, 600, "trend post-reset run"); // t = 10 s
+			auto const trends = world.getStationSystemsTrends();
+			for (auto const& series : trends)
+			{
+				require(series.samples.size() == 10,
+					"the post-reset series did not restart its sample window");
+				require(series.downsampleLevel == 0 && !series.truncated,
+					"the post-reset series carried downsampling or truncation across the reset");
+				require(series.samples.front().worldTick == 60,
+					"the post-reset series did not start from tick zero");
+			}
+		}
+		// Scenario F: the authored retention persists with the World and
+		// pre-95 documents carrying it are refused rather than silently
+		// dropped; a pre-95 document without it loads the default.
+		{
+			auto const path = context.temporaryRoot() / "trends-roundtrip.world.yaml";
+			core::World original("TrendSave", 2, 2);
+			original.pauseSimulation(); original.finishBuild();
+			auto settings = rigSettings();
+			settings.trendRetentionSeconds = 7200.0f;
+			require(original.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			original.resumeSimulation();
+			runOrDiagnose(original, 300, "trend save run");
+			original.saveTo(path.string());
+			auto const reopened = core::loadWorldDocument(path);
+			require(reopened != nullptr, "the trend document failed to reopen");
+			require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+				"the trend retention did not survive the document round trip");
+			require(reopened->getStationSystemsSettings().trendRetentionSeconds == 7200.0f,
+				"the reopened retention is not the authored 7200 s");
+			auto const text = yaml(original);
+			require(text.find("trendRetentionSeconds: 7200") != std::string::npos,
+				"the saved document does not carry the authored retention");
+			// A pre-95 document carrying the field is refused, not silently
+			// dropped, and the refusal names the schema it needs.
+			auto stale = replaceAll(text, "version: 95", "version: 94");
+			bool refused = false;
+			std::string refusal;
+			try
+			{
+				auto staleReader = core::YamlSerializer::fromString(stale);
+				staleReader->deserialize();
+				core::SerializationWorkData data;
+				core::World staleWorld("Stale", 2, 2);
+				staleWorld.deserialize(*staleReader, data);
+			}
+			catch (std::exception const& error) { refused = true; refusal = error.what(); }
+			require(refused && refusal.find("trend retention requires World schema 95")
+				!= std::string::npos,
+				("a pre-95 document carrying the trend retention was not refused by name: " + refusal).c_str());
+			// The same pre-95 document without the field loads with the
+			// default retention - compatible with documents that predate
+			// the feature.
+			stale = replaceAll(stale, "trendRetentionSeconds: 7200", "");
+			bool loaded = false;
+			try
+			{
+				auto legacyReader = core::YamlSerializer::fromString(stale);
+				legacyReader->deserialize();
+				core::SerializationWorkData data;
+				core::World legacyWorld("LegacyTrends", 2, 2);
+				legacyWorld.deserialize(*legacyReader, data);
+				loaded = legacyWorld.getStationSystemsSettings().trendRetentionSeconds == 3600.0f;
+			}
+			catch (std::exception const& error)
+			{
+				std::fprintf(stderr, "legacy trend document failed: %s\n", error.what());
+			}
+			require(loaded, "a pre-95 document without the retention field did not load the default");
+		}
+		// Scenario G: the stable presentation contract. Init, observation
+		// and eclipse-transition events each carry their declared category,
+		// so incidents render by subsystem without message parsing.
+		{
+			core::World world("TrendEvents", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto settings = rigSettings();
+			core::ProfileSettings flicker;
+			flicker.periodSeconds = 20.0;
+			flicker.segments = {{0.0, 1.0}, {10.0, 0.0}};
+			settings.solarArrays.front().illumination = flicker;
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			world.resumeSimulation();
+			runOrDiagnose(world, 1500, "trend event categories"); // t = 25 s: eclipse legs
+			bool sawStation = false, sawObservation = false, sawSolar = false;
+			for (auto const& event : world.getStationSystemsEvents())
+			{
+				if (event.message.rfind("Station systems initialized", 0) == 0)
+				{
+					require(event.category == "station",
+						"the initialization event does not carry the station category");
+					sawStation = true;
+				}
+				if (event.message.find("completed the World tick") != std::string::npos)
+				{
+					require(event.category == "observation",
+						"the observation event does not carry the observation category");
+					sawObservation = true;
+				}
+				if (event.message.rfind("Solar array", 0) == 0)
+				{
+					require(event.category == "solar",
+						"a solar transition event does not carry the solar category");
+					sawSolar = true;
+				}
+				if (event.message.rfind("Transfer '", 0) == 0)
+					require(event.category == "transfer",
+						"a transfer event does not carry the transfer category");
+			}
+			require(sawStation && sawObservation && sawSolar,
+				"the bounded history lost one of the categorized event producers");
+		}
+	}
+
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power},
@@ -18948,7 +19289,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"nutrientConservation", nutrientConservation}, {"bioContainment", bioContainment}, {"outages", outages}, {"maintenance", maintenance}, {"failures", failures}, {"dispatch", dispatch}, {"protectedServices", protectedServices}, {"recovery", recovery}};
+		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"nutrientConservation", nutrientConservation}, {"bioContainment", bioContainment}, {"outages", outages}, {"maintenance", maintenance}, {"failures", failures}, {"dispatch", dispatch}, {"protectedServices", protectedServices}, {"recovery", recovery}, {"trends", trends}};
 	registerStationDocumentChecks(checks);
 	registerCoupledStationChecks(checks);
 	return smoke::main("station", checks, argc, argv);

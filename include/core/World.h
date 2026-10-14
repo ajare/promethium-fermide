@@ -3124,6 +3124,7 @@ namespace core
 			std::string* diagnostic = nullptr);
 		StationSystemsSnapshot getStationSystemsSnapshot() const;
 		std::vector<StationSystemsEvent> getStationSystemsEvents() const;
+		std::vector<StationTrendSeries> getStationSystemsTrends() const;
 		std::vector<StationSystemsDiagnostic> getStationSystemsDiagnostics() const;
 
 		// Clear the modified state of the World and every Agent it owns, so

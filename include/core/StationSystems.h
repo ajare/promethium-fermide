@@ -1672,6 +1672,12 @@ namespace core
 		// settings so positional initialization of earlier fields is
 		// unchanged.
 		std::vector<MaintenanceJobSettings> maintenanceJobs;
+		// Authored trend retention (#418): the simulation-time window the
+		// bounded trend series keep. Samples older than this are dropped,
+		// so the retained window never exceeds these seconds regardless of
+		// how long or how fast the World runs. Declared last so positional
+		// initialization of every earlier field is unchanged.
+		float trendRetentionSeconds{3600.0f};
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// The installations registered with the shared availability contract
@@ -3683,7 +3689,50 @@ namespace core
 	{
 		uint64_t worldTick{0};
 		std::string message;
+		// Stable presentation category (#418): the subsystem family that
+		// announced the event, drawn from a fixed vocabulary ("station",
+		// "observation", "transfer", "conversion", "load", "solar",
+		// "battery", "dispatch", "thermal", "coolant", "chiller",
+		// "generator", "atmosphere", "airlock", "crew", "electrolyzer",
+		// "co2-capture", "fuel-cell", "sabatier", "methane",
+		// "microbial", "crop", "algae", "delivery", "waste-ejection",
+		// "outage", "maintenance"). Later features add
+		// event types through this same contract so the presentation
+		// never parses the message to decide how to show an incident.
+		std::string category;
 		bool operator==(StationSystemsEvent const&) const = default;
+	};
+	// One bounded trend sample (#418): the requested and actual value of
+	// one subsystem metric at one simulation instant. The unit comes from
+	// the owning series; the timestamp is World simulation time, never
+	// wall-clock, so accelerated runs stay on the same axis.
+	struct StationTrendSample
+	{
+		uint64_t worldTick{0};
+		double elapsedSeconds{0.0};
+		double requested{0.0};
+		double actual{0.0};
+		bool operator==(StationTrendSample const&) const = default;
+	};
+	// One bounded trend series (#418): the stable presentation contract
+	// for station resource/service trends. Subsystem identity, unit and
+	// the sampling window are explicit so the viewer never implies a
+	// complete history: sampleIntervalSeconds is the effective
+	// simulation-time stride after downsampling, downsampleLevel counts
+	// the pairwise merges this series has been through, and truncated
+	// reports that older history was merged or dropped beyond what is
+	// retained here. Later features add series through this same shape;
+	// the presentation never depends on their internals.
+	struct StationTrendSeries
+	{
+		std::string subsystem; // metric family: "power", "equipment-load", "transfer"
+		std::string id;        // subsystem instance identity (empty: station-wide)
+		std::string unit;      // display unit of the requested/actual values
+		double sampleIntervalSeconds{0.0};
+		uint32_t downsampleLevel{0};
+		bool truncated{false};
+		std::vector<StationTrendSample> samples;
+		bool operator==(StationTrendSeries const&) const = default;
 	};
 	struct StationSystemsDiagnostic
 	{

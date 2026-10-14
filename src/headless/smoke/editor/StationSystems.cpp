@@ -2010,6 +2010,151 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 	require(driver.passed(), "coupled live view failed on the Test Engine");
 }
 
+	// #418: the separate Station Systems window shows bounded trends and
+	// the categorized incident history; toggling visibility and switching
+	// the active World never leak state, and the authored retention is
+	// editable through the real paused-only controls.
+	void trendsWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO();
+		io.DisplaySize = {1200.0f, 3200.0f};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto const makeRig = [](std::string const& loadId)
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.trendRetentionSeconds = 300.0f;
+			core::ResourceStoreSettings source;
+			source.id = "source"; source.unit = "kg";
+			source.capacity = 10000.0; source.startingQualified = 8000.0;
+			core::ResourceStoreSettings sink;
+			sink.id = "sink"; sink.unit = "kg";
+			sink.capacity = 10000.0; sink.startingQualified = 0.0;
+			settings.stores = { source, sink };
+			core::ResourceTransferSettings pump;
+			pump.id = "pump"; pump.sourceId = "source"; pump.destinationId = "sink";
+			pump.unit = "kg"; pump.ratePerSecond = 1.0; pump.priority = 5;
+			settings.transfers = { pump };
+			core::ProfileSettings sunLight;
+			sunLight.constantLevel = 1.0;
+			core::SolarArraySettings sun;
+			sun.id = "sun"; sun.capacityKW = 10.0; sun.illumination = sunLight;
+			settings.solarArrays = { sun };
+			core::EquipmentLoadSettings load;
+			load.id = loadId; load.electricalDemandKW = 6.0;
+			load.operatingProfile = sunLight;
+			load.heatOutputKW = 0.0; load.thermalClass = "low";
+			load.coolingDisposition = core::StationCoolingDisposition::Exported;
+			load.criticalFloorKW = 0.0; load.priority = 10; load.maxCurtailment = 1.0;
+			settings.equipmentLoads = { load };
+			return settings;
+		};
+		auto world = std::make_shared<core::World>("Trends editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		require(world->configureStationSystems(makeRig("shop"), false, &diagnostic),
+			diagnostic.c_str());
+		world->resumeSimulation();
+		require(world->advanceTicks(300), "trends editor pre-run failed"); // t = 5 s
+		world->markSaved(); // the configure edit is expected dirt; rendering must add none
+		headless::TestEngineDriver driver([&]
+		{
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1150, 3100});
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "trendsWorkflow", [&](ImGuiTestContext* ctx)
+		{
+			ctx->SetRef("Station Systems");
+			REQ(driver.contains("Active World: Trends editor"),
+				"station window missing the trends World");
+			REQ(driver.contains("Trend retention: 300 s"),
+				"authored trend retention missing from the window");
+			// The bounded trends section is open by default and presents
+			// the series identity, units and effective stride.
+			REQ(driver.contains("power (station-wide) (kW)"),
+				"station-wide power trend series missing from the window");
+			REQ(driver.contains("equipment-load 'shop' (kW)"),
+				"equipment load trend series missing from the window");
+			REQ(driver.contains("transfer 'pump' (kg)"),
+				"transfer trend series missing from the window");
+			REQ(driver.contains("effective stride 1.00 s"),
+				"trend effective sample stride missing");
+			// The incident history shows simulation timestamps and the
+			// stable presentation categories.
+			REQ(driver.contains("[observation]"),
+				"observation category missing from the incident history");
+			REQ(driver.contains("[station]"),
+				"station category missing from the incident history");
+			// Visibility toggling never mutates state: hide the window, keep
+			// ticking, show it again. The trends advanced only with World
+			// ticks, and rendering dirtied nothing.
+			window.visible = false;
+			ctx->Sleep(2);
+			require(world->advanceTicks(120), "trends run during hidden window failed");
+			window.visible = true;
+			ctx->Sleep(2);
+			REQ(world->getStationSystemsTrends().size() == 3
+				&& world->getStationSystemsTrends()[0].samples.size() == 7,
+				"trends did not advance with the World ticks while the window was hidden");
+			REQ(driver.contains("power (station-wide) (kW)"),
+				"trend series vanished after toggling window visibility");
+			REQ(!world->isModified(), "rendering the trends view dirtied the document");
+			// Paused-only retention editing: invalid values are refused
+			// visibly with no mutation; a valid value applies through the
+			// reset-confirmation path and commits document history.
+			world->pauseSimulation();
+			ctx->Sleep(1);
+			ctx->ItemInputValue("Trend retention (seconds)", "0");
+			ctx->ItemClick("Apply settings");
+			ctx->Sleep(1);
+			ctx->ItemClick("Confirm World reset");
+			ctx->Sleep(1);
+			REQ(driver.contains("trend retention must be finite"),
+				"invalid trend retention was not refused visibly");
+			REQ(world->getStationSystemsSettings().trendRetentionSeconds == 300.0f,
+				"invalid trend retention mutated the authored settings");
+			ctx->ItemClick("Cancel edits");
+			ctx->Sleep(1);
+			ctx->ItemInputValue("Trend retention (seconds)", "120");
+			ctx->ItemClick("Apply settings");
+			ctx->Sleep(1);
+			ctx->ItemClick("Confirm World reset");
+			ctx->Sleep(1);
+			REQ(world->getStationSystemsSettings().trendRetentionSeconds == 120.0f
+				&& history.undoCount() >= 1,
+				"valid trend retention edit did not apply through the reset confirmation");
+			REQ(world->getSimulationTick() == 0,
+				"the confirmed retention change did not reset the World");
+			// Active-World switch: the window rebinds to the new World and
+			// shows only that World's series - nothing of the old one leaks.
+			world = std::make_shared<core::World>("Trends second", 2, 2);
+			world->pauseSimulation(); world->finishBuild();
+			require(world->configureStationSystems(makeRig("lab"), false, &diagnostic),
+				diagnostic.c_str());
+			world->resumeSimulation();
+			require(world->advanceTicks(180), "second trends world run failed"); // t = 3 s
+			ctx->Sleep(2);
+			REQ(driver.contains("Active World: Trends second"),
+				"window did not follow the active-World switch");
+			REQ(driver.contains("equipment-load 'lab' (kW)"),
+				"switched World's load trend series missing");
+			REQ(!driver.contains("equipment-load 'shop'"),
+				"previous World's load trend series leaked into the switched view");
+			REQ(world->getStationSystemsTrends()[1].samples.size() == 3,
+				"switched World's trend history is not its own");
+		});
+		#undef REQ
+		require(driver.passed(), "trends workflow failed on the Test Engine");
+	}
+
 void cropWorkflow(smoke::Context const&)
 	{
 		using smoke::require;
@@ -2485,4 +2630,5 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/algaeWorkflow", algaeWorkflow});
 	checks.push_back({"station/maintenanceWorkflow", maintenanceWorkflow});
 	checks.push_back({"station/coupledLiveViewWorkflow", coupledLiveViewWorkflow});
+	checks.push_back({"station/trendsWorkflow", trendsWorkflow});
 }

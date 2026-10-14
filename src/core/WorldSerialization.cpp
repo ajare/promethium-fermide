@@ -926,12 +926,19 @@ namespace core
 		// than silently dropped. The reservation state, progress, phase,
 		// occurrence counts and spend stay runtime-only, reconstructed on
 		// load from the authored schedule and the World tick.
-		serializer.writeUint32("version", 94);
+		// Schema 95 adds the authored trend retention (#418): the
+		// simulation-time window the bounded trend series keep. A pre-95
+		// document carrying `trendRetentionSeconds` is refused rather
+		// than silently dropped. The trend samples themselves never
+		// travel: they are observability, reconstructed from the
+		// observation cadence while the World runs.
+		serializer.writeUint32("version", 95);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
 			serializer.writeBool("enabled", mStationSystemsSettings.enabled);
 			serializer.writeFloat("observationIntervalSeconds", mStationSystemsSettings.observationIntervalSeconds);
+			serializer.writeFloat("trendRetentionSeconds", mStationSystemsSettings.trendRetentionSeconds);
 			// #415: the dispatch controller mode is authored settings; the
 			// controller's runtime scalars and alarms never travel.
 			serializer.writeString("dispatchMode",
@@ -2693,7 +2700,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 94)
+		if (version < 1 || version > 95)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -3692,6 +3699,20 @@ namespace core
 					serializer.endMap();
 				}
 				serializer.endArray();
+			}
+			// #418: the authored trend retention, read last so every older
+			// feature's guard names its own schema first (see the guard-order
+			// note above the dispatch mode read).
+			if (serializer.hasField("trendRetentionSeconds"))
+			{
+				if (version < 95) throw SerializationException(
+					"Station trend retention requires World schema 95");
+				stationSettings.trendRetentionSeconds = serializer.readFloat("trendRetentionSeconds");
+				if (!std::isfinite(stationSettings.trendRetentionSeconds)
+					|| stationSettings.trendRetentionSeconds < 1.0f
+					|| stationSettings.trendRetentionSeconds > 86400.0f)
+					throw SerializationException(
+						"Station trend retention must be finite, from 1 to 86400 seconds");
 			}
 			serializer.endMap();
 			std::string diagnostic;
