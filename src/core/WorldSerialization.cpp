@@ -913,7 +913,13 @@ namespace core
 		// per-tick protected demand, supply, unmet minima and reasons stay
 		// runtime-only, reconstructed from the authored flags and the
 		// World tick.
-		serializer.writeUint32("version", 92);
+		// Schema 93 adds the authored recovery rules on External equipment
+		// loads (#417): dwell, hysteresis and the startup surge. A pre-93
+		// document carrying any of `recoveryDwellSeconds`,
+		// `recoveryHysteresisFraction`, `restartSurgePowerKW` or
+		// `restartSurgeSeconds` is refused rather than silently dropped.
+		// The recovery stage, surge drawn and hold reasons stay runtime-only.
+		serializer.writeUint32("version", 93);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -1064,6 +1070,17 @@ namespace core
 					serializer.writeDouble("criticalFloorKW", load.criticalFloorKW);
 					serializer.writeInt32("priority", load.priority);
 					serializer.writeDouble("maxCurtailment", load.maxCurtailment);
+					// #417 authored recovery rules. Only written when set, so
+					// a load with no recovery stays byte-identical to a pre-93
+					// load and never trips the pre-93 refusal on the read side.
+					if (load.recoveryDwellSeconds != 0.0 || load.recoveryHysteresisFraction != 0.0
+						|| load.restartSurgePowerKW != 0.0 || load.restartSurgeSeconds != 0.0)
+					{
+						serializer.writeDouble("recoveryDwellSeconds", load.recoveryDwellSeconds);
+						serializer.writeDouble("recoveryHysteresisFraction", load.recoveryHysteresisFraction);
+						serializer.writeDouble("restartSurgePowerKW", load.restartSurgePowerKW);
+						serializer.writeDouble("restartSurgeSeconds", load.restartSurgeSeconds);
+					}
 					serializer.beginArray("materialExchanges");
 					for (auto const& exchange : load.materialExchanges)
 					{
@@ -2639,7 +2656,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 92)
+		if (version < 1 || version > 93)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2843,6 +2860,18 @@ namespace core
 					load.criticalFloorKW = serializer.readDouble("criticalFloorKW");
 					load.priority = serializer.readInt32("priority");
 					load.maxCurtailment = serializer.readDouble("maxCurtailment");
+					// #417 authored recovery rules. A pre-93 document that
+					// carries any of them is refused rather than silently
+					// dropped; a load without them keeps the zero defaults.
+					if (serializer.hasField("recoveryDwellSeconds"))
+					{
+						if (version < 93) throw SerializationException(
+							"Station load recovery rules require World schema 93");
+						load.recoveryDwellSeconds = serializer.readDouble("recoveryDwellSeconds");
+						load.recoveryHysteresisFraction = serializer.readDouble("recoveryHysteresisFraction");
+						load.restartSurgePowerKW = serializer.readDouble("restartSurgePowerKW");
+						load.restartSurgeSeconds = serializer.readDouble("restartSurgeSeconds");
+					}
 					serializer.beginArray("materialExchanges");
 					while (serializer.nextArrayItem())
 					{

@@ -148,7 +148,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 92"), 11, "version: 65");
+		text.replace(text.find("version: 93"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -15198,9 +15198,9 @@ void buffers(smoke::Context const&)
 			// than silently dropping the cultures.
 			{
 				auto stale = text;
-				size_t const position = stale.find("version: 92");
+				size_t const position = stale.find("version: 93");
 				require(position != std::string::npos, "the fixture document carries no version line");
-				stale.replace(position, std::string("version: 92").size(), "version: 88");
+				stale.replace(position, std::string("version: 93").size(), "version: 88");
 				require(stale.find("algaeCultures") != std::string::npos,
 					"the fixture document carries no algae cultures to test the guard with");
 				bool refused = false;
@@ -17132,13 +17132,13 @@ void dispatch(smoke::Context const&)
 			== core::StationDispatchMode::Automatic,
 			"automatic dispatch mode did not survive the round trip");
 		auto stale = text;
-		require(stale.find("version: 92") != std::string::npos,
+		require(stale.find("version: 93") != std::string::npos,
 			"the fixture document carries no version line");
 		require(stale.find("dispatchMode: automatic") != std::string::npos,
 			"the fixture document lost the dispatch mode before the guard test");
 		// A pre-91 document that still carries the dispatch mode is refused
 		// rather than silently dropping the controller setting.
-		stale = replaceAll(stale, "version: 92", "version: 90");
+		stale = replaceAll(stale, "version: 93", "version: 90");
 		bool refused = false;
 		try
 		{
@@ -18151,9 +18151,9 @@ void protectedServices(smoke::Context const&)
 		require(loaded.getStationSystemsSnapshot().worldTick == 0,
 			"the loaded world restored live station state instead of the authored start");
 		auto stale = text;
-		require(stale.find("version: 92") != std::string::npos,
+		require(stale.find("version: 93") != std::string::npos,
 			"the fixture document carries no version line");
-		stale.replace(stale.find("version: 92"), std::string("version: 92").size(),
+		stale.replace(stale.find("version: 93"), std::string("version: 93").size(),
 			"version: 91");
 		bool refused = false;
 		try
@@ -18173,6 +18173,270 @@ void protectedServices(smoke::Context const&)
 	}
 }
 
+// #417: service recovery staging. A purely discretionary load that
+// falls below its minimum operable supply is held Shed until the declared
+// dwell, hysteresis, cooling and firm-source gate reopens it, so a
+// capacity that flickers across the threshold cannot toggle the
+// equipment on and off. A restart draws its declared startup surge on
+// top of normal demand, bounded by the actual pool; the pending restart
+// headroom is held out of battery charging so reserves refill only from
+// surplus the recovery does not need. All scenarios drive the existing
+// World tick/snapshot seam and read the recovery stage off the snapshot.
+void recovery(smoke::Context const& context)
+{
+	auto const closeTo = [](double actual, double expected, double tolerance = 1e-6)
+	{ return std::abs(actual - expected) <= tolerance; };
+	auto const constantProfile = [](double level)
+	{ core::ProfileSettings p; p.constantLevel = level; return p; };
+	auto const stepProfile = [](double period, std::vector<std::pair<double, double>> segments)
+	{
+		core::ProfileSettings p;
+		p.periodSeconds = period;
+		for (auto const& segment : segments) p.segments.push_back({segment.first, segment.second});
+		return p;
+	};
+	auto const runOrDiagnose = [](core::World& world, uint64_t ticks, char const* what)
+	{
+		if (world.advanceTicks(ticks)) return;
+		auto const diagnostics = world.getStationSystemsDiagnostics();
+		std::fprintf(stderr, "%s failed: %s\n", what,
+			diagnostics.empty() ? "(no Station diagnostic)" : diagnostics.back().message.c_str());
+		throw std::runtime_error(std::string(what) + " run failed");
+	};
+	auto const massStore = [](std::string id, double capacity, double starting)
+	{
+		core::ResourceStoreSettings s; s.id = std::move(id); s.unit = "kg";
+		s.capacity = capacity; s.startingQualified = starting; return s;
+	};
+	auto const configure = [](core::World& world, core::StationSystemsSettings settings, char const* what)
+	{
+		std::string diagnostic; settings.enabled = true; settings.observationIntervalSeconds = 1.0f;
+		require(world.configureStationSystems(settings, false, &diagnostic),
+			(std::string(what) + " refused: " + diagnostic).c_str());
+	};
+	auto const recoveryLoad = [&](std::string id, double demandKW, double maxCurtailment,
+		double dwell, double hysteresis, double surgeKW, double surgeSeconds, double heatKW)
+	{
+		core::EquipmentLoadSettings s;
+		s.id = std::move(id);
+		s.electricalDemandKW = demandKW;
+		s.operatingProfile = constantProfile(1.0);
+		s.heatOutputKW = heatKW;
+		s.thermalClass = "low";
+		s.coolingDisposition = core::StationCoolingDisposition::Exported;
+		s.criticalFloorKW = 0.0;
+		s.priority = 10;
+		s.maxCurtailment = maxCurtailment;
+		s.recoveryDwellSeconds = dwell;
+		s.recoveryHysteresisFraction = hysteresis;
+		s.restartSurgePowerKW = surgeKW;
+		s.restartSurgeSeconds = surgeSeconds;
+		return s;
+	};
+	auto const solar = [](double capacity, core::ProfileSettings illum)
+	{
+		core::SolarArraySettings s; s.id = "field"; s.capacityKW = capacity; s.illumination = illum; return s;
+	};
+	auto const reservoir = [](std::string id, std::string thermalClass, double startingC, double maxC)
+	{
+		core::ThermalReservoirSettings s; s.id = std::move(id); s.thermalClass = std::move(thermalClass);
+		s.heatCapacityKJPerK = 10000.0; s.startingTemperatureC = startingC;
+		s.minTemperatureC = -50.0; s.maxTemperatureC = maxC; return s;
+	};
+	auto const battery = [](std::string id, double nameplate, double usable, double starting)
+	{
+		core::BatterySettings s; s.id = std::move(id); s.nameplateKWh = nameplate; s.usableKWh = usable;
+		s.startingStoredKWh = starting; s.maxChargeKW = 100.0; s.maxDischargeKW = 100.0; return s;
+	};
+	auto loadSnap = [](core::World& world, std::string const& id) -> core::StationEquipmentLoadSnapshot
+	{
+		for (auto const& l : world.getStationSystemsSnapshot().power.loads)
+			if (l.id == id) return l;
+		throw std::runtime_error("load not found: " + id);
+	};
+
+	// Scenario A: shed on shortage, hold through the dwell even after the
+	// capacity returns, restart once dwell + hysteresis clear, and repeat
+	// the whole cycle on the next low-sun half without drift.
+	{
+		core::World world("RecA", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		// capacity 20 kW: level 0.2 -> 4 kW (below the 10 kW min), level 0.75 -> 15 kW (above the 12 kW restart threshold).
+		settings.solarArrays = { solar(20.0, stepProfile(100.0, {{0.0, 0.2}, {50.0, 0.75}})) };
+		settings.equipmentLoads = { recoveryLoad("rig", 10.0, 0.0, 5.0, 0.2, 0.0, 0.0, 0.0) };
+		configure(world, settings, "recovery A rig");
+		world.resumeSimulation();
+		runOrDiagnose(world, 1500, "recovery A low sun"); // t = 25s
+		{
+			auto const& l = loadSnap(world, "rig");
+			require(l.recoveryStage == core::StationLoadRecoveryStage::Shed,
+				"the load did not shed under the low-sun shortage");
+			require(l.suppliedKW <= 1e-9, "a shed load drew power");
+			require(l.recoveryHoldReason.find("hysteresis") != std::string::npos,
+				"the shed load was not held by the hysteresis headroom");
+		}
+		runOrDiagnose(world, 1560, "recovery A high sun"); // t = 51s
+		{
+			auto const& l = loadSnap(world, "rig");
+			require(l.recoveryStage == core::StationLoadRecoveryStage::Active,
+				"the load did not restart once the dwell and hysteresis cleared");
+			require(closeTo(l.suppliedKW, 10.0), "the restarted load is not fully supplied");
+		}
+		runOrDiagnose(world, 4440, "recovery A second low sun"); // t = 125s
+		require(loadSnap(world, "rig").recoveryStage == core::StationLoadRecoveryStage::Shed,
+			"the load did not shed again on the second low-sun half (repeated incident)");
+		runOrDiagnose(world, 1560, "recovery A second high sun"); // t = 151s
+		require(loadSnap(world, "rig").recoveryStage == core::StationLoadRecoveryStage::Active,
+			"the load did not recover again on the second high-sun half (repeated incident)");
+	}
+
+	// Scenario B: a declared startup surge is drawn on top of normal
+	// demand through a Restoring stage, then the load settles to Active
+	// once the surge duration has elapsed.
+	{
+		core::World world("RecB", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		settings.solarArrays = { solar(20.0, stepProfile(100.0, {{0.0, 0.15}, {50.0, 0.75}})) };
+		// demand 10, min 10, dwell 0, hysteresis 0.1 (restart needs 11), surge 5 kW for 2s.
+		settings.equipmentLoads = { recoveryLoad("surger", 10.0, 0.0, 0.0, 0.1, 5.0, 2.0, 0.0) };
+		configure(world, settings, "recovery B rig");
+		world.resumeSimulation();
+		runOrDiagnose(world, 1500, "recovery B low sun"); // t = 25s
+		require(loadSnap(world, "surger").recoveryStage == core::StationLoadRecoveryStage::Shed,
+			"the surging load did not shed under the low-sun shortage");
+		runOrDiagnose(world, 1560, "recovery B restart"); // t = 51s, mid-Restoring
+		{
+			auto const& l = loadSnap(world, "surger");
+			require(l.recoveryStage == core::StationLoadRecoveryStage::Restoring,
+				"the load is not in the Restoring stage mid-surge");
+			require(closeTo(l.recoverySurgeKW, 5.0), "the startup surge was not drawn at the declared rate");
+			require(closeTo(l.suppliedKW, 10.0), "the Restoring load's normal demand was not supplied");
+			require(l.recoverySecondsRemaining > 0.0 && l.recoverySecondsRemaining <= 2.0,
+				"the surge countdown is not tracking the declared surge duration");
+		}
+		runOrDiagnose(world, 180, "recovery B settle"); // t = 54s, surge done
+		{
+			auto const& l = loadSnap(world, "surger");
+			require(l.recoveryStage == core::StationLoadRecoveryStage::Active,
+				"the load did not settle to Active after the surge elapsed");
+			require(closeTo(l.recoverySurgeKW, 0.0), "surge still drawn after the load went Active");
+		}
+	}
+
+	// Scenario C: a heat-producing load will not restart on a thin firm-
+	// generation supply - the firm-source prerequisite holds it Shed even
+	// though the hysteresis headroom is met, because the restart plus its
+	// surge exceeds what firm generation can carry.
+	{
+		core::World world("RecC", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		// level 0.4 -> 8 kW (shed), level 0.6 -> 12 kW (above the 11 kW hysteresis threshold but below the 15 kW restart+surge).
+		settings.solarArrays = { solar(20.0, stepProfile(100.0, {{0.0, 0.4}, {50.0, 0.6}})) };
+		// heat-producing, dwell 0, hysteresis 0.1 (threshold 11), surge 5 -> restartNeed 15.
+		settings.equipmentLoads = { recoveryLoad("kiln", 10.0, 0.0, 0.0, 0.1, 5.0, 1.0, 5.0) };
+		configure(world, settings, "recovery C rig");
+		world.resumeSimulation();
+		runOrDiagnose(world, 3060, "recovery C"); // t = 51s
+		auto const& l = loadSnap(world, "kiln");
+		require(l.recoveryStage == core::StationLoadRecoveryStage::Shed,
+			"the heat load restarted without enough firm generation");
+		require(l.recoveryHoldReason.find("firm generation") != std::string::npos,
+			"the heat load was not held by the firm-source prerequisite");
+	}
+
+	// Scenario D: a heat-producing load with a heat sink at or above its
+	// maximum service temperature cannot restart - the cooling
+	// qualification holds it Shed even with ample firm generation.
+	{
+		core::World world("RecD", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		settings.thermalReservoirs = { reservoir("hotSink", "low", 40.0, 40.0) }; // at its maximum service temp
+		settings.solarArrays = { solar(20.0, stepProfile(100.0, {{0.0, 0.15}, {50.0, 0.6}})) };
+		auto kiln = recoveryLoad("kiln2", 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0);
+		kiln.heatSinkId = "hotSink";
+		settings.equipmentLoads = { kiln };
+		configure(world, settings, "recovery D rig");
+		world.resumeSimulation();
+		runOrDiagnose(world, 3060, "recovery D"); // t = 51s
+		auto const& l = loadSnap(world, "kiln2");
+		require(l.recoveryStage == core::StationLoadRecoveryStage::Shed,
+			"the heat load restarted onto a sink at or above its maximum service temperature");
+		require(l.recoveryHoldReason.find("heat sink") != std::string::npos,
+			"the heat load was not held by the cooling qualification");
+	}
+
+	// Scenario E: while a load is pending restart, the pending restart
+	// headroom is held out of battery charging, so a depleted reserve
+	// refills only from the surplus the recovery does not need and never
+	// overloads the waiting restart.
+	{
+		core::World world("RecE", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		// level 0.25 -> 5 kW (shed), level 0.6 -> 12 kW (past dwell but below the 15 kW hysteresis threshold).
+		settings.solarArrays = { solar(20.0, stepProfile(100.0, {{0.0, 0.25}, {50.0, 0.6}})) };
+		settings.batteries = { battery("bank", 100.0, 80.0, 10.0) }; // depleted, wants to charge
+		// demand 10, dwell 5, hysteresis 0.5 (threshold 15), no surge.
+		settings.equipmentLoads = { recoveryLoad("waiter", 10.0, 0.0, 5.0, 0.5, 0.0, 0.0, 0.0) };
+		configure(world, settings, "recovery E rig");
+		world.resumeSimulation();
+		runOrDiagnose(world, 3060, "recovery E"); // t = 51s
+		auto const& snap = world.getStationSystemsSnapshot();
+		require(loadSnap(world, "waiter").recoveryStage == core::StationLoadRecoveryStage::Shed,
+			"the waiting load restarted although the pool was below its hysteresis threshold");
+		require(snap.power.recoveryPending,
+			"the recovery-pending flag did not raise while a load was Shed");
+		// Surplus is 12 kW; the 10 kW pending restart headroom is held out,
+		// so the battery charges at most 2 kW, not the full surplus.
+		require(snap.power.batteries[0].lastChargeKW <= 2.0 + 1e-6,
+			"battery charging was not capped by the pending restart headroom");
+		require(snap.power.batteries[0].lastChargeKW > 0.0,
+			"the depleted battery did not charge at all from the leftover surplus");
+	}
+
+	// Scenario F: the authored recovery rules survive the World document
+	// round trip, and the reopened World reproduces the same recovery
+	// behaviour tick-for-tick - persistence and reset stay compatible.
+	{
+		auto const path = context.temporaryRoot() / "recovery-roundtrip.world.yaml";
+		core::World original("RecF", 2, 2);
+		original.pauseSimulation(); original.finishBuild();
+		core::StationSystemsSettings settings;
+		settings.stores = { massStore("ballast", 10.0, 1.0) };
+		settings.solarArrays = { solar(20.0, stepProfile(100.0, {{0.0, 0.2}, {50.0, 0.75}})) };
+		settings.equipmentLoads = { recoveryLoad("rig", 10.0, 0.0, 5.0, 0.2, 3.0, 1.5, 0.0) };
+		configure(original, settings, "recovery F rig");
+		original.resumeSimulation();
+		runOrDiagnose(original, 3180, "recovery F original"); // t = 53s, surge done, recovered Active
+		require(loadSnap(original, "rig").recoveryStage == core::StationLoadRecoveryStage::Active,
+			"the recovery-F original did not reach the recovered state before saving");
+		original.saveTo(path.string());
+		auto const reopened = core::loadWorldDocument(path);
+		require(reopened != nullptr, "the recovery document failed to reopen");
+		require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+			"the authored recovery rules did not survive the document round trip");
+		auto const& reloaded = reopened->getStationSystemsSettings().equipmentLoads.at(0);
+		require(closeTo(reloaded.recoveryDwellSeconds, 5.0)
+			&& closeTo(reloaded.recoveryHysteresisFraction, 0.2)
+			&& closeTo(reloaded.restartSurgePowerKW, 3.0)
+			&& closeTo(reloaded.restartSurgeSeconds, 1.5),
+			"the recovery settings did not round-trip with their declared values");
+		reopened->resumeSimulation();
+		runOrDiagnose(*reopened, 3180, "recovery F reopened"); // t = 53s
+		require(loadSnap(*reopened, "rig").recoveryStage == core::StationLoadRecoveryStage::Active,
+			"the reopened World did not reproduce the same recovery stage as the original");
+	}
+}
+
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power},
@@ -18185,7 +18449,7 @@ int main(int argc, char** argv)
 		{"batteriesEclipse", batteriesEclipse}, {"batteriesLimited", batteriesLimited},
 		{"batteriesLosses", batteriesLosses}, {"batteriesDischarging", batteriesDischarging},
 		{"batteriesQuick", batteriesQuick},
-		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"nutrientConservation", nutrientConservation}, {"bioContainment", bioContainment}, {"outages", outages}, {"failures", failures}, {"dispatch", dispatch}, {"protectedServices", protectedServices}};
+		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"nutrientConservation", nutrientConservation}, {"bioContainment", bioContainment}, {"outages", outages}, {"failures", failures}, {"dispatch", dispatch}, {"protectedServices", protectedServices}, {"recovery", recovery}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

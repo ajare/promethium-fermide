@@ -226,6 +226,10 @@ namespace core
 					lua_pushnumber(state, load.criticalFloorKW); lua_setfield(state, -2, "criticalFloorKW");
 					lua_pushinteger(state, load.priority); lua_setfield(state, -2, "priority");
 					lua_pushnumber(state, load.maxCurtailment); lua_setfield(state, -2, "maxCurtailment");
+					lua_pushnumber(state, load.recoveryDwellSeconds); lua_setfield(state, -2, "recoveryDwellSeconds");
+					lua_pushnumber(state, load.recoveryHysteresisFraction); lua_setfield(state, -2, "recoveryHysteresisFraction");
+					lua_pushnumber(state, load.restartSurgePowerKW); lua_setfield(state, -2, "restartSurgePowerKW");
+					lua_pushnumber(state, load.restartSurgeSeconds); lua_setfield(state, -2, "restartSurgeSeconds");
 					lua_pushstring(state, load.heatSinkId.c_str()); lua_setfield(state, -2, "heatSinkId");
 					lua_createtable(state, static_cast<int>(load.materialExchanges.size()), 0);
 					for (size_t flow = 0; flow < load.materialExchanges.size(); ++flow)
@@ -1547,6 +1551,22 @@ namespace core
 				return refuse(where + " critical floor exceeds the declared electrical demand");
 			if (!std::isfinite(load.maxCurtailment) || load.maxCurtailment < 0.0 || load.maxCurtailment > 1.0)
 				return refuse(where + " allowed curtailment must be finite and from 0 to 1");
+			// #417 recovery settings. All four default to zero (no recovery
+			// protection, clean restart). When declared they must be finite
+			// and within range; the hysteresis fraction is capped at 1 so a
+			// restart never demands more than double the load's own demand as
+			// spare headroom.
+			if (!std::isfinite(load.recoveryDwellSeconds) || load.recoveryDwellSeconds < 0.0)
+				return refuse(where + " recovery dwell must be finite and non-negative");
+			if (!std::isfinite(load.recoveryHysteresisFraction) || load.recoveryHysteresisFraction < 0.0
+				|| load.recoveryHysteresisFraction > 1.0)
+				return refuse(where + " recovery hysteresis fraction must be finite and from 0 to 1");
+			if (!std::isfinite(load.restartSurgePowerKW) || load.restartSurgePowerKW < 0.0)
+				return refuse(where + " restart surge power must be finite and non-negative");
+			if (!std::isfinite(load.restartSurgeSeconds) || load.restartSurgeSeconds < 0.0)
+				return refuse(where + " restart surge seconds must be finite and non-negative");
+			if (load.restartSurgeSeconds > 0.0 && load.restartSurgePowerKW <= 0.0)
+				return refuse(where + " restart surge seconds are declared with no surge power");
 			if (!validateStationProfile(load.operatingProfile, where + " operating profile", diagnostic))
 				return false;
 			if (load.materialExchanges.size() > MaxStationLoadMaterialExchanges)
@@ -3545,6 +3565,21 @@ namespace core
 			std::string lastShortfallReason;
 			bool lastCriticalUnmet{false};
 			StationTransferStatus status{StationTransferStatus::Idle};
+			// #417 recovery machine state. recoveryStage is the stage the
+			// allocation passes ran against this tick (a Shed load is skipped,
+			// a Restoring load is allocated its normal demand and draws its
+			// surge at the end of the tick). shedSinceElapsed is the elapsed
+			// time the load entered Shed; surgeRemainingSeconds is the surge
+			// budget still owed while Restoring; lastSurgeKW is the surge
+			// actually drawn this tick; lastRecoveryHoldReason explains why a
+			// Shed load is held from restarting. Only purely discretionary
+			// loads (criticalFloorKW <= 0) are recovery-managed; every other
+			// load stays Active with these at their defaults.
+			StationLoadRecoveryStage recoveryStage{StationLoadRecoveryStage::Active};
+			double shedSinceElapsed{0.0};
+			double surgeRemainingSeconds{0.0};
+			double lastSurgeKW{0.0};
+			std::string lastRecoveryHoldReason;
 		};
 		// The authoritative ledger of one configured battery bank (#394).
 		// Discharge covers the load demand generation could not reach, on
@@ -4739,6 +4774,13 @@ namespace core
 		double lastProtectedUnmetTotalKW{0.0};
 		std::map<std::string, bool> lastProtectedServiceUnmet;
 		std::vector<StationProtectedServiceSnapshot> lastProtectedServices;
+		// #417: the recovery staging scalars. They cross the tick boundary
+		// like the other allocation results, so a rolled-back tick restores
+		// them exactly and a failed recovery pass never leaks a partial
+		// stage summary.
+		bool lastRecoveryPending{false};
+		int lastRecoveringCount{0};
+		double lastRecoverySurgeKW{0.0};
 		std::array<std::unique_ptr<ScriptObject>, 4> objects;
 		StationSystemsSnapshot snapshot;
 		std::vector<StationSystemsEvent> events;
@@ -4806,6 +4848,9 @@ namespace core
 			auto const committedProtectedUnmetTotalKW = lastProtectedUnmetTotalKW;
 			auto const committedProtectedServiceUnmet = lastProtectedServiceUnmet;
 			auto const committedProtectedServices = lastProtectedServices;
+			auto const committedRecoveryPending = lastRecoveryPending;
+			auto const committedRecoveringCount = lastRecoveringCount;
+			auto const committedRecoverySurgeKW = lastRecoverySurgeKW;
 			if (runLedger(tick, seconds, system, violation)) return true;
 			transfers = committedTransfers;
 			conversions = committedConversions;
@@ -4846,6 +4891,9 @@ namespace core
 			lastProtectedUnmetTotalKW = committedProtectedUnmetTotalKW;
 			lastProtectedServiceUnmet = committedProtectedServiceUnmet;
 			lastProtectedServices = committedProtectedServices;
+			lastRecoveryPending = committedRecoveryPending;
+			lastRecoveringCount = committedRecoveringCount;
+			lastRecoverySurgeKW = committedRecoverySurgeKW;
 			return false;
 		}
 		// Apply every authored transfer and conversion to a staged copy of
@@ -6410,7 +6458,22 @@ namespace core
 				load.lastMaterialComputed = false;
 				load.lastMaterialRefused = false;
 				load.lastMaterialReserved = false;
+				load.lastSurgeKW = 0.0;
 				for (auto& exchange : load.exchanges) exchange.lastReserved = 0.0;
+				// #417: a load held in Shed draws nothing this tick - it is
+				// not offered to the pool at all. Its demand is still
+				// reported (lastRequestedKW) so the window shows what it
+				// wants, but it is not admitted, produces no heat and drives
+				// no dispatch demand. The recovery gate at the end of the
+				// tick decides whether it restarts next tick. Only purely
+				// discretionary loads are ever Shed, so no protected floor is
+				// affected by the skip.
+				if (load.recoveryStage == StationLoadRecoveryStage::Shed)
+				{
+					load.lastAdmitted = false;
+					load.lastBlockReason = "shed: awaiting recovery";
+					continue;
+				}
 				if (load.lastRequestedKW <= 0.0) continue;
 				auto const floor = std::min(load.authored.criticalFloorKW, load.lastRequestedKW);
 				// A cooling-blocked load is refused admission and receives no
@@ -10318,6 +10381,173 @@ namespace core
 						< reservoir.authored.minTemperatureC - 1e-9;
 				}
 			}
+			// #417 recovery machine. Runs after every service has drawn and
+			// the surplus is known, before battery charging, so a restart
+			// surge is funded from real spare capacity and the charging pass
+			// never competes the recovery for it. Only purely discretionary
+			// loads (criticalFloorKW <= 0) are recovery-managed; a load with
+			// a protected floor is restored by the protected pass and always
+			// reports Active. The stage set here takes effect next tick: a
+			// load released to Restoring is allocated its normal demand next
+			// tick and draws its surge here the tick after that, so recovery
+			// is staged rather than instantaneous.
+			auto const dtSeconds = static_cast<double>(seconds);
+			double recoverySurgeTotalKW{0.0};
+			int recoveringCount{0};
+			bool recoveryPending{false};
+			// (A) Startup surge. A Restoring load draws its declared surge
+			// on top of the normal demand it was allocated, from the
+			// remaining firm generation and battery pool. The surge is a
+			// hard restart requirement: if the pool cannot cover it the
+			// restart is abandoned rather than run half-started, and the
+			// load returns to Shed to wait out its dwell again.
+			for (auto const index : loadOrder)
+			{
+				auto& load = loads[index];
+				if (load.authored.criticalFloorKW > 0.0) continue;
+				if (load.recoveryStage != StationLoadRecoveryStage::Restoring) continue;
+				auto const minOperating = load.lastRequestedKW * (1.0 - load.authored.maxCurtailment);
+				if (load.lastSuppliedKW + 1e-12 < minOperating)
+				{
+					load.recoveryStage = StationLoadRecoveryStage::Shed;
+					load.shedSinceElapsed = elapsed;
+					load.surgeRemainingSeconds = 0.0;
+					load.lastSurgeKW = 0.0;
+					load.lastRecoveryHoldReason =
+						"restart failed: the pool could not sustain the load's own demand";
+					continue;
+				}
+				if (load.surgeRemainingSeconds <= 0.0)
+				{
+					load.recoveryStage = StationLoadRecoveryStage::Active;
+					load.lastSurgeKW = 0.0;
+					load.lastRecoveryHoldReason.clear();
+					continue;
+				}
+				auto const surge = load.authored.restartSurgePowerKW;
+				auto const fromGeneration = std::min(surge, availableGeneration);
+				availableGeneration -= fromGeneration;
+				auto const ask = surge - fromGeneration;
+				auto const fromBattery = drawBatteries(ask);
+				auto const drawn = fromGeneration + fromBattery;
+				load.lastSurgeKW = drawn;
+				recoverySurgeTotalKW += drawn;
+				if (drawn + 1e-12 >= surge)
+				{
+					load.surgeRemainingSeconds -= dtSeconds;
+					if (load.surgeRemainingSeconds <= 0.0)
+					{
+						load.surgeRemainingSeconds = 0.0;
+						load.recoveryStage = StationLoadRecoveryStage::Active;
+						load.lastRecoveryHoldReason.clear();
+					}
+				}
+				else
+				{
+					load.recoveryStage = StationLoadRecoveryStage::Shed;
+					load.shedSinceElapsed = elapsed;
+					load.surgeRemainingSeconds = 0.0;
+					load.lastRecoveryHoldReason =
+						"restart failed: the pool could not cover the startup surge";
+				}
+			}
+			// (B) An Active load that could not reach its minimum operable
+			// supply this tick falls into Shed and holds there until the gate
+			// reopens, so a capacity that flickers across the threshold
+			// cannot toggle the equipment on and off each tick.
+			for (auto const index : loadOrder)
+			{
+				auto& load = loads[index];
+				if (load.authored.criticalFloorKW > 0.0) continue;
+				if (load.recoveryStage != StationLoadRecoveryStage::Active) continue;
+				if (load.lastRequestedKW <= 0.0) continue;
+				auto const minOperating = load.lastRequestedKW * (1.0 - load.authored.maxCurtailment);
+				if (load.lastSuppliedKW + 1e-12 < minOperating)
+				{
+					load.recoveryStage = StationLoadRecoveryStage::Shed;
+					load.shedSinceElapsed = elapsed;
+					load.lastRecoveryHoldReason =
+						"shed: supply fell below the minimum operable level";
+				}
+			}
+			// (C) Recovery gate. A Shed load restarts only when its dwell
+			// has elapsed, the spare pool shows the declared hysteresis
+			// headroom above its demand, its cooling is qualified, and - for
+			// a heat-producing load - firm generation can carry the restart
+			// plus its surge. One load is released per tick, in priority
+			// order, so several restarts never surge together.
+			bool restartSlotOpen{true};
+			double pendingRestartHeadroomKW{0.0};
+			for (auto const index : loadOrder)
+			{
+				auto& load = loads[index];
+				if (load.authored.criticalFloorKW > 0.0) continue;
+				if (load.recoveryStage != StationLoadRecoveryStage::Shed) continue;
+				recoveryPending = true;
+				if (load.lastRequestedKW <= 0.0) continue;
+				auto const restartNeed = load.lastRequestedKW + load.authored.restartSurgePowerKW;
+				if (elapsed + 1e-12 < load.shedSinceElapsed + load.authored.recoveryDwellSeconds)
+				{
+					load.lastRecoveryHoldReason = "restart held: dwell not elapsed";
+					continue;
+				}
+				// Past dwell: this load is eligible to restart soon, so hold
+				// its restart need out of battery charging below.
+				pendingRestartHeadroomKW = std::max(pendingRestartHeadroomKW, restartNeed);
+				if (!restartSlotOpen) continue;
+				auto const headroom = load.lastRequestedKW
+					* (1.0 + load.authored.recoveryHysteresisFraction);
+				auto const poolKW = availableGeneration + batteryDeliverableKW();
+				if (poolKW + 1e-12 < headroom)
+				{
+					load.lastRecoveryHoldReason =
+						"restart held: spare pool below the hysteresis headroom";
+					continue;
+				}
+				if (load.authored.heatOutputKW > 0.0)
+				{
+					if (load.hasHeatSink)
+					{
+						auto const& sink = reservoirs[load.heatSinkIndex];
+						if (sink.temperatureC + 1e-9 >= sink.authored.maxTemperatureC)
+						{
+							load.lastRecoveryHoldReason =
+								"restart held: heat sink at or above its maximum service temperature";
+							continue;
+						}
+					}
+					if (availableGeneration + 1e-12 < restartNeed)
+					{
+						load.lastRecoveryHoldReason =
+							"restart held: firm generation cannot carry the restart and surge";
+						continue;
+					}
+				}
+				load.recoveryStage = StationLoadRecoveryStage::Restoring;
+				load.surgeRemainingSeconds = load.authored.restartSurgeSeconds;
+				load.lastRecoveryHoldReason.clear();
+				restartSlotOpen = false;
+			}
+			// Tally the recovery stage for the power snapshot.
+			for (auto const& load : loads)
+			{
+				if (load.authored.criticalFloorKW > 0.0) continue;
+				if (load.recoveryStage == StationLoadRecoveryStage::Shed) recoveryPending = true;
+				else if (load.recoveryStage == StationLoadRecoveryStage::Restoring)
+				{
+					recoveryPending = true;
+					recoveringCount += 1;
+				}
+			}
+			lastRecoveryPending = recoveryPending;
+			lastRecoveringCount = recoveringCount;
+			lastRecoverySurgeKW = recoverySurgeTotalKW;
+			// Reserve the pending restart headroom out of the charging pool:
+			// while a load is waiting to restart, the firm generation it will
+			// need is not charged into the batteries, so reserves refill only
+			// from the surplus the recovery does not need and never overload
+			// a service that is still coming back.
+			auto const recoveryChargeReserveKW = recoveryPending ? pendingRestartHeadroomKW : 0.0;
 			// Charge from the surplus left after every allocation: batteries
 			// take only generation no load took, within the charge power
 			// limit, the headroom below nameplate and the charge efficiency.
@@ -10329,7 +10559,12 @@ namespace core
 				if (battery.lastDischargeKW > 0.0) continue;
 				auto const headroom = battery.authored.nameplateKWh - battery.stored;
 				if (headroom <= 0.0) continue;
-				auto const busKW = std::min(battery.authored.maxChargeKW, availableGeneration);
+				// #417: during a recovery stage the pending restart headroom
+				// is held out of the charge pool, so charging never consumes
+				// the firm generation a waiting load needs to restart.
+				auto const chargeableKW = std::max(0.0, availableGeneration - recoveryChargeReserveKW);
+				if (chargeableKW <= 0.0) continue;
+				auto const busKW = std::min(battery.authored.maxChargeKW, chargeableKW);
 				if (busKW <= 0.0) continue;
 				auto const storedGain = std::min(busKW * hours
 					* battery.authored.chargeEfficiency, headroom);
@@ -13400,6 +13635,15 @@ namespace core
 			loadResult.admitted = load.lastAdmitted;
 			loadResult.blockReason = load.lastBlockReason;
 			loadResult.status = load.status;
+			// #417 recovery observability.
+			loadResult.recoveryStage = load.recoveryStage;
+			loadResult.recoverySurgeKW = load.lastSurgeKW;
+			loadResult.recoverySecondsRemaining = load.recoveryStage
+				== StationLoadRecoveryStage::Shed
+				? std::max(0.0, load.authored.recoveryDwellSeconds
+					- (mImpl->snapshot.elapsedSeconds - load.shedSinceElapsed))
+				: load.surgeRemainingSeconds;
+			loadResult.recoveryHoldReason = load.lastRecoveryHoldReason;
 			for (auto const& exchange : load.exchanges)
 				loadResult.materialExchanges.push_back({mImpl->stores[exchange.storeIndex].authored.id,
 					mImpl->stores[exchange.storeIndex].authored.unit,
@@ -13474,6 +13718,10 @@ namespace core
 		result.power.protectedUnmetKW = mImpl->lastProtectedUnmetTotalKW;
 		result.power.protectedUnmet = mImpl->lastProtectedUnmetTotalKW > 1e-12;
 		result.power.protectedServices = mImpl->lastProtectedServices;
+		// #417 recovery staging summary.
+		result.power.recoveryPending = mImpl->lastRecoveryPending;
+		result.power.recoveringCount = mImpl->lastRecoveringCount;
+		result.power.recoverySurgeKW = mImpl->lastRecoverySurgeKW;
 		// Coolant loop electrical service rode the same pool as external
 		// loads; publish the totals so the window can show the loop draw
 		// beside the load draw (#396).

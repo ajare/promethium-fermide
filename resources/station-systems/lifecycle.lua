@@ -411,6 +411,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         starting_constituents = {}, constituent_loss = {},
         constituent_delivered = {},
         solar = {}, loads = {}, load_order = {}, batteries = {},
+        -- #417 recovery staging scalars (mirrored from the host ledger).
+        recoveryPending = false, recoveringCount = 0, recoverySurge = 0,
         deliveries = {}, reservoirs = {}, radiators = {}, coolant_loops = {},
         chillers = {}, generators = {}, atmospheres = {}, airlock_cycles = {},
         crews = {},
@@ -1173,6 +1175,30 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             and load.maxCurtailment == load.maxCurtailment
             and load.maxCurtailment >= 0 and load.maxCurtailment <= 1,
             'equipment load allowed curtailment must be finite and from 0 to 1')
+        -- #417 recovery settings mirror the host: all default to zero
+        -- (no recovery protection, clean restart); when declared they
+        -- must be finite and in range, and surge seconds need surge power.
+        local recoveryDwell = load.recoveryDwellSeconds or 0
+        local recoveryHysteresis = load.recoveryHysteresisFraction or 0
+        local restartSurgePower = load.restartSurgePowerKW or 0
+        local restartSurgeSeconds = load.restartSurgeSeconds or 0
+        assert(type(recoveryDwell) == 'number' and recoveryDwell == recoveryDwell
+            and recoveryDwell >= 0 and recoveryDwell < math.huge,
+            'equipment load recovery dwell must be finite and non-negative')
+        assert(type(recoveryHysteresis) == 'number'
+            and recoveryHysteresis == recoveryHysteresis
+            and recoveryHysteresis >= 0 and recoveryHysteresis <= 1,
+            'equipment load recovery hysteresis fraction must be finite and from 0 to 1')
+        assert(type(restartSurgePower) == 'number'
+            and restartSurgePower == restartSurgePower
+            and restartSurgePower >= 0 and restartSurgePower < math.huge,
+            'equipment load restart surge power must be finite and non-negative')
+        assert(type(restartSurgeSeconds) == 'number'
+            and restartSurgeSeconds == restartSurgeSeconds
+            and restartSurgeSeconds >= 0 and restartSurgeSeconds < math.huge,
+            'equipment load restart surge seconds must be finite and non-negative')
+        assert(not (restartSurgeSeconds > 0 and restartSurgePower <= 0),
+            'equipment load restart surge seconds are declared with no surge power')
         checkProfile(load.profile, 'equipment load ' .. load.id .. ' operating profile')
         local exchanges = {}
         for flowIndex = 1, #(load.exchanges or {}) do
@@ -1216,6 +1242,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             criticalFloorKW = load.criticalFloorKW,
             priority = load.priority,
             maxCurtailment = load.maxCurtailment,
+            recoveryDwellSeconds = recoveryDwell,
+            recoveryHysteresisFraction = recoveryHysteresis,
+            restartSurgePowerKW = restartSurgePower,
+            restartSurgeSeconds = restartSurgeSeconds,
             exchanges = exchanges,
             heatSink = heatSink,
             lastLevel = 0,
@@ -1232,6 +1262,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             heatExported = 0,
             unmetCooling = 0,
             admitted = false,
+            -- #417 recovery machine state: 'active', 'shed' or 'restoring'.
+            recoveryStage = 'active',
+            shedSince = 0,
+            surgeRemaining = 0,
+            lastSurge = 0,
+            recoveryHold = '',
         }
     end
     -- Battery banks: nameplate energy is the installed total, usable
@@ -4808,6 +4844,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             load.lastLevel = evaluateProfile(load.profile, elapsed)
             load.requested = load.demandKW * load.lastLevel
             load.admitted = load.cooling == 'exported'
+            -- #417: a load held in Shed draws nothing this tick - it is
+            -- not offered to the pool. Its demand is still reported so the
+            -- window shows what it wants, but it is not admitted, produces
+            -- no heat and drives no dispatch demand. Only purely
+            -- discretionary loads are ever Shed, so no protected floor is
+            -- affected by the skip.
+            if load.recoveryStage == 'shed' then
+                load.admitted = false
+            end
             load.unmetCritical = 0
             load.shortfall = ''
             load.materialFraction = 1
@@ -4815,6 +4860,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             load.materialComputed = false
             load.materialRefused = false
             load.materialReserved = false
+            load.lastSurge = 0
             for _, exchange in ipairs(load.exchanges) do exchange.lastReserved = 0 end
             supplied[index] = 0
             if not load.admitted and load.requested > 0 then
@@ -7674,6 +7720,141 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             assert(isFinite(loop.temperature) and isFinite(loop.extractedKJ),
                 "coolant loop '" .. loop.id .. "' integrated result is not finite")
         end
+        -- #417 recovery machine, mirroring the host ledger. Runs after
+        -- every service has drawn and the surplus is known, before battery
+        -- charging, so a restart surge is funded from real spare capacity
+        -- and the charging pass never competes the recovery for it. Only
+        -- purely discretionary loads (criticalFloorKW <= 0) are recovery-
+        -- managed; a load with a protected floor is restored by the
+        -- protected pass and always reports 'active'.
+        local recoverySurgeTotal = 0
+        local recoveringCount = 0
+        local recoveryPending = false
+        -- (A) Startup surge: a Restoring load draws its declared surge on
+        -- top of the normal demand it was allocated, from the remaining
+        -- firm generation and battery pool. The surge is a hard restart
+        -- requirement: if the pool cannot cover it the restart is
+        -- abandoned rather than run half-started.
+        for _, index in ipairs(self.load_order) do
+            local load = self.loads[index]
+            if load.criticalFloorKW <= 0 and load.recoveryStage == 'restoring' then
+                local minOperating = load.requested * (1 - load.maxCurtailment)
+                if (supplied[index] or 0) + 1e-12 < minOperating then
+                    load.recoveryStage = 'shed'
+                    load.shedSince = elapsed
+                    load.surgeRemaining = 0
+                    load.lastSurge = 0
+                    load.recoveryHold =
+                        "restart failed: the pool could not sustain the load's own demand"
+                elseif load.surgeRemaining <= 0 then
+                    load.recoveryStage = 'active'
+                    load.lastSurge = 0
+                    load.recoveryHold = ''
+                else
+                    local surge = load.restartSurgePowerKW
+                    local fromGeneration = math.min(surge, generation)
+                    generation = generation - fromGeneration
+                    local ask = surge - fromGeneration
+                    local fromBattery = drawBatteries(self, ask, fixed_hours)
+                    local drawn = fromGeneration + fromBattery
+                    load.lastSurge = drawn
+                    recoverySurgeTotal = recoverySurgeTotal + drawn
+                    if drawn + 1e-12 >= surge then
+                        load.surgeRemaining = load.surgeRemaining - fixed_seconds
+                        if load.surgeRemaining <= 0 then
+                            load.surgeRemaining = 0
+                            load.recoveryStage = 'active'
+                            load.recoveryHold = ''
+                        end
+                    else
+                        load.recoveryStage = 'shed'
+                        load.shedSince = elapsed
+                        load.surgeRemaining = 0
+                        load.recoveryHold =
+                            'restart failed: the pool could not cover the startup surge'
+                    end
+                end
+            end
+        end
+        -- (B) An Active load that could not reach its minimum operable
+        -- supply this tick falls into Shed and holds there until the gate
+        -- reopens, so a capacity that flickers across the threshold
+        -- cannot toggle the equipment on and off each tick.
+        for _, index in ipairs(self.load_order) do
+            local load = self.loads[index]
+            if load.criticalFloorKW <= 0 and load.recoveryStage == 'active'
+                and load.requested > 0 then
+                local minOperating = load.requested * (1 - load.maxCurtailment)
+                if (supplied[index] or 0) + 1e-12 < minOperating then
+                    load.recoveryStage = 'shed'
+                    load.shedSince = elapsed
+                    load.recoveryHold = 'shed: supply fell below the minimum operable level'
+                end
+            end
+        end
+        -- (C) Recovery gate: a Shed load restarts only when its dwell has
+        -- elapsed, the spare pool shows the declared hysteresis headroom
+        -- above its demand, its cooling is qualified, and - for a heat-
+        -- producing load - firm generation can carry the restart plus its
+        -- surge. One load is released per tick, in priority order.
+        local restartSlotOpen = true
+        local pendingRestartHeadroom = 0
+        for _, index in ipairs(self.load_order) do
+            local load = self.loads[index]
+            if load.criticalFloorKW <= 0 and load.recoveryStage == 'shed' then
+                recoveryPending = true
+                if load.requested > 0 then
+                    local restartNeed = load.requested + load.restartSurgePowerKW
+                    if elapsed + 1e-12 < load.shedSince + load.recoveryDwellSeconds then
+                        load.recoveryHold = 'restart held: dwell not elapsed'
+                    else
+                        pendingRestartHeadroom = math.max(pendingRestartHeadroom, restartNeed)
+                        if not restartSlotOpen then
+                            -- held: another restart already used this tick's slot
+                        else
+                            local headroom = load.requested * (1 + load.recoveryHysteresisFraction)
+                            local poolKW = generation + batteryDeliverableKW(self, fixed_hours)
+                            local coolingOk = true
+                            local holdReason = ''
+                            if load.heatKW > 0 then
+                                if load.heatSink ~= nil and load.heatSink
+                                    and load.heatSink.temperature + 1e-9 >= load.heatSink.maxTemperature then
+                                    coolingOk = false
+                                    holdReason = 'restart held: heat sink at or above its maximum service temperature'
+                                elseif generation + 1e-12 < restartNeed then
+                                    coolingOk = false
+                                    holdReason = 'restart held: firm generation cannot carry the restart and surge'
+                                end
+                            end
+                            if poolKW + 1e-12 < headroom then
+                                load.recoveryHold = 'restart held: spare pool below the hysteresis headroom'
+                            elseif not coolingOk then
+                                load.recoveryHold = holdReason
+                            else
+                                load.recoveryStage = 'restoring'
+                                load.surgeRemaining = load.restartSurgeSeconds
+                                load.recoveryHold = ''
+                                restartSlotOpen = false
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        for _, load in ipairs(self.loads) do
+            if load.criticalFloorKW <= 0 then
+                if load.recoveryStage == 'shed' then
+                    recoveryPending = true
+                elseif load.recoveryStage == 'restoring' then
+                    recoveryPending = true
+                    recoveringCount = recoveringCount + 1
+                end
+            end
+        end
+        self.recoveryPending = recoveryPending
+        self.recoveringCount = recoveringCount
+        self.recoverySurge = recoverySurgeTotal
+        local recoveryChargeReserve = recoveryPending and pendingRestartHeadroom or 0
         -- Charge from the surplus left after every allocation: batteries
         -- take only generation no load took, within the charge power
         -- limit, the headroom below nameplate and the charge efficiency.
@@ -7683,7 +7864,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             if not batteryDisabled(battery) and generation > 0 and battery.last_discharge <= 0 then
                 local headroom = battery.nameplateKWh - battery.stored
                 if headroom > 0 then
-                    local busKW = math.min(battery.maxChargeKW, generation)
+                    -- #417: during a recovery stage the pending restart
+                    -- headroom is held out of the charge pool.
+                    local chargeable = math.max(0, generation - recoveryChargeReserve)
+                    local busKW = math.min(battery.maxChargeKW, chargeable)
                     if busKW > 0 then
                         local storedGain = math.min(busKW * fixed_hours
                             * battery.chargeEfficiency, headroom)

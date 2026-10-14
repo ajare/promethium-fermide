@@ -392,6 +392,29 @@ namespace core
 		double criticalFloorKW{0.0};    // protected minimum supply, <= demand
 		int priority{0};                // higher allocates first
 		double maxCurtailment{1.0};     // allowed curtailment fraction, [0, 1]
+		// #417 recovery: the declared restoration rules for a purely
+		// discretionary load (criticalFloorKW <= 0). A load that was
+		// running and could not be supplied enters Shed and stays there -
+		// drawing nothing - until the declared recovery gate opens, so a
+		// capacity that flickers across the shed threshold cannot toggle
+		// the equipment on and off each tick. recoveryDwellSeconds is the
+		// minimum time the load must have been shed before a restart is
+		// attempted. recoveryHysteresisFraction is the headroom above the
+		// load's own demand the spare pool must show before the load may
+		// restart: the restart threshold is demand * (1 + hysteresis),
+		// strictly above the shed threshold, and that gap is what breaks
+		// the oscillation. restartSurgePowerKW and restartSurgeSeconds
+		// declare the startup surge the load draws on top of its normal
+		// demand while Restoring; zero surge is a clean restart. All four
+		// default to zero, which reproduces the pre-#417 behaviour of
+		// re-attempting every tick with no surge. These rules are read
+		// only for purely discretionary loads: a load with a protected
+		// floor is restored by the protected pass and is never delayed by
+		// the recovery machine.
+		double recoveryDwellSeconds{0.0};     // minimum shed time before restart, >= 0
+		double recoveryHysteresisFraction{0.0}; // spare headroom above demand, [0, 1]
+		double restartSurgePowerKW{0.0};      // startup surge on top of demand, >= 0
+		double restartSurgeSeconds{0.0};      // surge duration while Restoring, >= 0
 		std::vector<EquipmentMaterialExchangeSettings> materialExchanges;
 		// The thermal reservoir that receives this load's emitted heat
 		// (#395). Empty keeps the pre-#395 behaviour: the heat leaves the
@@ -1850,6 +1873,18 @@ namespace core
 	// per-exchange unmet material. A cooling-infeasible load is not
 	// admitted: it draws no power and its cooling need stays visible as
 	// unmet cooling.
+	// The recovery stage of a purely discretionary External load (#417).
+	// Active is normal operation. Shed is a supply refusal held after the
+	// load could not be served: it draws nothing and stays put until the
+	// declared dwell, hysteresis, cooling and firm-source gate opens. A
+	// load with a protected critical floor is never recovery-managed - the
+	// protected pass restores it - so it always reports Active.
+	enum class StationLoadRecoveryStage : std::uint8_t
+	{
+		Active,
+		Shed,
+		Restoring,
+	};
 	struct StationEquipmentLoadSnapshot
 	{
 		std::string id;
@@ -1876,6 +1911,16 @@ namespace core
 		bool admitted{false};
 		std::string blockReason;
 		StationTransferStatus status{StationTransferStatus::Idle};
+		// #417 recovery observability: the load's current recovery stage,
+		// the startup surge it drew this tick while Restoring, the seconds
+		// still owed before the stage advances (dwell while Shed, surge
+		// while Restoring), and the reason a Shed load is being held from
+		// restarting. A non-recovery-managed load reports Active with these
+		// at their zero/empty defaults.
+		StationLoadRecoveryStage recoveryStage{StationLoadRecoveryStage::Active};
+		double recoverySurgeKW{0.0};
+		double recoverySecondsRemaining{0.0};
+		std::string recoveryHoldReason;
 		std::vector<StationConversionFlowSnapshot> materialExchanges;
 		bool operator==(StationEquipmentLoadSnapshot const&) const = default;
 	};
@@ -2091,6 +2136,17 @@ namespace core
 		double protectedUnmetKW{0.0};
 		bool protectedUnmet{false};
 		std::vector<StationProtectedServiceSnapshot> protectedServices;
+		// #417 recovery staging summary. recoveryPending is true while any
+		// purely discretionary load is Shed or Restoring - the station is in
+		// a recovery stage rather than steady state. recoveringCount counts
+		// loads currently Restoring, and recoverySurgeKW is the total startup
+		// surge those loads drew this tick. The surge is held out of battery
+		// charging so depleted reserves refill only from the surplus the
+		// recovery does not need, never overloading a service that is still
+		// coming back.
+		bool recoveryPending{false};
+		int recoveringCount{0};
+		double recoverySurgeKW{0.0};
 		std::vector<StationSolarSourceSnapshot> sources;
 		std::vector<StationEquipmentLoadSnapshot> loads;
 		std::vector<StationBatterySnapshot> batteries;

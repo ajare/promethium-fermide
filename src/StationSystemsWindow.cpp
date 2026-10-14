@@ -404,6 +404,17 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		ImGui::InputInt(("Load " + row + " priority").c_str(), &load.priority);
 		ImGui::InputDouble(("Load " + row + " max curtailment").c_str(),
 			&load.maxCurtailment, 0.0, 0.0, "%.3f");
+		// #417 recovery rules (purely discretionary loads only; a load
+		// with a protected floor is restored by the protected pass). All
+		// default to zero: no dwell/hysteresis, clean restart.
+		ImGui::InputDouble(("Load " + row + " recovery dwell (s)").c_str(),
+			&load.recoveryDwellSeconds, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Load " + row + " recovery hysteresis fraction").c_str(),
+			&load.recoveryHysteresisFraction, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Load " + row + " restart surge power (kW)").c_str(),
+			&load.restartSurgePowerKW, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Load " + row + " restart surge seconds").c_str(),
+			&load.restartSurgeSeconds, 0.0, 0.0, "%.3f");
 		char heatSinkBuffer[core::MaxStationStoreIdLength + 1]{};
 		std::strncpy(heatSinkBuffer, load.heatSinkId.c_str(), core::MaxStationStoreIdLength);
 		if (ImGui::InputText(("Load " + row + " heat sink").c_str(),
@@ -2607,6 +2618,20 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			ImGui::Text("  exchange %s (%s): requested %.3f, completed %.3f, unmet %.3f",
 				flow.storeId.c_str(), flow.unit.c_str(), flow.requested, flow.completed,
 				flow.unmet);
+		// #417: the load's recovery stage. A purely discretionary load that
+		// fell below its minimum operable supply is held Shed until the
+		// dwell, hysteresis, cooling and firm-source gate reopens it; a
+		// Restoring load is drawing its startup surge. Loads with a
+		// protected floor are never recovery-managed and always show Active.
+		if (load.recoveryStage != core::StationLoadRecoveryStage::Active)
+		{
+			char const* stage = load.recoveryStage == core::StationLoadRecoveryStage::Shed
+				? "SHED" : "RESTORING";
+			ImGui::Text("  recovery %s: %.1f s remaining, surge %.3f kW%s%s",
+				stage, load.recoverySecondsRemaining, load.recoverySurgeKW,
+				!load.recoveryHoldReason.empty() ? " | held: " : "",
+				!load.recoveryHoldReason.empty() ? load.recoveryHoldReason.c_str() : "");
+		}
 	}
 	ImGui::Text("Power totals: generation %.3f kW, requested %.3f, supplied %.3f, unmet %.3f, unmet critical %.3f, surplus %.3f, exported heat %.3f kW, battery discharge %.3f kW, battery charge %.3f kW, battery shortfall %.3f kW, coolant pump %.3f kW, freeze heating %.3f kW, chiller power %.3f kW, generator output %.3f kW, generator startup %.3f kW, generator waste %.3f kW, generator decay %.3f kW",
 		snapshot.power.availableGenerationKW, snapshot.power.totalRequestedKW,
@@ -2646,6 +2671,15 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			service.unmetKW > 1e-12 ? " | reason: " : "",
 			service.unmetKW > 1e-12 ? service.reason.c_str() : "");
 	}
+	// #417: the recovery staging summary. While any purely discretionary
+	// load is Shed or Restoring the station is in a recovery stage; the
+	// startup surge those loads draw is held out of battery charging so
+	// depleted reserves refill only from surplus the recovery does not
+	// need, never overloading a service that is still coming back.
+	ImGui::SeparatorText("Service recovery staging (#417; shed loads restart in safe stages via declared dwell, hysteresis, cooling and firm-source gates; surge held out of reserve charging)");
+	ImGui::Text("Recovery: %s | restoring %d load(s), surge this tick %.3f kW",
+		snapshot.power.recoveryPending ? "PENDING (station in a recovery stage)" : "steady state",
+		snapshot.power.recoveringCount, snapshot.power.recoverySurgeKW);
 	ImGui::SeparatorText("Batteries (live; reserve = nameplate - usable is never dischargeable; discharge covers deficits on the same pool, charging takes only surplus)");
 	if (snapshot.power.batteries.empty()) ImGui::TextDisabled("No batteries authored.");
 	for (auto const& battery : snapshot.power.batteries)
