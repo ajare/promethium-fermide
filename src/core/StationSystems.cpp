@@ -3146,6 +3146,16 @@ namespace core
 			if (!std::isfinite(crop.maxBiomassDensityKgPerM2) || crop.maxBiomassDensityKgPerM2 <= 0.0)
 				return refuse(where + " maximum biomass density must be finite and positive");
 			auto const capacityKg = crop.growingAreaM2 * crop.maxBiomassDensityKgPerM2;
+			// #581: the two authored factors are each validated finite, but
+			// their product - the installation's Growing capacity - can still
+			// overflow to infinity. A non-finite capacity passes every upper-
+			// bound comparison downstream (inf > x is always true, inf > inf
+			// is false), so the finite installation bound the snapshot promises
+			// would silently vanish. The overflow is refused here, before any
+			// runtime construction or document mutation, rather than published
+			// as a healthy tick.
+			if (!std::isfinite(capacityKg))
+				return refuse(where + " derived Growing capacity overflows to a non-finite magnitude: growing area times maximum biomass density must stay finite so the installation bound stays a publishable, comparable number");
 			if (!std::isfinite(crop.initialBiomassKg) || crop.initialBiomassKg < 0.0)
 				return refuse(where + " initial living biomass must be finite and non-negative");
 			if (crop.initialBiomassKg > capacityKg + StationBalanceTolerance)
@@ -3316,6 +3326,14 @@ namespace core
 			if (!std::isfinite(algae.maxBiomassDensityKgPerL) || algae.maxBiomassDensityKgPerL <= 0.0)
 				return refuse(where + " maximum biomass density per litre must be finite and positive");
 			auto const capacityKg = algae.cultureVolumeL * algae.maxBiomassDensityKgPerL;
+			// #581: the same product-overflow contract as the crops - the
+			// culture volume and the density per litre are each validated
+			// finite, but their product, the culture's installation bound,
+			// can still overflow to infinity and would then pass every
+			// upper-bound comparison downstream. Refused before any runtime
+			// construction or document mutation.
+			if (!std::isfinite(capacityKg))
+				return refuse(where + " derived culture capacity overflows to a non-finite magnitude: active culture volume times maximum biomass density per litre must stay finite so the installation bound stays a publishable, comparable number");
 			if (!std::isfinite(algae.initialBiomassKg) || algae.initialBiomassKg < 0.0)
 				return refuse(where + " initial living biomass must be finite and non-negative");
 			if (algae.initialBiomassKg > capacityKg + StationBalanceTolerance)
@@ -11591,6 +11609,7 @@ namespace core
 			for (auto const& crop : cropPopulations)
 			{
 				auto const where = "crop population '" + crop.authored.id + "' ";
+				if (!requireFinite(crop.capacityKg, where + "derived Growing capacity")) return false;
 				if (!requireFinite(crop.livingBiomassKg, where + "living biomass")) return false;
 				if (!requireFinite(crop.lastIllumination, where + "evaluated illumination")) return false;
 				if (!requireFinite(crop.lastLightRequestedKW, where + "last light requested")) return false;
@@ -11633,6 +11652,32 @@ namespace core
 				if (!requireFinite(crop.chemicalEnergyFixedKJ, where + "cumulative fixed chemical energy")) return false;
 				if (!requireFinite(crop.respirationHeatKJ, where + "cumulative respiration heat")) return false;
 				if (!requireFinite(crop.heatIntoCompartmentKJ, where + "cumulative heat into compartment")) return false;
+				// #581: the harvest and death-routing magnitudes the snapshot
+				// publishes are derived results too - every published derived
+				// magnitude must be finite before the tick may commit, so a
+				// healthy snapshot can never carry an infinite harvest, surplus
+				// or residue total.
+				if (!requireFinite(crop.lastHarvestRequestedKg, where + "last harvest requested")) return false;
+				if (!requireFinite(crop.lastHarvestedKg, where + "last harvest")) return false;
+				if (!requireFinite(crop.lastFoodAddedKg, where + "last food added")) return false;
+				if (!requireFinite(crop.lastWasteAddedKg, where + "last waste added")) return false;
+				if (!requireFinite(crop.lastSurplusEdibleToWasteKg, where + "last edible surplus routed to waste")) return false;
+				if (!requireFinite(crop.lastHarvestConstrainedKg, where + "last harvest constraint")) return false;
+				if (!requireFinite(crop.lastDeadResidueToWasteKg, where + "last dead residue routed to waste")) return false;
+				if (!requireFinite(crop.lastDeadResidueLostKg, where + "last dead residue lost")) return false;
+				if (!requireFinite(crop.harvestedKg, where + "cumulative harvested")) return false;
+				if (!requireFinite(crop.foodProducedKg, where + "cumulative food produced")) return false;
+				if (!requireFinite(crop.wasteProducedKg, where + "cumulative waste produced")) return false;
+				if (!requireFinite(crop.surplusEdibleToWasteKg, where + "cumulative edible surplus routed to waste")) return false;
+				if (!requireFinite(crop.deadResidueToWasteKg, where + "cumulative dead residue routed to waste")) return false;
+				if (!requireFinite(crop.deadResidueLostKg, where + "cumulative dead residue lost")) return false;
+				// #581: the living chemical energy the snapshot publishes is
+				// the organic inventory times the declared energy density - a
+				// derived product of finite values that can still overflow, so
+				// the same magnitude is audited before it may publish.
+				if (!requireFinite(crop.livingConstituents.organicKg
+					* chemicalEnergyKJPerKgOrganic(crop.authored.composition),
+					where + "living chemical energy")) return false;
 				if (crop.livingBiomassKg < -StationBalanceTolerance)
 					return violation = where + "living biomass went negative", false;
 				if (crop.livingBiomassKg > crop.capacityKg
@@ -11664,6 +11709,117 @@ namespace core
 				auto const energyCapBound = StationBalanceTolerance
 					* std::max(1.0, crop.lightEnergyKJ);
 				if (crop.chemicalEnergyFixedKJ > crop.lightEnergyKJ + energyCapBound)
+					return violation = where
+						+ "fixed more chemical energy than the delivered light energy carries", false;
+			}
+			// Algae production ledger (#581): the culture runs the same
+			// biology on its own state, so the same audit runs over it -
+			// every published derived magnitude must be finite before the
+			// tick may commit, the living biomass stays inside the declared
+			// culture capacity, the growth scale stays in [0, 1], and the
+			// mass and energy ledgers close on what actually moved. Before
+			// this the culture's published capacity and flows were audited
+			// nowhere on the host, so a non-finite derived magnitude could
+			// have reached a healthy snapshot.
+			system = "Algae production";
+			for (auto const& culture : algaeCultures)
+			{
+				auto const where = "algae culture '" + culture.authored.id + "' ";
+				if (!requireFinite(culture.capacityKg, where + "derived culture capacity")) return false;
+				if (!requireFinite(culture.livingBiomassKg, where + "living biomass")) return false;
+				if (!requireFinite(culture.lastIllumination, where + "evaluated illumination")) return false;
+				if (!requireFinite(culture.lastLightRequestedKW, where + "last light requested")) return false;
+				if (!requireFinite(culture.lastLightSuppliedKW, where + "last light supplied")) return false;
+				if (!requireFinite(culture.lastCirculationRequestedKW, where + "last circulation requested")) return false;
+				if (!requireFinite(culture.lastCirculationSuppliedKW, where + "last circulation supplied")) return false;
+				if (!requireFinite(culture.lastGrowthPotentialKg, where + "last growth potential")) return false;
+				if (!requireFinite(culture.lastGrowthScale, where + "growth scale")) return false;
+				if (!requireFinite(culture.lastGrowthKg, where + "last growth")) return false;
+				if (!requireFinite(culture.lastCo2DrawnKg, where + "last CO2 drawn")) return false;
+				if (!requireFinite(culture.lastAssimilationWaterKg, where + "last assimilation water")) return false;
+				if (!requireFinite(culture.lastNitrogenDrawnKg, where + "last nitrogen drawn")) return false;
+				if (!requireFinite(culture.lastPhosphorusDrawnKg, where + "last phosphorus drawn")) return false;
+				if (!requireFinite(culture.lastPotassiumDrawnKg, where + "last potassium drawn")) return false;
+				if (!requireFinite(culture.lastMineralsDrawnKg, where + "last minerals drawn")) return false;
+				if (!requireFinite(culture.lastOxygenReleasedKg, where + "last oxygen released")) return false;
+				if (!requireFinite(culture.lastEvaporatedKg, where + "last evaporated water")) return false;
+				if (!requireFinite(culture.lastRespirationRequestedKg, where + "last respiration requested")) return false;
+				if (!requireFinite(culture.lastRespirationKg, where + "last respiration")) return false;
+				if (!requireFinite(culture.lastRespirationO2DrawnKg, where + "last respiration oxygen drawn")) return false;
+				if (!requireFinite(culture.lastRespirationCo2ReturnedKg, where + "last respiration CO2 returned")) return false;
+				if (!requireFinite(culture.lastRespirationWaterKg, where + "last respiration water returned")) return false;
+				if (!requireFinite(culture.lastRespirationHeatKW, where + "last respiration heat")) return false;
+				if (!requireFinite(culture.lastHeatIntoCompartmentKW, where + "last heat into compartment")) return false;
+				if (!requireFinite(culture.growthKg, where + "cumulative growth")) return false;
+				if (!requireFinite(culture.co2DrawnKg, where + "cumulative CO2 drawn")) return false;
+				if (!requireFinite(culture.waterDrawnKg, where + "cumulative culture water drawn")) return false;
+				if (!requireFinite(culture.nitrogenDrawnKg, where + "cumulative nitrogen drawn")) return false;
+				if (!requireFinite(culture.phosphorusDrawnKg, where + "cumulative phosphorus drawn")) return false;
+				if (!requireFinite(culture.potassiumDrawnKg, where + "cumulative potassium drawn")) return false;
+				if (!requireFinite(culture.mineralsDrawnKg, where + "cumulative minerals drawn")) return false;
+				if (!requireFinite(culture.oxygenReleasedKg, where + "cumulative oxygen released")) return false;
+				if (!requireFinite(culture.evaporatedKg, where + "cumulative evaporated water")) return false;
+				if (!requireFinite(culture.respirationKg, where + "cumulative respiration")) return false;
+				if (!requireFinite(culture.respirationO2DrawnKg, where + "cumulative respiration oxygen drawn")) return false;
+				if (!requireFinite(culture.respirationCo2ReturnedKg, where + "cumulative respiration CO2 returned")) return false;
+				if (!requireFinite(culture.respirationWaterKg, where + "cumulative respiration water returned")) return false;
+				if (!requireFinite(culture.lightEnergyKJ, where + "cumulative light energy")) return false;
+				if (!requireFinite(culture.circulationEnergyKJ, where + "cumulative circulation energy")) return false;
+				if (!requireFinite(culture.chemicalEnergyFixedKJ, where + "cumulative fixed chemical energy")) return false;
+				if (!requireFinite(culture.respirationHeatKJ, where + "cumulative respiration heat")) return false;
+				if (!requireFinite(culture.heatIntoCompartmentKJ, where + "cumulative heat into compartment")) return false;
+				if (!requireFinite(culture.lastHarvestRequestedKg, where + "last harvest requested")) return false;
+				if (!requireFinite(culture.lastHarvestedKg, where + "last harvest")) return false;
+				if (!requireFinite(culture.lastFoodAddedKg, where + "last food added")) return false;
+				if (!requireFinite(culture.lastRecoveryAddedKg, where + "last recovery added")) return false;
+				if (!requireFinite(culture.lastWasteAddedKg, where + "last waste added")) return false;
+				if (!requireFinite(culture.lastFoodSurplusToRecoveryKg, where + "last food surplus routed to recovery")) return false;
+				if (!requireFinite(culture.lastRecoverySurplusToWasteKg, where + "last recovery surplus routed to waste")) return false;
+				if (!requireFinite(culture.lastHarvestConstrainedKg, where + "last harvest constraint")) return false;
+				if (!requireFinite(culture.lastDeadResidueToWasteKg, where + "last dead residue routed to waste")) return false;
+				if (!requireFinite(culture.lastDeadResidueLostKg, where + "last dead residue lost")) return false;
+				if (!requireFinite(culture.harvestedKg, where + "cumulative harvested")) return false;
+				if (!requireFinite(culture.foodProducedKg, where + "cumulative food produced")) return false;
+				if (!requireFinite(culture.recoveryProducedKg, where + "cumulative recovery produced")) return false;
+				if (!requireFinite(culture.wasteProducedKg, where + "cumulative waste produced")) return false;
+				if (!requireFinite(culture.foodSurplusToRecoveryKg, where + "cumulative food surplus routed to recovery")) return false;
+				if (!requireFinite(culture.recoverySurplusToWasteKg, where + "cumulative recovery surplus routed to waste")) return false;
+				if (!requireFinite(culture.deadResidueToWasteKg, where + "cumulative dead residue routed to waste")) return false;
+				if (!requireFinite(culture.deadResidueLostKg, where + "cumulative dead residue lost")) return false;
+				if (!requireFinite(culture.livingConstituents.organicKg
+					* chemicalEnergyKJPerKgOrganic(culture.authored.composition),
+					where + "living chemical energy")) return false;
+				if (culture.livingBiomassKg < -StationBalanceTolerance)
+					return violation = where + "living biomass went negative", false;
+				if (culture.livingBiomassKg > culture.capacityKg
+					+ StationBalanceTolerance * std::max(1.0, culture.capacityKg))
+					return violation = where
+						+ "living biomass exceeds the declared culture capacity", false;
+				if (culture.lastGrowthScale < -StationBalanceTolerance
+					|| culture.lastGrowthScale > 1.0 + StationBalanceTolerance)
+					return violation = where
+						+ "growth scale left the declared [0, 1] range", false;
+				auto const massBound = StationBalanceTolerance * std::max(1.0,
+					culture.growthKg + culture.respirationKg + culture.co2DrawnKg
+						+ culture.oxygenReleasedKg);
+				auto const massResidual = culture.co2DrawnKg + culture.waterDrawnKg
+					+ culture.nitrogenDrawnKg + culture.phosphorusDrawnKg + culture.potassiumDrawnKg
+					+ culture.mineralsDrawnKg + culture.respirationO2DrawnKg
+					- culture.oxygenReleasedKg - culture.respirationCo2ReturnedKg
+					- culture.respirationWaterKg - culture.evaporatedKg
+					- (culture.growthKg - culture.respirationKg);
+				if (!std::isfinite(massResidual) || std::abs(massResidual) > massBound)
+					return violation = where
+						+ "growth/respiration mass ledger does not close within tolerance", false;
+				auto const energyResidual = culture.lightEnergyKJ + culture.circulationEnergyKJ
+					+ culture.respirationHeatKJ - culture.chemicalEnergyFixedKJ
+					- culture.heatIntoCompartmentKJ;
+				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > massBound)
+					return violation = where
+						+ "delivered/fixed/respired/heat energy ledger does not close within tolerance", false;
+				auto const energyCapBound = StationBalanceTolerance
+					* std::max(1.0, culture.lightEnergyKJ);
+				if (culture.chemicalEnergyFixedKJ > culture.lightEnergyKJ + energyCapBound)
 					return violation = where
 						+ "fixed more chemical energy than the delivered light energy carries", false;
 			}
@@ -11749,6 +11905,7 @@ namespace core
 				if (!requireFinite(totalMethaneProcessingPowerKW, "total methane processing power")) return false;
 				if (!requireFinite(totalMicrobialProcessingPowerKW, "total microbial processing power")) return false;
 				if (!requireFinite(totalCropPowerKW, "total crop lamp and circulation power")) return false;
+				if (!requireFinite(totalAlgaePowerKW, "total algae lamp and circulation power")) return false;
 			}
 			for (size_t index = 0; index < stores.size(); ++index)
 			{

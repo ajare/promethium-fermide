@@ -13455,6 +13455,29 @@ void buffers(smoke::Context const&)
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("exceeds the declared Growing capacity") != std::string::npos,
 				"a crop starting fuller than its Growing capacity was accepted");
+			// #581: the two authored factors are each validated finite, but
+			// their product - the derived Growing capacity - can still
+			// overflow to infinity, and an infinite bound passes every
+			// upper-bound comparison downstream. The overflowed product is
+			// refused; a large but finite product stays valid.
+			settings.cropPopulations = { crop() };
+			settings.cropPopulations[0].growingAreaM2 = 1e308;
+			settings.cropPopulations[0].maxBiomassDensityKgPerM2 = 1e308;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("derived Growing capacity overflows to a non-finite magnitude")
+					!= std::string::npos,
+				"a crop whose area times density product overflows the Growing capacity was accepted");
+			settings.cropPopulations = { crop() };
+			settings.cropPopulations[0].growingAreaM2 = 1e308;
+			settings.cropPopulations[0].maxBiomassDensityKgPerM2 = 10.0;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("overflows to a non-finite magnitude") != std::string::npos,
+				"a crop whose area times density product overflows to infinity was accepted");
+			settings.cropPopulations = { crop() };
+			settings.cropPopulations[0].growingAreaM2 = 1e154;
+			settings.cropPopulations[0].maxBiomassDensityKgPerM2 = 1e154;
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				"a large but finite derived Growing capacity of 1e308 kg was refused");
 			settings.cropPopulations = { crop() };
 			settings.cropPopulations[0].growthYieldKgPerKWh = 3.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
@@ -13506,6 +13529,42 @@ void buffers(smoke::Context const&)
 				&& diagnostic.find("waste store 'cropWaste' is authored hazardous-class")
 					!= std::string::npos,
 				"a normal canopy harvesting into a hazardous waste store was accepted");
+		}
+		// #581 World seam: an overflowed derived capacity is refused by
+		// configureStationSystems before any runtime is built, the World
+		// keeps its previous (here: empty) station settings untouched, and
+		// a subsequent valid configuration still works. A large but
+		// finite capacity configures, runs healthy ticks and publishes
+		// its finite Growing capacity intact.
+		{
+			core::World world("CropCapacityOverflow", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto broken = crop();
+			broken.growingAreaM2 = 1e308;
+			broken.maxBiomassDensityKgPerM2 = 1e308;
+			broken.respirationPerHour = 0.0;
+			auto const refused = configure(world, fullStores(), habitat(), { broken });
+			require(!refused.first
+				&& refused.second.find("overflows to a non-finite magnitude")
+					!= std::string::npos,
+				"an overflowed crop Growing capacity was configured into the World");
+			require(world.getStationSystemsSettings().cropPopulations.empty(),
+				"the refused crop configuration mutated the World's authored settings");
+			auto huge = crop();
+			huge.growingAreaM2 = 1e154;
+			huge.maxBiomassDensityKgPerM2 = 1e154;
+			auto const [ok, secondDiagnostic] = configure(world, fullStores(), habitat(), { huge });
+			require(ok, secondDiagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 120, "huge-but-finite capacity crop run"),
+				"huge-but-finite capacity crop run failed");
+			world.pauseSimulation();
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.healthy && snap.cropPopulations.size() == 1
+				&& snap.cropPopulations[0].capacityKg == 1e308
+				&& std::isfinite(snap.cropPopulations[0].capacityKg),
+				"the large but finite Growing capacity did not publish intact");
 		}
 		// Darkness: no light, no growth - but respiration runs day and
 		// night, burning the declared organic content against the
@@ -14544,6 +14603,30 @@ void buffers(smoke::Context const&)
 				&& diagnostic.find("harvest trigger exceeds the declared culture capacity")
 					!= std::string::npos,
 				"a harvest trigger above the culture capacity was accepted");
+			// #581: the same product-overflow contract as the crops - the
+			// culture volume and the density per litre are each validated
+			// finite, but their product, the culture's installation bound,
+			// can still overflow to infinity and would then pass every
+			// upper-bound comparison. Overflow is refused; a large but
+			// finite product stays valid.
+			settings.algaeCultures = { culture() };
+			settings.algaeCultures[0].cultureVolumeL = 1e308;
+			settings.algaeCultures[0].maxBiomassDensityKgPerL = 1e308;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("derived culture capacity overflows to a non-finite magnitude")
+					!= std::string::npos,
+				"an algae culture whose volume times density product overflows the culture capacity was accepted");
+			settings.algaeCultures = { culture() };
+			settings.algaeCultures[0].cultureVolumeL = 1e308;
+			settings.algaeCultures[0].maxBiomassDensityKgPerL = 10.0;
+			require(!core::validateStationSystemsSettings(settings, diagnostic)
+				&& diagnostic.find("overflows to a non-finite magnitude") != std::string::npos,
+				"an algae culture whose volume times density product overflows to infinity was accepted");
+			settings.algaeCultures = { culture() };
+			settings.algaeCultures[0].cultureVolumeL = 1e154;
+			settings.algaeCultures[0].maxBiomassDensityKgPerL = 1e154;
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				"a large but finite derived culture capacity of 1e308 kg was refused");
 			settings.algaeCultures = { culture() };
 			settings.stores = fullStores();
 			core::ResourceCompositionSettings different;
@@ -14784,6 +14867,42 @@ void buffers(smoke::Context const&)
 				"the constrained harvest's mass ledger does not close");
 			require(sawEvent(world, "harvest constrained"),
 				"the algae harvest constraint was not announced in the event log");
+		}
+		// #581 World seam: an overflowed derived culture capacity is
+		// refused by configureStationSystems before any runtime is built,
+		// the World keeps its previous (here: empty) station settings
+		// untouched, and a subsequent valid configuration still works. A
+		// large but finite capacity configures, runs healthy ticks and
+		// publishes its finite culture capacity intact.
+		{
+			core::World world("AlgaeCapacityOverflow", 2, 2);
+			world.pauseSimulation();
+			world.finishBuild();
+			auto broken = culture();
+			broken.cultureVolumeL = 1e308;
+			broken.maxBiomassDensityKgPerL = 1e308;
+			broken.respirationPerHour = 0.0;
+			auto const refused = configure(world, fullStores(), { broken });
+			require(!refused.first
+				&& refused.second.find("overflows to a non-finite magnitude")
+					!= std::string::npos,
+				"an overflowed algae culture capacity was configured into the World");
+			require(world.getStationSystemsSettings().algaeCultures.empty(),
+				"the refused culture configuration mutated the World's authored settings");
+			auto huge = culture();
+			huge.cultureVolumeL = 1e154;
+			huge.maxBiomassDensityKgPerL = 1e154;
+			auto const [ok, secondDiagnostic] = configure(world, fullStores(), { huge });
+			require(ok, secondDiagnostic.c_str());
+			world.resumeSimulation();
+			require(advanceOrDiagnose(world, 120, "huge-but-finite capacity culture run"),
+				"huge-but-finite capacity culture run failed");
+			world.pauseSimulation();
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.healthy && snap.algaeCultures.size() == 1
+				&& snap.algaeCultures[0].capacityKg == 1e308
+				&& std::isfinite(snap.algaeCultures[0].capacityKg),
+				"the large but finite culture capacity did not publish intact");
 		}
 		// Culture capacity: with the harvest disabled the culture grows
 		// to its own declared capacity and stops there - the limiter

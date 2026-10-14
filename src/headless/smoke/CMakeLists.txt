@@ -93,7 +93,7 @@ foreach(check lifecycle batching eventBound persistence stores transfers compoun
         # protect the respiration/harvest/death accounting.
         # #570 registers the microbial condition/recovery gate so its
         # zero-coefficient regression coverage runs in CI.
-        harvest algae nutrientConservation bioContainment bioHazardFiles
+        harvest algae nutrientConservation bioContainment bioHazardFiles bioCapacityFiles
         microbialConditionRecovery)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
@@ -642,6 +642,14 @@ add_test(NAME station-editor-thermal COMMAND pf-smoke-editor --check station/the
 set_tests_properties(station-editor-thermal PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-coolant COMMAND pf-smoke-editor --check station/coolantWorkflow)
 set_tests_properties(station-editor-coolant PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+# #581: the crop and algae editor workflows were reachable through the
+# binary but never registered here, so their rejection-and-repair seam
+# coverage ran in no CI pass. Register them like the other station
+# editor workflows.
+add_test(NAME station-editor-crops COMMAND pf-smoke-editor --check station/cropWorkflow)
+set_tests_properties(station-editor-crops PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+add_test(NAME station-editor-algae COMMAND pf-smoke-editor --check station/algaeWorkflow)
+set_tests_properties(station-editor-algae PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 
 pf_add_smoke_contract(NAME smoke-editor-contract COMMAND ${CMAKE_COMMAND}
     "-DEDITOR=$<TARGET_FILE:pf-smoke-editor>"

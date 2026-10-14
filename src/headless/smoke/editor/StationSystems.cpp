@@ -2092,6 +2092,24 @@ void cropWorkflow(smoke::Context const&)
 			REQ(driver.contains("capacity 40.0000 kg")
 				&& driver.contains("1 crop population(s)"),
 				"Applied growing area not reflected in the live capacity display");
+			// #581: a drafted finite growing area whose product with the
+			// authored density overflows the derived Growing capacity is
+			// refused with a visible diagnostic and never reaches the
+			// authored settings. Repairing the area applies through the
+			// reset-confirmed flow.
+			driver.typeValue(ctx, "Crop 0 growing area m2", "1e308");
+			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(driver.contains("overflows"),
+				"Overflowed derived Growing capacity diagnostic not shown");
+			REQ(world->getStationSystemsSettings().cropPopulations[0].growingAreaM2 == 20.0
+				&& world->getSimulationTick() == 120,
+				"Refused overflowed crop draft mutated the authored settings or the run");
+			driver.typeValue(ctx, "Crop 0 growing area m2", "30");
+			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+			REQ(world->getStationSystemsSettings().cropPopulations[0].growingAreaM2 == 30.0
+				&& history.undoCount() == 2 && world->getSimulationTick() == 0,
+				"Repaired crop capacity factor did not apply through the reset-confirmed flow");
 		});
 		#undef REQ
 		require(driver.passed(), "Crop workflow failed on the Test Engine");

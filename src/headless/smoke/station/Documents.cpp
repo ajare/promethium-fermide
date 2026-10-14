@@ -3385,6 +3385,188 @@ void bioHazardFiles(smoke::Context const& context)
 	}
 }
 
+// #581: the derived growing capacity - area times density for a crop,
+// active culture volume times density per litre for an algae culture -
+// must be finite. The two authored factors are each finite on their
+// own, so only the product check closes the hole; the file seam
+// enforces it: a document whose finite factors overflow the derived
+// capacity to infinity is refused on load rather than publishing an
+// infinite installation bound, while a large but finite product
+// round-trips and replays intact.
+void biologicalCapacityFiles(smoke::Context const& context)
+{
+	namespace filesystem = std::filesystem;
+	auto const directory = context.temporaryRoot() / "station-bio-capacity";
+	filesystem::create_directories(directory);
+	auto replaceOnceAfter = [](std::string& text, std::string const& anchor,
+		std::string const& from, std::string const& to)
+	{
+		auto const at = text.find(anchor);
+		require(at != std::string::npos, ("missing anchor: " + anchor).c_str());
+		auto const hit = text.find(from, at);
+		require(hit != std::string::npos, ("missing field after anchor: " + from).c_str());
+		text.replace(hit, from.size(), to);
+	};
+	auto store = [](std::string const& id, double capacity, double starting)
+	{
+		core::ResourceStoreSettings settings;
+		settings.id = id;
+		settings.unit = "kg";
+		settings.capacity = capacity;
+		settings.startingQualified = starting;
+		return settings;
+	};
+	core::AtmosphereSettings habitat;
+	habitat.id = "habitat";
+	habitat.hazardClass = "normal";
+	habitat.volumeM3 = 100.0;
+	habitat.startingOxygenKg = 40.0;
+	habitat.startingNitrogenKg = 80.0;
+	habitat.startingCarbonDioxideKg = 5.0;
+	habitat.startingWaterVapourKg = 1.0;
+	habitat.startingTemperatureC = 22.0;
+	habitat.thermalCapacityKJPerK = 20000.0;
+	habitat.minPressureKPa = 1.0;
+	habitat.maxPressureKPa = 200.0;
+	core::ResourceCompositionSettings dryComposition;
+	dryComposition.moisture = 0.0;
+	dryComposition.nutrientNitrogen = 0.05;
+	dryComposition.atmosphericNitrogen = 0.0;
+	dryComposition.phosphorus = 0.02;
+	dryComposition.potassium = 0.03;
+	dryComposition.otherMinerals = 0.05;
+	dryComposition.energyKJPerKgDry = 1700.0;
+	core::CropPopulationSettings crop;
+	crop.id = "canopy";
+	crop.atmosphereId = "habitat";
+	crop.waterStoreId = "irrigation";
+	crop.nitrogenStoreId = "fertN";
+	crop.phosphorusStoreId = "fertP";
+	crop.potassiumStoreId = "fertK";
+	crop.mineralsStoreId = "fertMin";
+	crop.composition = dryComposition;
+	crop.growingAreaM2 = 10.0;
+	crop.maxBiomassDensityKgPerM2 = 2.0;
+	crop.initialBiomassKg = 1.0;
+	crop.lampRatedKW = 3.6;
+	crop.illuminationProfile.constantLevel = 1.0;
+	crop.circulationPowerKW = 0.1;
+	crop.growthYieldKgPerKWh = 2.0;
+	crop.respirationPerHour = 0.5;
+	crop.transpirationKgPerKgGrowth = 1.0;
+	crop.minGrowingTemperatureC = 10.0;
+	crop.maxGrowingTemperatureC = 35.0;
+	core::AlgaeCultureSettings algae;
+	algae.id = "pond";
+	algae.atmosphereId = "habitat";
+	algae.waterStoreId = "makeup";
+	algae.nitrogenStoreId = "cN";
+	algae.phosphorusStoreId = "cP";
+	algae.potassiumStoreId = "cK";
+	algae.mineralsStoreId = "cMin";
+	algae.composition = dryComposition;
+	algae.cultureVolumeL = 1000.0;
+	algae.maxBiomassDensityKgPerL = 0.002;
+	algae.initialBiomassKg = 0.1;
+	algae.lampRatedKW = 36.0;
+	algae.illuminationProfile.constantLevel = 1.0;
+	algae.circulationPowerKW = 0.1;
+	algae.growthYieldKgPerKWh = 2.0;
+	algae.respirationPerHour = 0.5;
+	algae.evaporationKgPerKgGrowth = 1.0;
+	algae.minGrowingTemperatureC = 10.0;
+	algae.maxGrowingTemperatureC = 35.0;
+	algae.foodFraction = 0.4;
+	algae.recoveryFraction = 0.3;
+	algae.harvestTriggerKg = 0.0;
+	algae.harvestFraction = 1.0;
+	core::World original("BioCapacity Round Trip", 2, 2);
+	original.pauseSimulation();
+	original.finishBuild();
+	core::StationSystemsSettings settings;
+	settings.enabled = true;
+	settings.observationIntervalSeconds = 1.0f;
+	settings.stores = { store("irrigation", 200.0, 150.0), store("fertN", 10.0, 5.0),
+		store("fertP", 10.0, 5.0), store("fertK", 10.0, 5.0), store("fertMin", 10.0, 5.0),
+		store("makeup", 200.0, 150.0), store("cN", 10.0, 5.0), store("cP", 10.0, 5.0),
+		store("cK", 10.0, 5.0), store("cMin", 10.0, 5.0) };
+	settings.atmospheres = { habitat };
+	settings.cropPopulations = { crop };
+	settings.algaeCultures = { algae };
+	std::string diagnostic;
+	require(original.configureStationSystems(settings, false, &diagnostic),
+		"BioCapacity settings edit failed: " + diagnostic);
+	auto const withField = serializeYaml(original);
+	// A crop document whose finite area and finite density overflow the
+	// derived Growing capacity to infinity is refused on load.
+	{
+		auto malformed = withField;
+		replaceOnceAfter(malformed, "id: canopy",
+			"growingAreaM2: 10", "growingAreaM2: 1.0e+308");
+		replaceOnceAfter(malformed, "id: canopy",
+			"maxBiomassDensityKgPerM2: 2", "maxBiomassDensityKgPerM2: 1.0e+308");
+		auto const malformedPath = directory / "crop-capacity-overflow.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		std::string loadError;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const& error) { refused = true; loadError = error.what(); }
+		require(refused
+			&& loadError.find("overflows to a non-finite magnitude") != std::string::npos,
+			"a crop document whose area times density overflows the Growing capacity was accepted from a file");
+	}
+	// An algae document whose finite volume and finite density per litre
+	// overflow the derived culture capacity to infinity is refused on
+	// load.
+	{
+		auto malformed = withField;
+		replaceOnceAfter(malformed, "id: pond",
+			"cultureVolumeL: 1000", "cultureVolumeL: 1.0e+308");
+		replaceOnceAfter(malformed, "id: pond",
+			"maxBiomassDensityKgPerL: 0.002", "maxBiomassDensityKgPerL: 1.0e+308");
+		auto const malformedPath = directory / "algae-capacity-overflow.world.yaml";
+		writeFile(malformedPath, malformed);
+		bool refused = false;
+		std::string loadError;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const& error) { refused = true; loadError = error.what(); }
+		require(refused
+			&& loadError.find("overflows to a non-finite magnitude") != std::string::npos,
+			"an algae document whose volume times density overflows the culture capacity was accepted from a file");
+	}
+	// A large but finite product - 1e154 times 1e154 is 1e308, finite -
+	// stays valid: the document loads, carries the authored factors, and
+	// the reopened World runs healthy ticks that publish the finite
+	// derived capacity.
+	{
+		auto repaired = withField;
+		replaceOnceAfter(repaired, "id: canopy",
+			"growingAreaM2: 10", "growingAreaM2: 1.0e+154");
+		replaceOnceAfter(repaired, "id: canopy",
+			"maxBiomassDensityKgPerM2: 2", "maxBiomassDensityKgPerM2: 1.0e+154");
+		replaceOnceAfter(repaired, "id: pond",
+			"cultureVolumeL: 1000", "cultureVolumeL: 1.0e+154");
+		replaceOnceAfter(repaired, "id: pond",
+			"maxBiomassDensityKgPerL: 0.002", "maxBiomassDensityKgPerL: 1.0e+154");
+		auto const validPath = directory / "bio-capacity-huge-finite.world.yaml";
+		writeFile(validPath, repaired);
+		auto const reopened = core::loadWorldDocument(validPath);
+		require(reopened->getStationSystemsSettings().cropPopulations[0].growingAreaM2 == 1e154
+			&& reopened->getStationSystemsSettings().cropPopulations[0].maxBiomassDensityKgPerM2 == 1e154
+			&& reopened->getStationSystemsSettings().algaeCultures[0].cultureVolumeL == 1e154
+			&& reopened->getStationSystemsSettings().algaeCultures[0].maxBiomassDensityKgPerL == 1e154,
+			"the large but finite biological capacity factors did not survive the file round trip");
+		reopened->resumeSimulation();
+		require(reopened->advanceTicks(120),
+			"the reopened huge-but-finite biological rig failed to run");
+		auto const snap = reopened->getStationSystemsSnapshot();
+		require(snap.healthy
+			&& snap.cropPopulations[0].capacityKg == 1e308
+			&& snap.algaeCultures[0].capacityKg == 1e308,
+			"the reopened huge-but-finite derived capacities did not publish intact");
+	}
+}
+
 void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"fileRoundTrip", fileRoundTrip});
@@ -3405,6 +3587,7 @@ void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"atmosphereFiles", atmosphereFiles});
 	checks.push_back({"crewFiles", crewFiles});
 	checks.push_back({"bioHazardFiles", bioHazardFiles});
+	checks.push_back({"bioCapacityFiles", biologicalCapacityFiles});
 	checks.push_back({"waterFiles", waterFiles});
 	checks.push_back({"containmentFiles", containmentFiles});
 	checks.push_back({"gasFiles", gasFiles});

@@ -2078,10 +2078,16 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		if (ImGui::InputText(("Crop " + row + " minerals store").c_str(),
 			cropMineralsBuffer, sizeof(cropMineralsBuffer)))
 			crop.mineralsStoreId = cropMineralsBuffer;
+		// #581: the capacity-factor fields use %g so a large authored
+		// value round-trips through the 64-character InputScalar buffer.
+		// With %f a value above ~1e62 truncated to the buffer width and
+		// re-committing it silently changed the number; %g keeps every
+		// magnitude - including the overflow candidates the capacity
+		// contract now refuses - displayable and editable exactly.
 		ImGui::InputDouble(("Crop " + row + " growing area m2").c_str(),
-			&crop.growingAreaM2, 0.0, 0.0, "%.3f");
+			&crop.growingAreaM2, 0.0, 0.0, "%.15g");
 		ImGui::InputDouble(("Crop " + row + " max biomass density kg/m2").c_str(),
-			&crop.maxBiomassDensityKgPerM2, 0.0, 0.0, "%.3f");
+			&crop.maxBiomassDensityKgPerM2, 0.0, 0.0, "%.15g");
 		ImGui::InputDouble(("Crop " + row + " initial dry biomass kg").c_str(),
 			&crop.initialBiomassKg, 0.0, 0.0, "%.4f");
 		ImGui::InputDouble(("Crop " + row + " lamp rated kW").c_str(),
@@ -2251,9 +2257,9 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			algaeMineralsBuffer, sizeof(algaeMineralsBuffer)))
 			algae.mineralsStoreId = algaeMineralsBuffer;
 		ImGui::InputDouble(("Algae " + row + " active culture volume L").c_str(),
-			&algae.cultureVolumeL, 0.0, 0.0, "%.3f");
+			&algae.cultureVolumeL, 0.0, 0.0, "%.15g");
 		ImGui::InputDouble(("Algae " + row + " max biomass density kg/L").c_str(),
-			&algae.maxBiomassDensityKgPerL, 0.0, 0.0, "%.6f");
+			&algae.maxBiomassDensityKgPerL, 0.0, 0.0, "%.15g");
 		ImGui::InputDouble(("Algae " + row + " initial dry biomass kg").c_str(),
 			&algae.initialBiomassKg, 0.0, 0.0, "%.4f");
 		ImGui::InputDouble(("Algae " + row + " lamp rated kW").c_str(),

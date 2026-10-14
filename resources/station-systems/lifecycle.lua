@@ -2592,6 +2592,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         assert(isFinite(crop.maxBiomassDensityKgPerM2) and crop.maxBiomassDensityKgPerM2 > 0,
             'crop maximum biomass density must be finite and positive')
         local capacityKg = crop.growingAreaM2 * crop.maxBiomassDensityKgPerM2
+        -- #581: the factors are each finite, but their product - the
+        -- installation's Growing capacity - can still overflow to infinity
+        -- and an infinite bound passes every upper-bound comparison. The
+        -- sandbox mirrors the host refusal so the rule holds on both sides.
+        assert(isFinite(capacityKg),
+            'crop derived Growing capacity overflows to a non-finite magnitude: growing area times maximum biomass density must stay finite')
         assert(isFinite(crop.initialBiomassKg) and crop.initialBiomassKg >= 0,
             'crop initial living biomass must be finite and non-negative')
         assert(crop.initialBiomassKg <= capacityKg + BALANCE_TOLERANCE,
@@ -2842,6 +2848,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         assert(isFinite(algae.maxBiomassDensityKgPerL) and algae.maxBiomassDensityKgPerL > 0,
             'algae maximum biomass density per litre must be finite and positive')
         local capacityKg = algae.cultureVolumeL * algae.maxBiomassDensityKgPerL
+        -- #581: the same product-overflow contract as the crops, mirrored
+        -- in the sandbox for the culture's volume-times-density bound.
+        assert(isFinite(capacityKg),
+            'algae derived culture capacity overflows to a non-finite magnitude: active culture volume times maximum biomass density per litre must stay finite')
         assert(isFinite(algae.initialBiomassKg) and algae.initialBiomassKg >= 0,
             'algae initial living biomass must be finite and non-negative')
         assert(algae.initialBiomassKg <= capacityKg + BALANCE_TOLERANCE,
