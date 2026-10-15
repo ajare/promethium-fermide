@@ -610,7 +610,15 @@ namespace core
 		}
 		request->mResult = InteractionResult::Cancelled;
 		detachInteractionRequester(*request);
-		if (auto point = mWorld.mInteractionPoints.find(request->mPoint))
+		releaseInteractionPointRequest(id, request->mPoint);
+		publishInteractionOutcome(id, *request);
+		return true;
+	}
+
+	void SimulationCoordinator::releaseInteractionPointRequest(InteractionRequestId id, InteractionPointId pointId)
+	{
+		// Release only this request's ownership; another active press owns its timer.
+		if (auto point = mWorld.mInteractionPoints.find(pointId))
 		{
 			if (point->mActiveRequest == id)
 			{
@@ -619,17 +627,22 @@ namespace core
 			}
 			point->mQueue.erase(remove(point->mQueue.begin(), point->mQueue.end(), id), point->mQueue.end());
 		}
+	}
+
+	void SimulationCoordinator::publishInteractionOutcome(InteractionRequestId id, InteractionRequest const& request)
+	{
+		// Publication does not retire the record: traversal and passing readers
+		// must still observe it before the existing tick-boundary sweep.
 		SimulationEvent event;
 		event.sequence = mWorld.mNextEventSequence++;
 		event.tick = mWorld.mSimulationTick;
 		event.type = SimulationEventType::InteractionRequestChanged;
 		event.phase = mWorld.mCurrentPhase;
-		event.interactionRequest = makeInteractionRequestSnapshot(id, *request);
-		if (auto point = mWorld.mInteractionPoints.find(request->mPoint))
+		event.interactionRequest = makeInteractionRequestSnapshot(id, request);
+		if (auto point = mWorld.mInteractionPoints.find(request.mPoint))
 			event.interactionName = point->getName();
 		mWorld.mAgentBehaviourRuntime->observeOutcome(event);
 		mWorld.mEvents.push_back(std::move(event));
-		return true;
 	}
 
 	EntityRemovalResult SimulationCoordinator::removeInteractionRequest(InteractionRequestId id)
@@ -1544,18 +1557,8 @@ namespace core
 					request->mResult = InteractionResult::Rejected;
 					request->mMissingPermissions = std::move(missing);
 					detachInteractionRequester(*request);
-					point->mQueue.erase(remove(point->mQueue.begin(), point->mQueue.end(), requestId), point->mQueue.end());
-					point->mActiveRequest = {};
-					point->mInteractionTicksRemaining = 0;
-					SimulationEvent event;
-					event.sequence = mWorld.mNextEventSequence++;
-					event.tick = mWorld.mSimulationTick;
-					event.type = SimulationEventType::InteractionRequestChanged;
-					event.phase = mWorld.mCurrentPhase;
-					event.interactionRequest = makeInteractionRequestSnapshot(requestId, *request);
-					event.interactionName = point->getName();
-					mWorld.mAgentBehaviourRuntime->observeOutcome(event);
-					mWorld.mEvents.push_back(std::move(event));
+					releaseInteractionPointRequest(requestId, request->mPoint);
+					publishInteractionOutcome(requestId, *request);
 					mWorld.replanAgentAfterAuthorizationRefusal(request->mActor);
 					continue;
 				}
@@ -1691,16 +1694,7 @@ namespace core
 			}
 			if (request->mResult != InteractionResult::Pending)
 			{
-				SimulationEvent event;
-				event.sequence = mWorld.mNextEventSequence++;
-				event.tick = mWorld.mSimulationTick;
-				event.type = SimulationEventType::InteractionRequestChanged;
-				event.phase = mWorld.mCurrentPhase;
-				event.interactionRequest = makeInteractionRequestSnapshot(id, *request);
-				if (auto point = mWorld.mInteractionPoints.find(request->mPoint))
-					event.interactionName = point->getName();
-				mWorld.mAgentBehaviourRuntime->observeOutcome(event);
-				mWorld.mEvents.push_back(std::move(event));
+				publishInteractionOutcome(id, *request);
 			}
 		}
 	}

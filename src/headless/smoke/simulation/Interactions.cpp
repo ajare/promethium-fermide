@@ -100,6 +100,119 @@ namespace
 		}
 	}
 
+	void terminalCleanupPreservesOwnershipAndTrace()
+	{
+		using namespace core;
+		using smoke::require;
+		for (bool refuse : { false, true })
+		for (bool queued : { false, true })
+		{
+			World world("Terminal cleanup", 6, 2);
+			auto corridor = world.addCorridor(0, 0, 5);
+			world.finishBuild();
+			auto sector = SectorId{ corridor + 1u };
+			auto victim = world.createAgent("Cancelled or refused", corridor, 0, 0.5f);
+			auto survivor = world.createAgent("Surviving requester", corridor, 0, 0.5f);
+			auto blocker = world.createAgent("Queue owner", corridor, 0, 0.5f);
+			world.pauseSimulation();
+			auto permission = world.addAccessPermission("Control key");
+			require(world.grantAgentAccessPermission(survivor, permission), "Survivor grant failed");
+			require(world.resumeSimulation(), "Terminal setup resume failed");
+			InteractionBinding binding{ { DeviceCommandType::SetSectorLights, sector, false },
+				InteractionBindingRequirement::Required };
+			auto point = world.createInteractionPoint("Shared timed control", sector,
+				{ 0.5f, 0.0f }, 1.0f, World::getFixedTimestep() * 5.0f, { binding });
+			auto blockerRequest = queued ? world.requestInteraction(point, blocker) : InteractionRequestId{};
+			auto request = world.requestInteraction(point, victim);
+			auto survivingRequest = world.requestInteraction(point, survivor);
+			require(request && survivingRequest, "Terminal fixture requests refused");
+			auto operation = world.lookupInteractionRequest(request).entity->getOperations().front().first;
+			require(world.lookupInteractionRequest(survivingRequest).entity->getOperations().front().first == operation,
+				"Terminal fixture did not coalesce");
+			world.advanceTick();
+			auto duration = world.getSimulationSnapshot().interactionPoints.front().durationTicks;
+			require(world.getSimulationSnapshot().interactionPoints.front().activeRequest
+				== (queued ? blockerRequest : request), "Unexpected initial active owner");
+			world.consumeSimulationEvents();
+			uint64_t terminalTick = 1;
+			if (refuse)
+			{
+				world.pauseSimulation();
+				require(world.setInteractionPointPermissionRequirement(point, { permission }), "Requirement edit failed");
+				require(world.resumeSimulation(), "Terminal fixture resume failed");
+				if (queued)
+				{
+					// The queued request is checked only when it becomes active. Do not
+					// introduce an earlier authorization boundary during the refactor.
+					require(world.lookupInteractionRequest(request).entity->getResult() == InteractionResult::Pending,
+						"Queued authorization was checked early");
+					require(world.cancelInteraction(blockerRequest), "Blocker cancellation failed");
+				}
+				world.advanceTick();
+				terminalTick = 2;
+			}
+			else require(world.cancelInteraction(request), "Terminal cancellation failed");
+			auto expected = refuse ? InteractionResult::Rejected : InteractionResult::Cancelled;
+			auto terminal = world.lookupInteractionRequest(request);
+			require(terminal && terminal.entity->getResult() == expected
+				&& terminal.entity->getMissingPermissions() == (refuse
+					? std::vector<AccessPermissionId>{ permission } : std::vector<AccessPermissionId>{}),
+				"Terminal record was deleted or lost diagnostics");
+			require(!world.cancelInteraction(request), "Terminal request was cancelled twice");
+			auto op = world.lookupDeviceOperation(operation);
+			require(op && op.entity->getState() == DeviceOperationState::Pending
+				&& op.entity->getRequesters().contains(survivor)
+				&& !op.entity->getRequesters().contains(victim), "Detachment cancelled shared work");
+			auto active = world.getSimulationSnapshot().interactionPoints.front().activeRequest;
+			require(active == (!refuse && queued ? blockerRequest : InteractionRequestId{}),
+				"Cleanup released another request's active slot");
+			if (!refuse && queued)
+			{
+				// Cancelling a queued requester must not reset the active owner's
+				// remaining duration. Its first press tick has already elapsed.
+				world.advanceTicks(duration - 1);
+				require(!world.getSimulationSnapshot().interactionPoints.front().activeRequest,
+					"Queued cancellation reset the active press timer");
+				world.advanceTick();
+				require(world.lookupDeviceOperation(operation).entity->getState() == DeviceOperationState::Running,
+					"Completed press did not activate shared work");
+			}
+			world.advanceTicks(duration + 4);
+			auto events = world.consumeSimulationEvents();
+			unsigned terminalCount = 0, successCount = 0, removalCount = 0;
+			uint64_t terminalSequence = 0;
+			for (auto const& event : events)
+			{
+				if (event.type == SimulationEventType::InteractionRequestChanged && event.interactionRequest.id == request)
+				{
+					++terminalCount;
+					terminalSequence = event.sequence;
+					require(event.tick == terminalTick && event.interactionRequest.result == expected
+						&& event.interactionName == "Shared timed control", "Terminal publication trace changed");
+				}
+				if (event.type == SimulationEventType::InteractionRequestChanged && event.interactionRequest.id == survivingRequest)
+				{
+					++successCount;
+					require(event.interactionRequest.result == InteractionResult::Succeeded, "Shared survivor failed");
+				}
+				if (event.type == SimulationEventType::InteractionRequestRemoved && event.interactionRequest.id == request)
+				{
+					++removalCount;
+					require(terminalSequence && event.sequence > terminalSequence && event.tick > terminalTick,
+						"Terminal request retired before its observation boundary");
+				}
+			}
+			require(terminalCount == 1 && successCount == 1 && removalCount == 1,
+				"Terminal outcome or retirement not published exactly once");
+			require(!world.getSector(corridor)->areLightsOn()
+				&& world.getSimulationSnapshot().interactionRequests.empty()
+				&& world.getSimulationSnapshot().deviceOperations.empty(), "Terminal cleanup leaked work");
+			for (auto actor : { victim, survivor, blocker })
+				require(world.lookupAgent(actor).entity->getGlobalPosition().distanceTo({ 0.5f, 0.0f }) < 0.001f,
+					"Terminal cleanup changed Agent position");
+		}
+	}
+
 	bool typedLightingInteractionCoalescesAndCancelsByRequester()
 	{
 		core::World world("Typed lighting interaction", 6, 2);
@@ -264,6 +377,7 @@ void registerInteractions(std::vector<smoke::Check>& checks)
 	checks.push_back({ "typedLightingInteractionCoalescesAndCancelsByRequester", [](smoke::Context const&)
 		{
 			requestEntryPointsPreserveTrace();
+			terminalCleanupPreservesOwnershipAndTrace();
 			smoke::require(typedLightingInteractionCoalescesAndCancelsByRequester(), "typed lighting interaction, coalescing, or requester cancellation failed");
 		} });
 	checks.push_back({ "repeatedInteractionsRetireTerminalRecords", [](smoke::Context const&)

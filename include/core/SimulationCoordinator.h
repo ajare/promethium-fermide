@@ -746,6 +746,8 @@ namespace core
 		// Releases a cancelling Actor's claim on each operation its request
 		// needed; an operation nobody still wants is cancelled with it.
 		void detachInteractionRequester(InteractionRequest& request);
+		void releaseInteractionPointRequest(InteractionRequestId id, InteractionPointId point);
+		void publishInteractionOutcome(InteractionRequestId id, InteractionRequest const& request);
 
 		// Retires terminal interaction requests and device operations once no
 		// live owner - an interaction point, a traversal resource's active
