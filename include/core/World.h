@@ -1621,6 +1621,8 @@ namespace core
 		// SimulationCoordinator (ADR 0004); each entry point below - public or
 		// private - forwards to it.
 		DeviceOperationId findOrCreateDeviceOperation(DeviceCommand const& command, AgentId requester);
+		bool hasValidDeviceCommandTarget(DeviceCommand const& command) const;
+		bool isDeviceCommandTargetBroken(DeviceCommand const& command) const;
 
 		void advanceDeviceOperations();
 

@@ -65,34 +65,7 @@ namespace core
 		}
 		for (auto const& binding : bindings)
 		{
-			bool validTarget = false;
-			if (binding.command.type == DeviceCommandType::SetBoothWindowState
-				|| binding.command.type == DeviceCommandType::ToggleBoothWindow)
-				{
-				auto booth = mWorld.lookupBoothWindow(binding.command.boothWindow);
-				validTarget = booth && !booth->getDumbwaiterOwner();
-			}
-			else if (binding.command.type == DeviceCommandType::SetAccessPanelState)
-				validTarget = bool(mWorld.lookupAccessPanel(binding.command.accessPanel));
-			else if (binding.command.type == DeviceCommandType::PressDumbwaiterLanding)
-				validTarget = mWorld.lookupDumbwaiter(binding.command.dumbwaiter) && binding.command.stopIndex < 2;
-			else if (binding.command.type == DeviceCommandType::SetSectorLights)
-				validTarget = binding.command.target && binding.command.target.value <= mWorld.mSectors.size();
-			else if (binding.command.type == DeviceCommandType::RequestAirlock)
-				validTarget = binding.command.target && binding.command.target.value <= mWorld.mSectors.size()
-					&& mWorld.mSectors[binding.command.target.value - 1]->getType() == SectorType::Airlock
-					&& binding.command.stopIndex < 2;
-			else if (auto resource = mWorld.mTraversalResources.find(binding.command.traversalResource))
-				validTarget = binding.command.type == DeviceCommandType::OpenDoor ? resource->mDoor != nullptr
-					: (binding.command.type == DeviceCommandType::SetExtendedState
-						|| binding.command.type == DeviceCommandType::ToggleExtendedState) ? resource->mExtensible != nullptr
-					: (binding.command.type == DeviceCommandType::CallLift
-						|| binding.command.type == DeviceCommandType::SelectLiftDestination
-						|| binding.command.type == DeviceCommandType::CallShuttle
-						|| binding.command.type == DeviceCommandType::SelectShuttleDestination)
-						&& (resource->mLift || resource->mShuttle)
-						&& binding.command.stopIndex < resource->mLiftStops.size();
-			if (!validTarget)
+			if (!mWorld.hasValidDeviceCommandTarget(binding.command))
 			{
 				throw invalid_argument("An interaction binding requires a valid command target");
 			}
@@ -181,23 +154,10 @@ namespace core
 	DeviceOperationId SimulationCoordinator::findOrCreateDeviceOperation(DeviceCommand const& command, AgentId requester)
 	{
 		auto missing = mWorld.missingLiftDestinationPermissions(command, requester);
-		auto resource = mWorld.mTraversalResources.find(command.traversalResource);
-		bool const broken = resource && ((command.type == DeviceCommandType::OpenDoor
-			&& resource->mDoor && resource->mDoor->isBroken())
-			|| ((command.type == DeviceCommandType::SetExtendedState || command.type == DeviceCommandType::ToggleExtendedState)
-				&& resource->mExtensible && resource->mExtensible->isBroken())
-			|| ((command.type == DeviceCommandType::CallLift
-				|| command.type == DeviceCommandType::SelectLiftDestination)
-				&& resource->mLift && resource->mLift->isBroken())
-			|| ((command.type == DeviceCommandType::CallShuttle
-				|| command.type == DeviceCommandType::SelectShuttleDestination)
-				&& resource->mShuttle && resource->mShuttle->isBroken()));
+		bool const broken = mWorld.isDeviceCommandTargetBroken(command);
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 		{
-			if (command.type != DeviceCommandType::ToggleExtendedState
-				&& command.type != DeviceCommandType::SetAccessPanelState
-				&& command.type != DeviceCommandType::ToggleBoothWindow
-				&& command.type != DeviceCommandType::PressDumbwaiterLanding
+			if (isDeviceCommandCoalescible(command.type)
 				&& !broken && missing.empty() && operation->mHasCommand && operation->mCommand == command
 				&& (operation->mState == DeviceOperationState::Pending || operation->mState == DeviceOperationState::Running))
 			{
@@ -205,22 +165,7 @@ namespace core
 				return id;
 			}
 		}
-		auto name = command.type == DeviceCommandType::SetSectorLights
-			? string("Set sector lights ") + (command.desiredState ? "on" : "off")
-			: command.type == DeviceCommandType::OpenDoor ? "Open door"
-			: command.type == DeviceCommandType::ToggleExtendedState ? "Toggle resource extension"
-			: command.type == DeviceCommandType::SetExtendedState
-				? string(command.desiredState ? "Extend resource" : "Retract resource")
-			: command.type == DeviceCommandType::CallLift ? "Call lift"
-			: command.type == DeviceCommandType::SelectLiftDestination ? "Select lift destination"
-			: command.type == DeviceCommandType::CallShuttle ? "Call shuttle"
-			: command.type == DeviceCommandType::SelectShuttleDestination ? "Select shuttle destination"
-				: command.type == DeviceCommandType::RequestAirlock ? "Request Airlock"
-				: command.type == DeviceCommandType::ToggleBoothWindow ? "Toggle BoothWindow shutter"
-				: command.type == DeviceCommandType::SetBoothWindowState ? "Set BoothWindow shutter target"
-				: command.type == DeviceCommandType::PressDumbwaiterLanding ? "Press Dumbwaiter landing"
-				: command.type == DeviceCommandType::SetAccessPanelState
-					? (command.desiredState ? "Open Access panel" : "Close Access panel") : "Device command";
+		auto name = deviceCommandName(command);
 		if (!missing.empty())
 		{
 			name += ": missing Access permissions";
@@ -669,8 +614,7 @@ namespace core
 	{
 		if (command.type == DeviceCommandType::PressDumbwaiterLanding)
 		{
-			auto unit = std::const_pointer_cast<Dumbwaiter>(mWorld.lookupDumbwaiter(command.dumbwaiter));
-			if (!unit || command.stopIndex > 1) return {};
+			if (!mWorld.hasValidDeviceCommandTarget(command)) return {};
 			mWorld.invalidateSimulationSnapshot();
 			auto id = findOrCreateDeviceOperation(command, {});
 			auto operation = mWorld.mDeviceOperations.find(id);
@@ -688,8 +632,7 @@ namespace core
 		// No Agent, admission resource, or document/history mutation is involved.
 		if ((command.type != DeviceCommandType::SetBoothWindowState
 			&& command.type != DeviceCommandType::ToggleBoothWindow)
-			|| !mWorld.lookupBoothWindow(command.boothWindow)) return {};
-		if (mWorld.lookupBoothWindow(command.boothWindow)->getDumbwaiterOwner()) return {};
+			|| !mWorld.hasValidDeviceCommandTarget(command)) return {};
 		mWorld.invalidateSimulationSnapshot();
 		auto id = findOrCreateDeviceOperation(command, {});
 		mWorld.mDeviceOperations.find(id)->mActivated = true;

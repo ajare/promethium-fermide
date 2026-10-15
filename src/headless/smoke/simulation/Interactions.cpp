@@ -6,11 +6,94 @@
 #include <algorithm>
 #include <vector>
 #include "InteractionResults.h"
+#include "../support/BrokenLiftFixture.h"
 
 namespace
 {
 	constexpr uint64_t MaximumSimulationTicks = 1000;
 	using namespace simulation_smoke;
+
+	void deviceCommandClassificationPreservesCreation()
+	{
+		using namespace core;
+		using smoke::require;
+		struct Expected
+		{
+			DeviceCommandType type;
+			char const* offName;
+			char const* onName;
+			bool coalescible;
+		};
+		Expected const cases[] = {
+			{ DeviceCommandType::SetSectorLights, "Set sector lights off", "Set sector lights on", true },
+			{ DeviceCommandType::OpenDoor, "Open door", "Open door", true },
+			{ DeviceCommandType::SetExtendedState, "Retract resource", "Extend resource", true },
+			{ DeviceCommandType::CallLift, "Call lift", "Call lift", true },
+			{ DeviceCommandType::SelectLiftDestination, "Select lift destination", "Select lift destination", true },
+			{ DeviceCommandType::CallShuttle, "Call shuttle", "Call shuttle", true },
+			{ DeviceCommandType::SelectShuttleDestination, "Select shuttle destination", "Select shuttle destination", true },
+			{ DeviceCommandType::RequestAirlock, "Request Airlock", "Request Airlock", true },
+			{ DeviceCommandType::SetBoothWindowState, "Set BoothWindow shutter target", "Set BoothWindow shutter target", true },
+			{ DeviceCommandType::ToggleBoothWindow, "Toggle BoothWindow shutter", "Toggle BoothWindow shutter", false },
+			{ DeviceCommandType::PressDumbwaiterLanding, "Press Dumbwaiter landing", "Press Dumbwaiter landing", false },
+			{ DeviceCommandType::SetAccessPanelState, "Close Access panel", "Open Access panel", false },
+			{ DeviceCommandType::ToggleExtendedState, "Toggle resource extension", "Toggle resource extension", false }
+		};
+		World world("Command classification", 6, 2);
+		auto corridor = world.addCorridor(0, 0, 5);
+		world.finishBuild();
+		auto sector = SectorId{ corridor + 1u };
+		world.consumeSimulationEvents();
+		for (auto const& expected : cases)
+		for (bool desired : { false, true })
+		{
+			DeviceCommand command; command.type = expected.type; command.desiredState = desired;
+			require(deviceCommandName(command) == (desired ? expected.onName : expected.offName)
+				&& isDeviceCommandCoalescible(command.type) == expected.coalescible, "Command metadata changed");
+			bool rejected = false;
+			try
+			{
+				world.createInteractionPoint("Invalid target", sector, { 0.5f, 0 }, 1, 0,
+					{{ command, InteractionBindingRequirement::Required }});
+			}
+			catch (std::invalid_argument const& error)
+			{
+				rejected = std::string(error.what()) == "An interaction binding requires a valid command target";
+			}
+			require(rejected && !world.submitDeviceCommand(command), "Invalid creation target was not refused");
+			require(world.consumeSimulationEvents().empty(), "Failed creation published an event");
+		}
+		DeviceCommand lights{ DeviceCommandType::SetSectorLights, sector, false };
+		require(!world.submitDeviceCommand(lights), "Editor submission expanded to non-editor command types");
+		require(bool(world.createInteractionPoint("Valid lights", sector, { 0.5f, 0 }, 1, 0,
+			{{ lights, InteractionBindingRequirement::Required }})), "Valid Sector command refused");
+
+		// Creation historically accepts both transport command families on either
+		// transport kind. Broken classification is still command-specific, not a
+		// generic 'resource is Broken' query, even for these cross-kind bindings.
+		broken_lift::Scene lift(true);
+		for (auto type : { DeviceCommandType::CallLift, DeviceCommandType::SelectLiftDestination,
+			DeviceCommandType::CallShuttle, DeviceCommandType::SelectShuttleDestination })
+		{
+			DeviceCommand command; command.type = type;
+			command.traversalResource = lift.made.traversalResource; command.stopIndex = 0;
+			auto point = lift.world->createInteractionPoint("Transport classification", SectorId{ lift.bottom + 1u },
+				{ 0.5f, 0 }, 1, 0, {{ command, InteractionBindingRequirement::Required }});
+			bool const liftCommand = type == DeviceCommandType::CallLift || type == DeviceCommandType::SelectLiftDestination;
+			require(lift.world->isControlTargetBroken(point) == liftCommand, "Cross-kind Broken classification changed");
+			SimulationCoordinator coordinator(*lift.world);
+			auto operation = coordinator.findOrCreateDeviceOperation(command, {});
+			require(lift.world->lookupDeviceOperation(operation).entity->getState()
+				== (liftCommand ? DeviceOperationState::Failed : DeviceOperationState::Pending),
+				"Creation-time Broken outcome changed");
+			command.stopIndex = 2;
+			bool rejected = false;
+			try { lift.world->createInteractionPoint("Invalid stop", SectorId{ lift.bottom + 1u },
+				{ 0.5f, 0 }, 1, 0, {{ command, InteractionBindingRequirement::Required }}); }
+			catch (std::invalid_argument const&) { rejected = true; }
+			require(rejected, "Out-of-range transport stop accepted");
+		}
+	}
 
 	// Characterize public requests and the coordinator's internal passing seam (#620).
 	void requestEntryPointsPreserveTrace()
@@ -376,6 +459,7 @@ void registerInteractions(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "typedLightingInteractionCoalescesAndCancelsByRequester", [](smoke::Context const&)
 		{
+			deviceCommandClassificationPreservesCreation();
 			requestEntryPointsPreserveTrace();
 			terminalCleanupPreservesOwnershipAndTrace();
 			smoke::require(typedLightingInteractionCoalescesAndCancelsByRequester(), "typed lighting interaction, coalescing, or requester cancellation failed");

@@ -31,6 +31,33 @@ namespace
 			data.markSerializedUnmodified = false; world.serialize(*out, data); out->serialize(); return out->getSerializedString();
 		}
 	};
+	void identicalPressesRemainIndependent()
+	{
+		Fixture f;
+		auto first = f.world.createAgent("First opener", f.room, 0, 4.5f);
+		auto second = f.world.createAgent("Second opener", f.room, 0, 4.5f);
+		auto firstRequest = f.world.requestAccessPanel(f.panel->getId(), Panel::Action::Open, first);
+		auto secondRequest = f.world.requestAccessPanel(f.panel->getId(), Panel::Action::Open, second);
+		require(firstRequest && secondRequest, "Identical panel presses refused");
+		auto firstOperation = f.world.lookupInteractionRequest(firstRequest).entity->getOperations().front().first;
+		auto secondOperation = f.world.lookupInteractionRequest(secondRequest).entity->getOperations().front().first;
+		require(firstOperation != secondOperation, "Access panel desired-state presses coalesced");
+		require(f.world.cancelInteraction(firstRequest), "Panel cancellation failed");
+		require(f.world.lookupDeviceOperation(firstOperation).entity->getState() == core::DeviceOperationState::Cancelled
+			&& f.world.lookupDeviceOperation(secondOperation).entity->getState() == core::DeviceOperationState::Pending,
+			"Panel cancellation changed another press");
+		f.world.advanceTick();
+		require(f.panel->getState() == Panel::State::Opening
+			&& f.world.lookupDeviceOperation(secondOperation).entity->getState() == core::DeviceOperationState::Running,
+			"Surviving panel press did not activate on its original tick");
+		for (unsigned tick = 0; f.panel->getState() != Panel::State::Open && tick < 180; ++tick)
+			f.world.advanceTick();
+		require(f.world.lookupInteractionRequest(secondRequest).entity->getResult() == core::InteractionResult::Succeeded,
+			"Independent panel press lost its terminal result");
+		for (auto actor : { first, second })
+			require(f.world.lookupAgent(actor).entity->getGlobalPosition() == core::Vector2{ 4.5f, 0 },
+				"Panel press moved an Agent already at the control");
+	}
 	void animatedSpeed()
 	{
 		Fixture f;
@@ -59,6 +86,7 @@ namespace
 	}
 	void approach(smoke::Context const&)
 	{
+		identicalPressesRemainIndependent();
 		animatedSpeed();
 		for (unsigned kind = 0; kind < 3; ++kind)
 			for (auto geometry : {core::AccessPanelGeometry{}, {1, 0.25f, 0.75f}, {0, 0, 1}})

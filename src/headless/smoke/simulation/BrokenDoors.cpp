@@ -166,16 +166,25 @@ namespace
 			binding.command.type = core::DeviceCommandType::OpenDoor;
 			binding.command.traversalResource = scene.made.traversalResource;
 			binding.command.desiredState = true;
-			auto point = scene.world.createInteractionPoint("Broken request", core::SectorId{ scene.front + 1u },
-				scene.agent->getGlobalPosition(), 1, 0, { binding });
-			auto interaction = scene.world.requestInteraction(point, scene.id);
-			require(bool(interaction), "Operation request not represented");
-			auto operation = scene.world.lookupInteractionRequest(interaction).entity->getOperations().front().first;
-			require(scene.world.lookupDeviceOperation(operation).entity->getState() == core::DeviceOperationState::Failed,
-				"Fresh Broken operation was accepted");
-			scene.world.advanceTicks(5);
-			require(simulation_smoke::observedInteractionResult(scene.world, interaction) == core::InteractionResult::Failed,
-				"Broken interaction did not report failure");
+			for (auto requirement : { core::InteractionBindingRequirement::Required, core::InteractionBindingRequirement::BestEffort })
+			{
+				binding.requirement = requirement;
+				auto point = scene.world.createInteractionPoint("Broken request", core::SectorId{ scene.front + 1u },
+					scene.agent->getGlobalPosition(), 1, 0, { binding });
+				require(scene.world.isControlTargetBroken(point), "Control query missed Broken target");
+				auto interaction = scene.world.requestInteraction(point, scene.id);
+				require(bool(interaction), "Operation request not represented");
+				auto operation = scene.world.lookupInteractionRequest(interaction).entity->getOperations().front().first;
+				require(scene.world.lookupDeviceOperation(operation).entity->getState() == core::DeviceOperationState::Failed,
+					"Fresh Broken operation was accepted");
+				auto actorPosition = scene.agent->getGlobalPosition();
+				scene.world.advanceTicks(5);
+				auto expected = requirement == core::InteractionBindingRequirement::Required
+					? core::InteractionResult::Failed : core::InteractionResult::SucceededWithBestEffortFailure;
+				require(simulation_smoke::observedInteractionResult(scene.world, interaction) == expected,
+					"Broken interaction did not preserve binding-specific outcome");
+				require(scene.agent->getGlobalPosition() == actorPosition, "Broken interaction moved its operator");
+			}
 
 			Scene crossing(mode);
 			crossing.agent->setPath(crossing.path(), true);
