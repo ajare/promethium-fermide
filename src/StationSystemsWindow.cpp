@@ -123,6 +123,60 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 				ImGui::TextDisabled("Pause the World to load the reference into the draft.");
 		}
 	}
+	// #423: the packaged emergency and recovery scenario variants. Each
+	// is a complete authored reference document shipped as an
+	// application resource and read by the same authoritative reader;
+	// the window shows the documented limiting services, key event
+	// ordering and bounded outcome ranges alongside the provisional
+	// assumptions, and loading one into the draft is ordinary paused-only
+	// draft editing - the same seam as the base reference, never a
+	// parallel configuration or clock.
+	ImGui::SeparatorText("Emergency & recovery scenarios (packaged resources)");
+	{
+		for (auto const& scenario : core::bundledStationScenarios())
+		{
+			auto const& doc = scenario.document;
+			if (!ImGui::CollapsingHeader(scenario.id.c_str(),
+				ImGuiTreeNodeFlags_FramePadding))
+				continue;
+			ImGui::Text("%s - %.0f simulated s scenario",
+				doc.name.c_str(), doc.scenarioSeconds);
+			ImGui::TextWrapped("%s", doc.summary.c_str());
+			ImGui::TextWrapped("Scenario notes: %s", doc.scenarioNotes.c_str());
+			if (ImGui::TreeNode("Expected limiting services"))
+			{
+				for (auto const& expectation : doc.limitingServices)
+					ImGui::TextWrapped("%s: %s",
+						expectation.item.c_str(), expectation.detail.c_str());
+				ImGui::TreePop();
+			}
+			if (ImGui::TreeNode("Expected key event ordering"))
+			{
+				for (auto const& expectation : doc.eventOrdering)
+					ImGui::TextWrapped("%s: %s",
+						expectation.item.c_str(), expectation.detail.c_str());
+				ImGui::TreePop();
+			}
+			if (ImGui::TreeNode("Expected bounded outcome ranges"))
+			{
+				for (auto const& expectation : doc.outcomeRanges)
+					ImGui::TextWrapped("%s: %s",
+						expectation.item.c_str(), expectation.detail.c_str());
+				ImGui::TreePop();
+			}
+			ImGui::TextWrapped("Qualification: %s", doc.qualification.c_str());
+			ImGui::BeginDisabled(!world->isSimulationPaused());
+			auto const loadLabel = "Load scenario '" + scenario.id + "' into draft";
+			if (ImGui::Button(loadLabel.c_str()))
+			{
+				mDraft = doc.settings;
+				mDiagnostic.clear();
+			}
+			ImGui::EndDisabled();
+			if (!world->isSimulationPaused())
+				ImGui::TextDisabled("Pause the World to load a scenario into the draft.");
+		}
+	}
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);

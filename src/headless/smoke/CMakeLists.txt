@@ -75,7 +75,7 @@ endfunction()
 
 pf_add_smoke_module(pf-smoke-station
     NAME station
-    SOURCES station/Main.cpp station/Documents.cpp station/Coupled.cpp station/Reference.cpp
+    SOURCES station/Main.cpp station/Documents.cpp station/Coupled.cpp station/Reference.cpp station/Scenarios.cpp
     LIBRARIES promethium-fermide-core
     LABELS "core;station"
     TIMEOUT 600
@@ -108,6 +108,12 @@ foreach(check lifecycle batching eventBound persistence stores transfers compoun
         # documented normal-operation scenario with closed accounting, and
         # the shortage-accepted / inconsistent-refused contract.
         referenceBundled referenceNominal referenceShortageAndRejection
+        # #423: the packaged emergency/recovery scenario variants - the
+        # bundled scenario set, each documented shortfall/recovery story
+        # at the tick/snapshot/event seam, and scenario lifecycle
+        # semantics across pause/reset/document round trip.
+        scenariosBundled scenarioResupplyDelay scenarioPowerCoolingOutage
+        scenarioWasteConstrained scenarioMaintenanceRecovery scenarioLifecycle
         # #421: coupled microbial and carbon-loop operation in one World.
         coupledNominal coupledStress)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
@@ -127,6 +133,13 @@ set_tests_properties(station-coupledNominal PROPERTIES TIMEOUT 120)
 # coupled register.
 set_tests_properties(station-referenceNominal PROPERTIES TIMEOUT 240)
 set_tests_properties(station-referenceShortageAndRejection PROPERTIES TIMEOUT 240)
+# #423 the emergency/recovery scenario runs are multi-thousand-tick
+# simulated runs across the full coupled register.
+set_tests_properties(station-scenarioResupplyDelay PROPERTIES TIMEOUT 300)
+set_tests_properties(station-scenarioPowerCoolingOutage PROPERTIES TIMEOUT 150)
+set_tests_properties(station-scenarioWasteConstrained PROPERTIES TIMEOUT 240)
+set_tests_properties(station-scenarioMaintenanceRecovery PROPERTIES TIMEOUT 240)
+set_tests_properties(station-scenarioLifecycle PROPERTIES TIMEOUT 180)
 foreach(hourScale batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesLimited batteriesLosses batteriesDischarging)
     set_tests_properties(station-${hourScale} PROPERTIES TIMEOUT 90)
@@ -686,6 +699,11 @@ set_tests_properties(station-editor-trends PROPERTIES LABELS "smoke;functional;v
 # #420: the bounded scenario forecast observed through the separate window.
 add_test(NAME station-editor-forecast COMMAND pf-smoke-editor --check station/forecastWorkflow)
 set_tests_properties(station-editor-forecast PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+# #423: the packaged emergency/recovery scenarios observed through the
+# separate window: documented expectations render, paused-only scenario
+# loading, and closing the results window preserves the running scenario.
+add_test(NAME station-editor-scenarios COMMAND pf-smoke-editor --check station/scenarioWorkflow)
+set_tests_properties(station-editor-scenarios PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 
 pf_add_smoke_contract(NAME smoke-editor-contract COMMAND ${CMAKE_COMMAND}
     "-DEDITOR=$<TARGET_FILE:pf-smoke-editor>"

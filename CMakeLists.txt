@@ -331,6 +331,25 @@ file(READ "${PF_REFERENCE_STATION_SOURCE}" PF_REFERENCE_STATION_YAML)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/core/BundledStationReferenceSource.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/generated/BundledStationReferenceSource.h" @ONLY)
 
+# #423: the packaged emergency/recovery scenario variants. Each authored
+# resource is embedded the same way as the base reference; editing any
+# scenario resource triggers an incremental reconfigure.
+set(PF_SCENARIO_RESUPPLY_DELAY_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/station-systems/scenarios/resupply-delay.yaml")
+set(PF_SCENARIO_POWER_COOLING_OUTAGE_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/station-systems/scenarios/power-cooling-outage.yaml")
+set(PF_SCENARIO_WASTE_CONSTRAINED_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/station-systems/scenarios/waste-constrained.yaml")
+set(PF_SCENARIO_MAINTENANCE_RECOVERY_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/station-systems/scenarios/maintenance-recovery.yaml")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${PF_SCENARIO_RESUPPLY_DELAY_SOURCE}"
+    "${PF_SCENARIO_POWER_COOLING_OUTAGE_SOURCE}"
+    "${PF_SCENARIO_WASTE_CONSTRAINED_SOURCE}"
+    "${PF_SCENARIO_MAINTENANCE_RECOVERY_SOURCE}")
+file(READ "${PF_SCENARIO_RESUPPLY_DELAY_SOURCE}" PF_SCENARIO_RESUPPLY_DELAY_YAML)
+file(READ "${PF_SCENARIO_POWER_COOLING_OUTAGE_SOURCE}" PF_SCENARIO_POWER_COOLING_OUTAGE_YAML)
+file(READ "${PF_SCENARIO_WASTE_CONSTRAINED_SOURCE}" PF_SCENARIO_WASTE_CONSTRAINED_YAML)
+file(READ "${PF_SCENARIO_MAINTENANCE_RECOVERY_SOURCE}" PF_SCENARIO_MAINTENANCE_RECOVERY_YAML)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/core/BundledStationScenariosSource.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/BundledStationScenariosSource.h" @ONLY)
+
 file(GLOB PF_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/*.cpp")
 file(GLOB PF_CORE_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/include/core/*.h")
 

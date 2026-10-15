@@ -4,6 +4,7 @@
 #include "StationSystemsWindow.h"
 #include "DocumentEdit.h"
 #include "../CoupledRig.h"
+#include "core/StationReference.h"
 #include "core/World.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
@@ -261,6 +262,8 @@ namespace
 			driver.click(ctx, "Add transfer");
 			driver.typeValue(ctx, "Transfer 1 source", "nope");
 			driver.click(ctx, "Apply settings");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(driver.contains("references unknown source store 'nope'"),
 				"Invalid transfer source diagnostic not shown");
@@ -270,6 +273,8 @@ namespace
 			// Repair the drafted source (the invalid 'nope') to the aux store and
 			// confirm again: the valid transfer applies with the required reset.
 			driver.typeValue(ctx, "Transfer 1 source", "aux");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset");
 			REQ(world->getStationSystemsSettings().transfers.size() == 2 && history.undoCount() == 1
 				&& world->getSimulationTick() == 0,
@@ -478,6 +483,8 @@ namespace
 			driver.click(ctx, "Add load");
 			driver.typeValue(ctx, "Load 1 thermal class", "cryogenic");
 			driver.click(ctx, "Apply settings");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(driver.contains("unknown thermal service class 'cryogenic'"),
 				"Invalid thermal class diagnostic not shown");
@@ -489,6 +496,8 @@ namespace
 			driver.typeValue(ctx, "Load 1 thermal class", "warm");
 			driver.typeValue(ctx, "Load 1 critical floor kW", "2");
 			driver.typeValue(ctx, "Load 1 max curtailment", "0.5");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset");
 			REQ(world->getStationSystemsSettings().equipmentLoads.size() == 2
 				&& world->getStationSystemsSettings().equipmentLoads[1].criticalFloorKW == 2.0
@@ -523,6 +532,8 @@ namespace
 			driver.click(ctx, "Solar 0 periodic illumination");
 			driver.click(ctx, "Add segment to solar 0");
 			driver.click(ctx, "Apply settings");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset");
 			REQ(world->getStationSystemsSettings().solarArrays[0].illumination.periodSeconds == 120.0
 				&& world->getStationSystemsSettings().solarArrays[0].illumination.segments.size() == 2
@@ -599,6 +610,8 @@ namespace
 			driver.click(ctx, "Solar 0 periodic illumination");
 			driver.click(ctx, "Add segment to solar 0");
 			driver.click(ctx, "Apply settings");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset");
 			REQ(world->getStationSystemsSettings().solarArrays[0].illumination.segments.size() == 2
 				&& history.undoCount() == 1, "Periodic illumination did not apply");
@@ -622,6 +635,8 @@ namespace
 			driver.click(ctx, "Add battery");
 			driver.typeValue(ctx, "Battery 1 usable kWh", "15");
 			driver.click(ctx, "Apply settings");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(driver.contains("usable energy exceeds the nameplate energy"),
 				"Invalid battery usable energy diagnostic not shown");
@@ -631,6 +646,8 @@ namespace
 			// Repair the drafted value; the confirmed reset applies the new
 			// contract and the live view reconstructs from authored state.
 			driver.typeValue(ctx, "Battery 1 usable kWh", "6");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset");
 			REQ(world->getStationSystemsSettings().batteries.size() == 2
 				&& world->getStationSystemsSettings().batteries[1].usableKWh == 6.0
@@ -1191,6 +1208,8 @@ namespace
 			driver.typeValue(ctx, "Reservoir 1 min temperature C", "50");
 			driver.typeValue(ctx, "Reservoir 1 max temperature C", "40");
 			driver.click(ctx, "Apply settings");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(driver.contains("min below max"),
 				"Inverted drafted temperature limits diagnostic not shown");
@@ -1202,6 +1221,8 @@ namespace
 			// the live view restarts from authored state.
 			driver.typeValue(ctx, "Reservoir 1 min temperature C", "0");
 			driver.typeValue(ctx, "Reservoir 1 thermal class", "warm");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset");
 			REQ(world->getStationSystemsSettings().thermalReservoirs.size() == 2
 				&& world->getStationSystemsSettings().thermalReservoirs[1].minTemperatureC == 0.0
@@ -1327,6 +1348,8 @@ namespace
 			driver.click(ctx, "Add coolant loop");
 			driver.typeValue(ctx, "Coolant loop 1 starting coolant kg", "150");
 			driver.click(ctx, "Apply settings");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(driver.contains("exceeds the loop capacity"),
 				"Over-filled drafted coolant diagnostic not shown");
@@ -1338,6 +1361,8 @@ namespace
 			// view restarts from authored state.
 			driver.typeValue(ctx, "Coolant loop 1 starting coolant kg", "50");
 			driver.typeValue(ctx, "Coolant loop 1 hazard class", "hazardous");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset");
 			REQ(world->getStationSystemsSettings().coolantLoops.size() == 2
 				&& world->getStationSystemsSettings().coolantLoops[1].startingCoolantKg == 50.0
@@ -1490,6 +1515,8 @@ namespace
 			driver.typeValue(ctx, "Chiller 1 cold loop", "chilled2");
 			driver.typeValue(ctx, "Chiller 1 COP", "0");
 			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(driver.contains("COP must be finite and positive"),
 				"Zero-COP drafted chiller diagnostic not shown");
@@ -1504,6 +1531,8 @@ namespace
 			driver.typeValue(ctx, "Chiller 1 COP", "3");
 			driver.typeValue(ctx, "Chiller 1 thermal class", "warm");
 			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(driver.contains("incompatible with cold loop 'chilled2'"),
 				"Cross-class cold-side coupling diagnostic not shown");
@@ -1514,6 +1543,8 @@ namespace
 			driver.typeValue(ctx, "Chiller 1 thermal class", "moderate");
 			driver.typeValue(ctx, "Chiller 1 cold loop", "ghost");
 			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(driver.contains("unknown coolant loop 'ghost'"),
 				"Unknown cold-loop coupling diagnostic not shown");
@@ -1522,6 +1553,8 @@ namespace
 			driver.typeValue(ctx, "Chiller 1 cold loop", "chilled2");
 			driver.typeValue(ctx, "Chiller 1 chilled setpoint C", "45");
 			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(driver.contains("chilled setpoint must be below the maximum condensing"),
 				"Setpoint-above-max-condensing diagnostic not shown");
@@ -1529,6 +1562,8 @@ namespace
 			// contract and the live view restarts from authored state.
 			driver.typeValue(ctx, "Chiller 1 chilled setpoint C", "5");
 			driver.typeValue(ctx, "Chiller 1 cold loop", "chilled2");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset");
 			REQ(world->getStationSystemsSettings().chillers.size() == 2
 				&& world->getStationSystemsSettings().chillers[1].cop == 3.0
@@ -1637,6 +1672,8 @@ namespace
 			driver.click(ctx, "Add generator");
 			driver.typeValue(ctx, "Generator 1 efficiency", "0");
 			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(driver.contains("efficiency must be finite and greater than 0"),
 				"Zero-efficiency drafted generator diagnostic not shown");
@@ -1647,6 +1684,8 @@ namespace
 			driver.typeValue(ctx, "Generator 1 efficiency", "0.5");
 			driver.typeValue(ctx, "Generator 1 fuel store", "ghost");
 			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(driver.contains("fuel inventory references unknown Resource store 'ghost'"),
 				"Unknown fuel-store coupling diagnostic not shown");
@@ -1654,6 +1693,8 @@ namespace
 			driver.typeValue(ctx, "Generator 1 fuel store", "diesel");
 			driver.typeValue(ctx, "Generator 1 commanded output kW", "11");
 			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(driver.contains("commanded output exceeds the installed capacity"),
 				"Commanded-above-rating diagnostic not shown");
@@ -1662,12 +1703,16 @@ namespace
 			driver.typeValue(ctx, "Generator 1 commanded output kW", "10");
 			driver.typeValue(ctx, "Generator 1 thermal class", "warm");
 			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(driver.contains("incompatible with heat sink reservoir 'hot'"),
 				"Cross-class heat-sink coupling diagnostic not shown");
 			// Repair the drafted limits; the confirmed reset applies the
 			// contract and the live view restarts from authored state.
 			driver.typeValue(ctx, "Generator 1 thermal class", "generation");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset");
 			REQ(world->getStationSystemsSettings().generators.size() == 2
 				&& world->getStationSystemsSettings().generators[1].efficiency == 0.5
@@ -1894,6 +1939,8 @@ void bufferWorkflow(smoke::Context const&)
 			// diagnostic and never reaches the authored settings.
 			driver.typeValue(ctx, "Microbial processor 0 initial condition", "2");
 			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(driver.contains("initial culture condition must be finite and from 0 to 1"),
 				"Invalid drafted initial condition diagnostic not shown");
@@ -1904,6 +1951,8 @@ void bufferWorkflow(smoke::Context const&)
 			// confirmation and restarts the culture from its authored start.
 			driver.typeValue(ctx, "Microbial processor 0 initial condition", "0.25");
 			driver.typeValue(ctx, "Microbial processor 0 recovery per hour", "36");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(world->getStationSystemsSettings().microbialProcessors[0].initialCondition == 0.25
 				&& world->getStationSystemsSettings().microbialProcessors[0].recoveryPerHour == 36.0
@@ -2387,6 +2436,8 @@ void cropWorkflow(smoke::Context const&)
 			// reaches the authored settings.
 			driver.typeValue(ctx, "Crop 0 initial dry biomass kg", "999");
 			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(driver.contains("exceeds the declared Growing capacity"),
 				"Invalid drafted initial biomass diagnostic not shown");
@@ -2398,6 +2449,8 @@ void cropWorkflow(smoke::Context const&)
 			driver.typeValue(ctx, "Crop 0 initial dry biomass kg", "2");
 			driver.typeValue(ctx, "Crop 0 growing area m2", "20");
 			driver.typeValue(ctx, "Crop 0 harvest trigger kg (0 disables harvest)", "0.5");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(world->getStationSystemsSettings().cropPopulations[0].growingAreaM2 == 20.0
 				&& world->getStationSystemsSettings().cropPopulations[0].initialBiomassKg == 2.0
@@ -2418,6 +2471,8 @@ void cropWorkflow(smoke::Context const&)
 			// reset-confirmed flow.
 			driver.typeValue(ctx, "Crop 0 growing area m2", "1e308");
 			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(driver.contains("overflows"),
 				"Overflowed derived Growing capacity diagnostic not shown");
@@ -2425,6 +2480,8 @@ void cropWorkflow(smoke::Context const&)
 				&& world->getSimulationTick() == 120,
 				"Refused overflowed crop draft mutated the authored settings or the run");
 			driver.typeValue(ctx, "Crop 0 growing area m2", "30");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(world->getStationSystemsSettings().cropPopulations[0].growingAreaM2 == 30.0
 				&& history.undoCount() == 2 && world->getSimulationTick() == 0,
@@ -2555,6 +2612,8 @@ void cropWorkflow(smoke::Context const&)
 			// reaches the authored settings.
 			driver.typeValue(ctx, "Algae 0 recovery fraction of harvest", "0.9");
 			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(driver.contains("food and recovery fractions together exceed 1"),
 				"Invalid drafted harvest partition diagnostic not shown");
@@ -2567,6 +2626,8 @@ void cropWorkflow(smoke::Context const&)
 			driver.typeValue(ctx, "Algae 0 recovery fraction of harvest", "0.3");
 			driver.typeValue(ctx, "Algae 0 active culture volume L", "2000");
 			driver.typeValue(ctx, "Algae 0 initial dry biomass kg", "1");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(world->getStationSystemsSettings().algaeCultures[0].cultureVolumeL == 2000.0
 				&& world->getStationSystemsSettings().algaeCultures[0].initialBiomassKg == 1.0
@@ -2714,6 +2775,8 @@ void cropWorkflow(smoke::Context const&)
 			world->pauseSimulation();
 			driver.click(ctx, "Remove maintenance job 0");
 			driver.click(ctx, "Apply settings"); ctx->Sleep(1);
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
 			driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
 			REQ(world->getStationSystemsSettings().maintenanceJobs.empty()
 				&& history.undoCount() == 2,
@@ -2819,6 +2882,131 @@ void cropWorkflow(smoke::Context const&)
 		require(driver.passed(), "forecast workflow failed on the Test Engine");
 	}
 
+	// #423: the packaged emergency/recovery scenarios observed through
+	// the separate Station Systems window: the documented limiting
+	// services, ordering and outcome ranges render; loading a scenario
+	// into the draft is paused-only draft editing through the ordinary
+	// apply/reset seam; and closing the results window never touches the
+	// running scenario - visibility and simulation stay independent.
+	void scenarioWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO();
+		io.DisplaySize = {1200.0f, 4400.0f};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Scenario editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		headless::TestEngineDriver driver([&]
+		{
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1150, 4300});
+			window.render(world, history);
+		});
+		window.visible = true;
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		auto const& resupply = core::bundledStationScenarios();
+		require(resupply.size() == 4, "the bundled scenario set is not four deep");
+		driver.run("station", "scenarioWorkflow", [&](ImGuiTestContext* ctx)
+		{
+			ctx->SetRef("Station Systems");
+			REQ(driver.contains("Emergency & recovery scenarios (packaged resources)"),
+				"the scenario section is missing from the station window");
+			// Open the resupply-delay scenario: the documented expectations
+			// render alongside the configuration they describe.
+			ctx->ItemClick("resupply-delay"); ctx->Sleep(1);
+			REQ(driver.contains("Meridian resupply-delay drill"),
+				"the resupply-delay scenario name is missing");
+			REQ(driver.contains("Expected limiting services")
+				&& driver.contains("Crew food supply (food store)"),
+				"the documented limiting services are not rendered");
+			REQ(driver.contains("Expected key event ordering")
+				&& driver.contains("food-out before food resupply"),
+				"the documented event ordering is not rendered");
+			REQ(driver.contains("Expected bounded outcome ranges")
+				&& driver.contains("First rationing onset"),
+				"the documented outcome ranges are not rendered");
+			// Load into the draft while paused: ordinary draft editing.
+			driver.click(ctx, "Load scenario 'resupply-delay' into draft");
+			ctx->Sleep(1);
+			REQ(driver.contains("Draft differs from the authored start conditions"),
+				"the loaded scenario draft was not reported as a change");
+			ctx->ScrollToItemY("Apply settings");
+			ctx->Sleep(1);
+			ctx->MouseMove("Apply settings");
+			ctx->Sleep(1);
+			{
+				auto* ai = ctx->ItemInfo("Apply settings", ImGuiTestOpFlags_NoError);
+				}
+			driver.click(ctx, "Apply settings");
+			ctx->Sleep(1);
+			REQ(world->getStationSystemsSettings() == resupply[0].document.settings,
+				"applying the loaded scenario did not reach the World");
+			REQ(history.undoCount() == 1, "applying the scenario did not commit history");
+			// Run the scenario a little: live results render in the window.
+			world->resumeSimulation();
+			REQ(world->advanceTicks(600), "the scenario run failed"); // t = 10 s
+			ctx->Sleep(1);
+			REQ(driver.contains("Live station state: Enabled")
+				&& driver.contains("600 completed ticks"),
+				"the scenario live results are not observable");
+			// Scenario loading is paused-only: while the scenario runs the
+			// load control is really disabled and a real press changes nothing.
+			{
+				auto* hdr = ctx->ItemInfo("resupply-delay", ImGuiTestOpFlags_NoError);
+				if (!(hdr->StatusFlags & ImGuiItemStatusFlags_Opened))
+					ctx->ItemClick("resupply-delay");
+				ctx->Sleep(1);
+			}
+			REQ(driver.clickDisabled(ctx, "Load scenario 'resupply-delay' into draft",
+				"scenario load while running"),
+				"the scenario load control was not disabled while the World runs");
+			REQ(world->getStationSystemsSettings() == resupply[0].document.settings,
+				"the disabled scenario press mutated the settings");
+			// Close the results window through the real top-level close
+			// control: the scenario keeps running, untouched.
+			auto const before = world->getStationSystemsSnapshot();
+			auto* imguiWindow = ImGui::FindWindowByName("Station Systems");
+			ctx->MouseTeleportToPos(ImVec2(imguiWindow->Pos.x + imguiWindow->Size.x - 15,
+				imguiWindow->Pos.y + 10));
+			ctx->MouseClick();
+			ctx->Sleep(1);
+			REQ(!window.visible && world->getStationSystemsSettings().enabled
+				&& world->getStationSystemsSnapshot() == before,
+				"closing the results window changed the running scenario");
+			REQ(world->advanceTick(), "the hidden scenario stopped ticking");
+			// Reopen: the live results re-render from the running World.
+			window.visible = true; ctx->Sleep(1);
+			REQ(driver.contains("Live station state: Enabled")
+				&& driver.contains("601 completed ticks"),
+				"the reopened window lost the running scenario's live results");
+			// Pause, then switch scenarios through the same draft seam: the
+			// apply demands a World reset confirmation and honours it.
+			world->pauseSimulation(); ctx->Sleep(1);
+			ctx->ItemClick("maintenance-recovery"); ctx->Sleep(1);
+			REQ(driver.contains("Meridian maintenance miss-and-recovery drill"),
+				"the maintenance scenario name is missing");
+			driver.click(ctx, "Load scenario 'maintenance-recovery' into draft");
+			ctx->Sleep(1);
+			ctx->ScrollToItemY("Apply settings");
+			ctx->Sleep(1);
+			driver.click(ctx, "Apply settings");
+			ctx->Sleep(1);
+			REQ(driver.contains("Confirm?"), "the scenario switch bypassed reset confirmation");
+			ctx->ScrollToItemY("Confirm World reset");
+			ctx->Sleep(1);
+			driver.click(ctx, "Confirm World reset");
+			REQ(world->getStationSystemsSettings() == resupply[3].document.settings
+				&& world->getSimulationTick() == 0,
+				"the confirmed scenario switch did not land the settings and reset the World");
+			REQ(history.undoCount() == 2, "the scenario switch did not commit history");
+		});
+		#undef REQ
+		require(driver.passed(), "scenario workflow failed on the Test Engine");
+	}
+
 	void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"station/windowWorkflow", workflow});
@@ -2844,4 +3032,5 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/trendsWorkflow", trendsWorkflow});
 	checks.push_back({"station/enduranceWorkflow", enduranceWorkflow});
 	checks.push_back({"station/forecastWorkflow", forecastWorkflow});
+	checks.push_back({"station/scenarioWorkflow", scenarioWorkflow});
 }

@@ -1,0 +1,22 @@
+#pragma once
+
+// Generated from the authored emergency/recovery scenario resources
+// (#423), never a second definition. Embedded as char arrays (like
+// BundledStationReferenceSource) so the packaged scenario
+// configurations and the authored resource files are the same bytes
+// at runtime. The order here is the authored display order.
+namespace core
+{
+	struct BundledStationScenarioText
+	{
+		char const* id;
+		char const* text;
+	};
+
+	inline constexpr BundledStationScenarioText kBundledStationScenarios[] = {
+		{ "resupply-delay", R"PF_SCENARIO(@PF_SCENARIO_RESUPPLY_DELAY_YAML@)PF_SCENARIO" },
+		{ "power-cooling-outage", R"PF_SCENARIO(@PF_SCENARIO_POWER_COOLING_OUTAGE_YAML@)PF_SCENARIO" },
+		{ "waste-constrained", R"PF_SCENARIO(@PF_SCENARIO_WASTE_CONSTRAINED_YAML@)PF_SCENARIO" },
+		{ "maintenance-recovery", R"PF_SCENARIO(@PF_SCENARIO_MAINTENANCE_RECOVERY_YAML@)PF_SCENARIO" },
+	};
+}

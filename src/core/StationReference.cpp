@@ -13,6 +13,7 @@
 #include "core/SerializationException.h"
 #include "core/YamlSerializer.h"
 #include "BundledStationReferenceSource.h"
+#include "BundledStationScenariosSource.h"
 
 #include <cmath>
 #include <stdexcept>
@@ -1107,6 +1108,45 @@ namespace core
 			if (!std::isfinite(document.scenarioSeconds) || document.scenarioSeconds <= 0.0)
 				return refuse("Reference scenario duration must be finite and positive");
 			document.scenarioNotes = serializer->readString("scenarioNotes");
+			// #423: the scenario kind and the documented expectations.
+			// Optional: the normal-operation reference carries neither and
+			// keeps the "reference" default with empty expectation lists.
+			// An unknown kind is refused so a typo cannot silently reclass
+			// a drill as the baseline or vice versa.
+			if (serializer->hasField("scenarioKind"))
+			{
+				document.scenarioKind = serializer->readString("scenarioKind");
+				if (document.scenarioKind != "reference" && document.scenarioKind != "emergency")
+					throw SerializationException(
+						"Unknown reference scenario kind: " + document.scenarioKind);
+			}
+			auto const readExpectations = [&](char const* field,
+				std::vector<StationScenarioExpectation>& expectations)
+			{
+				if (!serializer->hasField(field)) return;
+				serializer->beginArray(field);
+				while (serializer->nextArrayItem())
+				{
+					serializer->beginMap("");
+					StationScenarioExpectation expectation;
+					expectation.item = serializer->readString("item");
+					expectation.detail = serializer->readString("detail");
+					if (expectation.item.empty())
+						throw SerializationException(
+							std::string("Reference scenario expectation with an empty item in '")
+							+ field + "'");
+					if (expectation.detail.empty())
+						throw SerializationException(
+							std::string("Reference scenario expectation '") + expectation.item
+							+ "' carries no documented bound or rationale");
+					expectations.push_back(std::move(expectation));
+					serializer->endMap();
+				}
+				serializer->endArray();
+			};
+			readExpectations("limitingServices", document.limitingServices);
+			readExpectations("eventOrdering", document.eventOrdering);
+			readExpectations("outcomeRanges", document.outcomeRanges);
 			// The settings themselves are read by the authoritative World
 			// station reader, including its full physical-consistency
 			// validation: intentional operational shortages (thin but
@@ -1128,6 +1168,31 @@ namespace core
 	{
 		static std::string const text{ kStationReferenceYaml };
 		return text;
+	}
+
+	std::vector<BundledStationScenario> const& bundledStationScenarios()
+	{
+		// #423: the packaged emergency/recovery variants are parsed once,
+		// each through the same authoritative reader and validation the
+		// base reference passes - a scenario resource that does not parse
+		// is a build defect, never a user error.
+		static std::vector<BundledStationScenario> const scenarios = []
+		{
+			std::vector<BundledStationScenario> parsed;
+			for (auto const& resource : kBundledStationScenarios)
+			{
+				BundledStationScenario scenario;
+				scenario.id = resource.id;
+				scenario.text = resource.text;
+				std::string diagnostic;
+				if (!parseStationReference(resource.text, scenario.document, &diagnostic))
+					throw std::runtime_error("Bundled station scenario '" + scenario.id
+						+ "' failed to parse: " + diagnostic);
+				parsed.push_back(std::move(scenario));
+			}
+			return parsed;
+		}();
+		return scenarios;
 	}
 
 	StationReferenceDocument const& bundledStationReference()

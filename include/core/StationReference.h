@@ -31,6 +31,19 @@ namespace core
 		bool operator==(StationReferenceProvenance const&) const = default;
 	};
 
+	// One documented expectation of an authored emergency/recovery scenario
+	// variant (#423): the aspect being expected (a limiting service, an
+	// ordering pair, or an outcome metric) and the documented bound or
+	// rationale behind it, with its provisional assumptions named in the
+	// detail. The expectations are documentation the acceptance tests
+	// verify against observable behaviour - never a runtime input.
+	struct StationScenarioExpectation
+	{
+		std::string item;
+		std::string detail;
+		bool operator==(StationScenarioExpectation const&) const = default;
+	};
+
 	// The packaged reference station document (#422): one reconciled,
 	// editable configuration that demonstrates the implemented Station
 	// systems with internally consistent source/load/thermal budgets and
@@ -55,6 +68,18 @@ namespace core
 		// in simulated seconds, and its notes.
 		double scenarioSeconds{3600.0};
 		std::string scenarioNotes;
+		// #423: what kind of documented scenario this document carries.
+		// "reference" for the normal-operation baseline, "emergency" for a
+		// failure/recovery drill. A document without the field reads as
+		// "reference".
+		std::string scenarioKind{"reference"};
+		// #423: the documented expectations of an emergency/recovery
+		// scenario: which services are expected to limit the outcome, the
+		// key event ordering, and the bounded outcome ranges with their
+		// provisional assumptions. Empty for the normal-operation reference.
+		std::vector<StationScenarioExpectation> limitingServices;
+		std::vector<StationScenarioExpectation> eventOrdering;
+		std::vector<StationScenarioExpectation> outcomeRanges;
 		StationSystemsSettings settings;
 	};
 
@@ -74,4 +99,22 @@ namespace core
 	StationReferenceDocument const& bundledStationReference();
 	// The raw packaged resource text, for display and re-editing.
 	std::string const& bundledStationReferenceText();
+
+	// One packaged emergency/recovery scenario variant (#423): a
+	// complete, editable reference document authored against the same
+	// format and validation as the base reference, plus its stable
+	// scenario id and raw resource text.
+	struct BundledStationScenario
+	{
+		std::string id;
+		std::string text;
+		StationReferenceDocument document;
+	};
+
+	// The packaged emergency and recovery scenario variants (#423),
+	// parsed once from the embedded resource texts on first use, in
+	// authored order. Throws std::runtime_error if a packaged scenario
+	// resource is broken: a bundled scenario failing to parse is a build
+	// defect, never a user error.
+	std::vector<BundledStationScenario> const& bundledStationScenarios();
 }

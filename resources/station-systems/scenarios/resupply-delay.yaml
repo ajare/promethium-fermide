@@ -1,0 +1,1068 @@
+# Meridian resupply-delay drill (#423)
+#
+# An authored emergency variant of the packaged Meridian reference station.
+# Same format, same authoritative reader, same validation as the base
+# reference and any saved World: this is ordinary authored stationSystems
+# configuration plus the documented scenario expectations of ticket #423.
+#
+# The drill: harvest contracts offline, thin food and drawable-water
+# inventories, and delayed resupply flights. Every shortfall and every
+# recovery below happens through implemented mechanisms - store drawdown,
+# crew rationing, scheduled deliveries - never scripted hidden resources.
+name: Meridian resupply-delay drill
+schemaVersion: 95
+summary: 'A four-crew Meridian configuration exercising delayed resupply: the crop and algae harvest
+  contracts are offline for the drill, the food store starts at a two-crew-day-quarter thin ration
+  and the potable store''s drawable inventory above its protected life-support reserve is minutes
+  of drinking water. The scheduled resupply flights are delayed: food runs out at about 600 s,
+  the delayed food flight lands at 900 s, the potable drawable runs out at about 1650 s and the
+  delayed water flight lands at 1950 s. Every shortfall is a countdown the crew actually lives
+  through: metabolism rations to zero against the empty store, unmet demand is recorded at the
+  full nominal rate, waste returns scale with the metabolism that actually ran, and the delayed
+  deliveries restore full service through the ordinary delivery mechanism. No hidden pantry: the
+  only supplies are the authored stores and the authored flights.'
+provenance:
+- coefficient: Crew oxygen uptake
+  value: 0.84 kg per person per day (authored as 9.722222e-6 kg/s)
+  units: kg O2 per crew per simulated second
+  source: 'Provisional biological assumption: typical human resting-to-light-activity oxygen uptake
+    from published life-support literature (approximately 0.84 kg/person/day). Converted to per-second
+    by dividing by 86400.
+
+    '
+- coefficient: Crew carbon dioxide production
+  value: 1.02 kg per person per day (authored as 1.180556e-5 kg/s)
+  units: kg CO2 per crew per simulated second
+  source: 'Provisional biological assumption at a respiratory quotient of about 0.85 against the
+    oxygen uptake above; the CO2/O2 mass ratio 1.214 is consistent with a mixed diet.
+
+    '
+- coefficient: Crew food and potable water
+  value: 0.8 kg dry food and 1.8 kg potable water per person per day
+  units: store units (kg) per crew per simulated second
+  source: 'Provisional: dry food at 17000 kJ/kg dry (about 4000 kcal/kg dry); potable water is
+    the drinking fraction only, with the remaining water demand met by recovered and treated process
+    water routed through the same treatment chain in a longer-haul configuration. The consumed
+    mass the waste streams do not carry away is reported as explicit retained body mass, never
+    discarded.
+
+    '
+- coefficient: Crew metabolic heat and moisture
+  value: 0.1 kW sensible heat and 0.55 kg evaporated moisture per person per day
+  units: kW and kg/s per crew
+  source: 'Provisional: nominal sensible heat about 100 W per person; evaporated moisture is the
+    fraction returned to the cabin air that the water collector must condense. The declared heat
+    sits well below the food energy minus the energy still bound in the urine and organic-waste
+    streams, so the crew energy ledger closes with margin.
+
+    '
+- coefficient: Electrolysis electrical dose
+  value: 4.5 kWh per kg of split water
+  units: kWh/kg
+  source: 'Provisional process assumption above the declared chemical floor of 3.70 kWh/kg (the
+    lower heating value of the hydrogen produced at the declared stoichiometry); the difference
+    is booked as process heat into the class-matched sink. Not a machine qualification.
+
+    '
+- coefficient: Sabatier electrical dose and reaction heat
+  value: 1.0 kWh per kg CO2 converted; exothermy derived from declared heating values
+  units: kWh/kg CO2
+  source: 'Provisional process assumption. The released heat is not authored separately: it is
+    the chemical energy the hydrogen reactant carried that the methane product does not retain,
+    derived from the declared lower heating values and the declared stoichiometry.
+
+    '
+- coefficient: Methane-processing electrical dose
+  value: 2.0 kWh per kg CH4 processed
+  units: kWh/kg CH4
+  source: 'Provisional process assumption above the declared endothermic reaction-heat demand
+    of about 1.30 kWh/kg; the difference is process heat routed to the sink. The recovered hydrogen
+    is recycled feed, not free supply: the Sabatier stage consumes twice the hydrogen per methane
+    it makes as the processor returns, so the combined loop retains a net hydrogen demand.
+
+    '
+- coefficient: Chilled service COP
+  value: 3.0 cooling per unit work at rated
+  units: dimensionless COP
+  source: 'Provisional vapour-cycle assumption for the habitable-class chilled service; auxiliaries
+    are authored separately at 0.05 kW.
+
+    '
+- coefficient: Radiator effective rejection
+  value: emissivity 0.90 x view factor 0.90 against a -30 C effective sink
+  units: dimensionless factors, Celsius sink temperature
+  source: 'Provisional radiator/view assumption under the declared Stefan-Boltzmann law. Areas
+    are effective areas for the declared emissivity and view factor; no fin efficiency or distribution
+    modelling is promised. The -30 C effective sink represents a sun-lit orbit-averaged back-radiation
+    environment, not deep space.
+
+    '
+- coefficient: Crop growth yield and respiration
+  value: 0.1 kg dry biomass per kWh of delivered light; 0.012 per hour respiration
+  units: kg/kWh and 1/hour
+  source: 'Provisional biological assumption (tunable model parameter, not validated agronomy).
+    The yield fixes 1700 kJ of chemical energy per kWh against the 3600 kJ the light carries,
+    well inside the declared energy ceiling.
+
+    '
+- coefficient: Digester recovery fractions
+  value: 0.8 bound N/P/K, 0.7 minerals, 0.7 moisture
+  units: fractions of the feed's bound content
+  source: 'Provisional biological assumption for an aerobic digester; the residue is the mass-balance
+    remainder and the declared reaction heat (600 kJ/kg feed) is capped by the feedstock''s own
+    declared chemical energy (2400 kJ/kg feed).
+
+    '
+assumptions:
+- topic: Water makeup and recovery
+  text: 'Cabin humidity is condensed by the hab water collector on a chilled-surface coolant loop
+    down to 40 percent relative humidity and lands in the raw water buffer. The Sabatier product
+    water, the digester recovered water and (when the backup runs) the fuel-cell product water
+    all join the same raw buffer. One normal-class treatment closes the loop: raw to potable-grade
+    fresh at a 0.9 recovery ratio, with the concentrate retained for disposal. The fresh store
+    carries a protected reserve of 30 kg that electrolysis and industry can never eat into; the
+    crew drinking store carries a 50 kg protected life-support reserve and is refilled by scheduled
+    potable deliveries. Makeup water is therefore explicit: condensation and process recovery
+    first, delivered potable top-ups second, and every kilogram that cannot be treated stays visible
+    in the raw buffer rather than disappearing.
+
+    '
+- topic: Hazardous autonomy
+  text: 'The hazardous processing bay is a self-contained segregated service. Hazardous water
+    (hazWaterRaw) is processed only by the hazardous-class treatment, which releases treated material
+    only on a passed release-clearance test drawn from the hazardous clearance kit at 0.001 clearance
+    units per kg treated; a curtailed energy dose or an exhausted kit holds the material unqualified.
+    The hazardous coolant loop owns its own finite coolant inventory, is protected as a containment-circulation
+    service regardless of its criticalService flag, and never shares a store, a loop or a generic
+    transfer with the normal side. Hazardous concentrate leaves the station only through its own
+    scheduled ejection. No normal-class process touches a hazardous store anywhere in this configuration,
+    and the validator refuses any edit that would.
+
+    '
+- topic: Hydrogen and carbon balance
+  text: 'Hydrogen is produced only by electrolysis and is spent on the Sabatier carbon loop; the
+    methane processor returns recycled hydrogen to the same store. Because the Sabatier stage
+    consumes about twice the hydrogen per methane that pyrolysis returns, the combined loop retains
+    a net hydrogen demand and can never run on its own return - the hydrogen store''s movement
+    closes over electrolysis production minus that net demand. Carbon is captured from the hab,
+    converted to methane, split to solid carbon, and the solid carbon is ejected: every kilogram
+    of carbon has a named pathway and a store that holds it. The hab CO2 capture rate is sized
+    above the crew CO2 production so cabin quality holds while the conversion chain works through
+    the capture inventory; the
+
+    '
+- topic: Microbial participation
+  text: 'The aerobic digester is the microbial participant: it eats the crew''s organic waste
+    (a declared compound feedstock), consumes oxygen, process water, electricity and culture medium,
+    and returns recovered nutrients (pumped to the crop nitrogen store), recovered water (to the
+    raw buffer), CO2 (to the capture inventory) and an unrecoverable residue routed to the terminal
+    waste store. The culture carries one aggregate condition in [0,1] - never individual organisms
+    - degraded by starvation, medium exhaustion, cold stress and heat stress at the recorded per-hour
+    rates and recovering at 0.02 condition points per hour only while fed, supplied and inside
+    its 15-45 C window, consuming replacement biological stock per recovered point. All microbial
+    coefficients are provisional biological assumptions, not validated biology.
+
+    '
+- topic: Thermal model
+  text: 'Process heat and the chiller condenser heat collect in the class-matched low-class process
+    sink and reject through one effective-area radiator by the declared Stefan-Boltzmann law against
+    the -30 C effective sink. The chilled service is a real chain: habitat and life-support heat
+    enters the chilled water reservoir, the protected coolant loop circulates it through the chiller
+    evaporator, and the condenser lifts it to the process sink. A passive thermal buffer on the
+    process sink absorbs what the radiator cannot take at the instant, and returns it only when
+    real rejection capacity comes back. Declared temperature limits are reported crossings, never
+    clamps.
+
+    '
+- topic: Power budget
+  text: 'One 20 kW solar array at a constant 0.85 illumination covers the reconciled nominal demand
+    of about 16 kW with a small surplus that charges the battery; the battery (80 kWh usable above
+    a 20 kWh reserve floor) rides transients and is never a sustained source. The fuelled generator
+    and the fuel-cell backup are authored at zero commanded output for normal operation: they
+    exist to be started when the sun or the batteries cannot carry the load, with their startup
+    energy, ramp and shutdown-heat contracts fully authored. Dispatch mode is manual: the authored
+    commanded outputs are authoritative.
+
+    '
+qualification: "Scope and qualification limits. This is a provisional, internally consistent model\
+  \ configuration for demonstrating the implemented Station system: it is not a flight-qualified\
+  \ engineering baseline and claims no validated biology, agronomy, phycology, reactor physics\
+  \ or qualified machine behaviour. The reconciled budgets are balanced for the documented normal-operation\
+  \ scenario below; long-duration closure over days and weeks (nutrient cycling completeness,\
+  \ consumable resupply cadence, radiator long-term sizing, biological stability) is explicitly\
+  \ NOT qualified by this configuration. Biological and process coefficients are tunable model\
+  \ parameters with recorded provenance; the declared temperature, pressure and quality limits\
+  \ are reported crossings, never enforced clamps. The configuration never reads Agent counts,\
+  \ movement, health or behaviour, and no station input here is derived from World entities: crews,\
+  \ occupants and loads are authored assignments only.\n The resupply-delay drill demonstrates\
+  \ rationing and delayed-recovery mechanics under authored thin inventories only: it certifies\
+  \ no crew survival timeline, no nutrition adequacy, and no real logistics cadence. The deliberately\
+  \ tiny food and drawable-water starting quantities are drill devices to compress a multi-day\
+  \ shortfall into a 40-minute trace, not a claim that a real station runs on them."
+scenarioSeconds: 2400.0
+scenarioNotes: 'Reproducible resupply-delay scenario: enable the configuration, resume the World
+  clock and run 2400 simulated seconds. Expected observable result at the tick/snapshot/event
+  seam: full-scale crew metabolism until the food drawable empties at about 600 s (limiter names
+  the food store), crew metabolic scale zero with full-rate unmet food demand until the 900 s
+  delivery lands, full-scale metabolism again until the potable drawable above the 50 kg protected
+  reserve empties at about 1800 s (limiter names the drinking store at its protected reserve),
+  and full-scale metabolism restored from the 2100 s water delivery to the end of the run. Urine
+  and organic-waste returns never exceed what the crew actually ate and drank; the unit and constituent
+  ledgers close.'
+stationSystems:
+  enabled: true
+  observationIntervalSeconds: 1.0
+  trendRetentionSeconds: 3600.0
+  dispatchMode: manual
+  stores:
+  - id: food
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.02222
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+    composition:
+      moisture: 0.0
+      nutrientNitrogen: 0.05
+      atmosphericNitrogen: 0.0
+      phosphorus: 0.02
+      potassium: 0.03
+      otherMinerals: 0.02
+      energyKJPerKgDry: 17000.0
+  - id: drinking
+    unit: kg
+    capacity: 200.0
+    startingQualified: 50.125
+    startingUnqualified: 0.0
+    protectedReserve: 50.0
+    hazardClass: normal
+    composition:
+      moisture: 0.999
+      nutrientNitrogen: 0.0
+      atmosphericNitrogen: 0.0
+      phosphorus: 0.0
+      potassium: 0.0
+      otherMinerals: 0.001
+      energyKJPerKgDry: 0.0
+  - id: urine
+    unit: kg
+    capacity: 60.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+    composition:
+      moisture: 0.95
+      nutrientNitrogen: 0.3
+      atmosphericNitrogen: 0.0
+      phosphorus: 0.1
+      potassium: 0.35
+      otherMinerals: 0.15
+      energyKJPerKgDry: 800.0
+  - id: organicWaste
+    unit: kg
+    capacity: 40.0
+    startingQualified: 5.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+    composition:
+      moisture: 0.7
+      nutrientNitrogen: 0.05
+      atmosphericNitrogen: 0.0
+      phosphorus: 0.05
+      potassium: 0.05
+      otherMinerals: 0.1
+      energyKJPerKgDry: 8000.0
+  - id: co2
+    unit: kg
+    capacity: 60.0
+    startingQualified: 5.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: hydrogen
+    unit: kg
+    capacity: 25.0
+    startingQualified: 2.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: methane
+    unit: kg
+    capacity: 10.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: rawWater
+    unit: kg
+    capacity: 150.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: fresh
+    unit: kg
+    capacity: 200.0
+    startingQualified: 80.0
+    startingUnqualified: 0.0
+    protectedReserve: 30.0
+    hazardClass: normal
+  - id: concentrate
+    unit: kg
+    capacity: 120.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: treatmentMedia
+    unit: kg
+    capacity: 30.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: captureMedia
+    unit: kg
+    capacity: 30.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: digesterMedia
+    unit: kg
+    capacity: 30.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: processOxygen
+    unit: kg
+    capacity: 40.0
+    startingQualified: 15.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: fertN
+    unit: kg
+    capacity: 10.0
+    startingQualified: 2.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: fertP
+    unit: kg
+    capacity: 10.0
+    startingQualified: 2.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: fertK
+    unit: kg
+    capacity: 10.0
+    startingQualified: 2.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: fertMin
+    unit: kg
+    capacity: 10.0
+    startingQualified: 2.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: nutrients
+    unit: kg
+    capacity: 15.0
+    startingQualified: 1.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: carbonWaste
+    unit: kg
+    capacity: 20.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: residue
+    unit: kg
+    capacity: 80.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: fuel
+    unit: kWh
+    capacity: 2000.0
+    startingQualified: 500.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: fuelcellH2
+    unit: kg
+    capacity: 25.0
+    startingQualified: 20.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: fuelcellO2
+    unit: kg
+    capacity: 100.0
+    startingQualified: 80.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: hazWaterRaw
+    unit: kg
+    capacity: 60.0
+    startingQualified: 20.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: hazardous
+  - id: hazWaterTreated
+    unit: kg
+    capacity: 60.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: hazardous
+  - id: hazConcentrate
+    unit: kg
+    capacity: 60.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: hazardous
+  - id: hazClearance
+    unit: kg
+    capacity: 10.0
+    startingQualified: 4.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: hazardous
+  - id: toolKit
+    unit: kg
+    capacity: 10.0
+    startingQualified: 4.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: maintenanceWaste
+    unit: kg
+    capacity: 20.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: bioStock
+    unit: kg
+    capacity: 10.0
+    startingQualified: 5.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  atmospheres:
+  - id: hab
+    hazardClass: normal
+    volumeM3: 200.0
+    startingOxygenKg: 60.0
+    startingNitrogenKg: 220.0
+    startingCarbonDioxideKg: 1.0
+    startingWaterVapourKg: 2.0
+    startingTemperatureC: 22.0
+    thermalCapacityKJPerK: 40000.0
+    reservoirId: ''
+    exchangerConductanceKWPerK: 0.0
+    occupants: 0
+    oxygenUsePerOccupantKgPerS: 0.0
+    co2ProductionPerOccupantKgPerS: 0.0
+    sensibleHeatPerOccupantKW: 0.0
+    moistureAdditionPerOccupantKgPerS: 0.0
+    leakRateKgPerS: 1.0e-05
+    minPressureKPa: 80.0
+    maxPressureKPa: 140.0
+    minOxygenPartialPressureKPa: 12.0
+    maxCarbonDioxidePartialPressureKPa: 0.4
+  - id: greenhouse
+    hazardClass: normal
+    volumeM3: 400.0
+    startingOxygenKg: 120.0
+    startingNitrogenKg: 400.0
+    startingCarbonDioxideKg: 3.0
+    startingWaterVapourKg: 2.0
+    startingTemperatureC: 24.0
+    thermalCapacityKJPerK: 60000.0
+    reservoirId: ''
+    exchangerConductanceKWPerK: 0.0
+    occupants: 0
+    oxygenUsePerOccupantKgPerS: 0.0
+    co2ProductionPerOccupantKgPerS: 0.0
+    sensibleHeatPerOccupantKW: 0.0
+    moistureAdditionPerOccupantKgPerS: 0.0
+    leakRateKgPerS: 5.0e-06
+    minPressureKPa: 80.0
+    maxPressureKPa: 140.0
+    minOxygenPartialPressureKPa: 12.0
+    maxCarbonDioxidePartialPressureKPa: 5.0
+  - id: pond
+    hazardClass: normal
+    volumeM3: 100.0
+    startingOxygenKg: 30.0
+    startingNitrogenKg: 100.0
+    startingCarbonDioxideKg: 2.0
+    startingWaterVapourKg: 1.0
+    startingTemperatureC: 25.0
+    thermalCapacityKJPerK: 30000.0
+    reservoirId: ''
+    exchangerConductanceKWPerK: 0.0
+    occupants: 0
+    oxygenUsePerOccupantKgPerS: 0.0
+    co2ProductionPerOccupantKgPerS: 0.0
+    sensibleHeatPerOccupantKW: 0.0
+    moistureAdditionPerOccupantKgPerS: 0.0
+    leakRateKgPerS: 2.0e-06
+    minPressureKPa: 80.0
+    maxPressureKPa: 140.0
+    minOxygenPartialPressureKPa: 12.0
+    maxCarbonDioxidePartialPressureKPa: 8.0
+  crews:
+  - id: crew
+    atmosphereId: hab
+    crewCount: 4
+    activity:
+      constantLevel: 1.0
+      periodSeconds: 0.0
+      segments: []
+    foodStoreId: food
+    waterStoreId: drinking
+    urineStoreId: urine
+    organicWasteStoreId: organicWaste
+    foodPerCrewPerS: 9.259259e-06
+    waterPerCrewPerS: 2.083333e-05
+    oxygenPerCrewKgPerS: 9.722222e-06
+    co2PerCrewKgPerS: 1.180556e-05
+    moisturePerCrewKgPerS: 6.365741e-06
+    urinePerCrewPerS: 1.157407e-05
+    organicWastePerCrewPerS: 2.893519e-06
+    metabolicHeatPerCrewKW: 0.1
+  waterCollectors:
+  - id: condHab
+    hazardClass: normal
+    atmosphereId: hab
+    coolingLoopId: loopChill
+    thermalClass: low
+    destStoreId: rawWater
+    maxRateKgPerS: 0.0005
+    targetRelativeHumidity: 0.4
+  waterTreatments:
+  - id: wtr
+    hazardClass: normal
+    sourceStoreId: rawWater
+    treatedStoreId: fresh
+    concentrateStoreId: concentrate
+    consumableStoreId: treatmentMedia
+    throughputKgPerS: 6.0e-05
+    recoveryRatio: 0.9
+    specificEnergyKWhPerKg: 0.5
+    consumablePerKg: 0.001
+    priority: 1
+  - id: hazWtr
+    hazardClass: hazardous
+    sourceStoreId: hazWaterRaw
+    treatedStoreId: hazWaterTreated
+    concentrateStoreId: hazConcentrate
+    consumableStoreId: hazClearance
+    clearanceStoreId: hazClearance
+    clearancePerKg: 0.001
+    throughputKgPerS: 2.0e-05
+    recoveryRatio: 0.85
+    specificEnergyKWhPerKg: 0.6
+    consumablePerKg: 0.002
+    priority: 2
+  electrolyzers:
+  - id: lyzerHab
+    hazardClass: normal
+    waterStoreId: fresh
+    oxygenStoreId: ''
+    hydrogenStoreId: hydrogen
+    atmosphereId: hab
+    thermalClass: low
+    heatSinkId: processSink
+    rateKgPerS: 5.0e-05
+    specificEnergyKWhPerKgWater: 4.5
+    maxSinkTemperatureC: 60.0
+    priority: 1
+  co2Captures:
+  - id: scrubHab
+    hazardClass: normal
+    atmosphereId: hab
+    captureStoreId: co2
+    consumableStoreId: captureMedia
+    maxRateKgPerS: 6.0e-05
+    specificEnergyKWhPerKg: 0.5
+    consumablePerKg: 0.001
+    priority: 1
+  sabatierReactors:
+  - id: sab
+    hazardClass: normal
+    co2StoreId: co2
+    hydrogenStoreId: hydrogen
+    methaneStoreId: methane
+    waterStoreId: rawWater
+    thermalClass: low
+    heatSinkId: processSink
+    rateKgPerS: 2.0e-05
+    specificEnergyKWhPerKgCO2: 1.0
+    maxSinkTemperatureC: 60.0
+    priority: 1
+  methaneProcessors:
+  - id: pyro
+    hazardClass: normal
+    methaneStoreId: methane
+    hydrogenStoreId: hydrogen
+    carbonStoreId: carbonWaste
+    thermalClass: low
+    heatSinkId: processSink
+    rateKgPerS: 1.0e-05
+    specificEnergyKWhPerKgCH4: 2.0
+    maxSinkTemperatureC: 60.0
+    priority: 1
+  fuelCells:
+  - id: fuelCellBackup
+    hazardClass: normal
+    hydrogenStoreId: fuelcellH2
+    oxygenStoreId: fuelcellO2
+    waterStoreId: rawWater
+    thermalClass: generation
+    heatSinkId: genSink
+    ratedOutputKW: 5.0
+    efficiency: 0.6
+    commandedOutputKW: 0.0
+    maxSinkTemperatureC: 80.0
+  microbialProcessors:
+  - id: dig
+    hazardClass: normal
+    feedStoreId: organicWaste
+    oxygenStoreId: processOxygen
+    waterStoreId: fresh
+    consumableStoreId: digesterMedia
+    nutrientStoreId: nutrients
+    recoveredWaterStoreId: rawWater
+    co2StoreId: co2
+    residueStoreId: residue
+    thermalClass: low
+    heatSinkId: processSink
+    rateKgPerS: 1.0e-05
+    specificEnergyKWhPerKgFeed: 2.0
+    oxygenPerKgFeedKg: 0.8
+    processWaterPerKgFeedKg: 0.5
+    consumablePerKgFeed: 0.01
+    co2PerKgFeedKg: 0.3
+    nitrogenRecovery: 0.8
+    phosphorusRecovery: 0.8
+    potassiumRecovery: 0.8
+    mineralsRecovery: 0.7
+    waterRecovery: 0.7
+    reactionHeatKJPerKgFeed: 600.0
+    minOperatingTemperatureC: 15.0
+    maxSinkTemperatureC: 45.0
+    initialCondition: 1.0
+    starvationDegradePerHour: 0.05
+    consumableExhaustionDegradePerHour: 0.05
+    coldStressDegradePerHour: 0.02
+    heatStressDegradePerHour: 0.1
+    recoveryPerHour: 0.02
+    stockStoreId: bioStock
+    stockUnitsPerConditionPoint: 1.0
+    priority: 1
+  cropPopulations:
+  - id: canopy
+    atmosphereId: greenhouse
+    waterStoreId: fresh
+    nitrogenStoreId: fertN
+    phosphorusStoreId: fertP
+    potassiumStoreId: fertK
+    mineralsStoreId: fertMin
+    composition:
+      moisture: 0.0
+      nutrientNitrogen: 0.05
+      atmosphericNitrogen: 0.0
+      phosphorus: 0.02
+      potassium: 0.03
+      otherMinerals: 0.02
+      energyKJPerKgDry: 17000.0
+    growingAreaM2: 50.0
+    maxBiomassDensityKgPerM2: 2.0
+    initialBiomassKg: 20.0
+    lampRatedKW: 3.0
+    illumination:
+      constantLevel: 1.0
+      periodSeconds: 0.0
+      segments: []
+    circulationPowerKW: 0.3
+    growthYieldKgPerKWh: 0.1
+    respirationPerHour: 0.001
+    transpirationKgPerKgGrowth: 0.5
+    minGrowingTemperatureC: 10.0
+    maxGrowingTemperatureC: 35.0
+    foodStoreId: food
+    wasteStoreId: residue
+    edibleFraction: 0.6
+    harvestTriggerKg: 0.0
+    harvestFraction: 0.5
+    priority: 1
+  algaeCultures:
+  - id: pondAlgae
+    atmosphereId: pond
+    waterStoreId: fresh
+    nitrogenStoreId: fertN
+    phosphorusStoreId: fertP
+    potassiumStoreId: fertK
+    mineralsStoreId: fertMin
+    composition:
+      moisture: 0.0
+      nutrientNitrogen: 0.05
+      atmosphericNitrogen: 0.0
+      phosphorus: 0.02
+      potassium: 0.03
+      otherMinerals: 0.02
+      energyKJPerKgDry: 17000.0
+    cultureVolumeL: 2000.0
+    maxBiomassDensityKgPerL: 0.002
+    initialBiomassKg: 1.0
+    lampRatedKW: 1.0
+    illumination:
+      constantLevel: 1.0
+      periodSeconds: 0.0
+      segments: []
+    circulationPowerKW: 0.1
+    growthYieldKgPerKWh: 0.18
+    respirationPerHour: 0.001
+    evaporationKgPerKgGrowth: 0.5
+    minGrowingTemperatureC: 10.0
+    maxGrowingTemperatureC: 35.0
+    foodStoreId: food
+    recoveryStoreId: nutrients
+    wasteStoreId: residue
+    foodFraction: 0.5
+    recoveryFraction: 0.3
+    harvestTriggerKg: 0.0
+    harvestFraction: 0.5
+    priority: 1
+  solarArrays:
+  - id: solarMain
+    capacityKW: 20.0
+    illumination:
+      constantLevel: 0.85
+      periodSeconds: 0.0
+      segments: []
+  batteries:
+  - id: mainBank
+    nameplateKWh: 100.0
+    usableKWh: 80.0
+    startingStoredKWh: 60.0
+    maxChargeKW: 10.0
+    maxDischargeKW: 15.0
+    chargeEfficiency: 0.95
+    dischargeEfficiency: 0.95
+  generators:
+  - id: dieselGen
+    fuelStoreId: fuel
+    thermalClass: generation
+    heatSinkId: genSink
+    ratedOutputKW: 15.0
+    efficiency: 0.35
+    maxRampKWPerSecond: 2.0
+    commandedOutputKW: 0.0
+    startupPowerKW: 2.0
+    startupSeconds: 10.0
+    shutdownHeatKW: 1.0
+    shutdownSeconds: 120.0
+    maxSinkTemperatureC: 90.0
+  thermalReservoirs:
+  - id: chilledWater
+    thermalClass: low
+    heatCapacityKJPerK: 20000.0
+    startingTemperatureC: 8.0
+    minTemperatureC: -5.0
+    maxTemperatureC: 25.0
+    absorbedHeatKW: 0.0
+  - id: processSink
+    thermalClass: low
+    heatCapacityKJPerK: 50000.0
+    startingTemperatureC: 25.0
+    minTemperatureC: -10.0
+    maxTemperatureC: 95.0
+    absorbedHeatKW: 0.0
+  - id: genSink
+    thermalClass: generation
+    heatCapacityKJPerK: 20000.0
+    startingTemperatureC: 20.0
+    minTemperatureC: -40.0
+    maxTemperatureC: 120.0
+    absorbedHeatKW: 0.0
+  - id: hazSink
+    thermalClass: warm
+    heatCapacityKJPerK: 10000.0
+    startingTemperatureC: 25.0
+    minTemperatureC: -40.0
+    maxTemperatureC: 80.0
+    absorbedHeatKW: 0.0
+  radiators:
+  - id: radProcess
+    reservoirId: processSink
+    areaM2: 6000.0
+    emissivity: 0.9
+    viewFactor: 0.9
+    sinkTemperatureC: -30.0
+  - id: radGen
+    reservoirId: genSink
+    areaM2: 500.0
+    emissivity: 0.9
+    viewFactor: 0.9
+    sinkTemperatureC: -30.0
+  - id: radHaz
+    reservoirId: hazSink
+    areaM2: 400.0
+    emissivity: 0.9
+    viewFactor: 0.9
+    sinkTemperatureC: -30.0
+  coolantLoops:
+  - id: loopChill
+    hazardClass: normal
+    reservoirId: chilledWater
+    coolantCapacityKg: 500.0
+    startingCoolantKg: 500.0
+    specificHeatKJPerKgK: 4.0
+    startingTemperatureC: 8.0
+    freezeProtectionSetpointC: 5.0
+    pumpPowerKW: 0.15
+    ratedFlowKgPerS: 2.0
+    exchangerConductanceKWPerK: 1.5
+    heaterCapacityKW: 0.5
+    criticalService: true
+  - id: loopHaz
+    hazardClass: hazardous
+    reservoirId: hazSink
+    coolantCapacityKg: 300.0
+    startingCoolantKg: 300.0
+    specificHeatKJPerKgK: 3.5
+    startingTemperatureC: 25.0
+    freezeProtectionSetpointC: 5.0
+    pumpPowerKW: 0.1
+    ratedFlowKgPerS: 1.5
+    exchangerConductanceKWPerK: 1.0
+    heaterCapacityKW: 0.4
+    criticalService: false
+  chillers:
+  - id: chillerMain
+    thermalClass: low
+    coldLoopId: loopChill
+    condenserReservoirId: processSink
+    ratedCoolingCapacityKW: 3.0
+    cop: 3.0
+    auxiliaryPowerKW: 0.05
+    chilledSetpointC: 5.0
+    maxCondensingTemperatureC: 45.0
+    criticalService: true
+  thermalBuffers:
+  - id: bufferProcess
+    reservoirId: processSink
+    accessMode: passive
+    circulationLoopId: ''
+    capacityKJ: 20000000.0
+    startingEnergyKJ: 2000000.0
+    minUsableTemperatureC: 5.0
+    maxUsableTemperatureC: 60.0
+    maxChargeKW: 2.0
+    maxDischargeKW: 2.0
+    transferConductanceKWPerK: 1.0
+  equipmentLoads:
+  - id: lifeSupport
+    electricalDemandKW: 2.0
+    operatingProfile:
+      constantLevel: 1.0
+      periodSeconds: 0.0
+      segments: []
+    heatOutputKW: 2.0
+    thermalClass: low
+    coolingDisposition: exported
+    criticalFloorKW: 1.5
+    priority: 20
+    maxCurtailment: 0.25
+    materialExchanges: []
+    heatSinkId: chilledWater
+  - id: comms
+    electricalDemandKW: 0.5
+    operatingProfile:
+      constantLevel: 1.0
+      periodSeconds: 0.0
+      segments: []
+    heatOutputKW: 0.5
+    thermalClass: low
+    coolingDisposition: exported
+    criticalFloorKW: 0.5
+    priority: 30
+    maxCurtailment: 0.0
+    materialExchanges: []
+    heatSinkId: chilledWater
+  - id: science
+    electricalDemandKW: 3.0
+    operatingProfile:
+      constantLevel: 1.0
+      periodSeconds: 0.0
+      segments: []
+    heatOutputKW: 3.0
+    thermalClass: moderate
+    coolingDisposition: exported
+    criticalFloorKW: 0.0
+    priority: 5
+    maxCurtailment: 1.0
+    recoveryDwellSeconds: 60.0
+    recoveryHysteresisFraction: 0.2
+    restartSurgePowerKW: 1.0
+    restartSurgeSeconds: 30.0
+    materialExchanges: []
+  - id: workshop
+    electricalDemandKW: 4.0
+    operatingProfile:
+      constantLevel: 1.0
+      periodSeconds: 0.0
+      segments: []
+    heatOutputKW: 4.0
+    thermalClass: moderate
+    coolingDisposition: exported
+    criticalFloorKW: 0.0
+    priority: 3
+    maxCurtailment: 1.0
+    recoveryDwellSeconds: 120.0
+    recoveryHysteresisFraction: 0.3
+    restartSurgePowerKW: 1.5
+    restartSurgeSeconds: 20.0
+    materialExchanges: []
+  transfers:
+  - id: fertPump
+    sourceId: nutrients
+    destinationId: fertN
+    unit: kg
+    ratePerSecond: 0.0001
+    priority: 1
+  deliveries:
+  - id: mediaTopUp
+    storeId: treatmentMedia
+    unit: kg
+    quantity: 10.0
+    firstOccurrenceSeconds: 0.0
+    recurrenceSeconds: 0.0
+    arrivesQualified: true
+    priority: 4
+  - id: delayedFoodFlight
+    storeId: food
+    unit: kg
+    quantity: 20.0
+    firstOccurrenceSeconds: 900.0
+    recurrenceSeconds: 0.0
+    arrivesQualified: true
+    priority: 5
+  - id: delayedWaterFlight
+    storeId: drinking
+    unit: kg
+    quantity: 50.0
+    firstOccurrenceSeconds: 2100.0
+    recurrenceSeconds: 0.0
+    arrivesQualified: true
+    priority: 5
+  wasteEjections:
+  - id: ejectCarbon
+    storeId: carbonWaste
+    unit: kg
+    quantity: 0.05
+    firstOccurrenceSeconds: 240.0
+    recurrenceSeconds: 240.0
+    priority: 1
+  - id: ejectHazConcentrate
+    storeId: hazConcentrate
+    unit: kg
+    quantity: 0.05
+    firstOccurrenceSeconds: 240.0
+    recurrenceSeconds: 240.0
+    priority: 1
+  - id: ejectResidue
+    storeId: residue
+    unit: kg
+    quantity: 0.1
+    firstOccurrenceSeconds: 240.0
+    recurrenceSeconds: 240.0
+    priority: 1
+  outages:
+  - id: genOverhaul
+    installationId: dieselGen
+    capacityFraction: 0.5
+    firstOccurrenceSeconds: 180.0
+    durationSeconds: 120.0
+    recurrenceSeconds: 0.0
+    priority: 1
+  airlockCycles:
+  - id: crewRotation
+    atmosphereId: hab
+    gasMassKg: 1.5
+    firstOccurrenceSeconds: 300.0
+    recurrenceSeconds: 300.0
+    recoveredFraction: 0.6
+    priority: 1
+  maintenanceJobs:
+  - id: maintChiller
+    installationId: chillerMain
+    firstOccurrenceSeconds: 300.0
+    durationSeconds: 300.0
+    recurrenceSeconds: 7200.0
+    priority: 1
+    wasteStoreId: maintenanceWaste
+    requirements:
+    - storeId: toolKit
+      quantity: 1.0
+      consumed: false
+    - storeId: treatmentMedia
+      quantity: 0.5
+      consumed: true
+scenarioKind: emergency
+limitingServices:
+- item: Crew food supply (food store)
+  detail: 'The thin 0.02222 kg food drawable is the first limiting service: crew metabolism rations
+    against it and stops when it empties near 600 s. Provisional assumption: the harvest contracts
+    are offline for the drill, so nothing but the authored flight replenishes food.'
+- item: Crew drinking water (drinking store above its protected reserve)
+  detail: The 0.125 kg drawable above the 50 kg protected life-support reserve is the second limiting
+    service near 1800 s. The protected reserve is never drawable by the crew's own taps in this
+    model; only the scheduled delivery restores service.
+- item: Food and water recovery services (harvest offline)
+  detail: Crop and algae harvest triggers are zero for the drill, so the closed-loop food pathway
+    contributes nothing and the resupply delay is the whole story. The water collector, treatment
+    and electrolysis chain keep running and are NOT the limiting service here.
+eventOrdering:
+- item: food-out before food resupply
+  detail: Food drawable empties near 600 s; the delayed food flight lands at 900 s. Rationing
+    window 600-900 s.
+- item: food resupply before water-out
+  detail: Full-scale metabolism resumes at 900 s and only then draws the potable drawable down;
+    the water shortfall opens near 1800 s.
+- item: water-out before water resupply
+  detail: The potable drawable empties near 1800 s; the delayed water flight lands at 2100 s.
+    Rationing window 1800-2100 s.
+outcomeRanges:
+- item: First rationing onset
+  detail: 'Between 595 s and 605 s (provisional: 0.02222 kg drawable at 3.703704e-5 kg/s for four
+    crew). Crew metabolic scale at or near zero from onset until the 900 s delivery.'
+- item: Second rationing onset
+  detail: 'Between 1795 s and 1805 s (provisional: 0.125 kg drawable at 8.333333e-5 kg/s, with
+    no draw during the ~600-900 s food outage).'
+- item: Recovery after each delivery
+  detail: Full-scale metabolism (scale 1.0) restored within 1 tick of each delivery landing at
+    900 s and 1950 s; no overshoot beyond scale 1 is possible by construction.
+- item: Waste honesty bound
+  detail: 'Urine and organic-waste production never exceed the scaled metabolism: with zero scale
+    there is zero waste. Provisional model assumption: reduced-consumption regimes produce proportionally
+    reduced returns, never nominal waste from absent food.'
