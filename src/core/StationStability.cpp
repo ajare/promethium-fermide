@@ -1111,6 +1111,13 @@ namespace core
 				"qualified contents " + tag("store", store.id));
 			bound(store.currentQualified + store.currentUnqualified, 0.0, store.capacity,
 				"physical contents " + tag("store", store.id));
+			// #598: the quality partition itself must be non-negative. A
+			// negative unqualified partition is physically invalid even
+			// when the sum stays within [0, capacity] - the total bound
+			// cannot see a negative partition offset by a larger
+			// qualified side, so the partition needs its own check.
+			sink.nonNeg(store.currentUnqualified,
+				"unqualified partition " + tag("store", store.id));
 			// The protected reserve is an authored discretionary-draw floor,
 			// not a contents floor: a store may legitimately drain below its
 			// reserve. The authored invariant is reserve <= capacity.

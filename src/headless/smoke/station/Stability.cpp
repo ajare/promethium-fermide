@@ -524,6 +524,77 @@ void stabilityAuditFaultInjection(smoke::Context const&)
 			"a NaN aggregate power request produced no non-finite finding");
 	}
 
+	// #598: a negative quality partition is physically invalid even
+	// when the total stays within capacity. The reported public-seam
+	// reproduction: capacity 10, qualified 5, unqualified -1 - the
+	// physical total of 4 is inside [0, 10], so the sum bound cannot
+	// see the corruption; the partition's own non-negativity must.
+	{
+		core::StationSystemsSnapshot snapshot;
+		snapshot.enabled = true;
+		core::StationSystemsStoreSnapshot store;
+		store.id = "bad";
+		store.capacity = 10.0;
+		store.currentQualified = 5.0;
+		store.currentUnqualified = -1.0;
+		snapshot.stores = {store};
+		auto const audit = core::auditStationStability(snapshot, {}, {}, {});
+		require(!audit.clean,
+			"a negative unqualified partition within capacity audited clean");
+		require(!audit.boundViolations.empty(),
+			"a negative unqualified partition produced no bound violation");
+		// The finding must name the store and the invalid magnitude -
+		// reported, never clamped away.
+		auto const identified = std::any_of(audit.boundViolations.begin(),
+			audit.boundViolations.end(), [](std::string const& text)
+			{
+				return text.find("bad") != std::string::npos
+					&& text.find("-1") != std::string::npos;
+			});
+		if (!identified)
+		{
+			for (auto const& text : audit.boundViolations)
+				std::fprintf(stderr, "bound violation: %s\n", text.c_str());
+			throw std::runtime_error(
+				"negative unqualified partition was not identified by store and magnitude");
+		}
+		// A larger negative partition that also drags the physical sum
+		// negative must report both the partition and the sum, never be
+		// silently absorbed.
+		{
+			core::StationSystemsSnapshot deeper;
+			deeper.enabled = true;
+			core::StationSystemsStoreSnapshot worse;
+			worse.id = "deeper";
+			worse.capacity = 10.0;
+			worse.currentQualified = 5.0;
+			worse.currentUnqualified = -7.5;
+			deeper.stores = {worse};
+			auto const deepAudit = core::auditStationStability(deeper, {}, {}, {});
+			require(!deepAudit.clean,
+				"a negative partition driving the physical sum negative audited clean");
+			require(!deepAudit.boundViolations.empty(),
+				"a negative partition driving the physical sum negative produced no bound violation");
+		}
+		// The control: a legitimate store drained below its protected
+		// reserve with a valid partition stays clean - the fix must not
+		// turn below-reserve contents into a violation.
+		{
+			core::StationSystemsSnapshot legit;
+			legit.enabled = true;
+			core::StationSystemsStoreSnapshot ok;
+			ok.id = "legit";
+			ok.capacity = 10.0;
+			ok.protectedReserve = 8.0;
+			ok.currentQualified = 2.5;
+			ok.currentUnqualified = 1.0;
+			legit.stores = {ok};
+			auto const legitAudit = core::auditStationStability(legit, {}, {}, {});
+			require(legitAudit.clean,
+				"a legitimate below-reserve store with a valid partition no longer audits clean");
+		}
+	}
+
 	// Base fixture: a short real run of the packaged workload, so the
 	// snapshot and trend history are genuine published runtime state.
 	auto const& workload = core::bundledStationLongRunWorkload();
