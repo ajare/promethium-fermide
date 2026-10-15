@@ -11942,40 +11942,41 @@ namespace core
 		return !applicableControl;
 	}
 
+	bool World::extensibleControlAppliesToApproach(TraversalResource const& resource,
+		InteractionPoint const& point, SectorId approach, Vector2 const& approachPosition)
+	{
+		if (point.mSector != approach) return false;
+		// Both controls can occupy one Room, but opposite-end requirements remain
+		// independent. Exact midpoint positions belong to the left/lower side.
+		if (resource.mForceBridge)
+		{
+			auto const middle = resource.mForceBridge->getPosition().x
+				+ resource.mForceBridge->getSize().x * 0.5f;
+			return (point.mPosition.x > middle) == (approachPosition.x > middle);
+		}
+		if (resource.mLadder)
+		{
+			// Handholds extend above the upper landing: classify using the logical
+			// landing midpoint, not the rendered object's centre.
+			auto const lower = resource.mLadder->getPosition().y
+				- CORE_LADDER_HEIGHT_OFF_GROUND;
+			auto const middle = lower
+				+ static_cast<float>(resource.mLadder->getLevelsHigh() - 1) * 0.5f;
+			return (point.mPosition.y > middle) == (approachPosition.y > middle);
+		}
+		return true;
+	}
+
 	bool World::canAgentOperateExtensibleControl(TraversalResourceId resourceId,
 		SectorId approach, Vector2 const& approachPosition, AgentId agentId) const
 	{
 		auto resource = mTraversalResources.find(resourceId);
 		auto agent = mAgents.find(agentId);
 		if (!resource || !resource->mExtensible || !agent || !agentCanOperateObjects(*agent)) return false;
-		auto applicable = [&](InteractionPoint const& point)
-		{
-			if (point.mSector != approach) return false;
-			// A Room may contain both controls. Keep the opposite endpoint's
-			// requirement out of this operation rather than treating every control
-			// in the shared Sector as one combined requirement.
-			if (resource->mForceBridge)
-			{
-				auto const middle = resource->mForceBridge->getPosition().x
-					+ resource->mForceBridge->getSize().x * 0.5f;
-				return (point.mPosition.x > middle) == (approachPosition.x > middle);
-			}
-			if (resource->mLadder)
-			{
-				// Ladder geometry extends above the upper landing for handholds; use
-				// the logical landing midpoint rather than the rendered object's centre.
-				auto const lower = resource->mLadder->getPosition().y
-					- CORE_LADDER_HEIGHT_OFF_GROUND;
-				auto const middle = lower
-					+ static_cast<float>(resource->mLadder->getLevelsHigh() - 1) * 0.5f;
-				return (point.mPosition.y > middle) == (approachPosition.y > middle);
-			}
-			return true;
-		};
 		for (auto pointId : resource->mControls)
 		{
 			auto point = mInteractionPoints.find(pointId);
-			if (point && applicable(*point)
+			if (point && extensibleControlAppliesToApproach(*resource, *point, approach, approachPosition)
 				&& (agent->getObjectUsage() == ObjectUsage::Arms
 					|| remoteButtonApproachDistance(pointId, approach, approachPosition, agentId))
 				&& missingInteractionPermissions(*point, *agent).empty()) return true;
@@ -12002,23 +12003,7 @@ namespace core
 		for (auto pointId : resource->mControls)
 		{
 			auto point = mInteractionPoints.find(pointId);
-			if (!point || point->mSector != approach) continue;
-			bool applicable = true;
-			if (resource->mForceBridge)
-			{
-				auto const middle = resource->mForceBridge->getPosition().x
-					+ resource->mForceBridge->getSize().x * 0.5f;
-				applicable = (point->mPosition.x > middle) == (approachPosition.x > middle);
-			}
-			else if (resource->mLadder)
-			{
-				auto const lower = resource->mLadder->getPosition().y
-					- CORE_LADDER_HEIGHT_OFF_GROUND;
-				auto const middle = lower
-					+ static_cast<float>(resource->mLadder->getLevelsHigh() - 1) * 0.5f;
-				applicable = (point->mPosition.y > middle) == (approachPosition.y > middle);
-			}
-			if (!applicable) continue;
+			if (!point || !extensibleControlAppliesToApproach(*resource, *point, approach, approachPosition)) continue;
 			applicableControl = true;
 			if (missingInteractionPermissions(*point, *agent).empty()) return true;
 		}

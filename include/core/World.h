@@ -2992,6 +2992,8 @@ namespace core
 			TraversalResourceId door) const;
 		bool canAgentOpenManualDoor(TraversalResourceId door, AgentId agent) const;
 	private:
+		static bool extensibleControlAppliesToApproach(TraversalResource const& resource,
+			InteractionPoint const& point, SectorId approach, Vector2 const& approachPosition);
 		std::optional<Vector2> remoteOrdinaryDoorCentre(TraversalResourceId door) const;
 		bool agentCanOperateManualDoorHere(TraversalResourceId door, AgentId agent) const;
 	public:
