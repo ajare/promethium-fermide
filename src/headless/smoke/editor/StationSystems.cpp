@@ -3004,10 +3004,16 @@ void cropWorkflow(smoke::Context const&)
 			REQ(driver.contains("Emergency & recovery scenarios (packaged resources)"),
 				"the scenario section is missing from the station window");
 			// Open the resupply-delay scenario: the documented expectations
-			// render alongside the configuration they describe.
+			// render alongside the configuration they describe. The trees
+			// open on request - #596 made them no-auto-open-on-log, so the
+			// harness capture no longer silently expands them.
 			ctx->ItemClick("resupply-delay"); ctx->Sleep(1);
 			REQ(driver.contains("Meridian resupply-delay drill"),
 				"the resupply-delay scenario name is missing");
+			ctx->ItemOpen("resupply-delay/Expected limiting services");
+			ctx->ItemOpen("resupply-delay/Expected key event ordering");
+			ctx->ItemOpen("resupply-delay/Expected bounded outcome ranges");
+			ctx->Sleep(1);
 			REQ(driver.contains("Expected limiting services")
 				&& driver.contains("Crew food supply (food store)"),
 				"the documented limiting services are not rendered");
@@ -3018,7 +3024,9 @@ void cropWorkflow(smoke::Context const&)
 				&& driver.contains("First rationing onset"),
 				"the documented outcome ranges are not rendered");
 			// Load into the draft while paused: ordinary draft editing.
-			driver.click(ctx, "Load scenario 'resupply-delay' into draft");
+			// #596: the scenario body is PushID-scoped by its scenario ID,
+			// so its controls are addressed through the scenario path.
+			driver.click(ctx, "resupply-delay/Load scenario 'resupply-delay' into draft");
 			ctx->Sleep(1);
 			REQ(driver.contains("Draft differs from the authored start conditions"),
 				"the loaded scenario draft was not reported as a change");
@@ -3049,7 +3057,8 @@ void cropWorkflow(smoke::Context const&)
 					ctx->ItemClick("resupply-delay");
 				ctx->Sleep(1);
 			}
-			REQ(driver.clickDisabled(ctx, "Load scenario 'resupply-delay' into draft",
+			REQ(driver.clickDisabled(ctx,
+				"resupply-delay/Load scenario 'resupply-delay' into draft",
 				"scenario load while running"),
 				"the scenario load control was not disabled while the World runs");
 			REQ(world->getStationSystemsSettings() == resupply[0].document.settings,
@@ -3077,7 +3086,8 @@ void cropWorkflow(smoke::Context const&)
 			ctx->ItemClick("maintenance-recovery"); ctx->Sleep(1);
 			REQ(driver.contains("Meridian maintenance miss-and-recovery drill"),
 				"the maintenance scenario name is missing");
-			driver.click(ctx, "Load scenario 'maintenance-recovery' into draft");
+			driver.click(ctx,
+				"maintenance-recovery/Load scenario 'maintenance-recovery' into draft");
 			ctx->Sleep(1);
 			ctx->ScrollToItemY("Apply settings");
 			ctx->Sleep(1);
@@ -3091,6 +3101,91 @@ void cropWorkflow(smoke::Context const&)
 				&& world->getSimulationTick() == 0,
 				"the confirmed scenario switch did not land the settings and reset the World");
 			REQ(history.undoCount() == 2, "the scenario switch did not commit history");
+			// #596: the expectation controls are per-scenario, not shared.
+			// Both scenario headers are open here (resupply-delay from the
+			// opening phase, maintenance-recovery from the switch). Each of
+			// the three expectation trees must resolve to a distinct widget
+			// ID per scenario - before the fix every scenario hashed the
+			// same literal label to one ID, so opening one tree opened them
+			// all.
+			ImGuiID treeIds[2][3] = { {} };
+			char const* trees[3] = { "Expected limiting services",
+				"Expected key event ordering", "Expected bounded outcome ranges" };
+			char const* scenarios[2] = { "resupply-delay", "maintenance-recovery" };
+			for (int s = 0; s < 2; ++s)
+				for (int t = 0; t < 3; ++t)
+				{
+					auto* info = ctx->ItemInfo(
+						(std::string(scenarios[s]) + "/" + trees[t]).c_str(),
+						ImGuiTestOpFlags_NoError);
+					REQ(!info->IsEmpty(),
+						"a scenario expectation tree did not resolve under its scenario path");
+					treeIds[s][t] = info->ID;
+				}
+			for (int t = 0; t < 3; ++t)
+				REQ(treeIds[0][t] != treeIds[1][t],
+					"two scenarios share one expectation-tree widget ID");
+			for (int s = 0; s < 2; ++s)
+				for (int o = 0; o < 3; ++o)
+					for (int t = o + 1; t < 3; ++t)
+						REQ(treeIds[s][o] != treeIds[s][t],
+							"the expectation trees of one scenario share a widget ID");
+			// Independent tree state. The trees opened in the opening phase
+			// are first driven closed through the engine's own Close action,
+			// then the open/close sequence is observed: opening one
+			// scenario's tree must not open the other scenario's
+			// same-labelled tree.
+			for (int s = 0; s < 2; ++s)
+				for (int t = 0; t < 3; ++t)
+					ctx->ItemClose((std::string(scenarios[s]) + "/" + trees[t]).c_str());
+			ctx->Sleep(1);
+			{
+				auto* first = ctx->ItemInfo("maintenance-recovery/Expected limiting services");
+				auto* second = ctx->ItemInfo("resupply-delay/Expected limiting services");
+				REQ(!(first->StatusFlags & ImGuiItemStatusFlags_Opened)
+					&& !(second->StatusFlags & ImGuiItemStatusFlags_Opened),
+					"the expectation trees did not start from a closed state");
+			}
+			ctx->ItemClick("maintenance-recovery/Expected limiting services");
+			ctx->Sleep(1);
+			{
+				auto* opened = ctx->ItemInfo(
+					"maintenance-recovery/Expected limiting services");
+				auto* other = ctx->ItemInfo("resupply-delay/Expected limiting services");
+				REQ(opened->StatusFlags & ImGuiItemStatusFlags_Opened,
+					"the maintenance expectation tree did not open");
+				REQ(!(other->StatusFlags & ImGuiItemStatusFlags_Opened),
+					"opening one scenario's tree opened another's");
+			}
+			REQ(driver.contains("Chiller maintenance (tool kit)")
+				&& !driver.contains("Crew food supply (food store)"),
+				"the independently opened tree did not render content exclusively");
+			// And the other scenario's tree opens on its own without
+			// disturbing the first: both stay open, each with its own state.
+			ctx->ItemClick("resupply-delay/Expected limiting services");
+			ctx->Sleep(1);
+			{
+				auto* first = ctx->ItemInfo("maintenance-recovery/Expected limiting services");
+				auto* second = ctx->ItemInfo("resupply-delay/Expected limiting services");
+				REQ(first->StatusFlags & ImGuiItemStatusFlags_Opened,
+					"opening another scenario's tree closed the first one");
+				REQ(second->StatusFlags & ImGuiItemStatusFlags_Opened,
+					"the second scenario's tree did not open on its own");
+			}
+			REQ(driver.contains("Crew food supply (food store)")
+				&& driver.contains("Chiller maintenance (tool kit)"),
+				"both scenarios' expectation trees must render their own content");
+			// Closing one leaves the other open: the states are per-scenario.
+			ctx->ItemClick("resupply-delay/Expected limiting services");
+			ctx->Sleep(1);
+			{
+				auto* first = ctx->ItemInfo("maintenance-recovery/Expected limiting services");
+				auto* second = ctx->ItemInfo("resupply-delay/Expected limiting services");
+				REQ(first->StatusFlags & ImGuiItemStatusFlags_Opened,
+					"closing one scenario's tree closed the other's");
+				REQ(!(second->StatusFlags & ImGuiItemStatusFlags_Opened),
+					"the toggled-close did not close the second scenario's tree");
+			}
 		});
 		#undef REQ
 		require(driver.passed(), "scenario workflow failed on the Test Engine");

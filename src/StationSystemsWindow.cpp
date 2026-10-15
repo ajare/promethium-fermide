@@ -139,25 +139,38 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			if (!ImGui::CollapsingHeader(scenario.id.c_str(),
 				ImGuiTreeNodeFlags_FramePadding))
 				continue;
+			// #596: a CollapsingHeader does not push an ID scope, so without
+			// this the three expectation-tree labels below hash to the same
+			// item ID in every scenario - opening one tree would open them
+			// all. Scope each expanded scenario by its stable scenario ID so
+			// every control inside is independently operable.
+			ImGui::PushID(scenario.id.c_str());
 			ImGui::Text("%s - %.0f simulated s scenario",
 				doc.name.c_str(), doc.scenarioSeconds);
 			ImGui::TextWrapped("%s", doc.summary.c_str());
 			ImGui::TextWrapped("Scenario notes: %s", doc.scenarioNotes.c_str());
-			if (ImGui::TreeNode("Expected limiting services"))
+			// #596: NoAutoOpenOnLog keeps these trees' open/closed state the
+			// user's own - the headless harness captures every frame through
+			// the log, and ImGui's default log auto-expand would force them
+			// open and mask the per-scenario state the harness verifies.
+			if (ImGui::TreeNodeEx("Expected limiting services",
+				ImGuiTreeNodeFlags_NoAutoOpenOnLog))
 			{
 				for (auto const& expectation : doc.limitingServices)
 					ImGui::TextWrapped("%s: %s",
 						expectation.item.c_str(), expectation.detail.c_str());
 				ImGui::TreePop();
 			}
-			if (ImGui::TreeNode("Expected key event ordering"))
+			if (ImGui::TreeNodeEx("Expected key event ordering",
+				ImGuiTreeNodeFlags_NoAutoOpenOnLog))
 			{
 				for (auto const& expectation : doc.eventOrdering)
 					ImGui::TextWrapped("%s: %s",
 						expectation.item.c_str(), expectation.detail.c_str());
 				ImGui::TreePop();
 			}
-			if (ImGui::TreeNode("Expected bounded outcome ranges"))
+			if (ImGui::TreeNodeEx("Expected bounded outcome ranges",
+				ImGuiTreeNodeFlags_NoAutoOpenOnLog))
 			{
 				for (auto const& expectation : doc.outcomeRanges)
 					ImGui::TextWrapped("%s: %s",
@@ -175,6 +188,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			ImGui::EndDisabled();
 			if (!world->isSimulationPaused())
 				ImGui::TextDisabled("Pause the World to load a scenario into the draft.");
+			ImGui::PopID();
 		}
 	}
 	// #424: the packaged long-duration stability workload. The same
