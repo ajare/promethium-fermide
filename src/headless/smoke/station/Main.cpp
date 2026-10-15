@@ -20890,6 +20890,31 @@ void recovery(smoke::Context const& context)
 				if (entry.storeId == id) return &entry;
 			return nullptr;
 		};
+		auto const findStore = [](std::vector<core::StationSystemsStoreSnapshot> const& stores,
+			std::string const& id) -> core::StationSystemsStoreSnapshot const*
+		{
+			for (auto const& store : stores)
+				if (store.id == id) return &store;
+			return nullptr;
+		};
+		auto const chainStores = [](std::string const& id, double capacity,
+			double starting) -> core::ResourceStoreSettings
+		{
+			core::ResourceStoreSettings settings;
+			settings.id = id; settings.unit = "kg";
+			settings.capacity = capacity; settings.startingQualified = starting;
+			return settings;
+		};
+		auto const chainTransfer = [](std::string const& id, std::string const& src,
+			std::string const& dst, double rate, int priority)
+			-> core::ResourceTransferSettings
+		{
+			core::ResourceTransferSettings settings;
+			settings.id = id; settings.sourceId = src; settings.destinationId = dst;
+			settings.unit = "kg"; settings.ratePerSecond = rate;
+			settings.priority = priority;
+			return settings;
+		};
 		std::string diagnostic;
 		// Scenario A: a known analytic profile with a timely one-off
 		// resupply. A 2 kg/s drain on 180 drawable at t=10 is rescued at
@@ -21487,6 +21512,178 @@ void recovery(smoke::Context const& context)
 			require(water != nullptr
 				&& approx(water->projectedDrawableAtHorizon, 996.0, 1e-2),
 				"the crew water draw did not stop with the metabolism");
+		}
+		// Scenario J: a transfer chain through a dry intermediate store
+		// (#593). A -> B -> C at equal 1 kg/s rates with B starting
+		// empty must flow straight through. Gating each transfer on the
+		// inventory at the segment start made the solve alternate fill
+		// and drain half-duty phases: it truncated the projection at the
+		// segment cap, delivered only half the through-flow to C, and
+		// invented an unmet transfer demand at B that the live chain
+		// never has. The forecast must instead carry the full horizon of
+		// through-flow, report no shortage and no uncovered outflow at
+		// the dry intermediate, and agree with the live trajectory.
+		{
+			core::World world("ForecastChainDry", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {
+				chainStores("A", 1.0e6, 100000.0),
+				chainStores("B", 10.0, 0.0),
+				chainStores("C", 1.0e6, 0.0) };
+			settings.transfers = {
+				chainTransfer("AB", "A", "B", 1.0, 2),
+				chainTransfer("BC", "B", "C", 1.0, 1) };
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.forecast.available
+				&& !snap.forecast.truncated,
+				"a sparse constant-rate transfer chain truncated the forecast");
+			require(snap.forecast.segmentsComputed <= 2u,
+				"a steady through-flow chain needed more than a couple of segments");
+			auto const* a = findForecast(snap.forecast.stores, "A");
+			auto const* b = findForecast(snap.forecast.stores, "B");
+			auto const* c = findForecast(snap.forecast.stores, "C");
+			require(a != nullptr && b != nullptr && c != nullptr,
+				"a transfer-chain store is missing from the forecast");
+			require(a->netRateAtStart == -1.0
+				&& !a->hasShortfall
+				&& approx(a->projectedDrawableAtHorizon, 13600.0, 1e-3),
+				"the chain source did not project a full-horizon drain");
+			require(!b->hasShortfall
+				&& approx(b->netRateAtStart, 0.0)
+				&& approx(b->unmetOutflowTotal, 0.0),
+				"the dry intermediate invented an unmet transfer demand");
+			require(c->netRateAtStart == 1.0
+				&& approx(c->projectedDrawableAtHorizon, 86400.0, 1e-3),
+				"the chain end did not receive the full horizon of through-flow");
+			for (auto const& entry : snap.forecast.stores)
+				require(std::abs(entry.conservationResidual)
+					<= core::StationBalanceTolerance * 1e6,
+					"the dry-intermediate chain projection does not conserve");
+			// Agreement with the live trajectory: 1200 fixed ticks (20 s)
+			// of continuous through-flow, then the forecast from that
+			// state starts exactly where the live stores are and continues
+			// the same line.
+			world.resumeSimulation();
+			runOrDiagnose(world, 1200, "chain dry live run");
+			auto const live = world.getStationSystemsSnapshot();
+			require(approx(findStore(live.stores, "A")->currentQualified, 99980.0, 1e-3)
+				&& approx(findStore(live.stores, "B")->currentQualified, 0.0, 1e-3)
+				&& approx(findStore(live.stores, "C")->currentQualified, 20.0, 1e-3),
+				"the live dry-intermediate chain did not flow continuously");
+			auto const f2 = live.forecast;
+			require(!f2.truncated && f2.segmentsComputed <= 2u,
+				"the through-flow chain truncated after the live run");
+			require(approx(findForecast(f2.stores, "A")->drawableAtStart, 99980.0, 1e-3)
+				&& approx(findForecast(f2.stores, "C")->drawableAtStart, 20.0, 1e-3),
+				"the re-forecast start state does not match the live stores");
+			require(approx(findForecast(f2.stores, "A")->projectedDrawableAtHorizon,
+				13580.0, 1e-3)
+				&& approx(findForecast(f2.stores, "C")->projectedDrawableAtHorizon,
+					86420.0, 1e-3),
+				"the re-forecast did not continue the live through-flow trajectory");
+			require(!findForecast(f2.stores, "B")->hasShortfall
+				&& approx(findForecast(f2.stores, "B")->unmetOutflowTotal, 0.0),
+				"the dry intermediate still invents unmet demand after the live run");
+			for (auto const& entry : f2.stores)
+				require(std::abs(entry.conservationResidual)
+					<= core::StationBalanceTolerance * 1e6,
+					"the post-run dry-intermediate chain projection does not conserve");
+		}
+		// Scenario K: the same chain with the intermediate store starting
+		// full. The incoming leg must not stop while the outgoing leg
+		// drains it: the through-flow is symmetric with the dry case and
+		// C again receives the full horizon.
+		{
+			core::World world("ForecastChainFull", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {
+				chainStores("A", 1.0e6, 100000.0),
+				chainStores("B", 10.0, 10.0),
+				chainStores("C", 1.0e6, 0.0) };
+			settings.transfers = {
+				chainTransfer("AB", "A", "B", 1.0, 2),
+				chainTransfer("BC", "B", "C", 1.0, 1) };
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			auto const snap = world.getStationSystemsSnapshot();
+			require(!snap.forecast.truncated && snap.forecast.segmentsComputed <= 2u,
+				"a full-intermediate through-flow chain truncated the forecast");
+			auto const* b = findForecast(snap.forecast.stores, "B");
+			auto const* c = findForecast(snap.forecast.stores, "C");
+			require(b != nullptr && !b->hasShortfall
+				&& approx(b->netRateAtStart, 0.0)
+				&& approx(b->unmetOutflowTotal, 0.0)
+				&& approx(b->projectedDrawableAtHorizon, 10.0, 1e-3),
+				"the full intermediate did not hold steady under symmetric through-flow");
+			require(c != nullptr
+				&& approx(c->projectedDrawableAtHorizon, 86400.0, 1e-3),
+				"the full-intermediate chain end did not receive the full horizon");
+			for (auto const& entry : snap.forecast.stores)
+				require(std::abs(entry.conservationResidual)
+					<= core::StationBalanceTolerance * 1e6,
+					"the full-intermediate chain projection does not conserve");
+			world.resumeSimulation();
+			runOrDiagnose(world, 1200, "chain full live run");
+			auto const live = world.getStationSystemsSnapshot();
+			require(approx(findStore(live.stores, "C")->currentQualified, 20.0, 1e-3),
+				"the live full-intermediate chain did not deliver the through-flow");
+			require(approx(findForecast(live.forecast.stores, "C")->projectedDrawableAtHorizon,
+				findStore(live.stores, "C")->currentQualified + 86400.0, 1e-3),
+				"the full-intermediate re-forecast did not continue the live trajectory");
+			require(!findForecast(live.forecast.stores, "B")->hasShortfall
+				&& approx(findForecast(live.forecast.stores, "B")->unmetOutflowTotal, 0.0),
+				"the full intermediate invents unmet demand after the live run");
+		}
+		// Scenario L: projected inventory at a later delivery on a
+		// through-flow chain. A drop lands on C at t=40; the forecast
+		// taken after the 20 s live run must see C at 20 plus 20 s of
+		// continued through-flow (40 kg drawable) at the arrival, accept
+		// the whole drop, and read it as a rescue.
+		{
+			core::World world("ForecastChainDelivery", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {
+				chainStores("A", 1.0e6, 100000.0),
+				chainStores("B", 10.0, 0.0),
+				chainStores("C", 1.0e6, 0.0) };
+			settings.transfers = {
+				chainTransfer("AB", "A", "B", 1.0, 2),
+				chainTransfer("BC", "B", "C", 1.0, 1) };
+			core::ResourceDeliverySettings drop;
+			drop.id = "drop"; drop.storeId = "C"; drop.unit = "kg";
+			drop.quantity = 100.0; drop.firstOccurrenceSeconds = 40.0;
+			settings.deliveries = { drop };
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			world.resumeSimulation();
+			runOrDiagnose(world, 1200, "chain delivery live run"); // t = 20 s
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const* c = findForecast(snap.forecast.stores, "C");
+			require(c != nullptr && c->arrivals.size() == 1,
+				"the later delivery is missing from the through-flow chain forecast");
+			if (c != nullptr && c->arrivals.size() == 1)
+			{
+				auto const& arrival = c->arrivals[0];
+				require(arrival.deliveryId == "drop"
+					&& approx(arrival.arrivalSeconds, 40.0),
+					"the later delivery lost its schedule");
+				require(approx(arrival.projectedDrawableBefore, 40.0, 1e-3),
+					"the projected inventory at the later delivery ignored the through-flow");
+				require(approx(arrival.acceptedQuantity, 100.0)
+					&& approx(arrival.rejectedQuantity, 0.0)
+					&& arrival.rescuesStore,
+					"the later delivery was not accepted as a rescue");
+			}
+			require(approx(c->projectedDrawableAtHorizon, 86520.0, 1e-3),
+				"the through-flow chain horizon total did not include the accepted delivery");
+			require(std::abs(c->conservationResidual)
+				<= core::StationBalanceTolerance * 1e6,
+				"the through-flow delivery projection does not conserve");
 		}
 	}
 

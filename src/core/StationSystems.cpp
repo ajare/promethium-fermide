@@ -5276,12 +5276,6 @@ namespace core
 					* std::max(1.0, projected[index].qualified
 						+ projected[index].unqualified);
 			};
-			for (size_t index = 0; index < stores.size(); ++index)
-				if (isDry(index))
-				{
-					projected[index].depleted = true;
-					projected[index].depletionOnset = asOfSeconds;
-				}
 			// Collect the authored event times inside the horizon.
 			// Deliveries and ejections share the scenario event ordering
 			// (#392): occurrence time, then service priority descending,
@@ -5406,12 +5400,20 @@ namespace core
 				double rate{0.0};
 			};
 			std::vector<BlockedFlow> blocked;
+			// #593: per-store transfer-out demand and total blocked
+			// outflow demand, and the through-flow coverage flag read by
+			// the depletion marking. These are recomputed on every
+			// computeRates call and describe the segment that call opens.
+			std::vector<double> transferOutDemand(stores.size(), 0.0);
+			std::vector<double> blockedRate(stores.size(), 0.0);
+			std::vector<char> coveredFlag(stores.size(), 0);
 			auto const computeRates = [&](double at)
 			{
 				std::fill(net.begin(), net.end(), 0.0);
 				std::fill(maxOutflow.begin(), maxOutflow.end(), 0.0);
 				std::fill(limiterId.begin(), limiterId.end(), std::string());
 				std::fill(limiterKind.begin(), limiterKind.end(), std::string());
+				std::fill(transferOutDemand.begin(), transferOutDemand.end(), 0.0);
 				blocked.clear();
 				auto const addOutflow = [&](size_t storeIndex, double rate,
 					std::string const& id, char const* kind)
@@ -5424,33 +5426,159 @@ namespace core
 						limiterKind[storeIndex] = kind;
 					}
 				};
-				for (auto const& transfer : transfers)
+				// #593: resolve the transfer rates for simultaneous
+				// through-flow at boundary stores before folding them into
+				// the net trajectory. Gating each transfer on the inventory
+				// at the segment start alone makes a transfer chain
+				// oscillate: a dry intermediate stops its outgoing leg while
+				// the incoming leg fills it, a full intermediate stops the
+				// incoming leg while the outgoing leg drains it, and the
+				// solve spends the horizon in half-duty phases that invent
+				// shortages and burn the segment budget while the live chain
+				// flows straight through. Instead every transfer starts at
+				// its full authored rate and the rates settle: a store
+				// projected dry may pass out only what arrives concurrently,
+				// and a store projected full may take in only what leaves
+				// concurrently, each capped in the live transfer-priority
+				// order. The caps only ever lower rates, so the settle
+				// terminates. What a dry store cannot pass out stays
+				// uncovered demand at that store; what a full store cannot
+				// take in is back-pressure that leaves the material
+				// upstream, not a shortage.
+				std::vector<double> resolvedRate(transfers.size(), 0.0);
+				std::vector<double> inflowRate(stores.size(), 0.0);
+				std::vector<double> outflowRate(stores.size(), 0.0);
+				std::vector<double> supplyCapped(stores.size(), 0.0);
+				// #593: a dry store's through-flow only counts when it is
+				// genuinely supported - traceable back along the transfer
+				// graph to a store that actually holds drawable material.
+				// Mark every store that holds material as supported and
+				// propagate support along any transfer that could carry
+				// material (authored rate above zero) out of a supported
+				// store. A transfer whose source is not supported can carry
+				// nothing real - a closed loop of dry stores each "feeding"
+				// the other has no supply behind it, and the live chain moves
+				// nothing there - so it is zeroed up front and its demand is
+				// uncovered at the dry source, exactly as the live transfer
+				// that finds nothing to move reports it. Doing this before
+				// the settle keeps a dry store's outflow budget equal to the
+				// supported inflow it can really pass, so no phantom
+				// material is ever created downstream.
+				std::vector<char> supported(stores.size(), 0);
+				for (size_t store = 0; store < stores.size(); ++store)
+					if (!isDry(store)) supported[store] = 1;
+				for (bool grew = true; grew; )
 				{
+					grew = false;
+					for (auto const index : transferOrder)
+					{
+						if (transfers[index].authored.ratePerSecond <= 0.0) continue;
+						if (!supported[transfers[index].sourceIndex]) continue;
+						if (supported[transfers[index].destinationIndex]) continue;
+						supported[transfers[index].destinationIndex] = 1;
+						grew = true;
+					}
+				}
+				for (size_t index = 0; index < transfers.size(); ++index)
+				{
+					if (transfers[index].authored.ratePerSecond <= 0.0) continue;
+					if (supported[transfers[index].sourceIndex])
+					{
+						resolvedRate[index] = transfers[index].authored.ratePerSecond;
+						continue;
+					}
+					supplyCapped[transfers[index].sourceIndex]
+						+= transfers[index].authored.ratePerSecond;
+				}
+				for (size_t pass = 0;
+					pass < transfers.size() * 2 + stores.size() + 4; ++pass)
+				{
+					std::fill(inflowRate.begin(), inflowRate.end(), 0.0);
+					std::fill(outflowRate.begin(), outflowRate.end(), 0.0);
+					for (size_t index = 0; index < transfers.size(); ++index)
+					{
+						inflowRate[transfers[index].destinationIndex]
+							+= resolvedRate[index];
+						outflowRate[transfers[index].sourceIndex]
+							+= resolvedRate[index];
+					}
+					bool settled = true;
+					for (size_t store = 0; store < stores.size(); ++store)
+					{
+						if (isDry(store))
+						{
+							double budget = inflowRate[store];
+							for (auto const index : transferOrder)
+							{
+								if (transfers[index].sourceIndex != store) continue;
+								auto const allowed = std::min(resolvedRate[index],
+									budget);
+								budget -= allowed;
+								if (allowed < resolvedRate[index])
+								{
+									supplyCapped[store]
+										+= resolvedRate[index] - allowed;
+									resolvedRate[index] = allowed;
+									settled = false;
+								}
+							}
+						}
+						if (isFull(store))
+						{
+							double budget = outflowRate[store];
+							for (auto const index : transferOrder)
+							{
+								if (transfers[index].destinationIndex != store)
+									continue;
+								auto const allowed = std::min(resolvedRate[index],
+									budget);
+								budget -= allowed;
+								if (allowed < resolvedRate[index])
+								{
+									resolvedRate[index] = allowed;
+									settled = false;
+								}
+							}
+						}
+					}
+					if (settled) break;
+				}
+				// Re-derive the concurrent in/out totals from the settled
+				// rates so the coverage test below reads the final rates
+				// even if the pass bound was reached without settling.
+				std::fill(inflowRate.begin(), inflowRate.end(), 0.0);
+				std::fill(outflowRate.begin(), outflowRate.end(), 0.0);
+				for (size_t index = 0; index < transfers.size(); ++index)
+				{
+					inflowRate[transfers[index].destinationIndex]
+						+= resolvedRate[index];
+					outflowRate[transfers[index].sourceIndex]
+						+= resolvedRate[index];
+				}
+				// Fold the settled rates into the net trajectory and record
+				// the authored outflow demand per store.
+				for (size_t index = 0; index < transfers.size(); ++index)
+				{
+					auto const& transfer = transfers[index];
 					if (transfer.authored.ratePerSecond <= 0.0) continue;
-					if (isDry(transfer.sourceIndex))
+					transferOutDemand[transfer.sourceIndex]
+						+= transfer.authored.ratePerSecond;
+					auto const rate = resolvedRate[index];
+					if (rate <= 0.0) continue;
+					net[transfer.sourceIndex] -= rate;
+					net[transfer.destinationIndex] += rate;
+					if (rate > maxOutflow[transfer.sourceIndex])
 					{
-						// The source is projected dry: the transfer service
-						// is unavailable and its demand stays uncovered.
-						blocked.push_back({transfer.sourceIndex,
-							transfer.authored.ratePerSecond});
-						continue;
-					}
-					if (isFull(transfer.destinationIndex))
-					{
-						// The destination is projected full: the transfer is
-						// back-pressured and moves nothing; the source keeps
-						// its material, so this is not a source shortage.
-						continue;
-					}
-					net[transfer.sourceIndex] -= transfer.authored.ratePerSecond;
-					net[transfer.destinationIndex] += transfer.authored.ratePerSecond;
-					if (transfer.authored.ratePerSecond > maxOutflow[transfer.sourceIndex])
-					{
-						maxOutflow[transfer.sourceIndex] = transfer.authored.ratePerSecond;
+						maxOutflow[transfer.sourceIndex] = rate;
 						limiterId[transfer.sourceIndex] = transfer.authored.id;
 						limiterKind[transfer.sourceIndex] = "transfer";
 					}
 				}
+				// A dry source that could not pass its full demand leaves
+				// the shortfall as uncovered demand at that store.
+				for (size_t store = 0; store < stores.size(); ++store)
+					if (supplyCapped[store] > 0.0)
+						blocked.push_back({store, supplyCapped[store]});
 				for (auto const& crew : crews)
 				{
 					if (crew.authored.crewCount <= 0) continue;
@@ -5523,7 +5651,41 @@ namespace core
 							net[exchange.storeIndex] += rate;
 					}
 				}
+				// #593: through-flow coverage. A store whose transfer
+				// outflow demand is nonzero, fully running (nothing of it
+				// blocked, by a transfer cap or by a crew or equipment
+				// stall) and fed by at least as much concurrent transfer
+				// inflow is a pass-through, not a shortage: it can sit dry
+				// at the boundary for the whole horizon while continuously
+				// satisfying its outflow, exactly as the live chain does.
+				std::fill(blockedRate.begin(), blockedRate.end(), 0.0);
+				for (auto const& flow : blocked)
+					blockedRate[flow.storeIndex] += flow.rate;
+				std::fill(coveredFlag.begin(), coveredFlag.end(), 0);
+				for (size_t store = 0; store < stores.size(); ++store)
+				{
+					auto const demand = transferOutDemand[store];
+					if (demand <= 0.0) continue;
+					auto const tol = StationBalanceTolerance
+						* std::max(1.0, demand);
+					if (blockedRate[store] > tol) continue;
+					if (inflowRate[store] + tol < demand) continue;
+					coveredFlag[store] = 1;
+				}
 			};
+			// A store that starts dry is short unless its transfer
+			// outflow demand is fully covered by concurrent transfer
+			// through-flow (#593): a pass-through intermediate that never
+			// holds material but always passes what arrives is not a
+			// shortage, so it must not read as a shortfall that starts
+			// with the forecast.
+			computeRates(asOfSeconds);
+			for (size_t index = 0; index < stores.size(); ++index)
+				if (isDry(index) && !coveredFlag[index])
+				{
+					projected[index].depleted = true;
+					projected[index].depletionOnset = asOfSeconds;
+				}
 			std::vector<std::vector<StationForecastArrival>> arrivalsByStore(
 				stores.size());
 			double time = asOfSeconds;
@@ -5671,7 +5833,7 @@ namespace core
 				// run ahead of this tick's drains.
 				for (size_t index = 0; index < stores.size(); ++index)
 					if (!projected[index].depleted && isDry(index)
-						&& duration > 0.0)
+						&& duration > 0.0 && !coveredFlag[index])
 					{
 						projected[index].depleted = true;
 						projected[index].depletionOnset = time;
