@@ -23,6 +23,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
+#include <functional>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -495,6 +497,191 @@ namespace
 	}
 }
 
+// #597: the audit's own detector must not be blind. Every published
+// scalar the finite-value contract covers - the power bus aggregates,
+// the thermal totals, the forecast header/entries/arrivals, the
+// snapshot clock and tolerance, and the retained trend history's
+// values - mutated to a non-finite value at the public seam, must come
+// back as an identified finding and a dirty audit, never a clean
+// STABLE. The unmutated runtime snapshot from the same run must still
+// audit clean, and the audit never clamps: the poisoned value reaches
+// the finding exactly as published.
+void stabilityAuditFaultInjection(smoke::Context const&)
+{
+	auto const nan = std::numeric_limits<double>::quiet_NaN();
+	auto const inf = std::numeric_limits<double>::infinity();
+
+	// The reported public-seam reproduction: a NaN aggregate power
+	// request on an otherwise minimal enabled snapshot must be reported,
+	// never read as clean.
+	{
+		core::StationSystemsSnapshot snapshot;
+		snapshot.enabled = true;
+		snapshot.power.totalRequestedKW = nan;
+		auto const audit = core::auditStationStability(snapshot, {}, {}, {});
+		require(!audit.clean, "a NaN aggregate power request audited clean");
+		require(!audit.nonFiniteFindings.empty(),
+			"a NaN aggregate power request produced no non-finite finding");
+	}
+
+	// Base fixture: a short real run of the packaged workload, so the
+	// snapshot and trend history are genuine published runtime state.
+	auto const& workload = core::bundledStationLongRunWorkload();
+	core::World world("StabilityAuditFaults", 2, 2);
+	world.pauseSimulation(); world.finishBuild();
+	configureOrDiagnose(world, workload.settings, "audit fault fixture");
+	world.resumeSimulation();
+	runOrDiagnose(world, scenarioTicks(120.0), "audit fault fixture run");
+	auto const events = world.getStationSystemsEvents();
+	auto const diagnostics = world.getStationSystemsDiagnostics();
+
+	struct AuditFixture
+	{
+		core::StationSystemsSnapshot snapshot;
+		std::vector<core::StationTrendSeries> trends;
+	};
+	AuditFixture base{world.getStationSystemsSnapshot(), world.getStationSystemsTrends()};
+
+	// Guarantee every published sub-shape is mutation-testable even if
+	// this fixture run happened not to populate it: default-constructed
+	// values are finite, so the baseline stays clean either way.
+	if (base.snapshot.forecast.stores.empty())
+		base.snapshot.forecast.stores.push_back(core::StationForecastEntry{});
+	if (base.snapshot.forecast.stores.front().arrivals.empty())
+		base.snapshot.forecast.stores.front().arrivals.push_back(core::StationForecastArrival{});
+	if (base.trends.empty())
+	{
+		core::StationTrendSeries series;
+		series.subsystem = "power";
+		series.id = "station";
+		series.unit = "kW";
+		series.sampleIntervalSeconds = 1.0;
+		base.trends.push_back(series);
+	}
+	if (base.trends.front().samples.empty())
+		base.trends.front().samples.push_back(core::StationTrendSample{});
+
+	// The valid runtime snapshot and history audit clean before any
+	// mutation - the passing check the contract retains.
+	auto const baseline = core::auditStationStability(base.snapshot, events, base.trends, diagnostics);
+	require(baseline.clean, "the unmutated runtime snapshot failed the stability audit");
+	require(baseline.enabled && baseline.finiteChecks > 1000,
+		"the baseline audit did not cover the full published state");
+
+	using AuditMutation = std::function<void(AuditFixture&, double)>;
+	std::vector<std::pair<std::string, AuditMutation>> fields;
+#define PF_AUDIT_MUTATE(name, expr) fields.push_back({name, [] (AuditFixture& fixture, double value) \
+	{ fixture.expr = value; }})
+	// Top-level published scalars
+	PF_AUDIT_MUTATE("elapsedSeconds", snapshot.elapsedSeconds);
+	PF_AUDIT_MUTATE("nextDeliverySeconds", snapshot.nextDeliverySeconds);
+	PF_AUDIT_MUTATE("nextWasteEjectionSeconds", snapshot.nextWasteEjectionSeconds);
+	PF_AUDIT_MUTATE("balanceTolerance", snapshot.balanceTolerance);
+	// Power bus aggregates
+	PF_AUDIT_MUTATE("power.availableGenerationKW", snapshot.power.availableGenerationKW);
+	PF_AUDIT_MUTATE("power.totalRequestedKW", snapshot.power.totalRequestedKW);
+	PF_AUDIT_MUTATE("power.totalSuppliedKW", snapshot.power.totalSuppliedKW);
+	PF_AUDIT_MUTATE("power.totalUnmetKW", snapshot.power.totalUnmetKW);
+	PF_AUDIT_MUTATE("power.unmetCriticalKW", snapshot.power.unmetCriticalKW);
+	PF_AUDIT_MUTATE("power.surplusKW", snapshot.power.surplusKW);
+	PF_AUDIT_MUTATE("power.exportedHeatKW", snapshot.power.exportedHeatKW);
+	PF_AUDIT_MUTATE("power.batteryDischargeKW", snapshot.power.batteryDischargeKW);
+	PF_AUDIT_MUTATE("power.batteryChargeKW", snapshot.power.batteryChargeKW);
+	PF_AUDIT_MUTATE("power.batteryShortfallKW", snapshot.power.batteryShortfallKW);
+	PF_AUDIT_MUTATE("power.dispatchDemandKW", snapshot.power.dispatchDemandKW);
+	PF_AUDIT_MUTATE("power.dispatchTargetKW", snapshot.power.dispatchTargetKW);
+	PF_AUDIT_MUTATE("power.dispatchCommittedKW", snapshot.power.dispatchCommittedKW);
+	PF_AUDIT_MUTATE("power.dispatchShortfallKW", snapshot.power.dispatchShortfallKW);
+	PF_AUDIT_MUTATE("power.coolantPumpKW", snapshot.power.coolantPumpKW);
+	PF_AUDIT_MUTATE("power.coolantHeaterKW", snapshot.power.coolantHeaterKW);
+	PF_AUDIT_MUTATE("power.chillerPowerKW", snapshot.power.chillerPowerKW);
+	PF_AUDIT_MUTATE("power.generatorOutputKW", snapshot.power.generatorOutputKW);
+	PF_AUDIT_MUTATE("power.generatorStartupDrawKW", snapshot.power.generatorStartupDrawKW);
+	PF_AUDIT_MUTATE("power.waterTreatmentPowerKW", snapshot.power.waterTreatmentPowerKW);
+	PF_AUDIT_MUTATE("power.electrolyzerPowerKW", snapshot.power.electrolyzerPowerKW);
+	PF_AUDIT_MUTATE("power.co2CapturePowerKW", snapshot.power.co2CapturePowerKW);
+	PF_AUDIT_MUTATE("power.sabatierPowerKW", snapshot.power.sabatierPowerKW);
+	PF_AUDIT_MUTATE("power.methaneProcessingPowerKW", snapshot.power.methaneProcessingPowerKW);
+	PF_AUDIT_MUTATE("power.microbialProcessingPowerKW", snapshot.power.microbialProcessingPowerKW);
+	PF_AUDIT_MUTATE("power.cropPowerKW", snapshot.power.cropPowerKW);
+	PF_AUDIT_MUTATE("power.algaePowerKW", snapshot.power.algaePowerKW);
+	PF_AUDIT_MUTATE("power.fuelCellOutputKW", snapshot.power.fuelCellOutputKW);
+	PF_AUDIT_MUTATE("power.fuelCellWasteHeatKW", snapshot.power.fuelCellWasteHeatKW);
+	PF_AUDIT_MUTATE("power.generatorWasteHeatKW", snapshot.power.generatorWasteHeatKW);
+	PF_AUDIT_MUTATE("power.generatorDecayHeatKW", snapshot.power.generatorDecayHeatKW);
+	PF_AUDIT_MUTATE("power.protectedDemandKW", snapshot.power.protectedDemandKW);
+	PF_AUDIT_MUTATE("power.protectedSuppliedKW", snapshot.power.protectedSuppliedKW);
+	PF_AUDIT_MUTATE("power.protectedUnmetKW", snapshot.power.protectedUnmetKW);
+	PF_AUDIT_MUTATE("power.recoverySurgeKW", snapshot.power.recoverySurgeKW);
+	// Thermal totals
+	PF_AUDIT_MUTATE("thermal.totalAbsorbedKW", snapshot.thermal.totalAbsorbedKW);
+	PF_AUDIT_MUTATE("thermal.totalRoutedKW", snapshot.thermal.totalRoutedKW);
+	PF_AUDIT_MUTATE("thermal.totalRejectedKW", snapshot.thermal.totalRejectedKW);
+	PF_AUDIT_MUTATE("thermal.totalCirculationKgPerS", snapshot.thermal.totalCirculationKgPerS);
+	PF_AUDIT_MUTATE("thermal.totalFreezeHeatingKW", snapshot.thermal.totalFreezeHeatingKW);
+	PF_AUDIT_MUTATE("thermal.totalCoolingProvidedKW", snapshot.thermal.totalCoolingProvidedKW);
+	PF_AUDIT_MUTATE("thermal.totalCoolingUnmetKW", snapshot.thermal.totalCoolingUnmetKW);
+	PF_AUDIT_MUTATE("thermal.totalCondenserHeatKW", snapshot.thermal.totalCondenserHeatKW);
+	PF_AUDIT_MUTATE("thermal.totalBufferStoredKJ", snapshot.thermal.totalBufferStoredKJ);
+	PF_AUDIT_MUTATE("thermal.totalBufferAvailableCapacityKJ", snapshot.thermal.totalBufferAvailableCapacityKJ);
+	PF_AUDIT_MUTATE("thermal.totalBufferChargeKW", snapshot.thermal.totalBufferChargeKW);
+	PF_AUDIT_MUTATE("thermal.totalBufferDischargeKW", snapshot.thermal.totalBufferDischargeKW);
+	// Forecast header, entries and arrivals
+	PF_AUDIT_MUTATE("forecast.asOfSeconds", snapshot.forecast.asOfSeconds);
+	PF_AUDIT_MUTATE("forecast.horizonSeconds", snapshot.forecast.horizonSeconds);
+	PF_AUDIT_MUTATE("forecastStore.asOfSeconds", snapshot.forecast.stores.front().asOfSeconds);
+	PF_AUDIT_MUTATE("forecastStore.drawableAtStart", snapshot.forecast.stores.front().drawableAtStart);
+	PF_AUDIT_MUTATE("forecastStore.physicalAtStart", snapshot.forecast.stores.front().physicalAtStart);
+	PF_AUDIT_MUTATE("forecastStore.netRateAtStart", snapshot.forecast.stores.front().netRateAtStart);
+	PF_AUDIT_MUTATE("forecastStore.shortfallOnsetSeconds", snapshot.forecast.stores.front().shortfallOnsetSeconds);
+	PF_AUDIT_MUTATE("forecastStore.projectedDrawableAtHorizon", snapshot.forecast.stores.front().projectedDrawableAtHorizon);
+	PF_AUDIT_MUTATE("forecastStore.unmetOutflowTotal", snapshot.forecast.stores.front().unmetOutflowTotal);
+	PF_AUDIT_MUTATE("forecastStore.conservationResidual", snapshot.forecast.stores.front().conservationResidual);
+	PF_AUDIT_MUTATE("forecastArrival.arrivalSeconds", snapshot.forecast.stores.front().arrivals.front().arrivalSeconds);
+	PF_AUDIT_MUTATE("forecastArrival.scheduledQuantity", snapshot.forecast.stores.front().arrivals.front().scheduledQuantity);
+	PF_AUDIT_MUTATE("forecastArrival.acceptedQuantity", snapshot.forecast.stores.front().arrivals.front().acceptedQuantity);
+	PF_AUDIT_MUTATE("forecastArrival.rejectedQuantity", snapshot.forecast.stores.front().arrivals.front().rejectedQuantity);
+	PF_AUDIT_MUTATE("forecastArrival.projectedDrawableBefore", snapshot.forecast.stores.front().arrivals.front().projectedDrawableBefore);
+	PF_AUDIT_MUTATE("forecastArrival.projectedPhysicalBefore", snapshot.forecast.stores.front().arrivals.front().projectedPhysicalBefore);
+	// Retained trend history: the interval and every sample value
+	PF_AUDIT_MUTATE("trendSeries.sampleIntervalSeconds", trends.front().sampleIntervalSeconds);
+	PF_AUDIT_MUTATE("trendSample.elapsedSeconds", trends.front().samples.front().elapsedSeconds);
+	PF_AUDIT_MUTATE("trendSample.requested", trends.front().samples.front().requested);
+	PF_AUDIT_MUTATE("trendSample.actual", trends.front().samples.front().actual);
+#undef PF_AUDIT_MUTATE
+
+	for (auto const& field : fields)
+	{
+		// The audit finding must identify the field by its leaf name -
+		// "power.totalRequestedKW" must show up as "totalRequestedKW"
+		// in the finding text, so a reported violation names what broke.
+		auto const leaf = field.first.substr(field.first.find_last_of('.') + 1);
+		for (auto const value : {nan, inf, -inf})
+		{
+			AuditFixture poisoned = base;
+			field.second(poisoned, value);
+			auto const audit = core::auditStationStability(poisoned.snapshot, events,
+				poisoned.trends, diagnostics);
+			if (audit.clean)
+			{
+				std::fprintf(stderr, "audit reported clean for non-finite %s\n", field.first.c_str());
+				throw std::runtime_error("non-finite " + field.first + " audited clean");
+			}
+			auto const identified = std::any_of(audit.nonFiniteFindings.begin(),
+				audit.nonFiniteFindings.end(), [&](std::string const& text)
+				{
+					return text.find(leaf) != std::string::npos;
+				});
+			if (!identified)
+			{
+				std::fprintf(stderr, "non-finite %s produced no finding naming the field\n",
+					field.first.c_str());
+				throw std::runtime_error("non-finite " + field.first + " was not identified");
+			}
+		}
+	}
+}
+
 void registerStabilityChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"stabilityWorkloadBundled", stabilityWorkloadBundled});
@@ -502,4 +689,5 @@ void registerStabilityChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"stabilityPathEquivalence", stabilityPathEquivalence});
 	checks.push_back({"stabilityResetIsolation", stabilityResetIsolation});
 	checks.push_back({"stabilityMultiWorldIsolation", stabilityMultiWorldIsolation});
+	checks.push_back({"stabilityAuditFaultInjection", stabilityAuditFaultInjection});
 }

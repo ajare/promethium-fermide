@@ -119,9 +119,13 @@ foreach(check lifecycle batching eventBound persistence stores transfers compoun
         # #424: long-duration stability and repeatability - the packaged
         # three-simulated-hour workload, the stability audit at every
         # checkpoint, path equivalence across update batching/time
-        # scales, reset replay and multi-World isolation.
+        # scales, reset replay and multi-World isolation. #597 adds the
+        # audit's own fault-injection regression: every aggregate and
+        # history scalar poisoned non-finite at the public seam must be
+        # reported, never audited clean.
         stabilityWorkloadBundled stabilityLongRun stabilityPathEquivalence
-        stabilityResetIsolation stabilityMultiWorldIsolation)
+        stabilityResetIsolation stabilityMultiWorldIsolation
+        stabilityAuditFaultInjection)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()

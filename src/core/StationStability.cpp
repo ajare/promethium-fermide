@@ -118,6 +118,7 @@ namespace core
 				"event history exceeded its bound: " + std::to_string(events.size())
 				+ " retained, limit " + std::to_string(audit.eventHistoryLimit));
 		audit.trendSeries = trends.size();
+		AuditSink sink{audit};
 		for (auto const& series : trends)
 		{
 			audit.trendSamplesRetained += series.samples.size();
@@ -127,6 +128,19 @@ namespace core
 					"trend series '" + series.subsystem + "/" + series.id
 					+ "' exceeded its sample bound: " + std::to_string(series.samples.size())
 					+ " retained, limit " + std::to_string(audit.trendSampleLimit));
+			// #597: the retained history's values are published state just
+			// as much as its size. A series inside its bound but carrying a
+			// non-finite interval or sample is a defect, reported here even
+			// for a disabled station: the history was published either way.
+			sink.fin(series.sampleIntervalSeconds,
+				"trend series '" + series.subsystem + "/" + series.id + "' sampleIntervalSeconds");
+			for (auto const& sample : series.samples)
+			{
+				auto const where = "trend sample '" + series.subsystem + "/" + series.id + "'";
+				sink.fin(sample.elapsedSeconds, where + " elapsedSeconds");
+				sink.fin(sample.requested, where + " requested");
+				sink.fin(sample.actual, where + " actual");
+			}
 		}
 		audit.softwareFailures = diagnostics.size();
 
@@ -137,13 +151,98 @@ namespace core
 			return audit;
 		}
 
-		AuditSink sink{audit};
 		auto const& fin = [&sink](double value, std::string label) { sink.fin(value, std::move(label)); };
 		auto const& bound = [&sink](double value, double lo, double hi, std::string label)
 		{ sink.bound(value, lo, hi, std::move(label)); };
 		auto const& ledger = [&sink](double residual, double scale, std::string label)
 		{ sink.ledger(residual, scale, std::move(label)); };
 
+		// #597: the aggregate and top-level published scalars. The
+		// per-instance loops below cover every subsystem's detail fields;
+		// this covers the rollups the overview reads directly - the
+		// station's own clock and tolerance, the power bus totals, the
+		// thermal totals, and the forecast header with every entry and
+		// arrival. A non-finite aggregate is reported exactly like a
+		// non-finite detail: a numerically invalid published value must
+		// never read as clean, and is never clamped away.
+		fin(snapshot.elapsedSeconds, "elapsedSeconds");
+		fin(snapshot.nextDeliverySeconds, "nextDeliverySeconds");
+		fin(snapshot.nextWasteEjectionSeconds, "nextWasteEjectionSeconds");
+		fin(snapshot.balanceTolerance, "balanceTolerance");
+		// StationPowerSnapshot aggregates
+		fin(snapshot.power.availableGenerationKW, "power.availableGenerationKW");
+		fin(snapshot.power.totalRequestedKW, "power.totalRequestedKW");
+		fin(snapshot.power.totalSuppliedKW, "power.totalSuppliedKW");
+		fin(snapshot.power.totalUnmetKW, "power.totalUnmetKW");
+		fin(snapshot.power.unmetCriticalKW, "power.unmetCriticalKW");
+		fin(snapshot.power.surplusKW, "power.surplusKW");
+		fin(snapshot.power.exportedHeatKW, "power.exportedHeatKW");
+		fin(snapshot.power.batteryDischargeKW, "power.batteryDischargeKW");
+		fin(snapshot.power.batteryChargeKW, "power.batteryChargeKW");
+		fin(snapshot.power.batteryShortfallKW, "power.batteryShortfallKW");
+		fin(snapshot.power.dispatchDemandKW, "power.dispatchDemandKW");
+		fin(snapshot.power.dispatchTargetKW, "power.dispatchTargetKW");
+		fin(snapshot.power.dispatchCommittedKW, "power.dispatchCommittedKW");
+		fin(snapshot.power.dispatchShortfallKW, "power.dispatchShortfallKW");
+		fin(snapshot.power.coolantPumpKW, "power.coolantPumpKW");
+		fin(snapshot.power.coolantHeaterKW, "power.coolantHeaterKW");
+		fin(snapshot.power.chillerPowerKW, "power.chillerPowerKW");
+		fin(snapshot.power.generatorOutputKW, "power.generatorOutputKW");
+		fin(snapshot.power.generatorStartupDrawKW, "power.generatorStartupDrawKW");
+		fin(snapshot.power.waterTreatmentPowerKW, "power.waterTreatmentPowerKW");
+		fin(snapshot.power.electrolyzerPowerKW, "power.electrolyzerPowerKW");
+		fin(snapshot.power.co2CapturePowerKW, "power.co2CapturePowerKW");
+		fin(snapshot.power.sabatierPowerKW, "power.sabatierPowerKW");
+		fin(snapshot.power.methaneProcessingPowerKW, "power.methaneProcessingPowerKW");
+		fin(snapshot.power.microbialProcessingPowerKW, "power.microbialProcessingPowerKW");
+		fin(snapshot.power.cropPowerKW, "power.cropPowerKW");
+		fin(snapshot.power.algaePowerKW, "power.algaePowerKW");
+		fin(snapshot.power.fuelCellOutputKW, "power.fuelCellOutputKW");
+		fin(snapshot.power.fuelCellWasteHeatKW, "power.fuelCellWasteHeatKW");
+		fin(snapshot.power.generatorWasteHeatKW, "power.generatorWasteHeatKW");
+		fin(snapshot.power.generatorDecayHeatKW, "power.generatorDecayHeatKW");
+		fin(snapshot.power.protectedDemandKW, "power.protectedDemandKW");
+		fin(snapshot.power.protectedSuppliedKW, "power.protectedSuppliedKW");
+		fin(snapshot.power.protectedUnmetKW, "power.protectedUnmetKW");
+		fin(snapshot.power.recoverySurgeKW, "power.recoverySurgeKW");
+		// StationThermalSnapshot aggregates
+		fin(snapshot.thermal.totalAbsorbedKW, "thermal.totalAbsorbedKW");
+		fin(snapshot.thermal.totalRoutedKW, "thermal.totalRoutedKW");
+		fin(snapshot.thermal.totalRejectedKW, "thermal.totalRejectedKW");
+		fin(snapshot.thermal.totalCirculationKgPerS, "thermal.totalCirculationKgPerS");
+		fin(snapshot.thermal.totalFreezeHeatingKW, "thermal.totalFreezeHeatingKW");
+		fin(snapshot.thermal.totalCoolingProvidedKW, "thermal.totalCoolingProvidedKW");
+		fin(snapshot.thermal.totalCoolingUnmetKW, "thermal.totalCoolingUnmetKW");
+		fin(snapshot.thermal.totalCondenserHeatKW, "thermal.totalCondenserHeatKW");
+		fin(snapshot.thermal.totalBufferStoredKJ, "thermal.totalBufferStoredKJ");
+		fin(snapshot.thermal.totalBufferAvailableCapacityKJ, "thermal.totalBufferAvailableCapacityKJ");
+		fin(snapshot.thermal.totalBufferChargeKW, "thermal.totalBufferChargeKW");
+		fin(snapshot.thermal.totalBufferDischargeKW, "thermal.totalBufferDischargeKW");
+		// StationForecastSnapshot header, entries and arrivals
+		fin(snapshot.forecast.asOfSeconds, "forecast.asOfSeconds");
+		fin(snapshot.forecast.horizonSeconds, "forecast.horizonSeconds");
+		for (auto const& entry : snapshot.forecast.stores)
+		{
+			auto const where = "forecast store '" + entry.storeId + "'";
+			fin(entry.asOfSeconds, where + " asOfSeconds");
+			fin(entry.drawableAtStart, where + " drawableAtStart");
+			fin(entry.physicalAtStart, where + " physicalAtStart");
+			fin(entry.netRateAtStart, where + " netRateAtStart");
+			fin(entry.shortfallOnsetSeconds, where + " shortfallOnsetSeconds");
+			fin(entry.projectedDrawableAtHorizon, where + " projectedDrawableAtHorizon");
+			fin(entry.unmetOutflowTotal, where + " unmetOutflowTotal");
+			fin(entry.conservationResidual, where + " conservationResidual");
+			for (auto const& arrival : entry.arrivals)
+			{
+				auto const at = where + " arrival '" + arrival.deliveryId + "'";
+				fin(arrival.arrivalSeconds, at + " arrivalSeconds");
+				fin(arrival.scheduledQuantity, at + " scheduledQuantity");
+				fin(arrival.acceptedQuantity, at + " acceptedQuantity");
+				fin(arrival.rejectedQuantity, at + " rejectedQuantity");
+				fin(arrival.projectedDrawableBefore, at + " projectedDrawableBefore");
+				fin(arrival.projectedPhysicalBefore, at + " projectedPhysicalBefore");
+			}
+		}
 		// StationSystemsStoreSnapshot
 		for (auto const& store : snapshot.stores)
 		{
