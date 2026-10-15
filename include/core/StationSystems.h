@@ -337,6 +337,15 @@ namespace core
 	// beyond this are conservation violations, never silent clamping.
 	inline constexpr double StationBalanceTolerance{1e-9};
 
+	// #424: the published bounds on retained runtime history. The event
+	// history keeps at most the newest this-many entries and every trend
+	// series keeps at most this-many samples no matter how long or how
+	// fast the World runs; these are the same limits the runtime enforces,
+	// published so the stability audit and the presentation can state
+	// the bound instead of restating a magic number.
+	inline constexpr size_t StationEventHistoryLimit{256};
+	inline constexpr size_t StationTrendSampleLimit{256};
+
 	// Outcome of the most recent tick's request for one authored transfer.
 	enum class StationTransferStatus : std::uint8_t
 	{
@@ -3953,6 +3962,60 @@ namespace core
 		ScriptExecutionFailure failure{ScriptExecutionFailure::None};
 		std::string message;
 	};
+
+	// #424: the long-duration stability audit. A pure, read-only pass over
+	// the public snapshot, the bounded event history and the reported
+	// diagnostics: it checks that every published state-carrying value is
+	// finite, that finite capacities are never exceeded (stores, batteries,
+	// coolant, buffers), that every closing conservation ledger stays
+	// inside the published tolerance for its own scale, and that the
+	// retained runtime history stays inside its published bounds. It is
+	// observability only: it never clamps, never mutates and never relaxes
+	// a tolerance - a violation is reported with its unit and magnitude,
+	// never silently corrected. A physical shortage (a store running low)
+	// is not a stability violation; a non-finite value, a capacity
+	// breach, an unclosed ledger or an over-bound history is.
+	struct StationStabilityAudit
+	{
+		bool enabled{false};
+		uint64_t worldTick{0};
+		double elapsedSeconds{0.0};
+		// Finite-value tracking over every published state-carrying field.
+		size_t finiteChecks{0};
+		std::vector<std::string> nonFiniteFindings;
+		// Finite-capacity bounds: contents never exceed capacity and never
+		// go below zero or above their declared reserve relationships.
+		size_t boundChecks{0};
+		std::vector<std::string> boundViolations;
+		// Closing conservation ledgers: |residual| against
+		// balanceTolerance x max(1, |ledger scale|).
+		size_t ledgerChecks{0};
+		double maxResidualRatio{0.0};
+		std::vector<std::string> conservationViolations;
+		// Bounded runtime history: the newest-N event window and the
+		// per-series trend sample bound.
+		size_t eventsRetained{0};
+		size_t eventHistoryLimit{StationEventHistoryLimit};
+		size_t trendSeries{0};
+		size_t trendSamplesRetained{0};
+		size_t trendSampleLimit{StationTrendSampleLimit};
+		bool trendsTruncated{false};
+		// Software failures the runtime reported (Lua errors, budget
+		// exhaustion, invalid accounting): every one is a stability defect.
+		size_t softwareFailures{0};
+		// True when nothing above reported a violation. A disabled Station
+		// audits clean: there is nothing running to violate anything.
+		bool clean{true};
+	};
+
+	// Run the stability audit over one public snapshot plus the bounded
+	// event history, the bounded trend series and the reported diagnostics.
+	// Deterministic and side-effect free: the same inputs always produce
+	// the same audit.
+	StationStabilityAudit auditStationStability(StationSystemsSnapshot const& snapshot,
+		std::vector<StationSystemsEvent> const& events,
+		std::vector<StationTrendSeries> const& trends,
+		std::vector<StationSystemsDiagnostic> const& diagnostics);
 
 	// Application Resource integration. The loader supplies immutable source;
 	// executed objects are never shared. Without an application, use the exact

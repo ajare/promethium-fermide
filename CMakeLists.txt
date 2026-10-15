@@ -350,6 +350,16 @@ file(READ "${PF_SCENARIO_MAINTENANCE_RECOVERY_SOURCE}" PF_SCENARIO_MAINTENANCE_R
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/core/BundledStationScenariosSource.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/generated/BundledStationScenariosSource.h" @ONLY)
 
+# #424: the packaged long-duration stability workload. The same
+# reference-document format, authored for a three-simulated-hour
+# recurring-schedule run; editing the resource triggers an incremental
+# reconfigure.
+set(PF_LONG_RUN_WORKLOAD_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/station-systems/long-run-workload.yaml")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PF_LONG_RUN_WORKLOAD_SOURCE}")
+file(READ "${PF_LONG_RUN_WORKLOAD_SOURCE}" PF_LONG_RUN_WORKLOAD_YAML)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/core/BundledStationLongRunSource.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/BundledStationLongRunSource.h" @ONLY)
+
 file(GLOB PF_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/*.cpp")
 file(GLOB PF_CORE_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/include/core/*.h")
 

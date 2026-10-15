@@ -14,6 +14,7 @@
 #include "core/YamlSerializer.h"
 #include "BundledStationReferenceSource.h"
 #include "BundledStationScenariosSource.h"
+#include "BundledStationLongRunSource.h"
 
 #include <cmath>
 #include <stdexcept>
@@ -1116,7 +1117,8 @@ namespace core
 			if (serializer->hasField("scenarioKind"))
 			{
 				document.scenarioKind = serializer->readString("scenarioKind");
-				if (document.scenarioKind != "reference" && document.scenarioKind != "emergency")
+				if (document.scenarioKind != "reference" && document.scenarioKind != "emergency"
+					&& document.scenarioKind != "stability")
 					throw SerializationException(
 						"Unknown reference scenario kind: " + document.scenarioKind);
 			}
@@ -1204,6 +1206,31 @@ namespace core
 			if (!parseStationReference(bundledStationReferenceText(), parsed, &diagnostic))
 				throw std::runtime_error(
 					"Bundled reference station failed to parse: " + diagnostic);
+			return parsed;
+		}();
+		return document;
+	}
+
+	std::string const& bundledStationLongRunWorkloadText()
+	{
+		// #424: the packaged long-duration stability workload text.
+		static std::string const text{ kStationLongRunYaml };
+		return text;
+	}
+
+	StationReferenceDocument const& bundledStationLongRunWorkload()
+	{
+		// Parsed once through the same authoritative reader and full
+		// physical-consistency validation the base reference passes - a
+		// workload resource that does not parse is a build defect, never
+		// a user error.
+		static StationReferenceDocument const document = []
+		{
+			StationReferenceDocument parsed;
+			std::string diagnostic;
+			if (!parseStationReference(bundledStationLongRunWorkloadText(), parsed, &diagnostic))
+				throw std::runtime_error(
+					"Bundled long-run stability workload failed to parse: " + diagnostic);
 			return parsed;
 		}();
 		return document;

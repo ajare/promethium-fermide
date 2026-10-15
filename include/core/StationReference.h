@@ -70,7 +70,8 @@ namespace core
 		std::string scenarioNotes;
 		// #423: what kind of documented scenario this document carries.
 		// "reference" for the normal-operation baseline, "emergency" for a
-		// failure/recovery drill. A document without the field reads as
+		// failure/recovery drill, "stability" for the long-duration
+		// stability workload (#424). A document without the field reads as
 		// "reference".
 		std::string scenarioKind{"reference"};
 		// #423: the documented expectations of an emergency/recovery
@@ -117,4 +118,15 @@ namespace core
 	// resource is broken: a bundled scenario failing to parse is a build
 	// defect, never a user error.
 	std::vector<BundledStationScenario> const& bundledStationScenarios();
+
+	// The packaged long-duration stability workload (#424): a complete
+	// reference document authored with the same format and validation as
+	// the base reference, carrying a three-simulated-hour scenario with
+	// recurring schedules and declared residual tolerances. Parsed once
+	// from the embedded resource text on first use. Throws
+	// std::runtime_error if the packaged resource is broken: a bundled
+	// workload failing to parse is a build defect, never a user error.
+	StationReferenceDocument const& bundledStationLongRunWorkload();
+	// The raw packaged workload resource text, for display and re-editing.
+	std::string const& bundledStationLongRunWorkloadText();
 }

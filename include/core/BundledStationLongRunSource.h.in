@@ -1,0 +1,7 @@
+#pragma once
+
+// Generated from the authored long-duration stability workload resource
+// (#424), never a second definition. Embedded as a char array (like
+// BundledStationReferenceSource) so the packaged workload configuration
+// and the authored resource file are the same bytes at runtime.
+namespace core { inline constexpr char kStationLongRunYaml[] = R"PF_LONRUN(@PF_LONG_RUN_WORKLOAD_YAML@)PF_LONRUN"; }

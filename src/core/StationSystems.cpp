@@ -14,13 +14,13 @@ namespace core
 	namespace
 	{
 		StationSystemsSourceLoader sourceLoader;
-		constexpr size_t EventLimit = 256;
+		constexpr size_t EventLimit = StationEventHistoryLimit;
 		constexpr size_t DiagnosticByteLimit = 2048;
 		// #418: the per-series sample budget for bounded trends. Storage
 		// never exceeds this many samples per series no matter how long or
 		// how fast the World runs; overflow coarsens the history instead
 		// of growing it.
-		constexpr size_t TrendSampleLimit = 256;
+		constexpr size_t TrendSampleLimit = StationTrendSampleLimit;
 		// Every public event producer appends through this one bounded
 		// helper (#551): the history never retains more than the newest
 		// EventLimit entries, evicting oldest-first, so a tick that

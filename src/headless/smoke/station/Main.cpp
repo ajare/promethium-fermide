@@ -3,6 +3,7 @@
 #include "Coupled.h"
 #include "Reference.h"
 #include "Scenarios.h"
+#include "Stability.h"
 #include "core/World.h"
 #include "core/AgentTagRegistryDocument.h"
 #include "core/YamlSerializer.h"
@@ -21506,5 +21507,6 @@ int main(int argc, char** argv)
 	registerCoupledStationChecks(checks);
 	registerReferenceStationChecks(checks);
 	registerScenarioChecks(checks);
+	registerStabilityChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

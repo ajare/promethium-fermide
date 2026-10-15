@@ -284,6 +284,7 @@ set(editor_names
     station/enduranceWorkflow
     station/forecastWorkflow
     station/scenarioWorkflow
+    station/stabilityWorkflow
 )
 
 if(DEFINED LANE)

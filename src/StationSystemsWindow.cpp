@@ -177,6 +177,54 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 				ImGui::TextDisabled("Pause the World to load a scenario into the draft.");
 		}
 	}
+	// #424: the packaged long-duration stability workload. The same
+	// reference-document format and the same authoritative reader as the
+	// base reference, authored for a two-simulated-hour recurring-schedule
+	// run with declared residual tolerances. The window shows the
+	// workload's scenario declaration and tolerance contract, and
+	// loading it into the draft is ordinary paused-only draft editing -
+	// the same seam as the reference and the emergency scenarios, never a
+	// parallel configuration or clock.
+	ImGui::SeparatorText("Long-duration stability workload (packaged resource)");
+	{
+		static std::optional<core::StationReferenceDocument> sLongRun;
+		static std::string sLongRunError;
+		static bool sLongRunLoaded = false;
+		if (!sLongRunLoaded)
+		{
+			sLongRunLoaded = true;
+			core::StationReferenceDocument candidate;
+			if (core::parseStationReference(core::bundledStationLongRunWorkloadText(),
+				candidate, &sLongRunError))
+				sLongRun = std::move(candidate);
+			else
+				sLongRun.reset();
+		}
+		if (!sLongRun)
+		{
+			ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f),
+				"Packaged long-run workload failed to parse: %s", sLongRunError.c_str());
+		}
+		else
+		{
+			ImGui::Text("%s - %.0f simulated s scenario", sLongRun->name.c_str(),
+				sLongRun->scenarioSeconds);
+			ImGui::TextWrapped("%s", sLongRun->summary.c_str());
+			ImGui::TextWrapped("Scenario notes: %s", sLongRun->scenarioNotes.c_str());
+			ImGui::TextWrapped("Declared residual tolerance: %.0e relative per ledger scale (core::StationBalanceTolerance) - every closing conservation ledger must stay inside it at every point of the run; the audit reports any residual beyond it, never absorbs it.",
+				core::StationBalanceTolerance);
+			ImGui::TextWrapped("Qualification: %s", sLongRun->qualification.c_str());
+			ImGui::BeginDisabled(!world->isSimulationPaused());
+			if (ImGui::Button("Load long-run workload into draft"))
+			{
+				mDraft = sLongRun->settings;
+				mDiagnostic.clear();
+			}
+			ImGui::EndDisabled();
+			if (!world->isSimulationPaused())
+				ImGui::TextDisabled("Pause the World to load the workload into the draft.");
+		}
+	}
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
@@ -3943,6 +3991,50 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 				draw->AddCircleFilled({origin.x + px(0), origin.y + py(series.samples[0].actual)},
 					2.0f, IM_COL32(80, 200, 120, 255));
 			}
+		}
+	}
+	ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
+	if (ImGui::CollapsingHeader("Long-run stability audit (read-only: finite values, capacity bounds, conservation ledgers and bounded history over the public snapshot; a violation is a model regression reported with its magnitude, never a clamped or relaxed state)"))
+	{
+		// #424: the stability audit over the public snapshot, events,
+		// trends and diagnostics. Rendering never ticks, mutates or
+		// re-runs anything: it reads the same audit the acceptance tests
+		// assert on, so the window and the regression seam can never
+		// disagree about what "stable" means.
+		auto const audit = core::auditStationStability(snapshot,
+			world->getStationSystemsEvents(), world->getStationSystemsTrends(),
+			world->getStationSystemsDiagnostics());
+		if (!audit.enabled)
+			ImGui::TextDisabled("No Station systems to audit: the Station is disabled.");
+		else
+		{
+			if (audit.clean)
+				ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f),
+					"STABLE at t=%.1f s: %zu finite-value checks, %zu capacity-bound checks and %zu conservation ledgers all inside the declared tolerance (worst ledger at %.3fx tolerance); history bounded.",
+					audit.elapsedSeconds, audit.finiteChecks, audit.boundChecks,
+					audit.ledgerChecks, audit.maxResidualRatio);
+			else
+				ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f),
+					"STABILITY VIOLATIONS at t=%.1f s: %zu non-finite, %zu bound breaches, %zu ledger residuals, %zu software failures.",
+					audit.elapsedSeconds, audit.nonFiniteFindings.size(),
+					audit.boundViolations.size(), audit.conservationViolations.size(),
+					audit.softwareFailures);
+			ImGui::Text("Finite-value checks: %zu | capacity-bound checks: %zu | conservation ledgers: %zu (worst %.3fx tolerance)",
+				audit.finiteChecks, audit.boundChecks, audit.ledgerChecks,
+				audit.maxResidualRatio);
+			ImGui::Text("Event history: %zu retained of %zu bound | trend series: %zu holding %zu samples of %zu per-series bound%s",
+				audit.eventsRetained, audit.eventHistoryLimit, audit.trendSeries,
+				audit.trendSamplesRetained, audit.trendSampleLimit,
+				audit.trendsTruncated ? " (truncated: older history merged or dropped)" : "");
+			for (auto const& finding : audit.nonFiniteFindings)
+				ImGui::TextWrapped("NON-FINITE: %s", finding.c_str());
+			for (auto const& violation : audit.boundViolations)
+				ImGui::TextWrapped("BOUND VIOLATION: %s", violation.c_str());
+			for (auto const& violation : audit.conservationViolations)
+				ImGui::TextWrapped("CONSERVATION: %s", violation.c_str());
+			if (audit.softwareFailures > 0)
+				ImGui::TextWrapped("SOFTWARE FAILURES: %zu reported by the runtime (see the diagnostics above).",
+					audit.softwareFailures);
 		}
 	}
 	ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
