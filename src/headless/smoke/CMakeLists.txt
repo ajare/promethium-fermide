@@ -137,6 +137,8 @@ endforeach()
 # The #547 analytical hour-scale crossings run multi-hour simulated runs.
 set_tests_properties(station-batteriesEclipse PROPERTIES TIMEOUT 180)
 set_tests_properties(station-batteriesCharging PROPERTIES TIMEOUT 120)
+# #603 the trend regression exercises multi-hour fine-cadence runs.
+set_tests_properties(station-trends PROPERTIES TIMEOUT 180)
 # #415 dispatch reserve-exhaustion runs a multi-thousand-tick battery drain.
 set_tests_properties(station-dispatch PROPERTIES TIMEOUT 180)
 # #421 the coupled stress scenarios run multi-hundred-second simulated

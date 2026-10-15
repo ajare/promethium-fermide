@@ -21105,11 +21105,12 @@ void recovery(smoke::Context const& context)
 			require(load != nullptr && load->unit == "kW" && load->id == "shop",
 				"equipment load trend identity or unit missing");
 		}
-		// Scenario B: a long run under the fixed sample budget. 1300 raw
-		// samples per series must downsample (pairwise merge, stride x2
-		// per level) instead of growing storage, keep the newest sample,
-		// keep gaps within the retained stride, and - because the rig is
-		// steady - keep every merged value exactly constant.
+		// Scenario B: a long run under the fixed sample budget. 1300
+		// observations per series must coarsen (pairwise merge, stride
+		// x2 per level, cadence-aware decimation) instead of growing
+		// storage, keep the newest retained sample within one stride of
+		// the run end, keep gaps at the retained stride, and - because
+		// the rig is steady - keep every merged value exactly constant.
 		{
 			core::World world("TrendLongRun", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
@@ -21131,8 +21132,9 @@ void recovery(smoke::Context const& context)
 				require(approx(series.sampleIntervalSeconds,
 					std::pow(2.0, static_cast<double>(series.downsampleLevel))),
 					"effective stride is not the base cadence times 2^level");
-				require(series.samples.back().worldTick == 78000,
-					"the series lost the newest sample");
+				require(78000 - series.samples.back().worldTick < static_cast<uint64_t>(
+					60.0 * series.sampleIntervalSeconds + 0.5),
+					"the series lost the newest sample: the newest retained sample is not within one stride of the run end");
 				for (size_t index = 1; index < series.samples.size(); ++index)
 				{
 					auto const gap = series.samples[index].worldTick - series.samples[index - 1].worldTick;
@@ -21330,6 +21332,215 @@ void recovery(smoke::Context const& context)
 			}
 			require(sawStation && sawObservation && sawSolar,
 				"the bounded history lost one of the categorized event producers");
+		}
+		// Scenario H: the #603 regression. The ticket reproduced at a
+		// station with no physical installations: 4500 s at the ordinary
+		// 1 s observation cadence left the station-wide power series
+		// declaring a ~545-year stride while new samples still arrived
+		// every second, and the level-34 presentation shift was
+		// undefined behavior. With cadence-aware decimation the series
+		// is uniformly spaced at its declared stride all the way
+		// through: every retained sample stands for exactly the declared
+		// number of seconds, the level stays small because coarsening
+		// itself slows the recording cadence, and the audit passes.
+		{
+			core::World world("TrendStrideTruth", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto settings = rigSettings();
+			settings.observationIntervalSeconds = 1.0f;
+			settings.trendRetentionSeconds = 86400.0f;
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			world.resumeSimulation();
+			runOrDiagnose(world, 270000, "trend stride truth run"); // t = 4500 s
+			auto const trends = world.getStationSystemsTrends();
+			require(trends.size() == 3, "the 4500 s run lost a trend series");
+			for (auto const& series : trends)
+			{
+				require(series.samples.size() <= 256,
+					"the coarsened series exceeded the sample bound");
+				require(series.downsampleLevel >= 1,
+					"a 4500-sample run did not coarsen at all");
+				require(series.downsampleLevel <= 6,
+					"cadence-aware decimation coarsened far past what the run length needs");
+				require(approx(series.sampleIntervalSeconds,
+					std::pow(2.0, static_cast<double>(series.downsampleLevel))),
+					"the declared stride is not the base cadence times 2^level");
+				auto const strideTicks = static_cast<uint64_t>(
+					60.0 * series.sampleIntervalSeconds + 0.5);
+				for (size_t index = 1; index < series.samples.size(); ++index)
+					require(series.samples[index].worldTick - series.samples[index - 1].worldTick
+						== strideTicks,
+					"samples are not uniformly spaced at the declared stride");
+				require(270000 - series.samples.back().worldTick < strideTicks,
+					"the newest retained sample is more than one stride behind the run end");
+				require(series.truncated, "a coarsened series does not report truncation");
+			}
+			auto const audit = core::auditStationStability(world.getStationSystemsSnapshot(),
+				world.getStationSystemsEvents(), trends, world.getStationSystemsDiagnostics());
+			require(audit.clean, "the coarsened trend history failed the stability audit");
+			// The audit must refuse the old failure mode: a series whose
+			// samples sit closer together than its declared stride
+			// reports a fictitious stride and is a bound violation, and
+			// so is a level past the published cap.
+			core::StationTrendSeries lying;
+			lying.subsystem = "power";
+			lying.unit = "kW";
+			lying.sampleIntervalSeconds = 32.0;
+			lying.downsampleLevel = 5;
+			lying.samples.push_back({60, 1.0, 1.0, 1.0});
+			lying.samples.push_back({120, 2.0, 1.0, 1.0});
+			auto const strideAudit = core::auditStationStability(world.getStationSystemsSnapshot(),
+				{}, {lying}, {});
+			require(!strideAudit.clean,
+				"a series with a fictitious stride audited clean");
+			require(std::any_of(strideAudit.boundViolations.begin(), strideAudit.boundViolations.end(),
+				[](std::string const& text) { return text.find("below its declared stride") != std::string::npos; }),
+				"the fictitious-stride violation was not reported by name");
+			lying.downsampleLevel = core::StationTrendDownsampleLevelCap + 1;
+			auto const capAudit = core::auditStationStability(world.getStationSystemsSnapshot(),
+				{}, {lying}, {});
+			require(!capAudit.clean,
+				"a downsample level past the cap audited clean");
+			require(std::any_of(capAudit.boundViolations.begin(), capAudit.boundViolations.end(),
+				[](std::string const& text) { return text.find("exceeds the cap") != std::string::npos; }),
+				"the past-cap level violation was not reported by name");
+		}
+		// Scenario I: retention expiry on a coarsened series. A 1000 s
+		// retention over a 5000 s run binds after the second
+		// coarsening: the window stays capped at the authored seconds,
+		// the stride stays uniform inside it, and the series never
+		// coarsens past the point where retention holds the count
+		// below the storage bound.
+		{
+			core::World world("TrendRetentionCoarsened", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto settings = rigSettings();
+			settings.observationIntervalSeconds = 1.0f;
+			settings.trendRetentionSeconds = 1000.0f;
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			world.resumeSimulation();
+			runOrDiagnose(world, 300000, "retention-bound coarsened run"); // t = 5000 s
+			auto const trends = world.getStationSystemsTrends();
+			require(trends.size() == 3, "the retention-bound run lost a trend series");
+			for (auto const& series : trends)
+			{
+				require(series.downsampleLevel >= 1,
+					"a 5000-sample run did not coarsen before retention bound it");
+				require(series.downsampleLevel <= 2,
+					"retention failed to hold the count below the storage bound, so coarsening ran on");
+				require(series.samples.size() <= 256,
+					"the retention-bound series exceeded the sample bound");
+				auto const window = series.samples.back().elapsedSeconds
+					- series.samples.front().elapsedSeconds;
+				require(window <= 1000.0 + 1e-9,
+					"the retained window exceeds the authored retention");
+				require(window >= 900.0,
+					"the retention window did not actually fill the authored seconds");
+				auto const strideTicks = static_cast<uint64_t>(
+					60.0 * series.sampleIntervalSeconds + 0.5);
+				for (size_t index = 1; index < series.samples.size(); ++index)
+					require(series.samples[index].worldTick - series.samples[index - 1].worldTick
+						== strideTicks,
+					"the retention-bound series lost uniform spacing");
+				require(series.truncated, "a retention-trimmed series does not report truncation");
+			}
+		}
+		// Scenario J: reset and replay. After a reset the coarsened
+		// history is gone, and re-running the same ticks reproduces the
+		// exact same series - the coarsening is a deterministic
+		// function of the tick grid, not of accumulated drift.
+		{
+			core::World world("TrendReplay", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto settings = rigSettings();
+			settings.observationIntervalSeconds = 1.0f;
+			settings.trendRetentionSeconds = 86400.0f;
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			world.resumeSimulation();
+			runOrDiagnose(world, 33000, "replay pre-reset run"); // t = 550 s: coarsened once
+			auto const firstRun = world.getStationSystemsTrends();
+			require(firstRun.size() == 3, "the pre-reset replay run produced no trends");
+			require(firstRun.front().downsampleLevel >= 1,
+				"the pre-reset run did not coarsen, so the replay proves nothing");
+			world.resetSimulation();
+			require(world.getStationSystemsTrends().empty(),
+				"reset left coarsened trend history behind");
+			runOrDiagnose(world, 33000, "replay post-reset run");
+			require(world.getStationSystemsTrends() == firstRun,
+				"the replay after reset did not reproduce the trend history exactly");
+		}
+		// Scenario K: the primitive exercised far past anything the
+		// World-driven bounds can reach - 52 successive coarsenings
+		// with nonconstant input, through the level cap and into the
+		// sliding-window regime. A shadow model of the documented merge
+		// semantics tracks every accepted value; the series must match
+		// it exactly below the cap, stay uniformly spaced at the
+		// declared stride throughout, and keep every published number
+		// finite past the cap.
+		{
+			std::vector<core::StationTrendSeries> series;
+			double const base = 1.0;
+			double const retention = 1e18; // never binds: pure coarsening
+			uint64_t tick = 0;
+			double value = 0.0;
+			uint32_t level = 0;
+			int overflows = 0;
+			std::vector<double> expected;
+			while (overflows < 52)
+			{
+				// Mirror the primitive's own order: coarsen first when
+				// the buffer is full, then record at the new stride.
+				if (expected.size() >= 256)
+				{
+					std::vector<double> merged;
+					for (size_t index = 0; index + 1 < expected.size(); index += 2)
+						merged.push_back((expected[index] + expected[index + 1]) / 2.0);
+					if (expected.size() % 2 != 0) merged.push_back(expected.back());
+					expected = std::move(merged);
+					++level;
+					++overflows;
+				}
+				auto const effective = std::min(level, core::StationTrendDownsampleLevelCap);
+				auto const strideTicks = static_cast<uint64_t>(60) << effective;
+				tick += strideTicks;
+				value += 1.0;
+				core::appendBoundedTrendSample(series, "power", "", "kW", base, retention,
+					tick, static_cast<double>(tick) / 60.0, value, value);
+				expected.push_back(value);
+				auto const& s = series.front();
+				require(s.downsampleLevel == effective,
+					"the primitive level diverged from the documented coarsening");
+				require(s.samples.size() <= 256,
+					"the primitive exceeded the sample bound");
+				require(approx(s.sampleIntervalSeconds,
+					std::ldexp(base, static_cast<int>(effective))),
+					"the primitive stride is not base x 2^level");
+				require(std::isfinite(s.sampleIntervalSeconds),
+					"the stride went non-finite during repeated coarsening");
+				for (size_t index = 1; index < s.samples.size(); ++index)
+					require(s.samples[index].worldTick - s.samples[index - 1].worldTick
+						== strideTicks,
+						"the primitive lost uniform spacing across a coarsening");
+				if (level <= core::StationTrendDownsampleLevelCap)
+				{
+					require(s.samples.size() == expected.size(),
+						"the primitive and the documented merge semantics kept different counts");
+					for (size_t index = 0; index < expected.size(); ++index)
+						require(approx(s.samples[index].requested, expected[index])
+							&& approx(s.samples[index].actual, expected[index]),
+							"a merged value disagrees with the documented pairwise mean");
+				}
+			}
+			auto const& s = series.front();
+			require(s.downsampleLevel == core::StationTrendDownsampleLevelCap,
+				"the level ran past the cap instead of sliding the window");
+			require(s.samples.size() <= 256 && approx(s.samples.back().requested, value),
+				"the sliding window lost the newest sample or grew past the bound");
+			require(s.truncated, "the capped sliding window does not report truncation");
+			for (auto const& sample : s.samples)
+				require(std::isfinite(sample.requested) && std::isfinite(sample.actual)
+					&& std::isfinite(sample.elapsedSeconds),
+					"a sample went non-finite past the level cap");
 		}
 	}
 

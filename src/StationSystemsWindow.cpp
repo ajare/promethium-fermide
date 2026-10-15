@@ -4,6 +4,7 @@
 #include "DocumentEdit.h"
 #include "imgui/imgui.h"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <optional>
 
@@ -3964,8 +3965,12 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 				series.samples.size(), series.sampleIntervalSeconds,
 				series.samples.front().elapsedSeconds, series.samples.back().elapsedSeconds);
 			if (series.downsampleLevel > 0)
-				ImGui::Text("  downsampled x%u (level %u): adjacent samples were merged pairwise to stay within the storage bound",
-					1u << series.downsampleLevel, series.downsampleLevel);
+				// #603: the level is reported through a finite double
+				// factor, never an unchecked 32-bit shift that would be
+				// undefined once the level reaches the operand width.
+				ImGui::Text("  downsampled x%.0f (level %u): each retained sample covers %.2f s of simulation time; adjacent samples were merged pairwise to stay within the storage bound",
+					std::ldexp(1.0, static_cast<int>(series.downsampleLevel)),
+					series.downsampleLevel, series.sampleIntervalSeconds);
 			if (series.truncated)
 				ImGui::Text("  TRUNCATED: history before t=%.1f s was merged or dropped; this is not the complete run history",
 					series.samples.front().elapsedSeconds);
@@ -3984,10 +3989,15 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			}
 			auto const span = maximum - minimum < 1e-12 ? 1.0 : maximum - minimum;
 			auto const count = series.samples.size();
-			auto const px = [width, count](size_t index)
+			// #603: the time axis is the samples' own simulation
+			// timestamps, not their indices, so the plot stays honest
+			// whatever spacing the retained history actually carries.
+			auto const firstTime = series.samples.front().elapsedSeconds;
+			auto const lastTime = series.samples.back().elapsedSeconds;
+			auto const px = [width, firstTime, lastTime](double elapsed)
 			{
-				return count == 1 ? width * 0.5f
-					: width * static_cast<float>(index) / static_cast<float>(count - 1);
+				return lastTime <= firstTime ? width * 0.5f
+					: width * static_cast<float>((elapsed - firstTime) / (lastTime - firstTime));
 			};
 			auto const py = [height, minimum, span](double value)
 			{
@@ -3995,18 +4005,18 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			};
 			for (size_t index = 1; index < count; ++index)
 			{
-				draw->AddLine({origin.x + px(index - 1), origin.y + py(series.samples[index - 1].requested)},
-					{origin.x + px(index), origin.y + py(series.samples[index].requested)},
+				draw->AddLine({origin.x + px(series.samples[index - 1].elapsedSeconds), origin.y + py(series.samples[index - 1].requested)},
+					{origin.x + px(series.samples[index].elapsedSeconds), origin.y + py(series.samples[index].requested)},
 					IM_COL32(170, 170, 170, 255));
-				draw->AddLine({origin.x + px(index - 1), origin.y + py(series.samples[index - 1].actual)},
-					{origin.x + px(index), origin.y + py(series.samples[index].actual)},
+				draw->AddLine({origin.x + px(series.samples[index - 1].elapsedSeconds), origin.y + py(series.samples[index - 1].actual)},
+					{origin.x + px(series.samples[index].elapsedSeconds), origin.y + py(series.samples[index].actual)},
 					IM_COL32(80, 200, 120, 255));
 			}
 			if (count == 1)
 			{
-				draw->AddCircleFilled({origin.x + px(0), origin.y + py(series.samples[0].requested)},
+				draw->AddCircleFilled({origin.x + px(series.samples[0].elapsedSeconds), origin.y + py(series.samples[0].requested)},
 					2.0f, IM_COL32(170, 170, 170, 255));
-				draw->AddCircleFilled({origin.x + px(0), origin.y + py(series.samples[0].actual)},
+				draw->AddCircleFilled({origin.x + px(series.samples[0].elapsedSeconds), origin.y + py(series.samples[0].actual)},
 					2.0f, IM_COL32(80, 200, 120, 255));
 			}
 		}

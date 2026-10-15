@@ -134,6 +134,35 @@ namespace core
 			// for a disabled station: the history was published either way.
 			sink.fin(series.sampleIntervalSeconds,
 				"trend series '" + series.subsystem + "/" + series.id + "' sampleIntervalSeconds");
+			// #603: the coarsening must stay finite. Past the published
+			// level cap the runtime slides the window instead of doubling
+			// again, so a level above the cap means the bound broke.
+			if (series.downsampleLevel > StationTrendDownsampleLevelCap)
+				audit.boundViolations.push_back(
+					"trend series '" + series.subsystem + "/" + series.id
+					+ "' downsample level exceeds the cap: " + std::to_string(series.downsampleLevel)
+					+ " > " + std::to_string(StationTrendDownsampleLevelCap));
+			// #603: the published stride must match the retained history.
+			// Consecutive samples standing closer together than the
+			// declared stride means the stride is fictitious - the exact
+			// failure a cadence-blind coarsening produced - and is a
+			// bound violation reported, never corrected.
+			for (size_t index = 1; index < series.samples.size(); ++index)
+			{
+				auto const gap = series.samples[index].elapsedSeconds
+					- series.samples[index - 1].elapsedSeconds;
+				// The tolerance absorbs the timestamp products' rounding,
+				// which grows with the elapsed magnitude, so a long run
+				// never trips this check on floating-point noise alone.
+				auto const tolerance = 1e-6
+					+ std::max(std::abs(series.samples[index].elapsedSeconds),
+						std::abs(series.samples[index - 1].elapsedSeconds)) * 1e-9;
+				if (gap + tolerance < series.sampleIntervalSeconds)
+					audit.boundViolations.push_back(
+						"trend series '" + series.subsystem + "/" + series.id
+						+ "' has a sample gap of " + std::to_string(gap)
+						+ " s below its declared stride " + std::to_string(series.sampleIntervalSeconds) + " s");
+			}
 			for (auto const& sample : series.samples)
 			{
 				auto const where = "trend sample '" + series.subsystem + "/" + series.id + "'";

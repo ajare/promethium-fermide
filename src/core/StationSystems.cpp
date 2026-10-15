@@ -47,23 +47,42 @@ namespace core
 			while (events.size() >= EventLimit) events.erase(events.begin());
 			events.push_back({tick, std::move(message), std::move(category)});
 		}
-		// #418: one bounded trend append. The series never retains more
-		// than TrendSampleLimit samples: on overflow every adjacent pair
-		// is merged into one averaged sample, halving the count and
-		// doubling the effective simulation-time stride, so a long run
-		// under accelerated World time coarsens its history instead of
-		// growing it. Samples older than the authored retention are then
-		// dropped outright, so the retained window never exceeds the
-		// authored seconds either. Both operations mark the series
-		// truncated: the presentation shows the gap rather than imply
-		// complete history. Deterministic and read-only with respect to
-		// the simulated state - trends never feed back into the ledger.
-		void appendTrendSample(std::vector<StationTrendSeries>& series,
+		// #418/#603: one bounded trend observation with cadence-aware
+		// decimation. A series at downsampleLevel L records one sample
+		// every 2^L base observations: consecutive samples always stand
+		// exactly sampleIntervalSeconds = base x 2^L of simulation time
+		// apart, so every sample in the series covers the same amount of
+		// time and the pairwise merge average stays time-weighted-correct
+		// - already-merged samples and newly recorded ones carry equal
+		// weight because they carry equal spans. Observations that fall
+		// inside the current stride are not recorded (the live value
+		// stays visible in the snapshot); the history skips them instead
+		// of appending raw fine-cadence samples onto a coarsened series
+		// the way the old merge-then-append-at-base-rate scheme did,
+		// which made the declared stride fictitious and averaged unequal
+		// time spans against each other (#603). Coarsening halves the
+		// count and doubles the stride on every overflow, so storage
+		// never exceeds TrendSampleLimit; the level is capped at
+		// StationTrendDownsampleLevelCap, past which the window slides
+		// oldest-first instead of doubling again, keeping the stride and
+		// every 2^level shift finite for any run length. Samples older
+		// than the authored retention are dropped outright. Both
+		// operations mark the series truncated: the presentation shows
+		// the gap rather than imply complete history. Deterministic and
+		// read-only with respect to the simulated state - trends never
+		// feed back into the ledger.
+		void appendBoundedTrendSampleImpl(std::vector<StationTrendSeries>& series,
 			std::string const& subsystem, std::string const& id,
 			std::string const& unit, double baseIntervalSeconds,
 			double retentionSeconds,
 			uint64_t tick, double elapsedSeconds, double requested, double actual)
 		{
+			// The base cadence in whole ticks, matching the gate the
+			// runtime uses to call this at the observation boundary, so
+			// the decimation stride is exact on the tick grid instead of
+			// re-derived from the floating-point seconds.
+			auto const baseTicks = std::max<uint64_t>(1,
+				static_cast<uint64_t>(std::ceil(baseIntervalSeconds / World::getFixedTimestep())));
 			auto found = std::ranges::find(series, std::make_pair(subsystem, id),
 				[](StationTrendSeries const& entry)
 				{ return std::make_pair(entry.subsystem, entry.id); });
@@ -80,23 +99,54 @@ namespace core
 			auto& target = *found;
 			if (target.samples.size() >= TrendSampleLimit)
 			{
-				std::vector<StationTrendSample> merged;
-				merged.reserve(TrendSampleLimit / 2 + 1);
-				size_t index = 0;
-				for (; index + 1 < target.samples.size(); index += 2)
+				if (target.downsampleLevel < StationTrendDownsampleLevelCap)
 				{
-					auto const& first = target.samples[index];
-					auto const& second = target.samples[index + 1];
-					merged.push_back({second.worldTick, second.elapsedSeconds,
-						(first.requested + second.requested) / 2.0,
-						(first.actual + second.actual) / 2.0});
+					// Every sample stands for the same span, so the
+					// pairwise mean is the correct time-weighted merge.
+					std::vector<StationTrendSample> merged;
+					merged.reserve(TrendSampleLimit / 2 + 1);
+					size_t index = 0;
+					for (; index + 1 < target.samples.size(); index += 2)
+					{
+						auto const& first = target.samples[index];
+						auto const& second = target.samples[index + 1];
+						merged.push_back({second.worldTick, second.elapsedSeconds,
+							(first.requested + second.requested) / 2.0,
+							(first.actual + second.actual) / 2.0});
+					}
+					if (index < target.samples.size()) merged.push_back(target.samples[index]);
+					target.samples = std::move(merged);
+					++target.downsampleLevel;
+					// Exact in binary floating point: scaling by a power
+					// of two never rounds, so the stride stays the true
+					// cadence instead of a drifting product.
+					target.sampleIntervalSeconds = std::ldexp(baseIntervalSeconds,
+						static_cast<int>(target.downsampleLevel));
+					target.truncated = true;
 				}
-				if (index < target.samples.size()) merged.push_back(target.samples[index]);
-				target.samples = std::move(merged);
-				++target.downsampleLevel;
-				target.sampleIntervalSeconds *= 2.0;
-				target.truncated = true;
+				else
+				{
+					// At the cap the stride never doubles again: the
+					// window slides oldest-first so the count stays
+					// bounded and the published stride and every shift of
+					// the level stay finite forever.
+					while (target.samples.size() >= TrendSampleLimit)
+					{
+						target.samples.erase(target.samples.begin());
+						target.truncated = true;
+					}
+				}
 			}
+			// Cadence-aware decimation: with the coarsening above already
+			// applied, the series' current stride is the minimum spacing
+			// a new sample may have. An observation inside it is skipped
+			// rather than appended, so the uniform-spacing invariant and
+			// the equal-span averaging survive every coarsening.
+			auto const level = std::min(target.downsampleLevel, StationTrendDownsampleLevelCap);
+			auto const strideTicks = baseTicks << level;
+			if (!target.samples.empty()
+				&& tick - target.samples.back().worldTick < strideTicks)
+				return;
 			target.samples.push_back({tick, elapsedSeconds, requested, actual});
 			while (target.samples.size() > 1
 				&& elapsedSeconds - target.samples.front().elapsedSeconds > retentionSeconds)
@@ -3859,6 +3909,23 @@ namespace core
 	}
 	void setStationSystemsSourceLoader(StationSystemsSourceLoader loader) { sourceLoader = std::move(loader); }
 	std::string bundledStationSystemsSource() { return std::string(kStationSystemsLua); }
+	// #418/#603: the public seam over the bounded trend-history
+	// primitive. The World runtime records through the same code from
+	// the committed snapshot at the observation cadence; the seam lets
+	// regression coverage exercise many successive coarsenings, the
+	// level cap and retention expiry directly - the World-driven
+	// bounds (retention <= 86400 s, observation >= 0.1 s) stop the
+	// level long before the cap in any feasible run.
+	void appendBoundedTrendSample(std::vector<StationTrendSeries>& series,
+		std::string const& subsystem, std::string const& id,
+		std::string const& unit, double baseIntervalSeconds,
+		double retentionSeconds,
+		uint64_t tick, double elapsedSeconds, double requested, double actual)
+	{
+		appendBoundedTrendSampleImpl(series, subsystem, id, unit,
+			baseIntervalSeconds, retentionSeconds,
+			tick, elapsedSeconds, requested, actual);
+	}
 	struct StationSystemsRuntime::Impl
 	{
 		// Current inventory is runtime state only: it is initialised from the
@@ -5279,13 +5346,13 @@ namespace core
 			auto const elapsed = static_cast<double>(tick) * World::getFixedTimestep();
 			auto const base = static_cast<double>(settings.observationIntervalSeconds);
 			auto const retention = static_cast<double>(settings.trendRetentionSeconds);
-			appendTrendSample(trendSeries, "power", "", "kW", base, retention,
+			appendBoundedTrendSampleImpl(trendSeries, "power", "", "kW", base, retention,
 				tick, elapsed, snap.power.totalRequestedKW, snap.power.totalSuppliedKW);
 			for (auto const& load : snap.power.loads)
-				appendTrendSample(trendSeries, "equipment-load", load.id, "kW", base, retention,
+				appendBoundedTrendSampleImpl(trendSeries, "equipment-load", load.id, "kW", base, retention,
 					tick, elapsed, load.requestedKW, load.suppliedKW);
 			for (auto const& transfer : snap.transfers)
-				appendTrendSample(trendSeries, "transfer", transfer.id, transfer.unit, base, retention,
+				appendBoundedTrendSampleImpl(trendSeries, "transfer", transfer.id, transfer.unit, base, retention,
 					tick, elapsed, transfer.lastRequested, transfer.lastCompleted);
 		}
 		// #419: the endurance observation windows. One window per Resource

@@ -346,6 +346,15 @@ namespace core
 	// the bound instead of restating a magic number.
 	inline constexpr size_t StationEventHistoryLimit{256};
 	inline constexpr size_t StationTrendSampleLimit{256};
+	// #603: the ceiling on a trend series' downsample level. Coarsening
+	// is cadence-aware (a level-L series records one sample every 2^L
+	// base observations), so under the validated settings (observation
+	// 0.1-60 s, retention 1-86400 s) the level stops growing long
+	// before this cap. Past the cap the retained window slides
+	// oldest-first instead of doubling again, so the published stride,
+	// every 2^level shift of the level and every derived number stay
+	// finite no matter how long the run is.
+	inline constexpr std::uint32_t StationTrendDownsampleLevelCap{48};
 
 	// Outcome of the most recent tick's request for one authored transfer.
 	enum class StationTransferStatus : std::uint8_t
@@ -3972,12 +3981,16 @@ namespace core
 	// One bounded trend series (#418): the stable presentation contract
 	// for station resource/service trends. Subsystem identity, unit and
 	// the sampling window are explicit so the viewer never implies a
-	// complete history: sampleIntervalSeconds is the effective
-	// simulation-time stride after downsampling, downsampleLevel counts
-	// the pairwise merges this series has been through, and truncated
-	// reports that older history was merged or dropped beyond what is
-	// retained here. Later features add series through this same shape;
-	// the presentation never depends on their internals.
+	// complete history. #603 made the stride a hard invariant:
+	// consecutive samples always stand exactly sampleIntervalSeconds of
+	// simulation time apart - the series is uniformly spaced at its
+	// current cadence, never a mix of a merged coarse tail and raw
+	// fine-grained appends. downsampleLevel counts the coarsenings
+	// (stride = base observation interval x 2^level, capped at
+	// StationTrendDownsampleLevelCap), and truncated reports that
+	// older history was merged or dropped beyond what is retained
+	// here. Later features add series through this same shape; the
+	// presentation never depends on their internals.
 	struct StationTrendSeries
 	{
 		std::string subsystem; // metric family: "power", "equipment-load", "transfer"
@@ -3989,6 +4002,25 @@ namespace core
 		std::vector<StationTrendSample> samples;
 		bool operator==(StationTrendSeries const&) const = default;
 	};
+	// #418/#603: the bounded trend-history primitive. Records one
+	// observation into the series with cadence-aware decimation: a
+	// series at downsampleLevel L accepts one sample every 2^L base
+	// observations, so the uniform-spacing invariant holds and every
+	// sample always stands for the same amount of simulation time -
+	// the pairwise merge average stays time-weighted-correct because
+	// merged and newly recorded samples carry equal spans.
+	// Observations inside the current stride are not recorded (the
+	// live value stays visible in the snapshot). On overflow the count
+	// halves and the stride doubles until the level cap, past which
+	// the window slides oldest-first so storage and every published
+	// number stay finite. Samples older than the authored retention
+	// are dropped outright. Deterministic and read-only with respect
+	// to the simulated state: trends never feed back into the ledger.
+	void appendBoundedTrendSample(std::vector<StationTrendSeries>& series,
+		std::string const& subsystem, std::string const& id,
+		std::string const& unit, double baseIntervalSeconds,
+		double retentionSeconds,
+		uint64_t tick, double elapsedSeconds, double requested, double actual);
 	struct StationSystemsDiagnostic
 	{
 		uint64_t worldTick{0};
