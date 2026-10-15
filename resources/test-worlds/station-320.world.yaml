@@ -1,0 +1,112 @@
+version: 68
+sectorImageSet: StationAtlas
+agentImageSet: DoctorFemale1Atlas
+furnitureImageSet: StationFurnitureAtlas
+nextDumbwaiterId: 1
+nextFurnitureId: 8
+furnitureCatalogue:
+  resource: FurnitureCatalogue
+  expectedUuid: 7ad3b31e-c85b-43ac-90ba-359359359359
+name: Untitled
+randomSeed: 0
+cellsWide: 16
+levelsHigh: 2
+layers: 2
+levelNames:
+  - Level 0
+  - Level 1
+layerNames:
+  - Layer 0
+  - Layer 1
+construction:
+  - type: corridor
+    layer: 0
+    y: 1
+    x: 4
+    cellsWide: 6
+    levelsHigh: 1
+  - type: objectTombstone
+    sectorIndex: 0
+  - type: objectTombstone
+    sectorIndex: 0
+  - type: objectTombstone
+    sectorIndex: 0
+  - type: furniture
+    sectorIndex: 0
+    id: 4
+    definition: bed
+    name: Bed
+    x: 4
+    y: 0
+    localDepth: 0
+    destinations:
+      - usablePoint: middle
+        markerId: 4
+        markerName: Bed Middle
+        properties: 0
+  - type: furniture
+    sectorIndex: 0
+    id: 5
+    definition: chair
+    name: Chair
+    x: 1
+    y: 0
+    localDepth: 1
+    destinations:
+      - usablePoint: seat
+        markerId: 5
+        markerName: Chair Seat
+        properties: 0
+  - type: furniture
+    sectorIndex: 0
+    id: 6
+    definition: desk
+    name: Desk
+    x: 0
+    y: 0
+    localDepth: 0
+    destinations:
+      []
+  - type: furniture
+    sectorIndex: 0
+    id: 7
+    definition: sofa
+    name: Sofa
+    x: 3
+    y: 0
+    localDepth: 3
+    destinations:
+      - usablePoint: left
+        markerId: 6
+        markerName: Sofa Left seat
+        properties: 0
+      - usablePoint: right
+        markerId: 7
+        markerName: Sofa Right seat
+        properties: 0
+agentGroups:
+  []
+accessPermissions:
+  []
+permissionSets:
+  []
+nextPermissionSetId: 1
+agentPermissionSetAssignments:
+  []
+accessPermissionGrants:
+  []
+interactionPermissionRequirements:
+  []
+nextMarkerId: 8
+nextAgentGroupId: 1
+agents:
+  - id: 1
+    agent:
+      type: Human
+      typeId: Human
+      resource: human.agent.lua
+      name: Agent 1
+      flags: 0
+    sector: 0
+    localX: 0.65625
+    localY: 0
