@@ -737,6 +737,12 @@ namespace core
 		bool retargetShuttleDoorTraversal(TraversalRequestId requestId,
 			TraversalResource& coordinator, ShuttleDoor const& door);
 
+		InteractionRequestId rejectInteractionRequest(InteractionPointId point, AgentId actor,
+			std::vector<AccessPermissionId> const& missingPermissions);
+		DeviceOperationId bindInteractionOperation(InteractionRequest& request,
+			DeviceCommand const& command, InteractionBindingRequirement requirement);
+		void publishInteractionRequestAdded(InteractionRequestId id, InteractionRequest const& request);
+
 		// Releases a cancelling Actor's claim on each operation its request
 		// needed; an operation nobody still wants is cancelled with it.
 		void detachInteractionRequester(InteractionRequest& request);

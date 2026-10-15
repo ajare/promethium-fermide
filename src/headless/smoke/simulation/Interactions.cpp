@@ -2,6 +2,7 @@
 #include "core/Agent.h"
 #include "core/World.h"
 #include "core/Graph.h"
+#include "core/SimulationCoordinator.h"
 #include <algorithm>
 #include <vector>
 #include "InteractionResults.h"
@@ -10,6 +11,94 @@ namespace
 {
 	constexpr uint64_t MaximumSimulationTicks = 1000;
 	using namespace simulation_smoke;
+
+	// Characterize public requests and the coordinator's internal passing seam (#620).
+	void requestEntryPointsPreserveTrace()
+	{
+		using namespace core;
+		using smoke::require;
+		World world("Request entry points", 6, 2);
+		SimulationCoordinator coordinator(world);
+		auto corridor = world.addCorridor(0, 0, 5);
+		world.finishBuild();
+		auto sector = SectorId{ corridor + 1u };
+		auto actor = world.createAgent("Operator", corridor, 0, 0.5f);
+		InteractionBinding binding{ { DeviceCommandType::SetSectorLights, sector, false },
+			InteractionBindingRequirement::BestEffort };
+		auto point = world.createInteractionPoint("Timed control", sector,
+			{ 0.5f, 0.0f }, 1.0f, World::getFixedTimestep() * 5.0f, { binding });
+		auto other = world.createInteractionPoint("Other control", sector,
+			{ 0.5f, 0.0f }, 1.0f, 0.0f, { binding });
+		world.consumeSimulationEvents();
+		auto queued = world.requestInteraction(point, actor);
+		require(bool(queued), "Normal request was refused");
+		auto operation = world.lookupInteractionRequest(queued).entity->getOperations().front();
+		require(operation.second == InteractionBindingRequirement::BestEffort, "Binding requirement changed");
+		require(world.requestInteraction(point, actor) == queued, "Same-point pending request identity changed");
+		require(!world.requestInteraction(other, actor)
+			&& !coordinator.requestInteractionWhilePassing(point, actor)
+			&& !coordinator.requestInteractionWhilePassing(other, actor), "Pending physical work was not refused");
+		auto events = world.consumeSimulationEvents();
+		require(events.size() == 2 && events[0].type == SimulationEventType::DeviceOperationAdded
+			&& events[1].type == SimulationEventType::InteractionRequestAdded
+			&& events[0].deviceOperation.id == operation.first
+			&& events[1].interactionRequest.id == queued
+			&& events[0].tick == 0 && events[1].tick == 0
+			&& events[1].sequence == events[0].sequence + 1
+			&& events[0].phase == events[1].phase, "Request construction trace changed");
+		world.advanceTick();
+		require(world.getSector(corridor)->areLightsOn()
+			&& world.lookupDeviceOperation(operation.first).entity->getState() == DeviceOperationState::Pending,
+			"Queued request bypassed its press duration");
+		require(world.cancelInteraction(queued), "Queued cancellation failed");
+		world.consumeSimulationEvents();
+		auto passing = coordinator.requestInteractionWhilePassing(point, actor);
+		require(bool(passing) && passing != queued, "Passing request did not receive a fresh identity");
+		auto passingOperation = world.lookupInteractionRequest(passing).entity->getOperations().front();
+		require(passingOperation.first != operation.first && passingOperation.second == operation.second,
+			"Cancelled operation was reused or binding requirement changed");
+		events = world.consumeSimulationEvents();
+		require(events.size() == 2 && events[0].type == SimulationEventType::DeviceOperationAdded
+			&& events[1].type == SimulationEventType::InteractionRequestAdded
+			&& events[1].interactionRequest.id == passing && events[0].tick == 1 && events[1].tick == 1
+			&& events[1].sequence == events[0].sequence + 1
+			&& events[0].phase == events[1].phase, "Passing construction trace changed");
+		world.advanceTick();
+		require(world.lookupDeviceOperation(passingOperation.first).entity->getState() == DeviceOperationState::Running,
+			"Passing activation waited for the queued press duration");
+		world.advanceTick();
+		require(!world.getSector(corridor)->areLightsOn(), "Passing operation did not complete on the next tick");
+		require(world.lookupAgent(actor).entity->getGlobalPosition().distanceTo({ 0.5f, 0.0f }) < 0.001f,
+			"Request construction moved the Agent");
+
+		world.pauseSimulation();
+		auto permission = world.addAccessPermission("Control key");
+		require(world.setInteractionPointPermissionRequirement(other, { permission }), "Control requirement refused");
+		require(world.resumeSimulation(), "Request fixture did not resume");
+		world.consumeSimulationEvents();
+		auto rejected = world.requestInteraction(other, actor);
+		auto rejectedPassing = coordinator.requestInteractionWhilePassing(other, actor);
+		require(rejected && rejectedPassing && rejected != rejectedPassing,
+			"Permission refusal must record distinct rejected requests");
+		events = world.consumeSimulationEvents();
+		require(events.size() == 2 && events[1].sequence == events[0].sequence + 1,
+			"Refusal published operations or changed event order");
+		for (size_t i = 0; i < events.size(); ++i)
+		{
+			auto id = i == 0 ? rejected : rejectedPassing;
+			auto request = world.lookupInteractionRequest(id);
+			require(request && request.entity->getResult() == InteractionResult::Rejected
+				&& request.entity->getMissingPermissions() == std::vector<AccessPermissionId>{ permission }
+				&& request.entity->getOperations().empty(), "Refusal diagnostics or operations changed");
+			require(events[i].type == SimulationEventType::InteractionRequestAdded
+				&& events[i].tick == 3 && events[i].phase == events[0].phase
+				&& events[i].interactionRequest.id == id && events[i].interactionRequest.point == other
+				&& events[i].interactionRequest.actor == actor
+				&& events[i].interactionRequest.result == InteractionResult::Rejected
+				&& events[i].interactionRequest.missingPermissions == request.entity->getMissingPermissions()
+				&& events[i].interactionRequest.operations.empty(), "Refusal event trace changed");
+		}
+	}
 
 	bool typedLightingInteractionCoalescesAndCancelsByRequester()
 	{
@@ -174,6 +263,7 @@ void registerInteractions(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "typedLightingInteractionCoalescesAndCancelsByRequester", [](smoke::Context const&)
 		{
+			requestEntryPointsPreserveTrace();
 			smoke::require(typedLightingInteractionCoalescesAndCancelsByRequester(), "typed lighting interaction, coalescing, or requester cancellation failed");
 		} });
 	checks.push_back({ "repeatedInteractionsRetireTerminalRecords", [](smoke::Context const&)

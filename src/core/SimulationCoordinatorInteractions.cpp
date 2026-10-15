@@ -388,6 +388,36 @@ namespace core
 				|| actor->getState() == Agent::State::Idle || actor->getState() == Agent::State::WaitingForTraversal);
 	}
 
+	void SimulationCoordinator::publishInteractionRequestAdded(InteractionRequestId id, InteractionRequest const& request)
+	{
+		SimulationEvent event;
+		event.sequence = mWorld.mNextEventSequence++;
+		event.tick = mWorld.mSimulationTick;
+		event.type = SimulationEventType::InteractionRequestAdded;
+		event.phase = mWorld.mCurrentPhase;
+		event.interactionRequest = makeInteractionRequestSnapshot(id, request);
+		mWorld.mEvents.push_back(std::move(event));
+	}
+
+	InteractionRequestId SimulationCoordinator::rejectInteractionRequest(InteractionPointId point, AgentId actor,
+		vector<AccessPermissionId> const& missingPermissions)
+	{
+		auto id = mWorld.mInteractionRequests.add(unique_ptr<InteractionRequest>(new InteractionRequest(point, actor)));
+		auto request = mWorld.mInteractionRequests.find(id);
+		request->mResult = InteractionResult::Rejected;
+		request->mMissingPermissions = missingPermissions;
+		publishInteractionRequestAdded(id, *request);
+		return id;
+	}
+
+	DeviceOperationId SimulationCoordinator::bindInteractionOperation(InteractionRequest& request,
+		DeviceCommand const& command, InteractionBindingRequirement requirement)
+	{
+		auto id = findOrCreateDeviceOperation(command, request.mActor);
+		request.mOperations.emplace_back(id, requirement);
+		return id;
+	}
+
 	InteractionRequestId SimulationCoordinator::requestInteraction(InteractionPointId pointId, AgentId actorId,
 		bool prepareTraversal)
 	{
@@ -408,18 +438,7 @@ namespace core
 		auto const missing = mWorld.missingInteractionPermissions(*point, *actor);
 		if (!missing.empty())
 		{
-			auto id = mWorld.mInteractionRequests.add(unique_ptr<InteractionRequest>(new InteractionRequest(pointId, actorId)));
-			auto request = mWorld.mInteractionRequests.find(id);
-			request->mResult = InteractionResult::Rejected;
-			request->mMissingPermissions = missing;
-			SimulationEvent event;
-			event.sequence = mWorld.mNextEventSequence++;
-			event.tick = mWorld.mSimulationTick;
-			event.type = SimulationEventType::InteractionRequestAdded;
-			event.phase = mWorld.mCurrentPhase;
-			event.interactionRequest = makeInteractionRequestSnapshot(id, *request);
-			mWorld.mEvents.push_back(std::move(event));
-			return id;
+			return rejectInteractionRequest(pointId, actorId, missing);
 		}
 		for (auto const& [id, request] : mWorld.mInteractionRequests.entries())
 		{
@@ -438,17 +457,11 @@ namespace core
 				command.type = DeviceCommandType::SetExtendedState;
 				command.desiredState = true;
 			}
-			request->mOperations.emplace_back(findOrCreateDeviceOperation(command, actorId), binding.requirement);
+			bindInteractionOperation(*request, command, binding.requirement);
 		}
 		point->mQueue.push_back(id);
 
-		SimulationEvent event;
-		event.sequence = mWorld.mNextEventSequence++;
-		event.tick = mWorld.mSimulationTick;
-		event.type = SimulationEventType::InteractionRequestAdded;
-		event.phase = mWorld.mCurrentPhase;
-		event.interactionRequest = makeInteractionRequestSnapshot(id, *request);
-		mWorld.mEvents.push_back(std::move(event));
+		publishInteractionRequestAdded(id, *request);
 		return id;
 	}
 
@@ -509,18 +522,7 @@ namespace core
 		auto const missing = mWorld.missingInteractionPermissions(*point, *actor);
 		if (!missing.empty())
 		{
-			auto id = mWorld.mInteractionRequests.add(unique_ptr<InteractionRequest>(new InteractionRequest(pointId, actorId)));
-			auto request = mWorld.mInteractionRequests.find(id);
-			request->mResult = InteractionResult::Rejected;
-			request->mMissingPermissions = missing;
-			SimulationEvent event;
-			event.sequence = mWorld.mNextEventSequence++;
-			event.tick = mWorld.mSimulationTick;
-			event.type = SimulationEventType::InteractionRequestAdded;
-			event.phase = mWorld.mCurrentPhase;
-			event.interactionRequest = makeInteractionRequestSnapshot(id, *request);
-			mWorld.mEvents.push_back(std::move(event));
-			return id;
+			return rejectInteractionRequest(pointId, actorId, missing);
 		}
 		for (auto const& [id, request] : mWorld.mInteractionRequests.entries())
 		{
@@ -534,19 +536,12 @@ namespace core
 		auto request = mWorld.mInteractionRequests.find(id);
 		for (auto const& binding : point->mBindings)
 		{
-			auto operationId = findOrCreateDeviceOperation(binding.command, actorId);
-			request->mOperations.emplace_back(operationId, binding.requirement);
+			auto operationId = bindInteractionOperation(*request, binding.command, binding.requirement);
 			if (auto operation = mWorld.mDeviceOperations.find(operationId)) operation->mActivated = true;
 		}
 		pressPhysicalControl(pointId);
 
-		SimulationEvent event;
-		event.sequence = mWorld.mNextEventSequence++;
-		event.tick = mWorld.mSimulationTick;
-		event.type = SimulationEventType::InteractionRequestAdded;
-		event.phase = mWorld.mCurrentPhase;
-		event.interactionRequest = makeInteractionRequestSnapshot(id, *request);
-		mWorld.mEvents.push_back(std::move(event));
+		publishInteractionRequestAdded(id, *request);
 		return id;
 	}
 
