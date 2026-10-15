@@ -104,6 +104,11 @@ foreach(check lifecycle batching eventBound persistence stores transfers compoun
         # the binary but never registered here, so their hazard-
         # segregation regressions ran in no CI pass.
         nutrientRecovery nutrientRecoveryFiles
+        # #599 registers the carbon-recovery contract checks - they were
+        # reachable through the binary but never ran in any pass, so the
+        # aliased-stream-role regression (#599) would otherwise protect
+        # nothing.
+        carbonRecovery carbonRecoveryFiles
         # #422: the packaged reference station - bundled resource, the
         # documented normal-operation scenario with closed accounting, and
         # the shortage-accepted / inconsistent-refused contract.
@@ -711,6 +716,10 @@ set_tests_properties(station-editor-maintenance PROPERTIES LABELS "smoke;functio
 # the separate Station Systems window.
 add_test(NAME station-editor-coupled-live-view COMMAND pf-smoke-editor --check station/coupledLiveViewWorkflow)
 set_tests_properties(station-editor-coupled-live-view PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+# #599: the aliased carbon-recovery stream refusal surfaced through the
+# real Station Systems window controls.
+add_test(NAME station-editor-carbon-alias COMMAND pf-smoke-editor --check station/carbonAliasWorkflow)
+set_tests_properties(station-editor-carbon-alias PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-trends COMMAND pf-smoke-editor --check station/trendsWorkflow)
 set_tests_properties(station-editor-trends PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 # #420: the bounded scenario forecast observed through the separate window.

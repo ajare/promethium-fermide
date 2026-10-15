@@ -3020,6 +3020,34 @@ namespace core
 			if (!std::isfinite(reactor.maxSinkTemperatureC)
 				|| reactor.maxSinkTemperatureC <= -StationCelsiusOffset)
 				return refuse(where + " maximum sink temperature must be finite and above absolute zero");
+			// Aliased stream roles are refused (#599), the same rule the
+			// electrolyzer and the fuel cell carry (#585): the four streams
+			// are chemically distinct, and the tick sizes each product
+			// against its own store's headroom before either is added, so
+			// one store named for two product roles has the same headroom
+			// spent twice and breaks the finite-capacity audit on the very
+			// first tick. Feed/feed and feed/product aliases are refused on
+			// the same principle even where no capacity error is reached:
+			// one inventory may not stand for two different substances the
+			// ledger books separately. Every pair of the reactor's own
+			// stream roles must name a distinct store; sharing between
+			// different machines - one reactor's methane feeding a
+			// processor - is untouched.
+			std::pair<char const*, std::string const*> const reactorRoles[] = {
+				{"CO2 feed", &reactor.co2StoreId},
+				{"hydrogen feed", &reactor.hydrogenStoreId},
+				{"methane product", &reactor.methaneStoreId},
+				{"product water", &reactor.waterStoreId},
+			};
+			for (size_t left = 0; left < 4; ++left)
+				for (size_t right = left + 1; right < 4; ++right)
+					if (!reactorRoles[left].second->empty()
+						&& *reactorRoles[left].second == *reactorRoles[right].second)
+						return refuse(where + " names the same store '"
+							+ *reactorRoles[left].second + "' for the "
+							+ reactorRoles[left].first + " and the "
+							+ reactorRoles[right].first
+							+ ": chemically distinct streams may not share one store");
 			if (!declareGasStore(reactor.co2StoreId, "CO2 feed", where,
 				reactor.hazardClass, false))
 				return false;
@@ -3069,6 +3097,27 @@ namespace core
 			if (!std::isfinite(processor.maxSinkTemperatureC)
 				|| processor.maxSinkTemperatureC <= -StationCelsiusOffset)
 				return refuse(where + " maximum sink temperature must be finite and above absolute zero");
+			// The same aliased-role rule as the Sabatier reactor (#599):
+			// the methane feed, the recovered hydrogen and the solid
+			// carbon are three chemically distinct streams, and the tick
+			// sizes each product against its own store's headroom before
+			// either is added, so one store named for two roles spends the
+			// same headroom twice. One inventory standing for two booked
+			// substances is refused whatever the fill levels.
+			std::pair<char const*, std::string const*> const processorRoles[] = {
+				{"methane feed", &processor.methaneStoreId},
+				{"recovered hydrogen", &processor.hydrogenStoreId},
+				{"solid carbon", &processor.carbonStoreId},
+			};
+			for (size_t left = 0; left < 3; ++left)
+				for (size_t right = left + 1; right < 3; ++right)
+					if (!processorRoles[left].second->empty()
+						&& *processorRoles[left].second == *processorRoles[right].second)
+						return refuse(where + " names the same store '"
+							+ *processorRoles[left].second + "' for the "
+							+ processorRoles[left].first + " and the "
+							+ processorRoles[right].first
+							+ ": chemically distinct streams may not share one store");
 			if (!declareGasStore(processor.methaneStoreId, "methane feed", where,
 				processor.hazardClass, false))
 				return false;

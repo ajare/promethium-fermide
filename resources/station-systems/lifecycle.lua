@@ -2370,6 +2370,25 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         local methane = declareGasStore(reactor.methaneStore, 'methane', reactor.hazardClass, false)
         local water = declareWaterStore(reactor.waterStore, 'product water',
             reactor.hazardClass, false)
+        -- Aliased stream roles are refused (#599), mirroring the host: the
+        -- four streams are chemically distinct, and the tick sizes each
+        -- product against its own store's headroom before either is
+        -- added, so one store named for two roles spends the same
+        -- headroom twice; feed aliases would let one inventory stand for
+        -- two substances the ledger books separately.
+        local reactor_streams = {
+            {'CO2 feed', co2}, {'hydrogen feed', hydrogen},
+            {'methane product', methane}, {'product water', water},
+        }
+        for left = 1, #reactor_streams do
+            for right = left + 1, #reactor_streams do
+                assert(reactor_streams[left][2] ~= reactor_streams[right][2],
+                    'Sabatier reactor may not name the same store for the '
+                        .. reactor_streams[left][1] .. ' and the '
+                        .. reactor_streams[right][1]
+                        .. ': chemically distinct streams may not share one store')
+            end
+        end
         local sink = reservoir_by_id[reactor.heatSink]
         assert(sink ~= nil, 'Sabatier reactor heat sink reservoir is unknown')
         assert(sink.thermalClass == reactor.thermalClass,
@@ -2422,6 +2441,23 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             processor.hazardClass, false)
         local carbon = declareGasStore(processor.carbonStore, 'solid carbon',
             processor.hazardClass, false)
+        -- The same aliased-role rule as the Sabatier reactor (#599):
+        -- the methane feed, the recovered hydrogen and the solid carbon
+        -- are three chemically distinct streams and may not share one
+        -- store, whatever the fill levels.
+        local processor_streams = {
+            {'methane feed', methane}, {'recovered hydrogen', hydrogen},
+            {'solid carbon', carbon},
+        }
+        for left = 1, #processor_streams do
+            for right = left + 1, #processor_streams do
+                assert(processor_streams[left][2] ~= processor_streams[right][2],
+                    'methane processor may not name the same store for the '
+                        .. processor_streams[left][1] .. ' and the '
+                        .. processor_streams[right][1]
+                        .. ': chemically distinct streams may not share one store')
+            end
+        end
         local sink = reservoir_by_id[processor.heatSink]
         assert(sink ~= nil, 'methane processor heat sink reservoir is unknown')
         assert(sink.thermalClass == processor.thermalClass,

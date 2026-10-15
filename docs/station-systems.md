@@ -1299,20 +1299,33 @@ and a capture machine must match the compartment it scrubs, so a
 hazardous atmosphere's carbon stays on the hazardous side — and stores
 shared across classes are refused at configuration.
 
-**Stream roles must name distinct stores (#585).** The tick sizes each
-product against its own store's headroom *before either is added*, so a
-single store named for two roles has the same headroom spent twice: the
-authored configuration turns a finite physical limit into a terminal
-runtime failure and pauses the World with the tick at zero. The
-electrolyzer therefore refuses one store named for both the oxygen and
-the hydrogen product, and one store named for both the feed water and
-either gas product; the fuel cell refuses the analogous pattern of one
-store named for both the hydrogen and the oxygen reactant, where the
-cell would spend one store's drawable stock as both. The refusal is a
-configuration refusal, not a runtime one: it happens before the World
-is touched, so the overfilling tick never runs. Cross-machine sharing is
-untouched — a fuel cell may burn the hydrogen its electrolyzer produced,
-and the closed loop that makes is the point of the contracts.
+**Stream roles must name distinct stores (#585, #599).** The tick sizes
+each product against its own store's headroom *before either is added*,
+so a single store named for two roles has the same headroom spent
+twice: the authored configuration turns a finite physical limit into a
+terminal runtime failure and pauses the World with the tick at zero.
+The electrolyzer therefore refuses one store named for both the oxygen
+and the hydrogen product, and one store named for both the feed water
+and either gas product; the fuel cell refuses the analogous pattern of
+one store named for both the hydrogen and the oxygen reactant, where
+the cell would spend one store's drawable stock as both. The carbon
+recovery chain carries the same rule (#599): the Sabatier reactor
+refuses **every pair** of its four stream roles — CO2 feed, hydrogen
+feed, methane product, product water — landing on one store, and the
+methane processor refuses every pair of its three — methane feed,
+recovered hydrogen, solid carbon. Feed/feed and feed/product aliases
+are refused on the same principle even where no capacity error is
+reached: one inventory may not stand for two different substances the
+ledger books separately. The refusal is a configuration refusal, not a
+runtime one: it happens before the World is touched, so the overfilling
+tick never runs, and document loading refuses an authored file that
+aliases roles with the same diagnostic. Cross-machine sharing is
+untouched — a fuel cell may burn the hydrogen its electrolyzer
+produced, and one reactor's methane output store may be a processor's
+methane feed, because machines book sequentially against the live
+inventory; the closed loop that makes is the point of the contracts.
+The bundled Lua model mirrors both carbon-recovery refusals at
+construction so the sandbox agrees with the host on replay.
 
 Within the tick, electrolyzers and capture machines run after the water
 collectors and before the coolant loop's second pass: they compete for

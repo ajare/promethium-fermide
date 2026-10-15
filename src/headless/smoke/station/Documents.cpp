@@ -3140,6 +3140,38 @@ void carbonRecoveryFiles(smoke::Context const& context)
 		catch (std::exception const&) { refused = true; }
 		require(refused, "an undeclared carbon-recovery hazard class was accepted from a file");
 	}
+	// An aliased stream role (#599) is refused from a file with the
+	// validation diagnostic: the reactor's product water pointed at the
+	// methane store would have spent one store's headroom twice on the
+	// first tick, so the document never loads.
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "waterStoreId: rawWater", "waterStoreId: methane");
+		auto const malformedPath = directory / "malformed-carbon-aliased-products.world.yaml";
+		writeFile(malformedPath, malformed);
+		std::string message = "loaded without error";
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const& error) { refused = true; message = error.what(); }
+		require(refused
+			&& message.find("chemically distinct streams may not share one store")
+				!= std::string::npos,
+			"a reactor aliasing its product water onto the methane store was accepted from a file: " + message);
+	}
+	{
+		auto malformed = withField;
+		replaceAll(malformed, "carbonStoreId: carbon", "carbonStoreId: h2");
+		auto const malformedPath = directory / "malformed-carbon-aliased-processor.world.yaml";
+		writeFile(malformedPath, malformed);
+		std::string message = "loaded without error";
+		bool refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const& error) { refused = true; message = error.what(); }
+		require(refused
+			&& message.find("chemically distinct streams may not share one store")
+				!= std::string::npos,
+			"a processor aliasing its solid carbon onto the hydrogen store was accepted from a file: " + message);
+	}
 }
 
 void nutrientRecoveryFiles(smoke::Context const& context)

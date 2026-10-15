@@ -11408,6 +11408,168 @@ void buffers(smoke::Context const&)
 			require(!bad.getStationSystemsSnapshot().enabled && bad.getSimulationTick() == 0,
 				"a refused carbon-recovery configuration mutated the World");
 		}
+		// Aliased stream roles (#599), the same rule #585 carries for the
+		// electrolyzer and the fuel cell: every pair of chemically distinct
+		// roles on one machine must name a distinct store. The reported
+		// reproduction named one nearly-full store for both the methane and
+		// the water product: each product was sized against the same 0.01 kg
+		// of headroom, both were booked, and the finite-capacity audit
+		// failed on the very first tick - accepted authored configuration
+		// turning a finite physical limit into a terminal failure that
+		// paused the World at tick zero. Every pair of roles is refused at
+		// configuration, with nearly full products and nearly empty feeds,
+		// and the World is never mutated.
+		{
+			auto const alias = "chemically distinct streams may not share one store";
+			struct Alias
+			{
+				std::string left;
+				std::string right;
+			};
+			// Nearly full products, nearly empty feeds: the refusal is about
+			// the roles, not the fill levels, so it must fire at any level.
+			auto tightStores = [&]()
+			{
+				std::vector<core::ResourceStoreSettings> stores;
+				stores.push_back(plainStore("co2", 100.0, 0.001));
+				stores.push_back(plainStore("h2", 100.0, 0.001));
+				stores.push_back(plainStore("methane", 1.0, 0.99));
+				stores.push_back(plainStore("rawWater", 1.0, 0.99));
+				stores.push_back(plainStore("carbon", 1.0, 0.99));
+				return stores;
+			}();
+			core::World tight("CarbonAliasedRoles", 2, 2);
+			tight.pauseSimulation(); tight.finishBuild();
+			std::string diagnostic;
+			// The role names below are the fixture store ids themselves, so
+			// aliasing a pair means pointing the right-hand role at the
+			// left-hand role's store.
+			auto setReactorRole = [](core::SabatierReactorSettings& unit,
+				std::string const& role, std::string const& id)
+			{
+				if (role == "co2") unit.co2StoreId = id;
+				else if (role == "h2") unit.hydrogenStoreId = id;
+				else if (role == "methane") unit.methaneStoreId = id;
+				else unit.waterStoreId = id;
+			};
+			auto setProcessorRole = [](core::MethaneProcessorSettings& unit,
+				std::string const& role, std::string const& id)
+			{
+				if (role == "methane") unit.methaneStoreId = id;
+				else if (role == "h2") unit.hydrogenStoreId = id;
+				else unit.carbonStoreId = id;
+			};
+			// Sabatier reactor: all six pairs of its four stream roles.
+			std::vector<Alias> reactorAliases = {
+				{"co2", "h2"}, {"co2", "methane"}, {"co2", "rawWater"},
+				{"h2", "methane"}, {"h2", "rawWater"}, {"methane", "rawWater"},
+			};
+			for (auto const& pair : reactorAliases)
+			{
+				core::StationSystemsSettings settings;
+				settings.enabled = true;
+				settings.stores = tightStores;
+				settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
+				settings.sabatierReactors = { reactor("sab", "normal") };
+				setReactorRole(settings.sabatierReactors[0], pair.right, pair.left);
+				require(!core::validateStationSystemsSettings(settings, diagnostic)
+					&& diagnostic.find(alias) != std::string::npos,
+					("a Sabatier reactor aliasing its '" + pair.left
+						+ "' and '" + pair.right + "' stream roles was accepted").c_str());
+			}
+			// Methane processor: all three pairs of its three stream roles.
+			std::vector<Alias> processorAliases = {
+				{"methane", "h2"}, {"methane", "carbon"}, {"h2", "carbon"},
+			};
+			for (auto const& pair : processorAliases)
+			{
+				core::StationSystemsSettings settings;
+				settings.enabled = true;
+				settings.stores = tightStores;
+				settings.thermalReservoirs = { reservoir("sink", "low", 10.0) };
+				settings.methaneProcessors = { processor("pyrolysis", "normal") };
+				setProcessorRole(settings.methaneProcessors[0], pair.right, pair.left);
+				require(!core::validateStationSystemsSettings(settings, diagnostic)
+					&& diagnostic.find(alias) != std::string::npos,
+					("a methane processor aliasing its '" + pair.left
+						+ "' and '" + pair.right + "' stream roles was accepted").c_str());
+			}
+			require(!tight.getStationSystemsSnapshot().enabled && tight.getSimulationTick() == 0,
+				"the refused aliased-role probes mutated the World");
+			// The reported reproduction through the public configure/tick/
+			// snapshot seam: the aliased-product reactor was admitted, then
+			// advanceTicks(1) failed the capacity audit and left the World
+			// paused at tick zero. The alias is now refused at configure,
+			// so the overfilling tick never runs.
+			{
+				core::World world("CarbonAliasRepro", 2, 2);
+				world.pauseSimulation(); world.finishBuild();
+				core::StationSystemsSettings repro;
+				repro.enabled = true;
+				repro.stores = {
+					plainStore("co2", 100.0, 10.0), plainStore("h2", 100.0, 10.0),
+					plainStore("product", 1.0, 0.99), plainStore("water", 100.0, 0.0) };
+				repro.thermalReservoirs = { reservoir("sink", "warm", 20.0) };
+				core::SolarArraySettings field;
+				field.id = "solar";
+				field.capacityKW = 100000.0;
+				repro.solarArrays = { field };
+				core::SabatierReactorSettings aliased;
+				aliased.id = "reactor";
+				aliased.hazardClass = "normal";
+				aliased.co2StoreId = "co2";
+				aliased.hydrogenStoreId = "h2";
+				aliased.methaneStoreId = "product";
+				aliased.waterStoreId = "product";
+				aliased.thermalClass = "warm";
+				aliased.heatSinkId = "sink";
+				aliased.rateKgPerS = 10.0;
+				repro.sabatierReactors = { aliased };
+				require(!world.configureStationSystems(repro, true, &diagnostic)
+					&& diagnostic.find(alias) != std::string::npos,
+					"the reproduction's aliased-product Sabatier reactor was accepted");
+				require(!world.getStationSystemsSnapshot().enabled
+					&& world.getSimulationTick() == 0 && world.getStationSystemsDiagnostics().empty(),
+					"the refused aliased-product reproduction mutated the World");
+				// The methane-processor variant of the same reproduction.
+				repro.sabatierReactors = {};
+				core::MethaneProcessorSettings aliasedProcessor;
+				aliasedProcessor.id = "processor";
+				aliasedProcessor.hazardClass = "normal";
+				aliasedProcessor.methaneStoreId = "co2";
+				aliasedProcessor.hydrogenStoreId = "product";
+				aliasedProcessor.carbonStoreId = "product";
+				aliasedProcessor.thermalClass = "warm";
+				aliasedProcessor.heatSinkId = "sink";
+				aliasedProcessor.rateKgPerS = 10.0;
+				aliasedProcessor.specificEnergyKWhPerKgCH4 = 2.0;
+				repro.methaneProcessors = { aliasedProcessor };
+				require(!world.configureStationSystems(repro, true, &diagnostic)
+					&& diagnostic.find(alias) != std::string::npos,
+					"the reproduction's aliased-product methane processor was accepted");
+				require(!world.getStationSystemsSnapshot().enabled
+					&& world.getSimulationTick() == 0 && world.getStationSystemsDiagnostics().empty(),
+					"the refused processor-alias reproduction mutated the World");
+			}
+			// Valid sharing between different machines is preserved: one
+			// reactor's methane output store is the processor's methane
+			// feed, and both book into the shared hydrogen store. The rule
+			// refuses aliases within a machine, never across machines.
+			{
+				core::World world("CarbonSharedAcrossMachines", 2, 2);
+				world.pauseSimulation(); world.finishBuild();
+				require(carbonConfigure(world, carbonStores(), { reactor("sab", "normal") },
+					{ processor("pyrolysis", "normal") }, 100.0).first,
+					"two machines sharing the methane and hydrogen stores were refused");
+				world.resumeSimulation();
+				require(world.advanceTicks(60), "the shared-store machine run failed");
+				require(world.getStationSystemsDiagnostics().empty(),
+					"the shared-store machine raised a runtime diagnostic");
+				require(world.getStationSystemsSnapshot().sabatierReactors.size() == 1
+					&& world.getStationSystemsSnapshot().methaneProcessors.size() == 1,
+					"the shared-store machines are missing from the snapshot");
+			}
+		}
 		// Nominal Sabatier conversion to stores: the conversion follows
 		// the declared stoichiometry, the energy closes over supplied +
 		// released = routed, the exothermic heat lands in the sink, and

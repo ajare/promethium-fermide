@@ -280,6 +280,7 @@ set(editor_names
     station/algaeWorkflow
     station/maintenanceWorkflow
     station/coupledLiveViewWorkflow
+    station/carbonAliasWorkflow
     station/trendsWorkflow
     station/enduranceWorkflow
     station/forecastWorkflow

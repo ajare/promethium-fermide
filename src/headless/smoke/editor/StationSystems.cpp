@@ -2000,6 +2000,111 @@ void bufferWorkflow(smoke::Context const&)
 		#undef REQ
 		require(driver.passed(), "Microbial condition workflow failed on the Test Engine");
 	}
+// #599: an aliased carbon-recovery stream role must surface in the
+// Station Systems window as a configuration refusal, not as the
+// runtime pause it used to cause. A running carbon rig is paused for
+// ordinary editing, the reactor's product water store is aliased onto
+// the methane store, and the apply - confirmed through the World-reset
+// prompt - is refused with a visible diagnostic while the authored
+// settings, the tick and the history stay untouched; the run then
+// resumes on the original configuration with no software failure.
+void carbonAliasWorkflow(smoke::Context const&)
+{
+	using smoke::require;
+	headless::ScopedImGuiContext context;
+	auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 2400};
+	io.Fonts->AddFontDefault(); io.Fonts->Build();
+	DocumentHistory history;
+	StationSystemsWindow window;
+	auto world = std::make_shared<core::World>("Carbon alias editor", 2, 2);
+	world->pauseSimulation(); world->finishBuild();
+	std::string diagnostic;
+	auto rig = []()
+	{
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 1.0f;
+		auto store = [](std::string const& id, double capacity, double starting)
+		{
+			core::ResourceStoreSettings s;
+			s.id = id; s.unit = "kg"; s.capacity = capacity; s.startingQualified = starting;
+			return s;
+		};
+		settings.stores = { store("co2", 100.0, 10.0), store("h2", 100.0, 10.0),
+			store("methane", 100.0, 0.0), store("rawWater", 100.0, 0.0),
+			store("carbon", 100.0, 0.0) };
+		core::ThermalReservoirSettings sink;
+		sink.id = "sink"; sink.thermalClass = "low"; sink.heatCapacityKJPerK = 10000.0;
+		sink.startingTemperatureC = 10.0; sink.minTemperatureC = -50.0; sink.maxTemperatureC = 200.0;
+		settings.thermalReservoirs = { sink };
+		core::SolarArraySettings field;
+		field.id = "field"; field.capacityKW = 100.0;
+		settings.solarArrays = { field };
+		core::SabatierReactorSettings reactor;
+		reactor.id = "sab"; reactor.hazardClass = "normal";
+		reactor.co2StoreId = "co2"; reactor.hydrogenStoreId = "h2";
+		reactor.methaneStoreId = "methane"; reactor.waterStoreId = "rawWater";
+		reactor.thermalClass = "low"; reactor.heatSinkId = "sink";
+		reactor.rateKgPerS = 0.001; reactor.specificEnergyKWhPerKgCO2 = 1.0;
+		reactor.maxSinkTemperatureC = 60.0;
+		settings.sabatierReactors = { reactor };
+		core::MethaneProcessorSettings processor;
+		processor.id = "pyrolysis"; processor.hazardClass = "normal";
+		processor.methaneStoreId = "methane"; processor.hydrogenStoreId = "h2";
+		processor.carbonStoreId = "carbon";
+		processor.thermalClass = "low"; processor.heatSinkId = "sink";
+		processor.rateKgPerS = 0.0003; processor.specificEnergyKWhPerKgCH4 = 2.0;
+		processor.maxSinkTemperatureC = 60.0;
+		settings.methaneProcessors = { processor };
+		return settings;
+	};
+	require(world->configureStationSystems(rig(), false, &diagnostic), diagnostic.c_str());
+	world->resumeSimulation();
+	require(world->advanceTicks(120), "the carbon rig run failed");
+	auto const runningTick = world->getSimulationTick();
+	world->pauseSimulation();
+	headless::TestEngineDriver driver([&]
+	{
+		ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 2300});
+		window.render(world, history);
+	});
+	window.visible = true;
+	driver.frame(); driver.frame();
+	#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+	driver.run("station", "carbonAliasWorkflow", [&](ImGuiTestContext* ctx)
+	{
+		ctx->SetRef("Station Systems");
+		// Alias the reactor's product water onto the methane store.
+		driver.typeValue(ctx, "Sabatier 0 product water store", "methane");
+		REQ(driver.contains("Draft differs from the authored start conditions"),
+			"aliased carbon draft not reported as a change");
+		driver.click(ctx, "Apply settings");
+		ctx->ScrollToItemY("Confirm World reset");
+		REQ(driver.contains("Confirm World reset"),
+			"reset confirmation missing for a mid-run apply");
+		driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+		REQ(driver.contains("chemically distinct streams may not share one store"),
+			"aliased carbon stream diagnostic not shown in the window");
+		REQ(world->getStationSystemsSettings().sabatierReactors[0].waterStoreId == "rawWater"
+			&& world->getSimulationTick() == runningTick
+			&& history.undoCount() == 0,
+			"the refused aliased apply mutated the authored settings, the tick or the history");
+		// The refusal is a configuration refusal, not a runtime one: the
+		// run resumes on the original configuration with no software
+		// failure and no aliased overfill.
+		driver.click(ctx, "Cancel reset");
+		driver.click(ctx, "Cancel edits"); ctx->Sleep(1);
+		world->resumeSimulation();
+		if (!driver.require(world->advanceTicks(120), "post-refusal run failed")) return;
+		if (!driver.require(world->getStationSystemsDiagnostics().empty(),
+			"post-refusal run raised a software failure")) return;
+		if (!driver.require(world->getStationSystemsSnapshot().healthy,
+			"post-refusal station is not healthy")) return;
+	});
+	#undef REQ
+	require(driver.passed(), "carbon alias workflow failed on the Test Engine");
+}
+
 // #421: the coupled rig's live picture is observable in the separate
 // Station Systems window. The rig is run with the hydrogen feed drained
 // and the electrolyzer off, so the Sabatier stage carries a named
@@ -3323,6 +3428,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/algaeWorkflow", algaeWorkflow});
 	checks.push_back({"station/maintenanceWorkflow", maintenanceWorkflow});
 	checks.push_back({"station/coupledLiveViewWorkflow", coupledLiveViewWorkflow});
+	checks.push_back({"station/carbonAliasWorkflow", carbonAliasWorkflow});
 	checks.push_back({"station/trendsWorkflow", trendsWorkflow});
 	checks.push_back({"station/enduranceWorkflow", enduranceWorkflow});
 	checks.push_back({"station/forecastWorkflow", forecastWorkflow});
