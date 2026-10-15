@@ -2877,6 +2877,95 @@ void cropWorkflow(smoke::Context const&)
 			REQ(driver.contains("Projected from t=50.0 s"),
 				"the forecast did not re-derive from the advanced World state");
 			REQ(!world->isModified(), "re-showing the forecast view dirtied the document");
+			// #595: the resupply timing wording must agree with the
+			// projected trajectory. Reset to t=0 and re-author the exact
+			// reproduction: the store runs dry at t=10 exactly as a
+			// 100 kg delivery lands, so the delivery prevents the
+			// shortage and the window must read it as landing before the
+			// shortfall even though the drawable at arrival is 0.000.
+			auto const timingStore = [](char const* id, double capacity,
+				double starting) -> core::ResourceStoreSettings
+			{
+				core::ResourceStoreSettings settings;
+				settings.id = id; settings.unit = "kg";
+				settings.capacity = capacity; settings.startingQualified = starting;
+				return settings;
+			};
+			auto const timingTransfer = [](char const* id, char const* src,
+				char const* dst, double rate, int priority)
+				-> core::ResourceTransferSettings
+			{
+				core::ResourceTransferSettings settings;
+				settings.id = id; settings.sourceId = src;
+				settings.destinationId = dst; settings.unit = "kg";
+				settings.ratePerSecond = rate; settings.priority = priority;
+				return settings;
+			};
+			world->pauseSimulation();
+			world->resetSimulation();
+			core::StationSystemsSettings exactTiming;
+			exactTiming.enabled = true;
+			exactTiming.observationIntervalSeconds = 5.0f;
+			exactTiming.stores = {
+				timingStore("A", 1000.0, 10.0),
+				timingStore("B", 1.0e6, 0.0) };
+			exactTiming.transfers = { timingTransfer("AB", "A", "B", 1.0, 1) };
+			{
+				core::ResourceDeliverySettings exact;
+				exact.id = "exact"; exact.storeId = "A"; exact.unit = "kg";
+				exact.quantity = 100.0; exact.firstOccurrenceSeconds = 10.0;
+				exactTiming.deliveries = { exact };
+			}
+			require(world->configureStationSystems(exactTiming, false, &diagnostic),
+				diagnostic.c_str());
+			ctx->Sleep(2);
+			REQ(driver.contains("Projected from t=0.0 s"),
+				"the timing-phase forecast did not re-derive from the reset t=0 state");
+			REQ(driver.contains("store 'A' (kg)")
+				&& driver.contains(
+					"PROJECTED SHORTFALL: drawable inventory reaches zero at t=110.0 s"),
+				"the exactly-timely resupply did not shift the rendered shortfall onset");
+			REQ(driver.contains("resupply 'exact' at t=10.0 s")
+				&& driver.contains("projected drawable at arrival: 0.000 kg"
+					" (lands before depletion, usable)"),
+				"the exactly-timely zero-drawable arrival did not render as a rescue");
+			// Genuinely late and multiple deliveries after a previous
+			// depletion: the store runs dry at t=10, a 100 kg delivery
+			// lands at t=20 and a 50 kg delivery at t=60. Both must
+			// render as landing after the projected shortfall - including
+			// the t=60 arrival whose positive 60 kg drawable was only
+			// restored by the earlier late delivery.
+			world->resetSimulation();
+			core::StationSystemsSettings lateTiming;
+			lateTiming.enabled = true;
+			lateTiming.observationIntervalSeconds = 5.0f;
+			lateTiming.stores = {
+				timingStore("A", 1000.0, 10.0),
+				timingStore("B", 1.0e6, 0.0) };
+			lateTiming.transfers = { timingTransfer("AB", "A", "B", 1.0, 1) };
+			{
+				core::ResourceDeliverySettings late;
+				late.id = "late"; late.storeId = "A"; late.unit = "kg";
+				late.quantity = 100.0; late.firstOccurrenceSeconds = 20.0;
+				core::ResourceDeliverySettings later;
+				later.id = "later"; later.storeId = "A"; later.unit = "kg";
+				later.quantity = 50.0; later.firstOccurrenceSeconds = 60.0;
+				lateTiming.deliveries = { late, later };
+			}
+			require(world->configureStationSystems(lateTiming, false, &diagnostic),
+				diagnostic.c_str());
+			ctx->Sleep(2);
+			REQ(driver.contains(
+					"PROJECTED SHORTFALL: drawable inventory reaches zero at t=10.0 s"),
+				"the late-delivery shortfall onset is missing or wrong");
+			REQ(driver.contains("resupply 'late' at t=20.0 s")
+				&& driver.contains("projected drawable at arrival: 0.000 kg"
+					" (lands only after the projected shortfall)"),
+				"the genuinely late t=20 arrival did not render as after-the-shortfall");
+			REQ(driver.contains("resupply 'later' at t=60.0 s")
+				&& driver.contains("projected drawable at arrival: 60.000 kg"
+					" (lands only after the projected shortfall)"),
+				"a delivery after a previous depletion rendered as a rescue on its restored drawable");
 		});
 		#undef REQ
 		require(driver.passed(), "forecast workflow failed on the Test Engine");

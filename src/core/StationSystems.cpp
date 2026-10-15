@@ -5863,7 +5863,22 @@ namespace core
 						arrival.projectedDrawableBefore = drawableBefore;
 						arrival.projectedPhysicalBefore = physicalBefore;
 						arrival.arrivesQualified = delivery.arrivesQualified;
-						arrival.rescuesStore = drawableBefore > 0.0;
+						// #595: a rescue is judged against the projected
+						// trajectory, not the drawable inventory at the
+						// arrival instant. The depletion marking runs after
+						// the instant's arrivals (arrivals precede the tick's
+						// drains), so a flag that is already set here means a
+						// shortfall was projected strictly before this
+						// arrival; no flag means the arrival is at or ahead
+						// of the first projected shortfall - including the
+						// exactly-timely delivery that lands drawable-zero
+						// and prevents the shortage it arrives into. Once a
+						// shortfall has occurred the store stays "late" for
+						// every later arrival even if an earlier delivery
+						// restored a positive drawable; the immediately
+						// preceding inventory alone cannot tell whether the
+						// shortage already happened.
+						arrival.rescuesStore = !projected[storeIndex].depleted;
 						arrivalsByStore[storeIndex].push_back(std::move(arrival));
 					}
 					else

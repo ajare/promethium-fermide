@@ -1848,9 +1848,14 @@ namespace core
 	// schedule brings, what the store's projected headroom actually
 	// accepts (accepted delivery quantity - what cannot fit is refused at
 	// the boundary, never overflowed), the projected drawable inventory
-	// at the moment of arrival, and whether the arrival lands while the
-	// store is still above drawable-zero (a rescue) or only after it has
-	// already run short.
+	// at the moment of arrival, and whether the arrival is timely against
+	// the projected trajectory (#595): rescuesStore is true when no
+	// shortfall is projected strictly before the arrival instant - which
+	// includes the exactly-timely arrival that lands drawable-zero as the
+	// store would otherwise run dry, because arrivals precede that tick's
+	// drains and the delivery prevents the shortage - and false only once
+	// the store's projected shortfall onset has passed, even if a prior
+	// delivery has restored a positive drawable since.
 	struct StationForecastArrival
 	{
 		std::string deliveryId;
@@ -1862,7 +1867,7 @@ namespace core
 		double projectedDrawableBefore{0.0};
 		double projectedPhysicalBefore{0.0};
 		bool arrivesQualified{true};
-		bool rescuesStore{false}; // lands while the store is still drawable-positive
+		bool rescuesStore{false}; // no shortfall projected strictly before this arrival
 		bool operator==(StationForecastArrival const&) const = default;
 	};
 	// The scenario forecast of one Resource store (#420): the projected

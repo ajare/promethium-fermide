@@ -21918,6 +21918,124 @@ void recovery(smoke::Context const& context)
 				&& world.getStationSystemsDiagnostics().empty(),
 				"the consumption-flag scenario produced a Station diagnostic");
 		}
+		// Scenario N: exactly-timely resupply (#595). The store runs dry
+		// at the very instant the delivery lands; because arrivals run
+		// ahead of the tick's drains, that delivery prevents the t=10
+		// shortage and the first projected shortfall is the later one.
+		// The arrival must classify as a rescue even though the drawable
+		// immediately before it is zero - the old drawable-positive rule
+		// called it late while the same forecast put the onset at t=110.
+		{
+			core::World world("ForecastExactResupply", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {
+				chainStores("A", 1000.0, 10.0),
+				chainStores("B", 1.0e6, 0.0) };
+			settings.transfers = { chainTransfer("AB", "A", "B", 1.0, 1) };
+			core::ResourceDeliverySettings exact;
+			exact.id = "exact"; exact.storeId = "A"; exact.unit = "kg";
+			exact.quantity = 100.0; exact.firstOccurrenceSeconds = 10.0;
+			settings.deliveries = { exact };
+			require(world.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.forecast.available && snap.forecast.asOfSeconds == 0.0,
+				"the exactly-timely forecast was not read from the paused t=0 state");
+			auto const* a = findForecast(snap.forecast.stores, "A");
+			require(a != nullptr && a->hasShortfall
+				&& a->basis == core::StationForecastBasis::Shortfall,
+				"the exactly-timely resupply store did not forecast a shortfall");
+			require(approx(a->shortfallOnsetSeconds, 110.0, 1e-5),
+				"the exactly-timely delivery did not shift the shortfall onset past itself");
+			require(a->arrivals.size() == 1, "the exactly-timely delivery is missing");
+			if (a != nullptr && a->arrivals.size() == 1)
+			{
+				auto const& arrival = a->arrivals[0];
+				require(arrival.deliveryId == "exact"
+					&& approx(arrival.arrivalSeconds, 10.0),
+					"the exactly-timely arrival lost its schedule");
+				require(approx(arrival.projectedDrawableBefore, 0.0, 1e-9),
+					"the exactly-timely arrival did not see a zero drawable");
+				require(approx(arrival.acceptedQuantity, 100.0)
+					&& approx(arrival.rejectedQuantity, 0.0),
+					"the exactly-timely delivery was not fully accepted");
+				require(arrival.arrivesQualified && arrival.rescuesStore,
+					"an exactly-timely zero-drawable arrival was not a rescue");
+			}
+			require(approx(a->unmetOutflowTotal,
+				core::StationForecastHorizonSeconds - 110.0, 1e-2),
+				"the drain after the exactly-timely rescue is not reported as uncovered");
+			require(std::abs(a->conservationResidual)
+				<= core::StationBalanceTolerance * 1e6,
+				"the exactly-timely resupply projection does not conserve");
+			auto const* b = findForecast(snap.forecast.stores, "B");
+			require(b != nullptr
+				&& approx(b->projectedDrawableAtHorizon, 110.0, 1e-3),
+				"the receiving store did not collect the rescued through-flow total");
+		}
+		// Scenario O: genuinely late and multiple deliveries after a
+		// previous depletion (#595). The store runs dry at t=10; a 100 kg
+		// delivery lands at t=20 and a 50 kg delivery at t=60. Neither is
+		// a rescue: the t=20 arrival lands after the shortfall with a
+		// zero drawable, and the t=60 arrival - despite a positive 60 kg
+		// drawable restored by the earlier delivery - still lands after
+		// the shortage that already occurred at t=10.
+		{
+			core::World world("ForecastLateDeliveries", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {
+				chainStores("A", 1000.0, 10.0),
+				chainStores("B", 1.0e6, 0.0) };
+			settings.transfers = { chainTransfer("AB", "A", "B", 1.0, 1) };
+			core::ResourceDeliverySettings late;
+			late.id = "late"; late.storeId = "A"; late.unit = "kg";
+			late.quantity = 100.0; late.firstOccurrenceSeconds = 20.0;
+			core::ResourceDeliverySettings later;
+			later.id = "later"; later.storeId = "A"; later.unit = "kg";
+			later.quantity = 50.0; later.firstOccurrenceSeconds = 60.0;
+			settings.deliveries = { late, later };
+			require(world.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const* a = findForecast(snap.forecast.stores, "A");
+			require(a != nullptr && a->hasShortfall,
+				"the late-delivery store did not forecast a shortfall");
+			require(approx(a->shortfallOnsetSeconds, 10.0, 1e-5),
+				"the shortfall onset moved even though every arrival is later");
+			require(a->arrivals.size() == 2,
+				"the late deliveries are not both in the forecast");
+			if (a != nullptr && a->arrivals.size() == 2)
+			{
+				auto const& first = a->arrivals[0];
+				require(first.deliveryId == "late"
+					&& approx(first.arrivalSeconds, 20.0)
+					&& approx(first.projectedDrawableBefore, 0.0, 1e-9)
+					&& approx(first.acceptedQuantity, 100.0)
+					&& !first.rescuesStore,
+					"the genuinely late t=20 arrival did not read as after-the-shortfall");
+				auto const& second = a->arrivals[1];
+				require(second.deliveryId == "later"
+					&& approx(second.arrivalSeconds, 60.0)
+					&& approx(second.projectedDrawableBefore, 60.0, 1e-3)
+					&& approx(second.acceptedQuantity, 50.0)
+					&& !second.rescuesStore,
+					"a delivery after a previous depletion read as a rescue on its positive drawable");
+			}
+			require(approx(a->unmetOutflowTotal,
+				10.0 + (core::StationForecastHorizonSeconds - 170.0), 1e-2),
+				"the blocked drain around the late deliveries is not fully reported");
+			require(std::abs(a->conservationResidual)
+				<= core::StationBalanceTolerance * 1e6,
+				"the late-delivery projection does not conserve");
+			auto const* b = findForecast(snap.forecast.stores, "B");
+			require(b != nullptr
+				&& approx(b->projectedDrawableAtHorizon, 160.0, 1e-3),
+				"the receiving store did not collect the late-delivery through-flow total");
+		}
 	}
 
 int main(int argc, char** argv)
