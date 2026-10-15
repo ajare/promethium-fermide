@@ -6266,12 +6266,12 @@ namespace core
 		// failed audit restores every one of those objects, and the
 		// allocation scalars derived from them, to the last committed
 		// state. Store inventory and the loss ledgers are staged and only
-		// published on success, and events are only appended after the
-		// audits pass; this rollback closes the remaining in-place mutation
-		// so a failed tick can never expose a partial allocation, energy
-		// draw or flow result through the public snapshot. The violated
-		// subsystem is reported through `system` so the structured
-		// diagnostic names what failed (#553).
+		// published on success; this rollback closes the remaining
+		// in-place mutation so a failed tick can never expose a partial
+		// allocation, energy draw, flow result, outage state or incident
+		// history through the public snapshot. The violated subsystem is
+		// reported through `system` so the structured diagnostic names
+		// what failed (#553, completed for outages and events by #602).
 		bool applyLedger(uint64_t tick, float seconds, std::string& system, std::string& violation)
 		{
 			system = "Resource transfer";
@@ -6283,6 +6283,16 @@ namespace core
 			auto const committedDeliveries = deliveries;
 			auto const committedWasteEjections = wasteEjections;
 			auto const committedMaintenanceJobs = maintenanceJobs;
+			// #602: the outage pass mutates outage state and appends the
+			// window's start/restoration events, and maintenance appends its
+			// start/completion/interruption events, all before the audits
+			// that can still fail the tick. Neither vector is staged, so
+			// both are backed up whole and restored on failure: an append
+			// into a full bounded event history evicts previously committed
+			// events, so trimming only the new tail could never restore the
+			// original history.
+			auto const committedOutages = outages;
+			auto const committedEvents = events;
 			auto const committedReservoirs = reservoirs;
 			auto const committedRadiators = radiators;
 			auto const committedCoolantLoops = coolantLoops;
@@ -6335,6 +6345,8 @@ namespace core
 			deliveries = committedDeliveries;
 			wasteEjections = committedWasteEjections;
 			maintenanceJobs = committedMaintenanceJobs;
+			outages = committedOutages;
+			events = committedEvents;
 			reservoirs = committedReservoirs;
 			radiators = committedRadiators;
 			coolantLoops = committedCoolantLoops;

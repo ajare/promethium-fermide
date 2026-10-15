@@ -3949,6 +3949,250 @@ namespace
 		core::setStationSystemsSourceLoader({});
 		require(hostFailure.getStationSystemsSnapshot() == after,
 			"Resetting the source loader changed the failed World's snapshot");
+		// A failed host tick must not leak outage state or incident history
+		// past the rollback (#602). The outage pass mutates outage state
+		// and appends window start/restoration events, and maintenance
+		// appends start/completion/interruption events, all before the
+		// audits that can still fail the tick - and an append into a full
+		// bounded history evicts previously committed events. This fixture
+		// schedules every one of those transitions onto the tick whose
+		// constituent audit fails: an outage restoration and a fresh
+		// outage start, a maintenance completion, and a maintenance
+		// interruption, with the event history already pinned at its
+		// 256-entry bound. The complete public snapshot and the complete
+		// event history must equal the preceding successful boundary
+		// apart from the failure status and its diagnostic, and retry
+		// refusal and reset replay must stay intact.
+		core::setStationSystemsSourceLoader([] {
+			return "return function() local n = 0 "
+				"return {advance=function() n = n + 1; return n end} end";
+		});
+		core::World hostIncidents("HostIncidents", 2, 2);
+		hostIncidents.pauseSimulation(); hostIncidents.finishBuild();
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			// The fastest legal observation cadence fills the bounded event
+			// history to its cap long before the failing tick, so the
+			// failed tick's appends would evict committed events if the
+			// rollback did not restore the whole history.
+			settings.observationIntervalSeconds = 0.1f;
+			auto plainStore = [](std::string id, std::string unit,
+				double capacity, double qualified)
+			{
+				core::ResourceStoreSettings store;
+				store.id = std::move(id);
+				store.unit = std::move(unit);
+				store.capacity = capacity;
+				store.startingQualified = qualified;
+				return store;
+			};
+			// The #555 constituent trap, gated behind a delivery: the dry
+			// source starts empty, so the transfer moves nothing until
+			// material arrives, and the audit failure lands exactly on
+			// the delivery tick rather than on tick one.
+			core::ResourceStoreSettings source = plainStore("a", "kg", 100.0, 0.0);
+			source.composition = core::ResourceCompositionSettings{};
+			core::ResourceStoreSettings destination = plainStore("b", "kg", 100.0, 0.0);
+			destination.composition = core::ResourceCompositionSettings{};
+			destination.composition->moisture = 5e-10;
+			settings.stores = {source, destination,
+				plainStore("tools", "kg", 100.0, 10.0),
+				plainStore("parts", "kg", 100.0, 10.0),
+				plainStore("waste", "kg", 10.0, 0.0),
+				plainStore("diesel", "kWh", 100000.0, 100000.0)};
+			settings.transfers = {{"a-to-b", "a", "b", "kg", 3000.0, 0}};
+			core::ThermalReservoirSettings sink;
+			sink.id = "sink";
+			sink.thermalClass = "generation";
+			sink.heatCapacityKJPerK = 100000.0;
+			sink.startingTemperatureC = 20.0;
+			sink.minTemperatureC = 0.0;
+			sink.maxTemperatureC = 60.0;
+			settings.thermalReservoirs = {sink};
+			core::CoolantLoopSettings loop;
+			loop.id = "loop";
+			loop.hazardClass = "normal";
+			loop.reservoirId = "sink";
+			loop.coolantCapacityKg = 1.0;
+			loop.startingCoolantKg = 1.0;
+			loop.specificHeatKJPerKgK = 1.0;
+			settings.coolantLoops = {loop};
+			core::GeneratorSettings generator;
+			generator.id = "gen";
+			generator.fuelStoreId = "diesel";
+			generator.thermalClass = "generation";
+			generator.heatSinkId = "sink";
+			generator.ratedOutputKW = 10.0;
+			generator.efficiency = 0.5;
+			generator.maxRampKWPerSecond = 100.0;
+			generator.commandedOutputKW = 10.0;
+			generator.startupPowerKW = 1.0;
+			generator.startupSeconds = 1.0;
+			generator.maxSinkTemperatureC = 90.0;
+			settings.generators = {generator};
+			// One outage window closes on the failing tick (its
+			// restoration would be announced there) and another opens on
+			// it (its start would be announced there).
+			core::InstallationOutageSettings restoring;
+			restoring.id = "outage-restore";
+			restoring.installationId = "loop";
+			restoring.capacityFraction = 0.0;
+			restoring.firstOccurrenceSeconds = 110.0;
+			restoring.durationSeconds = 10.0;
+			core::InstallationOutageSettings starting;
+			starting.id = "outage-start";
+			starting.installationId = "loop";
+			starting.capacityFraction = 0.0;
+			starting.firstOccurrenceSeconds = 120.0;
+			starting.durationSeconds = 10.0;
+			settings.outages = {restoring, starting};
+			// The completing job wins the waste-headroom contest while its
+			// window runs; the lower-precedence job's reservation stands on
+			// the last of that headroom, so the waste delivery on the
+			// failing tick interrupts it exactly as the audit fails.
+			core::MaintenanceJobSettings completer;
+			completer.id = "maint-complete";
+			completer.installationId = "gen";
+			completer.firstOccurrenceSeconds = 110.0;
+			completer.durationSeconds = 10.0;
+			completer.priority = 10;
+			completer.requirements = {{"tools", 5.0, false}, {"parts", 2.0, true}};
+			completer.wasteStoreId = "waste";
+			core::MaintenanceJobSettings interrupted;
+			interrupted.id = "maint-interrupt";
+			interrupted.installationId = "loop";
+			interrupted.firstOccurrenceSeconds = 115.0;
+			interrupted.durationSeconds = 20.0;
+			interrupted.priority = 5;
+			interrupted.requirements = {{"parts", 8.0, true}};
+			interrupted.wasteStoreId = "waste";
+			// A reusable-only job whose window opens exactly on the failing
+			// tick: its start attempt and fresh reservation happen on the
+			// tick the audit fails, so the start publication must roll back
+			// too.
+			core::MaintenanceJobSettings starter;
+			starter.id = "maint-start";
+			starter.installationId = "loop";
+			starter.firstOccurrenceSeconds = 120.0;
+			starter.durationSeconds = 10.0;
+			starter.priority = 1;
+			starter.requirements = {{"tools", 2.0, false}};
+			settings.maintenanceJobs = {completer, interrupted, starter};
+			// The failing tick: the first delivery feeds the transfer the
+			// mass that trips the constituent audit; the second eats the
+			// waste headroom the lower job's reservation stands on.
+			settings.deliveries = {
+				{"resupply-a", "a", "kg", 50.0, 120.0, 0.0, true, 0},
+				{"resupply-waste", "waste", "kg", 1.0, 120.0, 0.0, true, 0}};
+			std::string diagnostic;
+			require(hostIncidents.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+		}
+		hostIncidents.resumeSimulation();
+		require(hostIncidents.advanceTicks(7199),
+			"the incident fixture failed before its failing tick");
+		auto const incidentsBefore = hostIncidents.getStationSystemsSnapshot();
+		auto const incidentsBeforeEvents = hostIncidents.getStationSystemsEvents();
+		require(incidentsBefore.healthy && incidentsBefore.worldTick == 7199,
+			"incident fixture not healthy at the boundary tick");
+		require(incidentsBeforeEvents.size() == core::StationEventHistoryLimit,
+			"incident fixture history not pinned at its bound before the failing tick");
+		// The committed state the failing tick must not disturb: the
+		// restoring outage is mid-window with nothing restored yet, the
+		// starting outage has not begun, and both maintenance jobs are
+		// Active with their reservations held.
+		require(incidentsBefore.outages.size() == 2
+			&& incidentsBefore.outages[0].id == "outage-restore"
+			&& incidentsBefore.outages[0].active
+			&& incidentsBefore.outages[0].occurrencesStarted == 1
+			&& incidentsBefore.outages[0].occurrencesCompleted == 0
+			&& incidentsBefore.outages[1].id == "outage-start"
+			&& !incidentsBefore.outages[1].active
+			&& incidentsBefore.outages[1].occurrencesStarted == 0,
+			"outage state not as authored at the boundary tick");
+		require(incidentsBefore.maintenanceJobs.size() == 3
+			&& incidentsBefore.maintenanceJobs[0].phase == core::StationMaintenancePhase::Active
+			&& incidentsBefore.maintenanceJobs[0].occurrencesCompleted == 0
+			&& incidentsBefore.maintenanceJobs[1].phase == core::StationMaintenancePhase::Active
+			&& incidentsBefore.maintenanceJobs[1].occurrencesStarted == 1
+			&& incidentsBefore.maintenanceJobs[1].requirements[0].reserved
+			&& incidentsBefore.maintenanceJobs[2].id == "maint-start"
+			&& incidentsBefore.maintenanceJobs[2].phase == core::StationMaintenancePhase::Idle
+			&& incidentsBefore.maintenanceJobs[2].occurrencesStarted == 0,
+			"maintenance state not as authored at the boundary tick");
+		require(!hostIncidents.advanceTick(),
+			"incident-bearing host ledger violation accepted");
+		require(hostIncidents.isSimulationPaused() && hostIncidents.getSimulationTick() == 7199,
+			"incident host failure not fail-visible and synchronized");
+		auto const incidentsAfter = hostIncidents.getStationSystemsSnapshot();
+		auto incidentsExpected = incidentsBefore;
+		incidentsExpected.healthy = false;
+		require(incidentsAfter == incidentsExpected,
+			"failed incident tick published partially mutated snapshot state");
+		require(hostIncidents.getStationSystemsEvents() == incidentsBeforeEvents,
+			"failed incident tick published events or evicted committed history");
+		// Explicit spot checks beyond whole-snapshot equality: the failed
+		// tick's outage start and restoration, the maintenance completion
+		// and interruption, and the material they would have spent are all
+		// invisible through the public snapshot.
+		require(incidentsAfter.outages[0].active
+			&& incidentsAfter.outages[0].occurrencesCompleted == 0
+			&& incidentsAfter.outages[0].lastRestoreSeconds == 0.0
+			&& !incidentsAfter.outages[1].active
+			&& incidentsAfter.outages[1].occurrencesStarted == 0
+			&& incidentsAfter.outages[1].lastStartSeconds == 0.0,
+			"failed tick leaked outage start or restoration state");
+		require(incidentsAfter.maintenanceJobs[0].phase == core::StationMaintenancePhase::Active
+			&& incidentsAfter.maintenanceJobs[0].occurrencesCompleted == 0
+			&& incidentsAfter.maintenanceJobs[1].phase == core::StationMaintenancePhase::Active
+			&& incidentsAfter.maintenanceJobs[1].occurrencesMissed == 0
+			&& incidentsAfter.maintenanceJobs[1].blockReason.empty()
+			&& incidentsAfter.maintenanceJobs[2].phase == core::StationMaintenancePhase::Idle
+			&& incidentsAfter.maintenanceJobs[2].occurrencesStarted == 0
+			&& !incidentsAfter.maintenanceJobs[2].requirements[0].reserved,
+			"failed tick leaked maintenance start, completion or interruption state");
+		for (auto const& store : incidentsAfter.stores)
+		{
+			auto const expected = store.id == "tools" ? 10.0
+				: store.id == "parts" ? 10.0
+				: store.id == "diesel" ? incidentsBefore.stores[5].currentQualified : 0.0;
+			require(store.currentQualified == expected && store.currentUnqualified == 0.0,
+				"failed incident tick left committed inventory mutated");
+		}
+		auto const incidentDiagnostics = hostIncidents.getStationSystemsDiagnostics();
+		require(incidentDiagnostics.size() == 1
+			&& incidentDiagnostics[0].system == "Resource transfer"
+			&& incidentDiagnostics[0].failure == Failure::ConversionError
+			&& incidentDiagnostics[0].worldTick == 7200
+			&& incidentDiagnostics[0].message.find("constituent") != std::string::npos,
+			"incident host failure diagnostic missing or wrong");
+		// Terminal retry refusal across the incident state.
+		require(!hostIncidents.advanceTicks(10),
+			"failed incident host ledger retried after failure");
+		require(hostIncidents.getStationSystemsSnapshot() == incidentsAfter
+			&& hostIncidents.getStationSystemsEvents() == incidentsBeforeEvents
+			&& hostIncidents.getStationSystemsDiagnostics().size() == 1,
+			"retry changed failed incident state or duplicated the diagnostic");
+		// Reset reproducibility: the same fixture replays the identical
+		// successful boundary and fails identically on the incident tick.
+		hostIncidents.resetSimulation();
+		require(hostIncidents.getSimulationTick() == 0
+			&& hostIncidents.getStationSystemsSnapshot().healthy
+			&& hostIncidents.getStationSystemsDiagnostics().empty(),
+			"reset did not clear the incident host ledger failure");
+		hostIncidents.resumeSimulation();
+		require(hostIncidents.advanceTicks(7199),
+			"incident replay diverged before the failing tick");
+		require(hostIncidents.getStationSystemsSnapshot() == incidentsBefore
+			&& hostIncidents.getStationSystemsEvents() == incidentsBeforeEvents,
+			"incident replay of the successful boundary was not identical");
+		require(!hostIncidents.advanceTick(),
+			"incident host failure not reproduced after reset");
+		require(hostIncidents.getStationSystemsSnapshot() == incidentsAfter
+			&& hostIncidents.getStationSystemsEvents() == incidentsBeforeEvents,
+			"failed incident replay was not identical");
+		core::setStationSystemsSourceLoader({});
 		// Non-finite derived magnitudes are never published as healthy
 		// results (#553): two finite 1e308 kW arrays sum to infinite
 		// generation. With the bundled mirror the sandbox rejects the
