@@ -195,6 +195,33 @@ partition the wet mass exactly — plus a declared chemical energy term
 (kJ per kg dry) where represented. Mass constituents are accounted in
 kg regardless of whether the store is denominated in g or kg.
 
+**Actual biological deposits and downstream use (#601).**
+
+A compound store's authored composition describes its starting stock and
+external deliveries, not a relabelling rule for biological deposits.
+Crop and algae harvests and starvation residue deliver their **actual**
+N/P/K/mineral/organic inventories and remaining chemical energy. Respiration
+removes organic matter and energy without consuming the bound nutrients;
+the receiving store mixes that enriched material with its existing stock.
+`StationSystemsStoreSnapshot::actualConstituents` exposes the resulting
+inventory (kg for constituents, kJ for `energy`; empty for plain stores).
+Every draw spends a proportional share of that blend, and transfers and
+maintenance waste routing carry the blend with the material.
+
+Microbial nutrient recovery uses the actual feed composition. If the fixed
+digestion outputs would exceed the inputs, or reaction heat would exceed
+the feed's remaining chemical energy, the processor holds the feed and
+reports a rejection reason before consuming material or power. Likewise,
+fixed-yield conversions and crew metabolism hold incompatible feed rather
+than creating unfunded constituents or metabolic heat through a negative
+loss counter. These runtime inventories and holds are mirrored in Lua;
+Load and Reset reconstruct stock from authored starting conditions.
+
+`station-nutrientConservation` covers receiving-store inventories, partial
+harvest and overflow, mixed crop/algae deposits, transfers into downstream
+recovery, competing external consumers, and incompatible conversion/heat
+holds through public World ticks and snapshots.
+
 Validation refuses malformed compositions before anything runs: the unit
 must be a mass unit (g or kg); moisture must be finite and below 1;
 every dry fraction must be finite and non-negative and their sum may not

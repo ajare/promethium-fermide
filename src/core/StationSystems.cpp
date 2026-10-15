@@ -1133,6 +1133,94 @@ namespace core
 			settleLivingOrganic(inventory, dryMassKg);
 			return inventory;
 		}
+		// Add one ledger into another (#601).
+		void addLedger(ConstituentLedger& target, ConstituentLedger const& source,
+			double sign)
+		{
+			for (auto const& entry : source)
+				target[entry.first] += sign * entry.second;
+		}
+		// Fixed-yield processes must not turn a changed feed into unfunded
+		// constituents (or energy). Empty means the recipe is feasible.
+		std::string unfundedConstituent(ConstituentLedger const& funded,
+			ConstituentLedger const& required)
+		{
+			for (auto const& [key, amount] : required)
+			{
+				auto const available = funded.count(key) ? funded.at(key) : 0.0;
+				if (amount > available + StationBalanceTolerance * std::max(1.0, std::abs(available)))
+					return key;
+			}
+			return {};
+		}
+		// The constituent ledger a declared composition carries at a wet
+		// mass, returned instead of added in place (#601).
+		ConstituentLedger compositionLedgerOf(ResourceCompositionSettings const& composition,
+			double wetMassKg, double sign)
+		{
+			auto ledger = ConstituentLedger{};
+			addComposition(ledger, composition, wetMassKg, sign);
+			return ledger;
+		}
+		// The constituent ledger a routed biological mass actually carries
+		// (#601): the population's tracked dry constituents plus the
+		// chemical energy the organic share carries on the organic basis.
+		// Biological residue is dry material, so it brings no water.
+		ConstituentLedger biologicalLedgerOf(BiologicalConstituents const& inventory,
+			double energyKJPerKgOrganic)
+		{
+			auto ledger = ConstituentLedger{};
+			ledger["water"] += 0.0;
+			ledger["nutrientNitrogen"] += inventory.nutrientNitrogenKg;
+			ledger["atmosphericNitrogen"] += 0.0;
+			ledger["phosphorus"] += inventory.phosphorusKg;
+			ledger["potassium"] += inventory.potassiumKg;
+			ledger["otherMinerals"] += inventory.mineralsKg;
+			ledger["dryOrganics"] += inventory.organicKg;
+			ledger["energy"] += inventory.organicKg * energyKJPerKgOrganic;
+			return ledger;
+		}
+		// The composition a compound store's material actually has (#601):
+		// the authored declaration plus the drift of everything the store
+		// has really received, renormalised to the store's current mass.
+		// With no drift this is exactly the authored composition; with
+		// drift the fractions describe the blend that is actually in the
+		// store, so a process sizing its yields from the store's material
+		// tracks the actual constituents instead of the original
+		// declaration. The ledger is the source of truth: every fraction
+		// is the actual constituent over the actual dry (or wet) mass.
+		ResourceCompositionSettings effectiveCompositionOf(
+			ResourceCompositionSettings const& authored, double totalKg,
+			ConstituentLedger const& drift)
+		{
+			if (drift.empty() || totalKg <= 0.0) return authored;
+			auto const actual = compositionLedgerOf(authored, totalKg, 1.0);
+			auto blended = actual;
+			for (auto const& entry : drift)
+				blended[entry.first] += entry.second;
+			auto result = authored;
+			result.moisture = std::max(0.0, std::min(1.0, blended["water"] / totalKg));
+			auto const dry = std::max(0.0, totalKg * (1.0 - result.moisture));
+			if (dry > 0.0)
+			{
+				result.nutrientNitrogen = std::max(0.0, blended["nutrientNitrogen"] / dry);
+				result.atmosphericNitrogen = std::max(0.0, blended["atmosphericNitrogen"] / dry);
+				result.phosphorus = std::max(0.0, blended["phosphorus"] / dry);
+				result.potassium = std::max(0.0, blended["potassium"] / dry);
+				result.otherMinerals = std::max(0.0, blended["otherMinerals"] / dry);
+				result.energyKJPerKgDry = std::max(0.0, blended["energy"] / dry);
+			}
+			else
+			{
+				result.nutrientNitrogen = 0.0;
+				result.atmosphericNitrogen = 0.0;
+				result.phosphorus = 0.0;
+				result.potassium = 0.0;
+				result.otherMinerals = 0.0;
+				result.energyKJPerKgDry = 0.0;
+			}
+			return result;
+		}
 	}
 	bool validateStationProfile(ProfileSettings const& profile, std::string const& where,
 		std::string& diagnostic)
@@ -3783,6 +3871,16 @@ namespace core
 			double currentUnqualified{0.0};
 			double lastTickIn{0.0};
 			double lastTickOut{0.0};
+			// The store's actual constituent drift (#601): the difference
+			// between the constituents the store really holds and what its
+			// authored composition would represent at the current mass.
+			// Empty means the store is exactly as declared; a non-empty
+			// drift is carried by the material, so every draw takes its
+			// proportional share of the actual blend instead of the
+			// declared mix, and biological deposits leave behind the
+			// difference between what actually arrived and what the
+			// declaration would have booked.
+			ConstituentLedger constituentDrift;
 		};
 		// The authoritative ledger of one authored transfer. Results are
 		// staged per tick and committed atomically; unmet material never moves
@@ -4740,6 +4838,14 @@ namespace core
 			double energySuppliedKJ{0.0};
 			double reactionHeatKJ{0.0};
 			double heatRoutedKJ{0.0};
+			// #601: the chemical energy and bound nitrogen the digested
+			// feed actually carried, accumulated at digestion from the
+			// feed store's actual blend. The reaction-heat and nitrogen-
+			// recovery caps audit against these instead of against the
+			// feed store's authored composition, which no longer
+			// describes drifted material.
+			double feedChemicalEnergyConsumedKJ{0.0};
+			double feedBoundNitrogenConsumedKg{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
 		// The authoritative ledger of one authored crop population
@@ -6434,6 +6540,81 @@ namespace core
 			// material it did not commit.
 			std::map<std::string, double> stagedUnitHarvested = unitHarvested;
 			ConstituentLedger stagedConstituentHarvested = constituentHarvested;
+			// Per-store actual-constituent drift, staged alongside the
+			// other ledgers so a failed tick never commits drift it did
+			// not pay for (#601). The drift of a compound store is the
+			// difference between the constituents it actually holds and
+			// what its authored composition would represent at its
+			// current mass; it is created by biological deposits whose
+			// material differs from the destination's declaration, and
+			// it travels with the material: every draw, transfer and
+			// consumption takes its proportional share of the actual
+			// blend, never the declared mix.
+			std::vector<ConstituentLedger> stagedDrift(stores.size());
+			for (size_t index = 0; index < stores.size(); ++index)
+				stagedDrift[index] = stores[index].constituentDrift;
+			// The actual constituents carried by a draw of drawnKg from a
+			// store (#601): the authored composition's share plus the
+			// drawn share of the store's drift. The drawn share leaves the
+			// store with the material. Callers pass the store's total mass
+			// in kg measured BEFORE the draw is applied.
+			auto drawStoreActual = [&](size_t storeIndex, double totalKgBefore,
+				double drawnKg) -> ConstituentLedger
+			{
+				auto const& store = stores[storeIndex].authored;
+				auto actual = ConstituentLedger{};
+				if (store.composition)
+					addComposition(actual, *store.composition, drawnKg, 1.0);
+				auto& drift = stagedDrift[storeIndex];
+				if (!drift.empty() && totalKgBefore > 0.0 && drawnKg > 0.0)
+				{
+					auto const share = std::min(1.0, drawnKg / totalKgBefore);
+					for (auto& entry : drift)
+					{
+						actual[entry.first] += share * entry.second;
+						entry.second *= 1.0 - share;
+					}
+				}
+				return actual;
+			};
+			auto storeComposition = [&](size_t index)
+			{
+				return effectiveCompositionOf(*stores[index].authored.composition,
+					massToKg(stores[index].authored.unit, qualified[index] + unqualified[index]),
+					stagedDrift[index]);
+			};
+			// The drift a deposit of actual material leaves in a compound
+			// store: the difference between what actually arrived and what
+			// the store's authored declaration would have represented at
+			// that mass (#601). Plain stores sit outside the constituent
+			// ledger and record nothing.
+			auto depositStoreDrift = [&](size_t storeIndex, double depositedKg,
+				ConstituentLedger const& actual)
+			{
+				auto const& store = stores[storeIndex].authored;
+				if (!store.composition) return;
+				auto& drift = stagedDrift[storeIndex];
+				addLedger(drift, actual, 1.0);
+				addLedger(drift, compositionLedgerOf(*store.composition, depositedKg, 1.0), -1.0);
+			};
+			// Move the drift of a same-material mass between two stores
+			// (#601): the moved share of the source's drift rides with the
+			// material. Used for store-to-store moves that book nothing at
+			// the constituent boundary because the endpoints declare the
+			// same composition (transfers, maintenance consumption).
+			auto moveStoreDrift = [&](size_t sourceIndex, size_t destinationIndex,
+				double sourceKgBefore, double movedKg)
+			{
+				auto& source = stagedDrift[sourceIndex];
+				if (source.empty() || sourceKgBefore <= 0.0 || movedKg <= 0.0) return;
+				auto const share = std::min(1.0, movedKg / sourceKgBefore);
+				auto& destination = stagedDrift[destinationIndex];
+				for (auto& entry : source)
+				{
+					destination[entry.first] += share * entry.second;
+					entry.second *= 1.0 - share;
+				}
+			};
 			// Solar supply and external equipment allocation run before the
 			// resource ledger: the electrical service a load receives bounds
 			// its heat and material exchanges, and allocated power can never
@@ -6523,16 +6704,20 @@ namespace core
 					auto const eligible = std::max(0.0, qualified[ejection.storeIndex]);
 					auto const ejected = std::min(ejection.authored.quantity, eligible);
 					auto const unmet = ejection.authored.quantity - ejected;
+					auto const ejectedStoreKgBefore = massToKg(store.unit,
+						qualified[ejection.storeIndex] + unqualified[ejection.storeIndex]);
 					qualified[ejection.storeIndex] -= ejected;
 					flowOut[ejection.storeIndex] += ejected;
 					// Ejected material crosses the station boundary as an
 					// external loss: the per-unit and per-constituent
 					// ledgers close over it, so what left the station is
-					// accounted, never silently dropped.
+					// accounted, never silently dropped. The constituent
+					// booking carries the material the store actually
+					// holds, drift included, not the authored relabel
+					// (#601).
 					stagedUnitLoss[store.unit] += ejected;
-					if (store.composition)
-						addComposition(stagedLoss, *store.composition,
-							massToKg(store.unit, ejected), 1.0);
+					addLedger(stagedLoss, drawStoreActual(ejection.storeIndex,
+						ejectedStoreKgBefore, massToKg(store.unit, ejected)), 1.0);
 					ejection.occurrencesFired = arrival.occurrence + 1;
 					ejection.lastFiredTick = tick;
 					ejection.lastOccurrenceSeconds = arrival.key.occurrenceSeconds;
@@ -6951,10 +7136,23 @@ namespace core
 							continue;
 						}
 						auto const spent = requirement.reserved;
+						auto const spentSourceKgBefore = massToKg(
+							stores[requirement.storeIndex].authored.unit,
+							qualified[requirement.storeIndex]
+								+ unqualified[requirement.storeIndex]);
 						qualified[requirement.storeIndex] -= spent;
 						flowOut[requirement.storeIndex] += spent;
 						qualified[job.wasteStoreIndex] += spent;
 						flowIn[job.wasteStoreIndex] += spent;
+						// The consumed material keeps its actual makeup on
+						// the way into waste: validation pins the waste
+						// store to the requirement store's declared
+						// composition, so any drift the material really
+						// carries rides with it instead of being laundered
+						// into the waste store's declaration (#601).
+						moveStoreDrift(requirement.storeIndex, job.wasteStoreIndex,
+							spentSourceKgBefore, massToKg(
+								stores[requirement.storeIndex].authored.unit, spent));
 						consumedTotal += spent;
 						requirement.lastConsumed = spent;
 						requirement.reserved = 0.0;
@@ -8399,6 +8597,14 @@ namespace core
 				else if (load.lastShortfallReason.empty())
 					load.lastShortfallReason = "below the minimum operable supply level";
 			}
+			// Allocation reserves scalar inventory before exchanges commit.
+			// Undo every outstanding reservation when measuring the blend,
+			// including other loads' draws and not-yet-delivered production.
+			std::vector<double> pendingExchangeUnits(stores.size(), 0.0);
+			for (auto const& load : loads)
+				for (auto const& exchange : load.exchanges)
+					pendingExchangeUnits[exchange.storeIndex] +=
+						(exchange.consumes ? 1.0 : -1.0) * exchange.lastReserved;
 			for (size_t index = 0; index < loads.size(); ++index)
 			{
 				auto& load = loads[index];
@@ -8459,6 +8665,11 @@ namespace core
 					auto const requested = exchangeFullAmount(exchange, load.lastProfileLevel);
 					auto const completed = std::min(requested * load.lastDeliveredFraction,
 						exchange.lastReserved);
+					auto const exchangeStoreKgBefore = massToKg(exchangeStore.unit,
+						qualified[exchange.storeIndex] + unqualified[exchange.storeIndex]
+							+ pendingExchangeUnits[exchange.storeIndex]);
+					pendingExchangeUnits[exchange.storeIndex] -=
+						(exchange.consumes ? 1.0 : -1.0) * exchange.lastReserved;
 					if (exchange.consumes)
 					{
 						qualified[exchange.storeIndex] += exchange.lastReserved - completed;
@@ -8476,10 +8687,18 @@ namespace core
 					stagedUnitLoss[exchangeStore.unit] += exchange.consumes ? completed : -completed;
 					if (exchangeStore.composition)
 					{
+						// A consumed exchange spends the material the store
+						// actually holds, drift included (#601); a delivered
+						// exchange is external material arriving as the
+						// store's own declared composition.
 						ConstituentLedger delta;
-						addComposition(delta, *exchangeStore.composition,
-							massToKg(exchangeStore.unit, completed),
-							exchange.consumes ? -1.0 : 1.0);
+						if (exchange.consumes)
+							addLedger(delta, drawStoreActual(exchange.storeIndex,
+								exchangeStoreKgBefore,
+								massToKg(exchangeStore.unit, completed)), -1.0);
+						else
+							addComposition(delta, *exchangeStore.composition,
+								massToKg(exchangeStore.unit, completed), 1.0);
 						for (auto const& [constituent, change] : delta)
 							stagedLoss[constituent] -= change;
 					}
@@ -9075,6 +9294,14 @@ namespace core
 				treatment.lastConsumableRequested = treatment.authored.consumablePerKg * processedKg;
 				auto const consumableUsed = std::min(treatment.lastConsumableRequested,
 					drawableConsumableUnits);
+				// #601: measure the draw against the store as it stands
+				// before the draw, so the spent kit carries the material
+				// it actually is, drift included.
+				auto const consumableDrawnActual = drawStoreActual(treatment.consumableIndex,
+					massToKg(consumable.authored.unit,
+						qualified[treatment.consumableIndex]
+							+ unqualified[treatment.consumableIndex]),
+					massToKg(consumable.authored.unit, consumableUsed));
 				qualified[treatment.consumableIndex] -= consumableUsed;
 				flowOut[treatment.consumableIndex] += consumableUsed;
 				treatment.lastConsumableUsed = consumableUsed;
@@ -9130,17 +9357,17 @@ namespace core
 					if (released && clearanceDemandUnits > 0.0)
 					{
 						auto const& clearanceStore = stores[treatment.clearanceIndex].authored;
+						auto const clearanceKgBefore = massToKg(clearanceStore.unit,
+							qualified[treatment.clearanceIndex]
+								+ unqualified[treatment.clearanceIndex]);
 						qualified[treatment.clearanceIndex] -= clearanceDemandUnits;
 						flowOut[treatment.clearanceIndex] += clearanceDemandUnits;
 						stagedUnitLoss[clearanceStore.unit] += clearanceDemandUnits;
-						if (clearanceStore.composition)
-						{
-							ConstituentLedger netChange;
-							addComposition(netChange, *clearanceStore.composition,
-								massToKg(clearanceStore.unit, clearanceDemandUnits), -1.0);
-							for (auto const& entry : netChange)
-								stagedLoss[entry.first] -= entry.second;
-						}
+						// The kit is spent as the material it actually is,
+						// drift included (#601).
+						addLedger(stagedLoss, drawStoreActual(treatment.clearanceIndex,
+							clearanceKgBefore,
+							massToKg(clearanceStore.unit, clearanceDemandUnits)), 1.0);
 						treatment.lastClearanceUsed = clearanceDemandUnits;
 						treatment.clearanceUsedTotal += clearanceDemandUnits;
 					}
@@ -9154,14 +9381,9 @@ namespace core
 				stagedUnitLoss[treated.authored.unit] -= treatedUnits;
 				stagedUnitLoss[concentrate.authored.unit] -= concentrateUnits;
 				stagedUnitLoss[consumable.authored.unit] += consumableUsed;
-				if (consumable.authored.composition)
-				{
-					ConstituentLedger netChange;
-					addComposition(netChange, *consumable.authored.composition,
-						massToKg(consumable.authored.unit, consumableUsed), -1.0);
-					for (auto const& entry : netChange)
-						stagedLoss[entry.first] -= entry.second;
-				}
+				// The kit leaves the compound-material world as the
+				// material it actually was, measured at the draw (#601).
+				addLedger(stagedLoss, consumableDrawnActual, 1.0);
 				treatment.lastProcessedKg = processedKg;
 				treatment.lastTreatedKg = treatedKg;
 				treatment.lastConcentrateKg = concentrateKg;
@@ -9563,18 +9785,19 @@ namespace core
 					capture.lastConsumableRequested = capture.authored.consumablePerKg * capturedKg;
 					auto const consumableUsed = std::min(capture.lastConsumableRequested,
 						drawableConsumableUnits);
+					// #601: the media is spent as the material it actually
+					// is, measured before the draw.
+					auto const captureConsumableActual = drawStoreActual(
+						capture.consumableStoreIndex,
+						massToKg(consumable.authored.unit,
+							qualified[capture.consumableStoreIndex]
+								+ unqualified[capture.consumableStoreIndex]),
+						massToKg(consumable.authored.unit, consumableUsed));
 					qualified[capture.consumableStoreIndex] -= consumableUsed;
 					flowOut[capture.consumableStoreIndex] += consumableUsed;
 					capture.lastConsumableUsed = consumableUsed;
 					stagedUnitLoss[consumable.authored.unit] += consumableUsed;
-					if (consumable.authored.composition)
-					{
-						ConstituentLedger netChange;
-						addComposition(netChange, *consumable.authored.composition,
-							massToKg(consumable.authored.unit, consumableUsed), -1.0);
-						for (auto const& entry : netChange)
-							stagedLoss[entry.first] -= entry.second;
-					}
+					addLedger(stagedLoss, captureConsumableActual, 1.0);
 					capture.consumablesUsedTotal += consumableUsed;
 				}
 				capture.lastCapturedKg = capturedKg;
@@ -10070,17 +10293,18 @@ namespace core
 							auto const stockUnits = std::min(points
 								* processor.authored.stockUnitsPerConditionPoint,
 								drawableStock);
+							// #601: the stock is spent as the material it
+							// actually is, measured before the draw.
+							auto const stockDrawnActual = drawStoreActual(
+								processor.stockStoreIndex,
+								massToKg(stock.authored.unit,
+									qualified[processor.stockStoreIndex]
+										+ unqualified[processor.stockStoreIndex]),
+								massToKg(stock.authored.unit, stockUnits));
 							qualified[processor.stockStoreIndex] -= stockUnits;
 							flowOut[processor.stockStoreIndex] += stockUnits;
 							stagedUnitLoss[stock.authored.unit] += stockUnits;
-							if (stock.authored.composition)
-							{
-								ConstituentLedger stockChange;
-								addComposition(stockChange, *stock.authored.composition,
-									massToKg(stock.authored.unit, stockUnits), -1.0);
-								for (auto const& entry : stockChange)
-									stagedLoss[entry.first] -= entry.second;
-							}
+							addLedger(stagedLoss, stockDrawnActual, 1.0);
 							processor.lastStockConsumedUnits = stockUnits;
 							processor.stockConsumedUnits += stockUnits;
 						}
@@ -10106,7 +10330,16 @@ namespace core
 					processor.status = StationTransferStatus::Rejected;
 					continue;
 				}
-				auto const& composition = *feed.authored.composition;
+				// #601: the digestion is sized on the material the feed
+				// store actually holds - its authored composition plus
+				// the drift of everything really deposited into it - so
+				// recovery, residue and heat track the actual constituents
+				// of drifted feed instead of the original declaration.
+				auto const feedStoreKgBefore = massToKg(feed.authored.unit,
+					qualified[processor.feedStoreIndex]
+						+ unqualified[processor.feedStoreIndex]);
+				auto const composition = effectiveCompositionOf(*feed.authored.composition,
+					feedStoreKgBefore, stagedDrift[processor.feedStoreIndex]);
 				auto const dryPerKgFeed = 1.0 - composition.moisture;
 				// The recovered nutrients are funded by the feed's bound
 				// constituents only: bound nitrogen, phosphorus, potassium
@@ -10125,9 +10358,33 @@ namespace core
 				// inputs and outputs per kilogram of feed: validation
 				// guaranteed it is non-negative, so the digestion can never
 				// create or destroy mass.
-				auto const residuePerKgFeed = 1.0 + processor.authored.oxygenPerKgFeedKg
+				auto const residuePerKgFeedRaw = 1.0 + processor.authored.oxygenPerKgFeedKg
 					+ processor.authored.processWaterPerKgFeedKg - nutrientPerKgFeed
 					- recoveredWaterPerKgFeed - processor.authored.co2PerKgFeedKg;
+				// #601: drifted feed can be richer in recoverable nutrient
+				// than the authored material the declared balance was sized
+				// for. If the declared outputs would exceed the declared
+				// inputs, the digestion cannot run on this feed without
+				// creating mass: refuse the stage whole rather than book a
+				// negative residue.
+				if (residuePerKgFeedRaw < -StationBalanceTolerance)
+				{
+					processor.lastBlockReason = "feed store '" + feed.authored.id
+						+ "' material is too nutrient-rich for the declared digestion balance: the outputs would exceed the inputs";
+					processor.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				auto const residuePerKgFeed = std::max(0.0, residuePerKgFeedRaw);
+				// Hold energy-depleted material before spending power or feed.
+				auto const feedEnergyPerKg = dryPerKgFeed * composition.energyKJPerKgDry;
+				if (processor.authored.reactionHeatKJPerKgFeed > feedEnergyPerKg
+					+ StationBalanceTolerance * std::max(1.0, std::abs(feedEnergyPerKg)))
+				{
+					processor.lastBlockReason = "feed store '" + feed.authored.id
+						+ "' actual chemical energy cannot fund the declared reaction heat";
+					processor.status = StationTransferStatus::Rejected;
+					continue;
+				}
 				auto const drawableFeedUnits = std::max(0.0,
 					qualified[processor.feedStoreIndex] - feed.authored.protectedReserve);
 				auto const drawableOxygenUnits = std::max(0.0,
@@ -10274,6 +10531,17 @@ namespace core
 				auto const residueUnits = std::min(kgToMass(residue.authored.unit,
 					feedActualKg * residuePerKgFeed), residueHeadroomUnits);
 				auto const residueActualKg = massToKg(residue.authored.unit, residueUnits);
+				// #601: measure the feed and consumable draws against the
+				// stores as they stand before the draws, so the digested
+				// material leaves as the blend it actually is.
+				auto const feedDrawnActual = drawStoreActual(processor.feedStoreIndex,
+					feedStoreKgBefore, feedActualKg);
+				auto const processorConsumableActual = drawStoreActual(
+					processor.consumableStoreIndex,
+					massToKg(consumable.authored.unit,
+						qualified[processor.consumableStoreIndex]
+							+ unqualified[processor.consumableStoreIndex]),
+					massToKg(consumable.authored.unit, consumableUnits));
 				qualified[processor.feedStoreIndex] -= feedUnits;
 				flowOut[processor.feedStoreIndex] += feedUnits;
 				qualified[processor.oxygenStoreIndex] -= oxygenUnits;
@@ -10304,14 +10572,18 @@ namespace core
 				// is tracked in the processor's own per-constituent ledger;
 				// at the station boundary the whole feed constituent set is
 				// booked as leaving the compound stores, never created and
-				// never silently destroyed.
-				ConstituentLedger netChange;
-				addComposition(netChange, composition, feedActualKg, -1.0);
-				if (consumable.authored.composition)
-					addComposition(netChange, *consumable.authored.composition,
-						massToKg(consumable.authored.unit, consumableUnits), -1.0);
-				for (auto const& entry : netChange)
-					stagedLoss[entry.first] -= entry.second;
+				// never silently destroyed — and what leaves is the actual
+				// blend the feed store held, not the authored relabel
+				// (#601).
+				addLedger(stagedLoss, feedDrawnActual, 1.0);
+				addLedger(stagedLoss, processorConsumableActual, 1.0);
+				// #601: remember the actual energy and bound nitrogen the
+				// digested feed carried, so the reaction-heat and
+				// recovery caps audit against real material.
+				processor.feedChemicalEnergyConsumedKJ += feedActualKg * dryPerKgFeed
+					* composition.energyKJPerKgDry;
+				processor.feedBoundNitrogenConsumedKg += feedActualKg * dryPerKgFeed
+					* composition.nutrientNitrogen;
 				// Energy: the electrical dose plus the exothermic heat the
 				// products do not retain leave through the sink, once and
 				// nowhere else.
@@ -10618,11 +10890,33 @@ namespace core
 				// Move the growth flows: CO2 out of the compartment, O2 in,
 				// irrigation water and every nutrient out of their own
 				// stores above their protected reserves, and the dry mass
-				// onto the Living biomass ledger.
+				// onto the Living biomass ledger. Each uptake draw spends
+				// the material the store actually holds, drift included
+				// (#601), measured before the draw.
 				compartment.carbonDioxideKg -= co2DrawnKg;
 				compartment.cropCarbonDioxideDrawnKg += co2DrawnKg;
 				compartment.oxygenKg += oxygenReleasedKg;
 				compartment.cropOxygenAddedKg += oxygenReleasedKg;
+				auto const uptakeActual = std::array<ConstituentLedger, 5>{
+					drawStoreActual(crop.waterStoreIndex,
+						massToKg(water.authored.unit, qualified[crop.waterStoreIndex]
+							+ unqualified[crop.waterStoreIndex]), irrigationActualKg),
+					drawStoreActual(crop.nitrogenStoreIndex,
+						massToKg(nitrogen.authored.unit, qualified[crop.nitrogenStoreIndex]
+							+ unqualified[crop.nitrogenStoreIndex]),
+						massToKg(nitrogen.authored.unit, nitrogenUnits)),
+					drawStoreActual(crop.phosphorusStoreIndex,
+						massToKg(phosphorus.authored.unit, qualified[crop.phosphorusStoreIndex]
+							+ unqualified[crop.phosphorusStoreIndex]),
+						massToKg(phosphorus.authored.unit, phosphorusUnits)),
+					drawStoreActual(crop.potassiumStoreIndex,
+						massToKg(potassium.authored.unit, qualified[crop.potassiumStoreIndex]
+							+ unqualified[crop.potassiumStoreIndex]),
+						massToKg(potassium.authored.unit, potassiumUnits)),
+					drawStoreActual(crop.mineralsStoreIndex,
+						massToKg(minerals.authored.unit, qualified[crop.mineralsStoreIndex]
+							+ unqualified[crop.mineralsStoreIndex]),
+						massToKg(minerals.authored.unit, mineralsUnits))};
 				qualified[crop.waterStoreIndex] -= irrigationUnits;
 				flowOut[crop.waterStoreIndex] += irrigationUnits;
 				qualified[crop.nitrogenStoreIndex] -= nitrogenUnits;
@@ -10639,26 +10933,12 @@ namespace core
 				stagedUnitLoss[potassium.authored.unit] += potassiumUnits;
 				stagedUnitLoss[minerals.authored.unit] += mineralsUnits;
 				// Constituent boundary: what the uptake stores carry as
-				// declared compound material leaves the compound-material
-				// world with the draw, exactly like every other consumer;
-				// plain stores contribute nothing to the ledger.
-				ConstituentLedger netChange;
-				if (water.authored.composition)
-					addComposition(netChange, *water.authored.composition, irrigationActualKg, -1.0);
-				if (nitrogen.authored.composition)
-					addComposition(netChange, *nitrogen.authored.composition,
-						massToKg(nitrogen.authored.unit, nitrogenUnits), -1.0);
-				if (phosphorus.authored.composition)
-					addComposition(netChange, *phosphorus.authored.composition,
-						massToKg(phosphorus.authored.unit, phosphorusUnits), -1.0);
-				if (potassium.authored.composition)
-					addComposition(netChange, *potassium.authored.composition,
-						massToKg(potassium.authored.unit, potassiumUnits), -1.0);
-				if (minerals.authored.composition)
-					addComposition(netChange, *minerals.authored.composition,
-						massToKg(minerals.authored.unit, mineralsUnits), -1.0);
-				for (auto const& entry : netChange)
-					stagedLoss[entry.first] -= entry.second;
+				// compound material leaves the compound-material world
+				// with the draw exactly like every other consumer, as the
+				// actual blend rather than the declaration (#601); plain
+				// stores contribute nothing to the ledger.
+				for (auto const& drawn : uptakeActual)
+					addLedger(stagedLoss, drawn, 1.0);
 				crop.livingBiomassKg += growthKg;
 				// The living constituent inventory (#571): the organic share
 				// of the growth is fixed carbon, and every bound nutrient is
@@ -10749,8 +11029,25 @@ namespace core
 							qualified[crop.wasteStoreIndex] += routedUnits;
 							flowIn[crop.wasteStoreIndex] += routedUnits;
 							stagedUnitHarvested[waste.authored.unit] += routedUnits;
+							// #601: the store receives the residue as
+							// the material it actually is. The harvest
+							// ledger books the actual constituents and
+							// chemical energy that arrived, and the
+							// destination store carries the difference
+							// between the actual material and its own
+							// declaration as drift, so downstream
+							// consumers draw the real blend instead of
+							// the authored composition.
+							auto const routedConstituents = scaledConstituents(
+								residueConstituents, residueKg > 0.0
+									? routedKg / residueKg : 0.0);
+							auto const routedActual = biologicalLedgerOf(routedConstituents,
+								chemicalEnergyKJPerKgOrganic(composition));
 							if (waste.authored.composition)
-								addComposition(stagedConstituentHarvested, composition, routedKg, 1.0);
+							{
+								addLedger(stagedConstituentHarvested, routedActual, 1.0);
+								depositStoreDrift(crop.wasteStoreIndex, routedKg, routedActual);
+							}
 						}
 					}
 					crop.livingBiomassKg -= residueKg;
@@ -10830,16 +11127,35 @@ namespace core
 						qualified[crop.foodStoreIndex] += foodAcceptedUnits;
 						flowIn[crop.foodStoreIndex] += foodAcceptedUnits;
 						stagedUnitHarvested[food.authored.unit] += foodAcceptedUnits;
+						// #601: the yield enters the store as the actual
+						// material it is; the harvest ledger and the
+						// store's drift carry the real constituents and
+						// chemical energy, not the destination's
+						// declaration.
+						auto const foodActual = biologicalLedgerOf(
+							scaledConstituents(removedConstituents, harvestedKg > 0.0
+								? foodAcceptedKg / harvestedKg : 0.0),
+							chemicalEnergyKJPerKgOrganic(composition));
 						if (food.authored.composition)
-							addComposition(stagedConstituentHarvested, composition, foodAcceptedKg, 1.0);
+						{
+							addLedger(stagedConstituentHarvested, foodActual, 1.0);
+							depositStoreDrift(crop.foodStoreIndex, foodAcceptedKg, foodActual);
+						}
 					}
 					if (wasteAcceptedUnits > 0.0)
 					{
 						qualified[crop.wasteStoreIndex] += wasteAcceptedUnits;
 						flowIn[crop.wasteStoreIndex] += wasteAcceptedUnits;
 						stagedUnitHarvested[waste.authored.unit] += wasteAcceptedUnits;
+						auto const wasteYieldActual = biologicalLedgerOf(
+							scaledConstituents(removedConstituents, harvestedKg > 0.0
+								? wasteAcceptedKg / harvestedKg : 0.0),
+							chemicalEnergyKJPerKgOrganic(composition));
 						if (waste.authored.composition)
-							addComposition(stagedConstituentHarvested, composition, wasteAcceptedKg, 1.0);
+						{
+							addLedger(stagedConstituentHarvested, wasteYieldActual, 1.0);
+							depositStoreDrift(crop.wasteStoreIndex, wasteAcceptedKg, wasteYieldActual);
+						}
 					}
 					crop.livingBiomassKg -= harvestedKg;
 					crop.lastHarvestRequestedKg = requestedKg;
@@ -11170,10 +11486,32 @@ namespace core
 				// stores above their protected reserves, and the dry mass
 				// onto the Living biomass ledger. The compartment books the
 				// algae pathways as its own terms beside the crop pathways.
+				// Each uptake draw spends the material the store actually
+				// holds, drift included (#601), measured before the draw.
 				compartment.carbonDioxideKg -= co2DrawnKg;
 				compartment.algaeCarbonDioxideDrawnKg += co2DrawnKg;
 				compartment.oxygenKg += oxygenReleasedKg;
 				compartment.algaeOxygenAddedKg += oxygenReleasedKg;
+				auto const cultureUptakeActual = std::array<ConstituentLedger, 5>{
+					drawStoreActual(culture.waterStoreIndex,
+						massToKg(water.authored.unit, qualified[culture.waterStoreIndex]
+							+ unqualified[culture.waterStoreIndex]), makeupWaterActualKg),
+					drawStoreActual(culture.nitrogenStoreIndex,
+						massToKg(nitrogen.authored.unit, qualified[culture.nitrogenStoreIndex]
+							+ unqualified[culture.nitrogenStoreIndex]),
+						massToKg(nitrogen.authored.unit, nitrogenUnits)),
+					drawStoreActual(culture.phosphorusStoreIndex,
+						massToKg(phosphorus.authored.unit, qualified[culture.phosphorusStoreIndex]
+							+ unqualified[culture.phosphorusStoreIndex]),
+						massToKg(phosphorus.authored.unit, phosphorusUnits)),
+					drawStoreActual(culture.potassiumStoreIndex,
+						massToKg(potassium.authored.unit, qualified[culture.potassiumStoreIndex]
+							+ unqualified[culture.potassiumStoreIndex]),
+						massToKg(potassium.authored.unit, potassiumUnits)),
+					drawStoreActual(culture.mineralsStoreIndex,
+						massToKg(minerals.authored.unit, qualified[culture.mineralsStoreIndex]
+							+ unqualified[culture.mineralsStoreIndex]),
+						massToKg(minerals.authored.unit, mineralsUnits))};
 				qualified[culture.waterStoreIndex] -= makeupWaterUnits;
 				flowOut[culture.waterStoreIndex] += makeupWaterUnits;
 				qualified[culture.nitrogenStoreIndex] -= nitrogenUnits;
@@ -11190,26 +11528,12 @@ namespace core
 				stagedUnitLoss[potassium.authored.unit] += potassiumUnits;
 				stagedUnitLoss[minerals.authored.unit] += mineralsUnits;
 				// Constituent boundary: what the uptake stores carry as
-				// declared compound material leaves the compound-material
-				// world with the draw, exactly like every other consumer;
-				// plain stores contribute nothing to the ledger.
-				ConstituentLedger netChange;
-				if (water.authored.composition)
-					addComposition(netChange, *water.authored.composition, makeupWaterActualKg, -1.0);
-				if (nitrogen.authored.composition)
-					addComposition(netChange, *nitrogen.authored.composition,
-						massToKg(nitrogen.authored.unit, nitrogenUnits), -1.0);
-				if (phosphorus.authored.composition)
-					addComposition(netChange, *phosphorus.authored.composition,
-						massToKg(phosphorus.authored.unit, phosphorusUnits), -1.0);
-				if (potassium.authored.composition)
-					addComposition(netChange, *potassium.authored.composition,
-						massToKg(potassium.authored.unit, potassiumUnits), -1.0);
-				if (minerals.authored.composition)
-					addComposition(netChange, *minerals.authored.composition,
-						massToKg(minerals.authored.unit, mineralsUnits), -1.0);
-				for (auto const& entry : netChange)
-					stagedLoss[entry.first] -= entry.second;
+				// compound material leaves the compound-material world
+				// with the draw exactly like every other consumer, as the
+				// actual blend rather than the declaration (#601); plain
+				// stores contribute nothing to the ledger.
+				for (auto const& drawn : cultureUptakeActual)
+					addLedger(stagedLoss, drawn, 1.0);
 				culture.livingBiomassKg += growthKg;
 				// The living constituent inventory (#571): the organic share
 				// of the growth is fixed carbon, and every bound nutrient is
@@ -11295,8 +11619,20 @@ namespace core
 							qualified[culture.wasteStoreIndex] += routedUnits;
 							flowIn[culture.wasteStoreIndex] += routedUnits;
 							stagedUnitHarvested[waste.authored.unit] += routedUnits;
+							// #601: the store receives the residue as
+							// the material it actually is; the harvest
+							// ledger and the store's drift carry the
+							// real constituents and chemical energy.
+							auto const routedConstituents = scaledConstituents(
+								residueConstituents, residueKg > 0.0
+									? routedKg / residueKg : 0.0);
+							auto const routedActual = biologicalLedgerOf(routedConstituents,
+								chemicalEnergyKJPerKgOrganic(composition));
 							if (waste.authored.composition)
-								addComposition(stagedConstituentHarvested, composition, routedKg, 1.0);
+							{
+								addLedger(stagedConstituentHarvested, routedActual, 1.0);
+								depositStoreDrift(culture.wasteStoreIndex, routedKg, routedActual);
+							}
 						}
 					}
 					culture.livingBiomassKg -= residueKg;
@@ -11378,24 +11714,50 @@ namespace core
 						qualified[culture.foodStoreIndex] += foodAcceptedUnits;
 						flowIn[culture.foodStoreIndex] += foodAcceptedUnits;
 						stagedUnitHarvested[food.authored.unit] += foodAcceptedUnits;
+						// #601: the yield enters as the actual material;
+						// the ledger and the store's drift carry the real
+						// constituents and chemical energy.
+						auto const foodActual = biologicalLedgerOf(
+							scaledConstituents(removedConstituents, harvestedKg > 0.0
+								? foodAcceptedKg / harvestedKg : 0.0),
+							chemicalEnergyKJPerKgOrganic(composition));
 						if (food.authored.composition)
-							addComposition(stagedConstituentHarvested, composition, foodAcceptedKg, 1.0);
+						{
+							addLedger(stagedConstituentHarvested, foodActual, 1.0);
+							depositStoreDrift(culture.foodStoreIndex, foodAcceptedKg, foodActual);
+						}
 					}
 					if (recoveryAcceptedUnits > 0.0)
 					{
 						qualified[culture.recoveryStoreIndex] += recoveryAcceptedUnits;
 						flowIn[culture.recoveryStoreIndex] += recoveryAcceptedUnits;
 						stagedUnitHarvested[recovery.authored.unit] += recoveryAcceptedUnits;
+						auto const recoveryActual = biologicalLedgerOf(
+							scaledConstituents(removedConstituents, harvestedKg > 0.0
+								? recoveryAcceptedKg / harvestedKg : 0.0),
+							chemicalEnergyKJPerKgOrganic(composition));
 						if (recovery.authored.composition)
-							addComposition(stagedConstituentHarvested, composition, recoveryAcceptedKg, 1.0);
+						{
+							addLedger(stagedConstituentHarvested, recoveryActual, 1.0);
+							depositStoreDrift(culture.recoveryStoreIndex, recoveryAcceptedKg,
+								recoveryActual);
+						}
 					}
 					if (wasteAcceptedUnits > 0.0)
 					{
 						qualified[culture.wasteStoreIndex] += wasteAcceptedUnits;
 						flowIn[culture.wasteStoreIndex] += wasteAcceptedUnits;
 						stagedUnitHarvested[waste.authored.unit] += wasteAcceptedUnits;
+						auto const wasteYieldActual = biologicalLedgerOf(
+							scaledConstituents(removedConstituents, harvestedKg > 0.0
+								? wasteAcceptedKg / harvestedKg : 0.0),
+							chemicalEnergyKJPerKgOrganic(composition));
 						if (waste.authored.composition)
-							addComposition(stagedConstituentHarvested, composition, wasteAcceptedKg, 1.0);
+						{
+							addLedger(stagedConstituentHarvested, wasteYieldActual, 1.0);
+							depositStoreDrift(culture.wasteStoreIndex, wasteAcceptedKg,
+								wasteYieldActual);
+						}
 					}
 					culture.livingBiomassKg -= harvestedKg;
 					culture.lastHarvestRequestedKg = requestedKg;
@@ -11713,6 +12075,23 @@ namespace core
 					}
 					capHeadroom(crew.urineStoreIndex, urineRequested, "urine");
 					capHeadroom(crew.organicWasteStoreIndex, wasteRequested, "organic waste");
+					ConstituentLedger funded, required;
+					addComposition(funded, storeComposition(crew.foodStoreIndex),
+						massToKg(stores[crew.foodStoreIndex].authored.unit, crew.authored.foodPerCrewPerS), 1.0);
+					addComposition(funded, storeComposition(crew.waterStoreIndex),
+						massToKg(stores[crew.waterStoreIndex].authored.unit, crew.authored.waterPerCrewPerS), 1.0);
+					addComposition(required, *stores[crew.urineStoreIndex].authored.composition,
+						massToKg(stores[crew.urineStoreIndex].authored.unit, crew.authored.urinePerCrewPerS), 1.0);
+					addComposition(required, *stores[crew.organicWasteStoreIndex].authored.composition,
+						massToKg(stores[crew.organicWasteStoreIndex].authored.unit, crew.authored.organicWastePerCrewPerS), 1.0);
+					required["water"] += crew.authored.moisturePerCrewKgPerS;
+					required["energy"] += crew.authored.metabolicHeatPerCrewKW;
+					auto const missing = unfundedConstituent(funded, required);
+					if (!missing.empty())
+					{
+						scale = 0.0;
+						limiter = "actual feed cannot fund declared crew returns/heat: " + missing;
+					}
 					if (!(scale > 0.0)) scale = 0.0;
 					if (scale > 1.0) scale = 1.0;
 					// #556: apply the binding scale per pathway with a min
@@ -11766,10 +12145,27 @@ namespace core
 					stagedUnitLoss[stores[crew.urineStoreIndex].authored.unit] -= urineActual;
 					stagedUnitLoss[stores[crew.organicWasteStoreIndex].authored.unit] -= wasteActual;
 					ConstituentLedger netChange;
-					addComposition(netChange, *stores[crew.foodStoreIndex].authored.composition,
-						massToKg(stores[crew.foodStoreIndex].authored.unit, foodActual), -1.0);
-					addComposition(netChange, *stores[crew.waterStoreIndex].authored.composition,
-						massToKg(stores[crew.waterStoreIndex].authored.unit, waterActual), -1.0);
+					// #601: the crew eats and drinks the material the
+					// stores actually hold, drift included, measured
+					// before the draw; the metabolic returns are the
+					// declared returns of the metabolism and enter as
+					// the destination stores' own material.
+					auto const crewFoodKg = massToKg(
+						stores[crew.foodStoreIndex].authored.unit, foodActual);
+					auto const crewFoodDrawn = drawStoreActual(crew.foodStoreIndex,
+						massToKg(stores[crew.foodStoreIndex].authored.unit,
+							qualified[crew.foodStoreIndex]
+								+ unqualified[crew.foodStoreIndex])
+							+ crewFoodKg, crewFoodKg);
+					addLedger(netChange, crewFoodDrawn, -1.0);
+					auto const crewWaterKg = massToKg(
+						stores[crew.waterStoreIndex].authored.unit, waterActual);
+					auto const crewWaterDrawn = drawStoreActual(crew.waterStoreIndex,
+						massToKg(stores[crew.waterStoreIndex].authored.unit,
+							qualified[crew.waterStoreIndex]
+								+ unqualified[crew.waterStoreIndex])
+							+ crewWaterKg, crewWaterKg);
+					addLedger(netChange, crewWaterDrawn, -1.0);
 					addComposition(netChange, *stores[crew.urineStoreIndex].authored.composition,
 						massToKg(stores[crew.urineStoreIndex].authored.unit, urineActual), 1.0);
 					addComposition(netChange, *stores[crew.organicWasteStoreIndex].authored.composition,
@@ -12492,10 +12888,19 @@ namespace core
 				auto const headroom = destination.authored.capacity
 					- (qualified[transfer.destinationIndex] + unqualified[transfer.destinationIndex]);
 				auto const completed = std::min({requested, drawable, headroom});
+				// #601: the endpoints declare the same material (the
+				// configuration refuses any other transfer), so the
+				// moved share of the source's actual-constituent drift
+				// rides with the material instead of being left behind
+				// to mislabel the destination.
+				auto const transferSourceKgBefore = massToKg(source.authored.unit,
+					qualified[transfer.sourceIndex] + unqualified[transfer.sourceIndex]);
 				qualified[transfer.sourceIndex] -= completed;
 				qualified[transfer.destinationIndex] += completed;
 				flowOut[transfer.sourceIndex] += completed;
 				flowIn[transfer.destinationIndex] += completed;
+				moveStoreDrift(transfer.sourceIndex, transfer.destinationIndex,
+					transferSourceKgBefore, massToKg(source.authored.unit, completed));
 				transfer.lastRequested = requested;
 				transfer.lastCompleted = completed;
 				transfer.lastUnmet = requested - completed;
@@ -12542,6 +12947,19 @@ namespace core
 							+ "' headroom limits throughput";
 					}
 				}
+				ConstituentLedger funded, required;
+				for (auto const& flow : conversion.inputs)
+					addComposition(funded, storeComposition(flow.storeIndex),
+						massToKg(stores[flow.storeIndex].authored.unit, flow.ratePerSecond), 1.0);
+				for (auto const& flow : conversion.outputs)
+					addComposition(required, *stores[flow.storeIndex].authored.composition,
+						massToKg(stores[flow.storeIndex].authored.unit, flow.ratePerSecond), 1.0);
+				auto const missing = unfundedConstituent(funded, required);
+				if (!missing.empty())
+				{
+					scale = 0.0;
+					limiter = "actual feed cannot fund declared conversion outputs: " + missing;
+				}
 				if (!(scale > 0.0))
 				{
 					for (auto& flow : conversion.inputs)
@@ -12576,6 +12994,15 @@ namespace core
 					auto const drawable = std::max(0.0, qualified[flow.storeIndex]
 						- stores[flow.storeIndex].authored.protectedReserve);
 					auto const completed = std::min(requested * scale, drawable);
+					// #601: the conversion spends the input store's actual
+					// blend, measured before the draw; the drift it
+					// consumes is carried into the declared-loss side of
+					// the ledger with the material.
+					auto const conversionDrawnActual = drawStoreActual(flow.storeIndex,
+						massToKg(stores[flow.storeIndex].authored.unit,
+							qualified[flow.storeIndex]
+								+ unqualified[flow.storeIndex]),
+						massToKg(stores[flow.storeIndex].authored.unit, completed));
 					qualified[flow.storeIndex] -= completed;
 					// Conversion draws and deliveries are store outflow/inflow
 					// just like transfers and equipment exchanges: the public
@@ -12584,8 +13011,7 @@ namespace core
 					flowOut[flow.storeIndex] += completed;
 					flow.lastRequested = requested;
 					flow.lastCompleted = completed;
-					addComposition(netChange, *stores[flow.storeIndex].authored.composition,
-						massToKg(stores[flow.storeIndex].authored.unit, completed), -1.0);
+					addLedger(netChange, conversionDrawnActual, -1.0);
 				}
 				for (auto& flow : conversion.outputs)
 				{
@@ -12654,13 +13080,20 @@ namespace core
 			// constituent of the compound stores, plus the cumulative
 			// declared conversion losses, must account for the starting
 			// inventory. A residual beyond tolerance is a violation, never
-			// silent creation or deletion of material.
+			// silent creation or deletion of material. The store side is
+			// the actual material — the authored declaration plus the
+			// per-store drift of everything really deposited (#601) —
+			// so the boundary closes on what the stores actually hold,
+			// not on a relabelled composition.
 			ConstituentLedger currentConstituents;
 			for (size_t index = 0; index < stores.size(); ++index)
+			{
 				if (stores[index].authored.composition)
 					addComposition(currentConstituents, *stores[index].authored.composition,
 						massToKg(stores[index].authored.unit,
 							qualified[index] + unqualified[index]), 1.0);
+				addLedger(currentConstituents, stagedDrift[index], 1.0);
+			}
 			for (auto const& [constituent, starting] : startingConstituents)
 			{
 				auto const residual = (currentConstituents.count(constituent)
@@ -13660,15 +14093,17 @@ namespace core
 				if (!std::isfinite(energyResidual) || std::abs(energyResidual) > energyLedgerBound)
 					return violation = where
 						+ "supplied/released/routed energy ledger does not close within tolerance", false;
-				auto const& composition = *stores[processor.feedStoreIndex].authored.composition;
-				auto const feedEnergyKJ = processor.feedConsumedKg
-					* (1.0 - composition.moisture) * composition.energyKJPerKgDry;
+				// #601: the caps audit against the chemical energy and
+				// bound nitrogen the digested feed actually carried,
+				// accumulated at digestion from the feed store's actual
+				// blend. The feed store's authored composition no longer
+				// describes drifted material, so it is not the cap.
+				auto const feedEnergyKJ = processor.feedChemicalEnergyConsumedKJ;
 				auto const energyCapBound = StationBalanceTolerance * std::max(1.0, std::abs(feedEnergyKJ));
 				if (processor.reactionHeatKJ > feedEnergyKJ + energyCapBound)
 					return violation = where
-						+ "released more reaction heat than the consumed feedstock's declared chemical energy", false;
-				auto const boundNutrientKJ = processor.feedConsumedKg
-					* (1.0 - composition.moisture) * composition.nutrientNitrogen;
+						+ "released more reaction heat than the consumed feedstock's actual chemical energy", false;
+				auto const boundNutrientKJ = processor.feedBoundNitrogenConsumedKg;
 				auto const nutrientCapBound = StationBalanceTolerance * std::max(1.0, std::abs(boundNutrientKJ));
 				if (processor.nitrogenRecoveredKg > boundNutrientKJ + nutrientCapBound)
 					return violation = where
@@ -14003,6 +14438,7 @@ namespace core
 				stores[index].currentUnqualified = unqualified[index];
 				stores[index].lastTickIn = flowIn[index];
 				stores[index].lastTickOut = flowOut[index];
+				stores[index].constituentDrift = stagedDrift[index];
 			}
 			constituentLoss = stagedLoss;
 			unitLoss = stagedUnitLoss;
@@ -14673,7 +15109,8 @@ namespace core
 		mImpl->settings = settings; mImpl->snapshot.enabled = settings.enabled;
 		for (auto const& store : settings.stores)
 		{
-			mImpl->stores.push_back({store, store.startingQualified, store.startingUnqualified, 0.0, 0.0});
+			mImpl->stores.push_back({store, store.startingQualified, store.startingUnqualified,
+				0.0, 0.0, {}});
 			mImpl->startingTotals[store.unit] += store.startingQualified + store.startingUnqualified;
 			// #419: the endurance window starts anchored at the authored t = 0
 			// drawable, so the first observation window measures from the
@@ -15493,17 +15930,29 @@ namespace core
 		ConstituentLedger currentConstituents;
 		for (auto const& store : mImpl->stores)
 		{
+			// #601: publish the store's actual constituent inventory -
+			// the authored composition at the current mass plus the
+			// drift of everything really deposited - so a caller can
+			// assert what the store actually holds, not only what its
+			// declaration says it should.
+			auto actualConstituents = ConstituentLedger{};
+			if (store.authored.composition)
+			{
+				addComposition(actualConstituents, *store.authored.composition,
+					massToKg(store.authored.unit,
+						store.currentQualified + store.currentUnqualified), 1.0);
+				addLedger(actualConstituents, store.constituentDrift, 1.0);
+			}
 			result.stores.push_back({store.authored.id, store.authored.unit,
 				store.authored.capacity, store.authored.startingQualified,
 				store.authored.startingUnqualified, store.authored.protectedReserve,
 				store.currentQualified, store.currentUnqualified,
 				store.lastTickIn, store.lastTickOut, store.authored.composition,
-				store.authored.hazardClass});
+				store.authored.hazardClass,
+				store.authored.composition ? actualConstituents
+					: std::map<std::string, double>{}});
 			currentTotals[store.authored.unit] += store.currentQualified + store.currentUnqualified;
-			if (store.authored.composition)
-				addComposition(currentConstituents, *store.authored.composition,
-					massToKg(store.authored.unit,
-						store.currentQualified + store.currentUnqualified), 1.0);
+			addLedger(currentConstituents, actualConstituents, 1.0);
 		}
 		for (auto const index : mImpl->transferOrder)
 		{

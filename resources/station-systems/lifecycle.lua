@@ -339,6 +339,145 @@ local function toKg(unit, mass)
     return mass
 end
 
+-- #601: a compound store's material is its authored composition plus
+-- the drift of everything that really entered it. The drift is the
+-- difference between the actual constituents and what the authored
+-- declaration would represent at the store's current mass; it is
+-- created by deposits whose material differs from the destination's
+-- declaration (a harvest yield, a dead residue) and it travels with
+-- the material: every draw takes its proportional share of the actual
+-- blend, never the declared mix.
+
+-- Add one ledger into another.
+local function addLedger(target, source, sign)
+    for key, value in pairs(source) do
+        target[key] = (target[key] or 0) + sign * value
+    end
+end
+
+-- The constituent ledger a declared composition carries at a wet mass,
+-- returned instead of added in place.
+local function compositionLedgerOf(composition, wetMassKg, sign)
+    local ledger = {}
+    addConstituents(ledger, composition, wetMassKg, sign)
+    return ledger
+end
+
+-- The constituent ledger a routed biological mass actually carries
+-- (#601): the population's tracked dry constituents plus the chemical
+-- energy the organic share carries on the organic basis. Biological
+-- residue is dry material, so it brings no water.
+local function biologicalLedgerOf(inventory, energyKJPerKgOrganic)
+    local ledger = {}
+    ledger.water = 0
+    ledger.nutrientNitrogen = inventory.nutrientNitrogenKg
+    ledger.atmosphericNitrogen = 0
+    ledger.phosphorus = inventory.phosphorusKg
+    ledger.potassium = inventory.potassiumKg
+    ledger.otherMinerals = inventory.mineralsKg
+    ledger.dryOrganics = inventory.organicKg
+    ledger.energy = inventory.organicKg * energyKJPerKgOrganic
+    return ledger
+end
+
+-- The composition a compound store's material actually has: the
+-- authored declaration plus the drift, renormalised to the store's
+-- current mass. With no drift this is exactly the authored
+-- composition; with drift the fractions describe the blend that is
+-- really in the store, so a process sizing its yields from the store's
+-- material tracks the actual constituents instead of the original
+-- declaration.
+local function effectiveCompositionOf(authored, totalKg, drift)
+    if drift == nil or next(drift) == nil or totalKg <= 0 then return authored end
+    local blended = compositionLedgerOf(authored, totalKg, 1)
+    for key, value in pairs(drift) do
+        blended[key] = (blended[key] or 0) + value
+    end
+    local result = {}
+    for key, value in pairs(authored) do result[key] = value end
+    local moisture = math.max(0, math.min(1, (blended.water or 0) / totalKg))
+    result.moisture = moisture
+    local dry = math.max(0, totalKg * (1 - moisture))
+    if dry > 0 then
+        result.nutrientNitrogen = math.max(0, (blended.nutrientNitrogen or 0) / dry)
+        result.atmosphericNitrogen = math.max(0, (blended.atmosphericNitrogen or 0) / dry)
+        result.phosphorus = math.max(0, (blended.phosphorus or 0) / dry)
+        result.potassium = math.max(0, (blended.potassium or 0) / dry)
+        result.otherMinerals = math.max(0, (blended.otherMinerals or 0) / dry)
+        result.energyKJPerKgDry = math.max(0, (blended.energy or 0) / dry)
+    else
+        result.nutrientNitrogen = 0
+        result.atmosphericNitrogen = 0
+        result.phosphorus = 0
+        result.potassium = 0
+        result.otherMinerals = 0
+        result.energyKJPerKgDry = 0
+    end
+    return result
+end
+
+local function storeComposition(store)
+    return effectiveCompositionOf(store.composition,
+        toKg(store.unit, store.qualified + store.unqualified), store.drift)
+end
+
+local function unfundedConstituent(funded, required)
+    for key, amount in pairs(required) do
+        local available = funded[key] or 0
+        if amount > available + BALANCE_TOLERANCE * math.max(1, math.abs(available)) then
+            return key
+        end
+    end
+    return nil
+end
+
+-- The actual constituents carried by a draw of drawnKg from a store:
+-- the authored composition's share plus the drawn share of the store's
+-- drift. The drawn share leaves the store with the material. Call with
+-- the store's total mass in kg measured BEFORE the draw is applied.
+local function drawStoreActual(store, totalKgBefore, drawnKg)
+    local actual = {}
+    if store.composition then
+        addConstituents(actual, store.composition, drawnKg, 1)
+    end
+    local drift = store.drift
+    if drift ~= nil and next(drift) ~= nil and totalKgBefore > 0 and drawnKg > 0 then
+        local share = math.min(1, drawnKg / totalKgBefore)
+        for key, value in pairs(drift) do
+            actual[key] = (actual[key] or 0) + share * value
+            drift[key] = value * (1 - share)
+        end
+    end
+    return actual
+end
+
+-- The drift a deposit of actual material leaves in a compound store:
+-- the difference between what actually arrived and what the store's
+-- authored declaration would have represented at that mass. Plain
+-- stores sit outside the constituent ledger and record nothing.
+local function depositStoreDrift(store, depositedKg, actual)
+    if store.composition == nil then return end
+    if store.drift == nil then store.drift = {} end
+    addLedger(store.drift, actual, 1)
+    addLedger(store.drift, compositionLedgerOf(store.composition, depositedKg, 1), -1)
+end
+
+-- Move the drift of a same-material mass between two stores: the moved
+-- share of the source's drift rides with the material. Used for
+-- store-to-store moves that book nothing at the constituent boundary
+-- because the endpoints declare the same composition (transfers,
+-- maintenance consumption).
+local function moveStoreDrift(source, destination, sourceKgBefore, movedKg)
+    local drift = source.drift
+    if drift == nil or next(drift) == nil or sourceKgBefore <= 0 or movedKg <= 0 then return end
+    if destination.drift == nil then destination.drift = {} end
+    local share = math.min(1, movedKg / sourceKgBefore)
+    for key, value in pairs(drift) do
+        destination.drift[key] = (destination.drift[key] or 0) + share * value
+        drift[key] = value * (1 - share)
+    end
+end
+
 -- Inverse of toKg: a magnitude expressed in kilograms rendered in a
 -- store's own declared mass unit (#402, where the recovery rates are
 -- authored in kg/s against stores that may be grams).
@@ -512,6 +651,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             unqualified = store.unqualified,
             protected_reserve = protected,
             composition = composition,
+            -- #601: the store's actual-constituent drift ledger.
+            drift = {},
         }
         by_id[store.id] = object.stores[index]
         store_index_by_id[store.id] = index
@@ -2767,6 +2908,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             nitrogenRecoveredTotal = 0, phosphorusRecoveredTotal = 0,
             potassiumRecoveredTotal = 0, mineralsRecoveredTotal = 0,
             energySuppliedKJ = 0, reactionHeatKJ = 0, heatRoutedKJ = 0,
+            -- #601: the chemical energy and bound nitrogen the digested
+            -- feed actually carried, accumulated at digestion from the
+            -- feed store's actual blend; the caps audit against these.
+            feedChemicalEnergyConsumedKJ = 0, feedBoundNitrogenConsumedKg = 0,
         }
     end
     -- Crop production contracts (#409), mirroring the host validation:
@@ -3400,6 +3545,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 addConstituents(totals, store.composition,
                     toKg(store.unit, store.qualified + store.unqualified), 1)
             end
+            -- #601: the store side of the boundary is the actual
+            -- material - the authored declaration plus the per-store
+            -- drift of everything really deposited.
+            addLedger(totals, store.drift or {}, 1)
         end
         for constituent, starting in pairs(self.starting_constituents) do
             local residual = (totals[constituent] or 0)
@@ -3602,6 +3751,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             assert(spent <= requirement.store.qualified
                                 + BALANCE_TOLERANCE * math.max(1, spent),
                                 'maintenance spend exceeds the source store inventory')
+                            local spentSourceKgBefore = toKg(requirement.store.unit,
+                                requirement.store.qualified + requirement.store.unqualified)
                             requirement.store.qualified = requirement.store.qualified - spent
                             local waste = job.wasteStore
                             assert(waste ~= nil,
@@ -3610,6 +3761,14 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                                 <= waste.capacity + BALANCE_TOLERANCE * math.max(1, spent),
                                 'maintenance waste booking exceeds the waste store capacity')
                             waste.qualified = waste.qualified + spent
+                            -- #601: the consumed material keeps its
+                            -- actual makeup on the way into waste:
+                            -- validation pins the waste store to the
+                            -- requirement store's declared
+                            -- composition, so any drift the material
+                            -- really carries rides with it.
+                            moveStoreDrift(requirement.store, waste,
+                                spentSourceKgBefore, toKg(requirement.store.unit, spent))
                         end
                         requirement.reserved = 0
                     end
@@ -3802,13 +3961,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 assert(ejected >= 0 and unmet >= 0
                     and ejected == ejected and unmet == unmet,
                     "waste ejection amounts are not finite and non-negative")
+                local ejectedKgBefore = toKg(store.unit, store.qualified + store.unqualified)
                 store.qualified = store.qualified - ejected
                 self.unit_loss[store.unit] =
                     (self.unit_loss[store.unit] or 0) + ejected
-                if store.composition then
-                    addConstituents(self.constituent_loss, store.composition,
-                        toKg(store.unit, ejected), 1)
-                end
+                -- #601: what leaves the station is the material the
+                -- store actually holds, drift included, not the
+                -- authored relabel.
+                addLedger(self.constituent_loss,
+                    drawStoreActual(store, ejectedKgBefore, toKg(store.unit, ejected)), 1)
                 ejection.fired = arrival.occurrence
                 ejection.lastEjected = ejected
                 ejection.lastUnmet = unmet
@@ -3920,6 +4081,19 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             end
             capHeadroom(crew.urine, urineRequested, 'urine')
             capHeadroom(crew.organicWaste, wasteRequested, 'organic waste')
+            local funded, required = {}, {}
+            addConstituents(funded, storeComposition(crew.food), toKg(crew.food.unit, crew.foodRate), 1)
+            addConstituents(funded, storeComposition(crew.water), toKg(crew.water.unit, crew.waterRate), 1)
+            addConstituents(required, crew.urine.composition, toKg(crew.urine.unit, crew.urineRate), 1)
+            addConstituents(required, crew.organicWaste.composition,
+                toKg(crew.organicWaste.unit, crew.organicWasteRate), 1)
+            required.water = (required.water or 0) + crew.moistureRate
+            required.energy = (required.energy or 0) + crew.heatRate
+            local missing = unfundedConstituent(funded, required)
+            if missing ~= nil then
+                scale = 0
+                limiter = 'actual feed cannot fund declared crew returns/heat: ' .. missing
+            end
             if not (scale > 0) then scale = 0 end
             if scale > 1 then scale = 1 end
             local function drawCapped(store, requested)
@@ -3961,8 +4135,20 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             self.unit_loss[crew.organicWaste.unit] =
                 (self.unit_loss[crew.organicWaste.unit] or 0) - wasteActual
             local net = {}
-            addConstituents(net, crew.food.composition, toKg(crew.food.unit, foodActual), -1)
-            addConstituents(net, crew.water.composition, toKg(crew.water.unit, waterActual), -1)
+            -- #601: the crew eats and drinks the material the stores
+            -- actually hold, drift included, measured before the draw
+            -- (the draw already landed, so the pre-draw mass is the
+            -- current mass plus what was drawn); the metabolic returns
+            -- are declared returns entering as the destination
+            -- stores' own material.
+            local crewFoodKg = toKg(crew.food.unit, foodActual)
+            addLedger(net, drawStoreActual(crew.food,
+                toKg(crew.food.unit, crew.food.qualified + crew.food.unqualified)
+                    + crewFoodKg, crewFoodKg), -1)
+            local crewWaterKg = toKg(crew.water.unit, waterActual)
+            addLedger(net, drawStoreActual(crew.water,
+                toKg(crew.water.unit, crew.water.qualified + crew.water.unqualified)
+                    + crewWaterKg, crewWaterKg), -1)
             addConstituents(net, crew.urine.composition, toKg(crew.urine.unit, urineActual), 1)
             addConstituents(net, crew.organicWaste.composition,
                 toKg(crew.organicWaste.unit, wasteActual), 1)
@@ -4182,8 +4368,16 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             assert(completed >= 0 and completed == completed
                 and completed <= requested and completed <= drawable and completed <= headroom,
                 "transfer completed amount violates its bounds")
+            local transferSourceKgBefore = toKg(transfer.source.unit,
+                transfer.source.qualified + transfer.source.unqualified)
             transfer.source.qualified = transfer.source.qualified - completed
             transfer.destination.qualified = transfer.destination.qualified + completed
+            -- #601: the endpoints declare the same material (the
+            -- configuration refuses any other transfer), so the moved
+            -- share of the source's actual-constituent drift rides
+            -- with the material.
+            moveStoreDrift(transfer.source, transfer.destination,
+                transferSourceKgBefore, toKg(transfer.source.unit, completed))
         end
     end
     -- Mirror of the host conversion ledger: one common completed scale per
@@ -4206,6 +4400,14 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     - (flow.store.qualified + flow.store.unqualified)
                 scale = math.min(scale, headroom / produced)
             end
+            local funded, required = {}, {}
+            for _, flow in ipairs(conversion.inputs) do
+                addConstituents(funded, storeComposition(flow.store), toKg(flow.store.unit, flow.rate), 1)
+            end
+            for _, flow in ipairs(conversion.outputs) do
+                addConstituents(required, flow.store.composition, toKg(flow.store.unit, flow.rate), 1)
+            end
+            if unfundedConstituent(funded, required) ~= nil then scale = 0 end
             if scale > 0 then
                 local net = {}
                 for _, flow in ipairs(conversion.inputs) do
@@ -4217,10 +4419,16 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     -- Mirrors the host ledger.
                     local drawable = math.max(0.0, flow.store.qualified - flow.store.protected_reserve)
                     local completed = math.min(requested * scale, drawable)
+                    -- #601: the conversion spends the input store's
+                    -- actual blend, measured before the draw; the
+                    -- drift it consumes is carried into the declared-
+                    -- loss side of the ledger with the material.
+                    local conversionDrawn = drawStoreActual(flow.store,
+                        toKg(flow.store.unit, flow.store.qualified + flow.store.unqualified),
+                        toKg(flow.store.unit, completed))
                     flow.store.qualified = flow.store.qualified - completed
                     flow.last_completed = completed
-                    addConstituents(net, flow.store.composition,
-                        toKg(flow.store.unit, completed), -1)
+                    addLedger(net, conversionDrawn, -1)
                 end
                 for _, flow in ipairs(conversion.outputs) do
                     local requested = flow.rate * fixed_seconds
@@ -5938,6 +6146,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             treatment.consumablePerKg * processedKg
                         local consumableUsed = math.min(treatment.lastConsumableRequested,
                             drawableConsumable)
+                        -- #601: measure the draw against the store as
+                        -- it stands before the draw, so the spent kit
+                        -- carries the material it actually is.
+                        local treatmentConsumableDrawn = drawStoreActual(consumable,
+                            toKg(consumable.unit, consumable.qualified + consumable.unqualified),
+                            toKg(consumable.unit, consumableUsed))
                         consumable.qualified = consumable.qualified - consumableUsed
                         treatment.lastConsumableUsed = consumableUsed
                         -- Quality is three distinct gates (#412):
@@ -5982,6 +6196,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         if not curtailed then
                             treatment.lastClearanceRequested = clearanceDemand
                             if released and clearanceDemand > 0 then
+                                local clearanceKgBefore = toKg(treatment.clearance.unit,
+                                    treatment.clearance.qualified
+                                        + treatment.clearance.unqualified)
                                 treatment.clearance.qualified =
                                     treatment.clearance.qualified - clearanceDemand
                                 treatment.lastClearanceUsed = clearanceDemand
@@ -5990,15 +6207,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                                 self.unit_loss[treatment.clearance.unit] =
                                     (self.unit_loss[treatment.clearance.unit] or 0)
                                         + clearanceDemand
-                                if treatment.clearance.composition then
-                                    local net = {}
-                                    addConstituents(net, treatment.clearance.composition,
-                                        toKg(treatment.clearance.unit, clearanceDemand), -1)
-                                    for constituent, change in pairs(net) do
-                                        self.constituent_loss[constituent] =
-                                            (self.constituent_loss[constituent] or 0) - change
-                                    end
-                                end
+                                -- #601: the kit is spent as the
+                                -- material it actually is, drift
+                                -- included.
+                                addLedger(self.constituent_loss, drawStoreActual(
+                                    treatment.clearance, clearanceKgBefore,
+                                    toKg(treatment.clearance.unit, clearanceDemand)), 1)
                             end
                             treatment.lastClearanceUnmet = treatment.lastClearanceRequested
                                 - treatment.lastClearanceUsed
@@ -6015,15 +6229,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             (self.unit_loss[concentrate.unit] or 0) - concentrateUnits
                         self.unit_loss[consumable.unit] =
                             (self.unit_loss[consumable.unit] or 0) + consumableUsed
-                        if consumable.composition then
-                            local net = {}
-                            addConstituents(net, consumable.composition,
-                                toKg(consumable.unit, consumableUsed), -1)
-                            for constituent, change in pairs(net) do
-                                self.constituent_loss[constituent] =
-                                    (self.constituent_loss[constituent] or 0) - change
-                            end
-                        end
+                        -- The kit leaves the compound-material world as
+                        -- the material it actually was, measured at the
+                        -- draw (#601).
+                        addLedger(self.constituent_loss, treatmentConsumableDrawn, 1)
                         treatment.lastProcessed = processedKg
                         treatment.lastTreated = treatedKg
                         treatment.lastConcentrate = concentrateKg
@@ -6397,20 +6606,18 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                                 capture.consumablePerKg * capturedKg
                             local consumableUsed = math.min(capture.lastConsumableRequested,
                                 drawableConsumable)
+                            -- #601: the media is spent as the material
+                            -- it actually is, measured before the draw.
+                            local captureConsumableDrawn = drawStoreActual(capture.consumable,
+                                toKg(capture.consumable.unit, capture.consumable.qualified
+                                    + capture.consumable.unqualified),
+                                toKg(capture.consumable.unit, consumableUsed))
                             capture.consumable.qualified = capture.consumable.qualified
                                 - consumableUsed
                             capture.lastConsumableUsed = consumableUsed
                             self.unit_loss[capture.consumable.unit] =
                                 (self.unit_loss[capture.consumable.unit] or 0) + consumableUsed
-                            if capture.consumable.composition then
-                                local net = {}
-                                addConstituents(net, capture.consumable.composition,
-                                    toKg(capture.consumable.unit, consumableUsed), -1)
-                                for constituent, change in pairs(net) do
-                                    self.constituent_loss[constituent] =
-                                        (self.constituent_loss[constituent] or 0) - change
-                                end
-                            end
+                            addLedger(self.constituent_loss, captureConsumableDrawn, 1)
                             capture.consumablesUsedTotal = capture.consumablesUsedTotal
                                 + consumableUsed
                         end
@@ -6863,18 +7070,16 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             local stockUnits = math.min(
                                 points * proc.stockUnitsPerConditionPoint,
                                 drawableStock)
+                            -- #601: the stock is spent as the material
+                            -- it actually is, measured before the draw.
+                            local stockDrawn = drawStoreActual(proc.stock,
+                                toKg(proc.stock.unit, proc.stock.qualified
+                                    + proc.stock.unqualified),
+                                toKg(proc.stock.unit, stockUnits))
                             proc.stock.qualified = proc.stock.qualified - stockUnits
                             self.unit_loss[proc.stock.unit] =
                                 (self.unit_loss[proc.stock.unit] or 0) + stockUnits
-                            if proc.stock.composition then
-                                local stockNet = {}
-                                addConstituents(stockNet, proc.stock.composition,
-                                    toKg(proc.stock.unit, stockUnits), -1)
-                                for constituent, change in pairs(stockNet) do
-                                    self.constituent_loss[constituent] =
-                                        (self.constituent_loss[constituent] or 0) - change
-                                end
-                            end
+                            addLedger(self.constituent_loss, stockDrawn, 1)
                             proc.lastStockConsumed = stockUnits
                             proc.stockConsumedTotal = proc.stockConsumedTotal + stockUnits
                         end
@@ -6896,7 +7101,17 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         and 'below the minimum operating temperature: the culture is dormant'
                         or 'cooling is not qualified: sink at or above the maximum sink temperature'
                 else
-                    local composition = feed.composition
+                    -- #601: the digestion is sized on the material the
+                    -- feed store actually holds - its authored
+                    -- composition plus the drift of everything really
+                    -- deposited into it - so recovery, residue and
+                    -- heat track the actual constituents of drifted
+                    -- feed instead of the original declaration.
+                    local feedStoreKgBefore = toKg(feed.unit, feed.qualified + feed.unqualified)
+                    local procConsumableKgBefore = toKg(consumable.unit,
+                        consumable.qualified + consumable.unqualified)
+                    local composition = effectiveCompositionOf(feed.composition,
+                        feedStoreKgBefore, feed.drift)
                     local dryPerKgFeed = 1 - composition.moisture
                     -- The recovered nutrients are funded by the feed's
                     -- bound constituents only: bound nitrogen,
@@ -6913,6 +7128,23 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     local residuePerKgFeed = 1 + proc.oxygenPerKgFeedKg
                         + proc.processWaterPerKgFeedKg - nutrientPerKgFeed
                         - recoveredWaterPerKgFeed - proc.co2PerKgFeedKg
+                    -- #601: drifted feed can be richer in recoverable
+                    -- nutrient than the authored material the declared
+                    -- balance was sized for. If the declared outputs
+                    -- would exceed the declared inputs, the digestion
+                    -- cannot run on this feed without creating mass:
+                    -- refuse the stage whole rather than book a
+                    -- negative residue.
+                    local feedEnergyPerKg = dryPerKgFeed * composition.energyKJPerKgDry
+                    if residuePerKgFeed < -BALANCE_TOLERANCE then
+                        proc.lastBlockReason = "feed store '" .. feed.id
+                            .. "' material is too nutrient-rich for the declared digestion balance: the outputs would exceed the inputs"
+                    elseif proc.reactionHeatKJPerKgFeed > feedEnergyPerKg
+                        + BALANCE_TOLERANCE * math.max(1, math.abs(feedEnergyPerKg)) then
+                        proc.lastBlockReason = "feed store '" .. feed.id
+                            .. "' actual chemical energy cannot fund the declared reaction heat"
+                    else
+                    residuePerKgFeed = math.max(0, residuePerKgFeed)
                     local drawableFeed = math.max(0, feed.qualified - feed.protected_reserve)
                     local drawableOxygen = math.max(0,
                         oxygen.qualified - oxygen.protected_reserve)
@@ -7090,16 +7322,23 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             -- per-constituent ledger; at the station
                             -- boundary the whole feed constituent set
                             -- is booked as leaving the compound stores.
-                            local net = {}
-                            addConstituents(net, composition, feedActualKg, -1)
-                            if consumable.composition then
-                                addConstituents(net, consumable.composition,
-                                    toKg(consumable.unit, consumableUnits), -1)
-                            end
-                            for constituent, change in pairs(net) do
-                                self.constituent_loss[constituent] =
-                                    (self.constituent_loss[constituent] or 0) - change
-                            end
+                            -- #601: what leaves the feed store is the
+                            -- actual blend it held, measured before
+                            -- the draw, and the consumable likewise;
+                            -- the digested feed's actual chemical
+                            -- energy and bound nitrogen are
+                            -- accumulated for the caps audit.
+                            local feedDrawn = drawStoreActual(feed, feedStoreKgBefore,
+                                feedActualKg)
+                            local procConsumableDrawn = drawStoreActual(consumable,
+                                procConsumableKgBefore,
+                                toKg(consumable.unit, consumableUnits))
+                            addLedger(self.constituent_loss, feedDrawn, 1)
+                            addLedger(self.constituent_loss, procConsumableDrawn, 1)
+                            proc.feedChemicalEnergyConsumedKJ = proc.feedChemicalEnergyConsumedKJ
+                                + feedActualKg * dryPerKgFeed * composition.energyKJPerKgDry
+                            proc.feedBoundNitrogenConsumedKg = proc.feedBoundNitrogenConsumedKg
+                                + feedActualKg * dryPerKgFeed * composition.nutrientNitrogen
                             -- Energy: the dose plus the exothermic heat
                             -- the products do not retain leave through
                             -- the sink, once.
@@ -7147,6 +7386,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             proc.reactionHeatKJ = proc.reactionHeatKJ + reactionHeatKJ
                             proc.heatRoutedKJ = proc.heatRoutedKJ + heatKJ
                         end
+                    end
                     end
                 end
             end
@@ -7412,29 +7652,32 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 -- declared compound material leaves the compound-
                 -- material world with the draw; plain stores contribute
                 -- nothing to the ledger.
-                local net = {}
-                if crop.water.composition then
-                    addConstituents(net, crop.water.composition, irrigationActualKg, -1)
-                end
-                if crop.nitrogen.composition then
-                    addConstituents(net, crop.nitrogen.composition,
-                        toKg(crop.nitrogen.unit, nitrogenUnits), -1)
-                end
-                if crop.phosphorus.composition then
-                    addConstituents(net, crop.phosphorus.composition,
-                        toKg(crop.phosphorus.unit, phosphorusUnits), -1)
-                end
-                if crop.potassium.composition then
-                    addConstituents(net, crop.potassium.composition,
-                        toKg(crop.potassium.unit, potassiumUnits), -1)
-                end
-                if crop.minerals.composition then
-                    addConstituents(net, crop.minerals.composition,
-                        toKg(crop.minerals.unit, mineralsUnits), -1)
-                end
-                for constituent, change in pairs(net) do
-                    self.constituent_loss[constituent] =
-                        (self.constituent_loss[constituent] or 0) - change
+                -- #601: each uptake draw spends the material the store
+                -- actually holds, drift included, measured before the
+                -- draw; plain stores contribute nothing to the ledger.
+                local uptakeDrawn = {
+                    drawStoreActual(crop.water,
+                        toKg(crop.water.unit, crop.water.qualified + crop.water.unqualified),
+                        irrigationActualKg),
+                    drawStoreActual(crop.nitrogen,
+                        toKg(crop.nitrogen.unit, crop.nitrogen.qualified
+                            + crop.nitrogen.unqualified),
+                        toKg(crop.nitrogen.unit, nitrogenUnits)),
+                    drawStoreActual(crop.phosphorus,
+                        toKg(crop.phosphorus.unit, crop.phosphorus.qualified
+                            + crop.phosphorus.unqualified),
+                        toKg(crop.phosphorus.unit, phosphorusUnits)),
+                    drawStoreActual(crop.potassium,
+                        toKg(crop.potassium.unit, crop.potassium.qualified
+                            + crop.potassium.unqualified),
+                        toKg(crop.potassium.unit, potassiumUnits)),
+                    drawStoreActual(crop.minerals,
+                        toKg(crop.minerals.unit, crop.minerals.qualified
+                            + crop.minerals.unqualified),
+                        toKg(crop.minerals.unit, mineralsUnits)),
+                }
+                for _, drawn in ipairs(uptakeDrawn) do
+                    addLedger(self.constituent_loss, drawn, 1)
                 end
                 crop.livingBiomassKg = crop.livingBiomassKg + growthKg
                 -- The living constituent inventory (#571): the organic
@@ -7525,9 +7768,22 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             crop.waste.qualified = crop.waste.qualified + routedUnits
                             self.unit_harvested[crop.waste.unit] =
                                 (self.unit_harvested[crop.waste.unit] or 0) + routedUnits
+                            -- #601: the store receives the residue as
+                            -- the material it actually is. The harvest
+                            -- ledger books the actual constituents and
+                            -- chemical energy that arrived, and the
+                            -- destination store carries the difference
+                            -- between the actual material and its own
+                            -- declaration as drift, so downstream
+                            -- consumers draw the real blend instead of
+                            -- the authored composition.
                             if crop.waste.composition then
-                                addConstituents(self.constituent_harvested, composition,
-                                    routedKg, 1)
+                                local routedActual = biologicalLedgerOf(
+                                    scaleConstituents(residueConstituents,
+                                        residueKg > 0 and routedKg / residueKg or 0),
+                                    chemicalEnergyKJPerKgOrganic(composition))
+                                addLedger(self.constituent_harvested, routedActual, 1)
+                                depositStoreDrift(crop.waste, routedKg, routedActual)
                             end
                         end
                     end
@@ -7590,9 +7846,17 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         crop.food.qualified = crop.food.qualified + foodAcceptedUnits
                         self.unit_harvested[crop.food.unit] =
                             (self.unit_harvested[crop.food.unit] or 0) + foodAcceptedUnits
+                        -- #601: the yield enters the store as the
+                        -- actual material it is; the harvest ledger
+                        -- and the store's drift carry the real
+                        -- constituents and chemical energy.
                         if crop.food.composition then
-                            addConstituents(self.constituent_harvested, composition,
-                                foodAcceptedKg, 1)
+                            local foodActual = biologicalLedgerOf(
+                                scaleConstituents(removedConstituents,
+                                    harvestedKg > 0 and foodAcceptedKg / harvestedKg or 0),
+                                chemicalEnergyKJPerKgOrganic(composition))
+                            addLedger(self.constituent_harvested, foodActual, 1)
+                            depositStoreDrift(crop.food, foodAcceptedKg, foodActual)
                         end
                     end
                     if wasteAcceptedUnits > 0 then
@@ -7600,8 +7864,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         self.unit_harvested[crop.waste.unit] =
                             (self.unit_harvested[crop.waste.unit] or 0) + wasteAcceptedUnits
                         if crop.waste.composition then
-                            addConstituents(self.constituent_harvested, composition,
-                                wasteAcceptedKg, 1)
+                            local wasteYieldActual = biologicalLedgerOf(
+                                scaleConstituents(removedConstituents,
+                                    harvestedKg > 0 and wasteAcceptedKg / harvestedKg or 0),
+                                chemicalEnergyKJPerKgOrganic(composition))
+                            addLedger(self.constituent_harvested, wasteYieldActual, 1)
+                            depositStoreDrift(crop.waste, wasteAcceptedKg, wasteYieldActual)
                         end
                     end
                     crop.livingBiomassKg = crop.livingBiomassKg - harvestedKg
@@ -7925,29 +8193,33 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 -- declared compound material leaves the compound-
                 -- material world with the draw; plain stores contribute
                 -- nothing to the ledger.
-                local net = {}
-                if culture.water.composition then
-                    addConstituents(net, culture.water.composition, makeupWaterActualKg, -1)
-                end
-                if culture.nitrogen.composition then
-                    addConstituents(net, culture.nitrogen.composition,
-                        toKg(culture.nitrogen.unit, nitrogenUnits), -1)
-                end
-                if culture.phosphorus.composition then
-                    addConstituents(net, culture.phosphorus.composition,
-                        toKg(culture.phosphorus.unit, phosphorusUnits), -1)
-                end
-                if culture.potassium.composition then
-                    addConstituents(net, culture.potassium.composition,
-                        toKg(culture.potassium.unit, potassiumUnits), -1)
-                end
-                if culture.minerals.composition then
-                    addConstituents(net, culture.minerals.composition,
-                        toKg(culture.minerals.unit, mineralsUnits), -1)
-                end
-                for constituent, change in pairs(net) do
-                    self.constituent_loss[constituent] =
-                        (self.constituent_loss[constituent] or 0) - change
+                -- #601: each uptake draw spends the material the store
+                -- actually holds, drift included, measured before the
+                -- draw; plain stores contribute nothing to the ledger.
+                local cultureUptakeDrawn = {
+                    drawStoreActual(culture.water,
+                        toKg(culture.water.unit, culture.water.qualified
+                            + culture.water.unqualified),
+                        makeupWaterActualKg),
+                    drawStoreActual(culture.nitrogen,
+                        toKg(culture.nitrogen.unit, culture.nitrogen.qualified
+                            + culture.nitrogen.unqualified),
+                        toKg(culture.nitrogen.unit, nitrogenUnits)),
+                    drawStoreActual(culture.phosphorus,
+                        toKg(culture.phosphorus.unit, culture.phosphorus.qualified
+                            + culture.phosphorus.unqualified),
+                        toKg(culture.phosphorus.unit, phosphorusUnits)),
+                    drawStoreActual(culture.potassium,
+                        toKg(culture.potassium.unit, culture.potassium.qualified
+                            + culture.potassium.unqualified),
+                        toKg(culture.potassium.unit, potassiumUnits)),
+                    drawStoreActual(culture.minerals,
+                        toKg(culture.minerals.unit, culture.minerals.qualified
+                            + culture.minerals.unqualified),
+                        toKg(culture.minerals.unit, mineralsUnits)),
+                }
+                for _, drawn in ipairs(cultureUptakeDrawn) do
+                    addLedger(self.constituent_loss, drawn, 1)
                 end
                 culture.livingBiomassKg = culture.livingBiomassKg + growthKg
                 -- The living constituent inventory (#571): the organic
@@ -8031,9 +8303,17 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             culture.waste.qualified = culture.waste.qualified + routedUnits
                             self.unit_harvested[culture.waste.unit] =
                                 (self.unit_harvested[culture.waste.unit] or 0) + routedUnits
+                            -- #601: the store receives the residue as
+                            -- the material it actually is; the harvest
+                            -- ledger and the store's drift carry the
+                            -- real constituents and chemical energy.
                             if culture.waste.composition then
-                                addConstituents(self.constituent_harvested, composition,
-                                    routedKg, 1)
+                                local routedActual = biologicalLedgerOf(
+                                    scaleConstituents(residueConstituents,
+                                        residueKg > 0 and routedKg / residueKg or 0),
+                                    chemicalEnergyKJPerKgOrganic(composition))
+                                addLedger(self.constituent_harvested, routedActual, 1)
+                                depositStoreDrift(culture.waste, routedKg, routedActual)
                             end
                         end
                     end
@@ -8110,9 +8390,16 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         culture.food.qualified = culture.food.qualified + foodAcceptedUnits
                         self.unit_harvested[culture.food.unit] =
                             (self.unit_harvested[culture.food.unit] or 0) + foodAcceptedUnits
+                        -- #601: the yield enters as the actual
+                        -- material; the ledger and the store's drift
+                        -- carry the real constituents and energy.
                         if culture.food.composition then
-                            addConstituents(self.constituent_harvested, composition,
-                                foodAcceptedKg, 1)
+                            local foodActual = biologicalLedgerOf(
+                                scaleConstituents(removedConstituents,
+                                    harvestedKg > 0 and foodAcceptedKg / harvestedKg or 0),
+                                chemicalEnergyKJPerKgOrganic(composition))
+                            addLedger(self.constituent_harvested, foodActual, 1)
+                            depositStoreDrift(culture.food, foodAcceptedKg, foodActual)
                         end
                     end
                     if recoveryAcceptedUnits > 0 then
@@ -8120,8 +8407,13 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         self.unit_harvested[culture.recovery.unit] =
                             (self.unit_harvested[culture.recovery.unit] or 0) + recoveryAcceptedUnits
                         if culture.recovery.composition then
-                            addConstituents(self.constituent_harvested, composition,
-                                recoveryAcceptedKg, 1)
+                            local recoveryActual = biologicalLedgerOf(
+                                scaleConstituents(removedConstituents,
+                                    harvestedKg > 0
+                                        and recoveryAcceptedKg / harvestedKg or 0),
+                                chemicalEnergyKJPerKgOrganic(composition))
+                            addLedger(self.constituent_harvested, recoveryActual, 1)
+                            depositStoreDrift(culture.recovery, recoveryAcceptedKg, recoveryActual)
                         end
                     end
                     if wasteAcceptedUnits > 0 then
@@ -8129,8 +8421,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         self.unit_harvested[culture.waste.unit] =
                             (self.unit_harvested[culture.waste.unit] or 0) + wasteAcceptedUnits
                         if culture.waste.composition then
-                            addConstituents(self.constituent_harvested, composition,
-                                wasteAcceptedKg, 1)
+                            local wasteYieldActual = biologicalLedgerOf(
+                                scaleConstituents(removedConstituents,
+                                    harvestedKg > 0 and wasteAcceptedKg / harvestedKg or 0),
+                                chemicalEnergyKJPerKgOrganic(composition))
+                            addLedger(self.constituent_harvested, wasteYieldActual, 1)
+                            depositStoreDrift(culture.waste, wasteAcceptedKg, wasteYieldActual)
                         end
                     end
                     culture.livingBiomassKg = culture.livingBiomassKg - harvestedKg
@@ -8464,6 +8760,14 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 end
             end
         end
+        local pendingExchangeUnits = {}
+        for _, load in ipairs(self.loads) do
+            for _, exchange in ipairs(load.exchanges) do
+                local store = exchange.store
+                pendingExchangeUnits[store] = (pendingExchangeUnits[store] or 0)
+                    + (exchange.consumes and 1 or -1) * exchange.lastReserved
+            end
+        end
         for index, load in ipairs(self.loads) do
             local amount = supplied[index] or 0
             load.supplied = amount
@@ -8499,13 +8803,19 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 local requested = exchange.rate * fixed_seconds * load.lastLevel
                 local completed = math.min(requested * load.deliveredFraction,
                     exchange.lastReserved)
+                local exchangeKgBefore = toKg(store.unit, store.qualified + store.unqualified
+                    + pendingExchangeUnits[store])
+                pendingExchangeUnits[store] = pendingExchangeUnits[store]
+                    - (exchange.consumes and 1 or -1) * exchange.lastReserved
                 if exchange.consumes then
                     store.qualified = store.qualified + exchange.lastReserved - completed
                     self.unit_loss[store.unit] = (self.unit_loss[store.unit] or 0) + completed
-                    if store.composition then
-                        addConstituents(self.constituent_loss, store.composition,
-                            toKg(store.unit, completed), 1)
-                    end
+                    -- #601: a consumed exchange spends the material the
+                    -- store actually holds, drift included; a delivered
+                    -- exchange is external material arriving as the
+                    -- store's own declared composition.
+                    addLedger(self.constituent_loss, drawStoreActual(store,
+                        exchangeKgBefore, toKg(store.unit, completed)), 1)
                 else
                     store.qualified = store.qualified - (exchange.lastReserved - completed)
                     self.unit_loss[store.unit] = (self.unit_loss[store.unit] or 0) - completed
@@ -9431,15 +9741,17 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             assert(math.abs(energyResidual) <= energyLedgerBound,
                 "microbial processor '" .. proc.id
                     .. "' supplied/released/routed energy ledger does not close")
-            local composition = proc.feed.composition
-            local feedEnergyKJ = proc.feedConsumedTotal * (1 - composition.moisture)
-                * composition.energyKJPerKgDry
+            -- #601: the caps audit against the chemical energy and
+            -- bound nitrogen the digested feed actually carried,
+            -- accumulated at digestion from the feed store's actual
+            -- blend. The feed store's authored composition no longer
+            -- describes drifted material, so it is not the cap.
+            local feedEnergyKJ = proc.feedChemicalEnergyConsumedKJ
             local energyBound = BALANCE_TOLERANCE * math.max(1, math.abs(feedEnergyKJ))
             assert(proc.reactionHeatKJ <= feedEnergyKJ + energyBound,
                 "microbial processor '" .. proc.id
-                    .. "' released more reaction heat than the consumed feedstock's declared chemical energy")
-            local boundNitrogenKg = proc.feedConsumedTotal * (1 - composition.moisture)
-                * composition.nutrientNitrogen
+                    .. "' released more reaction heat than the consumed feedstock's actual chemical energy")
+            local boundNitrogenKg = proc.feedBoundNitrogenConsumedKg
             local nitrogenBound = BALANCE_TOLERANCE * math.max(1, math.abs(boundNitrogenKg))
             assert(proc.nitrogenRecoveredTotal <= boundNitrogenKg + nitrogenBound,
                 "microbial processor '" .. proc.id

@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -1728,6 +1729,16 @@ namespace core
 		// are a protected reserve of that class, reachable only by
 		// same-class processes and same-class transfers.
 		std::string hazardClass;
+		// The store's actual constituent inventory in kg (and kJ for the
+		// energy term) (#601): the authored composition at the current
+		// mass plus the drift of every material that really entered the
+		// store. For a compound store this is what the store actually
+		// holds - which diverges from the declared composition whenever
+		// deposited material (a harvest yield, a dead residue) carried a
+		// different makeup - and every draw spends this blend. Empty for
+		// plain, uncharacterised stores, which carry no constituent
+		// inventory.
+		std::map<std::string, double> actualConstituents;
 		bool operator==(StationSystemsStoreSnapshot const&) const = default;
 	};
 
@@ -2044,8 +2055,9 @@ namespace core
 		// Cumulative constituent admitted by accepted deliveries (#392).
 		double delivered{0.0};
 		// Cumulative constituent admitted into compound stores by crop
-		// harvest and dead-residue routing (#410), at the crop's declared
-		// composition. The residual closes as current + lost - delivered -
+		// harvest and dead-residue routing (#410), carrying the actual
+		// transferred composition and remaining chemical energy (#601).
+		// The residual closes as current + lost - delivered -
 		// harvested against starting: the constituents a harvest carries
 		// into the food and waste streams are accounted, never implicit.
 		double harvested{0.0};
@@ -3486,7 +3498,7 @@ namespace core
 	// or left as heat into the compartment - nothing is free and nothing
 	// closes over fixed + respired = delivered. Harvest (#410) removes
 	// actual living material at the declared trigger and preserves its
-	// declared constituents into the food and waste stores; full
+	// actual constituents and remaining energy into food and waste stores; full
 	// destinations constrain the harvest or route the edible surplus
 	// through the waste path, and starvation death routes the dead
 	// residue to waste or books it as explicit uncontained loss.
