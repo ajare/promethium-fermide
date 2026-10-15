@@ -1,9 +1,11 @@
 #include "StationSystemsWindow.h"
+#include "core/StationReference.h"
 #include "core/World.h"
 #include "DocumentEdit.h"
 #include "imgui/imgui.h"
 #include <algorithm>
 #include <cstring>
+#include <optional>
 
 void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, DocumentHistory& history)
 {
@@ -47,6 +49,80 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	// #418: the authored trend retention, in simulation seconds.
 	ImGui::Text("Trend retention: %.0f s (bounded per-series samples, downsampled on long runs)",
 		authored.trendRetentionSeconds);
+	// #422: the packaged reference station. The Meridian configuration
+	// ships as an application resource, parsed through the same
+	// authoritative reader a saved World uses, so the editor displays
+	// exactly what the bundle declares: the reconciled budgets, the
+	// coefficient provenance and units, the provisional assumptions and
+	// the qualification limits. Loading it into the draft is ordinary
+	// draft editing - no parallel configuration, no second clock.
+	ImGui::SeparatorText("Reference station (packaged resource)");
+	{
+		static std::optional<core::StationReferenceDocument> sReference;
+		static std::string sReferenceError;
+		static bool sReferenceLoaded = false;
+		if (!sReferenceLoaded)
+		{
+			sReferenceLoaded = true;
+			core::StationReferenceDocument candidate;
+			if (core::parseStationReference(core::bundledStationReferenceText(),
+				candidate, &sReferenceError))
+				sReference = std::move(candidate);
+			else
+				sReference.reset();
+		}
+		if (!sReference)
+		{
+			ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f),
+				"Packaged reference station failed to parse: %s", sReferenceError.c_str());
+		}
+		else
+		{
+			ImGui::Text("%s - %zu store(s), %zu subsystem object(s) in the reconciled register",
+				sReference->name.c_str(), sReference->settings.stores.size(),
+				sReference->settings.waterTreatments.size()
+				+ sReference->settings.electrolyzers.size()
+				+ sReference->settings.co2Captures.size()
+				+ sReference->settings.sabatierReactors.size()
+				+ sReference->settings.methaneProcessors.size()
+				+ sReference->settings.microbialProcessors.size()
+				+ sReference->settings.cropPopulations.size()
+				+ sReference->settings.algaeCultures.size());
+			ImGui::TextWrapped("%s", sReference->summary.c_str());
+			ImGui::TextWrapped("Scenario: %.0f simulated s. %s",
+				sReference->scenarioSeconds, sReference->scenarioNotes.c_str());
+			if (ImGui::TreeNodeEx("Coefficient provenance",
+				ImGuiTreeNodeFlags_DefaultOpen))
+			{
+				for (auto const& entry : sReference->provenance)
+					ImGui::TextWrapped("%s = %s %s - %s", entry.coefficient.c_str(),
+						entry.value.c_str(), entry.units.c_str(), entry.source.c_str());
+				ImGui::TreePop();
+			}
+			if (ImGui::TreeNode("Provisional assumptions"))
+			{
+				for (auto const& [topic, text] : sReference->assumptions)
+				{
+					if (ImGui::TreeNode(topic.c_str()))
+					{
+						ImGui::TextWrapped("%s", text.c_str());
+						ImGui::TreePop();
+					}
+				}
+				ImGui::TreePop();
+			}
+			ImGui::TextWrapped("Qualification: %s", sReference->qualification.c_str());
+			ImGui::BeginDisabled(!world->isSimulationPaused());
+			if (ImGui::Button("Load reference station into draft"))
+			{
+				mDraft = sReference->settings;
+				mDiagnostic.clear();
+			}
+			ImGui::EndDisabled();
+			if (!world->isSimulationPaused())
+				ImGui::TextDisabled("Pause the World to load the reference into the draft.");
+		}
+	}
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);

@@ -322,6 +322,15 @@ file(READ "${PF_STATION_SOURCE}" PF_STATION_SYSTEMS_LUA)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/core/BundledStationSystemsSource.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/generated/BundledStationSystemsSource.h" @ONLY)
 
+# #422: the packaged reference station. One reconciled, editable
+# configuration resource embedded for the editor and headless seams;
+# editing the resource triggers an incremental reconfigure.
+set(PF_REFERENCE_STATION_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/station-systems/reference-station.yaml")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PF_REFERENCE_STATION_SOURCE}")
+file(READ "${PF_REFERENCE_STATION_SOURCE}" PF_REFERENCE_STATION_YAML)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/core/BundledStationReferenceSource.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/BundledStationReferenceSource.h" @ONLY)
+
 file(GLOB PF_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/*.cpp")
 file(GLOB PF_CORE_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/include/core/*.h")
 

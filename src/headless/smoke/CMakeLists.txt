@@ -75,7 +75,7 @@ endfunction()
 
 pf_add_smoke_module(pf-smoke-station
     NAME station
-    SOURCES station/Main.cpp station/Documents.cpp station/Coupled.cpp
+    SOURCES station/Main.cpp station/Documents.cpp station/Coupled.cpp station/Reference.cpp
     LIBRARIES promethium-fermide-core
     LABELS "core;station"
     TIMEOUT 600
@@ -104,6 +104,10 @@ foreach(check lifecycle batching eventBound persistence stores transfers compoun
         # the binary but never registered here, so their hazard-
         # segregation regressions ran in no CI pass.
         nutrientRecovery nutrientRecoveryFiles
+        # #422: the packaged reference station - bundled resource, the
+        # documented normal-operation scenario with closed accounting, and
+        # the shortage-accepted / inconsistent-refused contract.
+        referenceBundled referenceNominal referenceShortageAndRejection
         # #421: coupled microbial and carbon-loop operation in one World.
         coupledNominal coupledStress)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
@@ -118,6 +122,11 @@ set_tests_properties(station-dispatch PROPERTIES TIMEOUT 180)
 # runs across several coupled Worlds in one check.
 set_tests_properties(station-coupledStress PROPERTIES TIMEOUT 180)
 set_tests_properties(station-coupledNominal PROPERTIES TIMEOUT 120)
+# #422 the reference nominal scenario runs a quarter-hour simulated run
+# three times (run, reset replay, reopened replay) across the full
+# coupled register.
+set_tests_properties(station-referenceNominal PROPERTIES TIMEOUT 240)
+set_tests_properties(station-referenceShortageAndRejection PROPERTIES TIMEOUT 240)
 foreach(hourScale batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesLimited batteriesLosses batteriesDischarging)
     set_tests_properties(station-${hourScale} PROPERTIES TIMEOUT 90)
