@@ -12,7 +12,11 @@
 #include <core/Window.h>
 #include "PlayerTransportSelectorDrawing.h"
 #include <willpower/application/resourcesystem/ResourceManager.h>
+#include <willpower/application/resourcesystem/ImageResource.h>
+#include <willpower/application/resourcesystem/ImageSetResource.h>
 #include <willpower/common/Logger.h>
+#include <mpp/Logger.h>
+#include <mpp/ResourceManager.h>
 #include "ApplicationResources.h"
 #include "DirectoryResourceLocation.h"
 #include "Map.h"
@@ -112,6 +116,55 @@ void checkCanvas(render::WorldDrawList const& draws, float width, float height) 
           require(uv.x >= 0 && uv.x <= 1 && uv.y >= 0 && uv.y <= 1, "Invalid atlas UV");
       }
     }, command);
+  }
+}
+void checkAtlasReload(std::filesystem::path const& directory) {
+  using namespace wp::application::resourcesystem;
+  wp::Logger logger;
+  mpp::Logger renderLogger;
+  mpp::ResourceManager renderResources(nullptr, &renderLogger);
+  ResourceManager manager(nullptr, &renderResources, nullptr, &logger);
+  registerApplicationResourceTypes(manager);
+  manager.addResourceLocationFactory("Directory",
+      [&logger](std::string const& path, std::string const& definition) -> ResourceLocation* {
+        return new DirectoryResourceLocation(&logger, path, definition);
+      });
+  manager.addResourceLocation("Directory", directory.string(), "Resources.yaml");
+  manager.scanLocations();
+  // Match editor startup and switching SectorAtlas -> StationAtlas -> SectorAtlas.
+  // ImageResource declares its real MPP texture here; GPU upload is not needed.
+  std::map<std::string, mpp::ResourcePtr> declarations;
+  for (auto const* name : {"SectorAtlas", "StationAtlas", "SectorAtlas", "SectorAtlas",
+           "AgentAtlas", "FurnitureAtlas", "ObjectAtlas", "AgentAtlas",
+           "StationFurnitureAtlas", "DoctorFemale1Atlas", "FurnitureAtlas"}) {
+    auto resource = manager.acquireResource(name);
+    try {
+      manager.createResource(resource);
+      manager.loadResource(resource);
+    } catch (std::exception const& error) {
+      manager.releaseResource(resource);
+      throw std::runtime_error(std::string("Sector ImageSet unavailable: ") + error.what());
+    }
+    auto set = std::dynamic_pointer_cast<ImageSetResource>(resource);
+    auto image = std::dynamic_pointer_cast<ImageResource>(set->getImage());
+    auto texture = image->getMppResource();
+    auto [entry, inserted] = declarations.emplace(image->getQualifiedName(), texture);
+    require(inserted || entry->second == texture,
+        "Atlas reload must reuse its registered texture, including shared ImageSets");
+    auto stream = std::dynamic_pointer_cast<mpp::TextureStream>(texture->getResourceStream());
+    stream->load(); // Exercise pixel refresh without GPU upload.
+    require(stream->getWidth() == static_cast<unsigned>(image->getWidth())
+        && stream->getHeight() == static_cast<unsigned>(image->getHeight())
+        && std::equal(image->getData(), image->getData() + image->getSize(), stream->getData()),
+        "Reloaded texture must read the Image's current decoded pixels");
+    manager.releaseResource(resource);
+    require(renderResources.getResource(image->getQualifiedName()) == texture,
+        "Image release must retain the reusable backend declaration");
+    if (!manager.isResourceLoaded(image)) {
+      require(!texture->isReferenced(), "Unloaded image leaked its MPP acquisition");
+      require(!stream->getData(), "Unreferenced image retained stale copied pixels");
+      manager.destroyResources({resource, image});
+    }
   }
 }
 void checkStagedMap(std::filesystem::path const& directory) {
@@ -440,6 +493,7 @@ int main(int argc, char** argv) {
     // graphics context, texture upload, auxiliary manifest or ImGui is needed.
     checkSectorTileScaling();
     auto atlas = installAtlases(directory);
+    checkAtlasReload(directory);
     checkStagedMap(directory);
     checkNoOverlaysAndAgents();
     checkPlayerCamera();
