@@ -2536,6 +2536,29 @@ namespace core
 						+ habitat->id + "', a " + habitat->hazardClass + "-class compartment: a crew may only consume and return material of its compartment's hazard class; crew returns never relabel material across the hazard boundary");
 				streamStores[stream] = &*found;
 			}
+			// Aliased stream roles are refused (#600), the same rule the
+			// electrolyzer and fuel cell carry (#585) and the carbon-recovery
+			// machines carry (#599): food, drinking water, urine and organic
+			// waste are four physically distinct streams the ledger books
+			// separately. The tick sizes every draw and return against the
+			// store's inventory or headroom measured from the same starting
+			// state, then books them sequentially, so one store named for two
+			// roles has the same inventory spent twice: with aliased inputs the
+			// second draw finds the store already drained while the returns
+			// still use the original scale, driving retained body mass
+			// negative and pausing the World at tick zero; with aliased outputs
+			// the second return is clipped after both inputs were consumed,
+			// silently changing the metabolic balance the author sized. Every
+			// pair of the crew's own stream roles must name a distinct store;
+			// sharing between different crews is untouched, because crews book
+			// sequentially against the live inventory.
+			for (size_t left = 0; left < 4; ++left)
+				for (size_t right = left + 1; right < 4; ++right)
+					if (!streamIds[left].empty() && streamIds[left] == streamIds[right])
+						return refuse(where + " names the same store '"
+							+ streamIds[left] + "' for the "
+							+ streamRoles[left] + " and the " + streamRoles[right]
+							+ ": chemically distinct streams may not share one store");
 			auto const* food = streamStores[0];
 			auto const* water = streamStores[1];
 			auto const* urine = streamStores[2];

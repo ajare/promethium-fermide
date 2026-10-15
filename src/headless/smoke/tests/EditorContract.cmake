@@ -281,6 +281,7 @@ set(editor_names
     station/maintenanceWorkflow
     station/coupledLiveViewWorkflow
     station/carbonAliasWorkflow
+    station/crewAliasWorkflow
     station/trendsWorkflow
     station/enduranceWorkflow
     station/forecastWorkflow

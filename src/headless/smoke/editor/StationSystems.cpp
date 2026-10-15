@@ -2105,6 +2105,130 @@ void carbonAliasWorkflow(smoke::Context const&)
 	require(driver.passed(), "carbon alias workflow failed on the Test Engine");
 }
 
+// #600: the crew stream-alias refusal surfaced through the real Station
+// Systems window controls. A crew that names one store for two of its
+// own stream roles - here, drinking water pointed at the food store -
+// is refused on apply; the authored settings, the tick and the history
+// stay untouched, and the run resumes healthy on the original
+// configuration instead of pausing on a broken first tick.
+void crewAliasWorkflow(smoke::Context const&)
+{
+	using smoke::require;
+	headless::ScopedImGuiContext context;
+	auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 2400};
+	io.Fonts->AddFontDefault(); io.Fonts->Build();
+	DocumentHistory history;
+	StationSystemsWindow window;
+	auto world = std::make_shared<core::World>("Crew alias editor", 2, 2);
+	world->pauseSimulation(); world->finishBuild();
+	std::string diagnostic;
+	auto rig = []()
+	{
+		core::StationSystemsSettings settings;
+		settings.enabled = true;
+		settings.observationIntervalSeconds = 1.0f;
+		core::ResourceCompositionSettings foodComposition;
+		foodComposition.moisture = 0.8;
+		foodComposition.nutrientNitrogen = 0.05;
+		foodComposition.phosphorus = 0.01;
+		foodComposition.potassium = 0.02;
+		foodComposition.otherMinerals = 0.02;
+		foodComposition.energyKJPerKgDry = 17000.0;
+		core::ResourceCompositionSettings waterComposition;
+		waterComposition.moisture = 0.999;
+		waterComposition.otherMinerals = 0.001;
+		core::ResourceCompositionSettings urineComposition;
+		urineComposition.moisture = 0.95;
+		urineComposition.nutrientNitrogen = 0.1;
+		urineComposition.phosphorus = 0.02;
+		urineComposition.potassium = 0.05;
+		urineComposition.otherMinerals = 0.05;
+		urineComposition.energyKJPerKgDry = 500.0;
+		core::ResourceCompositionSettings wasteComposition;
+		wasteComposition.moisture = 0.5;
+		wasteComposition.energyKJPerKgDry = 10000.0;
+		auto store = [](std::string const& id, double capacity, double starting,
+			core::ResourceCompositionSettings const& composition)
+		{
+			core::ResourceStoreSettings s;
+			s.id = id; s.unit = "kg"; s.capacity = capacity; s.startingQualified = starting;
+			s.composition = composition;
+			return s;
+		};
+		settings.stores = { store("food", 100.0, 50.0, foodComposition),
+			store("water", 100.0, 50.0, waterComposition),
+			store("urine", 100.0, 0.0, urineComposition),
+			store("organicWaste", 100.0, 0.0, wasteComposition) };
+		core::AtmosphereSettings habitat;
+		habitat.id = "habitat"; habitat.hazardClass = "normal";
+		habitat.volumeM3 = 100.0;
+		habitat.startingOxygenKg = 20.0; habitat.startingNitrogenKg = 80.0;
+		habitat.startingTemperatureC = 20.0;
+		habitat.thermalCapacityKJPerK = 10000.0;
+		habitat.minPressureKPa = 1.0; habitat.maxPressureKPa = 200.0;
+		settings.atmospheres = { habitat };
+		core::CrewSettings crew;
+		crew.id = "crew"; crew.atmosphereId = "habitat"; crew.crewCount = 2;
+		crew.foodStoreId = "food"; crew.waterStoreId = "water";
+		crew.urineStoreId = "urine"; crew.organicWasteStoreId = "organicWaste";
+		crew.foodPerCrewPerS = 0.001;
+		crew.waterPerCrewPerS = 0.002;
+		crew.oxygenPerCrewKgPerS = 0.001;
+		crew.co2PerCrewKgPerS = 0.0011;
+		crew.moisturePerCrewKgPerS = 0.0005;
+		crew.urinePerCrewPerS = 0.0015;
+		crew.organicWastePerCrewPerS = 0.0002;
+		crew.metabolicHeatPerCrewKW = 0.1;
+		settings.crews = { crew };
+		return settings;
+	};
+	require(world->configureStationSystems(rig(), false, &diagnostic), diagnostic.c_str());
+	world->resumeSimulation();
+	require(world->advanceTicks(120), "the crew rig run failed");
+	auto const runningTick = world->getSimulationTick();
+	world->pauseSimulation();
+	headless::TestEngineDriver driver([&]
+	{
+		ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 2300});
+		window.render(world, history);
+	});
+	window.visible = true;
+	driver.frame(); driver.frame();
+	#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+	driver.run("station", "crewAliasWorkflow", [&](ImGuiTestContext* ctx)
+	{
+		ctx->SetRef("Station Systems");
+		// Alias the crew's drinking water onto the food store.
+		driver.typeValue(ctx, "Crew 0 water store", "food");
+		REQ(driver.contains("Draft differs from the authored start conditions"),
+			"aliased crew draft not reported as a change");
+		driver.click(ctx, "Apply settings");
+		ctx->ScrollToItemY("Confirm World reset");
+		REQ(driver.contains("Confirm World reset"),
+			"reset confirmation missing for a mid-run apply");
+		driver.click(ctx, "Confirm World reset"); ctx->Sleep(1);
+		REQ(driver.contains("chemically distinct streams may not share one store"),
+			"aliased crew stream diagnostic not shown in the window");
+		REQ(world->getStationSystemsSettings().crews[0].waterStoreId == "water"
+			&& world->getSimulationTick() == runningTick
+			&& history.undoCount() == 0,
+			"the refused aliased apply mutated the authored settings, the tick or the history");
+		// The refusal is a configuration refusal, not a runtime one: the
+		// run resumes on the original configuration with no software
+		// failure and no aliased double-spend.
+		driver.click(ctx, "Cancel reset");
+		driver.click(ctx, "Cancel edits"); ctx->Sleep(1);
+		world->resumeSimulation();
+		if (!driver.require(world->advanceTicks(120), "post-refusal run failed")) return;
+		if (!driver.require(world->getStationSystemsDiagnostics().empty(),
+			"post-refusal run raised a software failure")) return;
+		if (!driver.require(world->getStationSystemsSnapshot().healthy,
+			"post-refusal station is not healthy")) return;
+	});
+	#undef REQ
+	require(driver.passed(), "crew alias workflow failed on the Test Engine");
+}
+
 // #421: the coupled rig's live picture is observable in the separate
 // Station Systems window. The rig is run with the hydrogen feed drained
 // and the electrolyzer off, so the Sabatier stage carries a named
@@ -3429,6 +3553,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/maintenanceWorkflow", maintenanceWorkflow});
 	checks.push_back({"station/coupledLiveViewWorkflow", coupledLiveViewWorkflow});
 	checks.push_back({"station/carbonAliasWorkflow", carbonAliasWorkflow});
+	checks.push_back({"station/crewAliasWorkflow", crewAliasWorkflow});
 	checks.push_back({"station/trendsWorkflow", trendsWorkflow});
 	checks.push_back({"station/enduranceWorkflow", enduranceWorkflow});
 	checks.push_back({"station/forecastWorkflow", forecastWorkflow});

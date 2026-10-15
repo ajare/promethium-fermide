@@ -1890,6 +1890,29 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             streams[stream] = store
         end
         local food, water, urine, waste = streams[1], streams[2], streams[3], streams[4]
+        -- Aliased stream roles are refused (#600), mirroring the host: the
+        -- same rule the electrolyzer and fuel cell carry (#585) and the
+        -- carbon-recovery machines carry (#599). Food, drinking water,
+        -- urine and organic waste are four physically distinct streams
+        -- the ledger books separately, and the tick sizes every draw and
+        -- return against the store's inventory or headroom measured from
+        -- the same starting state, so one store named for two roles has
+        -- the same inventory spent twice: aliased inputs drive retained
+        -- body mass negative, aliased outputs are clipped after both
+        -- inputs were consumed and silently change the metabolic balance.
+        local crew_streams = {
+            {'food', food}, {'water', water},
+            {'urine', urine}, {'organic waste', waste},
+        }
+        for left = 1, #crew_streams do
+            for right = left + 1, #crew_streams do
+                assert(crew_streams[left][2] ~= crew_streams[right][2],
+                    'crew may not name the same store for the '
+                        .. crew_streams[left][1] .. ' and the '
+                        .. crew_streams[right][1]
+                        .. ': chemically distinct streams may not share one store')
+            end
+        end
         local foodKg = toKg(food.unit, crew.foodRate)
         local waterKg = toKg(water.unit, crew.waterRate)
         local urineKg = toKg(urine.unit, crew.urineRate)

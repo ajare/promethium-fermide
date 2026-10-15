@@ -2440,6 +2440,38 @@ namespace
 			catch (std::exception const&) { refused = true; }
 			require(refused, "metabolic heat beyond the funded food energy was accepted from a file");
 		}
+		// An aliased crew stream role (#600) is refused from a file with
+		// the validation diagnostic: drinking water pointed at the food
+		// store would spend one inventory for two substances the ledger
+		// books separately, so the document never loads.
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "waterStoreId: water", "waterStoreId: food");
+			auto const malformedPath = directory / "malformed-crew-aliased-water.world.yaml";
+			writeFile(malformedPath, malformed);
+			std::string message = "loaded without error";
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const& error) { refused = true; message = error.what(); }
+			require(refused
+				&& message.find("chemically distinct streams may not share one store")
+					!= std::string::npos,
+				"a crew aliasing its drinking water onto the food store was accepted from a file: " + message);
+		}
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "organicWasteStoreId: organicWaste", "organicWasteStoreId: urine");
+			auto const malformedPath = directory / "malformed-crew-aliased-waste.world.yaml";
+			writeFile(malformedPath, malformed);
+			std::string message = "loaded without error";
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const& error) { refused = true; message = error.what(); }
+			require(refused
+				&& message.find("chemically distinct streams may not share one store")
+					!= std::string::npos,
+				"a crew aliasing its organic waste onto the urine store was accepted from a file: " + message);
+		}
 	}
 }
 

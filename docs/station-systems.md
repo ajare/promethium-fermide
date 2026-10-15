@@ -1071,6 +1071,28 @@ mass, reported in the ledger rather than discarded. The four matter
 streams must reference compound mass stores (g or kg with declared
 compositions) so the element closure is checkable at authoring time.
 
+**Crew stream roles must name distinct stores (#600).** The tick sizes
+every draw and return against the store's inventory or headroom
+measured from the same starting state, then books the pathways
+sequentially, so one store named for two of the crew's own roles —
+food, water, urine, organic waste — has the same inventory spent
+twice. With aliased inputs the second draw finds the store already
+drained while the returns still run at the original scale, driving
+retained body mass negative and pausing the World at tick zero; with
+aliased outputs the second return is clipped after both inputs were
+consumed, silently changing the metabolic balance the author sized.
+The crew therefore refuses **every pair** of its four stream roles
+landing on one store — the same rule the electrolyzer and fuel cell
+carry (#585) and the carbon-recovery machines carry (#599): one
+inventory may not stand for two different substances the ledger books
+separately. The refusal is a configuration refusal, transactional and
+before the World is touched, and document loading refuses an authored
+file that aliases crew roles with the same diagnostic. Sharing between
+different crews is untouched — two crews may draw from one food store
+and return into one waste store, because crews book sequentially
+against the live inventory. The bundled Lua model mirrors the refusal
+at construction so the sandbox agrees with the host on replay.
+
 Crew run after the airlock cycles and before the compartment's
 thermal integration, so metabolic heat enters the same coupled
 vapour/thermal solve as every other heat source: the crew's heat
@@ -1098,7 +1120,15 @@ compartment, unknown, non-mass or non-compound stream stores,
 negative crew count, malformed activity profile, returns exceeding
 consumption, a returned constituent the food and water cannot fund,
 metabolic heat above the released food energy, over-budget crew
-count) with no World mutation; nominal metabolism where every
+count) with no World mutation; all six pairs of the crew's four
+stream roles probed for aliasing with nearly empty inputs and nearly
+full outputs, and both reported reproductions (aliased food/water
+inputs, aliased urine/organic-waste outputs) refused through the
+public configure/tick/snapshot seam with the World untouched; a
+two-crew run sharing the food, water, urine and waste stores stays
+clean, with the actual per-crew draws and returns, the shared-store
+depletion, the retained mass and the constituent closure asserted;
+nominal metabolism where every
 pathway runs at the authored rate, the compartment books the crew's
 oxygen draw, CO2, moisture and heat, the waste stores receive the
 returns, the consumed-minus-returned difference lands in the

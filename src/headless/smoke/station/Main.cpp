@@ -7460,6 +7460,188 @@ namespace
 			require(!bad.getStationSystemsSnapshot().enabled && bad.getSimulationTick() == 0,
 				"a refused crew configuration mutated the World");
 		}
+		// Aliased crew stream roles (#600), the same rule #585 carries for
+		// the electrolyzer and the fuel cell and #599 carries for the
+		// carbon-recovery machines: every pair of the crew's four
+		// physically distinct stream roles - food, water, urine and
+		// organic waste - must name a distinct store. The tick sized each
+		// draw and return against the store's inventory or headroom
+		// measured from the same starting state, then booked them
+		// sequentially, so one store named for two roles had the same
+		// inventory spent twice: aliased inputs left the second draw with
+		// nothing while the returns still ran at the original scale,
+		// driving retained body mass negative and pausing the World at
+		// tick zero; aliased outputs clipped the second return after both
+		// inputs were consumed, silently changing the metabolic balance
+		// the author sized. Every pair is refused at configuration,
+		// whatever the fill levels, and the World is never mutated.
+		{
+			auto const alias = "chemically distinct streams may not share one store";
+			struct Alias
+			{
+				std::string left;
+				std::string right;
+			};
+			// Nearly full outputs, nearly empty inputs: the refusal is about
+			// the roles, not the fill levels, so it must fire at any level.
+			auto const tightStores = [&]()
+			{
+				std::vector<core::ResourceStoreSettings> stores;
+				stores.push_back(store("food", "kg", 100.0, 0.001, foodComposition));
+				stores.push_back(store("water", "kg", 100.0, 0.001, waterComposition));
+				stores.push_back(store("urine", "kg", 1.0, 0.99, urineComposition));
+				stores.push_back(store("organicWaste", "kg", 1.0, 0.99, wasteComposition));
+				return stores;
+			}();
+			core::World tight("CrewAliasedRoles", 2, 2);
+			tight.pauseSimulation(); tight.finishBuild();
+			std::string diagnostic;
+			// The role names below are the fixture store ids themselves, so
+			// aliasing a pair means pointing the right-hand role at the
+			// left-hand role's store.
+			auto setRole = [](core::CrewSettings& unit,
+				std::string const& role, std::string const& id)
+			{
+				if (role == "food") unit.foodStoreId = id;
+				else if (role == "water") unit.waterStoreId = id;
+				else if (role == "urine") unit.urineStoreId = id;
+				else unit.organicWasteStoreId = id;
+			};
+			// All six pairs of the crew's four stream roles: input/input,
+			// input/output and output/output aliases.
+			std::vector<Alias> crewAliases = {
+				{"food", "water"}, {"food", "urine"}, {"food", "organicWaste"},
+				{"water", "urine"}, {"water", "organicWaste"},
+				{"urine", "organicWaste"},
+			};
+			for (auto const& pair : crewAliases)
+			{
+				core::StationSystemsSettings settings;
+				settings.enabled = true;
+				settings.stores = tightStores;
+				settings.atmospheres = { compartment() };
+				settings.crews = { crew(1, 1.0) };
+				setRole(settings.crews[0], pair.right, pair.left);
+				require(!core::validateStationSystemsSettings(settings, diagnostic)
+					&& diagnostic.find(alias) != std::string::npos,
+					("a crew aliasing its '" + pair.left + "' and '" + pair.right
+						+ "' stream roles was accepted").c_str());
+			}
+			require(!tight.getStationSystemsSnapshot().enabled
+				&& tight.getSimulationTick() == 0,
+				"the refused aliased crew-role probes mutated the World");
+			// The reported reproductions through the public configure/tick/
+			// snapshot seam, with the ticket's own settings. Case 1 aliased
+			// food and drinking water onto one store holding 0.01 kg: the
+			// configuration was admitted, then the first tick failed and
+			// paused the World at tick zero with "retained body mass is
+			// negative". Case 2 aliased urine and organic waste onto one
+			// 1 kg store holding 0.99 kg: one tick consumed 0.01 kg from
+			// each input while adding only 0.01 kg total to the shared
+			// output, breaking the authored common-scale contract. Both are
+			// now refused at configure, so the broken tick never runs and
+			// the World is never touched.
+			{
+				core::World world("CrewAliasRepro", 2, 2);
+				world.pauseSimulation(); world.finishBuild();
+				core::StationSystemsSettings inputs;
+				inputs.enabled = true;
+				inputs.stores = {
+					store("food", "kg", 100.0, 0.01, foodComposition),
+					store("water", "kg", 100.0, 0.0, waterComposition),
+					store("waste", "kg", 1.0, 0.0, wasteComposition) };
+				inputs.atmospheres = { compartment() };
+				core::CrewSettings aliasedInputs = crew(1, 1.0);
+				aliasedInputs.waterStoreId = "food";
+				aliasedInputs.urineStoreId = "water";
+				aliasedInputs.organicWasteStoreId = "waste";
+				aliasedInputs.foodPerCrewPerS = 1.0;
+				aliasedInputs.waterPerCrewPerS = 1.0;
+				aliasedInputs.urinePerCrewPerS = 1.0;
+				aliasedInputs.organicWastePerCrewPerS = 1.0;
+				inputs.crews = { aliasedInputs };
+				require(!world.configureStationSystems(inputs, true, &diagnostic)
+					&& diagnostic.find(alias) != std::string::npos,
+					("the reproduction's aliased food/water crew was accepted: "
+						+ diagnostic).c_str());
+				require(!world.getStationSystemsSnapshot().enabled
+					&& world.getSimulationTick() == 0
+					&& world.getStationSystemsDiagnostics().empty(),
+					"the refused aliased-input reproduction mutated the World");
+				// Case 2: the aliased-outputs variant of the reproduction.
+				core::StationSystemsSettings outputs;
+				outputs.enabled = true;
+				outputs.stores = {
+					store("food", "kg", 100.0, 10.0, foodComposition),
+					store("water", "kg", 100.0, 10.0, waterComposition),
+					store("sharedWaste", "kg", 1.0, 0.99, urineComposition) };
+				outputs.atmospheres = { compartment() };
+				core::CrewSettings aliasedOutputs = crew(1, 1.0);
+				aliasedOutputs.urineStoreId = "sharedWaste";
+				aliasedOutputs.organicWasteStoreId = "sharedWaste";
+				aliasedOutputs.foodPerCrewPerS = 1.0;
+				aliasedOutputs.waterPerCrewPerS = 1.0;
+				aliasedOutputs.urinePerCrewPerS = 1.0;
+				aliasedOutputs.organicWastePerCrewPerS = 1.0;
+				outputs.crews = { aliasedOutputs };
+				require(!world.configureStationSystems(outputs, true, &diagnostic)
+					&& diagnostic.find(alias) != std::string::npos,
+					("the reproduction's aliased urine/organic-waste crew was accepted: "
+						+ diagnostic).c_str());
+				require(!world.getStationSystemsSnapshot().enabled
+					&& world.getSimulationTick() == 0
+					&& world.getStationSystemsDiagnostics().empty(),
+					"the refused aliased-output reproduction mutated the World");
+			}
+			// Valid sharing between different crews is preserved: two crews
+			// draw food from one store and return into one urine store,
+			// booking sequentially against the live inventory, so the shared
+			// supply is spent once, not twice. The actual per-crew draws and
+			// returns, the shared-store depletion, the retained mass and the
+			// constituent closure are asserted, not just nonnegative
+			// inventory. The rule refuses aliases within a crew, never
+			// sharing across crews.
+			{
+				core::World world("CrewSharedAcrossCrews", 2, 2);
+				world.pauseSimulation(); world.finishBuild();
+				auto first = crew(2, 1.0);
+				auto second = crew(1, 1.0);
+				second.id = "crewB";
+				require(crewConfigure(world, fullStores(), compartment(),
+					{ first, second }).first,
+					"two crews sharing the food, water, urine and waste stores were refused");
+				world.resumeSimulation();
+				require(world.advanceTicks(120), "the shared-store crew run failed");
+				require(world.getStationSystemsDiagnostics().empty(),
+					"the shared-store crews raised a runtime diagnostic");
+				auto const elapsed = 120.0 * dt;
+				auto const snap = world.getStationSystemsSnapshot();
+				require(snap.healthy && snap.crews.size() == 2,
+					"the shared-store crews are missing or unhealthy in the snapshot");
+				auto const& a = snap.crews[0];
+				auto const& b = snap.crews[1];
+				require(approx(a.foodConsumed, 0.001 * 2.0 * elapsed)
+					&& approx(b.foodConsumed, 0.001 * 1.0 * elapsed),
+					"a crew sharing the food store did not draw its authored rate");
+				// The shared stores gave up exactly the summed consumption -
+				// no double-spend against the same starting inventory.
+				require(approx(snap.stores[0].currentQualified,
+					50.0 - a.foodConsumed - b.foodConsumed),
+					"the shared food store was spent more than once");
+				require(approx(snap.stores[1].currentQualified,
+					50.0 - a.waterConsumed - b.waterConsumed),
+					"the shared water store was spent more than once");
+				require(approx(snap.stores[2].currentQualified,
+					a.urineProduced + b.urineProduced),
+					"the shared urine store did not receive exactly the summed returns");
+				require(a.retainedKg > 0.0 && b.retainedKg > 0.0,
+					"a sharing crew retained no body mass - the balance was altered");
+				for (auto const& balance : snap.constituentBalances)
+					require(std::abs(balance.residual) <= 1e-6,
+						("constituent '" + balance.constituent
+							+ "' ledger not closed").c_str());
+			}
+		}
 		// Nominal metabolism: every pathway runs at the authored rate,
 		// the compartment gains the crew's CO2, moisture and heat, the
 		// waste stores receive the returns, and the crew ledger closes
@@ -7761,6 +7943,34 @@ namespace
 			sandbox.resumeSimulation();
 			require(sandbox.advanceTicks(60),
 				"bundled Lua crew mirror failed its in-sandbox assertions");
+			core::setStationSystemsSourceLoader({});
+		}
+		// The Lua mirror refuses an aliased crew stream role at
+		// construction (#600), independently of the host check: the host
+		// rig here is valid, and the alias is introduced only inside the
+		// Lua crossing - the bundled model's own constructor assert must
+		// reject it, contained as a construction failure carrying the
+		// refusal diagnostic, so Reset/replay reconstructs the same
+		// contained state even if a crossing is tampered with.
+		{
+			auto const bundled = core::bundledStationSystemsSource();
+			core::setStationSystemsSourceLoader([bundled] {
+				return std::string("local factory = (function()\n") + bundled
+					+ "\nend)()\n"
+					"return function(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
+					"crews[1].waterStore = crews[1].foodStore\n"
+					"return factory(name, stores, transfers, conversions, solar, loads, batteries, deliveries, reservoirs, radiators, coolantLoops, chillers, generators, atmospheres, airlockCycles, crews, waterCollectors, waterTreatments, electrolyzers, co2Captures, fuelCells, thermalBuffers, wasteEjections, sabatierReactors, methaneProcessors, microbialProcessors, cropPopulations, algaeCultures)\n"
+					"end";
+			});
+			core::World sandbox("SandboxCrewAlias", 2, 2);
+			sandbox.pauseSimulation(); sandbox.finishBuild();
+			auto const result = crewConfigure(sandbox, fullStores(), compartment(), { crew(2, 1.0) });
+			require(!result.first
+				&& result.second.find("chemically distinct streams may not share one store")
+					!= std::string::npos
+				&& !sandbox.getStationSystemsSnapshot().enabled,
+				("the Lua mirror did not refuse an aliased crew stream crossing: "
+					+ result.second).c_str());
 			core::setStationSystemsSourceLoader({});
 		}
 	}

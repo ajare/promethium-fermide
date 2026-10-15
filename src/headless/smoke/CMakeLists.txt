@@ -720,6 +720,10 @@ set_tests_properties(station-editor-coupled-live-view PROPERTIES LABELS "smoke;f
 # real Station Systems window controls.
 add_test(NAME station-editor-carbon-alias COMMAND pf-smoke-editor --check station/carbonAliasWorkflow)
 set_tests_properties(station-editor-carbon-alias PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+# #600: the aliased crew stream refusal surfaced through the real
+# Station Systems window controls.
+add_test(NAME station-editor-crew-alias COMMAND pf-smoke-editor --check station/crewAliasWorkflow)
+set_tests_properties(station-editor-crew-alias PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 add_test(NAME station-editor-trends COMMAND pf-smoke-editor --check station/trendsWorkflow)
 set_tests_properties(station-editor-trends PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 # #420: the bounded scenario forecast observed through the separate window.
