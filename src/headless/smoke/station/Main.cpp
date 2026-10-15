@@ -22493,7 +22493,10 @@ void recovery(smoke::Context const& context)
 		// Scenario F: the computation is bounded. A one-second
 		// recurrence across the whole horizon cannot make the forecast
 		// run forever: collection stops at the declared segment cap and
-		// the truncation is reported.
+		// the truncation is reported. #604: a truncated store with no
+		// shortfall inside its complete range reports Incomplete, never
+		// Sustained, and the snapshot exposes the complete-through bound
+		// so the unavailable range beyond it is explicit.
 		{
 			core::World world("ForecastBounded", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
@@ -22514,11 +22517,284 @@ void recovery(smoke::Context const& context)
 				"a schedule denser than the segment cap did not truncate the forecast");
 			require(snap.forecast.segmentsComputed <= core::StationForecastMaxSegments,
 				"the forecast computed more segments than the declared cap");
+			require(snap.forecast.completeThroughSeconds > snap.forecast.asOfSeconds
+				&& snap.forecast.completeThroughSeconds
+					< snap.forecast.asOfSeconds + core::StationForecastHorizonSeconds,
+				"a truncated forecast does not report a partial complete-through bound");
 			auto const* entry = findForecast(snap.forecast.stores, "ballast");
-			require(entry != nullptr && entry->basis == core::StationForecastBasis::Sustained,
-				"the truncated projection lost the store entry");
+			require(entry != nullptr
+				&& entry->basis == core::StationForecastBasis::Incomplete,
+				"a truncated store with no shortfall inside its complete range "
+				"did not report Incomplete instead of an unjustified Sustained");
 			require(!entry->arrivals.empty(),
 				"the truncated projection dropped every already-collected arrival");
+			for (auto const& storeEntry : snap.forecast.stores)
+				for (auto const& arrival : storeEntry.arrivals)
+					require(arrival.arrivalSeconds
+						<= snap.forecast.completeThroughSeconds + 1e-6,
+						"an arrival outside the complete-through range was reported");
+		}
+		// Scenario #604-A: the ticket reproduction. A dense unrelated
+		// drip (0.1 s recurrence into "noisy") is declared before a
+		// one-off 10 kg rescue of the "feed" store, which starts with
+		// 2 drawable and drains 1 kg/s to the sink. Without the rescue
+		// feed runs out at t=2; with the rescue landing at t=1 it runs
+		// out at t=12. The drip still overruns the event budget - the
+		// forecast truncates - but the chronological frontier merge
+		// keeps the rescue inside the complete-through range, so the
+		// depletion onset reads 12 in both declaration orders and
+		// matches the sparse control that has no drip at all.
+		{
+			core::World dense("ForecastDenseRescue", 2, 2);
+			dense.pauseSimulation(); dense.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = { chainStores("noisy", 1.0e9, 1.0),
+				chainStores("feed", 100.0, 2.0),
+				chainStores("sink", 1.0e6, 0.0) };
+			settings.transfers = { chainTransfer("drain", "feed", "sink", 1.0, 0) };
+			core::ResourceDeliverySettings noise;
+			noise.id = "noise"; noise.storeId = "noisy"; noise.unit = "kg";
+			noise.quantity = 1.0; noise.firstOccurrenceSeconds = 0.1;
+			noise.recurrenceSeconds = 0.1;
+			core::ResourceDeliverySettings rescue;
+			rescue.id = "rescue"; rescue.storeId = "feed"; rescue.unit = "kg";
+			rescue.quantity = 10.0; rescue.firstOccurrenceSeconds = 1.0;
+			settings.deliveries = { noise, rescue };
+			require(dense.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+			auto const denseSnap = dense.getStationSystemsSnapshot().forecast;
+			require(denseSnap.truncated,
+				"the dense drip schedule did not truncate the forecast");
+			auto const* feed = findForecast(denseSnap.stores, "feed");
+			require(feed != nullptr && feed->hasShortfall
+				&& feed->basis == core::StationForecastBasis::Shortfall,
+				"the rescued feed store did not forecast a shortfall");
+			require(approx(feed->shortfallOnsetSeconds, 12.0, 1e-3),
+				("the dense unrelated schedule dropped the early rescue: onset is "
+				+ std::to_string(feed->shortfallOnsetSeconds) + ", expected 12").c_str());
+			require(feed->arrivals.size() == 1
+				&& feed->arrivals[0].deliveryId == "rescue"
+				&& approx(feed->arrivals[0].arrivalSeconds, 1.0)
+				&& approx(feed->arrivals[0].acceptedQuantity, 10.0)
+				&& feed->arrivals[0].rescuesStore,
+				"the rescue arrival is missing or misapplied behind the dense schedule");
+			require(denseSnap.completeThroughSeconds > 12.0
+				&& denseSnap.completeThroughSeconds
+					< denseSnap.asOfSeconds + core::StationForecastHorizonSeconds,
+				"the truncated forecast does not cover the rescue but stop short of the horizon");
+			for (auto const& storeEntry : denseSnap.stores)
+				for (auto const& arrival : storeEntry.arrivals)
+					require(arrival.arrivalSeconds
+						<= denseSnap.completeThroughSeconds + 1e-6,
+						"an arrival outside the complete-through range was reported");
+			// Declaration permutation: the rescue declared first must
+			// project identically - the frontier merge never lets the
+			// drip's budget position depend on declaration order.
+			settings.deliveries = { rescue, noise };
+			core::World permuted("ForecastDenseRescuePermuted", 2, 2);
+			permuted.pauseSimulation(); permuted.finishBuild();
+			require(permuted.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+			auto const permutedSnap = permuted.getStationSystemsSnapshot().forecast;
+			require(permutedSnap.truncated, "the permuted forecast stopped truncating");
+			auto const* permutedFeed = findForecast(permutedSnap.stores, "feed");
+			require(permutedFeed != nullptr
+				&& approx(permutedFeed->shortfallOnsetSeconds,
+					feed->shortfallOnsetSeconds, 1e-9),
+				"swapping the declaration order changed the projected depletion onset");
+			// Sparse control: the same rig without the dense drip must
+			// project the same depletion onset over the full horizon.
+			settings.deliveries = { rescue };
+			core::World sparse("ForecastDenseRescueControl", 2, 2);
+			sparse.pauseSimulation(); sparse.finishBuild();
+			require(sparse.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+			auto const sparseSnap = sparse.getStationSystemsSnapshot().forecast;
+			require(!sparseSnap.truncated,
+				"the sparse control forecast truncated without a dense schedule");
+			require(approx(sparseSnap.completeThroughSeconds,
+				sparseSnap.asOfSeconds + sparseSnap.horizonSeconds),
+				"a complete forecast does not report complete-through at the horizon");
+			auto const* controlFeed = findForecast(sparseSnap.stores, "feed");
+			require(controlFeed != nullptr
+				&& approx(controlFeed->shortfallOnsetSeconds,
+					feed->shortfallOnsetSeconds, 1e-9),
+				"the dense-schedule projection disagrees with the sparse control");
+		}
+		// Scenario #604-B: a dense ejection schedule declared first
+		// must not drop a later one-off ejection. The feed store starts
+		// with 10 drawable and drains 1 kg/s; a one-off 3 kg ejection
+		// at t=1 leaves 6, so depletion lands at t=7. A dense unrelated
+		// bilge ejection every 0.1 s overruns the event budget; the
+		// merged frontier must still include the one-off whatever the
+		// declaration order, matching the sparse control.
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = { chainStores("bilge", 1.0e9, 1.0e8),
+				chainStores("feed", 100.0, 10.0),
+				chainStores("sink", 1.0e6, 0.0) };
+			settings.transfers = { chainTransfer("drain", "feed", "sink", 1.0, 0) };
+			core::WasteEjectionSettings bilgeEject;
+			bilgeEject.id = "bilgeEject"; bilgeEject.storeId = "bilge";
+			bilgeEject.unit = "kg"; bilgeEject.quantity = 1.0;
+			bilgeEject.firstOccurrenceSeconds = 0.1; bilgeEject.recurrenceSeconds = 0.1;
+			core::WasteEjectionSettings feedEject;
+			feedEject.id = "feedEject"; feedEject.storeId = "feed";
+			feedEject.unit = "kg"; feedEject.quantity = 3.0;
+			feedEject.firstOccurrenceSeconds = 1.0;
+			settings.wasteEjections = { bilgeEject, feedEject };
+			core::World dense("ForecastDenseEject", 2, 2);
+			dense.pauseSimulation(); dense.finishBuild();
+			require(dense.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+			auto const denseSnap = dense.getStationSystemsSnapshot().forecast;
+			require(denseSnap.truncated,
+				"the dense ejection schedule did not truncate the forecast");
+			auto const* feed = findForecast(denseSnap.stores, "feed");
+			require(feed != nullptr && feed->hasShortfall
+				&& approx(feed->shortfallOnsetSeconds, 7.0, 1e-3),
+				("the dense ejection schedule dropped the one-off ejection: onset is "
+				+ std::to_string(feed->shortfallOnsetSeconds) + ", expected 7").c_str());
+			settings.wasteEjections = { feedEject, bilgeEject };
+			core::World permuted("ForecastDenseEjectPermuted", 2, 2);
+			permuted.pauseSimulation(); permuted.finishBuild();
+			require(permuted.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+			auto const permutedSnap = permuted.getStationSystemsSnapshot().forecast;
+			auto const* permutedFeed = findForecast(permutedSnap.stores, "feed");
+			require(permutedSnap.truncated && permutedFeed != nullptr
+				&& approx(permutedFeed->shortfallOnsetSeconds,
+					feed->shortfallOnsetSeconds, 1e-9),
+				"swapping the ejection declaration order changed the onset");
+			settings.wasteEjections = { feedEject };
+			core::World sparse("ForecastDenseEjectControl", 2, 2);
+			sparse.pauseSimulation(); sparse.finishBuild();
+			require(sparse.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+			auto const sparseSnap = sparse.getStationSystemsSnapshot().forecast;
+			auto const* controlFeed = findForecast(sparseSnap.stores, "feed");
+			require(!sparseSnap.truncated && controlFeed != nullptr
+				&& approx(controlFeed->shortfallOnsetSeconds,
+					feed->shortfallOnsetSeconds, 1e-9),
+				"the dense-ejection projection disagrees with the sparse control");
+		}
+		// Scenario #604-C: a dense demand profile must not drop another
+		// profile's breakpoints. A crew with a maximally dense activity
+		// profile (8 segments per second) is declared before an
+		// equipment load whose operating profile (period 100 s) steps on
+		// at t=50.05 and drains a feed store holding 62 drawable at
+		// 1 kg/s. The crew never touches the feed store; only the load's
+		// step at 50.05 matters, and the crew's 0.125 s breakpoints
+		// cannot stand in for it. The load draws 49.95 kg during
+		// [50.05, 100), idles through [100, 150.05) and takes the last
+		// 12.05 kg from 150.05, depleting the store at t=162.1. The
+		// crew alone overruns the breakpoint budget so the forecast
+		// truncates, but the merged frontier must still have collected
+		// the load's 50.05 step, putting depletion at t=162.1 exactly
+		// as in the sparse control with no crew. The old
+		// declaration-order collection dropped every load breakpoint
+		// once the crew filled the budget, starting the drain no earlier
+		// than the next 0.125 s crew breakpoint and reporting the
+		// depletion late.
+		{
+			core::ResourceCompositionSettings foodComposition;
+			foodComposition.moisture = 0.8;
+			foodComposition.nutrientNitrogen = 0.05;
+			foodComposition.phosphorus = 0.01;
+			foodComposition.potassium = 0.02;
+			foodComposition.otherMinerals = 0.02;
+			foodComposition.energyKJPerKgDry = 17000.0;
+			core::ResourceCompositionSettings waterComposition;
+			waterComposition.moisture = 0.999;
+			waterComposition.otherMinerals = 0.001;
+			core::ResourceCompositionSettings urineComposition;
+			urineComposition.moisture = 0.95;
+			urineComposition.nutrientNitrogen = 0.1;
+			urineComposition.phosphorus = 0.02;
+			urineComposition.potassium = 0.05;
+			urineComposition.otherMinerals = 0.05;
+			urineComposition.energyKJPerKgDry = 500.0;
+			core::ResourceCompositionSettings wasteComposition;
+			wasteComposition.moisture = 0.5;
+			wasteComposition.energyKJPerKgDry = 10000.0;
+			auto compound = [](std::string const& id, double capacity, double starting,
+				std::optional<core::ResourceCompositionSettings> composition)
+			{
+				core::ResourceStoreSettings store;
+				store.id = id; store.unit = "kg";
+				store.capacity = capacity; store.startingQualified = starting;
+				store.composition = std::move(composition);
+				return store;
+			};
+			core::AtmosphereSettings habitat;
+			habitat.id = "habitat"; habitat.hazardClass = "normal";
+			habitat.volumeM3 = 100.0;
+			habitat.startingOxygenKg = 20.0; habitat.startingNitrogenKg = 80.0;
+			habitat.startingTemperatureC = 20.0;
+			habitat.thermalCapacityKJPerK = 10000.0;
+			habitat.minPressureKPa = 1.0; habitat.maxPressureKPa = 200.0;
+			core::CrewSettings crew;
+			crew.id = "denseCrew"; crew.atmosphereId = "habitat";
+			crew.crewCount = 100;
+			crew.activityProfile.periodSeconds = 1.0;
+			crew.activityProfile.segments = {{0.0, 0.5}, {0.125, 0.6},
+				{0.25, 0.7}, {0.375, 0.8}, {0.5, 0.9}, {0.625, 1.0},
+				{0.75, 0.9}, {0.875, 0.8}};
+			crew.foodStoreId = "rations"; crew.waterStoreId = "potable";
+			crew.urineStoreId = "urine"; crew.organicWasteStoreId = "organicWaste";
+			crew.foodPerCrewPerS = 0.001; crew.waterPerCrewPerS = 0.002;
+			crew.oxygenPerCrewKgPerS = 0.001; crew.co2PerCrewKgPerS = 0.0011;
+			crew.moisturePerCrewKgPerS = 0.0005;
+			crew.urinePerCrewPerS = 0.0015; crew.organicWastePerCrewPerS = 0.0002;
+			crew.metabolicHeatPerCrewKW = 0.1;
+			core::EquipmentLoadSettings drill;
+			drill.id = "drill"; drill.electricalDemandKW = 0.0;
+			drill.operatingProfile.periodSeconds = 100.0;
+			drill.operatingProfile.segments = {{0.0, 0.0}, {50.05, 1.0}};
+			drill.heatOutputKW = 0.0; drill.thermalClass = "low";
+			drill.coolingDisposition = core::StationCoolingDisposition::Exported;
+			drill.criticalFloorKW = 0.0; drill.priority = 0; drill.maxCurtailment = 1.0;
+			core::EquipmentMaterialExchangeSettings draw;
+			draw.storeId = "feed"; draw.ratePerSecond = 1.0; draw.consumes = true;
+			drill.materialExchanges = { draw };
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {
+				compound("rations", 100000.0, 100000.0, foodComposition),
+				compound("potable", 100000.0, 100000.0, waterComposition),
+				compound("urine", 100000.0, 1.0, urineComposition),
+				compound("organicWaste", 100000.0, 1.0, wasteComposition),
+				chainStores("feed", 1000.0, 62.0) };
+			settings.atmospheres = { habitat };
+			settings.crews = { crew };
+			settings.equipmentLoads = { drill };
+			core::World dense("ForecastDenseProfile", 2, 2);
+			dense.pauseSimulation(); dense.finishBuild();
+			require(dense.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+			auto const denseSnap = dense.getStationSystemsSnapshot().forecast;
+			require(denseSnap.truncated,
+				"the dense crew profile did not truncate the forecast");
+			auto const* feed = findForecast(denseSnap.stores, "feed");
+			require(feed != nullptr && feed->hasShortfall
+				&& approx(feed->shortfallOnsetSeconds, 162.1, 1e-3),
+				("the dense crew profile dropped the load's step breakpoint: onset is "
+					+ std::to_string(feed->shortfallOnsetSeconds)
+					+ ", expected 162.1").c_str());
+			settings.crews.clear();
+			settings.atmospheres.clear();
+			core::World sparse("ForecastDenseProfileControl", 2, 2);
+			sparse.pauseSimulation(); sparse.finishBuild();
+			require(sparse.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+			auto const sparseSnap = sparse.getStationSystemsSnapshot().forecast;
+			auto const* controlFeed = findForecast(sparseSnap.stores, "feed");
+			require(!sparseSnap.truncated && controlFeed != nullptr
+				&& approx(controlFeed->shortfallOnsetSeconds,
+					feed->shortfallOnsetSeconds, 1e-6),
+				"the dense-profile projection disagrees with the sparse control");
 		}
 		// Scenario G: a store that starts depleted reads as a shortfall
 		// from the forecast instant, never as sustained supply.

@@ -3891,9 +3891,18 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		{
 			ImGui::TextWrapped("Scenario: %s", forecast.scenarioLabel.c_str());
 			ImGui::TextWrapped("Uncertainty: %s", forecast.uncertaintyLabel.c_str());
-			ImGui::Text("Projected from t=%.1f s over a %.0f s horizon (%u segments%s)",
-				forecast.asOfSeconds, forecast.horizonSeconds, forecast.segmentsComputed,
-				forecast.truncated ? " - TRUNCATED at the segment cap: the projection stopped early and covers less than the full horizon" : "");
+			// #604: when the budget truncates, show exactly how far the
+			// projection is complete instead of only warning that it is
+			// truncated: everything strictly before the complete-through
+			// time is fully modelled, the range beyond is unavailable.
+			if (forecast.truncated)
+				ImGui::Text("Projected from t=%.1f s: BUDGET-TRUNCATED, complete only through t=%.1f s (%u segments); the range beyond is unavailable and no store result should be read as covering the full horizon",
+					forecast.asOfSeconds, forecast.completeThroughSeconds,
+					forecast.segmentsComputed);
+			else
+				ImGui::Text("Projected from t=%.1f s over a %.0f s horizon (%u segments)",
+					forecast.asOfSeconds, forecast.horizonSeconds,
+					forecast.segmentsComputed);
 			if (forecast.stores.empty())
 				ImGui::TextDisabled("No Resource stores authored.");
 			for (auto const& entry : forecast.stores)
@@ -3916,6 +3925,10 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 						ImGui::Text("    uncovered outflow while short: %.3f %s (demand that could not be drawn, reported not deleted)",
 							entry.unmetOutflowTotal, entry.unit.c_str());
 				}
+				else if (entry.basis == core::StationForecastBasis::Incomplete)
+					ImGui::Text("  no shortfall projected before t=%.1f s; beyond that the forecast is budget-truncated and unavailable (drawable at the complete-through bound: %.3f %s)",
+						forecast.completeThroughSeconds,
+						entry.projectedDrawableAtHorizon, entry.unit.c_str());
 				else
 					ImGui::Text("  no shortfall projected inside the horizon; drawable at horizon end: %.3f %s",
 						entry.projectedDrawableAtHorizon, entry.unit.c_str());

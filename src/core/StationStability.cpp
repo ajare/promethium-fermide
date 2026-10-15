@@ -250,6 +250,7 @@ namespace core
 		// StationForecastSnapshot header, entries and arrivals
 		fin(snapshot.forecast.asOfSeconds, "forecast.asOfSeconds");
 		fin(snapshot.forecast.horizonSeconds, "forecast.horizonSeconds");
+		fin(snapshot.forecast.completeThroughSeconds, "forecast.completeThroughSeconds");
 		for (auto const& entry : snapshot.forecast.stores)
 		{
 			auto const where = "forecast store '" + entry.storeId + "'";

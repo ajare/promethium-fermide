@@ -1846,15 +1846,21 @@ namespace core
 	// whole projected window; "shortfall" means the projection reaches
 	// drawable-zero inside the window - the store runs out before any
 	// accepted arrival can prevent it - with the onset time and the
-	// limiting service reported beside it.
+	// limiting service reported beside it. "Incomplete" (#604) means the
+	// bounded projection stopped before reaching the horizon: no shortfall
+	// was found inside the complete-through range, but the status beyond
+	// StationForecastSnapshot::completeThroughSeconds is unknown and must
+	// never be read as sustained supply.
 	enum class StationForecastBasis : std::uint8_t
 	{
-		Unknown,   // no forecast has been computed for this store
-		Sustained, // projected drawable stays above zero through the window
-		Shortfall, // projected drawable reaches zero inside the window
+		Unknown,    // no forecast has been computed for this store
+		Sustained,  // projected drawable stays above zero through the window
+		Shortfall,  // projected drawable reaches zero inside the window
+		Incomplete, // budget-truncated: no shortfall inside the complete
+		            // range, status beyond it unknown
 	};
-	inline constexpr std::array<char const*, 3> StationForecastBasisNames{
-		"unknown", "sustained", "shortfall"};
+	inline constexpr std::array<char const*, 4> StationForecastBasisNames{
+		"unknown", "sustained", "shortfall", "incomplete"};
 	// Documented forecast bounds (#420): the projection runs over a fixed
 	// simulated-time horizon and integrates at most this many event-driven
 	// segments. A schedule dense enough to need more segments truncates at
@@ -1910,7 +1916,11 @@ namespace core
 		double netRateAtStart{0.0}; // projected net rate over the first segment
 		bool hasShortfall{false};
 		double shortfallOnsetSeconds{0.0}; // when drawable reaches zero; 0 = none
-		double projectedDrawableAtHorizon{0.0}; // at horizon end or truncation
+		// Drawable at the end of the complete projected range: the horizon
+		// value only when the forecast is not truncated; otherwise the
+		// value at StationForecastSnapshot::completeThroughSeconds, which
+		// is not a horizon projection (#604).
+		double projectedDrawableAtHorizon{0.0};
 		// The binding outflow at the projected depletion: the largest
 		// modelled outflow of the store in the segment that drives it to
 		// zero. Empty when no depletion is projected.
@@ -1961,6 +1971,15 @@ namespace core
 		bool available{false};
 		double asOfSeconds{0.0};
 		double horizonSeconds{0.0};
+		// #604: the time through which the projection is complete: every
+		// authored event and profile breakpoint strictly before it was
+		// modelled. Equals asOfSeconds + horizonSeconds when the whole
+		// horizon was projected; when the event/segment budget truncated
+		// the run it is the earliest unmodelled event (or the point the
+		// segment cap stopped the integration), and the range beyond it is
+		// explicitly unavailable - no result there may be read as covering
+		// the full horizon.
+		double completeThroughSeconds{0.0};
 		std::uint32_t segmentsComputed{0};
 		bool truncated{false};
 		std::string scenarioLabel;

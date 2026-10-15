@@ -700,6 +700,7 @@ void stabilityAuditFaultInjection(smoke::Context const&)
 	// Forecast header, entries and arrivals
 	PF_AUDIT_MUTATE("forecast.asOfSeconds", snapshot.forecast.asOfSeconds);
 	PF_AUDIT_MUTATE("forecast.horizonSeconds", snapshot.forecast.horizonSeconds);
+	PF_AUDIT_MUTATE("forecast.completeThroughSeconds", snapshot.forecast.completeThroughSeconds);
 	PF_AUDIT_MUTATE("forecastStore.asOfSeconds", snapshot.forecast.stores.front().asOfSeconds);
 	PF_AUDIT_MUTATE("forecastStore.drawableAtStart", snapshot.forecast.stores.front().drawableAtStart);
 	PF_AUDIT_MUTATE("forecastStore.physicalAtStart", snapshot.forecast.stores.front().physicalAtStart);

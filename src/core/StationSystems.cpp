@@ -7,6 +7,7 @@
 #include <cmath>
 #include <map>
 #include <numeric>
+#include <queue>
 #include <set>
 
 namespace core
@@ -5464,6 +5465,15 @@ namespace core
 		// so zero-hits and fill-ups land exactly, and it is capped at
 		// StationForecastMaxSegments segments: a schedule dense enough to
 		// need more truncates and reports it rather than running forever.
+		// #604: the segment budget is filled by merging every schedule -
+		// each delivery, each ejection and each profile segment - at its
+		// chronological frontier, so a dense schedule can only crowd out
+		// occurrences later than the frontier, never an earlier resupply
+		// declared behind it. When the budget fills the projection stops
+		// at the earliest omitted event and reports completeThroughSeconds:
+		// everything strictly before that bound is modelled completely,
+		// everything beyond it is explicitly unavailable, and no store
+		// result is ever projected over a schedule with a hole in it.
 		// Nothing here mutates live inventory, advances the World clock,
 		// consumes a deterministic stream or touches the sandbox: the
 		// projection reads the committed state and the authored settings
@@ -5473,6 +5483,9 @@ namespace core
 			StationForecastSnapshot result;
 			result.horizonSeconds = StationForecastHorizonSeconds;
 			result.asOfSeconds = asOfSeconds;
+			// Nothing is modelled before the forecast instant; a disabled
+			// Station never completes any range (#604).
+			result.completeThroughSeconds = asOfSeconds;
 			result.scenarioLabel =
 				"declared-profile scenario: authored transfer, crew and equipment demand profiles continue unchanged; "
 				"a manually commanded generator's fuel draw is projected as deterministic demand; "
@@ -5544,6 +5557,17 @@ namespace core
 			// equal time and priority - the same rule the live ledger
 			// applies. Profile segment starts become breakpoints at which
 			// the demand levels step.
+			//
+			// #604: each delivery, each ejection and each profile segment
+			// is one stream of occurrences, and the budget is filled by
+			// merging the streams at their chronological frontier: the
+			// earliest next occurrence across all streams is taken first,
+			// so exhausting one declaration in turn can no longer fill the
+			// budget before a later-declared schedule's early events are
+			// ever considered. When the budget fills, the frontier time is
+			// the earliest event the projection cannot model; the run
+			// stops there and reports it as the complete-through bound
+			// rather than projecting a hole.
 			struct TimedEvent
 			{
 				StationScenarioEventKey key;
@@ -5553,89 +5577,137 @@ namespace core
 			std::vector<TimedEvent> events;
 			std::vector<double> breakpoints;
 			bool truncated = false;
-			auto const withinBudget = [&]()
+			// The earliest authored occurrence the budget could not
+			// include; horizonEnd until collection actually overflows.
+			double firstOmittedSeconds = horizonEnd;
+			struct OccurrenceStream
 			{
-				return events.size() + breakpoints.size() <= StationForecastMaxSegments;
+				double first{0.0};
+				double recurrence{0.0}; // <= 0: a single one-off occurrence
+				long long occurrence{0}; // index of `next` in the stream
+				double next{0.0};
+				bool isBreakpoint{false};
+				bool isDelivery{true};
+				size_t configIndex{0};
+				int priority{0};
+				size_t declaration{0};
+				size_t streamId{0};
 			};
-			auto const collectOccurrences = [&](double first, double recurrence,
-				auto&& emit)
+			// Min-heap on the frontier time; the stream id breaks ties so
+			// the merge order is deterministic whatever the heap does.
+			auto const frontierLess = [](OccurrenceStream const& left,
+				OccurrenceStream const& right)
 			{
+				if (left.next != right.next) return left.next > right.next;
+				return left.streamId > right.streamId;
+			};
+			std::priority_queue<OccurrenceStream, std::vector<OccurrenceStream>,
+				decltype(frontierLess)> frontier(frontierLess);
+			auto const advanceStream = [&](OccurrenceStream& stream)
+			{
+				if (stream.recurrence <= 0.0) return false; // one-off: done
+				++stream.occurrence;
+				stream.next = stream.first
+					+ static_cast<double>(stream.occurrence) * stream.recurrence;
+				if (stream.next > horizonEnd + StationScheduleTolerance)
+					return false;
+				frontier.push(stream);
+				return true;
+			};
+			auto const addStream = [&](double first, double recurrence,
+				bool isBreakpoint, bool isDelivery, size_t configIndex,
+				int priority, size_t declaration)
+			{
+				OccurrenceStream stream;
+				stream.first = first;
+				stream.recurrence = recurrence;
+				stream.isBreakpoint = isBreakpoint;
+				stream.isDelivery = isDelivery;
+				stream.configIndex = configIndex;
+				stream.priority = priority;
+				stream.declaration = declaration;
+				stream.streamId = frontier.size();
 				if (recurrence <= 0.0)
 				{
-					if (first > asOfSeconds + StationScheduleTolerance) emit(first);
-					return;
+					// A one-off outside the projected window models
+					// nothing: it never enters the merge and never
+					// spends budget.
+					if (first <= asOfSeconds + StationScheduleTolerance
+						|| first > horizonEnd + StationScheduleTolerance)
+						return;
+					stream.occurrence = 0;
+					stream.next = first;
 				}
-				double start = 0.0;
-				if (first <= asOfSeconds + StationScheduleTolerance)
-					start = std::ceil((asOfSeconds + StationScheduleTolerance - first)
-						/ recurrence);
-				for (double k = start; ; ++k)
+				else
 				{
-					auto const occurrence = first + k * recurrence;
-					if (occurrence > horizonEnd + StationScheduleTolerance) break;
-					emit(occurrence);
-					if (!withinBudget())
-					{
-						truncated = true;
-						break;
-					}
+					long long index = 0;
+					if (first <= asOfSeconds + StationScheduleTolerance)
+						index = static_cast<long long>(std::ceil(
+							(asOfSeconds + StationScheduleTolerance - first)
+								/ recurrence));
+					stream.occurrence = index;
+					stream.next = first
+						+ static_cast<double>(index) * recurrence;
+					if (stream.next > horizonEnd + StationScheduleTolerance)
+						return;
 				}
+				frontier.push(stream);
 			};
-			for (size_t index = 0; index < deliveries.size() && !truncated; ++index)
-			{
-				auto const& authored = deliveries[index].authored;
-				auto const declaration = deliveries[index].declarationIndex;
-				collectOccurrences(authored.firstOccurrenceSeconds,
-					authored.recurrenceSeconds, [&](double occurrence)
-					{
-						events.push_back({{occurrence, authored.priority,
-							declaration}, true, index});
-					});
-			}
-			for (size_t index = 0; index < wasteEjections.size() && !truncated; ++index)
-			{
-				auto const& authored = wasteEjections[index].authored;
-				auto const declaration = wasteEjections[index].declarationIndex;
-				collectOccurrences(authored.firstOccurrenceSeconds,
-					authored.recurrenceSeconds, [&](double occurrence)
-					{
-						events.push_back({{occurrence, authored.priority,
-							declaration}, false, index});
-					});
-			}
-			auto const collectProfileBreakpoints = [&](ProfileSettings const& profile)
+			for (size_t index = 0; index < deliveries.size(); ++index)
+				addStream(deliveries[index].authored.firstOccurrenceSeconds,
+					deliveries[index].authored.recurrenceSeconds, false, true,
+					index, deliveries[index].authored.priority,
+					deliveries[index].declarationIndex);
+			for (size_t index = 0; index < wasteEjections.size(); ++index)
+				addStream(wasteEjections[index].authored.firstOccurrenceSeconds,
+					wasteEjections[index].authored.recurrenceSeconds, false,
+					false, index, wasteEjections[index].authored.priority,
+					wasteEjections[index].declarationIndex);
+			auto const addProfileStreams = [&](ProfileSettings const& profile)
 			{
 				if (profile.periodSeconds <= 0.0) return;
 				for (auto const& segment : profile.segments)
-				{
-					double start = 0.0;
-					if (segment.startSeconds <= asOfSeconds + StationScheduleTolerance)
-						start = std::ceil((asOfSeconds + StationScheduleTolerance
-							- segment.startSeconds) / profile.periodSeconds);
-					for (double k = start; ; ++k)
-					{
-						auto const when = segment.startSeconds + k * profile.periodSeconds;
-						if (when > horizonEnd + StationScheduleTolerance) break;
-						breakpoints.push_back(when);
-						if (!withinBudget())
-						{
-							truncated = true;
-							return;
-						}
-					}
-				}
+					addStream(segment.startSeconds, profile.periodSeconds,
+						true, true, 0, 0, 0);
 			};
 			for (auto const& crew : crews)
+				addProfileStreams(crew.authored.activityProfile);
+			for (auto const& load : loads)
+				addProfileStreams(load.authored.operatingProfile);
+			while (!frontier.empty())
 			{
-				collectProfileBreakpoints(crew.authored.activityProfile);
-				if (truncated) break;
-			}
-			if (!truncated)
-				for (auto const& load : loads)
+				auto stream = frontier.top();
+				if (stream.next > horizonEnd + StationScheduleTolerance) break;
+				// A breakpoint already collected at this exact instant
+				// carries no new information: consume the duplicate
+				// without spending budget. Streams leave the frontier in
+				// non-decreasing time order, so the last breakpoint
+				// collected is the only possible duplicate.
+				if (stream.isBreakpoint && !breakpoints.empty()
+					&& breakpoints.back() == stream.next)
 				{
-					collectProfileBreakpoints(load.authored.operatingProfile);
-					if (truncated) break;
+					frontier.pop();
+					advanceStream(stream);
+					continue;
 				}
+				if (events.size() + breakpoints.size()
+					>= StationForecastMaxSegments)
+				{
+					// The budget is spent and this frontier event is real:
+					// the projection is complete only up to here.
+					truncated = true;
+					firstOmittedSeconds = stream.next;
+					break;
+				}
+				frontier.pop();
+				if (stream.isBreakpoint)
+					breakpoints.push_back(stream.next);
+				else
+					events.push_back({{stream.next, stream.priority,
+						stream.declaration}, stream.isDelivery,
+						stream.configIndex});
+				advanceStream(stream);
+			}
 			std::sort(events.begin(), events.end(),
 				[](TimedEvent const& left, TimedEvent const& right)
 				{
@@ -5997,14 +6069,21 @@ namespace core
 			std::uint32_t segments = 0;
 			std::vector<double> netAtStart(stores.size(), 0.0);
 			bool firstSegment = true;
-			while (time < horizonEnd)
+			// #604: the projection may not run past the earliest event the
+			// budget could not include. Everything strictly before this
+			// bound is modelled completely; everything beyond it is
+			// explicitly unavailable, never silently projected over.
+			double const completeLimit = truncated
+				? std::min(horizonEnd, firstOmittedSeconds)
+				: horizonEnd;
+			while (time < completeLimit)
 			{
 				if (segments >= StationForecastMaxSegments)
 				{
 					truncated = true;
 					break;
 				}
-				double nextTime = horizonEnd;
+				double nextTime = completeLimit;
 				if (breakpointIndex < breakpoints.size()
 					&& breakpoints[breakpointIndex] < nextTime)
 					nextTime = breakpoints[breakpointIndex];
@@ -6291,9 +6370,17 @@ namespace core
 					store.currentQualified - store.authored.protectedReserve);
 				entry.physicalAtStart = store.currentQualified + store.currentUnqualified;
 				entry.netRateAtStart = netAtStart[index];
+				// #604: a shortfall found inside the complete-through range
+				// is real - every event before it was modelled - and is
+				// reported whatever the truncation. "Sustained" is claimed
+				// only for a projection that actually reached the horizon;
+				// a truncated projection with no shortfall inside its
+				// complete range reports Incomplete, never a promise the
+				// unmodelled range cannot break.
 				entry.basis = projected[index].depleted
 					? StationForecastBasis::Shortfall
-					: StationForecastBasis::Sustained;
+					: (truncated ? StationForecastBasis::Incomplete
+						: StationForecastBasis::Sustained);
 				entry.hasShortfall = projected[index].depleted;
 				entry.shortfallOnsetSeconds = projected[index].depleted
 					? projected[index].depletionOnset : 0.0;
@@ -6324,6 +6411,13 @@ namespace core
 			}
 			result.segmentsComputed = segments;
 			result.truncated = truncated;
+			// #604: the range [asOfSeconds, completeThroughSeconds) is
+			// modelled with every authored event and profile breakpoint
+			// inside it; whenever this falls short of the horizon the range
+			// beyond is unavailable. The loop never advances time past
+			// completeLimit, so on a full-horizon run time lands exactly
+			// on the horizon end.
+			result.completeThroughSeconds = std::min(time, completeLimit);
 			return result;
 		}
 
