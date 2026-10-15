@@ -49,6 +49,11 @@ bool selectFurnitureCatalogue(std::shared_ptr<core::World> const& world,
 		if (resourceName.empty() || name.is_absolute() || name.has_parent_path()
 			|| name.filename().string() != resourceName)
 			throw std::runtime_error("Select a Furniture catalogue Resource");
+		// Reselecting the current entry is not a replacement or an implicit reload.
+		if (world->furnitureCatalogue() && world->furnitureCatalogueResourceName() == resourceName)
+		{
+			diagnostic.clear(); return true;
+		}
 		auto source = core::resolveCatalogSource("FurnitureCatalogue", resourceName);
 		if (source.empty()) source = worldPath.parent_path() / name;
 		auto catalogue = core::FurnitureCatalogue::load(source);

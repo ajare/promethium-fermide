@@ -115,6 +115,20 @@ void FurnitureCatalogueResource::create(resources::DataStreamPtr, resources::Res
 }
 void FurnitureCatalogueResource::destroy() { mCatalogue.reset(); }
 
+std::shared_ptr<FurnitureCatalogueResource> FurnitureCatalogueResource::createSnapshot(
+	resources::ResourceManager& manager, std::filesystem::path const& path)
+{
+	// A preflight snapshot is not a new selectable catalogue. Keep it private:
+	// registering each attempt polluted the selector, even when reload failed.
+	// The returned immutable catalogue remains alive in any World that accepts it.
+	auto resource = std::make_shared<FurnitureCatalogueResource>(
+		path.filename().string(), "", std::filesystem::weakly_canonical(path).string(),
+		std::map<std::string, std::string>{}, nullptr);
+	manager.createResource(resource);
+	manager.loadResource(resource);
+	return resource;
+}
+
 WorldResource::WorldResource(std::string const& name,
 	std::string const& namesp, std::string const& source,
 	std::map<std::string, std::string> const& tags,

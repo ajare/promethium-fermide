@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <string>
@@ -99,6 +100,8 @@ public:
 		std::string const& source, std::map<std::string, std::string> const& tags,
 		wp::application::resourcesystem::ResourceLocation* location);
 	std::shared_ptr<const core::FurnitureCatalogue> const& catalogue() const { return mCatalogue; }
+	static std::shared_ptr<FurnitureCatalogueResource> createSnapshot(
+		wp::application::resourcesystem::ResourceManager& manager, std::filesystem::path const& path);
 private:
 	void create(wp::application::resourcesystem::DataStreamPtr data,
 		wp::application::resourcesystem::ResourceManager* manager) override;

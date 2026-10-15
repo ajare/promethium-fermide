@@ -1,4 +1,5 @@
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -117,6 +118,59 @@ void checkCanvas(render::WorldDrawList const& draws, float width, float height) 
       }
     }, command);
   }
+}
+void checkFurnitureCatalogueReload(std::filesystem::path const& directory) {
+  using namespace wp::application::resourcesystem;
+  struct Cleanup {
+    std::filesystem::path path;
+    ~Cleanup() {
+      core::FurnitureCatalogue::setResourceLoader({});
+      std::error_code error;
+      std::filesystem::remove_all(path, error);
+    }
+  } cleanup{std::filesystem::temp_directory_path() / ("pf-furniture-reload-" +
+      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()))};
+  std::filesystem::create_directories(cleanup.path);
+  auto source = cleanup.path / "chair.furniture.lua";
+  std::filesystem::copy_file(directory / "test-worlds/chair.furniture.lua", source);
+  std::ifstream input(source);
+  std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+  input.close();
+  wp::Logger logger;
+  ResourceManager manager(nullptr, nullptr, nullptr, &logger);
+  core::FurnitureCatalogue::setResourceLoader([&manager](std::filesystem::path const& path) {
+    return FurnitureCatalogueResource::createSnapshot(manager, path)->catalogue();
+  });
+  // Use the editor's resource-backed loader and World's real reload transaction.
+  auto world = std::make_shared<core::World>("Catalogue reload", 4, 2);
+  world->pauseSimulation();
+  world->attachFurnitureCatalogue("ChairCatalogue", core::FurnitureCatalogue::load(source));
+  auto original = world->furnitureCatalogue();
+  auto count = manager.getResourcesByType("FurnitureCatalogue").size();
+  auto label = text.find("label = \"Chair\"");
+  require(label != std::string::npos, "Missing fixture label");
+  text.replace(label, std::string("label = \"Chair\"").size(), "label = \"Reloaded chair\"");
+  std::ofstream(source) << text;
+  std::string diagnostic;
+  if (!world->reloadFurnitureCatalogue(source, &diagnostic)) throw std::runtime_error(diagnostic);
+  require(manager.getResourcesByType("FurnitureCatalogue").size() == count,
+      "Reload added another UserFurniture entry to the catalogue selector");
+  require(world->furnitureCatalogueResourceName() == "ChairCatalogue"
+      && world->furnitureCatalogue() != original
+      && world->furnitureCatalogue()->definition("chair")->label == "Reloaded chair"
+      && original->definition("chair")->label == "Chair",
+      "Reload must preserve selection and old snapshots while reading fresh data");
+  auto accepted = world->furnitureCatalogue();
+  std::ofstream(source) << "invalid Lua!";
+  require(!world->reloadFurnitureCatalogue(source, &diagnostic) && !diagnostic.empty(),
+      "Malformed catalogue reload must fail");
+  require(world->furnitureCatalogue() == accepted
+      && manager.getResourcesByType("FurnitureCatalogue").size() == count,
+      "Failed reload must preserve the accepted snapshot without registering a catalogue");
+  std::ofstream(source) << text;
+  if (!world->reloadFurnitureCatalogue(source, &diagnostic)) throw std::runtime_error(diagnostic);
+  require(manager.getResourcesByType("FurnitureCatalogue").size() == count,
+      "Repeated reload must not register synthetic catalogues");
 }
 void checkAtlasReload(std::filesystem::path const& directory) {
   using namespace wp::application::resourcesystem;
@@ -493,6 +547,7 @@ int main(int argc, char** argv) {
     // graphics context, texture upload, auxiliary manifest or ImGui is needed.
     checkSectorTileScaling();
     auto atlas = installAtlases(directory);
+    checkFurnitureCatalogueReload(directory);
     checkAtlasReload(directory);
     checkStagedMap(directory);
     checkNoOverlaysAndAgents();

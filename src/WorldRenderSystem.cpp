@@ -265,21 +265,12 @@ namespace
 			mScene->setClearColour({ 0.08f, 0.08f, 0.08f, 1.0f });
 			core::FurnitureCatalogue::setResourceLoader([this](std::filesystem::path const& path)
 			{
-				auto canonicalPath = std::filesystem::weakly_canonical(path);
 				// Loading is an explicit package preflight, including reload. Never
 				// return a path-only cache: external edits must be read and scripts
 				// validated into a fresh immutable snapshot. Existing Worlds retain
 				// their own accepted catalogue until their transaction commits.
 
-				static uint64_t sequence = 0;
-				auto resource = std::make_shared<FurnitureCatalogueResource>(
-					"UserFurniture" + std::to_string(++sequence), "",
-					canonicalPath.string(), std::map<std::string, std::string>{}, nullptr);
-				mResources->addResource(resource);
-				mResources->createResource(resource);
-				mResources->loadResource(resource);
-				mFurnitureCatalogueResources.insert_or_assign(std::move(canonicalPath), resource);
-				return resource->catalogue();
+				return FurnitureCatalogueResource::createSnapshot(*mResources, path)->catalogue();
 			});
 		}
 
@@ -741,10 +732,6 @@ namespace
 		// bundled Human and all manifest-registered types are loaded at startup
 		// so the creation selector and document loading can resolve them.
 		std::unique_ptr<ApplicationAgentTypes> mAgentTypes;
-		// The ResourceManager owns registered resources; this index prevents
-		// repeated World loads from registering another resource for one file.
-		std::map<std::filesystem::path, std::shared_ptr<FurnitureCatalogueResource>>
-			mFurnitureCatalogueResources;
 		mpp::ScenePtr mScene;
 		// Both images are composited later by ImGui, so neither canvas may
 		// overwrite the other's offscreen texture during the same frame.

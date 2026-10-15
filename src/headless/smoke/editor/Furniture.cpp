@@ -80,6 +80,18 @@ namespace
 		require(world->furniture().front().marker == desk.marker && world->furniture().front().x == 4.125f,
 			"Lua history reconstructed different authored data");
 		auto before = captureDocumentSnapshot(world, history)->yaml; auto count = history.undoCount();
+		auto selectedCatalogue = world->furnitureCatalogue();
+		diagnostic = "Previous selection error";
+		auto reselected = selectFurnitureCatalogue(world, path, "objects.furniture.lua", diagnostic, history);
+		require(reselected, "Reselecting the current Furniture catalogue was rejected: " + diagnostic);
+		require(diagnostic.empty() && world->furnitureCatalogue() == selectedCatalogue
+			&& history.undoCount() == count && captureDocumentSnapshot(world, history)->yaml == before,
+			"Reselecting the current catalogue must be a no-op, not a reload or document edit");
+		std::filesystem::copy_file(root / "objects.furniture.lua", root / "other.furniture.lua");
+		require(!selectFurnitureCatalogue(world, path, "other.furniture.lua", diagnostic, history)
+			&& diagnostic.find("Cannot replace a Furniture catalogue while instances use it") != std::string::npos
+			&& world->furnitureCatalogue() == selectedCatalogue && history.undoCount() == count,
+			"Selecting a different catalogue must still refuse replacement while instances use it");
 		{ std::ofstream output(root / "broken.furniture.lua"); output << "while true do end"; }
 		for (auto filename : {"broken.furniture.lua", "missing.furniture.lua", "../objects.furniture.lua"})
 			require(!selectFurnitureCatalogue(world, path, filename, diagnostic, history) && !diagnostic.empty()
