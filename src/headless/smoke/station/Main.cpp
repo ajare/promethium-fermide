@@ -21329,6 +21329,27 @@ void recovery(smoke::Context const& context)
 			require(!treated->biologyRecoveryPossible
 				&& treated->basis == core::StationForecastBasis::Sustained,
 				"the treatment destination carries the wrong uncertainty mix");
+			// #594: the consuming side of the same scenario - the crop's
+			// uptake stores and the treatment's source and consumable are
+			// drained by pathways the forecast does not project, and must
+			// carry the matching consumption flags.
+			for (auto const* id : {"irrigation", "fertN", "fertP", "fertK", "fertMin"})
+			{
+				auto const* entry = findForecast(snap.forecast.stores, id);
+				require(entry != nullptr && entry->biologyConsumptionPossible
+					&& !entry->processConsumptionPossible,
+					"a crop uptake store is not flagged for unprojected biology consumption");
+			}
+			for (auto const* id : {"raw", "consumable"})
+			{
+				auto const* entry = findForecast(snap.forecast.stores, id);
+				require(entry != nullptr && entry->processConsumptionPossible
+					&& !entry->biologyConsumptionPossible,
+					"a treatment feed store is not flagged for unprojected process consumption");
+			}
+			require(food != nullptr && !food->biologyConsumptionPossible
+				&& !food->processConsumptionPossible,
+				"the crop food destination carries a consumption flag it does not earn");
 			world.resumeSimulation();
 			runOrDiagnose(world, 600, "forecast uncertainty live run");
 			require(world.getStationSystemsSnapshot().healthy,
@@ -21684,6 +21705,218 @@ void recovery(smoke::Context const& context)
 			require(std::abs(c->conservationResidual)
 				<= core::StationBalanceTolerance * 1e6,
 				"the through-flow delivery projection does not conserve");
+		}
+		// Scenario M: generator fuel is projected demand, never
+		// sustained inventory (#594). The ticket's minimal generator: a
+		// manually commanded 1 kW machine at efficiency 1 burns a
+		// 0.001 kWh store dry in 3.6 s. The forecast must report the
+		// shortfall with the generator as the limiting service and the
+		// post-depletion draw as uncovered demand, and the live run must
+		// agree: the fuel really is gone inside the window the forecast
+		// named.
+		{
+			core::World world("ForecastGeneratorFuel", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			core::ResourceStoreSettings fuel;
+			fuel.id = "fuel"; fuel.unit = "kWh";
+			fuel.capacity = 1.0; fuel.startingQualified = 0.001;
+			core::ThermalReservoirSettings sink;
+			sink.id = "sink"; sink.thermalClass = "generation";
+			sink.heatCapacityKJPerK = 10000.0; sink.startingTemperatureC = 20.0;
+			sink.minTemperatureC = 0.0; sink.maxTemperatureC = 100.0;
+			core::GeneratorSettings generator;
+			generator.id = "gen"; generator.fuelStoreId = "fuel";
+			generator.thermalClass = "generation"; generator.heatSinkId = "sink";
+			generator.ratedOutputKW = 1.0; generator.commandedOutputKW = 1.0;
+			generator.efficiency = 1.0; generator.maxRampKWPerSecond = 60.0;
+			settings.stores = { fuel };
+			settings.thermalReservoirs = { sink };
+			settings.generators = { generator };
+			require(world.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const* fuelEntry = findForecast(snap.forecast.stores, "fuel");
+			require(fuelEntry != nullptr,
+				"no forecast entry for the generator fuel store");
+			if (fuelEntry != nullptr)
+			{
+				require(approx(fuelEntry->netRateAtStart, -1.0 / 3600.0, 1e-12),
+					"the commanded generator fuel draw is not in the projected net rate");
+				require(fuelEntry->basis == core::StationForecastBasis::Shortfall
+					&& fuelEntry->hasShortfall,
+					"a finite fuel store under a commanded generator read as sustained");
+				require(approx(fuelEntry->shortfallOnsetSeconds, 3.6, 1e-6),
+					"the projected fuel depletion onset is wrong");
+				require(fuelEntry->limitingServiceId == "gen"
+					&& fuelEntry->limitingServiceKind == "generator",
+					"the limiting service is not the generator");
+				require(approx(fuelEntry->unmetOutflowTotal,
+					(core::StationForecastHorizonSeconds - 3.6) / 3600.0, 1e-6),
+					"the fuel demand after depletion is not reported as uncovered");
+				require(!fuelEntry->processConsumptionPossible
+					&& !fuelEntry->biologyConsumptionPossible,
+					"a projected manual generator draw must not also read as unprojected consumption");
+				require(std::abs(fuelEntry->conservationResidual)
+					<= core::StationBalanceTolerance * 1e6,
+					"the generator-fuel projection does not conserve");
+			}
+			// The live run agrees: the whole 0.001 kWh inventory is gone
+			// well inside the window the forecast called short, and the
+			// re-forecast from the empty store reads an immediate
+			// shortfall rather than sustained supply.
+			world.resumeSimulation();
+			runOrDiagnose(world, 1200, "generator fuel live run"); // t = 20 s
+			auto const live = world.getStationSystemsSnapshot();
+			auto const* liveFuel = findStore(live.stores, "fuel");
+			require(liveFuel != nullptr && liveFuel->currentQualified <= 1e-12,
+				"the live run did not consume the fuel the forecast projected away");
+			auto const* reEntry = findForecast(live.forecast.stores, "fuel");
+			require(reEntry != nullptr && reEntry->hasShortfall
+				&& approx(reEntry->drawableAtStart, 0.0)
+				&& approx(reEntry->shortfallOnsetSeconds, live.forecast.asOfSeconds),
+				"the re-forecast of the empty fuel store is not an immediate shortfall");
+			require(live.healthy && world.getStationSystemsDiagnostics().empty(),
+				"the generator-fuel forecast scenario produced a Station diagnostic");
+		}
+		// Scenario N: under Automatic dispatch the generator's draw
+		// follows the unmodelled net load, so it is not projected - but
+		// the fuel store must carry the unprojected-consumption flag so
+		// its Sustained basis is never read as a promise (#594).
+		{
+			core::World world("ForecastGeneratorAuto", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.dispatchMode = core::StationDispatchMode::Automatic;
+			core::ResourceStoreSettings fuel;
+			fuel.id = "fuel"; fuel.unit = "kWh";
+			fuel.capacity = 1.0; fuel.startingQualified = 0.001;
+			core::ThermalReservoirSettings sink;
+			sink.id = "sink"; sink.thermalClass = "generation";
+			sink.heatCapacityKJPerK = 10000.0; sink.startingTemperatureC = 20.0;
+			sink.minTemperatureC = 0.0; sink.maxTemperatureC = 100.0;
+			core::GeneratorSettings generator;
+			generator.id = "gen"; generator.fuelStoreId = "fuel";
+			generator.thermalClass = "generation"; generator.heatSinkId = "sink";
+			generator.ratedOutputKW = 1.0; generator.commandedOutputKW = 1.0;
+			generator.efficiency = 1.0; generator.maxRampKWPerSecond = 60.0;
+			settings.stores = { fuel };
+			settings.thermalReservoirs = { sink };
+			settings.generators = { generator };
+			require(world.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const* fuelEntry = findForecast(snap.forecast.stores, "fuel");
+			require(fuelEntry != nullptr, "no forecast entry for the fuel store");
+			if (fuelEntry != nullptr)
+			{
+				require(approx(fuelEntry->netRateAtStart, 0.0),
+					"an Automatic-dispatch generator must not project a fixed fuel draw");
+				require(fuelEntry->processConsumptionPossible,
+					"the fuel store under Automatic dispatch is not flagged for unprojected consumption");
+				require(!fuelEntry->biologyConsumptionPossible,
+					"the generator fuel store carries a biology consumption flag");
+			}
+			require(snap.forecast.uncertaintyLabel.find("processConsumptionPossible")
+				!= std::string::npos,
+				"the uncertainty label does not explain the unprojected consuming pathways");
+		}
+		// Scenario O: every deliberately-excluded consuming pathway
+		// flags the stores it drains (#594): electrolysis feed water,
+		// fuel-cell reactants and consumed maintenance spares carry
+		// processConsumptionPossible; pure product destinations and an
+		// uncommanded manual generator's fuel store carry neither flag.
+		{
+			core::World world("ForecastConsumptionFlags", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto plain = [](std::string const& id, double capacity, double starting)
+			{
+				core::ResourceStoreSettings settings;
+				settings.id = id; settings.unit = "kg";
+				settings.capacity = capacity; settings.startingQualified = starting;
+				return settings;
+			};
+			core::ThermalReservoirSettings sink;
+			sink.id = "sink"; sink.thermalClass = "moderate";
+			sink.heatCapacityKJPerK = 10000.0; sink.startingTemperatureC = 20.0;
+			sink.minTemperatureC = 0.0; sink.maxTemperatureC = 100.0;
+			core::GeneratorSettings idleGen;
+			idleGen.id = "idleGen"; idleGen.fuelStoreId = "diesel";
+			idleGen.thermalClass = "generation"; idleGen.heatSinkId = "genSink";
+			idleGen.ratedOutputKW = 1.0; idleGen.commandedOutputKW = 0.0;
+			idleGen.efficiency = 0.35; idleGen.maxRampKWPerSecond = 60.0;
+			core::ThermalReservoirSettings genSink;
+			genSink.id = "genSink"; genSink.thermalClass = "generation";
+			genSink.heatCapacityKJPerK = 10000.0; genSink.startingTemperatureC = 20.0;
+			genSink.minTemperatureC = 0.0; genSink.maxTemperatureC = 100.0;
+			core::ElectrolyzerSettings electrolyzer;
+			electrolyzer.id = "elektro"; electrolyzer.hazardClass = "normal";
+			electrolyzer.waterStoreId = "feedWater";
+			electrolyzer.oxygenStoreId = "o2"; electrolyzer.hydrogenStoreId = "h2";
+			electrolyzer.thermalClass = "moderate"; electrolyzer.heatSinkId = "sink";
+			electrolyzer.rateKgPerS = 0.001;
+			core::FuelCellSettings fuelCell;
+			fuelCell.id = "cell"; fuelCell.hazardClass = "normal";
+			fuelCell.hydrogenStoreId = "cellH2"; fuelCell.oxygenStoreId = "cellO2";
+			fuelCell.waterStoreId = "cellWater";
+			fuelCell.thermalClass = "moderate"; fuelCell.heatSinkId = "sink";
+			fuelCell.ratedOutputKW = 1.0; fuelCell.commandedOutputKW = 0.0;
+			core::MaintenanceJobSettings job;
+			job.id = "service"; job.installationId = "idleGen";
+			job.firstOccurrenceSeconds = 0.0; job.durationSeconds = 10.0;
+			core::MaintenanceRequirementSettings spare;
+			spare.storeId = "spares"; spare.quantity = 1.0; spare.consumed = true;
+			job.requirements = { spare };
+			job.wasteStoreId = "usedParts";
+			core::ResourceStoreSettings diesel;
+			diesel.id = "diesel"; diesel.unit = "kWh";
+			diesel.capacity = 100.0; diesel.startingQualified = 50.0;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {
+				diesel,
+				plain("feedWater", 100.0, 50.0),
+				plain("o2", 100.0, 1.0), plain("h2", 100.0, 1.0),
+				plain("cellH2", 100.0, 10.0), plain("cellO2", 100.0, 10.0),
+				plain("cellWater", 100.0, 0.0),
+				plain("spares", 10.0, 5.0), plain("usedParts", 10.0, 0.0) };
+			settings.thermalReservoirs = { sink, genSink };
+			settings.generators = { idleGen };
+			settings.electrolyzers = { electrolyzer };
+			settings.fuelCells = { fuelCell };
+			settings.maintenanceJobs = { job };
+			require(world.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const requireProcess = [&](char const* id) {
+				auto const* entry = findForecast(snap.forecast.stores, id);
+				require(entry != nullptr && entry->processConsumptionPossible,
+					"a store feeding an unprojected consuming pathway is not flagged");
+				require(!entry->biologyConsumptionPossible,
+					"a process-feed store carries a biology consumption flag"); };
+			requireProcess("feedWater");
+			requireProcess("cellH2");
+			requireProcess("cellO2");
+			requireProcess("spares");
+			// Product destinations and the uncommanded manual generator's
+			// fuel store carry no omitted drain.
+			auto const requireClean = [&](char const* id) {
+				auto const* entry = findForecast(snap.forecast.stores, id);
+				require(entry != nullptr && !entry->processConsumptionPossible
+					&& !entry->biologyConsumptionPossible,
+					"a store with no omitted consuming pathway carries a consumption flag"); };
+			requireClean("diesel");
+			requireClean("o2");
+			requireClean("h2");
+			requireClean("cellWater");
+			requireClean("usedParts");
+			world.resumeSimulation();
+			runOrDiagnose(world, 1200, "consumption-flags live run");
+			require(world.getStationSystemsSnapshot().healthy
+				&& world.getStationSystemsDiagnostics().empty(),
+				"the consumption-flag scenario produced a Station diagnostic");
 		}
 	}
 

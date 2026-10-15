@@ -1784,13 +1784,18 @@ observability.
 The projection is a declared-profile scenario carried with explicit
 labels. It continues the authored transfer rates, crew activity
 profile and equipment operating profiles unchanged to the horizon;
-scheduled deliveries land as authored and are accepted only as far
-as the store's projected headroom reaches (what cannot fit is
-refused at the boundary and reported, never overflowed); scheduled
-ejections remove only what the store is projected to hold qualified
-above its protected reserve. Every entry publishes the scenario label
-and the uncertainty label beside its numbers so no projection can be
-read as a guarantee.
+a manually commanded generator's fuel draw is projected as
+deterministic demand at the full commanded rate over the declared
+efficiency - an upper bound on the live burn, which ramp, cooling
+trips and fuel throttling can only lower - so a finite fuel store
+never reads as sustained supply (#594); scheduled deliveries land
+as authored and are accepted only as far as the store's projected
+headroom reaches (what cannot fit is refused at the boundary and
+reported, never overflowed); scheduled ejections remove only what
+the store is projected to hold qualified above its protected
+reserve. Every entry publishes the scenario label and the
+uncertainty label beside its numbers so no projection can be read
+as a guarantee.
 
 The integration is event-driven and bounded. It steps over the
 authored schedule occurrences and profile segment breakpoints inside
@@ -1827,6 +1832,24 @@ products) is likewise not projected; destination stores carry
 `processProductionPossible` so the gap is visible rather than
 implied.
 
+Excluded demand is flagged with the same discipline as excluded
+supply (#594). Dropping a consuming pathway would let the live store
+fare worse than the projection - the wrong safety direction - so
+every consuming pathway is either projected or flagged. Manually
+commanded generator fuel draw is projected (above). The pathways
+whose draw depends on state the forecast does not re-derive -
+fuel-cell reactants, treatment source/consumables/clearance,
+electrolysis feed water, capture consumables, Sabatier and methane
+feeds, authored conversion inputs, consumed maintenance spares, and
+Automatic-dispatch generator fuel - are not projected, and every
+store they drain carries `processConsumptionPossible`; crop and
+algae water/nutrient uptake and microbial feed, oxygen, process
+water, culture medium and replacement stock set
+`biologyConsumptionPossible`. A Sustained basis beside one of these
+flags is not a promise of no shortfall: the omitted draw can make
+the live store run short earlier than projected. A store with no
+consumption flag carries no omitted drain.
+
 Approximation limits, documented as promised: the forecast projects
 store inventories only - atmosphere compartments, thermal state,
 coolant loops and the electrical power pool are not re-derived, so
@@ -1835,7 +1858,11 @@ without the live power-pool admission and curtailment, and crew
 oxygen draw is assumed satisfiable by the compartment. The
 provisional-biology and process-chain exclusions mean a flagged store
 may fare better in the live run than the guaranteed projection says,
-never worse through hidden help. The scenario assumes declared
+never worse through hidden help; the consumption flags of #594 close
+the other direction, so an omitted draw is never silently possible -
+only stores carrying `processConsumptionPossible` or
+`biologyConsumptionPossible` can fare worse than projected, and they
+say so. The scenario assumes declared
 profiles continue unchanged: mid-horizon configuration edits, outage
 schedules and maintenance isolation are not folded into the
 projection. The projection is a linear relaxation of the coupled

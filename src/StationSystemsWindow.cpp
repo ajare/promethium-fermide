@@ -3917,6 +3917,10 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 					ImGui::TextWrapped("  UNCERTAIN: crop/algae/microbial recovery could replenish this store; provisional biology is not counted as guaranteed recovery");
 				if (entry.processProductionPossible)
 					ImGui::Text("  NOT PROJECTED: process-chain production (treatment/electrolysis/conversion/capture) could add to this store but is outside the forecast scope");
+				if (entry.processConsumptionPossible)
+					ImGui::TextWrapped("  NOT PROJECTED: this store feeds consuming pathways the forecast does not project (process feeds/consumables, consumed maintenance spares, or generator fuel under automatic dispatch); the live store can run short earlier than shown");
+				if (entry.biologyConsumptionPossible)
+					ImGui::TextWrapped("  NOT PROJECTED: crop/algae/microbial uptake can drain this store; provisional biology consumption is outside the forecast scope");
 			}
 		}
 	}

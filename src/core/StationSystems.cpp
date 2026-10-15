@@ -21,6 +21,18 @@ namespace core
 		// how fast the World runs; overflow coarsens the history instead
 		// of growing it.
 		constexpr size_t TrendSampleLimit = StationTrendSampleLimit;
+		// Fuel energy is authored in the store's unit; the generator's
+		// physics runs in kWh. One factor converts store units to kWh so
+		// host and sandbox agree on every draw (#399). The scenario
+		// forecast reads the same contract to project generator fuel draw
+		// in the store's own unit (#594).
+		double stationEnergyUnitsToKWh(std::string const& unit)
+		{
+			if (unit == "kJ") return 1.0 / 3600.0;
+			if (unit == "MJ") return 1000.0 / 3600.0;
+			if (unit == "Wh") return 1.0 / 1000.0;
+			return 1.0;
+		}
 		// Every public event producer appends through this one bounded
 		// helper (#551): the history never retains more than the newest
 		// EventLimit entries, evicting oldest-first, so a tick that
@@ -5218,12 +5230,16 @@ namespace core
 			result.asOfSeconds = asOfSeconds;
 			result.scenarioLabel =
 				"declared-profile scenario: authored transfer, crew and equipment demand profiles continue unchanged; "
+				"a manually commanded generator's fuel draw is projected as deterministic demand; "
 				"scheduled deliveries land as authored with capacity-capped acceptance; ejections remove only projected "
 				"drawable contents; biology and process-chain recovery are never counted as guaranteed supply";
 			result.uncertaintyLabel =
 				"provisional biology: crop, algae and microbial recovery pathways are tunable model assumptions, not "
 				"validated biology, and are flagged and excluded from the guaranteed projection; process-chain production "
-				"(treatment, electrolysis, conversion, capture) is not projected";
+				"(treatment, electrolysis, conversion, capture) is not projected; consuming pathways other than manually "
+				"commanded generator fuel are not projected either - stores they drain carry processConsumptionPossible or "
+				"biologyConsumptionPossible, and a Sustained basis beside those flags does not rule out an earlier live "
+				"shortfall from the omitted draw";
 			if (!settings.enabled) return result;
 			result.available = true;
 			auto const horizonEnd = asOfSeconds + StationForecastHorizonSeconds;
@@ -5400,6 +5416,12 @@ namespace core
 				double rate{0.0};
 			};
 			std::vector<BlockedFlow> blocked;
+			// #594: under Automatic dispatch a generator's draw follows the
+			// unmodelled net load rather than an authored setpoint, so it
+			// is not projected and the fuel store is flagged as carrying
+			// unprojected consumption instead.
+			auto const forecastDispatchAutomatic
+				= settings.dispatchMode == StationDispatchMode::Automatic;
 			// #593: per-store transfer-out demand and total blocked
 			// outflow demand, and the through-flow coverage flag read by
 			// the depletion marking. These are recomputed on every
@@ -5651,6 +5673,42 @@ namespace core
 							net[exchange.storeIndex] += rate;
 					}
 				}
+				// #594: a manually commanded generator is already burning
+				// authored fuel: its draw is deterministic demand and is
+				// projected like any other outflow, so a finite fuel store
+				// can never read as sustained supply. The projected rate is
+				// the full commanded output over the declared efficiency -
+				// an upper bound on the live burn, which ramp, cooling trips
+				// and fuel throttling can only lower - so the projection
+				// stays on the safe side of the live outcome, and what the
+				// store cannot pay for after it runs dry is reported as
+				// uncovered demand by the ordinary drawable-zero accounting.
+				// Under Automatic dispatch the draw follows the unmodelled
+				// net load, so nothing is projected here; the fuel store is
+				// flagged with the other unprojected consuming pathways.
+				if (!forecastDispatchAutomatic)
+				{
+					for (auto const& generator : generators)
+					{
+						auto const boundKW = std::min(generator.authored.ratedOutputKW,
+							generator.authored.commandedOutputKW);
+						if (boundKW <= 0.0) continue;
+						auto const kwhPerUnit = stationEnergyUnitsToKWh(
+							stores[generator.fuelStoreIndex].authored.unit);
+						auto const drawUnitsPerS = boundKW
+							/ generator.authored.efficiency / 3600.0 / kwhPerUnit;
+						// A fuel store projected dry cannot run the machine:
+						// the draw stays uncovered at that store rather than
+						// entering the net trajectory, matching the live rule
+						// that a generator with nothing drawable shuts down.
+						if (isDry(generator.fuelStoreIndex))
+							blocked.push_back({generator.fuelStoreIndex,
+								drawUnitsPerS});
+						else
+							addOutflow(generator.fuelStoreIndex, drawUnitsPerS,
+								generator.authored.id, "generator");
+					}
+				}
 				// #593: through-flow coverage. A store whose transfer
 				// outflow demand is nonzero, fully running (nothing of it
 				// blocked, by a transfer cap or by a crew or equipment
@@ -5888,6 +5946,80 @@ namespace core
 				processProductionStores.insert(processor.hydrogenStoreId);
 				processProductionStores.insert(processor.carbonStoreId);
 			}
+			// #594: consuming pathways the projection deliberately does
+			// not count. Every store these pathways draw from is flagged so
+			// a Sustained basis never silently hides an omitted drain.
+			// Manually commanded generator fuel draw is projected above as
+			// deterministic demand, so a manual generator's fuel store is
+			// not flagged for that draw; under Automatic dispatch the draw
+			// follows the unmodelled net load and the fuel store is
+			// flagged like the other unprojected consumers.
+			std::set<std::string> processConsumptionStores;
+			if (forecastDispatchAutomatic)
+				for (auto const& generator : settings.generators)
+					if (generator.ratedOutputKW > 0.0)
+						processConsumptionStores.insert(generator.fuelStoreId);
+			for (auto const& cell : settings.fuelCells)
+			{
+				processConsumptionStores.insert(cell.hydrogenStoreId);
+				processConsumptionStores.insert(cell.oxygenStoreId);
+			}
+			for (auto const& treatment : settings.waterTreatments)
+			{
+				processConsumptionStores.insert(treatment.sourceStoreId);
+				processConsumptionStores.insert(treatment.consumableStoreId);
+				if (!treatment.clearanceStoreId.empty())
+					processConsumptionStores.insert(treatment.clearanceStoreId);
+			}
+			for (auto const& cell : settings.electrolyzers)
+				processConsumptionStores.insert(cell.waterStoreId);
+			for (auto const& capture : settings.co2Captures)
+				if (!capture.consumableStoreId.empty())
+					processConsumptionStores.insert(capture.consumableStoreId);
+			for (auto const& reactor : settings.sabatierReactors)
+			{
+				processConsumptionStores.insert(reactor.co2StoreId);
+				processConsumptionStores.insert(reactor.hydrogenStoreId);
+			}
+			for (auto const& processor : settings.methaneProcessors)
+				processConsumptionStores.insert(processor.methaneStoreId);
+			for (auto const& conversion : settings.conversions)
+				for (auto const& input : conversion.inputs)
+					processConsumptionStores.insert(input.storeId);
+			for (auto const& job : settings.maintenanceJobs)
+				for (auto const& requirement : job.requirements)
+					if (requirement.consumed)
+						processConsumptionStores.insert(requirement.storeId);
+			// Biology uptake is excluded from the projection for the same
+			// provisional-biology reason as biology recovery: the stores
+			// crops, algae and microbial digesters draw on are flagged so
+			// their silent drain cannot read as sustained supply.
+			std::set<std::string> biologyConsumptionStores;
+			for (auto const& crop : settings.cropPopulations)
+			{
+				biologyConsumptionStores.insert(crop.waterStoreId);
+				biologyConsumptionStores.insert(crop.nitrogenStoreId);
+				biologyConsumptionStores.insert(crop.phosphorusStoreId);
+				biologyConsumptionStores.insert(crop.potassiumStoreId);
+				biologyConsumptionStores.insert(crop.mineralsStoreId);
+			}
+			for (auto const& culture : settings.algaeCultures)
+			{
+				biologyConsumptionStores.insert(culture.waterStoreId);
+				biologyConsumptionStores.insert(culture.nitrogenStoreId);
+				biologyConsumptionStores.insert(culture.phosphorusStoreId);
+				biologyConsumptionStores.insert(culture.potassiumStoreId);
+				biologyConsumptionStores.insert(culture.mineralsStoreId);
+			}
+			for (auto const& processor : settings.microbialProcessors)
+			{
+				biologyConsumptionStores.insert(processor.feedStoreId);
+				biologyConsumptionStores.insert(processor.oxygenStoreId);
+				biologyConsumptionStores.insert(processor.waterStoreId);
+				biologyConsumptionStores.insert(processor.consumableStoreId);
+				if (!processor.stockStoreId.empty())
+					biologyConsumptionStores.insert(processor.stockStoreId);
+			}
 			for (size_t index = 0; index < stores.size(); ++index)
 			{
 				auto const& store = stores[index];
@@ -5914,6 +6046,10 @@ namespace core
 					= biologyRecoveryStores.count(store.authored.id) > 0;
 				entry.processProductionPossible
 					= processProductionStores.count(store.authored.id) > 0;
+				entry.processConsumptionPossible
+					= processConsumptionStores.count(store.authored.id) > 0;
+				entry.biologyConsumptionPossible
+					= biologyConsumptionStores.count(store.authored.id) > 0;
 				// Conservation of the projected exchanges: the projected
 				// physical total must equal the start plus accepted
 				// arrivals plus inflow moved minus outflow moved, within
@@ -6952,10 +7088,7 @@ namespace core
 			// host and sandbox agree on every draw.
 			auto const energyUnitsToKWh = [](std::string const& unit) -> double
 			{
-				if (unit == "kJ") return 1.0 / 3600.0;
-				if (unit == "MJ") return 1000.0 / 3600.0;
-				if (unit == "Wh") return 1.0 / 1000.0;
-				return 1.0;
+				return stationEnergyUnitsToKWh(unit);
 			};
 			// #415: automatic electrical dispatch. When the controller is
 			// Automatic it commands the dispatchable sources against the net

@@ -1901,6 +1901,23 @@ namespace core
 		// store but are NOT counted in the guaranteed projection.
 		bool biologyRecoveryPossible{false};
 		bool processProductionPossible{false};
+		// #594: consuming pathways that could drain this store but are
+		// NOT counted in the projection. A Sustained basis beside one of
+		// these flags is not a promise of no shortfall: the omitted draw
+		// can make the live store run short earlier than projected. A
+		// manually commanded generator's fuel draw is projected as
+		// deterministic demand; under Automatic dispatch the draw
+		// follows the unmodelled net load, so the generator's fuel store
+		// is flagged here instead of projected. processConsumptionPossible
+		// covers process feeds and consumables (fuel-cell reactants,
+		// treatment source/consumables/clearance, electrolysis feed
+		// water, capture consumables, Sabatier and methane feeds, authored
+		// conversion inputs, consumed maintenance spares) plus Automatic-
+		// dispatch generator fuel; biologyConsumptionPossible covers
+		// crop/algae water and nutrient uptake and microbial feed,
+		// oxygen, process water, culture medium and replacement stock.
+		bool processConsumptionPossible{false};
+		bool biologyConsumptionPossible{false};
 		// Conservation of the projected exchanges: the residual of
 		// (projected physical) - (start physical + accepted arrivals +
 		// inflow moved - outflow moved). It must stay within the declared
