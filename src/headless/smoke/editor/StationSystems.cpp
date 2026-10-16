@@ -2,12 +2,15 @@
 #include "TestEngine.h"
 #include "State.h"
 #include "StationSystemsWindow.h"
+#include "ViewWindow.h"
 #include "DocumentEdit.h"
 #include "../CoupledRig.h"
 #include "core/StationReference.h"
 #include "core/World.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
+#include <cmath>
+#include <set>
 
 namespace
 {
@@ -112,8 +115,317 @@ namespace
 		require(driver.passed(), "Store workflow failed on the Test Engine");
 	}
 
+	void flowProjectionChecks()
+	{
+		using smoke::require;
+		core::StationSystemsSettings draft;
+		draft.stores = {{"raw", "kg", 100, 50}, {"clean", "kg", 100}, {"residue", "kg", 100}};
+		core::WaterTreatmentSettings treatment;
+		treatment.id = "purifier"; treatment.sourceStoreId = "raw";
+		treatment.treatedStoreId = "clean"; treatment.concentrateStoreId = "residue";
+		draft.waterTreatments.push_back(treatment);
+		auto graph = station_flow::build(draft);
+		auto linked = [&](char const* from, char const* to, char const* role)
+		{
+			return std::any_of(graph.links.begin(), graph.links.end(), [&](auto const& e) {
+				return graph.nodes[e.from].id == from && graph.nodes[e.to].id == to && e.label == role;
+			});
+		};
+		require(linked("raw", "purifier", "Raw water") && linked("purifier", "clean", "Treated water")
+			&& linked("purifier", "residue", "Concentrate"), "Flow diagram reversed or omitted treatment connections");
+		require(std::none_of(graph.nodes.begin(), graph.nodes.end(), [](auto const& n) { return n.unresolved; }),
+			"Optional empty process references became missing nodes");
+		using station_flow::Medium;
+		auto mediumFor = [&](char const* role) {
+			for (auto const& e : graph.links) if (e.label == role) return e.medium;
+			return Medium::Unspecified;
+		};
+		require(mediumFor("Raw water") == Medium::Water && mediumFor("Treated water") == Medium::Water
+			&& mediumFor("Electrical supply") == Medium::Electricity,
+			"Process ports do not carry their physical media");
+		core::ResourceStoreSettings buffer; buffer.id = "misleadingCO2Name"; buffer.unit = "kg";
+		draft.stores.push_back(buffer);
+		core::ResourceTransferSettings transfer;
+		transfer.id = "refill"; transfer.sourceId = "clean"; transfer.destinationId = buffer.id;
+		draft.transfers.push_back(transfer);
+		core::ResourceDeliverySettings delivery; delivery.id = "supply"; delivery.storeId = buffer.id;
+		draft.deliveries.push_back(delivery);
+		graph = station_flow::build(draft);
+		require(mediumFor("Source") == Medium::Water && mediumFor("Destination") == Medium::Water
+			&& mediumFor("Scheduled delivery") == Medium::Water,
+			"Transfer/delivery material did not follow connected process roles");
+		// With no typed role, names alone must not invent a material.
+		core::StationSystemsSettings unknown;
+		unknown.stores.push_back(buffer); unknown.deliveries.push_back(delivery);
+		auto unknownGraph = station_flow::build(unknown);
+		require(unknownGraph.links.front().medium == Medium::Unspecified,
+			"Flow diagram guessed a material from a store ID");
+		// Conflicting roles on a transfer path are kept neutral rather than choosing one.
+		core::ElectrolyzerSettings incompatible;
+		incompatible.id = "conflicting"; incompatible.waterStoreId = "raw";
+		incompatible.oxygenStoreId = buffer.id; incompatible.hydrogenStoreId = "residue";
+		draft.electrolyzers.push_back(incompatible); graph = station_flow::build(draft);
+		require(mediumFor("Source") == Medium::Unspecified && mediumFor("Scheduled delivery") == Medium::Unspecified,
+			"Conflicting material assignments were silently resolved to a guessed colour");
+		draft.electrolyzers.clear();
+		draft.waterTreatments[0].sourceStoreId = "not-yet-authored";
+		graph = station_flow::build(draft);
+		require(std::any_of(graph.nodes.begin(), graph.nodes.end(), [](auto const& n) {
+			return n.id == "not-yet-authored" && n.unresolved;
+		}), "Incomplete draft reference silently disappeared from flow");
+		draft.stores.push_back(draft.stores[1]);
+		graph = station_flow::build(draft);
+		require(std::any_of(graph.nodes.begin(), graph.nodes.end(), [](auto const& n) {
+			return n.id == "clean" && n.type == "Ambiguous Store" && n.unresolved;
+		}), "Duplicate draft IDs silently chose a destination");
+		core::StationReferenceDocument reference;
+		std::string diagnostic;
+		require(core::parseStationReference(core::bundledStationReferenceText(), reference, &diagnostic), diagnostic.c_str());
+		graph = station_flow::build(reference.settings);
+		std::set<Medium> referenceMedia;
+		for (auto const& e : graph.links) referenceMedia.insert(e.medium);
+		std::set<ImU32> flowColours;
+		for (auto medium : {Medium::Water, Medium::CarbonDioxide, Medium::Oxygen, Medium::Hydrogen,
+			Medium::Methane, Medium::Heat, Medium::Cooling, Medium::Electricity, Medium::Control})
+		{
+			require(referenceMedia.contains(medium), "Reference flow omitted a known material/service");
+			flowColours.insert(station_flow::edgeColor(medium));
+		}
+		require(flowColours.size() == 9, "Different material/service flows share a colour");
+		for (auto const& n : graph.nodes)
+			require(!n.unresolved, ("Reference flow has unresolved node: " + n.type + " " + n.id).c_str());
+		for (auto const& e : graph.links)
+			require(e.from < graph.nodes.size() && e.to < graph.nodes.size(), "Flow link points outside node set");
+		require(station_flow::build({}).nodes.empty(), "Empty draft created a fictitious system");
+		auto checkLayout = [&](station_flow::Graph const& input)
+		{
+			auto a = station_flow::forceLayout(input), b = station_flow::forceLayout(input);
+			require(a.size() == input.nodes.size(), "Force layout omitted nodes");
+			for (size_t i = 0; i < a.size(); ++i)
+			{
+				require(std::isfinite(a[i].x) && std::isfinite(a[i].y) && a[i].x >= 0 && a[i].y >= 0,
+					"Force layout produced an invalid position");
+				require(a[i].x == b[i].x && a[i].y == b[i].y, "Force layout is not deterministic");
+				for (size_t j = i + 1; j < a.size(); ++j)
+					require(std::abs(a[i].x - a[j].x) >= station_flow::NodeWidth
+						|| std::abs(a[i].y - a[j].y) >= station_flow::NodeHeight,
+						"Force layout overlaps node labels");
+			}
+		};
+		checkLayout(graph); // complete reference: cycles, hubs, all process kinds
+		checkLayout({});
+		station_flow::Graph pair;
+		pair.nodes.resize(2);
+		auto disconnected = station_flow::forceLayout(pair);
+		pair.links.push_back({0, 1, "test connection"});
+		auto connected = station_flow::forceLayout(pair);
+		auto distance = [](auto const& p) { return std::hypot(p[0].x - p[1].x, p[0].y - p[1].y); };
+		require(distance(connected) < distance(disconnected), "Connections do not attract nodes in force layout");
+		connected[0].x -= 700; connected[0].y -= 150;
+		auto pin = connected[0], neighbour = connected[1];
+		auto repeat = connected;
+		for (int step = 0; step < 20; ++step)
+		{
+			station_flow::relaxLayout(pair, connected, 0.045f, 0);
+			station_flow::relaxLayout(pair, repeat, 0.045f, 0);
+		}
+		require(connected[0].x == pin.x && connected[0].y == pin.y,
+			"Realtime forces displaced the dragged node");
+		require(connected[1].x != neighbour.x || connected[1].y != neighbour.y,
+			"Connected nodes did not respond to a dragged node");
+		require(connected[1].x == repeat[1].x && connected[1].y == repeat[1].y,
+			"Realtime force step is not deterministic");
+		station_flow::Node storeNode{"Store", "one"}, anotherStore{"Store", "two"}, processNode{"Water treatment", "one"};
+		require(station_flow::nodeColor(storeNode) == station_flow::nodeColor(anotherStore)
+			&& station_flow::nodeColor(storeNode) != station_flow::nodeColor(processNode),
+			"Node colour does not follow node type");
+		processNode.unresolved = true;
+		require(station_flow::nodeColor(processNode) == IM_COL32(110, 35, 35, 255),
+			"Unresolved node lost its red error colour");
+		// Stress disconnected nodes, reciprocal/parallel flows, and a self-loop.
+		pair.nodes.resize(48);
+		for (size_t i = 1; i < 24; ++i)
+		{
+			pair.links.push_back({0, i, "hub"}); pair.links.push_back({i, 0, "return"});
+		}
+		pair.links.push_back({0, 0, "self"});
+		checkLayout(pair);
+	}
+
+	void viewWorkflow()
+	{
+		flowProjectionChecks();
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		ViewWindow view;
+		auto world = std::make_shared<core::World>("Tabbed station", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		require(world->configureStationSystems({true, 1.0f}, false), "Could not enable tabbed station");
+		world->markSaved();
+		headless::TestEngineDriver driver([&]
+		{
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 980});
+			view.render(world, history, [] { ImGui::TextUnformatted("World canvas active"); });
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "viewTabs", [&](ImGuiTestContext* ctx)
+		{
+			ctx->SetRef("View");
+			REQ(driver.contains("World canvas active"), "World tab is not the default");
+			REQ(!view.stationSystemsVisible() && !driver.contains("Station Systems") && !driver.contains("Station Flow"),
+				"Station Systems tab is available by default");
+			view.setStationSystemsVisible(true); ctx->Yield(3);
+			ctx->ItemClick("Views/World"); ctx->Yield(3);
+			ctx->ItemClick("Views/Station Systems");
+			ctx->Sleep(1);
+			REQ(view.selectedTab() == ViewWindow::Tab::StationSystems
+				&& driver.contains("Active World: Tabbed station"), "Station tab did not open");
+			ctx->SetRef(ImGui::FindWindowByName("View")->DC.ChildWindows.back());
+			ctx->ItemClick("Add store");
+			ctx->Sleep(1);
+			REQ(driver.contains("Draft differs from the authored start conditions"), "Draft edit missing");
+			ctx->SetRef("View");
+			ctx->ItemClick("Views/Station Flow"); ctx->Yield(3);
+			REQ(view.selectedTab() == ViewWindow::Tab::StationFlow
+				&& driver.contains("1 nodes, 0 connections"), "Flow did not show the unapplied draft store");
+			REQ(world->getStationSystemsSettings().stores.empty() && history.undoCount() == 0,
+				"Flow applied draft settings or changed document history");
+			auto* canvas = ImGui::FindWindowByName("View")->DC.ChildWindows.back();
+			ImVec2 const nodePoint{canvas->Pos.x + 70, canvas->Pos.y + 60};
+			ctx->MouseTeleportToPos(nodePoint);
+			ctx->MouseDragWithDelta({300, 100}, ImGuiMouseButton_Right); ctx->Yield(3);
+			REQ(!driver.contains("Selected: Store"), "Right-drag selected a flow node");
+			ctx->MouseTeleportToPos({nodePoint.x + 300, nodePoint.y + 100});
+			ctx->MouseClick(); ctx->Yield(3);
+			REQ(driver.contains("Selected: Store 'store1'"), "Right-drag did not pan the flow node to the expected position");
+			ctx->ItemClick("Views/Station Flow/Fit all");
+			ctx->ItemClick("Views/Station Flow/Reset view"); ctx->Yield(3);
+			auto storeBounds = [&]
+			{
+				station_flow::Node node{"Store", "store1"};
+				auto* w = ImGui::FindWindowByName("View")->DC.ChildWindows.back();
+				ImRect bounds{ImVec2(1e9f, 1e9f), ImVec2(-1e9f, -1e9f)};
+				for (auto const& v : w->DrawList->VtxBuffer)
+					if (v.col == station_flow::nodeColor(node) || v.col == station_flow::nodeColor(node, true))
+						bounds.Add(v.pos);
+				return bounds;
+			};
+			auto originalBox = storeBounds();
+			REQ(originalBox.GetWidth() > 0, "Type-coloured store node was not rendered");
+			auto grab = originalBox.GetCenter();
+			ctx->MouseTeleportToPos(grab); ctx->MouseDown(ImGuiMouseButton_Left); ctx->Yield(2);
+			ctx->MouseMoveToPos({grab.x + 130, grab.y + 200}); ctx->Yield(3);
+			auto draggedBox = storeBounds();
+			REQ(std::abs(draggedBox.Min.x - originalBox.Min.x - 130) < 3
+				&& std::abs(draggedBox.Min.y - originalBox.Min.y - 200) < 3,
+				"Left-drag did not hold the node under the cursor at the current zoom");
+			ctx->MouseUp(ImGuiMouseButton_Left); ctx->Yield(60);
+			auto releasedBox = storeBounds();
+			REQ(std::abs(releasedBox.Min.x - draggedBox.Min.x) < 3,
+				"Isolated dragged node snapped back after release");
+			REQ(world->getStationSystemsSettings().stores.empty() && history.undoCount() == 0
+				&& world->getSimulationTick() == 0, "Node dragging mutated the draft's World or history");
+			ctx->ItemClick("Views/Station Flow/Fit all"); ctx->Yield(3);
+			// The same selection requests are used by the menu and toolbar.
+			ctx->SetRef("View");
+			view.select(ViewWindow::Tab::World); ctx->Yield(3);
+			REQ(driver.contains("World canvas active"), "World selection shortcut failed");
+			world->resumeSimulation();
+			REQ(world->advanceTicks(60), "Inactive station failed to advance");
+			auto before = world->getStationSystemsSnapshot();
+			// Menu/toolbar visibility controls hide the tab even while World is selected.
+			view.setStationSystemsVisible(false); ctx->Yield(3);
+			REQ(!driver.contains("Station Systems") && !driver.contains("Station Flow"), "Hidden station tabs are still available");
+			view.setStationSystemsVisible(true); ctx->Yield(3);
+			REQ(world->getStationSystemsSnapshot() == before && !world->isModified()
+				&& history.undoCount() == 0, "Tab selection changed simulation or document state");
+			REQ(driver.contains("Draft differs from the authored start conditions"), "Tab switch discarded draft");
+			view.select(ViewWindow::Tab::StationFlow); ctx->Yield(3);
+			REQ(driver.contains("1 nodes, 0 connections"), "Flow lost draft after hiding tabs");
+			view.setStationSystemsVisible(false); ctx->Yield(3);
+			REQ(view.selectedTab() == ViewWindow::Tab::World && driver.contains("World canvas active")
+				&& !driver.contains("Station Systems"), "Hiding the active station tab did not return to World");
+			REQ(world->advanceTick(), "Hiding station tab stopped simulation");
+			view.setStationSystemsVisible(true); ctx->Yield(3);
+			REQ(driver.contains("Draft differs from the authored start conditions"), "Hiding station tab discarded draft");
+			ctx->SetRef("View");
+			ctx->ItemClick("Views/World"); ctx->Sleep(1);
+			REQ(view.selectedTab() == ViewWindow::Tab::World, "World tab click failed");
+			world.reset(); ctx->Sleep(1);
+			REQ(driver.contains("No World is open."), "World tab lacks empty state");
+			view.select(ViewWindow::Tab::StationSystems); ctx->Yield(3);
+			REQ(driver.contains("No World is open."), "Station tab lacks empty state");
+			view.select(ViewWindow::Tab::StationFlow); ctx->Yield(3);
+			REQ(driver.contains("No World is open."), "Flow tab lacks empty state");
+			world = std::make_shared<core::World>("New empty World", 2, 2);
+			world->pauseSimulation(); world->finishBuild(); ctx->Yield(3);
+			REQ(driver.contains("No systems configured in the draft"), "Flow leaked the previous World's draft");
+			view.select(ViewWindow::Tab::StationSystems); ctx->Yield(3);
+			ctx->SetRef(ImGui::FindWindowByName("View")->DC.ChildWindows.back());
+			ctx->ItemClick("Load reference station into draft");
+			ctx->SetRef("View");
+			ctx->ItemClick("Views/Station Flow"); ctx->Yield(3);
+			REQ(driver.contains("Draft configuration flow") && !driver.contains("No systems configured in the draft"),
+				"Packaged reference draft did not regenerate the flow diagram");
+			core::StationReferenceDocument flowReference;
+			std::string flowDiagnostic;
+			REQ(core::parseStationReference(core::bundledStationReferenceText(), flowReference, &flowDiagnostic),
+				"Could not load reference for visible-node colour checks");
+			std::set<ImU32> nodeColours;
+			for (auto const& node : station_flow::build(flowReference.settings).nodes)
+			{
+				nodeColours.insert(station_flow::nodeColor(node));
+				nodeColours.insert(station_flow::nodeColor(node, true));
+			}
+			auto graphInView = [&]
+			{
+				auto* flowCanvas = ImGui::FindWindowByName("View")->DC.ChildWindows.back();
+				bool foundNode = false;
+				for (auto const& vertex : flowCanvas->DrawList->VtxBuffer)
+					if (nodeColours.contains(vertex.col))
+					{
+						foundNode = true;
+						if (!flowCanvas->InnerClipRect.Contains(vertex.pos)) return false;
+					}
+				return foundNode;
+			};
+			REQ(graphInView(), "Reference force graph is not framed inside the initial viewport");
+			auto* colouredCanvas = ImGui::FindWindowByName("View")->DC.ChildWindows.back();
+			for (auto medium : {station_flow::Medium::Water, station_flow::Medium::CarbonDioxide,
+				station_flow::Medium::Heat, station_flow::Medium::Electricity})
+			{
+				bool rendered = false;
+				for (auto const& vertex : colouredCanvas->DrawList->VtxBuffer)
+					if (vertex.col == station_flow::edgeColor(medium)) rendered = true;
+				REQ(rendered, "Flow renderer omitted a material-specific edge colour");
+			}
+			ctx->ItemClick("Views/Station Flow/Fit all"); ctx->Yield(3);
+			REQ(graphInView(), "Fit all leaves graph nodes outside the viewport");
+			auto* flowCanvas = ImGui::FindWindowByName("View")->DC.ChildWindows.back();
+			ctx->MouseTeleportToPos({flowCanvas->Pos.x + 60, flowCanvas->Pos.y + 60});
+			ctx->MouseDragWithDelta({600, 400}, ImGuiMouseButton_Right); ctx->Yield(3);
+			REQ(!graphInView(), "Pan visibility regression did not move graph out of view");
+			ctx->ItemClick("Views/Station Flow/Reset view"); ctx->Yield(3);
+			REQ(graphInView(), "Reset view restored the blank corner instead of framing the graph");
+			ctx->ItemClick("Views/Station Flow/Edge colours"); ctx->Yield(3);
+			REQ(driver.contains("Water / water vapour") && driver.contains("Carbon dioxide (CO2)")
+				&& driver.contains("Electricity"), "Material/service edge legend missing");
+			ctx->ItemClick("Views/Station Flow/Edge colours"); ctx->Yield(3);
+			REQ(graphInView(), "Edge legend changed the graph camera");
+			REQ(world->getStationSystemsSettings().stores.empty() && !world->getStationSystemsSnapshot().enabled,
+				"Viewing a reference draft activated or applied the station");
+		});
+		#undef REQ
+		require(driver.passed(), "Tabbed View workflow failed on the Test Engine");
+	}
+
 	void workflow(smoke::Context const&)
 	{
+		viewWorkflow();
 		using smoke::require;
 		editor_smoke::State state;
 		headless::ScopedImGuiContext context;
@@ -139,10 +451,14 @@ namespace
 				"Separate top-level station window missing active World");
 			REQ(driver.contains("Draft matches the authored start conditions"),
 				"Unchanged draft state not reported");
-			ctx->ItemClick("Enable Station systems");
-			REQ(driver.contains("Draft differs from the authored start conditions"),
-				"Draft change not reported");
-			ctx->ItemClick("Apply settings");
+			REQ(!world->getStationSystemsSettings().enabled && driver.contains("Inactive: no Station systems simulation runs."),
+				"Station systems must start inactive");
+			world->resumeSimulation();
+			REQ(world->advanceTicks(60) && !world->getStationSystemsSnapshot().enabled
+				&& world->getStationSystemsEvents().empty(), "Inactive station ran a simulation");
+			world->pauseSimulation(); world->resetSimulation(); ctx->Yield(2);
+			ctx->ItemClick("Activate Station systems");
+			ctx->Yield(2);
 			REQ(world->getStationSystemsSettings().enabled && history.undoCount() == 1,
 				"Enable did not commit document history");
 			REQ(driver.contains("Document: unsaved changes"), "Dirty state not shown after applying settings");
@@ -166,20 +482,25 @@ namespace
 				"Closing window changed station simulation");
 			REQ(world->advanceTick(), "Hidden station stopped ticking");
 			window.visible = true; world->pauseSimulation(); ctx->Sleep(1);
-			ctx->ItemClick("Enable Station systems"); ctx->ItemClick("Cancel edits");
+			ctx->ItemClick("Activate Station systems"); ctx->ItemClick("Cancel activation reset");
 			REQ(world->getStationSystemsSettings().enabled && history.undoCount() == 1,
 				"Cancel changed live/authored state");
-			ctx->ItemClick("Enable Station systems"); ctx->ItemClick("Apply settings");
+			ctx->ItemClick("Activate Station systems");
 			ctx->Sleep(1);
 			REQ(world->getStationSystemsSettings().enabled && world->getSimulationTick() == 61
 				&& driver.contains("Confirm?"), "Apply bypassed reset confirmation");
-			ctx->ItemClick("Cancel reset");
+			ctx->ItemClick("Cancel activation reset");
 			REQ(world->getSimulationTick() == 61 && history.undoCount() == 1,
 				"Reset cancellation mutated state");
-			ctx->ItemClick("Apply settings"); ctx->ItemClick("Confirm World reset");
+			ctx->ItemClick("Activate Station systems"); ctx->ItemClick("Confirm activation reset");
 			REQ(!world->getStationSystemsSettings().enabled && world->getSimulationTick() == 0
 				&& history.undoCount() == 2,
 				"Confirmed setting did not reset World and commit history");
+			world->resumeSimulation();
+			REQ(world->advanceTicks(60) && !world->getStationSystemsSnapshot().enabled
+				&& world->getStationSystemsSnapshot() == core::StationSystemsSnapshot{}
+				&& world->getStationSystemsEvents().empty(), "Deactivated station continued simulating");
+			world->pauseSimulation();
 			auto restore = [&](DocumentSnapshot const& snapshot)
 			{ world = deserializeDocumentSnapshot(snapshot, world, {}); world->pauseSimulation(); return true; };
 			REQ(history.undo(captureDocumentSnapshot(world, history), restore)

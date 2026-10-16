@@ -11,17 +11,70 @@
 void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, DocumentHistory& history)
 {
 	if (!visible) return;
-	if (!ImGui::Begin("Station Systems", &visible)) { ImGui::End(); return; }
+	if (ImGui::Begin("Station Systems", &visible)) renderContents(world, history);
+	ImGui::End();
+}
+
+bool StationSystemsWindow::syncWorld(std::shared_ptr<core::World> const& world)
+{
 	if (!world)
 	{
-		mWorld.reset(); mConfirmReset = false;
-		ImGui::TextDisabled("No World is open."); ImGui::End(); return;
+		mWorld.reset(); mConfirmReset = false; mPendingActivation.reset();
+		mFlow.reset();
+		ImGui::TextDisabled("No World is open."); return false;
 	}
 	if (mWorld.lock() != world->getLifetimeToken().lock())
 	{
 		mWorld = world->getLifetimeToken(); mDraft = world->getStationSystemsSettings();
-		mDiagnostic.clear(); mConfirmReset = false;
+		mDiagnostic.clear(); mConfirmReset = false; mPendingActivation.reset();
+		mFlow.reset();
 	}
+	return true;
+}
+
+void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const& world)
+{
+	if (!syncWorld(world)) return;
+	mFlow.render(mDraft);
+}
+
+void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& world, DocumentHistory& history)
+{
+	if (!syncWorld(world)) return;
+	// Activation is a World-wide authored gate, not a draft-only checkbox or
+	// a side effect of opening this tab. Disabled Worlds own no station runtime.
+	ImGui::BeginDisabled(!world->isSimulationPaused());
+	auto active = world->getStationSystemsSettings().enabled;
+	auto activate = [&](bool enabled, bool confirm)
+	{
+		auto settings = world->getStationSystemsSettings();
+		settings.enabled = enabled;
+		auto before = captureDocumentSnapshot(world, history);
+		if (world->configureStationSystems(settings, confirm, &mDiagnostic))
+		{
+			commitDocumentEdit(std::move(before), history);
+			mDraft.enabled = enabled;
+			mPendingActivation.reset();
+			mConfirmReset = false;
+		}
+	};
+	if (ImGui::Checkbox("Activate Station systems", &active))
+	{
+		if (world->getSimulationTick()) mPendingActivation = active;
+		else activate(active, false);
+	}
+	if (mPendingActivation)
+	{
+		ImGui::TextWrapped("Changing activation resets the complete World simulation, including Agent movement. Confirm?");
+		if (ImGui::Button("Confirm activation reset")) activate(*mPendingActivation, true);
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel activation reset")) mPendingActivation.reset();
+	}
+	ImGui::EndDisabled();
+	if (!world->isSimulationPaused())
+		ImGui::TextDisabled("Pause the World to change Station systems activation.");
+	if (!world->getStationSystemsSettings().enabled)
+		ImGui::TextDisabled("Inactive: no Station systems simulation runs.");
 	ImGui::Text("Active World: %s", world->getName().c_str());
 	ImGui::Text("World status: %s", world->isSimulationPaused() ? "Paused" : "Running");
 	ImGui::Text("World elapsed: %.3f seconds (tick %llu)",
@@ -242,7 +295,6 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	}
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
-	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
 	ImGui::InputFloat("Observation interval (seconds)", &mDraft.observationIntervalSeconds, 0.1f, 1.0f, "%.2f");
 	// #418: the authored trend retention. Trends are sampled on the same
 	// observation cadence (no second clock) and this bounds the retained
@@ -308,6 +360,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			ImGui::InputDouble(("Store " + row + " energy kJ per kg dry").c_str(), &composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
 		}
 		ImGui::PopItemWidth();
+		if (index + 1 < mDraft.stores.size()) ImGui::Separator();
 		if (removeStore)
 			mDraft.stores.erase(mDraft.stores.begin() + static_cast<std::ptrdiff_t>(index));
 		else
@@ -4086,5 +4139,4 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 				static_cast<double>(event.worldTick) * static_cast<double>(core::World::getFixedTimestep()),
 				event.category.empty() ? "station" : event.category.c_str(),
 				event.message.c_str());
-	ImGui::End();
 }

@@ -38,7 +38,7 @@
 #include "AgentBehaviourAssignmentPanel.h"
 #include "TagsPanel.h"
 #include "BehavioursPanel.h"
-#include "StationSystemsWindow.h"
+#include "ViewWindow.h"
 #include "MarkerPanel.h"
 #include "FurniturePanel.h"
 #include "AgentClipboard.h"
@@ -116,7 +116,7 @@ using namespace std;
 
 
 static LocationPlan gLocationPlan;
-static StationSystemsWindow gStationSystemsWindow;
+static ViewWindow gViewWindow;
 static uint32_t gSelectedWorldLevel{};
 static bool gWorldHovered{ false };
 static bool gPegmanConsumesLeftMouse{ false };
@@ -5189,7 +5189,11 @@ void renderMenu(shared_ptr<core::World>& world)
 				}
 				ImGui::EndMenu();
 			}
-			ImGui::MenuItem("Station Systems", nullptr, &gStationSystemsWindow.visible);
+			if (ImGui::MenuItem("World", nullptr, gViewWindow.selectedTab() == ViewWindow::Tab::World))
+				gViewWindow.select(ViewWindow::Tab::World);
+			bool stationVisible = gViewWindow.stationSystemsVisible();
+			if (ImGui::MenuItem("Station Systems", nullptr, &stationVisible))
+				gViewWindow.setStationSystemsVisible(stationVisible);
 			ImGui::MenuItem("Grid", "G", &gUISettings.renderGrid);
 			ImGui::MenuItem("Show markers", nullptr, &gUISettings.renderMarkers);
 			ImGui::MenuItem("Show next layer wireframe", "F3", &gUISettings.renderNextLayerWireframe);
@@ -5274,7 +5278,9 @@ void renderDocumentToolbar(shared_ptr<core::World>& world)
 	ImGui::SameLine();
 	imgui::ToggleButton("Agent Debug", "Agent debug", &gUISettings.renderAgentDebug);
 	ImGui::SameLine();
-	imgui::ToggleButton("Station Systems", "Station Systems", &gStationSystemsWindow.visible);
+	bool stationVisible = gViewWindow.stationSystemsVisible();
+	if (imgui::ToggleButton("Station Systems", "Show / hide Station Systems and Station Flow tabs", &stationVisible))
+		gViewWindow.setStationSystemsVisible(stationVisible);
 
 	ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
 	ImGui::SetNextItemWidth(80.0f);
@@ -8443,10 +8449,19 @@ void renderDockSpace()
 		ImGuiID worldId;
 		ImGui::DockBuilderSplitNode(dockspaceId, ImGuiDir_Left, 0.32f, &leftId, &worldId);
 		ImGui::DockBuilderDockWindow("Controls", leftId);
-		ImGui::DockBuilderDockWindow("World", worldId);
+		ImGui::DockBuilderDockWindow("View", worldId);
 		ImGui::DockBuilderFinish(dockspaceId);
 	}
 
+	// Reuse the old World docking position when upgrading an existing layout.
+	static bool migratedView = false;
+	if (!migratedView)
+	{
+		if (!ImGui::FindWindowSettingsByID(ImHashStr("View")))
+			if (auto oldWorld = ImGui::FindWindowSettingsByID(ImHashStr("World")); oldWorld && oldWorld->DockId)
+				ImGui::DockBuilderDockWindow("View", oldWorld->DockId);
+		migratedView = true;
+	}
 	ImGui::DockSpace(dockspaceId, ImVec2(0.0f, 0.0f));
 	ImGui::End();
 }
@@ -9388,10 +9403,6 @@ namespace
 
 void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Graph> graph)
 {
-	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-	ImGui::Begin("World", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-	ImGui::PopStyleVar();
-
 	ImVec2 canvasPos = ImGui::GetCursorScreenPos();
 
 	auto const& style = ImGui::GetStyle();
@@ -9668,7 +9679,6 @@ void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Gra
 		reinterpret_cast<ImTextureID>(static_cast<intptr_t>(texture)),
 		canvasPos, canvasPos + canvasSize, { 0.0f, 1.0f }, { 1.0f, 0.0f });
 
-	ImGui::End();
 }
 
 void renderUI(shared_ptr<core::World>& world, shared_ptr<core::Agent> pathingAgent)
@@ -9680,22 +9690,29 @@ void renderUI(shared_ptr<core::World>& world, shared_ptr<core::Agent> pathingAge
 	renderDestinationActionPopup(world);
 	renderFilePopups(world);
 	renderDockSpace();
-	gStationSystemsWindow.render(world, gWorldDocumentHistory);
+	// Inactive views must not leave canvas hover/drag state claiming UI input.
+	gWorldHovered = false;
+	gHoveredAgent = nullptr;
+	gHoveredInteractionPoint = {};
+	gHoveredSector.reset();
+	gHoveredSectorObject = nullptr;
+	gHoveredVertex = nullptr;
+	gViewWindow.render(world, gWorldDocumentHistory, [&]
+	{
+		renderWorldWindow(world, world->getGraph());
+	});
+	if (gViewWindow.selectedTab() != ViewWindow::Tab::World)
+		gViewPan.dragging = false;
 
 	if (!world)
 	{
 		gLocationPlan.close();
-		ImGui::Begin("World");
-		ImGui::TextDisabled("No World is open.");
-		ImGui::TextUnformatted("Choose File > New or File > Open to begin.");
-		ImGui::End();
 		return;
 	}
 
 	auto const graph = world->getGraph();
 	renderStatusBar(world);
 	renderControlsWindow(world, graph, pathingAgent);
-	renderWorldWindow(world, graph);
 	gLocationPlan.render(world, [](WorldDrawList const& commands, ImVec2 position, ImVec2 size)
 	{
 		auto texture = renderWorldCommands(commands, position, size, WorldCanvas::LocationPlan);

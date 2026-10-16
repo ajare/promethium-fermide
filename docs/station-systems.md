@@ -1,15 +1,70 @@
 # Station systems — lifecycle, authored scenarios, containment, resource stores, transfers, compound resources, solar-supplied external loads, batteries, scheduled deliveries, terminal-waste storage and scheduled ejection, thermal reservoirs with radiator rejection, coolant loops with freeze-protection heating, chilled thermal services, fuelled generators, compartment atmospheres with airlock cycles, crew metabolic returns, water recovery with qualification, oxygen production with finite CO2 capture, finite thermal buffers that ride through cooling deficits, and hazardous treatment and containment boundaries, protected cross-system service dependencies (#386–#391, #393–#404, #406, #412, #416) and bounded scenario forecasting of resource balance and resupply needs (#420)
 
-Station systems are opt-in per World and disabled in existing documents. Open
-**View > Station Systems** or use the
-**Station Systems** toolbar toggle. This is a separate top-level window;
-closing it only changes visibility. It reports the active World, pause/run
+Station systems are opt-in per World and disabled in existing documents. The
+main **View** window shows the **World** tab by default. Toggle
+**View > Station Systems** or the **Station Systems** toolbar button to show
+or hide the **Station Systems** and **Station Flow** tabs together. Showing
+them selects Station Systems; hiding either active station view returns to World. The menu checkmark and toolbar state indicate tab availability,
+even when World is selected. **View > World** selects the World tab without
+hiding Station Systems. Switching or hiding tabs does not stop simulation
+or discard a Station Systems configuration draft. It reports the active World, pause/run
 status, World and station elapsed simulation seconds, all four system objects'
 completed ticks, bounded events and structured software diagnostics.
 
+## Draft flow diagram
+
+The **Station Flow** tab beside **Station Systems** automatically generates a
+**force-directed** connection diagram from the **current draft**,
+including unapplied edits and loaded presets. Connection springs pull related
+nodes together; repulsion and box-collision separation keep labels apart.
+The deterministic, bounded layout is calculated, cached, and automatically
+framed to the visible canvas when the draft changes. Left-dragging a node
+reheats the force solver: the node follows the pointer while its neighbours
+and connections adjust in realtime, then the layout cools and settles after
+release. It is available even when systems are inactive. Moving nodes changes
+only their session-local diagram positions, never the draft, authored settings,
+World simulation, or document history.
+
+- Nodes represent stores, processes, atmosphere compartments, thermal equipment,
+  power equipment, and scheduled deliveries/ejections/outages/maintenance.
+  Each type has a stable colour independent of its ID; expand **Node type colours**
+  for the legend. Unresolved references remain red.
+- Arrows are coloured by **material or service**, not just by a generic material
+  category: water/vapour, O2, CO2, H2, methane, solid carbon, food, organic waste,
+  urine, nutrients, consumables, fuel, mixed atmospheric gas, heat, cooling,
+  electricity and control each have a stable colour. Expand **Edge colours**
+  for the legend of flows present; tooltips and the connection inspector name
+  each edge's material/service. Parallel exchanges use separate curves.
+- Material colours come from explicit process input/output roles. Transfers,
+  deliveries and other generic store connections inherit a material only when
+  their connected process roles identify it unambiguously. Mixed, conflicting
+  or unknown materials stay neutral; store IDs are never interpreted as chemistry.
+  Atmosphere exchanges show O2, CO2, moisture and heat separately. Shared electrical
+  and cooling-class nodes represent aggregate services, not physical wiring or pipes.
+- Missing or ambiguous referenced IDs appear as red nodes, so an incomplete draft
+  remains inspectable. This is not a substitute for Apply's configuration validation.
+- Click a node for its incoming/outgoing connections, or hover for a tooltip.
+  Left-drag it to rearrange the graph (also while the World is paused).
+  **Connected only** focuses its immediate neighbours. **Find node** filters by
+  type/ID (case-sensitive) and moves the view to the first match.
+- Right- or middle-drag to pan; use the mouse wheel to zoom. **Fit all** stops
+  relaxation and frames the entire rearranged graph; **Reset view** also clears
+  the node selection and reframes the
+  graph, including after panning it off-screen.
+
+This is a configuration topology, **not live flow rates**, a schedule timeline,
+capacity/admission prediction, or a physical distribution network. Ambient losses
+and implicit process internals are not expanded into individual nodes. Changing
+Worlds starts a fresh diagram and draft; switching/hiding tabs retains the draft.
+
 ## Authored settings and lifecycle
 
-- **Enable Station systems**: boolean, default false.
+- **Activate Station systems**: global toggle at the top of the tab, default
+  off for new Worlds. Inactive Worlds run no Station systems simulation and
+  own no station runtime. Activation is saved with the World, independently
+  of tab visibility. Pause before changing it; after any World ticks, changing
+  activation requires explicit confirmation of a complete World reset.
+  This toggle applies activation directly without applying other draft edits.
 - **Observation interval (seconds)**: finite 0.1–60 seconds, default 1 second.
   This provisional UI/event sampling setting is rounded upward to whole World
   ticks. It neither changes integration cadence nor creates another clock.
