@@ -644,7 +644,7 @@ namespace core
 		std::filesystem::path mDocumentDirectory;
 		std::map<MarkerId, std::vector<std::string>> mMarkerActions;
 		bool mActionExecutionFailed{ false };
-		// Set only while finishFurnitureUse executes a lifecycle callback. Departure
+		// Scoped to Furniture finishing effect validation (and departure's callback). Departure
 		// has already moved the Agent into a navigation state, but the finishing
 		// contract runs before the physical position commits, so a staged device
 		// request is still judged from the usable point the Agent stands on.
@@ -657,6 +657,7 @@ namespace core
 		void applyActionResult(AgentId agent, MarkerId marker, ActionExecutionResult result, SimulationEvent& event,
 			bool finishing = false, bool validateOnly = false, bool replacingUse = false);
 		void finishFurnitureUse(AgentId agent);
+		void restoreFurnitureFinishPose(Agent& agent, Pose finishPose);
 		std::vector<SimulationEvent> mPendingMovementOutcomes;
 
 		struct AgentTagRegistryReference

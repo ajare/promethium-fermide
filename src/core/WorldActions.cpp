@@ -11,6 +11,20 @@ namespace core
 {
 	namespace
 	{
+		// Preserve the caller's context, including when finishing scopes nest.
+		class FurnitureFinishingScope
+		{
+		public:
+			FurnitureFinishingScope(AgentId& slot, AgentId agent)
+				: mSlot(slot), mRestore(slot) { mSlot = agent; }
+			~FurnitureFinishingScope() { mSlot = mRestore; }
+			FurnitureFinishingScope(FurnitureFinishingScope const&) = delete;
+			FurnitureFinishingScope& operator=(FurnitureFinishingScope const&) = delete;
+		private:
+			AgentId& mSlot;
+			AgentId mRestore;
+		};
+
 		bool configurationActionsAvailable(AgentBehaviourConfigurationValue const& value,
 			ActionRegistry const* registry, std::string& missing)
 		{
@@ -465,11 +479,8 @@ namespace core
 			{
 				applyActionResult(agentId, use.marker, std::move(finished), event, true);
 				agent->mFurnitureUse.reset();
-				agent->mOccupiedUsablePoint = {};
-				agent->mPose = finishPose;
-				agent->mRetainedActionPose = true;
+				restoreFurnitureFinishPose(*agent, finishPose);
 				event.agent = mSimulationCoordinator.makeAgentSnapshot(agent);
-				invalidateSimulationSnapshot();
 				return;
 			}
 			finished.effects.insert(finished.effects.begin(), {ActionEffectType::Pose, static_cast<int>(finishPose)});
@@ -477,13 +488,7 @@ namespace core
 			finished.effects.insert(finished.effects.end(), result.effects.begin(), result.effects.end());
 			finished.logs.insert(finished.logs.end(), result.logs.begin(), result.logs.end());
 			finished.logsSuppressed |= result.logsSuppressed;
-			struct FinishingScope
-			{
-				AgentId& slot;
-				AgentId restore;
-				~FinishingScope() { slot = restore; }
-			} scope{mFinishingFurnitureUseAgent, mFinishingFurnitureUseAgent};
-			mFinishingFurnitureUseAgent = agentId;
+			FurnitureFinishingScope scope{mFinishingFurnitureUseAgent, agentId};
 			applyActionResult(agentId, markerId, std::move(finished), event, true);
 			if (event.type != SimulationEventType::DestinationReached) return;
 			agent->mFurnitureUse.reset();
@@ -529,13 +534,7 @@ namespace core
 		// Departure has already put the Agent into a navigation state, but the
 		// finishing contract runs before the physical position commits, so mark the
 		// batch while its callback and staged effects are validated.
-		struct FinishingScope
-		{
-			AgentId& slot;
-			AgentId restore;
-			~FinishingScope() { slot = restore; }
-		} finishingScope{ mFinishingFurnitureUseAgent, mFinishingFurnitureUseAgent };
-		mFinishingFurnitureUseAgent = agentId;
+		FurnitureFinishingScope finishingScope{mFinishingFurnitureUseAgent, agentId};
 		SimulationEvent event;
 		event.agent = mSimulationCoordinator.makeAgentSnapshot(agent);
 		event.destinationMarker = use.marker;
@@ -549,12 +548,7 @@ namespace core
 			result.effects.push_back({ActionEffectType::Release});
 		}
 		applyActionResult(agentId, use.marker, std::move(result), event, true);
-		// Admission and mutation guards guarantee this literal finishing pose.
-		// Callback failure cannot leak occupancy or invent another stance.
-		agent->mPose = finishPose;
-		agent->mRetainedActionPose = true;
-		agent->mOccupiedUsablePoint = {};
-		invalidateSimulationSnapshot();
+		restoreFurnitureFinishPose(*agent, finishPose);
 		if (event.type == SimulationEventType::ActionFailed)
 		{
 			// An ordinary refusal stays ordinary. The host has restored the declared
@@ -563,6 +557,17 @@ namespace core
 			event.agent = mSimulationCoordinator.makeAgentSnapshot(agent);
 			mPendingMovementOutcomes.push_back(std::move(event));
 		}
+	}
+
+	void World::restoreFurnitureFinishPose(Agent& agent, Pose finishPose)
+	{
+		// Admission and mutation guards guarantee this literal finishing pose.
+		// Callback failure cannot leak occupancy or invent another stance.
+		// Lifecycle reset and outcome publication remain owned by each workflow.
+		agent.mPose = finishPose;
+		agent.mRetainedActionPose = true;
+		agent.mOccupiedUsablePoint = {};
+		invalidateSimulationSnapshot();
 	}
 
 	void World::applyActionResult(AgentId agentId, MarkerId markerId, ActionExecutionResult result,

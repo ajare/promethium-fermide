@@ -838,12 +838,20 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 			auto end = custom.find("\nend", begin);
 			custom.replace(begin, end-begin, body);
 			auto path = context.temporaryRoot() / "failure.furniture.lua"; write(path, custom);
-			for (unsigned ending : {0u, 1u, 2u, 3u})
+			for (unsigned ending : {0u, 1u, 2u, 3u, 4u})
 			{
 				auto world = useFixture(path); auto seat = world->furniture()[0].marker; auto agent = core::AgentId{1};
+				if (ending == 4)
+				{
+					auto actions = context.temporaryRoot() / "finish-replacement.actions.lua";
+					write(actions, package("{key='hello',name='Replacement',run=function(a,w,m) w.log('replacement rollback') end}"));
+					require(world->selectActionRegistry(actions) && world->setMarkerActions(seat, {first}), "Finish replacement setup failed");
+				}
 				require(runAction(*world, agent, seat, std::string(core::UseFurnitureAction)).type == core::SimulationEventType::DestinationReached, "Failure fixture use failed");
 				world->consumeSimulationEvents(); core::consumeLogMessages();
-				if (ending < 2)
+				if (ending == 4)
+					require(world->moveAgentToMarker(agent, seat, first).accepted(), "Custom replacement refused");
+				else if (ending < 2)
 					require((ending ? world->moveAgentToNamedMarker(agent, "Origin") : world->moveAgentToMarker(agent, seat)).accepted(), "Finish request refused");
 				else
 				{
@@ -860,15 +868,18 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 				require(failed && world->isSimulationPaused() && !world->usablePointOccupant(seat)
 					&& world->lookupAgent(agent).entity->getPose() == core::Pose::Standing, "Finish failure stranded pose/occupancy or ignored failure policy");
 				bool diagnostic = false;
+				unsigned failures = 0;
 				for (auto const& event : world->consumeSimulationEvents())
 					if (event.type == core::SimulationEventType::ActionFailed)
 					{
+						++failures;
 						diagnostic = !event.diagnostic.empty() && event.scriptFailure != core::ScriptExecutionFailure::None;
 						if (std::string_view(body).starts_with("while")) require(event.scriptFailure == core::ScriptExecutionFailure::InstructionBudgetExceeded, "Finish budget lost classification");
 						if (std::string_view(body).starts_with("local")) require(event.scriptFailure == core::ScriptExecutionFailure::MemoryBudgetExceeded, "Finish heap budget lost classification");
 					}
-				require(diagnostic, "Finish failure has no structured diagnostic");
-				for (auto const& log : core::consumeLogMessages()) require(log.msg != "finish rollback", "Failed/incomplete finish published staged logs");
+				require(diagnostic && failures == 1, "Finish failure must publish exactly one structured diagnostic");
+				for (auto const& log : core::consumeLogMessages())
+					require(log.msg != "finish rollback" && log.msg != "replacement rollback", "Failed/incomplete finish published staged logs");
 			}
 		}
 	}
@@ -945,6 +956,9 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 			}
 			require(succeeded && !world->getSector(0)->areLightsOn(), "Departure finishing refused the staged device request");
 			require(!refused, "Departure finishing published a spurious refusal");
+			unsigned finishes = 0;
+			for (auto const& log : core::consumeLogMessages()) if (log.msg.starts_with("finish:")) ++finishes;
+			require(finishes == 1, "Departure must publish finish logs exactly once");
 		}
 		// An out-of-reach device request is an ordinary refusal: it must stay a
 		// non-script failure so host cleanup stands and headless advancement continues.
@@ -958,6 +972,8 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 					&& event.scriptFailure == core::ScriptExecutionFailure::None && !event.diagnostic.empty();
 			require(refused, "Ordinary finish refusal was not published as an ordinary Action failure");
 			require(world->getSector(0)->areLightsOn(), "Refused finish device changed the lights");
+			for (auto const& log : core::consumeLogMessages())
+				require(!log.msg.starts_with("finish:"), "Refused finish device leaked staged logs");
 		}
 	}
 
