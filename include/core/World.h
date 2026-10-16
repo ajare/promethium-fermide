@@ -695,8 +695,37 @@ namespace core
 		// once, never once per nested pose/view check (#627).
 		mutable uint64_t mUsablePointResolveVisits{ 0 };
 		ActionViews actionViews(AgentId agent, MarkerId marker) const;
+		// Named evaluation context for one applyActionResult() pass. The axes the
+		// evaluator reads - the claim a batch starts from, whether a repeated
+		// Release is tolerated, which device reach applies, and whether accepted
+		// effects commit - are not independent. Only the three combinations below
+		// occur, so the caller names the combination instead of carrying a boolean
+		// triple whose legal members had to be inferred at each call site.
+		//
+		//   Immediate              starts from the Agent's own claim; one Release
+		//                          only; ImmediatePress device reach; commits.
+		//   ReplacementValidation starts unclaimed; one Release only;
+		//                          ImmediatePress device reach; commits nothing.
+		//   FurnitureFinishing     starts from the Agent's own claim; repeated
+		//                          Releases allowed; staged-departure device
+		//                          reach; commits.
+		enum class ActionEffectContext
+		{
+			// An ordinary Action arriving at its destination: apply and commit its
+			// effects against the state the Agent already holds.
+			Immediate,
+			// Judge a replacement Action before any finish runs. The seat being
+			// replaced is not yet released, so the batch is evaluated unclaimed
+			// and nothing may commit if it is refused.
+			ReplacementValidation,
+			// A staged Furniture finishing batch, from departure or from a
+			// replacement. The Agent is leaving its usable point, so the batch may
+			// release more than once and device requests are judged from the
+			// usable point rather than the post-departure position.
+			FurnitureFinishing
+		};
 		void applyActionResult(AgentId agent, MarkerId marker, ActionExecutionResult result, SimulationEvent& event,
-			bool finishing = false, bool validateOnly = false, bool replacingUse = false);
+			ActionEffectContext context);
 		void finishFurnitureUse(AgentId agent);
 		void restoreFurnitureFinishPose(Agent& agent, Pose finishPose);
 		std::vector<SimulationEvent> mPendingMovementOutcomes;

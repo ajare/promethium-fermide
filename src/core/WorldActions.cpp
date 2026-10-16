@@ -509,13 +509,13 @@ namespace core
 			// Validate replacement before invoking finish, then stage both batches
 			// together. In particular, competing device requests cannot tear down
 			// a seat before the complete replacement is judged.
-			applyActionResult(agentId, markerId, result, event, false, true, true);
+			applyActionResult(agentId, markerId, result, event, ActionEffectContext::ReplacementValidation);
 			if (event.type != SimulationEventType::DestinationReached) return;
 			auto const use = *agent->mFurnitureUse;
 			auto finished = use.catalogue->executeUse(use.definition, true, actionViews(agentId, use.marker, current));
 			if (!finished.succeeded)
 			{
-				applyActionResult(agentId, use.marker, std::move(finished), event, true);
+				applyActionResult(agentId, use.marker, std::move(finished), event, ActionEffectContext::FurnitureFinishing);
 				agent->mFurnitureUse.reset();
 				restoreFurnitureFinishPose(*agent, currentFinishPose);
 				event.agent = mSimulationCoordinator.makeAgentSnapshot(agent);
@@ -527,11 +527,11 @@ namespace core
 			finished.logs.insert(finished.logs.end(), result.logs.begin(), result.logs.end());
 			finished.logsSuppressed |= result.logsSuppressed;
 			FurnitureFinishingScope scope{mFinishingFurnitureUseAgent, agentId};
-			applyActionResult(agentId, markerId, std::move(finished), event, true);
+			applyActionResult(agentId, markerId, std::move(finished), event, ActionEffectContext::FurnitureFinishing);
 			if (event.type != SimulationEventType::DestinationReached) return;
 			agent->mFurnitureUse.reset();
 		}
-		else applyActionResult(agentId, markerId, std::move(result), event);
+		else applyActionResult(agentId, markerId, std::move(result), event, ActionEffectContext::Immediate);
 		if (action == UseFurnitureAction && event.type == SimulationEventType::DestinationReached)
 			agent->mFurnitureUse = Agent::FurnitureUse{markerId, target.instance->id, target.instance->definitionKey, mFurnitureCatalogue};
 	}
@@ -589,7 +589,7 @@ namespace core
 			result.effects.insert(result.effects.begin(), {ActionEffectType::Pose, static_cast<int>(finishPose)});
 			result.effects.push_back({ActionEffectType::Release});
 		}
-		applyActionResult(agentId, use.marker, std::move(result), event, true);
+		applyActionResult(agentId, use.marker, std::move(result), event, ActionEffectContext::FurnitureFinishing);
 		restoreFurnitureFinishPose(*agent, finishPose);
 		if (event.type == SimulationEventType::ActionFailed)
 		{
@@ -613,8 +613,20 @@ namespace core
 	}
 
 	void World::applyActionResult(AgentId agentId, MarkerId markerId, ActionExecutionResult result,
-		SimulationEvent& event, bool finishing, bool validateOnly, bool replacingUse)
+		SimulationEvent& event, ActionEffectContext context)
 	{
+		// The named context selects one supported combination of the three axes.
+		// Every axis is derived here so the evaluation and commit logic below is
+		// exactly the one the boolean triple drove (#633).
+		bool finishing = false;
+		bool validateOnly = false;
+		bool replacingUse = false;
+		switch (context)
+		{
+		case ActionEffectContext::Immediate: break;
+		case ActionEffectContext::ReplacementValidation: validateOnly = replacingUse = true; break;
+		case ActionEffectContext::FurnitureFinishing: finishing = true; break;
+		}
 		auto agent = mAgents.find(agentId);
 		if (!result.succeeded)
 		{
