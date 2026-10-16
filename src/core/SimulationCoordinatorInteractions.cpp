@@ -969,41 +969,23 @@ namespace core
 		panel->mOpen = operation.mCommand.desiredState;
 	}
 
+	// Device advancement and completion dispatch (#624). The outer order is
+	// exactly the order the inline code used: pending physical retractions,
+	// then the operation loop (activation on the Pending-to-Running boundary,
+	// completion observation for operations already Running), then the
+	// physical travel of shutters and panels, the panel completion check,
+	// the Dumbwaiter progression, and finally the shutter completion check.
+	// Physical advancement moves the device; observation only reads the
+	// device and retires an operation which has reached its target. Every
+	// state change still goes through touchDeviceOperation so the tick
+	// events are unchanged.
 	void SimulationCoordinator::advanceDeviceOperations()
 	{
 		mWorld.invalidateSimulationSnapshot();
-		auto canRetract = [&](TraversalResource const& resource)
-		{
-			if (!resource.mExtensionRequestLeases.empty() || !resource.mExtensionOccupantLeases.empty()) return false;
-			// Manual Floor walking has no routed crossing task/lease. Retain its
-			// support too, including a stopped or deactivated Player on the span.
-			if (resource.mForceBridge)
-				for (auto const& [agentId, agent] : mWorld.mAgents.entries())
-				{
-					(void)agentId;
-					if (!agent->getSector() || !any_of(resource.mQueueLanes.begin(), resource.mQueueLanes.end(),
-						[&](auto const& lane) { return lane.sector == SectorId{uint64_t(agent->getSector()->getIndex()) + 1}; })) continue;
-					auto const position = agent->getGlobalPosition();
-					auto const bridgePosition = resource.mForceBridge->getPosition();
-					if (std::abs(position.y - bridgePosition.y) < .001f
-						&& position.x + agent->getWidth() * .5f > bridgePosition.x
-						&& position.x - agent->getWidth() * .5f < bridgePosition.x + resource.mForceBridge->getSize().x) return false;
-				}
-			return true;
-		};
-		// The physical safe-retract intent outlives its queryable operation, which
-		// fails on breakage. Restoration may resume it only after leases drain.
-		for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
-		{
-			(void)resourceId;
-			if (!resource->mRetractionPending || !resource->mExtensible
-				|| resource->mExtensible->isBroken()) continue;
-			if (canRetract(*resource))
-			{
-				resource->mExtensible->retract();
-				if (resource->mExtensible->isRetracted()) resource->mRetractionPending = false;
-			}
-		}
+		// The physical safe-retract intent outlives its queryable operation,
+		// which fails on breakage. Restoration may resume it only after
+		// leases drain.
+		advancePendingRetractions();
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 		{
 			(void)id;
@@ -1014,134 +996,241 @@ namespace core
 			touchDeviceOperation(id, *operation);
 			if (operation->mState == DeviceOperationState::Pending)
 			{
-				// The Pending-to-Running transition is this phase's activation
-				// boundary: each device family's activation helper is reached
-				// here, on the tick the operation was already activated on, and
-				// retires the operations its target supersedes (#623).
-				operation->mState = DeviceOperationState::Running;
-				if (operation->mCommand.type == DeviceCommandType::SetBoothWindowState
-					|| operation->mCommand.type == DeviceCommandType::ToggleBoothWindow)
-					activateBoothWindow(id, *operation);
-				else if (operation->mCommand.type == DeviceCommandType::OpenDoor)
-					activateManualDoor(id, *operation);
-				else if (operation->mCommand.type == DeviceCommandType::SetExtendedState
-					|| operation->mCommand.type == DeviceCommandType::ToggleExtendedState)
-					activateExtensible(id, *operation);
+				activatePendingOperation(id, *operation);
 				continue;
 			}
+			// A Dumbwaiter press is advanced by the unit itself; its landing
+			// cycle never observes completion through this loop.
 			if (operation->mCommand.type == DeviceCommandType::PressDumbwaiterLanding) continue;
 			if (operation->mState != DeviceOperationState::Running)
 			{
 				continue;
 			}
-			if (operation->mCommand.type == DeviceCommandType::SetBoothWindowState
-				|| operation->mCommand.type == DeviceCommandType::ToggleBoothWindow)
+			observeRunningOperation(id, *operation);
+		}
+		// Travel is owned by the device, not by the lifetime of an operation
+		// or a traversal lease. This phase runs only on active simulation
+		// ticks. The completion checks observe the travel applied above, in
+		// the original order: panels first, then the Dumbwaiter progression,
+		// then the shutters.
+		advanceBoothWindowTravel();
+		advanceAccessPanelTravel();
+		completeAccessPanelOperations();
+		advanceDumbwaiters();
+		completeBoothWindowOperations();
+	}
+
+	// A span may be retracted only when no traversal still depends on it:
+	// no extension request or occupant lease, and - because a manually
+	// positioned Player has no routed crossing task to hold a lease - no
+	// Player standing on the bridge itself, even a stopped or deactivated
+	// one. Extracted from the inline lambda unchanged (#624).
+	bool SimulationCoordinator::canRetractSafely(TraversalResource const& resource) const
+	{
+		if (!resource.mExtensionRequestLeases.empty() || !resource.mExtensionOccupantLeases.empty()) return false;
+		// Manual Floor walking has no routed crossing task/lease. Retain its
+		// support too, including a stopped or deactivated Player on the span.
+		if (resource.mForceBridge)
+			for (auto const& [agentId, agent] : mWorld.mAgents.entries())
 			{
-				if (!mWorld.lookupBoothWindow(operation->mCommand.boothWindow))
-					operation->mState = DeviceOperationState::Failed;
+				(void)agentId;
+				if (!agent->getSector() || !any_of(resource.mQueueLanes.begin(), resource.mQueueLanes.end(),
+					[&](auto const& lane) { return lane.sector == SectorId{uint64_t(agent->getSector()->getIndex()) + 1}; })) continue;
+				auto const position = agent->getGlobalPosition();
+				auto const bridgePosition = resource.mForceBridge->getPosition();
+				if (std::abs(position.y - bridgePosition.y) < .001f
+					&& position.x + agent->getWidth() * .5f > bridgePosition.x
+					&& position.x - agent->getWidth() * .5f < bridgePosition.x + resource.mForceBridge->getSize().x) return false;
 			}
-			else if (operation->mCommand.type == DeviceCommandType::SetAccessPanelState)
+		return true;
+	}
+
+	// The physical safe-retract intent outlives its queryable operation, which
+	// fails on breakage. Restoration may resume it only after leases drain.
+	void SimulationCoordinator::advancePendingRetractions()
+	{
+		for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
+		{
+			(void)resourceId;
+			if (!resource->mRetractionPending || !resource->mExtensible
+				|| resource->mExtensible->isBroken()) continue;
+			if (canRetractSafely(*resource))
 			{
-				if (!mWorld.lookupAccessPanel(operation->mCommand.accessPanel))
-					operation->mState = DeviceOperationState::Failed;
-			}
-			else if (operation->mCommand.type == DeviceCommandType::SetSectorLights
-				&& operation->mCommand.target
-				&& operation->mCommand.target.value <= mWorld.mSectors.size())
-			{
-				auto sector = mWorld.mSectors[(size_t)operation->mCommand.target.value - 1];
-				bool succeeded = operation->mCommand.desiredState ? sector->lightsOn() : sector->lightsOff();
-				operation->mState = succeeded ? DeviceOperationState::Succeeded : DeviceOperationState::Failed;
-			}
-			else if (operation->mCommand.type == DeviceCommandType::RequestAirlock)
-			{
-				operation->mState = acceptAirlockCommand(operation->mCommand)
-					? DeviceOperationState::Succeeded : DeviceOperationState::Rejected;
-			}
-			else if (operation->mCommand.type == DeviceCommandType::SetExtendedState
-				|| operation->mCommand.type == DeviceCommandType::ToggleExtendedState)
-			{
-				auto resource = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
-				if (!resource || !resource->mExtensible || resource->mExtensible->isBroken())
-				{
-					operation->mState = DeviceOperationState::Failed;
-				}
-				else if (operation->mCommand.desiredState && resource->mExtensible->isExtended())
-				{
-					operation->mState = DeviceOperationState::Succeeded;
-				}
-				else if (!operation->mCommand.desiredState)
-				{
-					if (canRetract(*resource))
-					{
-						if (!resource->mExtensible->isRetracted() && !resource->mExtensible->isRetracting())
-							resource->mExtensible->retract();
-						if (resource->mExtensible->isRetracted())
-						{
-							resource->mRetractionPending = false;
-							operation->mState = DeviceOperationState::Succeeded;
-						}
-					}
-				}
-			}
-			else if (operation->mCommand.type == DeviceCommandType::CallLift
-				|| operation->mCommand.type == DeviceCommandType::SelectLiftDestination
-				|| operation->mCommand.type == DeviceCommandType::CallShuttle
-				|| operation->mCommand.type == DeviceCommandType::SelectShuttleDestination)
-			{
-				auto resource = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
-				if (!resource || (!resource->mLift && !resource->mShuttle) || !resource->mEnabled
-					|| (resource->mLift && resource->mLift->isBroken())
-					|| (resource->mShuttle && resource->mShuttle->isBroken())
-					|| operation->mCommand.stopIndex >= resource->mLiftStops.size())
-				{
-					operation->mState = DeviceOperationState::Rejected;
-				}
-				else
-				{
-					if (operation->mCommand.type == DeviceCommandType::CallLift
-						|| operation->mCommand.type == DeviceCommandType::CallShuttle)
-					{
-						// The operation may be shared by several waiting passengers. Each
-						// keeps independent ownership even though the physical call coalesces.
-						for (auto requester : operation->mRequesters)
-						{
-							auto actor = mWorld.mAgents.find(requester);
-							if (actor && actor->isPlayerControlled())
-								resource->mPlayerStopRequests.try_emplace(operation->mCommand.stopIndex, mWorld.mSimulationTick);
-							else addLiftStopRequest(*resource, operation->mCommand.stopIndex, requester);
-						}
-						if (resource->mLiftStopPhase == LiftStopPhase::Idle)
-							resource->mLiftStopPhase = LiftStopPhase::Closing;
-					}
-					else resource->mLiftDestinationStop = operation->mCommand.stopIndex;
-					operation->mState = DeviceOperationState::Succeeded;
-				}
-			}
-			else if (operation->mCommand.type == DeviceCommandType::OpenDoor)
-			{
-				auto resource = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
-				if (!resource || !resource->mDoor || resource->mDoor->isBroken())
-				{
-					operation->mState = DeviceOperationState::Failed;
-				}
-				else if (!resource->mEnabled)
-				{
-					operation->mState = DeviceOperationState::Rejected;
-				}
-				else if ((operation->mCommand.desiredState && resource->mDoor->isOpen())
-					|| (!operation->mCommand.desiredState && resource->mDoor->isClosed()))
-				{
-					operation->mState = DeviceOperationState::Succeeded;
-				}
-			}
-			else
-			{
-				operation->mState = DeviceOperationState::Failed;
+				resource->mExtensible->retract();
+				if (resource->mExtensible->isRetracted()) resource->mRetractionPending = false;
 			}
 		}
-		// Travel is owned by the device, not by the lifetime of an operation or
-		// a traversal lease. This phase runs only on active simulation ticks.
+	}
+
+	// The Pending-to-Running transition is this phase's activation boundary:
+	// each device family's activation helper is reached here, on the tick the
+	// operation was already activated on, and retires the operations its
+	// target supersedes (#623). A freshly activated operation is not also
+	// observed for completion until a later tick.
+	void SimulationCoordinator::activatePendingOperation(DeviceOperationId id, DeviceOperation& operation)
+	{
+		operation.mState = DeviceOperationState::Running;
+		if (operation.mCommand.type == DeviceCommandType::SetBoothWindowState
+			|| operation.mCommand.type == DeviceCommandType::ToggleBoothWindow)
+			activateBoothWindow(id, operation);
+		else if (operation.mCommand.type == DeviceCommandType::OpenDoor)
+			activateManualDoor(id, operation);
+		else if (operation.mCommand.type == DeviceCommandType::SetExtendedState
+			|| operation.mCommand.type == DeviceCommandType::ToggleExtendedState)
+			activateExtensible(id, operation);
+	}
+
+	// Completion observation for an already-running operation: the command
+	// family decides whether the device's current state satisfies the
+	// operation, and the operation retires here only when it does. The
+	// switch mirrors the original if/else chain; command types are mutually
+	// exclusive, so the dispatch order carries no behaviour, and an
+	// unrecognised type fails exactly as the final else clause did (#624).
+	void SimulationCoordinator::observeRunningOperation(DeviceOperationId id, DeviceOperation& operation)
+	{
+		(void)id;
+		switch (operation.mCommand.type)
+		{
+		case DeviceCommandType::SetBoothWindowState:
+		case DeviceCommandType::ToggleBoothWindow:
+			// The shutter's travel completion is observed after the physical
+			// advance; here only the device's disappearance fails the
+			// operation.
+			if (!mWorld.lookupBoothWindow(operation.mCommand.boothWindow))
+				operation.mState = DeviceOperationState::Failed;
+			break;
+		case DeviceCommandType::SetAccessPanelState:
+			if (!mWorld.lookupAccessPanel(operation.mCommand.accessPanel))
+				operation.mState = DeviceOperationState::Failed;
+			break;
+		case DeviceCommandType::SetSectorLights:
+			if (operation.mCommand.target && operation.mCommand.target.value <= mWorld.mSectors.size())
+			{
+				auto sector = mWorld.mSectors[(size_t)operation.mCommand.target.value - 1];
+				bool succeeded = operation.mCommand.desiredState ? sector->lightsOn() : sector->lightsOff();
+				operation.mState = succeeded ? DeviceOperationState::Succeeded : DeviceOperationState::Failed;
+			}
+			else
+				operation.mState = DeviceOperationState::Failed;
+			break;
+		case DeviceCommandType::RequestAirlock:
+			operation.mState = acceptAirlockCommand(operation.mCommand)
+				? DeviceOperationState::Succeeded : DeviceOperationState::Rejected;
+			break;
+		case DeviceCommandType::SetExtendedState:
+		case DeviceCommandType::ToggleExtendedState:
+			advanceExtensibleOperation(operation);
+			break;
+		case DeviceCommandType::CallLift:
+		case DeviceCommandType::SelectLiftDestination:
+		case DeviceCommandType::CallShuttle:
+		case DeviceCommandType::SelectShuttleDestination:
+			advanceTransportCallOperation(operation);
+			break;
+		case DeviceCommandType::OpenDoor:
+			advanceDoorOperation(operation);
+			break;
+		default:
+			operation.mState = DeviceOperationState::Failed;
+			break;
+		}
+	}
+
+	// An extensible operation completes by observing the resource: extension
+	// succeeds once the span is fully extended, while closing drives the
+	// physical retraction itself when the span is safe to retract and only
+	// succeeds when the retraction has actually landed. A broken or missing
+	// resource fails the operation exactly as the inline chain did.
+	void SimulationCoordinator::advanceExtensibleOperation(DeviceOperation& operation)
+	{
+		auto resource = mWorld.mTraversalResources.find(operation.mCommand.traversalResource);
+		if (!resource || !resource->mExtensible || resource->mExtensible->isBroken())
+		{
+			operation.mState = DeviceOperationState::Failed;
+		}
+		else if (operation.mCommand.desiredState && resource->mExtensible->isExtended())
+		{
+			operation.mState = DeviceOperationState::Succeeded;
+		}
+		else if (!operation.mCommand.desiredState)
+		{
+			if (canRetractSafely(*resource))
+			{
+				if (!resource->mExtensible->isRetracted() && !resource->mExtensible->isRetracting())
+					resource->mExtensible->retract();
+				if (resource->mExtensible->isRetracted())
+				{
+					resource->mRetractionPending = false;
+					operation.mState = DeviceOperationState::Succeeded;
+				}
+			}
+		}
+	}
+
+	// A transport call or destination selection is revalidated against the
+	// resource's live capability, then recorded: a call fans out over every
+	// requester while a selection simply retargets the car. Device-owned
+	// travel keeps its existing relationship to request cancellation and
+	// lifetime - this only records the intent the vehicle advances on its own.
+	void SimulationCoordinator::advanceTransportCallOperation(DeviceOperation& operation)
+	{
+		auto resource = mWorld.mTraversalResources.find(operation.mCommand.traversalResource);
+		if (!resource || (!resource->mLift && !resource->mShuttle) || !resource->mEnabled
+			|| (resource->mLift && resource->mLift->isBroken())
+			|| (resource->mShuttle && resource->mShuttle->isBroken())
+			|| operation.mCommand.stopIndex >= resource->mLiftStops.size())
+		{
+			operation.mState = DeviceOperationState::Rejected;
+		}
+		else
+		{
+			if (operation.mCommand.type == DeviceCommandType::CallLift
+				|| operation.mCommand.type == DeviceCommandType::CallShuttle)
+			{
+				// The operation may be shared by several waiting passengers. Each
+				// keeps independent ownership even though the physical call coalesces.
+				for (auto requester : operation.mRequesters)
+				{
+					auto actor = mWorld.mAgents.find(requester);
+					if (actor && actor->isPlayerControlled())
+						resource->mPlayerStopRequests.try_emplace(operation.mCommand.stopIndex, mWorld.mSimulationTick);
+					else addLiftStopRequest(*resource, operation.mCommand.stopIndex, requester);
+				}
+				if (resource->mLiftStopPhase == LiftStopPhase::Idle)
+					resource->mLiftStopPhase = LiftStopPhase::Closing;
+			}
+			else resource->mLiftDestinationStop = operation.mCommand.stopIndex;
+			operation.mState = DeviceOperationState::Succeeded;
+		}
+	}
+
+	// A manual Door operation succeeds only when the physical door has
+	// reached the requested position; breakage fails it and a disabled
+	// resource rejects it, exactly as the inline chain did.
+	void SimulationCoordinator::advanceDoorOperation(DeviceOperation& operation)
+	{
+		auto resource = mWorld.mTraversalResources.find(operation.mCommand.traversalResource);
+		if (!resource || !resource->mDoor || resource->mDoor->isBroken())
+		{
+			operation.mState = DeviceOperationState::Failed;
+		}
+		else if (!resource->mEnabled)
+		{
+			operation.mState = DeviceOperationState::Rejected;
+		}
+		else if ((operation.mCommand.desiredState && resource->mDoor->isOpen())
+			|| (!operation.mCommand.desiredState && resource->mDoor->isClosed()))
+		{
+			operation.mState = DeviceOperationState::Succeeded;
+		}
+	}
+
+	// Physical travel: the shutter keeps moving toward its target regardless
+	// of whether any operation still observes it. Travel is owned by the
+	// device, not by the lifetime of an operation or a traversal lease, and
+	// this runs only on active simulation ticks.
+	void SimulationCoordinator::advanceBoothWindowTravel()
+	{
 		for (auto const& [deviceId, weak] : mWorld.mBoothWindows)
 		{
 			(void)deviceId;
@@ -1155,6 +1244,13 @@ namespace core
 				booth->refreshState();
 			}
 		}
+	}
+
+	// The panel leaf advances toward its open target at its own speed; the
+	// operation's success is observed separately, after this travel has
+	// been applied (#624).
+	void SimulationCoordinator::advanceAccessPanelTravel()
+	{
 		for (auto const& [panelId, weak] : mWorld.mAccessPanels)
 		{
 			(void)panelId;
@@ -1167,6 +1263,14 @@ namespace core
 				if (panel->mOpen && panel->mProgress > 1 - 1e-6f) panel->mProgress = 1;
 			}
 		}
+	}
+
+	// Completion observation runs after the physical advance so a panel
+	// which reached its target this tick retires its operation on this same
+	// tick, before the Dumbwaiter progression which may drive another
+	// shutter.
+	void SimulationCoordinator::completeAccessPanelOperations()
+	{
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 			if (operation->mState == DeviceOperationState::Running
 				&& operation->mCommand.type == DeviceCommandType::SetAccessPanelState)
@@ -1176,7 +1280,14 @@ namespace core
 					touchDeviceOperation(id, *operation);
 					operation->mState = DeviceOperationState::Succeeded;
 				}
-		advanceDumbwaiters();
+	}
+
+	// The BoothWindow completion check runs last, after the Dumbwaiter
+	// progression, preserving the original ordering in which a Dumbwaiter
+	// cycle retires its own operation before the shutter operations it
+	// drove observe the same final progress (#624).
+	void SimulationCoordinator::completeBoothWindowOperations()
+	{
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 			if (operation->mState == DeviceOperationState::Running
 				&& (operation->mCommand.type == DeviceCommandType::SetBoothWindowState

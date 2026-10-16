@@ -791,6 +791,30 @@ namespace core
 		void activateAccessPanelPress(DeviceOperationId id, DeviceOperation& operation,
 			AgentId actor);
 
+		// Device advancement and completion dispatch (#624). The tick phase
+		// keeps the exact outer order the inline code used: pending physical
+		// retractions, then the operation loop (activation on the
+		// Pending-to-Running boundary via activatePendingOperation, completion
+		// observation for operations already Running via
+		// observeRunningOperation and its command-family helpers), then the
+		// physical travel of shutters and panels, the panel completion check,
+		// the Dumbwaiter progression, and finally the shutter completion
+		// check. Physical advancement moves the device; observation only
+		// reads the device and retires an operation which has reached its
+		// target. Every state change still goes through touchDeviceOperation
+		// so the published tick events are unchanged.
+		bool canRetractSafely(TraversalResource const& resource) const;
+		void advancePendingRetractions();
+		void activatePendingOperation(DeviceOperationId id, DeviceOperation& operation);
+		void observeRunningOperation(DeviceOperationId id, DeviceOperation& operation);
+		void advanceExtensibleOperation(DeviceOperation& operation);
+		void advanceTransportCallOperation(DeviceOperation& operation);
+		void advanceDoorOperation(DeviceOperation& operation);
+		void advanceBoothWindowTravel();
+		void advanceAccessPanelTravel();
+		void completeAccessPanelOperations();
+		void completeBoothWindowOperations();
+
 		// A newer activation takes the device's target: the operations which
 		// were still Running toward another target on that device retire with
 		// it, touched for event publication exactly as the inline loops did.
