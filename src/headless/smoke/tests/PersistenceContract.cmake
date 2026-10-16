@@ -82,6 +82,7 @@ set(names dumbwaiters/authoredRoundTripAndMalformedRecords accessPanels/roundTri
     doorOpenApartPersistsThroughEveryEditorPath
     liftDoorsDefaultToOpenApartWhileOtherDoorsKeepOpenUp
     doorStyleMapsAdvanceTheSchemaVersionAndLegacySixStillLoads
+    transportStopShortNames
     liftStopDoorStyleOverridesArePerStopAndPersist
     liftCreationStopDoorStylesAreAuthoredAndPersist
     liftShortStopDoorStyleVectorEditPreservesEarlierOverrides

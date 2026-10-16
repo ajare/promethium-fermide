@@ -10,6 +10,33 @@ file(MAKE_DIRECTORY "${work}")
 
 set(agent_checks
     identity
+    playerControlButtons
+    playerControlButtonPriority
+    playerControlExtensibleLadders
+    playerControlBasics
+    playerControlBoundaries
+    playerControlBulkheads
+    playerControlDoorways
+    playerControlDoorwayRestrictions
+    playerControlContextualPrecedence
+    playerControlStairwellPlatforms
+    playerControlLadders
+    playerControlLadderSharedCapacity
+    playerControlLadderRestrictions
+    playerControlEscalators
+    playerControlStaircases
+    playerControlStaircaseRestrictions
+    playerControlStairwells
+    playerControlStairwellRestrictions
+    playerControlPersistence
+    playerControlLiftCalledLanding
+    playerControlManualTransports
+    playerControlAirlocks
+    playerControlChambers
+    playerControlBoothWindows
+    playerControlAccessPanels
+    playerControlPoses
+    playerControlBulkheadPoses
     agentGroupsHaveStableIdsAndEnumerateInCreationOrder
     agentGroupNamesAreTrimmedValidatedAndCaseSensitive
     renamingAnAgentGroupKeepsItsPlaceAndFailsAtomically

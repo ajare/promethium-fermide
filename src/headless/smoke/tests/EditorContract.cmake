@@ -95,6 +95,7 @@ set(editor_names
     agentTypesEditorSelectionDependencyRefusedAtomically
     agentTypesEditorCopiedFixturePreservesTypeIdentity
     agentTypesHistoryPreservesSurvivorsAndReconstructsDeletedAgents
+    playerControlEditorWorkflow
     agent/assignmentAndPropertyAdditionConflictsAreAtomic
     agent/editorCommitsRevisionedColourAndUndoRedoExactly
     agent/conflictingColourRedoIsRefusedAtomically
@@ -185,6 +186,7 @@ set(editor_names
     routing/historyAndClipboard
     airlocks/structuralHistory
     airlocks/editorCommands
+    transportStopNames/editorHistory
     furniture/bundledLuaWorkflow
     furniture/luaWorkflow
     furniture/demoActions

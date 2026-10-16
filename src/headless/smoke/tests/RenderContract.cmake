@@ -130,6 +130,7 @@ set(names
     brokenDoorButtonRendersRed
     onlyTheSelectedLayerIsDrawn
     transitsOnTheLayerBehindAreOnlyDrawnThroughApertures
+    stairwellDoorwayBoxes
     stairwellSectorsAreCanvasSelectableRendering
     staircasesConnectAdjacentCorridorsAndRoundTripRendering
     laddersCanBeValidatedEditedAndDeletedRendering

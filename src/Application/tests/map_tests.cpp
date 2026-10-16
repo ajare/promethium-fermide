@@ -143,7 +143,7 @@ void checkManifest(std::string const& directory) {
             "Manifest must declare an unloaded Application Map with a World dependency");
     manager.createResource(map);
     require(map->getWorld() && map->getWorld()->getCellsWide() == 16 &&
-                map->getWorld()->getLevelsHigh() == 3 && map->getWorld()->getLayerCount() == 2,
+                map->getWorld()->getLevelsHigh() == 6 && map->getWorld()->getLayerCount() == 2,
             "WorldResource must deserialize the repository WorldFile");
     auto worldResource = std::static_pointer_cast<WorldResource>(source);
     require(map->getWorldResource() == worldResource && map->getWorld() == worldResource->world().get(),

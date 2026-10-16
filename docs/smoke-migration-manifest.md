@@ -276,6 +276,21 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/simulation/RoomHeights.cpp` | Room height pose checks | `pf-smoke-simulation` |
 | `smoke/editor/RoomHeightScale.cpp` | Room height scale editor checks | `pf-smoke-editor` |
 | `smoke/simulation/DeviceActivation.cpp` | Device activation and supersession boundary checks | `pf-smoke-simulation` |
+| `smoke/agent/PlayerAccessPanels.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/PlayerAirlocks.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/PlayerBoothWindows.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/PlayerBulkheadPoses.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/PlayerButtons.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/PlayerChambers.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/PlayerControl.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/PlayerControlEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/agent/PlayerPoses.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/PlayerTransports.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/QueuedPressLookup.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/editor/TransportStopNames.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/persistence/TransportStopNames.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/simulation/UsablePointResolution.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/world/PhysicalControlLookup.cpp` | module-owned | `pf-smoke-world` |
 <!-- current-ownership-end -->
 Simulation Observation was migrated in #280. Its stable registered check
 is `simulation/observation`; its old path was
