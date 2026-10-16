@@ -81,7 +81,7 @@ pf_add_smoke_module(pf-smoke-station
     TIMEOUT 600
     DEFAULT_CHECK lifecycle
 )
-foreach(check lifecycle batching eventBound persistence stores transfers compounds power
+foreach(check lifecycle batching eventBound persistence stores transfers linkSeam compounds power
         batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
@@ -720,6 +720,10 @@ add_test(NAME station-editor-window COMMAND pf-smoke-editor --check station/wind
 set_tests_properties(station-editor-window PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
 add_test(NAME station-editor-stores COMMAND pf-smoke-editor --check station/storeWorkflow)
 set_tests_properties(station-editor-stores PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
+# #640: dragging connectors on the Station Flow canvas and the shared draft
+# history that records each link created, refused or removed.
+add_test(NAME station-editor-flow-links COMMAND pf-smoke-editor --check station/flowLinkWorkflow)
+set_tests_properties(station-editor-flow-links PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
 add_test(NAME station-editor-transfers COMMAND pf-smoke-editor --check station/transferWorkflow)
 set_tests_properties(station-editor-transfers PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
 add_test(NAME station-editor-removals COMMAND pf-smoke-editor --check station/removalWorkflow)

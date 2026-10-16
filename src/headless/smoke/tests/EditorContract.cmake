@@ -265,6 +265,7 @@ set(editor_names
     station/windowWorkflow
     station/removalWorkflow
     station/storeWorkflow
+    station/flowLinkWorkflow
     station/transferWorkflow
     station/compoundWorkflow
     station/powerWorkflow

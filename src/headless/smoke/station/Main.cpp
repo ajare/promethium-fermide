@@ -5,6 +5,7 @@
 #include "Scenarios.h"
 #include "Stability.h"
 #include "core/World.h"
+#include "core/StationPorts.h"
 #include "core/AgentTagRegistryDocument.h"
 #include "core/YamlSerializer.h"
 #include "core/BinarySerializer.h"
@@ -514,6 +515,340 @@ namespace
 			"Reset did not reconstruct the violated store");
 		core::setStationSystemsSourceLoader({});
 	}
+	// #640: the pure link-evaluation seam. Every legal and illegal Store and
+	// Transfer connector pair is asserted here against the same function the
+	// editor calls, with no editor context at all, so the rule cannot drift
+	// between the two surfaces that enforce it.
+	void linkSeam(smoke::Context const&)
+	{
+		auto store = [](std::string const& id, std::string const& unit,
+			std::string const& hazard = "normal")
+		{
+			core::ResourceStoreSettings entry;
+			entry.id = id;
+			entry.unit = unit;
+			entry.capacity = 100.0;
+			entry.startingQualified = 50.0;
+			entry.hazardClass = hazard;
+			return entry;
+		};
+		auto compoundStore = [&store](std::string const& id)
+		{
+			auto entry = store(id, "kg");
+			entry.composition = core::ResourceCompositionSettings{};
+			entry.composition->moisture = 0.5;
+			return entry;
+		};
+		auto transfer = [](std::string const& id, std::string const& source,
+			std::string const& destination, std::string const& unit)
+		{
+			core::ResourceTransferSettings entry;
+			entry.id = id;
+			entry.sourceId = source;
+			entry.destinationId = destination;
+			entry.unit = unit;
+			entry.ratePerSecond = 1.0;
+			return entry;
+		};
+		auto pin = [](char const* type, char const* id, char const* port)
+		{
+			return core::StationPinRef{type, id, port};
+		};
+		auto link = [](core::StationPinRef from, core::StationPinRef to)
+		{
+			return core::CandidateLink{std::move(from), std::move(to)};
+		};
+		// A draft the validator accepts end to end: two plain kilogram stores
+		// already wired through a transfer, plus endpoints for illegal pairs.
+		auto base = [&]
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {store("water", "kg"), store("tank", "kg"),
+				store("brine", "kg", "hazardous"), store("litres", "L"),
+				store("drum", "kg"), compoundStore("silage")};
+			settings.transfers = {transfer("t1", "water", "tank", "kg")};
+			return settings;
+		};
+		auto requireAllowed = [](core::StationSystemsSettings const& settings,
+			core::CandidateLink const& candidate, char const* what)
+		{
+			auto const verdict = core::evaluateStationLink(settings, candidate);
+			require(verdict.allowed,
+				(std::string("expected this link to be allowed: ") + what + " | refused: " + verdict.reason).c_str());
+			require(verdict.reason.empty(),
+				(std::string("an allowed link carried a reason: ") + what).c_str());
+		};
+		auto requireRefused = [](core::StationSystemsSettings const& settings,
+			core::CandidateLink const& candidate, char const* needle, char const* what)
+		{
+			auto const verdict = core::evaluateStationLink(settings, candidate);
+			require(!verdict.allowed, (std::string("expected this link to be refused: ") + what).c_str());
+			require(!verdict.reason.empty(),
+				(std::string("a refused link gave no reason: ") + what).c_str());
+			require(verdict.reason.find(needle) != std::string::npos,
+				(std::string("refusal for ") + what + " did not carry '" + needle + "' but said: "
+					+ verdict.reason).c_str());
+		};
+
+		// The descriptor table declares each connector's kind, direction,
+		// cardinality and permitted counterpart kinds for Store and Transfer.
+		{
+				auto const& descriptors = core::stationPortDescriptors();
+			auto found = [&](char const* type, char const* name) -> core::PortDescriptor const*
+			{
+				for (auto const& descriptor : descriptors)
+					if (descriptor.nodeType == type && descriptor.name == name) return &descriptor;
+				return nullptr;
+			};
+			for (auto pair : {std::pair<char const*, char const*>{"Store", "Inventory in"},
+				{"Store", "Inventory out"}, {"Transfer", "Source"}, {"Transfer", "Destination"}})
+				require(found(pair.first, pair.second) != nullptr,
+					("descriptor missing for " + std::string(pair.first) + " " + pair.second).c_str());
+			require(found("Store", "Inventory in")->direction == core::StationPortDirection::Input
+				&& found("Store", "Inventory out")->direction == core::StationPortDirection::Output
+				&& found("Transfer", "Source")->direction == core::StationPortDirection::Input
+				&& found("Transfer", "Destination")->direction == core::StationPortDirection::Output,
+				"descriptor directions do not match the connector they declare");
+			require(found("Store", "Inventory in")->kind == "inventory"
+				&& found("Store", "Inventory in")->counterpartKind == "material"
+				&& found("Transfer", "Source")->kind == "material"
+				&& found("Transfer", "Destination")->counterpartKind == "inventory",
+				"descriptor kind/counterpart pairing is not the declared one");
+			require(found("Store", "Inventory out")->maximumLinks == 0
+				&& found("Transfer", "Source")->maximumLinks == 1
+				&& found("Transfer", "Destination")->maximumLinks == 1,
+				"descriptor cardinality does not match what the configuration can hold");
+		}
+
+		// The legal pairs, in both drag orders: the seam orients the pair from
+		// the descriptors, so a caller never has to know which way the drag went.
+		{
+			// A freshly placed transfer with both ends still unconnected: the
+			// user wires it one link at a time, and each single link has to be
+			// possible while the other end is still open.
+			auto open = base();
+			open.transfers[0].sourceId.clear();
+			open.transfers[0].destinationId.clear();
+			requireAllowed(open, link(pin("Store", "water", "Inventory out"),
+				pin("Transfer", "t1", "Source")), "store output into a transfer source");
+			requireAllowed(open, link(pin("Transfer", "t1", "Source"),
+				pin("Store", "water", "Inventory out")), "the same pair dragged the other way round");
+			requireAllowed(open, link(pin("Transfer", "t1", "Destination"),
+				pin("Store", "drum", "Inventory in")), "a transfer destination into a store input");
+			requireAllowed(open, link(pin("Store", "drum", "Inventory in"),
+				pin("Transfer", "t1", "Destination")), "the destination pair dragged the other way round");
+			// Wiring one end of a half-built transfer is still possible, and the
+			// draft as a whole stays invalid until the other end lands — which
+			// is the user's next action, not this link's reason.
+			auto halfWired = base();
+			halfWired.transfers[0].destinationId.clear();
+			requireAllowed(halfWired, link(pin("Transfer", "t1", "Destination"),
+				pin("Store", "drum", "Inventory in")), "the second end of a half-wired transfer");
+			std::string whole;
+			require(!core::validateStationSystemsSettings(halfWired, whole),
+				"an unwired transfer endpoint should still leave the draft invalid as a whole");
+		}
+
+		// The illegal pairs. Each refusal says why in the rule's own terms.
+		{
+			auto const settings = base();
+			// A store never feeds a store: the reason names the intermediary the
+			// user has to add, in either drag order.
+			requireRefused(settings, link(pin("Store", "water", "Inventory out"),
+				pin("Store", "tank", "Inventory in")), "Transfer", "store straight into store");
+			requireRefused(settings, link(pin("Store", "water", "Inventory out"),
+				pin("Store", "tank", "Inventory in")), "Conversion", "store straight into store");
+			requireRefused(settings, link(pin("Store", "tank", "Inventory in"),
+				pin("Store", "water", "Inventory out")), "Transfer", "store straight into store, reversed drag");
+			requireRefused(settings, link(pin("Store", "water", "Inventory out"),
+				pin("Store", "water", "Inventory in")), "cannot feed", "a store into itself");
+			requireRefused(settings, link(pin("Transfer", "t1", "Destination"),
+				pin("Transfer", "t1", "Source")), "cannot join", "a transfer straight back into itself");
+			requireRefused(settings, link(pin("Transfer", "t1", "Destination"),
+				pin("Transfer", "t2", "Source")), "cannot join", "transfer into transfer");
+			requireRefused(settings, link(pin("Store", "water", "Inventory out"),
+				pin("Transfer", "t1", "Destination")), "output connector", "two outputs");
+			requireRefused(settings, link(pin("Store", "water", "Inventory in"),
+				pin("Transfer", "t1", "Source")), "output connector", "two inputs");
+			requireRefused(settings, link(pin("Store", "water", "Inventory in"),
+				pin("Store", "tank", "Inventory in")), "output connector", "input into input");
+			requireRefused(settings, link(pin("Store", "water", "Inventory out"),
+				pin("Store", "tank", "Inventory out")), "output connector", "output into output");
+			requireRefused(settings, link(pin("Conversion", "c1", "Conversion input"),
+				pin("Transfer", "t1", "Source")), "Unknown connector", "a type with no descriptor");
+			requireRefused(settings, link(pin("Store", "water", "Bogus port"),
+				pin("Transfer", "t1", "Source")), "Unknown connector", "an unknown port name");
+		}
+
+		// Cardinality: a transfer names exactly one store per side, a store's
+		// output is referenced by as many transfers as the design needs.
+		{
+			auto const settings = base();
+			requireRefused(settings, link(pin("Store", "tank", "Inventory out"),
+				pin("Transfer", "t1", "Source")), "already joins", "a second store on an occupied source");
+			requireRefused(settings, link(pin("Store", "water", "Inventory out"),
+				pin("Transfer", "t1", "Source")), "already joined", "the same store on its own source");
+			requireRefused(settings, link(pin("Transfer", "t1", "Destination"),
+				pin("Store", "litres", "Inventory in")), "already joins", "a second store on an occupied destination");
+			// The store's output face is unbounded: a second transfer may draw
+			// from a store the first one already draws from.
+			auto shared = base();
+			shared.transfers.push_back(transfer("t2", "", "tank", "kg"));
+			requireAllowed(shared, link(pin("Store", "water", "Inventory out"),
+				pin("Transfer", "t2", "Source")), "a second transfer drawing from the same store");
+			// A freed connector accepts the next link.
+			auto freed = base();
+			freed.transfers[0].sourceId.clear();
+			requireAllowed(freed, link(pin("Store", "drum", "Inventory out"),
+				pin("Transfer", "t1", "Source")), "a store onto a source the user disconnected");
+		}
+
+		// Semantic refusals carry the validator's own diagnostic for the rule
+		// the link breaks, never a generic message.
+		{
+			auto hazard = base();
+			hazard.transfers[0].sourceId.clear();
+			hazard.transfers[0].destinationId = "brine";
+			requireRefused(hazard, link(pin("Store", "water", "Inventory out"),
+				pin("Transfer", "t1", "Source")), "crosses the hazard-class boundary",
+				"a normal store into a hazardous transfer");
+			auto units = base();
+			units.transfers[0].sourceId.clear();
+			requireRefused(units, link(pin("Store", "litres", "Inventory out"),
+				pin("Transfer", "t1", "Source")), "does not match", "a litre store into a kilogram transfer");
+			auto looped = base();
+			looped.transfers[0].sourceId.clear();
+			requireRefused(looped, link(pin("Store", "tank", "Inventory out"),
+				pin("Transfer", "t1", "Source")), "source and destination must differ",
+				"a transfer fed by its own destination store");
+			auto compound = base();
+			compound.transfers[0].sourceId.clear();
+			compound.transfers[0].destinationId = "silage";
+			requireRefused(compound, link(pin("Store", "water", "Inventory out"),
+				pin("Transfer", "t1", "Source")), "compound-material boundary",
+				"a plain store into a compound destination");
+			// The destination side is judged by the same rules.
+			auto backSide = base();
+			backSide.transfers[0].destinationId.clear();
+			requireRefused(backSide, link(pin("Transfer", "t1", "Destination"),
+				pin("Store", "litres", "Inventory in")), "does not match",
+				"a transfer destination into a mismatched store");
+			requireRefused(backSide, link(pin("Transfer", "t1", "Destination"),
+				pin("Store", "brine", "Inventory in")), "crosses the hazard-class boundary",
+				"a transfer destination into a hazardous store");
+		}
+
+		// The validator diff: a half-built draft stays buildable. An unrelated
+		// defect elsewhere in the draft is never reported as this link's reason.
+		{
+			auto unrelatedStore = base();
+			core::ResourceStoreSettings broken;
+			broken.id = "gravel";
+			broken.unit = "stone";   // not a declared unit
+			broken.capacity = 10.0;
+			unrelatedStore.stores.push_back(broken);
+			std::string whole;
+			require(!core::validateStationSystemsSettings(unrelatedStore, whole)
+				&& whole.find("gravel") != std::string::npos,
+				"the seeded unrelated invalid store is not what the whole-configuration validator reports");
+			auto legal = unrelatedStore;
+			legal.transfers.push_back(transfer("t2", "", "tank", "kg"));
+			requireAllowed(legal, link(pin("Store", "water", "Inventory out"),
+				pin("Transfer", "t2", "Source")), "a legal link beside an unrelated invalid store");
+			auto illegal = legal;
+			illegal.transfers.back().destinationId = "brine";
+			requireRefused(illegal, link(pin("Store", "water", "Inventory out"),
+				pin("Transfer", "t2", "Source")), "crosses the hazard-class boundary",
+				"an illegal link beside an unrelated invalid store");
+			require(core::evaluateStationLink(illegal, link(pin("Store", "water", "Inventory out"),
+				pin("Transfer", "t2", "Source"))).reason.find("gravel") == std::string::npos,
+				"the unrelated invalid store was reported as this link's reason");
+
+			auto unrelatedTransfer = base();
+			unrelatedTransfer.transfers.push_back(transfer("ghostly", "ghost", "tank", "kg"));
+			require(!core::validateStationSystemsSettings(unrelatedTransfer, whole)
+				&& whole.find("ghostly") != std::string::npos,
+				"the seeded unrelated invalid transfer is not what the whole-configuration validator reports");
+			auto legalToo = unrelatedTransfer;
+			legalToo.transfers.push_back(transfer("t2", "", "tank", "kg"));
+			requireAllowed(legalToo, link(pin("Store", "water", "Inventory out"),
+				pin("Transfer", "t2", "Source")), "a legal link beside an unrelated invalid transfer");
+			auto illegalToo = legalToo;
+			illegalToo.transfers.back().destinationId = "brine";
+			requireRefused(illegalToo, link(pin("Store", "water", "Inventory out"),
+				pin("Transfer", "t2", "Source")), "crosses the hazard-class boundary",
+				"an illegal link beside an unrelated invalid transfer");
+			require(core::evaluateStationLink(illegalToo, link(pin("Store", "water", "Inventory out"),
+				pin("Transfer", "t2", "Source"))).reason.find("ghostly") == std::string::npos,
+				"the unrelated invalid transfer was reported as this link's reason");
+		}
+
+		// Identity and the write/clear round trip: a link is the reference it
+		// writes, named by configuration identity alone.
+		{
+			auto const settings = base();
+			auto const authored = core::stationAuthoredLinks(settings);
+			require(authored.size() == 2,
+				("the authored link table did not carry both references: " + std::to_string(authored.size())).c_str());
+			require(authored[0].identity == "Transfer:t1:Source"
+				&& authored[0].from == pin("Store", "water", "Inventory out")
+				&& authored[0].to == pin("Transfer", "t1", "Source"),
+				"the source reference is not presented as the source connector pair");
+			require(authored[1].identity == "Transfer:t1:Destination"
+				&& authored[1].from == pin("Transfer", "t1", "Destination")
+				&& authored[1].to == pin("Store", "tank", "Inventory in"),
+				"the destination reference is not presented as the destination connector pair");
+			// Inserting entries anywhere cannot renumber an existing link: the
+			// identity and both endpoints name configuration, not position.
+			auto reordered = base();
+			reordered.stores.insert(reordered.stores.begin(), store("ahead", "kg"));
+			reordered.transfers.insert(reordered.transfers.begin(), transfer("t0", "ahead", "tank", "kg"));
+			auto const remapped = core::stationAuthoredLinks(reordered);
+			require(remapped.size() == 4, "the reordered authored link table lost a reference");
+			for (auto const& expected : authored)
+			{
+				auto const found = std::find_if(remapped.begin(), remapped.end(),
+					[&](core::AuthoredLink const& entry) { return entry.identity == expected.identity; });
+				require(found != remapped.end()
+					&& found->from == expected.from && found->to == expected.to,
+					"inserting draft entries renumbered an existing link");
+			}
+			// Applying writes exactly the reference the connector stands for.
+			auto written = base();
+			written.transfers.push_back(transfer("t2", "", "tank", "kg"));
+			require(core::applyStationLink(written, link(pin("Store", "water", "Inventory out"),
+					pin("Transfer", "t2", "Source"))), "applying a source link was refused");
+			require(written.transfers.back().sourceId == "water"
+				&& written.transfers.back().destinationId == "tank",
+				"applying a source link wrote more than the source reference");
+			require(core::applyStationLink(written, link(pin("Transfer", "t2", "Destination"),
+				pin("Store", "silage", "Inventory in"))), "applying a destination link was refused");
+			require(written.transfers.back().destinationId == "silage",
+				"applying a destination link did not write the destination reference");
+			require(core::clearStationLink(written, "Transfer:t2:Source")
+				&& written.transfers.back().sourceId.empty()
+				&& written.transfers.back().destinationId == "silage",
+				"clearing a link removed more than the reference it names");
+			require(core::clearStationLink(written, "Transfer:t2:Destination")
+				&& written.transfers.back().destinationId.empty(),
+				"clearing a destination link did not clear it");
+			require(!core::clearStationLink(written, "Generator:g1:Source")
+				&& !core::clearStationLink(written, "nonsense")
+				&& !core::clearStationLink(written, "Transfer:missing:Source"),
+				"clearing an identity that names no reference claimed success");
+			// A pair with no reference behind it never writes anything.
+			auto untouched = base();
+			auto const snapshot = untouched;
+			require(!core::applyStationLink(untouched, link(pin("Store", "water", "Inventory out"),
+				pin("Store", "tank", "Inventory in"))) && untouched == snapshot,
+				"an unmappable link mutated the draft anyway");
+			require(!core::applyStationLink(untouched, link(pin("Store", "water", "Inventory out"),
+				pin("Transfer", "ghost", "Source"))) && untouched == snapshot,
+				"a link to a transfer that does not exist mutated the draft anyway");
+		}
+	}
+
 	void compounds(smoke::Context const&)
 	{
 		// #391: compound Resource stores carry declared constituent
@@ -23811,7 +24146,7 @@ void recovery(smoke::Context const& context)
 
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"power", power},
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"compounds", compounds}, {"power", power},
 		// Split out of the former `batteries` check: the hour-scale legs are
 		// independent worlds, so each is its own test and they run in parallel
 		// instead of as one ~182s serial chain.

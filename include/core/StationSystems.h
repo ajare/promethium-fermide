@@ -1714,6 +1714,20 @@ namespace core
 		std::string& diagnostic);
 	double evaluateStationProfile(ProfileSettings const&, double elapsedSeconds);
 	bool validateStationSystemsSettings(StationSystemsSettings const&, std::string& diagnostic);
+	// The endpoint half of the transfer entry check (#640): the rules a link
+	// between a store connector and a transfer connector can violate — the
+	// endpoints exist, differ, and agree on unit, declared composition and
+	// hazard class. validateStationSystemsSettings runs it for every transfer;
+	// the link-evaluation seam runs it for the single entry a candidate link
+	// writes, so the rule exists once and a refusal always carries this
+	// rule's own wording. Identity and rate rules stay with the whole entry.
+	// ignoreUnconnected (link seam only) tolerates the endpoint the link did
+	// not write, so a half-built transfer stays buildable; the whole-
+	// configuration validator leaves it false and reports an incomplete
+	// transfer as the invalid configuration it is.
+	bool validateStationTransferWiring(StationSystemsSettings const& settings,
+		ResourceTransferSettings const& transfer, std::string& diagnostic,
+		bool ignoreUnconnected = false);
 	inline constexpr std::array<char const*, 4> StationSystemNames{
 		"Power", "ECLSS", "Thermal control", "Monitoring/supervision"};
 	// Read-only view of one Resource store: the authored capacity, protected

@@ -2,6 +2,7 @@
 #include "core/StationPorts.h"
 #include "imgui/imnodes.h"
 #include <algorithm>
+#include <limits>
 #include <set>
 #include <cmath>
 #include <map>
@@ -492,6 +493,90 @@ char const* mediumName(Medium medium)
 namespace
 {
 	constexpr float nodeWidth = station_flow::NodeWidth, nodeHeight = station_flow::NodeHeight;
+	constexpr char keySeparator = '\x1f';
+
+	// One connector of a node type, placed in graph space relative to the
+	// node's top-left: inputs on the left face, outputs on the right, spread
+	// evenly so a node shows every port it declares.
+	struct FlowPort
+	{
+		core::PortDescriptor const* descriptor;
+		ImVec2 offset{};
+	};
+
+	std::vector<FlowPort> nodePorts(std::string const& nodeType)
+	{
+		std::vector<FlowPort> inputs, outputs;
+		for (auto const& descriptor : core::stationPortDescriptors())
+		{
+			if (descriptor.nodeType != nodeType) continue;
+			if (descriptor.direction == core::StationPortDirection::Input)
+				inputs.push_back({&descriptor, {}});
+			else
+				outputs.push_back({&descriptor, {}});
+		}
+		auto spread = [](std::vector<FlowPort>& ports, float x)
+		{
+			for (size_t i = 0; i < ports.size(); ++i)
+				ports[i].offset = {x, nodeHeight * float(i + 1) / float(ports.size() + 1)};
+		};
+		spread(inputs, 0.0f);
+		spread(outputs, nodeWidth);
+		std::vector<FlowPort> all;
+		all.reserve(inputs.size() + outputs.size());
+		all.insert(all.end(), inputs.begin(), inputs.end());
+		all.insert(all.end(), outputs.begin(), outputs.end());
+		return all;
+	}
+
+	std::string pinKey(std::string const& nodeType, std::string const& nodeId,
+		std::string const& portName)
+	{
+		return nodeType + keySeparator + nodeId + keySeparator + portName;
+	}
+
+	std::string pinKey(core::StationPinRef const& pin)
+	{
+		return pinKey(pin.nodeType, pin.nodeId, pin.portName);
+	}
+
+	// Control points for the curve drawn between two connector centres.
+	struct FlowCurve
+	{
+		ImVec2 a, b, c, d;
+	};
+
+	FlowCurve linkCurve(ImVec2 const& from, ImVec2 const& to)
+	{
+		float const bend = std::clamp(std::abs(to.x - from.x) * 0.5f, 40.0f, 170.0f);
+		return {from, {from.x + bend, from.y}, {to.x - bend, to.y}, to};
+	}
+
+	float curveDistance(FlowCurve const& curve, ImVec2 const& point)
+	{
+		float best = std::numeric_limits<float>::max();
+		for (int i = 0; i <= 32; ++i)
+		{
+			float const t = float(i) / 32.0f;
+			auto const u = 1.0f - t;
+			ImVec2 sample{u * u * u * curve.a.x + 3 * u * u * t * curve.b.x
+				+ 3 * u * t * t * curve.c.x + t * t * t * curve.d.x,
+				u * u * u * curve.a.y + 3 * u * u * t * curve.b.y
+				+ 3 * u * t * t * curve.c.y + t * t * t * curve.d.y};
+			best = std::min(best, std::hypot(sample.x - point.x, sample.y - point.y));
+		}
+		return best;
+	}
+
+	void drawLinkCurve(ImDrawList* draw, FlowCurve const& curve, ImU32 colour, float thickness)
+	{
+		draw->AddBezierCubic(curve.a, curve.b, curve.c, curve.d, colour, thickness);
+		auto const tangentLength = std::max(std::hypot(curve.d.x - curve.c.x, curve.d.y - curve.c.y), 0.01f);
+		ImVec2 tangent{(curve.d.x - curve.c.x) / tangentLength, (curve.d.y - curve.c.y) / tangentLength};
+		draw->AddTriangleFilled(curve.d,
+			{curve.d.x - tangent.x * 8 - tangent.y * 4, curve.d.y - tangent.y * 8 + tangent.x * 4},
+			{curve.d.x - tangent.x * 8 + tangent.y * 4, curve.d.y - tangent.y * 8 - tangent.x * 4}, colour);
+	}
 }
 
 StationFlowDiagram::~StationFlowDiagram()
@@ -506,6 +591,26 @@ void StationFlowDiagram::reset()
 	mCached.reset(); mGraph = {}; mPositions.clear(); mPan = {24, 24};
 	mZoom = 0.8f; mFitRequested = true; mSelected = -1; mConnectedOnly = false; mSearch[0] = 0;
 	mDragging = -1; mLastFrame = -1; mTemperature = 0;
+	mLinks.clear(); mPinIds.clear(); mPinRefs.clear(); mPinScreen.clear(); mNodeScreen.clear();
+	mLinkRejection.clear();
+}
+
+bool StationFlowDiagram::pinScreenPosition(std::string const& nodeType, std::string const& nodeId,
+	std::string const& portName, ImVec2* out) const
+{
+	auto const found = mPinScreen.find(pinKey(nodeType, nodeId, portName));
+	if (found == mPinScreen.end()) return false;
+	if (out) *out = found->second;
+	return true;
+}
+
+bool StationFlowDiagram::nodeScreenRect(std::string const& nodeType, std::string const& nodeId,
+	ImVec4* out) const
+{
+	auto const found = mNodeScreen.find(nodeType + keySeparator + nodeId);
+	if (found == mNodeScreen.end()) return false;
+	if (out) *out = found->second;
+	return true;
 }
 
 void StationFlowDiagram::updateBounds()
@@ -539,6 +644,26 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft)
 			if (auto found = mLayout.find(key); found != mLayout.end()) mPositions[i] = found->second;
 		}
 		mDragging = -1; mTemperature = 0;
+		// The editable links are the draft's own references, resolved to the
+		// nodes that carry them. Identity comes from configuration, so adding
+		// or removing another entry cannot renumber what is already wired.
+		mLinks.clear();
+		for (auto const& authored : core::stationAuthoredLinks(draft))
+		{
+			FlowLink link;
+			link.authored = authored;
+			auto const locate = [&](core::StationPinRef const& pin)
+			{
+				for (size_t i = 0; i < mGraph.nodes.size(); ++i)
+					if (mGraph.nodes[i].type == pin.nodeType && mGraph.nodes[i].id == pin.nodeId)
+						return i;
+				return SIZE_MAX;
+			};
+			link.fromNode = locate(authored.from);
+			link.toNode = locate(authored.to);
+			link.drawable = link.fromNode != SIZE_MAX && link.toNode != SIZE_MAX;
+			mLinks.push_back(std::move(link));
+		}
 		updateBounds();
 	}
 	ImGui::TextUnformatted("Draft configuration flow (not live rates)");
@@ -553,6 +678,13 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft)
 		ImGui::EndCombo();
 	}
 	if (mPlaceStore) ImGui::TextDisabled("Store placement armed - Esc or right-click to cancel.");
+	// The status line keeps its height whether or not a refusal is showing:
+	// a message appearing must not shove the canvas out from under the
+	// pointer in the middle of a drag.
+	ImGui::BeginChild("Link status", {0, ImGui::GetTextLineHeightWithSpacing() * 2.0f}, false);
+	if (!mLinkRejection.empty())
+		ImGui::TextColored({1.0f, 0.55f, 0.45f, 1.0f}, "Link refused: %s", mLinkRejection.c_str());
+	ImGui::EndChild();
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
 		&& (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsMouseClicked(ImGuiMouseButton_Right)))
 		mPlaceStore = false;
@@ -570,7 +702,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft)
 	if (ImGui::Button("Fit all")) { mFitRequested = true; mDragging = -1; mTemperature = 0; }
 	ImGui::SameLine();
 	if (ImGui::Button("Reset view")) { mFitRequested = true; mSelected = -1; mDragging = -1; mTemperature = 0; }
-	ImGui::TextDisabled("Edges: material/service colours. Red = unresolved reference.");
+	ImGui::TextDisabled("Edges: material/service colours. Red = unresolved reference. Drag a connector to wire; hover a link and press Delete to disconnect.");
 	if (ImGui::TreeNodeEx("Edge colours", ImGuiTreeNodeFlags_NoAutoOpenOnLog))
 	{
 		std::set<station_flow::Medium> media;
@@ -596,9 +728,35 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft)
 	{
 		auto const& n = mGraph.nodes[mSelected];
 		ImGui::Text("Selected: %s '%s'", n.type.c_str(), n.id.c_str());
-		if (ImGui::BeginChild("Connections", {0, 125}, true))
+		if (ImGui::BeginChild("Connections", {0, 170}, true))
 		{
 			if (!n.detail.empty()) ImGui::TextUnformatted(n.detail.c_str());
+			auto const ports = nodePorts(n.type);
+			for (auto const& port : ports)
+			{
+				auto const self = pinKey(n.type, n.id, std::string(port.descriptor->name));
+				bool const connected = std::any_of(mLinks.begin(), mLinks.end(),
+					[&](FlowLink const& link) { return pinKey(link.authored.from) == self
+						|| pinKey(link.authored.to) == self; });
+				ImGui::Text("%s (%s) - %s", std::string(port.descriptor->name).c_str(),
+					port.descriptor->direction == core::StationPortDirection::Input
+						? "input" : "output", connected ? "connected" : "unconnected");
+			}
+			for (auto const& link : mLinks)
+			{
+				if (link.fromNode != size_t(mSelected) && link.toNode != size_t(mSelected)) continue;
+				bool const outgoing = link.fromNode == size_t(mSelected);
+				auto const& peer = mGraph.nodes[outgoing ? link.toNode : link.fromNode];
+				auto const& port = outgoing ? link.authored.from : link.authored.to;
+				auto const label = std::string("Disconnect ") + port.portName + " " + peer.id;
+				if (ImGui::SmallButton(label.c_str()))
+				{
+					core::clearStationLink(draft, link.authored.identity);
+					mLinkRejection.clear();
+				}
+				ImGui::SameLine();
+				ImGui::Text("%s %s '%s'", outgoing ? "->" : "<-", peer.type.c_str(), peer.id.c_str());
+			}
 			for (auto const& link : mGraph.links)
 				if (link.from == size_t(mSelected) || link.to == size_t(mSelected))
 				{
@@ -616,7 +774,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft)
 		// Reserve the inspector's height so selecting a node never moves the
 		// canvas out from under the pointer at the start of a drag.
 		ImGui::TextDisabled("Select a node to inspect its connections.");
-		ImGui::BeginChild("Connections", {0, 125}, true);
+		ImGui::BeginChild("Connections", {0, 170}, true);
 		ImGui::TextDisabled("Node colours identify types. Left-drag a node to reshape the graph.");
 		ImGui::EndChild();
 	}
@@ -673,6 +831,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft)
 	auto* previousContext = ImNodes::GetCurrentContext();
 	if (!mNodeContext) mNodeContext = ImNodes::CreateContext();
 	ImNodes::SetCurrentContext(mNodeContext);
+	mPinScreen.clear(); mNodeScreen.clear();
 	ImNodes::GetIO().AltMouseButton = io.MouseDown[ImGuiMouseButton_Right]
 		? ImGuiMouseButton_Right : ImGuiMouseButton_Middle;
 	ImNodes::EditorContextResetPanning(mPan);
@@ -680,6 +839,11 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft)
 	for (auto colour : {ImNodesCol_NodeBackground, ImNodesCol_NodeBackgroundHovered,
 		ImNodesCol_NodeBackgroundSelected, ImNodesCol_NodeOutline})
 		ImNodes::PushColorStyle(colour, IM_COL32(0, 0, 0, 0));
+	// The connector is drawn by this view, not the library: keep the library's
+	// hover generous enough that a small zoomed connector is still grabbable.
+	float const pinSize = std::max(7.0f, 13.0f * mZoom);
+	ImNodes::GetStyle().PinHoverRadius = std::max(9.0f, pinSize * 0.75f + 3.0f);
+	std::map<std::string, ImVec2> framePins;
 	ImNodes::BeginNodeEditor();
 	auto* canvasDraw = ImGui::GetWindowDrawList();
 	bool const canvasHovered = ImNodes::IsEditorHovered();
@@ -698,10 +862,63 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft)
 		ImNodes::SetNodeGridSpacePos(ids[i], {mPositions[i].x * mZoom, mPositions[i].y * mZoom});
 		ImNodes::BeginNode(ids[i]);
 		ImGui::Dummy({nodeWidth * mZoom, nodeHeight * mZoom});
+		// Every declared connector is a real pin the user can start or end a
+		// link on. They sit inside the node body so the node's own rect, which
+		// the library derives from this group, stays the size we draw.
+		auto const nodeScreen = point(mPositions[i]);
+		for (auto const& port : nodePorts(n.type))
+		{
+			auto const centre = point({mPositions[i].x + port.offset.x,
+				mPositions[i].y + port.offset.y});
+			ImVec2 topLeft{centre.x - pinSize * 0.5f, centre.y - pinSize * 0.5f};
+			topLeft.x = std::clamp(topLeft.x, nodeScreen.x + 1.0f,
+				nodeScreen.x + nodeWidth * mZoom - pinSize - 1.0f);
+			topLeft.y = std::clamp(topLeft.y, nodeScreen.y + 1.0f,
+				nodeScreen.y + nodeHeight * mZoom - pinSize - 1.0f);
+			auto const key = pinKey(n.type, n.id, std::string(port.descriptor->name));
+			auto const pinEntry = mPinIds.try_emplace(key, mNextPinId);
+			if (pinEntry.second) ++mNextPinId;
+			mPinRefs[pinEntry.first->second] = {n.type, n.id, std::string(port.descriptor->name)};
+			ImGui::SetCursorScreenPos(topLeft);
+			bool const isInput = port.descriptor->direction == core::StationPortDirection::Input;
+			if (isInput) ImNodes::BeginInputAttribute(pinEntry.first->second, ImNodesPinShape_CircleFilled);
+			else ImNodes::BeginOutputAttribute(pinEntry.first->second, ImNodesPinShape_CircleFilled);
+			ImGui::Dummy({pinSize, pinSize});
+			if (isInput) ImNodes::EndInputAttribute();
+			else ImNodes::EndOutputAttribute();
+			auto const placed = ImVec2{topLeft.x + pinSize * 0.5f, topLeft.y + pinSize * 0.5f};
+			framePins[key] = placed;
+			mPinScreen[key] = placed;
+		}
 		ImNodes::EndNode();
 		ImNodes::SetNodeDraggable(ids[i], !mPlaceStore && n.type != "Power" && n.type != "Cooling service");
 	}
 	ImNodes::EndNodeEditor();
+	int hoveredPin = -1;
+	ImNodes::IsPinHovered(&hoveredPin);
+	// A new drag starts clean: a previous refusal stays on screen only while
+	// it is the newest thing the user did.
+	int linkStartedFrom = -1;
+	if (ImNodes::IsLinkStarted(&linkStartedFrom)) mLinkRejection.clear();
+	// A dropped link goes through the same seam the headless constraint matrix
+	// calls: the library reports the pair, core decides, and the draft only
+	// changes when core allows it.
+	int linkStart = -1, linkEnd = -1;
+	if (ImNodes::IsLinkCreated(&linkStart, &linkEnd))
+	{
+		auto const from = mPinRefs.find(linkStart);
+		auto const to = mPinRefs.find(linkEnd);
+		if (from != mPinRefs.end() && to != mPinRefs.end())
+		{
+			core::CandidateLink candidate{from->second, to->second};
+			auto const verdict = core::evaluateStationLink(draft, candidate);
+			if (!verdict.allowed) mLinkRejection = verdict.reason;
+			else if (core::applyStationLink(draft, candidate)) mLinkRejection.clear();
+			// Allowed but unwritable means the draft moved between the verdict
+			// and the write. Say so rather than fail silently.
+			else mLinkRejection = "That link could not be recorded in the draft. Please try again.";
+		}
+	}
 	for (int c = 0; c < 4; ++c) ImNodes::PopColorStyle();
 	ImNodes::PopStyleVar();
 	int hoveredId = -1, hoveredNode = -1;
@@ -716,9 +933,10 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft)
 		}
 		mLayout[keys[i]] = mPositions[i];
 	}
-	if (!mPlaceStore && canvasHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+	if (!mPlaceStore && canvasHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hoveredPin < 0)
 		mSelected = hoveredNode;
-	if (mPlaceStore && canvasHovered && draft.stores.size() < core::MaxStationResourceStores
+	if (mPlaceStore && canvasHovered && hoveredPin < 0
+		&& draft.stores.size() < core::MaxStationResourceStores
 		&& ImGui::IsMouseClicked(ImGuiMouseButton_Left))
 	{
 		core::ResourceStoreSettings store;
@@ -737,10 +955,17 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft)
 	updateBounds();
 	auto* draw = canvasDraw;
 	draw->PushClipRect(origin, {origin.x + available.x, origin.y + available.y}, true);
+	// Links the user can edit are drawn between their connectors, not box to
+	// box, so the curve on screen is the curve the drag and the delete hit.
+	std::set<std::pair<size_t, size_t>> authoredPairs;
+	for (auto const& link : mLinks)
+		if (link.drawable && visible[link.fromNode] && visible[link.toNode])
+			authoredPairs.insert({link.fromNode, link.toNode});
 	std::map<std::pair<size_t, size_t>, size_t> parallelSlot;
 	for (auto const& link : mGraph.links)
 	{
 		if (!visible[link.from] || !visible[link.to]) continue;
+		if (authoredPairs.contains({link.from, link.to})) continue;
 		auto from = mPositions[link.from], to = mPositions[link.to];
 		from.x += nodeWidth / 2; from.y += nodeHeight / 2;
 		to.x += nodeWidth / 2; to.y += nodeHeight / 2;
@@ -770,12 +995,44 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft)
 			{d.x - tangent.x * 8 - tangent.y * 4, d.y - tangent.y * 8 + tangent.x * 4},
 			{d.x - tangent.x * 8 + tangent.y * 4, d.y - tangent.y * 8 - tangent.x * 4}, color);
 	}
+	// Editable links, drawn connector to connector. The curve drawn here is
+	// the curve the pointer is measured against, so what the user sees is what
+	// they can grab and delete.
+	int hoveredLink = -1;
+	for (size_t i = 0; i < mLinks.size(); ++i)
+	{
+		auto const& link = mLinks[i];
+		if (!link.drawable || !visible[link.fromNode] || !visible[link.toNode]) continue;
+		auto const from = framePins.find(pinKey(link.authored.from));
+		auto const to = framePins.find(pinKey(link.authored.to));
+		if (from == framePins.end() || to == framePins.end()) continue;
+		auto const curve = linkCurve(from->second, to->second);
+		auto colour = IM_COL32(160, 160, 175, 225);
+		for (auto const& edge : mGraph.links)
+			if (edge.from == link.fromNode && edge.to == link.toNode)
+			{
+				colour = station_flow::edgeColor(edge.medium);
+				break;
+			}
+		bool const touchesSelection = mSelected >= 0
+			&& (link.fromNode == size_t(mSelected) || link.toNode == size_t(mSelected));
+		bool const hot = hovered && curveDistance(curve, io.MousePos) <= 8.0f;
+		if (hot && hoveredLink < 0) hoveredLink = int(i);
+		if (hot) colour = IM_COL32(255, 255, 255, 240);
+		drawLinkCurve(draw, curve, colour, hot ? 3.0f : touchesSelection ? 2.4f : 1.6f);
+	}
+	if (hoveredLink >= 0 && hovered && ImGui::IsKeyPressed(ImGuiKey_Delete))
+	{
+		core::clearStationLink(draft, mLinks[hoveredLink].authored.identity);
+		mLinkRejection.clear();
+	}
 	for (size_t i = 0; i < mGraph.nodes.size(); ++i)
 	{
 		if (!visible[i]) continue;
 		auto const& n = mGraph.nodes[i];
 		auto a = point(mPositions[i]);
 		ImVec2 d{a.x + nodeWidth * mZoom, a.y + nodeHeight * mZoom};
+		mNodeScreen[n.type + keySeparator + n.id] = {a.x, a.y, d.x, d.y};
 		bool const over = hovered && ImGui::IsMouseHoveringRect(a, d);
 		if (over) hoveredNode = int(i);
 		auto fill = station_flow::nodeColor(n, over);
@@ -789,6 +1046,23 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft)
 		auto label = n.type + "\n" + n.id + (n.detail.empty() ? "" : "\n" + n.detail);
 		draw->AddText(ImGui::GetFont(), ImGui::GetFontSize() * mZoom, {a.x + 8 * mZoom, a.y + 6 * mZoom},
 			IM_COL32(235, 240, 245, 255), label.c_str(), nullptr, (nodeWidth - 16) * mZoom, &clip);
+		for (auto const& port : nodePorts(n.type))
+		{
+			auto const key = pinKey(n.type, n.id, std::string(port.descriptor->name));
+			auto const pin = framePins.find(key);
+			if (pin == framePins.end()) continue;
+			bool const connected = std::any_of(mLinks.begin(), mLinks.end(), [&](FlowLink const& wired)
+			{
+				return pinKey(wired.authored.from) == key || pinKey(wired.authored.to) == key;
+			});
+			bool const near = hovered
+				&& std::hypot(pin->second.x - io.MousePos.x, pin->second.y - io.MousePos.y)
+					<= pinSize * 0.75f + 2.0f;
+			auto const pinColour = near ? IM_COL32(255, 255, 255, 255)
+				: connected ? IM_COL32(150, 200, 240, 235) : IM_COL32(125, 135, 155, 215);
+			draw->AddCircleFilled(pin->second, pinSize * 0.5f, pinColour, 20);
+			draw->AddCircle(pin->second, pinSize * 0.5f, IM_COL32(24, 28, 34, 255), 20, 1.0f);
+		}
 	}
 	if (mPlaceStore && canvasHovered)
 	{

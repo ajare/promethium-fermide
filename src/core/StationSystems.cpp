@@ -1563,6 +1563,84 @@ namespace core
 			identities.push_back({chiller.id, "chiller"});
 		return identities;
 	}
+	// The endpoint half of the transfer entry check (#640): exactly the rules
+	// a link between a store connector and a transfer connector can violate.
+	// The whole-configuration validator below runs it for every transfer, and
+	// the link-evaluation seam runs it for the single entry a candidate link
+	// writes, so the rule lives in exactly one place and a refusal always
+	// carries this rule's own wording. Identity and rate rules stay with the
+	// whole-entry check because no connector can violate them.
+	//
+	// ignoreUnconnected is set only by the link seam: the endpoint the link
+	// did not write is the user's next action, not this link's defect, so an
+	// open endpoint is tolerated and the pair-level rules — same store on
+	// both ends, unit agreement across the pair, composition and hazard
+	// boundaries — are judged once both ends are connected. The whole-
+	// configuration validator never sets it: an incomplete transfer is
+	// invalid as a configuration.
+	bool validateStationTransferWiring(StationSystemsSettings const& settings,
+		ResourceTransferSettings const& transfer, std::string& diagnostic,
+		bool ignoreUnconnected)
+	{
+		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
+		auto const where = "Station resource transfer '" + transfer.id + "'";
+		auto const openSource = ignoreUnconnected && transfer.sourceId.empty();
+		auto const openDestination = ignoreUnconnected && transfer.destinationId.empty();
+		if (openSource && openDestination) return true;
+		if (!openSource && !openDestination && transfer.sourceId == transfer.destinationId)
+			return refuse(where + " source and destination must differ");
+		auto const findStore = [&](std::string const& id) -> ResourceStoreSettings const*
+		{
+			auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == id; });
+			return it == settings.stores.end() ? nullptr : &*it;
+		};
+		auto const* source = openSource ? nullptr : findStore(transfer.sourceId);
+		auto const* destination = openDestination ? nullptr : findStore(transfer.destinationId);
+		if (!openSource && !source)
+			return refuse(where + " references unknown source store '" + transfer.sourceId + "'");
+		if (!openDestination && !destination)
+			return refuse(where + " references unknown destination store '" + transfer.destinationId + "'");
+		// Same-unit endpoints only: cross-unit movement is conversion, which
+		// later slices introduce with explicit composition accounting. With
+		// one end still open only the connected end can be judged.
+		if (source && destination)
+		{
+			if (transfer.unit != source->unit || transfer.unit != destination->unit)
+				return refuse(where + " unit '" + transfer.unit
+					+ "' does not match both stores ('" + source->unit + "' -> '" + destination->unit + "')");
+		}
+		else if (source && transfer.unit != source->unit)
+			return refuse(where + " unit '" + transfer.unit + "' does not match store '"
+				+ source->id + "' ('" + source->unit + "')");
+		else if (destination && transfer.unit != destination->unit)
+			return refuse(where + " unit '" + transfer.unit + "' does not match store '"
+				+ destination->id + "' ('" + destination->unit + "')");
+		if (!source || !destination) return true;
+		// Compound material only moves between identical declared
+		// compositions. Crossing a composition boundary — including bound
+		// nutrient nitrogen versus atmospheric nitrogen, which are never
+		// freely interchangeable — is conversion and requires an
+		// explicitly declared, constituent-balanced conversion process.
+		if (source->composition || destination->composition)
+		{
+			if (!source->composition || !destination->composition
+				|| !compositionsClose(*source->composition, *destination->composition))
+				return refuse(where + " crosses a compound-material boundary; transfers between stores with different declared compositions require an explicit conversion");
+		}
+		// A generic transfer never crosses the hazard-class boundary
+		// (#412): a hazardous store's contents are a protected reserve
+		// of their own class, and an accidentally-wired transfer cannot
+		// siphon hazardous material into the normal inventory or dilute
+		// hazardous containment with normal material. Recovery of
+		// hazardous material runs inside the hazardous class, between
+		// stores of that class only.
+		if (source->hazardClass != destination->hazardClass)
+			return refuse(where + " crosses the hazard-class boundary ('"
+				+ source->hazardClass + "' -> '" + destination->hazardClass
+				+ "'); hazardous and normal material may not share a generic transfer");
+		return true;
+	}
 	bool validateStationSystemsSettings(StationSystemsSettings const& settings, std::string& diagnostic)
 	{
 		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
@@ -1641,48 +1719,9 @@ namespace core
 				return refuse("Station resource transfer id exceeds "
 					+ std::to_string(MaxStationStoreIdLength) + " characters");
 			if (!transferIds.insert(transfer.id).second) return refuse(where + " id is duplicated");
-			if (transfer.sourceId == transfer.destinationId)
-				return refuse(where + " source and destination must differ");
-			auto const findStore = [&](std::string const& id) -> ResourceStoreSettings const*
-			{
-				auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
-					[&](ResourceStoreSettings const& store) { return store.id == id; });
-				return it == settings.stores.end() ? nullptr : &*it;
-			};
-			auto const* source = findStore(transfer.sourceId);
-			auto const* destination = findStore(transfer.destinationId);
-			if (!source) return refuse(where + " references unknown source store '" + transfer.sourceId + "'");
-			if (!destination)
-				return refuse(where + " references unknown destination store '" + transfer.destinationId + "'");
-			// Same-unit endpoints only: cross-unit movement is conversion, which
-			// later slices introduce with explicit composition accounting.
-			if (transfer.unit != source->unit || transfer.unit != destination->unit)
-				return refuse(where + " unit '" + transfer.unit
-					+ "' does not match both stores ('" + source->unit + "' -> '" + destination->unit + "')");
+			if (!validateStationTransferWiring(settings, transfer, diagnostic)) return false;
 			if (!std::isfinite(transfer.ratePerSecond) || transfer.ratePerSecond <= 0.0)
 				return refuse(where + " rate must be finite and positive");
-			// Compound material only moves between identical declared
-			// compositions. Crossing a composition boundary — including bound
-			// nutrient nitrogen versus atmospheric nitrogen, which are never
-			// freely interchangeable — is conversion and requires an
-			// explicitly declared, constituent-balanced conversion process.
-			if (source->composition || destination->composition)
-			{
-				if (!source->composition || !destination->composition
-					|| !compositionsClose(*source->composition, *destination->composition))
-					return refuse(where + " crosses a compound-material boundary; transfers between stores with different declared compositions require an explicit conversion");
-			}
-			// A generic transfer never crosses the hazard-class boundary
-			// (#412): a hazardous store's contents are a protected reserve
-			// of their own class, and an accidentally-wired transfer cannot
-			// siphon hazardous material into the normal inventory or dilute
-			// hazardous containment with normal material. Recovery of
-			// hazardous material runs inside the hazardous class, between
-			// stores of that class only.
-			if (source->hazardClass != destination->hazardClass)
-				return refuse(where + " crosses the hazard-class boundary ('"
-					+ source->hazardClass + "' -> '" + destination->hazardClass
-					+ "'); hazardous and normal material may not share a generic transfer");
 		}
 		if (settings.conversions.size() > MaxStationResourceConversions)
 			return refuse("Station resource conversions are limited to "

@@ -1,5 +1,6 @@
 #pragma once
 #include "core/StationSystems.h"
+#include "core/StationPorts.h"
 #include "imgui/imgui.h"
 #include <optional>
 #include <map>
@@ -48,6 +49,15 @@ public:
 	StationFlowDiagram& operator=(StationFlowDiagram const&) = delete;
 	void render(core::StationSystemsSettings& draft);
 	void reset();
+	// Screen-space geometry recorded by the last rendered frame. Presentation
+	// state, exposed read-only so a caller — including a headless check that
+	// drives the real controls — can address a connector without guessing
+	// where the layout put it. False when the element is not on screen.
+	bool pinScreenPosition(std::string const& nodeType, std::string const& nodeId,
+		std::string const& portName, ImVec2* out) const;
+	bool nodeScreenRect(std::string const& nodeType, std::string const& nodeId, ImVec4* out) const;
+	// Why the last link attempt was refused; empty when nothing is outstanding.
+	std::string const& linkRejection() const { return mLinkRejection; }
 private:
 	std::optional<core::StationSystemsSettings> mCached;
 	station_flow::Graph mGraph;
@@ -65,4 +75,20 @@ private:
 	int mNextNodeId{1};
 	bool mConnectedOnly{false};
 	char mSearch[128]{};
+	// Authored references presented as editable links, resolved to graph
+	// nodes once per rebuild: the link's identity is the configuration entry
+	// behind it, so no reordering of the draft can renumber it.
+	struct FlowLink
+	{
+		core::AuthoredLink authored;
+		size_t fromNode{0}, toNode{0};
+		bool drawable{false};
+	};
+	std::vector<FlowLink> mLinks;
+	std::map<std::string, int> mPinIds;
+	int mNextPinId{1};
+	std::map<int, core::StationPinRef> mPinRefs;
+	std::map<std::string, ImVec2> mPinScreen;
+	std::map<std::string, ImVec4> mNodeScreen;
+	std::string mLinkRejection;
 };

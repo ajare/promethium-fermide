@@ -95,6 +95,180 @@ namespace
 		require(driver.passed(), "Flow placement workflow failed on the Test Engine");
 	}
 
+	// #640: wiring the Flow canvas. The real controls are driven — a
+	// connector is dragged onto another, the inspector's disconnect is
+	// clicked, a hovered link is deleted — and every assertion is about the
+	// draft and the shared history, never about the editor's bookkeeping.
+	void flowLinkWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory worldHistory;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Flow linking", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		auto store = [](std::string const& id, std::string const& unit,
+			std::string const& hazard = "normal")
+		{
+			core::ResourceStoreSettings entry;
+			entry.id = id; entry.unit = unit; entry.capacity = 1000.0;
+			entry.startingQualified = 500.0; entry.hazardClass = hazard;
+			return entry;
+		};
+		auto transfer = [](std::string const& id, std::string const& source,
+			std::string const& destination, std::string const& unit)
+		{
+			core::ResourceTransferSettings entry;
+			entry.id = id; entry.sourceId = source; entry.destinationId = destination;
+			entry.unit = unit; entry.ratePerSecond = 1.0;
+			return entry;
+		};
+		core::StationSystemsSettings seed;
+		seed.enabled = true;
+		seed.observationIntervalSeconds = 1.0f;
+		seed.stores = {store("a", "kg"), store("b", "kg"),
+			store("hazard", "kg", "hazardous"), store("litres", "L")};
+		seed.transfers = {transfer("t1", "a", "b", "kg")};
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+		bool flow = true;
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration");
+			if (flow) window.renderFlowContents(world);
+			else window.renderContents(world, worldHistory);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "flowLink", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			auto drag = [&](char const* fromType, char const* fromId, char const* fromPort,
+				char const* toType, char const* toId, char const* toPort) -> bool
+			{
+				ImVec2 a{}, b{};
+				if (!window.flowPinPosition(fromType, fromId, fromPort, &a)) return false;
+				if (!window.flowPinPosition(toType, toId, toPort, &b)) return false;
+				// Teleport rather than animate: the engine's animated move
+				// does not reliably reach a distant target inside the yields
+				// the library needs to see the hover before the release.
+				ctx->MouseTeleportToPos(a); ctx->Yield(2);
+				ctx->MouseDown(); ctx->Yield(2);
+				ctx->MouseTeleportToPos({(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f}); ctx->Yield(2);
+				ctx->MouseTeleportToPos(b); ctx->Yield(2);
+				// Re-read and re-aim: if the view shifted while the drag was
+				// in flight, the recorded connector is no longer the connector.
+				ImVec2 live{};
+				if (window.flowPinPosition(toType, toId, toPort, &live))
+				{ ctx->MouseTeleportToPos(live); ctx->Yield(2); }
+				ctx->MouseUp(); ctx->Yield(3);
+				return true;
+			};
+			auto rejection = [&] { return window.flowLinkRejection(); };
+			auto wired = [&] { return window.draft().transfers.at(0).sourceId; };
+			auto counts = [&]
+			{
+				return window.draft().stores.size() * 100 + window.draft().transfers.size();
+			};
+			// Store and Transfer both show their connectors on the canvas.
+			ImVec2 probe{};
+			REQ(window.flowPinPosition("Store", "a", "Inventory in", &probe),
+				"a store shows no input connector");
+			REQ(window.flowPinPosition("Store", "a", "Inventory out", &probe),
+				"a store shows no output connector");
+			REQ(window.flowPinPosition("Transfer", "t1", "Source", &probe),
+				"a transfer shows no source connector");
+			REQ(window.flowPinPosition("Transfer", "t1", "Destination", &probe),
+				"a transfer shows no destination connector");
+			REQ(wired() == "a" && window.draft().transfers.at(0).destinationId == "b",
+				"the seeded reference is not what the view started from");
+			auto const beforeCounts = counts();
+			// Store to store is refused, naming the intermediary the user needs,
+			// and nothing is invented behind their back.
+			REQ(drag("Store", "a", "Inventory out", "Store", "b", "Inventory in"),
+				"store connectors were not drawn");
+			REQ(rejection().find("Transfer") != std::string::npos
+				&& rejection().find("Conversion") != std::string::npos,
+				("store-to-store refusal did not name an intermediary: " + rejection()).c_str());
+			REQ(driver.contains("Link refused"), "a refused link was not shown to the user");
+			REQ(counts() == beforeCounts && wired() == "a",
+				"a refused store-to-store drag invented a node or rewired the draft");
+			// Disconnect the source through the inspector: one history entry.
+			ImVec4 nodeRect{};
+			REQ(window.flowNodeRect("Transfer", "t1", &nodeRect), "the transfer node is not on screen");
+			ctx->MouseTeleportToPos({(nodeRect.x + nodeRect.z) * 0.5f, (nodeRect.y + nodeRect.w) * 0.5f});
+			ctx->MouseClick(); ctx->Yield(3);
+			REQ(driver.contains("Selected: Transfer 't1'"), "clicking the node did not select it");
+			// The control lives in the inspector's child window, so it is
+			// addressed by its label wherever the layout put it.
+			driver.click(ctx, "**/Disconnect Source a"); ctx->Yield(3);
+			REQ(wired().empty(), "the source reference was not cleared");
+			REQ(window.draftHistory().undoCount() == 1, "the disconnect was not one history entry");
+			REQ(window.draft().transfers.at(0).destinationId == "b",
+				"disconnecting a link did not commit exactly one history entry");
+			// Undo and redo rewind the same shared draft.
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(wired() == "a" && window.draftHistory().redoCount() == 1,
+				"undo did not restore the disconnected link");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(wired().empty() && window.draftHistory().undoCount() == 1,
+				"redo did not re-remove the link");
+			// Semantic refusals carry the validator's own words, not a generic
+			// "invalid connection".
+			REQ(drag("Store", "litres", "Inventory out", "Transfer", "t1", "Source"),
+				"litres/store connectors were not drawn");
+			REQ(rejection().find("does not match") != std::string::npos,
+				("a unit-breaking link did not report the unit rule: " + rejection()).c_str());
+			REQ(wired().empty(), "a refused link still wrote the draft");
+			REQ(drag("Store", "hazard", "Inventory out", "Transfer", "t1", "Source"),
+				"hazard/store connectors were not drawn");
+			REQ(rejection().find("hazard-class boundary") != std::string::npos,
+				("a hazard-breaking link did not report the hazard rule: " + rejection()).c_str());
+			REQ(wired().empty(), "a refused hazard link still wrote the draft");
+			// The legal link lands, clears the refusal, and commits one entry.
+			REQ(drag("Store", "a", "Inventory out", "Transfer", "t1", "Source"),
+				"store/t1 connectors were not drawn");
+			REQ(wired() == "a" && rejection().empty()
+				&& window.draftHistory().undoCount() == 2,
+				"a legal link did not create the reference and commit one entry");
+			// A single-source connector refuses a second store, naming what is
+			// already in the way.
+			REQ(drag("Store", "b", "Inventory out", "Transfer", "t1", "Source"),
+				"b/t1 connectors were not drawn");
+			REQ(rejection().find("already joins") != std::string::npos && wired() == "a",
+				("a second store on an occupied source was not refused by name: " + rejection()).c_str());
+			// Hovering the drawn link and pressing Delete removes it, as one
+			// history entry, and undo brings it back.
+			ImVec2 fromPin{}, toPin{};
+			REQ(window.flowPinPosition("Store", "a", "Inventory out", &fromPin)
+				&& window.flowPinPosition("Transfer", "t1", "Source", &toPin),
+				"the wired link's connectors are not on screen");
+			ctx->MouseTeleportToPos({(fromPin.x + toPin.x) * 0.5f, (fromPin.y + toPin.y) * 0.5f});
+			ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Delete); ctx->Yield(3);
+			REQ(wired().empty() && window.draftHistory().undoCount() == 3,
+				"deleting a hovered link did not remove it as one history entry");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(wired() == "a", "undo did not restore the deleted link");
+			// Authoring never touches the World, the World's own history, or
+			// the simulation.
+			world->resumeSimulation(); auto const tick = world->getSimulationTick();
+			REQ(drag("Store", "b", "Inventory out", "Store", "a", "Inventory in"),
+				"store connectors were not drawn while running");
+			REQ(world->getStationSystemsSettings().transfers.size() == 1
+				&& world->getStationSystemsSettings().transfers.at(0).sourceId == "a"
+				&& world->getStationSystemsSettings().stores.size() == 4
+				&& worldHistory.undoCount() == 0 && !world->isModified()
+				&& world->getSimulationTick() == tick,
+				"Flow link editing mutated or advanced the World");
+		});
+		#undef REQ
+		require(driver.passed(), "Flow link workflow failed on the Test Engine");
+	}
+
 	void storeWorkflow(smoke::Context const&)
 	{
 		flowPlacementWorkflow();
@@ -3937,6 +4111,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/windowWorkflow", workflow});
 	checks.push_back({"station/removalWorkflow", removalWorkflow});
 	checks.push_back({"station/storeWorkflow", storeWorkflow});
+	checks.push_back({"station/flowLinkWorkflow", flowLinkWorkflow});
 	checks.push_back({"station/transferWorkflow", transferWorkflow});
 	checks.push_back({"station/compoundWorkflow", compoundWorkflow});
 	checks.push_back({"station/powerWorkflow", powerWorkflow});
