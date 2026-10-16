@@ -431,14 +431,13 @@ namespace core
 			auto horizontal = std::sqrt(std::max(0., double(range) * range - double(vertical) * vertical));
 			// Aim just inside to avoid float round-off repeatedly refusing equality.
 			auto x = float(centre->x + (position.x < centre->x ? -1.f : 1.f) * horizontal * .999999f);
-			agent->mRemoteButtonApproachTarget = Vector2{x, position.y};
+			agent->mRemoteInteractionApproachTarget = Vector2{x, position.y};
 			return {};
 		}
-		if (agent) agent->mRemoteButtonApproachTarget.reset();
-		if (agent && agent->mEarlyDoorPressInteraction)
+		if (agent) agent->mRemoteInteractionApproachTarget.reset();
+		if (agent && agent->mAnticipatoryInteraction.retainedRequest())
 		{
-			auto const earlyId = agent->mEarlyDoorPressInteraction;
-			agent->mEarlyDoorPressInteraction = {};
+			auto const earlyId = agent->mAnticipatoryInteraction.takeRequest();
 			auto early = mWorld.mInteractionRequests.find(earlyId);
 			if (early && early->mActor == actor && early->mPoint == point) return earlyId;
 		}
@@ -522,7 +521,7 @@ namespace core
 		mWorld.invalidateSimulationSnapshot();
 		auto actor = mWorld.mAgents.find(id);
 		if (!actor) return;
-		actor->mRemoteButtonApproachTarget.reset();
+		actor->mRemoteInteractionApproachTarget.reset();
 		std::vector<InteractionRequestId> cancelled;
 		for (auto const& [requestId, request] : mWorld.mInteractionRequests.entries())
 		{
@@ -543,7 +542,7 @@ namespace core
 				&& !mWorld.agentCanOperateManualDoorHere(operation->mCommand.traversalResource, id))
 				operations.push_back(operationId);
 		for (auto operation : operations) cancelDeviceOperation(operation, id);
-		if (!operations.empty()) actor->mEarlyDoorPressAttempted = false;
+		if (!operations.empty()) actor->mAnticipatoryInteraction.allowRetry();
 	}
 
 	bool SimulationCoordinator::cancelInteraction(InteractionRequestId id)
@@ -1147,7 +1146,7 @@ namespace core
 		}
 	}
 
-	vector<InteractionPointId> SimulationCoordinator::upcomingRemoteButtons(Agent const& agent, TraversalResourceId& upcoming) const
+	vector<InteractionPointId> SimulationCoordinator::upcomingRemoteInteractionPoints(Agent const& agent, TraversalResourceId& upcoming) const
 	{
 		// Authored Path intent, not proximity, identifies the operation. Stop at
 		// the first action-bearing edge; never inspect another Sector's controls.
@@ -1210,11 +1209,11 @@ namespace core
 		return result;
 	}
 
-	Vector2 SimulationCoordinator::limitRemoteButtonMovement(Agent const& agent, Vector2 const& start, Vector2 const& end) const
+	Vector2 SimulationCoordinator::limitRemoteInteractionMovement(Agent const& agent, Vector2 const& start, Vector2 const& end) const
 	{
-		if (agent.getObjectUsage() != ObjectUsage::RemoteControl || agent.mEarlyDoorPressAttempted) return end;
+		if (agent.getObjectUsage() != ObjectUsage::RemoteControl || agent.mAnticipatoryInteraction.attempted()) return end;
 		TraversalResourceId upcoming;
-		auto controls = upcomingRemoteButtons(agent, upcoming);
+		auto controls = upcomingRemoteInteractionPoints(agent, upcoming);
 		auto delta = end - start;
 		double a = double(delta.x) * delta.x + double(delta.y) * delta.y;
 		if (a == 0) return end;
@@ -1259,7 +1258,7 @@ namespace core
 		return result;
 	}
 
-	void SimulationCoordinator::tryPressUpcomingDoorButton(Agent& agent,
+	void SimulationCoordinator::tryAnticipatoryInteraction(Agent& agent,
 		Vector2 const& movementStart, Vector2 const& movementEnd)
 	{
 		mWorld.invalidateSimulationSnapshot();
@@ -1267,23 +1266,16 @@ namespace core
 		auto const target = agent.mPath.targetNode;
 		if (!path || target + 1 >= path->nodes.size())
 		{
-			agent.mEarlyDoorPressResource = {};
-			agent.mEarlyDoorPressInteraction = {};
-			agent.mEarlyDoorPressAttempted = false;
+			agent.mAnticipatoryInteraction.reset();
 			return;
 		}
 
 		if (agent.getObjectUsage() == ObjectUsage::RemoteControl)
 		{
 			TraversalResourceId upcoming;
-			auto controls = upcomingRemoteButtons(agent, upcoming);
-			if (agent.mEarlyDoorPressResource != upcoming)
-			{
-				agent.mEarlyDoorPressResource = upcoming;
-				agent.mEarlyDoorPressInteraction = {};
-				agent.mEarlyDoorPressAttempted = false;
-			}
-			if (agent.mEarlyDoorPressAttempted) return;
+			auto controls = upcomingRemoteInteractionPoints(agent, upcoming);
+			agent.mAnticipatoryInteraction.selectResource(upcoming);
+			if (agent.mAnticipatoryInteraction.attempted()) return;
 			auto actor = getAgentId(&agent);
 			if (mWorld.agentCanOperateManualDoorHere(upcoming, actor))
 			{
@@ -1298,7 +1290,7 @@ namespace core
 					command.traversalResource = upcoming;
 					auto operationId = findOrCreateDeviceOperation(command, actor);
 					if (auto operation = mWorld.mDeviceOperations.find(operationId)) operation->mActivated = true;
-					agent.mEarlyDoorPressAttempted = true;
+					agent.mAnticipatoryInteraction.recordAttempt();
 				}
 			}
 			for (auto pointId : controls)
@@ -1306,8 +1298,7 @@ namespace core
 				if (!mWorld.agentCanOperateInteraction(pointId, agent, true)) continue;
 				if (auto request = requestInteraction(pointId, actor, true))
 				{
-					agent.mEarlyDoorPressInteraction = request;
-					agent.mEarlyDoorPressAttempted = true;
+					agent.mAnticipatoryInteraction.retainRequest(request);
 					break;
 				}
 			}
@@ -1345,18 +1336,11 @@ namespace core
 			|| (regularDoor
 				&& resource->mDoorActivationMode != DoorActivationMode::RemoteControlled))
 		{
-			agent.mEarlyDoorPressResource = {};
-			agent.mEarlyDoorPressInteraction = {};
-			agent.mEarlyDoorPressAttempted = false;
+			agent.mAnticipatoryInteraction.reset();
 			return;
 		}
-		if (agent.mEarlyDoorPressResource != resourceId)
-		{
-			agent.mEarlyDoorPressResource = resourceId;
-			agent.mEarlyDoorPressInteraction = {};
-			agent.mEarlyDoorPressAttempted = false;
-		}
-		if (agent.mEarlyDoorPressAttempted || !resource->mEnabled
+		agent.mAnticipatoryInteraction.selectResource(resourceId);
+		if (agent.mAnticipatoryInteraction.attempted() || !resource->mEnabled
 			|| (regularDoor && (resource->mDoor->isOpen() || resource->mDoor->isOpening())))
 		{
 			return;
@@ -1414,8 +1398,7 @@ namespace core
 
 		if (auto interaction = requestInteractionWhilePassing(selected, actorId))
 		{
-			agent.mEarlyDoorPressInteraction = interaction;
-			agent.mEarlyDoorPressAttempted = true;
+			agent.mAnticipatoryInteraction.retainRequest(interaction);
 		}
 	}
 
@@ -1668,7 +1651,7 @@ namespace core
 		for (auto const& [agentId, agent] : mWorld.mAgents.entries())
 		{
 			(void)agentId;
-			if (agent->mEarlyDoorPressInteraction) referencedRequests.insert(agent->mEarlyDoorPressInteraction);
+			if (auto request = agent->mAnticipatoryInteraction.retainedRequest()) referencedRequests.insert(request);
 		}
 
 		std::vector<InteractionRequestId> retiredRequests;

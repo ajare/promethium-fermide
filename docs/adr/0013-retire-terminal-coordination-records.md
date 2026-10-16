@@ -21,7 +21,7 @@ of its readers still holds its identity:
 
 - an `InteractionPoint` still names it as `mActiveRequest` or in `mQueue`;
 - a `TraversalResource` still names it as `mActivePreparation`;
-- an `Agent` still names it as `mEarlyDoorPressInteraction`;
+- an `Agent` still names it through `mAnticipatoryInteraction.retainedRequest()`;
 - a device operation is additionally retained while another interaction request
   names it in `mOperations`, or a `TraversalRequest` names it as
   `mPreparationOperation`.

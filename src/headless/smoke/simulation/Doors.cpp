@@ -296,6 +296,95 @@ namespace
 				== core::bundledHumanBaseline().standingHeight * 0.4f;
 	}
 
+	// A completed passing press is still a reader-owned terminal record until
+	// path replacement, idling or a paused capability edit releases it. Exercise
+	// both Arms and Remote control through the real tick pipeline. Pausing for an
+	// edit already clears runtime Path state; the edit must not revive that work.
+	void anticipatoryRequestLifetime()
+	{
+		enum class Release { ReplacePath, ClearPath, CapabilityEdit };
+		for (bool remote : {false, true})
+		for (auto release : {Release::ReplacePath, Release::ClearPath, Release::CapabilityEdit})
+		{
+			core::World world("Anticipatory request lifetime", 8, 2);
+			auto corridor = world.addCorridor(0, 1, 5);
+			auto destination = world.addRoom("Destination", 1, 0, 0, 3, 1);
+			uint32_t marker;
+			world.addSectorMarker(destination, 0, .5f, &marker);
+			core::World::CreateDoorOptions options;
+			options.activationMode = core::DoorActivationMode::RemoteControlled;
+			options.controls[0] = true;
+			world.addSectorDoor(0, 0, 1, options);
+			world.finishBuild();
+			auto id = world.createAgent("Presser", corridor, 0, 2.75f);
+			auto agent = world.lookupAgent(id).entity;
+			if (remote)
+			{
+				world.pauseSimulation();
+				smoke::require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::RemoteControl)
+					&& world.setAgentIndividualObjectUsageDistance(id, 3.f), "Remote capability setup failed");
+				world.resumeSimulation();
+			}
+			auto path = world.getGraph()->calculatePath(agent, world.getGraph()->getVertexByIdentifier(marker));
+			smoke::require(bool(path), "Anticipatory lifetime fixture has no Path");
+			agent->setPath(path, true);
+			core::InteractionRequestId request;
+			for (unsigned tick = 0; tick < MaximumSimulationTicks && !request; ++tick)
+			{
+				world.advanceTick();
+				for (auto const& item : world.getSimulationSnapshot().interactionRequests)
+					if (item.actor == id) request = item.id;
+			}
+			smoke::require(bool(request), "No anticipatory request created");
+			agent->pausePathing();
+			auto position = agent->getGlobalPosition();
+			world.advanceTicks(600);
+			auto retained = world.lookupInteractionRequest(request);
+			smoke::require(retained && retained.entity->getResult() == core::InteractionResult::Succeeded
+				&& agent->getGlobalPosition() == position && agent->getSector() == world.getSector(corridor).get(),
+				"Passing result retired before its reader, or activation moved the idle Agent");
+			world.consumeSimulationEvents();
+			switch (release)
+			{
+			case Release::ReplacePath: agent->setPath(path, false); break;
+			case Release::ClearPath: agent->clearPath(); break;
+			case Release::CapabilityEdit:
+				world.pauseSimulation();
+				smoke::require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None), "Capability edit failed");
+				world.resumeSimulation();
+				break;
+			}
+			world.advanceTick();
+			unsigned removals = 0;
+			for (auto const& event : world.consumeSimulationEvents())
+			{
+				smoke::require(event.type != core::SimulationEventType::InteractionRequestAdded,
+					"Releasing a retained result issued a duplicate interaction");
+				if (event.type == core::SimulationEventType::InteractionRequestRemoved
+					&& event.interactionRequest.id == request) ++removals;
+			}
+			smoke::require(removals == 1, "Released passing request did not publish exactly one removal");
+			smoke::require(!world.lookupInteractionRequest(request)
+				&& world.getSimulationSnapshot().deviceOperations.empty()
+				&& agent->getGlobalPosition() == position, "Path reset retained anticipatory work or moved Agent");
+			if (release == Release::CapabilityEdit)
+			{
+				world.pauseSimulation();
+				smoke::require(world.setAgentIndividualObjectUsage(id,
+					remote ? core::ObjectUsage::RemoteControl : core::ObjectUsage::Arms), "Capability restore failed");
+				world.resumeSimulation();
+			}
+			agent->setPath(path, true);
+			for (unsigned tick = 0; tick < MaximumSimulationTicks && agent->getState() != core::Agent::State::Idle; ++tick)
+				world.advanceTick();
+			smoke::require(agent->getSector() == world.getSector(destination).get(), "Replacement Path did not cross physically");
+			world.advanceTicks(600);
+			auto snapshot = world.getSimulationSnapshot();
+			smoke::require(snapshot.interactionRequests.empty() && snapshot.deviceOperations.empty()
+				&& snapshot.traversalRequests.empty() && snapshot.traversalPermits.empty(), "Completed journey leaked work");
+		}
+	}
+
 	bool remoteDoorUsesOnePhysicalOperatorAndSharedOperation()
 	{
 		core::World world("Shared remote door", 7, 2);
@@ -546,6 +635,10 @@ void registerDoors(std::vector<smoke::Check>& checks)
 	checks.push_back({ "agentsPressUpcomingDoorButtonsWhilePassing", [](smoke::Context const&)
 		{
 			smoke::require(agentsPressUpcomingDoorButtonsWhilePassing(), "agents did not press upcoming Door Buttons while passing");
+		} });
+	checks.push_back({ "anticipatoryRequestLifetime", [](smoke::Context const&)
+		{
+			anticipatoryRequestLifetime();
 		} });
 	checks.push_back({ "remoteDoorUsesOnePhysicalOperatorAndSharedOperation", [](smoke::Context const&)
 		{

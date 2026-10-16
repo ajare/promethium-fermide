@@ -1736,9 +1736,7 @@ namespace core
 		cancelTraversal();
 		mPlayerLadderMount.reset();
 		mPlayerLadderEntry = false;
-		mEarlyDoorPressResource = {};
-		mEarlyDoorPressInteraction = {};
-		mEarlyDoorPressAttempted = false;
+		mAnticipatoryInteraction.reset();
 		mEarlyQueueApproachDirectionX = 0;
 		mPath.path = nullptr;
 		mPath.targetNode = 0;
@@ -1829,9 +1827,7 @@ namespace core
 			mPath.path = nullptr;
 			mPath.targetNode = 0;
 			mRouteJourneyDestinationVertexId = 0;
-			mEarlyDoorPressResource = {};
-			mEarlyDoorPressInteraction = {};
-			mEarlyDoorPressAttempted = false;
+			mAnticipatoryInteraction.reset();
 			addLogMessage(getDescription(), 0, LogLevel::Debug, format("Started idling"));
 			return true;
 		}
@@ -1844,9 +1840,7 @@ namespace core
 	{
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		cancelTraversal();
-		mEarlyDoorPressResource = {};
-		mEarlyDoorPressInteraction = {};
-		mEarlyDoorPressAttempted = false;
+		mAnticipatoryInteraction.reset();
 		mEarlyQueueApproachDirectionX = 0;
 		mState = State::Idle;
 		mPath.path = nullptr;
@@ -1875,7 +1869,7 @@ namespace core
 				&& mTraversalTask && mTraversalTask->edge->getType() == EdgeType::Location)))
 		{
 			auto end = agentPos + moveAmt;
-			auto limited = mWorld->mSimulationCoordinator.limitRemoteButtonMovement(*this, agentPos, end);
+			auto limited = mWorld->mSimulationCoordinator.limitRemoteInteractionMovement(*this, agentPos, end);
 			if (limited.x != end.x || limited.y != end.y)
 			{
 				moveAmt = limited - agentPos;
@@ -2338,7 +2332,7 @@ namespace core
 		syncStandingRouteObservation();
 		mQueuedTraversalTask.reset();
 		mTraversalLocalGoal.reset();
-		mRemoteButtonApproachTarget.reset();
+		mRemoteInteractionApproachTarget.reset();
 	}
 
 	bool Agent::moveToVertexOffset(int dim, float offset, float frameTime)
@@ -2462,9 +2456,9 @@ namespace core
 			break;
 
 		case State::WaitingForTraversal:
-			if (mRemoteButtonApproachTarget && getObjectUsage() == ObjectUsage::RemoteControl)
+			if (mRemoteInteractionApproachTarget && getObjectUsage() == ObjectUsage::RemoteControl)
 			{
-				moveToPosition(*mRemoteButtonApproachTarget, frameTime, getWalkSpeed());
+				moveToPosition(*mRemoteInteractionApproachTarget, frameTime, getWalkSpeed());
 			}
 			else if (mTraversalLocalGoal)
 			{

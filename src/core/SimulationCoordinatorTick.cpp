@@ -597,12 +597,12 @@ namespace core
 					continue;
 				}
 				auto const movementStart = agent->getGlobalPosition();
-				auto const approachingDoor = agent->getState() == Agent::State::MovingToVertex
+				auto const approachingResource = agent->getState() == Agent::State::MovingToVertex
 					|| (agent->getState() == Agent::State::TraversingEdge && agent->mTraversalTask
 						&& agent->mTraversalTask->edge
 						&& agent->mTraversalTask->edge->getType() != EdgeType::Door);
-				if (approachingDoor && agent->getObjectUsage() == ObjectUsage::RemoteControl)
-					tryPressUpcomingDoorButton(*agent, movementStart, movementStart);
+				if (approachingResource && agent->getObjectUsage() == ObjectUsage::RemoteControl)
+					tryAnticipatoryInteraction(*agent, movementStart, movementStart);
 				// A remote press retains the ordinary control queue and duration.
 				// Hold position during that physical operation, not during device travel.
 				bool pressingRemote = false;
@@ -618,8 +618,8 @@ namespace core
 						}
 					}
 				if (!pressingRemote) agent->update(timestep);
-				if (approachingDoor)
-					tryPressUpcomingDoorButton(*agent, movementStart, agent->getGlobalPosition());
+				if (approachingResource)
+					tryAnticipatoryInteraction(*agent, movementStart, agent->getGlobalPosition());
 			}
 			moveInteractions(timestep);
 			break;

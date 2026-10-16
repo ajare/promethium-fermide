@@ -59,6 +59,7 @@ set(core_names
     automaticBulkheadSensesNearbyNonTraveller
     bulkheadAndWindowThresholdsUseTraversalResources
     agentsPressUpcomingDoorButtonsWhilePassing
+    anticipatoryRequestLifetime
     remoteDoorUsesOnePhysicalOperatorAndSharedOperation
     remoteDoorWithoutReachableControlIsUnavailable
     wideDoorLanesAndGracefulDisableAreSafe

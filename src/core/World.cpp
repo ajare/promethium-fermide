@@ -13484,7 +13484,7 @@ namespace core
 		Vector2 const& movementStart, Vector2 const& movementEnd)
 	{
 		invalidateSimulationSnapshot();
-		mSimulationCoordinator.tryPressUpcomingDoorButton(agent, movementStart, movementEnd);
+		mSimulationCoordinator.tryAnticipatoryInteraction(agent, movementStart, movementEnd);
 	}
 
 	void World::allocateInteractions()

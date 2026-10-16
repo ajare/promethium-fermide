@@ -222,13 +222,21 @@ namespace core
 		// reports, not a separate simulation of the device state.
 		void pressPhysicalControl(InteractionPointId point);
 
-		// An Agent walking towards a regular, Lift, or Shuttle Door presses an
-		// applicable control early - while still moving, and only once per door -
-		// so it does not reach the threshold and double back to the control.
-		std::vector<InteractionPointId> upcomingRemoteButtons(Agent const& agent, TraversalResourceId& resource) const;
-		Vector2 limitRemoteButtonMovement(Agent const& agent, Vector2 const& start, Vector2 const& end) const;
-		void tryPressUpcomingDoorButton(Agent& agent, Vector2 const& movementStart,
+		// Prepare the next required resource while moving: remote manual Doors,
+		// transport calls, extensible controls and Airlocks, plus physical passing
+		// presses. This never grants traversal admission.
+		std::vector<InteractionPointId> upcomingRemoteInteractionPoints(Agent const& agent, TraversalResourceId& resource) const;
+		Vector2 limitRemoteInteractionMovement(Agent const& agent, Vector2 const& start, Vector2 const& end) const;
+		void tryAnticipatoryInteraction(Agent& agent, Vector2 const& movementStart,
 			Vector2 const& movementEnd);
+
+		// Compatibility entry points; internal callers use the scope-correct names.
+		std::vector<InteractionPointId> upcomingRemoteButtons(Agent const& agent, TraversalResourceId& resource) const
+		{ return upcomingRemoteInteractionPoints(agent, resource); }
+		Vector2 limitRemoteButtonMovement(Agent const& agent, Vector2 const& start, Vector2 const& end) const
+		{ return limitRemoteInteractionMovement(agent, start, end); }
+		void tryPressUpcomingDoorButton(Agent& agent, Vector2 const& start, Vector2 const& end)
+		{ tryAnticipatoryInteraction(agent, start, end); }
 
 		// ------------------------------------------------------------------
 		// Door and extensible traversal preparation (ADR 0004 stage 3)

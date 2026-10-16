@@ -519,15 +519,42 @@ namespace core
 		// Traversal resources assign local goals; the Agent remains the sole owner
 		// of walking and advances itself during the movement phase.
 		std::optional<Vector2> mTraversalLocalGoal;
-		std::optional<Vector2> mRemoteButtonApproachTarget;
+		// Traversal approach goal: cancelTraversal(), preparation once in range,
+		// and capability changes clear it. Anticipatory resets alone do not.
+		std::optional<Vector2> mRemoteInteractionApproachTarget;
 
-		// Prevent repeated opportunistic presses while following the same immediate
-		// Door edge. The saved interaction lets traversal preparation reuse a press
-		// made while passing instead of sending the Agent back from the threshold.
-		// This is transient locomotion state, not authored simulation data.
-		TraversalResourceId mEarlyDoorPressResource;
-		InteractionRequestId mEarlyDoorPressInteraction;
-		bool mEarlyDoorPressAttempted{ false };
+		// Transient preparation of the next resource: manual Doors, transport calls,
+		// extensible controls and Airlocks. Retain a passing request until preparation
+		// consumes it; terminal-record retirement must continue to see that identity.
+		struct AnticipatoryInteractionState
+		{
+			void reset() { mResource = {}; mRequest = {}; mAttempted = false; }
+			void selectResource(TraversalResourceId resource)
+			{
+				if (mResource == resource) return;
+				reset();
+				mResource = resource;
+			}
+			void recordAttempt() { mAttempted = true; }
+			void retainRequest(InteractionRequestId request) { mRequest = request; recordAttempt(); }
+			// Capability edits may retry without releasing a retained result.
+			void allowRetry() { mAttempted = false; }
+			bool attempted() const { return mAttempted; }
+			InteractionRequestId retainedRequest() const { return mRequest; }
+			// Preparation consumes the identity, not the once-per-resource attempt.
+			InteractionRequestId takeRequest()
+			{
+				auto request = mRequest;
+				mRequest = {};
+				return request;
+			}
+
+		private:
+			TraversalResourceId mResource;
+			InteractionRequestId mRequest;
+			bool mAttempted{ false };
+		};
+		AnticipatoryInteractionState mAnticipatoryInteraction;
 
 		// Set when locomotion stops at the outer edge of an available queue lane.
 		// +1 approaches from the left, -1 from the right, and 0 requests at the endpoint.
