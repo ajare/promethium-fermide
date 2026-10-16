@@ -172,6 +172,8 @@ namespace core
 		result.liftCarDoorOpen = resource.mLiftCarDoorOpen;
 		result.liftStopPhase = resource.mLiftStopPhase;
 		result.liftServiceStartedTick = resource.mLiftServiceStartedTick;
+		result.liftMinimumDwellTicks = resource.mLiftMinimumDwellTicks;
+		result.liftMaximumBoardingTicks = resource.mLiftMaximumBoardingTicks;
 		result.liftBoardingCutoffTick = resource.mLiftBoardingCutoffTick;
 		result.liftAcceptingBoarders = (resource.mLift || resource.mShuttle) && resource.mEnabled && !result.liftBroken && !result.shuttleBroken && !resource.mLiftMoving
 			&& resource.mLiftStopPhase == LiftStopPhase::Boarding
@@ -191,13 +193,18 @@ namespace core
 		result.liftConfirmationQueue = resource.mLiftConfirmationQueue;
 		for (uint32_t stop = 0; stop < resource.mLiftStopRequestOwners.size(); ++stop)
 		{
-			result.liftStopRequestOwnerCounts.push_back((uint32_t)resource.mLiftStopRequestOwners[stop].size());
+			result.liftStopRequestOwnerCounts.push_back((uint32_t)resource.mLiftStopRequestOwners[stop].size()
+				+ (resource.mPlayerStopRequests.contains(stop) ? 1u : 0u));
 			auto const& ticks = resource.mLiftStopRequestTicks[stop];
 			auto oldest = ticks.empty() ? ticks.end() : min_element(ticks.begin(), ticks.end(),
 				[](auto const& left, auto const& right)
 				{ return left.second != right.second ? left.second < right.second : left.first < right.first; });
-			result.liftStopOldestRequestTicks.push_back(oldest == ticks.end() ? 0 : oldest->second);
-			if (!resource.mLiftStopRequestOwners[stop].empty()) result.liftScheduledStops.push_back(stop);
+			auto manual = resource.mPlayerStopRequests.find(stop);
+			auto oldestTick = oldest == ticks.end() ? (manual == resource.mPlayerStopRequests.end() ? 0 : manual->second)
+				: (manual == resource.mPlayerStopRequests.end() ? oldest->second : min(oldest->second, manual->second));
+			result.liftStopOldestRequestTicks.push_back(oldestTick);
+			if (!resource.mLiftStopRequestOwners[stop].empty() || manual != resource.mPlayerStopRequests.end())
+				result.liftScheduledStops.push_back(stop);
 		}
 		if (resource.mLift || resource.mShuttle)
 		{

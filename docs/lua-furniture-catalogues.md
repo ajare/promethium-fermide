@@ -21,8 +21,8 @@ return {
     {
       key = "desk", label = "Desk", sideRoutes = true,
       tiles = {
-        {x = 0, y = 0, imageSet = "ObjectAtlas", image = "chair"},
-        {x = 1, y = 0, imageSet = "ObjectAtlas", image = "chair"}
+        {x = 0, y = 0, image = "chair"},
+        {x = 1, y = 0, image = "chair"}
       },
       usablePoints = {},
       vertices = {
@@ -46,9 +46,18 @@ owned Marker and does not imply Furniture use.
   Keys contain 1–128 ASCII letters, digits, underscores or hyphens. Definitions
   are a non-empty ordered array of at most 256 records. Lists must be dense arrays;
   unknown fields, mixed table keys, metatables and unsupported values are refused.
-- Tiles have integer `x/y`, `imageSet` and `image`. They determine the complete
-  artwork rectangle, including gaps. Existing tile bounds, ObjectAtlas resource
-  resolution and World-tile-sized artwork requirements remain authoritative.
+- Tiles have integer `x/y` and a named `image`. They determine the complete
+  cell-based artwork rectangle, including gaps. The World selects `furnitureImageSet`
+  (default `FurnitureAtlas`), independently of its catalogue, Agent and Sector artwork.
+  The editor's **Furniture artwork** selector lists registered ImageSets; changes are
+  immediate, persisted and undoable, including palette and placement previews. Play
+  uses the same selection. Each region fills one World cell regardless of source pixel
+  dimensions; routing, usable points and physical layout never change with artwork.
+  Missing sets/regions retain the authored selection, warn and render magenta rather
+  than substituting defaults. Legacy tile `imageSet` fields naming `ObjectAtlas` or
+  `FurnitureAtlas` are accepted but do not override the World; other values are refused.
+  `FurnitureAtlas` shares `ObjectAtlasImage`; old `ObjectAtlas` Furniture regions remain
+  as compatibility aliases.
 - `usablePoints` is required but may be empty. Points have `key`, `label`, finite
   `x`, optional floor-height `y = 0` and optional boolean `blocksPathing` (default
   true). Each explicit bound routing vertex must match its point's position.

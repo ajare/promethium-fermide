@@ -221,6 +221,9 @@ namespace core
 			front.sectorObjectIndex = ~0u;
 			mLayers[unit->getLayerIndex()]->getCellDefinition(unit->getCellX(), unit->getCellY() + stop) = {};
 		}
+		// Erasing placements shifts every later index; re-derive the point
+		// lookup so no stale index survives the topology change (#625).
+		rebuildPhysicalControlIndex();
 	}
 
 	World::DumbwaiterMovePlan World::planMoveDumbwaiter(DumbwaiterId id, uint32_t layer, uint32_t y, uint32_t x) const

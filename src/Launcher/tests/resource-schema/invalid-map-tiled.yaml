@@ -1,0 +1,14 @@
+Resources:
+  Resource:
+    type: Map
+    name: Invalid
+    DependentResources:
+      DependentResource:
+        - id: File
+          ref: Source
+        - id: TilesImageSet
+          ref: Tiles
+    Definitions:
+      Definition:
+        factory: Tiled
+        unexpected: true

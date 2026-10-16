@@ -8,7 +8,7 @@
 # Hazardous segregation is preserved throughout: the hazardous side never
 # borrows normal-class headroom.
 name: Meridian waste-storage constraint drill
-schemaVersion: 95
+schemaVersion: 96
 summary: 'A four-crew Meridian configuration exercising constrained waste storage and stalled
   ejection, sized down to hours of production. The hazardous concentrate buffer fills first and
   the hazardous chain stops qualifying releases while hazWaterRaw backs up. The residue store

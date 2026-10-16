@@ -19,6 +19,7 @@ namespace
 	constexpr smoke::Check existingChecks[] = {
 		{ "marker-identity", [](smoke::Context const&) { runMarkerIdentitySmokeChecks(); } },
 		{ "two-sided-buttons", [](smoke::Context const&) { runDoorTwoSidedButtonSmokeChecks(); } },
+		{ "physical-control-lookup", [](smoke::Context const&) { runPhysicalControlLookupSmokeChecks(); } },
 		{ "layers", layers },
 		{ "background-sector", backgroundSector },
 		{ "background-paint", backgroundPaint },

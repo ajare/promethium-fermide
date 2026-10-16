@@ -10,7 +10,7 @@
 # recovery below happens through implemented mechanisms - store drawdown,
 # crew rationing, scheduled deliveries - never scripted hidden resources.
 name: Meridian resupply-delay drill
-schemaVersion: 95
+schemaVersion: 96
 summary: 'A four-crew Meridian configuration exercising delayed resupply: the crop and algae harvest
   contracts are offline for the drill, the food store starts at a two-crew-day-quarter thin ration
   and the potable store''s drawable inventory above its protected life-support reserve is minutes

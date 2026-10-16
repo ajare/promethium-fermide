@@ -59,6 +59,7 @@ set(core_names
     automaticBulkheadSensesNearbyNonTraveller
     bulkheadAndWindowThresholdsUseTraversalResources
     agentsPressUpcomingDoorButtonsWhilePassing
+    anticipatoryRequestLifetime
     remoteDoorUsesOnePhysicalOperatorAndSharedOperation
     remoteDoorWithoutReachableControlIsUnavailable
     wideDoorLanesAndGracefulDisableAreSafe
@@ -202,6 +203,7 @@ set(core_names
     markerActions/atomicEffects
     markerActions/poseVocabulary
     markerActions/deviceEffects
+    markerActions/replacementDeviceRefusalKeepsUse
     markerActions/claimCompetition
     markerActions/furnitureUse
     markerActions/furnitureFinishDevice
@@ -210,6 +212,18 @@ set(core_names
     markerActions/furnitureUseCompetition
     markerActions/furnitureUseAtomicity
     markerActions/furnitureUseDocuments
+    usablePointResolution/wholeChain
+    usablePointResolution/onePassPerEvaluation
+    usablePointResolution/viewsParity
+    usablePointResolution/effectFreeEligibility
+    usablePointResolution/catalogueReload
+    usablePointResolution/topologyMutation
+    deviceActivation/boothWindowActivationTick
+    deviceActivation/boothWindowCompetingTarget
+    deviceActivation/extensibleCompetingTarget
+    deviceActivation/accessPanelReversalKeepsLeaf
+    deviceActivation/dumbwaiterBusyOwnership
+    deviceActivation/manualDoorRevalidation
     mixedCrawling/journeys
     mixedCrawling/costs
     mixedCrawling/gates

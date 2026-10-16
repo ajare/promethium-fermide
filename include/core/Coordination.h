@@ -66,7 +66,8 @@ namespace core
 		SetBoothWindowState,
 		ToggleBoothWindow,
 		PressDumbwaiterLanding,
-		SetAccessPanelState
+		SetAccessPanelState,
+		ToggleExtendedState
 	};
 
 	enum struct DoorOpenLeaseKind
@@ -89,9 +90,10 @@ namespace core
 		TraversalRequestId request;
 	};
 
-	// Desired-state commands are idempotent and coalescible. ToggleBoothWindow
-	// and PressDumbwaiterLanding are activations, never coalesced. A landing
-	// press reserves busy at acceptance; a toggle resolves its target once.
+	// Most desired-state commands may share an in-flight operation. Access panel
+	// state commands are an exception: each press retains its own activation and
+	// supersession lifecycle. Toggles and Dumbwaiter landing presses never share
+	// operations either; a press reserves busy at acceptance, a toggle resolves once.
 	struct DeviceCommand
 	{
 		DeviceCommandType type{ DeviceCommandType::SetSectorLights };
@@ -105,6 +107,11 @@ namespace core
 
 		friend bool operator==(DeviceCommand const&, DeviceCommand const&) = default;
 	};
+
+	// Classification only: callers still apply mutable permission, Broken and
+	// lifecycle checks before sharing an operation.
+	std::string deviceCommandName(DeviceCommand const& command);
+	bool isDeviceCommandCoalescible(DeviceCommandType type);
 
 	enum struct InteractionBindingRequirement
 	{
@@ -379,6 +386,10 @@ namespace core
 		std::map<AgentId, LiftTripIntent> mLiftTripIntents;
 		std::vector<std::set<AgentId>> mLiftStopRequestOwners;
 		std::vector<std::map<AgentId, uint64_t>> mLiftStopRequestTicks;
+		// Service requests, deliberately independent of passenger journey ownership.
+		std::map<uint32_t, uint64_t> mPlayerStopRequests;
+		uint32_t mPlayerStopFocus{ ~0u };
+		bool mPlayerBoardingWindow{ false };
 		std::vector<TraversalRequestId> mLiftConfirmationQueue;
 		TraversalRequestId mLiftActiveConfirmation;
 		// Shuttle motion and scheduling remain vehicle-wide. These records partition

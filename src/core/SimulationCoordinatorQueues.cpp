@@ -529,6 +529,16 @@ namespace core
 			auto agent = request ? mWorld.mAgents.find(request->mOwner) : nullptr;
 			if (!request || !agent) { expiredPermits.push_back(permitId); continue; }
 			auto distance = agent->getGlobalPosition().distanceTo(request->mDestinationEndpoint);
+			auto resource = mWorld.mTraversalResources.find(request->mResource);
+			// Manual climbing and chamber threshold crossings may deliberately stop
+			// or reverse. Keep their admitted boundary/capacity safe until completion.
+			if (agent->isPlayerControlled() && agent->getSector()
+				&& (request->mEdgeType == EdgeType::Ladder
+					|| (request->mEdgeType == EdgeType::BulkheadDoor && resource && (resource->mAirlock || resource->mSecurityScanner))
+					|| (agent->getSector()->getType() == SectorType::Stairwell
+						&& (request->mEdgeType == EdgeType::Stairwell || request->mEdgeType == EdgeType::Location)))
+				&& agent->mTraversalTask && agent->mTraversalTask->permit == permitId)
+				permit->mExpiresAtTick = mWorld.mSimulationTick + mWorld.mTraversalWaitingPolicy.permitProgressTimeoutTicks;
 			if (distance + 0.001f < permit->mBestDestinationDistance)
 			{
 				permit->mBestDestinationDistance = distance;
@@ -726,8 +736,15 @@ namespace core
 	void SimulationCoordinator::tryGrantDoorQueue(TraversalResource& resource)
 	{
 		mWorld.invalidateSimulationSnapshot();
+		bool const playerPassage = resource.mDoor && !resource.mDoor->admitsNewCrossings()
+			&& !resource.mDoor->isIndependentlyBroken() && any_of(resource.mQueueLanes.begin(), resource.mQueueLanes.end(),
+			[&](auto const& lane) { return any_of(lane.queue.begin(), lane.queue.end(), [&](auto requestId) {
+				auto request = mWorld.mTraversalRequests.find(requestId);
+				auto actor = request ? mWorld.mAgents.find(request->mOwner) : nullptr;
+				return actor && resource.mDoor->admitsPlayerCrossing(*actor, actor->getGlobalPosition().y);
+			}); });
 		if (!resource.mEnabled || (!resource.mDoor && !resource.mForceBridge)
-			|| (resource.mDoor && !resource.mDoor->admitsNewCrossings() && !resource.mDoor->isIndependentlyBroken())
+			|| (resource.mDoor && !resource.mDoor->admitsNewCrossings() && !resource.mDoor->isIndependentlyBroken() && !playerPassage)
 			|| (resource.mForceBridge && !resource.mForceBridge->admitsNewTraversals()))
 		{
 			return;
@@ -758,6 +775,8 @@ namespace core
 				if (!request || request->mState != TraversalRequestState::Pending) continue;
 				auto actor = mWorld.mAgents.find(request->mOwner);
 				if (!actor) continue;
+				if (!actor->isPlayerControlled() && !resource.mDoor->admitsNewCrossings()
+					&& !resource.mDoor->isIndependentlyBroken()) continue;
 				if (resource.mDoor->admitsAgentTraversal(*actor, actor->getGlobalPosition().y)
 					&& (!resource.mDoor->isIndependentlyBroken()
 						|| resource.mDoor->admitsBrokenPassage(*actor, actor->getGlobalPosition().y))) continue;
@@ -831,9 +850,23 @@ namespace core
 				{
 					continue;
 				}
+				if (resource.mDoor && !resource.mDoor->admitsNewCrossings())
+				{
+					bool ready = agent->isPlayerControlled()
+						? resource.mDoor->admitsPlayerCrossing(*agent, agent->getGlobalPosition().y)
+						: resource.mDoor->isIndependentlyBroken()
+							&& resource.mDoor->admitsBrokenPassage(*agent, agent->getGlobalPosition().y);
+					if (!ready) continue;
+				}
 				if (useCrossingBand)
 				{
-					if (!isWithinDoorCrossingBand(agent->getGlobalPosition(), lane.origin, crossingWidth))
+					// Player Up uses the complete current-pose body inside the aperture,
+					// not the historical fixed-width autonomous arrival band.
+					auto const width = agent->isPlayerControlled()
+						? std::max(0.f, (resource.mDoor->getSize().x
+							- agent->getWidth()) * .5f)
+						: crossingWidth;
+					if (!isWithinDoorCrossingBand(agent->getGlobalPosition(), lane.origin, width))
 					{
 						continue;
 					}

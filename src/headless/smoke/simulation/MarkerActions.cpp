@@ -756,13 +756,25 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 		std::string const use(core::UseFurnitureAction);
 		auto path = context.temporaryRoot() / "replacement.actions.lua";
 		write(path, package("{key='hello',name='Replacement',run=function(a,w,m) w.release() end},"
-			"{key='other',name='Observe Standing',run=function(a,w,m) assert(a.pose == 'standing'); w.log('replacement') end}"));
+			"{key='other',name='Observe Standing',run=function(a,w,m) "
+			"assert(a.pose == 'standing'); "
+			"assert(m.furniture ~= nil, 'Custom Action lost Furniture metadata'); "
+			"assert(m.furniture.id == " + std::to_string(world->furniture()[0].id) + "); "
+			"assert(m.furniture.name == 'Chair' and m.furniture.definition == 'chair'); "
+			"assert(m.usable_point == 'seat'); w.log('replacement') end}"));
 		require(world->selectActionRegistry(path) && world->setMarkerActions(chair, {second, use, second, "idle"}), "Use assignment refused");
 		require(world->availableAgentActions(chair) == std::vector<std::string>{"idle", use, second}, "Derived use ordering/deduplication changed");
 		require(world->availableAgentActions(desk) == std::vector<std::string>{"idle"}, "Desk invented derived use");
 		require(!world->setMarkerActions(desk, {use}) && world->markerActions(desk).empty(), "Desk accepted an unavailable built-in use assignment");
 		require(runAction(*world, owner, chair, "idle").type == core::SimulationEventType::DestinationReached
 			&& world->lookupAgent(owner).entity->getPose() == core::Pose::Standing && !world->usablePointOccupant(chair), "Idle implicitly used chair");
+		// Exercise real custom Action dispatch, not just Action-view helpers.
+		// The same metadata assertions also run during the same-seat replacement below.
+		auto custom = runAction(*world, owner, chair, second);
+		require(custom.type == core::SimulationEventType::DestinationReached,
+			"Custom Action at a free Furniture Marker failed: " + custom.diagnostic);
+		require(world->lookupAgent(owner).entity->getPose() == core::Pose::Standing
+			&& !world->usablePointOccupant(chair), "Custom metadata query changed pose/occupancy");
 		core::consumeLogMessages();
 		require(runAction(*world, owner, chair, use).type == core::SimulationEventType::DestinationReached, "Explicit use failed");
 		require(world->lookupAgent(owner).entity->getPose() == core::Pose::Sitting && world->usablePointOccupant(chair) == owner, "Chair use did not sit/claim");
@@ -838,12 +850,20 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 			auto end = custom.find("\nend", begin);
 			custom.replace(begin, end-begin, body);
 			auto path = context.temporaryRoot() / "failure.furniture.lua"; write(path, custom);
-			for (unsigned ending : {0u, 1u, 2u, 3u})
+			for (unsigned ending : {0u, 1u, 2u, 3u, 4u})
 			{
 				auto world = useFixture(path); auto seat = world->furniture()[0].marker; auto agent = core::AgentId{1};
+				if (ending == 4)
+				{
+					auto actions = context.temporaryRoot() / "finish-replacement.actions.lua";
+					write(actions, package("{key='hello',name='Replacement',run=function(a,w,m) w.log('replacement rollback') end}"));
+					require(world->selectActionRegistry(actions) && world->setMarkerActions(seat, {first}), "Finish replacement setup failed");
+				}
 				require(runAction(*world, agent, seat, std::string(core::UseFurnitureAction)).type == core::SimulationEventType::DestinationReached, "Failure fixture use failed");
 				world->consumeSimulationEvents(); core::consumeLogMessages();
-				if (ending < 2)
+				if (ending == 4)
+					require(world->moveAgentToMarker(agent, seat, first).accepted(), "Custom replacement refused");
+				else if (ending < 2)
 					require((ending ? world->moveAgentToNamedMarker(agent, "Origin") : world->moveAgentToMarker(agent, seat)).accepted(), "Finish request refused");
 				else
 				{
@@ -860,15 +880,18 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 				require(failed && world->isSimulationPaused() && !world->usablePointOccupant(seat)
 					&& world->lookupAgent(agent).entity->getPose() == core::Pose::Standing, "Finish failure stranded pose/occupancy or ignored failure policy");
 				bool diagnostic = false;
+				unsigned failures = 0;
 				for (auto const& event : world->consumeSimulationEvents())
 					if (event.type == core::SimulationEventType::ActionFailed)
 					{
+						++failures;
 						diagnostic = !event.diagnostic.empty() && event.scriptFailure != core::ScriptExecutionFailure::None;
 						if (std::string_view(body).starts_with("while")) require(event.scriptFailure == core::ScriptExecutionFailure::InstructionBudgetExceeded, "Finish budget lost classification");
 						if (std::string_view(body).starts_with("local")) require(event.scriptFailure == core::ScriptExecutionFailure::MemoryBudgetExceeded, "Finish heap budget lost classification");
 					}
-				require(diagnostic, "Finish failure has no structured diagnostic");
-				for (auto const& log : core::consumeLogMessages()) require(log.msg != "finish rollback", "Failed/incomplete finish published staged logs");
+				require(diagnostic && failures == 1, "Finish failure must publish exactly one structured diagnostic");
+				for (auto const& log : core::consumeLogMessages())
+					require(log.msg != "finish rollback" && log.msg != "replacement rollback", "Failed/incomplete finish published staged logs");
 			}
 		}
 	}
@@ -945,6 +968,9 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 			}
 			require(succeeded && !world->getSector(0)->areLightsOn(), "Departure finishing refused the staged device request");
 			require(!refused, "Departure finishing published a spurious refusal");
+			unsigned finishes = 0;
+			for (auto const& log : core::consumeLogMessages()) if (log.msg.starts_with("finish:")) ++finishes;
+			require(finishes == 1, "Departure must publish finish logs exactly once");
 		}
 		// An out-of-reach device request is an ordinary refusal: it must stay a
 		// non-script failure so host cleanup stands and headless advancement continues.
@@ -958,6 +984,8 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 					&& event.scriptFailure == core::ScriptExecutionFailure::None && !event.diagnostic.empty();
 			require(refused, "Ordinary finish refusal was not published as an ordinary Action failure");
 			require(world->getSector(0)->areLightsOn(), "Refused finish device changed the lights");
+			for (auto const& log : core::consumeLogMessages())
+				require(!log.msg.starts_with("finish:"), "Refused finish device leaked staged logs");
 		}
 	}
 
@@ -1181,6 +1209,63 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 				for (auto const& log : core::consumeLogMessages()) require(log.msg != "device", "Device rejection published log");
 			}
 		}
+	}
+
+	void replacementDeviceRefusalKeepsUse(smoke::Context const& context)
+	{
+		// R20 (#634): a replacement Action whose device request is refused must
+		// never tear down the Agent's current Furniture use. Preparation judges the
+		// whole replacement batch before any finish runs, so an ineligible device
+		// request leaves the seat, pose, claim and device registries untouched and
+		// publishes no accepted-effect log. This is the replacement-path counterpart
+		// to the arrival-path rejection deviceEffects asserts.
+		auto fixture = context.fixture("src/headless/smoke/fixtures/use.furniture.lua");
+		auto world = useFixture(fixture);
+		auto id = core::AgentId{1};
+		auto seat = world->furniture()[0].marker;
+		// A device the Agent is not authorized to operate: the replacement's
+		// request is an ordinary host refusal, not a script failure.
+		auto permission = world->addAccessPermission("Protected");
+		core::InteractionBinding binding;
+		binding.command = {core::DeviceCommandType::SetSectorLights, core::SectorId{1}, false};
+		core::Vector2 const pointPosition{3.5f, 0.f}; // at the chair's usable point
+		auto point = world->createInteractionPoint("Protected light", core::SectorId{1},
+			pointPosition, 0.25f, 0.05f, {binding});
+		require(world->setInteractionPointPermissionRequirement(point, {permission}), "Device requirement refused");
+		auto actions = context.temporaryRoot() / "replacement-device.actions.lua";
+		write(actions, package("{key='hello',name='Sit',run=function(a,w,m) w.set_pose('sitting'); w.claim() end},"
+			"{key='other',name='Replace',run=function(a,w,m) w.request_device(" + std::to_string(point.value)
+			+ ", 'set-sector-lights'); w.log('replace-device') end}"));
+		require(world->selectActionRegistry(actions) && world->setMarkerActions(seat, {first, second}), "Replacement package refused");
+		// Seat the Agent first, then replace with an Action whose only effect is the
+		// unauthorized device request.
+		require(runAction(*world, id, seat, std::string(core::UseFurnitureAction)).type == core::SimulationEventType::DestinationReached,
+			"Replacement setup use failed");
+		auto agent = world->lookupAgent(id).entity;
+		require(world->usablePointOccupant(seat) == id && agent->getPose() == core::Pose::Sitting,
+			"Replacement setup did not seat the Agent");
+		auto const distance = agent->getGlobalPosition().distanceTo(pointPosition);
+		require(agent->getObjectUsage() == core::ObjectUsage::Arms
+			&& distance <= 0.25f && distance <= agent->getObjectUsageDistance(),
+			"Protected device must be within the seated Agent's Arms reach");
+		core::consumeLogMessages();
+		auto refused = runAction(*world, id, seat, second);
+		require(refused.type == core::SimulationEventType::ActionFailed
+			&& refused.scriptFailure == core::ScriptExecutionFailure::None && !refused.diagnostic.empty(),
+			"Unauthorized replacement was not an ordinary refusal: " + refused.diagnostic);
+		require(world->usablePointOccupant(seat) == id && world->lookupAgent(id).entity->getPose() == core::Pose::Sitting,
+			"Refused replacement tore down the current Furniture use");
+		auto const& snapshot = world->getSimulationSnapshot();
+		require(snapshot.deviceOperations.empty() && snapshot.interactionRequests.empty(),
+			"Refused replacement published device work");
+		for (auto const& log : core::consumeLogMessages()) require(log.msg != "replace-device", "Refused replacement published its log");
+		// Granting only the missing permission must make the same replacement
+		// valid. This proves authorization, not reach or another eligibility rule,
+		// caused the first refusal, and that the use survived it intact.
+		world->pauseSimulation();
+		require(world->grantAgentAccessPermission(id, permission), "Replacement permission grant refused");
+		require(runAction(*world, id, seat, second).type == core::SimulationEventType::DestinationReached
+			&& !world->usablePointOccupant(seat), "Authorized replacement could not finish the surviving use");
 	}
 
 	void failures(smoke::Context const& context)
@@ -1454,6 +1539,7 @@ void registerMarkerActions(std::vector<smoke::Check>& checks)
 	checks.push_back({"markerActions/atomicEffects", atomicEffects});
 	checks.push_back({"markerActions/poseVocabulary", poseVocabulary});
 	checks.push_back({"markerActions/deviceEffects", deviceEffects});
+	checks.push_back({"markerActions/replacementDeviceRefusalKeepsUse", replacementDeviceRefusalKeepsUse});
 	checks.push_back({"markerActions/claimCompetition", claimCompetition});
 	checks.push_back({"markerActions/furnitureUse", furnitureUse});
 	checks.push_back({"markerActions/furnitureFinishDevice", furnitureFinishDevice});

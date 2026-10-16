@@ -5,6 +5,7 @@
 #include "FurniturePanel.h"
 #include "LocationPlan.h"
 #include "PaletteLayout.h"
+#include "ObjectTileset.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
 #include "core/YamlSerializer.h"
@@ -79,6 +80,18 @@ namespace
 		require(world->furniture().front().marker == desk.marker && world->furniture().front().x == 4.125f,
 			"Lua history reconstructed different authored data");
 		auto before = captureDocumentSnapshot(world, history)->yaml; auto count = history.undoCount();
+		auto selectedCatalogue = world->furnitureCatalogue();
+		diagnostic = "Previous selection error";
+		auto reselected = selectFurnitureCatalogue(world, path, "objects.furniture.lua", diagnostic, history);
+		require(reselected, "Reselecting the current Furniture catalogue was rejected: " + diagnostic);
+		require(diagnostic.empty() && world->furnitureCatalogue() == selectedCatalogue
+			&& history.undoCount() == count && captureDocumentSnapshot(world, history)->yaml == before,
+			"Reselecting the current catalogue must be a no-op, not a reload or document edit");
+		std::filesystem::copy_file(root / "objects.furniture.lua", root / "other.furniture.lua");
+		require(!selectFurnitureCatalogue(world, path, "other.furniture.lua", diagnostic, history)
+			&& diagnostic.find("Cannot replace a Furniture catalogue while instances use it") != std::string::npos
+			&& world->furnitureCatalogue() == selectedCatalogue && history.undoCount() == count,
+			"Selecting a different catalogue must still refuse replacement while instances use it");
 		{ std::ofstream output(root / "broken.furniture.lua"); output << "while true do end"; }
 		for (auto filename : {"broken.furniture.lua", "missing.furniture.lua", "../objects.furniture.lua"})
 			require(!selectFurnitureCatalogue(world, path, filename, diagnostic, history) && !diagnostic.empty()
@@ -627,6 +640,23 @@ namespace
 		LocationPlan plan; require(plan.open(world, world->getSector(room), 4), "Cannot open placement plan");
 		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
 		io.DisplaySize = {1600, 1000}; io.Fonts->AddFontDefault(); io.Fonts->Build();
+		for (bool available : {false, true})
+		{
+			ObjectTileset artwork; artwork.width = 600; artwork.height = 256;
+			if (available) artwork.sprites.emplace("chair", ObjectSprite{{8,63,71,193}, false});
+			setFurnitureTileset(std::move(artwork), reinterpret_cast<ImTextureID>(1));
+			ImGui::NewFrame();
+			WorldDrawList row({{0,0},{1600,1000}});
+			plan.renderPaletteRow(world, row, {20,430}, false);
+			unsigned triangles = 0;
+			for (auto const& command : row.commands())
+				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+					triangle && (available ? triangle->texture == WorldDrawList::Texture::FurnitureAtlas
+						: triangle->texture == WorldDrawList::Texture::None && triangle->colour == IM_COL32(255,0,255,255))) ++triangles;
+			require(triangles == 2, "Furniture palette ignored selected artwork/fallback");
+			ImGui::EndFrame();
+		}
+		clearFurnitureTileset();
 		ImVec2 tray{20, 430}, viewport{}, viewportSize{};
 		std::vector<std::string> rowLabels, depths;
 		unsigned previews = 0, invalidPreviews = 0;

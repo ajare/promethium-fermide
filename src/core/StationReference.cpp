@@ -1069,8 +1069,8 @@ namespace core
 			// systems, the upper bound is the newest schema this reader
 			// knows. A reference outside that range is refused rather than
 			// read under assumptions the reader has not been checked for.
-			if (document.schemaVersion < 65 || document.schemaVersion > 95)
-				return refuse("Reference station schema version must be from 65 to 95");
+			if (document.schemaVersion < 65 || document.schemaVersion > 96)
+				return refuse("Reference station schema version must be from 65 to 96");
 			if (serializer->hasField("provenance"))
 			{
 				serializer->beginArray("provenance");

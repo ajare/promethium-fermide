@@ -74,6 +74,38 @@ out-of-range requests refuse rather than walking. None can share already usable
 passage and locally observed accepted journeys but cannot supply missing operation.
 Range grants neither authorization nor remote knowledge of schedules/queues.
 
+## Internal query boundaries (#619)
+
+Do not substitute similarly named eligibility queries across lifecycle boundaries:
+
+| Query | Meaning; deliberately not implied |
+| --- | --- |
+| `agentHasFeasibleManualDoorOperation` | Capability and authorization from a projected floor approach; no current-position reach, live availability or admission |
+| `agentCanOperateManualDoorHere` | Active Agent, enabled/unbroken Door, approach Sector and actual Arms/Remote range, plus the feasibility checks |
+| `agentHasFeasibleTransportLandingOperation` | Landing authorization plus projected control approach; not a runtime Button request or boarding permit |
+| `agentHasFeasibleRemoteLiftSelection` | Supported selector category/Buttons capability and projected boarding range; an existing passenger uses actual own-car geometry |
+| `agentCanRemotelySelectLiftDestinationHere` | Actual occupancy, own Sector and current range; not destination authorization |
+| `agentHasFeasibleLiftSelection` | Projected Arms/Remote selection capability plus destination authorization; never a command |
+| `agentCanReuseAcceptedLiftJourney` | Separate willingness/local-knowledge branch, including committed exits; never grants command capability |
+| `agentHasFeasibleLiftJourney` | Selection feasibility OR permitted accepted-journey reuse |
+
+`canAgentOpenManualDoor`, `canAgentOperateTransportLandingControl` and
+`canAgentUseLiftJourney` retain their original public behavior as compatibility
+wrappers. Internal planning and allocation callers use the explicitly named
+queries. `canAgentTraverseManualDoorNow` remains an admission capability check,
+not a current-position operation check. Door authorization, landing authorization,
+destination authorization and Permission adherence remain distinct queries.
+
+Accepted shared destination requests are inspected only for occupants or a
+locally boardable vehicle at the Agent's landing; projected selection does not
+inspect remote queues or schedules. Runtime interaction requests and selector
+allocation still revalidate current occupancy/range and mutable authorization at
+their existing boundaries. No request, event, tick, queue or commitment lifecycle
+is moved by this refactor. The focused `agentTypesRemoteOnboardJourneys` and
+`agentTypesNoneSharedJourneys` checks characterize projected-feasibility versus
+empty-handle runtime refusal (including no recorded work/position change), remote
+unobserved shared requests, no None command capability, and committed completion.
+
 ## Runnable laboratory
 
 Open **RemoteActivationDemo** or

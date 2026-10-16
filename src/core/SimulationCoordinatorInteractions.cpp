@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "core/SimulationCoordinator.h"
+#include "core/ForceBridge.h"
 #include "core/Shuttle.h"
 #include "core/Window.h"
 
@@ -24,6 +25,25 @@ namespace core
 {
 
 	using namespace std;
+
+	namespace
+	{
+		// Horizontal slice of the inclusive range circle. Callers deliberately
+		// retain their subtraction precision: route prediction subtracts in double,
+		// while the traversal approach first rounds the vertical gap to float.
+		optional<double> remoteHorizontalReach(double range, double vertical)
+		{
+			if (std::abs(vertical) > range) return nullopt;
+			return std::sqrt(std::max(0., range * range - vertical * vertical));
+		}
+
+		// Shrink the horizontal radius, not the eligibility range, so a rounded
+		// approach target does not repeatedly stop just outside the circle.
+		constexpr float RemoteApproachRadiusInset = .999999f;
+		// A fraction of the current movement segment, not a World-space distance
+		// or an eligibility tolerance. Exact horizontal tangency must bypass it.
+		constexpr double RemoteSegmentEntryInset = .00001;
+	}
 
 	// Interaction and device-operation orchestration moved out of World
 	// (ADR 0004 stage 2). The behaviour is unchanged: the coordinator works on
@@ -64,33 +84,7 @@ namespace core
 		}
 		for (auto const& binding : bindings)
 		{
-			bool validTarget = false;
-			if (binding.command.type == DeviceCommandType::SetBoothWindowState
-				|| binding.command.type == DeviceCommandType::ToggleBoothWindow)
-				{
-				auto booth = mWorld.lookupBoothWindow(binding.command.boothWindow);
-				validTarget = booth && !booth->getDumbwaiterOwner();
-			}
-			else if (binding.command.type == DeviceCommandType::SetAccessPanelState)
-				validTarget = bool(mWorld.lookupAccessPanel(binding.command.accessPanel));
-			else if (binding.command.type == DeviceCommandType::PressDumbwaiterLanding)
-				validTarget = mWorld.lookupDumbwaiter(binding.command.dumbwaiter) && binding.command.stopIndex < 2;
-			else if (binding.command.type == DeviceCommandType::SetSectorLights)
-				validTarget = binding.command.target && binding.command.target.value <= mWorld.mSectors.size();
-			else if (binding.command.type == DeviceCommandType::RequestAirlock)
-				validTarget = binding.command.target && binding.command.target.value <= mWorld.mSectors.size()
-					&& mWorld.mSectors[binding.command.target.value - 1]->getType() == SectorType::Airlock
-					&& binding.command.stopIndex < 2;
-			else if (auto resource = mWorld.mTraversalResources.find(binding.command.traversalResource))
-				validTarget = binding.command.type == DeviceCommandType::OpenDoor ? resource->mDoor != nullptr
-					: binding.command.type == DeviceCommandType::SetExtendedState ? resource->mExtensible != nullptr
-					: (binding.command.type == DeviceCommandType::CallLift
-						|| binding.command.type == DeviceCommandType::SelectLiftDestination
-						|| binding.command.type == DeviceCommandType::CallShuttle
-						|| binding.command.type == DeviceCommandType::SelectShuttleDestination)
-						&& (resource->mLift || resource->mShuttle)
-						&& binding.command.stopIndex < resource->mLiftStops.size();
-			if (!validTarget)
+			if (!mWorld.hasValidDeviceCommandTarget(binding.command))
 			{
 				throw invalid_argument("An interaction binding requires a valid command target");
 			}
@@ -164,6 +158,12 @@ namespace core
 		{
 			cancelInteraction(requestId);
 		}
+		// The point's whole queue leaves with it: drop every derived press
+		// entry the queue still holds (#626). Pending requests were cancelled
+		// above and are already unindexed; this sweeps any terminal residue.
+		for (auto const requestId : found.entity->mQueue)
+			if (auto request = mWorld.mInteractionRequests.find(requestId))
+				unindexQueuedPress(request->mActor, requestId);
 		auto snapshot = makeInteractionPointSnapshot(id, *found.entity);
 		mWorld.mInteractionPoints.remove(id);
 
@@ -179,22 +179,10 @@ namespace core
 	DeviceOperationId SimulationCoordinator::findOrCreateDeviceOperation(DeviceCommand const& command, AgentId requester)
 	{
 		auto missing = mWorld.missingLiftDestinationPermissions(command, requester);
-		auto resource = mWorld.mTraversalResources.find(command.traversalResource);
-		bool const broken = resource && ((command.type == DeviceCommandType::OpenDoor
-			&& resource->mDoor && resource->mDoor->isBroken())
-			|| (command.type == DeviceCommandType::SetExtendedState
-				&& resource->mExtensible && resource->mExtensible->isBroken())
-			|| ((command.type == DeviceCommandType::CallLift
-				|| command.type == DeviceCommandType::SelectLiftDestination)
-				&& resource->mLift && resource->mLift->isBroken())
-			|| ((command.type == DeviceCommandType::CallShuttle
-				|| command.type == DeviceCommandType::SelectShuttleDestination)
-				&& resource->mShuttle && resource->mShuttle->isBroken()));
+		bool const broken = mWorld.isDeviceCommandTargetBroken(command);
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 		{
-			if (command.type != DeviceCommandType::SetAccessPanelState
-				&& command.type != DeviceCommandType::ToggleBoothWindow
-				&& command.type != DeviceCommandType::PressDumbwaiterLanding
+			if (isDeviceCommandCoalescible(command.type)
 				&& !broken && missing.empty() && operation->mHasCommand && operation->mCommand == command
 				&& (operation->mState == DeviceOperationState::Pending || operation->mState == DeviceOperationState::Running))
 			{
@@ -202,21 +190,7 @@ namespace core
 				return id;
 			}
 		}
-		auto name = command.type == DeviceCommandType::SetSectorLights
-			? string("Set sector lights ") + (command.desiredState ? "on" : "off")
-			: command.type == DeviceCommandType::OpenDoor ? "Open door"
-			: command.type == DeviceCommandType::SetExtendedState
-				? string(command.desiredState ? "Extend resource" : "Retract resource")
-			: command.type == DeviceCommandType::CallLift ? "Call lift"
-			: command.type == DeviceCommandType::SelectLiftDestination ? "Select lift destination"
-			: command.type == DeviceCommandType::CallShuttle ? "Call shuttle"
-			: command.type == DeviceCommandType::SelectShuttleDestination ? "Select shuttle destination"
-				: command.type == DeviceCommandType::RequestAirlock ? "Request Airlock"
-				: command.type == DeviceCommandType::ToggleBoothWindow ? "Toggle BoothWindow shutter"
-				: command.type == DeviceCommandType::SetBoothWindowState ? "Set BoothWindow shutter target"
-				: command.type == DeviceCommandType::PressDumbwaiterLanding ? "Press Dumbwaiter landing"
-				: command.type == DeviceCommandType::SetAccessPanelState
-					? (command.desiredState ? "Open Access panel" : "Close Access panel") : "Device command";
+		auto name = deviceCommandName(command);
 		if (!missing.empty())
 		{
 			name += ": missing Access permissions";
@@ -277,28 +251,37 @@ namespace core
 			|| point->mSector != approach) return nullopt;
 		double range = actor->getObjectUsageDistance();
 		double vertical = double(centre->y) - position.y;
-		if (std::abs(vertical) > range) return nullopt;
-		auto horizontal = std::sqrt(std::max(0., range * range - vertical * vertical));
-		return float(std::max(0., std::abs(double(centre->x) - position.x) - horizontal));
+		auto horizontal = remoteHorizontalReach(range, vertical);
+		if (!horizontal) return nullopt;
+		return float(std::max(0., std::abs(double(centre->x) - position.x) - *horizontal));
 	}
 
-	bool World::agentCanRemotelySelectLiftDestination(TraversalResourceId resourceId,
-		Agent const& actor, bool requireOccupancy) const
+	bool World::agentHasRemoteLiftSelectorCapability(TraversalResourceId resourceId,
+		Agent const& actor) const
 	{
 		auto resource = mTraversalResources.find(resourceId);
-		if (!resource || !resource->mLift || resource->mShuttle || !resource->mLiftSector
-			|| actor.getObjectUsage() != ObjectUsage::RemoteControl || agentForbidsButtons(&actor)) return false;
-		auto centre = resource->mLift->getPosition() + resource->mLift->getSize() * .5f;
-		auto occupied = find(resource->mOccupants.begin(), resource->mOccupants.end(), getAgentId(&actor))
-			!= resource->mOccupants.end();
-		if (occupied)
-		{
-			if (actor.getSector() != mSectors[resource->mLiftSector.value - 1].get()) return false;
-			auto position = actor.getGlobalPosition();
-			return std::hypot(double(position.x) - centre.x, double(position.y) - centre.y)
-				<= actor.getObjectUsageDistance();
-		}
-		if (requireOccupancy) return false;
+		return resource && resource->mLift && !resource->mShuttle && resource->mLiftSector
+			&& actor.getObjectUsage() == ObjectUsage::RemoteControl && !agentForbidsButtons(&actor);
+	}
+
+	bool World::agentCanRemotelySelectLiftDestinationHere(TraversalResourceId resourceId,
+		Agent const& actor) const
+	{
+		if (!agentHasRemoteLiftSelectorCapability(resourceId, actor)) return false;
+		auto resource = mTraversalResources.find(resourceId);
+		if (!isAgentTransportOccupant(resourceId, getAgentId(&actor))
+			|| actor.getSector() != mSectors[resource->mLiftSector.value - 1].get()) return false;
+		return agentWithinRemoteControlRange(actor,
+			resource->mLift->getPosition() + resource->mLift->getSize() * .5f);
+	}
+
+	bool World::agentHasFeasibleRemoteLiftSelection(TraversalResourceId resourceId,
+		Agent const& actor) const
+	{
+		if (!agentHasRemoteLiftSelectorCapability(resourceId, actor)) return false;
+		if (isAgentTransportOccupant(resourceId, getAgentId(&actor)))
+			return agentCanRemotelySelectLiftDestinationHere(resourceId, actor);
+		auto resource = mTraversalResources.find(resourceId);
 		// Planning may project boarding, never operate a selector. Enclosed cars
 		// centre a lone passenger; platforms retain authored capacity slots. Neither
 		// prediction exposes remote scheduling or occupancy. Allocation rechecks
@@ -306,45 +289,74 @@ namespace core
 		if (!resource->mOpenPlatformLift)
 			return resource->mLift->getSize().y * .5f <= actor.getObjectUsageDistance();
 		auto sector = mSectors[resource->mLiftSector.value - 1]->getPosition();
+		// Only the fixed horizontal geometry is needed for projected slots; do
+		// not read the remote vehicle's live vertical position.
+		auto centreX = resource->mLift->getPosition().x + resource->mLift->getSize().x * .5f;
 		return any_of(resource->mCapacityPositions.begin(), resource->mCapacityPositions.end(), [&](auto const& slot)
 		{
-			return std::hypot(double(sector.x + slot.x) - centre.x,
+			return std::hypot(double(sector.x + slot.x) - centreX,
 				double(slot.y) - resource->mLift->getSize().y * .5f) <= actor.getObjectUsageDistance();
 		});
 	}
 
-	bool World::agentCanOperateInteraction(InteractionPointId pointId, Agent const& actor, bool requireReach) const
+	bool World::agentCanOperateControlInSector(InteractionPoint const& point, Agent const& actor) const
+	{
+		return point.mSector && point.mSector.value <= mSectors.size() && actor.isActive()
+			&& agentCanOperateObjects(actor) && !agentForbidsButtons(&actor)
+			&& actor.getSector() == mSectors[point.mSector.value - 1].get();
+	}
+
+	bool World::agentWithinRemoteControlRange(Agent const& actor, Vector2 const& centre) const
+	{
+		auto position = actor.getGlobalPosition();
+		return std::hypot(double(position.x) - centre.x, double(position.y) - centre.y)
+			<= actor.getObjectUsageDistance();
+	}
+
+	shared_ptr<const BoothWindow> World::ownedBoothWindowControl(InteractionPointId id, InteractionPoint const& point) const
+	{
+		auto booth = lookupBoothWindow(point.mBoothWindowOwner);
+		return booth && !booth->getDumbwaiterOwner() && booth->getPanel() == id ? booth : nullptr;
+	}
+
+	optional<AccessPanel::Action> World::ownedAccessPanelAction(InteractionPointId id, InteractionPoint const& point) const
+	{
+		auto panel = lookupAccessPanel(point.mAccessPanelOwner);
+		if (!panel || point.mBindings.empty()) return nullopt;
+		auto action = point.mBindings.front().command.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close;
+		// A binding is not ownership: only the generated applicable control may
+		// use the panel geometry and remote capability.
+		if (panel->getControl(action) != id || !all_of(point.mBindings.begin(), point.mBindings.end(), [&](auto const& binding)
+		{
+			return binding.command.type == DeviceCommandType::SetAccessPanelState
+				&& binding.command.accessPanel == panel->getId()
+				&& binding.command.desiredState == (action == AccessPanel::Action::Open);
+		})) return nullopt;
+		return action;
+	}
+
+	bool World::agentCanOperateInteraction(InteractionPointId pointId, Agent const& actor,
+		InteractionEvaluationContext context) const
 	{
 		auto point = mInteractionPoints.find(pointId);
-		if (!point || !point->mSector || !actor.isActive() || agentForbidsButtons(&actor)
-			|| actor.getSector() != mSectors[point->mSector.value - 1].get()) return false;
+		if (!point || !agentCanOperateControlInSector(*point, actor)) return false;
 		if (actor.getObjectUsage() == ObjectUsage::RemoteControl)
 		{
 			if (point->mBoothWindowOwner)
 			{
 				// The owned back-side control is the authority; proximity to an
 				// aperture or an arbitrary binding must not grant another control.
-				auto booth = lookupBoothWindow(point->mBoothWindowOwner);
-				if (!booth || booth->getDumbwaiterOwner() || booth->getPanel() != pointId
-					|| !actor.getEffectiveRemoteBoothWindowShutters().value) return false;
-				auto centre = booth->getPosition() + booth->getSize() * .5f;
-				auto position = actor.getGlobalPosition();
-				return std::hypot(double(position.x) - centre.x, double(position.y) - centre.y)
-					<= actor.getObjectUsageDistance();
+				auto booth = ownedBoothWindowControl(pointId, *point);
+				return booth && actor.getEffectiveRemoteBoothWindowShutters().value
+					&& agentWithinRemoteControlRange(actor, booth->getPosition() + booth->getSize() * .5f);
 			}
 			if (point->mAccessPanelOwner)
 			{
 				// Only the panel's generated, applicable command qualifies. A generic
 				// point bound to a panel command cannot acquire remote eligibility.
 				auto panel = lookupAccessPanel(point->mAccessPanelOwner);
-				return panel && !point->mBindings.empty()
-					&& all_of(point->mBindings.begin(), point->mBindings.end(), [&](auto const& binding)
-					{
-						auto action = binding.command.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close;
-						return binding.command.type == DeviceCommandType::SetAccessPanelState
-							&& binding.command.accessPanel == panel->getId() && panel->getControl(action) == pointId
-							&& canRequestAccessPanel(panel->getId(), action, getAgentId(&actor));
-					});
+				auto action = ownedAccessPanelAction(pointId, *point);
+				return panel && action && accessPanelOperationEligible(*panel, *action, *point, actor);
 			}
 			auto centre = physicalButtonCentre(pointId);
 			if (!centre)
@@ -356,35 +368,71 @@ namespace core
 					auto resource = mTraversalResources.find(binding.command.traversalResource);
 					return binding.command.type == DeviceCommandType::SelectLiftDestination && resource
 						&& find(resource->mControls.begin(), resource->mControls.end(), pointId) != resource->mControls.end()
-						&& agentCanRemotelySelectLiftDestination(binding.command.traversalResource, actor);
+						&& agentCanRemotelySelectLiftDestinationHere(binding.command.traversalResource, actor);
 				});
 			}
-			auto position = actor.getGlobalPosition();
-			return centre && std::hypot(double(position.x) - centre->x, double(position.y) - centre->y) <= actor.getObjectUsageDistance();
+			return agentWithinRemoteControlRange(actor, *centre);
 		}
 		return actor.getObjectUsage() == ObjectUsage::Arms
-			&& (!(requireReach || point->requiresReachAtRequest())
+			&& (!(context != InteractionEvaluationContext::AutonomousApproach || point->requiresReachAtRequest())
 				|| agentCanPhysicallyOperate(actor, actor.getGlobalPosition().distanceTo(point->mPosition), point->mReach));
 	}
 
-	bool World::interactionRequestEligible(InteractionPointId pointId, AgentId actorId, bool requireReach) const
+	bool World::interactionRequestEligible(InteractionPointId pointId, AgentId actorId,
+		InteractionEvaluationContext context) const
 	{
 		auto point = mInteractionPoints.find(pointId);
 		auto actor = mAgents.find(actorId);
-		if (point && point->mAccessPanelOwner
-			&& !canRequestAccessPanel(point->mAccessPanelOwner,
-				point->mBindings.front().command.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close, actorId)) return false;
+		// Remote operation already includes panel policy. Arms request admission
+		// additionally checks action availability, Level and movement state.
+		if (point && actor && point->mAccessPanelOwner && actor->getObjectUsage() != ObjectUsage::RemoteControl)
+		{
+			auto panel = lookupAccessPanel(point->mAccessPanelOwner);
+			auto action = ownedAccessPanelAction(pointId, *point);
+			if (!panel || !action || !accessPanelOperationEligible(*panel, *action, *point, *actor)) return false;
+		}
 		// A finishing callback runs before physical movement commits, so the Agent
 		// is still standing at the usable point even though departure already set
 		// its movement state. Judge that one staged device request from the
 		// physical position rather than rejecting it merely because departure began.
 		bool const finishing = actorId == mFinishingFurnitureUseAgent;
-		return point && actor && agentCanOperateInteraction(pointId, *actor, requireReach)
+		return point && actor && agentCanOperateInteraction(pointId, *actor, context)
 			&& (actor->getObjectUsage() == ObjectUsage::RemoteControl || finishing
 				|| actor->getState() == Agent::State::Idle || actor->getState() == Agent::State::WaitingForTraversal);
 	}
 
-	InteractionRequestId SimulationCoordinator::requestInteraction(InteractionPointId pointId, AgentId actorId)
+	void SimulationCoordinator::publishInteractionRequestAdded(InteractionRequestId id, InteractionRequest const& request)
+	{
+		SimulationEvent event;
+		event.sequence = mWorld.mNextEventSequence++;
+		event.tick = mWorld.mSimulationTick;
+		event.type = SimulationEventType::InteractionRequestAdded;
+		event.phase = mWorld.mCurrentPhase;
+		event.interactionRequest = makeInteractionRequestSnapshot(id, request);
+		mWorld.mEvents.push_back(std::move(event));
+	}
+
+	InteractionRequestId SimulationCoordinator::rejectInteractionRequest(InteractionPointId point, AgentId actor,
+		vector<AccessPermissionId> const& missingPermissions)
+	{
+		auto id = mWorld.mInteractionRequests.add(unique_ptr<InteractionRequest>(new InteractionRequest(point, actor)));
+		auto request = mWorld.mInteractionRequests.find(id);
+		request->mResult = InteractionResult::Rejected;
+		request->mMissingPermissions = missingPermissions;
+		publishInteractionRequestAdded(id, *request);
+		return id;
+	}
+
+	DeviceOperationId SimulationCoordinator::bindInteractionOperation(InteractionRequest& request,
+		DeviceCommand const& command, InteractionBindingRequirement requirement)
+	{
+		auto id = findOrCreateDeviceOperation(command, request.mActor);
+		request.mOperations.emplace_back(id, requirement);
+		return id;
+	}
+
+	InteractionRequestId SimulationCoordinator::requestInteraction(InteractionPointId pointId, AgentId actorId,
+		bool prepareTraversal)
 	{
 		mWorld.invalidateSimulationSnapshot();
 		auto point = mWorld.mInteractionPoints.find(pointId);
@@ -396,25 +444,17 @@ namespace core
 		// than a route preference (ADR 0011), so a forbidden Agent is refused
 		// here too (#193); agentForbidsButtons keeps individual-over-tag
 		// precedence (ADR 0012) and never consults ordinary Door restrictions.
-		if (!mWorld.interactionRequestEligible(pointId, actorId))
+		auto const context = actor && actor->getObjectUsage() == ObjectUsage::RemoteControl
+			? World::InteractionEvaluationContext::RemoteActivation
+			: World::InteractionEvaluationContext::AutonomousApproach;
+		if (!mWorld.interactionRequestEligible(pointId, actorId, context))
 		{
 			return {};
 		}
 		auto const missing = mWorld.missingInteractionPermissions(*point, *actor);
 		if (!missing.empty())
 		{
-			auto id = mWorld.mInteractionRequests.add(unique_ptr<InteractionRequest>(new InteractionRequest(pointId, actorId)));
-			auto request = mWorld.mInteractionRequests.find(id);
-			request->mResult = InteractionResult::Rejected;
-			request->mMissingPermissions = missing;
-			SimulationEvent event;
-			event.sequence = mWorld.mNextEventSequence++;
-			event.tick = mWorld.mSimulationTick;
-			event.type = SimulationEventType::InteractionRequestAdded;
-			event.phase = mWorld.mCurrentPhase;
-			event.interactionRequest = makeInteractionRequestSnapshot(id, *request);
-			mWorld.mEvents.push_back(std::move(event));
-			return id;
+			return rejectInteractionRequest(pointId, actorId, missing);
 		}
 		for (auto const& [id, request] : mWorld.mInteractionRequests.entries())
 		{
@@ -427,17 +467,18 @@ namespace core
 		auto request = mWorld.mInteractionRequests.find(id);
 		for (auto const& binding : point->mBindings)
 		{
-			request->mOperations.emplace_back(findOrCreateDeviceOperation(binding.command, actorId), binding.requirement);
+			auto command = binding.command;
+			if (prepareTraversal && command.type == DeviceCommandType::ToggleExtendedState)
+			{
+				command.type = DeviceCommandType::SetExtendedState;
+				command.desiredState = true;
+			}
+			bindInteractionOperation(*request, command, binding.requirement);
 		}
 		point->mQueue.push_back(id);
+		indexQueuedPress(actorId, id); // Derived queued-press index mirrors the queue (#626).
 
-		SimulationEvent event;
-		event.sequence = mWorld.mNextEventSequence++;
-		event.tick = mWorld.mSimulationTick;
-		event.type = SimulationEventType::InteractionRequestAdded;
-		event.phase = mWorld.mCurrentPhase;
-		event.interactionRequest = makeInteractionRequestSnapshot(id, *request);
-		mWorld.mEvents.push_back(std::move(event));
+		publishInteractionRequestAdded(id, *request);
 		return id;
 	}
 
@@ -448,7 +489,7 @@ namespace core
 		// A route may need a Button beyond the current range. Approach only as
 		// far as the inclusive range boundary, never the physical control point.
 		if (agent && agent->getObjectUsage() == ObjectUsage::RemoteControl
-			&& !mWorld.agentCanOperateInteraction(point, *agent, true))
+			&& !mWorld.agentCanOperateInteraction(point, *agent, World::InteractionEvaluationContext::RemoteActivation))
 		{
 			auto control = mWorld.mInteractionPoints.find(point);
 			auto centre = mWorld.physicalButtonCentre(point);
@@ -458,22 +499,20 @@ namespace core
 			auto position = agent->getGlobalPosition();
 			auto range = agent->getObjectUsageDistance();
 			auto vertical = centre->y - position.y;
-			if (std::abs(vertical) > range) return {};
-			auto horizontal = std::sqrt(std::max(0., double(range) * range - double(vertical) * vertical));
-			// Aim just inside to avoid float round-off repeatedly refusing equality.
-			auto x = float(centre->x + (position.x < centre->x ? -1.f : 1.f) * horizontal * .999999f);
-			agent->mRemoteButtonApproachTarget = Vector2{x, position.y};
+			auto horizontal = remoteHorizontalReach(range, vertical);
+			if (!horizontal) return {};
+			auto x = float(centre->x + (position.x < centre->x ? -1.f : 1.f) * *horizontal * RemoteApproachRadiusInset);
+			agent->mRemoteInteractionApproachTarget = Vector2{x, position.y};
 			return {};
 		}
-		if (agent) agent->mRemoteButtonApproachTarget.reset();
-		if (agent && agent->mEarlyDoorPressInteraction)
+		if (agent) agent->mRemoteInteractionApproachTarget.reset();
+		if (agent && agent->mAnticipatoryInteraction.retainedRequest())
 		{
-			auto const earlyId = agent->mEarlyDoorPressInteraction;
-			agent->mEarlyDoorPressInteraction = {};
+			auto const earlyId = agent->mAnticipatoryInteraction.takeRequest();
 			auto early = mWorld.mInteractionRequests.find(earlyId);
 			if (early && early->mActor == actor && early->mPoint == point) return earlyId;
 		}
-		return requestInteraction(point, actor);
+		return requestInteraction(point, actor, true);
 	}
 
 	InteractionRequestId SimulationCoordinator::requestInteractionWhilePassing(
@@ -498,18 +537,7 @@ namespace core
 		auto const missing = mWorld.missingInteractionPermissions(*point, *actor);
 		if (!missing.empty())
 		{
-			auto id = mWorld.mInteractionRequests.add(unique_ptr<InteractionRequest>(new InteractionRequest(pointId, actorId)));
-			auto request = mWorld.mInteractionRequests.find(id);
-			request->mResult = InteractionResult::Rejected;
-			request->mMissingPermissions = missing;
-			SimulationEvent event;
-			event.sequence = mWorld.mNextEventSequence++;
-			event.tick = mWorld.mSimulationTick;
-			event.type = SimulationEventType::InteractionRequestAdded;
-			event.phase = mWorld.mCurrentPhase;
-			event.interactionRequest = makeInteractionRequestSnapshot(id, *request);
-			mWorld.mEvents.push_back(std::move(event));
-			return id;
+			return rejectInteractionRequest(pointId, actorId, missing);
 		}
 		for (auto const& [id, request] : mWorld.mInteractionRequests.entries())
 		{
@@ -523,19 +551,12 @@ namespace core
 		auto request = mWorld.mInteractionRequests.find(id);
 		for (auto const& binding : point->mBindings)
 		{
-			auto operationId = findOrCreateDeviceOperation(binding.command, actorId);
-			request->mOperations.emplace_back(operationId, binding.requirement);
+			auto operationId = bindInteractionOperation(*request, binding.command, binding.requirement);
 			if (auto operation = mWorld.mDeviceOperations.find(operationId)) operation->mActivated = true;
 		}
 		pressPhysicalControl(pointId);
 
-		SimulationEvent event;
-		event.sequence = mWorld.mNextEventSequence++;
-		event.tick = mWorld.mSimulationTick;
-		event.type = SimulationEventType::InteractionRequestAdded;
-		event.phase = mWorld.mCurrentPhase;
-		event.interactionRequest = makeInteractionRequestSnapshot(id, *request);
-		mWorld.mEvents.push_back(std::move(event));
+		publishInteractionRequestAdded(id, *request);
 		return id;
 	}
 
@@ -571,13 +592,13 @@ namespace core
 		mWorld.invalidateSimulationSnapshot();
 		auto actor = mWorld.mAgents.find(id);
 		if (!actor) return;
-		actor->mRemoteButtonApproachTarget.reset();
+		actor->mRemoteInteractionApproachTarget.reset();
 		std::vector<InteractionRequestId> cancelled;
 		for (auto const& [requestId, request] : mWorld.mInteractionRequests.entries())
 		{
 			if (request->mActor != id || request->mResult != InteractionResult::Pending) continue;
 			auto point = mWorld.mInteractionPoints.find(request->mPoint);
-			if (!point || !mWorld.agentCanOperateInteraction(request->mPoint, *actor, false))
+			if (!point || !mWorld.agentCanOperateInteraction(request->mPoint, *actor, World::InteractionEvaluationContext::AutonomousApproach))
 				cancelled.push_back(requestId);
 		}
 		for (auto request : cancelled) cancelInteraction(request);
@@ -592,7 +613,7 @@ namespace core
 				&& !mWorld.agentCanOperateManualDoorHere(operation->mCommand.traversalResource, id))
 				operations.push_back(operationId);
 		for (auto operation : operations) cancelDeviceOperation(operation, id);
-		if (!operations.empty()) actor->mEarlyDoorPressAttempted = false;
+		if (!operations.empty()) actor->mAnticipatoryInteraction.allowRetry();
 	}
 
 	bool SimulationCoordinator::cancelInteraction(InteractionRequestId id)
@@ -604,7 +625,15 @@ namespace core
 		}
 		request->mResult = InteractionResult::Cancelled;
 		detachInteractionRequester(*request);
-		if (auto point = mWorld.mInteractionPoints.find(request->mPoint))
+		releaseInteractionPointRequest(id, request->mPoint);
+		publishInteractionOutcome(id, *request);
+		return true;
+	}
+
+	void SimulationCoordinator::releaseInteractionPointRequest(InteractionRequestId id, InteractionPointId pointId)
+	{
+		// Release only this request's ownership; another active press owns its timer.
+		if (auto point = mWorld.mInteractionPoints.find(pointId))
 		{
 			if (point->mActiveRequest == id)
 			{
@@ -613,17 +642,57 @@ namespace core
 			}
 			point->mQueue.erase(remove(point->mQueue.begin(), point->mQueue.end(), id), point->mQueue.end());
 		}
+		// Leaving the queue leaves the derived press index with it (#626).
+		if (auto request = mWorld.mInteractionRequests.find(id))
+			unindexQueuedPress(request->mActor, id);
+	}
+
+	bool SimulationCoordinator::hasQueuedPressWork(AgentId id) const
+	{
+		// Direct query over the derived index (#626): only the queried Agent's
+		// own entries are visited. The index mirrors queue membership; the
+		// request record stays authoritative for the actor and the Pending
+		// result, so a stale entry can never fabricate a pause.
+		auto const found = mWorld.mQueuedPressesByAgent.find(id);
+		if (found == mWorld.mQueuedPressesByAgent.end()) return false;
+		for (auto const requestId : found->second)
+		{
+			++mWorld.mQueuedPressQueryVisits;
+			auto request = mWorld.mInteractionRequests.find(requestId);
+			if (request && request->mActor == id && request->mResult == InteractionResult::Pending)
+				return true;
+		}
+		return false;
+	}
+
+	void SimulationCoordinator::indexQueuedPress(AgentId actor, InteractionRequestId id)
+	{
+		if (!actor || !id) return;
+		mWorld.mQueuedPressesByAgent[actor].insert(id);
+	}
+
+	void SimulationCoordinator::unindexQueuedPress(AgentId actor, InteractionRequestId id)
+	{
+		auto const found = mWorld.mQueuedPressesByAgent.find(actor);
+		if (found == mWorld.mQueuedPressesByAgent.end()) return;
+		found->second.erase(id);
+		if (found->second.empty()) mWorld.mQueuedPressesByAgent.erase(found);
+	}
+
+	void SimulationCoordinator::publishInteractionOutcome(InteractionRequestId id, InteractionRequest const& request)
+	{
+		// Publication does not retire the record: traversal and passing readers
+		// must still observe it before the existing tick-boundary sweep.
 		SimulationEvent event;
 		event.sequence = mWorld.mNextEventSequence++;
 		event.tick = mWorld.mSimulationTick;
 		event.type = SimulationEventType::InteractionRequestChanged;
 		event.phase = mWorld.mCurrentPhase;
-		event.interactionRequest = makeInteractionRequestSnapshot(id, *request);
-		if (auto point = mWorld.mInteractionPoints.find(request->mPoint))
+		event.interactionRequest = makeInteractionRequestSnapshot(id, request);
+		if (auto point = mWorld.mInteractionPoints.find(request.mPoint))
 			event.interactionName = point->getName();
 		mWorld.mAgentBehaviourRuntime->observeOutcome(event);
 		mWorld.mEvents.push_back(std::move(event));
-		return true;
 	}
 
 	EntityRemovalResult SimulationCoordinator::removeInteractionRequest(InteractionRequestId id)
@@ -635,6 +704,9 @@ namespace core
 			return { false, found.diagnostic };
 		}
 		auto snapshot = makeInteractionRequestSnapshot(id, *found.entity);
+		// An explicitly removed request must not linger in the derived index,
+		// even while its stale handle stays in a point queue until dequeue (#626).
+		unindexQueuedPress(found.entity->mActor, id);
 		mWorld.mInteractionRequests.remove(id);
 
 		SimulationEvent event;
@@ -650,8 +722,7 @@ namespace core
 	{
 		if (command.type == DeviceCommandType::PressDumbwaiterLanding)
 		{
-			auto unit = std::const_pointer_cast<Dumbwaiter>(mWorld.lookupDumbwaiter(command.dumbwaiter));
-			if (!unit || command.stopIndex > 1) return {};
+			if (!mWorld.hasValidDeviceCommandTarget(command)) return {};
 			mWorld.invalidateSimulationSnapshot();
 			auto id = findOrCreateDeviceOperation(command, {});
 			auto operation = mWorld.mDeviceOperations.find(id);
@@ -669,8 +740,7 @@ namespace core
 		// No Agent, admission resource, or document/history mutation is involved.
 		if ((command.type != DeviceCommandType::SetBoothWindowState
 			&& command.type != DeviceCommandType::ToggleBoothWindow)
-			|| !mWorld.lookupBoothWindow(command.boothWindow)) return {};
-		if (mWorld.lookupBoothWindow(command.boothWindow)->getDumbwaiterOwner()) return {};
+			|| !mWorld.hasValidDeviceCommandTarget(command)) return {};
 		mWorld.invalidateSimulationSnapshot();
 		auto id = findOrCreateDeviceOperation(command, {});
 		mWorld.mDeviceOperations.find(id)->mActivated = true;
@@ -764,22 +834,158 @@ namespace core
 		return { true, {} };
 	}
 
+	// A newer activation takes the device's target: the operations which were
+	// still Running toward another target on that device retire with it. The
+	// scan keeps the registry's stable-ID order and touches each retired
+	// operation for event publication, exactly as the inline loops did.
+	template <typename Matches>
+	void SimulationCoordinator::supersedeRunningOperations(DeviceOperationId winner, Matches matches)
+	{
+		for (auto const& [otherId, other] : mWorld.mDeviceOperations.entries())
+			if (otherId != winner && other->mState == DeviceOperationState::Running && matches(*other))
+			{
+				touchDeviceOperation(otherId, *other);
+				other->mState = DeviceOperationState::Cancelled;
+			}
+	}
+
+	// A BoothWindow shutter activates by taking its new target: a Toggle
+	// resolves once against the shutter's current target, and any operation
+	// still travelling the other way on the same shutter is superseded. The
+	// shutter keeps its physical progress and reverses from there.
+	void SimulationCoordinator::activateBoothWindow(DeviceOperationId id, DeviceOperation& operation)
+	{
+		auto found = mWorld.mBoothWindows.find(operation.mCommand.boothWindow);
+		auto booth = found == mWorld.mBoothWindows.end() ? nullptr : found->second.lock();
+		if (!booth)
+		{
+			operation.mState = DeviceOperationState::Rejected;
+			return;
+		}
+		// A new target supersedes prior travel, not its physical position.
+		supersedeRunningOperations(id, [&](DeviceOperation const& other)
+		{
+			return (other.mCommand.type == DeviceCommandType::SetBoothWindowState
+				|| other.mCommand.type == DeviceCommandType::ToggleBoothWindow)
+				&& other.mCommand.boothWindow == operation.mCommand.boothWindow;
+		});
+		if (operation.mCommand.type == DeviceCommandType::ToggleBoothWindow)
+			operation.mCommand.desiredState = !booth->mTargetOpen;
+		booth->mTargetOpen = operation.mCommand.desiredState;
+		booth->refreshState();
+	}
+
+	// A manual Door keeps its implicit revalidation at activation: an
+	// ordinary Door with requesters may only be opened by an Agent which can
+	// still operate it here, so a request nobody reached cannot open it.
+	// Automatic and transport-coordinated Doors carry no requesters and are
+	// unaffected by that check.
+	void SimulationCoordinator::activateManualDoor(DeviceOperationId id, DeviceOperation& operation)
+	{
+		(void)id;
+		auto resource = mWorld.mTraversalResources.find(operation.mCommand.traversalResource);
+		bool eligible = true;
+		if (mWorld.remoteOrdinaryDoorCentre(operation.mCommand.traversalResource)
+			&& !operation.mRequesters.empty())
+			eligible = any_of(operation.mRequesters.begin(), operation.mRequesters.end(), [&](auto actor)
+			{
+				return mWorld.agentCanOperateManualDoorHere(operation.mCommand.traversalResource, actor);
+			});
+		if (!resource || !resource->mDoor || !resource->mEnabled || !eligible
+			|| !(operation.mCommand.desiredState
+				? resource->mDoor->requestOpen() : resource->mDoor->requestClose()))
+		{
+			operation.mState = DeviceOperationState::Rejected;
+		}
+	}
+
+	// An extensible resource resolves a Toggle once against its current
+	// extension target, then commits the intent: extending starts now, while
+	// closing only withdraws admission and the physical retraction still
+	// waits for whoever is standing on the span.
+	void SimulationCoordinator::activateExtensible(DeviceOperationId id, DeviceOperation& operation)
+	{
+		auto resource = mWorld.mTraversalResources.find(operation.mCommand.traversalResource);
+		if (!resource || !resource->mExtensible || !resource->mExtensible->isExtensible())
+		{
+			operation.mState = DeviceOperationState::Rejected;
+			return;
+		}
+		if (resource->mExtensible->isBroken())
+		{
+			operation.mState = DeviceOperationState::Failed;
+			return;
+		}
+		// Resolve an activation once, against the current extension target.
+		if (operation.mCommand.type == DeviceCommandType::ToggleExtendedState)
+			operation.mCommand.desiredState = resource->mRetractionPending
+				|| !(resource->mExtensible->isExtended() || resource->mExtensible->isExtending());
+		// Opposite targets supersede old operations, not physical position.
+		supersedeRunningOperations(id, [&](DeviceOperation const& other)
+		{
+			return (other.mCommand.type == DeviceCommandType::SetExtendedState
+				|| other.mCommand.type == DeviceCommandType::ToggleExtendedState)
+				&& other.mCommand.traversalResource == operation.mCommand.traversalResource
+				&& other.mCommand.desiredState != operation.mCommand.desiredState;
+		});
+		if (operation.mCommand.desiredState)
+		{
+			resource->mRetractionPending = false;
+			resource->mEnabled = true;
+			if (!resource->mExtensible->extend())
+				operation.mState = DeviceOperationState::Rejected;
+		}
+		else
+		{
+			// Close admission now; physical retraction waits for users.
+			resource->mRetractionPending = true;
+			resource->mEnabled = false;
+		}
+	}
+
+	// The panel press is the activation: the leaf takes its new direction from
+	// the physical position it has already reached, so a reversal turns
+	// around mid-travel instead of waiting for the old travel to finish, and
+	// the superseded travel retires on this same tick.
+	void SimulationCoordinator::activateAccessPanelPress(DeviceOperationId id, DeviceOperation& operation,
+		AgentId actor)
+	{
+		auto found = mWorld.mAccessPanels.find(operation.mCommand.accessPanel);
+		auto panel = found == mWorld.mAccessPanels.end() ? nullptr : found->second.lock();
+		touchDeviceOperation(id, operation);
+		operation.mActivated = true;
+		auto action = operation.mCommand.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close;
+		auto control = panel ? mWorld.mInteractionPoints.find(panel->getControl(action)) : nullptr;
+		bool eligible = panel && control && mWorld.interactionRequestEligible(
+			panel->getControl(action), actor, World::InteractionEvaluationContext::ImmediatePress);
+		operation.mState = eligible ? DeviceOperationState::Running : DeviceOperationState::Rejected;
+		if (!eligible) return;
+		// Reversal keeps the physical leaf position, cancelling superseded travel.
+		supersedeRunningOperations(id, [&](DeviceOperation const& other)
+		{
+			return other.mCommand.type == DeviceCommandType::SetAccessPanelState
+				&& other.mCommand.accessPanel == panel->getId();
+		});
+		panel->mOpen = operation.mCommand.desiredState;
+	}
+
+	// Device advancement and completion dispatch (#624). The outer order is
+	// exactly the order the inline code used: pending physical retractions,
+	// then the operation loop (activation on the Pending-to-Running boundary,
+	// completion observation for operations already Running), then the
+	// physical travel of shutters and panels, the panel completion check,
+	// the Dumbwaiter progression, and finally the shutter completion check.
+	// Physical advancement moves the device; observation only reads the
+	// device and retires an operation which has reached its target. Every
+	// state change still goes through touchDeviceOperation so the tick
+	// events are unchanged.
 	void SimulationCoordinator::advanceDeviceOperations()
 	{
 		mWorld.invalidateSimulationSnapshot();
-		// The physical safe-retract intent outlives its queryable operation, which
-		// fails on breakage. Restoration may resume it only after leases drain.
-		for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
-		{
-			(void)resourceId;
-			if (!resource->mRetractionPending || !resource->mExtensible
-				|| resource->mExtensible->isBroken()) continue;
-			if (resource->mExtensionRequestLeases.empty() && resource->mExtensionOccupantLeases.empty())
-			{
-				resource->mExtensible->retract();
-				if (resource->mExtensible->isRetracted()) resource->mRetractionPending = false;
-			}
-		}
+		// The physical safe-retract intent outlives its queryable operation,
+		// which fails on breakage. Restoration may resume it only after
+		// leases drain.
+		advancePendingRetractions();
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 		{
 			(void)id;
@@ -790,183 +996,241 @@ namespace core
 			touchDeviceOperation(id, *operation);
 			if (operation->mState == DeviceOperationState::Pending)
 			{
-				operation->mState = DeviceOperationState::Running;
-				if (operation->mCommand.type == DeviceCommandType::SetBoothWindowState
-					|| operation->mCommand.type == DeviceCommandType::ToggleBoothWindow)
-				{
-					auto found = mWorld.mBoothWindows.find(operation->mCommand.boothWindow);
-					auto booth = found == mWorld.mBoothWindows.end() ? nullptr : found->second.lock();
-					if (!booth) operation->mState = DeviceOperationState::Rejected;
-					else
-					{
-						// A new target supersedes prior travel, not its physical position.
-						for (auto const& [otherId, other] : mWorld.mDeviceOperations.entries())
-							if (otherId != id && other->mState == DeviceOperationState::Running
-								&& (other->mCommand.type == DeviceCommandType::SetBoothWindowState
-									|| other->mCommand.type == DeviceCommandType::ToggleBoothWindow)
-								&& other->mCommand.boothWindow == operation->mCommand.boothWindow)
-							{
-								touchDeviceOperation(otherId, *other);
-								other->mState = DeviceOperationState::Cancelled;
-							}
-						if (operation->mCommand.type == DeviceCommandType::ToggleBoothWindow)
-							operation->mCommand.desiredState = !booth->mTargetOpen;
-						booth->mTargetOpen = operation->mCommand.desiredState;
-						booth->refreshState();
-					}
-				}
-				else if (operation->mCommand.type == DeviceCommandType::OpenDoor)
-				{
-					auto resource = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
-					bool eligible = true;
-					if (mWorld.remoteOrdinaryDoorCentre(operation->mCommand.traversalResource)
-						&& !operation->mRequesters.empty())
-						eligible = any_of(operation->mRequesters.begin(), operation->mRequesters.end(), [&](auto actor) {
-							return mWorld.agentCanOperateManualDoorHere(operation->mCommand.traversalResource, actor);
-						});
-					if (!resource || !resource->mDoor || !resource->mEnabled || !eligible
-						|| !(operation->mCommand.desiredState
-							? resource->mDoor->requestOpen() : resource->mDoor->requestClose()))
-					{
-						operation->mState = DeviceOperationState::Rejected;
-					}
-				}
-				else if (operation->mCommand.type == DeviceCommandType::SetExtendedState)
-				{
-					auto resource = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
-					if (!resource || !resource->mExtensible || !resource->mExtensible->isExtensible())
-					{
-						operation->mState = DeviceOperationState::Rejected;
-					}
-					else if (resource->mExtensible->isBroken())
-					{
-						operation->mState = DeviceOperationState::Failed;
-					}
-					else if (operation->mCommand.desiredState)
-					{
-						resource->mRetractionPending = false;
-						resource->mEnabled = true;
-						if (!resource->mExtensible->extend())
-							operation->mState = DeviceOperationState::Rejected;
-					}
-					else
-					{
-						// Accepting a safe retract closes admission immediately. Physical
-						// retraction starts only after every independently-owned lease drains.
-						resource->mRetractionPending = true;
-						resource->mEnabled = false;
-					}
-				}
+				activatePendingOperation(id, *operation);
 				continue;
 			}
+			// A Dumbwaiter press is advanced by the unit itself; its landing
+			// cycle never observes completion through this loop.
 			if (operation->mCommand.type == DeviceCommandType::PressDumbwaiterLanding) continue;
 			if (operation->mState != DeviceOperationState::Running)
 			{
 				continue;
 			}
-			if (operation->mCommand.type == DeviceCommandType::SetBoothWindowState
-				|| operation->mCommand.type == DeviceCommandType::ToggleBoothWindow)
+			observeRunningOperation(id, *operation);
+		}
+		// Travel is owned by the device, not by the lifetime of an operation
+		// or a traversal lease. This phase runs only on active simulation
+		// ticks. The completion checks observe the travel applied above, in
+		// the original order: panels first, then the Dumbwaiter progression,
+		// then the shutters.
+		advanceBoothWindowTravel();
+		advanceAccessPanelTravel();
+		completeAccessPanelOperations();
+		advanceDumbwaiters();
+		completeBoothWindowOperations();
+	}
+
+	// A span may be retracted only when no traversal still depends on it:
+	// no extension request or occupant lease, and - because a manually
+	// positioned Player has no routed crossing task to hold a lease - no
+	// Player standing on the bridge itself, even a stopped or deactivated
+	// one. Extracted from the inline lambda unchanged (#624).
+	bool SimulationCoordinator::canRetractSafely(TraversalResource const& resource) const
+	{
+		if (!resource.mExtensionRequestLeases.empty() || !resource.mExtensionOccupantLeases.empty()) return false;
+		// Manual Floor walking has no routed crossing task/lease. Retain its
+		// support too, including a stopped or deactivated Player on the span.
+		if (resource.mForceBridge)
+			for (auto const& [agentId, agent] : mWorld.mAgents.entries())
 			{
-				if (!mWorld.lookupBoothWindow(operation->mCommand.boothWindow))
-					operation->mState = DeviceOperationState::Failed;
+				(void)agentId;
+				if (!agent->getSector() || !any_of(resource.mQueueLanes.begin(), resource.mQueueLanes.end(),
+					[&](auto const& lane) { return lane.sector == SectorId{uint64_t(agent->getSector()->getIndex()) + 1}; })) continue;
+				auto const position = agent->getGlobalPosition();
+				auto const bridgePosition = resource.mForceBridge->getPosition();
+				if (std::abs(position.y - bridgePosition.y) < .001f
+					&& position.x + agent->getWidth() * .5f > bridgePosition.x
+					&& position.x - agent->getWidth() * .5f < bridgePosition.x + resource.mForceBridge->getSize().x) return false;
 			}
-			else if (operation->mCommand.type == DeviceCommandType::SetAccessPanelState)
+		return true;
+	}
+
+	// The physical safe-retract intent outlives its queryable operation, which
+	// fails on breakage. Restoration may resume it only after leases drain.
+	void SimulationCoordinator::advancePendingRetractions()
+	{
+		for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
+		{
+			(void)resourceId;
+			if (!resource->mRetractionPending || !resource->mExtensible
+				|| resource->mExtensible->isBroken()) continue;
+			if (canRetractSafely(*resource))
 			{
-				if (!mWorld.lookupAccessPanel(operation->mCommand.accessPanel))
-					operation->mState = DeviceOperationState::Failed;
-			}
-			else if (operation->mCommand.type == DeviceCommandType::SetSectorLights
-				&& operation->mCommand.target
-				&& operation->mCommand.target.value <= mWorld.mSectors.size())
-			{
-				auto sector = mWorld.mSectors[(size_t)operation->mCommand.target.value - 1];
-				bool succeeded = operation->mCommand.desiredState ? sector->lightsOn() : sector->lightsOff();
-				operation->mState = succeeded ? DeviceOperationState::Succeeded : DeviceOperationState::Failed;
-			}
-			else if (operation->mCommand.type == DeviceCommandType::RequestAirlock)
-			{
-				operation->mState = acceptAirlockCommand(operation->mCommand)
-					? DeviceOperationState::Succeeded : DeviceOperationState::Rejected;
-			}
-			else if (operation->mCommand.type == DeviceCommandType::SetExtendedState)
-			{
-				auto resource = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
-				if (!resource || !resource->mExtensible || resource->mExtensible->isBroken())
-				{
-					operation->mState = DeviceOperationState::Failed;
-				}
-				else if (operation->mCommand.desiredState && resource->mExtensible->isExtended())
-				{
-					operation->mState = DeviceOperationState::Succeeded;
-				}
-				else if (!operation->mCommand.desiredState)
-				{
-					if (resource->mExtensionRequestLeases.empty()
-						&& resource->mExtensionOccupantLeases.empty())
-					{
-						if (!resource->mExtensible->isRetracted() && !resource->mExtensible->isRetracting())
-							resource->mExtensible->retract();
-						if (resource->mExtensible->isRetracted())
-						{
-							resource->mRetractionPending = false;
-							operation->mState = DeviceOperationState::Succeeded;
-						}
-					}
-				}
-			}
-			else if (operation->mCommand.type == DeviceCommandType::CallLift
-				|| operation->mCommand.type == DeviceCommandType::SelectLiftDestination
-				|| operation->mCommand.type == DeviceCommandType::CallShuttle
-				|| operation->mCommand.type == DeviceCommandType::SelectShuttleDestination)
-			{
-				auto resource = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
-				if (!resource || (!resource->mLift && !resource->mShuttle) || !resource->mEnabled
-					|| (resource->mLift && resource->mLift->isBroken())
-					|| (resource->mShuttle && resource->mShuttle->isBroken())
-					|| operation->mCommand.stopIndex >= resource->mLiftStops.size())
-				{
-					operation->mState = DeviceOperationState::Rejected;
-				}
-				else
-				{
-					if (operation->mCommand.type == DeviceCommandType::CallLift
-						|| operation->mCommand.type == DeviceCommandType::CallShuttle)
-					{
-						// The operation may be shared by several waiting passengers. Each
-						// keeps independent ownership even though the physical call coalesces.
-						for (auto requester : operation->mRequesters)
-							addLiftStopRequest(*resource, operation->mCommand.stopIndex, requester);
-						if (resource->mLiftStopPhase == LiftStopPhase::Idle)
-							resource->mLiftStopPhase = LiftStopPhase::Closing;
-					}
-					else resource->mLiftDestinationStop = operation->mCommand.stopIndex;
-					operation->mState = DeviceOperationState::Succeeded;
-				}
-			}
-			else if (operation->mCommand.type == DeviceCommandType::OpenDoor)
-			{
-				auto resource = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
-				if (!resource || !resource->mDoor || resource->mDoor->isBroken())
-				{
-					operation->mState = DeviceOperationState::Failed;
-				}
-				else if (!resource->mEnabled)
-				{
-					operation->mState = DeviceOperationState::Rejected;
-				}
-				else if ((operation->mCommand.desiredState && resource->mDoor->isOpen())
-					|| (!operation->mCommand.desiredState && resource->mDoor->isClosed()))
-				{
-					operation->mState = DeviceOperationState::Succeeded;
-				}
-			}
-			else
-			{
-				operation->mState = DeviceOperationState::Failed;
+				resource->mExtensible->retract();
+				if (resource->mExtensible->isRetracted()) resource->mRetractionPending = false;
 			}
 		}
-		// Travel is owned by the device, not by the lifetime of an operation or
-		// a traversal lease. This phase runs only on active simulation ticks.
+	}
+
+	// The Pending-to-Running transition is this phase's activation boundary:
+	// each device family's activation helper is reached here, on the tick the
+	// operation was already activated on, and retires the operations its
+	// target supersedes (#623). A freshly activated operation is not also
+	// observed for completion until a later tick.
+	void SimulationCoordinator::activatePendingOperation(DeviceOperationId id, DeviceOperation& operation)
+	{
+		operation.mState = DeviceOperationState::Running;
+		if (operation.mCommand.type == DeviceCommandType::SetBoothWindowState
+			|| operation.mCommand.type == DeviceCommandType::ToggleBoothWindow)
+			activateBoothWindow(id, operation);
+		else if (operation.mCommand.type == DeviceCommandType::OpenDoor)
+			activateManualDoor(id, operation);
+		else if (operation.mCommand.type == DeviceCommandType::SetExtendedState
+			|| operation.mCommand.type == DeviceCommandType::ToggleExtendedState)
+			activateExtensible(id, operation);
+	}
+
+	// Completion observation for an already-running operation: the command
+	// family decides whether the device's current state satisfies the
+	// operation, and the operation retires here only when it does. The
+	// switch mirrors the original if/else chain; command types are mutually
+	// exclusive, so the dispatch order carries no behaviour, and an
+	// unrecognised type fails exactly as the final else clause did (#624).
+	void SimulationCoordinator::observeRunningOperation(DeviceOperationId id, DeviceOperation& operation)
+	{
+		(void)id;
+		switch (operation.mCommand.type)
+		{
+		case DeviceCommandType::SetBoothWindowState:
+		case DeviceCommandType::ToggleBoothWindow:
+			// The shutter's travel completion is observed after the physical
+			// advance; here only the device's disappearance fails the
+			// operation.
+			if (!mWorld.lookupBoothWindow(operation.mCommand.boothWindow))
+				operation.mState = DeviceOperationState::Failed;
+			break;
+		case DeviceCommandType::SetAccessPanelState:
+			if (!mWorld.lookupAccessPanel(operation.mCommand.accessPanel))
+				operation.mState = DeviceOperationState::Failed;
+			break;
+		case DeviceCommandType::SetSectorLights:
+			if (operation.mCommand.target && operation.mCommand.target.value <= mWorld.mSectors.size())
+			{
+				auto sector = mWorld.mSectors[(size_t)operation.mCommand.target.value - 1];
+				bool succeeded = operation.mCommand.desiredState ? sector->lightsOn() : sector->lightsOff();
+				operation.mState = succeeded ? DeviceOperationState::Succeeded : DeviceOperationState::Failed;
+			}
+			else
+				operation.mState = DeviceOperationState::Failed;
+			break;
+		case DeviceCommandType::RequestAirlock:
+			operation.mState = acceptAirlockCommand(operation.mCommand)
+				? DeviceOperationState::Succeeded : DeviceOperationState::Rejected;
+			break;
+		case DeviceCommandType::SetExtendedState:
+		case DeviceCommandType::ToggleExtendedState:
+			advanceExtensibleOperation(operation);
+			break;
+		case DeviceCommandType::CallLift:
+		case DeviceCommandType::SelectLiftDestination:
+		case DeviceCommandType::CallShuttle:
+		case DeviceCommandType::SelectShuttleDestination:
+			advanceTransportCallOperation(operation);
+			break;
+		case DeviceCommandType::OpenDoor:
+			advanceDoorOperation(operation);
+			break;
+		default:
+			operation.mState = DeviceOperationState::Failed;
+			break;
+		}
+	}
+
+	// An extensible operation completes by observing the resource: extension
+	// succeeds once the span is fully extended, while closing drives the
+	// physical retraction itself when the span is safe to retract and only
+	// succeeds when the retraction has actually landed. A broken or missing
+	// resource fails the operation exactly as the inline chain did.
+	void SimulationCoordinator::advanceExtensibleOperation(DeviceOperation& operation)
+	{
+		auto resource = mWorld.mTraversalResources.find(operation.mCommand.traversalResource);
+		if (!resource || !resource->mExtensible || resource->mExtensible->isBroken())
+		{
+			operation.mState = DeviceOperationState::Failed;
+		}
+		else if (operation.mCommand.desiredState && resource->mExtensible->isExtended())
+		{
+			operation.mState = DeviceOperationState::Succeeded;
+		}
+		else if (!operation.mCommand.desiredState)
+		{
+			if (canRetractSafely(*resource))
+			{
+				if (!resource->mExtensible->isRetracted() && !resource->mExtensible->isRetracting())
+					resource->mExtensible->retract();
+				if (resource->mExtensible->isRetracted())
+				{
+					resource->mRetractionPending = false;
+					operation.mState = DeviceOperationState::Succeeded;
+				}
+			}
+		}
+	}
+
+	// A transport call or destination selection is revalidated against the
+	// resource's live capability, then recorded: a call fans out over every
+	// requester while a selection simply retargets the car. Device-owned
+	// travel keeps its existing relationship to request cancellation and
+	// lifetime - this only records the intent the vehicle advances on its own.
+	void SimulationCoordinator::advanceTransportCallOperation(DeviceOperation& operation)
+	{
+		auto resource = mWorld.mTraversalResources.find(operation.mCommand.traversalResource);
+		if (!resource || (!resource->mLift && !resource->mShuttle) || !resource->mEnabled
+			|| (resource->mLift && resource->mLift->isBroken())
+			|| (resource->mShuttle && resource->mShuttle->isBroken())
+			|| operation.mCommand.stopIndex >= resource->mLiftStops.size())
+		{
+			operation.mState = DeviceOperationState::Rejected;
+		}
+		else
+		{
+			if (operation.mCommand.type == DeviceCommandType::CallLift
+				|| operation.mCommand.type == DeviceCommandType::CallShuttle)
+			{
+				// The operation may be shared by several waiting passengers. Each
+				// keeps independent ownership even though the physical call coalesces.
+				for (auto requester : operation.mRequesters)
+				{
+					auto actor = mWorld.mAgents.find(requester);
+					if (actor && actor->isPlayerControlled())
+						resource->mPlayerStopRequests.try_emplace(operation.mCommand.stopIndex, mWorld.mSimulationTick);
+					else addLiftStopRequest(*resource, operation.mCommand.stopIndex, requester);
+				}
+				if (resource->mLiftStopPhase == LiftStopPhase::Idle)
+					resource->mLiftStopPhase = LiftStopPhase::Closing;
+			}
+			else resource->mLiftDestinationStop = operation.mCommand.stopIndex;
+			operation.mState = DeviceOperationState::Succeeded;
+		}
+	}
+
+	// A manual Door operation succeeds only when the physical door has
+	// reached the requested position; breakage fails it and a disabled
+	// resource rejects it, exactly as the inline chain did.
+	void SimulationCoordinator::advanceDoorOperation(DeviceOperation& operation)
+	{
+		auto resource = mWorld.mTraversalResources.find(operation.mCommand.traversalResource);
+		if (!resource || !resource->mDoor || resource->mDoor->isBroken())
+		{
+			operation.mState = DeviceOperationState::Failed;
+		}
+		else if (!resource->mEnabled)
+		{
+			operation.mState = DeviceOperationState::Rejected;
+		}
+		else if ((operation.mCommand.desiredState && resource->mDoor->isOpen())
+			|| (!operation.mCommand.desiredState && resource->mDoor->isClosed()))
+		{
+			operation.mState = DeviceOperationState::Succeeded;
+		}
+	}
+
+	// Physical travel: the shutter keeps moving toward its target regardless
+	// of whether any operation still observes it. Travel is owned by the
+	// device, not by the lifetime of an operation or a traversal lease, and
+	// this runs only on active simulation ticks.
+	void SimulationCoordinator::advanceBoothWindowTravel()
+	{
 		for (auto const& [deviceId, weak] : mWorld.mBoothWindows)
 		{
 			(void)deviceId;
@@ -980,6 +1244,13 @@ namespace core
 				booth->refreshState();
 			}
 		}
+	}
+
+	// The panel leaf advances toward its open target at its own speed; the
+	// operation's success is observed separately, after this travel has
+	// been applied (#624).
+	void SimulationCoordinator::advanceAccessPanelTravel()
+	{
 		for (auto const& [panelId, weak] : mWorld.mAccessPanels)
 		{
 			(void)panelId;
@@ -992,6 +1263,14 @@ namespace core
 				if (panel->mOpen && panel->mProgress > 1 - 1e-6f) panel->mProgress = 1;
 			}
 		}
+	}
+
+	// Completion observation runs after the physical advance so a panel
+	// which reached its target this tick retires its operation on this same
+	// tick, before the Dumbwaiter progression which may drive another
+	// shutter.
+	void SimulationCoordinator::completeAccessPanelOperations()
+	{
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 			if (operation->mState == DeviceOperationState::Running
 				&& operation->mCommand.type == DeviceCommandType::SetAccessPanelState)
@@ -1001,7 +1280,14 @@ namespace core
 					touchDeviceOperation(id, *operation);
 					operation->mState = DeviceOperationState::Succeeded;
 				}
-		advanceDumbwaiters();
+	}
+
+	// The BoothWindow completion check runs last, after the Dumbwaiter
+	// progression, preserving the original ordering in which a Dumbwaiter
+	// cycle retires its own operation before the shutter operations it
+	// drove observe the same final progress (#624).
+	void SimulationCoordinator::completeBoothWindowOperations()
+	{
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 			if (operation->mState == DeviceOperationState::Running
 				&& (operation->mCommand.type == DeviceCommandType::SetBoothWindowState
@@ -1127,90 +1413,130 @@ namespace core
 	void SimulationCoordinator::pressPhysicalControl(InteractionPointId pointId)
 	{
 		mWorld.invalidateSimulationSnapshot();
-		for (auto const& sector : mWorld.mSectors)
+		// Derived point-to-placement lookup replaces the all-Sector Button
+		// scan (#625). The placement resolves only when its Button is still
+		// bound to this point, so press feedback follows the same authority
+		// as geometry lookups and no disabled control can be missed by a
+		// stale index.
+		if (auto const* placement = mWorld.physicalControlPlacement(pointId))
 		{
-			for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
-			{
-				auto object = sector->getObject(i);
-				auto button = object
-					? dynamic_pointer_cast<Button>(object->_getObject()) : nullptr;
-				if (button && button->getInteractionPointId() == pointId)
-				{
-					button->disable();
-					return;
-				}
-			}
+			auto button = dynamic_pointer_cast<Button>(
+				mWorld.mSectors[placement->sectorIndex]->_getObject(placement->objectIndex)->_getObject());
+			if (button) button->disable();
 		}
 	}
 
-	vector<InteractionPointId> SimulationCoordinator::upcomingRemoteButtons(Agent const& agent, TraversalResourceId& upcoming) const
+	// R16 (#630): the upcoming remote-interaction pipeline is split into
+	// focused steps. Path-based discovery yields the target facts - the next
+	// action-bearing edge's resource and the in-Sector source vertex the
+	// approach is measured from - without consulting live device state,
+	// permissions or proximity. Control resolution turns the target into the
+	// resource's candidate controls, and the necessity step decides which of
+	// them still have work for the upcoming traversal. The movement-limit and
+	// activation consumers compose these steps once per step and reuse the
+	// facts downstream; each still revalidates mutable eligibility at its
+	// own lifecycle boundary, so no stale target cache is introduced.
+
+	bool SimulationCoordinator::discoverUpcomingRemoteTarget(Agent const& agent,
+		TraversalResourceId& upcoming, shared_ptr<const Vertex>& source) const
 	{
 		// Authored Path intent, not proximity, identifies the operation. Stop at
 		// the first action-bearing edge; never inspect another Sector's controls.
 		auto const& path = agent.mPath.path;
-		if (!path || !agent.getSector()) return {};
-		shared_ptr<const Vertex> source;
+		if (!path || !agent.getSector()) return false;
 		for (uint32_t i = agent.mPath.targetNode + 1; i < path->nodes.size(); ++i)
 		{
 			auto const& node = path->nodes[i];
 			source = path->nodes[i - 1].targetVertex;
-			if (!node.edge || !node.targetVertex || !source || source->getSector().get() != agent.getSector()) return {};
+			if (!node.edge || !node.targetVertex || !source || source->getSector().get() != agent.getSector()) return false;
 			if (node.edge->getType() != EdgeType::Location)
 			{
 				upcoming = node.edge->getTraversalResourceId();
-				break;
+				return true;
 			}
-			if (node.targetVertex->getSector().get() != agent.getSector()) return {};
+			if (node.targetVertex->getSector().get() != agent.getSector()) return false;
 		}
-		auto resource = mWorld.mTraversalResources.find(upcoming);
-		if (!source || !resource || !resource->mEnabled || agentForbidsButtons(&agent)) return {};
-		auto controls = resource->mControls;
-		if (resource->mOpenPlatformLift)
+		return false;
+	}
+
+	vector<InteractionPointId> SimulationCoordinator::remoteInteractionControls(
+		TraversalResource const& resource, Vector2 const& sourcePosition) const
+	{
+		// Candidate controls for the discovered resource: its own controls,
+		// plus the open-platform Stop's call control for the Stop at the
+		// approach source. Resolution judges no eligibility - filtering is the
+		// next steps' job.
+		auto controls = resource.mControls;
+		if (resource.mOpenPlatformLift)
 		{
-			auto stop = findLiftStop(*resource, source->getPosition());
-			if (stop < resource->mLiftStops.size()) controls.push_back(resource->mLiftStops[stop].callControl);
+			auto stop = findLiftStop(resource, sourcePosition);
+			if (stop < resource.mLiftStops.size()) controls.push_back(resource.mLiftStops[stop].callControl);
 		}
-		vector<InteractionPointId> result;
+		return controls;
+	}
+
+	bool SimulationCoordinator::remoteControlIsNeeded(InteractionPoint const& point,
+		TraversalResource const& resource, TraversalResourceId upcoming,
+		vector<InteractionPointId> const& controls, Vector2 const& sourcePosition,
+		SectorId sector) const
+	{
+		// The resource's live state decides whether this control still has work
+		// to do for the upcoming traversal.
+		return any_of(point.mBindings.begin(), point.mBindings.end(), [&](auto const& binding)
+		{
+			auto const& command = binding.command;
+			if (command.type == DeviceCommandType::OpenDoor)
+				return command.desiredState && resource.mDoor && !resource.mDoor->isOpen()
+					&& command.traversalResource == upcoming;
+			if (command.type == DeviceCommandType::SetExtendedState || command.type == DeviceCommandType::ToggleExtendedState)
+			{
+				// Endpoint controls remain independent even within one Room.
+				bool nearest = none_of(controls.begin(), controls.end(), [&](auto otherId)
+				{
+					auto other = mWorld.mInteractionPoints.find(otherId);
+					return other && other->mSector == sector
+						&& other->mPosition.distanceTo(sourcePosition) + .001f < point.mPosition.distanceTo(sourcePosition);
+				});
+				return nearest && (command.desiredState || command.type == DeviceCommandType::ToggleExtendedState) && resource.mExtensible && !resource.mExtensible->admitsNewTraversals()
+					&& command.traversalResource == upcoming;
+			}
+			if (command.type == DeviceCommandType::RequestAirlock)
+				return resource.mAirlock && command.traversalResource == upcoming;
+			if (command.type == DeviceCommandType::CallLift || command.type == DeviceCommandType::CallShuttle)
+				return bool(resource.mLiftCoordinator) || resource.mOpenPlatformLift;
+			return false;
+		});
+	}
+
+	vector<InteractionPointId> SimulationCoordinator::upcomingRemoteInteractionPoints(Agent const& agent, TraversalResourceId& upcoming) const
+	{
+		// Composed discovery entry point: the focused steps above run once and
+		// the returned controls keep their candidate order. The resource id is
+		// reported even when no control survives filtering, because the
+		// movement-limit consumer pairs it with the manual-Door centre.
+		shared_ptr<const Vertex> source;
+		if (!discoverUpcomingRemoteTarget(agent, upcoming, source)) return {};
+		auto resource = mWorld.mTraversalResources.find(upcoming);
+		if (!resource || !resource->mEnabled || agentForbidsButtons(&agent)) return {};
+		auto const controls = remoteInteractionControls(*resource, source->getPosition());
 		auto sector = SectorId{uint64_t(agent.getSector()->getIndex()) + 1};
+		vector<InteractionPointId> result;
 		for (auto pointId : controls)
 		{
 			auto point = mWorld.mInteractionPoints.find(pointId);
 			if (!point || point->mSector != sector || !mWorld.physicalButtonCentre(pointId)
 				|| !mWorld.missingInteractionPermissions(*point, agent).empty()) continue;
-			bool needed = any_of(point->mBindings.begin(), point->mBindings.end(), [&](auto const& binding)
-			{
-				auto const& command = binding.command;
-				if (command.type == DeviceCommandType::OpenDoor)
-					return command.desiredState && resource->mDoor && !resource->mDoor->isOpen()
-						&& command.traversalResource == upcoming;
-				if (command.type == DeviceCommandType::SetExtendedState)
-				{
-					// Endpoint controls remain independent even within one Room.
-					bool nearest = none_of(controls.begin(), controls.end(), [&](auto otherId)
-					{
-						auto other = mWorld.mInteractionPoints.find(otherId);
-						return other && other->mSector == sector
-							&& other->mPosition.distanceTo(source->getPosition()) + .001f < point->mPosition.distanceTo(source->getPosition());
-					});
-					return nearest && command.desiredState && resource->mExtensible && !resource->mExtensible->admitsNewTraversals()
-						&& command.traversalResource == upcoming;
-				}
-				if (command.type == DeviceCommandType::RequestAirlock)
-					return resource->mAirlock && command.traversalResource == upcoming;
-				if (command.type == DeviceCommandType::CallLift || command.type == DeviceCommandType::CallShuttle)
-					return bool(resource->mLiftCoordinator) || resource->mOpenPlatformLift;
-				return false;
-			});
-			if (needed) result.push_back(pointId);
+			if (remoteControlIsNeeded(*point, *resource, upcoming, controls, source->getPosition(), sector))
+				result.push_back(pointId);
 		}
 		return result;
 	}
 
-	Vector2 SimulationCoordinator::limitRemoteButtonMovement(Agent const& agent, Vector2 const& start, Vector2 const& end) const
+	Vector2 SimulationCoordinator::limitRemoteInteractionMovement(Agent const& agent, Vector2 const& start, Vector2 const& end) const
 	{
-		if (agent.getObjectUsage() != ObjectUsage::RemoteControl || agent.mEarlyDoorPressAttempted) return end;
+		if (agent.getObjectUsage() != ObjectUsage::RemoteControl || agent.mAnticipatoryInteraction.attempted()) return end;
 		TraversalResourceId upcoming;
-		auto controls = upcomingRemoteButtons(agent, upcoming);
+		auto controls = upcomingRemoteInteractionPoints(agent, upcoming);
 		auto delta = end - start;
 		double a = double(delta.x) * delta.x + double(delta.y) * delta.y;
 		if (a == 0) return end;
@@ -1218,7 +1544,7 @@ namespace core
 		vector<Vector2> centres;
 		for (auto point : controls) centres.push_back(*mWorld.physicalButtonCentre(point));
 		if (auto centre = mWorld.remoteOrdinaryDoorCentre(upcoming);
-			centre && mWorld.canAgentOpenManualDoor(upcoming, getAgentId(&agent)))
+			centre && mWorld.agentHasFeasibleManualDoorOperation(upcoming, getAgentId(&agent)))
 		{
 			auto const& door = *mWorld.mTraversalResources.find(upcoming)->mDoor;
 			if (!door.isOpen() && !door.isOpening() && !door.isBroken()) centres.push_back(*centre);
@@ -1238,7 +1564,7 @@ namespace core
 				// A horizontal tangent at exact vertical range has one eligible
 				// point, not an interval into which an epsilon may be added.
 				if (discriminant == 0 && delta.y == 0) return {centre.x, start.y};
-				limit = std::min(1., enter + .00001);
+				limit = std::min(1., enter + RemoteSegmentEntryInset);
 			}
 		}
 		if (limit == 1.) return end;
@@ -1255,7 +1581,7 @@ namespace core
 		return result;
 	}
 
-	void SimulationCoordinator::tryPressUpcomingDoorButton(Agent& agent,
+	void SimulationCoordinator::tryAnticipatoryInteraction(Agent& agent,
 		Vector2 const& movementStart, Vector2 const& movementEnd)
 	{
 		mWorld.invalidateSimulationSnapshot();
@@ -1263,56 +1589,68 @@ namespace core
 		auto const target = agent.mPath.targetNode;
 		if (!path || target + 1 >= path->nodes.size())
 		{
-			agent.mEarlyDoorPressResource = {};
-			agent.mEarlyDoorPressInteraction = {};
-			agent.mEarlyDoorPressAttempted = false;
+			agent.mAnticipatoryInteraction.reset();
 			return;
 		}
-
+		// Remote activation and physical passing are distinct consumers with
+		// their own selection policies (#630): the remote Agent prepares the
+		// discovered target from range, while an Arms Agent presses the next
+		// Door control on its in-Sector route in passing. Neither replaces
+		// physical crossing or boarding.
 		if (agent.getObjectUsage() == ObjectUsage::RemoteControl)
 		{
 			TraversalResourceId upcoming;
-			auto controls = upcomingRemoteButtons(agent, upcoming);
-			if (agent.mEarlyDoorPressResource != upcoming)
-			{
-				agent.mEarlyDoorPressResource = upcoming;
-				agent.mEarlyDoorPressInteraction = {};
-				agent.mEarlyDoorPressAttempted = false;
-			}
-			if (agent.mEarlyDoorPressAttempted) return;
-			auto actor = getAgentId(&agent);
-			if (mWorld.agentCanOperateManualDoorHere(upcoming, actor))
-			{
-				auto resource = mWorld.mTraversalResources.find(upcoming);
-				auto const& door = *resource->mDoor;
-				if (resource->mEnabled && !door.isBroken() && !door.isOpen() && !door.isOpening()
-					&& (door.getFrontSector().get() == agent.getSector() || door.getBackSector().get() == agent.getSector()))
-				{
-					DeviceCommand command;
-					command.type = DeviceCommandType::OpenDoor;
-					command.desiredState = true;
-					command.traversalResource = upcoming;
-					auto operationId = findOrCreateDeviceOperation(command, actor);
-					if (auto operation = mWorld.mDeviceOperations.find(operationId)) operation->mActivated = true;
-					agent.mEarlyDoorPressAttempted = true;
-				}
-			}
-			for (auto pointId : controls)
-			{
-				if (!mWorld.agentCanOperateInteraction(pointId, agent, true)) continue;
-				if (auto request = requestInteraction(pointId, actor))
-				{
-					agent.mEarlyDoorPressInteraction = request;
-					agent.mEarlyDoorPressAttempted = true;
-					break;
-				}
-			}
+			auto controls = upcomingRemoteInteractionPoints(agent, upcoming);
+			activateRemoteAnticipatoryInteraction(agent, upcoming, controls);
 			return;
 		}
+		tryPhysicalPassingPress(agent, movementStart, movementEnd);
+	}
 
+	void SimulationCoordinator::activateRemoteAnticipatoryInteraction(Agent& agent,
+		TraversalResourceId upcoming, vector<InteractionPointId> const& controls)
+	{
+		agent.mAnticipatoryInteraction.selectResource(upcoming);
+		if (agent.mAnticipatoryInteraction.attempted()) return;
+		auto actor = getAgentId(&agent);
+		if (mWorld.agentCanOperateManualDoorHere(upcoming, actor))
+		{
+			auto resource = mWorld.mTraversalResources.find(upcoming);
+			auto const& door = *resource->mDoor;
+			if (resource->mEnabled && !door.isBroken() && !door.isOpen() && !door.isOpening()
+				&& (door.getFrontSector().get() == agent.getSector() || door.getBackSector().get() == agent.getSector()))
+			{
+				DeviceCommand command;
+				command.type = DeviceCommandType::OpenDoor;
+				command.desiredState = true;
+				command.traversalResource = upcoming;
+				auto operationId = findOrCreateDeviceOperation(command, actor);
+				if (auto operation = mWorld.mDeviceOperations.find(operationId)) operation->mActivated = true;
+				agent.mAnticipatoryInteraction.recordAttempt();
+			}
+		}
+		for (auto pointId : controls)
+		{
+			// Revalidate mutable eligibility at activation: the discovery
+			// step's filtering is not a substitute for this check, and no
+			// long-lived target may carry a stale grant to the request (#630).
+			if (!mWorld.agentCanOperateInteraction(pointId, agent, World::InteractionEvaluationContext::RemoteActivation)) continue;
+			if (auto request = requestInteraction(pointId, actor, true))
+			{
+				agent.mAnticipatoryInteraction.retainRequest(request);
+				break;
+			}
+		}
+	}
+
+	void SimulationCoordinator::tryPhysicalPassingPress(Agent& agent,
+		Vector2 const& movementStart, Vector2 const& movementEnd)
+	{
 		// A Door Button contributes an Interactable vertex to the in-sector route.
 		// Follow that route through its in-sector edges to find the next Door
 		// threshold without looking beyond the current Sector.
+		auto const& path = agent.mPath.path;
+		auto const target = agent.mPath.targetNode;
 		TraversalResourceId resourceId;
 		auto currentSector = agent.getSector();
 		for (uint32_t i = target + 1; i < path->nodes.size(); ++i)
@@ -1341,18 +1679,11 @@ namespace core
 			|| (regularDoor
 				&& resource->mDoorActivationMode != DoorActivationMode::RemoteControlled))
 		{
-			agent.mEarlyDoorPressResource = {};
-			agent.mEarlyDoorPressInteraction = {};
-			agent.mEarlyDoorPressAttempted = false;
+			agent.mAnticipatoryInteraction.reset();
 			return;
 		}
-		if (agent.mEarlyDoorPressResource != resourceId)
-		{
-			agent.mEarlyDoorPressResource = resourceId;
-			agent.mEarlyDoorPressInteraction = {};
-			agent.mEarlyDoorPressAttempted = false;
-		}
-		if (agent.mEarlyDoorPressAttempted || !resource->mEnabled
+		agent.mAnticipatoryInteraction.selectResource(resourceId);
+		if (agent.mAnticipatoryInteraction.attempted() || !resource->mEnabled
 			|| (regularDoor && (resource->mDoor->isOpen() || resource->mDoor->isOpening())))
 		{
 			return;
@@ -1410,8 +1741,7 @@ namespace core
 
 		if (auto interaction = requestInteractionWhilePassing(selected, actorId))
 		{
-			agent.mEarlyDoorPressInteraction = interaction;
-			agent.mEarlyDoorPressAttempted = true;
+			agent.mAnticipatoryInteraction.retainRequest(interaction);
 		}
 	}
 
@@ -1437,6 +1767,9 @@ namespace core
 				auto request = mWorld.mInteractionRequests.find(requestId);
 				if (!request || request->mResult != InteractionResult::Pending)
 				{
+					// A removed request was already unindexed at removal; a
+					// terminal one still holds its index entry until dequeued (#626).
+					if (request) unindexQueuedPress(request->mActor, requestId);
 					point->mQueue.erase(point->mQueue.begin());
 					continue;
 				}
@@ -1447,7 +1780,9 @@ namespace core
 				// not be overridden by earlier work, and cancellation must not resume
 				// that work later.
 				auto actor = mWorld.mAgents.find(request->mActor);
-				if (!actor || !mWorld.agentCanOperateInteraction(pointId, *actor, false))
+				if (!actor || !(actor->isPlayerControlled()
+					? mWorld.interactionRequestEligible(pointId, request->mActor, World::InteractionEvaluationContext::ImmediatePress)
+					: mWorld.agentCanOperateInteraction(pointId, *actor, World::InteractionEvaluationContext::AutonomousApproach)))
 				{
 					cancelInteraction(requestId);
 					continue;
@@ -1464,6 +1799,7 @@ namespace core
 				}
 				if (reusedActiveWork)
 				{
+					unindexQueuedPress(request->mActor, requestId);
 					point->mQueue.erase(point->mQueue.begin());
 					continue;
 				}
@@ -1495,30 +1831,30 @@ namespace core
 					request->mResult = InteractionResult::Rejected;
 					request->mMissingPermissions = std::move(missing);
 					detachInteractionRequester(*request);
-					point->mQueue.erase(remove(point->mQueue.begin(), point->mQueue.end(), requestId), point->mQueue.end());
-					point->mActiveRequest = {};
-					point->mInteractionTicksRemaining = 0;
-					SimulationEvent event;
-					event.sequence = mWorld.mNextEventSequence++;
-					event.tick = mWorld.mSimulationTick;
-					event.type = SimulationEventType::InteractionRequestChanged;
-					event.phase = mWorld.mCurrentPhase;
-					event.interactionRequest = makeInteractionRequestSnapshot(requestId, *request);
-					event.interactionName = point->getName();
-					mWorld.mAgentBehaviourRuntime->observeOutcome(event);
-					mWorld.mEvents.push_back(std::move(event));
+					releaseInteractionPointRequest(requestId, request->mPoint);
+					publishInteractionOutcome(requestId, *request);
 					mWorld.replanAgentAfterAuthorizationRefusal(request->mActor);
 					continue;
 				}
 			}
-			if (point->mAccessPanelOwner && !mWorld.canRequestAccessPanel(point->mAccessPanelOwner,
-				point->mBindings.front().command.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close,
-				request->mActor))
+			// Remote and Player evaluation below already includes owned-panel policy.
+			// Autonomous Arms work retains its separate pre-movement boundary.
+			if (point->mAccessPanelOwner && actor && !actor->isPlayerControlled()
+				&& actor->getObjectUsage() != ObjectUsage::RemoteControl)
 			{
-				cancelInteraction(point->mActiveRequest);
-				continue;
+				auto panel = mWorld.lookupAccessPanel(point->mAccessPanelOwner);
+				auto action = mWorld.ownedAccessPanelAction(pointId, *point);
+				if (!panel || !action || !mWorld.accessPanelOperationEligible(*panel, *action, *point, *actor))
+				{
+					cancelInteraction(point->mActiveRequest);
+					continue;
+				}
 			}
-			if (!actor || !mWorld.agentCanOperateInteraction(pointId, *actor, false))
+			// Manual presses never chase the Button or execute while crossing.
+			// Walking away or shortening arm length cancels unpressed Player work.
+			if (!actor || !(actor->isPlayerControlled()
+				? mWorld.interactionRequestEligible(pointId, request->mActor, World::InteractionEvaluationContext::ImmediatePress)
+				: mWorld.agentCanOperateInteraction(pointId, *actor, World::InteractionEvaluationContext::AutonomousApproach)))
 			{
 				// A deactivated Agent must not walk to the point or press it, and a
 				// Buttons-forbidden Agent must not press it either; the point must
@@ -1533,6 +1869,7 @@ namespace core
 			if (actor->getObjectUsage() != ObjectUsage::RemoteControl
 				&& !mWorld.agentCanPhysicallyOperate(*actor, actor->getGlobalPosition().distanceTo(point->mPosition), point->mReach))
 			{
+				// Player work was reach-checked above; only autonomous Agents approach.
 				actor->moveToPosition(point->mPosition, frameTime);
 				continue;
 			}
@@ -1551,36 +1888,19 @@ namespace core
 					if (auto operation = mWorld.mDeviceOperations.find(operationId);
 						operation && operation->mState == DeviceOperationState::Pending)
 					{
+						// The press interval ending is this device family's
+						// activation boundary, unchanged from before the helpers
+						// were extracted (#623).
 						if (operation->mCommand.type == DeviceCommandType::SetAccessPanelState)
-						{
-							auto found = mWorld.mAccessPanels.find(operation->mCommand.accessPanel);
-							auto panel = found == mWorld.mAccessPanels.end() ? nullptr : found->second.lock();
-							touchDeviceOperation(operationId, *operation);
-							operation->mActivated = true;
-							auto action = operation->mCommand.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close;
-							auto control = panel ? mWorld.mInteractionPoints.find(panel->getControl(action)) : nullptr;
-							bool eligible = panel && control && mWorld.canRequestAccessPanel(panel->getId(), action, request->mActor)
-								&& mWorld.agentCanOperateInteraction(panel->getControl(action), *actor, true);
-							operation->mState = eligible ? DeviceOperationState::Running : DeviceOperationState::Rejected;
-							if (eligible)
-							{
-								// Reversal keeps the physical leaf position, cancelling superseded travel.
-								for (auto const& [otherId, other] : mWorld.mDeviceOperations.entries())
-									if (otherId != operationId && other->mState == DeviceOperationState::Running
-										&& other->mCommand.type == DeviceCommandType::SetAccessPanelState
-										&& other->mCommand.accessPanel == panel->getId())
-									{
-										touchDeviceOperation(otherId, *other);
-										other->mState = DeviceOperationState::Cancelled;
-									}
-								panel->mOpen = operation->mCommand.desiredState;
-							}
-						}
+							activateAccessPanelPress(operationId, *operation, request->mActor);
 						else if (operation->mCommand.type == DeviceCommandType::PressDumbwaiterLanding)
 							admitDumbwaiterPress(operationId, *operation);
 						else operation->mActivated = true;
 					}
 				}
+				// The pressed request leaves the queue and the derived index
+				// together; device travel that follows holds neither (#626).
+				unindexQueuedPress(request->mActor, point->mActiveRequest);
 				point->mQueue.erase(remove(point->mQueue.begin(), point->mQueue.end(), point->mActiveRequest), point->mQueue.end());
 				point->mActiveRequest = {};
 			}
@@ -1638,16 +1958,7 @@ namespace core
 			}
 			if (request->mResult != InteractionResult::Pending)
 			{
-				SimulationEvent event;
-				event.sequence = mWorld.mNextEventSequence++;
-				event.tick = mWorld.mSimulationTick;
-				event.type = SimulationEventType::InteractionRequestChanged;
-				event.phase = mWorld.mCurrentPhase;
-				event.interactionRequest = makeInteractionRequestSnapshot(id, *request);
-				if (auto point = mWorld.mInteractionPoints.find(request->mPoint))
-					event.interactionName = point->getName();
-				mWorld.mAgentBehaviourRuntime->observeOutcome(event);
-				mWorld.mEvents.push_back(std::move(event));
+				publishInteractionOutcome(id, *request);
 			}
 		}
 	}
@@ -1678,7 +1989,7 @@ namespace core
 		for (auto const& [agentId, agent] : mWorld.mAgents.entries())
 		{
 			(void)agentId;
-			if (agent->mEarlyDoorPressInteraction) referencedRequests.insert(agent->mEarlyDoorPressInteraction);
+			if (auto request = agent->mAnticipatoryInteraction.retainedRequest()) referencedRequests.insert(request);
 		}
 
 		std::vector<InteractionRequestId> retiredRequests;

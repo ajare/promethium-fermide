@@ -2,6 +2,7 @@
 #include <cassert>
 
 #include "core/Defines.h"
+#include "core/Agent.h"
 #include "core/BulkheadDoor.h"
 #include "core/BulkheadDoorVertex.h"
 #include "core/Sector.h"
@@ -130,5 +131,27 @@ namespace core
 		minExtent.y += getOpenPercentage() * CORE_CORRIDOR_HEIGHT;
 	}
 
+	std::optional<PoseSelection> BulkheadDoor::selectPlayerCrossing(Agent const& agent, float floorY) const
+	{
+		auto envelope = agent.getPoseEnvelope(agent.getPose());
+		auto speed = agent.getPhysicalBaseline().automaticSpeedRatio(AutomaticPoseContext::DoorCrossing, agent.getPose());
+		if (!agent.isPlayerControlled() || !envelope || !speed || !admitsVerticalExtent(envelope->y, floorY)) return {};
+		for (int side : {CORE_SIDE_LEFT, CORE_SIDE_RIGHT})
+			if (auto sector = getSideSector(side); sector && !agent.poseFits(agent.getPose(), sector->getPosition().y
+				+ sector->getLevelsHigh() - 1 + sector->getEffectiveTopLevelHeight() - floorY)) return {};
+		return PoseSelection{agent.getPose(), *speed};
+	}
+
+	bool BulkheadDoor::admitsPlayerPassage(Agent const& agent, float floorY) const
+	{
+		if (!agent.isPlayerControlled()) return false;
+		auto envelope = agent.getPoseEnvelope(agent.getPose());
+		if (!envelope || !admitsVerticalExtent(envelope->y, floorY)) return false;
+		Vector2 min, max;
+		getCurrentShape(min, max);
+		constexpr float tolerance = 0.0001f;
+		return min.x >= max.x || min.y >= max.y
+			|| floorY + envelope->y <= min.y + tolerance || floorY >= max.y - tolerance;
+	}
 
 } // core

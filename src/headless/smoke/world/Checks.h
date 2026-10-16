@@ -13,6 +13,7 @@ void registerLayerDeletion(std::vector<smoke::Check>& checks);
 
 void runMarkerIdentitySmokeChecks();
 void runDoorTwoSidedButtonSmokeChecks();
+void runPhysicalControlLookupSmokeChecks();
 void runBackgroundSectorSmokeChecks();
 void runBackgroundPaintSmokeChecks();
 void runBackgroundPlacementSmokeChecks();

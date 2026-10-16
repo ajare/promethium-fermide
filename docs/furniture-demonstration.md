@@ -7,7 +7,7 @@ For the complete integration tour below, open
 `resources/test-worlds/furniture-integration.world.yaml`. Keep
 `furniture-integration.furniture.lua` beside it; the bundled
 `FurnitureIntegrationDemo` resource depends on `FurnitureIntegrationCatalogue`,
-which depends on `ObjectAtlas` and its placeholder PNG. Its separate catalogue
+which depends on `FurnitureAtlas`, sharing the current Object atlas PNG. Its separate catalogue
 keeps the explicit overlapping-route layout independent of the compact sample.
 The chair, sofa halves and desk halves are full 64 × 160 World-tile regions in
 `resources/Resources.yaml`. No production-quality artwork is intended.
@@ -58,7 +58,7 @@ rules. In particular:
 - Keep the catalogue UUID, definition `key` and usable-point `key` stable. Labels,
   definition order and point order are not identities. Worlds store a relative
   catalogue basename and expected UUID, not a copy of the definition layout.
-- Each `tiles` entry names an `ObjectAtlas` region at integer x/y tile offsets.
+- Each `tiles` entry names a World-selected Furniture region at integer x/y tile offsets.
   Artwork extends upward from its Floor; the complete rectangular footprint,
   including transparent pixels/gaps, requires continuous support in one Location.
 - `usablePoints` and `vertices` use finite, possibly fractional horizontal offsets.

@@ -62,6 +62,9 @@ namespace core
 		// the private machinery beside them on the World's behalf (ADR 0004).
 		friend class SimulationCoordinator;
 		friend struct WorldAgentRestorationTestAccess;
+		friend struct PhysicalControlLookupTestAccess;
+		friend struct QueuedPressLookupTestAccess;
+		friend struct UsablePointResolutionTestAccess;
 		// Headless diagnostic driver dispatches validated Actions at a traversal
 		// boundary, never edits fields or introduces retained-Pose locomotion.
 		friend struct DoorClearanceDiagnostic;
@@ -247,6 +250,8 @@ namespace core
 			bool initiallyBroken{ false };
 			// Per-stop speed, zero inherits the default.
 			std::vector<float> doorSpeeds{};
+			// Optional complete Stop-order list; omission defaults to "0", "1", ...
+			std::vector<std::string> stopShortNames{};
 		};
 
 		struct CreateLiftResult
@@ -291,6 +296,7 @@ namespace core
 			bool initiallyBroken{ false };
 			// Same grid as doorOpenStyles; zero inherits the default.
 			std::vector<float> doorSpeeds{};
+			std::vector<std::string> stopShortNames{};
 		};
 
 		struct CreateShuttleResult
@@ -611,6 +617,9 @@ namespace core
 		std::shared_ptr<const FurnitureCatalogue> mFurnitureCatalogue;
 		// The catalogue is an application Resource (ADR 0010) resolved by name.
 		std::string mFurnitureCatalogueResourceName;
+		std::string mSectorImageSetResourceName{"SectorAtlas"};
+		std::string mAgentImageSetResourceName{"AgentAtlas"};
+		std::string mFurnitureImageSetResourceName{"FurnitureAtlas"};
 		std::vector<FurnitureInstance> mFurniture;
 		uint64_t mNextFurnitureId{ 1 };
 		struct MovementGoal
@@ -641,7 +650,7 @@ namespace core
 		std::filesystem::path mDocumentDirectory;
 		std::map<MarkerId, std::vector<std::string>> mMarkerActions;
 		bool mActionExecutionFailed{ false };
-		// Set only while finishFurnitureUse executes a lifecycle callback. Departure
+		// Scoped to Furniture finishing effect validation (and departure's callback). Departure
 		// has already moved the Agent into a navigation state, but the finishing
 		// contract runs before the physical position commits, so a staged device
 		// request is still judged from the usable point the Agent stands on.
@@ -650,10 +659,109 @@ namespace core
 		void clearUnavailableResetRequests();
 		void executeMarkerAction(AgentId agent, MarkerId marker, std::string_view action, SimulationEvent& event);
 		FurnitureInstance const* furnitureForMarker(MarkerId marker) const;
+		// Short-lived resolved Furniture usable-point context (#627): the
+		// Marker -> instance, definition, destination, usable-point support
+		// and Sector chain is resolved once per evaluation and reused by
+		// eligibility, pose-fit and Action-view construction instead of each
+		// repeating nested scans. Every reference is borrowed from the
+		// current World and catalogue: the context never leaves the
+		// evaluation that created it and cannot survive a catalogue swap or
+		// topology mutation.
+		struct ResolvedUsablePoint
+		{
+			MarkerId marker{};
+			FurnitureInstance const* instance{ nullptr };
+			FurnitureDefinition const* definition{ nullptr };
+			FurnitureDestination const* destination{ nullptr };
+			FurnitureUsablePoint const* point{ nullptr };
+			Sector const* sector{ nullptr };
+			explicit operator bool() const { return instance != nullptr; }
+			// An unmatched usable-point key resolves to floor support, the
+			// default the previous nested scans applied.
+			float supportElevation() const { return point ? point->supportElevation : 0.f; }
+		};
+		// One pass over the Furniture instances resolves the whole chain.
+		// An explicit catalogue serves live finishing, which keeps the
+		// catalogue its use began with even while a replacement is being
+		// installed; absent means the currently installed catalogue.
+		ResolvedUsablePoint resolveUsablePoint(MarkerId marker,
+			std::shared_ptr<const FurnitureCatalogue> const& catalogue = nullptr) const;
+		// Resolved-context variants: same rules and diagnostics, no re-scan.
+		bool furnitureUseEligible(AgentId agent, ResolvedUsablePoint const& point,
+			std::string* diagnostic) const;
+		bool furniturePoseFits(AgentId agent, ResolvedUsablePoint const& point, Pose pose, bool usingSupport,
+			std::string* diagnostic) const;
+		bool actionAvailable(MarkerId marker, std::string_view action, ResolvedUsablePoint const& point) const;
+		ActionViews actionViews(AgentId agent, MarkerId marker, ResolvedUsablePoint const& point) const;
+		// Query-operation evidence: Furniture instances visited while
+		// resolving. One evaluation must visit the instance list at most
+		// once, never once per nested pose/view check (#627).
+		mutable uint64_t mUsablePointResolveVisits{ 0 };
 		ActionViews actionViews(AgentId agent, MarkerId marker) const;
+		// Named evaluation context for one applyActionResult() pass. The axes the
+		// evaluator reads - the claim a batch starts from, whether a repeated
+		// Release is tolerated, which device reach applies, and whether accepted
+		// effects commit - are not independent. Only the three combinations below
+		// occur, so the caller names the combination instead of carrying a boolean
+		// triple whose legal members had to be inferred at each call site.
+		//
+		//   Immediate              starts from the Agent's own claim; one Release
+		//                          only; ImmediatePress device reach; commits.
+		//   ReplacementValidation starts unclaimed; one Release only;
+		//                          ImmediatePress device reach; commits nothing.
+		//   FurnitureFinishing     starts from the Agent's own claim; repeated
+		//                          Releases allowed; staged-departure device
+		//                          reach; commits.
+		enum class ActionEffectContext
+		{
+			// An ordinary Action arriving at its destination: apply and commit its
+			// effects against the state the Agent already holds.
+			Immediate,
+			// Judge a replacement Action before any finish runs. The seat being
+			// replaced is not yet released, so the batch is evaluated unclaimed
+			// and nothing may commit if it is refused.
+			ReplacementValidation,
+			// A staged Furniture finishing batch, from departure or from a
+			// replacement. The Agent is leaving its usable point, so the batch may
+			// release more than once and device requests are judged from the
+			// usable point rather than the post-departure position.
+			FurnitureFinishing
+		};
+		// A validated Action-effect batch that has not yet touched the Agent or
+		// any shared authority (#634). prepareActionResult() computes the host
+		// state the batch would apply and any refusal without mutating the Agent,
+		// issuing a device request, or publishing accepted-effect logs;
+		// commitPreparedActionEffects() is the only place those effects become
+		// visible. A refused or validation-only batch therefore cannot leak a
+		// partial pose, occupancy, device request or staged log.
+		struct PreparedActionEffects
+		{
+			bool accepted{ false };
+			// Host state the batch would apply when accepted.
+			Pose pose{};
+			MarkerId claim{};
+			InteractionPointId device{};
+			bool poseAuthored{ false };
+			// Refusal reporting when accepted == false. A script failure carries
+			// its own failure payload and owns the pause/headless policy; an
+			// ordinary host refusal carries only a diagnostic and leaves the
+			// event's script-failure field as the caller set it.
+			bool scriptFailed{ false };
+			ScriptExecutionFailure failure{ ScriptExecutionFailure::None };
+			std::string diagnostic;
+		};
+		// Evaluation half of the transaction: validate the batch and compute the
+		// pending host state. Const and side-effect free - it never touches the
+		// Agent, the device/traversal authorities, or the log stream.
+		PreparedActionEffects prepareActionResult(AgentId agent, MarkerId marker,
+			ActionExecutionResult const& result, bool finishing, bool replacingUse) const;
+		// Commitment half: the single place an accepted batch becomes observable.
+		void commitPreparedActionEffects(AgentId agent, PreparedActionEffects const& prepared,
+			SimulationEvent& event, ActionExecutionResult const& result);
 		void applyActionResult(AgentId agent, MarkerId marker, ActionExecutionResult result, SimulationEvent& event,
-			bool finishing = false, bool validateOnly = false, bool replacingUse = false);
+			ActionEffectContext context);
 		void finishFurnitureUse(AgentId agent);
+		void restoreFurnitureFinishPose(Agent& agent, Pose finishPose);
 		std::vector<SimulationEvent> mPendingMovementOutcomes;
 
 		struct AgentTagRegistryReference
@@ -687,6 +795,61 @@ namespace core
 		// Lua/sol2 types out of this domain header and its per-Agent environments
 		// prevent mutable module or instance state crossing assignments.
 		std::unique_ptr<AgentBehaviourRuntimeAdapter> mAgentBehaviourRuntime;
+		// App-only transient input. Editor simulation never supplies this intent.
+		int mPlayerMovementDirection{ 0 };
+		bool mPlayerStairUp{ false }, mPlayerStairDown{ false }, mPlayerCrouch{ false };
+		AgentId mPlayerDoorAction{};
+		// One threshold the held contextual action could mean: a Stairwell mount or
+		// an ordinary/transport-owned Door. `passable` thresholds are crossed and
+		// `openable` ones are only opened by hand; one press never does both, and a
+		// passage always outranks an opening. `distance` orders candidates within a
+		// rank, with resource and edge identity breaking exact ties deterministically.
+		struct PlayerActionCandidate
+		{
+			std::shared_ptr<const Edge> edge;
+			std::shared_ptr<const Vertex> source, destination;
+			std::optional<PoseSelection> pose;
+			float distance;
+			bool passable, openable;
+		};
+		// The held action's meaning is contextual. A climb in progress, or one the
+		// Player is already walking into, suppresses every other reading; otherwise
+		// the readings resolve in strict priority: threshold passage first, then
+		// manual Door opening, then a physical control within arm's reach.
+		void performPlayerContextualAction();
+		void refreshPlayerContextPose(Agent& agent);
+		bool playerClimbSelectionActive(Agent const& agent) const;
+		std::vector<PlayerActionCandidate> collectPlayerActionCandidates(Agent const& agent, AgentId id) const;
+		bool beginPlayerContextualPassage(Agent& agent, AgentId id,
+			std::vector<PlayerActionCandidate> const& candidates, bool flatTask);
+		bool openPlayerThreshold(std::vector<PlayerActionCandidate> const& candidates);
+		void pressNearestPhysicalControl(Agent const& agent, AgentId id);
+		std::shared_ptr<const Edge> playerStaircaseApproach(Agent const& agent) const;
+		std::shared_ptr<const Edge> playerLadderApproach(Agent const& agent) const;
+		void advancePlayerLadderAgent(Agent& agent, float timestep);
+		bool beginPlayerTraversal(Agent& agent, std::shared_ptr<const Edge> const& edge,
+			std::shared_ptr<const Vertex> const& source, std::shared_ptr<const Vertex> const& destination);
+		void advancePlayerStairSegment(Agent& agent, float timestep);
+		void advancePlayerStaircaseAgent(Agent& agent, float timestep);
+		void advancePlayerStairwellAgent(Agent& agent, float timestep);
+		void advancePlayerControlledAgent(AgentId agent, float timestep);
+		void updatePlayerPose(Agent& agent, float height, float left, float right, bool transitSupport = false);
+		void updatePlayerClimbingPose(Agent& agent);
+		bool advancePlayerChamberAgent(Agent& agent, float timestep);
+		bool advancePlayerTransportAgent(Agent& agent, float timestep);
+		bool tryPlayerPlatformMount(Agent& agent);
+		bool playerTransportLandingSupported(Sector const& sector, Vector2 position, float halfWidth) const;
+		struct PlayerPlatformCrossing
+		{
+			TraversalResourceId resource;
+			TraversalRequestId request;
+			TraversalPermitId permit;
+			std::shared_ptr<const Vertex> destination;
+			AgentId owner;
+			uint32_t capacity;
+			bool entering;
+		};
+		std::optional<PlayerPlatformCrossing> mPlayerPlatformCrossing;
 
 		// Registered Agent-type definitions, keyed by stable type ID. The bundled
 		// Human is registered at construction; additional types are attached
@@ -889,6 +1052,20 @@ namespace core
 
 		EntityRegistry<InteractionRequestId, InteractionRequest> mInteractionRequests;
 
+		// Derived Agent -> queued press work index (#626): the interaction
+		// requests currently sitting in an InteractionPoint queue for that
+		// Agent. Maintained by the request/queue lifecycle transitions in
+		// SimulationCoordinator so the Movement phase can ask a remote Agent's
+		// press question directly instead of scanning every point and queue.
+		// It is an accelerator only: the query re-checks each request's actor
+		// and Pending result against the record, so a stale entry can never
+		// fabricate a pause.
+		std::map<AgentId, std::set<InteractionRequestId>> mQueuedPressesByAgent;
+		// Query-operation evidence: request records visited by direct queries.
+		// A query only ever visits the queried Agent's own index entries; it
+		// must never scale with the point or queue registries.
+		mutable uint64_t mQueuedPressQueryVisits{ 0 };
+
 		EntityRegistry<DeviceOperationId, DeviceOperation> mDeviceOperations;
 		// Runtime-only device identities, independent of movement admission.
 		uint64_t mNextAccessPanelId{ 1 };
@@ -1058,9 +1235,12 @@ namespace core
 			std::vector<std::vector<uint32_t>> landingControlPermissionRequirements{};
 			// Lift, Platform lift, and Shuttle requirements, parallel to values (Stops).
 			std::vector<std::vector<uint32_t>> destinationPermissionRequirements{};
+			// Authored transport Stop labels, parallel to values; empty uses indices.
+			std::vector<std::string> stopShortNames{};
+			void retainStopShortNames(std::vector<uint32_t> const& stops);
 			// Room/Corridor: all-of passage requirement, independent of controls.
 			std::vector<uint32_t> locationPermissionRequirement{};
-			void retainDestinationRequirements(std::vector<uint32_t> const& stops);
+			void retainStopMetadata(std::vector<uint32_t> const& stops);
 			// Marker / RemoveMarker: stable World-local identity. Marker also
 			// uses name above and c for its MarkerProperties bitfield. Zero identity
 			// occurs only while migrating versions 1-10.
@@ -1104,6 +1284,16 @@ namespace core
 
 		PhysicalControlPlacement const* physicalControlPlacement(InteractionPointId point) const;
 		std::vector<PhysicalControlPlacement> mPhysicalControlPlacements;
+		// Derived InteractionPointId -> index into mPhysicalControlPlacements.
+		// Maintained at the canonical bind seam (bindPhysicalControl) and rebuilt
+		// whenever placement indices shift or the vector is cleared. It is an
+		// accelerator only: the Button's own binding stays authoritative, and a
+		// lookup verifies the resolved placement before returning it.
+		std::map<InteractionPointId, uint32_t> mPhysicalControlByPoint;
+		// Lookup-operation evidence: placements visited by full index scans.
+		// Hot-path lookups must never increase this; only explicit rebuilds do.
+		mutable uint64_t mPhysicalControlPlacementScanVisits{ 0 };
+		void rebuildPhysicalControlIndex();
 		bool mResolvingPhysicalControls{ false };
 		// Current record ordinal during detached/live replay, independent of the
 		// not-yet-adopted construction log. Used for stable landing permissions.
@@ -1584,6 +1774,8 @@ namespace core
 		// SimulationCoordinator (ADR 0004); each entry point below - public or
 		// private - forwards to it.
 		DeviceOperationId findOrCreateDeviceOperation(DeviceCommand const& command, AgentId requester);
+		bool hasValidDeviceCommandTarget(DeviceCommand const& command) const;
+		bool isDeviceCommandTargetBroken(DeviceCommand const& command) const;
 
 		void advanceDeviceOperations();
 
@@ -1604,13 +1796,35 @@ namespace core
 		bool agentCanOperateObjects(Agent const& actor) const;
 		bool agentCanPhysicallyOperate(Agent const& actor, float distance, float geometryReach) const;
 		std::optional<Vector2> physicalButtonCentre(InteractionPointId point) const;
-		bool agentCanOperateInteraction(InteractionPointId point, Agent const& actor, bool requireReach) const;
-		bool agentCanRemotelySelectLiftDestination(TraversalResourceId resource, Agent const& actor,
-			bool requireOccupancy = true) const;
+		// Internal evaluation policy, not a new capability or traversal permit.
+		enum class InteractionEvaluationContext
+		{
+			AutonomousApproach,   // Arms may approach; owned request-reach still applies.
+			ImmediatePress,      // Require current Arms reach; never chase a control.
+			RemoteActivation,    // Remote range is mandatory, including during movement.
+			FurnitureFinishEffects // Immediate reach, with the staged-departure exception.
+		};
+		bool agentCanOperateControlInSector(InteractionPoint const& point, Agent const& actor) const;
+		bool agentWithinRemoteControlRange(Agent const& actor, Vector2 const& centre) const;
+		std::shared_ptr<const BoothWindow> ownedBoothWindowControl(InteractionPointId id, InteractionPoint const& point) const;
+		std::optional<AccessPanel::Action> ownedAccessPanelAction(InteractionPointId id, InteractionPoint const& point) const;
+		// Composable panel policy; caller has checked capability, Mobility and Sector.
+		bool accessPanelOperationEligible(AccessPanel const& panel, AccessPanel::Action action,
+			InteractionPoint const& point, Agent const& actor) const;
+		bool agentCanOperateInteraction(InteractionPointId point, Agent const& actor,
+			InteractionEvaluationContext context) const;
+		// Selector capability/geometry only; authorization and admission are separate.
+		bool agentHasRemoteLiftSelectorCapability(TraversalResourceId resource, Agent const& actor) const;
+		bool agentCanRemotelySelectLiftDestinationHere(TraversalResourceId resource, Agent const& actor) const;
+		bool agentHasFeasibleRemoteLiftSelection(TraversalResourceId resource, Agent const& actor) const;
+		bool agentHasFeasibleLiftSelection(TraversalResourceId resource, uint32_t stop, Agent const& actor) const;
+		bool agentCanReuseAcceptedLiftJourney(TraversalResourceId resource, uint32_t stop,
+			Vector2 const& origin, AgentId agent) const;
 		// Authorization-only policy for Permission adherence to usable transport.
 		bool agentSatisfiesTransportLandingPermission(TraversalResourceId resource,
 			SectorId approach, Vector2 const& endpoint, AgentId agent) const;
-		bool interactionRequestEligible(InteractionPointId point, AgentId actor, bool requireReach = false) const;
+		bool interactionRequestEligible(InteractionPointId point, AgentId actor,
+			InteractionEvaluationContext context) const;
 		InteractionRequestId requestInteractionForTraversal(InteractionPointId point, AgentId actor);
 
 		InteractionRequestId requestInteractionWhilePassing(InteractionPointId point, AgentId actor);
@@ -1830,10 +2044,34 @@ namespace core
 			std::string* diagnostic = nullptr);
 		std::optional<AgentBehaviourAssignment> const& getAgentBehaviourAssignment(
 			AgentId agent) const;
+		// Registry-dependent assignments only; immutable built-ins need no package.
 		uint32_t getAgentBehaviourAssignmentCount() const;
 		// True while an enabled instance, or its safe movement teardown, owns the
 		// Agent's movement intent. Editor/manual path controls use this one gate.
 		bool agentBehaviourOwnsMovement(AgentId agent) const;
+
+		// Lowest stable-ID eligible Agent, including inactive Agents (no fallback).
+		AgentId getPlayerControlledAgent() const;
+		// Held input: -1 left, 0 idle, +1 right. Never authored or persisted.
+		void setPlayerMovementDirection(int direction);
+		void setPlayerStairSelection(bool up, bool down);
+		void setPlayerCrouch(bool held);
+		[[nodiscard]] float maximumInstalledStandingWidth() const;
+		// One Up keypress, consumed at the next allocation phase; never saved.
+		void requestPlayerDoorAction();
+		struct PlayerTransportSelector
+		{
+			struct Stop { uint32_t index; std::string name; bool current, pending; };
+			TraversalResourceId resource;
+			Vector2 anchor;
+			bool horizontal{ false };
+			uint32_t focus{ ~0u };
+			std::vector<Stop> stops;
+		};
+		std::optional<PlayerTransportSelector> getPlayerTransportSelector() const;
+		void browsePlayerTransportStop(int direction, bool horizontal);
+		void confirmPlayerTransportStop();
+		void clearPlayerInput();
 		// Runtime failures are value diagnostics and are not authored or persisted.
 		// Inspecting or consuming them does not consume the public simulation event
 		// queue. The non-consuming snapshot supports persistent editor presentation;
@@ -2887,6 +3125,13 @@ namespace core
 		// Shared transport destination API (historical Lift names). Omit objectIndex
 		// for a Lift or Shuttle; specify the Room object for a Platform lift.
 		// Positions are absolute Levels for Lifts and absolute x positions for Shuttles.
+		// Stop labels are authored metadata, independent of routing and admission.
+		static bool isValidTransportStopShortName(std::string_view name);
+		std::string getTransportStopShortName(uint32_t sectorIndex, uint32_t stopIndex,
+			uint32_t objectIndex = ~0u) const;
+		std::string getTransportStopShortName(TraversalResourceId resource, uint32_t stopIndex) const;
+		bool setTransportStopShortName(uint32_t sectorIndex, uint32_t stopIndex,
+			std::string const& name, std::string* diagnostic = nullptr, uint32_t objectIndex = ~0u);
 		std::vector<uint32_t> getLiftDestinationLevels(uint32_t sectorIndex, uint32_t objectIndex = ~0u) const;
 		std::vector<AccessPermissionId> getLiftDestinationPermissionRequirement(
 			uint32_t sectorIndex, uint32_t stopIndex, uint32_t objectIndex = ~0u) const;
@@ -2922,8 +3167,12 @@ namespace core
 			std::string* diagnostic = nullptr);
 		std::vector<AccessPermissionId> getManualDoorPermissionRequirement(
 			TraversalResourceId door) const;
+		// Compatibility query: projected floor-approach feasibility, NOT operation here.
 		bool canAgentOpenManualDoor(TraversalResourceId door, AgentId agent) const;
+		bool agentHasFeasibleManualDoorOperation(TraversalResourceId door, AgentId agent) const;
 	private:
+		static bool extensibleControlAppliesToApproach(TraversalResource const& resource,
+			InteractionPoint const& point, SectorId approach, Vector2 const& approachPosition);
 		std::optional<Vector2> remoteOrdinaryDoorCentre(TraversalResourceId door) const;
 		bool agentCanOperateManualDoorHere(TraversalResourceId door, AgentId agent) const;
 	public:
@@ -2949,13 +3198,19 @@ namespace core
 			SectorId approach, Vector2 const& approachPosition, AgentId agent) const;
 		std::vector<AccessPermissionId> missingLiftDestinationPermissions(
 			DeviceCommand const& command, AgentId agent) const;
+		// Compatibility wrapper for selection feasibility OR locally accepted reuse.
 		bool canAgentUseLiftJourney(TraversalResourceId resource, Vector2 const& origin,
+			Vector2 const& destination, AgentId agent) const;
+		bool agentHasFeasibleLiftJourney(TraversalResourceId resource, Vector2 const& origin,
 			Vector2 const& destination, AgentId agent) const;
 		// Destination willingness only. Non-adherence never authorizes selection;
 		// occupants are always allowed to complete an accepted journey.
 		bool agentAdheresToLiftDestinationPermission(TraversalResourceId resource,
 			uint32_t destinationStop, AgentId agent) const;
+		// Compatibility query: projected approach, not current-position reach or admission.
 		bool canAgentOperateTransportLandingControl(TraversalResourceId resource,
+			SectorId approach, Vector2 const& endpoint, AgentId agent) const;
+		bool agentHasFeasibleTransportLandingOperation(TraversalResourceId resource,
 			SectorId approach, Vector2 const& endpoint, AgentId agent) const;
 		// Landing willingness only: destination selection and physical boarding
 		// availability remain independent, and this is never an alighting gate.
@@ -3140,6 +3395,27 @@ namespace core
 			std::shared_ptr<const FurnitureCatalogue> catalogue);
 		auto const& furnitureCatalogue() const { return mFurnitureCatalogue; }
 		std::string const& furnitureCatalogueResourceName() const { return mFurnitureCatalogueResourceName; }
+		std::string const& sectorImageSetResourceName() const { return mSectorImageSetResourceName; }
+		void setSectorImageSetResourceName(std::string name)
+		{
+			if (name == mSectorImageSetResourceName) return;
+			mSectorImageSetResourceName = std::move(name);
+			modify();
+		}
+		std::string const& agentImageSetResourceName() const { return mAgentImageSetResourceName; }
+		void setAgentImageSetResourceName(std::string name)
+		{
+			if (name == mAgentImageSetResourceName) return;
+			mAgentImageSetResourceName = std::move(name);
+			modify();
+		}
+		std::string const& furnitureImageSetResourceName() const { return mFurnitureImageSetResourceName; }
+		void setFurnitureImageSetResourceName(std::string name)
+		{
+			if (name == mFurnitureImageSetResourceName) return;
+			mFurnitureImageSetResourceName = std::move(name);
+			modify();
+		}
 		auto const& furniture() const { return mFurniture; }
 		bool isFurnitureMarker(MarkerId id) const;
 		AgentId usablePointOccupant(MarkerId id) const;
@@ -3209,6 +3485,8 @@ namespace core
 		}
 		static constexpr uint32_t getMaxTicksPerUpdate() { return 600; }
 
+		// Non-consuming view for presentation/diagnostic observers. Invalidated by mutation.
+		std::vector<SimulationEvent> const& getSimulationEvents() const { return mEvents; }
 		std::vector<SimulationEvent> consumeSimulationEvents();
 	};
 

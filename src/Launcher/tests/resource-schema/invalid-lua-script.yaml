@@ -1,0 +1,11 @@
+Resources:
+  Resource:
+    type: LuaScript
+    name: Invalid
+    Definitions:
+      Definition:
+        Params:
+          Param:
+            name: bad
+            type: vector
+            default: 0

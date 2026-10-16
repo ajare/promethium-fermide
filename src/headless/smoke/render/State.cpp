@@ -19,12 +19,16 @@ render_smoke::State::State() : saved_(std::make_unique<Saved>())
 	gUISettings = UISettings{};
 	gSelectedAgent = nullptr;
 	clearObjectTileset();
+	clearAgentTileset();
+	clearFurnitureTileset();
 	clearSectorTileset();
 }
 
 render_smoke::State::~State()
 {
 	clearObjectTileset();
+	clearAgentTileset();
+	clearFurnitureTileset();
 	clearSectorTileset();
 	gUISettings = saved_->settings;
 	gSelectedAgent = saved_->selection;

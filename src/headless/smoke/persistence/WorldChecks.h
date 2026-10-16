@@ -60,6 +60,7 @@ namespace persistence
 	void doorOpenApartPersistsThroughEveryEditorPath(smoke::Context const&);
 	void liftDoorsDefaultToOpenApartWhileOtherDoorsKeepOpenUp(smoke::Context const&);
 	void doorStyleMapsAdvanceTheSchemaVersionAndLegacySixStillLoads(smoke::Context const&);
+	void transportStopShortNames(smoke::Context const&);
 	void liftStopDoorStyleOverridesArePerStopAndPersist(smoke::Context const&);
 	void liftCreationStopDoorStylesAreAuthoredAndPersist(smoke::Context const&);
 	void liftShortStopDoorStyleVectorEditPreservesEarlierOverrides(smoke::Context const&);

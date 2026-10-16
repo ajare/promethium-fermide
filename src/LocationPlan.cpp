@@ -6,6 +6,7 @@
 #include <limits>
 #include "PaletteLayout.h"
 #include "FurniturePanel.h"
+#include "ObjectTileset.h"
 
 namespace
 {
@@ -132,7 +133,17 @@ bool LocationPlan::renderPaletteRow(std::shared_ptr<core::World> const& world,
 			&& io.MousePos.y >= min.y && io.MousePos.y < max.y;
 		commands.AddRect(min, max, over ? IM_COL32(251, 188, 4, 255) : IM_COL32(180, 180, 190, 180), 3);
 		commands.PushClipRect(min, max, true);
-		commands.AddText({min.x + 4, min.y + 10}, IM_COL32_WHITE, definition.label.c_str());
+		float tileWidth = 28.f / float(definition.maxX - definition.minX);
+		float tileHeight = 28.f / float(definition.maxY - definition.minY);
+		for (auto const& tile : definition.tiles)
+		{
+			ImVec2 a{min.x + 3 + (tile.x - definition.minX) * tileWidth,
+				min.y + 4 + (definition.maxY - tile.y - 1) * tileHeight};
+			ImVec2 b{a.x + tileWidth, a.y + tileHeight};
+			if (!drawFurnitureSprite(tile.image.c_str(), &commands, a, b))
+				commands.AddRectFilled(a, b, IM_COL32(255, 0, 255, 255));
+		}
+		commands.AddText({min.x + 34, min.y + 10}, IM_COL32_WHITE, definition.label.c_str());
 		commands.PopClipRect();
 		if (over)
 		{

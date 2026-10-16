@@ -17,6 +17,7 @@ int main(int argc, char** argv)
 	agent_smoke::registerActivationEditor(checks);
 	agent_smoke::registerGroupClipboardEditor(checks);
 	agent_smoke::registerAgentTypeEditor(checks);
+	agent_smoke::registerPlayerControlEditor(checks);
 	agent_smoke::registerColourEditor(checks);
 	agent_smoke::registerWalkSpeedEditor(checks);
 	agent_smoke::registerHeightEditor(checks);
@@ -47,6 +48,7 @@ int main(int argc, char** argv)
 	routing_smoke::registerPlanningEditor(checks);
 	routing_smoke::registerPlanningTimeEditor(checks);
 	editor_smoke::registerAirlocks(checks);
+	editor_smoke::registerTransportStopNames(checks);
 	editor_smoke::registerFurniture(checks);
 	editor_smoke::registerMarkerActions(checks);
 	editor_smoke::registerSecurityScanners(checks);

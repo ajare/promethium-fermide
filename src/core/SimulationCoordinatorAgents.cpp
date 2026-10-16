@@ -173,11 +173,12 @@ namespace core
 				(void)resourceId;
 				if (!resource->mAirlock && !resource->mSecurityScanner) continue;
 				bool occupant = find(resource->mOccupants.begin(), resource->mOccupants.end(), id) != resource->mOccupants.end();
-				if (!occupant && !(resource->mAirlock && hasCommittedMovement(*agent)))
+				if (!occupant && !((resource->mAirlock || (resource->mSecurityScanner && agent->isPlayerControlled()))
+					&& hasCommittedMovement(*agent)))
 				{
 					// Pausing retained selected boarders. Deactivation abandons
 					// unadopted admission, but never an occupied slot or an
-					// already underway Airlock entry crossing.
+					// already underway Airlock or manual Chamber entry crossing.
 					if ((agent->mTraversalTask && agent->mTraversalTask->edge->getTraversalResourceId() == resourceId)
 						|| (agent->mQueuedTraversalTask && agent->mQueuedTraversalTask->edge->getTraversalResourceId() == resourceId))
 					{
@@ -604,7 +605,10 @@ namespace core
 		if (!agent) return;
 		mWorld.mMovementGoals.erase(id);
 		mWorld.mPausedPathIntents.erase(id);
+		bool const manualPose = agent->mPlayerPose.has_value();
+		agent->mPlayerPose.reset();
 		agent->clearRuntimePath();
+		if (manualPose) agent->syncPoseToSector();
 		agent->mResetPosition = agent->mPosition;
 		agent->mResetLocalDepth = agent->mLocalDepth;
 		agent->mResetPath.reset();
@@ -884,6 +888,10 @@ namespace core
 		// and cannot veto removal.
 		mWorld.mAgentBehaviourRuntime->removeInstance(mWorld, id,
 			AgentBehaviourTeardownReason::Unassignment);
+		// The derived queued-press index must not outlive its Agent (#626):
+		// pending work was cancelled above, and any terminal residue keyed by
+		// this handle goes with the handle.
+		mWorld.mQueuedPressesByAgent.erase(id);
 		mWorld.mAgentIds.erase(found.entity);
 		mWorld.mAgents.remove(id);
 

@@ -14,6 +14,7 @@
 #include "core/Background.h"
 #include "core/Facade.h"
 #include "core/World.h"
+#include "PlayerTransportSelectorDrawing.h"
 #include "core/AirlockTransit.h"
 #include "core/ChamberTransit.h"
 #include "core/Location.h"
@@ -1260,7 +1261,7 @@ void renderShuttle(shared_ptr<const core::Shuttle> shuttle, uint32_t /* layer */
 }
 
 
-void renderStairwell(shared_ptr<const core::Stairwell> stairwell, uint32_t /* layer */, LayerRenderStyle /* style */, bool /* selected */, WorldDrawList* drawList)
+void renderStairwell(shared_ptr<const core::Stairwell> stairwell, uint32_t /* layer */, LayerRenderStyle style, bool /* selected */, WorldDrawList* drawList)
 {
 	core::Vector2 worldMin, worldMax;
 	stairwell->getCurrentShape(worldMin, worldMax);
@@ -1293,6 +1294,13 @@ void renderStairwell(shared_ptr<const core::Stairwell> stairwell, uint32_t /* la
 		pathPoints.push_back(toScreen(path[2]));
 		pathPoints.push_back(toScreen(path[3]));
 	}
+	for (uint32_t level = 0; level < stairwell->getLevelsHigh(); ++level)
+		for (auto const& platform : stairwell->getLandingPaths(level))
+		{
+			array<ImVec2, 2> points{toScreen(platform[0]), toScreen(platform[1])};
+			drawList->AddPolyline(points.data(), 2, ImColor(223, 223, 223), ImDrawFlags_None, 10.0f);
+			drawList->AddPolyline(points.data(), 2, ImColor(0, 0, 0), ImDrawFlags_None, 4.0f);
+		}
 	if (pathPoints.size() >= 2)
 	{
 		drawList->AddPolyline(pathPoints.data(), (int)pathPoints.size(),
@@ -1300,6 +1308,17 @@ void renderStairwell(shared_ptr<const core::Stairwell> stairwell, uint32_t /* la
 		drawList->AddPolyline(pathPoints.data(), (int)pathPoints.size(),
 			ImColor(0, 0, 0), ImDrawFlags_None, 4.0f);
 	}
+	// Outline each permanently open doorway both from inside the Stairwell
+	// and through the landing aperture. The aperture pass already clips each
+	// box to its landing; these frames never reveal the fore Layer recursively.
+	if (isDrawnSolid(style))
+		for (uint32_t level = 0; level < stairwell->getLevelsHigh(); ++level)
+		{
+			auto low = toScreen({1.f - CORE_STAIRWELL_PASSAGE_WIDTH * .5f, float(level)});
+			auto high = toScreen({1.f + CORE_STAIRWELL_PASSAGE_WIDTH * .5f,
+				float(level) + CORE_STAIRWELL_DOORWAY_HEIGHT});
+			drawList->AddRect({low.x, high.y}, {high.x, low.y}, ImColor(0, 0, 0));
+		}
 }
 
 
@@ -1653,41 +1672,24 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 	transformPosition(pos1);
 
 	auto const colour = agentRenderColour(*agent, gSelectedAgent == agent);
-	ImFont* font = gAgentIconFont ? gAgentIconFont : ImGui::GetFont();
-	float sourceSize = font->FontSize;
-	auto sourceBounds = font->CalcTextSizeA(sourceSize, FLT_MAX, 0.0f, ICON_FA_MALE);
 	float availableWidth = pos1.x - pos0.x;
-	// The authored modifier is visual height, not physical width. Establish the
-	// ordinary icon's fit against its unmodified bounds, then scale that icon
-	// uniformly by Height so a narrow glyph still visibly changes size instead
-	// of remaining pinned to the unchanged width constraint.
-	auto const heightModifier = agent->getEffectiveHeightModifier().value;
-	float standardAvailableHeight = agent->getPhysicalBaseline().standingHeight
-		* CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom;
-	float standardAvailableWidth = agent->getPhysicalBaseline().width * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom;
-	float scale = min(standardAvailableWidth / max(sourceBounds.x, 1.0f),
-		standardAvailableHeight / max(sourceBounds.y, 1.0f)) * heightModifier;
-	float fontSize = sourceSize * scale;
-	auto iconSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, ICON_FA_MALE);
-	// Fit the declared artwork, not the Human fallback glyph. A low wheeled
-	// Agent must retain its own aspect ratio rather than become a tall icon.
-	// Other poses use native dimensions at the same Standing artwork scale.
-	auto const tileSize = objectSpriteSize(agent->getPoseImageTile().c_str());
-	auto const standingTileSize = objectSpriteSize(
+	auto const tileSize = agentSpriteSize(agent->getPoseImageTile().c_str());
+	auto const standingTileSize = agentSpriteSize(
 		agent->getPhysicalBaseline().poses.at(core::Pose::Standing).imageTile.c_str());
 	if (tileSize && standingTileSize)
 	{
-		auto const artworkScale = min(standardAvailableWidth / standingTileSize->x,
-			standardAvailableHeight / standingTileSize->y) * heightModifier;
-		iconSize = {tileSize->x * artworkScale, tileSize->y * artworkScale};
+		float const standardHeight = agent->getPhysicalBaseline().standingHeight
+			* CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom;
+		float const standardWidth = agent->getPhysicalBaseline().width
+			* CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom;
+		auto const scale = min(standardWidth / standingTileSize->x, standardHeight / standingTileSize->y)
+			* agent->getEffectiveHeightModifier().value;
+		ImVec2 size{tileSize->x * scale, tileSize->y * scale};
+		ImVec2 minimum{(pos0.x + pos1.x - size.x) * .5f, pos0.y - size.y};
+		drawAgentSprite(agent->getPoseImageTile().c_str(), drawList, minimum,
+			{minimum.x + size.x, minimum.y + size.y}, colour);
 	}
-	ImVec2 iconPosition{
-		(pos0.x + pos1.x - iconSize.x) * 0.5f,
-		pos0.y - iconSize.y
-	};
-	if (!drawObjectSprite(agent->getPoseImageTile().c_str(), drawList, iconPosition,
-		{iconPosition.x + iconSize.x, iconPosition.y + iconSize.y}, colour))
-		drawList->AddText(font, fontSize, iconPosition, colour, ICON_FA_MALE);
+	else drawList->AddRectFilled({pos0.x, pos1.y}, {pos1.x, pos0.y}, IM_COL32(255, 0, 255, 255));
 
 	auto const planning = agent->getState() == core::Agent::State::RoutePlanning;
 	if (!gUISettings.renderAgentDebug) return;
@@ -1808,8 +1810,8 @@ void renderSectorDepthContent(shared_ptr<const core::Sector> sector, WorldDrawLi
 			core::Vector2 top{ sector->getCellX() + instance.x + tile.x, sector->getCellY() + instance.y + tile.y + 1 };
 			core::Vector2 bottom{ top.x + 1, top.y - 1 };
 			transformPosition(top); transformPosition(bottom);
-			if (!drawObjectSprite(tile.image.c_str(), drawList, { top.x, top.y }, { bottom.x, bottom.y }))
-				throw std::runtime_error("Missing Furniture Image-set region: " + tile.image);
+			if (!drawFurnitureSprite(tile.image.c_str(), drawList, { top.x, top.y }, { bottom.x, bottom.y }))
+				drawList->AddRectFilled({top.x, top.y}, {bottom.x, bottom.y}, IM_COL32(255, 0, 255, 255));
 		}
 	}
 }
@@ -1888,7 +1890,7 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		default: break;
 		}
 		if (!drawSectorTileSurface(kind, drawList, {bounds0.x, bounds1.y},
-			{bounds1.x, bounds0.y}, colour))
+			{bounds1.x, bounds0.y}, colour, gUISettings.worldZoom))
 			drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, colour);
 	}
 
@@ -2345,6 +2347,14 @@ void renderWorld(shared_ptr<const core::World> world, WorldDrawList* drawList)
 	// Queue diagnostics are selection overlays and should remain visible above
 	// the selected object and agents.
 	renderSelectedQueues(world, viewLayer, drawList);
+
+	if (auto selector = world->getPlayerTransportSelector())
+	{
+		auto anchor = selector->anchor; transformPosition(anchor);
+		pf::drawPlayerTransportSelector(*selector, anchor.x, anchor.y,
+			[&](float x0, float y0, float x1, float y1, uint32_t colour) { drawList->AddRectFilled({x0,y0}, {x1,y1}, colour); },
+			[&](float x0, float y0, float x1, float y1, uint32_t colour) { drawList->AddRect({x0,y0}, {x1,y1}, colour); });
+	}
 
 	// Grid
 	if (gUISettings.renderGrid)

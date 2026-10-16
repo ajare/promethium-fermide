@@ -107,6 +107,12 @@ namespace core
 						return landing && landing->mLiftStopIndex == stop;
 					});
 			};
+			auto hasPlayerVisit = [&]
+			{
+				return resource.mPlayerStopRequests.contains(resource.mLiftCurrentStop)
+					|| any_of(resource.mOccupants.begin(), resource.mOccupants.end(), [&](AgentId owner)
+						{ auto actor = mWorld.mAgents.find(owner); return actor && actor->isPlayerControlled(); });
+			};
 			auto beginBoardingWindow = [&]
 			{
 				resource.mLiftStopPhase = LiftStopPhase::Boarding;
@@ -197,7 +203,8 @@ namespace core
 						resource.mLiftMoving = false;
 						resource.mLiftStopPhase = LiftStopPhase::Opening;
 						resource.mLiftServiceStartedTick = mWorld.mSimulationTick;
-						resource.mLiftBoardingCutoffTick = resource.mShuttle ? 0
+						resource.mPlayerBoardingWindow = !resource.mOpenPlatformLift && hasPlayerVisit();
+						resource.mLiftBoardingCutoffTick = (resource.mShuttle || resource.mPlayerBoardingWindow) ? 0
 							: mWorld.mSimulationTick + resource.mLiftMaximumBoardingTicks;
 					}
 				}
@@ -209,7 +216,8 @@ namespace core
 				resource.mLiftMoving = false;
 				resource.mLiftStopPhase = LiftStopPhase::Opening;
 				resource.mLiftServiceStartedTick = mWorld.mSimulationTick;
-				resource.mLiftBoardingCutoffTick = resource.mShuttle ? 0
+				resource.mPlayerBoardingWindow = !resource.mOpenPlatformLift && hasPlayerVisit();
+				resource.mLiftBoardingCutoffTick = (resource.mShuttle || resource.mPlayerBoardingWindow) ? 0
 					: mWorld.mSimulationTick + resource.mLiftMaximumBoardingTicks;
 			}
 			else if (resource.mLiftTargetStop == resource.mLiftCurrentStop
@@ -227,7 +235,8 @@ namespace core
 
 			// Every Shuttle Door authored at the aligned stop opens together. Door
 			// leases still protect active crossings; the stop phase controls closure.
-			if (resource.mShuttle && !resource.mLiftMoving
+			bool playerVisit = hasPlayerVisit();
+			if ((resource.mShuttle || (playerVisit && !resource.mOpenPlatformLift)) && !resource.mLiftMoving
 				&& resource.mLiftCurrentStop < resource.mLiftStops.size()
 				&& (resource.mLiftStopPhase == LiftStopPhase::Opening
 					|| resource.mLiftStopPhase == LiftStopPhase::Disembarking
@@ -239,19 +248,36 @@ namespace core
 						landing->mDoor->requestOpen();
 				});
 
+			bool playerBoundaryOpen = true;
+			if (resource.mPlayerBoardingWindow)
+				forEachLanding([&](uint32_t stop, TraversalResource* landing)
+				{
+					if (stop == resource.mLiftCurrentStop && landing && landing->mDoor)
+						playerBoundaryOpen = playerBoundaryOpen && landing->mDoor->isOpen();
+				});
 			if (!resource.mLiftMoving && resource.mLiftStopPhase == LiftStopPhase::Opening
 				&& mWorld.mSimulationTick > resource.mLiftServiceStartedTick)
 			{
 				if (liftHasDisembarkDemand(resource, resource.mLiftCurrentStop))
 					resource.mLiftStopPhase = LiftStopPhase::Disembarking;
-				else beginBoardingWindow();
+				else if (playerBoundaryOpen) beginBoardingWindow();
 			}
 			if (resource.mLiftStopPhase == LiftStopPhase::Disembarking
 				&& !liftHasDisembarkDemand(resource, resource.mLiftCurrentStop)
-				&& resource.mLiftExitAtSafeStop.empty())
+				&& resource.mLiftExitAtSafeStop.empty() && playerBoundaryOpen)
 				beginBoardingWindow();
 
 			assignLiftSafeExitPaths(resource);
+			if (!resource.mLiftMoving && resource.mLiftStopPhase == LiftStopPhase::Boarding)
+			{
+				bool open = true;
+				forEachLanding([&](uint32_t stop, TraversalResource* landing)
+				{
+					if (stop == resource.mLiftCurrentStop && landing && landing->mDoor)
+						open = open && landing->mDoor->isOpen();
+				});
+				if (open) resource.mPlayerStopRequests.erase(resource.mLiftCurrentStop);
+			}
 
 			bool crossing = any_of(resource.mVirtualBoundaryOwners.begin(),
 				resource.mVirtualBoundaryOwners.end(), [](auto owner) { return (bool)owner; });
@@ -265,7 +291,9 @@ namespace core
 			auto occupied = (uint32_t)count_if(resource.mOccupants.begin(), resource.mOccupants.end(),
 				[](auto id) { return (bool)id; });
 			auto unresolvedDestination = any_of(resource.mOccupants.begin(), resource.mOccupants.end(), [&](auto owner)
-				{ return owner && !resource.mLiftPassengerDestinations.contains(owner); });
+				{ auto actor = mWorld.mAgents.find(owner);
+					return owner && !(actor && actor->isPlayerControlled())
+						&& !resource.mLiftPassengerDestinations.contains(owner); });
 			bool occupantsPositioned = true;
 			if (resource.mLift && !resource.mOpenPlatformLift)
 			{
@@ -273,6 +301,7 @@ namespace core
 				for (uint32_t i = 0; i < resource.mOccupants.size(); ++i)
 					if (auto passenger = mWorld.mAgents.find(resource.mOccupants[i]))
 					{
+						if (passenger->isPlayerControlled()) continue;
 						auto local = resource.mCapacityPositions[i];
 						if (auto target = resource.mLiftPassengerTargets.find(resource.mOccupants[i]);
 							target != resource.mLiftPassengerTargets.end()) local = target->second;
@@ -300,6 +329,9 @@ namespace core
 						>= resource.mLiftServiceStartedTick + resource.mLiftMinimumDwellTicks
 					&& !crossing && !reserved && !unresolvedDestination && occupantsPositioned
 					&& !resource.mLiftActiveConfirmation
+					// Manual visitors have no admission/confirmation queue to keep this
+					// window alive. Give them the advertised finite open boarding window.
+					&& (!resource.mPlayerBoardingWindow || mWorld.mSimulationTick >= resource.mLiftBoardingCutoffTick)
 					&& (occupied == resource.mCapacity
 						|| mWorld.mSimulationTick > resource.mLiftBoardingCutoffTick || !waitingHere);
 			}
@@ -351,6 +383,14 @@ namespace core
 				if (auto passenger = mWorld.mAgents.find(resource.mOccupants[i]))
 				{
 					auto transit = mWorld.mSectors[(size_t)resource.mLiftSector.value - 1].get();
+					if (passenger->isPlayerControlled())
+					{
+						auto delta = resource.mLiftPosition - previousVehiclePosition;
+						passenger->setPosition({ transit, passenger->getLocalPosition()
+							+ (resource.mShuttle ? Vector2{delta, 0.f} : Vector2{0.f, delta}) }, false);
+						passenger->mTraversalLocalGoal.reset();
+						continue;
+					}
 					auto local = resource.mCapacityPositions[i];
 					if (auto target = resource.mLiftPassengerTargets.find(resource.mOccupants[i]);
 						target != resource.mLiftPassengerTargets.end()) local = target->second;
@@ -453,6 +493,23 @@ namespace core
 					presence = resource.mAutomaticPresenceObserved;
 				}
 			}
+			// Player same-Layer walking has no autonomous threshold task. Protect
+			// its physical body while under an already moving/open Bulkhead leaf;
+			// this is obstruction safety, not permission to open a closed Door.
+			if (!resource.mDoor->isClosed())
+				if (auto bulkhead = dynamic_pointer_cast<BulkheadDoor>(resource.mDoor))
+					for (int side = 0; side < CORE_NUM_SIDES; ++side)
+						if (auto sector = bulkhead->getSideSector(side))
+							for (auto actor : sector->getAgents())
+							{
+								if (!actor->isPlayerControlled()) continue;
+								auto position = actor->getGlobalPosition();
+								auto envelope = actor->getPoseEnvelope(actor->getPose());
+								if (envelope && abs(position.y - bulkhead->getPosition().y) < .001f
+									&& position.x + envelope->x * .5f > bulkhead->getPosition().x + .0001f
+									&& position.x - envelope->x * .5f < bulkhead->getPosition().x + bulkhead->getSize().x - .0001f)
+									obstruction = true;
+							}
 			for (auto const& [sensor, observation] : resource.mSensorObservations)
 			{
 				(void)sensor;
@@ -519,43 +576,44 @@ namespace core
 				if (!agent->isActive()) continue;
 				agent->allocateTraversal();
 			}
+			mWorld.performPlayerContextualAction();
 			allocateInteractions();
 			break;
 
 		case SimulationPhase::Movement:
 			// Sample every predecessor before any Agent moves this tick.
 			updateQueueStandingTargets();
-			for (auto const& [id, agent] : mWorld.mAgents.entries())
+			for (auto const player = mWorld.getPlayerControlledAgent(); auto const& [id, agent] : mWorld.mAgents.entries())
 			{
 				(void)id;
 				// A deactivated Agent is not simulated (#118): no phase of the
 				// tick moves it, commits for it, or cleans up traversal on its
 				// behalf, and its queued door presses are not pressed.
 				if (!agent->isActive()) continue;
+				if (agent->isPlayerControlled())
+				{
+					// Selection changes do not revoke an admitted crossing.
+					if (id == player || agent->mTraversalTask)
+						mWorld.advancePlayerControlledAgent(id, timestep);
+					continue;
+				}
 				auto const movementStart = agent->getGlobalPosition();
-				auto const approachingDoor = agent->getState() == Agent::State::MovingToVertex
+				auto const approachingResource = agent->getState() == Agent::State::MovingToVertex
 					|| (agent->getState() == Agent::State::TraversingEdge && agent->mTraversalTask
 						&& agent->mTraversalTask->edge
 						&& agent->mTraversalTask->edge->getType() != EdgeType::Door);
-				if (approachingDoor && agent->getObjectUsage() == ObjectUsage::RemoteControl)
-					tryPressUpcomingDoorButton(*agent, movementStart, movementStart);
+				if (approachingResource && agent->getObjectUsage() == ObjectUsage::RemoteControl)
+					tryAnticipatoryInteraction(*agent, movementStart, movementStart);
 				// A remote press retains the ordinary control queue and duration.
-				// Hold position during that physical operation, not during device travel.
-				bool pressingRemote = false;
-				if (agent->getObjectUsage() == ObjectUsage::RemoteControl)
-					for (auto const& [pointId, point] : mWorld.mInteractionPoints.entries())
-					{
-						(void)pointId;
-						for (auto requestId : point->mQueue)
-						{
-							auto request = mWorld.mInteractionRequests.find(requestId);
-							if (request && request->mActor == id && request->mResult == InteractionResult::Pending)
-								pressingRemote = true;
-						}
-					}
+				// Hold position during that physical operation, not during device
+				// travel. #626: the derived per-Agent queued-press index answers
+				// the question directly instead of scanning every point and queue
+				// for each remote Agent every tick.
+				bool const pressingRemote = agent->getObjectUsage() == ObjectUsage::RemoteControl
+					&& hasQueuedPressWork(id);
 				if (!pressingRemote) agent->update(timestep);
-				if (approachingDoor)
-					tryPressUpcomingDoorButton(*agent, movementStart, agent->getGlobalPosition());
+				if (approachingResource)
+					tryAnticipatoryInteraction(*agent, movementStart, agent->getGlobalPosition());
 			}
 			moveInteractions(timestep);
 			break;
@@ -928,6 +986,17 @@ namespace core
 							airlockJourney = true;
 			}
 			if (airlockJourney) continue;
+			// Player stairs and Ladders are input-controlled movement. A plain pause
+			// freezes their admitted task and capacity rather than abandoning it.
+			if (agent->isPlayerControlled() && agent->mTraversalTask && hasCommittedMovement(*agent)
+				&& (agent->mTraversalTask->edge->getType() == EdgeType::Staircase
+					|| agent->mTraversalTask->edge->getType() == EdgeType::StaircaseMount
+					|| agent->mTraversalTask->edge->getType() == EdgeType::Ladder
+					|| agent->mTraversalTask->edge->getType() == EdgeType::LadderMount
+					|| agent->mTraversalTask->edge->getType() == EdgeType::Stairwell
+					|| agent->mTraversalTask->edge->getType() == EdgeType::StairwellMount
+					|| (agent->mTraversalTask->edge->getType() == EdgeType::Location
+						&& agent->getSector() && agent->getSector()->getType() == SectorType::Stairwell))) continue;
 			// Admitted standalone thresholds retain their physical safety commitment.
 			if (agent->mTraversalTask && hasCommittedMovement(*agent))
 				if (auto bulkhead = dynamic_pointer_cast<BulkheadDoorEdge const>(agent->mTraversalTask->edge);

@@ -10,6 +10,33 @@ file(MAKE_DIRECTORY "${work}")
 
 set(agent_checks
     identity
+    playerControlButtons
+    playerControlButtonPriority
+    playerControlExtensibleLadders
+    playerControlBasics
+    playerControlBoundaries
+    playerControlBulkheads
+    playerControlDoorways
+    playerControlDoorwayRestrictions
+    playerControlContextualPrecedence
+    playerControlStairwellPlatforms
+    playerControlLadders
+    playerControlLadderSharedCapacity
+    playerControlLadderRestrictions
+    playerControlEscalators
+    playerControlStaircases
+    playerControlStaircaseRestrictions
+    playerControlStairwells
+    playerControlStairwellRestrictions
+    playerControlPersistence
+    playerControlLiftCalledLanding
+    playerControlManualTransports
+    playerControlAirlocks
+    playerControlChambers
+    playerControlBoothWindows
+    playerControlAccessPanels
+    playerControlPoses
+    playerControlBulkheadPoses
     agentGroupsHaveStableIdsAndEnumerateInCreationOrder
     agentGroupNamesAreTrimmedValidatedAndCaseSensitive
     renamingAnAgentGroupKeepsItsPlaceAndFailsAtomically
@@ -133,6 +160,7 @@ set(agent_checks
     agentTypesRemotePanelProperties
     agentTypesRemotePanelDeclarations
     agentTypesRemoteDeclarations
+    agentTypesRemoteApproachBoundaries
     agentTypesRemoteGeometry
     agentTypesRemoteJourneys
     agentTypesRemotePendingEdits
@@ -153,6 +181,16 @@ set(agent_checks
     remoteMixedWorld
     remoteMixedControls
     remoteMixedCosts
+    queuedPressHoldsForExactlyThePressInterval
+    queuedPressDeviceTravelDoesNotHold
+    queuedPressSharedOperationRelease
+    queuedPressCancellationClears
+    queuedPressCancelBehindActive
+    queuedPressCoalesceAndRefusal
+    queuedPressRejectedNotQueued
+    queuedPressRemovalPathsClear
+    queuedPressQueryScalingEvidence
+    queuedPressRetirementClean
 )
 
 function(invoke status expected)

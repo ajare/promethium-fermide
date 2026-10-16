@@ -20,7 +20,7 @@ return {
       label = "Chair",
       sideRoutes = true,
       tiles = {
-        {x = 0, y = 0, imageSet = "ObjectAtlas", image = "chair"},
+        {x = 0, y = 0, image = "chair"},
       },
       usablePoints = {
         {key = "seat", label = "Seat", x = 0.5, blocksPathing = false},
@@ -55,8 +55,8 @@ return {
       label = "Sofa",
       sideRoutes = true,
       tiles = {
-        {x = 0, y = 0, imageSet = "ObjectAtlas", image = "sofa-left"},
-        {x = 1, y = 0, imageSet = "ObjectAtlas", image = "sofa-right"},
+        {x = 0, y = 0, image = "sofa-left"},
+        {x = 1, y = 0, image = "sofa-right"},
       },
       usablePoints = {
         {key = "left", label = "Left seat", x = 0.5, blocksPathing = false},
@@ -89,8 +89,8 @@ return {
       label = "Bed",
       sideRoutes = true,
       tiles = {
-        {x = 0, y = 0, imageSet = "ObjectAtlas", image = "bed-left"},
-        {x = 1, y = 0, imageSet = "ObjectAtlas", image = "bed-right"},
+        {x = 0, y = 0, image = "bed-left"},
+        {x = 1, y = 0, image = "bed-right"},
       },
       usablePoints = {
         {key = "middle", label = "Middle", x = 1, blocksPathing = false},
@@ -120,8 +120,8 @@ return {
       label = "Desk",
       sideRoutes = true,
       tiles = {
-        {x = 0, y = 0, imageSet = "ObjectAtlas", image = "desk-left"},
-        {x = 1, y = 0, imageSet = "ObjectAtlas", image = "desk-right"},
+        {x = 0, y = 0, image = "desk-left"},
+        {x = 1, y = 0, image = "desk-right"},
       },
       usablePoints = {
       },

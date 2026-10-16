@@ -242,7 +242,7 @@ namespace core
 			AgentBehaviourTeardownReason::Reset);
 		mRandomSeed = seed;
 		for (auto const& [agentId, agent] : mAgents.entries())
-			if (agent && agent->getBehaviourAssignment())
+			if (agent && agent->getBehaviourAssignment() && !agent->isPlayerControlled())
 				mSimulationCoordinator.clearAgentMovementForBehaviourEdit(agentId);
 		modify();
 		return true;
@@ -598,6 +598,13 @@ namespace core
 				if (diagnostic) *diagnostic = std::move(message);
 				return false;
 			};
+			if (behaviourId == PlayerControlledBehaviour)
+			{
+				if (revision != PlayerControlledBehaviourRevision || !configuration.empty())
+					return reject("Player controlled requires revision 1 and no configuration");
+				if (normalized) normalized->clear();
+				return true;
+			}
 			auto const* behaviour = registry.lookupAgentBehaviour(behaviourId);
 			if (!behaviour)
 				return reject(format("Agent behaviour {} is not defined in the attached registry",
@@ -675,7 +682,7 @@ namespace core
 		mAgentBehaviourRegistry = std::move(registry);
 		mAgentBehaviourDependencyDiagnostic.clear();
 		for (auto const& [agentId, agent] : mAgents.entries())
-			if (agent && agent->getBehaviourAssignment())
+			if (agent && agent->getBehaviourAssignment() && !agent->isPlayerControlled())
 				mSimulationCoordinator.clearAgentMovementForBehaviourEdit(agentId);
 		if (referenceChanges) modify();
 	}
@@ -703,7 +710,7 @@ namespace core
 			mAgentBehaviourRuntime->consumeDiagnostics());
 		for (auto const& [agentId, agent] : mAgents.entries())
 		{
-			if (!agent || !agent->getBehaviourAssignment()) continue;
+			if (!agent || !agent->getBehaviourAssignment() || agent->isPlayerControlled()) continue;
 			mSimulationCoordinator.clearAgentMovementForBehaviourEdit(agentId);
 			agent->clearBehaviourAssignment();
 		}
@@ -747,7 +754,7 @@ namespace core
 			mAgentBehaviourRuntime->consumeDiagnostics());
 		for (auto const& [agentId, agent] : mAgents.entries())
 		{
-			if (!agent || !agent->getBehaviourAssignment()) continue;
+			if (!agent || !agent->getBehaviourAssignment() || agent->isPlayerControlled()) continue;
 			mSimulationCoordinator.clearAgentMovementForBehaviourEdit(agentId);
 			agent->clearBehaviourAssignment();
 		}
@@ -877,7 +884,7 @@ namespace core
 		if (registryChanges && previousRegistry)
 			previousRegistry->unregisterWorld(*this);
 		for (auto const& [agentId, agent] : mAgents.entries())
-			if (agent && agent->getBehaviourAssignment())
+			if (agent && agent->getBehaviourAssignment() && !agent->isPlayerControlled())
 				mSimulationCoordinator.clearAgentMovementForBehaviourEdit(agentId);
 	}
 
@@ -943,6 +950,13 @@ namespace core
 		uint64_t revision, AgentBehaviourConfiguration const& configuration,
 		AgentBehaviourConfiguration* normalized, string* diagnostic) const
 	{
+		if (behaviour == PlayerControlledBehaviour)
+		{
+			bool valid = revision == PlayerControlledBehaviourRevision && configuration.empty();
+			if (diagnostic) *diagnostic = valid ? "" : "Player controlled requires revision 1 and no configuration";
+			if (valid && normalized) normalized->clear();
+			return valid;
+		}
 		if (!mAgentBehaviourRegistry)
 		{
 			if (diagnostic) *diagnostic =
@@ -1043,7 +1057,7 @@ namespace core
 		for (auto const& [id, agent] : mAgents.entries())
 		{
 			(void)id;
-			if (agent && agent->getBehaviourAssignment()) ++count;
+			if (agent && agent->getBehaviourAssignment() && !agent->isPlayerControlled()) ++count;
 		}
 		return count;
 	}
@@ -2709,6 +2723,10 @@ namespace core
 
 	void World::validateLiftOptions(string const& caller, CreateLiftOptions const& options) const
 	{
+		if (options.stopOffsets.size() > 1000 || (!options.stopShortNames.empty()
+			&& (options.stopShortNames.size() != options.stopOffsets.size()
+				|| !all_of(options.stopShortNames.begin(), options.stopShortNames.end(), isValidTransportStopShortName))))
+			throw WorldException(this, caller + ": Stop short names require 1–3 characters A–Z or 0–9, parallel to at most 1000 Stops");
 		for (float speed : options.doorSpeeds)
 			if (!std::isfinite(speed) || speed < 0.0f) throw WorldException(this, caller + ": Invalid landing Door speed");
 		if (options.cellsWide == 0)
@@ -2764,6 +2782,10 @@ namespace core
 
 	void World::validateShuttleOptions(string const& caller, CreateShuttleOptions const& options) const
 	{
+		if (options.stopOffsets.size() > 1000 || (!options.stopShortNames.empty()
+			&& (options.stopShortNames.size() != options.stopOffsets.size()
+				|| !all_of(options.stopShortNames.begin(), options.stopShortNames.end(), isValidTransportStopShortName))))
+			throw WorldException(this, caller + ": Stop short names require 1–3 characters A–Z or 0–9, parallel to at most 1000 Stops");
 		for (float speed : options.doorSpeeds)
 			if (!std::isfinite(speed) || speed < 0.0f) throw WorldException(this, caller + ": Invalid landing Door speed");
 		if (options.numCars == 0)
@@ -3716,7 +3738,7 @@ namespace core
 		{
 			auto object = control.sector->_getObject(control.index);
 			DeviceCommand command;
-			command.type = DeviceCommandType::SetExtendedState;
+			command.type = DeviceCommandType::ToggleExtendedState;
 			command.desiredState = true;
 			command.traversalResource = traversalResource;
 			auto point = createPhysicalControlInteractionPoint("Ladder extension control",
@@ -3732,11 +3754,11 @@ namespace core
 		if (options.extensible)
 		{
 			createdControls[CORE_LADDER_ENDPOINT_LOW] = createPhysicalControl("Ladder button", landingLayer, y0,
-				transportControlDemand(foreSector0, physicalControl::OwnerType::Ladder, controlGeometry, x, y0, 1), 0);
+				transportControlDemand(foreSector0, physicalControl::OwnerType::Ladder, controlGeometry, x, y0, 1), CORE_BUTTON_F_AUTO_REENABLE);
 			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_LOW], CORE_LADDER_ENDPOINT_LOW);
 
 			createdControls[CORE_LADDER_ENDPOINT_HIGH] = createPhysicalControl("Ladder button", landingLayer, y1,
-				transportControlDemand(foreSector1, physicalControl::OwnerType::Ladder, controlGeometry, x, y1, 1), 0);
+				transportControlDemand(foreSector1, physicalControl::OwnerType::Ladder, controlGeometry, x, y1, 1), CORE_BUTTON_F_AUTO_REENABLE);
 			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_HIGH], CORE_LADDER_ENDPOINT_HIGH);
 		}
 
@@ -4329,6 +4351,7 @@ namespace core
 		record.e = levelsHigh; record.g = options.initialStop;
 		record.x = options.minimumDwellSeconds; record.y = options.maximumBoardingSeconds;
 		record.values = options.stopOffsets;
+		record.stopShortNames = options.stopShortNames;
 		// The per-stop Door styles are authored Lift data, not just initial Door
 		// state: record them so save/load and later rebuilds replay them, the
 		// way the Shuttle path records its doorOpenStyles.
@@ -4623,6 +4646,7 @@ namespace core
 		record.h = options.doorMask; record.p = options.allowPartialLandings;
 		record.x = options.minimumDwellSeconds; record.y = options.maximumBoardingSeconds;
 		record.values = options.stopOffsets;
+		record.stopShortNames = options.stopShortNames;
 		record.overrides = options.doorOpenStyles;
 		record.transportDoorSpeeds = options.doorSpeeds;
 		for (auto const& requirement : options.landingControlPermissionRequirements)
@@ -4995,27 +5019,7 @@ namespace core
 		if (!point) return false;
 		for (auto const& binding : point->mBindings)
 		{
-			auto resource = mTraversalResources.find(binding.command.traversalResource);
-			if (!resource) continue;
-			switch (binding.command.type)
-			{
-			case DeviceCommandType::OpenDoor:
-				if (resource->mDoor && resource->mDoor->isBroken()) return true;
-				break;
-			case DeviceCommandType::SetExtendedState:
-				if (resource->mExtensible && resource->mExtensible->isBroken()) return true;
-				break;
-			case DeviceCommandType::CallLift:
-			case DeviceCommandType::SelectLiftDestination:
-				if (resource->mLift && resource->mLift->isBroken()) return true;
-				break;
-			case DeviceCommandType::CallShuttle:
-			case DeviceCommandType::SelectShuttleDestination:
-				if (resource->mShuttle && resource->mShuttle->isBroken()) return true;
-				break;
-			default:
-				break;
-			}
+			if (isDeviceCommandTargetBroken(binding.command)) return true;
 		}
 		return false;
 	}
@@ -5075,7 +5079,7 @@ namespace core
 				{
 					options = { record.d, record.e, record.values, record.f, record.g,
 						record.x, record.y, record.p, record.h ? record.h : (1u << 1),
-						record.overrides, {}, record.initiallyBroken, record.transportDoorSpeeds };
+						record.overrides, {}, record.initiallyBroken, record.transportDoorSpeeds, record.stopShortNames };
 					return true;
 				}
 			}
@@ -7482,8 +7486,8 @@ namespace core
 
 			if (options.controlCount > 0)
 			{
-				createdControls[0] = _createForceBridgeButton(fbObject.sector, x, y, options.width, options.fromSide, 0);
-				DeviceCommand command{ DeviceCommandType::SetExtendedState, {}, true, traversalResource };
+				createdControls[0] = _createForceBridgeButton(fbObject.sector, x, y, options.width, options.fromSide, CORE_BUTTON_F_AUTO_REENABLE);
+				DeviceCommand command{ DeviceCommandType::ToggleExtendedState, {}, false, traversalResource };
 				auto point = createPhysicalControlInteractionPoint("Force bridge extension control",
 					createdControls[0], (float)y, CORE_RESOURCE_SLOT_WIDTH * 0.5f + 0.001f,
 					getFixedTimestep(), { { command, InteractionBindingRequirement::Required } });
@@ -7494,8 +7498,8 @@ namespace core
 			}
 			if (options.controlCount > 1)
 			{
-				createdControls[1] = _createForceBridgeButton(fbObject.sector, x, y, options.width, 1 - options.fromSide, 0);
-				DeviceCommand command{ DeviceCommandType::SetExtendedState, {}, true, traversalResource };
+				createdControls[1] = _createForceBridgeButton(fbObject.sector, x, y, options.width, 1 - options.fromSide, CORE_BUTTON_F_AUTO_REENABLE);
+				DeviceCommand command{ DeviceCommandType::ToggleExtendedState, {}, false, traversalResource };
 				auto point = createPhysicalControlInteractionPoint("Force bridge extension control",
 					createdControls[1], (float)y, CORE_RESOURCE_SLOT_WIDTH * 0.5f + 0.001f,
 					getFixedTimestep(), { { command, InteractionBindingRequirement::Required } });
@@ -7672,7 +7676,7 @@ namespace core
 		{
 			auto object = control.sector->_getObject(control.index);
 			DeviceCommand command;
-			command.type = DeviceCommandType::SetExtendedState;
+			command.type = DeviceCommandType::ToggleExtendedState;
 			command.desiredState = true;
 			command.traversalResource = traversalResource;
 			auto point = createPhysicalControlInteractionPoint("Ladder extension control",
@@ -7699,13 +7703,13 @@ namespace core
 		{
 			// Endpoints independently participate in the complete row allocation.
 			createdControls[CORE_LADDER_ENDPOINT_LOW] = createPhysicalControl("Ladder button", layerIndex, y0,
-				transportControlDemand(sector, physicalControl::OwnerType::Ladder, controlGeometry, x, y0, 1), 0);
+				transportControlDemand(sector, physicalControl::OwnerType::Ladder, controlGeometry, x, y0, 1), CORE_BUTTON_F_AUTO_REENABLE);
 			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_LOW], CORE_LADDER_ENDPOINT_LOW);
 
 
 			// Upper
 			createdControls[CORE_LADDER_ENDPOINT_HIGH] = createPhysicalControl("Ladder button", layerIndex, y1,
-				transportControlDemand(sector, physicalControl::OwnerType::Ladder, controlGeometry, x, y1, 1), 0);
+				transportControlDemand(sector, physicalControl::OwnerType::Ladder, controlGeometry, x, y1, 1), CORE_BUTTON_F_AUTO_REENABLE);
 			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_HIGH], CORE_LADDER_ENDPOINT_HIGH);
 
 		}
@@ -8002,6 +8006,7 @@ namespace core
 		record.d = options.cellsWide; record.e = options.capacity;
 		record.z = options.platformStopDurationSeconds;
 		record.values = options.stopOffsets;
+		record.stopShortNames = options.stopShortNames;
 		for (auto const& requirement : options.landingControlPermissionRequirements)
 		{
 			record.landingControlPermissionRequirements.emplace_back();
@@ -8049,6 +8054,7 @@ namespace core
 			throw WorldException(this, "Simulation cannot be paused from inside a simulation phase");
 
 		mSimulationPaused = true;
+		clearPlayerInput();
 		mAccumulatedTime = 0.0;
 		mSimulationCoordinator.cancelAllTraversalForTopologyRebuild();
 		mSimulationCoordinator.publishTopologyEvent(SimulationEventType::SimulationPaused);
@@ -8739,7 +8745,31 @@ namespace core
 		definition->displayName = std::move(preflight.displayName);
 		definition->resourceName = std::move(resourceName);
 		definition->source = std::move(source);
-		mAgentTypes.emplace(definition->typeId, std::move(definition));
+		bool const hasStairs = any_of(mSectors.begin(), mSectors.end(), [](auto const& sector) {
+			return sector && sector->getType() == SectorType::Stairwell;
+		});
+		bool widenStairs = false;
+		if (hasStairs)
+			if (auto baseline = agentTypeDefinitionBaseline(*definition); baseline && baseline->supportsPose(Pose::Standing))
+			{
+				widenStairs = baseline->width > maximumInstalledStandingWidth();
+				if (baseline->width >= 2.f)
+					return reject("Agent Standing width leaves no room for Stairwell platforms");
+				if (widenStairs && mBuildFinished)
+				{
+					if (!mSimulationPaused) return reject("Pause before installing a type that changes Stairwell platforms");
+					for (auto const& [id, agent] : mAgents.entries())
+						if (agent && agent->getSector() && agent->getSector()->getType() == SectorType::Stairwell)
+							return reject("Cannot change Stairwell platform geometry while an Agent occupies it");
+				}
+			}
+		auto const typeId = definition->typeId;
+		mAgentTypes.emplace(typeId, std::move(definition));
+		if (widenStairs && mBuildFinished && !rebuildTraversalTopology())
+		{
+			mAgentTypes.erase(typeId);
+			return reject(mTopologyDiagnostic);
+		}
 		if (diagnostic) diagnostic->clear();
 		return true;
 	}
@@ -11046,6 +11076,47 @@ namespace core
 		return nullptr;
 	}
 
+	bool World::isValidTransportStopShortName(string_view name)
+	{
+		return !name.empty() && name.size() <= 3 && all_of(name.begin(), name.end(), [](char c)
+			{ return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'); });
+	}
+
+	string World::getTransportStopShortName(uint32_t sectorIndex, uint32_t stopIndex, uint32_t objectIndex) const
+	{
+		auto record = findLiftDestinationRecord(sectorIndex, objectIndex);
+		if (!record || stopIndex >= record->values.size()) throw invalid_argument("Unknown transport destination Stop");
+		return record->stopShortNames.empty() ? to_string(stopIndex) : record->stopShortNames.at(stopIndex);
+	}
+
+	string World::getTransportStopShortName(TraversalResourceId resourceId, uint32_t stopIndex) const
+	{
+		auto resource = mTraversalResources.find(resourceId);
+		auto record = resource ? findLiftDestinationRecord(*resource) : nullptr;
+		if (!record || stopIndex >= record->values.size()) throw invalid_argument("Unknown transport destination Stop");
+		return record->stopShortNames.empty() ? to_string(stopIndex) : record->stopShortNames.at(stopIndex);
+	}
+
+	bool World::setTransportStopShortName(uint32_t sectorIndex, uint32_t stopIndex,
+		string const& name, string* diagnostic, uint32_t objectIndex)
+	{
+		auto reject = [&](string text) { if (diagnostic) *diagnostic = std::move(text); return false; };
+		if (!mSimulationPaused) return reject("Stop short names can only be edited while the simulation is paused");
+		if (!isValidTransportStopShortName(name)) return reject("Use 1–3 uppercase alphanumeric characters (A–Z, 0–9)");
+		auto record = findLiftDestinationRecord(sectorIndex, objectIndex);
+		if (!record || stopIndex >= record->values.size()) return reject("Unknown transport destination Stop");
+		if (getTransportStopShortName(sectorIndex, stopIndex, objectIndex) != name)
+		{
+			auto& names = mConstructionRecords[record - mConstructionRecords.data()].stopShortNames;
+			if (names.empty())
+				for (size_t i = 0; i < record->values.size(); ++i) names.push_back(to_string(i));
+			names[stopIndex] = name;
+			modify();
+		}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	vector<uint32_t> World::getLiftDestinationLevels(uint32_t sectorIndex, uint32_t objectIndex) const
 	{
 		auto record = findLiftDestinationRecord(sectorIndex, objectIndex);
@@ -11779,7 +11850,7 @@ namespace core
 		auto resource = mTraversalResources.find(doorId);
 		auto agent = mAgents.find(agentId);
 		if (!resource || !agent || !agent->isActive() || !resource->mEnabled
-			|| !canAgentOpenManualDoor(doorId, agentId) || resource->mDoor->isBroken()) return false;
+			|| !agentHasFeasibleManualDoorOperation(doorId, agentId) || resource->mDoor->isBroken()) return false;
 		auto const& door = *resource->mDoor;
 		if (door.getFrontSector().get() != agent->getSector() && door.getBackSector().get() != agent->getSector()) return false;
 		if (agent->getObjectUsage() == ObjectUsage::RemoteControl)
@@ -11792,6 +11863,11 @@ namespace core
 	}
 
 	bool World::canAgentOpenManualDoor(TraversalResourceId doorId, AgentId agentId) const
+	{
+		return agentHasFeasibleManualDoorOperation(doorId, agentId);
+	}
+
+	bool World::agentHasFeasibleManualDoorOperation(TraversalResourceId doorId, AgentId agentId) const
 	{
 		auto resource = mTraversalResources.find(doorId);
 		auto agent = mAgents.find(agentId);
@@ -11851,40 +11927,41 @@ namespace core
 		return !applicableControl;
 	}
 
+	bool World::extensibleControlAppliesToApproach(TraversalResource const& resource,
+		InteractionPoint const& point, SectorId approach, Vector2 const& approachPosition)
+	{
+		if (point.mSector != approach) return false;
+		// Both controls can occupy one Room, but opposite-end requirements remain
+		// independent. Exact midpoint positions belong to the left/lower side.
+		if (resource.mForceBridge)
+		{
+			auto const middle = resource.mForceBridge->getPosition().x
+				+ resource.mForceBridge->getSize().x * 0.5f;
+			return (point.mPosition.x > middle) == (approachPosition.x > middle);
+		}
+		if (resource.mLadder)
+		{
+			// Handholds extend above the upper landing: classify using the logical
+			// landing midpoint, not the rendered object's centre.
+			auto const lower = resource.mLadder->getPosition().y
+				- CORE_LADDER_HEIGHT_OFF_GROUND;
+			auto const middle = lower
+				+ static_cast<float>(resource.mLadder->getLevelsHigh() - 1) * 0.5f;
+			return (point.mPosition.y > middle) == (approachPosition.y > middle);
+		}
+		return true;
+	}
+
 	bool World::canAgentOperateExtensibleControl(TraversalResourceId resourceId,
 		SectorId approach, Vector2 const& approachPosition, AgentId agentId) const
 	{
 		auto resource = mTraversalResources.find(resourceId);
 		auto agent = mAgents.find(agentId);
 		if (!resource || !resource->mExtensible || !agent || !agentCanOperateObjects(*agent)) return false;
-		auto applicable = [&](InteractionPoint const& point)
-		{
-			if (point.mSector != approach) return false;
-			// A Room may contain both controls. Keep the opposite endpoint's
-			// requirement out of this operation rather than treating every control
-			// in the shared Sector as one combined requirement.
-			if (resource->mForceBridge)
-			{
-				auto const middle = resource->mForceBridge->getPosition().x
-					+ resource->mForceBridge->getSize().x * 0.5f;
-				return (point.mPosition.x > middle) == (approachPosition.x > middle);
-			}
-			if (resource->mLadder)
-			{
-				// Ladder geometry extends above the upper landing for handholds; use
-				// the logical landing midpoint rather than the rendered object's centre.
-				auto const lower = resource->mLadder->getPosition().y
-					- CORE_LADDER_HEIGHT_OFF_GROUND;
-				auto const middle = lower
-					+ static_cast<float>(resource->mLadder->getLevelsHigh() - 1) * 0.5f;
-				return (point.mPosition.y > middle) == (approachPosition.y > middle);
-			}
-			return true;
-		};
 		for (auto pointId : resource->mControls)
 		{
 			auto point = mInteractionPoints.find(pointId);
-			if (point && applicable(*point)
+			if (point && extensibleControlAppliesToApproach(*resource, *point, approach, approachPosition)
 				&& (agent->getObjectUsage() == ObjectUsage::Arms
 					|| remoteButtonApproachDistance(pointId, approach, approachPosition, agentId))
 				&& missingInteractionPermissions(*point, *agent).empty()) return true;
@@ -11911,23 +11988,7 @@ namespace core
 		for (auto pointId : resource->mControls)
 		{
 			auto point = mInteractionPoints.find(pointId);
-			if (!point || point->mSector != approach) continue;
-			bool applicable = true;
-			if (resource->mForceBridge)
-			{
-				auto const middle = resource->mForceBridge->getPosition().x
-					+ resource->mForceBridge->getSize().x * 0.5f;
-				applicable = (point->mPosition.x > middle) == (approachPosition.x > middle);
-			}
-			else if (resource->mLadder)
-			{
-				auto const lower = resource->mLadder->getPosition().y
-					- CORE_LADDER_HEIGHT_OFF_GROUND;
-				auto const middle = lower
-					+ static_cast<float>(resource->mLadder->getLevelsHigh() - 1) * 0.5f;
-				applicable = (point->mPosition.y > middle) == (approachPosition.y > middle);
-			}
-			if (!applicable) continue;
+			if (!point || !extensibleControlAppliesToApproach(*resource, *point, approach, approachPosition)) continue;
 			applicableControl = true;
 			if (missingInteractionPermissions(*point, *agent).empty()) return true;
 		}
@@ -11955,6 +12016,12 @@ namespace core
 	bool World::canAgentUseLiftJourney(TraversalResourceId resourceId,
 		Vector2 const& origin, Vector2 const& destination, AgentId agentId) const
 	{
+		return agentHasFeasibleLiftJourney(resourceId, origin, destination, agentId);
+	}
+
+	bool World::agentHasFeasibleLiftJourney(TraversalResourceId resourceId,
+		Vector2 const& origin, Vector2 const& destination, AgentId agentId) const
+	{
 		auto resource = mTraversalResources.find(resourceId);
 		auto destinationStop = resource && resource->mLiftCoordinator ? resource->mLiftStopIndex : ~0u;
 		if (resource && resource->mLiftCoordinator)
@@ -11964,15 +12031,31 @@ namespace core
 		}
 		if (!resource || (!resource->mLift && !resource->mShuttle)) return true;
 		auto stop = destinationStop != ~0u ? destinationStop : mSimulationCoordinator.findLiftStop(*resource, destination);
+		auto agent = mAgents.find(agentId);
+		return (agent && agentHasFeasibleLiftSelection(resourceId, stop, *agent))
+			|| agentCanReuseAcceptedLiftJourney(resourceId, stop, origin, agentId);
+	}
+
+	bool World::agentHasFeasibleLiftSelection(TraversalResourceId resourceId,
+		uint32_t stop, Agent const& agent) const
+	{
 		DeviceCommand command;
 		command.type = DeviceCommandType::SelectLiftDestination;
 		command.traversalResource = resourceId;
 		command.stopIndex = stop;
+		// Projected capability plus authorization. This must never issue a command;
+		// runtime selectors recheck actual occupancy, Sector and current range.
+		return (agent.getObjectUsage() == ObjectUsage::Arms
+			|| agentHasFeasibleRemoteLiftSelection(resourceId, agent))
+			&& missingLiftDestinationPermissions(command, getAgentId(&agent)).empty();
+	}
+
+	bool World::agentCanReuseAcceptedLiftJourney(TraversalResourceId resourceId,
+		uint32_t stop, Vector2 const& origin, AgentId agentId) const
+	{
+		auto resource = mTraversalResources.find(resourceId);
 		auto agent = mAgents.find(agentId);
-		if (agent && (agent->getObjectUsage() == ObjectUsage::Arms
-			|| agentCanRemotelySelectLiftDestination(resourceId, *agent, false))
-			&& missingLiftDestinationPermissions(command, agentId).empty()) return true;
-		if (!agent || !agent->getSector()) return false;
+		if (!resource || !agent || !agent->getSector()) return false;
 		bool local = find(resource->mOccupants.begin(), resource->mOccupants.end(), agentId)
 			!= resource->mOccupants.end();
 		if (!agentAdheresToLiftDestinationPermission(resourceId, stop, agentId)) return false;
@@ -12005,7 +12088,7 @@ namespace core
 			}
 		}
 		return local && stop < resource->mLiftStopRequestOwners.size()
-			&& (!resource->mLiftStopRequestOwners[stop].empty()
+			&& (!resource->mLiftStopRequestOwners[stop].empty() || resource->mPlayerStopRequests.contains(stop)
 				|| (!resource->mLiftMoving && resource->mLiftCurrentStop == stop));
 	}
 
@@ -12037,6 +12120,12 @@ namespace core
 	}
 
 	bool World::canAgentOperateTransportLandingControl(TraversalResourceId resourceId,
+		SectorId approach, Vector2 const& endpoint, AgentId agentId) const
+	{
+		return agentHasFeasibleTransportLandingOperation(resourceId, approach, endpoint, agentId);
+	}
+
+	bool World::agentHasFeasibleTransportLandingOperation(TraversalResourceId resourceId,
 		SectorId approach, Vector2 const& endpoint, AgentId agentId) const
 	{
 		auto agent = mAgents.find(agentId);
@@ -12131,7 +12220,9 @@ namespace core
 			auto agent = mAgents.find(agentId);
 			return agent && resource->mDoor->admitsBrokenPassage(*agent, agent->getGlobalPosition().y);
 		}
-		return canAgentOpenManualDoor(doorId, agentId);
+		// Admission's capability check deliberately remains projected: actual
+		// manual operation revalidates present-position reach separately.
+		return agentHasFeasibleManualDoorOperation(doorId, agentId);
 	}
 
 	void World::replanAgentAfterAuthorizationRefusal(AgentId id)
@@ -12294,7 +12385,7 @@ namespace core
 			if (!record || stop >= record->destinationPermissionRequirements.size()) continue;
 			auto const& requirement = record->destinationPermissionRequirements[stop];
 			if (find(requirement.begin(), requirement.end(), changed.value) != requirement.end()
-				&& !canAgentUseLiftJourney(node.edge->getTraversalResourceId(), agent.getGlobalPosition(),
+				&& !agentHasFeasibleLiftJourney(node.edge->getTraversalResourceId(), agent.getGlobalPosition(),
 					source->getPosition(), getAgentId(&agent))) currentRelevant = true;
 		}
 		if (!gained)
@@ -13064,6 +13155,7 @@ namespace core
 			|| !found.entity->mAdmissionQueue.empty() || !found.entity->mOpenLeases.empty()
 			|| !found.entity->mExtensionRequestLeases.empty()
 			|| !found.entity->mExtensionOccupantLeases.empty()
+			|| !found.entity->mPlayerStopRequests.empty()
 			|| any_of(found.entity->mQueueLanes.begin(), found.entity->mQueueLanes.end(),
 				[](auto const& lane) { return !lane.queue.empty(); })
 			|| any_of(found.entity->mLiftStopRequestOwners.begin(), found.entity->mLiftStopRequestOwners.end(),
@@ -13428,7 +13520,7 @@ namespace core
 		Vector2 const& movementStart, Vector2 const& movementEnd)
 	{
 		invalidateSimulationSnapshot();
-		mSimulationCoordinator.tryPressUpcomingDoorButton(agent, movementStart, movementEnd);
+		mSimulationCoordinator.tryAnticipatoryInteraction(agent, movementStart, movementEnd);
 	}
 
 	void World::allocateInteractions()

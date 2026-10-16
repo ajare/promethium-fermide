@@ -80,6 +80,7 @@ namespace
 		{ "doorOpenApartPersistsThroughEveryEditorPath", persistence::doorOpenApartPersistsThroughEveryEditorPath },
 		{ "liftDoorsDefaultToOpenApartWhileOtherDoorsKeepOpenUp", persistence::liftDoorsDefaultToOpenApartWhileOtherDoorsKeepOpenUp },
 		{ "doorStyleMapsAdvanceTheSchemaVersionAndLegacySixStillLoads", persistence::doorStyleMapsAdvanceTheSchemaVersionAndLegacySixStillLoads },
+		{ "transportStopShortNames", persistence::transportStopShortNames },
 		{ "liftStopDoorStyleOverridesArePerStopAndPersist", persistence::liftStopDoorStyleOverridesArePerStopAndPersist },
 		{ "liftCreationStopDoorStylesAreAuthoredAndPersist", persistence::liftCreationStopDoorStylesAreAuthoredAndPersist },
 		{ "liftShortStopDoorStyleVectorEditPreservesEarlierOverrides", persistence::liftShortStopDoorStyleVectorEditPreservesEarlierOverrides },

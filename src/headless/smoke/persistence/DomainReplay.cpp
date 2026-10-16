@@ -551,8 +551,8 @@ namespace persistence
 				&& left[i].y == right[i].y,
 				"Right-mounted Stairwell path is not mirrored horizontally");
 		require(left[0].x == 1.0f && left[0].y == 0.0f
-			&& std::abs(left[1].x - 1.666f) < 0.0001f && left[1].y == 0.25f
-			&& std::abs(left[2].x - 0.334f) < 0.0001f && left[2].y == 0.75f
+			&& std::abs(left[1].x - 1.55f) < 0.0001f && left[1].y == 0.25f
+			&& std::abs(left[2].x - 0.45f) < 0.0001f && left[2].y == 0.75f
 			&& left[3].x == 1.0f && left[3].y == 1.0f,
 			"Stairwell primitive endpoints do not match its path vertices");
 		auto nextLevel = leftStairwell.getLevelPath(1);

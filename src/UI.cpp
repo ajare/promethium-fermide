@@ -794,35 +794,25 @@ namespace
 		return target;
 	}
 
-	float fittedPegmanFontSize(float maximumWidth, float maximumHeight, ImVec2& renderedSize)
-	{
-		ImFont* font = gAgentIconFont ? gAgentIconFont : ImGui::GetFont();
-		float sourceSize = font->FontSize;
-		auto sourceBounds = font->CalcTextSizeA(sourceSize, FLT_MAX, 0.0f, ICON_FA_STREET_VIEW);
-		float scale = min(maximumWidth / max(sourceBounds.x, 1.0f),
-			maximumHeight / max(sourceBounds.y, 1.0f));
-		float fontSize = sourceSize * scale;
-		renderedSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, ICON_FA_STREET_VIEW);
-		return fontSize;
-	}
-
 	void drawPegman(WorldDrawList* drawList, ImVec2 feet, float maximumWidth,
-		float maximumHeight, ImU32 colour)
+		float maximumHeight, ImU32 colour, core::AgentPhysicalBaseline const& baseline,
+		float pixelScale = 0.f, float heightModifier = 1.f, core::Pose pose = core::Pose::Standing)
 	{
-		// MPP text uses its own font and cannot preserve an ImGui Font Awesome
-		// face or per-command size. Prefer the same atlas sprite as the World.
-		constexpr float aspect = 26.0f / 72.0f;
-		auto height = min(maximumHeight, maximumWidth / aspect);
-		auto width = height * aspect;
-		if (drawObjectSprite("agent", drawList,
-			{ feet.x - width * 0.5f, feet.y - height },
-			{ feet.x + width * 0.5f, feet.y }, colour)) return;
-
-		ImVec2 size;
-		float fontSize = fittedPegmanFontSize(maximumWidth, maximumHeight, size);
-		ImVec2 topLeft{ feet.x - size.x * 0.5f, feet.y - size.y };
-		drawList->AddText(gAgentIconFont ? gAgentIconFont : ImGui::GetFont(), fontSize,
-			topLeft, colour, ICON_FA_STREET_VIEW);
+		auto const& tile = baseline.poses.at(pose).imageTile;
+		auto size = agentSpriteSize(tile.c_str());
+		auto standing = agentSpriteSize(baseline.poses.at(core::Pose::Standing).imageTile.c_str());
+		if (size && standing)
+		{
+			auto scale = pixelScale > 0.f
+				? min(baseline.width * CORE_CELL_WIDTH_PIXELS * pixelScale / standing->x,
+					baseline.standingHeight * CORE_LEVEL_HEIGHT_PIXELS * pixelScale / standing->y) * heightModifier
+				: min(maximumWidth / standing->x, maximumHeight / standing->y);
+			auto width = size->x * scale, height = size->y * scale;
+			drawAgentSprite(tile.c_str(), drawList,
+				{feet.x - width * .5f, feet.y - height}, {feet.x + width * .5f, feet.y}, colour);
+		}
+		else drawList->AddRectFilled({feet.x - maximumWidth * .5f, feet.y - maximumHeight},
+			{feet.x + maximumWidth * .5f, feet.y}, IM_COL32(255, 0, 255, 255));
 	}
 
 	void drawMarkerIcon(WorldDrawList* drawList, ImVec2 point, float maximumSize, ImU32 colour)
@@ -2231,8 +2221,10 @@ namespace
 			}
 		}
 
+		auto const draftBaseline = world->registeredAgentTypeBaseline(gAgentTypeDraft.typeId,
+			gAgentTypeDraft.resourceName).value_or(core::bundledHumanBaseline());
 		drawPegman(drawList, { (agentMin.x + agentMax.x) * 0.5f, agentMax.y - 3.0f },
-			PaletteSlotSize - 8.0f, PaletteSlotSize - 8.0f, yellow);
+			PaletteSlotSize - 8.0f, PaletteSlotSize - 8.0f, yellow, draftBaseline);
 		drawMarkerIcon(drawList, { (markerMin.x + markerMax.x) * 0.5f, markerMax.y - 5.0f },
 			PaletteSlotSize - 10.0f, yellow);
 		drawDoorIcon(drawList, doorMin, doorMax, yellow);
@@ -2335,7 +2327,7 @@ namespace
 				drawPegman(drawList, io.MousePos,
 					dimensions.x * CORE_CELL_WIDTH_PIXELS * previewScale,
 					dimensions.y * CORE_LEVEL_HEIGHT_PIXELS * previewScale,
-					colour);
+					colour, draftBaseline, previewScale);
 			}
 			if (!target.diagnostic.empty()) ImGui::SetTooltip("%s", target.diagnostic.c_str());
 			ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
@@ -2349,7 +2341,9 @@ namespace
 			drawPegman(drawList, worldToScreen({ globalX, gPegman.feetY }),
 				dimensions.x * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom,
 				dimensions.y * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom,
-				yellow);
+				yellow, gPegman.pastedAgent.previewBaseline ? *gPegman.pastedAgent.previewBaseline : draftBaseline,
+				gUISettings.worldZoom, gPegman.pastedAgent.armed() && gPegman.pastedAgent.payload.heightModifierSample
+					? gPegman.pastedAgent.payload.heightModifierSample->value : 1.f);
 		}
 
 		gPegmanConsumesLeftMouse = gSectorResize.dragging || gObjectMove.dragging
@@ -3855,6 +3849,8 @@ namespace
 				<< YAML::Key << "capacity" << YAML::Value << options.capacity
 				<< YAML::Key << "stopDurationSeconds" << YAML::Value
 				<< options.platformStopDurationSeconds
+				<< YAML::Key << "stopOffsets" << YAML::Value << options.stopOffsets
+				<< YAML::Key << "stopShortNames" << YAML::Value << options.stopShortNames
 				<< YAML::EndMap;
 		}
 		else if (gSelectedSectorObject->getObjectType() == core::SectorObjectType::Ladder)
@@ -4044,6 +4040,15 @@ namespace
 				// window is the closest equivalent to the new fixed stop duration.
 				definition.platformLift.platformStopDurationSeconds = requiredYaml<float>(
 					object, "maximumBoardingSeconds");
+			if (object["stopShortNames"])
+			{
+				definition.platformLift.stopOffsets = requiredYaml<vector<uint32_t>>(object, "stopOffsets");
+				definition.platformLift.stopShortNames = requiredYaml<vector<string>>(object, "stopShortNames");
+				auto const& names = definition.platformLift.stopShortNames;
+				if (!names.empty() && (names.size() != definition.platformLift.stopOffsets.size()
+					|| !all_of(names.begin(), names.end(), core::World::isValidTransportStopShortName)))
+					throw runtime_error("PlatformLift Stop short names must match Stops and use 1–3 characters A–Z or 0–9");
+			}
 			if (!core::isFiniteTiming(definition.platformLift.platformStopDurationSeconds))
 				throw runtime_error("PlatformLift stopDurationSeconds must be finite and non-negative");
 		}
@@ -4359,9 +4364,19 @@ namespace
 					throw runtime_error("PlatformLifts can only be placed in Rooms");
 				auto xOffset = x - room->getCellX();
 				bool valid = false;
+				auto const originalStops = definition.platformLift.stopOffsets;
+				auto const originalNames = definition.platformLift.stopShortNames;
 				for (auto const& candidate : world->getPlatformLiftStopCandidates(room->getIndex(), xOffset))
 				{
 					definition.platformLift.stopOffsets = { 0, candidate.levelOffset };
+					definition.platformLift.stopShortNames.clear();
+					if (!originalNames.empty())
+						for (size_t stop = 0; stop < definition.platformLift.stopOffsets.size(); ++stop)
+						{
+							auto found = find(originalStops.begin(), originalStops.end(), definition.platformLift.stopOffsets[stop]);
+							definition.platformLift.stopShortNames.push_back(found == originalStops.end() ? to_string(stop)
+								: originalNames.at(distance(originalStops.begin(), found)));
+						}
 					if (world->canAddPlatformLift(room->getIndex(), xOffset,
 						definition.platformLift, &diagnostic)) { valid = true; break; }
 				}
@@ -6290,6 +6305,8 @@ void renderPlatformLiftPanel(shared_ptr<core::World> const& world,
 	}
 	// The separate condition control may change while this settings draft stays open.
 	draft.initiallyBroken = platformLift->isInitiallyBroken();
+	// Stop labels are edited separately and retained by structural Stop identity.
+	draft.stopShortNames.clear();
 	ImGui::Separator();
 	ImGui::TextUnformatted("Connected levels");
 	bool ground = true;
@@ -8127,6 +8144,76 @@ void renderWorldPanel(shared_ptr<core::World> world)
 		renderAgentView(world);
 	}
 
+	if (ImGui::CollapsingHeader("Sector artwork"))
+	{
+		auto const& selected = world->sectorImageSetResourceName();
+		if (ImGui::BeginCombo("ImageSet", selected.c_str()))
+		{
+			for (auto const& name : applicationResourceNames("ImageSet"))
+				if (ImGui::Selectable(name.c_str(), name == selected))
+				{
+					auto before = captureDocumentSnapshot(world);
+					world->setSectorImageSetResourceName(name);
+					commitDocumentEdit(std::move(before));
+				}
+			ImGui::EndCombo();
+		}
+		auto diagnostic = selectWorldSectorImageSet(world->sectorImageSetResourceName());
+		if (!diagnostic.empty()) ImGui::TextWrapped("Sector ImageSet unavailable: %s", diagnostic.c_str());
+	}
+	if (ImGui::CollapsingHeader("Furniture artwork"))
+	{
+		auto const& selected = world->furnitureImageSetResourceName();
+		if (ImGui::BeginCombo("Furniture ImageSet", selected.c_str()))
+		{
+			for (auto const& name : applicationResourceNames("ImageSet"))
+				if (ImGui::Selectable(name.c_str(), name == selected))
+				{
+					auto before = captureDocumentSnapshot(world);
+					world->setFurnitureImageSetResourceName(name);
+					commitDocumentEdit(std::move(before));
+				}
+			ImGui::EndCombo();
+		}
+		auto diagnostic = selectWorldFurnitureImageSet(selected);
+		if (!diagnostic.empty()) ImGui::TextWrapped("Furniture ImageSet unavailable: %s", diagnostic.c_str());
+		else if (auto catalogue = world->furnitureCatalogue())
+			for (auto const& [key, definition] : catalogue->definitions())
+				for (auto const& tile : definition.tiles)
+					if (!furnitureSpriteSize(tile.image.c_str()))
+						ImGui::TextWrapped("Furniture ImageSet lacks %s; rendering in magenta.", tile.image.c_str());
+	}
+	if (ImGui::CollapsingHeader("Agent artwork"))
+	{
+		auto const& selected = world->agentImageSetResourceName();
+		if (ImGui::BeginCombo("Agent ImageSet", selected.c_str()))
+		{
+			for (auto const& name : applicationResourceNames("ImageSet"))
+				if (ImGui::Selectable(name.c_str(), name == selected))
+				{
+					auto before = captureDocumentSnapshot(world);
+					world->setAgentImageSetResourceName(name);
+					commitDocumentEdit(std::move(before));
+				}
+			ImGui::EndCombo();
+		}
+		auto diagnostic = selectWorldAgentImageSet(world->agentImageSetResourceName());
+		auto const previewBaseline = world->registeredAgentTypeBaseline(gAgentTypeDraft.typeId,
+			gAgentTypeDraft.resourceName).value_or(core::bundledHumanBaseline());
+		if (!diagnostic.empty()) ImGui::TextWrapped("Agent ImageSet unavailable: %s", diagnostic.c_str());
+		else if (!agentSpriteSize(previewBaseline.poses.at(core::Pose::Standing).imageTile.c_str()))
+			ImGui::TextWrapped("Agent ImageSet lacks Standing artwork for the placement type; rendering previews in magenta.");
+		else for (auto const& snapshot : world->getSimulationSnapshotView().agents)
+		{
+			auto agent = world->lookupAgent(snapshot.id).entity;
+			if (agent && (!agentSpriteSize(agent->getPoseImageTile().c_str())
+				|| !agentSpriteSize(agent->getPhysicalBaseline().poses.at(core::Pose::Standing).imageTile.c_str())))
+			{
+				ImGui::TextWrapped("Agent ImageSet lacks required pose artwork for %s; rendering physical bounds in magenta.", snapshot.name.c_str());
+				break;
+			}
+		}
+	}
 	renderFurniturePanel(world, gWorldFilepath,
 		[] { return applicationResourceNames("FurnitureCatalogue"); });
 	renderSelectedObjectPanel(world);
@@ -9624,10 +9711,13 @@ void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Gra
 		{
 			auto position = core::Vector2{ preview.sector->getPosition().x + preview.localX,
 				preview.floorY };
+			position.x += gSelectedAgent->getPoseRenderXOffset();
+			position.y += gSelectedAgent->getPoseRenderYOffset();
 			drawPegman(drawList, worldToScreen(position),
 				gSelectedAgent->getWidth() * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom,
-				gSelectedAgent->getStandingHeight() * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom,
-				IM_COL32(255, 255, 0, 255));
+				gSelectedAgent->getHeight() * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom,
+				IM_COL32(255, 255, 0, 255), gSelectedAgent->getPhysicalBaseline(),
+				gUISettings.worldZoom, gSelectedAgent->getEffectiveHeightModifier().value, gSelectedAgent->getPose());
 		}
 		else if (!preview.diagnostic.empty()) ImGui::SetTooltip("%s", preview.diagnostic.c_str());
 	}
@@ -9710,6 +9800,9 @@ void renderUI(shared_ptr<core::World>& world, shared_ptr<core::Agent> pathingAge
 		return;
 	}
 
+	selectWorldSectorImageSet(world->sectorImageSetResourceName());
+	selectWorldAgentImageSet(world->agentImageSetResourceName());
+	selectWorldFurnitureImageSet(world->furnitureImageSetResourceName());
 	auto const graph = world->getGraph();
 	renderStatusBar(world);
 	renderControlsWindow(world, graph, pathingAgent);

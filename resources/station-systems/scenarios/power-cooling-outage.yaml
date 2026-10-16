@@ -8,7 +8,7 @@
 # dispatch, battery discharge, load curtailment and recovery staging -
 # never scripted hidden resources or hand-set outputs.
 name: Meridian eclipse and cooling-derate drill
-schemaVersion: 95
+schemaVersion: 96
 summary: 'A four-crew Meridian configuration exercising a coupled power and cooling failure: the
   solar array enters a hard eclipse from 120 s to 420 s (authored illumination profile) while
   a scheduled outage derates the main chiller to 25 percent of rated cooling for the same window.

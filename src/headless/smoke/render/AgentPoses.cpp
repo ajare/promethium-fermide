@@ -46,11 +46,11 @@ namespace
 			"Bed offset changed physical position or free Lying pose");
 		for (bool sprite : {false, true})
 		{
-			clearObjectTileset();
+			clearAgentTileset();
 			if (sprite)
 			{
 				auto tiles = ObjectTileset::load(context.fixture("resources/textures/objects.tileset.yaml"));
-				setObjectTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
+				setAgentTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
 			}
 			for (float zoom : {1.f, 2.f})
 			{
@@ -81,7 +81,7 @@ namespace
 		world.advanceTicks(1800);
 		require(sleeper->getPose() == core::Pose::Standing && sleeper->getPoseRenderYOffset() == 0.f
 			&& sleeper->getPoseRenderXOffset() == 0.f, "Bed departure retained offset");
-		clearObjectTileset(); ImGui::EndFrame();
+		clearAgentTileset(); ImGui::EndFrame();
 	}
 
 	void agentPoses(smoke::Context const& context)
@@ -115,7 +115,7 @@ namespace
 		auto near = [](float a, float b) { return std::abs(a - b) < 0.01f; };
 		for (bool sprite : {false, true})
 		{
-			clearObjectTileset();
+			clearAgentTileset();
 			if (sprite)
 			{
 				ObjectTileset tiles; tiles.width = 384; tiles.height = 160;
@@ -124,7 +124,7 @@ namespace
 					tiles.sprites.emplace(std::string("pose-") + name, ObjectSprite{{64 * index++, 0, 64, 160}, true});
 				// A generic tile must not override a pose's declared artwork.
 				tiles.sprites.emplace("agent", ObjectSprite{{320, 0, 64, 160}, true});
-				setObjectTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
+				setAgentTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
 			}
 			int tileIndex = 0;
 			ImVec2 originalMin{}, originalMax{};
@@ -142,8 +142,14 @@ namespace
 				WorldDrawList list(WorldDrawList::ClipRectangle{{0,0},{800,600}});
 				renderAgent(agent, &list);
 				if (!sprite)
-					require(list.commands().size() == 1 && std::holds_alternative<WorldDrawList::Text>(list.commands().front()),
-						"Missing artwork must use an untransformed glyph fallback");
+					{
+					require(list.commands().size() == 2, "Missing artwork must draw a physical-bound rectangle");
+					for (auto const& command : list.commands()) {
+						auto const& triangle = std::get<WorldDrawList::Triangle>(command);
+						require(triangle.texture == WorldDrawList::Texture::None
+							&& triangle.colour == IM_COL32(255, 0, 255, 255), "Missing Agent tile must be opaque magenta");
+					}
+				}
 				ImDrawList adapter(ImGui::GetDrawListSharedData());
 				adapter._ResetForNewFrame();
 				adapter.PushTextureID(ImGui::GetIO().Fonts->TexID);
@@ -156,7 +162,7 @@ namespace
 					for (auto const& command : list.commands())
 					{
 						auto const& triangle = std::get<WorldDrawList::Triangle>(command);
-						require(triangle.texture == WorldDrawList::Texture::ObjectAtlas, "Pose lost sprite texture");
+						require(triangle.texture == WorldDrawList::Texture::AgentAtlas, "Pose lost sprite texture");
 						for (auto uv : triangle.texcoords)
 							require(uv.x >= tileIndex / 6.f - .00001f && uv.x <= (tileIndex + 1) / 6.f + .00001f,
 								"Renderer ignored the script-defined pose image tile");
@@ -173,9 +179,12 @@ namespace
 				}
 				require(hi.x > lo.x && hi.y > lo.y, "Pose produced no visible body");
 				if (pose == core::Pose::Standing) { originalMin = lo; originalMax = hi; }
-				else require(near(hi.x-lo.x, originalMax.x-originalMin.x)
+				else if (sprite) require(near(hi.x-lo.x, originalMax.x-originalMin.x)
 					&& near(hi.y-lo.y, originalMax.y-originalMin.y) && near(hi.y, originalMax.y),
 					"Equal-size declared tiles must not be rotated or squashed by Pose");
+				if (!sprite) require(near(hi.x - lo.x, agent->getWidth() * CORE_CELL_WIDTH_PIXELS)
+					&& near(hi.y - lo.y, agent->getHeight() * CORE_LEVEL_HEIGHT_PIXELS),
+					"Missing artwork must follow current Pose physical bounds");
 				++tileIndex;
 			}
 			// Standing Human appearance retains the historical uniform Height
@@ -206,8 +215,8 @@ namespace
 					&& near(agent->getBounds().getSize().y, dimensions.y),
 					"Human render bounds disagreed with modified preview dimensions");
 				auto const modified = extent();
-				require(near(modified.x, original.x * modifier) && near(modified.y, original.y * modifier),
-					"Human Height changed sprite/glyph appearance scaling");
+				require(near(modified.x, original.x * (sprite ? modifier : 1.f)) && near(modified.y, original.y * modifier),
+					"Human Height changed artwork or physical-bound fallback scaling");
 			}
 			require(world.setAgentIndividualHeightModifier(id, {}), "Human Height reset refused");
 		}
@@ -216,7 +225,7 @@ namespace
 		auto tiles = ObjectTileset::load(context.fixture("resources/textures/objects.tileset.yaml"));
 		auto const regions = tiles.sprites;
 		auto const atlasWidth = tiles.width, atlasHeight = tiles.height;
-		setObjectTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
+		setAgentTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
 		auto humanId = world.createAgent("Human reference", 0, 0, 4.5f);
 		auto* human = world.lookupAgent(humanId).entity;
 		ImVec2 standingSize{};
@@ -244,6 +253,22 @@ namespace
 				&& near(hi.y - lo.y, standingSize.y * region.height / 72.f),
 				"Human baked artwork was squashed or rotated again");
 		}
+		// Either missing required tile must fall back, even when the other exists.
+		for (auto const* absent : {"human-standing", "human-crawling"})
+		{
+			auto incomplete = ObjectTileset::load(context.fixture("resources/textures/objects.tileset.yaml"));
+			incomplete.sprites.erase(absent);
+			setAgentTileset(std::move(incomplete), reinterpret_cast<ImTextureID>(1));
+			WorldDrawList missing(WorldDrawList::ClipRectangle{{-2000,-2000},{2000,2000}});
+			renderAgent(human, &missing);
+			require(missing.commands().size() == 2, "Missing pose or Standing tile did not draw a rectangle");
+			for (auto const& command : missing.commands()) {
+				auto const& body = std::get<WorldDrawList::Triangle>(command);
+				require(body.texture == WorldDrawList::Texture::None && body.colour == IM_COL32(255, 0, 255, 255),
+					"Missing required Agent tile silently substituted artwork");
+			}
+		}
+		setAgentTileset(ObjectTileset::load(context.fixture("resources/textures/objects.tileset.yaml")), reinterpret_cast<ImTextureID>(1));
 		// A short non-Human Standing tile keeps its own proportions and UVs.
 		std::ifstream botInput(context.fixture("resources/test-worlds/cleaning-bot.agent.lua"));
 		std::string botSource{std::istreambuf_iterator<char>(botInput), {}};
@@ -283,7 +308,7 @@ namespace
 				&& hi.y - lo.y <= .15f * CORE_LEVEL_HEIGHT_PIXELS * zoom + .01f,
 				"CleaningBot artwork inherited Human proportions or exceeded its baseline");
 		}
-		clearObjectTileset(); ImGui::EndFrame();
+		clearAgentTileset(); ImGui::EndFrame();
 	}
 }
 namespace render_smoke

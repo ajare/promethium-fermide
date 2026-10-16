@@ -18,6 +18,8 @@ public:
 		None,
 		SectorAtlas,
 		ObjectAtlas,
+		AgentAtlas,
+		FurnitureAtlas,
 		FontAtlas
 	};
 

@@ -27,26 +27,32 @@ namespace core
 	{
 		auto panel = lookupAccessPanel(id);
 		auto actor = mAgents.find(actorId);
-		if (!panel || !actor || !actor->isActive() || !agentCanOperateObjects(*actor) || agentForbidsButtons(actor)) return false;
-		auto actions = panel->getActions();
+		auto point = panel ? mInteractionPoints.find(panel->getControl(action)) : nullptr;
+		return point && actor && agentCanOperateControlInSector(*point, *actor)
+			&& accessPanelOperationEligible(*panel, action, *point, *actor);
+	}
+
+	bool World::accessPanelOperationEligible(AccessPanel const& panel, AccessPanel::Action action,
+		InteractionPoint const& point, Agent const& actor) const
+	{
+		auto actions = panel.getActions();
 		if (std::find(actions.begin(), actions.end(), action) == actions.end()) return false;
-		auto point = mInteractionPoints.find(panel->getControl(action));
-		if (!point || actor->getSector() != mSectors[point->getSector().value - 1].get()) return false;
-		if (actor->getObjectUsage() == ObjectUsage::RemoteControl)
+		if (actor.getObjectUsage() == ObjectUsage::RemoteControl)
 		{
-			auto centre = panel->getPosition() + panel->getSize() * .5f;
-			auto position = actor->getGlobalPosition();
-			return actor->getEffectiveRemoteAccessPanels().value
-				&& std::hypot(double(position.x) - centre.x, double(position.y) - centre.y) <= actor->getObjectUsageDistance();
+			auto centre = panel.getPosition() + panel.getSize() * .5f;
+			return actor.getEffectiveRemoteAccessPanels().value && agentWithinRemoteControlRange(actor, centre);
 		}
-		return std::abs(actor->getGlobalPosition().y - point->getPosition().y) < 0.001f
-			&& (actor->getState() == Agent::State::Idle || actor->getState() == Agent::State::WaitingForTraversal);
+		return std::abs(actor.getGlobalPosition().y - point.getPosition().y) < 0.001f
+			&& (actor.getState() == Agent::State::Idle || actor.getState() == Agent::State::WaitingForTraversal);
 	}
 
 	InteractionRequestId World::requestAccessPanel(AccessPanelId id, AccessPanel::Action action, AgentId actor)
 	{
-		if (!canRequestAccessPanel(id, action, actor)) return {};
-		return requestInteraction(lookupAccessPanel(id)->getControl(action), actor);
+		auto panel = lookupAccessPanel(id);
+		// getControl maps every non-Open value to Close; do not let an invalid
+		// public action borrow that valid command. Admission evaluates the rest.
+		if (!panel || (action != AccessPanel::Action::Open && action != AccessPanel::Action::Close)) return {};
+		return requestInteraction(panel->getControl(action), actor);
 	}
 
 	bool World::validateAccessPanel(uint32_t index, uint32_t level, uint32_t x,

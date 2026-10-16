@@ -246,6 +246,8 @@ namespace
 
 			mSectorSet = requireImageSet("SectorAtlas");
 			mObjectSet = requireImageSet("ObjectAtlas");
+			mAgentSet = requireImageSet("AgentAtlas");
+			mFurnitureSet = requireImageSet("FurnitureAtlas");
 			installAtlasDefinitions();
 
 			mAgentTypes = std::make_unique<ApplicationAgentTypes>(*mResources);
@@ -279,22 +281,12 @@ namespace
 			mScene->setClearColour({ 0.08f, 0.08f, 0.08f, 1.0f });
 			core::FurnitureCatalogue::setResourceLoader([this](std::filesystem::path const& path)
 			{
-				auto canonicalPath = std::filesystem::weakly_canonical(path);
 				// Loading is an explicit package preflight, including reload. Never
-				// return a path-only cache: external edits must be read and artwork
+				// return a path-only cache: external edits must be read and scripts
 				// validated into a fresh immutable snapshot. Existing Worlds retain
 				// their own accepted catalogue until their transaction commits.
 
-				static uint64_t sequence = 0;
-				auto resource = std::make_shared<FurnitureCatalogueResource>(
-					"UserFurniture" + std::to_string(++sequence), "",
-					canonicalPath.string(), std::map<std::string, std::string>{}, nullptr);
-				resource->setArtwork(mObjectSet);
-				mResources->addResource(resource);
-				mResources->createResource(resource);
-				mResources->loadResource(resource);
-				mFurnitureCatalogueResources.insert_or_assign(std::move(canonicalPath), resource);
-				return resource->catalogue();
+				return FurnitureCatalogueResource::createSnapshot(*mResources, path)->catalogue();
 			});
 		}
 
@@ -317,9 +309,13 @@ namespace
 			if (mStationScript) mResources->releaseResource(mStationScript);
 			if (mSectorSet) mResources->releaseResource(mSectorSet);
 			if (mObjectSet) mResources->releaseResource(mObjectSet);
+			if (mFurnitureSet) mResources->releaseResource(mFurnitureSet);
+			if (mAgentSet) mResources->releaseResource(mAgentSet);
 			mAgentTypes.reset();
 			clearSectorTileset();
 			clearObjectTileset();
+			clearAgentTileset();
+			clearFurnitureTileset();
 			mResources.reset();
 			if (mRenderSystem) mRenderSystem->destroyCoreResources();
 			mRenderResources.reset();
@@ -380,6 +376,10 @@ namespace
 		resources::ResourcePtr requireImageSet(std::string const& name)
 		{
 			auto resource = mResources->acquireResource(name);
+			if (!std::dynamic_pointer_cast<resources::ImageSetResource>(resource)) {
+				mResources->releaseResource(resource);
+				throw std::runtime_error(name + " is not an ImageSet resource");
+			}
 			try
 			{
 				mResources->createResource(resource);
@@ -390,26 +390,27 @@ namespace
 				mResources->releaseResource(resource);
 				throw;
 			}
-			if (!std::dynamic_pointer_cast<resources::ImageSetResource>(resource))
-				throw std::runtime_error(name + " is not an ImageSet resource");
 			return resource;
 		}
 
 		void installAtlasDefinitions()
 		{
 			auto sector = std::dynamic_pointer_cast<resources::ImageSetResource>(mSectorSet);
-			auto sectorImage = std::dynamic_pointer_cast<resources::ImageResource>(sector->getImage());
 			SectorTileset sectorTiles;
-			sectorTiles.width = sectorImage->getWidth();
-			sectorTiles.height = sectorImage->getHeight();
-			for (auto const& [name, definition] : sector->getImageDefinitions())
+			if (sector)
 			{
-				SectorTileRegion region{ static_cast<int>(definition.x),
-					static_cast<int>(definition.y), static_cast<int>(definition.width),
-					static_cast<int>(definition.height) };
-				if (name.rfind("boundary-", 0) == 0)
-					sectorTiles.boundaries.emplace(name.substr(9), region);
-				else sectorTiles.surfaces.emplace(name, region);
+				auto sectorImage = std::dynamic_pointer_cast<resources::ImageResource>(sector->getImage());
+				sectorTiles.width = sectorImage->getWidth();
+				sectorTiles.height = sectorImage->getHeight();
+				for (auto const& [name, definition] : sector->getImageDefinitions())
+				{
+					SectorTileRegion region{ static_cast<int>(definition.x),
+						static_cast<int>(definition.y), static_cast<int>(definition.width),
+						static_cast<int>(definition.height) };
+					if (name.rfind("boundary-", 0) == 0)
+						sectorTiles.boundaries.emplace(name.substr(9), region);
+					else sectorTiles.surfaces.emplace(name, region);
+				}
 			}
 			setSectorTileset(std::move(sectorTiles), reinterpret_cast<ImTextureID>(1));
 
@@ -429,9 +430,75 @@ namespace
 				objectTiles.sprites.emplace(name, ObjectSprite{ region, tintable });
 			}
 			setObjectTileset(std::move(objectTiles), reinterpret_cast<ImTextureID>(1));
+			ObjectTileset agentTiles;
+			if (auto agents = std::dynamic_pointer_cast<resources::ImageSetResource>(mAgentSet))
+			{
+				auto image = std::dynamic_pointer_cast<resources::ImageResource>(agents->getImage());
+				agentTiles.width = image->getWidth(); agentTiles.height = image->getHeight();
+				for (auto const& [name, definition] : agents->getImageDefinitions())
+					agentTiles.sprites.emplace(name, ObjectSprite{{int(definition.x), int(definition.y),
+						int(definition.width), int(definition.height)}, true});
+			}
+			setAgentTileset(std::move(agentTiles), reinterpret_cast<ImTextureID>(1));
+			ObjectTileset furnitureTiles;
+			if (auto furniture = std::dynamic_pointer_cast<resources::ImageSetResource>(mFurnitureSet))
+			{
+				auto image = std::dynamic_pointer_cast<resources::ImageResource>(furniture->getImage());
+				furnitureTiles.width = image->getWidth(); furnitureTiles.height = image->getHeight();
+				for (auto const& [name, definition] : furniture->getImageDefinitions())
+					furnitureTiles.sprites.emplace(name, ObjectSprite{{int(definition.x), int(definition.y),
+						int(definition.width), int(definition.height)}, false});
+			}
+			setFurnitureTileset(std::move(furnitureTiles), reinterpret_cast<ImTextureID>(1));
 		}
 
 	public:
+		std::string selectSectorImageSet(std::string const& name)
+		{
+			if (name == mSectorSetName) return mSectorDiagnostic;
+			mSectorSetName = name;
+			for (auto& slot : mSlots) remove(slot);
+			mSlots.clear();
+			mSlotAllocator = {};
+			mSectorDiagnostic.clear();
+			if (mSectorSet) mResources->releaseResource(mSectorSet);
+			mSectorSet.reset();
+			try { mSectorSet = requireImageSet(name); }
+			catch (std::exception const& error) { mSectorDiagnostic = error.what(); }
+			installAtlasDefinitions();
+			return mSectorDiagnostic;
+		}
+
+		std::string selectAgentImageSet(std::string const& name)
+		{
+			if (name == mAgentSetName) return mAgentDiagnostic;
+			mAgentSetName = name;
+			for (auto& slot : mSlots) remove(slot);
+			mSlots.clear(); mSlotAllocator = {};
+			mAgentDiagnostic.clear();
+			if (mAgentSet) mResources->releaseResource(mAgentSet);
+			mAgentSet.reset();
+			try { mAgentSet = requireImageSet(name); }
+			catch (std::exception const& error) { mAgentDiagnostic = error.what(); }
+			installAtlasDefinitions();
+			return mAgentDiagnostic;
+		}
+
+		std::string selectFurnitureImageSet(std::string const& name)
+		{
+			if (name == mFurnitureSetName) return mFurnitureDiagnostic;
+			mFurnitureSetName = name;
+			for (auto& slot : mSlots) remove(slot);
+			mSlots.clear(); mSlotAllocator = {};
+			mFurnitureDiagnostic.clear();
+			if (mFurnitureSet) mResources->releaseResource(mFurnitureSet);
+			mFurnitureSet.reset();
+			try { mFurnitureSet = requireImageSet(name); }
+			catch (std::exception const& error) { mFurnitureDiagnostic = error.what(); }
+			installAtlasDefinitions();
+			return mFurnitureDiagnostic;
+		}
+
 		std::vector<std::string> resourceNames(std::string const& type)
 		{
 			std::vector<std::string> names;
@@ -474,7 +541,9 @@ namespace
 				return std::static_pointer_cast<mpp::RenderTexture>(mFontAtlas);
 			}
 			auto set = std::dynamic_pointer_cast<resources::ImageSetResource>(
-				textureKind == WorldDrawList::Texture::SectorAtlas ? mSectorSet : mObjectSet);
+				textureKind == WorldDrawList::Texture::SectorAtlas ? mSectorSet
+					: textureKind == WorldDrawList::Texture::AgentAtlas ? mAgentSet
+					: textureKind == WorldDrawList::Texture::FurnitureAtlas ? mFurnitureSet : mObjectSet);
 			return set->getImage()->getMppResource();
 		}
 
@@ -558,6 +627,10 @@ namespace
 					kind = Kind::SectorTriangles;
 				else if (segment.texture == WorldDrawList::Texture::ObjectAtlas)
 					kind = Kind::ObjectTriangles;
+				else if (segment.texture == WorldDrawList::Texture::AgentAtlas)
+					kind = Kind::AgentTriangles;
+				else if (segment.texture == WorldDrawList::Texture::FurnitureAtlas)
+					kind = Kind::FurnitureTriangles;
 				else if (segment.texture == WorldDrawList::Texture::FontAtlas)
 					kind = Kind::FontTriangles;
 				auto const slotIndex = mSlotAllocator.acquire(kind);
@@ -665,15 +738,19 @@ namespace
 		std::shared_ptr<ManifestCatalogResolver> mCatalogResolver;
 		resources::ResourcePtr mStationScript;
 		resources::ResourcePtr mSectorSet;
+		std::string mSectorSetName{"SectorAtlas"};
+		std::string mSectorDiagnostic;
+		resources::ResourcePtr mAgentSet;
+		std::string mAgentSetName{"AgentAtlas"};
+		std::string mAgentDiagnostic;
+		resources::ResourcePtr mFurnitureSet;
+		std::string mFurnitureSetName{"FurnitureAtlas"};
+		std::string mFurnitureDiagnostic;
 		resources::ResourcePtr mObjectSet;
 		// Every valid, loaded Agent type Resource, keyed by Resource name. The
 		// bundled Human and all manifest-registered types are loaded at startup
 		// so the creation selector and document loading can resolve them.
 		std::unique_ptr<ApplicationAgentTypes> mAgentTypes;
-		// The ResourceManager owns registered resources; this index prevents
-		// repeated World loads from registering another resource for one file.
-		std::map<std::filesystem::path, std::shared_ptr<FurnitureCatalogueResource>>
-			mFurnitureCatalogueResources;
 		mpp::ScenePtr mScene;
 		// Both images are composited later by ImGui, so neither canvas may
 		// overwrite the other's offscreen texture during the same frame.
@@ -712,6 +789,24 @@ std::uint32_t renderWorldCommands(WorldDrawList const& commands,
 {
 	if (!gSystem) throw std::runtime_error("The World render system is not initialised");
 	return gSystem->render(commands, canvasPosition, canvasSize, canvas);
+}
+
+std::string selectWorldSectorImageSet(std::string const& name)
+{
+	if (!gSystem) return {};
+	return gSystem->selectSectorImageSet(name);
+}
+
+std::string selectWorldAgentImageSet(std::string const& name)
+{
+	if (!gSystem) return {};
+	return gSystem->selectAgentImageSet(name);
+}
+
+std::string selectWorldFurnitureImageSet(std::string const& name)
+{
+	if (!gSystem) return "Rendering service is not initialized";
+	return gSystem->selectFurnitureImageSet(name);
 }
 
 std::vector<std::string> applicationResourceNames(std::string const& type)

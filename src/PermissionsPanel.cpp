@@ -239,15 +239,27 @@ bool commitClearLiftDestinationPermissionRequirement(shared_ptr<core::World> con
 	});
 }
 
+bool commitTransportStopShortName(shared_ptr<core::World> const& world,
+	uint32_t sectorIndex, uint32_t stopIndex, string const& name, string& diagnostic, uint32_t objectIndex)
+{
+	return commit(world, diagnostic, [&]
+	{
+		if (world->getTransportStopShortName(sectorIndex, stopIndex, objectIndex) == name) return false;
+		return world->setTransportStopShortName(sectorIndex, stopIndex, name, &diagnostic, objectIndex);
+	});
+}
+
 void renderLiftDestinationPermissions(shared_ptr<core::World> const& world, uint32_t sectorIndex, uint32_t objectIndex)
 {
 	if (!world) return;
 	ImGui::TextUnformatted("Destination permissions");
+	ImGui::TextWrapped("Short names: 1–3 characters A–Z or 0–9, used for Player destination selection.");
 	ImGui::TextWrapped("All listed Access permissions are required to select this destination, from direct or Permission set grants. Accepted shared journeys and disembarking remain available after permission loss.");
 	auto levels = world->getLiftDestinationLevels(sectorIndex, objectIndex);
 	auto shuttle = world->getSector(sectorIndex)->getType() == core::SectorType::Shuttle;
-	if (!ImGui::BeginTable("Destination permissions", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchProp)) return;
-	ImGui::TableSetupColumn("Stop / position"); ImGui::TableSetupColumn("Add / remove permissions");
+	if (!ImGui::BeginTable("Destination permissions", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchProp)) return;
+	ImGui::TableSetupColumn("Stop / position"); ImGui::TableSetupColumn("Short name");
+	ImGui::TableSetupColumn("Add / remove permissions");
 	ImGui::TableSetupColumn("Required (all)"); ImGui::TableSetupColumn("Clear");
 	ImGui::TableHeadersRow();
 	for (uint32_t stop = 0; stop < levels.size(); ++stop)
@@ -262,6 +274,23 @@ void renderLiftDestinationPermissions(shared_ptr<core::World> const& world, uint
 		}
 		if (summary.empty()) summary = "None";
 		ImGui::TableNextRow(); ImGui::TableNextColumn(); ImGui::Text("Stop %u: %s %u", stop, shuttle ? "x" : "Level", levels[stop]);
+		ImGui::TableNextColumn();
+		ImGui::BeginDisabled(!world->isSimulationPaused());
+		array<char, 4> shortName{};
+		loadIntoBuffer(shortName, world->getTransportStopShortName(sectorIndex, stop, objectIndex));
+		auto filter = [](ImGuiInputTextCallbackData* data) -> int {
+			auto c = data->EventChar;
+			return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ? 0 : 1;
+		};
+		bool submitted = ImGui::InputText("##shortName", shortName.data(), shortName.size(),
+			ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_CallbackCharFilter | ImGuiInputTextFlags_EnterReturnsTrue, filter);
+		if (submitted || ImGui::IsItemDeactivatedAfterEdit())
+		{
+			string diagnostic;
+			if (!commitTransportStopShortName(world, sectorIndex, stop, shortName.data(), diagnostic, objectIndex)
+				&& !diagnostic.empty()) core::addLogMessage("Editor", 0, core::LogLevel::Error, "Stop short name: " + diagnostic);
+		}
+		ImGui::EndDisabled();
 		ImGui::TableNextColumn();
 		ImGui::BeginDisabled(!world->isSimulationPaused());
 		if (ImGui::BeginCombo("##permissions", summary.c_str()))

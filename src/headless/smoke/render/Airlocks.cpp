@@ -1,6 +1,7 @@
 #include "Checks.h"
 #include "Render.h"
 #include "WorldDrawList.h"
+#include "ObjectTileset.h"
 #include "UISettings.h"
 #include "core/AirlockTransit.h"
 #include "core/World.h"
@@ -14,8 +15,10 @@ extern std::shared_ptr<const core::Sector> gSelectedSector;
 
 namespace
 {
-	void chamber(smoke::Context const&)
+	void chamber(smoke::Context const& context)
 	{
+		setAgentTileset(ObjectTileset::load(context.fixture("resources/textures/objects.tileset.yaml")),
+			reinterpret_cast<ImTextureID>(1));
 		using smoke::require;
 		ImGui::GetIO().DisplaySize = { 1600, 720 };
 		ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build(); ImGui::NewFrame();

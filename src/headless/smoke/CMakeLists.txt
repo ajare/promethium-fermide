@@ -197,6 +197,8 @@ pf_add_smoke_module(pf-smoke-simulation
         simulation/Dumbwaiters.cpp
         simulation/Furniture.cpp
         simulation/MarkerActions.cpp
+        simulation/UsablePointResolution.cpp
+        simulation/DeviceActivation.cpp
     LIBRARIES promethium-fermide-core pf-pause-position-support
     LABELS core
     TIMEOUT 60
@@ -266,6 +268,15 @@ pf_add_smoke_module(pf-smoke-agent
     SOURCES
         agent/Main.cpp
         agent/Identity.cpp
+        agent/PlayerControl.cpp
+        agent/PlayerButtons.cpp
+        agent/PlayerTransports.cpp
+        agent/PlayerAirlocks.cpp
+        agent/PlayerChambers.cpp
+        agent/PlayerBoothWindows.cpp
+        agent/PlayerAccessPanels.cpp
+        agent/PlayerPoses.cpp
+        agent/PlayerBulkheadPoses.cpp
         agent/Activation.cpp
         agent/Group.cpp
         agent/GroupAssignment.cpp
@@ -282,10 +293,25 @@ pf_add_smoke_module(pf-smoke-agent
         agent/AgentTypes.cpp
         agent/NoneUsage.cpp
         agent/RemoteIntegration.cpp
+        agent/QueuedPressLookup.cpp
     LIBRARIES promethium-fermide-core
     LABELS core
     TIMEOUT 30
 )
+
+add_test(NAME agent-playerControlEditorWorkflow COMMAND pf-smoke-editor --check playerControlEditorWorkflow)
+set_tests_properties(agent-playerControlEditorWorkflow PROPERTIES LABELS "agent;editor;functional;validation-fast" TIMEOUT 30)
+
+foreach(check playerControlBasics playerControlBoundaries playerControlBulkheads playerControlPersistence
+        playerControlDoorways playerControlDoorwayRestrictions playerControlContextualPrecedence
+        playerControlStairwells playerControlStairwellRestrictions playerControlStairwellPlatforms
+        playerControlStaircases playerControlStaircaseRestrictions playerControlEscalators
+        playerControlLadders playerControlLadderRestrictions playerControlLadderSharedCapacity
+        playerControlButtons playerControlButtonPriority playerControlExtensibleLadders
+        playerControlManualTransports playerControlLiftCalledLanding playerControlAirlocks playerControlChambers playerControlBoothWindows playerControlAccessPanels playerControlPoses playerControlBulkheadPoses)
+    add_test(NAME agent-${check} COMMAND pf-smoke-agent --check ${check})
+    set_tests_properties(agent-${check} PROPERTIES LABELS "agent;functional;validation-fast" TIMEOUT 30)
+endforeach()
 
 # Explicit diagnostic invocations retain the smoke runner's ordinary CLI output
 # contract while providing the labelled traces required by ticket #476.
@@ -299,9 +325,18 @@ add_test(NAME agent-type-reserved-behaviour COMMAND pf-smoke-agent
     --check agentTypesReservedBehaviourMember)
 set_tests_properties(agent-type-reserved-behaviour PROPERTIES LABELS "core;functional;smoke;validation-fast")
 
-foreach(check remoteMixedWorld remoteMixedControls remoteMixedCosts agentTypesRemoteBoothWindowShutters agentTypesRemoteShutterProperties agentTypesRemoteShutterDeclarations agentTypesRemoteAccessPanels agentTypesRemotePanelProperties agentTypesRemotePanelDeclarations agentTypesRemoteOnboardJourneys agentTypesRemoteOrdinaryDoors agentTypesRemoteDoorGates agentTypesRemoteTightDoor agentTypesRemoteDeclarations agentTypesRemoteGeometry agentTypesRemoteJourneys agentTypesRemotePendingEdits agentTypesRemoteLandingButtons agentTypesInheritedObjectUsage agentTypesInheritedObjectUsageRoutes agentTypesObjectUsageOverrides agentTypesObjectUsageCommittedCrossing agentTypesNoneDeclarations agentTypesNoneInvalidDeclarations agentTypesNoneDirectRefusals agentTypesNoneDoors agentTypesNoneOtherResources agentTypesNoneSharedAirlock agentTypesNoneLifetimes agentTypesNoneSharedJourneys)
+foreach(check agentTypesRemoteApproachBoundaries remoteMixedWorld remoteMixedControls remoteMixedCosts agentTypesRemoteBoothWindowShutters agentTypesRemoteShutterProperties agentTypesRemoteShutterDeclarations agentTypesRemoteAccessPanels agentTypesRemotePanelProperties agentTypesRemotePanelDeclarations agentTypesRemoteOnboardJourneys agentTypesRemoteOrdinaryDoors agentTypesRemoteDoorGates agentTypesRemoteTightDoor agentTypesRemoteDeclarations agentTypesRemoteGeometry agentTypesRemoteJourneys agentTypesRemotePendingEdits agentTypesRemoteLandingButtons agentTypesInheritedObjectUsage agentTypesInheritedObjectUsageRoutes agentTypesObjectUsageOverrides agentTypesObjectUsageCommittedCrossing agentTypesNoneDeclarations agentTypesNoneInvalidDeclarations agentTypesNoneDirectRefusals agentTypesNoneDoors agentTypesNoneOtherResources agentTypesNoneSharedAirlock agentTypesNoneLifetimes agentTypesNoneSharedJourneys)
     add_test(NAME object-usage-${check} COMMAND pf-smoke-agent --check ${check})
     set_tests_properties(object-usage-${check} PROPERTIES LABELS "agent;functional;validation-fast" TIMEOUT 60)
+endforeach()
+
+# Derived queued-press lookup by Agent (#626).
+foreach(check queuedPressHoldsForExactlyThePressInterval queuedPressDeviceTravelDoesNotHold
+        queuedPressSharedOperationRelease queuedPressCancellationClears queuedPressCancelBehindActive
+        queuedPressCoalesceAndRefusal queuedPressRejectedNotQueued queuedPressRemovalPathsClear
+        queuedPressQueryScalingEvidence queuedPressRetirementClean)
+    add_test(NAME agent-${check} COMMAND pf-smoke-agent --check ${check})
+    set_tests_properties(agent-${check} PROPERTIES LABELS "agent;functional;validation-fast" TIMEOUT 60)
 endforeach()
 
 foreach(check agentTypesArmsDeclarations agentTypesArmsPhysicalOperations agentTypesArmsManualDoor agentTypesArmsOnboardSelector)
@@ -504,6 +539,7 @@ pf_add_smoke_module(pf-smoke-world
         world/ScaledDoors.cpp world/Main.cpp world/AccessPanels.cpp world/Airlocks.cpp world/Furniture.cpp world/SecurityScanners.cpp world/BoothWindows.cpp
         world/MarkerIdentity.cpp
         world/TwoSidedButtons.cpp
+        world/PhysicalControlLookup.cpp
         world/BackgroundSector.cpp
         world/BackgroundPaint.cpp
         world/BackgroundPlacement.cpp
@@ -553,7 +589,7 @@ pf_add_smoke_module(pf-smoke-persistence
         persistence/BrokenLifts.cpp
         persistence/BrokenPlatformLifts.cpp
         persistence/BrokenShuttles.cpp
-        persistence/LiftDocuments.cpp
+        persistence/LiftDocuments.cpp persistence/TransportStopNames.cpp
         persistence/ShuttleDocuments.cpp
         persistence/DeepLayerReplay.cpp
         persistence/Restoration.cpp
@@ -622,7 +658,7 @@ set_tests_properties(smoke-harness-contract PROPERTIES LABELS "harness;core" TIM
 pf_add_smoke_module(pf-smoke-editor
     NAME editor
     SOURCES
-        editor/StationSystems.cpp editor/ScaledDoors.cpp editor/RoomHeightScale.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
+        editor/StationSystems.cpp editor/ScaledDoors.cpp editor/RoomHeightScale.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/TransportStopNames.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
         agent/ActivationEditor.cpp
         agent/GroupEditor.cpp
         agent/GroupAssignmentEditor.cpp
@@ -632,6 +668,7 @@ pf_add_smoke_module(pf-smoke-editor
         agent/GroupTopologyEditor.cpp
         agent/GroupClipboardEditor.cpp
         agent/AgentTypeEditor.cpp
+        agent/PlayerControlEditor.cpp
         agent/ColourEditor.cpp
         agent/WalkSpeedEditor.cpp
         agent/HeightEditor.cpp
@@ -791,3 +828,10 @@ if(BUILD_TESTING)
     endforeach()
     set_tests_properties(smoke-metrics-contract PROPERTIES PROCESSORS 8)
 endif()
+
+add_test(NAME transport-stop-names-persistence COMMAND pf-smoke-persistence --check transportStopShortNames)
+add_test(NAME transport-stop-names-editor COMMAND pf-smoke-editor --check transportStopNames/editorHistory)
+set_tests_properties(transport-stop-names-persistence PROPERTIES
+    LABELS "core;persistence;functional;smoke;validation-fast" TIMEOUT 30)
+set_tests_properties(transport-stop-names-editor PROPERTIES
+    LABELS "editor;functional;smoke;validation-fast" TIMEOUT 30)

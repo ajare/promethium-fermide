@@ -15,8 +15,8 @@ return {
       key = "sofa",
       label = "Two-seat sofa",
       tiles = {
-        {x = 0, y = 0, imageSet = "ObjectAtlas", image = "chair"},
-        {x = 1, y = 0, imageSet = "ObjectAtlas", image = "chair"},
+        {x = 0, y = 0, image = "chair"},
+        {x = 1, y = 0, image = "chair"},
       },
       usablePoints = {
         {key = "left", label = "Left seat", x = 0.25, y = 0},
@@ -28,9 +28,9 @@ return {
       key = "larger",
       label = "Larger layout",
       tiles = {
-        {x = -1, y = 0, imageSet = "ObjectAtlas", image = "chair"},
-        {x = 1, y = 0, imageSet = "ObjectAtlas", image = "chair"},
-        {x = 0, y = 1, imageSet = "ObjectAtlas", image = "chair"},
+        {x = -1, y = 0, image = "chair"},
+        {x = 1, y = 0, image = "chair"},
+        {x = 0, y = 1, image = "chair"},
       },
       usablePoints = {
         {key = "left", label = "Left point", x = -0.75, y = 0},

@@ -1,4 +1,7 @@
 #include "Checks.h"
+#include <algorithm>
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -203,6 +206,76 @@ namespace
 		require(world.agentAdheresToExtensiblePermission(ladder.traversalResource,
 			ladderSector, { 8.5f, 0.0f }, ladderAgent),
 			"A Permission set grant did not satisfy an extensible Ladder requirement");
+
+		// Protect both ends independently, even though each pair shares a Room.
+		// Exercise the public operation/willingness seams and directed routing facts.
+		auto right = world.addAccessPermission("Bridge right");
+		auto high = world.addAccessPermission("Ladder high");
+		require(world.setInteractionPointPermissionRequirement(
+			bridge.controls[1].interactionPoint, { right }, &diagnostic), diagnostic);
+		require(world.setInteractionPointPermissionRequirement(
+			ladder.controls[1].interactionPoint, { high }, &diagnostic), diagnostic);
+		require(world.setAgentIndividualPermissionAdherence(leftAgent, true, &diagnostic), diagnostic);
+		require(world.setAgentPermissionSetAssignment(ladderAgent, set, false, &diagnostic), diagnostic);
+		auto checkEnds = [&](core::TraversalResourceId resource, core::SectorId sector,
+			core::AgentId actor, core::AccessPermissionId first, core::AccessPermissionId second,
+			bool vertical, float middle, core::Vector2 start, core::Vector2 end)
+		{
+			auto* agent = world.lookupAgent(actor).entity;
+			auto const position = agent->getGlobalPosition();
+			for (unsigned grants = 0; grants != 4; ++grants)
+			{
+				auto setGrant = [&](core::AccessPermissionId permission, bool granted)
+				{
+					auto current = world.getAgentDirectAccessGrants(actor);
+					if ((std::find(current.begin(), current.end(), permission) != current.end()) != granted)
+						require(world.setAgentAccessPermissionGrant(actor, permission, granted, &diagnostic), diagnostic);
+				};
+				setGrant(first, grants & 1);
+				setGrant(second, grants & 2);
+				auto check = [&](core::SectorId approach, core::Vector2 point, bool allowed, bool applies = true)
+				{
+					require(world.canAgentOperateExtensibleControl(resource, approach, point, actor) == (applies && allowed),
+						"Extensible operation classified the wrong approach endpoint");
+					require(world.agentAdheresToExtensiblePermission(resource, approach, point, actor) == (!applies || allowed),
+						"Extensible Permission adherence classified the wrong approach endpoint");
+				};
+				check(sector, start, grants & 1);
+				check(sector, end, grants & 2);
+				for (float coordinate : { std::nextafter(middle, -std::numeric_limits<float>::infinity()),
+					middle, std::nextafter(middle, std::numeric_limits<float>::infinity()) })
+				{
+					auto point = start;
+					if (vertical) point.y = coordinate; else point.x = coordinate;
+					check(sector, point, grants & (coordinate > middle ? 2 : 1));
+				}
+				check({}, start, false, false);
+				core::RouteDecisionContext context{ agent, policy.baselineProfile, policy,
+					agent->getSector(), agent->getWalkSpeed(), &world, agent->getClimbSpeed() };
+				bool found = false;
+				for (auto const& edge : world.getGraph()->getEdges())
+					if (edge->getTraversalResourceId() == resource
+						&& edge->getType() == (vertical ? core::EdgeType::Ladder : core::EdgeType::ForceBridge))
+					{
+						found = true;
+						for (unsigned target = 0; target != 2; ++target)
+						{
+							auto source = edge->getVertex(1 - target)->getPosition();
+							auto allowed = grants & ((vertical ? source.y : source.x) > middle ? 2 : 1);
+							require(edge->getDirectedTraversalFacts(edge->getVertex(target), context).feasible == bool(allowed),
+								"Directed routing did not preserve independent endpoint requirements");
+						}
+					}
+				require(found, "Extensible routing edge missing");
+				require(agent->getGlobalPosition() == position, "Eligibility queries moved the Agent");
+			}
+		};
+		checkEnds(bridge.traversalResource, bridgeSector, leftAgent, left, right,
+			false, 2.f, { 0.5f, 1.f }, { 3.5f, 1.f });
+		// Logical landings are y=0 and y=1. Their midpoint is 0.5, not the
+		// rendered Ladder centre above it (which includes the handholds).
+		checkEnds(ladder.traversalResource, ladderSector, ladderAgent, low, high,
+			true, 0.5f, { 8.5f, 0.f }, { 8.5f, 1.f });
 	}
 }
 

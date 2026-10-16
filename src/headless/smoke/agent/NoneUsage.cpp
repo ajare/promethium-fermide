@@ -733,7 +733,21 @@ namespace
 				require(world.setAgentIndividualMobilityProfile(id, profile), "Buttons restriction refused"); world.resumeSimulation();
 			}
 			if (variant == 2) { world.pauseSimulation(); require(world.grantAgentAccessPermission(id, key), "Destination grant refused"); world.resumeSimulation(); }
+			auto origin = world.lookupAgent(id).entity->getGlobalPosition();
+			auto destination = origin; destination.y = 1.f;
+			bool const selectionFeasible = variant == 0 || variant == 2 || variant == 4;
+			require(world.agentHasFeasibleLiftJourney(vehicle, origin, destination, id) == selectionFeasible
+				&& world.canAgentUseLiftJourney(vehicle, origin, destination, id) == selectionFeasible,
+				"Projected selection capability/authorization changed");
+			world.consumeSimulationEvents();
+			auto before = world.getSimulationSnapshot();
 			require(!world.requestInteraction(selector, id), "Non-occupant remotely selected onboard destination");
+			auto after = world.getSimulationSnapshot();
+			require(world.consumeSimulationEvents().empty()
+				&& after.interactionRequests.size() == before.interactionRequests.size()
+				&& after.deviceOperations.size() == before.deviceOperations.size()
+				&& world.lookupAgent(id).entity->getGlobalPosition().distanceTo(origin) == 0,
+				"Projected feasibility authorized or recorded a runtime selector operation");
 			core::DeviceCommand select; select.type = core::DeviceCommandType::SelectLiftDestination; select.traversalResource = vehicle; select.stopIndex = 1;
 			auto generic = world.createInteractionPoint("Not an onboard selector", core::SectorId{ground + 1}, {7.f, 0.f}, 100.f, 0,
 				{{select, core::InteractionBindingRequirement::Required}});
@@ -836,6 +850,47 @@ namespace
 		world.advanceTicks(120);
 		require(!world.getSector(room)->areLightsOn() && world.lookupAgent(id).entity->getGlobalPosition().x >= position.x,
 			"Direct press during pathing failed or caused approach detour");
+	}
+
+	void remoteApproachBoundaries(smoke::Context const&)
+	{
+		// Record the first request's position and tick, not just the final Door state.
+		for (unsigned variant = 0; variant < 5; ++variant)
+		{
+			unsigned offset = variant == 4 ? 4096 : 0;
+			core::World world("Remote approach boundaries", offset + 12, 2);
+			auto origin = world.addRoom("Front", 0, 0, offset, 12, 1);
+			auto destination = world.addRoom("Back", 1, 0, offset, 12, 1);
+			auto made = world.addSectorDoor(0, 0, offset + 6, core::World::RemoteControlledDoor1Options);
+			auto point = made.controls[0].interactionPoint;
+			auto button = std::dynamic_pointer_cast<const core::Button>(made.controls[0].sector->getObject(made.controls[0].index)->_getObject());
+			auto centre = button->getPosition() + button->getSize() * .5f;
+			world.addSectorMarker(destination, 0, 8.f, "Goal"); world.finishBuild();
+			auto id = world.createAgent("Remote", origin, 0, 3.f);
+			float range = centre.y;
+			if (variant == 1) range = std::nextafter(range, 0.f);
+			if (variant == 2) range = std::nextafter(range, std::numeric_limits<float>::infinity());
+			if (variant >= 3) range = 2.f;
+			remote(world, id, range); quickPlanning(world, id);
+			world.consumeSimulationEvents();
+			require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Boundary journey refused");
+			bool pressed = false;
+			for (unsigned tick = 1; tick <= 1000 && !pressed; ++tick)
+			{
+				world.advanceTick();
+				for (auto const& event : world.consumeSimulationEvents())
+					if (event.type == core::SimulationEventType::InteractionRequestAdded && event.interactionRequest.point == point)
+					{
+						pressed = true;
+						auto position = world.lookupAgent(id).entity->getGlobalPosition();
+						constexpr unsigned expectedTicks[] = {491, 0, 488, 249, 249};
+						constexpr float expectedX[] = {0x1.cp+2f, 0.f, 0x1.bffdecp+2f, 0x1.412bfcp+2f, 0x1.00504cp+12f};
+						require(tick == expectedTicks[variant] && position == core::Vector2{expectedX[variant], 0.f},
+							"Remote boundary request position/tick changed, variant " + std::to_string(variant));
+					}
+			}
+			require(pressed == (variant != 1), "Unreachable vertical range changed");
+		}
 	}
 
 	void remoteJourneys(smoke::Context const&)
@@ -1419,6 +1474,9 @@ namespace
 			if (protectedJourney) require(world.setLiftDestinationPermissionRequirement(vehicleSector, 1, {key}, nullptr, object), "Destination requirement refused");
 			auto id = world.createAgent("Human", "Passenger", ground, 0, shuttle ? 5.5f : 8.5f);
 			require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None), "Passenger None override refused");
+			auto distantId = world.createAgent("Distant observer", upper, platform ? 1 : 0, 7.f);
+			require(world.setAgentIndividualObjectUsage(distantId, core::ObjectUsage::None)
+				&& world.setAgentIndividualPermissionAdherence(distantId, false), "Distant observer setup refused");
 			auto operatorId = world.createAgent("Operator", ground, 0, 7.f);
 			require(world.grantAgentAccessPermission(operatorId, key), "Operator grant refused");
 			quickPlanning(world, id);
@@ -1448,6 +1506,10 @@ namespace
 			for (auto const& entry : world.getSimulationSnapshot().traversalResources)
 				if (entry.id == vehicle) diagnostic = " stop=" + std::to_string(entry.liftCurrentStop) + " phase=" + std::to_string((int)entry.liftStopPhase) + " moving=" + std::to_string(entry.liftMoving);
 			require(usable, "None cannot observe an accepted boardable journey, kind " + std::to_string(kind) + diagnostic);
+			require(!world.agentHasFeasibleLiftJourney(vehicle, origin, destination, distantId)
+				&& !world.canAgentUseLiftJourney(vehicle, origin, destination, distantId),
+				"Unobserved remote accepted request leaked into journey planning");
+			require(!world.requestInteraction(landing, id), "Shared journey granted None command capability");
 			world.consumeSimulationEvents(); require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Shared intent refused");
 			bool onboard = false, arrived = false;
 			for (unsigned tick = 0; tick < 7000; ++tick)
@@ -1461,6 +1523,8 @@ namespace
 					require(world.setAgentIndividualObjectUsage(id, std::nullopt)
 						&& world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None)
 						&& world.setAgentIndividualObjectUsageDistance(id, 0.f), "Onboard override edits refused");
+					require(world.agentHasFeasibleLiftJourney(vehicle, origin, destination, id),
+						"Accepted passenger lost committed exit after capability/adherence changes");
 					world.resumeSimulation();
 				}
 				auto agent = world.lookupAgent(id).entity;
@@ -1485,6 +1549,7 @@ void agent_smoke::registerNoneUsage(std::vector<smoke::Check>& checks)
 	checks.push_back({"agentTypesRemotePanelProperties", remotePanelProperties});
 	checks.push_back({"agentTypesRemotePanelDeclarations", remotePanelDeclarations});
 	checks.push_back({"agentTypesRemoteDeclarations", remoteDeclarations});
+	checks.push_back({"agentTypesRemoteApproachBoundaries", remoteApproachBoundaries});
 	checks.push_back({"agentTypesRemoteGeometry", remoteGeometry});
 	checks.push_back({"agentTypesRemoteJourneys", remoteJourneys});
 	checks.push_back({"agentTypesRemotePendingEdits", remotePendingEdits});

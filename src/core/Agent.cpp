@@ -835,6 +835,7 @@ namespace core
 		mRememberedDeviceConditions.clear();
 		mOccupiedUsablePoint = {};
 		mPose = Pose::Standing;
+		mPlayerPose.reset();
 		mRetainedActionPose = false;
 		mRoutePlanningSequence = 0;
 		mRoutePlanningTotalTicks = 0;
@@ -1317,6 +1318,12 @@ namespace core
 	std::optional<PoseSelection> Agent::selectDoorPose(float clearance,
 		bool beginningMovement, float openingWidth) const
 	{
+		if (isPlayerControlled() && !mFurnitureUse)
+		{
+			auto speed = getPhysicalBaseline().automaticSpeedRatio(AutomaticPoseContext::DoorCrossing, mPose);
+			return speed && poseFits(mPose, clearance, getSupportElevation(), openingWidth)
+				? std::optional<PoseSelection>{{mPose, *speed}} : std::nullopt;
+		}
 		// Retained Action ownership is not an automatic movement choice. Predict
 		// departure without releasing it; Furniture support ends on departure.
 		if (!beginningMovement && !mFurnitureUse && mRetainedActionPose)
@@ -1355,7 +1362,10 @@ namespace core
 
 	void Agent::syncPoseToSector()
 	{
+		if (mPlayerPose && !isPlayerControlled()) mPlayerPose.reset();
 		if (mFurnitureUse || mRetainedActionPose || (mTraversalTask && mTraversalTask->crossingPose)) return;
+		if (mPlayerPose)
+		{ mPose = *mPlayerPose; return; }
 		auto const* sector = physicalMovementSector();
 		if (auto choice = sector ? requiredPoseFor(*sector, getGlobalPosition().y)
 			: std::optional<PoseSelection>{{Pose::Standing, 1.0f}})
@@ -1364,6 +1374,9 @@ namespace core
 
 	float Agent::getRoomMovementSpeed() const
 	{
+		if (isPlayerControlled() && mPlayerPose)
+			return getWalkSpeed() * getPhysicalBaseline().automaticSpeedRatio(
+				AutomaticPoseContext::RoomMovement, *mPlayerPose).value_or(0.f);
 		auto const* sector = physicalMovementSector();
 		auto choice = sector ? requiredPoseFor(*sector, getGlobalPosition().y)
 			: std::optional<PoseSelection>{{Pose::Standing, 1.0f}};
@@ -1721,9 +1734,9 @@ namespace core
 	{
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		cancelTraversal();
-		mEarlyDoorPressResource = {};
-		mEarlyDoorPressInteraction = {};
-		mEarlyDoorPressAttempted = false;
+		mPlayerLadderMount.reset();
+		mPlayerLadderEntry = false;
+		mAnticipatoryInteraction.reset();
 		mEarlyQueueApproachDirectionX = 0;
 		mPath.path = nullptr;
 		mPath.targetNode = 0;
@@ -1814,9 +1827,7 @@ namespace core
 			mPath.path = nullptr;
 			mPath.targetNode = 0;
 			mRouteJourneyDestinationVertexId = 0;
-			mEarlyDoorPressResource = {};
-			mEarlyDoorPressInteraction = {};
-			mEarlyDoorPressAttempted = false;
+			mAnticipatoryInteraction.reset();
 			addLogMessage(getDescription(), 0, LogLevel::Debug, format("Started idling"));
 			return true;
 		}
@@ -1829,9 +1840,7 @@ namespace core
 	{
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		cancelTraversal();
-		mEarlyDoorPressResource = {};
-		mEarlyDoorPressInteraction = {};
-		mEarlyDoorPressAttempted = false;
+		mAnticipatoryInteraction.reset();
 		mEarlyQueueApproachDirectionX = 0;
 		mState = State::Idle;
 		mPath.path = nullptr;
@@ -1860,7 +1869,7 @@ namespace core
 				&& mTraversalTask && mTraversalTask->edge->getType() == EdgeType::Location)))
 		{
 			auto end = agentPos + moveAmt;
-			auto limited = mWorld->mSimulationCoordinator.limitRemoteButtonMovement(*this, agentPos, end);
+			auto limited = mWorld->mSimulationCoordinator.limitRemoteInteractionMovement(*this, agentPos, end);
 			if (limited.x != end.x || limited.y != end.y)
 			{
 				moveAmt = limited - agentPos;
@@ -2286,6 +2295,7 @@ namespace core
 		{
 			mWorld->releaseTraversal(mTraversalTask->request, mTraversalTask->permit);
 			mTraversalTask.reset();
+			if (isPlayerControlled() || !mPath.path) mState = State::Idle;
 			syncPoseToSector();
 			syncStandingRouteObservation();
 			mTraversalLocalGoal.reset();
@@ -2322,7 +2332,7 @@ namespace core
 		syncStandingRouteObservation();
 		mQueuedTraversalTask.reset();
 		mTraversalLocalGoal.reset();
-		mRemoteButtonApproachTarget.reset();
+		mRemoteInteractionApproachTarget.reset();
 	}
 
 	bool Agent::moveToVertexOffset(int dim, float offset, float frameTime)
@@ -2411,6 +2421,7 @@ namespace core
 					? mWorld->lookupTraversalResource(mTraversalTask->edge->getTraversalResourceId())
 					: EntityLookup<TraversalResource>{};
 				auto const commitsInPlace = mTraversalTask->edge->getType() == EdgeType::Door
+					|| (isPlayerControlled() && mTraversalTask->edge->getType() == EdgeType::StairwellMount)
 					|| (mTraversalTask->edge->getType() == EdgeType::Lift
 						&& resource && resource.entity->isLift()
 						&& !resource.entity->isOpenPlatformLift())
@@ -2435,6 +2446,9 @@ namespace core
 					traversalSpeed = mTraversalTask->edge->getType() == EdgeType::Ladder
 						? getClimbSpeed() : getWalkSpeed();
 				if (mTraversalTask->crossingPose) traversalSpeed *= mTraversalTask->crossingPose->speedRatio;
+				else if (isPlayerControlled() && mPlayerPose)
+					traversalSpeed *= getPhysicalBaseline().automaticSpeedRatio(
+						AutomaticPoseContext::RoomMovement, *mPlayerPose).value_or(0.f);
 				if (moveToPosition(mTraversalTask->destinationVertex->getPosition(), frameTime,
 					traversalSpeed))
 					mState = State::AwaitingTraversalCommit;
@@ -2442,9 +2456,9 @@ namespace core
 			break;
 
 		case State::WaitingForTraversal:
-			if (mRemoteButtonApproachTarget && getObjectUsage() == ObjectUsage::RemoteControl)
+			if (mRemoteInteractionApproachTarget && getObjectUsage() == ObjectUsage::RemoteControl)
 			{
-				moveToPosition(*mRemoteButtonApproachTarget, frameTime, getWalkSpeed());
+				moveToPosition(*mRemoteInteractionApproachTarget, frameTime, getWalkSpeed());
 			}
 			else if (mTraversalLocalGoal)
 			{

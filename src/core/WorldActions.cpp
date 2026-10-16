@@ -11,6 +11,20 @@ namespace core
 {
 	namespace
 	{
+		// Preserve the caller's context, including when finishing scopes nest.
+		class FurnitureFinishingScope
+		{
+		public:
+			FurnitureFinishingScope(AgentId& slot, AgentId agent)
+				: mSlot(slot), mRestore(slot) { mSlot = agent; }
+			~FurnitureFinishingScope() { mSlot = mRestore; }
+			FurnitureFinishingScope(FurnitureFinishingScope const&) = delete;
+			FurnitureFinishingScope& operator=(FurnitureFinishingScope const&) = delete;
+		private:
+			AgentId& mSlot;
+			AgentId mRestore;
+		};
+
 		bool configurationActionsAvailable(AgentBehaviourConfigurationValue const& value,
 			ActionRegistry const* registry, std::string& missing)
 		{
@@ -33,6 +47,24 @@ namespace core
 					if (!configurationActionsAvailable(item, registry, missing)) return false;
 			}
 			return true;
+		}
+
+		// Compose the staged finishing batch for a same-Agent replacement: the
+		// current seat's finish_use result, its declared finish pose and a
+		// Release, followed by the incoming replacement Action's effects and
+		// logs. Kept out of the commit path so the composition is a named step
+		// and the finishing-failure branch above it is not tangled with the
+		// effect/log surgery (#634).
+		ActionExecutionResult composeReplacementBatch(ActionExecutionResult finished,
+			ActionExecutionResult const& incoming, Pose currentFinishPose)
+		{
+			finished.effects.insert(finished.effects.begin(),
+				{ActionEffectType::Pose, static_cast<int>(currentFinishPose)});
+			finished.effects.push_back({ActionEffectType::Release});
+			finished.effects.insert(finished.effects.end(), incoming.effects.begin(), incoming.effects.end());
+			finished.logs.insert(finished.logs.end(), incoming.logs.begin(), incoming.logs.end());
+			finished.logsSuppressed |= incoming.logsSuppressed;
+			return finished;
 		}
 	}
 
@@ -273,14 +305,17 @@ namespace core
 
 	bool World::actionAvailable(MarkerId marker, std::string_view action) const
 	{
+		// Only the Furniture-use branch needs the instance chain; resolve it
+		// through the shared single-pass resolver (#627).
+		if (action == UseFurnitureAction) return actionAvailable(marker, action, resolveUsablePoint(marker));
+		return actionAvailable(marker, action, ResolvedUsablePoint{});
+	}
+
+	bool World::actionAvailable(MarkerId marker, std::string_view action, ResolvedUsablePoint const& point) const
+	{
 		if (!lookupMarker(marker)) return false;
 		if (action == IdleAction) return true;
-		if (action == UseFurnitureAction)
-		{
-			auto instance = furnitureForMarker(marker);
-			auto definition = instance && mFurnitureCatalogue ? mFurnitureCatalogue->definition(instance->definitionKey) : nullptr;
-			return definition && definition->hasUse;
-		}
+		if (action == UseFurnitureAction) return point && point.definition->hasUse;
 		if (!mActionRegistry || !mActionRegistry->find(action)) return false;
 		auto found = mMarkerActions.find(marker);
 		return found != mMarkerActions.end()
@@ -311,13 +346,9 @@ namespace core
 		{
 			auto const& use = *agent.mFurnitureUse;
 			auto definition = use.catalogue->definition(use.definition);
-			float support = 0;
-			if (auto instance = furnitureForMarker(use.marker))
-				for (auto const& destination : instance->destinations)
-					if (destination.marker == use.marker)
-						for (auto const& point : definition->usablePoints)
-							if (point.key == destination.key) support = point.supportElevation;
-			return fits(definition->usePose, support) && fits(definition->finishUsePose, 0);
+			// Support comes from the same single-pass resolution the use-side
+			auto const point = resolveUsablePoint(use.marker, use.catalogue);
+			return fits(definition->usePose, point.supportElevation()) && fits(definition->finishUsePose, 0);
 		}
 		if (agent.mRetainedActionPose || (agent.mTraversalTask && agent.mTraversalTask->crossingPose))
 			return fits(agent.getPose(), agent.getSupportElevation());
@@ -326,23 +357,53 @@ namespace core
 		return false;
 	}
 
+	World::ResolvedUsablePoint World::resolveUsablePoint(MarkerId marker,
+		std::shared_ptr<const FurnitureCatalogue> const& catalogue) const
+	{
+		// One pass over the instances resolves the whole Marker -> instance,
+		// definition, destination, usable-point support and Sector chain.
+		// The result borrows from the current World and catalogue and is
+		// meant to live only inside the calling evaluation (#627).
+		ResolvedUsablePoint resolved;
+		auto const& activeCatalogue = catalogue ? catalogue : mFurnitureCatalogue;
+		if (!marker || !activeCatalogue) return resolved;
+		for (auto const& instance : mFurniture)
+		{
+			++mUsablePointResolveVisits;
+			auto const destination = std::find_if(instance.destinations.begin(), instance.destinations.end(),
+				[&](auto const& point) { return point.marker == marker; });
+			if (destination == instance.destinations.end()) continue;
+			auto const definition = activeCatalogue->definition(instance.definitionKey);
+			if (!definition) return resolved;
+			auto const point = std::find_if(definition->usablePoints.begin(), definition->usablePoints.end(),
+				[&](auto const& candidate) { return candidate.key == destination->key; });
+			resolved.marker = marker;
+			resolved.instance = &instance;
+			resolved.definition = definition;
+			resolved.destination = &*destination;
+			resolved.point = point != definition->usablePoints.end() ? &*point : nullptr;
+			resolved.sector = mSectors.at(instance.sector).get();
+			return resolved;
+		}
+		return resolved;
+	}
+
 	bool World::furniturePoseFits(AgentId id, MarkerId marker, Pose pose, bool usingSupport,
+		std::string* diagnostic) const
+	{
+		return furniturePoseFits(id, resolveUsablePoint(marker), pose, usingSupport, diagnostic);
+	}
+
+	bool World::furniturePoseFits(AgentId id, ResolvedUsablePoint const& point, Pose pose, bool usingSupport,
 		std::string* diagnostic) const
 	{
 		auto reject = [&](std::string message) { if (diagnostic) *diagnostic = std::move(message); return false; };
 		auto agent = mAgents.find(id);
-		auto instance = furnitureForMarker(marker);
-		if (!agent || !instance || !mFurnitureCatalogue) return reject("Unknown Agent or Furniture usable point");
+		if (!agent || !point) return reject("Unknown Agent or Furniture usable point");
 		if (!agent->supportsPose(pose)) return reject(std::string("Agent does not support Furniture pose ") + poseName(pose));
-		auto definition = mFurnitureCatalogue->definition(instance->definitionKey);
-		auto sector = mSectors.at(instance->sector);
-		float support = 0;
-		for (auto const& destination : instance->destinations)
-			if (destination.marker == marker)
-				for (auto const& point : definition->usablePoints)
-					if (point.key == destination.key && usingSupport) support = point.supportElevation;
-		auto clearance = sector->isRoom()
-			? sector->getLevelsHigh() - 1 + sector->getEffectiveTopLevelHeight() - instance->y
+		float support = usingSupport ? point.supportElevation() : 0;
+		auto clearance = point.sector->isRoom()
+			? point.sector->getLevelsHigh() - 1 + point.sector->getEffectiveTopLevelHeight() - point.instance->y
 			: std::numeric_limits<float>::infinity();
 		if (!agent->poseFits(pose, clearance, support))
 			return reject(std::string("Furniture ") + (usingSupport ? "use" : "finish") + " pose " + poseName(pose) + " does not fit target space");
@@ -352,25 +413,27 @@ namespace core
 
 	bool World::furnitureUseEligible(AgentId id, MarkerId marker, std::string* diagnostic) const
 	{
+		return furnitureUseEligible(id, resolveUsablePoint(marker), diagnostic);
+	}
+
+	bool World::furnitureUseEligible(AgentId id, ResolvedUsablePoint const& point, std::string* diagnostic) const
+	{
 		auto reject = [&](std::string message) { if (diagnostic) *diagnostic = std::move(message); return false; };
-		if (!actionAvailable(marker, UseFurnitureAction)) return reject("Furniture definition has no use");
-		if (auto owner = usablePointOccupant(marker); owner && owner != id) return reject("Usable point is occupied by another Agent");
-		auto instance = furnitureForMarker(marker);
-		auto definition = mFurnitureCatalogue->definition(instance->definitionKey);
+		if (!point || !lookupMarker(point.marker) || !point.definition->hasUse) return reject("Furniture definition has no use");
+		if (auto owner = usablePointOccupant(point.marker); owner && owner != id) return reject("Usable point is occupied by another Agent");
 		// Use begins from the Sector floor: an Agent that cannot stand in the
 		// Furniture's Sector (capability and clearance at the Furniture) cannot
 		// begin use, however well the declared poses themselves would fit.
 		if (auto agent = mAgents.find(id))
 		{
-			auto sector = mSectors.at(instance->sector);
-			auto const clearance = sector->isRoom()
-				? sector->getLevelsHigh() - 1 + sector->getEffectiveTopLevelHeight() - instance->y
+			auto const clearance = point.sector->isRoom()
+				? point.sector->getLevelsHigh() - 1 + point.sector->getEffectiveTopLevelHeight() - point.instance->y
 				: std::numeric_limits<float>::infinity();
 			if (!agent->poseFits(Pose::Standing, clearance))
 				return reject("Agent cannot stand in the Furniture's Sector");
 		}
-		return furniturePoseFits(id, marker, definition->usePose, true, diagnostic)
-			&& furniturePoseFits(id, marker, definition->finishUsePose, false, diagnostic);
+		return furniturePoseFits(id, point, point.definition->usePose, true, diagnostic)
+			&& furniturePoseFits(id, point, point.definition->finishUsePose, false, diagnostic);
 	}
 
 	std::string World::agentActionDisplayName(std::string_view action) const
@@ -408,6 +471,12 @@ namespace core
 	void World::executeMarkerAction(AgentId agentId, MarkerId markerId, std::string_view action, SimulationEvent& event)
 	{
 		auto agent = mAgents.find(agentId);
+		// Resolve the target usable point once (#627): availability,
+		// eligibility, Action views, use execution and the committed use
+		// record all share this single resolution. Custom Actions also receive
+		// Furniture metadata; only Idle skips Action-view construction.
+		ResolvedUsablePoint target;
+		if (action != IdleAction) target = resolveUsablePoint(markerId);
 		if (auto occupant = usablePointOccupant(markerId); occupant && occupant != agentId)
 		{
 			event.type = SimulationEventType::ActionFailed;
@@ -415,12 +484,17 @@ namespace core
 			return;
 		}
 		bool const replacingUse = agent && agent->mFurnitureUse.has_value();
+		// The seat being replaced resolves against the catalogue its use
+		// began with, not the currently installed one (#627).
+		ResolvedUsablePoint current;
+		Pose currentFinishPose{ Pose::Standing };
 		if (replacingUse)
 		{
 			if (action == UseFurnitureAction && agent->mFurnitureUse->marker == markerId) return;
-			auto const& use = *agent->mFurnitureUse;
-			if (!furniturePoseFits(agentId, use.marker, use.catalogue->definition(use.definition)->finishUsePose,
-				false, &event.diagnostic)) { event.type = SimulationEventType::ActionFailed; return; }
+			current = resolveUsablePoint(agent->mFurnitureUse->marker, agent->mFurnitureUse->catalogue);
+			currentFinishPose = agent->mFurnitureUse->catalogue->definition(agent->mFurnitureUse->definition)->finishUsePose;
+			if (!furniturePoseFits(agentId, current, currentFinishPose, false, &event.diagnostic))
+			{ event.type = SimulationEventType::ActionFailed; return; }
 		}
 		if (action == IdleAction)
 		{
@@ -429,68 +503,52 @@ namespace core
 			return;
 		}
 		auto marker = lookupMarker(markerId);
-		if (!agent || !marker || !actionAvailable(markerId, action))
+		if (!agent || !marker || !actionAvailable(markerId, action, target))
 		{
 			event.type = SimulationEventType::MovementCancelled;
 			event.movementCancellationReason = MovementCancellationReason::ActionUnavailable;
 			event.diagnostic = "Selected Action is no longer available";
 			return;
 		}
-		if (action == UseFurnitureAction && !furnitureUseEligible(agentId, markerId, &event.diagnostic))
+		if (action == UseFurnitureAction && !furnitureUseEligible(agentId, target, &event.diagnostic))
 		{
 			event.type = SimulationEventType::ActionFailed;
 			return;
 		}
-		auto views = actionViews(agentId, markerId);
-		if (replacingUse) views.pose = poseName(agent->mFurnitureUse->catalogue
-			->definition(agent->mFurnitureUse->definition)->finishUsePose);
-		auto instance = furnitureForMarker(markerId);
+		auto views = actionViews(agentId, markerId, target);
+		if (replacingUse) views.pose = poseName(currentFinishPose);
 		auto result = action == UseFurnitureAction
-			? mFurnitureCatalogue->executeUse(instance->definitionKey, false, views)
+			? mFurnitureCatalogue->executeUse(target.instance->definitionKey, false, views)
 			: mActionRegistry->execute(action, views);
 		if (action == UseFurnitureAction && result.succeeded)
 			result.effects.insert(result.effects.begin(), {ActionEffectType::Pose,
-				static_cast<int>(mFurnitureCatalogue->definition(instance->definitionKey)->usePose)});
+				static_cast<int>(target.definition->usePose)});
 		if (replacingUse)
 		{
 			// Validate replacement before invoking finish, then stage both batches
 			// together. In particular, competing device requests cannot tear down
 			// a seat before the complete replacement is judged.
-			applyActionResult(agentId, markerId, result, event, false, true, true);
+			applyActionResult(agentId, markerId, result, event, ActionEffectContext::ReplacementValidation);
 			if (event.type != SimulationEventType::DestinationReached) return;
 			auto const use = *agent->mFurnitureUse;
-			auto finishPose = use.catalogue->definition(use.definition)->finishUsePose;
-			auto finished = use.catalogue->executeUse(use.definition, true, actionViews(agentId, use.marker));
+			auto finished = use.catalogue->executeUse(use.definition, true, actionViews(agentId, use.marker, current));
 			if (!finished.succeeded)
 			{
-				applyActionResult(agentId, use.marker, std::move(finished), event, true);
+				applyActionResult(agentId, use.marker, std::move(finished), event, ActionEffectContext::FurnitureFinishing);
 				agent->mFurnitureUse.reset();
-				agent->mOccupiedUsablePoint = {};
-				agent->mPose = finishPose;
-				agent->mRetainedActionPose = true;
+				restoreFurnitureFinishPose(*agent, currentFinishPose);
 				event.agent = mSimulationCoordinator.makeAgentSnapshot(agent);
-				invalidateSimulationSnapshot();
 				return;
 			}
-			finished.effects.insert(finished.effects.begin(), {ActionEffectType::Pose, static_cast<int>(finishPose)});
-			finished.effects.push_back({ActionEffectType::Release});
-			finished.effects.insert(finished.effects.end(), result.effects.begin(), result.effects.end());
-			finished.logs.insert(finished.logs.end(), result.logs.begin(), result.logs.end());
-			finished.logsSuppressed |= result.logsSuppressed;
-			struct FinishingScope
-			{
-				AgentId& slot;
-				AgentId restore;
-				~FinishingScope() { slot = restore; }
-			} scope{mFinishingFurnitureUseAgent, mFinishingFurnitureUseAgent};
-			mFinishingFurnitureUseAgent = agentId;
-			applyActionResult(agentId, markerId, std::move(finished), event, true);
+			finished = composeReplacementBatch(std::move(finished), result, currentFinishPose);
+			FurnitureFinishingScope scope{mFinishingFurnitureUseAgent, agentId};
+			applyActionResult(agentId, markerId, std::move(finished), event, ActionEffectContext::FurnitureFinishing);
 			if (event.type != SimulationEventType::DestinationReached) return;
 			agent->mFurnitureUse.reset();
 		}
-		else applyActionResult(agentId, markerId, std::move(result), event);
+		else applyActionResult(agentId, markerId, std::move(result), event, ActionEffectContext::Immediate);
 		if (action == UseFurnitureAction && event.type == SimulationEventType::DestinationReached)
-			agent->mFurnitureUse = Agent::FurnitureUse{markerId, instance->id, instance->definitionKey, mFurnitureCatalogue};
+			agent->mFurnitureUse = Agent::FurnitureUse{markerId, target.instance->id, target.instance->definitionKey, mFurnitureCatalogue};
 	}
 
 	FurnitureInstance const* World::furnitureForMarker(MarkerId marker) const
@@ -503,19 +561,23 @@ namespace core
 
 	ActionViews World::actionViews(AgentId agentId, MarkerId markerId) const
 	{
+		return actionViews(agentId, markerId, resolveUsablePoint(markerId));
+	}
+
+	ActionViews World::actionViews(AgentId agentId, MarkerId markerId, ResolvedUsablePoint const& point) const
+	{
 		auto agent = mAgents.find(agentId);
 		auto marker = lookupMarker(markerId);
 		auto position = agent->getGlobalPosition();
 		ActionViews views{agent->getName(), getName(), marker ? marker->getName() : "", agentId.value, markerId.value,
 			getSimulationTick(), position.x, position.y, {}, {}, {},
 			poseName(agent->mPose), 0};
-		if (auto instance = furnitureForMarker(markerId))
+		if (point)
 		{
-			views.furnitureId = instance->id;
-			views.furnitureName = instance->name;
-			views.definitionKey = instance->definitionKey;
-			for (auto const& point : instance->destinations)
-				if (point.marker == markerId) views.usablePointKey = point.key;
+			views.furnitureId = point.instance->id;
+			views.furnitureName = point.instance->name;
+			views.definitionKey = point.instance->definitionKey;
+			views.usablePointKey = point.destination->key;
 		}
 		return views;
 	}
@@ -529,13 +591,7 @@ namespace core
 		// Departure has already put the Agent into a navigation state, but the
 		// finishing contract runs before the physical position commits, so mark the
 		// batch while its callback and staged effects are validated.
-		struct FinishingScope
-		{
-			AgentId& slot;
-			AgentId restore;
-			~FinishingScope() { slot = restore; }
-		} finishingScope{ mFinishingFurnitureUseAgent, mFinishingFurnitureUseAgent };
-		mFinishingFurnitureUseAgent = agentId;
+		FurnitureFinishingScope finishingScope{mFinishingFurnitureUseAgent, agentId};
 		SimulationEvent event;
 		event.agent = mSimulationCoordinator.makeAgentSnapshot(agent);
 		event.destinationMarker = use.marker;
@@ -548,13 +604,8 @@ namespace core
 			result.effects.insert(result.effects.begin(), {ActionEffectType::Pose, static_cast<int>(finishPose)});
 			result.effects.push_back({ActionEffectType::Release});
 		}
-		applyActionResult(agentId, use.marker, std::move(result), event, true);
-		// Admission and mutation guards guarantee this literal finishing pose.
-		// Callback failure cannot leak occupancy or invent another stance.
-		agent->mPose = finishPose;
-		agent->mRetainedActionPose = true;
-		agent->mOccupiedUsablePoint = {};
-		invalidateSimulationSnapshot();
+		applyActionResult(agentId, use.marker, std::move(result), event, ActionEffectContext::FurnitureFinishing);
+		restoreFurnitureFinishPose(*agent, finishPose);
 		if (event.type == SimulationEventType::ActionFailed)
 		{
 			// An ordinary refusal stays ordinary. The host has restored the declared
@@ -565,21 +616,38 @@ namespace core
 		}
 	}
 
-	void World::applyActionResult(AgentId agentId, MarkerId markerId, ActionExecutionResult result,
-		SimulationEvent& event, bool finishing, bool validateOnly, bool replacingUse)
+	void World::restoreFurnitureFinishPose(Agent& agent, Pose finishPose)
 	{
-		auto agent = mAgents.find(agentId);
+		// Admission and mutation guards guarantee this literal finishing pose.
+		// Callback failure cannot leak occupancy or invent another stance.
+		// Lifecycle reset and outcome publication remain owned by each workflow.
+		agent.mPose = finishPose;
+		agent.mRetainedActionPose = true;
+		agent.mOccupiedUsablePoint = {};
+		invalidateSimulationSnapshot();
+	}
+
+	World::PreparedActionEffects World::prepareActionResult(AgentId agentId, MarkerId markerId,
+		ActionExecutionResult const& result, bool finishing, bool replacingUse) const
+	{
+		// Evaluation half of the transaction (#634): compute the host state the
+		// batch would apply and any refusal, without mutating the Agent, issuing
+		// a device request, or publishing accepted-effect logs. Nothing here may
+		// make a partial effect observable; that is the commit's job alone.
+		PreparedActionEffects prepared;
 		if (!result.succeeded)
 		{
-			event.type = SimulationEventType::ActionFailed;
-			event.scriptFailure = result.failure;
-			event.diagnostic = std::move(result.diagnostic);
-			addLogMessage("Marker Action", 0, LogLevel::Error, event.diagnostic);
-			mActionExecutionFailed = true;
-			return;
+			// A Lua failure carries its own failure payload; the caller reports it
+			// and owns the pause/headless policy. This is distinct from an ordinary
+			// host refusal, which never sets the script-failure field.
+			prepared.scriptFailed = true;
+			prepared.failure = result.failure;
+			prepared.diagnostic = result.diagnostic;
+			return prepared;
 		}
 		// Shadow only host-owned values. No effects (including logging and
 		// operation events) are published until the entire batch is accepted.
+		auto agent = mAgents.find(agentId);
 		auto pose = agent->mPose;
 		auto claim = replacingUse ? MarkerId{} : agent->mOccupiedUsablePoint;
 		if (replacingUse && agent->mFurnitureUse)
@@ -587,10 +655,10 @@ namespace core
 		bool poseAuthored = false;
 		bool released = false;
 		InteractionPointId device;
-		auto reject = [&](char const* diagnostic)
+		auto reject = [&](char const* diagnostic) -> PreparedActionEffects
 		{
-			event.type = SimulationEventType::ActionFailed;
-			event.diagnostic = diagnostic; // ordinary request refusal, not a Lua failure
+			prepared.diagnostic = diagnostic; // ordinary request refusal, not a Lua failure
+			return prepared;
 		};
 		for (auto const& effect : result.effects)
 		{
@@ -599,15 +667,15 @@ namespace core
 			case ActionEffectType::Pose: pose = static_cast<Pose>(effect.value); poseAuthored = true; break;
 			case ActionEffectType::Claim:
 				if (!isFurnitureMarker(markerId) || (claim && claim != markerId))
-				{ reject("Selected Marker is not an eligible usable point"); return; }
+					return reject("Selected Marker is not an eligible usable point");
 				if (auto owner = usablePointOccupant(markerId); owner && owner != agentId)
-				{ reject("Usable point is occupied by another Agent"); return; }
+					return reject("Usable point is occupied by another Agent");
 				claim = markerId;
 				break;
 			case ActionEffectType::Release:
 				if (!isFurnitureMarker(markerId) || (released && !finishing)
 					|| (claim != markerId && !((finishing || replacingUse) && !claim)))
-				{ reject("Only the owning Agent may release this usable point"); return; }
+					return reject("Only the owning Agent may release this usable point");
 				claim = {};
 				released = true;
 				break;
@@ -615,17 +683,19 @@ namespace core
 			{
 				InteractionPointId pointId{effect.point};
 				auto point = mInteractionPoints.find(pointId);
-				if ((device && device != pointId) || !interactionRequestEligible(pointId, agentId, true)
+				auto const reach = finishing ? InteractionEvaluationContext::FurnitureFinishEffects
+					: InteractionEvaluationContext::ImmediatePress;
+				if ((device && device != pointId) || !interactionRequestEligible(pointId, agentId, reach)
 					|| !missingInteractionPermissions(*point, *agent).empty() || point->mBindings.empty())
-				{ reject("Device Interaction point is not eligible or authorized"); return; }
+					return reject("Device Interaction point is not eligible or authorized");
 				for (auto const& binding : point->mBindings)
 					if (static_cast<int>(binding.command.type) != effect.value
 						|| !missingLiftDestinationPermissions(binding.command, agentId).empty())
-					{ reject("Typed device operation is not offered or authorized"); return; }
+						return reject("Typed device operation is not offered or authorized");
 				for (auto const& [id, request] : mInteractionRequests.entries())
 					if (request->mActor == agentId && request->mResult == InteractionResult::Pending
 						&& request->mPoint != pointId)
-					{ reject("Agent already has another device request"); return; }
+						return reject("Agent already has another device request");
 				device = pointId;
 				break;
 			}
@@ -633,28 +703,87 @@ namespace core
 		}
 		if (poseAuthored || claim != agent->mOccupiedUsablePoint)
 		{
+			std::string fitDiagnostic;
 			bool fits = isFurnitureMarker(markerId)
-				? furniturePoseFits(agentId, markerId, pose, static_cast<bool>(claim), &event.diagnostic)
+				? furniturePoseFits(agentId, markerId, pose, static_cast<bool>(claim), &fitDiagnostic)
 				: agent->poseFits(pose, agent->getSector()->isRoom()
 					? agent->getSector()->getPosition().y + agent->getSector()->getLevelsHigh() - 1
 						+ agent->getSector()->getEffectiveTopLevelHeight() - agent->getGlobalPosition().y
 					: std::numeric_limits<float>::infinity());
-			if (!fits) { event.type = SimulationEventType::ActionFailed; if (event.diagnostic.empty()) event.diagnostic = "Action pose is unsupported or does not fit"; return; }
+			if (!fits)
+			{
+				prepared.diagnostic = fitDiagnostic.empty() ? "Action pose is unsupported or does not fit" : fitDiagnostic;
+				return prepared;
+			}
 		}
-		if (validateOnly) return;
+		prepared.accepted = true;
+		prepared.pose = pose;
+		prepared.claim = claim;
+		prepared.device = device;
+		prepared.poseAuthored = poseAuthored;
+		return prepared;
+	}
+
+	void World::commitPreparedActionEffects(AgentId agentId, PreparedActionEffects const& prepared,
+		SimulationEvent& event, ActionExecutionResult const& result)
+	{
+		// Commitment half of the transaction (#634): the only place an accepted
+		// batch becomes observable. Every host mutation, device request and log
+		// publication lives here, so a batch that never reaches this method can
+		// leave no partial pose, occupancy, device request or staged log behind.
+		auto agent = mAgents.find(agentId);
 		// Committed requests retain the ordinary asynchronous device/traversal
 		// authorities; scripts never submit unvalidated raw device commands.
-		if (device) requestInteraction(device, agentId);
-		if (claim != agent->mOccupiedUsablePoint)
+		if (prepared.device) requestInteraction(prepared.device, agentId);
+		if (prepared.claim != agent->mOccupiedUsablePoint)
 		{
-			if (claim) claimUsablePoint(agentId, claim);
+			if (prepared.claim) claimUsablePoint(agentId, prepared.claim);
 			else agent->mOccupiedUsablePoint = {};
 		}
-		agent->mPose = pose;
-		if (poseAuthored) agent->mRetainedActionPose = true;
-		event.agent.pose = pose;
+		agent->mPose = prepared.pose;
+		if (prepared.poseAuthored) agent->mRetainedActionPose = true;
+		event.agent.pose = prepared.pose;
 		invalidateSimulationSnapshot();
 		for (auto const& log : result.logs) addLogMessage("Marker Action", 0, LogLevel::Info, log.message);
 		if (result.logsSuppressed) addLogMessage("Marker Action", 0, LogLevel::Warning, "Action logging budget exhausted");
+	}
+
+	void World::applyActionResult(AgentId agentId, MarkerId markerId, ActionExecutionResult result,
+		SimulationEvent& event, ActionEffectContext context)
+	{
+		// The named context selects one supported combination of the three axes.
+		// Every axis is derived here once so preparation and commitment read the
+		// same rules the boolean triple drove (#633, #634).
+		bool finishing = false;
+		bool validateOnly = false;
+		bool replacingUse = false;
+		switch (context)
+		{
+		case ActionEffectContext::Immediate: break;
+		case ActionEffectContext::ReplacementValidation: validateOnly = replacingUse = true; break;
+		case ActionEffectContext::FurnitureFinishing: finishing = true; break;
+		}
+		// Preparation never commits; it only reports the pending state or a
+		// refusal. A refused batch reports through the event and stops; a
+		// validation-only batch stops before commitment so a replacement can never
+		// tear down the current Furniture use (#634).
+		auto prepared = prepareActionResult(agentId, markerId, result, finishing, replacingUse);
+		if (!prepared.accepted)
+		{
+			event.type = SimulationEventType::ActionFailed;
+			event.diagnostic = std::move(prepared.diagnostic);
+			if (prepared.scriptFailed)
+			{
+				// A Lua failure owns the failure payload and the pause/headless
+				// policy; an ordinary host refusal leaves the script-failure field
+				// exactly as the caller set it.
+				event.scriptFailure = prepared.failure;
+				addLogMessage("Marker Action", 0, LogLevel::Error, event.diagnostic);
+				mActionExecutionFailed = true;
+			}
+			return;
+		}
+		if (validateOnly) return;
+		commitPreparedActionEffects(agentId, prepared, event, result);
 	}
 }

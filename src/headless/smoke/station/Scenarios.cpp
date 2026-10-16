@@ -193,7 +193,7 @@ namespace
 			auto const& doc = scenario.document;
 			require(doc.scenarioKind == "emergency",
 				("bundled scenario '" + scenario.id + "' is not authored as an emergency drill").c_str());
-			require(doc.schemaVersion == 95,
+			require(doc.schemaVersion == 96,
 				("bundled scenario '" + scenario.id + "' is not on the current station schema").c_str());
 			require(!doc.summary.empty(), ("bundled scenario '" + scenario.id + "' has no summary").c_str());
 			require(doc.scenarioSeconds > 0.0,

@@ -49,7 +49,7 @@ A single straight flight of steps connecting two adjacent levels. It may rise in
 _Avoid_: Stairwell
 
 **Escalator**:
-A staircase whose steps move at a non-zero speed. Its movement direction determines its sole permitted travel direction and its agents' travel speed.
+A staircase whose steps move at a non-zero speed. Its movement direction determines autonomous Agents' sole permitted travel direction; Player-controlled Agents may walk either way, with their motion combined with the moving steps.
 
 **Local depth**:
 A sector-local non-negative integer indicating front-to-back order within one Layer, with 0 front-most and larger values farther back. Numerical differences between Local depths express an Agent's preference for depth continuity between otherwise equally good routes, not physical distance.
@@ -348,6 +348,10 @@ _Avoid_: Physical fit, pose capability
 **Agent behaviour**:
 A reusable state-machine definition that may direct many Agents. Each assigned Agent runs an independent instance of the behaviour.
 _Avoid_: Agent group, Agent tag
+
+**Player-controlled Agent**:
+An Agent assigned the Player controlled behaviour, eligible for direct human control rather than autonomous destination choice. It remains an Agent of its existing Agent type, not a separate physical identity.
+_Avoid_: Player Agent type, Human when describing the control role
 
 **Agent behaviour configuration**:
 Authored data supplied to one Agent's behaviour instance according to its Agent behaviour schema. Agents using the same Agent behaviour may have different configurations, such as different schedules.

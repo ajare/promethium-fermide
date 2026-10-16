@@ -202,7 +202,7 @@ namespace core
 				? context.world->getAgentId(context.agent) : AgentId{};
 			if (result.type == EdgeType::LiftMount && lift->isOpenPlatformLift()
 				&& !result.boarding && routeAgent
-				&& !context.world->canAgentUseLiftJourney(edge.getTraversalResourceId(),
+				&& !context.world->agentHasFeasibleLiftJourney(edge.getTraversalResourceId(),
 					context.agent->getGlobalPosition(), source->getPosition(), routeAgent))
 				result.exclusion = RouteExclusionReason::Permission;
 			// Platform passengers share their Room's Sector. After a paused edit,
@@ -219,7 +219,7 @@ namespace core
 					edge.getTraversalResourceId(), source->getPosition())
 					&& context.world->agentAdheresToTransportLandingPermission(
 						edge.getTraversalResourceId(), sourceSector, source->getPosition(), routeAgent))
-				&& !context.world->canAgentOperateTransportLandingControl(
+				&& !context.world->agentHasFeasibleTransportLandingOperation(
 					edge.getTraversalResourceId(), sourceSector, source->getPosition(), routeAgent))
 				result.exclusion = RouteExclusionReason::Permission;
 			break;
@@ -401,7 +401,7 @@ namespace core
 			// Agent even if another Agent currently has it open.
 			if (result.type == EdgeType::Door && door.getActivationMode() == DoorActivationMode::Manual
 				&& !result.open && context.world && context.agent
-				&& !context.world->canAgentOpenManualDoor(door.getTraversalResourceId(),
+				&& !context.world->agentHasFeasibleManualDoorOperation(door.getTraversalResourceId(),
 					context.world->getAgentId(context.agent)))
 				result.exclusion = RouteExclusionReason::Permission;
 			if (door.getActivationMode() == DoorActivationMode::RemoteControlled
@@ -418,7 +418,7 @@ namespace core
 			// A Lift body is segmented at intermediate Stops. Test the actual
 			// disembark destination, not each segment passed on the way there.
 			if (!result.boarding && (result.lift || result.shuttle) && routeAgent
-				&& !context.world->canAgentUseLiftJourney(edge.getTraversalResourceId(),
+				&& !context.world->agentHasFeasibleLiftJourney(edge.getTraversalResourceId(),
 					context.agent->getGlobalPosition(), source->getPosition(), routeAgent))
 				result.exclusion = RouteExclusionReason::Permission;
 			if (result.boarding && (result.lift || result.shuttle) && routeAgent
@@ -428,7 +428,7 @@ namespace core
 					edge.getTraversalResourceId(), source->getPosition())
 					&& context.world->agentAdheresToTransportLandingPermission(
 						edge.getTraversalResourceId(), sourceSector, source->getPosition(), routeAgent))
-				&& !context.world->canAgentOperateTransportLandingControl(
+				&& !context.world->agentHasFeasibleTransportLandingOperation(
 					edge.getTraversalResourceId(), sourceSector, source->getPosition(), routeAgent))
 				result.exclusion = RouteExclusionReason::Permission;
 			if (!brokenOpen && door.getActivationMode() == DoorActivationMode::Manual) result.activation = 1;

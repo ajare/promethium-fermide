@@ -7,6 +7,10 @@
 namespace {
 ObjectTileset active;
 ImTextureID textureId{};
+ObjectTileset agents;
+ImTextureID agentTextureId{};
+ObjectTileset furniture;
+ImTextureID furnitureTextureId{};
 }
 ObjectTileset ObjectTileset::load(std::filesystem::path const& path)
 {
@@ -50,6 +54,50 @@ void setObjectTileset(ObjectTileset tileset, ImTextureID texture)
     active = std::move(tileset); textureId = texture;
 }
 void clearObjectTileset() { textureId = {}; active = {}; }
+void setAgentTileset(ObjectTileset tileset, ImTextureID texture)
+{
+    agents = std::move(tileset); agentTextureId = texture;
+}
+void clearAgentTileset() { agents = {}; agentTextureId = {}; }
+std::optional<ImVec2> agentSpriteSize(char const* name)
+{
+    auto const found = agents.sprites.find(name);
+    if (!agentTextureId || agents.width <= 0 || agents.height <= 0 || found == agents.sprites.end())
+        return std::nullopt;
+    return ImVec2{float(found->second.region.width), float(found->second.region.height)};
+}
+bool drawAgentSprite(char const* name, WorldDrawList* list, ImVec2 a, ImVec2 b, ImU32 tint)
+{
+    if (!agentSpriteSize(name)) return false;
+    auto const& r = agents.sprites.at(name).region;
+    ImVec2 uv0{(r.x + .5f) / agents.width, (r.y + .5f) / agents.height};
+    ImVec2 uv1{(r.x + r.width - .5f) / agents.width, (r.y + r.height - .5f) / agents.height};
+    list->AddImage(WorldDrawList::Texture::AgentAtlas, a, b, uv0, uv1, tint);
+    return true;
+}
+void setFurnitureTileset(ObjectTileset tileset, ImTextureID texture)
+{
+    furniture = std::move(tileset); furnitureTextureId = texture;
+}
+void clearFurnitureTileset() { furniture = {}; furnitureTextureId = {}; }
+std::optional<ImVec2> furnitureSpriteSize(char const* name)
+{
+    auto const found = furniture.sprites.find(name);
+    if (!furnitureTextureId || furniture.width <= 0 || furniture.height <= 0 || found == furniture.sprites.end())
+        return std::nullopt;
+    return ImVec2{float(found->second.region.width), float(found->second.region.height)};
+}
+bool drawFurnitureSprite(char const* name, WorldDrawList* list, ImVec2 a, ImVec2 b)
+{
+    if (!furnitureSpriteSize(name)) return false;
+    auto const& r = furniture.sprites.at(name).region;
+    ImVec2 minimum{std::min(a.x, b.x), std::min(a.y, b.y)};
+    ImVec2 maximum{std::max(a.x, b.x), std::max(a.y, b.y)};
+    list->AddImage(WorldDrawList::Texture::FurnitureAtlas, minimum, maximum,
+        {(r.x + .5f) / furniture.width, (r.y + .5f) / furniture.height},
+        {(r.x + r.width - .5f) / furniture.width, (r.y + r.height - .5f) / furniture.height});
+    return true;
+}
 bool hasObjectTileset() { return textureId != ImTextureID{}; }
 std::optional<ImVec2> objectSpriteSize(char const* name)
 {

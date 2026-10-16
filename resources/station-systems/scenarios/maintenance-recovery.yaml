@@ -7,7 +7,7 @@
 # implemented maintenance mechanisms - reservation, isolation, consumed-
 # material booking, missed-window policy - never a scripted repair.
 name: Meridian maintenance miss-and-recovery drill
-schemaVersion: 95
+schemaVersion: 96
 summary: 'A four-crew Meridian configuration exercising maintenance that misses and then recovers:
   the chiller maintenance job opens its first window while the tool kit it needs is barely off
   the ledger (0.2 kg against a 1.0 kg requirement), so the job blocks at the window opening, the

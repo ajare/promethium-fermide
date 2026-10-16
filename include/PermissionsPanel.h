@@ -50,6 +50,10 @@ bool commitLiftDestinationPermissionRequirement(std::shared_ptr<core::World> con
 	std::string& diagnostic, uint32_t objectIndex = ~0u);
 bool commitClearLiftDestinationPermissionRequirement(std::shared_ptr<core::World> const& world,
 	uint32_t sectorIndex, uint32_t stopIndex, std::string& diagnostic, uint32_t objectIndex = ~0u);
+bool commitTransportStopShortName(std::shared_ptr<core::World> const& world,
+	uint32_t sectorIndex, uint32_t stopIndex, std::string const& name,
+	std::string& diagnostic, uint32_t objectIndex = ~0u);
+
 void renderLiftDestinationPermissions(std::shared_ptr<core::World> const& world, uint32_t sectorIndex,
 	uint32_t objectIndex = ~0u);
 void resetPermissionsPanelState();

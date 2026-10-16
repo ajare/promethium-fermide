@@ -170,7 +170,8 @@ namespace core
 		// Requesting an interaction. A traversal request queues behind whatever
 		// the point is already doing; a request made while passing does not wait -
 		// it activates its operations and presses the control immediately.
-		InteractionRequestId requestInteraction(InteractionPointId point, AgentId actor);
+		InteractionRequestId requestInteraction(InteractionPointId point, AgentId actor,
+			bool prepareTraversal = false);
 
 		InteractionRequestId requestInteractionForTraversal(InteractionPointId point, AgentId actor);
 
@@ -221,13 +222,36 @@ namespace core
 		// reports, not a separate simulation of the device state.
 		void pressPhysicalControl(InteractionPointId point);
 
-		// An Agent walking towards a regular, Lift, or Shuttle Door presses an
-		// applicable control early - while still moving, and only once per door -
-		// so it does not reach the threshold and double back to the control.
-		std::vector<InteractionPointId> upcomingRemoteButtons(Agent const& agent, TraversalResourceId& resource) const;
-		Vector2 limitRemoteButtonMovement(Agent const& agent, Vector2 const& start, Vector2 const& end) const;
-		void tryPressUpcomingDoorButton(Agent& agent, Vector2 const& movementStart,
+		// Prepare the next required resource while moving: remote manual Doors,
+		// transport calls, extensible controls and Airlocks, plus physical passing
+		// presses. This never grants traversal admission.
+		std::vector<InteractionPointId> upcomingRemoteInteractionPoints(Agent const& agent, TraversalResourceId& resource) const;
+		Vector2 limitRemoteInteractionMovement(Agent const& agent, Vector2 const& start, Vector2 const& end) const;
+		void tryAnticipatoryInteraction(Agent& agent, Vector2 const& movementStart,
 			Vector2 const& movementEnd);
+
+		// Compatibility entry points; internal callers use the scope-correct names.
+		std::vector<InteractionPointId> upcomingRemoteButtons(Agent const& agent, TraversalResourceId& resource) const
+		{ return upcomingRemoteInteractionPoints(agent, resource); }
+		Vector2 limitRemoteButtonMovement(Agent const& agent, Vector2 const& start, Vector2 const& end) const
+		{ return limitRemoteInteractionMovement(agent, start, end); }
+		void tryPressUpcomingDoorButton(Agent& agent, Vector2 const& start, Vector2 const& end)
+		{ tryAnticipatoryInteraction(agent, start, end); }
+
+		// Direct query for queued press work owned by an Agent (#626): true
+		// when the Agent has an InteractionRequest sitting in some
+		// InteractionPoint queue that is still Pending - the exact condition the
+		// Movement phase used to find by scanning every point and queue each
+		// tick. Backed by the World's derived per-Agent index, which mirrors
+		// queue membership; the request record stays authoritative for the
+		// actor and the Pending result.
+		bool hasQueuedPressWork(AgentId id) const;
+
+		// Index maintenance: mirror of InteractionPoint queue membership by
+		// actor. Every queue insert and removal runs through these so the
+		// derived index stays in step with the queues (#626).
+		void indexQueuedPress(AgentId actor, InteractionRequestId id);
+		void unindexQueuedPress(AgentId actor, InteractionRequestId id);
 
 		// ------------------------------------------------------------------
 		// Door and extensible traversal preparation (ADR 0004 stage 3)
@@ -348,6 +372,8 @@ namespace core
 		// resource. `edgeResource` is the resource the request was made on: the
 		// journey itself, or the landing door whose coordinator link is followed.
 		void allocateLiftTraversal(TraversalRequestId requestId, TraversalResource& edgeResource);
+		void allocatePlayerTransportCrossing(TraversalRequestId requestId,
+			TraversalResource& landing, TraversalResource& vehicle);
 
 		// ------------------------------------------------------------------
 		// Lift boarding branch (ADR 0004 stage 3)
@@ -388,6 +414,43 @@ namespace core
 		// shuttle journey resource the request was made against; the request's
 		// own landing edge is not consulted, since the passenger is already aboard.
 		void allocateLiftRiding(TraversalRequestId requestId, TraversalResource& coordinator);
+
+		// ------------------------------------------------------------------
+		// Shared autonomous transport destination-selection mechanics (R17)
+		//
+		// An onboard destination selection at the interior selector control is
+		// the same three-step dance whether it is an enclosed Lift passenger or a
+		// Platform lift passenger: create the selector interaction request, then
+		// observe the captured preparation operation, and classify the result.
+		// Only the surrounding policy differs - the enclosed Lift serialises
+		// confirmations and retries with a delay, the Platform lift retries
+		// immediately - so that policy stays with each caller. This helper owns
+		// the shared request creation, operation observation and descriptive
+		// result classification only; it never denies, retries, orders
+		// occupants or requests a safe exit.
+		//
+		// The descriptive outcome keeps the empty-handle refusal (the request
+		// was never made, so the caller simply waits) distinct from a recorded
+		// rejection (the interaction came back Refused, so the caller safe-exits
+		// and denies), as the behavior-preservation contract requires.
+		// ------------------------------------------------------------------
+		enum class LiftSelectorOutcome
+		{
+			NoHandle,   // no interaction handle returned; caller waits, no deny
+			Requested,  // fresh selector interaction created; caller waits for it
+			Awaiting,   // captured preparation operation still pending/running
+			Succeeded,  // captured preparation operation succeeded
+			Rejected,   // interaction recorded as Refused at request time
+			Failed,     // captured preparation operation ended not-succeeded
+			NoControl,  // stop has no interior selector control; caller denies
+		};
+
+		// Create the onboard selector interaction for `stop` on `coordinator`, or
+		// observe the already-captured preparation operation, and return the
+		// descriptive outcome. The caller applies its own retry/queue/safe-exit
+		// policy from the result.
+		LiftSelectorOutcome requestLiftSelectorDestination(
+			TraversalRequestId requestId, TraversalResource& coordinator, uint32_t stop);
 
 		// Keep enclosed Lift occupants in deterministic door-to-car order. Existing
 		// physical order breaks equal-destination ties, preserving boarding order;
@@ -734,9 +797,97 @@ namespace core
 		bool retargetShuttleDoorTraversal(TraversalRequestId requestId,
 			TraversalResource& coordinator, ShuttleDoor const& door);
 
+		// Upcoming remote-interaction steps (#630, R16). Path-based discovery,
+		// control resolution and per-control necessity are separated from the
+		// movement-limit and activation consumers so each step is reviewable on
+		// its own and the discovered target facts are reused within a step
+		// instead of being re-walked inline. Discovery reads only Path intent
+		// within the permitted Sector scope - never live device state,
+		// permissions or proximity - so every consumer still revalidates
+		// mutable eligibility at its own lifecycle boundary and no target
+		// outlives the step that produced it.
+		bool discoverUpcomingRemoteTarget(Agent const& agent,
+			TraversalResourceId& upcoming,
+			std::shared_ptr<const Vertex>& source) const;
+		std::vector<InteractionPointId> remoteInteractionControls(
+			TraversalResource const& resource, Vector2 const& sourcePosition) const;
+		bool remoteControlIsNeeded(InteractionPoint const& point,
+			TraversalResource const& resource, TraversalResourceId upcoming,
+			std::vector<InteractionPointId> const& controls,
+			Vector2 const& sourcePosition, SectorId sector) const;
+
+		// The two anticipatory consumers keep their distinct selection
+		// policies: remote activation prepares the discovered target from
+		// range, while a physical passing press follows the in-Sector Door
+		// route. Neither replaces physical crossing or boarding (#630).
+		void activateRemoteAnticipatoryInteraction(Agent& agent,
+			TraversalResourceId upcoming,
+			std::vector<InteractionPointId> const& controls);
+		void tryPhysicalPassingPress(Agent& agent, Vector2 const& movementStart,
+			Vector2 const& movementEnd);
+
+		InteractionRequestId rejectInteractionRequest(InteractionPointId point, AgentId actor,
+			std::vector<AccessPermissionId> const& missingPermissions);
+		DeviceOperationId bindInteractionOperation(InteractionRequest& request,
+			DeviceCommand const& command, InteractionBindingRequirement requirement);
+		void publishInteractionRequestAdded(InteractionRequestId id, InteractionRequest const& request);
+
 		// Releases a cancelling Actor's claim on each operation its request
 		// needed; an operation nobody still wants is cancelled with it.
 		void detachInteractionRequester(InteractionRequest& request);
+		void releaseInteractionPointRequest(InteractionRequestId id, InteractionPointId point);
+		void publishInteractionOutcome(InteractionRequestId id, InteractionRequest const& request);
+
+		// Device activation (#623). Every device family owns exactly one
+		// activation helper, and each helper is called from the phase and the
+		// dispatch position its inline code used to occupy: BoothWindow, Door
+		// and extensible intents activate in the ResourceAdvancement phase's
+		// Pending-to-Running transition, an Access panel press activates at the
+		// end of the pressing Agent's Movement-phase press interval, and a
+		// Dumbwaiter press is admitted by admitDumbwaiterPress from both the
+		// user submission and the Agent press. There is deliberately no shared
+		// activation phase: moving one helper's call site would shift that
+		// device's activation by a tick, which is the regression this
+		// extraction must not introduce. Each helper commits the intent and
+		// retires the operations its target supersedes; the device itself keeps
+		// its physical position.
+		void activateBoothWindow(DeviceOperationId id, DeviceOperation& operation);
+		void activateManualDoor(DeviceOperationId id, DeviceOperation& operation);
+		void activateExtensible(DeviceOperationId id, DeviceOperation& operation);
+		void activateAccessPanelPress(DeviceOperationId id, DeviceOperation& operation,
+			AgentId actor);
+
+		// Device advancement and completion dispatch (#624). The tick phase
+		// keeps the exact outer order the inline code used: pending physical
+		// retractions, then the operation loop (activation on the
+		// Pending-to-Running boundary via activatePendingOperation, completion
+		// observation for operations already Running via
+		// observeRunningOperation and its command-family helpers), then the
+		// physical travel of shutters and panels, the panel completion check,
+		// the Dumbwaiter progression, and finally the shutter completion
+		// check. Physical advancement moves the device; observation only
+		// reads the device and retires an operation which has reached its
+		// target. Every state change still goes through touchDeviceOperation
+		// so the published tick events are unchanged.
+		bool canRetractSafely(TraversalResource const& resource) const;
+		void advancePendingRetractions();
+		void activatePendingOperation(DeviceOperationId id, DeviceOperation& operation);
+		void observeRunningOperation(DeviceOperationId id, DeviceOperation& operation);
+		void advanceExtensibleOperation(DeviceOperation& operation);
+		void advanceTransportCallOperation(DeviceOperation& operation);
+		void advanceDoorOperation(DeviceOperation& operation);
+		void advanceBoothWindowTravel();
+		void advanceAccessPanelTravel();
+		void completeAccessPanelOperations();
+		void completeBoothWindowOperations();
+
+		// A newer activation takes the device's target: the operations which
+		// were still Running toward another target on that device retire with
+		// it, touched for event publication exactly as the inline loops did.
+		// The scan follows the registry's stable-ID order. Defined in the
+		// interactions translation unit, which is its only caller.
+		template <typename Matches>
+		void supersedeRunningOperations(DeviceOperationId winner, Matches matches);
 
 		// Retires terminal interaction requests and device operations once no
 		// live owner - an interaction point, a traversal resource's active

@@ -8,10 +8,10 @@ return {
       label = "Wide replacement",
       sideRoutes = true,
       tiles = {
-        {x = 0, y = 0, imageSet = "ObjectAtlas", image = "chair"},
-        {x = 1, y = 0, imageSet = "ObjectAtlas", image = "chair"},
-        {x = 2, y = 0, imageSet = "ObjectAtlas", image = "chair"},
-        {x = 3, y = 0, imageSet = "ObjectAtlas", image = "chair"},
+        {x = 0, y = 0, image = "chair"},
+        {x = 1, y = 0, image = "chair"},
+        {x = 2, y = 0, image = "chair"},
+        {x = 3, y = 0, image = "chair"},
       },
       usablePoints = {
         {key = "seat", label = "Seat", x = 0.75},
@@ -37,8 +37,8 @@ return {
       label = "Narrow replacement",
       sideRoutes = true,
       tiles = {
-        {x = 0, y = 0, imageSet = "ObjectAtlas", image = "chair"},
-        {x = 1, y = 0, imageSet = "ObjectAtlas", image = "chair"},
+        {x = 0, y = 0, image = "chair"},
+        {x = 1, y = 0, image = "chair"},
       },
       usablePoints = {
         {key = "seat", label = "Seat", x = 0.75},

@@ -18,7 +18,7 @@
 # in one declared unit with the recorded provenance; nothing here is a
 # flight-qualified engineering value.
 name: "Meridian long-duration stability workload"
-schemaVersion: 95
+schemaVersion: 96
 summary: >
   The reconciled four-crew Meridian register configured for a two-hour
   continuous run that exercises the whole implemented Station system -

@@ -268,7 +268,7 @@ namespace core
 		float stairDescentSpeed;
 		// Only declared poses exist. Standing uses the type's base dimensions;
 		// other poses carry validated dimension ratios. Every pose declares
-		// an ObjectAtlas image tile, frozen with the rest of the definition.
+		// an Agent ImageSet tile name, frozen with the rest of the definition.
 		std::map<Pose, AgentPoseDefinition> poses;
 		std::vector<AutomaticPoseChoice> roomMovement;
 		std::vector<AutomaticPoseChoice> doorCrossing;
@@ -340,6 +340,8 @@ namespace core
 		int mLocalDepth{ 0 };
 		// Runtime bodily stance, deliberately absent from serialization.
 		Pose mPose{ Pose::Standing };
+		// Runtime-only ownership for held Player posture input, never authored.
+		std::optional<Pose> mPlayerPose;
 		// True while mPose was authored by a Marker Action's set_pose effect and
 		// is retained until successful replacement or actual physical departure.
 		// Distinguishes a retained Action pose from the Sector-derived pose that
@@ -479,6 +481,14 @@ namespace core
 		std::map<uint32_t, DeviceCondition> mRememberedEscalatorConditions;
 
 		SectorPosition mPosition;
+		// Mounted fixed Ladder identity also distinguishes Room Ladders, whose
+		// mount does not change Sector. Never authored or serialized.
+		std::shared_ptr<const Edge> mPlayerLadderMount;
+		bool mPlayerLadderEntry{ false };
+		// Runtime platform approach, never an advance flight selection.
+		bool mPlayerStaircaseEntry{ false };
+		bool mPlayerStairPlatform{ true };
+		int mPlayerStairApproach{ 0 };
 
 		// Authored position and route are kept separate from transient locomotion.
 		// Simulation advances mPosition/mPath, while serialization and Reset use
@@ -509,15 +519,42 @@ namespace core
 		// Traversal resources assign local goals; the Agent remains the sole owner
 		// of walking and advances itself during the movement phase.
 		std::optional<Vector2> mTraversalLocalGoal;
-		std::optional<Vector2> mRemoteButtonApproachTarget;
+		// Traversal approach goal: cancelTraversal(), preparation once in range,
+		// and capability changes clear it. Anticipatory resets alone do not.
+		std::optional<Vector2> mRemoteInteractionApproachTarget;
 
-		// Prevent repeated opportunistic presses while following the same immediate
-		// Door edge. The saved interaction lets traversal preparation reuse a press
-		// made while passing instead of sending the Agent back from the threshold.
-		// This is transient locomotion state, not authored simulation data.
-		TraversalResourceId mEarlyDoorPressResource;
-		InteractionRequestId mEarlyDoorPressInteraction;
-		bool mEarlyDoorPressAttempted{ false };
+		// Transient preparation of the next resource: manual Doors, transport calls,
+		// extensible controls and Airlocks. Retain a passing request until preparation
+		// consumes it; terminal-record retirement must continue to see that identity.
+		struct AnticipatoryInteractionState
+		{
+			void reset() { mResource = {}; mRequest = {}; mAttempted = false; }
+			void selectResource(TraversalResourceId resource)
+			{
+				if (mResource == resource) return;
+				reset();
+				mResource = resource;
+			}
+			void recordAttempt() { mAttempted = true; }
+			void retainRequest(InteractionRequestId request) { mRequest = request; recordAttempt(); }
+			// Capability edits may retry without releasing a retained result.
+			void allowRetry() { mAttempted = false; }
+			bool attempted() const { return mAttempted; }
+			InteractionRequestId retainedRequest() const { return mRequest; }
+			// Preparation consumes the identity, not the once-per-resource attempt.
+			InteractionRequestId takeRequest()
+			{
+				auto request = mRequest;
+				mRequest = {};
+				return request;
+			}
+
+		private:
+			TraversalResourceId mResource;
+			InteractionRequestId mRequest;
+			bool mAttempted{ false };
+		};
+		AnticipatoryInteractionState mAnticipatoryInteraction;
 
 		// Set when locomotion stops at the outer edge of an available queue lane.
 		// +1 approaches from the left, -1 from the right, and 0 requests at the endpoint.
@@ -904,6 +941,11 @@ namespace core
 		// or a reset works on them.
 		bool isActive() const { return mActive; }
 
+		bool isPlayerControlled() const
+		{
+			return mBehaviourAssignment
+				&& mBehaviourAssignment->behaviour == PlayerControlledBehaviour;
+		}
 		std::optional<AgentBehaviourAssignment> const& getBehaviourAssignment() const
 		{
 			return mBehaviourAssignment;

@@ -1,0 +1,8 @@
+Resources:
+  Resource:
+    type: ProtoEntity
+    name: Invalid
+    Definitions:
+      Definition:
+        Properties:
+          Unknown: true

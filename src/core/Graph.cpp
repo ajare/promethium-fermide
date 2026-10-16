@@ -1279,7 +1279,15 @@ namespace core
 		}
 
 		auto stairwell = stairwellTransit->getStairwell();
+		stairwell->configureStandingWidth(mwWorld->maximumInstalledStandingWidth());
 		auto path = stairwell->getLevelPath(levelOffset);
+		auto platforms = stairwell->getLandingPaths(levelOffset);
+		auto addPlatform = [&](shared_ptr<Vertex> junction, size_t index) {
+			auto endpoint = platforms[index][1];
+			auto vertex = make_shared<StairwellVertex>(sector, stairwell, endpoint.x, endpoint.y, levelOffset);
+			appendStandaloneRowVertex(row, x, SlotTransit, vertex);
+			addEdge(make_shared<SectorEdge>(), junction, vertex, false);
+		};
 		auto stairwellVert0 = make_shared<StairwellVertex>(sector, stairwell,
 			path[0].x, path[0].y, levelOffset);
 
@@ -1301,6 +1309,8 @@ namespace core
 
 		// Add Ladder Vertex to lookup for joining up
 		addCrossLevelVertex(stairwellTransit, stairwellVert0, crossLevelVertices);
+		addPlatform(stairwellVert0, 0);
+		addPlatform(stairwellVert0, 1);
 
 		// Intermediate Vertices
 		if (y < (stairwellTransit->getCellY() + stairwellTransit->getLevelsHigh() - 1))
@@ -1311,6 +1321,7 @@ namespace core
 
 			appendStandaloneRowVertex(row, x, SlotTransit, stairwellVert1);
 			addCrossLevelVertex(stairwellTransit, stairwellVert1, crossLevelVertices);
+			addPlatform(stairwellVert1, 2);
 
 			// Upper landing
 			auto stairwellVert2 = make_shared<StairwellVertex>(sector, stairwell,
@@ -1318,6 +1329,7 @@ namespace core
 
 			appendStandaloneRowVertex(row, x, SlotTransit, stairwellVert2);
 			addCrossLevelVertex(stairwellTransit, stairwellVert2, crossLevelVertices);
+			addPlatform(stairwellVert2, 3);
 		}
 	}
 
@@ -1339,6 +1351,15 @@ namespace core
 			// Mount at the Staircase path endpoint rather than the endpoint cell's
 			// centre. Z-connected mount vertices must occupy the same global point.
 			auto const endpointX = (float)transit->getCellX() + point.x;
+			// An upper Room-wall endpoint can have no Floor in the Staircase's
+			// footprint. Its actual landing is the adjacent supported Location,
+			// not the unsupported Room cell on the other side of the open wall.
+			if (!lower && !mwWorld->getLayer(transit->getLayerIndex() - 1)->getCellDefinition(x, y).isTraversableOnFoot())
+			{
+				auto const adjacentX = transit->getRiseSide() == CORE_SIDE_RIGHT ? x + 1 : x - 1;
+				auto const& adjacent = mwWorld->getLayer(transit->getLayerIndex() - 1)->getCellDefinition(adjacentX, y);
+				sector = mwWorld->_getSector(adjacent.sectorIndex);
+			}
 			auto locationVertex = make_shared<StairwellLocationVertex>(sector,
 				endpointX - (float)sector->getCellX(), (float)(y - sector->getCellY()));
 			appendRowVertex(row, x, SlotTransit, locationVertex);

@@ -30,6 +30,23 @@ Resources:
               - { name: "boundary-left", x: "8", y: "179", width: "9", height: "65" }
               - { name: "boundary-right", x: "127", y: "179", width: "9", height: "65" }
     - type: "Image"
+      name: "StationAtlasImage"
+      location: "textures/station-128x320.png"
+      Option:
+        - { name: "filtering", value: "none" }
+        - { name: "uv-style", value: "atlas" }
+    - type: "ImageSet"
+      name: "StationAtlas"
+      DependentResources:
+        DependentResource:
+          id: "Image"
+          ref: "StationAtlasImage"
+      Definitions:
+        Definition:
+          Images:
+            Image:
+              - { name: "corridor", x: "0", y: "0", width: "128", height: "320" }
+    - type: "Image"
       name: "ObjectAtlasImage"
       location: "textures/objects.png"
       Option:
@@ -37,6 +54,85 @@ Resources:
           value: "none"
         - name: "uv-style"
           value: "atlas"
+    - type: "ImageSet"
+      name: "AgentAtlas"
+      DependentResources:
+        DependentResource:
+          id: "Image"
+          ref: "ObjectAtlasImage"
+      Definitions:
+        Definition:
+          Images:
+            Image:
+              - { name: "agent", x: "83", y: "248", width: "26", height: "72" }
+              - { name: "human-standing", x: "0", y: "888", width: "26", height: "72" }
+              - { name: "human-sitting", x: "32", y: "917", width: "26", height: "43" }
+              - { name: "human-lying", x: "64", y: "934", width: "72", height: "26" }
+              - { name: "human-crouching", x: "144", y: "917", width: "26", height: "43" }
+              - { name: "human-crawling", x: "192", y: "952", width: "72", height: "8" }
+              - { name: "robot-standing", x: "288", y: "888", width: "26", height: "72" }
+              - { name: "cleaning-bot-standing", x: "240", y: "912", width: "26", height: "24" }
+    - type: "Image"
+      name: "DoctorFemale1AtlasImage"
+      location: "textures/doctor-female-1-320.png"
+      Option:
+        - { name: "filtering", value: "none" }
+        - { name: "uv-style", value: "atlas" }
+    - type: "ImageSet"
+      name: "DoctorFemale1Atlas"
+      DependentResources:
+        DependentResource:
+          id: "Image"
+          ref: "DoctorFemale1AtlasImage"
+      Definitions:
+        Definition:
+          Images:
+            Image:
+              - { name: "human-standing", x: "8", y: "63", width: "71", height: "193" }
+              - { name: "human-sitting", x: "88", y: "88", width: "86", height: "168" }
+              - { name: "human-lying", x: "418", y: "203", width: "181", height: "53" }
+              - { name: "human-crouching", x: "185", y: "142", width: "85", height: "114" }
+              - { name: "human-crawling", x: "277", y: "169", width: "142", height: "87" }
+    - type: "Image"
+      name: "StationFurnitureAtlasImage"
+      location: "textures/station-furniture-320.png"
+      Option:
+        - { name: "filtering", value: "none" }
+        - { name: "uv-style", value: "atlas" }
+    - type: "ImageSet"
+      name: "StationFurnitureAtlas"
+      DependentResources:
+        DependentResource:
+          id: "Image"
+          ref: "StationFurnitureAtlasImage"
+      Definitions:
+        Definition:
+          Images:
+            Image:
+              - { name: "chair", x: "0", y: "0", width: "128", height: "320" }
+              - { name: "bed-left", x: "256", y: "0", width: "128", height: "320" }
+              - { name: "bed-right", x: "384", y: "0", width: "128", height: "320" }
+              - { name: "sofa-left", x: "0", y: "320", width: "128", height: "320" }
+              - { name: "sofa-right", x: "128", y: "320", width: "128", height: "320" }
+              - { name: "desk-left", x: "256", y: "320", width: "128", height: "320" }
+              - { name: "desk-right", x: "384", y: "320", width: "128", height: "320" }
+    - type: "ImageSet"
+      name: "FurnitureAtlas"
+      DependentResources:
+        DependentResource:
+          id: "Image"
+          ref: "ObjectAtlasImage"
+      Definitions:
+        Definition:
+          Images:
+            Image:
+              - { name: "chair", x: "256", y: "160", width: "64", height: "160" }
+              - { name: "sofa-left", x: "0", y: "480", width: "64", height: "160" }
+              - { name: "sofa-right", x: "64", y: "480", width: "64", height: "160" }
+              - { name: "desk-left", x: "128", y: "480", width: "64", height: "160" }
+              - { name: "desk-right", x: "192", y: "480", width: "64", height: "160" }
+              - { name: "bed-left", x: "0", y: "640", width: "64", height: "160" }
+              - { name: "bed-right", x: "64", y: "640", width: "64", height: "160" }
     - type: "ImageSet"
       name: "ObjectAtlas"
       DependentResources:
@@ -56,14 +152,6 @@ Resources:
               - { name: "booth-window-open", x: "262", y: "560", width: "52", height: "48" }
               - { name: "booth-window-shutter", x: "267", y: "501", width: "42", height: "38" }
               - { name: "booth-window-closed", x: "262", y: "496", width: "52", height: "48" }
-              - { name: "agent", x: "83", y: "248", width: "26", height: "72" }
-              - { name: "human-standing", x: "0", y: "888", width: "26", height: "72" }
-              - { name: "human-sitting", x: "32", y: "917", width: "26", height: "43" }
-              - { name: "human-lying", x: "64", y: "934", width: "72", height: "26" }
-              - { name: "human-crouching", x: "144", y: "917", width: "26", height: "43" }
-              - { name: "human-crawling", x: "192", y: "952", width: "72", height: "8" }
-              - { name: "robot-standing", x: "288", y: "888", width: "26", height: "72" }
-              - { name: "cleaning-bot-standing", x: "240", y: "912", width: "26", height: "24" }
               - { name: "marker", x: "152", y: "282", width: "16", height: "22" }
               - { name: "chair", x: "256", y: "160", width: "64", height: "160" }
               - { name: "sofa-left", x: "0", y: "480", width: "64", height: "160" }
@@ -84,7 +172,7 @@ Resources:
       DependentResources:
         DependentResource:
           id: "Artwork"
-          ref: "ObjectAtlas"
+          ref: "FurnitureAtlas"
     - type: "World"
       name: "FurnitureDemo"
       location: "test-worlds/furniture.world.yaml"
@@ -98,7 +186,7 @@ Resources:
       DependentResources:
         DependentResource:
           id: "Artwork"
-          ref: "ObjectAtlas"
+          ref: "FurnitureAtlas"
     - type: "World"
       name: "FurnitureIntegrationDemo"
       location: "test-worlds/furniture-integration.world.yaml"
@@ -112,14 +200,14 @@ Resources:
       DependentResources:
         DependentResource:
           id: "Artwork"
-          ref: "ObjectAtlas"
+          ref: "FurnitureAtlas"
     - type: "FurnitureCatalogue"
       name: "DeskCatalogue"
       location: "test-worlds/desk.furniture.lua"
       DependentResources:
         DependentResource:
           id: "Artwork"
-          ref: "ObjectAtlas"
+          ref: "FurnitureAtlas"
     - type: "AgentTagRegistry"
       name: "TestAgentTags"
       location: "test-worlds/test.tags.yaml"
@@ -204,3 +292,19 @@ Resources:
     - type: "World"
       name: "Office"
       location: "Office.world.yaml"
+  Namespace:
+    name: World
+    Resource:
+      - type: World
+        name: WorldFile
+        location: test-worlds/room-height-test-1.world.yaml
+      - type: Map
+        name: World
+        DependentResources:
+          DependentResource:
+            id: World
+            ref: WorldFile
+        Definitions:
+          Definition:
+            factory: PromethiumFermide
+            Resource: World

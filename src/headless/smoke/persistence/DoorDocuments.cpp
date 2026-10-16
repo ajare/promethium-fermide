@@ -1082,7 +1082,7 @@ namespace persistence
 			("A Lift stop style override was refused: " + diagnostic).c_str());
 
 		auto const yaml = serialize(authored);
-		require(yaml.find("version: 95") != std::string::npos,
+		require(yaml.find("version: 96") != std::string::npos,
 			"A map with authored Door styles was not written at the current schema version");
 		require(yaml.find("version: 6\n") == std::string::npos,
 			"A map with authored Door styles still carries version 6");
@@ -1167,7 +1167,7 @@ namespace persistence
 			"A legacy Shuttle-owned Door");
 
 		// The current reader still refuses anything above its own ceiling.
-		auto const futureYaml = std::string("version: 96")
+		auto const futureYaml = std::string("version: 97")
 			+ defaultsYaml.substr(defaultsYaml.find("\n"));
 		bool refusedFuture{ false };
 		try

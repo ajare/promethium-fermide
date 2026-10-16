@@ -311,6 +311,15 @@ namespace
 				&& snapshot(world) == before && world.furnitureCatalogue() == acceptedCatalogue,
 				"YAML rejection mutated the World/package or silently rewrote the file");
 		}
+		for (auto field : {"nil", "'ObjectAtlas'", "'FurnitureAtlas'"})
+		{
+			write(variant(std::string("for _, d in ipairs(catalogue.definitions) do for _, tile in ipairs(d.tiles) do tile.imageSet = ")
+				+ field + " end end"));
+			auto compatible = core::FurnitureCatalogue::readFile(package);
+			for (auto const& [key, definition] : compatible->definitions())
+				for (auto const& tile : definition.tiles)
+					require(tile.imageSet == "FurnitureAtlas", "Legacy Furniture ImageSet field was not normalized");
+		}
 		auto rejected = [&](std::string const& sourceText) {
 			write(sourceText);
 			for (auto const& document : documents)

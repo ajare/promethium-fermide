@@ -1,0 +1,199 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ajare.github.io/boolean-world/schemas/resource-manifest/v1/map.schema.json",
+  "title": "Map Resource",
+  "$ref": "#/definitions/resource",
+  "definitions": {
+    "dependency": {
+      "oneOf": [
+        { "$ref": "#/definitions/yamlDependency" },
+        { "$ref": "#/definitions/fileDependency" },
+        { "$ref": "#/definitions/tilesImageSetDependency" }
+      ]
+    },
+    "yamlDependency": {
+      "allOf": [
+        { "$ref": "https://schemas.willpower.dev/resource-manifest/resource.schema.json#/definitions/dependentResource" },
+        {
+          "required": ["id", "ref"],
+          "properties": {
+            "id": { "enum": ["Yaml"] },
+            "ref": {
+              "$ref": "https://schemas.willpower.dev/resource-manifest/common.schema.json#/definitions/nonEmptyString",
+              "x-willpower-editor-version": "1.0",
+              "x-willpower-widget": "resource-reference",
+              "x-willpower-allowed-resource-types": ["TextFile"],
+              "x-willpower-reference-scope": "manifest"
+            }
+          }
+        }
+      ]
+    },
+    "fileDependency": {
+      "allOf": [
+        { "$ref": "https://schemas.willpower.dev/resource-manifest/resource.schema.json#/definitions/dependentResource" },
+        {
+          "required": ["id", "ref"],
+          "properties": {
+            "id": { "enum": ["File"] },
+            "ref": {
+              "$ref": "https://schemas.willpower.dev/resource-manifest/common.schema.json#/definitions/nonEmptyString",
+              "x-willpower-editor-version": "1.0",
+              "x-willpower-widget": "resource-reference",
+              "x-willpower-allowed-resource-types": ["XmlFile"],
+              "x-willpower-reference-scope": "manifest"
+            }
+          }
+        }
+      ]
+    },
+    "tilesImageSetDependency": {
+      "allOf": [
+        { "$ref": "https://schemas.willpower.dev/resource-manifest/resource.schema.json#/definitions/dependentResource" },
+        {
+          "required": ["id", "ref"],
+          "properties": {
+            "id": { "enum": ["TilesImageSet"] },
+            "ref": {
+              "$ref": "https://schemas.willpower.dev/resource-manifest/common.schema.json#/definitions/nonEmptyString",
+              "x-willpower-editor-version": "1.0",
+              "x-willpower-widget": "resource-reference",
+              "x-willpower-allowed-resource-types": ["ImageSet"],
+              "x-willpower-reference-scope": "manifest"
+            }
+          }
+        }
+      ]
+    },
+    "dependencyCollection": {
+      "oneOf": [
+        { "$ref": "#/definitions/dependency" },
+        {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": { "$ref": "#/definitions/dependency" }
+        }
+      ]
+    },
+    "dependentResources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["DependentResource"],
+      "properties": {
+        "DependentResource": { "$ref": "#/definitions/dependencyCollection" }
+      }
+    },
+    "booleanWorldDependentResources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["DependentResource"],
+      "properties": {
+        "DependentResource": { "$ref": "#/definitions/yamlDependency" }
+      }
+    },
+    "tiledDependentResources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["DependentResource"],
+      "properties": {
+        "DependentResource": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "oneOf": [
+              { "$ref": "#/definitions/fileDependency" },
+              { "$ref": "#/definitions/tilesImageSetDependency" }
+            ]
+          },
+          "allOf": [
+            { "contains": { "$ref": "#/definitions/fileDependency" } },
+            { "contains": { "$ref": "#/definitions/tilesImageSetDependency" } }
+          ]
+        }
+      }
+    },
+    "specializedDefinition": {
+      "allOf": [
+        { "$ref": "https://schemas.willpower.dev/resource-manifest/resource.schema.json#/definitions/definition" },
+        { "required": ["factory"] }
+      ]
+    },
+    "definitionCollection": {
+      "oneOf": [
+        { "$ref": "#/definitions/specializedDefinition" },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/specializedDefinition" }
+        }
+      ]
+    },
+    "definitions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["Definition"],
+      "properties": {
+        "Definition": { "$ref": "#/definitions/definitionCollection" }
+      }
+    },
+    "resource": {
+      "allOf": [
+        { "$ref": "https://schemas.willpower.dev/resource-manifest/resource.schema.json#/definitions/resource" },
+        {
+          "required": ["name", "DependentResources", "Definitions"],
+          "properties": {
+            "type": { "enum": ["Map"] },
+            "DependentResources": { "$ref": "#/definitions/dependentResources" },
+            "Definitions": { "$ref": "#/definitions/definitions" }
+          },
+          "not": {
+            "anyOf": [
+              { "required": ["location"] },
+              { "required": ["Option"] }
+            ]
+          },
+          "oneOf": [
+            {
+              "properties": {
+                "DependentResources": {
+                  "$ref": "#/definitions/booleanWorldDependentResources"
+                },
+                "Definitions": {
+                  "properties": {
+                    "Definition": {
+                      "type": "object",
+                      "required": ["factory"],
+                      "properties": {
+                        "factory": { "enum": ["BooleanWorld"] }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "properties": {
+                "DependentResources": {
+                  "$ref": "#/definitions/tiledDependentResources"
+                },
+                "Definitions": {
+                  "properties": {
+                    "Definition": {
+                      "type": "object",
+                      "required": ["factory"],
+                      "properties": {
+                        "factory": { "enum": ["Tiled"] }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

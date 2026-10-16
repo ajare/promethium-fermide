@@ -416,15 +416,43 @@ namespace core
 
 	World::PhysicalControlPlacement const* World::physicalControlPlacement(InteractionPointId point) const
 	{
-		for (auto const& placement : mPhysicalControlPlacements)
+		// Derived lookup (#625): resolve through the point index instead of
+		// scanning every placement. The index is an accelerator only; the
+		// Button's own binding stays authoritative, so a stale entry that no
+		// longer resolves to this point's Button returns no placement rather
+		// than a dangling one.
+		if (!point) return nullptr;
+		auto found = mPhysicalControlByPoint.find(point);
+		if (found == mPhysicalControlByPoint.end() || found->second >= mPhysicalControlPlacements.size())
+			return nullptr;
+		auto const& placement = mPhysicalControlPlacements[found->second];
+		if (placement.objectIndex == ~0u) return nullptr;
+		auto object = mSectors[placement.sectorIndex]->getObject(placement.objectIndex);
+		auto control = dynamic_pointer_cast<const ButtonSectorObject>(object);
+		if (!control || static_pointer_cast<const Button>(control->_getObject())->getInteractionPointId() != point)
+			return nullptr;
+		return &placement;
+	}
+
+	void World::rebuildPhysicalControlIndex()
+	{
+		// Full rescan from the authoritative placements and their Button
+		// bindings. Only required when placement indices shift (erase) or the
+		// vector is cleared; appends and candidate/assignment updates keep the
+		// existing entries valid.
+		mPhysicalControlByPoint.clear();
+		for (uint32_t index = 0; index < mPhysicalControlPlacements.size(); ++index)
 		{
+			++mPhysicalControlPlacementScanVisits;
+			auto const& placement = mPhysicalControlPlacements[index];
 			if (placement.objectIndex == ~0u) continue;
 			auto object = mSectors[placement.sectorIndex]->getObject(placement.objectIndex);
 			auto control = dynamic_pointer_cast<const ButtonSectorObject>(object);
-			if (control && static_pointer_cast<const Button>(control->_getObject())->getInteractionPointId() == point)
-				return &placement;
+			if (!control) continue;
+			auto const point = static_pointer_cast<const Button>(control->_getObject())->getInteractionPointId();
+			if (!point) continue;
+			mPhysicalControlByPoint[point] = index;
 		}
-		return nullptr;
 	}
 
 	void World::bindPhysicalControl(CreateObjectResult& control, InteractionPointId point)
@@ -434,11 +462,22 @@ namespace core
 		auto object = control.sector->getObject(control.index)->_getObject();
 		auto button = dynamic_pointer_cast<Button>(object);
 		if (!button) throw logic_error("Physical control is not backed by a Button");
+		auto const previous = button->getInteractionPointId();
 		button->_setInteractionPointId(point);
-		for (auto& placement : mPhysicalControlPlacements)
+		for (uint32_t index = 0; index < mPhysicalControlPlacements.size(); ++index)
 		{
+			auto& placement = mPhysicalControlPlacements[index];
 			if (placement.sectorIndex != control.sector->getIndex()
 				|| placement.objectIndex != control.index) continue;
+			// Canonical binding seam (#625): keep the derived point lookup in
+			// step with the authoritative Button binding.
+			if (previous && previous != point)
+			{
+				auto stale = mPhysicalControlByPoint.find(previous);
+				if (stale != mPhysicalControlByPoint.end() && stale->second == index)
+					mPhysicalControlByPoint.erase(stale);
+			}
+			mPhysicalControlByPoint[point] = index;
 			auto interaction = mInteractionPoints.find(point);
 			if (interaction)
 			{

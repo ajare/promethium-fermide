@@ -6,6 +6,16 @@
 namespace agent_smoke
 {
 	void registerIdentity(std::vector<smoke::Check>& checks);
+	void registerPlayerControl(std::vector<smoke::Check>& checks);
+	void registerPlayerButtons(std::vector<smoke::Check>& checks);
+	void registerPlayerTransports(std::vector<smoke::Check>& checks);
+	void registerPlayerAirlocks(std::vector<smoke::Check>& checks);
+	void registerPlayerChambers(std::vector<smoke::Check>& checks);
+	void registerPlayerBoothWindows(std::vector<smoke::Check>& checks);
+	void registerPlayerAccessPanels(std::vector<smoke::Check>& checks);
+	void registerPlayerPoses(std::vector<smoke::Check>& checks);
+	void registerPlayerBulkheadPoses(std::vector<smoke::Check>& checks);
+	void registerPlayerControlEditor(std::vector<smoke::Check>& checks);
 	void registerGroup(std::vector<smoke::Check>& checks);
 	void registerGroupAssignment(std::vector<smoke::Check>& checks);
 	void registerGroupCount(std::vector<smoke::Check>& checks);
@@ -20,6 +30,7 @@ namespace agent_smoke
 	void registerAgentTypes(std::vector<smoke::Check>& checks);
 	void registerNoneUsage(std::vector<smoke::Check>& checks);
 	void registerRemoteIntegration(std::vector<smoke::Check>& checks);
+	void registerQueuedPressLookup(std::vector<smoke::Check>& checks);
 	void registerAgentTypeEditor(std::vector<smoke::Check>& checks);
 	void registerGroupEditor(std::vector<smoke::Check>& checks);
 	void registerGroupAssignmentEditor(std::vector<smoke::Check>& checks);

@@ -4,6 +4,8 @@
 
 This document describes the current movement and coordination model after the traversal-resource migration. The legacy usability, controller, orchestrator, and vertex-controller hierarchies have been removed. Deterministic headless scenarios cover ordinary movement, controlled thresholds, extensible resources, lifts, shuttles, cancellation, failure, topology rebuilds, and typed interaction.
 
+For a code-referenced visual guide to route evaluation, controls, admission, and movement, see the [Agent Path evaluation flowchart](diagrams/agent-path-evaluation.svg) and its [reading guide](diagrams/README.md).
+
 ## Authoritative model
 
 ```text

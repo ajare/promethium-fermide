@@ -1,6 +1,7 @@
 #include "Checks.h"
 #include "Render.h"
 #include "WorldDrawList.h"
+#include "ObjectTileset.h"
 #include "UISettings.h"
 #include "core/World.h"
 #include "core/Agent.h"
@@ -46,7 +47,8 @@ namespace
 			float top = 720 - high.y * CORE_LEVEL_HEIGHT_PIXELS, bottom = 720 - low.y * CORE_LEVEL_HEIGHT_PIXELS;
 			for (auto const& command : drawing.commands())
 			{
-				if (auto text = std::get_if<WorldDrawList::Text>(&command); text && text->value == ICON_FA_MALE)
+				if (auto body = std::get_if<WorldDrawList::Triangle>(&command);
+					body && body->texture == WorldDrawList::Texture::AgentAtlas)
 				{
 					require(quads == 0, "Chamber occupant repainted above white quad by a later render pass");
 					occupant = true;
@@ -74,8 +76,10 @@ namespace
 		ImGui::EndFrame();
 	}
 
-	void beams(smoke::Context const&)
+	void beams(smoke::Context const& context)
 	{
+		setAgentTileset(ObjectTileset::load(context.fixture("resources/textures/objects.tileset.yaml")),
+			reinterpret_cast<ImTextureID>(1));
 		whitePulse();
 		using smoke::require;
 		ImGui::GetIO().DisplaySize = { 1600, 720 };
@@ -107,8 +111,9 @@ namespace
 					bool agentDrawn = false;
 					for (auto const& command : drawing.commands())
 					{
-						if (auto text = std::get_if<WorldDrawList::Text>(&command))
-							if (text->value == ICON_FA_MALE && text->colour == agentRenderColour(*rendered->lookupAgent(id).entity, false)) agentDrawn = true;
+						if (auto body = std::get_if<WorldDrawList::Triangle>(&command))
+							if (body->texture == WorldDrawList::Texture::AgentAtlas
+								&& body->colour == agentRenderColour(*rendered->lookupAgent(id).entity, false)) agentDrawn = true;
 						if (auto line = std::get_if<WorldDrawList::Line>(&command))
 							if (line->colour == IM_COL32(255, 0, 0, 128))
 							{

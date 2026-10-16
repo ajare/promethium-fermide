@@ -453,6 +453,16 @@ namespace
 	{
 		if (!payload.behaviour) return true;
 		auto const& assignment = *payload.behaviour;
+		if (assignment.behaviour == core::PlayerControlledBehaviour)
+		{
+			if (!assignment.registryUuid.empty() || !assignment.configuration.empty())
+			{
+				diagnostic = "Player controlled clipboard data must have no registry or configuration";
+				return false;
+			}
+			return world.validateAgentBehaviourAssignment(assignment.behaviour,
+				assignment.revision, {}, configuration, &diagnostic);
+		}
 		vector<string> failures;
 		if (!core::AgentBehaviourRegistry::uuidIsValid(assignment.registryUuid))
 			failures.push_back("Clipboard Agent behaviour registry UUID is invalid");
@@ -701,11 +711,12 @@ AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
 
 	if (auto const& assignment = lookup.entity->getBehaviourAssignment())
 	{
-		if (!world.hasAgentBehaviourRegistryReference())
+		if (!lookup.entity->isPlayerControlled() && !world.hasAgentBehaviourRegistryReference())
 			throw runtime_error(
 				"An assigned Agent's World has no Agent behaviour registry identity");
 		AgentClipboardBehaviourAssignment portable;
-		portable.registryUuid = world.getExpectedAgentBehaviourRegistryUuid();
+		if (!lookup.entity->isPlayerControlled())
+			portable.registryUuid = world.getExpectedAgentBehaviourRegistryUuid();
 		portable.behaviour = assignment->behaviour;
 		portable.revision = assignment->revision;
 		for (auto const& [field, value] : assignment->configuration)
@@ -734,7 +745,9 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 	if (!clipboardTagStateIsWellFormed(payload, diagnostic))
 		throw invalid_argument(diagnostic);
 	if (payload.behaviour
-		&& (!core::AgentBehaviourRegistry::uuidIsValid(payload.behaviour->registryUuid)
+		&& (!(payload.behaviour->behaviour == core::PlayerControlledBehaviour
+			? payload.behaviour->registryUuid.empty()
+			: core::AgentBehaviourRegistry::uuidIsValid(payload.behaviour->registryUuid))
 			|| !payload.behaviour->behaviour || !payload.behaviour->revision))
 		throw invalid_argument("Agent behaviour clipboard identity is invalid");
 	if (payload.authorizationWorldIdentity)
@@ -1271,7 +1284,9 @@ bool readAgentClipboardObject(YAML::Node const& object,
 			diagnostic = "Clipboard Agent behaviour has an invalid or missing identity field";
 			return false;
 		}
-		if (!core::AgentBehaviourRegistry::uuidIsValid(assignment.registryUuid)
+		if (!(assignment.behaviour == core::PlayerControlledBehaviour
+			? assignment.registryUuid.empty()
+			: core::AgentBehaviourRegistry::uuidIsValid(assignment.registryUuid))
 			|| !assignment.behaviour || !assignment.revision)
 		{
 			diagnostic = "Clipboard Agent behaviour identity, revision, or registry UUID is invalid";

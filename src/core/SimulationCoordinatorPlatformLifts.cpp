@@ -132,7 +132,7 @@ namespace core
 				return;
 			}
 			if (actor && actor->getObjectUsage() != ObjectUsage::Arms
-				&& !mWorld.canAgentUseLiftJourney(request->mResource, request->mSourceEndpoint,
+				&& !mWorld.agentHasFeasibleLiftJourney(request->mResource, request->mSourceEndpoint,
 					request->mDestinationEndpoint, request->mOwner))
 			{
 				denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
@@ -162,7 +162,7 @@ namespace core
 			}
 			auto const opportunisticBoarding = mWorld.isTransportLocallyBoardable(
 				request->mResource, request->mSourceEndpoint)
-				&& !mWorld.canAgentOperateTransportLandingControl(request->mResource,
+				&& !mWorld.agentHasFeasibleTransportLandingOperation(request->mResource,
 					request->mSourceSector, request->mSourceEndpoint, request->mOwner);
 			if (!request->mPreparationRequested && !opportunisticBoarding)
 			{
@@ -262,42 +262,38 @@ namespace core
 			}
 			auto actor = mWorld.mAgents.find(request->mOwner);
 			if (actor && actor->getObjectUsage() != ObjectUsage::Arms
-				&& !mWorld.agentCanRemotelySelectLiftDestination(request->mResource, *actor))
+				&& !mWorld.agentCanRemotelySelectLiftDestinationHere(request->mResource, *actor))
 			{
 				requestLiftPassengerSafeExit(request->mOwner, TraversalFailureReason::ControlRejected);
 				denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
 				return;
 			}
-			if (!request->mPreparationRequested)
+			// Platform lift retry counting, Broken behavior and shared destination
+			// reuse are unchanged: the immediate retry (no delay, no cancellation of
+			// a still-pending interaction) and the onboard commit stay here. Only
+			// the shared request creation and operation observation move into
+			// requestLiftSelectorDestination.
+			switch (requestLiftSelectorDestination(requestId, resource, destination))
 			{
-				if (destination >= resource.mControls.size()) { denyTraversalRequest(requestId); return; }
-				resource.mLiftSelector = resource.mControls[destination];
-				if (auto selector = mWorld.mInteractionPoints.find(resource.mLiftSelector))
-					if (auto actor = mWorld.mAgents.find(request->mOwner)) selector->mPosition = actor->getGlobalPosition();
-				auto interactionId = requestInteractionForTraversal(resource.mLiftSelector, request->mOwner);
-				if (!interactionId) return;
-				auto interaction = mWorld.mInteractionRequests.find(interactionId);
-				if (interaction && interaction->mResult == InteractionResult::Rejected)
-				{
-					requestLiftPassengerSafeExit(request->mOwner, TraversalFailureReason::PreparationFailed);
-					denyTraversalRequest(requestId, TraversalFailureReason::PreparationFailed);
-					return;
-				}
-				request->mPreparationRequested = true;
-				if (interaction && !interaction->mOperations.empty())
-					request->mPreparationOperation = interaction->mOperations.front().first;
+			case LiftSelectorOutcome::NoHandle:
+			case LiftSelectorOutcome::Requested:
+			case LiftSelectorOutcome::Awaiting:
 				return;
-			}
-			auto operation = mWorld.mDeviceOperations.find(request->mPreparationOperation);
-			if (!operation || operation->mState == DeviceOperationState::Pending
-				|| operation->mState == DeviceOperationState::Running) return;
-			if (operation->mState != DeviceOperationState::Succeeded)
-			{
+			case LiftSelectorOutcome::NoControl:
+				denyTraversalRequest(requestId);
+				return;
+			case LiftSelectorOutcome::Rejected:
+				requestLiftPassengerSafeExit(request->mOwner, TraversalFailureReason::PreparationFailed);
+				denyTraversalRequest(requestId, TraversalFailureReason::PreparationFailed);
+				return;
+			case LiftSelectorOutcome::Failed:
 				if (request->mPreparationAttempts++ < mWorld.mTraversalWaitingPolicy.maximumDestinationRetries)
 				{ request->mPreparationRequested = false; request->mPreparationOperation = {}; return; }
 				requestLiftPassengerSafeExit(request->mOwner, TraversalFailureReason::PreparationFailed);
 				denyTraversalRequest(requestId, TraversalFailureReason::PreparationFailed);
 				return;
+			case LiftSelectorOutcome::Succeeded:
+				break;
 			}
 			resource.mLiftPassengerDestinations[request->mOwner] = destination;
 			resource.mLiftPassenger = request->mOwner;

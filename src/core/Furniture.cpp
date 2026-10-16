@@ -34,13 +34,15 @@ namespace core
 				for (auto tile : tiles)
 				{
 					FurnitureTile t{ tile["x"].template as<int>(), tile["y"].template as<int>(),
-						tile["imageSet"].template as<std::string>(), tile["image"].template as<std::string>() };
+						tile["imageSet"] ? tile["imageSet"].template as<std::string>() : "FurnitureAtlas",
+						tile["image"].template as<std::string>() };
 					// Bound arithmetic and prohibit artwork below its supporting Floor.
 					if (t.x < -65536 || t.x > 65536 || t.y < 0 || t.y > 65536
 						|| !offsets.emplace(t.x, t.y).second)
 						throw SerializationException("Invalid or duplicate Furniture tile offset");
-					if (t.imageSet != "ObjectAtlas" || t.image.empty())
-						throw SerializationException("Furniture artwork requires an ObjectAtlas Image-set region");
+					if ((t.imageSet != "ObjectAtlas" && t.imageSet != "FurnitureAtlas") || t.image.empty())
+						throw SerializationException("Furniture artwork requires a tile name; the World selects its ImageSet (only legacy ObjectAtlas/FurnitureAtlas fields are accepted)");
+					t.imageSet = "FurnitureAtlas"; // Compatibility field, never an artwork override.
 					if (first) { d.minX = t.x; d.minY = t.y; d.maxX = t.x + 1; d.maxY = t.y + 1; first = false; }
 					else { d.minX = std::min(d.minX, t.x); d.minY = std::min(d.minY, t.y);
 						d.maxX = std::max(d.maxX, t.x + 1); d.maxY = std::max(d.maxY, t.y + 1); }
