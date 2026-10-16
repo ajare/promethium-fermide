@@ -133,6 +133,7 @@ set(agent_checks
     agentTypesRemotePanelProperties
     agentTypesRemotePanelDeclarations
     agentTypesRemoteDeclarations
+    agentTypesRemoteApproachBoundaries
     agentTypesRemoteGeometry
     agentTypesRemoteJourneys
     agentTypesRemotePendingEdits

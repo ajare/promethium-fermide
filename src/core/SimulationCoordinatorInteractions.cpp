@@ -26,6 +26,25 @@ namespace core
 
 	using namespace std;
 
+	namespace
+	{
+		// Horizontal slice of the inclusive range circle. Callers deliberately
+		// retain their subtraction precision: route prediction subtracts in double,
+		// while the traversal approach first rounds the vertical gap to float.
+		optional<double> remoteHorizontalReach(double range, double vertical)
+		{
+			if (std::abs(vertical) > range) return nullopt;
+			return std::sqrt(std::max(0., range * range - vertical * vertical));
+		}
+
+		// Shrink the horizontal radius, not the eligibility range, so a rounded
+		// approach target does not repeatedly stop just outside the circle.
+		constexpr float RemoteApproachRadiusInset = .999999f;
+		// A fraction of the current movement segment, not a World-space distance
+		// or an eligibility tolerance. Exact horizontal tangency must bypass it.
+		constexpr double RemoteSegmentEntryInset = .00001;
+	}
+
 	// Interaction and device-operation orchestration moved out of World
 	// (ADR 0004 stage 2). The behaviour is unchanged: the coordinator works on
 	// World's interaction and device-operation registries through friendship,
@@ -226,9 +245,9 @@ namespace core
 			|| point->mSector != approach) return nullopt;
 		double range = actor->getObjectUsageDistance();
 		double vertical = double(centre->y) - position.y;
-		if (std::abs(vertical) > range) return nullopt;
-		auto horizontal = std::sqrt(std::max(0., range * range - vertical * vertical));
-		return float(std::max(0., std::abs(double(centre->x) - position.x) - horizontal));
+		auto horizontal = remoteHorizontalReach(range, vertical);
+		if (!horizontal) return nullopt;
+		return float(std::max(0., std::abs(double(centre->x) - position.x) - *horizontal));
 	}
 
 	bool World::agentCanRemotelySelectLiftDestination(TraversalResourceId resourceId,
@@ -427,10 +446,9 @@ namespace core
 			auto position = agent->getGlobalPosition();
 			auto range = agent->getObjectUsageDistance();
 			auto vertical = centre->y - position.y;
-			if (std::abs(vertical) > range) return {};
-			auto horizontal = std::sqrt(std::max(0., double(range) * range - double(vertical) * vertical));
-			// Aim just inside to avoid float round-off repeatedly refusing equality.
-			auto x = float(centre->x + (position.x < centre->x ? -1.f : 1.f) * horizontal * .999999f);
+			auto horizontal = remoteHorizontalReach(range, vertical);
+			if (!horizontal) return {};
+			auto x = float(centre->x + (position.x < centre->x ? -1.f : 1.f) * *horizontal * RemoteApproachRadiusInset);
 			agent->mRemoteInteractionApproachTarget = Vector2{x, position.y};
 			return {};
 		}
@@ -1241,7 +1259,7 @@ namespace core
 				// A horizontal tangent at exact vertical range has one eligible
 				// point, not an interval into which an epsilon may be added.
 				if (discriminant == 0 && delta.y == 0) return {centre.x, start.y};
-				limit = std::min(1., enter + .00001);
+				limit = std::min(1., enter + RemoteSegmentEntryInset);
 			}
 		}
 		if (limit == 1.) return end;

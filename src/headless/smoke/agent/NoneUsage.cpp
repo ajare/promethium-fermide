@@ -838,6 +838,47 @@ namespace
 			"Direct press during pathing failed or caused approach detour");
 	}
 
+	void remoteApproachBoundaries(smoke::Context const&)
+	{
+		// Record the first request's position and tick, not just the final Door state.
+		for (unsigned variant = 0; variant < 5; ++variant)
+		{
+			unsigned offset = variant == 4 ? 4096 : 0;
+			core::World world("Remote approach boundaries", offset + 12, 2);
+			auto origin = world.addRoom("Front", 0, 0, offset, 12, 1);
+			auto destination = world.addRoom("Back", 1, 0, offset, 12, 1);
+			auto made = world.addSectorDoor(0, 0, offset + 6, core::World::RemoteControlledDoor1Options);
+			auto point = made.controls[0].interactionPoint;
+			auto button = std::dynamic_pointer_cast<const core::Button>(made.controls[0].sector->getObject(made.controls[0].index)->_getObject());
+			auto centre = button->getPosition() + button->getSize() * .5f;
+			world.addSectorMarker(destination, 0, 8.f, "Goal"); world.finishBuild();
+			auto id = world.createAgent("Remote", origin, 0, 3.f);
+			float range = centre.y;
+			if (variant == 1) range = std::nextafter(range, 0.f);
+			if (variant == 2) range = std::nextafter(range, std::numeric_limits<float>::infinity());
+			if (variant >= 3) range = 2.f;
+			remote(world, id, range); quickPlanning(world, id);
+			world.consumeSimulationEvents();
+			require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Boundary journey refused");
+			bool pressed = false;
+			for (unsigned tick = 1; tick <= 1000 && !pressed; ++tick)
+			{
+				world.advanceTick();
+				for (auto const& event : world.consumeSimulationEvents())
+					if (event.type == core::SimulationEventType::InteractionRequestAdded && event.interactionRequest.point == point)
+					{
+						pressed = true;
+						auto position = world.lookupAgent(id).entity->getGlobalPosition();
+						constexpr unsigned expectedTicks[] = {491, 0, 488, 249, 249};
+						constexpr float expectedX[] = {0x1.cp+2f, 0.f, 0x1.bffdecp+2f, 0x1.412bfcp+2f, 0x1.00504cp+12f};
+						require(tick == expectedTicks[variant] && position == core::Vector2{expectedX[variant], 0.f},
+							"Remote boundary request position/tick changed, variant " + std::to_string(variant));
+					}
+			}
+			require(pressed == (variant != 1), "Unreachable vertical range changed");
+		}
+	}
+
 	void remoteJourneys(smoke::Context const&)
 	{
 		for (unsigned kind = 0; kind < 4; ++kind)
@@ -1485,6 +1526,7 @@ void agent_smoke::registerNoneUsage(std::vector<smoke::Check>& checks)
 	checks.push_back({"agentTypesRemotePanelProperties", remotePanelProperties});
 	checks.push_back({"agentTypesRemotePanelDeclarations", remotePanelDeclarations});
 	checks.push_back({"agentTypesRemoteDeclarations", remoteDeclarations});
+	checks.push_back({"agentTypesRemoteApproachBoundaries", remoteApproachBoundaries});
 	checks.push_back({"agentTypesRemoteGeometry", remoteGeometry});
 	checks.push_back({"agentTypesRemoteJourneys", remoteJourneys});
 	checks.push_back({"agentTypesRemotePendingEdits", remotePendingEdits});
