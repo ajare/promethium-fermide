@@ -61,6 +61,7 @@ namespace core
 		// the private machinery beside them on the World's behalf (ADR 0004).
 		friend class SimulationCoordinator;
 		friend struct WorldAgentRestorationTestAccess;
+		friend struct PhysicalControlLookupTestAccess;
 		// Headless diagnostic driver dispatches validated Actions at a traversal
 		// boundary, never edits fields or introduces retained-Pose locomotion.
 		friend struct DoorClearanceDiagnostic;
@@ -1142,6 +1143,16 @@ namespace core
 
 		PhysicalControlPlacement const* physicalControlPlacement(InteractionPointId point) const;
 		std::vector<PhysicalControlPlacement> mPhysicalControlPlacements;
+		// Derived InteractionPointId -> index into mPhysicalControlPlacements.
+		// Maintained at the canonical bind seam (bindPhysicalControl) and rebuilt
+		// whenever placement indices shift or the vector is cleared. It is an
+		// accelerator only: the Button's own binding stays authoritative, and a
+		// lookup verifies the resolved placement before returning it.
+		std::map<InteractionPointId, uint32_t> mPhysicalControlByPoint;
+		// Lookup-operation evidence: placements visited by full index scans.
+		// Hot-path lookups must never increase this; only explicit rebuilds do.
+		mutable uint64_t mPhysicalControlPlacementScanVisits{ 0 };
+		void rebuildPhysicalControlIndex();
 		bool mResolvingPhysicalControls{ false };
 		// Current record ordinal during detached/live replay, independent of the
 		// not-yet-adopted construction log. Used for stable landing permissions.

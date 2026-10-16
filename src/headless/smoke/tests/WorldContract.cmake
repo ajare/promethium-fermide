@@ -11,6 +11,7 @@ file(MAKE_DIRECTORY "${work}")
 set(checks
     marker-identity
     two-sided-buttons
+    physical-control-lookup
     layers
     background-sector
     background-paint

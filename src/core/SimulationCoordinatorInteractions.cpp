@@ -1194,19 +1194,16 @@ namespace core
 	void SimulationCoordinator::pressPhysicalControl(InteractionPointId pointId)
 	{
 		mWorld.invalidateSimulationSnapshot();
-		for (auto const& sector : mWorld.mSectors)
+		// Derived point-to-placement lookup replaces the all-Sector Button
+		// scan (#625). The placement resolves only when its Button is still
+		// bound to this point, so press feedback follows the same authority
+		// as geometry lookups and no disabled control can be missed by a
+		// stale index.
+		if (auto const* placement = mWorld.physicalControlPlacement(pointId))
 		{
-			for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
-			{
-				auto object = sector->getObject(i);
-				auto button = object
-					? dynamic_pointer_cast<Button>(object->_getObject()) : nullptr;
-				if (button && button->getInteractionPointId() == pointId)
-				{
-					button->disable();
-					return;
-				}
-			}
+			auto button = dynamic_pointer_cast<Button>(
+				mWorld.mSectors[placement->sectorIndex]->_getObject(placement->objectIndex)->_getObject());
+			if (button) button->disable();
 		}
 	}
 

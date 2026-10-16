@@ -3023,6 +3023,7 @@ namespace core
 		mFurniture.clear();
 		mConstructionRecords.clear();
 		mPhysicalControlPlacements.clear();
+		mPhysicalControlByPoint.clear(); // Derived index follows the placements it indexes (#625).
 
 		mName = std::move(name);
 		mCellsWide = cellsWide;

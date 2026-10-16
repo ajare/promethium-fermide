@@ -421,6 +421,7 @@ pf_add_smoke_module(pf-smoke-world
         world/ScaledDoors.cpp world/Main.cpp world/AccessPanels.cpp world/Airlocks.cpp world/Furniture.cpp world/SecurityScanners.cpp world/BoothWindows.cpp
         world/MarkerIdentity.cpp
         world/TwoSidedButtons.cpp
+        world/PhysicalControlLookup.cpp
         world/BackgroundSector.cpp
         world/BackgroundPaint.cpp
         world/BackgroundPlacement.cpp
