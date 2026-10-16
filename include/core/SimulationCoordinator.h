@@ -415,6 +415,43 @@ namespace core
 		// own landing edge is not consulted, since the passenger is already aboard.
 		void allocateLiftRiding(TraversalRequestId requestId, TraversalResource& coordinator);
 
+		// ------------------------------------------------------------------
+		// Shared autonomous transport destination-selection mechanics (R17)
+		//
+		// An onboard destination selection at the interior selector control is
+		// the same three-step dance whether it is an enclosed Lift passenger or a
+		// Platform lift passenger: create the selector interaction request, then
+		// observe the captured preparation operation, and classify the result.
+		// Only the surrounding policy differs - the enclosed Lift serialises
+		// confirmations and retries with a delay, the Platform lift retries
+		// immediately - so that policy stays with each caller. This helper owns
+		// the shared request creation, operation observation and descriptive
+		// result classification only; it never denies, retries, orders
+		// occupants or requests a safe exit.
+		//
+		// The descriptive outcome keeps the empty-handle refusal (the request
+		// was never made, so the caller simply waits) distinct from a recorded
+		// rejection (the interaction came back Refused, so the caller safe-exits
+		// and denies), as the behavior-preservation contract requires.
+		// ------------------------------------------------------------------
+		enum class LiftSelectorOutcome
+		{
+			NoHandle,   // no interaction handle returned; caller waits, no deny
+			Requested,  // fresh selector interaction created; caller waits for it
+			Awaiting,   // captured preparation operation still pending/running
+			Succeeded,  // captured preparation operation succeeded
+			Rejected,   // interaction recorded as Refused at request time
+			Failed,     // captured preparation operation ended not-succeeded
+			NoControl,  // stop has no interior selector control; caller denies
+		};
+
+		// Create the onboard selector interaction for `stop` on `coordinator`, or
+		// observe the already-captured preparation operation, and return the
+		// descriptive outcome. The caller applies its own retry/queue/safe-exit
+		// policy from the result.
+		LiftSelectorOutcome requestLiftSelectorDestination(
+			TraversalRequestId requestId, TraversalResource& coordinator, uint32_t stop);
+
 		// Keep enclosed Lift occupants in deterministic door-to-car order. Existing
 		// physical order breaks equal-destination ties, preserving boarding order;
 		// destinations farther along the current run occupy positions farther from

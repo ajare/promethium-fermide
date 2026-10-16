@@ -1061,6 +1061,54 @@ namespace core
 	// selector control. A failed confirmation is retried on the waiting policy's
 	// delay until the retries run out, at which point the passenger is asked to
 	// leave at the next safe stop and the request is denied.
+	// Shared autonomous transport destination-selection mechanics (R17).
+	//
+	// One onboard destination selection at the interior selector control, whether
+	// for an enclosed Lift passenger or a Platform lift passenger, is the same
+	// three steps: create the selector interaction request, then observe the
+	// captured preparation operation, and classify the result descriptively.
+	// This helper performs those steps and nothing else - it never denies the
+	// traversal request, retries, orders occupants or requests a safe exit.
+	// Those are the transport-specific policies that differ between the enclosed
+	// Lift (confirmation-queue serialisation, delayed retry) and the Platform
+	// lift (immediate retry, shared-destination reuse) and stay in each caller.
+	//
+	// The empty-handle case (requestInteractionForTraversal returned nothing, so
+	// no request was made) is reported as NoHandle rather than folded into the
+	// recorded Rejected outcome, so a caller can keep the two distinct as the
+	// behavior-preservation contract requires.
+	SimulationCoordinator::LiftSelectorOutcome
+	SimulationCoordinator::requestLiftSelectorDestination(
+		TraversalRequestId requestId, TraversalResource& coordinator, uint32_t stop)
+	{
+		auto request = mWorld.mTraversalRequests.find(requestId);
+		if (!request) return LiftSelectorOutcome::NoHandle;
+		if (!request->mPreparationRequested)
+		{
+			if (stop >= coordinator.mControls.size()) return LiftSelectorOutcome::NoControl;
+			coordinator.mLiftSelector = coordinator.mControls[stop];
+			if (auto selector = mWorld.mInteractionPoints.find(coordinator.mLiftSelector))
+				if (auto actor = mWorld.mAgents.find(request->mOwner))
+					selector->mPosition = actor->getGlobalPosition();
+			auto interactionId = requestInteractionForTraversal(coordinator.mLiftSelector, request->mOwner);
+			if (!interactionId) return LiftSelectorOutcome::NoHandle;
+			auto interaction = mWorld.mInteractionRequests.find(interactionId);
+			if (interaction && interaction->mResult == InteractionResult::Rejected)
+				return LiftSelectorOutcome::Rejected;
+			request->mPreparationRequested = true;
+			if (interaction && !interaction->mOperations.empty())
+				request->mPreparationOperation = interaction->mOperations.front().first;
+			return LiftSelectorOutcome::Requested;
+		}
+		auto operation = mWorld.mDeviceOperations.find(request->mPreparationOperation);
+		if (!operation || operation->mState == DeviceOperationState::Pending
+			|| operation->mState == DeviceOperationState::Running)
+			return LiftSelectorOutcome::Awaiting;
+		if (operation->mState != DeviceOperationState::Succeeded)
+			return LiftSelectorOutcome::Failed;
+		return LiftSelectorOutcome::Succeeded;
+	}
+
 	void SimulationCoordinator::allocateLiftRiding(TraversalRequestId requestId, TraversalResource& coordinator)
 	{
 		mWorld.invalidateSimulationSnapshot();
@@ -1152,33 +1200,27 @@ namespace core
 		if (!coordinator.mLiftActiveConfirmation)
 			coordinator.mLiftActiveConfirmation = coordinator.mLiftConfirmationQueue.front();
 		if (coordinator.mLiftActiveConfirmation != requestId) return;
-		if (!request->mPreparationRequested)
+		// Enclosed Lift confirmation serialization and retry delays are unchanged:
+		// the delay gate before a fresh selection, the delayed retry with its
+		// cancellation of any still-pending interaction, and the confirmation-
+		// queue pop on success all stay here. Only the shared request creation and
+		// operation observation move into requestLiftSelectorDestination.
+		if (!request->mPreparationRequested
+			&& mWorld.mSimulationTick < request->mNextPreparationTick) return;
+		switch (requestLiftSelectorDestination(requestId, coordinator, journeyStop))
 		{
-			if (mWorld.mSimulationTick < request->mNextPreparationTick) return;
-			if (journeyStop >= coordinator.mControls.size()) { denyTraversalRequest(requestId); return; }
-			coordinator.mLiftSelector = coordinator.mControls[journeyStop];
-			auto selector = mWorld.mInteractionPoints.find(coordinator.mLiftSelector);
-			auto actor = mWorld.mAgents.find(request->mOwner);
-			if (selector && actor) selector->mPosition = actor->getGlobalPosition();
-			auto interactionId = requestInteractionForTraversal(coordinator.mLiftSelector, request->mOwner);
-			if (!interactionId) return;
-			auto interaction = mWorld.mInteractionRequests.find(interactionId);
-			if (interaction && interaction->mResult == InteractionResult::Rejected)
-			{
-				requestLiftPassengerSafeExit(request->mOwner, TraversalFailureReason::PreparationFailed);
-				denyTraversalRequest(requestId, TraversalFailureReason::PreparationFailed);
-				return;
-			}
-			request->mPreparationRequested = true;
-			if (interaction && !interaction->mOperations.empty())
-				request->mPreparationOperation = interaction->mOperations.front().first;
+		case LiftSelectorOutcome::NoHandle:
+		case LiftSelectorOutcome::Requested:
+		case LiftSelectorOutcome::Awaiting:
 			return;
-		}
-		auto operation = mWorld.mDeviceOperations.find(request->mPreparationOperation);
-		if (!operation || operation->mState == DeviceOperationState::Pending
-			|| operation->mState == DeviceOperationState::Running) return;
-		if (operation->mState != DeviceOperationState::Succeeded)
-		{
+		case LiftSelectorOutcome::NoControl:
+			denyTraversalRequest(requestId);
+			return;
+		case LiftSelectorOutcome::Rejected:
+			requestLiftPassengerSafeExit(request->mOwner, TraversalFailureReason::PreparationFailed);
+			denyTraversalRequest(requestId, TraversalFailureReason::PreparationFailed);
+			return;
+		case LiftSelectorOutcome::Failed:
 			if (request->mPreparationAttempts < mWorld.mTraversalWaitingPolicy.maximumDestinationRetries)
 			{
 				++request->mPreparationAttempts;
@@ -1195,6 +1237,8 @@ namespace core
 			requestLiftPassengerSafeExit(request->mOwner, TraversalFailureReason::PreparationFailed);
 			denyTraversalRequest(requestId, TraversalFailureReason::PreparationFailed);
 			return;
+		case LiftSelectorOutcome::Succeeded:
+			break;
 		}
 		addLiftStopRequest(coordinator, journeyStop, request->mOwner);
 		coordinator.mLiftPassengerDestinations[request->mOwner] = journeyStop;
