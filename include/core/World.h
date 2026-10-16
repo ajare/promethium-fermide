@@ -724,6 +724,37 @@ namespace core
 			// usable point rather than the post-departure position.
 			FurnitureFinishing
 		};
+		// A validated Action-effect batch that has not yet touched the Agent or
+		// any shared authority (#634). prepareActionResult() computes the host
+		// state the batch would apply and any refusal without mutating the Agent,
+		// issuing a device request, or publishing accepted-effect logs;
+		// commitPreparedActionEffects() is the only place those effects become
+		// visible. A refused or validation-only batch therefore cannot leak a
+		// partial pose, occupancy, device request or staged log.
+		struct PreparedActionEffects
+		{
+			bool accepted{ false };
+			// Host state the batch would apply when accepted.
+			Pose pose{};
+			MarkerId claim{};
+			InteractionPointId device{};
+			bool poseAuthored{ false };
+			// Refusal reporting when accepted == false. A script failure carries
+			// its own failure payload and owns the pause/headless policy; an
+			// ordinary host refusal carries only a diagnostic and leaves the
+			// event's script-failure field as the caller set it.
+			bool scriptFailed{ false };
+			ScriptExecutionFailure failure{ ScriptExecutionFailure::None };
+			std::string diagnostic;
+		};
+		// Evaluation half of the transaction: validate the batch and compute the
+		// pending host state. Const and side-effect free - it never touches the
+		// Agent, the device/traversal authorities, or the log stream.
+		PreparedActionEffects prepareActionResult(AgentId agent, MarkerId marker,
+			ActionExecutionResult const& result, bool finishing, bool replacingUse) const;
+		// Commitment half: the single place an accepted batch becomes observable.
+		void commitPreparedActionEffects(AgentId agent, PreparedActionEffects const& prepared,
+			SimulationEvent& event, ActionExecutionResult const& result);
 		void applyActionResult(AgentId agent, MarkerId marker, ActionExecutionResult result, SimulationEvent& event,
 			ActionEffectContext context);
 		void finishFurnitureUse(AgentId agent);

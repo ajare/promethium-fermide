@@ -1199,6 +1199,54 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 		}
 	}
 
+	void replacementDeviceRefusalKeepsUse(smoke::Context const& context)
+	{
+		// R20 (#634): a replacement Action whose device request is refused must
+		// never tear down the Agent's current Furniture use. Preparation judges the
+		// whole replacement batch before any finish runs, so an ineligible device
+		// request leaves the seat, pose, claim and device registries untouched and
+		// publishes no accepted-effect log. This is the replacement-path counterpart
+		// to the arrival-path rejection deviceEffects asserts.
+		auto fixture = context.fixture("src/headless/smoke/fixtures/use.furniture.lua");
+		auto world = useFixture(fixture);
+		auto id = core::AgentId{1};
+		auto seat = world->furniture()[0].marker;
+		// A device the Agent is not authorized to operate: the replacement's
+		// request is an ordinary host refusal, not a script failure.
+		auto permission = world->addAccessPermission("Protected");
+		core::InteractionBinding binding;
+		binding.command = {core::DeviceCommandType::SetSectorLights, core::SectorId{1}, false};
+		auto point = world->createInteractionPoint("Protected light", core::SectorId{1},
+			{6.5f, 0.f}, 0.25f, 0.05f, {binding});
+		require(world->setInteractionPointPermissionRequirement(point, {permission}), "Device requirement refused");
+		auto actions = context.temporaryRoot() / "replacement-device.actions.lua";
+		write(actions, package("{key='hello',name='Sit',run=function(a,w,m) w.set_pose('sitting'); w.claim() end},"
+			"{key='other',name='Replace',run=function(a,w,m) w.request_device(" + std::to_string(point.value)
+			+ ", 'set-sector-lights'); w.log('replace-device') end}"));
+		require(world->selectActionRegistry(actions) && world->setMarkerActions(seat, {first, second}), "Replacement package refused");
+		// Seat the Agent first, then replace with an Action whose only effect is the
+		// unauthorized device request.
+		require(runAction(*world, id, seat, std::string(core::UseFurnitureAction)).type == core::SimulationEventType::DestinationReached,
+			"Replacement setup use failed");
+		require(world->usablePointOccupant(seat) == id && world->lookupAgent(id).entity->getPose() == core::Pose::Sitting,
+			"Replacement setup did not seat the Agent");
+		core::consumeLogMessages();
+		auto refused = runAction(*world, id, seat, second);
+		require(refused.type == core::SimulationEventType::ActionFailed
+			&& refused.scriptFailure == core::ScriptExecutionFailure::None && !refused.diagnostic.empty(),
+			"Unauthorized replacement was not an ordinary refusal: " + refused.diagnostic);
+		require(world->usablePointOccupant(seat) == id && world->lookupAgent(id).entity->getPose() == core::Pose::Sitting,
+			"Refused replacement tore down the current Furniture use");
+		auto const& snapshot = world->getSimulationSnapshot();
+		require(snapshot.deviceOperations.empty() && snapshot.interactionRequests.empty(),
+			"Refused replacement published device work");
+		for (auto const& log : core::consumeLogMessages()) require(log.msg != "replace-device", "Refused replacement published its log");
+		// The seat remains fully usable afterwards: the refused replacement left no
+		// partial lifecycle that would block a legitimate finish.
+		require(runAction(*world, id, seat, std::string(core::IdleAction)).type == core::SimulationEventType::DestinationReached
+			&& !world->usablePointOccupant(seat), "Refused replacement stranded the seat");
+	}
+
 	void failures(smoke::Context const& context)
 	{
 		std::vector<std::string> callbacks{
@@ -1470,6 +1518,7 @@ void registerMarkerActions(std::vector<smoke::Check>& checks)
 	checks.push_back({"markerActions/atomicEffects", atomicEffects});
 	checks.push_back({"markerActions/poseVocabulary", poseVocabulary});
 	checks.push_back({"markerActions/deviceEffects", deviceEffects});
+	checks.push_back({"markerActions/replacementDeviceRefusalKeepsUse", replacementDeviceRefusalKeepsUse});
 	checks.push_back({"markerActions/claimCompetition", claimCompetition});
 	checks.push_back({"markerActions/furnitureUse", furnitureUse});
 	checks.push_back({"markerActions/furnitureFinishDevice", furnitureFinishDevice});

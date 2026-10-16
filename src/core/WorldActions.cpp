@@ -48,6 +48,24 @@ namespace core
 			}
 			return true;
 		}
+
+		// Compose the staged finishing batch for a same-Agent replacement: the
+		// current seat's finish_use result, its declared finish pose and a
+		// Release, followed by the incoming replacement Action's effects and
+		// logs. Kept out of the commit path so the composition is a named step
+		// and the finishing-failure branch above it is not tangled with the
+		// effect/log surgery (#634).
+		ActionExecutionResult composeReplacementBatch(ActionExecutionResult finished,
+			ActionExecutionResult const& incoming, Pose currentFinishPose)
+		{
+			finished.effects.insert(finished.effects.begin(),
+				{ActionEffectType::Pose, static_cast<int>(currentFinishPose)});
+			finished.effects.push_back({ActionEffectType::Release});
+			finished.effects.insert(finished.effects.end(), incoming.effects.begin(), incoming.effects.end());
+			finished.logs.insert(finished.logs.end(), incoming.logs.begin(), incoming.logs.end());
+			finished.logsSuppressed |= incoming.logsSuppressed;
+			return finished;
+		}
 	}
 
 	bool World::selectActionRegistry(std::filesystem::path const& path, std::string* diagnostic)
@@ -521,11 +539,7 @@ namespace core
 				event.agent = mSimulationCoordinator.makeAgentSnapshot(agent);
 				return;
 			}
-			finished.effects.insert(finished.effects.begin(), {ActionEffectType::Pose, static_cast<int>(currentFinishPose)});
-			finished.effects.push_back({ActionEffectType::Release});
-			finished.effects.insert(finished.effects.end(), result.effects.begin(), result.effects.end());
-			finished.logs.insert(finished.logs.end(), result.logs.begin(), result.logs.end());
-			finished.logsSuppressed |= result.logsSuppressed;
+			finished = composeReplacementBatch(std::move(finished), result, currentFinishPose);
 			FurnitureFinishingScope scope{mFinishingFurnitureUseAgent, agentId};
 			applyActionResult(agentId, markerId, std::move(finished), event, ActionEffectContext::FurnitureFinishing);
 			if (event.type != SimulationEventType::DestinationReached) return;
@@ -612,12 +626,133 @@ namespace core
 		invalidateSimulationSnapshot();
 	}
 
+	World::PreparedActionEffects World::prepareActionResult(AgentId agentId, MarkerId markerId,
+		ActionExecutionResult const& result, bool finishing, bool replacingUse) const
+	{
+		// Evaluation half of the transaction (#634): compute the host state the
+		// batch would apply and any refusal, without mutating the Agent, issuing
+		// a device request, or publishing accepted-effect logs. Nothing here may
+		// make a partial effect observable; that is the commit's job alone.
+		PreparedActionEffects prepared;
+		if (!result.succeeded)
+		{
+			// A Lua failure carries its own failure payload; the caller reports it
+			// and owns the pause/headless policy. This is distinct from an ordinary
+			// host refusal, which never sets the script-failure field.
+			prepared.scriptFailed = true;
+			prepared.failure = result.failure;
+			prepared.diagnostic = result.diagnostic;
+			return prepared;
+		}
+		// Shadow only host-owned values. No effects (including logging and
+		// operation events) are published until the entire batch is accepted.
+		auto agent = mAgents.find(agentId);
+		auto pose = agent->mPose;
+		auto claim = replacingUse ? MarkerId{} : agent->mOccupiedUsablePoint;
+		if (replacingUse && agent->mFurnitureUse)
+			pose = agent->mFurnitureUse->catalogue->definition(agent->mFurnitureUse->definition)->finishUsePose;
+		bool poseAuthored = false;
+		bool released = false;
+		InteractionPointId device;
+		auto reject = [&](char const* diagnostic) -> PreparedActionEffects
+		{
+			prepared.diagnostic = diagnostic; // ordinary request refusal, not a Lua failure
+			return prepared;
+		};
+		for (auto const& effect : result.effects)
+		{
+			switch (effect.type)
+			{
+			case ActionEffectType::Pose: pose = static_cast<Pose>(effect.value); poseAuthored = true; break;
+			case ActionEffectType::Claim:
+				if (!isFurnitureMarker(markerId) || (claim && claim != markerId))
+					return reject("Selected Marker is not an eligible usable point");
+				if (auto owner = usablePointOccupant(markerId); owner && owner != agentId)
+					return reject("Usable point is occupied by another Agent");
+				claim = markerId;
+				break;
+			case ActionEffectType::Release:
+				if (!isFurnitureMarker(markerId) || (released && !finishing)
+					|| (claim != markerId && !((finishing || replacingUse) && !claim)))
+					return reject("Only the owning Agent may release this usable point");
+				claim = {};
+				released = true;
+				break;
+			case ActionEffectType::Device:
+			{
+				InteractionPointId pointId{effect.point};
+				auto point = mInteractionPoints.find(pointId);
+				auto const reach = finishing ? InteractionEvaluationContext::FurnitureFinishEffects
+					: InteractionEvaluationContext::ImmediatePress;
+				if ((device && device != pointId) || !interactionRequestEligible(pointId, agentId, reach)
+					|| !missingInteractionPermissions(*point, *agent).empty() || point->mBindings.empty())
+					return reject("Device Interaction point is not eligible or authorized");
+				for (auto const& binding : point->mBindings)
+					if (static_cast<int>(binding.command.type) != effect.value
+						|| !missingLiftDestinationPermissions(binding.command, agentId).empty())
+						return reject("Typed device operation is not offered or authorized");
+				for (auto const& [id, request] : mInteractionRequests.entries())
+					if (request->mActor == agentId && request->mResult == InteractionResult::Pending
+						&& request->mPoint != pointId)
+						return reject("Agent already has another device request");
+				device = pointId;
+				break;
+			}
+			}
+		}
+		if (poseAuthored || claim != agent->mOccupiedUsablePoint)
+		{
+			std::string fitDiagnostic;
+			bool fits = isFurnitureMarker(markerId)
+				? furniturePoseFits(agentId, markerId, pose, static_cast<bool>(claim), &fitDiagnostic)
+				: agent->poseFits(pose, agent->getSector()->isRoom()
+					? agent->getSector()->getPosition().y + agent->getSector()->getLevelsHigh() - 1
+						+ agent->getSector()->getEffectiveTopLevelHeight() - agent->getGlobalPosition().y
+					: std::numeric_limits<float>::infinity());
+			if (!fits)
+			{
+				prepared.diagnostic = fitDiagnostic.empty() ? "Action pose is unsupported or does not fit" : fitDiagnostic;
+				return prepared;
+			}
+		}
+		prepared.accepted = true;
+		prepared.pose = pose;
+		prepared.claim = claim;
+		prepared.device = device;
+		prepared.poseAuthored = poseAuthored;
+		return prepared;
+	}
+
+	void World::commitPreparedActionEffects(AgentId agentId, PreparedActionEffects const& prepared,
+		SimulationEvent& event, ActionExecutionResult const& result)
+	{
+		// Commitment half of the transaction (#634): the only place an accepted
+		// batch becomes observable. Every host mutation, device request and log
+		// publication lives here, so a batch that never reaches this method can
+		// leave no partial pose, occupancy, device request or staged log behind.
+		auto agent = mAgents.find(agentId);
+		// Committed requests retain the ordinary asynchronous device/traversal
+		// authorities; scripts never submit unvalidated raw device commands.
+		if (prepared.device) requestInteraction(prepared.device, agentId);
+		if (prepared.claim != agent->mOccupiedUsablePoint)
+		{
+			if (prepared.claim) claimUsablePoint(agentId, prepared.claim);
+			else agent->mOccupiedUsablePoint = {};
+		}
+		agent->mPose = prepared.pose;
+		if (prepared.poseAuthored) agent->mRetainedActionPose = true;
+		event.agent.pose = prepared.pose;
+		invalidateSimulationSnapshot();
+		for (auto const& log : result.logs) addLogMessage("Marker Action", 0, LogLevel::Info, log.message);
+		if (result.logsSuppressed) addLogMessage("Marker Action", 0, LogLevel::Warning, "Action logging budget exhausted");
+	}
+
 	void World::applyActionResult(AgentId agentId, MarkerId markerId, ActionExecutionResult result,
 		SimulationEvent& event, ActionEffectContext context)
 	{
 		// The named context selects one supported combination of the three axes.
-		// Every axis is derived here so the evaluation and commit logic below is
-		// exactly the one the boolean triple drove (#633).
+		// Every axis is derived here once so preparation and commitment read the
+		// same rules the boolean triple drove (#633, #634).
 		bool finishing = false;
 		bool validateOnly = false;
 		bool replacingUse = false;
@@ -627,95 +762,27 @@ namespace core
 		case ActionEffectContext::ReplacementValidation: validateOnly = replacingUse = true; break;
 		case ActionEffectContext::FurnitureFinishing: finishing = true; break;
 		}
-		auto agent = mAgents.find(agentId);
-		if (!result.succeeded)
+		// Preparation never commits; it only reports the pending state or a
+		// refusal. A refused batch reports through the event and stops; a
+		// validation-only batch stops before commitment so a replacement can never
+		// tear down the current Furniture use (#634).
+		auto prepared = prepareActionResult(agentId, markerId, result, finishing, replacingUse);
+		if (!prepared.accepted)
 		{
 			event.type = SimulationEventType::ActionFailed;
-			event.scriptFailure = result.failure;
-			event.diagnostic = std::move(result.diagnostic);
-			addLogMessage("Marker Action", 0, LogLevel::Error, event.diagnostic);
-			mActionExecutionFailed = true;
+			event.diagnostic = std::move(prepared.diagnostic);
+			if (prepared.scriptFailed)
+			{
+				// A Lua failure owns the failure payload and the pause/headless
+				// policy; an ordinary host refusal leaves the script-failure field
+				// exactly as the caller set it.
+				event.scriptFailure = prepared.failure;
+				addLogMessage("Marker Action", 0, LogLevel::Error, event.diagnostic);
+				mActionExecutionFailed = true;
+			}
 			return;
 		}
-		// Shadow only host-owned values. No effects (including logging and
-		// operation events) are published until the entire batch is accepted.
-		auto pose = agent->mPose;
-		auto claim = replacingUse ? MarkerId{} : agent->mOccupiedUsablePoint;
-		if (replacingUse && agent->mFurnitureUse)
-			pose = agent->mFurnitureUse->catalogue->definition(agent->mFurnitureUse->definition)->finishUsePose;
-		bool poseAuthored = false;
-		bool released = false;
-		InteractionPointId device;
-		auto reject = [&](char const* diagnostic)
-		{
-			event.type = SimulationEventType::ActionFailed;
-			event.diagnostic = diagnostic; // ordinary request refusal, not a Lua failure
-		};
-		for (auto const& effect : result.effects)
-		{
-			switch (effect.type)
-			{
-			case ActionEffectType::Pose: pose = static_cast<Pose>(effect.value); poseAuthored = true; break;
-			case ActionEffectType::Claim:
-				if (!isFurnitureMarker(markerId) || (claim && claim != markerId))
-				{ reject("Selected Marker is not an eligible usable point"); return; }
-				if (auto owner = usablePointOccupant(markerId); owner && owner != agentId)
-				{ reject("Usable point is occupied by another Agent"); return; }
-				claim = markerId;
-				break;
-			case ActionEffectType::Release:
-				if (!isFurnitureMarker(markerId) || (released && !finishing)
-					|| (claim != markerId && !((finishing || replacingUse) && !claim)))
-				{ reject("Only the owning Agent may release this usable point"); return; }
-				claim = {};
-				released = true;
-				break;
-			case ActionEffectType::Device:
-			{
-				InteractionPointId pointId{effect.point};
-				auto point = mInteractionPoints.find(pointId);
-				auto const context = finishing ? InteractionEvaluationContext::FurnitureFinishEffects
-					: InteractionEvaluationContext::ImmediatePress;
-				if ((device && device != pointId) || !interactionRequestEligible(pointId, agentId, context)
-					|| !missingInteractionPermissions(*point, *agent).empty() || point->mBindings.empty())
-				{ reject("Device Interaction point is not eligible or authorized"); return; }
-				for (auto const& binding : point->mBindings)
-					if (static_cast<int>(binding.command.type) != effect.value
-						|| !missingLiftDestinationPermissions(binding.command, agentId).empty())
-					{ reject("Typed device operation is not offered or authorized"); return; }
-				for (auto const& [id, request] : mInteractionRequests.entries())
-					if (request->mActor == agentId && request->mResult == InteractionResult::Pending
-						&& request->mPoint != pointId)
-					{ reject("Agent already has another device request"); return; }
-				device = pointId;
-				break;
-			}
-			}
-		}
-		if (poseAuthored || claim != agent->mOccupiedUsablePoint)
-		{
-			bool fits = isFurnitureMarker(markerId)
-				? furniturePoseFits(agentId, markerId, pose, static_cast<bool>(claim), &event.diagnostic)
-				: agent->poseFits(pose, agent->getSector()->isRoom()
-					? agent->getSector()->getPosition().y + agent->getSector()->getLevelsHigh() - 1
-						+ agent->getSector()->getEffectiveTopLevelHeight() - agent->getGlobalPosition().y
-					: std::numeric_limits<float>::infinity());
-			if (!fits) { event.type = SimulationEventType::ActionFailed; if (event.diagnostic.empty()) event.diagnostic = "Action pose is unsupported or does not fit"; return; }
-		}
 		if (validateOnly) return;
-		// Committed requests retain the ordinary asynchronous device/traversal
-		// authorities; scripts never submit unvalidated raw device commands.
-		if (device) requestInteraction(device, agentId);
-		if (claim != agent->mOccupiedUsablePoint)
-		{
-			if (claim) claimUsablePoint(agentId, claim);
-			else agent->mOccupiedUsablePoint = {};
-		}
-		agent->mPose = pose;
-		if (poseAuthored) agent->mRetainedActionPose = true;
-		event.agent.pose = pose;
-		invalidateSimulationSnapshot();
-		for (auto const& log : result.logs) addLogMessage("Marker Action", 0, LogLevel::Info, log.message);
-		if (result.logsSuppressed) addLogMessage("Marker Action", 0, LogLevel::Warning, "Action logging budget exhausted");
+		commitPreparedActionEffects(agentId, prepared, event, result);
 	}
 }
