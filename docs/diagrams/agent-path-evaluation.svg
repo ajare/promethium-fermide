@@ -1,0 +1,3010 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="4400" height="9855" viewBox="0 0 4400 9855" role="img" aria-labelledby="title description">
+<title id="title">Agent Path evaluation and vertex-to-vertex movement</title>
+<desc id="description">Nine linked flowcharts show generic route planning, directed edge evaluation, waypoint approach, resource admission, control operation, transport and chamber journeys, movement and commit, and recovery. Function and source links refer to this repository. Diamonds are inline decisions unless identified as predicate functions. Dashed arrows indicate cross-panel calls or next-tick continuation, not synchronous calls.</desc>
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L10,5 L0,10 Z" fill="#48617b"/></marker></defs>
+<style>
+svg { background:#edf2f7; } text { fill:#152d42; font-family:DejaVu Sans,sans-serif; }
+.panel { fill:#fff; stroke:#bdcbd8; stroke-width:2; }
+.heading { font-size:28px; font-weight:700; } .subtitle { font-size:18px; fill:#466078; }
+.fn { font-family:DejaVu Sans Mono,monospace; font-size:16px; font-weight:700; }
+.fn-small { font-family:DejaVu Sans Mono,monospace; font-size:13px; font-weight:700; }
+.body { font-size:18px; } .body-small { font-size:15px; }
+.action { fill:#edf5ff; stroke:#4f86bd; stroke-width:2; }
+.decision { fill:#fff4d6; stroke:#c68c28; stroke-width:2; }
+.port { fill:#e8f6ef; stroke:#348361; stroke-width:2; }
+.failure { fill:#ffeded; stroke:#bd6666; stroke-width:2; }
+.ref { font-size:12px; fill:#48617b; text-decoration:underline; }
+.edge { fill:none; stroke:#48617b; stroke-width:2; } .dashed { stroke-dasharray:8 6; }
+.edge-label { font-size:15px; font-weight:700; paint-order:stroke; stroke:#fff; stroke-width:6px; stroke-linejoin:round; }
+.note-heading { font-size:15px; font-weight:700; fill:#526779; } .note { font-size:17px; fill:#526779; }
+a:hover rect, a:hover polygon { stroke:#152d42; stroke-width:4; }
+</style>
+<rect width="4400" height="9855" fill="#edf2f7"/>
+<text x="60" y="70" class="heading" text-anchor="start">
+<tspan x="60" dy="0">Agent Path evaluation &amp; vertex-to-vertex movement</tspan>
+</text>
+<text x="60" y="115" class="subtitle" text-anchor="start">
+<tspan x="60" dy="0">General decision logic for any Path — not an example route. Read A, then follow the lettered, clickable subchart ports.</tspan>
+</text>
+<text x="60" y="157" class="subtitle" text-anchor="start">
+<tspan x="60" dy="0">Blue = function/action   •   Amber diamond = predicate or enclosing-function [inline] condition   •   Green = linked subchart/continuation   •   Red = refusal/recovery</tspan>
+</text>
+<text x="60" y="197" class="subtitle" text-anchor="start">
+<tspan x="60" dy="0">SC = SimulationCoordinator. World forwards traversal APIs to SC. Source references are clickable relative links; regenerate after code changes.</tspan>
+</text>
+<text x="60" y="237" class="subtitle" text-anchor="start">
+<tspan x="60" dy="0">Solid arrows show local control flow. Dashed arrows show tick continuation or subchart handoff. A subchart return resumes its caller; preparation never grants admission.</tspan>
+</text>
+<text x="60" y="277" class="subtitle" text-anchor="start">
+<tspan x="60" dy="0">Scope: autonomous Path following. Player input-specific movement is intentionally not expanded. Panels summarize function-level branches, not every defensive guard.</tspan>
+</text>
+<g id="A"><rect x="35" y="370" width="1420" height="3100" rx="20" class="panel"/>
+<text x="70" y="418" class="heading" text-anchor="start">
+<tspan x="70" dy="0">A  Overview &amp; tick ordering</tspan>
+</text>
+<text x="70" y="452" class="subtitle" text-anchor="start">
+<tspan x="70" dy="0">Planning produces route intent. Every movement transition still follows the request → allocation → permit → commit</tspan>
+</text>
+<text x="70" y="475" class="subtitle" text-anchor="start">
+<tspan x="70" dy="0">protocol.</tspan>
+</text>
+<g id="a0">
+<text x="108.0" y="515.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">a0</tspan>
+</text>
+<title>SC::moveAgentToMarker(): Accept destination Marker and explicitly selected Agent action.</title>
+<rect x="100.0" y="523.0" width="760" height="174" rx="10" class="action"/>
+<text x="480" y="599.0" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">SC::moveAgentToMarker()</tspan>
+</text>
+<text x="480" y="627.0" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Accept destination Marker and explicitly selected Agent action.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorAgents.cpp#L398">
+<text x="480" y="716.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorAgents.cpp:398</tspan>
+</text>
+</a>
+</g>
+<g id="a1">
+<text x="108.0" y="790.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">a1</tspan>
+</text>
+<title>SC::beginRoutePlanning(): Sample the planning interval; retain goal and remain stationary.</title>
+<rect x="100.0" y="798.0" width="760" height="174" rx="10" class="action"/>
+<text x="480" y="874.0" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">SC::beginRoutePlanning()</tspan>
+</text>
+<text x="480" y="902.0" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Sample the planning interval; retain goal and remain stationary.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorAgents.cpp#L525">
+<text x="480" y="991.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorAgents.cpp:525</tspan>
+</text>
+</a>
+</g>
+<g id="a2">
+<text x="108.0" y="1065.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">a2</tspan>
+</text>
+<a href="#B">
+<title>B · Route planning: Evaluate candidate directed transitions; select a Path or report Route loss.</title>
+<rect x="100.0" y="1073.0" width="760" height="174" rx="35" class="port"/>
+<text x="480" y="1149.0" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">B · Route planning</tspan>
+</text>
+<text x="480" y="1177.0" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Evaluate candidate directed transitions; select a Path or report Route loss.</tspan>
+</text>
+</a>
+</g>
+<g id="a3">
+<text x="108.0" y="1340.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">a3</tspan>
+</text>
+<title>SC::runSimulationPhase(): ResourceAdvancement: advance devices, vehicles, Airlocks and Chambers.</title>
+<rect x="100.0" y="1348.0" width="760" height="174" rx="10" class="action"/>
+<text x="480" y="1424.0" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">SC::runSimulationPhase()</tspan>
+</text>
+<text x="480" y="1452.0" class="body" text-anchor="middle">
+<tspan x="480" dy="0">ResourceAdvancement: advance devices, vehicles, Airlocks and Chambers.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorTick.cpp#L540">
+<text x="480" y="1541.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorTick.cpp:540</tspan>
+</text>
+</a>
+</g>
+<g id="a4">
+<text x="108.0" y="1615.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">a4</tspan>
+</text>
+<a href="#D">
+<title>D · Intent collection: Observe local conditions; approach/skip waypoints; create traversal request.</title>
+<rect x="100.0" y="1623.0" width="760" height="174" rx="35" class="port"/>
+<text x="480" y="1699.0" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">D · Intent collection</tspan>
+</text>
+<text x="480" y="1727.0" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Observe local conditions; approach/skip waypoints; create traversal request.</tspan>
+</text>
+</a>
+</g>
+<g id="a5">
+<text x="108.0" y="1890.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">a5</tspan>
+</text>
+<a href="#E">
+<title>E · Allocation: Dispatch to resource admission; F handles required controls; G handles journeys.</title>
+<rect x="100.0" y="1898.0" width="760" height="174" rx="35" class="port"/>
+<text x="480" y="1963.5" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">E · Allocation</tspan>
+</text>
+<text x="480" y="1991.5" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Dispatch to resource admission; F handles required controls; G handles</tspan>
+<tspan x="480" dy="21">journeys.</tspan>
+</text>
+</a>
+</g>
+<g id="a6">
+<text x="108.0" y="2165.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">a6</tspan>
+</text>
+<a href="#H">
+<title>H · Movement and commit: Move only with an adopted permit. Commit the transfer in the Commit phase.</title>
+<rect x="100.0" y="2173.0" width="760" height="174" rx="35" class="port"/>
+<text x="480" y="2249.0" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">H · Movement and commit</tspan>
+</text>
+<text x="480" y="2277.0" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Move only with an adopted permit. Commit the transfer in the Commit phase.</tspan>
+</text>
+</a>
+</g>
+<g id="a7">
+<text x="108.0" y="2440.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">a7</tspan>
+</text>
+<title>SC::runSimulationPhase(): Cleanup: progress/timeouts, task cleanup, interaction outcomes, planning expiry, movement goals.</title>
+<rect x="100.0" y="2448.0" width="760" height="174" rx="10" class="action"/>
+<text x="480" y="2513.5" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">SC::runSimulationPhase()</tspan>
+</text>
+<text x="480" y="2541.5" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Cleanup: progress/timeouts, task cleanup, interaction outcomes, planning</tspan>
+<tspan x="480" dy="21">expiry, movement goals.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorTick.cpp#L540">
+<text x="480" y="2641.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorTick.cpp:540</tspan>
+</text>
+</a>
+</g>
+<g id="a8">
+<text x="108.0" y="2697.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">a8</tspan>
+</text>
+<title>SC::updateMovementGoals() [inline]: Goal completed, cancelled or lost?</title>
+<polygon points="480,2705.0 860.0,2810 480,2915.0 100.0,2810" class="decision"/>
+<text x="480" y="2799.0" class="fn-small" text-anchor="middle">
+<tspan x="480" dy="0">SC::updateMovementGoals() [inline]</tspan>
+</text>
+<text x="480" y="2827.0" class="body-small" text-anchor="middle">
+<tspan x="480" dy="0">Goal completed, cancelled or lost?</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorAgents.cpp#L739">
+<text x="480" y="2934.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorAgents.cpp:739</tspan>
+</text>
+</a>
+</g>
+<g id="a9">
+<text x="108.0" y="2990.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">a9</tspan>
+</text>
+<title>SC::updateMovementGoals(): Publish DestinationReached / MovementCancelled / RouteLost; execute selected Action on arrival.</title>
+<rect x="100.0" y="2998.0" width="760" height="174" rx="35" class="port"/>
+<text x="480" y="3063.5" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">SC::updateMovementGoals()</tspan>
+</text>
+<text x="480" y="3091.5" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Publish DestinationReached / MovementCancelled / RouteLost; execute selected</tspan>
+<tspan x="480" dy="21">Action on arrival.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorAgents.cpp#L739">
+<text x="480" y="3191.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorAgents.cpp:739</tspan>
+</text>
+</a>
+</g>
+<g id="ar">
+<text x="968.0" y="2715.0" class="note-heading" text-anchor="start">
+<tspan x="968.0" dy="0">ar</tspan>
+</text>
+<a href="#a3">
+<title>SC::advanceTick(): Continue the six phases on the next fixed tick.</title>
+<rect x="960.0" y="2723.0" width="450" height="174" rx="35" class="port"/>
+<text x="1185" y="2788.5" class="fn" text-anchor="middle">
+<tspan x="1185" dy="0">SC::advanceTick()</tspan>
+</text>
+<text x="1185" y="2816.5" class="body" text-anchor="middle">
+<tspan x="1185" dy="0">Continue the six phases on the next fixed</tspan>
+<tspan x="1185" dy="21">tick.</tspan>
+</text>
+</a>
+<a href="../../src/core/SimulationCoordinatorTick.cpp#L722">
+<text x="1185" y="2916.0" class="ref" text-anchor="middle">
+<tspan x="1185" dy="0">src/core/SimulationCoordinatorTick.cpp:722</tspan>
+</text>
+</a>
+</g>
+<path d="M 480 725.0 V 793.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 480 1000.0 V 1068.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 480 1275.0 V 1343.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 480 1550.0 V 1618.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 480 1825.0 V 1893.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 480 2100.0 V 2168.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 480 2375.0 V 2443.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 480 2650.0 V 2700.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 480 2943.0 V 2993.0" class="edge" marker-end="url(#arrow)"/>
+<text x="495" y="2968.0" class="edge-label" text-anchor="start">
+<tspan x="495" dy="0">yes</tspan>
+</text>
+<path d="M 860.0 2810 H 907.5 V 2810 H 955.0" class="edge dashed" marker-end="url(#arrow)"/>
+<text x="907.5" y="2798" class="edge-label" text-anchor="middle">
+<tspan x="907.5" dy="0">no</tspan>
+</text>
+<text x="70" y="3325" class="note-heading" text-anchor="start">
+<tspan x="70" dy="0">READING NOTES</tspan>
+</text>
+<text x="70" y="3359" class="note" text-anchor="start">
+<tspan x="70" dy="0">The D approach subchart runs during Movement; its collected request is handled in the following IntentCollection phase. Each</tspan>
+</text>
+<text x="70" y="3382" class="note" text-anchor="start">
+<tspan x="70" dy="0">phase skips inactive Agents. Resource advancement and interaction progression continue separately from Path decisions.</tspan>
+</text>
+</g>
+<g id="B"><rect x="1490" y="370" width="1420" height="3100" rx="20" class="panel"/>
+<text x="1525" y="418" class="heading" text-anchor="start">
+<tspan x="1525" dy="0">B  Planning &amp; search</tspan>
+</text>
+<text x="1525" y="452" class="subtitle" text-anchor="start">
+<tspan x="1525" dy="0">Graph::calculatePath() delegates to pathing::findPath(); each candidate directed arc uses C, not runtime</tspan>
+</text>
+<text x="1525" y="475" class="subtitle" text-anchor="start">
+<tspan x="1525" dy="0">admission.</tspan>
+</text>
+<g id="b0">
+<text x="1563.0" y="497.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">b0</tspan>
+</text>
+<title>pathing::findPath() [inline]: Graph, target fit, destination occupancy and Location access valid?</title>
+<polygon points="1935,505.0 2315.0,610 1935,715.0 1555.0,610" class="decision"/>
+<text x="1935" y="588.5" class="fn-small" text-anchor="middle">
+<tspan x="1935" dy="0">pathing::findPath() [inline]</tspan>
+</text>
+<text x="1935" y="616.5" class="body-small" text-anchor="middle">
+<tspan x="1935" dy="0">Graph, target fit, destination occupancy</tspan>
+<tspan x="1935" dy="21">and Location access valid?</tspan>
+</text>
+<a href="../../src/core/Pathing.cpp#L640">
+<text x="1935" y="734.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/Pathing.cpp:640</tspan>
+</text>
+</a>
+</g>
+<g id="bx">
+<text x="2423.0" y="515.0" class="note-heading" text-anchor="start">
+<tspan x="2423.0" dy="0">bx</tspan>
+</text>
+<a href="#I">
+<title>pathing::findPath(): Return nullptr; I handles Route loss or retained valid Path.</title>
+<rect x="2415.0" y="523.0" width="450" height="174" rx="10" class="failure"/>
+<text x="2640" y="588.5" class="fn" text-anchor="middle">
+<tspan x="2640" dy="0">pathing::findPath()</tspan>
+</text>
+<text x="2640" y="616.5" class="body" text-anchor="middle">
+<tspan x="2640" dy="0">Return nullptr; I handles Route loss or</tspan>
+<tspan x="2640" dy="21">retained valid Path.</tspan>
+</text>
+</a>
+<a href="../../src/core/Pathing.cpp#L640">
+<text x="2640" y="716.0" class="ref" text-anchor="middle">
+<tspan x="2640" dy="0">src/core/Pathing.cpp:640</tspan>
+</text>
+</a>
+</g>
+<g id="b1">
+<text x="1563.0" y="790.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">b1</tspan>
+</text>
+<title>Graph::getPathSourceVertex(): Infer source when omitted; seed connected floor interval endpoints, never split controlled edges.</title>
+<rect x="1555.0" y="798.0" width="760" height="174" rx="10" class="action"/>
+<text x="1935" y="863.5" class="fn" text-anchor="middle">
+<tspan x="1935" dy="0">Graph::getPathSourceVertex()</tspan>
+</text>
+<text x="1935" y="891.5" class="body" text-anchor="middle">
+<tspan x="1935" dy="0">Infer source when omitted; seed connected floor interval endpoints, never</tspan>
+<tspan x="1935" dy="21">split controlled edges.</tspan>
+</text>
+<a href="../../src/core/Graph.cpp#L150">
+<text x="1935" y="991.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/Graph.cpp:150</tspan>
+</text>
+</a>
+</g>
+<g id="b2">
+<text x="1563.0" y="1065.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">b2</tspan>
+</text>
+<title>PathfindingWorkspace::beginRouteDecision(): Freeze profile, Mobility and observations; capture non-Location traversal inputs.</title>
+<rect x="1555.0" y="1073.0" width="760" height="174" rx="10" class="action"/>
+<text x="1935" y="1138.5" class="fn" text-anchor="middle">
+<tspan x="1935" dy="0">PathfindingWorkspace::beginRouteDecision()</tspan>
+</text>
+<text x="1935" y="1166.5" class="body" text-anchor="middle">
+<tspan x="1935" dy="0">Freeze profile, Mobility and observations; capture non-Location traversal</tspan>
+<tspan x="1935" dy="21">inputs.</tspan>
+</text>
+<a href="../../src/core/Pathing.cpp#L111">
+<text x="1935" y="1266.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/Pathing.cpp:111</tspan>
+</text>
+</a>
+</g>
+<g id="b3">
+<text x="1563.0" y="1322.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">b3</tspan>
+</text>
+<title>pathing::findPath() [inline]: runSearch: Local-depth routes present?</title>
+<polygon points="1935,1330.0 2315.0,1435 1935,1540.0 1555.0,1435" class="decision"/>
+<text x="1935" y="1424.0" class="fn-small" text-anchor="middle">
+<tspan x="1935" dy="0">pathing::findPath() [inline]</tspan>
+</text>
+<text x="1935" y="1452.0" class="body-small" text-anchor="middle">
+<tspan x="1935" dy="0">runSearch: Local-depth routes present?</tspan>
+</text>
+<a href="../../src/core/Pathing.cpp#L640">
+<text x="1935" y="1559.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/Pathing.cpp:640</tspan>
+</text>
+</a>
+</g>
+<g id="bd">
+<text x="2423.0" y="1340.0" class="note-heading" text-anchor="start">
+<tspan x="2423.0" dy="0">bd</tspan>
+</text>
+<title>findDepthContinuousPath(): Search depth-continuous states; Local depth is a secondary objective.</title>
+<rect x="2415.0" y="1348.0" width="450" height="174" rx="10" class="action"/>
+<text x="2640" y="1413.5" class="fn" text-anchor="middle">
+<tspan x="2640" dy="0">findDepthContinuousPath()</tspan>
+</text>
+<text x="2640" y="1441.5" class="body" text-anchor="middle">
+<tspan x="2640" dy="0">Search depth-continuous states; Local depth</tspan>
+<tspan x="2640" dy="21">is a secondary objective.</tspan>
+</text>
+<a href="../../src/core/Pathing.cpp#L474">
+<text x="2640" y="1541.0" class="ref" text-anchor="middle">
+<tspan x="2640" dy="0">src/core/Pathing.cpp:474</tspan>
+</text>
+</a>
+</g>
+<g id="b4">
+<text x="1563.0" y="1597.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">b4</tspan>
+</text>
+<title>pathing::findPath() [inline]: Expand minimum-priority vertex. Blocking Marker is intermediate?</title>
+<polygon points="1935,1605.0 2315.0,1710 1935,1815.0 1555.0,1710" class="decision"/>
+<text x="1935" y="1688.5" class="fn-small" text-anchor="middle">
+<tspan x="1935" dy="0">pathing::findPath() [inline]</tspan>
+</text>
+<text x="1935" y="1716.5" class="body-small" text-anchor="middle">
+<tspan x="1935" dy="0">Expand minimum-priority vertex. Blocking</tspan>
+<tspan x="1935" dy="21">Marker is intermediate?</tspan>
+</text>
+<a href="../../src/core/Pathing.cpp#L640">
+<text x="1935" y="1834.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/Pathing.cpp:640</tspan>
+</text>
+</a>
+</g>
+<g id="bs">
+<text x="2423.0" y="1615.0" class="note-heading" text-anchor="start">
+<tspan x="2423.0" dy="0">bs</tspan>
+</text>
+<a href="#b4">
+<title>pathing::findPath(): Do not expand it. Origin may leave; destination may finish.</title>
+<rect x="2415.0" y="1623.0" width="450" height="174" rx="35" class="port"/>
+<text x="2640" y="1688.5" class="fn" text-anchor="middle">
+<tspan x="2640" dy="0">pathing::findPath()</tspan>
+</text>
+<text x="2640" y="1716.5" class="body" text-anchor="middle">
+<tspan x="2640" dy="0">Do not expand it. Origin may leave;</tspan>
+<tspan x="2640" dy="21">destination may finish.</tspan>
+</text>
+</a>
+<a href="../../src/core/Pathing.cpp#L640">
+<text x="2640" y="1816.0" class="ref" text-anchor="middle">
+<tspan x="2640" dy="0">src/core/Pathing.cpp:640</tspan>
+</text>
+</a>
+</g>
+<g id="b5">
+<text x="1563.0" y="1890.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">b5</tspan>
+</text>
+<a href="#C">
+<title>C · Directed transition evaluation: evaluateArc() → arcFacts() → captured evaluate() or Location edge facts.</title>
+<rect x="1555.0" y="1898.0" width="760" height="174" rx="35" class="port"/>
+<text x="1935" y="1974.0" class="fn" text-anchor="middle">
+<tspan x="1935" dy="0">C · Directed transition evaluation</tspan>
+</text>
+<text x="1935" y="2002.0" class="body" text-anchor="middle">
+<tspan x="1935" dy="0">evaluateArc() → arcFacts() → captured evaluate() or Location edge facts.</tspan>
+</text>
+</a>
+</g>
+<g id="b6">
+<text x="1563.0" y="2147.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">b6</tspan>
+</text>
+<title>pathing::findPath() [inline]: Arc cost exists and improves the target score?</title>
+<polygon points="1935,2155.0 2315.0,2260 1935,2365.0 1555.0,2260" class="decision"/>
+<text x="1935" y="2238.5" class="fn-small" text-anchor="middle">
+<tspan x="1935" dy="0">pathing::findPath() [inline]</tspan>
+</text>
+<text x="1935" y="2266.5" class="body-small" text-anchor="middle">
+<tspan x="1935" dy="0">Arc cost exists and improves the target</tspan>
+<tspan x="1935" dy="21">score?</tspan>
+</text>
+<a href="../../src/core/Pathing.cpp#L640">
+<text x="1935" y="2384.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/Pathing.cpp:640</tspan>
+</text>
+</a>
+</g>
+<g id="br">
+<text x="2423.0" y="2165.0" class="note-heading" text-anchor="start">
+<tspan x="2423.0" dy="0">br</tspan>
+</text>
+<a href="#b4">
+<title>pathing::findPath(): Skip infeasible/non-improving arc; continue frontier until target or exhaustion.</title>
+<rect x="2415.0" y="2173.0" width="450" height="174" rx="35" class="port"/>
+<text x="2640" y="2238.5" class="fn" text-anchor="middle">
+<tspan x="2640" dy="0">pathing::findPath()</tspan>
+</text>
+<text x="2640" y="2266.5" class="body" text-anchor="middle">
+<tspan x="2640" dy="0">Skip infeasible/non-improving arc; continue</tspan>
+<tspan x="2640" dy="21">frontier until target or exhaustion.</tspan>
+</text>
+</a>
+<a href="../../src/core/Pathing.cpp#L640">
+<text x="2640" y="2366.0" class="ref" text-anchor="middle">
+<tspan x="2640" dy="0">src/core/Pathing.cpp:640</tspan>
+</text>
+</a>
+</g>
+<g id="b7">
+<text x="1563.0" y="2440.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">b7</tspan>
+</text>
+<title>pathing::findPath(): Update predecessor, perceived score, duration and priority; reconstruct reached Path.</title>
+<rect x="1555.0" y="2448.0" width="760" height="174" rx="10" class="action"/>
+<text x="1935" y="2513.5" class="fn" text-anchor="middle">
+<tspan x="1935" dy="0">pathing::findPath()</tspan>
+</text>
+<text x="1935" y="2541.5" class="body" text-anchor="middle">
+<tspan x="1935" dy="0">Update predecessor, perceived score, duration and priority; reconstruct</tspan>
+<tspan x="1935" dy="21">reached Path.</tspan>
+</text>
+<a href="../../src/core/Pathing.cpp#L640">
+<text x="1935" y="2641.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/Pathing.cpp:640</tspan>
+</text>
+</a>
+</g>
+<g id="b8">
+<text x="1563.0" y="2697.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">b8</tspan>
+</text>
+<title>pathing::findPath() [inline]: Search found a Path?</title>
+<polygon points="1935,2705.0 2315.0,2810 1935,2915.0 1555.0,2810" class="decision"/>
+<text x="1935" y="2799.0" class="fn-small" text-anchor="middle">
+<tspan x="1935" dy="0">pathing::findPath() [inline]</tspan>
+</text>
+<text x="1935" y="2827.0" class="body-small" text-anchor="middle">
+<tspan x="1935" dy="0">Search found a Path?</tspan>
+</text>
+<a href="../../src/core/Pathing.cpp#L640">
+<text x="1935" y="2934.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/Pathing.cpp:640</tspan>
+</text>
+</a>
+</g>
+<g id="bf">
+<text x="2423.0" y="2715.0" class="note-heading" text-anchor="start">
+<tspan x="2423.0" dy="0">bf</tspan>
+</text>
+<a href="#b3">
+<title>PathfindingWorkspace::allowFallbackMobility(): If first pass failed: allow OnlyIfNoOtherOption; repeat once with same observations.</title>
+<rect x="2415.0" y="2723.0" width="450" height="174" rx="35" class="port"/>
+<text x="2640" y="2768.5" class="fn" text-anchor="middle">
+<tspan x="2640" dy="0">PathfindingWorkspace::allowFallbackMo</tspan>
+<tspan x="2640" dy="19">bility()</tspan>
+</text>
+<text x="2640" y="2815.5" class="body" text-anchor="middle">
+<tspan x="2640" dy="0">If first pass failed: allow</tspan>
+<tspan x="2640" dy="21">OnlyIfNoOtherOption; repeat once with same</tspan>
+<tspan x="2640" dy="21">observations.</tspan>
+</text>
+</a>
+<a href="../../src/core/Pathing.cpp#L142">
+<text x="2640" y="2916.0" class="ref" text-anchor="middle">
+<tspan x="2640" dy="0">src/core/Pathing.cpp:142</tspan>
+</text>
+</a>
+</g>
+<g id="b9">
+<text x="1563.0" y="2990.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">b9</tspan>
+</text>
+<a href="#D">
+<title>SC::advanceRoutePlanning(): At interval expiry: apply Route persistence to valid retained Path; assign selected Path. No Path → I.</title>
+<rect x="1555.0" y="2998.0" width="760" height="174" rx="35" class="port"/>
+<text x="1935" y="3063.5" class="fn" text-anchor="middle">
+<tspan x="1935" dy="0">SC::advanceRoutePlanning()</tspan>
+</text>
+<text x="1935" y="3091.5" class="body" text-anchor="middle">
+<tspan x="1935" dy="0">At interval expiry: apply Route persistence to valid retained Path; assign</tspan>
+<tspan x="1935" dy="21">selected Path. No Path → I.</tspan>
+</text>
+</a>
+<a href="../../src/core/SimulationCoordinatorAgents.cpp#L628">
+<text x="1935" y="3191.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/SimulationCoordinatorAgents.cpp:628</tspan>
+</text>
+</a>
+</g>
+<path d="M 2315.0 610 H 2362.5 V 610 H 2410.0" class="edge" marker-end="url(#arrow)"/>
+<text x="2362.5" y="598" class="edge-label" text-anchor="middle">
+<tspan x="2362.5" dy="0">no</tspan>
+</text>
+<path d="M 1935 743.0 V 793.0" class="edge" marker-end="url(#arrow)"/>
+<text x="1950" y="768.0" class="edge-label" text-anchor="start">
+<tspan x="1950" dy="0">yes</tspan>
+</text>
+<path d="M 1935 1000.0 V 1068.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 1935 1275.0 V 1325.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 2315.0 1435 H 2362.5 V 1435 H 2410.0" class="edge" marker-end="url(#arrow)"/>
+<text x="2362.5" y="1423" class="edge-label" text-anchor="middle">
+<tspan x="2362.5" dy="0">yes</tspan>
+</text>
+<path d="M 1935 1568.0 V 1600.0" class="edge" marker-end="url(#arrow)"/>
+<text x="1950" y="1584.0" class="edge-label" text-anchor="start">
+<tspan x="1950" dy="0">no</tspan>
+</text>
+<path d="M 2315.0 1710 H 2362.5 V 1710 H 2410.0" class="edge" marker-end="url(#arrow)"/>
+<text x="2362.5" y="1698" class="edge-label" text-anchor="middle">
+<tspan x="2362.5" dy="0">yes</tspan>
+</text>
+<path d="M 1935 1843.0 V 1893.0" class="edge" marker-end="url(#arrow)"/>
+<text x="1950" y="1868.0" class="edge-label" text-anchor="start">
+<tspan x="1950" dy="0">no</tspan>
+</text>
+<path d="M 1935 2100.0 V 2150.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 2315.0 2260 H 2362.5 V 2260 H 2410.0" class="edge" marker-end="url(#arrow)"/>
+<text x="2362.5" y="2248" class="edge-label" text-anchor="middle">
+<tspan x="2362.5" dy="0">no</tspan>
+</text>
+<path d="M 1935 2393.0 V 2443.0" class="edge" marker-end="url(#arrow)"/>
+<text x="1950" y="2418.0" class="edge-label" text-anchor="start">
+<tspan x="1950" dy="0">yes</tspan>
+</text>
+<path d="M 1935 2650.0 V 2700.0" class="edge" marker-end="url(#arrow)"/>
+<text x="1950" y="2675.0" class="edge-label" text-anchor="start">
+<tspan x="1950" dy="0">search end</tspan>
+</text>
+<path d="M 2315.0 2810 H 2362.5 V 2810 H 2410.0" class="edge" marker-end="url(#arrow)"/>
+<text x="2362.5" y="2780" class="edge-label" text-anchor="middle">
+<tspan x="2362.5" dy="0">no, first</tspan>
+<tspan x="2362.5" dy="18">pass</tspan>
+</text>
+<path d="M 1935 2943.0 V 2993.0" class="edge" marker-end="url(#arrow)"/>
+<text x="1950" y="2968.0" class="edge-label" text-anchor="start">
+<tspan x="1950" dy="0">yes</tspan>
+</text>
+<text x="1525" y="3325" class="note-heading" text-anchor="start">
+<tspan x="1525" dy="0">READING NOTES</tspan>
+</text>
+<text x="1525" y="3359" class="note" text-anchor="start">
+<tspan x="1525" dy="0">Depth search also uses evaluateArc() / C. The successful-update branch repeats expansion before reconstruction; it does not</tspan>
+</text>
+<text x="1525" y="3382" class="note" text-anchor="start">
+<tspan x="1525" dy="0">stop after one edge. If the fallback search also fails, return nullptr to advanceRoutePlanning() / I. CannotUse is never</tspan>
+</text>
+<text x="1525" y="3405" class="note" text-anchor="start">
+<tspan x="1525" dy="0">relaxed.</tspan>
+</text>
+</g>
+<g id="C"><rect x="2945" y="370" width="1420" height="3100" rx="20" class="panel"/>
+<text x="2980" y="418" class="heading" text-anchor="start">
+<tspan x="2980" dy="0">C  Directed arc facts &amp; vertex pairs</tspan>
+</text>
+<text x="2980" y="452" class="subtitle" text-anchor="start">
+<tspan x="2980" dy="0">The dispatch key is EdgeType plus directed source/target Sector. VertexType alone does not determine permission or</tspan>
+</text>
+<text x="2980" y="475" class="subtitle" text-anchor="start">
+<tspan x="2980" dy="0">motion.</tspan>
+</text>
+<g id="c0">
+<text x="3018.0" y="497.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">c0</tspan>
+</text>
+<title>PathfindingWorkspace::arcFacts() [inline]: Target requiredPoseFor() and canAgentAccessLocation() pass?</title>
+<polygon points="3390,505.0 3770.0,610 3390,715.0 3010.0,610" class="decision"/>
+<text x="3390" y="579.0" class="fn-small" text-anchor="middle">
+<tspan x="3390" dy="0">PathfindingWorkspace::arcFacts()</tspan>
+<tspan x="3390" dy="19">[inline]</tspan>
+</text>
+<text x="3390" y="626.0" class="body-small" text-anchor="middle">
+<tspan x="3390" dy="0">Target requiredPoseFor() and</tspan>
+<tspan x="3390" dy="21">canAgentAccessLocation() pass?</tspan>
+</text>
+<a href="../../src/core/Pathing.cpp#L152">
+<text x="3390" y="734.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/Pathing.cpp:152</tspan>
+</text>
+</a>
+</g>
+<g id="cx">
+<text x="3878.0" y="515.0" class="note-heading" text-anchor="start">
+<tspan x="3878.0" dy="0">cx</tspan>
+</text>
+<a href="#b6">
+<title>PathfindingWorkspace::evaluateArc(): No cost: exclude arc (Clearance / Permission / Mobility / Control / Direction / PreparationSide / NoContinuation).</title>
+<rect x="3870.0" y="523.0" width="450" height="174" rx="10" class="failure"/>
+<text x="4095" y="578.0" class="fn" text-anchor="middle">
+<tspan x="4095" dy="0">PathfindingWorkspace::evaluateArc()</tspan>
+</text>
+<text x="4095" y="606.0" class="body" text-anchor="middle">
+<tspan x="4095" dy="0">No cost: exclude arc (Clearance /</tspan>
+<tspan x="4095" dy="21">Permission / Mobility / Control / Direction</tspan>
+<tspan x="4095" dy="21">/ PreparationSide / NoContinuation).</tspan>
+</text>
+</a>
+<a href="../../src/core/Pathing.cpp#L208">
+<text x="4095" y="716.0" class="ref" text-anchor="middle">
+<tspan x="4095" dy="0">src/core/Pathing.cpp:208</tspan>
+</text>
+</a>
+</g>
+<g id="c1">
+<text x="3018.0" y="790.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">c1</tspan>
+</text>
+<title>RouteTraversalInputs::capture(): Derive source = edge.getOtherVertex(target), observed Sector, rise, length and requiresButton().</title>
+<rect x="3010.0" y="798.0" width="760" height="174" rx="10" class="action"/>
+<text x="3390" y="863.5" class="fn" text-anchor="middle">
+<tspan x="3390" dy="0">RouteTraversalInputs::capture()</tspan>
+</text>
+<text x="3390" y="891.5" class="body" text-anchor="middle">
+<tspan x="3390" dy="0">Derive source = edge.getOtherVertex(target), observed Sector, rise, length</tspan>
+<tspan x="3390" dy="21">and requiresButton().</tspan>
+</text>
+<a href="../../src/core/RouteTraversalCapture.cpp#L22">
+<text x="3390" y="991.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/RouteTraversalCapture.cpp:22</tspan>
+</text>
+</a>
+</g>
+<g id="c2">
+<text x="3018.0" y="1047.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">c2</tspan>
+</text>
+<title>RouteTraversalInputs::evaluate() [inline]: Traversal Mobility AND required Buttons allowed in this search pass?</title>
+<polygon points="3390,1055.0 3770.0,1160 3390,1265.0 3010.0,1160" class="decision"/>
+<text x="3390" y="1129.0" class="fn-small" text-anchor="middle">
+<tspan x="3390" dy="0">RouteTraversalInputs::evaluate()</tspan>
+<tspan x="3390" dy="19">[inline]</tspan>
+</text>
+<text x="3390" y="1176.0" class="body-small" text-anchor="middle">
+<tspan x="3390" dy="0">Traversal Mobility AND required Buttons</tspan>
+<tspan x="3390" dy="21">allowed in this search pass?</tspan>
+</text>
+<a href="../../src/core/RouteTraversalInputs.cpp#L11">
+<text x="3390" y="1284.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/RouteTraversalInputs.cpp:11</tspan>
+</text>
+</a>
+</g>
+<g id="cm">
+<text x="3878.0" y="1065.0" class="note-heading" text-anchor="start">
+<tspan x="3878.0" dy="0">cm</tspan>
+</text>
+<a href="#cx">
+<title>RouteTraversalInputs::evaluate(): CannotUse rejects; OnlyIfNoOtherOption rejects first pass. This authored classification is not current press necessity.</title>
+<rect x="3870.0" y="1073.0" width="450" height="174" rx="35" class="port"/>
+<text x="4095" y="1117.5" class="fn" text-anchor="middle">
+<tspan x="4095" dy="0">RouteTraversalInputs::evaluate()</tspan>
+</text>
+<text x="4095" y="1145.5" class="body" text-anchor="middle">
+<tspan x="4095" dy="0">CannotUse rejects; OnlyIfNoOtherOption</tspan>
+<tspan x="4095" dy="21">rejects first pass. This authored</tspan>
+<tspan x="4095" dy="21">classification is not current press</tspan>
+<tspan x="4095" dy="21">necessity.</tspan>
+</text>
+</a>
+<a href="../../src/core/RouteTraversalInputs.cpp#L11">
+<text x="4095" y="1266.0" class="ref" text-anchor="middle">
+<tspan x="4095" dy="0">src/core/RouteTraversalInputs.cpp:11</tspan>
+</text>
+</a>
+</g>
+<g id="c3">
+<text x="3018.0" y="1322.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">c3</tspan>
+</text>
+<title>RouteTraversalInputs::capture() [inline]: Location / Gap / Window edge?</title>
+<polygon points="3390,1330.0 3770.0,1435 3390,1540.0 3010.0,1435" class="decision"/>
+<text x="3390" y="1414.5" class="fn-small" text-anchor="middle">
+<tspan x="3390" dy="0">RouteTraversalInputs::capture()</tspan>
+<tspan x="3390" dy="19">[inline]</tspan>
+</text>
+<text x="3390" y="1461.5" class="body-small" text-anchor="middle">
+<tspan x="3390" dy="0">Location / Gap / Window edge?</tspan>
+</text>
+<a href="../../src/core/RouteTraversalCapture.cpp#L22">
+<text x="3390" y="1559.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/RouteTraversalCapture.cpp:22</tspan>
+</text>
+</a>
+</g>
+<g id="cl">
+<text x="3878.0" y="1340.0" class="note-heading" text-anchor="start">
+<tspan x="3878.0" dy="0">cl</tspan>
+</text>
+<a href="#c8">
+<title>SectorEdge::getDirectedTraversalFacts(): Location: Room fit/speed. Gap: no continuation. Window: normally traversable aperture only. Return c8.</title>
+<rect x="3870.0" y="1348.0" width="450" height="174" rx="35" class="port"/>
+<text x="4095" y="1393.5" class="fn" text-anchor="middle">
+<tspan x="4095" dy="0">SectorEdge::getDirectedTraversalFacts</tspan>
+<tspan x="4095" dy="19">()</tspan>
+</text>
+<text x="4095" y="1440.5" class="body" text-anchor="middle">
+<tspan x="4095" dy="0">Location: Room fit/speed. Gap: no</tspan>
+<tspan x="4095" dy="21">continuation. Window: normally traversable</tspan>
+<tspan x="4095" dy="21">aperture only. Return c8.</tspan>
+</text>
+</a>
+<a href="../../src/core/SectorEdge.cpp#L53">
+<text x="4095" y="1541.0" class="ref" text-anchor="middle">
+<tspan x="4095" dy="0">src/core/SectorEdge.cpp:53</tspan>
+</text>
+</a>
+</g>
+<g id="c4">
+<text x="3018.0" y="1597.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">c4</tspan>
+</text>
+<title>RouteTraversalInputs::capture() [inline]: Door/Bulkhead endpoints: ordinary threshold, transport landing, Airlock or Chamber?</title>
+<polygon points="3390,1605.0 3770.0,1710 3390,1815.0 3010.0,1710" class="decision"/>
+<text x="3390" y="1668.5" class="fn-small" text-anchor="middle">
+<tspan x="3390" dy="0">RouteTraversalInputs::capture()</tspan>
+<tspan x="3390" dy="19">[inline]</tspan>
+</text>
+<text x="3390" y="1715.5" class="body-small" text-anchor="middle">
+<tspan x="3390" dy="0">Door/Bulkhead endpoints: ordinary</tspan>
+<tspan x="3390" dy="21">threshold, transport landing, Airlock or</tspan>
+<tspan x="3390" dy="21">Chamber?</tspan>
+</text>
+<a href="../../src/core/RouteTraversalCapture.cpp#L22">
+<text x="3390" y="1834.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/RouteTraversalCapture.cpp:22</tspan>
+</text>
+</a>
+</g>
+<g id="ct">
+<text x="3878.0" y="1615.0" class="note-heading" text-anchor="start">
+<tspan x="3878.0" dy="0">ct</tspan>
+</text>
+<a href="#c8">
+<title>RouteTraversalInputs::capture(): selectAgentCrossing(); validate both journey apertures, direction, Location access, operation vs locally usable passage. Return c8.</title>
+<rect x="3870.0" y="1623.0" width="450" height="174" rx="35" class="port"/>
+<text x="4095" y="1667.5" class="fn" text-anchor="middle">
+<tspan x="4095" dy="0">RouteTraversalInputs::capture()</tspan>
+</text>
+<text x="4095" y="1695.5" class="body" text-anchor="middle">
+<tspan x="4095" dy="0">selectAgentCrossing(); validate both</tspan>
+<tspan x="4095" dy="21">journey apertures, direction, Location</tspan>
+<tspan x="4095" dy="21">access, operation vs locally usable</tspan>
+<tspan x="4095" dy="21">passage. Return c8.</tspan>
+</text>
+</a>
+<a href="../../src/core/RouteTraversalCapture.cpp#L22">
+<text x="4095" y="1816.0" class="ref" text-anchor="middle">
+<tspan x="4095" dy="0">src/core/RouteTraversalCapture.cpp:22</tspan>
+</text>
+</a>
+</g>
+<g id="c5">
+<text x="3018.0" y="1872.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">c5</tspan>
+</text>
+<title>RouteTraversalInputs::capture() [inline]: Ladder or LadderMount edge?</title>
+<polygon points="3390,1880.0 3770.0,1985 3390,2090.0 3010.0,1985" class="decision"/>
+<text x="3390" y="1964.5" class="fn-small" text-anchor="middle">
+<tspan x="3390" dy="0">RouteTraversalInputs::capture()</tspan>
+<tspan x="3390" dy="19">[inline]</tspan>
+</text>
+<text x="3390" y="2011.5" class="body-small" text-anchor="middle">
+<tspan x="3390" dy="0">Ladder or LadderMount edge?</tspan>
+</text>
+<a href="../../src/core/RouteTraversalCapture.cpp#L22">
+<text x="3390" y="2109.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/RouteTraversalCapture.cpp:22</tspan>
+</text>
+</a>
+</g>
+<g id="clad">
+<text x="3878.0" y="1890.0" class="note-heading" text-anchor="start">
+<tspan x="3878.0" dy="0">clad</tspan>
+</text>
+<a href="#c8">
+<title>RouteTraversalInputs::capture(): Check endpoint/control side, extension, remembered Broken state, operation or adherence. Return c8.</title>
+<rect x="3870.0" y="1898.0" width="450" height="174" rx="35" class="port"/>
+<text x="4095" y="1953.0" class="fn" text-anchor="middle">
+<tspan x="4095" dy="0">RouteTraversalInputs::capture()</tspan>
+</text>
+<text x="4095" y="1981.0" class="body" text-anchor="middle">
+<tspan x="4095" dy="0">Check endpoint/control side, extension,</tspan>
+<tspan x="4095" dy="21">remembered Broken state, operation or</tspan>
+<tspan x="4095" dy="21">adherence. Return c8.</tspan>
+</text>
+</a>
+<a href="../../src/core/RouteTraversalCapture.cpp#L22">
+<text x="4095" y="2091.0" class="ref" text-anchor="middle">
+<tspan x="4095" dy="0">src/core/RouteTraversalCapture.cpp:22</tspan>
+</text>
+</a>
+</g>
+<g id="c6">
+<text x="3018.0" y="2147.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">c6</tspan>
+</text>
+<title>RouteTraversalInputs::capture() [inline]: Staircase/Stairwell body or Mount edge?</title>
+<polygon points="3390,2155.0 3770.0,2260 3390,2365.0 3010.0,2260" class="decision"/>
+<text x="3390" y="2239.5" class="fn-small" text-anchor="middle">
+<tspan x="3390" dy="0">RouteTraversalInputs::capture()</tspan>
+<tspan x="3390" dy="19">[inline]</tspan>
+</text>
+<text x="3390" y="2286.5" class="body-small" text-anchor="middle">
+<tspan x="3390" dy="0">Staircase/Stairwell body or Mount edge?</tspan>
+</text>
+<a href="../../src/core/RouteTraversalCapture.cpp#L22">
+<text x="3390" y="2384.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/RouteTraversalCapture.cpp:22</tspan>
+</text>
+</a>
+</g>
+<g id="cst">
+<text x="3878.0" y="2165.0" class="note-heading" text-anchor="start">
+<tspan x="3878.0" dy="0">cst</tspan>
+</text>
+<a href="#c8">
+<title>RouteTraversalInputs::capture(): Check mount/body role. Moving Escalator: one-way. Broken Escalator: stationary Staircase. Return c8.</title>
+<rect x="3870.0" y="2173.0" width="450" height="174" rx="35" class="port"/>
+<text x="4095" y="2228.0" class="fn" text-anchor="middle">
+<tspan x="4095" dy="0">RouteTraversalInputs::capture()</tspan>
+</text>
+<text x="4095" y="2256.0" class="body" text-anchor="middle">
+<tspan x="4095" dy="0">Check mount/body role. Moving Escalator:</tspan>
+<tspan x="4095" dy="21">one-way. Broken Escalator: stationary</tspan>
+<tspan x="4095" dy="21">Staircase. Return c8.</tspan>
+</text>
+</a>
+<a href="../../src/core/RouteTraversalCapture.cpp#L22">
+<text x="4095" y="2366.0" class="ref" text-anchor="middle">
+<tspan x="4095" dy="0">src/core/RouteTraversalCapture.cpp:22</tspan>
+</text>
+</a>
+</g>
+<g id="c7">
+<text x="3018.0" y="2440.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">c7</tspan>
+</text>
+<title>RouteTraversalInputs::capture(): ForceBridge: Room fit, extension, approach side/control. Lift/Shuttle/Mount: boarding, ride or exit; feasible landing/journey.</title>
+<rect x="3010.0" y="2448.0" width="760" height="174" rx="10" class="action"/>
+<text x="3390" y="2513.5" class="fn" text-anchor="middle">
+<tspan x="3390" dy="0">RouteTraversalInputs::capture()</tspan>
+</text>
+<text x="3390" y="2541.5" class="body" text-anchor="middle">
+<tspan x="3390" dy="0">ForceBridge: Room fit, extension, approach side/control. Lift/Shuttle/Mount:</tspan>
+<tspan x="3390" dy="21">boarding, ride or exit; feasible landing/journey.</tspan>
+</text>
+<a href="../../src/core/RouteTraversalCapture.cpp#L22">
+<text x="3390" y="2641.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/RouteTraversalCapture.cpp:22</tspan>
+</text>
+</a>
+</g>
+<g id="c8">
+<text x="3018.0" y="2715.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">c8</tspan>
+</text>
+<title>RouteTraversalInputs::evaluate(): For the matching type only: motion + known/expected wait + interaction + effort + crowding + risk + uncertainty.</title>
+<rect x="3010.0" y="2723.0" width="760" height="174" rx="10" class="action"/>
+<text x="3390" y="2788.5" class="fn" text-anchor="middle">
+<tspan x="3390" dy="0">RouteTraversalInputs::evaluate()</tspan>
+</text>
+<text x="3390" y="2816.5" class="body" text-anchor="middle">
+<tspan x="3390" dy="0">For the matching type only: motion + known/expected wait + interaction +</tspan>
+<tspan x="3390" dy="21">effort + crowding + risk + uncertainty.</tspan>
+</text>
+<a href="../../src/core/RouteTraversalInputs.cpp#L11">
+<text x="3390" y="2916.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/RouteTraversalInputs.cpp:11</tspan>
+</text>
+</a>
+</g>
+<g id="c9">
+<text x="3018.0" y="2990.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">c9</tspan>
+</text>
+<a href="#b6">
+<title>PathfindingWorkspace::evaluateArc(): policy.evaluate(facts, profile) returns weighted perceived cost and objective duration; cache by decision/pass.</title>
+<rect x="3010.0" y="2998.0" width="760" height="174" rx="35" class="port"/>
+<text x="3390" y="3063.5" class="fn" text-anchor="middle">
+<tspan x="3390" dy="0">PathfindingWorkspace::evaluateArc()</tspan>
+</text>
+<text x="3390" y="3091.5" class="body" text-anchor="middle">
+<tspan x="3390" dy="0">policy.evaluate(facts, profile) returns weighted perceived cost and</tspan>
+<tspan x="3390" dy="21">objective duration; cache by decision/pass.</tspan>
+</text>
+</a>
+<a href="../../src/core/Pathing.cpp#L208">
+<text x="3390" y="3191.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/Pathing.cpp:208</tspan>
+</text>
+</a>
+</g>
+<path d="M 3770.0 610 H 3817.5 V 610 H 3865.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3817.5" y="598" class="edge-label" text-anchor="middle">
+<tspan x="3817.5" dy="0">no</tspan>
+</text>
+<path d="M 3390 743.0 V 793.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3405" y="768.0" class="edge-label" text-anchor="start">
+<tspan x="3405" dy="0">yes</tspan>
+</text>
+<path d="M 3390 1000.0 V 1050.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 3770.0 1160 H 3817.5 V 1160 H 3865.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3817.5" y="1148" class="edge-label" text-anchor="middle">
+<tspan x="3817.5" dy="0">no</tspan>
+</text>
+<path d="M 3390 1293.0 V 1325.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3405" y="1309.0" class="edge-label" text-anchor="start">
+<tspan x="3405" dy="0">yes</tspan>
+</text>
+<path d="M 3770.0 1435 H 3817.5 V 1435 H 3865.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3817.5" y="1423" class="edge-label" text-anchor="middle">
+<tspan x="3817.5" dy="0">yes</tspan>
+</text>
+<path d="M 3390 1568.0 V 1600.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3405" y="1584.0" class="edge-label" text-anchor="start">
+<tspan x="3405" dy="0">no</tspan>
+</text>
+<path d="M 3770.0 1710 H 3817.5 V 1710 H 3865.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3817.5" y="1698" class="edge-label" text-anchor="middle">
+<tspan x="3817.5" dy="0">threshold</tspan>
+</text>
+<path d="M 3390 1843.0 V 1875.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3405" y="1859.0" class="edge-label" text-anchor="start">
+<tspan x="3405" dy="0">other types</tspan>
+</text>
+<path d="M 3770.0 1985 H 3817.5 V 1985 H 3865.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3817.5" y="1973" class="edge-label" text-anchor="middle">
+<tspan x="3817.5" dy="0">yes</tspan>
+</text>
+<path d="M 3390 2118.0 V 2150.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3405" y="2134.0" class="edge-label" text-anchor="start">
+<tspan x="3405" dy="0">no</tspan>
+</text>
+<path d="M 3770.0 2260 H 3817.5 V 2260 H 3865.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3817.5" y="2248" class="edge-label" text-anchor="middle">
+<tspan x="3817.5" dy="0">yes</tspan>
+</text>
+<path d="M 3390 2393.0 V 2443.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3405" y="2418.0" class="edge-label" text-anchor="start">
+<tspan x="3405" dy="0">no</tspan>
+</text>
+<path d="M 3390 2650.0 V 2718.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 3390 2925.0 V 2993.0" class="edge" marker-end="url(#arrow)"/>
+<text x="2980" y="3325" class="note-heading" text-anchor="start">
+<tspan x="2980" dy="0">READING NOTES</tspan>
+</text>
+<text x="2980" y="3359" class="note" text-anchor="start">
+<tspan x="2980" dy="0">Rows 3–7 summarize alternative type cases, not cumulative requirements. Ordinary Location arcs bypass capture and use</tspan>
+</text>
+<text x="2980" y="3382" class="note" text-anchor="start">
+<tspan x="2980" dy="0">SectorEdge facts directly. Live device/queue observations are local; remote planning uses baseline expectations or remembered</tspan>
+</text>
+<text x="2980" y="3405" class="note" text-anchor="start">
+<tspan x="2980" dy="0">condition, not global live state. BoothWindows never admit Agents.</tspan>
+</text>
+</g>
+<g id="D"><rect x="35" y="3505" width="1420" height="3100" rx="20" class="panel"/>
+<text x="70" y="3553" class="heading" text-anchor="start">
+<tspan x="70" dy="0">D  Waypoint approach &amp; intent</tspan>
+</text>
+<text x="70" y="3587" class="subtitle" text-anchor="start">
+<tspan x="70" dy="0">Path nodes store targetVertex and incoming edge. The next transition uses nodes[targetNode] → nodes[targetNode +</tspan>
+</text>
+<text x="70" y="3610" class="subtitle" text-anchor="start">
+<tspan x="70" dy="0">1].</tspan>
+</text>
+<g id="d0">
+<text x="108.0" y="3650.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">d0</tspan>
+</text>
+<title>Agent::startPathingInternal(): Validate destination occupancy/access; sync pose; enter MovingToVertex.</title>
+<rect x="100.0" y="3658.0" width="760" height="174" rx="10" class="action"/>
+<text x="480" y="3734.0" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">Agent::startPathingInternal()</tspan>
+</text>
+<text x="480" y="3762.0" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Validate destination occupancy/access; sync pose; enter MovingToVertex.</tspan>
+</text>
+<a href="../../src/core/Agent.cpp#L1765">
+<text x="480" y="3851.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/Agent.cpp:1765</tspan>
+</text>
+</a>
+</g>
+<g id="d1">
+<text x="108.0" y="3907.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">d1</tspan>
+</text>
+<title>Agent::getSkippablePathTarget() [inline]: Can bypass this intermediate physical waypoint?</title>
+<polygon points="480,3915.0 860.0,4020 480,4125.0 100.0,4020" class="decision"/>
+<text x="480" y="3989.0" class="fn-small" text-anchor="middle">
+<tspan x="480" dy="0">Agent::getSkippablePathTarget()</tspan>
+<tspan x="480" dy="19">[inline]</tspan>
+</text>
+<text x="480" y="4036.0" class="body-small" text-anchor="middle">
+<tspan x="480" dy="0">Can bypass this intermediate physical</tspan>
+<tspan x="480" dy="21">waypoint?</tspan>
+</text>
+<a href="../../src/core/Agent.cpp#L1898">
+<text x="480" y="4144.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/Agent.cpp:1898</tspan>
+</text>
+</a>
+</g>
+<g id="ds">
+<text x="968.0" y="3925.0" class="note-heading" text-anchor="start">
+<tspan x="968.0" dy="0">ds</tspan>
+</text>
+<title>Agent::getSkippablePathTarget(): Same Layer/height; opposite sides of Agent; same Local depth; no required source action or Chamber waypoint.</title>
+<rect x="960.0" y="3933.0" width="450" height="174" rx="10" class="action"/>
+<text x="1185" y="3988.0" class="fn" text-anchor="middle">
+<tspan x="1185" dy="0">Agent::getSkippablePathTarget()</tspan>
+</text>
+<text x="1185" y="4016.0" class="body" text-anchor="middle">
+<tspan x="1185" dy="0">Same Layer/height; opposite sides of Agent;</tspan>
+<tspan x="1185" dy="21">same Local depth; no required source action</tspan>
+<tspan x="1185" dy="21">or Chamber waypoint.</tspan>
+</text>
+<a href="../../src/core/Agent.cpp#L1898">
+<text x="1185" y="4126.0" class="ref" text-anchor="middle">
+<tspan x="1185" dy="0">src/core/Agent.cpp:1898</tspan>
+</text>
+</a>
+</g>
+<g id="d2">
+<text x="108.0" y="4200.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">d2</tspan>
+</text>
+<title>Agent::moveToVertex(): Use original or skippable target; look through coincident topology-only nodes, never skip an action-bearing edge.</title>
+<rect x="100.0" y="4208.0" width="760" height="174" rx="10" class="action"/>
+<text x="480" y="4273.5" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">Agent::moveToVertex()</tspan>
+</text>
+<text x="480" y="4301.5" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Use original or skippable target; look through coincident topology-only</tspan>
+<tspan x="480" dy="21">nodes, never skip an action-bearing edge.</tspan>
+</text>
+<a href="../../src/core/Agent.cpp#L1956">
+<text x="480" y="4401.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/Agent.cpp:1956</tspan>
+</text>
+</a>
+</g>
+<g id="d3">
+<text x="108.0" y="4475.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">d3</tspan>
+</text>
+<title>SC::stopForAvailableQueuePosition(): Can stop at a reserved waiting position before exact endpoint? Airlock occupants keep assigned interior position.</title>
+<rect x="100.0" y="4483.0" width="760" height="174" rx="10" class="action"/>
+<text x="480" y="4548.5" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">SC::stopForAvailableQueuePosition()</tspan>
+</text>
+<text x="480" y="4576.5" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Can stop at a reserved waiting position before exact endpoint? Airlock</tspan>
+<tspan x="480" dy="21">occupants keep assigned interior position.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorQueues.cpp#L122">
+<text x="480" y="4676.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorQueues.cpp:122</tspan>
+</text>
+</a>
+</g>
+<g id="d4">
+<text x="108.0" y="4750.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">d4</tspan>
+</text>
+<title>SC::isAtDoorCrossingArrival(): For ordinary Door, threshold row and crossing-width band suffice; do not force convergence on vertex centre.</title>
+<rect x="100.0" y="4758.0" width="760" height="174" rx="10" class="action"/>
+<text x="480" y="4823.5" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">SC::isAtDoorCrossingArrival()</tspan>
+</text>
+<text x="480" y="4851.5" class="body" text-anchor="middle">
+<tspan x="480" dy="0">For ordinary Door, threshold row and crossing-width band suffice; do not</tspan>
+<tspan x="480" dy="21">force convergence on vertex centre.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorQueues.cpp#L237">
+<text x="480" y="4951.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorQueues.cpp:237</tspan>
+</text>
+</a>
+</g>
+<g id="d5">
+<text x="108.0" y="5007.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">d5</tspan>
+</text>
+<title>Agent::moveToVertex() [inline]: Queue boundary, Door arrival band, or exact source endpoint reached?</title>
+<polygon points="480,5015.0 860.0,5120 480,5225.0 100.0,5120" class="decision"/>
+<text x="480" y="5098.5" class="fn-small" text-anchor="middle">
+<tspan x="480" dy="0">Agent::moveToVertex() [inline]</tspan>
+</text>
+<text x="480" y="5126.5" class="body-small" text-anchor="middle">
+<tspan x="480" dy="0">Queue boundary, Door arrival band, or exact</tspan>
+<tspan x="480" dy="21">source endpoint reached?</tspan>
+</text>
+<a href="../../src/core/Agent.cpp#L1956">
+<text x="480" y="5244.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/Agent.cpp:1956</tspan>
+</text>
+</a>
+</g>
+<g id="dw">
+<text x="968.0" y="5025.0" class="note-heading" text-anchor="start">
+<tspan x="968.0" dy="0">dw</tspan>
+</text>
+<a href="#F">
+<title>Agent::moveToPosition(): Walk at fitting Room-pose speed. F may operate the next needed control while approaching.</title>
+<rect x="960.0" y="5033.0" width="450" height="174" rx="35" class="port"/>
+<text x="1185" y="5088.0" class="fn" text-anchor="middle">
+<tspan x="1185" dy="0">Agent::moveToPosition()</tspan>
+</text>
+<text x="1185" y="5116.0" class="body" text-anchor="middle">
+<tspan x="1185" dy="0">Walk at fitting Room-pose speed. F may</tspan>
+<tspan x="1185" dy="21">operate the next needed control while</tspan>
+<tspan x="1185" dy="21">approaching.</tspan>
+</text>
+</a>
+<a href="../../src/core/Agent.cpp#L1853">
+<text x="1185" y="5226.0" class="ref" text-anchor="middle">
+<tspan x="1185" dy="0">src/core/Agent.cpp:1853</tspan>
+</text>
+</a>
+</g>
+<g id="d6">
+<text x="108.0" y="5282.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">d6</tspan>
+</text>
+<title>Agent::moveToVertex() [inline]: This is the final Path node?</title>
+<polygon points="480,5290.0 860.0,5395 480,5500.0 100.0,5395" class="decision"/>
+<text x="480" y="5384.0" class="fn-small" text-anchor="middle">
+<tspan x="480" dy="0">Agent::moveToVertex() [inline]</tspan>
+</text>
+<text x="480" y="5412.0" class="body-small" text-anchor="middle">
+<tspan x="480" dy="0">This is the final Path node?</tspan>
+</text>
+<a href="../../src/core/Agent.cpp#L1956">
+<text x="480" y="5519.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/Agent.cpp:1956</tspan>
+</text>
+</a>
+</g>
+<g id="de">
+<text x="968.0" y="5300.0" class="note-heading" text-anchor="start">
+<tspan x="968.0" dy="0">de</tspan>
+</text>
+<a href="#a9">
+<title>SC::updateMovementGoals(): Arrival is finalized in cleanup; selected Agent action only, no implicit Furniture use.</title>
+<rect x="960.0" y="5308.0" width="450" height="174" rx="35" class="port"/>
+<text x="1185" y="5363.0" class="fn" text-anchor="middle">
+<tspan x="1185" dy="0">SC::updateMovementGoals()</tspan>
+</text>
+<text x="1185" y="5391.0" class="body" text-anchor="middle">
+<tspan x="1185" dy="0">Arrival is finalized in cleanup; selected</tspan>
+<tspan x="1185" dy="21">Agent action only, no implicit Furniture</tspan>
+<tspan x="1185" dy="21">use.</tspan>
+</text>
+</a>
+<a href="../../src/core/SimulationCoordinatorAgents.cpp#L739">
+<text x="1185" y="5501.0" class="ref" text-anchor="middle">
+<tspan x="1185" dy="0">src/core/SimulationCoordinatorAgents.cpp:739</tspan>
+</text>
+</a>
+</g>
+<g id="d7">
+<text x="108.0" y="5575.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">d7</tspan>
+</text>
+<title>Agent::collectTraversalIntent(): WaitingForTraversal with no task: bind next edge, source vertex and destination vertex.</title>
+<rect x="100.0" y="5583.0" width="760" height="174" rx="10" class="action"/>
+<text x="480" y="5648.5" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">Agent::collectTraversalIntent()</tspan>
+</text>
+<text x="480" y="5676.5" class="body" text-anchor="middle">
+<tspan x="480" dy="0">WaitingForTraversal with no task: bind next edge, source vertex and</tspan>
+<tspan x="480" dy="21">destination vertex.</tspan>
+</text>
+<a href="../../src/core/Agent.cpp#L2006">
+<text x="480" y="5776.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/Agent.cpp:2006</tspan>
+</text>
+</a>
+</g>
+<g id="d8">
+<text x="108.0" y="5850.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">d8</tspan>
+</text>
+<title>SC::createTraversalRequest(): Create owned request; attach queue ticket / Ladder admission and extension lease where applicable.</title>
+<rect x="100.0" y="5858.0" width="760" height="174" rx="10" class="action"/>
+<text x="480" y="5923.5" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">SC::createTraversalRequest()</tspan>
+</text>
+<text x="480" y="5951.5" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Create owned request; attach queue ticket / Ladder admission and extension</tspan>
+<tspan x="480" dy="21">lease where applicable.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorQueues.cpp#L37">
+<text x="480" y="6051.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorQueues.cpp:37</tspan>
+</text>
+</a>
+</g>
+<g id="d9">
+<text x="108.0" y="6125.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">d9</tspan>
+</text>
+<a href="#E">
+<title>E · Runtime allocation: The next Allocation phase rechecks feasibility and asks the resource for admission.</title>
+<rect x="100.0" y="6133.0" width="760" height="174" rx="35" class="port"/>
+<text x="480" y="6198.5" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">E · Runtime allocation</tspan>
+</text>
+<text x="480" y="6226.5" class="body" text-anchor="middle">
+<tspan x="480" dy="0">The next Allocation phase rechecks feasibility and asks the resource for</tspan>
+<tspan x="480" dy="21">admission.</tspan>
+</text>
+</a>
+</g>
+<path d="M 480 3860.0 V 3910.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 860.0 4020 H 907.5 V 4020 H 955.0" class="edge" marker-end="url(#arrow)"/>
+<text x="907.5" y="4008" class="edge-label" text-anchor="middle">
+<tspan x="907.5" dy="0">yes</tspan>
+</text>
+<path d="M 480 4153.0 V 4203.0" class="edge" marker-end="url(#arrow)"/>
+<text x="495" y="4178.0" class="edge-label" text-anchor="start">
+<tspan x="495" dy="0">no</tspan>
+</text>
+<path d="M 960.0 4020 H 912.5 V 4295 H 865.0" class="edge" marker-end="url(#arrow)"/>
+<text x="912.5" y="4147.5" class="edge-label" text-anchor="middle">
+<tspan x="912.5" dy="0">new target</tspan>
+</text>
+<path d="M 480 4410.0 V 4478.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 480 4685.0 V 4753.0" class="edge" marker-end="url(#arrow)"/>
+<text x="495" y="4719.0" class="edge-label" text-anchor="start">
+<tspan x="495" dy="0">not stopped</tspan>
+</text>
+<path d="M 480 4960.0 V 5010.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 860.0 5120 H 907.5 V 5120 H 955.0" class="edge" marker-end="url(#arrow)"/>
+<text x="907.5" y="5108" class="edge-label" text-anchor="middle">
+<tspan x="907.5" dy="0">no</tspan>
+</text>
+<path d="M 480 5253.0 V 5285.0" class="edge" marker-end="url(#arrow)"/>
+<text x="495" y="5269.0" class="edge-label" text-anchor="start">
+<tspan x="495" dy="0">yes</tspan>
+</text>
+<path d="M 860.0 5395 H 907.5 V 5395 H 955.0" class="edge" marker-end="url(#arrow)"/>
+<text x="907.5" y="5383" class="edge-label" text-anchor="middle">
+<tspan x="907.5" dy="0">yes</tspan>
+</text>
+<path d="M 480 5528.0 V 5578.0" class="edge" marker-end="url(#arrow)"/>
+<text x="495" y="5553.0" class="edge-label" text-anchor="start">
+<tspan x="495" dy="0">no / next intent</tspan>
+</text>
+<path d="M 480 5785.0 V 5853.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 480 6060.0 V 6128.0" class="edge" marker-end="url(#arrow)"/>
+<text x="70" y="6460" class="note-heading" text-anchor="start">
+<tspan x="70" dy="0">READING NOTES</tspan>
+</text>
+<text x="70" y="6494" class="note" text-anchor="start">
+<tspan x="70" dy="0">A physical Interactable waypoint blocks skipping for Arms/None, but Remote control may omit a control-only detour. Gap,</tspan>
+</text>
+<text x="70" y="6517" class="note" text-anchor="start">
+<tspan x="70" dy="0">threshold, mount/body and Local-depth constraints still apply. Early queue stopping takes precedence over Door crossing-band</tspan>
+</text>
+<text x="70" y="6540" class="note" text-anchor="start">
+<tspan x="70" dy="0">arrival. An absent/finished Path idles instead of creating a request.</tspan>
+</text>
+</g>
+<g id="E"><rect x="1490" y="3505" width="1420" height="3100" rx="20" class="panel"/>
+<text x="1525" y="3553" class="heading" text-anchor="start">
+<tspan x="1525" dy="0">E  Runtime admission dispatch</tspan>
+</text>
+<text x="1525" y="3587" class="subtitle" text-anchor="start">
+<tspan x="1525" dy="0">Agent::allocateTraversal() rechecks before starting, not in the middle of an admitted crossing. Every branch</tspan>
+</text>
+<text x="1525" y="3610" class="subtitle" text-anchor="start">
+<tspan x="1525" dy="0">returns Pending, Granted or refusal.</tspan>
+</text>
+<g id="e0">
+<text x="1563.0" y="3650.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">e0</tspan>
+</text>
+<title>Agent::allocateTraversal(): Recheck opening fit, Location access, manual Door operation and committed-exit pose. Entry/resource gates repeat hard Mobility constraints.</title>
+<rect x="1555.0" y="3658.0" width="760" height="174" rx="10" class="action"/>
+<text x="1935" y="3723.5" class="fn" text-anchor="middle">
+<tspan x="1935" dy="0">Agent::allocateTraversal()</tspan>
+</text>
+<text x="1935" y="3751.5" class="body" text-anchor="middle">
+<tspan x="1935" dy="0">Recheck opening fit, Location access, manual Door operation and committed-</tspan>
+<tspan x="1935" dy="21">exit pose. Entry/resource gates repeat hard Mobility constraints.</tspan>
+</text>
+<a href="../../src/core/Agent.cpp#L2032">
+<text x="1935" y="3851.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/Agent.cpp:2032</tspan>
+</text>
+</a>
+</g>
+<g id="e1">
+<text x="1563.0" y="3907.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">e1</tspan>
+</text>
+<title>SC::allocateTraversalRequest() [inline]: Destination fit valid, and resource exists if identified?</title>
+<polygon points="1935,3915.0 2315.0,4020 1935,4125.0 1555.0,4020" class="decision"/>
+<text x="1935" y="3998.5" class="fn-small" text-anchor="middle">
+<tspan x="1935" dy="0">SC::allocateTraversalRequest() [inline]</tspan>
+</text>
+<text x="1935" y="4026.5" class="body-small" text-anchor="middle">
+<tspan x="1935" dy="0">Destination fit valid, and resource exists</tspan>
+<tspan x="1935" dy="21">if identified?</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L83">
+<text x="1935" y="4144.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/SimulationCoordinatorTraversal.cpp:83</tspan>
+</text>
+</a>
+</g>
+<g id="ex">
+<text x="2423.0" y="3925.0" class="note-heading" text-anchor="start">
+<tspan x="2423.0" dy="0">ex</tspan>
+</text>
+<a href="#I">
+<title>I · Refusal / replan: denyTraversalRequest(); authorization/clearance refusals may enter Route planning.</title>
+<rect x="2415.0" y="3933.0" width="450" height="174" rx="10" class="failure"/>
+<text x="2640" y="3988.0" class="fn" text-anchor="middle">
+<tspan x="2640" dy="0">I · Refusal / replan</tspan>
+</text>
+<text x="2640" y="4016.0" class="body" text-anchor="middle">
+<tspan x="2640" dy="0">denyTraversalRequest();</tspan>
+<tspan x="2640" dy="21">authorization/clearance refusals may enter</tspan>
+<tspan x="2640" dy="21">Route planning.</tspan>
+</text>
+</a>
+</g>
+<g id="e2">
+<text x="1563.0" y="4182.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">e2</tspan>
+</text>
+<title>SC::allocateTraversalRequest() [inline]: Airlock / Chamber / Lift / Shuttle authority?</title>
+<polygon points="1935,4190.0 2315.0,4295 1935,4400.0 1555.0,4295" class="decision"/>
+<text x="1935" y="4273.5" class="fn-small" text-anchor="middle">
+<tspan x="1935" dy="0">SC::allocateTraversalRequest() [inline]</tspan>
+</text>
+<text x="1935" y="4301.5" class="body-small" text-anchor="middle">
+<tspan x="1935" dy="0">Airlock / Chamber / Lift / Shuttle</tspan>
+<tspan x="1935" dy="21">authority?</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L83">
+<text x="1935" y="4419.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/SimulationCoordinatorTraversal.cpp:83</tspan>
+</text>
+</a>
+</g>
+<g id="eg">
+<text x="2423.0" y="4200.0" class="note-heading" text-anchor="start">
+<tspan x="2423.0" dy="0">eg</tspan>
+</text>
+<a href="#G">
+<title>G · Journey admission: Includes transport-owned Doors and open Platform lifts; interior Chamber walk waits for release phase.</title>
+<rect x="2415.0" y="4208.0" width="450" height="174" rx="35" class="port"/>
+<text x="2640" y="4263.0" class="fn" text-anchor="middle">
+<tspan x="2640" dy="0">G · Journey admission</tspan>
+</text>
+<text x="2640" y="4291.0" class="body" text-anchor="middle">
+<tspan x="2640" dy="0">Includes transport-owned Doors and open</tspan>
+<tspan x="2640" dy="21">Platform lifts; interior Chamber walk waits</tspan>
+<tspan x="2640" dy="21">for release phase.</tspan>
+</text>
+</a>
+</g>
+<g id="e3">
+<text x="1563.0" y="4457.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">e3</tspan>
+</text>
+<title>SC::allocateTraversalRequest() [inline]: Extensible resource not yet admitting?</title>
+<polygon points="1935,4465.0 2315.0,4570 1935,4675.0 1555.0,4570" class="decision"/>
+<text x="1935" y="4559.0" class="fn-small" text-anchor="middle">
+<tspan x="1935" dy="0">SC::allocateTraversalRequest() [inline]</tspan>
+</text>
+<text x="1935" y="4587.0" class="body-small" text-anchor="middle">
+<tspan x="1935" dy="0">Extensible resource not yet admitting?</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L83">
+<text x="1935" y="4694.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/SimulationCoordinatorTraversal.cpp:83</tspan>
+</text>
+</a>
+</g>
+<g id="ef">
+<text x="2423.0" y="4475.0" class="note-heading" text-anchor="start">
+<tspan x="2423.0" dy="0">ef</tspan>
+</text>
+<a href="#F">
+<title>SC::allocateExtensiblePreparation(): Choose applicable nearest source-side control; F prepares it; then retry admission.</title>
+<rect x="2415.0" y="4483.0" width="450" height="174" rx="35" class="port"/>
+<text x="2640" y="4538.0" class="fn" text-anchor="middle">
+<tspan x="2640" dy="0">SC::allocateExtensiblePreparation()</tspan>
+</text>
+<text x="2640" y="4566.0" class="body" text-anchor="middle">
+<tspan x="2640" dy="0">Choose applicable nearest source-side</tspan>
+<tspan x="2640" dy="21">control; F prepares it; then retry</tspan>
+<tspan x="2640" dy="21">admission.</tspan>
+</text>
+</a>
+<a href="../../src/core/SimulationCoordinatorDoors.cpp#L452">
+<text x="2640" y="4676.0" class="ref" text-anchor="middle">
+<tspan x="2640" dy="0">src/core/SimulationCoordinatorDoors.cpp:452</tspan>
+</text>
+</a>
+</g>
+<g id="e4">
+<text x="1563.0" y="4732.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">e4</tspan>
+</text>
+<title>SC::allocateTraversalRequest() [inline]: Ladder / coordinated Stairwell / ForceBridge?</title>
+<polygon points="1935,4740.0 2315.0,4845 1935,4950.0 1555.0,4845" class="decision"/>
+<text x="1935" y="4823.5" class="fn-small" text-anchor="middle">
+<tspan x="1935" dy="0">SC::allocateTraversalRequest() [inline]</tspan>
+</text>
+<text x="1935" y="4851.5" class="body-small" text-anchor="middle">
+<tspan x="1935" dy="0">Ladder / coordinated Stairwell /</tspan>
+<tspan x="1935" dy="21">ForceBridge?</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L83">
+<text x="1935" y="4969.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/SimulationCoordinatorTraversal.cpp:83</tspan>
+</text>
+</a>
+</g>
+<g id="el">
+<text x="2423.0" y="4750.0" class="note-heading" text-anchor="start">
+<tspan x="2423.0" dy="0">el</tspan>
+</text>
+<a href="#e9">
+<title>SC::tryGrantLadderAdmissions(): Entry: direction, capacity, spacing. Non-entry grants directly. ForceBridge: tryGrantDoorQueue(). Return e9.</title>
+<rect x="2415.0" y="4758.0" width="450" height="174" rx="35" class="port"/>
+<text x="2640" y="4813.0" class="fn" text-anchor="middle">
+<tspan x="2640" dy="0">SC::tryGrantLadderAdmissions()</tspan>
+</text>
+<text x="2640" y="4841.0" class="body" text-anchor="middle">
+<tspan x="2640" dy="0">Entry: direction, capacity, spacing. Non-</tspan>
+<tspan x="2640" dy="21">entry grants directly. ForceBridge:</tspan>
+<tspan x="2640" dy="21">tryGrantDoorQueue(). Return e9.</tspan>
+</text>
+</a>
+<a href="../../src/core/SimulationCoordinatorAdmissions.cpp#L147">
+<text x="2640" y="4951.0" class="ref" text-anchor="middle">
+<tspan x="2640" dy="0">src/core/SimulationCoordinatorAdmissions.cpp:147</tspan>
+</text>
+</a>
+</g>
+<g id="e5">
+<text x="1563.0" y="5007.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">e5</tspan>
+</text>
+<title>SC::allocateTraversalRequest() [inline]: Ordinary Door/Bulkhead: Broken, Unavailable or already usable?</title>
+<polygon points="1935,5015.0 2315.0,5120 1935,5225.0 1555.0,5120" class="decision"/>
+<text x="1935" y="5098.5" class="fn-small" text-anchor="middle">
+<tspan x="1935" dy="0">SC::allocateTraversalRequest() [inline]</tspan>
+</text>
+<text x="1935" y="5126.5" class="body-small" text-anchor="middle">
+<tspan x="1935" dy="0">Ordinary Door/Bulkhead: Broken, Unavailable</tspan>
+<tspan x="1935" dy="21">or already usable?</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L83">
+<text x="1935" y="5244.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/SimulationCoordinatorTraversal.cpp:83</tspan>
+</text>
+</a>
+</g>
+<g id="eu">
+<text x="2423.0" y="5025.0" class="note-heading" text-anchor="start">
+<tspan x="2423.0" dy="0">eu</tspan>
+</text>
+<a href="#e9">
+<title>SC::tryGrantDoorQueue(): If physical passage, willingness and queue/lane safety pass, grant. Frozen/unavailable unusable aperture → I.</title>
+<rect x="2415.0" y="5033.0" width="450" height="174" rx="35" class="port"/>
+<text x="2640" y="5088.0" class="fn" text-anchor="middle">
+<tspan x="2640" dy="0">SC::tryGrantDoorQueue()</tspan>
+</text>
+<text x="2640" y="5116.0" class="body" text-anchor="middle">
+<tspan x="2640" dy="0">If physical passage, willingness and</tspan>
+<tspan x="2640" dy="21">queue/lane safety pass, grant.</tspan>
+<tspan x="2640" dy="21">Frozen/unavailable unusable aperture → I.</tspan>
+</text>
+</a>
+<a href="../../src/core/SimulationCoordinatorQueues.cpp#L736">
+<text x="2640" y="5226.0" class="ref" text-anchor="middle">
+<tspan x="2640" dy="0">src/core/SimulationCoordinatorQueues.cpp:736</tspan>
+</text>
+</a>
+</g>
+<g id="e6">
+<text x="1563.0" y="5282.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">e6</tspan>
+</text>
+<title>SC::allocateTraversalRequest() [inline]: RemoteControlled activation mode?</title>
+<polygon points="1935,5290.0 2315.0,5395 1935,5500.0 1555.0,5395" class="decision"/>
+<text x="1935" y="5384.0" class="fn-small" text-anchor="middle">
+<tspan x="1935" dy="0">SC::allocateTraversalRequest() [inline]</tspan>
+</text>
+<text x="1935" y="5412.0" class="body-small" text-anchor="middle">
+<tspan x="1935" dy="0">RemoteControlled activation mode?</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L83">
+<text x="1935" y="5519.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/SimulationCoordinatorTraversal.cpp:83</tspan>
+</text>
+</a>
+</g>
+<g id="ed">
+<text x="2423.0" y="5300.0" class="note-heading" text-anchor="start">
+<tspan x="2423.0" dy="0">ed</tspan>
+</text>
+<a href="#F">
+<title>SC::allocateRemoteDoorPreparation(): Select same-source-Sector control, share preparation; F executes the press.</title>
+<rect x="2415.0" y="5308.0" width="450" height="174" rx="35" class="port"/>
+<text x="2640" y="5373.5" class="fn" text-anchor="middle">
+<tspan x="2640" dy="0">SC::allocateRemoteDoorPreparation()</tspan>
+</text>
+<text x="2640" y="5401.5" class="body" text-anchor="middle">
+<tspan x="2640" dy="0">Select same-source-Sector control, share</tspan>
+<tspan x="2640" dy="21">preparation; F executes the press.</tspan>
+</text>
+</a>
+<a href="../../src/core/SimulationCoordinatorDoors.cpp#L269">
+<text x="2640" y="5501.0" class="ref" text-anchor="middle">
+<tspan x="2640" dy="0">src/core/SimulationCoordinatorDoors.cpp:269</tspan>
+</text>
+</a>
+</g>
+<g id="e7">
+<text x="1563.0" y="5575.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">e7</tspan>
+</text>
+<a href="#e9">
+<title>SC::allocateTraversalRequest(): Manual ordinary Door: feasible and within capability reach before OpenDoor. Automatic ordinary Door: activate operation. Bulkhead Automatic: wait for spatial sensor. Return e9.</title>
+<rect x="1555.0" y="5583.0" width="760" height="174" rx="35" class="port"/>
+<text x="1935" y="5638.0" class="fn" text-anchor="middle">
+<tspan x="1935" dy="0">SC::allocateTraversalRequest()</tspan>
+</text>
+<text x="1935" y="5666.0" class="body" text-anchor="middle">
+<tspan x="1935" dy="0">Manual ordinary Door: feasible and within capability reach before OpenDoor.</tspan>
+<tspan x="1935" dy="21">Automatic ordinary Door: activate operation. Bulkhead Automatic: wait for</tspan>
+<tspan x="1935" dy="21">spatial sensor. Return e9.</tspan>
+</text>
+</a>
+<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L83">
+<text x="1935" y="5776.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/SimulationCoordinatorTraversal.cpp:83</tspan>
+</text>
+</a>
+</g>
+<g id="e8">
+<text x="1563.0" y="5850.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">e8</tspan>
+</text>
+<title>SC::allocateTraversalRequest(): No shared resource: edge.isTraversable() or requestTraversal(); traversable → grantTraversalRequest(). Window resource: normally traversable only.</title>
+<rect x="1555.0" y="5858.0" width="760" height="174" rx="10" class="action"/>
+<text x="1935" y="5923.5" class="fn" text-anchor="middle">
+<tspan x="1935" dy="0">SC::allocateTraversalRequest()</tspan>
+</text>
+<text x="1935" y="5951.5" class="body" text-anchor="middle">
+<tspan x="1935" dy="0">No shared resource: edge.isTraversable() or requestTraversal(); traversable</tspan>
+<tspan x="1935" dy="21">→ grantTraversalRequest(). Window resource: normally traversable only.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L83">
+<text x="1935" y="6051.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/SimulationCoordinatorTraversal.cpp:83</tspan>
+</text>
+</a>
+</g>
+<g id="e9">
+<text x="1563.0" y="6125.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">e9</tspan>
+</text>
+<a href="#H">
+<title>Agent::allocateTraversal() [inline]: Granted → adopt permit and go H. Pending → wait/local approach and repeat E next tick. Denied/expired → I.</title>
+<rect x="1555.0" y="6133.0" width="760" height="174" rx="35" class="port"/>
+<text x="1935" y="6198.5" class="fn" text-anchor="middle">
+<tspan x="1935" dy="0">Agent::allocateTraversal() [inline]</tspan>
+</text>
+<text x="1935" y="6226.5" class="body" text-anchor="middle">
+<tspan x="1935" dy="0">Granted → adopt permit and go H. Pending → wait/local approach and repeat E</tspan>
+<tspan x="1935" dy="21">next tick. Denied/expired → I.</tspan>
+</text>
+</a>
+<a href="../../src/core/Agent.cpp#L2032">
+<text x="1935" y="6326.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/Agent.cpp:2032</tspan>
+</text>
+</a>
+</g>
+<path d="M 1935 3860.0 V 3910.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 2315.0 4020 H 2362.5 V 4020 H 2410.0" class="edge" marker-end="url(#arrow)"/>
+<text x="2362.5" y="4008" class="edge-label" text-anchor="middle">
+<tspan x="2362.5" dy="0">no</tspan>
+</text>
+<path d="M 1555.0 4020 H 1517 V 5945 H 1550.0" class="edge dashed" marker-end="url(#arrow)"/>
+<text x="1560" y="4178.0" class="edge-label" text-anchor="start">
+<tspan x="1560" dy="0">valid; no authority /</tspan>
+<tspan x="1560" dy="18">Window</tspan>
+</text>
+<path d="M 1935 4153.0 V 4185.0" class="edge" marker-end="url(#arrow)"/>
+<text x="1950" y="4169.0" class="edge-label" text-anchor="start">
+<tspan x="1950" dy="0">valid resource</tspan>
+</text>
+<path d="M 2315.0 4295 H 2362.5 V 4295 H 2410.0" class="edge" marker-end="url(#arrow)"/>
+<text x="2362.5" y="4283" class="edge-label" text-anchor="middle">
+<tspan x="2362.5" dy="0">yes</tspan>
+</text>
+<path d="M 1935 4428.0 V 4460.0" class="edge" marker-end="url(#arrow)"/>
+<text x="1950" y="4444.0" class="edge-label" text-anchor="start">
+<tspan x="1950" dy="0">no</tspan>
+</text>
+<path d="M 2315.0 4570 H 2362.5 V 4570 H 2410.0" class="edge" marker-end="url(#arrow)"/>
+<text x="2362.5" y="4558" class="edge-label" text-anchor="middle">
+<tspan x="2362.5" dy="0">yes</tspan>
+</text>
+<path d="M 1935 4703.0 V 4735.0" class="edge" marker-end="url(#arrow)"/>
+<text x="1950" y="4719.0" class="edge-label" text-anchor="start">
+<tspan x="1950" dy="0">no</tspan>
+</text>
+<path d="M 2315.0 4845 H 2362.5 V 4845 H 2410.0" class="edge" marker-end="url(#arrow)"/>
+<text x="2362.5" y="4833" class="edge-label" text-anchor="middle">
+<tspan x="2362.5" dy="0">yes</tspan>
+</text>
+<path d="M 1935 4978.0 V 5010.0" class="edge" marker-end="url(#arrow)"/>
+<text x="1950" y="4994.0" class="edge-label" text-anchor="start">
+<tspan x="1950" dy="0">Door/Bulkhead</tspan>
+</text>
+<path d="M 2315.0 5120 H 2362.5 V 5120 H 2410.0" class="edge" marker-end="url(#arrow)"/>
+<text x="2362.5" y="5108" class="edge-label" text-anchor="middle">
+<tspan x="2362.5" dy="0">yes</tspan>
+</text>
+<path d="M 1935 5253.0 V 5285.0" class="edge" marker-end="url(#arrow)"/>
+<text x="1950" y="5269.0" class="edge-label" text-anchor="start">
+<tspan x="1950" dy="0">needs opening</tspan>
+</text>
+<path d="M 2315.0 5395 H 2362.5 V 5395 H 2410.0" class="edge" marker-end="url(#arrow)"/>
+<text x="2362.5" y="5383" class="edge-label" text-anchor="middle">
+<tspan x="2362.5" dy="0">yes</tspan>
+</text>
+<path d="M 1935 5528.0 V 5578.0" class="edge" marker-end="url(#arrow)"/>
+<text x="1950" y="5553.0" class="edge-label" text-anchor="start">
+<tspan x="1950" dy="0">no</tspan>
+</text>
+<path d="M 1935 6060.0 V 6128.0" class="edge" marker-end="url(#arrow)"/>
+<text x="1525" y="6460" class="note-heading" text-anchor="start">
+<tspan x="1525" dy="0">READING NOTES</tspan>
+</text>
+<text x="1525" y="6494" class="note" text-anchor="start">
+<tspan x="1525" dy="0">Dispatch rows are alternatives; no-resource/Window enters e8 directly. Ladder/Bridge/Door cases return to e9, not unrelated</tspan>
+</text>
+<text x="1525" y="6517" class="note" text-anchor="start">
+<tspan x="1525" dy="0">gates. Extensible passage repeats Permission adherence even when extended. Fully open standalone Bulkhead Doors allow</tspan>
+</text>
+<text x="1525" y="6540" class="note" text-anchor="start">
+<tspan x="1525" dy="0">concurrent bidirectional passage; controlled Door crossing lanes remain coordinated.</tspan>
+</text>
+</g>
+<g id="F"><rect x="2945" y="3505" width="1420" height="3100" rx="20" class="panel"/>
+<text x="2980" y="3553" class="heading" text-anchor="start">
+<tspan x="2980" dy="0">F  Control necessity, reach &amp; press</tspan>
+</text>
+<text x="2980" y="3587" class="subtitle" text-anchor="start">
+<tspan x="2980" dy="0">Device activation and physical crossing are separate. Remote control still uses control ownership, authorization,</tspan>
+</text>
+<text x="2980" y="3610" class="subtitle" text-anchor="start">
+<tspan x="2980" dy="0">queue and press duration.</tspan>
+</text>
+<g id="f0">
+<text x="3018.0" y="3632.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">f0</tspan>
+</text>
+<title>SC::tryAnticipatoryInteraction() [inline]: Remote control Object usage?</title>
+<polygon points="3390,3640.0 3770.0,3745 3390,3850.0 3010.0,3745" class="decision"/>
+<text x="3390" y="3724.5" class="fn-small" text-anchor="middle">
+<tspan x="3390" dy="0">SC::tryAnticipatoryInteraction()</tspan>
+<tspan x="3390" dy="19">[inline]</tspan>
+</text>
+<text x="3390" y="3771.5" class="body-small" text-anchor="middle">
+<tspan x="3390" dy="0">Remote control Object usage?</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L1584">
+<text x="3390" y="3869.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:1584</tspan>
+</text>
+</a>
+</g>
+<g id="fp">
+<text x="3878.0" y="3650.0" class="note-heading" text-anchor="start">
+<tspan x="3878.0" dy="0">fp</tspan>
+</text>
+<title>SC::tryPhysicalPassingPress(): Arms: may press next Door control in passing. None: cannot operate objects.</title>
+<rect x="3870.0" y="3658.0" width="450" height="174" rx="10" class="action"/>
+<text x="4095" y="3723.5" class="fn" text-anchor="middle">
+<tspan x="4095" dy="0">SC::tryPhysicalPassingPress()</tspan>
+</text>
+<text x="4095" y="3751.5" class="body" text-anchor="middle">
+<tspan x="4095" dy="0">Arms: may press next Door control in</tspan>
+<tspan x="4095" dy="21">passing. None: cannot operate objects.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L1646">
+<text x="4095" y="3851.0" class="ref" text-anchor="middle">
+<tspan x="4095" dy="0">src/core/SimulationCoordinatorInteractions.cpp:1646</tspan>
+</text>
+</a>
+</g>
+<g id="f1">
+<text x="3018.0" y="3925.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">f1</tspan>
+</text>
+<title>SC::discoverUpcomingRemoteTarget(): Find first action-bearing edge after Location legs in current Sector; never activate unrelated nearby objects.</title>
+<rect x="3010.0" y="3933.0" width="760" height="174" rx="10" class="action"/>
+<text x="3390" y="3998.5" class="fn" text-anchor="middle">
+<tspan x="3390" dy="0">SC::discoverUpcomingRemoteTarget()</tspan>
+</text>
+<text x="3390" y="4026.5" class="body" text-anchor="middle">
+<tspan x="3390" dy="0">Find first action-bearing edge after Location legs in current Sector; never</tspan>
+<tspan x="3390" dy="21">activate unrelated nearby objects.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L1440">
+<text x="3390" y="4126.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:1440</tspan>
+</text>
+</a>
+</g>
+<g id="f2">
+<text x="3018.0" y="4200.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">f2</tspan>
+</text>
+<title>SC::remoteControlIsNeeded(): Resolve remoteInteractionControls(); filter source-Sector physical Buttons, permissions, enabled resource and needed command.</title>
+<rect x="3010.0" y="4208.0" width="760" height="174" rx="10" class="action"/>
+<text x="3390" y="4273.5" class="fn" text-anchor="middle">
+<tspan x="3390" dy="0">SC::remoteControlIsNeeded()</tspan>
+</text>
+<text x="3390" y="4301.5" class="body" text-anchor="middle">
+<tspan x="3390" dy="0">Resolve remoteInteractionControls(); filter source-Sector physical Buttons,</tspan>
+<tspan x="3390" dy="21">permissions, enabled resource and needed command.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L1478">
+<text x="3390" y="4401.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:1478</tspan>
+</text>
+</a>
+</g>
+<g id="f3">
+<text x="3018.0" y="4457.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">f3</tspan>
+</text>
+<title>World::agentCanOperateInteraction() [inline]: Agent active, same Sector, non-None, Buttons allowed and eligible geometry/capability?</title>
+<polygon points="3390,4465.0 3770.0,4570 3390,4675.0 3010.0,4570" class="decision"/>
+<text x="3390" y="4528.5" class="fn-small" text-anchor="middle">
+<tspan x="3390" dy="0">World::agentCanOperateInteraction()</tspan>
+<tspan x="3390" dy="19">[inline]</tspan>
+</text>
+<text x="3390" y="4575.5" class="body-small" text-anchor="middle">
+<tspan x="3390" dy="0">Agent active, same Sector, non-None,</tspan>
+<tspan x="3390" dy="21">Buttons allowed and eligible</tspan>
+<tspan x="3390" dy="21">geometry/capability?</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L338">
+<text x="3390" y="4694.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:338</tspan>
+</text>
+</a>
+</g>
+<g id="fx">
+<text x="3878.0" y="4475.0" class="note-heading" text-anchor="start">
+<tspan x="3878.0" dy="0">fx</tspan>
+</text>
+<a href="#I">
+<title>I · Ineligible operation: Rejected/cancelled or no approach. Already usable passage may still be eligible via E/G; None grants no operation.</title>
+<rect x="3870.0" y="4483.0" width="450" height="174" rx="10" class="failure"/>
+<text x="4095" y="4538.0" class="fn" text-anchor="middle">
+<tspan x="4095" dy="0">I · Ineligible operation</tspan>
+</text>
+<text x="4095" y="4566.0" class="body" text-anchor="middle">
+<tspan x="4095" dy="0">Rejected/cancelled or no approach. Already</tspan>
+<tspan x="4095" dy="21">usable passage may still be eligible via</tspan>
+<tspan x="4095" dy="21">E/G; None grants no operation.</tspan>
+</text>
+</a>
+</g>
+<g id="f4">
+<text x="3018.0" y="4750.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">f4</tspan>
+</text>
+<title>SC::requestInteractionForTraversal(): Arms may queue an autonomous physical approach. Remote must enter eligible range; use limitRemoteInteractionMovement() while walking.</title>
+<rect x="3010.0" y="4758.0" width="760" height="174" rx="10" class="action"/>
+<text x="3390" y="4823.5" class="fn" text-anchor="middle">
+<tspan x="3390" dy="0">SC::requestInteractionForTraversal()</tspan>
+</text>
+<text x="3390" y="4851.5" class="body" text-anchor="middle">
+<tspan x="3390" dy="0">Arms may queue an autonomous physical approach. Remote must enter eligible</tspan>
+<tspan x="3390" dy="21">range; use limitRemoteInteractionMovement() while walking.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L485">
+<text x="3390" y="4951.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:485</tspan>
+</text>
+</a>
+</g>
+<g id="f5">
+<text x="3018.0" y="5025.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">f5</tspan>
+</text>
+<title>SC::allocateInteractions(): Revalidate mutable eligibility; serialize control queue; compatible already-activated work can be shared.</title>
+<rect x="3010.0" y="5033.0" width="760" height="174" rx="10" class="action"/>
+<text x="3390" y="5098.5" class="fn" text-anchor="middle">
+<tspan x="3390" dy="0">SC::allocateInteractions()</tspan>
+</text>
+<text x="3390" y="5126.5" class="body" text-anchor="middle">
+<tspan x="3390" dy="0">Revalidate mutable eligibility; serialize control queue; compatible already-</tspan>
+<tspan x="3390" dy="21">activated work can be shared.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L1748">
+<text x="3390" y="5226.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:1748</tspan>
+</text>
+</a>
+</g>
+<g id="f6">
+<text x="3018.0" y="5282.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">f6</tspan>
+</text>
+<title>SC::moveInteractions() [inline]: Current grants/capability valid, and physical reach/range satisfied?</title>
+<polygon points="3390,5290.0 3770.0,5395 3390,5500.0 3010.0,5395" class="decision"/>
+<text x="3390" y="5373.5" class="fn-small" text-anchor="middle">
+<tspan x="3390" dy="0">SC::moveInteractions() [inline]</tspan>
+</text>
+<text x="3390" y="5401.5" class="body-small" text-anchor="middle">
+<tspan x="3390" dy="0">Current grants/capability valid, and</tspan>
+<tspan x="3390" dy="21">physical reach/range satisfied?</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L1813">
+<text x="3390" y="5519.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:1813</tspan>
+</text>
+</a>
+</g>
+<g id="fa">
+<text x="3878.0" y="5300.0" class="note-heading" text-anchor="start">
+<tspan x="3878.0" dy="0">fa</tspan>
+</text>
+<a href="#f6">
+<title>SC::moveInteractions(): Arms approaches until distance ≤ min(arm length, point reach). Remote uses inclusive Euclidean range to Button centre.</title>
+<rect x="3870.0" y="5308.0" width="450" height="174" rx="35" class="port"/>
+<text x="4095" y="5363.0" class="fn" text-anchor="middle">
+<tspan x="4095" dy="0">SC::moveInteractions()</tspan>
+</text>
+<text x="4095" y="5391.0" class="body" text-anchor="middle">
+<tspan x="4095" dy="0">Arms approaches until distance ≤ min(arm</tspan>
+<tspan x="4095" dy="21">length, point reach). Remote uses inclusive</tspan>
+<tspan x="4095" dy="21">Euclidean range to Button centre.</tspan>
+</text>
+</a>
+<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L1813">
+<text x="4095" y="5501.0" class="ref" text-anchor="middle">
+<tspan x="4095" dy="0">src/core/SimulationCoordinatorInteractions.cpp:1813</tspan>
+</text>
+</a>
+</g>
+<g id="f7">
+<text x="3018.0" y="5575.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">f7</tspan>
+</text>
+<title>SC::moveInteractions(): Count normal press ticks; pressPhysicalControl(); activate typed operations. Remote pauses locomotion while press work is queued.</title>
+<rect x="3010.0" y="5583.0" width="760" height="174" rx="10" class="action"/>
+<text x="3390" y="5648.5" class="fn" text-anchor="middle">
+<tspan x="3390" dy="0">SC::moveInteractions()</tspan>
+</text>
+<text x="3390" y="5676.5" class="body" text-anchor="middle">
+<tspan x="3390" dy="0">Count normal press ticks; pressPhysicalControl(); activate typed operations.</tspan>
+<tspan x="3390" dy="21">Remote pauses locomotion while press work is queued.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L1813">
+<text x="3390" y="5776.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:1813</tspan>
+</text>
+</a>
+</g>
+<g id="f8">
+<text x="3018.0" y="5850.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">f8</tspan>
+</text>
+<title>SC::advanceDeviceOperations(): Pending → Running → terminal. Reuse compatible work; enforce interlocks and Broken state; observe actual device travel.</title>
+<rect x="3010.0" y="5858.0" width="760" height="174" rx="10" class="action"/>
+<text x="3390" y="5923.5" class="fn" text-anchor="middle">
+<tspan x="3390" dy="0">SC::advanceDeviceOperations()</tspan>
+</text>
+<text x="3390" y="5951.5" class="body" text-anchor="middle">
+<tspan x="3390" dy="0">Pending → Running → terminal. Reuse compatible work; enforce interlocks and</tspan>
+<tspan x="3390" dy="21">Broken state; observe actual device travel.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L982">
+<text x="3390" y="6051.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:982</tspan>
+</text>
+</a>
+</g>
+<g id="f9">
+<text x="3018.0" y="6125.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">f9</tspan>
+</text>
+<a href="#E">
+<title>SC::updateInteractionResults(): Required rejection/failure propagates; otherwise wait or succeed (possibly best-effort failure). Return to E/G; still no traversal permit.</title>
+<rect x="3010.0" y="6133.0" width="760" height="174" rx="35" class="port"/>
+<text x="3390" y="6198.5" class="fn" text-anchor="middle">
+<tspan x="3390" dy="0">SC::updateInteractionResults()</tspan>
+</text>
+<text x="3390" y="6226.5" class="body" text-anchor="middle">
+<tspan x="3390" dy="0">Required rejection/failure propagates; otherwise wait or succeed (possibly</tspan>
+<tspan x="3390" dy="21">best-effort failure). Return to E/G; still no traversal permit.</tspan>
+</text>
+</a>
+<a href="../../src/core/SimulationCoordinatorInteractions.cpp#L1910">
+<text x="3390" y="6326.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/SimulationCoordinatorInteractions.cpp:1910</tspan>
+</text>
+</a>
+</g>
+<path d="M 3770.0 3745 H 3817.5 V 3745 H 3865.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3817.5" y="3733" class="edge-label" text-anchor="middle">
+<tspan x="3817.5" dy="0">no</tspan>
+</text>
+<path d="M 3390 3878.0 V 3928.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3405" y="3903.0" class="edge-label" text-anchor="start">
+<tspan x="3405" dy="0">yes</tspan>
+</text>
+<path d="M 3390 4135.0 V 4203.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 3390 4410.0 V 4460.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 3770.0 4570 H 3817.5 V 4570 H 3865.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3817.5" y="4558" class="edge-label" text-anchor="middle">
+<tspan x="3817.5" dy="0">no</tspan>
+</text>
+<path d="M 3390 4703.0 V 4753.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3405" y="4728.0" class="edge-label" text-anchor="start">
+<tspan x="3405" dy="0">yes</tspan>
+</text>
+<path d="M 3870.0 3745 H 3822.5 V 4845 H 3775.0" class="edge dashed" marker-end="url(#arrow)"/>
+<text x="3822.5" y="4267.0" class="edge-label" text-anchor="middle">
+<tspan x="3822.5" dy="0">if needed/el</tspan>
+<tspan x="3822.5" dy="18">igible</tspan>
+</text>
+<path d="M 3390 4960.0 V 5028.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 3390 5235.0 V 5285.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 3770.0 5395 H 3817.5 V 5395 H 3865.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3817.5" y="5383" class="edge-label" text-anchor="middle">
+<tspan x="3817.5" dy="0">not in reach</tspan>
+</text>
+<path d="M 3390 5528.0 V 5578.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3405" y="5553.0" class="edge-label" text-anchor="start">
+<tspan x="3405" dy="0">yes</tspan>
+</text>
+<path d="M 3390 5785.0 V 5853.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 3390 6060.0 V 6128.0" class="edge" marker-end="url(#arrow)"/>
+<text x="2980" y="6460" class="note-heading" text-anchor="start">
+<tspan x="2980" dy="0">READING NOTES</tspan>
+</text>
+<text x="2980" y="6494" class="note" text-anchor="start">
+<tspan x="2980" dy="0">Manual ordinary Doors have no separate Button: activateRemoteAnticipatoryInteraction() can issue eligible OpenDoor directly;</tspan>
+</text>
+<text x="2980" y="6517" class="note" text-anchor="start">
+<tspan x="2980" dy="0">E handles physical threshold operation. No eligible target means continue Path movement, not automatically fail.</tspan>
+</text>
+<text x="2980" y="6540" class="note" text-anchor="start">
+<tspan x="2980" dy="0">Panel/BoothWindow ownership-specific eligibility exists, but neither creates a passage edge.</tspan>
+</text>
+</g>
+<g id="G"><rect x="35" y="6640" width="1420" height="3100" rx="20" class="panel"/>
+<text x="70" y="6688" class="heading" text-anchor="start">
+<tspan x="70" dy="0">G  Transport &amp; chamber journeys</tspan>
+</text>
+<text x="70" y="6722" class="subtitle" text-anchor="start">
+<tspan x="70" dy="0">Source/target Sector selects boarding, riding or exit. This panel is called from E for every corresponding journey</tspan>
+</text>
+<text x="70" y="6745" class="subtitle" text-anchor="start">
+<tspan x="70" dy="0">edge.</tspan>
+</text>
+<g id="g0">
+<text x="108.0" y="6767.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">g0</tspan>
+</text>
+<title>SC::allocateLiftTraversal() [inline]: Outside → inside: g1 boarding. Both inside: g4 riding. Inside → outside: g6 exit.</title>
+<polygon points="480,6775.0 860.0,6880 480,6985.0 100.0,6880" class="decision"/>
+<text x="480" y="6858.5" class="fn-small" text-anchor="middle">
+<tspan x="480" dy="0">SC::allocateLiftTraversal() [inline]</tspan>
+</text>
+<text x="480" y="6886.5" class="body-small" text-anchor="middle">
+<tspan x="480" dy="0">Outside → inside: g1 boarding. Both inside:</tspan>
+<tspan x="480" dy="21">g4 riding. Inside → outside: g6 exit.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorLifts.cpp#L614">
+<text x="480" y="7004.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorLifts.cpp:614</tspan>
+</text>
+</a>
+</g>
+<g id="gp">
+<text x="968.0" y="6785.0" class="note-heading" text-anchor="start">
+<tspan x="968.0" dy="0">gp</tspan>
+</text>
+<title>SC::allocateOpenPlatformLiftTraversal(): Open Platform lift: same Room Sector; use mount/body role, occupant and Stop intent rather than Sector change.</title>
+<rect x="960.0" y="6793.0" width="450" height="174" rx="10" class="action"/>
+<text x="1185" y="6838.5" class="fn" text-anchor="middle">
+<tspan x="1185" dy="0">SC::allocateOpenPlatformLiftTraversal</tspan>
+<tspan x="1185" dy="19">()</tspan>
+</text>
+<text x="1185" y="6885.5" class="body" text-anchor="middle">
+<tspan x="1185" dy="0">Open Platform lift: same Room Sector; use</tspan>
+<tspan x="1185" dy="21">mount/body role, occupant and Stop intent</tspan>
+<tspan x="1185" dy="21">rather than Sector change.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorPlatformLifts.cpp#L40">
+<text x="1185" y="6986.0" class="ref" text-anchor="middle">
+<tspan x="1185" dy="0">src/core/SimulationCoordinatorPlatformLifts.cpp:40</tspan>
+</text>
+</a>
+</g>
+<g id="g1">
+<text x="108.0" y="7060.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">g1</tspan>
+</text>
+<title>SC::allocateLiftBoarding(): Recheck landing/destination willingness and feasible complete journey; attach ticket and Trip intent.</title>
+<rect x="100.0" y="7068.0" width="760" height="174" rx="10" class="action"/>
+<text x="480" y="7133.5" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">SC::allocateLiftBoarding()</tspan>
+</text>
+<text x="480" y="7161.5" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Recheck landing/destination willingness and feasible complete journey;</tspan>
+<tspan x="480" dy="21">attach ticket and Trip intent.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorLifts.cpp#L775">
+<text x="480" y="7261.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorLifts.cpp:775</tspan>
+</text>
+</a>
+</g>
+<g id="g2">
+<text x="108.0" y="7317.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">g2</tspan>
+</text>
+<title>SC::allocateLiftBoarding() [inline]: Locally boardable shared journey, or successful landing call?</title>
+<polygon points="480,7325.0 860.0,7430 480,7535.0 100.0,7430" class="decision"/>
+<text x="480" y="7408.5" class="fn-small" text-anchor="middle">
+<tspan x="480" dy="0">SC::allocateLiftBoarding() [inline]</tspan>
+</text>
+<text x="480" y="7436.5" class="body-small" text-anchor="middle">
+<tspan x="480" dy="0">Locally boardable shared journey, or</tspan>
+<tspan x="480" dy="21">successful landing call?</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorLifts.cpp#L775">
+<text x="480" y="7554.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorLifts.cpp:775</tspan>
+</text>
+</a>
+</g>
+<g id="gf">
+<text x="968.0" y="7335.0" class="note-heading" text-anchor="start">
+<tspan x="968.0" dy="0">gf</tspan>
+</text>
+<a href="#F">
+<title>F · Call / select control: Call if needed. None may only share a locally available accepted journey; no capability/permission bypass.</title>
+<rect x="960.0" y="7343.0" width="450" height="174" rx="35" class="port"/>
+<text x="1185" y="7398.0" class="fn" text-anchor="middle">
+<tspan x="1185" dy="0">F · Call / select control</tspan>
+</text>
+<text x="1185" y="7426.0" class="body" text-anchor="middle">
+<tspan x="1185" dy="0">Call if needed. None may only share a</tspan>
+<tspan x="1185" dy="21">locally available accepted journey; no</tspan>
+<tspan x="1185" dy="21">capability/permission bypass.</tspan>
+</text>
+</a>
+</g>
+<g id="g3">
+<text x="108.0" y="7610.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">g3</tspan>
+</text>
+<title>SC::allocateLiftBoarding(): Wait for vehicle alignment, entry aperture, disembark-first order, queue priority, capacity and boarding window; reserve slot then grant.</title>
+<rect x="100.0" y="7618.0" width="760" height="174" rx="10" class="action"/>
+<text x="480" y="7683.5" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">SC::allocateLiftBoarding()</tspan>
+</text>
+<text x="480" y="7711.5" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Wait for vehicle alignment, entry aperture, disembark-first order, queue</tspan>
+<tspan x="480" dy="21">priority, capacity and boarding window; reserve slot then grant.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorLifts.cpp#L775">
+<text x="480" y="7811.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorLifts.cpp:775</tspan>
+</text>
+</a>
+</g>
+<g id="g4">
+<text x="108.0" y="7885.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">g4</tspan>
+</text>
+<title>SC::allocateLiftRiding(): Occupant only: reuse accepted destination, or serialize requestLiftSelectorDestination(). Remote onboard selection is Lift/Platform only, not Shuttle.</title>
+<rect x="100.0" y="7893.0" width="760" height="174" rx="10" class="action"/>
+<text x="480" y="7948.0" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">SC::allocateLiftRiding()</tspan>
+</text>
+<text x="480" y="7976.0" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Occupant only: reuse accepted destination, or serialize</tspan>
+<tspan x="480" dy="21">requestLiftSelectorDestination(). Remote onboard selection is Lift/Platform</tspan>
+<tspan x="480" dy="21">only, not Shuttle.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorLifts.cpp#L1112">
+<text x="480" y="8086.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorLifts.cpp:1112</tspan>
+</text>
+</a>
+</g>
+<g id="g5">
+<text x="108.0" y="8160.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">g5</tspan>
+</text>
+<title>SC::advanceLiftResources(): Interlocked close → travel → open → disembark → board. Move passengers with vehicle; grant ride at scheduled destination.</title>
+<rect x="100.0" y="8168.0" width="760" height="174" rx="10" class="action"/>
+<text x="480" y="8233.5" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">SC::advanceLiftResources()</tspan>
+</text>
+<text x="480" y="8261.5" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Interlocked close → travel → open → disembark → board. Move passengers with</tspan>
+<tspan x="480" dy="21">vehicle; grant ride at scheduled destination.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorTick.cpp#L54">
+<text x="480" y="8361.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorTick.cpp:54</tspan>
+</text>
+</a>
+</g>
+<g id="g6">
+<text x="108.0" y="8435.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">g6</tspan>
+</text>
+<title>SC::allocateLiftDisembarking(): Reserve safe exit; walk within car/carriage as needed; retain occupancy until crossing commit. Committed exits survive later authorization loss.</title>
+<rect x="100.0" y="8443.0" width="760" height="174" rx="10" class="action"/>
+<text x="480" y="8508.5" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">SC::allocateLiftDisembarking()</tspan>
+</text>
+<text x="480" y="8536.5" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Reserve safe exit; walk within car/carriage as needed; retain occupancy</tspan>
+<tspan x="480" dy="21">until crossing commit. Committed exits survive later authorization loss.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorLifts.cpp#L1262">
+<text x="480" y="8636.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorLifts.cpp:1262</tspan>
+</text>
+</a>
+</g>
+<g id="g7">
+<text x="108.0" y="8710.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">g7</tspan>
+</text>
+<title>SC::allocateAirlockTraversal(): Alternative Airlock branch: entry control/shared accepted call, entry/exit clearance, same-side batch capacity, interlocked Door admission.</title>
+<rect x="100.0" y="8718.0" width="760" height="174" rx="10" class="action"/>
+<text x="480" y="8783.5" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">SC::allocateAirlockTraversal()</tspan>
+</text>
+<text x="480" y="8811.5" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Alternative Airlock branch: entry control/shared accepted call, entry/exit</tspan>
+<tspan x="480" dy="21">clearance, same-side batch capacity, interlocked Door admission.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorAirlocks.cpp#L144">
+<text x="480" y="8911.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorAirlocks.cpp:144</tspan>
+</text>
+</a>
+</g>
+<g id="g8">
+<text x="108.0" y="8985.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">g8</tspan>
+</text>
+<title>SC::allocateSecurityScannerTraversal(): Alternative Chamber branch: fixed entry/exit, exit fit and Location access; automatic capacity-one Scanner or batched Decontamination.</title>
+<rect x="100.0" y="8993.0" width="760" height="174" rx="10" class="action"/>
+<text x="480" y="9058.5" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">SC::allocateSecurityScannerTraversal()</tspan>
+</text>
+<text x="480" y="9086.5" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Alternative Chamber branch: fixed entry/exit, exit fit and Location access;</tspan>
+<tspan x="480" dy="21">automatic capacity-one Scanner or batched Decontamination.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorSecurityScanners.cpp#L237">
+<text x="480" y="9186.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorSecurityScanners.cpp:237</tspan>
+</text>
+</a>
+</g>
+<g id="g9">
+<text x="108.0" y="9260.0" class="note-heading" text-anchor="start">
+<tspan x="108.0" dy="0">g9</tspan>
+</text>
+<a href="#H">
+<title>SC::grantTraversalRequest(): Each journey leg grants only when ready. Airlock/Chamber close–process–open progression is resource-owned; return E/H for physical commit.</title>
+<rect x="100.0" y="9268.0" width="760" height="174" rx="35" class="port"/>
+<text x="480" y="9333.5" class="fn" text-anchor="middle">
+<tspan x="480" dy="0">SC::grantTraversalRequest()</tspan>
+</text>
+<text x="480" y="9361.5" class="body" text-anchor="middle">
+<tspan x="480" dy="0">Each journey leg grants only when ready. Airlock/Chamber close–process–open</tspan>
+<tspan x="480" dy="21">progression is resource-owned; return E/H for physical commit.</tspan>
+</text>
+</a>
+<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L35">
+<text x="480" y="9461.0" class="ref" text-anchor="middle">
+<tspan x="480" dy="0">src/core/SimulationCoordinatorTraversal.cpp:35</tspan>
+</text>
+</a>
+</g>
+<path d="M 860.0 6880 H 907.5 V 6880 H 955.0" class="edge" marker-end="url(#arrow)"/>
+<text x="907.5" y="6868" class="edge-label" text-anchor="middle">
+<tspan x="907.5" dy="0">platform</tspan>
+</text>
+<path d="M 480 7013.0 V 7063.0" class="edge" marker-end="url(#arrow)"/>
+<text x="495" y="7038.0" class="edge-label" text-anchor="start">
+<tspan x="495" dy="0">boarding</tspan>
+</text>
+<path d="M 480 7270.0 V 7320.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 860.0 7430 H 907.5 V 7430 H 955.0" class="edge" marker-end="url(#arrow)"/>
+<text x="907.5" y="7418" class="edge-label" text-anchor="middle">
+<tspan x="907.5" dy="0">call needed</tspan>
+</text>
+<path d="M 480 7563.0 V 7613.0" class="edge" marker-end="url(#arrow)"/>
+<text x="495" y="7588.0" class="edge-label" text-anchor="start">
+<tspan x="495" dy="0">ready</tspan>
+</text>
+<path d="M 480 7820.0 V 7888.0" class="edge dashed" marker-end="url(#arrow)"/>
+<text x="495" y="7854.0" class="edge-label" text-anchor="start">
+<tspan x="495" dy="0">after entry commit</tspan>
+</text>
+<path d="M 480 8095.0 V 8163.0" class="edge" marker-end="url(#arrow)"/>
+<text x="495" y="8129.0" class="edge-label" text-anchor="start">
+<tspan x="495" dy="0">destination accepted</tspan>
+</text>
+<path d="M 480 8370.0 V 8438.0" class="edge" marker-end="url(#arrow)"/>
+<text x="495" y="8404.0" class="edge-label" text-anchor="start">
+<tspan x="495" dy="0">destination reached</tspan>
+</text>
+<path d="M 100.0 8530 H 62 V 9355 H 95.0" class="edge dashed" marker-end="url(#arrow)"/>
+<text x="105" y="8670.0" class="edge-label" text-anchor="start">
+<tspan x="105" dy="0">exit ready</tspan>
+</text>
+<path d="M 100.0 8805 H 62 V 9355 H 95.0" class="edge dashed" marker-end="url(#arrow)"/>
+<text x="105" y="8945.0" class="edge-label" text-anchor="start">
+<tspan x="105" dy="0">cycle/exit ready</tspan>
+</text>
+<path d="M 480 9195.0 V 9263.0" class="edge dashed" marker-end="url(#arrow)"/>
+<text x="495" y="9229.0" class="edge-label" text-anchor="start">
+<tspan x="495" dy="0">scan/process/exit</tspan>
+<tspan x="495" dy="18">ready</tspan>
+</text>
+<text x="70" y="9595" class="note-heading" text-anchor="start">
+<tspan x="70" dy="0">READING NOTES</tspan>
+</text>
+<text x="70" y="9629" class="note" text-anchor="start">
+<tspan x="70" dy="0">g7 and g8 are independent entries from E, not stages after a Lift. Vehicle rides and entry/exit are separate requests.</tspan>
+</text>
+<text x="70" y="9652" class="note" text-anchor="start">
+<tspan x="70" dy="0">Platform contiguous Lift legs form one final-Stop journey; Shuttle carriage/door assignment is coordinated. Interrupted or</tspan>
+</text>
+<text x="70" y="9675" class="note" text-anchor="start">
+<tspan x="70" dy="0">Broken journeys use safe-exit recovery in I, never teleportation.</tspan>
+</text>
+</g>
+<g id="H"><rect x="1490" y="6640" width="1420" height="3100" rx="20" class="panel"/>
+<text x="1525" y="6688" class="heading" text-anchor="start">
+<tspan x="1525" dy="0">H  Permit, motion &amp; commit</tspan>
+</text>
+<text x="1525" y="6722" class="subtitle" text-anchor="start">
+<tspan x="1525" dy="0">Runtime movement preserves physical source membership until a valid authorized commit; source and target may</tspan>
+</text>
+<text x="1525" y="6745" class="subtitle" text-anchor="start">
+<tspan x="1525" dy="0">coincide in 2D but lie on different Layers.</tspan>
+</text>
+<g id="h0">
+<text x="1563.0" y="6785.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">h0</tspan>
+</text>
+<title>Agent::allocateTraversal(): Adopt Granted permit; record accepted exit pose, coalesce contiguous platform legs, and apply permitted waypoint skipping.</title>
+<rect x="1555.0" y="6793.0" width="760" height="174" rx="10" class="action"/>
+<text x="1935" y="6858.5" class="fn" text-anchor="middle">
+<tspan x="1935" dy="0">Agent::allocateTraversal()</tspan>
+</text>
+<text x="1935" y="6886.5" class="body" text-anchor="middle">
+<tspan x="1935" dy="0">Adopt Granted permit; record accepted exit pose, coalesce contiguous</tspan>
+<tspan x="1935" dy="21">platform legs, and apply permitted waypoint skipping.</tspan>
+</text>
+<a href="../../src/core/Agent.cpp#L2032">
+<text x="1935" y="6986.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/Agent.cpp:2032</tspan>
+</text>
+</a>
+</g>
+<g id="h1">
+<text x="1563.0" y="7060.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">h1</tspan>
+</text>
+<title>Door::selectAgentCrossing(): Door/Bulkhead: tallest allowed supported pose fitting aperture, including frozen opening; accepted exit pose may be grandfathered.</title>
+<rect x="1555.0" y="7068.0" width="760" height="174" rx="10" class="action"/>
+<text x="1935" y="7133.5" class="fn" text-anchor="middle">
+<tspan x="1935" dy="0">Door::selectAgentCrossing()</tspan>
+</text>
+<text x="1935" y="7161.5" class="body" text-anchor="middle">
+<tspan x="1935" dy="0">Door/Bulkhead: tallest allowed supported pose fitting aperture, including</tspan>
+<tspan x="1935" dy="21">frozen opening; accepted exit pose may be grandfathered.</tspan>
+</text>
+<a href="../../src/core/Door.cpp#L91">
+<text x="1935" y="7261.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/Door.cpp:91</tspan>
+</text>
+</a>
+</g>
+<g id="h2">
+<text x="1563.0" y="7335.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">h2</tspan>
+</text>
+<title>Agent::allocateTraversal(): Set crossing pose/duration; release Furniture use on departure. Moving Escalator samples walk/stand once per admitted task.</title>
+<rect x="1555.0" y="7343.0" width="760" height="174" rx="10" class="action"/>
+<text x="1935" y="7408.5" class="fn" text-anchor="middle">
+<tspan x="1935" dy="0">Agent::allocateTraversal()</tspan>
+</text>
+<text x="1935" y="7436.5" class="body" text-anchor="middle">
+<tspan x="1935" dy="0">Set crossing pose/duration; release Furniture use on departure. Moving</tspan>
+<tspan x="1935" dy="21">Escalator samples walk/stand once per admitted task.</tspan>
+</text>
+<a href="../../src/core/Agent.cpp#L2032">
+<text x="1935" y="7536.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/Agent.cpp:2032</tspan>
+</text>
+</a>
+</g>
+<g id="h3">
+<text x="1563.0" y="7592.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">h3</tspan>
+</text>
+<title>Agent::update() [inline]: Ordinary Door crossing duration still running?</title>
+<polygon points="1935,7600.0 2315.0,7705 1935,7810.0 1555.0,7705" class="decision"/>
+<text x="1935" y="7683.5" class="fn-small" text-anchor="middle">
+<tspan x="1935" dy="0">Agent::update() [inline]</tspan>
+</text>
+<text x="1935" y="7711.5" class="body-small" text-anchor="middle">
+<tspan x="1935" dy="0">Ordinary Door crossing duration still</tspan>
+<tspan x="1935" dy="21">running?</tspan>
+</text>
+<a href="../../src/core/Agent.cpp#L2371">
+<text x="1935" y="7829.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/Agent.cpp:2371</tspan>
+</text>
+</a>
+</g>
+<g id="hw">
+<text x="2423.0" y="7610.0" class="note-heading" text-anchor="start">
+<tspan x="2423.0" dy="0">hw</tspan>
+</text>
+<a href="#h3">
+<title>Agent::update(): Decrement crossing ticks in place; continue on a later tick.</title>
+<rect x="2415.0" y="7618.0" width="450" height="174" rx="35" class="port"/>
+<text x="2640" y="7683.5" class="fn" text-anchor="middle">
+<tspan x="2640" dy="0">Agent::update()</tspan>
+</text>
+<text x="2640" y="7711.5" class="body" text-anchor="middle">
+<tspan x="2640" dy="0">Decrement crossing ticks in place; continue</tspan>
+<tspan x="2640" dy="21">on a later tick.</tspan>
+</text>
+</a>
+<a href="../../src/core/Agent.cpp#L2371">
+<text x="2640" y="7811.0" class="ref" text-anchor="middle">
+<tspan x="2640" dy="0">src/core/Agent.cpp:2371</tspan>
+</text>
+</a>
+</g>
+<g id="h4">
+<text x="1563.0" y="7867.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">h4</tspan>
+</text>
+<title>Agent::update() [inline]: Door or enclosed Lift/Shuttle ride commits in place?</title>
+<polygon points="1935,7875.0 2315.0,7980 1935,8085.0 1555.0,7980" class="decision"/>
+<text x="1935" y="7958.5" class="fn-small" text-anchor="middle">
+<tspan x="1935" dy="0">Agent::update() [inline]</tspan>
+</text>
+<text x="1935" y="7986.5" class="body-small" text-anchor="middle">
+<tspan x="1935" dy="0">Door or enclosed Lift/Shuttle ride commits</tspan>
+<tspan x="1935" dy="21">in place?</tspan>
+</text>
+<a href="../../src/core/Agent.cpp#L2371">
+<text x="1935" y="8104.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/Agent.cpp:2371</tspan>
+</text>
+</a>
+</g>
+<g id="hi">
+<text x="2423.0" y="7885.0" class="note-heading" text-anchor="start">
+<tspan x="2423.0" dy="0">hi</tspan>
+</text>
+<a href="#h8">
+<title>Agent::update(): Enter AwaitingTraversalCommit without walking toward the far-side coincident/ride vertex.</title>
+<rect x="2415.0" y="7893.0" width="450" height="174" rx="35" class="port"/>
+<text x="2640" y="7948.0" class="fn" text-anchor="middle">
+<tspan x="2640" dy="0">Agent::update()</tspan>
+</text>
+<text x="2640" y="7976.0" class="body" text-anchor="middle">
+<tspan x="2640" dy="0">Enter AwaitingTraversalCommit without</tspan>
+<tspan x="2640" dy="21">walking toward the far-side coincident/ride</tspan>
+<tspan x="2640" dy="21">vertex.</tspan>
+</text>
+</a>
+<a href="../../src/core/Agent.cpp#L2371">
+<text x="2640" y="8086.0" class="ref" text-anchor="middle">
+<tspan x="2640" dy="0">src/core/Agent.cpp:2371</tspan>
+</text>
+</a>
+</g>
+<g id="h5">
+<text x="1563.0" y="8142.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">h5</tspan>
+</text>
+<title>Agent::update() [inline]: Ladder mount not yet reached horizontally?</title>
+<polygon points="1935,8150.0 2315.0,8255 1935,8360.0 1555.0,8255" class="decision"/>
+<text x="1935" y="8244.0" class="fn-small" text-anchor="middle">
+<tspan x="1935" dy="0">Agent::update() [inline]</tspan>
+</text>
+<text x="1935" y="8272.0" class="body-small" text-anchor="middle">
+<tspan x="1935" dy="0">Ladder mount not yet reached horizontally?</tspan>
+</text>
+<a href="../../src/core/Agent.cpp#L2371">
+<text x="1935" y="8379.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/Agent.cpp:2371</tspan>
+</text>
+</a>
+</g>
+<g id="hl">
+<text x="2423.0" y="8160.0" class="note-heading" text-anchor="start">
+<tspan x="2423.0" dy="0">hl</tspan>
+</text>
+<a href="#h5">
+<title>Agent::moveToPosition(): First walk to Ladder source x; only then begin vertical climb.</title>
+<rect x="2415.0" y="8168.0" width="450" height="174" rx="35" class="port"/>
+<text x="2640" y="8233.5" class="fn" text-anchor="middle">
+<tspan x="2640" dy="0">Agent::moveToPosition()</tspan>
+</text>
+<text x="2640" y="8261.5" class="body" text-anchor="middle">
+<tspan x="2640" dy="0">First walk to Ladder source x; only then</tspan>
+<tspan x="2640" dy="21">begin vertical climb.</tspan>
+</text>
+</a>
+<a href="../../src/core/Agent.cpp#L1853">
+<text x="2640" y="8361.0" class="ref" text-anchor="middle">
+<tspan x="2640" dy="0">src/core/Agent.cpp:1853</tspan>
+</text>
+</a>
+</g>
+<g id="h6">
+<text x="1563.0" y="8435.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">h6</tspan>
+</text>
+<title>Edge::getTraversalSpeed(): Resolve type-specific climb/stair/escalator speed; fallback to climb/walk; apply crossing pose ratio. Vehicle translation runs in G.</title>
+<rect x="1555.0" y="8443.0" width="760" height="174" rx="10" class="action"/>
+<text x="1935" y="8508.5" class="fn" text-anchor="middle">
+<tspan x="1935" dy="0">Edge::getTraversalSpeed()</tspan>
+</text>
+<text x="1935" y="8536.5" class="body" text-anchor="middle">
+<tspan x="1935" dy="0">Resolve type-specific climb/stair/escalator speed; fallback to climb/walk;</tspan>
+<tspan x="1935" dy="21">apply crossing pose ratio. Vehicle translation runs in G.</tspan>
+</text>
+<a href="../../include/core/Edge.h#L110">
+<text x="1935" y="8636.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">include/core/Edge.h:110</tspan>
+</text>
+</a>
+</g>
+<g id="h7">
+<text x="1563.0" y="8710.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">h7</tspan>
+</text>
+<title>Agent::moveToPosition(): Move toward destination; wait if not reached. A Location leg may stop/commit early at the next resource queue boundary.</title>
+<rect x="1555.0" y="8718.0" width="760" height="174" rx="10" class="action"/>
+<text x="1935" y="8783.5" class="fn" text-anchor="middle">
+<tspan x="1935" dy="0">Agent::moveToPosition()</tspan>
+</text>
+<text x="1935" y="8811.5" class="body" text-anchor="middle">
+<tspan x="1935" dy="0">Move toward destination; wait if not reached. A Location leg may stop/commit</tspan>
+<tspan x="1935" dy="21">early at the next resource queue boundary.</tspan>
+</text>
+<a href="../../src/core/Agent.cpp#L1853">
+<text x="1935" y="8911.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/Agent.cpp:1853</tspan>
+</text>
+</a>
+</g>
+<g id="h8">
+<text x="1563.0" y="8967.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">h8</tspan>
+</text>
+<title>SC::commitTraversal() [inline]: Request/permit live, owner matched, endpoint or in-place rule and reservations/sector/interlocks valid?</title>
+<polygon points="1935,8975.0 2315.0,9080 1935,9185.0 1555.0,9080" class="decision"/>
+<text x="1935" y="9048.0" class="fn-small" text-anchor="middle">
+<tspan x="1935" dy="0">SC::commitTraversal() [inline]</tspan>
+</text>
+<text x="1935" y="9076.0" class="body-small" text-anchor="middle">
+<tspan x="1935" dy="0">Request/permit live, owner matched,</tspan>
+<tspan x="1935" dy="21">endpoint or in-place rule and</tspan>
+<tspan x="1935" dy="21">reservations/sector/interlocks valid?</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorTraversal.cpp#L394">
+<text x="1935" y="9204.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/SimulationCoordinatorTraversal.cpp:394</tspan>
+</text>
+</a>
+</g>
+<g id="hc">
+<text x="2423.0" y="8985.0" class="note-heading" text-anchor="start">
+<tspan x="2423.0" dy="0">hc</tspan>
+</text>
+<a href="#I">
+<title>I · Commit not accepted: Stay AwaitingTraversalCommit; cleanup handles timeout/expiry. Never transfer without authority.</title>
+<rect x="2415.0" y="8993.0" width="450" height="174" rx="10" class="failure"/>
+<text x="2640" y="9048.0" class="fn" text-anchor="middle">
+<tspan x="2640" dy="0">I · Commit not accepted</tspan>
+</text>
+<text x="2640" y="9076.0" class="body" text-anchor="middle">
+<tspan x="2640" dy="0">Stay AwaitingTraversalCommit; cleanup</tspan>
+<tspan x="2640" dy="21">handles timeout/expiry. Never transfer</tspan>
+<tspan x="2640" dy="21">without authority.</tspan>
+</text>
+</a>
+</g>
+<g id="h9">
+<text x="1563.0" y="9260.0" class="note-heading" text-anchor="start">
+<tspan x="1563.0" dy="0">h9</tspan>
+</text>
+<a href="#D">
+<title>Agent::commitTraversal(): Commit sector/occupancy transfer; consume node(s) via nextPathNode(); syncPoseToSector(); cleanup releases ownership → D or arrival A.</title>
+<rect x="1555.0" y="9268.0" width="760" height="174" rx="35" class="port"/>
+<text x="1935" y="9333.5" class="fn" text-anchor="middle">
+<tspan x="1935" dy="0">Agent::commitTraversal()</tspan>
+</text>
+<text x="1935" y="9361.5" class="body" text-anchor="middle">
+<tspan x="1935" dy="0">Commit sector/occupancy transfer; consume node(s) via nextPathNode();</tspan>
+<tspan x="1935" dy="21">syncPoseToSector(); cleanup releases ownership → D or arrival A.</tspan>
+</text>
+</a>
+<a href="../../src/core/Agent.cpp#L2237">
+<text x="1935" y="9461.0" class="ref" text-anchor="middle">
+<tspan x="1935" dy="0">src/core/Agent.cpp:2237</tspan>
+</text>
+</a>
+</g>
+<path d="M 1935 6995.0 V 7063.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 1935 7270.0 V 7338.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 1935 7545.0 V 7595.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 2315.0 7705 H 2362.5 V 7705 H 2410.0" class="edge" marker-end="url(#arrow)"/>
+<text x="2362.5" y="7693" class="edge-label" text-anchor="middle">
+<tspan x="2362.5" dy="0">yes</tspan>
+</text>
+<path d="M 1935 7838.0 V 7870.0" class="edge" marker-end="url(#arrow)"/>
+<text x="1950" y="7854.0" class="edge-label" text-anchor="start">
+<tspan x="1950" dy="0">no</tspan>
+</text>
+<path d="M 2315.0 7980 H 2362.5 V 7980 H 2410.0" class="edge" marker-end="url(#arrow)"/>
+<text x="2362.5" y="7968" class="edge-label" text-anchor="middle">
+<tspan x="2362.5" dy="0">yes</tspan>
+</text>
+<path d="M 1935 8113.0 V 8145.0" class="edge" marker-end="url(#arrow)"/>
+<text x="1950" y="8129.0" class="edge-label" text-anchor="start">
+<tspan x="1950" dy="0">no</tspan>
+</text>
+<path d="M 2315.0 8255 H 2362.5 V 8255 H 2410.0" class="edge" marker-end="url(#arrow)"/>
+<text x="2362.5" y="8243" class="edge-label" text-anchor="middle">
+<tspan x="2362.5" dy="0">yes</tspan>
+</text>
+<path d="M 1935 8388.0 V 8438.0" class="edge" marker-end="url(#arrow)"/>
+<text x="1950" y="8413.0" class="edge-label" text-anchor="start">
+<tspan x="1950" dy="0">no</tspan>
+</text>
+<path d="M 1935 8645.0 V 8713.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 1935 8920.0 V 8970.0" class="edge" marker-end="url(#arrow)"/>
+<text x="1950" y="8945.0" class="edge-label" text-anchor="start">
+<tspan x="1950" dy="0">reached / Commit</tspan>
+</text>
+<path d="M 2315.0 9080 H 2362.5 V 9080 H 2410.0" class="edge" marker-end="url(#arrow)"/>
+<text x="2362.5" y="9068" class="edge-label" text-anchor="middle">
+<tspan x="2362.5" dy="0">no</tspan>
+</text>
+<path d="M 1935 9213.0 V 9263.0" class="edge" marker-end="url(#arrow)"/>
+<text x="1950" y="9238.0" class="edge-label" text-anchor="start">
+<tspan x="1950" dy="0">yes</tspan>
+</text>
+<text x="1525" y="9595" class="note-heading" text-anchor="start">
+<tspan x="1525" dy="0">READING NOTES</tspan>
+</text>
+<text x="1525" y="9629" class="note" text-anchor="start">
+<tspan x="1525" dy="0">h1 is a threshold-only step; other edge types proceed to h2. Bulkhead crossing is physical horizontal movement, ordinary Door</tspan>
+</text>
+<text x="1525" y="9652" class="note" text-anchor="start">
+<tspan x="1525" dy="0">crossing is timed in place. Waiting Agents move only toward resource-owned local goals or remote-range approach targets.</tspan>
+</text>
+<text x="1525" y="9675" class="note" text-anchor="start">
+<tspan x="1525" dy="0">Crossings finish in their admitted pose even if later conditions change.</tspan>
+</text>
+</g>
+<g id="I"><rect x="2945" y="6640" width="1420" height="3100" rx="20" class="panel"/>
+<text x="2980" y="6688" class="heading" text-anchor="start">
+<tspan x="2980" dy="0">I  Waiting, refusal &amp; recovery</tspan>
+</text>
+<text x="2980" y="6722" class="subtitle" text-anchor="start">
+<tspan x="2980" dy="0">Continuation paths are conditional: waiting does not mean immediate failure, and replanning does not revoke an</tspan>
+</text>
+<text x="2980" y="6745" class="subtitle" text-anchor="start">
+<tspan x="2980" dy="0">accepted commitment.</tspan>
+</text>
+<g id="i0">
+<text x="3018.0" y="6785.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">i0</tspan>
+</text>
+<title>SC::updateTraversalProgressAndTimeouts(): Observe queue/approach/permit progress. Permit expiry returns request to Pending; local-goal retries may deny LocalGoalUnreachable.</title>
+<rect x="3010.0" y="6793.0" width="760" height="174" rx="10" class="action"/>
+<text x="3390" y="6858.5" class="fn" text-anchor="middle">
+<tspan x="3390" dy="0">SC::updateTraversalProgressAndTimeouts()</tspan>
+</text>
+<text x="3390" y="6886.5" class="body" text-anchor="middle">
+<tspan x="3390" dy="0">Observe queue/approach/permit progress. Permit expiry returns request to</tspan>
+<tspan x="3390" dy="21">Pending; local-goal retries may deny LocalGoalUnreachable.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorQueues.cpp#L521">
+<text x="3390" y="6986.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/SimulationCoordinatorQueues.cpp:521</tspan>
+</text>
+</a>
+</g>
+<g id="i1">
+<text x="3018.0" y="7042.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">i1</tspan>
+</text>
+<title>Agent::considerTraversalReplan() [inline]: Unpermitted queued request waited to a replan boundary?</title>
+<polygon points="3390,7050.0 3770.0,7155 3390,7260.0 3010.0,7155" class="decision"/>
+<text x="3390" y="7124.0" class="fn-small" text-anchor="middle">
+<tspan x="3390" dy="0">Agent::considerTraversalReplan()</tspan>
+<tspan x="3390" dy="19">[inline]</tspan>
+</text>
+<text x="3390" y="7171.0" class="body-small" text-anchor="middle">
+<tspan x="3390" dy="0">Unpermitted queued request waited to a</tspan>
+<tspan x="3390" dy="21">replan boundary?</tspan>
+</text>
+<a href="../../src/core/Agent.cpp#L2264">
+<text x="3390" y="7279.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/Agent.cpp:2264</tspan>
+</text>
+</a>
+</g>
+<g id="iw">
+<text x="3878.0" y="7060.0" class="note-heading" text-anchor="start">
+<tspan x="3878.0" dy="0">iw</tspan>
+</text>
+<a href="#E">
+<title>E · Continue waiting: Move to assigned queue/local goal; repeat allocation. Already served Airlock/Chamber batch reservation suppresses voluntary replanning.</title>
+<rect x="3870.0" y="7068.0" width="450" height="174" rx="35" class="port"/>
+<text x="4095" y="7112.5" class="fn" text-anchor="middle">
+<tspan x="4095" dy="0">E · Continue waiting</tspan>
+</text>
+<text x="4095" y="7140.5" class="body" text-anchor="middle">
+<tspan x="4095" dy="0">Move to assigned queue/local goal; repeat</tspan>
+<tspan x="4095" dy="21">allocation. Already served Airlock/Chamber</tspan>
+<tspan x="4095" dy="21">batch reservation suppresses voluntary</tspan>
+<tspan x="4095" dy="21">replanning.</tspan>
+</text>
+</a>
+</g>
+<g id="i2">
+<text x="3018.0" y="7335.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">i2</tspan>
+</text>
+<a href="#B">
+<title>World::beginVoluntaryRoutePlanning(): Retain valid Path/intent; sample interval; return B. Route persistence prevents marginal voluntary switching.</title>
+<rect x="3010.0" y="7343.0" width="760" height="174" rx="35" class="port"/>
+<text x="3390" y="7408.5" class="fn" text-anchor="middle">
+<tspan x="3390" dy="0">World::beginVoluntaryRoutePlanning()</tspan>
+</text>
+<text x="3390" y="7436.5" class="body" text-anchor="middle">
+<tspan x="3390" dy="0">Retain valid Path/intent; sample interval; return B. Route persistence</tspan>
+<tspan x="3390" dy="21">prevents marginal voluntary switching.</tspan>
+</text>
+</a>
+<a href="../../src/core/World.cpp#L12232">
+<text x="3390" y="7536.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/World.cpp:12232</tspan>
+</text>
+</a>
+</g>
+<g id="i3">
+<text x="3018.0" y="7610.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">i3</tspan>
+</text>
+<title>SC::replanAgentAfterAuthorizationRefusal(): Hard invalidation (permission, fit or stale Path): mandatory planning; current valid commitment must finish first.</title>
+<rect x="3010.0" y="7618.0" width="760" height="174" rx="10" class="action"/>
+<text x="3390" y="7683.5" class="fn" text-anchor="middle">
+<tspan x="3390" dy="0">SC::replanAgentAfterAuthorizationRefusal()</tspan>
+</text>
+<text x="3390" y="7711.5" class="body" text-anchor="middle">
+<tspan x="3390" dy="0">Hard invalidation (permission, fit or stale Path): mandatory planning;</tspan>
+<tspan x="3390" dy="21">current valid commitment must finish first.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorAgents.cpp#L483">
+<text x="3390" y="7811.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/SimulationCoordinatorAgents.cpp:483</tspan>
+</text>
+</a>
+</g>
+<g id="i4">
+<text x="3018.0" y="7867.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">i4</tspan>
+</text>
+<title>SC::hasCommittedMovement() [inline]: Crossing or occupied journey still committed?</title>
+<polygon points="3390,7875.0 3770.0,7980 3390,8085.0 3010.0,7980" class="decision"/>
+<text x="3390" y="7958.5" class="fn-small" text-anchor="middle">
+<tspan x="3390" dy="0">SC::hasCommittedMovement() [inline]</tspan>
+</text>
+<text x="3390" y="7986.5" class="body-small" text-anchor="middle">
+<tspan x="3390" dy="0">Crossing or occupied journey still</tspan>
+<tspan x="3390" dy="21">committed?</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorAgents.cpp#L439">
+<text x="3390" y="8104.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/SimulationCoordinatorAgents.cpp:439</tspan>
+</text>
+</a>
+</g>
+<g id="ic">
+<text x="3878.0" y="7885.0" class="note-heading" text-anchor="start">
+<tspan x="3878.0" dy="0">ic</tspan>
+</text>
+<a href="#G">
+<title>SC::requestLiftPassengerSafeExit(): Retain passenger/exit guarantees; defer ordinary planning until safe completion. Broken vehicle may have to wait aligned/open.</title>
+<rect x="3870.0" y="7893.0" width="450" height="174" rx="35" class="port"/>
+<text x="4095" y="7937.5" class="fn" text-anchor="middle">
+<tspan x="4095" dy="0">SC::requestLiftPassengerSafeExit()</tspan>
+</text>
+<text x="4095" y="7965.5" class="body" text-anchor="middle">
+<tspan x="4095" dy="0">Retain passenger/exit guarantees; defer</tspan>
+<tspan x="4095" dy="21">ordinary planning until safe completion.</tspan>
+<tspan x="4095" dy="21">Broken vehicle may have to wait</tspan>
+<tspan x="4095" dy="21">aligned/open.</tspan>
+</text>
+</a>
+<a href="../../src/core/SimulationCoordinatorLifts.cpp#L433">
+<text x="4095" y="8086.0" class="ref" text-anchor="middle">
+<tspan x="4095" dy="0">src/core/SimulationCoordinatorLifts.cpp:433</tspan>
+</text>
+</a>
+</g>
+<g id="i5">
+<text x="3018.0" y="8142.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">i5</tspan>
+</text>
+<title>SC::allocateRemoteDoorPreparation() [inline]: Temporary preparation failed but retry budget remains?</title>
+<polygon points="3390,8150.0 3770.0,8255 3390,8360.0 3010.0,8255" class="decision"/>
+<text x="3390" y="8224.0" class="fn-small" text-anchor="middle">
+<tspan x="3390" dy="0">SC::allocateRemoteDoorPreparation()</tspan>
+<tspan x="3390" dy="19">[inline]</tspan>
+</text>
+<text x="3390" y="8271.0" class="body-small" text-anchor="middle">
+<tspan x="3390" dy="0">Temporary preparation failed but retry</tspan>
+<tspan x="3390" dy="21">budget remains?</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorDoors.cpp#L269">
+<text x="3390" y="8379.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/SimulationCoordinatorDoors.cpp:269</tspan>
+</text>
+</a>
+</g>
+<g id="ir">
+<text x="3878.0" y="8160.0" class="note-heading" text-anchor="start">
+<tspan x="3878.0" dy="0">ir</tspan>
+</text>
+<a href="#F">
+<title>F · Bounded retry: Remote Door: at most 2 failed attempts, 3-tick retry delay. Lift destination retry uses TraversalWaitingPolicy instead.</title>
+<rect x="3870.0" y="8168.0" width="450" height="174" rx="35" class="port"/>
+<text x="4095" y="8223.0" class="fn" text-anchor="middle">
+<tspan x="4095" dy="0">F · Bounded retry</tspan>
+</text>
+<text x="4095" y="8251.0" class="body" text-anchor="middle">
+<tspan x="4095" dy="0">Remote Door: at most 2 failed attempts,</tspan>
+<tspan x="4095" dy="21">3-tick retry delay. Lift destination retry</tspan>
+<tspan x="4095" dy="21">uses TraversalWaitingPolicy instead.</tspan>
+</text>
+</a>
+</g>
+<g id="i6">
+<text x="3018.0" y="8435.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">i6</tspan>
+</text>
+<title>Agent::cancelTraversal(): Cancel/release uncommitted requests and permits; clear local goals/remote approach. Cancellation is requester-local for shared work.</title>
+<rect x="3010.0" y="8443.0" width="760" height="174" rx="10" class="action"/>
+<text x="3390" y="8508.5" class="fn" text-anchor="middle">
+<tspan x="3390" dy="0">Agent::cancelTraversal()</tspan>
+</text>
+<text x="3390" y="8536.5" class="body" text-anchor="middle">
+<tspan x="3390" dy="0">Cancel/release uncommitted requests and permits; clear local goals/remote</tspan>
+<tspan x="3390" dy="21">approach. Cancellation is requester-local for shared work.</tspan>
+</text>
+<a href="../../src/core/Agent.cpp#L2313">
+<text x="3390" y="8636.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/Agent.cpp:2313</tspan>
+</text>
+</a>
+</g>
+<g id="i7">
+<text x="3018.0" y="8710.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">i7</tspan>
+</text>
+<a href="#B">
+<title>B · Re-evaluate route: At planning expiry calculate replacement; preserve valid retained alternative where applicable.</title>
+<rect x="3010.0" y="8718.0" width="760" height="174" rx="35" class="port"/>
+<text x="3390" y="8783.5" class="fn" text-anchor="middle">
+<tspan x="3390" dy="0">B · Re-evaluate route</tspan>
+</text>
+<text x="3390" y="8811.5" class="body" text-anchor="middle">
+<tspan x="3390" dy="0">At planning expiry calculate replacement; preserve valid retained</tspan>
+<tspan x="3390" dy="21">alternative where applicable.</tspan>
+</text>
+</a>
+</g>
+<g id="i8">
+<text x="3018.0" y="8967.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">i8</tspan>
+</text>
+<title>SC::advanceRoutePlanning() [inline]: No replacement AND no valid retained Path?</title>
+<polygon points="3390,8975.0 3770.0,9080 3390,9185.0 3010.0,9080" class="decision"/>
+<text x="3390" y="9069.0" class="fn-small" text-anchor="middle">
+<tspan x="3390" dy="0">SC::advanceRoutePlanning() [inline]</tspan>
+</text>
+<text x="3390" y="9097.0" class="body-small" text-anchor="middle">
+<tspan x="3390" dy="0">No replacement AND no valid retained Path?</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorAgents.cpp#L628">
+<text x="3390" y="9204.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/SimulationCoordinatorAgents.cpp:628</tspan>
+</text>
+</a>
+</g>
+<g id="iv">
+<text x="3878.0" y="8985.0" class="note-heading" text-anchor="start">
+<tspan x="3878.0" dy="0">iv</tspan>
+</text>
+<a href="#D">
+<title>D · Resume valid Path: assignPath(); active movement resumes on following tick.</title>
+<rect x="3870.0" y="8993.0" width="450" height="174" rx="35" class="port"/>
+<text x="4095" y="9058.5" class="fn" text-anchor="middle">
+<tspan x="4095" dy="0">D · Resume valid Path</tspan>
+</text>
+<text x="4095" y="9086.5" class="body" text-anchor="middle">
+<tspan x="4095" dy="0">assignPath(); active movement resumes on</tspan>
+<tspan x="4095" dy="21">following tick.</tspan>
+</text>
+</a>
+</g>
+<g id="i9">
+<text x="3018.0" y="9260.0" class="note-heading" text-anchor="start">
+<tspan x="3018.0" dy="0">i9</tspan>
+</text>
+<title>SC::updateMovementGoals(): Publish RouteLost once. Cancellation/target removal emits its appropriate outcome; behaviour may choose another destination.</title>
+<rect x="3010.0" y="9268.0" width="760" height="174" rx="10" class="failure"/>
+<text x="3390" y="9333.5" class="fn" text-anchor="middle">
+<tspan x="3390" dy="0">SC::updateMovementGoals()</tspan>
+</text>
+<text x="3390" y="9361.5" class="body" text-anchor="middle">
+<tspan x="3390" dy="0">Publish RouteLost once. Cancellation/target removal emits its appropriate</tspan>
+<tspan x="3390" dy="21">outcome; behaviour may choose another destination.</tspan>
+</text>
+<a href="../../src/core/SimulationCoordinatorAgents.cpp#L739">
+<text x="3390" y="9461.0" class="ref" text-anchor="middle">
+<tspan x="3390" dy="0">src/core/SimulationCoordinatorAgents.cpp:739</tspan>
+</text>
+</a>
+</g>
+<path d="M 3390 6995.0 V 7045.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 3770.0 7155 H 3817.5 V 7155 H 3865.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3817.5" y="7143" class="edge-label" text-anchor="middle">
+<tspan x="3817.5" dy="0">no</tspan>
+</text>
+<path d="M 3390 7288.0 V 7338.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3405" y="7313.0" class="edge-label" text-anchor="start">
+<tspan x="3405" dy="0">yes</tspan>
+</text>
+<path d="M 3390 7820.0 V 7870.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3405" y="7845.0" class="edge-label" text-anchor="start">
+<tspan x="3405" dy="0">mandatory entry</tspan>
+</text>
+<path d="M 3770.0 7980 H 3817.5 V 7980 H 3865.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3817.5" y="7968" class="edge-label" text-anchor="middle">
+<tspan x="3817.5" dy="0">yes</tspan>
+</text>
+<path d="M 3010.0 7980 H 2972 V 8530 H 3005.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3015" y="8138.0" class="edge-label" text-anchor="start">
+<tspan x="3015" dy="0">no</tspan>
+</text>
+<path d="M 3770.0 8255 H 3817.5 V 8255 H 3865.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3817.5" y="8225" class="edge-label" text-anchor="middle">
+<tspan x="3817.5" dy="0">yes / device</tspan>
+<tspan x="3817.5" dy="18">case</tspan>
+</text>
+<path d="M 3390 8388.0 V 8438.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3405" y="8413.0" class="edge-label" text-anchor="start">
+<tspan x="3405" dy="0">otherwise</tspan>
+</text>
+<path d="M 3390 8645.0 V 8713.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 3390 8920.0 V 8970.0" class="edge" marker-end="url(#arrow)"/>
+<path d="M 3770.0 9080 H 3817.5 V 9080 H 3865.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3817.5" y="9068" class="edge-label" text-anchor="middle">
+<tspan x="3817.5" dy="0">no</tspan>
+</text>
+<path d="M 3390 9213.0 V 9263.0" class="edge" marker-end="url(#arrow)"/>
+<text x="3405" y="9238.0" class="edge-label" text-anchor="start">
+<tspan x="3405" dy="0">yes</tspan>
+</text>
+<text x="2980" y="9595" class="note-heading" text-anchor="start">
+<tspan x="2980" dy="0">READING NOTES</tspan>
+</text>
+<text x="2980" y="9629" class="note" text-anchor="start">
+<tspan x="2980" dy="0">i3 and i5 are independent refusal/preparation entries as well as recovery gates; voluntary planning need not pass through</tspan>
+</text>
+<text x="2980" y="9652" class="note" text-anchor="start">
+<tspan x="2980" dy="0">remote Door retries. Paused simulation freezes planning intervals. Inactive Agents do not walk or press. Safe committed</tspan>
+</text>
+<text x="2980" y="9675" class="note" text-anchor="start">
+<tspan x="2980" dy="0">completion is an exception for that journey, never permission for a new admission.</tspan>
+</text>
+</g>
+<text x="60" y="9820" class="note" text-anchor="start">
+<tspan x="60" dy="0">Generated by docs/diagrams/generate_agent_path_flow.py • Source of truth: current C++ implementation • ADRs 0001, 0011, 0014, 0015, 0016, 0017, 0020</tspan>
+</text>
+</svg>
