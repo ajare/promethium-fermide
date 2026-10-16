@@ -11849,7 +11849,7 @@ namespace core
 		auto resource = mTraversalResources.find(doorId);
 		auto agent = mAgents.find(agentId);
 		if (!resource || !agent || !agent->isActive() || !resource->mEnabled
-			|| !canAgentOpenManualDoor(doorId, agentId) || resource->mDoor->isBroken()) return false;
+			|| !agentHasFeasibleManualDoorOperation(doorId, agentId) || resource->mDoor->isBroken()) return false;
 		auto const& door = *resource->mDoor;
 		if (door.getFrontSector().get() != agent->getSector() && door.getBackSector().get() != agent->getSector()) return false;
 		if (agent->getObjectUsage() == ObjectUsage::RemoteControl)
@@ -11862,6 +11862,11 @@ namespace core
 	}
 
 	bool World::canAgentOpenManualDoor(TraversalResourceId doorId, AgentId agentId) const
+	{
+		return agentHasFeasibleManualDoorOperation(doorId, agentId);
+	}
+
+	bool World::agentHasFeasibleManualDoorOperation(TraversalResourceId doorId, AgentId agentId) const
 	{
 		auto resource = mTraversalResources.find(doorId);
 		auto agent = mAgents.find(agentId);
@@ -12010,6 +12015,12 @@ namespace core
 	bool World::canAgentUseLiftJourney(TraversalResourceId resourceId,
 		Vector2 const& origin, Vector2 const& destination, AgentId agentId) const
 	{
+		return agentHasFeasibleLiftJourney(resourceId, origin, destination, agentId);
+	}
+
+	bool World::agentHasFeasibleLiftJourney(TraversalResourceId resourceId,
+		Vector2 const& origin, Vector2 const& destination, AgentId agentId) const
+	{
 		auto resource = mTraversalResources.find(resourceId);
 		auto destinationStop = resource && resource->mLiftCoordinator ? resource->mLiftStopIndex : ~0u;
 		if (resource && resource->mLiftCoordinator)
@@ -12019,15 +12030,31 @@ namespace core
 		}
 		if (!resource || (!resource->mLift && !resource->mShuttle)) return true;
 		auto stop = destinationStop != ~0u ? destinationStop : mSimulationCoordinator.findLiftStop(*resource, destination);
+		auto agent = mAgents.find(agentId);
+		return (agent && agentHasFeasibleLiftSelection(resourceId, stop, *agent))
+			|| agentCanReuseAcceptedLiftJourney(resourceId, stop, origin, agentId);
+	}
+
+	bool World::agentHasFeasibleLiftSelection(TraversalResourceId resourceId,
+		uint32_t stop, Agent const& agent) const
+	{
 		DeviceCommand command;
 		command.type = DeviceCommandType::SelectLiftDestination;
 		command.traversalResource = resourceId;
 		command.stopIndex = stop;
+		// Projected capability plus authorization. This must never issue a command;
+		// runtime selectors recheck actual occupancy, Sector and current range.
+		return (agent.getObjectUsage() == ObjectUsage::Arms
+			|| agentHasFeasibleRemoteLiftSelection(resourceId, agent))
+			&& missingLiftDestinationPermissions(command, getAgentId(&agent)).empty();
+	}
+
+	bool World::agentCanReuseAcceptedLiftJourney(TraversalResourceId resourceId,
+		uint32_t stop, Vector2 const& origin, AgentId agentId) const
+	{
+		auto resource = mTraversalResources.find(resourceId);
 		auto agent = mAgents.find(agentId);
-		if (agent && (agent->getObjectUsage() == ObjectUsage::Arms
-			|| agentCanRemotelySelectLiftDestination(resourceId, *agent, false))
-			&& missingLiftDestinationPermissions(command, agentId).empty()) return true;
-		if (!agent || !agent->getSector()) return false;
+		if (!resource || !agent || !agent->getSector()) return false;
 		bool local = find(resource->mOccupants.begin(), resource->mOccupants.end(), agentId)
 			!= resource->mOccupants.end();
 		if (!agentAdheresToLiftDestinationPermission(resourceId, stop, agentId)) return false;
@@ -12092,6 +12119,12 @@ namespace core
 	}
 
 	bool World::canAgentOperateTransportLandingControl(TraversalResourceId resourceId,
+		SectorId approach, Vector2 const& endpoint, AgentId agentId) const
+	{
+		return agentHasFeasibleTransportLandingOperation(resourceId, approach, endpoint, agentId);
+	}
+
+	bool World::agentHasFeasibleTransportLandingOperation(TraversalResourceId resourceId,
 		SectorId approach, Vector2 const& endpoint, AgentId agentId) const
 	{
 		auto agent = mAgents.find(agentId);
@@ -12186,7 +12219,9 @@ namespace core
 			auto agent = mAgents.find(agentId);
 			return agent && resource->mDoor->admitsBrokenPassage(*agent, agent->getGlobalPosition().y);
 		}
-		return canAgentOpenManualDoor(doorId, agentId);
+		// Admission's capability check deliberately remains projected: actual
+		// manual operation revalidates present-position reach separately.
+		return agentHasFeasibleManualDoorOperation(doorId, agentId);
 	}
 
 	void World::replanAgentAfterAuthorizationRefusal(AgentId id)
@@ -12349,7 +12384,7 @@ namespace core
 			if (!record || stop >= record->destinationPermissionRequirements.size()) continue;
 			auto const& requirement = record->destinationPermissionRequirements[stop];
 			if (find(requirement.begin(), requirement.end(), changed.value) != requirement.end()
-				&& !canAgentUseLiftJourney(node.edge->getTraversalResourceId(), agent.getGlobalPosition(),
+				&& !agentHasFeasibleLiftJourney(node.edge->getTraversalResourceId(), agent.getGlobalPosition(),
 					source->getPosition(), getAgentId(&agent))) currentRelevant = true;
 		}
 		if (!gained)

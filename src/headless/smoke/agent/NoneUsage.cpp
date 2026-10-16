@@ -733,7 +733,21 @@ namespace
 				require(world.setAgentIndividualMobilityProfile(id, profile), "Buttons restriction refused"); world.resumeSimulation();
 			}
 			if (variant == 2) { world.pauseSimulation(); require(world.grantAgentAccessPermission(id, key), "Destination grant refused"); world.resumeSimulation(); }
+			auto origin = world.lookupAgent(id).entity->getGlobalPosition();
+			auto destination = origin; destination.y = 1.f;
+			bool const selectionFeasible = variant == 0 || variant == 2 || variant == 4;
+			require(world.agentHasFeasibleLiftJourney(vehicle, origin, destination, id) == selectionFeasible
+				&& world.canAgentUseLiftJourney(vehicle, origin, destination, id) == selectionFeasible,
+				"Projected selection capability/authorization changed");
+			world.consumeSimulationEvents();
+			auto before = world.getSimulationSnapshot();
 			require(!world.requestInteraction(selector, id), "Non-occupant remotely selected onboard destination");
+			auto after = world.getSimulationSnapshot();
+			require(world.consumeSimulationEvents().empty()
+				&& after.interactionRequests.size() == before.interactionRequests.size()
+				&& after.deviceOperations.size() == before.deviceOperations.size()
+				&& world.lookupAgent(id).entity->getGlobalPosition().distanceTo(origin) == 0,
+				"Projected feasibility authorized or recorded a runtime selector operation");
 			core::DeviceCommand select; select.type = core::DeviceCommandType::SelectLiftDestination; select.traversalResource = vehicle; select.stopIndex = 1;
 			auto generic = world.createInteractionPoint("Not an onboard selector", core::SectorId{ground + 1}, {7.f, 0.f}, 100.f, 0,
 				{{select, core::InteractionBindingRequirement::Required}});
@@ -1460,6 +1474,9 @@ namespace
 			if (protectedJourney) require(world.setLiftDestinationPermissionRequirement(vehicleSector, 1, {key}, nullptr, object), "Destination requirement refused");
 			auto id = world.createAgent("Human", "Passenger", ground, 0, shuttle ? 5.5f : 8.5f);
 			require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None), "Passenger None override refused");
+			auto distantId = world.createAgent("Distant observer", upper, platform ? 1 : 0, 7.f);
+			require(world.setAgentIndividualObjectUsage(distantId, core::ObjectUsage::None)
+				&& world.setAgentIndividualPermissionAdherence(distantId, false), "Distant observer setup refused");
 			auto operatorId = world.createAgent("Operator", ground, 0, 7.f);
 			require(world.grantAgentAccessPermission(operatorId, key), "Operator grant refused");
 			quickPlanning(world, id);
@@ -1489,6 +1506,10 @@ namespace
 			for (auto const& entry : world.getSimulationSnapshot().traversalResources)
 				if (entry.id == vehicle) diagnostic = " stop=" + std::to_string(entry.liftCurrentStop) + " phase=" + std::to_string((int)entry.liftStopPhase) + " moving=" + std::to_string(entry.liftMoving);
 			require(usable, "None cannot observe an accepted boardable journey, kind " + std::to_string(kind) + diagnostic);
+			require(!world.agentHasFeasibleLiftJourney(vehicle, origin, destination, distantId)
+				&& !world.canAgentUseLiftJourney(vehicle, origin, destination, distantId),
+				"Unobserved remote accepted request leaked into journey planning");
+			require(!world.requestInteraction(landing, id), "Shared journey granted None command capability");
 			world.consumeSimulationEvents(); require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Shared intent refused");
 			bool onboard = false, arrived = false;
 			for (unsigned tick = 0; tick < 7000; ++tick)
@@ -1502,6 +1523,8 @@ namespace
 					require(world.setAgentIndividualObjectUsage(id, std::nullopt)
 						&& world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None)
 						&& world.setAgentIndividualObjectUsageDistance(id, 0.f), "Onboard override edits refused");
+					require(world.agentHasFeasibleLiftJourney(vehicle, origin, destination, id),
+						"Accepted passenger lost committed exit after capability/adherence changes");
 					world.resumeSimulation();
 				}
 				auto agent = world.lookupAgent(id).entity;

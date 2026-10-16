@@ -1170,7 +1170,7 @@ namespace core
 				bool eligible = missingLiftDestinationPermissions(command, id).empty()
 					&& agentAdheresToLiftDestinationPermission(resourceId, stop, id)
 					&& ((!agentForbidsButtons(actor) && actor->getObjectUsage() == ObjectUsage::Arms) || pending
-						|| agentCanRemotelySelectLiftDestination(resourceId, *actor, false));
+						|| agentHasFeasibleRemoteLiftSelection(resourceId, *actor));
 				auto stopLanding = landingAt(stop);
 				auto locationId = stopLanding && vehicle.mShuttle
 					? SectorId{(uint64_t)stopLanding->mDoor->getFrontSector()->getIndex() + 1}

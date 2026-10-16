@@ -250,21 +250,32 @@ namespace core
 		return float(std::max(0., std::abs(double(centre->x) - position.x) - *horizontal));
 	}
 
-	bool World::agentCanRemotelySelectLiftDestination(TraversalResourceId resourceId,
-		Agent const& actor, bool requireOccupancy) const
+	bool World::agentHasRemoteLiftSelectorCapability(TraversalResourceId resourceId,
+		Agent const& actor) const
 	{
 		auto resource = mTraversalResources.find(resourceId);
-		if (!resource || !resource->mLift || resource->mShuttle || !resource->mLiftSector
-			|| actor.getObjectUsage() != ObjectUsage::RemoteControl || agentForbidsButtons(&actor)) return false;
-		auto centre = resource->mLift->getPosition() + resource->mLift->getSize() * .5f;
-		auto occupied = find(resource->mOccupants.begin(), resource->mOccupants.end(), getAgentId(&actor))
-			!= resource->mOccupants.end();
-		if (occupied)
-		{
-			if (actor.getSector() != mSectors[resource->mLiftSector.value - 1].get()) return false;
-			return agentWithinRemoteControlRange(actor, centre);
-		}
-		if (requireOccupancy) return false;
+		return resource && resource->mLift && !resource->mShuttle && resource->mLiftSector
+			&& actor.getObjectUsage() == ObjectUsage::RemoteControl && !agentForbidsButtons(&actor);
+	}
+
+	bool World::agentCanRemotelySelectLiftDestinationHere(TraversalResourceId resourceId,
+		Agent const& actor) const
+	{
+		if (!agentHasRemoteLiftSelectorCapability(resourceId, actor)) return false;
+		auto resource = mTraversalResources.find(resourceId);
+		if (!isAgentTransportOccupant(resourceId, getAgentId(&actor))
+			|| actor.getSector() != mSectors[resource->mLiftSector.value - 1].get()) return false;
+		return agentWithinRemoteControlRange(actor,
+			resource->mLift->getPosition() + resource->mLift->getSize() * .5f);
+	}
+
+	bool World::agentHasFeasibleRemoteLiftSelection(TraversalResourceId resourceId,
+		Agent const& actor) const
+	{
+		if (!agentHasRemoteLiftSelectorCapability(resourceId, actor)) return false;
+		if (isAgentTransportOccupant(resourceId, getAgentId(&actor)))
+			return agentCanRemotelySelectLiftDestinationHere(resourceId, actor);
+		auto resource = mTraversalResources.find(resourceId);
 		// Planning may project boarding, never operate a selector. Enclosed cars
 		// centre a lone passenger; platforms retain authored capacity slots. Neither
 		// prediction exposes remote scheduling or occupancy. Allocation rechecks
@@ -272,9 +283,12 @@ namespace core
 		if (!resource->mOpenPlatformLift)
 			return resource->mLift->getSize().y * .5f <= actor.getObjectUsageDistance();
 		auto sector = mSectors[resource->mLiftSector.value - 1]->getPosition();
+		// Only the fixed horizontal geometry is needed for projected slots; do
+		// not read the remote vehicle's live vertical position.
+		auto centreX = resource->mLift->getPosition().x + resource->mLift->getSize().x * .5f;
 		return any_of(resource->mCapacityPositions.begin(), resource->mCapacityPositions.end(), [&](auto const& slot)
 		{
-			return std::hypot(double(sector.x + slot.x) - centre.x,
+			return std::hypot(double(sector.x + slot.x) - centreX,
 				double(slot.y) - resource->mLift->getSize().y * .5f) <= actor.getObjectUsageDistance();
 		});
 	}
@@ -348,7 +362,7 @@ namespace core
 					auto resource = mTraversalResources.find(binding.command.traversalResource);
 					return binding.command.type == DeviceCommandType::SelectLiftDestination && resource
 						&& find(resource->mControls.begin(), resource->mControls.end(), pointId) != resource->mControls.end()
-						&& agentCanRemotelySelectLiftDestination(binding.command.traversalResource, actor);
+						&& agentCanRemotelySelectLiftDestinationHere(binding.command.traversalResource, actor);
 				});
 			}
 			return agentWithinRemoteControlRange(actor, *centre);
@@ -1271,7 +1285,7 @@ namespace core
 		vector<Vector2> centres;
 		for (auto point : controls) centres.push_back(*mWorld.physicalButtonCentre(point));
 		if (auto centre = mWorld.remoteOrdinaryDoorCentre(upcoming);
-			centre && mWorld.canAgentOpenManualDoor(upcoming, getAgentId(&agent)))
+			centre && mWorld.agentHasFeasibleManualDoorOperation(upcoming, getAgentId(&agent)))
 		{
 			auto const& door = *mWorld.mTraversalResources.find(upcoming)->mDoor;
 			if (!door.isOpen() && !door.isOpening() && !door.isBroken()) centres.push_back(*centre);

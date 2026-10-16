@@ -807,7 +807,7 @@ namespace core
 			auto destination = request->mSourceEndpoint;
 			if (coordinator.mShuttle) destination.x = coordinator.mLiftStops[desiredStop].globalPosition;
 			else destination.y = coordinator.mLiftStops[desiredStop].globalPosition;
-			if (!mWorld.canAgentUseLiftJourney(request->mResource, request->mSourceEndpoint,
+			if (!mWorld.agentHasFeasibleLiftJourney(request->mResource, request->mSourceEndpoint,
 				destination, request->mOwner))
 			{
 				denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
@@ -842,7 +842,7 @@ namespace core
 		}
 		bool const opportunisticBoarding = mWorld.isTransportLocallyBoardable(
 			request->mResource, request->mSourceEndpoint)
-			&& !mWorld.canAgentOperateTransportLandingControl(request->mResource,
+			&& !mWorld.agentHasFeasibleTransportLandingOperation(request->mResource,
 				request->mSourceSector, request->mSourceEndpoint, request->mOwner);
 		if (!request->mPreparationRequested && !opportunisticBoarding)
 		{
@@ -1140,7 +1140,7 @@ namespace core
 			return;
 		}
 		if (actor && actor->getObjectUsage() != ObjectUsage::Arms
-			&& (!coordinator.mLift || !mWorld.agentCanRemotelySelectLiftDestination(coordinator.mLift->getTraversalResourceId(), *actor)))
+			&& (!coordinator.mLift || !mWorld.agentCanRemotelySelectLiftDestinationHere(coordinator.mLift->getTraversalResourceId(), *actor)))
 		{
 			requestLiftPassengerSafeExit(request->mOwner, TraversalFailureReason::ControlRejected);
 			denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);

@@ -132,7 +132,7 @@ namespace core
 				return;
 			}
 			if (actor && actor->getObjectUsage() != ObjectUsage::Arms
-				&& !mWorld.canAgentUseLiftJourney(request->mResource, request->mSourceEndpoint,
+				&& !mWorld.agentHasFeasibleLiftJourney(request->mResource, request->mSourceEndpoint,
 					request->mDestinationEndpoint, request->mOwner))
 			{
 				denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
@@ -162,7 +162,7 @@ namespace core
 			}
 			auto const opportunisticBoarding = mWorld.isTransportLocallyBoardable(
 				request->mResource, request->mSourceEndpoint)
-				&& !mWorld.canAgentOperateTransportLandingControl(request->mResource,
+				&& !mWorld.agentHasFeasibleTransportLandingOperation(request->mResource,
 					request->mSourceSector, request->mSourceEndpoint, request->mOwner);
 			if (!request->mPreparationRequested && !opportunisticBoarding)
 			{
@@ -262,7 +262,7 @@ namespace core
 			}
 			auto actor = mWorld.mAgents.find(request->mOwner);
 			if (actor && actor->getObjectUsage() != ObjectUsage::Arms
-				&& !mWorld.agentCanRemotelySelectLiftDestination(request->mResource, *actor))
+				&& !mWorld.agentCanRemotelySelectLiftDestinationHere(request->mResource, *actor))
 			{
 				requestLiftPassengerSafeExit(request->mOwner, TraversalFailureReason::ControlRejected);
 				denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);

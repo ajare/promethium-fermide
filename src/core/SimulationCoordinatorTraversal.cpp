@@ -267,7 +267,7 @@ namespace core
 				&& !resource->mDoor->isOpen())
 			{
 				auto actor = mWorld.mAgents.find(request->mOwner);
-				if (!actor || !mWorld.canAgentOpenManualDoor(request->mResource, request->mOwner))
+				if (!actor || !mWorld.agentHasFeasibleManualDoorOperation(request->mResource, request->mOwner))
 				{
 					denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
 					return;

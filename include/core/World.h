@@ -1661,8 +1661,13 @@ namespace core
 			InteractionPoint const& point, Agent const& actor) const;
 		bool agentCanOperateInteraction(InteractionPointId point, Agent const& actor,
 			InteractionEvaluationContext context) const;
-		bool agentCanRemotelySelectLiftDestination(TraversalResourceId resource, Agent const& actor,
-			bool requireOccupancy = true) const;
+		// Selector capability/geometry only; authorization and admission are separate.
+		bool agentHasRemoteLiftSelectorCapability(TraversalResourceId resource, Agent const& actor) const;
+		bool agentCanRemotelySelectLiftDestinationHere(TraversalResourceId resource, Agent const& actor) const;
+		bool agentHasFeasibleRemoteLiftSelection(TraversalResourceId resource, Agent const& actor) const;
+		bool agentHasFeasibleLiftSelection(TraversalResourceId resource, uint32_t stop, Agent const& actor) const;
+		bool agentCanReuseAcceptedLiftJourney(TraversalResourceId resource, uint32_t stop,
+			Vector2 const& origin, AgentId agent) const;
 		// Authorization-only policy for Permission adherence to usable transport.
 		bool agentSatisfiesTransportLandingPermission(TraversalResourceId resource,
 			SectorId approach, Vector2 const& endpoint, AgentId agent) const;
@@ -3010,7 +3015,9 @@ namespace core
 			std::string* diagnostic = nullptr);
 		std::vector<AccessPermissionId> getManualDoorPermissionRequirement(
 			TraversalResourceId door) const;
+		// Compatibility query: projected floor-approach feasibility, NOT operation here.
 		bool canAgentOpenManualDoor(TraversalResourceId door, AgentId agent) const;
+		bool agentHasFeasibleManualDoorOperation(TraversalResourceId door, AgentId agent) const;
 	private:
 		static bool extensibleControlAppliesToApproach(TraversalResource const& resource,
 			InteractionPoint const& point, SectorId approach, Vector2 const& approachPosition);
@@ -3039,13 +3046,19 @@ namespace core
 			SectorId approach, Vector2 const& approachPosition, AgentId agent) const;
 		std::vector<AccessPermissionId> missingLiftDestinationPermissions(
 			DeviceCommand const& command, AgentId agent) const;
+		// Compatibility wrapper for selection feasibility OR locally accepted reuse.
 		bool canAgentUseLiftJourney(TraversalResourceId resource, Vector2 const& origin,
+			Vector2 const& destination, AgentId agent) const;
+		bool agentHasFeasibleLiftJourney(TraversalResourceId resource, Vector2 const& origin,
 			Vector2 const& destination, AgentId agent) const;
 		// Destination willingness only. Non-adherence never authorizes selection;
 		// occupants are always allowed to complete an accepted journey.
 		bool agentAdheresToLiftDestinationPermission(TraversalResourceId resource,
 			uint32_t destinationStop, AgentId agent) const;
+		// Compatibility query: projected approach, not current-position reach or admission.
 		bool canAgentOperateTransportLandingControl(TraversalResourceId resource,
+			SectorId approach, Vector2 const& endpoint, AgentId agent) const;
+		bool agentHasFeasibleTransportLandingOperation(TraversalResourceId resource,
 			SectorId approach, Vector2 const& endpoint, AgentId agent) const;
 		// Landing willingness only: destination selection and physical boarding
 		// availability remain independent, and this is never an alighting gate.
