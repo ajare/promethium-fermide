@@ -760,6 +760,35 @@ namespace core
 		bool retargetShuttleDoorTraversal(TraversalRequestId requestId,
 			TraversalResource& coordinator, ShuttleDoor const& door);
 
+		// Upcoming remote-interaction steps (#630, R16). Path-based discovery,
+		// control resolution and per-control necessity are separated from the
+		// movement-limit and activation consumers so each step is reviewable on
+		// its own and the discovered target facts are reused within a step
+		// instead of being re-walked inline. Discovery reads only Path intent
+		// within the permitted Sector scope - never live device state,
+		// permissions or proximity - so every consumer still revalidates
+		// mutable eligibility at its own lifecycle boundary and no target
+		// outlives the step that produced it.
+		bool discoverUpcomingRemoteTarget(Agent const& agent,
+			TraversalResourceId& upcoming,
+			std::shared_ptr<const Vertex>& source) const;
+		std::vector<InteractionPointId> remoteInteractionControls(
+			TraversalResource const& resource, Vector2 const& sourcePosition) const;
+		bool remoteControlIsNeeded(InteractionPoint const& point,
+			TraversalResource const& resource, TraversalResourceId upcoming,
+			std::vector<InteractionPointId> const& controls,
+			Vector2 const& sourcePosition, SectorId sector) const;
+
+		// The two anticipatory consumers keep their distinct selection
+		// policies: remote activation prepares the discovered target from
+		// range, while a physical passing press follows the in-Sector Door
+		// route. Neither replaces physical crossing or boarding (#630).
+		void activateRemoteAnticipatoryInteraction(Agent& agent,
+			TraversalResourceId upcoming,
+			std::vector<InteractionPointId> const& controls);
+		void tryPhysicalPassingPress(Agent& agent, Vector2 const& movementStart,
+			Vector2 const& movementEnd);
+
 		InteractionRequestId rejectInteractionRequest(InteractionPointId point, AgentId actor,
 			std::vector<AccessPermissionId> const& missingPermissions);
 		DeviceOperationId bindInteractionOperation(InteractionRequest& request,

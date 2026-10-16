@@ -1426,65 +1426,108 @@ namespace core
 		}
 	}
 
-	vector<InteractionPointId> SimulationCoordinator::upcomingRemoteInteractionPoints(Agent const& agent, TraversalResourceId& upcoming) const
+	// R16 (#630): the upcoming remote-interaction pipeline is split into
+	// focused steps. Path-based discovery yields the target facts - the next
+	// action-bearing edge's resource and the in-Sector source vertex the
+	// approach is measured from - without consulting live device state,
+	// permissions or proximity. Control resolution turns the target into the
+	// resource's candidate controls, and the necessity step decides which of
+	// them still have work for the upcoming traversal. The movement-limit and
+	// activation consumers compose these steps once per step and reuse the
+	// facts downstream; each still revalidates mutable eligibility at its
+	// own lifecycle boundary, so no stale target cache is introduced.
+
+	bool SimulationCoordinator::discoverUpcomingRemoteTarget(Agent const& agent,
+		TraversalResourceId& upcoming, shared_ptr<const Vertex>& source) const
 	{
 		// Authored Path intent, not proximity, identifies the operation. Stop at
 		// the first action-bearing edge; never inspect another Sector's controls.
 		auto const& path = agent.mPath.path;
-		if (!path || !agent.getSector()) return {};
-		shared_ptr<const Vertex> source;
+		if (!path || !agent.getSector()) return false;
 		for (uint32_t i = agent.mPath.targetNode + 1; i < path->nodes.size(); ++i)
 		{
 			auto const& node = path->nodes[i];
 			source = path->nodes[i - 1].targetVertex;
-			if (!node.edge || !node.targetVertex || !source || source->getSector().get() != agent.getSector()) return {};
+			if (!node.edge || !node.targetVertex || !source || source->getSector().get() != agent.getSector()) return false;
 			if (node.edge->getType() != EdgeType::Location)
 			{
 				upcoming = node.edge->getTraversalResourceId();
-				break;
+				return true;
 			}
-			if (node.targetVertex->getSector().get() != agent.getSector()) return {};
+			if (node.targetVertex->getSector().get() != agent.getSector()) return false;
 		}
-		auto resource = mWorld.mTraversalResources.find(upcoming);
-		if (!source || !resource || !resource->mEnabled || agentForbidsButtons(&agent)) return {};
-		auto controls = resource->mControls;
-		if (resource->mOpenPlatformLift)
+		return false;
+	}
+
+	vector<InteractionPointId> SimulationCoordinator::remoteInteractionControls(
+		TraversalResource const& resource, Vector2 const& sourcePosition) const
+	{
+		// Candidate controls for the discovered resource: its own controls,
+		// plus the open-platform Stop's call control for the Stop at the
+		// approach source. Resolution judges no eligibility - filtering is the
+		// next steps' job.
+		auto controls = resource.mControls;
+		if (resource.mOpenPlatformLift)
 		{
-			auto stop = findLiftStop(*resource, source->getPosition());
-			if (stop < resource->mLiftStops.size()) controls.push_back(resource->mLiftStops[stop].callControl);
+			auto stop = findLiftStop(resource, sourcePosition);
+			if (stop < resource.mLiftStops.size()) controls.push_back(resource.mLiftStops[stop].callControl);
 		}
-		vector<InteractionPointId> result;
+		return controls;
+	}
+
+	bool SimulationCoordinator::remoteControlIsNeeded(InteractionPoint const& point,
+		TraversalResource const& resource, TraversalResourceId upcoming,
+		vector<InteractionPointId> const& controls, Vector2 const& sourcePosition,
+		SectorId sector) const
+	{
+		// The resource's live state decides whether this control still has work
+		// to do for the upcoming traversal.
+		return any_of(point.mBindings.begin(), point.mBindings.end(), [&](auto const& binding)
+		{
+			auto const& command = binding.command;
+			if (command.type == DeviceCommandType::OpenDoor)
+				return command.desiredState && resource.mDoor && !resource.mDoor->isOpen()
+					&& command.traversalResource == upcoming;
+			if (command.type == DeviceCommandType::SetExtendedState || command.type == DeviceCommandType::ToggleExtendedState)
+			{
+				// Endpoint controls remain independent even within one Room.
+				bool nearest = none_of(controls.begin(), controls.end(), [&](auto otherId)
+				{
+					auto other = mWorld.mInteractionPoints.find(otherId);
+					return other && other->mSector == sector
+						&& other->mPosition.distanceTo(sourcePosition) + .001f < point.mPosition.distanceTo(sourcePosition);
+				});
+				return nearest && (command.desiredState || command.type == DeviceCommandType::ToggleExtendedState) && resource.mExtensible && !resource.mExtensible->admitsNewTraversals()
+					&& command.traversalResource == upcoming;
+			}
+			if (command.type == DeviceCommandType::RequestAirlock)
+				return resource.mAirlock && command.traversalResource == upcoming;
+			if (command.type == DeviceCommandType::CallLift || command.type == DeviceCommandType::CallShuttle)
+				return bool(resource.mLiftCoordinator) || resource.mOpenPlatformLift;
+			return false;
+		});
+	}
+
+	vector<InteractionPointId> SimulationCoordinator::upcomingRemoteInteractionPoints(Agent const& agent, TraversalResourceId& upcoming) const
+	{
+		// Composed discovery entry point: the focused steps above run once and
+		// the returned controls keep their candidate order. The resource id is
+		// reported even when no control survives filtering, because the
+		// movement-limit consumer pairs it with the manual-Door centre.
+		shared_ptr<const Vertex> source;
+		if (!discoverUpcomingRemoteTarget(agent, upcoming, source)) return {};
+		auto resource = mWorld.mTraversalResources.find(upcoming);
+		if (!resource || !resource->mEnabled || agentForbidsButtons(&agent)) return {};
+		auto const controls = remoteInteractionControls(*resource, source->getPosition());
 		auto sector = SectorId{uint64_t(agent.getSector()->getIndex()) + 1};
+		vector<InteractionPointId> result;
 		for (auto pointId : controls)
 		{
 			auto point = mWorld.mInteractionPoints.find(pointId);
 			if (!point || point->mSector != sector || !mWorld.physicalButtonCentre(pointId)
 				|| !mWorld.missingInteractionPermissions(*point, agent).empty()) continue;
-			bool needed = any_of(point->mBindings.begin(), point->mBindings.end(), [&](auto const& binding)
-			{
-				auto const& command = binding.command;
-				if (command.type == DeviceCommandType::OpenDoor)
-					return command.desiredState && resource->mDoor && !resource->mDoor->isOpen()
-						&& command.traversalResource == upcoming;
-				if (command.type == DeviceCommandType::SetExtendedState || command.type == DeviceCommandType::ToggleExtendedState)
-				{
-					// Endpoint controls remain independent even within one Room.
-					bool nearest = none_of(controls.begin(), controls.end(), [&](auto otherId)
-					{
-						auto other = mWorld.mInteractionPoints.find(otherId);
-						return other && other->mSector == sector
-							&& other->mPosition.distanceTo(source->getPosition()) + .001f < point->mPosition.distanceTo(source->getPosition());
-					});
-					return nearest && (command.desiredState || command.type == DeviceCommandType::ToggleExtendedState) && resource->mExtensible && !resource->mExtensible->admitsNewTraversals()
-						&& command.traversalResource == upcoming;
-				}
-				if (command.type == DeviceCommandType::RequestAirlock)
-					return resource->mAirlock && command.traversalResource == upcoming;
-				if (command.type == DeviceCommandType::CallLift || command.type == DeviceCommandType::CallShuttle)
-					return bool(resource->mLiftCoordinator) || resource->mOpenPlatformLift;
-				return false;
-			});
-			if (needed) result.push_back(pointId);
+			if (remoteControlIsNeeded(*point, *resource, upcoming, controls, source->getPosition(), sector))
+				result.push_back(pointId);
 		}
 		return result;
 	}
@@ -1549,45 +1592,65 @@ namespace core
 			agent.mAnticipatoryInteraction.reset();
 			return;
 		}
-
+		// Remote activation and physical passing are distinct consumers with
+		// their own selection policies (#630): the remote Agent prepares the
+		// discovered target from range, while an Arms Agent presses the next
+		// Door control on its in-Sector route in passing. Neither replaces
+		// physical crossing or boarding.
 		if (agent.getObjectUsage() == ObjectUsage::RemoteControl)
 		{
 			TraversalResourceId upcoming;
 			auto controls = upcomingRemoteInteractionPoints(agent, upcoming);
-			agent.mAnticipatoryInteraction.selectResource(upcoming);
-			if (agent.mAnticipatoryInteraction.attempted()) return;
-			auto actor = getAgentId(&agent);
-			if (mWorld.agentCanOperateManualDoorHere(upcoming, actor))
-			{
-				auto resource = mWorld.mTraversalResources.find(upcoming);
-				auto const& door = *resource->mDoor;
-				if (resource->mEnabled && !door.isBroken() && !door.isOpen() && !door.isOpening()
-					&& (door.getFrontSector().get() == agent.getSector() || door.getBackSector().get() == agent.getSector()))
-				{
-					DeviceCommand command;
-					command.type = DeviceCommandType::OpenDoor;
-					command.desiredState = true;
-					command.traversalResource = upcoming;
-					auto operationId = findOrCreateDeviceOperation(command, actor);
-					if (auto operation = mWorld.mDeviceOperations.find(operationId)) operation->mActivated = true;
-					agent.mAnticipatoryInteraction.recordAttempt();
-				}
-			}
-			for (auto pointId : controls)
-			{
-				if (!mWorld.agentCanOperateInteraction(pointId, agent, World::InteractionEvaluationContext::RemoteActivation)) continue;
-				if (auto request = requestInteraction(pointId, actor, true))
-				{
-					agent.mAnticipatoryInteraction.retainRequest(request);
-					break;
-				}
-			}
+			activateRemoteAnticipatoryInteraction(agent, upcoming, controls);
 			return;
 		}
+		tryPhysicalPassingPress(agent, movementStart, movementEnd);
+	}
 
+	void SimulationCoordinator::activateRemoteAnticipatoryInteraction(Agent& agent,
+		TraversalResourceId upcoming, vector<InteractionPointId> const& controls)
+	{
+		agent.mAnticipatoryInteraction.selectResource(upcoming);
+		if (agent.mAnticipatoryInteraction.attempted()) return;
+		auto actor = getAgentId(&agent);
+		if (mWorld.agentCanOperateManualDoorHere(upcoming, actor))
+		{
+			auto resource = mWorld.mTraversalResources.find(upcoming);
+			auto const& door = *resource->mDoor;
+			if (resource->mEnabled && !door.isBroken() && !door.isOpen() && !door.isOpening()
+				&& (door.getFrontSector().get() == agent.getSector() || door.getBackSector().get() == agent.getSector()))
+			{
+				DeviceCommand command;
+				command.type = DeviceCommandType::OpenDoor;
+				command.desiredState = true;
+				command.traversalResource = upcoming;
+				auto operationId = findOrCreateDeviceOperation(command, actor);
+				if (auto operation = mWorld.mDeviceOperations.find(operationId)) operation->mActivated = true;
+				agent.mAnticipatoryInteraction.recordAttempt();
+			}
+		}
+		for (auto pointId : controls)
+		{
+			// Revalidate mutable eligibility at activation: the discovery
+			// step's filtering is not a substitute for this check, and no
+			// long-lived target may carry a stale grant to the request (#630).
+			if (!mWorld.agentCanOperateInteraction(pointId, agent, World::InteractionEvaluationContext::RemoteActivation)) continue;
+			if (auto request = requestInteraction(pointId, actor, true))
+			{
+				agent.mAnticipatoryInteraction.retainRequest(request);
+				break;
+			}
+		}
+	}
+
+	void SimulationCoordinator::tryPhysicalPassingPress(Agent& agent,
+		Vector2 const& movementStart, Vector2 const& movementEnd)
+	{
 		// A Door Button contributes an Interactable vertex to the in-sector route.
 		// Follow that route through its in-sector edges to find the next Door
 		// threshold without looking beyond the current Sector.
+		auto const& path = agent.mPath.path;
+		auto const target = agent.mPath.targetNode;
 		TraversalResourceId resourceId;
 		auto currentSector = agent.getSector();
 		for (uint32_t i = target + 1; i < path->nodes.size(); ++i)
