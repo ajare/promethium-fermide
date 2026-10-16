@@ -482,6 +482,77 @@ namespace
 		run(false); run(true);
 	}
 
+	// One Up press carries exactly one meaning: a passable threshold wins over a
+	// manual opening, and a manual opening wins over a physical control. The
+	// losing candidates must be left completely untouched, and the Player must
+	// never be moved toward a control they could not already reach.
+	void contextualPrecedence()
+	{
+		enum Mode { ControlOnly, OpenWins, PassWins };
+		for (auto const mode : {ControlOnly, OpenWins, PassWins})
+		{
+			core::World world("Contextual precedence", 8, 2);
+			world.addLayer();
+			world.addRoom("Front", 0, 0, 0, 8, 1);
+			auto middle = world.addRoom("Middle", 1, 0, 0, 8, 1);
+			auto back = world.addRoom("Back", 2, 0, 0, 8, 1);
+			core::World::CreateDoorOptions options; options.holdOpenSeconds = 30.f;
+			// The near Door is the one Up could open by hand; the far Door is the one
+			// that can already be passable. PassWins therefore offers both at once.
+			options.activationMode = mode == ControlOnly ? core::DoorActivationMode::RemoteControlled
+				: core::DoorActivationMode::Manual;
+			auto nearResult = world.addSectorDoor(0, 0, 2, options);
+			options.activationMode = core::DoorActivationMode::RemoteControlled;
+			auto farResult = world.addSectorDoor(1, 0, 2, options);
+			auto control = world.addSectorLightSwitch(middle, 2);
+			auto nearDoor = std::dynamic_pointer_cast<core::DoorSectorObject>(
+				nearResult.door.sector->getObject(nearResult.door.index))->getDoor();
+			auto farDoor = std::dynamic_pointer_cast<core::DoorSectorObject>(
+				farResult.door.sector->getObject(farResult.door.index))->getDoor();
+			world.finishBuild(); world.pauseSimulation();
+			auto const point = world.lookupInteractionPoint(control.interactionPoint).entity;
+			auto const local = point->getPosition().x - world.getSector(middle)->getPosition().x;
+			auto id = world.createAgent("Player", middle, 0, local);
+			assign(world, id);
+			if (mode == PassWins) farDoor->requestOpen();
+			walk(world, 0, 3.f);
+			auto const lights = world.getSector(middle)->areLightsOn();
+			world.consumeSimulationEvents();
+			world.requestPlayerDoorAction(); world.update(.2f);
+			std::vector<core::InteractionPointId> pressed;
+			for (auto const& event : world.consumeSimulationEvents())
+				if (event.type == core::SimulationEventType::InteractionRequestAdded)
+					pressed.push_back(event.interactionRequest.point);
+			if (mode == ControlOnly)
+			{
+				require(pressed == std::vector<core::InteractionPointId>{control.interactionPoint},
+					"Fixture must prove the Light switch is reachable when no threshold competes");
+				require(world.getSector(middle)->areLightsOn() != lights, "Control-only press must operate the switch");
+				require(world.lookupAgent(id).entity->getSector()->getIndex() == middle
+					&& std::abs(x(world, id) - local) < .0001f, "A control press must never move the Player");
+			}
+			else
+			{
+				require(pressed.empty(), "A threshold candidate must never fall through to a physical control");
+				require(world.getSector(middle)->areLightsOn() == lights,
+					"A threshold action must not operate an overlapping Light switch");
+			}
+			if (mode == PassWins)
+			{
+				require(world.lookupAgent(id).entity->getSector()->getIndex() == back,
+					"A passable threshold must win over both opening and control");
+				require(nearDoor->isClosed(), "Winning a passage must not open a nearer manual Door");
+			}
+			else if (mode == OpenWins)
+			{
+				require(world.lookupAgent(id).entity->getSector()->getIndex() == middle,
+					"Opening a Door must not move the Player");
+				require(nearDoor->isOpening() || nearDoor->isOpen(),
+					"A manual opening must win over a reachable physical control");
+			}
+		}
+	}
+
 	void stairwells()
 	{
 		for (int mountSide : {CORE_SIDE_LEFT, CORE_SIDE_RIGHT})
@@ -1165,6 +1236,7 @@ void agent_smoke::registerPlayerControl(std::vector<smoke::Check>& checks)
 	checks.push_back({"playerControlBulkheads", [](smoke::Context const&) { bulkheads(); }});
 	checks.push_back({"playerControlDoorways", [](smoke::Context const&) { doorways(); partialDoorways(); partialDoorMatrix(); narrowCrawlingDoor(); }});
 	checks.push_back({"playerControlDoorwayRestrictions", [](smoke::Context const&) { doorwayRestrictions(); doorwaySelection(); }});
+	checks.push_back({"playerControlContextualPrecedence", [](smoke::Context const&) { contextualPrecedence(); }});
 	checks.push_back({"playerControlStairwellPlatforms", [](smoke::Context const&) { stairwellPlatforms(); }});
 	checks.push_back({"playerControlLadders", [](smoke::Context const&) { ladders(); }});
 	checks.push_back({"playerControlLadderSharedCapacity", [](smoke::Context const&) { ladderSharedCapacity(); }});

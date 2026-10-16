@@ -88,50 +88,74 @@ namespace core
 		if (!isSimulationPaused()) mPlayerDoorAction = getPlayerControlledAgent();
 	}
 
-	void World::performPlayerDoorAction()
+	// The held action's meaning is contextual: a climb in progress, or one the
+	// Player is already walking into, suppresses every other reading. Otherwise
+	// the readings resolve in strict priority - threshold passage, then manual
+	// Door opening, then a physical control - and one press never mixes two.
+	void World::performPlayerContextualAction()
 	{
 		auto const id = std::exchange(mPlayerDoorAction, AgentId{});
 		auto* agent = mAgents.find(id);
 		if (!agent || id != getPlayerControlledAgent() || !agent->isActive() || !agent->getSector()) return;
-		auto const* stairSector = dynamic_cast<StairwellTransit const*>(agent->getSector());
-		bool const flatTask = stairSector && agent->mTraversalTask
+		// A Player crossing a Stairwell's flat platform holds a live Location task that a
+		// fresh doorway choice may replace; any other live task owns the Player already.
+		bool const flatTask = dynamic_cast<StairwellTransit const*>(agent->getSector()) && agent->mTraversalTask
 			&& agent->mTraversalTask->edge->getType() == EdgeType::Location;
 		if (agent->mTraversalTask && !flatTask) return;
-		if (isLocationLike(agent->getSector()->getType()))
-			updatePlayerPose(*agent, agent->getSector()->getPosition().y + agent->getSector()->getLevelsHigh() - 1
-				+ agent->getSector()->getEffectiveTopLevelHeight() - agent->getGlobalPosition().y,
+		refreshPlayerContextPose(*agent);
+		if (playerClimbSelectionActive(*agent)) return;
+		auto const candidates = collectPlayerActionCandidates(*agent, id);
+		if (beginPlayerContextualPassage(*agent, id, candidates, flatTask)) return;
+		if (openPlayerThreshold(candidates)) return;
+		pressNearestPhysicalControl(*agent, id);
+	}
+
+	// The action re-measures the Player's posture before reading anything else: a
+	// held C key only changes what they can pass through once the space around
+	// them has been re-evaluated against the current Sector.
+	void World::refreshPlayerContextPose(Agent& agent)
+	{
+		if (isLocationLike(agent.getSector()->getType()))
+			updatePlayerPose(agent, agent.getSector()->getPosition().y + agent.getSector()->getLevelsHigh() - 1
+				+ agent.getSector()->getEffectiveTopLevelHeight() - agent.getGlobalPosition().y,
 				-std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity());
-		else if (stairSector) updatePlayerClimbingPose(*agent);
-		// Held climb selection is contextual: approaching a stair or Ladder
-		// endpoint must not simultaneously activate a neighbouring Door.
-		if (agent->mPlayerLadderMount || playerLadderApproach(*agent) || playerStaircaseApproach(*agent)) return;
-		auto const position = agent->getGlobalPosition();
+		else if (dynamic_cast<StairwellTransit const*>(agent.getSector())) updatePlayerClimbingPose(agent);
+	}
+
+	// Held climb selection is contextual: approaching a stair or Ladder endpoint
+	// must not simultaneously activate a neighbouring Door, and a Stairwell
+	// platform keeps Up reserved for the junction the Player is walking into.
+	bool World::playerClimbSelectionActive(Agent const& agent) const
+	{
+		if (agent.mPlayerLadderMount || playerLadderApproach(agent) || playerStaircaseApproach(agent)) return true;
+		auto const* stairSector = dynamic_cast<StairwellTransit const*>(agent.getSector());
+		if (!stairSector || !agent.mPlayerStairPlatform || !mPlayerMovementDirection || !mPlayerStairUp) return false;
 		// Holding Up while approaching a junction selects at departure; it must
 		// not accidentally exit before arrival. Walking away (or stopping) retains
 		// fresh Up's doorway meaning, even midway along a flat platform edge.
-		if (stairSector && agent->mPlayerStairPlatform && mPlayerMovementDirection && mPlayerStairUp)
+		auto const position = agent.getGlobalPosition();
+		auto stairs = stairSector->getStairwell();
+		auto const level = static_cast<uint32_t>(std::max(0.f, std::floor(position.y - stairs->getPosition().y)));
+		for (auto const& platform : stairs->getLandingPaths(level))
 		{
-			auto stairs = stairSector->getStairwell();
-			auto const level = static_cast<uint32_t>(std::max(0.f, std::floor(position.y - stairs->getPosition().y)));
-			for (auto const& platform : stairs->getLandingPaths(level))
-			{
-				auto junction = stairs->getPosition() + platform[0], endpoint = stairs->getPosition() + platform[1];
-				if (std::abs(position.y - junction.y) <= PoseFitTolerance
-					&& position.x >= std::min(junction.x, endpoint.x) - PoseFitTolerance
-					&& position.x <= std::max(junction.x, endpoint.x) + PoseFitTolerance
-					&& (std::abs(position.x - junction.x) <= PoseFitTolerance
-						|| mPlayerMovementDirection * (junction.x - position.x) > 0.f)) return;
-			}
+			auto junction = stairs->getPosition() + platform[0], endpoint = stairs->getPosition() + platform[1];
+			if (std::abs(position.y - junction.y) <= PoseFitTolerance
+				&& position.x >= std::min(junction.x, endpoint.x) - PoseFitTolerance
+				&& position.x <= std::max(junction.x, endpoint.x) + PoseFitTolerance
+				&& (std::abs(position.x - junction.x) <= PoseFitTolerance
+					|| mPlayerMovementDirection * (junction.x - position.x) > 0.f)) return true;
 		}
-		struct Candidate
-		{
-			std::shared_ptr<const Edge> edge;
-			std::shared_ptr<const Vertex> source, destination;
-			std::optional<PoseSelection> pose;
-			float distance;
-			bool passable, openable;
-		};
-		std::vector<Candidate> candidates;
+		return false;
+	}
+
+	// Every threshold the held action could mean from where the Player stands:
+	// Stairwell mounts and ordinary or transport-owned Doors. Candidates are
+	// ordered passable-first, then by distance to the Player, then by stable
+	// resource and edge identity so an identical press always resolves identically.
+	std::vector<World::PlayerActionCandidate> World::collectPlayerActionCandidates(Agent const& agent, AgentId id) const
+	{
+		auto const position = agent.getGlobalPosition();
+		std::vector<PlayerActionCandidate> candidates;
 		for (auto const& edge : getGraph()->getEdges())
 		{
 			auto ordinary = std::dynamic_pointer_cast<DoorEdge const>(edge);
@@ -140,23 +164,23 @@ namespace core
 				auto mount = std::dynamic_pointer_cast<StairwellMountEdge const>(edge);
 				if (!mount) continue;
 				auto source = edge->getVertex(0), destination = edge->getVertex(1);
-				if (source->getSector().get() != agent->getSector()) std::swap(source, destination);
-				if (source->getSector().get() != agent->getSector()
+				if (source->getSector().get() != agent.getSector()) std::swap(source, destination);
+				if (source->getSector().get() != agent.getSector()
 					|| std::abs(position.y - source->getPosition().y) > PoseFitTolerance
-					|| agentForbidsEdge(agent, *edge, TraversalKind::Stairwell)
-					|| !canAgentAccessLocation(*destination->getSector(), *agent)) continue;
-				auto const envelope = agent->getPoseEnvelope(agent->getPose());
+					|| agentForbidsEdge(&agent, *edge, TraversalKind::Stairwell)
+					|| !canAgentAccessLocation(*destination->getSector(), agent)) continue;
+				auto const envelope = agent.getPoseEnvelope(agent.getPose());
 				auto const stairs = mount->getStairwell();
-				if (!envelope || !agent->poseFits(agent->getPose(), CORE_DOOR_HEIGHT)
+				if (!envelope || !agent.poseFits(agent.getPose(), CORE_DOOR_HEIGHT)
 					|| position.x - envelope->x * .5f < stairs->getPosition().x + CORE_DOOR_X_INSET - PoseFitTolerance
 					|| position.x + envelope->x * .5f > stairs->getPosition().x + stairs->getSize().x - CORE_DOOR_X_INSET + PoseFitTolerance)
 					continue;
 				bool fit = true;
 				for (auto const& sector : {source->getSector(), destination->getSector()})
-					fit = fit && agent->poseFits(agent->getPose(), sector->getPosition().y + sector->getLevelsHigh() - 1
+					fit = fit && agent.poseFits(agent.getPose(), sector->getPosition().y + sector->getLevelsHigh() - 1
 						+ sector->getEffectiveTopLevelHeight() - position.y);
-				if (fit) candidates.push_back({edge, source, destination, PoseSelection{agent->getPose(), agent->getPhysicalBaseline().automaticSpeedRatio(
-					AutomaticPoseContext::RoomMovement, agent->getPose()).value_or(0.f)},
+				if (fit) candidates.push_back({edge, source, destination, PoseSelection{agent.getPose(), agent.getPhysicalBaseline().automaticSpeedRatio(
+					AutomaticPoseContext::RoomMovement, agent.getPose()).value_or(0.f)},
 					std::abs(position.x - source->getPosition().x), true, false});
 				continue;
 			}
@@ -166,36 +190,36 @@ namespace core
 				|| (!transport && (!isLocationLike(door->getFrontSector()->getType())
 					|| !isLocationLike(door->getBackSector()->getType())))) continue;
 			auto source = edge->getVertex(0), destination = edge->getVertex(1);
-			if (source->getSector().get() != agent->getSector()) std::swap(source, destination);
-			if (source->getSector().get() != agent->getSector()
+			if (source->getSector().get() != agent.getSector()) std::swap(source, destination);
+			if (source->getSector().get() != agent.getSector()
 				|| std::abs(position.y - door->getPosition().y) > PoseFitTolerance
 				|| position.x < door->getPosition().x
 				|| position.x > door->getPosition().x + door->getSize().x
-				|| agentForbidsEdge(agent, *edge, transport
+				|| agentForbidsEdge(&agent, *edge, transport
 					? (door->isLiftOwned() ? TraversalKind::Lift : TraversalKind::Shuttle)
 					: TraversalKind::Door)) continue;
 			auto resource = mTraversalResources.find(door->getTraversalResourceId());
 			if (!resource || !resource->mEnabled) continue;
-			auto const halfWidth = agent->getWidth() * .5f;
-			auto const pose = door->selectAgentCrossing(*agent, position.y, true,
+			auto const halfWidth = agent.getWidth() * .5f;
+			auto const pose = door->selectAgentCrossing(agent, position.y, true,
 				transport ? std::nullopt : std::optional<float>{door->getOpenPercentage()});
 			auto const currentPoseRoom = [&](Sector const& sector) {
-				return agent->poseFits(agent->getPose(), sector.getPosition().y + sector.getLevelsHigh() - 1
+				return agent.poseFits(agent.getPose(), sector.getPosition().y + sector.getLevelsHigh() - 1
 					+ sector.getEffectiveTopLevelHeight() - position.y);
 			};
-			bool const passable = (transport ? door->admitsNewCrossings() : door->admitsPlayerCrossing(*agent, position.y)) && pose
+			bool const passable = (transport ? door->admitsNewCrossings() : door->admitsPlayerCrossing(agent, position.y)) && pose
 				&& currentPoseRoom(*source->getSector()) && currentPoseRoom(*destination->getSector())
 				&& position.x - halfWidth >= door->getPosition().x - PoseFitTolerance
 				&& position.x + halfWidth <= door->getPosition().x + door->getSize().x + PoseFitTolerance
-				&& canAgentAccessLocation(*destination->getSector(), *agent)
+				&& canAgentAccessLocation(*destination->getSector(), agent)
 				&& (!transport || !isLocationLike(destination->getSector()->getType())
 					|| playerTransportLandingSupported(*destination->getSector(), position, halfWidth))
 				&& agentAdheresToDoorPermission(door->getTraversalResourceId(),
-					SectorId{uint64_t(agent->getSector()->getIndex()) + 1}, id);
+					SectorId{uint64_t(agent.getSector()->getIndex()) + 1}, id);
 			// Player geometry replaces distance, not capability or authorization.
 			bool const openable = !transport && door->getActivationMode() == DoorActivationMode::Manual
 				&& !door->isBroken() && !door->isOpen() && !door->isOpening()
-				&& agentCanOperateObjects(*agent) && agentSatisfiesDoorPermission(*door, *agent);
+				&& agentCanOperateObjects(agent) && agentSatisfiesDoorPermission(*door, agent);
 			if (passable || openable) candidates.push_back({ordinary, source, destination, pose,
 				std::abs(position.x - (door->getPosition().x + door->getSize().x * .5f)), passable, openable});
 		}
@@ -206,11 +230,21 @@ namespace core
 				return a.edge->getTraversalResourceId() < b.edge->getTraversalResourceId();
 			return a.edge->getId() < b.edge->getId();
 		});
+		return candidates;
+	}
+
+	// Crossing outranks every other reading, but only where admission actually
+	// grants the request: a refusal falls through to the next candidate rather
+	// than auto-aligning, queueing movement, or bypassing another Agent's lane.
+	bool World::beginPlayerContextualPassage(Agent& agent, AgentId id,
+		std::vector<PlayerActionCandidate> const& candidates, bool flatTask)
+	{
+		auto const position = agent.getGlobalPosition();
 		for (auto const& candidate : candidates)
 		{
 			if (!candidate.passable) continue;
-			agent->mPathStartPosition = position;
-			auto request = createTraversalRequest(*agent, candidate.edge, candidate.source, candidate.destination);
+			agent.mPathStartPosition = position;
+			auto request = createTraversalRequest(agent, candidate.edge, candidate.source, candidate.destination);
 			allocateTraversalRequest(request, candidate.edge, candidate.destination);
 			auto lookup = lookupTraversalRequest(request);
 			if (!lookup || lookup.entity->getState() != TraversalRequestState::Granted)
@@ -227,41 +261,54 @@ namespace core
 			task.permit = lookup.entity->getPermit();
 			task.crossingPose = candidate.pose;
 			task.traversalTicksRemaining = Door::crossingDurationTicks(task.crossingPose->speedRatio);
-			if (flatTask) agent->cancelTraversal();
+			if (flatTask) agent.cancelTraversal();
 			finishFurnitureUse(id);
-			agent->mOccupiedUsablePoint = {};
-			agent->mRetainedActionPose = false;
-			agent->mPlayerPose = candidate.pose->pose;
-			agent->mPose = candidate.pose->pose;
+			agent.mOccupiedUsablePoint = {};
+			agent.mRetainedActionPose = false;
+			agent.mPlayerPose = candidate.pose->pose;
+			agent.mPose = candidate.pose->pose;
 			if (candidate.edge->getType() == EdgeType::StairwellMount)
 			{
-				agent->mPlayerStairPlatform = true;
-				agent->mPlayerStairApproach = 0;
+				agent.mPlayerStairPlatform = true;
+				agent.mPlayerStairApproach = 0;
 			}
-			agent->mTraversalTask = std::move(task);
-			agent->mState = Agent::State::TraversingEdge;
-			return;
+			agent.mTraversalTask = std::move(task);
+			agent.mState = Agent::State::TraversingEdge;
+			return true;
 		}
+		return false;
+	}
+
+	// A closed manual Door within reach is opened only when nothing passable was
+	// found first, so opening never consumes a crossing opportunity.
+	bool World::openPlayerThreshold(std::vector<PlayerActionCandidate> const& candidates)
+	{
 		for (auto const& candidate : candidates)
 			if (candidate.openable)
 			{
 				static_cast<DoorEdge const&>(*candidate.edge).getDoor()->requestOpen();
-				return;
+				return true;
 			}
-		// Physical Buttons and owned BoothWindow/Access panel controls are the last
-		// meaning of Up. Use physical reach, never remote range or auto-approach.
-		if (agent->getObjectUsage() != ObjectUsage::Arms || agentForbidsButtons(agent)) return;
+		return false;
+	}
+
+	// Physical Buttons and owned BoothWindow/Access panel controls are the last
+	// meaning of Up. Use physical reach, never remote range or auto-approach.
+	void World::pressNearestPhysicalControl(Agent const& agent, AgentId id)
+	{
+		if (agent.getObjectUsage() != ObjectUsage::Arms || agentForbidsButtons(&agent)) return;
+		auto const position = agent.getGlobalPosition();
 		InteractionPointId selected;
 		float nearest = 0.f;
 		for (auto const& [pointId, point] : mInteractionPoints.entries())
 		{
 			auto placement = physicalControlPlacement(pointId);
 			auto booth = ownedBoothWindowControl(pointId, *point);
-			bool boothPanel = booth && booth->getBackSector().get() == agent->getSector();
+			bool boothPanel = booth && booth->getBackSector().get() == agent.getSector();
 			bool accessPanelControl = ownedAccessPanelAction(pointId, *point).has_value();
 			if ((!placement && !boothPanel && !accessPanelControl) || std::abs(position.y - point->getPosition().y) > PoseFitTolerance
 				|| !interactionRequestEligible(pointId, id, InteractionEvaluationContext::ImmediatePress)
-				|| !missingInteractionPermissions(*point, *agent).empty()
+				|| !missingInteractionPermissions(*point, agent).empty()
 				|| isControlTargetBroken(pointId)) continue;
 			if (!boothPanel && !accessPanelControl)
 			{

@@ -197,7 +197,7 @@ add_test(NAME agent-playerControlEditorWorkflow COMMAND pf-smoke-editor --check 
 set_tests_properties(agent-playerControlEditorWorkflow PROPERTIES LABELS "agent;editor;functional;validation-fast" TIMEOUT 30)
 
 foreach(check playerControlBasics playerControlBoundaries playerControlBulkheads playerControlPersistence
-        playerControlDoorways playerControlDoorwayRestrictions
+        playerControlDoorways playerControlDoorwayRestrictions playerControlContextualPrecedence
         playerControlStairwells playerControlStairwellRestrictions playerControlStairwellPlatforms
         playerControlStaircases playerControlStaircaseRestrictions playerControlEscalators
         playerControlLadders playerControlLadderRestrictions playerControlLadderSharedCapacity

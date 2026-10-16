@@ -736,7 +736,31 @@ namespace core
 		int mPlayerMovementDirection{ 0 };
 		bool mPlayerStairUp{ false }, mPlayerStairDown{ false }, mPlayerCrouch{ false };
 		AgentId mPlayerDoorAction{};
-		void performPlayerDoorAction();
+		// One threshold the held contextual action could mean: a Stairwell mount or
+		// an ordinary/transport-owned Door. `passable` thresholds are crossed and
+		// `openable` ones are only opened by hand; one press never does both, and a
+		// passage always outranks an opening. `distance` orders candidates within a
+		// rank, with resource and edge identity breaking exact ties deterministically.
+		struct PlayerActionCandidate
+		{
+			std::shared_ptr<const Edge> edge;
+			std::shared_ptr<const Vertex> source, destination;
+			std::optional<PoseSelection> pose;
+			float distance;
+			bool passable, openable;
+		};
+		// The held action's meaning is contextual. A climb in progress, or one the
+		// Player is already walking into, suppresses every other reading; otherwise
+		// the readings resolve in strict priority: threshold passage first, then
+		// manual Door opening, then a physical control within arm's reach.
+		void performPlayerContextualAction();
+		void refreshPlayerContextPose(Agent& agent);
+		bool playerClimbSelectionActive(Agent const& agent) const;
+		std::vector<PlayerActionCandidate> collectPlayerActionCandidates(Agent const& agent, AgentId id) const;
+		bool beginPlayerContextualPassage(Agent& agent, AgentId id,
+			std::vector<PlayerActionCandidate> const& candidates, bool flatTask);
+		bool openPlayerThreshold(std::vector<PlayerActionCandidate> const& candidates);
+		void pressNearestPhysicalControl(Agent const& agent, AgentId id);
 		std::shared_ptr<const Edge> playerStaircaseApproach(Agent const& agent) const;
 		std::shared_ptr<const Edge> playerLadderApproach(Agent const& agent) const;
 		void advancePlayerLadderAgent(Agent& agent, float timestep);

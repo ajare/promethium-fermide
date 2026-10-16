@@ -575,7 +575,7 @@ namespace core
 				if (!agent->isActive()) continue;
 				agent->allocateTraversal();
 			}
-			mWorld.performPlayerDoorAction();
+			mWorld.performPlayerContextualAction();
 			allocateInteractions();
 			break;
 
