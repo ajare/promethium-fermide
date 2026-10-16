@@ -5739,11 +5739,13 @@ namespace core
 			// unprojected consumption instead.
 			auto const forecastDispatchAutomatic
 				= settings.dispatchMode == StationDispatchMode::Automatic;
-			// #593: per-store transfer-out demand and total blocked
-			// outflow demand, and the through-flow coverage flag read by
-			// the depletion marking. These are recomputed on every
-			// computeRates call and describe the segment that call opens.
-			std::vector<double> transferOutDemand(stores.size(), 0.0);
+			// #593/#605: per-store outflow demand across every projected
+			// pathway (transfer, equipment, crew and commanded generator
+			// draw), the total blocked outflow demand, and the through-flow
+			// coverage flag read by the depletion marking. These are
+			// recomputed on every computeRates call and describe the
+			// segment that call opens.
+			std::vector<double> outflowDemand(stores.size(), 0.0);
 			std::vector<double> blockedRate(stores.size(), 0.0);
 			std::vector<char> coveredFlag(stores.size(), 0);
 			auto const computeRates = [&](double at)
@@ -5752,7 +5754,7 @@ namespace core
 				std::fill(maxOutflow.begin(), maxOutflow.end(), 0.0);
 				std::fill(limiterId.begin(), limiterId.end(), std::string());
 				std::fill(limiterKind.begin(), limiterKind.end(), std::string());
-				std::fill(transferOutDemand.begin(), transferOutDemand.end(), 0.0);
+				std::fill(outflowDemand.begin(), outflowDemand.end(), 0.0);
 				blocked.clear();
 				auto const addOutflow = [&](size_t storeIndex, double rate,
 					std::string const& id, char const* kind)
@@ -5765,72 +5767,173 @@ namespace core
 						limiterKind[storeIndex] = kind;
 					}
 				};
-				// #593: resolve the transfer rates for simultaneous
-				// through-flow at boundary stores before folding them into
-				// the net trajectory. Gating each transfer on the inventory
-				// at the segment start alone makes a transfer chain
-				// oscillate: a dry intermediate stops its outgoing leg while
-				// the incoming leg fills it, a full intermediate stops the
-				// incoming leg while the outgoing leg drains it, and the
-				// solve spends the horizon in half-duty phases that invent
-				// shortages and burn the segment budget while the live chain
-				// flows straight through. Instead every transfer starts at
-				// its full authored rate and the rates settle: a store
-				// projected dry may pass out only what arrives concurrently,
-				// and a store projected full may take in only what leaves
-				// concurrently, each capped in the live transfer-priority
-				// order. The caps only ever lower rates, so the settle
-				// terminates. What a dry store cannot pass out stays
-				// uncovered demand at that store; what a full store cannot
-				// take in is back-pressure that leaves the material
-				// upstream, not a shortage.
-				std::vector<double> resolvedRate(transfers.size(), 0.0);
+				// #605: resolve the rates of every projected material
+				// pathway - transfers, equipment material exchanges, crew
+				// metabolism and manually commanded generator draw - for
+				// simultaneous through-flow at dry and full boundary
+				// stores before folding them into the net trajectory.
+				// Gating each pathway on the inventory at the segment
+				// start alone makes any cross-pathway chain oscillate: a
+				// dry store fed by equipment stops its outgoing transfer
+				// while the equipment fills it, a full store drained by
+				// equipment stops the transfer filling it while the
+				// equipment drains it, and the solve spends the horizon
+				// in alternating half-duty phases that invent shortages
+				// and burn the segment budget while the live station
+				// flows straight through. #593 settled this for transfer
+				// edges only; the same rule now covers every pathway.
+				//
+				// Every consuming pathway starts at its full authored,
+				// profile-scaled rate and the rates settle: a store
+				// projected dry may pass out only what arrives
+				// concurrently from any pathway, and a store projected
+				// full may take in only what leaves concurrently to any
+				// pathway. Transfers are capped in the live
+				// transfer-priority order; equipment loads and crew
+				// metabolism keep their whole-unit semantics - a load
+				// whose feed or destination cannot be fully covered
+				// stops whole, exactly as the forecast's conservative
+				// #554 starvation rule already does, and the claim
+				// order mirrors the live tick where a granted load
+				// reserves its material ahead of the transfer pass and
+				// crew metabolism runs ahead of it too. The settle only
+				// ever lowers rates or stops whole units, so it
+				// terminates. What a dry store cannot pass out or pay
+				// for stays uncovered demand at that store; what a full
+				// store cannot take in is back-pressure that leaves the
+				// material upstream, not a shortage.
+				//
+				// Support is recomputed inside the settle over the whole
+				// graph, not just transfer edges: a store is supported
+				// when it holds drawable material, or when a running
+				// pathway could carry material into it from a supported
+				// source - a transfer out of a supported store, a load
+				// whose own feeds are all supported delivering into it,
+				// or a crew with supported food and water returning
+				// waste into it. A dry store behind no real supply
+				// stays unsupported: its transfers are zeroed and its
+				// consuming loads, crews and commanded generators stop
+				// whole, so a closed cycle of dry stores and starved
+				// machines can never bootstrap itself into phantom
+				// material however its rates balance.
 				std::vector<double> inflowRate(stores.size(), 0.0);
 				std::vector<double> outflowRate(stores.size(), 0.0);
 				std::vector<double> supplyCapped(stores.size(), 0.0);
-				// #593: a dry store's through-flow only counts when it is
-				// genuinely supported - traceable back along the transfer
-				// graph to a store that actually holds drawable material.
-				// Mark every store that holds material as supported and
-				// propagate support along any transfer that could carry
-				// material (authored rate above zero) out of a supported
-				// store. A transfer whose source is not supported can carry
-				// nothing real - a closed loop of dry stores each "feeding"
-				// the other has no supply behind it, and the live chain moves
-				// nothing there - so it is zeroed up front and its demand is
-				// uncovered at the dry source, exactly as the live transfer
-				// that finds nothing to move reports it. Doing this before
-				// the settle keeps a dry store's outflow budget equal to the
-				// supported inflow it can really pass, so no phantom
-				// material is ever created downstream.
-				std::vector<char> supported(stores.size(), 0);
-				for (size_t store = 0; store < stores.size(); ++store)
-					if (!isDry(store)) supported[store] = 1;
-				for (bool grew = true; grew; )
-				{
-					grew = false;
-					for (auto const index : transferOrder)
-					{
-						if (transfers[index].authored.ratePerSecond <= 0.0) continue;
-						if (!supported[transfers[index].sourceIndex]) continue;
-						if (supported[transfers[index].destinationIndex]) continue;
-						supported[transfers[index].destinationIndex] = 1;
-						grew = true;
-					}
-				}
+				std::vector<double> resolvedRate(transfers.size(), 0.0);
 				for (size_t index = 0; index < transfers.size(); ++index)
+					resolvedRate[index] = transfers[index].authored.ratePerSecond
+						> 0.0 ? transfers[index].authored.ratePerSecond : 0.0;
+				// Candidate rates for the non-transfer pathways at this
+				// instant's profile level. A stopped load or crew stops
+				// whole and its consuming demand is recorded uncovered
+				// at the stores it would have drawn from.
+				struct CrewRates
 				{
-					if (transfers[index].authored.ratePerSecond <= 0.0) continue;
-					if (supported[transfers[index].sourceIndex])
-					{
-						resolvedRate[index] = transfers[index].authored.ratePerSecond;
-						continue;
-					}
-					supplyCapped[transfers[index].sourceIndex]
-						+= transfers[index].authored.ratePerSecond;
+					double food{0.0};
+					double water{0.0};
+					double urine{0.0};
+					double organicWaste{0.0};
+				};
+				std::vector<CrewRates> crewRates(crews.size());
+				std::vector<char> crewRunning(crews.size(), 0);
+				for (size_t index = 0; index < crews.size(); ++index)
+				{
+					auto const& crew = crews[index];
+					if (crew.authored.crewCount <= 0) continue;
+					auto const level = evaluateStationProfile(
+						crew.authored.activityProfile, at);
+					if (level <= 0.0) continue;
+					auto const scale = static_cast<double>(crew.authored.crewCount)
+						* level;
+					crewRates[index].food = crew.authored.foodPerCrewPerS * scale;
+					crewRates[index].water = crew.authored.waterPerCrewPerS * scale;
+					crewRates[index].urine = crew.authored.urinePerCrewPerS * scale;
+					crewRates[index].organicWaste
+						= crew.authored.organicWastePerCrewPerS * scale;
+					crewRunning[index] = 1;
+					outflowDemand[crew.foodStoreIndex] += crewRates[index].food;
+					outflowDemand[crew.waterStoreIndex] += crewRates[index].water;
 				}
-				for (size_t pass = 0;
-					pass < transfers.size() * 2 + stores.size() + 4; ++pass)
+				std::vector<double> loadLevel(loads.size(), 0.0);
+				std::vector<char> loadRunning(loads.size(), 0);
+				for (size_t index = 0; index < loads.size(); ++index)
+				{
+					auto const& load = loads[index];
+					if (load.exchanges.empty()) continue;
+					auto const level = evaluateStationProfile(
+						load.authored.operatingProfile, at);
+					if (level <= 0.0) continue;
+					loadLevel[index] = level;
+					loadRunning[index] = 1;
+					for (auto const& exchange : load.exchanges)
+						if (exchange.consumes && exchange.ratePerSecond > 0.0)
+							outflowDemand[exchange.storeIndex]
+								+= exchange.ratePerSecond * level;
+				}
+				std::vector<double> generatorDraw(generators.size(), 0.0);
+				std::vector<char> generatorRunning(generators.size(), 0);
+				// #594: a manually commanded generator is already burning
+				// authored fuel: its draw is deterministic demand and is
+				// projected like any other pathway - an upper bound on the
+				// live burn, which ramp, cooling trips and fuel throttling
+				// can only lower - so the projection stays on the safe
+				// side of the live outcome. Under Automatic dispatch the
+				// draw follows the unmodelled net load, so nothing is
+				// projected here and the fuel store is flagged with the
+				// other unprojected consuming pathways.
+				if (!forecastDispatchAutomatic)
+				{
+					for (size_t index = 0; index < generators.size(); ++index)
+					{
+						auto const& generator = generators[index];
+						auto const boundKW = std::min(generator.authored.ratedOutputKW,
+							generator.authored.commandedOutputKW);
+						if (boundKW <= 0.0) continue;
+						auto const kwhPerUnit = stationEnergyUnitsToKWh(
+							stores[generator.fuelStoreIndex].authored.unit);
+						auto const drawUnitsPerS = boundKW
+							/ generator.authored.efficiency / 3600.0 / kwhPerUnit;
+						if (drawUnitsPerS <= 0.0) continue;
+						generatorDraw[index] = drawUnitsPerS;
+						generatorRunning[index] = 1;
+						outflowDemand[generator.fuelStoreIndex] += drawUnitsPerS;
+					}
+				}
+				auto const stopLoad = [&](size_t index)
+				{
+					if (!loadRunning[index]) return;
+					loadRunning[index] = 0;
+					// #554 whole-load starvation: the load's material
+					// exchanges are one operating dependency; when the
+					// load stops, every consuming exchange's demand stays
+					// uncovered at its store.
+					for (auto const& exchange : loads[index].exchanges)
+						if (exchange.consumes && exchange.ratePerSecond > 0.0)
+							blocked.push_back({exchange.storeIndex,
+								exchange.ratePerSecond * loadLevel[index]});
+				};
+				auto const stopCrew = [&](size_t index)
+				{
+					if (!crewRunning[index]) return;
+					crewRunning[index] = 0;
+					// Crew metabolism runs whole or not at all: the
+					// held-back food and water demand stays uncovered,
+					// matching the live uniform-scale rule (#401).
+					if (crewRates[index].food > 0.0)
+						blocked.push_back({crews[index].foodStoreIndex,
+							crewRates[index].food});
+					if (crewRates[index].water > 0.0)
+						blocked.push_back({crews[index].waterStoreIndex,
+							crewRates[index].water});
+				};
+				auto const stopGenerator = [&](size_t index)
+				{
+					if (!generatorRunning[index]) return;
+					generatorRunning[index] = 0;
+					blocked.push_back({generators[index].fuelStoreIndex,
+						generatorDraw[index]});
+				};
+				auto const recomputeFlows = [&]
 				{
 					std::fill(inflowRate.begin(), inflowRate.end(), 0.0);
 					std::fill(outflowRate.begin(), outflowRate.end(), 0.0);
@@ -5841,12 +5944,225 @@ namespace core
 						outflowRate[transfers[index].sourceIndex]
 							+= resolvedRate[index];
 					}
+					for (size_t index = 0; index < crews.size(); ++index)
+					{
+						if (!crewRunning[index]) continue;
+						outflowRate[crews[index].foodStoreIndex]
+							+= crewRates[index].food;
+						outflowRate[crews[index].waterStoreIndex]
+							+= crewRates[index].water;
+						inflowRate[crews[index].urineStoreIndex]
+							+= crewRates[index].urine;
+						inflowRate[crews[index].organicWasteStoreIndex]
+							+= crewRates[index].organicWaste;
+					}
+					for (size_t index = 0; index < loads.size(); ++index)
+					{
+						if (!loadRunning[index]) continue;
+						for (auto const& exchange : loads[index].exchanges)
+						{
+							if (exchange.ratePerSecond <= 0.0) continue;
+							auto const rate = exchange.ratePerSecond
+								* loadLevel[index];
+							if (exchange.consumes)
+								outflowRate[exchange.storeIndex] += rate;
+							else
+								inflowRate[exchange.storeIndex] += rate;
+						}
+					}
+					for (size_t index = 0; index < generators.size(); ++index)
+					{
+						if (!generatorRunning[index]) continue;
+						outflowRate[generators[index].fuelStoreIndex]
+							+= generatorDraw[index];
+					}
+				};
+				// Every pass either settles or strictly lowers some rate
+				// or stops some whole unit; nothing ever rises, so the
+				// solve terminates. Each stop or cap propagates at most
+				// one dependency hop per pass, and the whole run holds
+				// at most one stop per actor and one cap wave per hop,
+				// so the product below bounds the passes with room to
+				// spare.
+				for (size_t pass = 0;
+					pass < (loads.size() + crews.size() + generators.size() + 2)
+						* (transfers.size() + stores.size() + 2); ++pass)
+				{
 					bool settled = true;
+					// Support fixed point over every pathway.
+					std::vector<char> supported(stores.size(), 0);
+					for (size_t store = 0; store < stores.size(); ++store)
+						if (!isDry(store)) supported[store] = 1;
+					for (bool grew = true; grew; )
+					{
+						grew = false;
+						for (auto const index : transferOrder)
+						{
+							if (resolvedRate[index] <= 0.0) continue;
+							if (!supported[transfers[index].sourceIndex]) continue;
+							if (supported[transfers[index].destinationIndex]) continue;
+							supported[transfers[index].destinationIndex] = 1;
+							grew = true;
+						}
+						for (size_t index = 0; index < loads.size(); ++index)
+						{
+							if (!loadRunning[index]) continue;
+							bool feedsSupported = true;
+							for (auto const& exchange : loads[index].exchanges)
+								if (exchange.consumes
+									&& exchange.ratePerSecond > 0.0
+									&& !supported[exchange.storeIndex])
+									feedsSupported = false;
+							if (!feedsSupported) continue;
+							for (auto const& exchange : loads[index].exchanges)
+							{
+								if (exchange.consumes
+									|| exchange.ratePerSecond <= 0.0) continue;
+								if (supported[exchange.storeIndex]) continue;
+								supported[exchange.storeIndex] = 1;
+								grew = true;
+							}
+						}
+						for (size_t index = 0; index < crews.size(); ++index)
+						{
+							if (!crewRunning[index]) continue;
+							if (!supported[crews[index].foodStoreIndex]
+								|| !supported[crews[index].waterStoreIndex])
+								continue;
+							if (!supported[crews[index].urineStoreIndex])
+							{
+								supported[crews[index].urineStoreIndex] = 1;
+								grew = true;
+							}
+							if (!supported[crews[index].organicWasteStoreIndex])
+							{
+								supported[crews[index].organicWasteStoreIndex] = 1;
+								grew = true;
+							}
+						}
+					}
+					// Nothing real can flow out of an unsupported store.
+					for (size_t index = 0; index < transfers.size(); ++index)
+					{
+						if (resolvedRate[index] <= 0.0) continue;
+						if (supported[transfers[index].sourceIndex]) continue;
+						supplyCapped[transfers[index].sourceIndex]
+							+= resolvedRate[index];
+						resolvedRate[index] = 0.0;
+						settled = false;
+					}
+					for (size_t index = 0; index < loads.size(); ++index)
+					{
+						if (!loadRunning[index]) continue;
+						for (auto const& exchange : loads[index].exchanges)
+							if (exchange.consumes && exchange.ratePerSecond > 0.0
+								&& !supported[exchange.storeIndex])
+							{
+								stopLoad(index);
+								settled = false;
+								break;
+							}
+					}
+					for (size_t index = 0; index < crews.size(); ++index)
+					{
+						if (!crewRunning[index]) continue;
+						if (!supported[crews[index].foodStoreIndex]
+							|| !supported[crews[index].waterStoreIndex])
+						{
+							stopCrew(index);
+							settled = false;
+						}
+					}
+					for (size_t index = 0; index < generators.size(); ++index)
+					{
+						if (!generatorRunning[index]) continue;
+						if (!supported[generators[index].fuelStoreIndex])
+						{
+							stopGenerator(index);
+							settled = false;
+						}
+					}
+					recomputeFlows();
+					// Boundary budgets: a dry store passes out only what
+					// arrives concurrently, a full store takes in only
+					// what leaves concurrently. Equipment loads claim
+					// first, then crew, then commanded generators, then
+					// transfers in the authored priority order,
+					// mirroring the live tick where a granted load
+					// reserves its feed and destination and the crew
+					// draws ahead of the transfer pass.
 					for (size_t store = 0; store < stores.size(); ++store)
 					{
 						if (isDry(store))
 						{
 							double budget = inflowRate[store];
+							for (size_t index = 0; index < loads.size(); ++index)
+							{
+								if (!loadRunning[index]) continue;
+								double draw = 0.0;
+								for (auto const& exchange : loads[index].exchanges)
+									if (exchange.consumes
+										&& exchange.storeIndex == store)
+										draw += exchange.ratePerSecond
+											* loadLevel[index];
+								if (draw <= 0.0) continue;
+								auto const tol = StationBalanceTolerance
+									* std::max(1.0, draw);
+								if (draw > budget + tol)
+								{
+									stopLoad(index);
+									settled = false;
+									continue;
+								}
+								// A claim admitted within the balance
+								// tolerance can leave the budget a hair
+								// negative; clamp so a later min() can
+								// never resolve a negative rate.
+								budget = std::max(0.0, budget - draw);
+							}
+							for (size_t index = 0; index < crews.size(); ++index)
+							{
+								if (!crewRunning[index]) continue;
+								auto const draw = crews[index].foodStoreIndex
+									== store ? crewRates[index].food
+									: (crews[index].waterStoreIndex == store
+										? crewRates[index].water : 0.0);
+								if (draw <= 0.0) continue;
+								auto const tol = StationBalanceTolerance
+									* std::max(1.0, draw);
+								if (draw > budget + tol)
+								{
+									stopCrew(index);
+									settled = false;
+									continue;
+								}
+								// A claim admitted within the balance
+								// tolerance can leave the budget a hair
+								// negative; clamp so a later min() can
+								// never resolve a negative rate.
+								budget = std::max(0.0, budget - draw);
+							}
+							for (size_t index = 0; index < generators.size();
+								++index)
+							{
+								if (!generatorRunning[index]) continue;
+								if (generators[index].fuelStoreIndex != store)
+									continue;
+								auto const draw = generatorDraw[index];
+								auto const tol = StationBalanceTolerance
+									* std::max(1.0, draw);
+								if (draw > budget + tol)
+								{
+									stopGenerator(index);
+									settled = false;
+									continue;
+								}
+								// A claim admitted within the balance
+								// tolerance can leave the budget a hair
+								// negative; clamp so a later min() can
+								// never resolve a negative rate.
+								budget = std::max(0.0, budget - draw);
+							}
 							for (auto const index : transferOrder)
 							{
 								if (transfers[index].sourceIndex != store) continue;
@@ -5865,6 +6181,45 @@ namespace core
 						if (isFull(store))
 						{
 							double budget = outflowRate[store];
+							for (size_t index = 0; index < loads.size(); ++index)
+							{
+								if (!loadRunning[index]) continue;
+								double deliver = 0.0;
+								for (auto const& exchange : loads[index].exchanges)
+									if (!exchange.consumes
+										&& exchange.storeIndex == store)
+										deliver += exchange.ratePerSecond
+											* loadLevel[index];
+								if (deliver <= 0.0) continue;
+								auto const tol = StationBalanceTolerance
+									* std::max(1.0, deliver);
+								if (deliver > budget + tol)
+								{
+									stopLoad(index);
+									settled = false;
+									continue;
+								}
+								budget = std::max(0.0, budget - deliver);
+							}
+							for (size_t index = 0; index < crews.size(); ++index)
+							{
+								if (!crewRunning[index]) continue;
+								auto const deliver = crews[index].urineStoreIndex
+									== store ? crewRates[index].urine
+									: (crews[index].organicWasteStoreIndex
+										== store ? crewRates[index].organicWaste
+											: 0.0);
+								if (deliver <= 0.0) continue;
+								auto const tol = StationBalanceTolerance
+									* std::max(1.0, deliver);
+								if (deliver > budget + tol)
+								{
+									stopCrew(index);
+									settled = false;
+									continue;
+								}
+								budget = std::max(0.0, budget - deliver);
+							}
 							for (auto const index : transferOrder)
 							{
 								if (transfers[index].destinationIndex != store)
@@ -5885,22 +6240,13 @@ namespace core
 				// Re-derive the concurrent in/out totals from the settled
 				// rates so the coverage test below reads the final rates
 				// even if the pass bound was reached without settling.
-				std::fill(inflowRate.begin(), inflowRate.end(), 0.0);
-				std::fill(outflowRate.begin(), outflowRate.end(), 0.0);
-				for (size_t index = 0; index < transfers.size(); ++index)
-				{
-					inflowRate[transfers[index].destinationIndex]
-						+= resolvedRate[index];
-					outflowRate[transfers[index].sourceIndex]
-						+= resolvedRate[index];
-				}
-				// Fold the settled rates into the net trajectory and record
-				// the authored outflow demand per store.
+				recomputeFlows();
+				// Fold the settled rates into the net trajectory.
 				for (size_t index = 0; index < transfers.size(); ++index)
 				{
 					auto const& transfer = transfers[index];
 					if (transfer.authored.ratePerSecond <= 0.0) continue;
-					transferOutDemand[transfer.sourceIndex]
+					outflowDemand[transfer.sourceIndex]
 						+= transfer.authored.ratePerSecond;
 					auto const rate = resolvedRate[index];
 					if (rate <= 0.0) continue;
@@ -5913,133 +6259,59 @@ namespace core
 						limiterKind[transfer.sourceIndex] = "transfer";
 					}
 				}
+				for (size_t index = 0; index < crews.size(); ++index)
+				{
+					if (!crewRunning[index]) continue;
+					auto const& crew = crews[index];
+					addOutflow(crew.foodStoreIndex, crewRates[index].food,
+						crew.authored.id, "crew");
+					addOutflow(crew.waterStoreIndex, crewRates[index].water,
+						crew.authored.id, "crew");
+					net[crew.urineStoreIndex] += crewRates[index].urine;
+					net[crew.organicWasteStoreIndex]
+						+= crewRates[index].organicWaste;
+				}
+				for (size_t index = 0; index < loads.size(); ++index)
+				{
+					if (!loadRunning[index]) continue;
+					for (auto const& exchange : loads[index].exchanges)
+					{
+						if (exchange.ratePerSecond <= 0.0) continue;
+						auto const rate = exchange.ratePerSecond * loadLevel[index];
+						if (exchange.consumes)
+							addOutflow(exchange.storeIndex, rate,
+								loads[index].authored.id, "equipment");
+						else
+							net[exchange.storeIndex] += rate;
+					}
+				}
+				for (size_t index = 0; index < generators.size(); ++index)
+				{
+					if (!generatorRunning[index]) continue;
+					addOutflow(generators[index].fuelStoreIndex,
+						generatorDraw[index], generators[index].authored.id,
+						"generator");
+				}
 				// A dry source that could not pass its full demand leaves
 				// the shortfall as uncovered demand at that store.
 				for (size_t store = 0; store < stores.size(); ++store)
 					if (supplyCapped[store] > 0.0)
 						blocked.push_back({store, supplyCapped[store]});
-				for (auto const& crew : crews)
-				{
-					if (crew.authored.crewCount <= 0) continue;
-					auto const level = evaluateStationProfile(
-						crew.authored.activityProfile, at);
-					if (level <= 0.0) continue;
-					auto const scale = static_cast<double>(crew.authored.crewCount) * level;
-					auto const foodDraw = crew.authored.foodPerCrewPerS * scale;
-					auto const waterDraw = crew.authored.waterPerCrewPerS * scale;
-					// Crew metabolism runs whole or not at all: with any
-					// input projected dry OR any waste destination
-					// projected full the crew draws nothing and returns
-					// nothing - absent material never generates nominal
-					// waste and a full destination back-pressures the whole
-					// metabolism, matching the live uniform-scale rule (#401).
-					if (isDry(crew.foodStoreIndex)
-						|| isDry(crew.waterStoreIndex)
-						|| isFull(crew.urineStoreIndex)
-						|| isFull(crew.organicWasteStoreIndex))
-					{
-						if (foodDraw > 0.0)
-							blocked.push_back({crew.foodStoreIndex, foodDraw});
-						if (waterDraw > 0.0)
-							blocked.push_back({crew.waterStoreIndex, waterDraw});
-						continue;
-					}
-					addOutflow(crew.foodStoreIndex, foodDraw, crew.authored.id, "crew");
-					addOutflow(crew.waterStoreIndex, waterDraw, crew.authored.id, "crew");
-					net[crew.urineStoreIndex] += crew.authored.urinePerCrewPerS * scale;
-					net[crew.organicWasteStoreIndex]
-						+= crew.authored.organicWastePerCrewPerS * scale;
-				}
-				for (auto const& load : loads)
-				{
-					if (load.exchanges.empty()) continue;
-					auto const level = evaluateStationProfile(
-						load.authored.operatingProfile, at);
-					if (level <= 0.0) continue;
-					bool feasible = true;
-					for (auto const& exchange : load.exchanges)
-					{
-						if (exchange.ratePerSecond <= 0.0) continue;
-						if (exchange.consumes)
-						{
-							if (isDry(exchange.storeIndex)) feasible = false;
-						}
-						else if (isFull(exchange.storeIndex)) feasible = false;
-					}
-					if (!feasible)
-					{
-						// #554 whole-load starvation: the load's material
-						// exchanges are one operating dependency; with any
-						// feed projected dry or any destination projected
-						// full the whole exchange set stops, and every
-						// consuming exchange's demand stays uncovered.
-						for (auto const& exchange : load.exchanges)
-							if (exchange.consumes && exchange.ratePerSecond > 0.0)
-								blocked.push_back({exchange.storeIndex,
-									exchange.ratePerSecond * level});
-						continue;
-					}
-					for (auto const& exchange : load.exchanges)
-					{
-						if (exchange.ratePerSecond <= 0.0) continue;
-						auto const rate = exchange.ratePerSecond * level;
-						if (exchange.consumes)
-							addOutflow(exchange.storeIndex, rate, load.authored.id,
-								"equipment");
-						else
-							net[exchange.storeIndex] += rate;
-					}
-				}
-				// #594: a manually commanded generator is already burning
-				// authored fuel: its draw is deterministic demand and is
-				// projected like any other outflow, so a finite fuel store
-				// can never read as sustained supply. The projected rate is
-				// the full commanded output over the declared efficiency -
-				// an upper bound on the live burn, which ramp, cooling trips
-				// and fuel throttling can only lower - so the projection
-				// stays on the safe side of the live outcome, and what the
-				// store cannot pay for after it runs dry is reported as
-				// uncovered demand by the ordinary drawable-zero accounting.
-				// Under Automatic dispatch the draw follows the unmodelled
-				// net load, so nothing is projected here; the fuel store is
-				// flagged with the other unprojected consuming pathways.
-				if (!forecastDispatchAutomatic)
-				{
-					for (auto const& generator : generators)
-					{
-						auto const boundKW = std::min(generator.authored.ratedOutputKW,
-							generator.authored.commandedOutputKW);
-						if (boundKW <= 0.0) continue;
-						auto const kwhPerUnit = stationEnergyUnitsToKWh(
-							stores[generator.fuelStoreIndex].authored.unit);
-						auto const drawUnitsPerS = boundKW
-							/ generator.authored.efficiency / 3600.0 / kwhPerUnit;
-						// A fuel store projected dry cannot run the machine:
-						// the draw stays uncovered at that store rather than
-						// entering the net trajectory, matching the live rule
-						// that a generator with nothing drawable shuts down.
-						if (isDry(generator.fuelStoreIndex))
-							blocked.push_back({generator.fuelStoreIndex,
-								drawUnitsPerS});
-						else
-							addOutflow(generator.fuelStoreIndex, drawUnitsPerS,
-								generator.authored.id, "generator");
-					}
-				}
-				// #593: through-flow coverage. A store whose transfer
-				// outflow demand is nonzero, fully running (nothing of it
-				// blocked, by a transfer cap or by a crew or equipment
-				// stall) and fed by at least as much concurrent transfer
-				// inflow is a pass-through, not a shortage: it can sit dry
-				// at the boundary for the whole horizon while continuously
-				// satisfying its outflow, exactly as the live chain does.
+				// #593/#605: through-flow coverage. A store whose outflow
+				// demand - transfer, equipment, crew or commanded
+				// generator draw - is nonzero, fully running (nothing of
+				// it blocked) and fed by at least as much concurrent
+				// inflow from any pathway is a pass-through, not a
+				// shortage: it can sit dry at the boundary for the whole
+				// horizon while continuously satisfying its outflow,
+				// exactly as the live station does.
 				std::fill(blockedRate.begin(), blockedRate.end(), 0.0);
 				for (auto const& flow : blocked)
 					blockedRate[flow.storeIndex] += flow.rate;
 				std::fill(coveredFlag.begin(), coveredFlag.end(), 0);
 				for (size_t store = 0; store < stores.size(); ++store)
 				{
-					auto const demand = transferOutDemand[store];
+					auto const demand = outflowDemand[store];
 					if (demand <= 0.0) continue;
 					auto const tol = StationBalanceTolerance
 						* std::max(1.0, demand);
@@ -6048,10 +6320,11 @@ namespace core
 					coveredFlag[store] = 1;
 				}
 			};
-			// A store that starts dry is short unless its transfer
-			// outflow demand is fully covered by concurrent transfer
-			// through-flow (#593): a pass-through intermediate that never
-			// holds material but always passes what arrives is not a
+			// A store that starts dry is short unless its outflow demand
+			// is fully covered by concurrent through-flow from any
+			// projected pathway (#593, extended to every pathway by
+			// #605): a pass-through intermediate that never holds
+			// material but always passes what arrives is not a
 			// shortage, so it must not read as a shortfall that starts
 			// with the forecast.
 			computeRates(asOfSeconds);

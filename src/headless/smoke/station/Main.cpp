@@ -23447,6 +23447,366 @@ void recovery(smoke::Context const& context)
 				&& approx(b->projectedDrawableAtHorizon, 160.0, 1e-3),
 				"the receiving store did not collect the late-delivery through-flow total");
 		}
+		// Scenario P: equipment-to-transfer through-flow at a dry
+		// intermediate store (#605), the ticket fixture. A producer
+		// delivers 1 kg/s into a dry 1 kg buffer and a transfer drains
+		// the buffer at 1 kg/s. The live station flows straight through;
+		// the forecast gated the transfer on the inventory at the
+		// segment start and the equipment on the destination at the
+		// segment start, so the solve alternated fill/drain half-duty
+		// phases: it burned the whole segment cap, invented a buffer
+		// shortage and delivered only a fraction of the through-flow.
+		// The solve now settles every pathway together: no shortage, no
+		// truncation, a segment count bounded well below the cap and
+		// independent of the horizon, full-horizon throughput at the
+		// sink, closed conservation, and agreement with the live
+		// trajectory.
+		{
+			core::World world("ForecastEquipmentThroughDry", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {
+				chainStores("buffer", 1.0, 0.0),
+				chainStores("sink", 100000.0, 0.0) };
+			core::EquipmentLoadSettings producer;
+			producer.id = "producer";
+			producer.electricalDemandKW = 1.0;
+			producer.thermalClass = "warm";
+			producer.materialExchanges = {{"buffer", 1.0, false}};
+			settings.equipmentLoads = {producer};
+			settings.solarArrays = {{"solar", 100.0, {}}};
+			settings.transfers = {
+				chainTransfer("drain", "buffer", "sink", 1.0, 0) };
+			require(world.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.forecast.available && !snap.forecast.truncated,
+				"the equipment-to-transfer through-flow truncated the forecast");
+			require(snap.forecast.segmentsComputed <= 2u,
+				"a constant equipment through-flow needed more than a couple of segments");
+			auto const* buffer = findForecast(snap.forecast.stores, "buffer");
+			auto const* sink = findForecast(snap.forecast.stores, "sink");
+			require(buffer != nullptr && sink != nullptr,
+				"an equipment-through-flow store is missing from the forecast");
+			require(buffer != nullptr && !buffer->hasShortfall
+				&& approx(buffer->netRateAtStart, 0.0)
+				&& approx(buffer->unmetOutflowTotal, 0.0),
+				"the equipment-fed dry intermediate invented a shortage");
+			require(sink != nullptr
+				&& approx(sink->netRateAtStart, 1.0)
+				&& approx(sink->projectedDrawableAtHorizon, 86400.0, 1e-3),
+				"the sink did not receive the full horizon of equipment through-flow");
+			for (auto const& entry : snap.forecast.stores)
+				require(std::abs(entry.conservationResidual)
+					<= core::StationBalanceTolerance * 1e6,
+					"the equipment-through-flow projection does not conserve");
+			// Agreement with the live trajectory: the producer adds
+			// 1/60 kg per tick and the transfer moves it out the same
+			// tick, leaving the buffer empty.
+			world.resumeSimulation();
+			runOrDiagnose(world, 1200, "equipment through-flow live run");
+			auto const live = world.getStationSystemsSnapshot();
+			require(approx(findStore(live.stores, "buffer")->currentQualified, 0.0, 1e-9)
+				&& approx(findStore(live.stores, "sink")->currentQualified, 20.0, 1e-3),
+				"the live equipment-to-transfer chain did not flow straight through");
+			auto const f2 = live.forecast;
+			require(!f2.truncated && f2.segmentsComputed <= 2u,
+				"the equipment through-flow truncated after the live run");
+			require(!findForecast(f2.stores, "buffer")->hasShortfall
+				&& approx(findForecast(f2.stores, "buffer")->unmetOutflowTotal, 0.0),
+				"the equipment-fed intermediate still invents demand after the live run");
+			require(approx(findForecast(f2.stores, "sink")->projectedDrawableAtHorizon,
+				86420.0, 1e-3),
+				"the re-forecast did not continue the equipment through-flow trajectory");
+			for (auto const& entry : f2.stores)
+				require(std::abs(entry.conservationResidual)
+					<= core::StationBalanceTolerance * 1e6,
+					"the post-run equipment-through-flow projection does not conserve");
+		}
+		// Scenario Q: the dual boundary - a full intermediate store
+		// supplied by a transfer and drained by equipment consumption
+		// (#605). The incoming leg must not stop while the equipment
+		// drains: the through-flow is symmetric with the dry case and
+		// the intermediate holds steady at capacity for the horizon.
+		{
+			core::World world("ForecastEquipmentThroughFull", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {
+				chainStores("source", 1.0e6, 100000.0),
+				chainStores("mid", 10.0, 10.0),
+				chainStores("product", 1.0e6, 0.0) };
+			settings.transfers = {
+				chainTransfer("fill", "source", "mid", 1.0, 1) };
+			core::EquipmentLoadSettings drainer;
+			drainer.id = "drainer";
+			drainer.electricalDemandKW = 1.0;
+			drainer.thermalClass = "warm";
+			drainer.materialExchanges = {
+				{"mid", 1.0, true}, {"product", 1.0, false} };
+			settings.equipmentLoads = {drainer};
+			settings.solarArrays = {{"solar", 100.0, {}}};
+			require(world.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+			auto const snap = world.getStationSystemsSnapshot();
+			require(!snap.forecast.truncated && snap.forecast.segmentsComputed <= 2u,
+				"a full-intermediate equipment through-flow chain truncated the forecast");
+			auto const* mid = findForecast(snap.forecast.stores, "mid");
+			auto const* source = findForecast(snap.forecast.stores, "source");
+			auto const* product = findForecast(snap.forecast.stores, "product");
+			require(mid != nullptr && !mid->hasShortfall
+				&& approx(mid->netRateAtStart, 0.0)
+				&& approx(mid->unmetOutflowTotal, 0.0)
+				&& approx(mid->projectedDrawableAtHorizon, 10.0, 1e-3),
+				"the full intermediate did not hold steady under equipment through-flow");
+			require(source != nullptr
+				&& approx(source->netRateAtStart, -1.0)
+				&& approx(source->projectedDrawableAtHorizon, 13600.0, 1e-3),
+				"the transfer source did not project the full-horizon through-flow drain");
+			require(product != nullptr
+				&& approx(product->projectedDrawableAtHorizon, 86400.0, 1e-3),
+				"the equipment product store did not receive the full horizon");
+			for (auto const& entry : snap.forecast.stores)
+				require(std::abs(entry.conservationResidual)
+					<= core::StationBalanceTolerance * 1e6,
+					"the full-intermediate equipment through-flow does not conserve");
+			world.resumeSimulation();
+			runOrDiagnose(world, 1200, "full-intermediate equipment live run");
+			auto const live = world.getStationSystemsSnapshot();
+			require(approx(findStore(live.stores, "mid")->currentQualified, 10.0, 1e-3)
+				&& approx(findStore(live.stores, "product")->currentQualified, 20.0, 1e-3),
+				"the live full-intermediate equipment chain did not hold the store steady");
+			require(!findForecast(live.forecast.stores, "mid")->hasShortfall
+				&& approx(findForecast(live.forecast.stores, "mid")->unmetOutflowTotal, 0.0),
+				"the full intermediate invents unmet demand after the live run");
+		}
+		// Scenario R: shared-feed competition at a dry store (#605).
+		// One producer feeds 1 kg/s into a dry store and two equipment
+		// loads each want 1 kg/s from it. Only one load can run: the
+		// other stops whole and its demand stays uncovered - the
+		// forecast must never promise the same kilogram twice.
+		{
+			core::World world("ForecastSharedFeed", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {
+				chainStores("feed", 1.0, 0.0),
+				chainStores("out1", 1.0e6, 0.0),
+				chainStores("out2", 1.0e6, 0.0) };
+			core::EquipmentLoadSettings supplier;
+			supplier.id = "supplier";
+			supplier.electricalDemandKW = 1.0;
+			supplier.thermalClass = "warm";
+			supplier.materialExchanges = {{"feed", 1.0, false}};
+			core::EquipmentLoadSettings consumer1;
+			consumer1.id = "consumer1";
+			consumer1.electricalDemandKW = 1.0;
+			consumer1.thermalClass = "warm";
+			consumer1.materialExchanges = {
+				{"feed", 1.0, true}, {"out1", 1.0, false} };
+			core::EquipmentLoadSettings consumer2;
+			consumer2.id = "consumer2";
+			consumer2.electricalDemandKW = 1.0;
+			consumer2.thermalClass = "warm";
+			consumer2.materialExchanges = {
+				{"feed", 1.0, true}, {"out2", 1.0, false} };
+			settings.equipmentLoads = {supplier, consumer1, consumer2};
+			settings.solarArrays = {{"solar", 100.0, {}}};
+			require(world.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+			auto const snap = world.getStationSystemsSnapshot();
+			require(!snap.forecast.truncated && snap.forecast.segmentsComputed <= 2u,
+				"the shared-feed competition truncated the forecast");
+			auto const* feed = findForecast(snap.forecast.stores, "feed");
+			require(feed != nullptr && feed->hasShortfall
+				&& approx(feed->shortfallOnsetSeconds, 0.0),
+				"the over-subscribed dry feed did not read as short from the start");
+			require(approx(feed->unmetOutflowTotal,
+				core::StationForecastHorizonSeconds, 1e-2),
+				"the losing consumer's demand is not fully reported as uncovered");
+			// Exactly one consumer runs: one output store collects the
+			// full horizon of through-flow and the other stays empty.
+			auto const* out1 = findForecast(snap.forecast.stores, "out1");
+			auto const* out2 = findForecast(snap.forecast.stores, "out2");
+			require(out1 != nullptr && out2 != nullptr, "a consumer output is missing");
+			if (out1 != nullptr && out2 != nullptr)
+			{
+				auto const one = out1->projectedDrawableAtHorizon;
+				auto const other = out2->projectedDrawableAtHorizon;
+				require((approx(one, 86400.0, 1e-3) && approx(other, 0.0, 1e-9))
+					|| (approx(other, 86400.0, 1e-3) && approx(one, 0.0, 1e-9)),
+					"the shared feed did not run exactly one consumer at full rate");
+			}
+			for (auto const& entry : snap.forecast.stores)
+				require(std::abs(entry.conservationResidual)
+					<= core::StationBalanceTolerance * 1e6,
+					"the shared-feed competition does not conserve");
+		}
+		// Scenario S: crew metabolism through-flow at dry food and
+		// water stores (#605). The crew's food and water stores start
+		// empty but transfers cover the draws concurrently, so the
+		// metabolism runs at full rate for the whole horizon: the
+		// waste streams accumulate at the full crew rate and the dry
+		// food stores are a covered pass-through, not a shortage.
+		{
+			core::World world("ForecastCrewThroughFlow", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::ResourceCompositionSettings foodComposition;
+			foodComposition.moisture = 0.8;
+			foodComposition.nutrientNitrogen = 0.05;
+			foodComposition.phosphorus = 0.01;
+			foodComposition.potassium = 0.02;
+			foodComposition.otherMinerals = 0.02;
+			foodComposition.energyKJPerKgDry = 17000.0;
+			core::ResourceCompositionSettings waterComposition;
+			waterComposition.moisture = 0.999;
+			waterComposition.otherMinerals = 0.001;
+			core::ResourceCompositionSettings urineComposition;
+			urineComposition.moisture = 0.95;
+			urineComposition.nutrientNitrogen = 0.1;
+			urineComposition.phosphorus = 0.02;
+			urineComposition.potassium = 0.05;
+			urineComposition.otherMinerals = 0.05;
+			urineComposition.energyKJPerKgDry = 500.0;
+			core::ResourceCompositionSettings wasteComposition;
+			wasteComposition.moisture = 0.5;
+			wasteComposition.energyKJPerKgDry = 10000.0;
+			auto const compound = [](std::string const& id, double capacity,
+				double starting,
+				std::optional<core::ResourceCompositionSettings> composition)
+			{
+				core::ResourceStoreSettings store;
+				store.id = id; store.unit = "kg";
+				store.capacity = capacity; store.startingQualified = starting;
+				store.composition = std::move(composition);
+				return store;
+			};
+			core::AtmosphereSettings habitat;
+			habitat.id = "habitat"; habitat.hazardClass = "normal";
+			habitat.volumeM3 = 100.0;
+			habitat.startingOxygenKg = 20.0; habitat.startingNitrogenKg = 80.0;
+			habitat.startingTemperatureC = 20.0;
+			habitat.thermalCapacityKJPerK = 10000.0;
+			habitat.minPressureKPa = 1.0; habitat.maxPressureKPa = 200.0;
+			core::CrewSettings crew;
+			crew.id = "crew"; crew.atmosphereId = "habitat";
+			crew.crewCount = 100;
+			crew.activityProfile.constantLevel = 1.0;
+			crew.foodStoreId = "food"; crew.waterStoreId = "water";
+			crew.urineStoreId = "urine"; crew.organicWasteStoreId = "organicWaste";
+			crew.foodPerCrewPerS = 0.001; crew.waterPerCrewPerS = 0.002;
+			crew.oxygenPerCrewKgPerS = 0.001; crew.co2PerCrewKgPerS = 0.0011;
+			crew.moisturePerCrewKgPerS = 0.0005;
+			crew.urinePerCrewPerS = 0.0015; crew.organicWastePerCrewPerS = 0.0002;
+			crew.metabolicHeatPerCrewKW = 0.1;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {
+				compound("bulkFood", 1.0e6, 100000.0, foodComposition),
+				compound("bulkWater", 1.0e6, 100000.0, waterComposition),
+				compound("food", 1.0, 0.0, foodComposition),
+				compound("water", 1.0, 0.0, waterComposition),
+				compound("urine", 1.0e6, 0.0, urineComposition),
+				compound("organicWaste", 1.0e6, 0.0, wasteComposition) };
+			settings.atmospheres = { habitat };
+			settings.crews = { crew };
+			settings.transfers = {
+				chainTransfer("foodFill", "bulkFood", "food", 0.1, 1),
+				chainTransfer("waterFill", "bulkWater", "water", 0.2, 1) };
+			require(world.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+			auto const snap = world.getStationSystemsSnapshot();
+			require(!snap.forecast.truncated && snap.forecast.segmentsComputed <= 2u,
+				"the crew through-flow forecast truncated or churned segments");
+			auto const* food = findForecast(snap.forecast.stores, "food");
+			auto const* water = findForecast(snap.forecast.stores, "water");
+			require(food != nullptr && !food->hasShortfall
+				&& approx(food->netRateAtStart, 0.0)
+				&& approx(food->unmetOutflowTotal, 0.0),
+				"the covered dry food store invented a crew food shortage");
+			require(water != nullptr && !water->hasShortfall
+				&& approx(water->netRateAtStart, 0.0)
+				&& approx(water->unmetOutflowTotal, 0.0),
+				"the covered dry water store invented a crew water shortage");
+			auto const* urine = findForecast(snap.forecast.stores, "urine");
+			auto const* waste = findForecast(snap.forecast.stores, "organicWaste");
+			require(urine != nullptr
+				&& approx(urine->netRateAtStart, 0.15)
+				&& approx(urine->projectedDrawableAtHorizon, 12960.0, 1e-2),
+				"the covered crew did not project full-rate urine");
+			require(waste != nullptr
+				&& approx(waste->netRateAtStart, 0.02)
+				&& approx(waste->projectedDrawableAtHorizon, 1728.0, 1e-2),
+				"the covered crew did not project full-rate organic waste");
+			for (auto const& entry : snap.forecast.stores)
+				require(std::abs(entry.conservationResidual)
+					<= core::StationBalanceTolerance * 1e6,
+					"the crew through-flow projection does not conserve");
+			// The live station agrees: the crew eats what the transfers
+			// deliver each tick and the waste streams accumulate at the
+			// full crew rate (minus the first tick the empty food store
+			// costs the metabolism).
+			world.resumeSimulation();
+			runOrDiagnose(world, 1200, "crew through-flow live run");
+			auto const live = world.getStationSystemsSnapshot();
+			require(approx(findStore(live.stores, "food")->currentQualified, 0.1 / 60.0, 1e-9)
+				&& approx(findStore(live.stores, "urine")->currentQualified,
+					0.15 * (1199.0 / 60.0), 1e-2),
+				"the live crew did not run on the delivered through-flow");
+			require(!findForecast(live.forecast.stores, "food")->hasShortfall
+				&& approx(findForecast(live.forecast.stores, "food")->unmetOutflowTotal, 0.0),
+				"the covered crew invents unmet demand after the live run");
+		}
+		// Scenario T: a closed equipment cycle between two dry stores
+		// cannot bootstrap itself (#605). Load X consumes A and
+		// produces B; load Y consumes B and produces A; both stores
+		// start empty with no external supply. Neither load is
+		// supported: both stop whole, their feed demand stays
+		// uncovered, and no phantom material appears anywhere.
+		{
+			core::World world("ForecastCycleDry", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {
+				chainStores("A", 10.0, 0.0),
+				chainStores("B", 10.0, 0.0) };
+			core::EquipmentLoadSettings x;
+			x.id = "x";
+			x.thermalClass = "warm";
+			x.materialExchanges = {{"A", 1.0, true}, {"B", 1.0, false}};
+			core::EquipmentLoadSettings y;
+			y.id = "y";
+			y.thermalClass = "warm";
+			y.materialExchanges = {{"B", 1.0, true}, {"A", 1.0, false}};
+			settings.equipmentLoads = {x, y};
+			require(world.configureStationSystems(settings, false, &diagnostic),
+				diagnostic.c_str());
+			auto const snap = world.getStationSystemsSnapshot();
+			require(!snap.forecast.truncated && snap.forecast.segmentsComputed <= 2u,
+				"the unsupported equipment cycle churned the segment budget");
+			auto const* a = findForecast(snap.forecast.stores, "A");
+			auto const* b = findForecast(snap.forecast.stores, "B");
+			require(a != nullptr && a->hasShortfall
+				&& approx(a->shortfallOnsetSeconds, 0.0)
+				&& approx(a->projectedDrawableAtHorizon, 0.0, 1e-9)
+				&& approx(a->unmetOutflowTotal,
+					core::StationForecastHorizonSeconds, 1e-2),
+				"the unsupported cycle revived store A instead of reporting its demand uncovered");
+			require(b != nullptr && b->hasShortfall
+				&& approx(b->shortfallOnsetSeconds, 0.0)
+				&& approx(b->projectedDrawableAtHorizon, 0.0, 1e-9)
+				&& approx(b->unmetOutflowTotal,
+					core::StationForecastHorizonSeconds, 1e-2),
+				"the unsupported cycle revived store B instead of reporting its demand uncovered");
+			for (auto const& entry : snap.forecast.stores)
+				require(std::abs(entry.conservationResidual)
+					<= core::StationBalanceTolerance * 1e6,
+					"the unsupported equipment cycle does not conserve");
+		}
 	}
 
 int main(int argc, char** argv)
