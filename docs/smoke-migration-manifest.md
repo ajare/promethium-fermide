@@ -275,6 +275,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/persistence/RoomHeightScaleDocuments.cpp` | Room height scale persistence checks | `pf-smoke-persistence` |
 | `smoke/simulation/RoomHeights.cpp` | Room height pose checks | `pf-smoke-simulation` |
 | `smoke/editor/RoomHeightScale.cpp` | Room height scale editor checks | `pf-smoke-editor` |
+| `smoke/simulation/DeviceActivation.cpp` | Device activation and supersession boundary checks | `pf-smoke-simulation` |
 <!-- current-ownership-end -->
 Simulation Observation was migrated in #280. Its stable registered check
 is `simulation/observation`; its old path was

@@ -36,6 +36,7 @@ int main(int argc, char** argv)
 	registerFurniture(checks);
 	registerMarkerActions(checks);
 	registerUsablePointResolution(checks);
+	registerDeviceActivation(checks);
 	registerMixedCrawling(checks);
 	registerRoomHeights(checks);
 	registerScale(checks);

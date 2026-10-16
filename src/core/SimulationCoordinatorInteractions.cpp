@@ -834,6 +834,141 @@ namespace core
 		return { true, {} };
 	}
 
+	// A newer activation takes the device's target: the operations which were
+	// still Running toward another target on that device retire with it. The
+	// scan keeps the registry's stable-ID order and touches each retired
+	// operation for event publication, exactly as the inline loops did.
+	template <typename Matches>
+	void SimulationCoordinator::supersedeRunningOperations(DeviceOperationId winner, Matches matches)
+	{
+		for (auto const& [otherId, other] : mWorld.mDeviceOperations.entries())
+			if (otherId != winner && other->mState == DeviceOperationState::Running && matches(*other))
+			{
+				touchDeviceOperation(otherId, *other);
+				other->mState = DeviceOperationState::Cancelled;
+			}
+	}
+
+	// A BoothWindow shutter activates by taking its new target: a Toggle
+	// resolves once against the shutter's current target, and any operation
+	// still travelling the other way on the same shutter is superseded. The
+	// shutter keeps its physical progress and reverses from there.
+	void SimulationCoordinator::activateBoothWindow(DeviceOperationId id, DeviceOperation& operation)
+	{
+		auto found = mWorld.mBoothWindows.find(operation.mCommand.boothWindow);
+		auto booth = found == mWorld.mBoothWindows.end() ? nullptr : found->second.lock();
+		if (!booth)
+		{
+			operation.mState = DeviceOperationState::Rejected;
+			return;
+		}
+		// A new target supersedes prior travel, not its physical position.
+		supersedeRunningOperations(id, [&](DeviceOperation const& other)
+		{
+			return (other.mCommand.type == DeviceCommandType::SetBoothWindowState
+				|| other.mCommand.type == DeviceCommandType::ToggleBoothWindow)
+				&& other.mCommand.boothWindow == operation.mCommand.boothWindow;
+		});
+		if (operation.mCommand.type == DeviceCommandType::ToggleBoothWindow)
+			operation.mCommand.desiredState = !booth->mTargetOpen;
+		booth->mTargetOpen = operation.mCommand.desiredState;
+		booth->refreshState();
+	}
+
+	// A manual Door keeps its implicit revalidation at activation: an
+	// ordinary Door with requesters may only be opened by an Agent which can
+	// still operate it here, so a request nobody reached cannot open it.
+	// Automatic and transport-coordinated Doors carry no requesters and are
+	// unaffected by that check.
+	void SimulationCoordinator::activateManualDoor(DeviceOperationId id, DeviceOperation& operation)
+	{
+		(void)id;
+		auto resource = mWorld.mTraversalResources.find(operation.mCommand.traversalResource);
+		bool eligible = true;
+		if (mWorld.remoteOrdinaryDoorCentre(operation.mCommand.traversalResource)
+			&& !operation.mRequesters.empty())
+			eligible = any_of(operation.mRequesters.begin(), operation.mRequesters.end(), [&](auto actor)
+			{
+				return mWorld.agentCanOperateManualDoorHere(operation.mCommand.traversalResource, actor);
+			});
+		if (!resource || !resource->mDoor || !resource->mEnabled || !eligible
+			|| !(operation.mCommand.desiredState
+				? resource->mDoor->requestOpen() : resource->mDoor->requestClose()))
+		{
+			operation.mState = DeviceOperationState::Rejected;
+		}
+	}
+
+	// An extensible resource resolves a Toggle once against its current
+	// extension target, then commits the intent: extending starts now, while
+	// closing only withdraws admission and the physical retraction still
+	// waits for whoever is standing on the span.
+	void SimulationCoordinator::activateExtensible(DeviceOperationId id, DeviceOperation& operation)
+	{
+		auto resource = mWorld.mTraversalResources.find(operation.mCommand.traversalResource);
+		if (!resource || !resource->mExtensible || !resource->mExtensible->isExtensible())
+		{
+			operation.mState = DeviceOperationState::Rejected;
+			return;
+		}
+		if (resource->mExtensible->isBroken())
+		{
+			operation.mState = DeviceOperationState::Failed;
+			return;
+		}
+		// Resolve an activation once, against the current extension target.
+		if (operation.mCommand.type == DeviceCommandType::ToggleExtendedState)
+			operation.mCommand.desiredState = resource->mRetractionPending
+				|| !(resource->mExtensible->isExtended() || resource->mExtensible->isExtending());
+		// Opposite targets supersede old operations, not physical position.
+		supersedeRunningOperations(id, [&](DeviceOperation const& other)
+		{
+			return (other.mCommand.type == DeviceCommandType::SetExtendedState
+				|| other.mCommand.type == DeviceCommandType::ToggleExtendedState)
+				&& other.mCommand.traversalResource == operation.mCommand.traversalResource
+				&& other.mCommand.desiredState != operation.mCommand.desiredState;
+		});
+		if (operation.mCommand.desiredState)
+		{
+			resource->mRetractionPending = false;
+			resource->mEnabled = true;
+			if (!resource->mExtensible->extend())
+				operation.mState = DeviceOperationState::Rejected;
+		}
+		else
+		{
+			// Close admission now; physical retraction waits for users.
+			resource->mRetractionPending = true;
+			resource->mEnabled = false;
+		}
+	}
+
+	// The panel press is the activation: the leaf takes its new direction from
+	// the physical position it has already reached, so a reversal turns
+	// around mid-travel instead of waiting for the old travel to finish, and
+	// the superseded travel retires on this same tick.
+	void SimulationCoordinator::activateAccessPanelPress(DeviceOperationId id, DeviceOperation& operation,
+		AgentId actor)
+	{
+		auto found = mWorld.mAccessPanels.find(operation.mCommand.accessPanel);
+		auto panel = found == mWorld.mAccessPanels.end() ? nullptr : found->second.lock();
+		touchDeviceOperation(id, operation);
+		operation.mActivated = true;
+		auto action = operation.mCommand.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close;
+		auto control = panel ? mWorld.mInteractionPoints.find(panel->getControl(action)) : nullptr;
+		bool eligible = panel && control && mWorld.interactionRequestEligible(
+			panel->getControl(action), actor, World::InteractionEvaluationContext::ImmediatePress);
+		operation.mState = eligible ? DeviceOperationState::Running : DeviceOperationState::Rejected;
+		if (!eligible) return;
+		// Reversal keeps the physical leaf position, cancelling superseded travel.
+		supersedeRunningOperations(id, [&](DeviceOperation const& other)
+		{
+			return other.mCommand.type == DeviceCommandType::SetAccessPanelState
+				&& other.mCommand.accessPanel == panel->getId();
+		});
+		panel->mOpen = operation.mCommand.desiredState;
+	}
+
 	void SimulationCoordinator::advanceDeviceOperations()
 	{
 		mWorld.invalidateSimulationSnapshot();
@@ -879,91 +1014,19 @@ namespace core
 			touchDeviceOperation(id, *operation);
 			if (operation->mState == DeviceOperationState::Pending)
 			{
+				// The Pending-to-Running transition is this phase's activation
+				// boundary: each device family's activation helper is reached
+				// here, on the tick the operation was already activated on, and
+				// retires the operations its target supersedes (#623).
 				operation->mState = DeviceOperationState::Running;
 				if (operation->mCommand.type == DeviceCommandType::SetBoothWindowState
 					|| operation->mCommand.type == DeviceCommandType::ToggleBoothWindow)
-				{
-					auto found = mWorld.mBoothWindows.find(operation->mCommand.boothWindow);
-					auto booth = found == mWorld.mBoothWindows.end() ? nullptr : found->second.lock();
-					if (!booth) operation->mState = DeviceOperationState::Rejected;
-					else
-					{
-						// A new target supersedes prior travel, not its physical position.
-						for (auto const& [otherId, other] : mWorld.mDeviceOperations.entries())
-							if (otherId != id && other->mState == DeviceOperationState::Running
-								&& (other->mCommand.type == DeviceCommandType::SetBoothWindowState
-									|| other->mCommand.type == DeviceCommandType::ToggleBoothWindow)
-								&& other->mCommand.boothWindow == operation->mCommand.boothWindow)
-							{
-								touchDeviceOperation(otherId, *other);
-								other->mState = DeviceOperationState::Cancelled;
-							}
-						if (operation->mCommand.type == DeviceCommandType::ToggleBoothWindow)
-							operation->mCommand.desiredState = !booth->mTargetOpen;
-						booth->mTargetOpen = operation->mCommand.desiredState;
-						booth->refreshState();
-					}
-				}
+					activateBoothWindow(id, *operation);
 				else if (operation->mCommand.type == DeviceCommandType::OpenDoor)
-				{
-					auto resource = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
-					bool eligible = true;
-					if (mWorld.remoteOrdinaryDoorCentre(operation->mCommand.traversalResource)
-						&& !operation->mRequesters.empty())
-						eligible = any_of(operation->mRequesters.begin(), operation->mRequesters.end(), [&](auto actor) {
-							return mWorld.agentCanOperateManualDoorHere(operation->mCommand.traversalResource, actor);
-						});
-					if (!resource || !resource->mDoor || !resource->mEnabled || !eligible
-						|| !(operation->mCommand.desiredState
-							? resource->mDoor->requestOpen() : resource->mDoor->requestClose()))
-					{
-						operation->mState = DeviceOperationState::Rejected;
-					}
-				}
+					activateManualDoor(id, *operation);
 				else if (operation->mCommand.type == DeviceCommandType::SetExtendedState
 					|| operation->mCommand.type == DeviceCommandType::ToggleExtendedState)
-				{
-					auto resource = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
-					if (!resource || !resource->mExtensible || !resource->mExtensible->isExtensible())
-					{
-						operation->mState = DeviceOperationState::Rejected;
-					}
-					else if (resource->mExtensible->isBroken())
-					{
-						operation->mState = DeviceOperationState::Failed;
-					}
-					else
-					{
-						// Resolve an activation once, against the current extension target.
-						if (operation->mCommand.type == DeviceCommandType::ToggleExtendedState)
-							operation->mCommand.desiredState = resource->mRetractionPending
-								|| !(resource->mExtensible->isExtended() || resource->mExtensible->isExtending());
-						// Opposite targets supersede old operations, not physical position.
-						for (auto const& [otherId, other] : mWorld.mDeviceOperations.entries())
-							if (otherId != id && other->mState == DeviceOperationState::Running
-								&& (other->mCommand.type == DeviceCommandType::SetExtendedState
-									|| other->mCommand.type == DeviceCommandType::ToggleExtendedState)
-								&& other->mCommand.traversalResource == operation->mCommand.traversalResource
-								&& other->mCommand.desiredState != operation->mCommand.desiredState)
-							{
-								touchDeviceOperation(otherId, *other);
-								other->mState = DeviceOperationState::Cancelled;
-							}
-						if (operation->mCommand.desiredState)
-						{
-							resource->mRetractionPending = false;
-							resource->mEnabled = true;
-							if (!resource->mExtensible->extend())
-								operation->mState = DeviceOperationState::Rejected;
-						}
-						else
-						{
-							// Close admission now; physical retraction waits for users.
-							resource->mRetractionPending = true;
-							resource->mEnabled = false;
-						}
-					}
-				}
+					activateExtensible(id, *operation);
 				continue;
 			}
 			if (operation->mCommand.type == DeviceCommandType::PressDumbwaiterLanding) continue;
@@ -1651,31 +1714,11 @@ namespace core
 					if (auto operation = mWorld.mDeviceOperations.find(operationId);
 						operation && operation->mState == DeviceOperationState::Pending)
 					{
+						// The press interval ending is this device family's
+						// activation boundary, unchanged from before the helpers
+						// were extracted (#623).
 						if (operation->mCommand.type == DeviceCommandType::SetAccessPanelState)
-						{
-							auto found = mWorld.mAccessPanels.find(operation->mCommand.accessPanel);
-							auto panel = found == mWorld.mAccessPanels.end() ? nullptr : found->second.lock();
-							touchDeviceOperation(operationId, *operation);
-							operation->mActivated = true;
-							auto action = operation->mCommand.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close;
-							auto control = panel ? mWorld.mInteractionPoints.find(panel->getControl(action)) : nullptr;
-							bool eligible = panel && control && mWorld.interactionRequestEligible(
-								panel->getControl(action), request->mActor, World::InteractionEvaluationContext::ImmediatePress);
-							operation->mState = eligible ? DeviceOperationState::Running : DeviceOperationState::Rejected;
-							if (eligible)
-							{
-								// Reversal keeps the physical leaf position, cancelling superseded travel.
-								for (auto const& [otherId, other] : mWorld.mDeviceOperations.entries())
-									if (otherId != operationId && other->mState == DeviceOperationState::Running
-										&& other->mCommand.type == DeviceCommandType::SetAccessPanelState
-										&& other->mCommand.accessPanel == panel->getId())
-									{
-										touchDeviceOperation(otherId, *other);
-										other->mState = DeviceOperationState::Cancelled;
-									}
-								panel->mOpen = operation->mCommand.desiredState;
-							}
-						}
+							activateAccessPanelPress(operationId, *operation, request->mActor);
 						else if (operation->mCommand.type == DeviceCommandType::PressDumbwaiterLanding)
 							admitDumbwaiterPress(operationId, *operation);
 						else operation->mActivated = true;

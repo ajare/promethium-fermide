@@ -217,6 +217,12 @@ set(core_names
     usablePointResolution/effectFreeEligibility
     usablePointResolution/catalogueReload
     usablePointResolution/topologyMutation
+    deviceActivation/boothWindowActivationTick
+    deviceActivation/boothWindowCompetingTarget
+    deviceActivation/extensibleCompetingTarget
+    deviceActivation/accessPanelReversalKeepsLeaf
+    deviceActivation/dumbwaiterBusyOwnership
+    deviceActivation/manualDoorRevalidation
     mixedCrawling/journeys
     mixedCrawling/costs
     mixedCrawling/gates

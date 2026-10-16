@@ -772,6 +772,33 @@ namespace core
 		void releaseInteractionPointRequest(InteractionRequestId id, InteractionPointId point);
 		void publishInteractionOutcome(InteractionRequestId id, InteractionRequest const& request);
 
+		// Device activation (#623). Every device family owns exactly one
+		// activation helper, and each helper is called from the phase and the
+		// dispatch position its inline code used to occupy: BoothWindow, Door
+		// and extensible intents activate in the ResourceAdvancement phase's
+		// Pending-to-Running transition, an Access panel press activates at the
+		// end of the pressing Agent's Movement-phase press interval, and a
+		// Dumbwaiter press is admitted by admitDumbwaiterPress from both the
+		// user submission and the Agent press. There is deliberately no shared
+		// activation phase: moving one helper's call site would shift that
+		// device's activation by a tick, which is the regression this
+		// extraction must not introduce. Each helper commits the intent and
+		// retires the operations its target supersedes; the device itself keeps
+		// its physical position.
+		void activateBoothWindow(DeviceOperationId id, DeviceOperation& operation);
+		void activateManualDoor(DeviceOperationId id, DeviceOperation& operation);
+		void activateExtensible(DeviceOperationId id, DeviceOperation& operation);
+		void activateAccessPanelPress(DeviceOperationId id, DeviceOperation& operation,
+			AgentId actor);
+
+		// A newer activation takes the device's target: the operations which
+		// were still Running toward another target on that device retire with
+		// it, touched for event publication exactly as the inline loops did.
+		// The scan follows the registry's stable-ID order. Defined in the
+		// interactions translation unit, which is its only caller.
+		template <typename Matches>
+		void supersedeRunningOperations(DeviceOperationId winner, Matches matches);
+
 		// Retires terminal interaction requests and device operations once no
 		// live owner - an interaction point, a traversal resource's active
 		// preparation, an Agent's early door press, another request, or a
