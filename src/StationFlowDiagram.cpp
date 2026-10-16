@@ -1,4 +1,6 @@
 #include "StationFlowDiagram.h"
+#include "core/StationPorts.h"
+#include "imgui/imnodes.h"
 #include <algorithm>
 #include <set>
 #include <cmath>
@@ -492,8 +494,15 @@ namespace
 	constexpr float nodeWidth = station_flow::NodeWidth, nodeHeight = station_flow::NodeHeight;
 }
 
+StationFlowDiagram::~StationFlowDiagram()
+{
+	if (mNodeContext) ImNodes::DestroyContext(mNodeContext);
+}
+
 void StationFlowDiagram::reset()
 {
+	mPlaceStore = false; mLayout.clear(); mNodeIds.clear(); mNextNodeId = 1;
+	if (mNodeContext) { ImNodes::DestroyContext(mNodeContext); mNodeContext = nullptr; }
 	mCached.reset(); mGraph = {}; mPositions.clear(); mPan = {24, 24};
 	mZoom = 0.8f; mFitRequested = true; mSelected = -1; mConnectedOnly = false; mSearch[0] = 0;
 	mDragging = -1; mLastFrame = -1; mTemperature = 0;
@@ -513,7 +522,7 @@ void StationFlowDiagram::updateBounds()
 	mExtent = {maximum.x - mMinimum.x + nodeWidth, maximum.y - mMinimum.y + nodeHeight};
 }
 
-void StationFlowDiagram::render(core::StationSystemsSettings const& draft)
+void StationFlowDiagram::render(core::StationSystemsSettings& draft)
 {
 	if (mLastFrame != ImGui::GetFrameCount() - 1) { mDragging = -1; mTemperature = 0; }
 	mLastFrame = ImGui::GetFrameCount();
@@ -521,11 +530,38 @@ void StationFlowDiagram::render(core::StationSystemsSettings const& draft)
 	{
 		mGraph = station_flow::build(draft); mCached = draft; mSelected = -1;
 		mPositions = station_flow::forceLayout(mGraph);
+		std::map<std::string, size_t> occurrences;
+		for (size_t i = 0; i < mGraph.nodes.size(); ++i)
+		{
+			auto const& node = mGraph.nodes[i];
+			auto base = node.type + ":" + node.id;
+			auto key = base + ":" + std::to_string(occurrences[base]++);
+			if (auto found = mLayout.find(key); found != mLayout.end()) mPositions[i] = found->second;
+		}
 		mDragging = -1; mTemperature = 0;
+		updateBounds();
+	}
+	ImGui::TextUnformatted("Draft configuration flow (not live rates)");
+	ImGui::TextDisabled("Left-drag nodes; right/middle-drag to pan; wheel to zoom. Placement edits only the draft.");
+	ImGui::SetNextItemWidth(160);
+	if (ImGui::BeginCombo("Place node", mPlaceStore ? "Store" : "Choose type..."))
+	{
+		std::set<std::string_view> types;
+		for (auto const& port : core::stationPortDescriptors())
+			if (types.insert(port.nodeType).second && ImGui::Selectable(port.nodeType.data(), mPlaceStore))
+				mPlaceStore = port.nodeType == "Store";
+		ImGui::EndCombo();
+	}
+	if (mPlaceStore) ImGui::TextDisabled("Store placement armed - Esc or right-click to cancel.");
+	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
+		&& (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsMouseClicked(ImGuiMouseButton_Right)))
+		mPlaceStore = false;
+	ImGui::SameLine();
+	if (ImGui::Button("Auto-arrange"))
+	{
+		mPositions = station_flow::forceLayout(mGraph);
 		updateBounds(); mFitRequested = true;
 	}
-	ImGui::TextUnformatted("Draft configuration flow (force-directed; not live rates)");
-	ImGui::TextDisabled("Left-drag nodes to rearrange; right/middle-drag to pan; wheel to zoom. Layout edits never change the draft.");
 	ImGui::Text("Draft activation: %s | %zu nodes, %zu connections", draft.enabled ? "on" : "off",
 		mGraph.nodes.size(), mGraph.links.size());
 	ImGui::SetNextItemWidth(220);
@@ -555,7 +591,6 @@ void StationFlowDiagram::render(core::StationSystemsSettings const& draft)
 	if (mGraph.nodes.empty())
 	{
 		ImGui::TextDisabled("No systems configured in the draft. Add stores/processes or load a reference station.");
-		return;
 	}
 	if (mSelected >= 0)
 	{
@@ -591,7 +626,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings const& draft)
 	auto origin = ImGui::GetCursorScreenPos();
 	auto available = ImGui::GetContentRegionAvail();
 	available.x = std::max(available.x, 1.0f); available.y = std::max(available.y, 1.0f);
-	if (mFitRequested && available.x > 48 && available.y > 48)
+	if (mFitRequested && !mPositions.empty() && available.x > 48 && available.y > 48)
 	{
 		// The force layout's minimum x and y can belong to different nodes:
 		// its upper-left corner may be empty. Frame the complete bounds, not
@@ -608,16 +643,15 @@ void StationFlowDiagram::render(core::StationSystemsSettings const& draft)
 				mPan = {24 - mPositions[i].x * mZoom, 24 - mPositions[i].y * mZoom};
 				break;
 			}
-	ImGui::InvisibleButton("Flow interaction", available, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle | ImGuiButtonFlags_MouseButtonRight);
 	auto const& io = ImGui::GetIO();
-	bool const hovered = ImGui::IsItemHovered();
+	bool const hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
 	if (hovered && io.MouseWheel != 0)
 	{
 		auto old = mZoom; mZoom = std::clamp(mZoom * std::pow(1.15f, io.MouseWheel), 0.001f, 1.5f);
 		auto local = ImVec2(io.MousePos.x - origin.x, io.MousePos.y - origin.y);
 		mPan = {local.x - (local.x - mPan.x) * mZoom / old, local.y - (local.y - mPan.y) * mZoom / old};
 	}
-	if (mDragging < 0 && ImGui::IsItemActive() && (ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0)
+	if (hovered && !mPlaceStore && (ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0)
 		|| ImGui::IsMouseDragging(ImGuiMouseButton_Right, 0)))
 	{ mPan.x += io.MouseDelta.x; mPan.y += io.MouseDelta.y; }
 	auto point = [&](ImVec2 p) { return ImVec2(origin.x + mPan.x + p.x * mZoom, origin.y + mPan.y + p.y * mZoom); };
@@ -632,41 +666,76 @@ void StationFlowDiagram::render(core::StationSystemsSettings const& draft)
 	auto matched = visible;
 	for (auto const& e : mGraph.links)
 		if (matched[e.from] || matched[e.to]) visible[e.from] = visible[e.to] = true;
-	if (!io.MouseDown[ImGuiMouseButton_Left]) mDragging = -1;
-	int hoveredNode = -1;
-	for (size_t i = 0; i < mPositions.size(); ++i)
+	// imnodes owns hit testing, selection and node dragging. Keep panning
+	// over nodes as well as empty canvas (the library only pans empty space).
+	// Keep the existing compact, zoomable node/parallel-edge draw pass: the
+	// library has no zoom API and the full legacy projection must remain visible.
+	auto* previousContext = ImNodes::GetCurrentContext();
+	if (!mNodeContext) mNodeContext = ImNodes::CreateContext();
+	ImNodes::SetCurrentContext(mNodeContext);
+	ImNodes::GetIO().AltMouseButton = io.MouseDown[ImGuiMouseButton_Right]
+		? ImGuiMouseButton_Right : ImGuiMouseButton_Middle;
+	ImNodes::EditorContextResetPanning(mPan);
+	ImNodes::PushStyleVar(ImNodesStyleVar_NodePadding, ImVec2(0, 0));
+	for (auto colour : {ImNodesCol_NodeBackground, ImNodesCol_NodeBackgroundHovered,
+		ImNodesCol_NodeBackgroundSelected, ImNodesCol_NodeOutline})
+		ImNodes::PushColorStyle(colour, IM_COL32(0, 0, 0, 0));
+	ImNodes::BeginNodeEditor();
+	auto* canvasDraw = ImGui::GetWindowDrawList();
+	bool const canvasHovered = ImNodes::IsEditorHovered();
+	std::vector<int> ids(mGraph.nodes.size());
+	std::vector<std::string> keys(mGraph.nodes.size());
+	std::map<std::string, size_t> occurrences;
+	for (size_t i = 0; i < mGraph.nodes.size(); ++i)
 	{
+		auto const& n = mGraph.nodes[i];
+		auto base = n.type + ":" + n.id;
+		keys[i] = base + ":" + std::to_string(occurrences[base]++);
+		auto [entry, inserted] = mNodeIds.try_emplace(keys[i], mNextNodeId);
+		if (inserted) ++mNextNodeId;
+		ids[i] = entry->second;
 		if (!visible[i]) continue;
-		auto a = point(mPositions[i]);
-		if (hovered && ImGui::IsMouseHoveringRect(a, {a.x + nodeWidth * mZoom, a.y + nodeHeight * mZoom}))
-			hoveredNode = int(i);
+		ImNodes::SetNodeGridSpacePos(ids[i], {mPositions[i].x * mZoom, mPositions[i].y * mZoom});
+		ImNodes::BeginNode(ids[i]);
+		ImGui::Dummy({nodeWidth * mZoom, nodeHeight * mZoom});
+		ImNodes::EndNode();
+		ImNodes::SetNodeDraggable(ids[i], !mPlaceStore && n.type != "Power" && n.type != "Cooling service");
 	}
-	if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+	ImNodes::EndNodeEditor();
+	for (int c = 0; c < 4; ++c) ImNodes::PopColorStyle();
+	ImNodes::PopStyleVar();
+	int hoveredId = -1, hoveredNode = -1;
+	ImNodes::IsNodeHovered(&hoveredId);
+	for (size_t i = 0; i < ids.size(); ++i)
 	{
-		mSelected = hoveredNode; mDragging = hoveredNode;
-		if (mDragging >= 0)
+		if (ids[i] == hoveredId) hoveredNode = int(i);
+		if (visible[i])
 		{
-			auto p = mPositions[mDragging];
-			mDragOffset = {(io.MousePos.x - origin.x - mPan.x) / mZoom - p.x,
-				(io.MousePos.y - origin.y - mPan.y) / mZoom - p.y};
+			auto p = ImNodes::GetNodeGridSpacePos(ids[i]);
+			mPositions[i] = {p.x / mZoom, p.y / mZoom};
 		}
+		mLayout[keys[i]] = mPositions[i];
 	}
-	if (mDragging >= 0 && ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+	if (!mPlaceStore && canvasHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+		mSelected = hoveredNode;
+	if (mPlaceStore && canvasHovered && draft.stores.size() < core::MaxStationResourceStores
+		&& ImGui::IsMouseClicked(ImGuiMouseButton_Left))
 	{
-		mPositions[mDragging] = {(io.MousePos.x - origin.x - mPan.x) / mZoom - mDragOffset.x,
-			(io.MousePos.y - origin.y - mPan.y) / mZoom - mDragOffset.y};
-		mTemperature = 0.045f;
-		ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+		core::ResourceStoreSettings store;
+		store.unit = "kg"; store.capacity = 100;
+		for (size_t candidate = 1;; ++candidate)
+		{
+			store.id = "store" + std::to_string(candidate);
+			if (std::none_of(draft.stores.begin(), draft.stores.end(), [&](auto const& s) { return s.id == store.id; })) break;
+		}
+		mLayout["Store:" + store.id + ":0"] = {(io.MousePos.x - origin.x - mPan.x) / mZoom,
+			(io.MousePos.y - origin.y - mPan.y) / mZoom};
+		draft.stores.push_back(std::move(store));
+		mFitRequested = false;
 	}
-	if (mTemperature > 0.001f)
-	{
-		// UI-only bounded work; never advances World ticks, even while paused.
-		for (int step = 0; step < 2; ++step)
-			station_flow::relaxLayout(mGraph, mPositions, mTemperature, mDragging);
-		mTemperature *= 0.92f;
-		updateBounds();
-	}
-	auto* draw = ImGui::GetWindowDrawList();
+	ImNodes::SetCurrentContext(previousContext);
+	updateBounds();
+	auto* draw = canvasDraw;
 	draw->PushClipRect(origin, {origin.x + available.x, origin.y + available.y}, true);
 	std::map<std::pair<size_t, size_t>, size_t> parallelSlot;
 	for (auto const& link : mGraph.links)
@@ -721,8 +790,17 @@ void StationFlowDiagram::render(core::StationSystemsSettings const& draft)
 		draw->AddText(ImGui::GetFont(), ImGui::GetFontSize() * mZoom, {a.x + 8 * mZoom, a.y + 6 * mZoom},
 			IM_COL32(235, 240, 245, 255), label.c_str(), nullptr, (nodeWidth - 16) * mZoom, &clip);
 	}
+	if (mPlaceStore && canvasHovered)
+	{
+		auto a = io.MousePos;
+		ImVec2 b{a.x + nodeWidth * mZoom, a.y + nodeHeight * mZoom};
+		draw->AddRectFilled(a, b, IM_COL32(80, 130, 170, 100), 5);
+		draw->AddRect(a, b, IM_COL32(180, 220, 255, 200), 5);
+		draw->AddText({a.x + 8, a.y + 6}, IM_COL32(235, 240, 245, 255),
+			draft.stores.size() < core::MaxStationResourceStores ? "Store (click to place)" : "Store limit reached");
+	}
 	draw->PopClipRect();
-	if (hoveredNode >= 0)
+	if (hoveredNode >= 0 && !mPlaceStore)
 	{
 		auto const& n = mGraph.nodes[hoveredNode];
 		ImGui::BeginTooltip();

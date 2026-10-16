@@ -547,6 +547,7 @@ add_library(pf-agent-editing STATIC
     src/FurniturePanel.cpp
     src/StationSystemsWindow.cpp
     src/StationFlowDiagram.cpp
+    src/imgui/imnodes.cpp
     src/LocationPlan.cpp
     src/PermissionsPanel.cpp
 )
@@ -660,7 +661,8 @@ if(PF_BUILD_GUI)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/imgui/imgui.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/imgui/imgui_draw.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/imgui/imgui_tables.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/imgui/imgui_widgets.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/imgui/imgui_widgets.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/imgui/imnodes.cpp")
     add_executable(editor
         src/Helpers.cpp
         src/ApplicationResources.cpp

@@ -14,8 +14,90 @@
 
 namespace
 {
+	ImGuiWindow* flowCanvasWindow(char const* name)
+	{
+		auto* window = ImGui::FindWindowByName(name);
+		while (!window->DC.ChildWindows.empty()) window = window->DC.ChildWindows.back();
+		return window;
+	}
+
+	void flowPlacementWorkflow()
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory worldHistory;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Flow authoring", 2, 2);
+		world->pauseSimulation(); world->finishBuild(); world->markSaved();
+		bool flow = true;
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration");
+			if (flow) window.renderFlowContents(world);
+			else window.renderContents(world, worldHistory);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "flowPlacement", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			auto arm = [&] {
+				ctx->ComboClick("Place node/Store"); ctx->Yield(2);
+			};
+			auto canvasPoint = [&] {
+				auto* canvas = flowCanvasWindow("Configuration");
+				return ImVec2(canvas->Pos.x + 350, canvas->Pos.y + 180);
+			};
+			auto clickCanvas = [&] { ctx->MouseTeleportToPos(canvasPoint()); ctx->MouseClick(); ctx->Yield(3); };
+			arm();
+			REQ(driver.contains("Store placement armed"), "Store selection did not arm placement");
+			clickCanvas(); clickCanvas();
+			REQ(window.draft().stores.size() == 2 && window.draftHistory().undoCount() == 2,
+				"Repeated placement did not commit one configuration entry per store");
+			REQ(window.draft().stores[0].id != window.draft().stores[1].id
+				&& window.draft().stores[1].id.size() <= core::MaxStationStoreIdLength,
+				"Placement generated duplicate or overlong IDs");
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2); clickCanvas();
+			REQ(window.draft().stores.size() == 2 && !driver.contains("Store placement armed"),
+				"Escape did not disarm placement");
+			arm(); ctx->MouseTeleportToPos(canvasPoint()); ctx->MouseClick(ImGuiMouseButton_Right); ctx->Yield(2);
+			clickCanvas();
+			REQ(window.draft().stores.size() == 2 && !driver.contains("Store placement armed"),
+				"Right-click did not disarm placement");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().stores.size() == 1 && window.draftHistory().redoCount() == 1,
+				"Flow Ctrl+Z did not rewind the draft");
+			flow = false; ctx->Yield(3);
+			REQ(driver.contains("Store 0 id"), "Form did not expose the Flow store");
+			ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+			REQ(window.draft().stores.empty() && window.draftHistory().redoCount() == 2,
+				"Form did not share the Flow history");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().stores.size() == 1, "Form Ctrl+Y did not restore the Flow store");
+			ctx->ItemClick("Add store"); ctx->Yield(3);
+			REQ(window.draft().stores.size() == 2 && window.draftHistory().undoCount() == 2
+				&& window.draftHistory().redoCount() == 0, "Form edit did not commit shared history");
+			flow = true; ctx->Yield(3);
+			ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+			REQ(window.draft().stores.size() == 1, "Flow undo did not rewind the form edit");
+			ctx->ItemClick("Auto-arrange"); ctx->Yield(3);
+			REQ(window.draftHistory().undoCount() == 1, "Auto-arrange changed configuration history");
+			world->resumeSimulation(); auto const tick = world->getSimulationTick();
+			arm(); clickCanvas();
+			REQ(window.draft().stores.size() == 2, "Running World blocked draft-only placement");
+			REQ(world->getStationSystemsSettings().stores.empty() && worldHistory.undoCount() == 0
+				&& world->getSimulationTick() == tick && !world->isModified(),
+				"Flow placement or history mutated or advanced the World");
+		});
+		#undef REQ
+		require(driver.passed(), "Flow placement workflow failed on the Test Engine");
+	}
+
 	void storeWorkflow(smoke::Context const&)
 	{
+		flowPlacementWorkflow();
 		using smoke::require;
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
@@ -294,8 +376,17 @@ namespace
 				&& driver.contains("1 nodes, 0 connections"), "Flow did not show the unapplied draft store");
 			REQ(world->getStationSystemsSettings().stores.empty() && history.undoCount() == 0,
 				"Flow applied draft settings or changed document history");
-			auto* canvas = ImGui::FindWindowByName("View")->DC.ChildWindows.back();
-			ImVec2 const nodePoint{canvas->Pos.x + 70, canvas->Pos.y + 60};
+			auto storeBounds = [&]
+			{
+				station_flow::Node node{"Store", "store1"};
+				auto* w = flowCanvasWindow("View");
+				ImRect bounds{ImVec2(1e9f, 1e9f), ImVec2(-1e9f, -1e9f)};
+				for (auto const& v : w->DrawList->VtxBuffer)
+					if (v.col == station_flow::nodeColor(node) || v.col == station_flow::nodeColor(node, true))
+						bounds.Add(v.pos);
+				return bounds;
+			};
+			auto const nodePoint = storeBounds().GetCenter();
 			ctx->MouseTeleportToPos(nodePoint);
 			ctx->MouseDragWithDelta({300, 100}, ImGuiMouseButton_Right); ctx->Yield(3);
 			REQ(!driver.contains("Selected: Store"), "Right-drag selected a flow node");
@@ -304,16 +395,6 @@ namespace
 			REQ(driver.contains("Selected: Store 'store1'"), "Right-drag did not pan the flow node to the expected position");
 			ctx->ItemClick("Views/Station Flow/Fit all");
 			ctx->ItemClick("Views/Station Flow/Reset view"); ctx->Yield(3);
-			auto storeBounds = [&]
-			{
-				station_flow::Node node{"Store", "store1"};
-				auto* w = ImGui::FindWindowByName("View")->DC.ChildWindows.back();
-				ImRect bounds{ImVec2(1e9f, 1e9f), ImVec2(-1e9f, -1e9f)};
-				for (auto const& v : w->DrawList->VtxBuffer)
-					if (v.col == station_flow::nodeColor(node) || v.col == station_flow::nodeColor(node, true))
-						bounds.Add(v.pos);
-				return bounds;
-			};
 			auto originalBox = storeBounds();
 			REQ(originalBox.GetWidth() > 0, "Type-coloured store node was not rendered");
 			auto grab = originalBox.GetCenter();
@@ -383,7 +464,7 @@ namespace
 			}
 			auto graphInView = [&]
 			{
-				auto* flowCanvas = ImGui::FindWindowByName("View")->DC.ChildWindows.back();
+				auto* flowCanvas = flowCanvasWindow("View");
 				bool foundNode = false;
 				for (auto const& vertex : flowCanvas->DrawList->VtxBuffer)
 					if (nodeColours.contains(vertex.col))
@@ -394,7 +475,7 @@ namespace
 				return foundNode;
 			};
 			REQ(graphInView(), "Reference force graph is not framed inside the initial viewport");
-			auto* colouredCanvas = ImGui::FindWindowByName("View")->DC.ChildWindows.back();
+			auto* colouredCanvas = flowCanvasWindow("View");
 			for (auto medium : {station_flow::Medium::Water, station_flow::Medium::CarbonDioxide,
 				station_flow::Medium::Heat, station_flow::Medium::Electricity})
 			{
@@ -405,7 +486,7 @@ namespace
 			}
 			ctx->ItemClick("Views/Station Flow/Fit all"); ctx->Yield(3);
 			REQ(graphInView(), "Fit all leaves graph nodes outside the viewport");
-			auto* flowCanvas = ImGui::FindWindowByName("View")->DC.ChildWindows.back();
+			auto* flowCanvas = flowCanvasWindow("View");
 			ctx->MouseTeleportToPos({flowCanvas->Pos.x + 60, flowCanvas->Pos.y + 60});
 			ctx->MouseDragWithDelta({600, 400}, ImGuiMouseButton_Right); ctx->Yield(3);
 			REQ(!graphInView(), "Pan visibility regression did not move graph out of view");

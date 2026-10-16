@@ -2,6 +2,8 @@
 #include "core/StationSystems.h"
 #include "imgui/imgui.h"
 #include <optional>
+#include <map>
+struct ImNodesContext;
 #include <string>
 #include <vector>
 
@@ -40,7 +42,11 @@ namespace station_flow
 class StationFlowDiagram
 {
 public:
-	void render(core::StationSystemsSettings const& draft);
+	StationFlowDiagram() = default;
+	~StationFlowDiagram();
+	StationFlowDiagram(StationFlowDiagram const&) = delete;
+	StationFlowDiagram& operator=(StationFlowDiagram const&) = delete;
+	void render(core::StationSystemsSettings& draft);
 	void reset();
 private:
 	std::optional<core::StationSystemsSettings> mCached;
@@ -52,6 +58,11 @@ private:
 	bool mFitRequested{true};
 	int mSelected{-1}, mDragging{-1}, mLastFrame{-1};
 	float mTemperature{};
+	bool mPlaceStore{false};
+	ImNodesContext* mNodeContext{};
+	std::map<std::string, int> mNodeIds;
+	std::map<std::string, ImVec2> mLayout;
+	int mNextNodeId{1};
 	bool mConnectedOnly{false};
 	char mSearch[128]{};
 };

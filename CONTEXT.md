@@ -601,3 +601,45 @@ Material designated for disposal after resource recovery, including unrecoverabl
 
 **Scheduled waste ejection**:
 The removal of available, disposal-ready Terminal waste to space at declared simulation times. Ejected material leaves station inventories and is recorded as a material loss; material awaiting required treatment is not eligible.
+
+### Station diagram authoring
+
+**Configuration draft**:
+The working Station systems configuration the editor mutates, distinct from the configuration a World is actually simulating. A draft changes nothing in the World until it is applied.
+_Avoid_: Working copy, staging config
+
+**Authored node**:
+A station diagram node backed by a configuration entry the user created — a Resource store, transfer, conversion, chiller, crew, or any other declared station object.
+_Avoid_: Real node, editable node
+
+**Derived service node**:
+A station diagram node representing an aggregate service with no configuration entry of its own: the shared electrical pool, and one cooling service per Thermal service class. Drawn for legibility only — never authored, selected, or connected by the user.
+_Avoid_: Bus node, virtual node, pseudo-node
+
+**Port**:
+One declared input or output requirement of an Authored node, shown as a connector. A Port is the visible face of a reference the underlying configuration entry carries, not a separate object.
+_Avoid_: Pin, socket, slot
+
+**Growable port set**:
+A Port group whose count the user increases within a declared limit, such as a conversion's inputs and outputs or a maintenance job's requirements.
+_Avoid_: Dynamic port
+
+**Optional port**:
+A Port a node may or may not declare, such as a treatment consumable or a buffer's circulation gate. Always drawn so a node's needs stay visible, marked as unused until connected.
+_Avoid_: Empty port
+
+**Port descriptor**:
+The structural declaration of a Port's kind, direction, cardinality, and which counterpart kinds it may join. Deliberately too coarse to restate hazard class, thermal service class, medium, or unit agreement — those belong to configuration validation alone.
+_Avoid_: Port type, port schema
+
+**Connection constraint**:
+Whether a Port may join a counterpart: structurally from its Port descriptor, semantically from configuration validation. A link is permitted only when both allow it; the descriptor can be more permissive than validation but never less.
+_Avoid_: Link rule, compatibility check
+
+**Cascade disconnect**:
+Removing an Authored node, or renaming it, together with every link that referenced it, as a single undoable action. A refused cascade leaves no partial state.
+_Avoid_: Orphan cleanup, implicit unlink
+
+**Station configuration document**:
+A standalone authored document holding one Station systems configuration plus its diagram layout, so a configuration can be created, saved, and loaded independently of any World. Layout is presentation and never simulation input.
+_Avoid_: Preset, station file

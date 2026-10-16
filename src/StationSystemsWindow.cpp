@@ -3,10 +3,66 @@
 #include "core/World.h"
 #include "DocumentEdit.h"
 #include "imgui/imgui.h"
+#include "imgui/imgui_internal.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <optional>
+
+namespace
+{
+	// In-memory draft snapshots deliberately accept incomplete configurations.
+	// Applying/validating a draft and persisting a World are separate operations.
+	struct StationDraftSnapshot : DocumentSnapshotContext
+	{
+		core::StationSystemsSettings settings;
+		explicit StationDraftSnapshot(core::StationSystemsSettings const& value) : settings(value) {}
+	};
+}
+
+DocumentSnapshot StationSystemsWindow::captureDraft() const
+{
+	auto snapshot = mDraftHistory.capture({});
+	snapshot.context = std::make_shared<StationDraftSnapshot>(mDraft);
+	return snapshot;
+}
+
+void StationSystemsWindow::commitDraftChanges()
+{
+	if (!mPendingDraftEdit || ImGui::IsAnyItemActive()) return;
+	auto const before = std::static_pointer_cast<StationDraftSnapshot>(mPendingDraftEdit->context);
+	if (before->settings != mDraft) mDraftHistory.commit(std::move(mPendingDraftEdit));
+	mPendingDraftEdit.reset();
+}
+
+void StationSystemsWindow::renderDraftHistory()
+{
+	commitDraftChanges();
+	auto restore = [&](DocumentSnapshot const& snapshot) {
+		auto state = std::dynamic_pointer_cast<StationDraftSnapshot>(snapshot.context);
+		if (!state) return false;
+		mDraft = state->settings;
+		mConfirmReset = false;
+		mDiagnostic.clear();
+		return true;
+	};
+	bool const undoKey = ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z);
+	bool const redoKey = ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Y);
+	ImGui::BeginDisabled(!mDraftHistory.canUndo());
+	bool const undo = ImGui::Button("Undo configuration");
+	ImGui::EndDisabled(); ImGui::SameLine();
+	ImGui::BeginDisabled(!mDraftHistory.canRedo());
+	bool const redo = ImGui::Button("Redo configuration");
+	ImGui::EndDisabled();
+	bool didHistory = false;
+	if (undo || undoKey) didHistory = mDraftHistory.undo(captureDraft(), restore);
+	if (redo || redoKey) didHistory = mDraftHistory.redo(captureDraft(), restore) || didHistory;
+	// A rewind/restore changes the current state out from under the pending
+	// pre-edit snapshot; resync it to the restored draft so the end-of-frame
+	// commit never mistakes the restore for a fresh edit and wipes the redo stack.
+	if (didHistory) mPendingDraftEdit = captureDraft();
+	else if (!mPendingDraftEdit) mPendingDraftEdit = captureDraft();
+}
 
 void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, DocumentHistory& history)
 {
@@ -20,14 +76,15 @@ bool StationSystemsWindow::syncWorld(std::shared_ptr<core::World> const& world)
 	if (!world)
 	{
 		mWorld.reset(); mConfirmReset = false; mPendingActivation.reset();
-		mFlow.reset();
+		mFlow.reset(); mDraftHistory.clear(); mPendingDraftEdit.reset();
 		ImGui::TextDisabled("No World is open."); return false;
 	}
 	if (mWorld.lock() != world->getLifetimeToken().lock())
 	{
 		mWorld = world->getLifetimeToken(); mDraft = world->getStationSystemsSettings();
 		mDiagnostic.clear(); mConfirmReset = false; mPendingActivation.reset();
-		mFlow.reset();
+		mFlow.reset(); mDraftHistory.clear(); mPendingDraftEdit.reset();
+		mDraftHistory.markSaved();
 	}
 	return true;
 }
@@ -35,12 +92,24 @@ bool StationSystemsWindow::syncWorld(std::shared_ptr<core::World> const& world)
 void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const& world)
 {
 	if (!syncWorld(world)) return;
+	renderDraftHistory();
 	mFlow.render(mDraft);
+	// Placement is one action, including on the mouse-down frame.
+	if (mPendingDraftEdit)
+	{
+		auto const before = std::static_pointer_cast<StationDraftSnapshot>(mPendingDraftEdit->context);
+		if (before->settings != mDraft)
+		{
+			mDraftHistory.commit(std::move(mPendingDraftEdit));
+			mPendingDraftEdit.reset();
+		}
+	}
 }
 
 void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& world, DocumentHistory& history)
 {
 	if (!syncWorld(world)) return;
+	renderDraftHistory();
 	// Activation is a World-wide authored gate, not a draft-only checkbox or
 	// a side effect of opening this tab. Disabled Worlds own no station runtime.
 	ImGui::BeginDisabled(!world->isSimulationPaused());
@@ -2866,6 +2935,7 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	}
 	ImGui::EndDisabled();
 	if (!mDiagnostic.empty()) ImGui::TextWrapped("%s", mDiagnostic.c_str());
+	commitDraftChanges();
 	auto const snapshot = world->getStationSystemsSnapshot();
 	ImGui::Separator();
 	ImGui::Text("Live station state: %s", snapshot.enabled ? (snapshot.healthy ? "Enabled" : "Failed") : "Disabled");
