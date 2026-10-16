@@ -1216,8 +1216,9 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 		auto permission = world->addAccessPermission("Protected");
 		core::InteractionBinding binding;
 		binding.command = {core::DeviceCommandType::SetSectorLights, core::SectorId{1}, false};
+		core::Vector2 const pointPosition{3.5f, 0.f}; // at the chair's usable point
 		auto point = world->createInteractionPoint("Protected light", core::SectorId{1},
-			{6.5f, 0.f}, 0.25f, 0.05f, {binding});
+			pointPosition, 0.25f, 0.05f, {binding});
 		require(world->setInteractionPointPermissionRequirement(point, {permission}), "Device requirement refused");
 		auto actions = context.temporaryRoot() / "replacement-device.actions.lua";
 		write(actions, package("{key='hello',name='Sit',run=function(a,w,m) w.set_pose('sitting'); w.claim() end},"
@@ -1228,8 +1229,13 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 		// unauthorized device request.
 		require(runAction(*world, id, seat, std::string(core::UseFurnitureAction)).type == core::SimulationEventType::DestinationReached,
 			"Replacement setup use failed");
-		require(world->usablePointOccupant(seat) == id && world->lookupAgent(id).entity->getPose() == core::Pose::Sitting,
+		auto agent = world->lookupAgent(id).entity;
+		require(world->usablePointOccupant(seat) == id && agent->getPose() == core::Pose::Sitting,
 			"Replacement setup did not seat the Agent");
+		auto const distance = agent->getGlobalPosition().distanceTo(pointPosition);
+		require(agent->getObjectUsage() == core::ObjectUsage::Arms
+			&& distance <= 0.25f && distance <= agent->getObjectUsageDistance(),
+			"Protected device must be within the seated Agent's Arms reach");
 		core::consumeLogMessages();
 		auto refused = runAction(*world, id, seat, second);
 		require(refused.type == core::SimulationEventType::ActionFailed
@@ -1241,10 +1247,13 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 		require(snapshot.deviceOperations.empty() && snapshot.interactionRequests.empty(),
 			"Refused replacement published device work");
 		for (auto const& log : core::consumeLogMessages()) require(log.msg != "replace-device", "Refused replacement published its log");
-		// The seat remains fully usable afterwards: the refused replacement left no
-		// partial lifecycle that would block a legitimate finish.
-		require(runAction(*world, id, seat, std::string(core::IdleAction)).type == core::SimulationEventType::DestinationReached
-			&& !world->usablePointOccupant(seat), "Refused replacement stranded the seat");
+		// Granting only the missing permission must make the same replacement
+		// valid. This proves authorization, not reach or another eligibility rule,
+		// caused the first refusal, and that the use survived it intact.
+		world->pauseSimulation();
+		require(world->grantAgentAccessPermission(id, permission), "Replacement permission grant refused");
+		require(runAction(*world, id, seat, second).type == core::SimulationEventType::DestinationReached
+			&& !world->usablePointOccupant(seat), "Authorized replacement could not finish the surviving use");
 	}
 
 	void failures(smoke::Context const& context)

@@ -203,6 +203,7 @@ set(core_names
     markerActions/atomicEffects
     markerActions/poseVocabulary
     markerActions/deviceEffects
+    markerActions/replacementDeviceRefusalKeepsUse
     markerActions/claimCompetition
     markerActions/furnitureUse
     markerActions/furnitureFinishDevice
