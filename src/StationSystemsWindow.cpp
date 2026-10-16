@@ -1,4 +1,5 @@
 #include "StationSystemsWindow.h"
+#include "StationSystemsEntryEditor.h"
 #include "core/StationReference.h"
 #include "core/World.h"
 #include "DocumentEdit.h"
@@ -381,131 +382,12 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	ImGui::SameLine();
 	if (ImGui::RadioButton("Dispatch: automatic (bridge losses, start backup, protect reserves)", &dispatchModeIndex, 1))
 		mDraft.dispatchMode = core::StationDispatchMode::Automatic;
-	// Removal is deferred until the whole row has rendered: erasing the element
-	// mid-row would destroy the bound reference (and, for a compound store, its
-	// nested composition) while the rest of the row still reads it (#557).
-	// The index only advances on kept rows so a shifted row is never skipped.
-	for (size_t index = 0; index < mDraft.stores.size(); )
-	{
-		auto& store = mDraft.stores[index];
-		auto const row = std::to_string(index);
-		bool removeStore = false;
-		ImGui::PushItemWidth(220);
-		char idBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(idBuffer, store.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Store " + row + " id").c_str(), idBuffer, sizeof(idBuffer)))
-			store.id = idBuffer;
-		char unitBuffer[8]{};
-		std::strncpy(unitBuffer, store.unit.c_str(), sizeof(unitBuffer) - 1);
-		if (ImGui::InputText(("Store " + row + " unit").c_str(), unitBuffer, sizeof(unitBuffer)))
-			store.unit = unitBuffer;
-		char storeHazardBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(storeHazardBuffer, store.hazardClass.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Store " + row + " hazard class").c_str(),
-			storeHazardBuffer, sizeof(storeHazardBuffer)))
-			store.hazardClass = storeHazardBuffer;
-		ImGui::InputDouble(("Store " + row + " capacity").c_str(), &store.capacity, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Store " + row + " starting usable").c_str(), &store.startingQualified, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Store " + row + " starting held").c_str(), &store.startingUnqualified, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Store " + row + " protected reserve").c_str(), &store.protectedReserve, 0.0, 0.0, "%.3f");
-		ImGui::SameLine();
-		if (ImGui::Button(("Remove store " + row).c_str()))
-			removeStore = true;
-		bool compound = store.composition.has_value();
-		if (ImGui::Checkbox(("Store " + row + " declared composition").c_str(), &compound))
-		{
-			if (compound && !store.composition) store.composition = core::ResourceCompositionSettings{};
-			else if (!compound) store.composition.reset();
-		}
-		if (store.composition)
-		{
-			auto& composition = *store.composition;
-			ImGui::InputDouble(("Store " + row + " moisture fraction").c_str(), &composition.moisture, 0.0, 0.0, "%.4f");
-			ImGui::InputDouble(("Store " + row + " nutrient nitrogen fraction").c_str(), &composition.nutrientNitrogen, 0.0, 0.0, "%.4f");
-			ImGui::InputDouble(("Store " + row + " atmospheric nitrogen fraction").c_str(), &composition.atmosphericNitrogen, 0.0, 0.0, "%.4f");
-			ImGui::InputDouble(("Store " + row + " phosphorus fraction").c_str(), &composition.phosphorus, 0.0, 0.0, "%.4f");
-			ImGui::InputDouble(("Store " + row + " potassium fraction").c_str(), &composition.potassium, 0.0, 0.0, "%.4f");
-			ImGui::InputDouble(("Store " + row + " other minerals fraction").c_str(), &composition.otherMinerals, 0.0, 0.0, "%.4f");
-			ImGui::InputDouble(("Store " + row + " energy kJ per kg dry").c_str(), &composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
-		}
-		ImGui::PopItemWidth();
-		if (index + 1 < mDraft.stores.size()) ImGui::Separator();
-		if (removeStore)
-			mDraft.stores.erase(mDraft.stores.begin() + static_cast<std::ptrdiff_t>(index));
-		else
-			++index;
-	}
-	if (ImGui::Button("Add store"))
-	{
-		core::ResourceStoreSettings store;
-		store.unit = "kg";
-		store.capacity = 100.0;
-		store.startingQualified = 50.0;
-		for (size_t candidate = mDraft.stores.size() + 1;; ++candidate)
-		{
-			store.id = "store" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.stores.begin(), mDraft.stores.end(),
-				[&](core::ResourceStoreSettings const& existing) { return existing.id == store.id; });
-			if (!taken) break;
-		}
-		mDraft.stores.push_back(std::move(store));
-	}
+	// #652: Store and Transfer editing renders through the shared entry
+	// editor seam so the Flow inspector reuses the exact same widgets,
+	// labels and deferred-removal behavior against this same draft.
+	station_editor::renderStoreList(mDraft);
 	ImGui::SeparatorText("Draft transfers (qualified material, same-unit stores)");
-	for (size_t index = 0; index < mDraft.transfers.size(); )
-	{
-		auto& transfer = mDraft.transfers[index];
-		auto const row = std::to_string(index);
-		bool removeTransfer = false;
-		ImGui::PushItemWidth(220);
-		char transferIdBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(transferIdBuffer, transfer.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Transfer " + row + " id").c_str(), transferIdBuffer, sizeof(transferIdBuffer)))
-			transfer.id = transferIdBuffer;
-		char sourceBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(sourceBuffer, transfer.sourceId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Transfer " + row + " source").c_str(), sourceBuffer, sizeof(sourceBuffer)))
-			transfer.sourceId = sourceBuffer;
-		char destinationBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(destinationBuffer, transfer.destinationId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Transfer " + row + " destination").c_str(), destinationBuffer, sizeof(destinationBuffer)))
-			transfer.destinationId = destinationBuffer;
-		char transferUnitBuffer[8]{};
-		std::strncpy(transferUnitBuffer, transfer.unit.c_str(), sizeof(transferUnitBuffer) - 1);
-		if (ImGui::InputText(("Transfer " + row + " unit").c_str(), transferUnitBuffer, sizeof(transferUnitBuffer)))
-			transfer.unit = transferUnitBuffer;
-		ImGui::InputDouble(("Transfer " + row + " rate per second").c_str(), &transfer.ratePerSecond, 0.0, 0.0, "%.3f");
-		ImGui::InputInt(("Transfer " + row + " priority").c_str(), &transfer.priority);
-		ImGui::SameLine();
-		if (ImGui::Button(("Remove transfer " + row).c_str()))
-			removeTransfer = true;
-		ImGui::PopItemWidth();
-		if (removeTransfer)
-			mDraft.transfers.erase(mDraft.transfers.begin() + static_cast<std::ptrdiff_t>(index));
-		else
-			++index;
-	}
-	if (ImGui::Button("Add transfer"))
-	{
-		core::ResourceTransferSettings transfer;
-		transfer.unit = "kg";
-		transfer.ratePerSecond = 1.0;
-		if (!mDraft.stores.empty())
-		{
-			transfer.sourceId = mDraft.stores.front().id;
-			transfer.unit = mDraft.stores.front().unit;
-			for (auto const& store : mDraft.stores)
-				if (store.id != transfer.sourceId && store.unit == transfer.unit)
-				{ transfer.destinationId = store.id; break; }
-		}
-		for (size_t candidate = mDraft.transfers.size() + 1;; ++candidate)
-		{
-			transfer.id = "transfer" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.transfers.begin(), mDraft.transfers.end(),
-				[&](core::ResourceTransferSettings const& existing) { return existing.id == transfer.id; });
-			if (!taken) break;
-		}
-		mDraft.transfers.push_back(std::move(transfer));
-	}
+	station_editor::renderTransferList(mDraft);
 	ImGui::SeparatorText("Draft conversions (compound material; declared yields may lose but never create constituents)");
 	for (size_t index = 0; index < mDraft.conversions.size(); )
 	{
