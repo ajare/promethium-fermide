@@ -58,6 +58,49 @@ namespace
 			require(f.world.lookupAgent(actor).entity->getGlobalPosition() == core::Vector2{ 4.5f, 0 },
 				"Panel press moved an Agent already at the control");
 	}
+	void queuedActionAvailability()
+	{
+		for (auto mode : {core::ObjectUsage::Arms, core::ObjectUsage::RemoteControl})
+		{
+			Fixture f;
+			auto first = f.world.createAgent("First", f.room, 0, 4.5f);
+			auto second = f.world.createAgent("Queued", f.room, 0, 4.5f);
+			f.world.pauseSimulation();
+			for (auto actor : {first, second})
+				require(f.world.setAgentIndividualObjectUsage(actor, mode)
+					&& f.world.setAgentIndividualObjectUsageDistance(actor, 10.f), "Queue capability setup failed");
+			f.world.resumeSimulation();
+			f.world.consumeSimulationEvents();
+			for (auto action : {Panel::Action::Close, static_cast<Panel::Action>(42)})
+				require(!f.world.canRequestAccessPanel(f.panel->getId(), action, first)
+					&& !f.world.requestAccessPanel(f.panel->getId(), action, first), "Unsupported action accepted");
+			require(f.world.consumeSimulationEvents().empty(), "Unsupported action recorded work");
+			auto opening = f.world.requestAccessPanel(f.panel->getId(), Panel::Action::Open, first);
+			auto queued = f.world.requestInteraction(f.panel->getControl(Panel::Action::Open), second);
+			require(opening && queued, "Applicable queued Open refused");
+			f.world.advanceTick();
+			require(f.panel->getState() == Panel::State::Opening
+				&& f.world.lookupInteractionRequest(queued).entity->getResult() == core::InteractionResult::Pending,
+				"Queued action revalidated before its allocation boundary");
+			f.world.consumeSimulationEvents();
+			f.world.advanceTick();
+			require(f.world.lookupInteractionRequest(queued).entity->getResult() == core::InteractionResult::Cancelled,
+				"Unavailable queued Open activated");
+			auto events = f.world.consumeSimulationEvents();
+			bool cancelled = false;
+			for (auto const& event : events)
+				if (event.type == core::SimulationEventType::InteractionRequestChanged && event.interactionRequest.id == queued)
+				{
+					require(event.tick == 2 && event.interactionRequest.result == core::InteractionResult::Cancelled,
+						"Queued cancellation trace changed");
+					cancelled = true;
+				}
+			require(cancelled, "Missing queued cancellation event");
+			for (auto actor : {first, second})
+				require(f.world.lookupAgent(actor).entity->getGlobalPosition() == core::Vector2{4.5f, 0},
+					"Queued revalidation moved an Agent");
+		}
+	}
 	void animatedSpeed()
 	{
 		Fixture f;
@@ -87,6 +130,7 @@ namespace
 	void approach(smoke::Context const&)
 	{
 		identicalPressesRemainIndependent();
+		queuedActionAvailability();
 		animatedSpeed();
 		for (unsigned kind = 0; kind < 3; ++kind)
 			for (auto geometry : {core::AccessPanelGeometry{}, {1, 0.25f, 0.75f}, {0, 0, 1}})

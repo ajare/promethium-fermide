@@ -262,9 +262,7 @@ namespace core
 		if (occupied)
 		{
 			if (actor.getSector() != mSectors[resource->mLiftSector.value - 1].get()) return false;
-			auto position = actor.getGlobalPosition();
-			return std::hypot(double(position.x) - centre.x, double(position.y) - centre.y)
-				<= actor.getObjectUsageDistance();
+			return agentWithinRemoteControlRange(actor, centre);
 		}
 		if (requireOccupancy) return false;
 		// Planning may project boarding, never operate a selector. Enclosed cars
@@ -281,39 +279,64 @@ namespace core
 		});
 	}
 
+	bool World::agentCanOperateControlInSector(InteractionPoint const& point, Agent const& actor) const
+	{
+		return point.mSector && point.mSector.value <= mSectors.size() && actor.isActive()
+			&& agentCanOperateObjects(actor) && !agentForbidsButtons(&actor)
+			&& actor.getSector() == mSectors[point.mSector.value - 1].get();
+	}
+
+	bool World::agentWithinRemoteControlRange(Agent const& actor, Vector2 const& centre) const
+	{
+		auto position = actor.getGlobalPosition();
+		return std::hypot(double(position.x) - centre.x, double(position.y) - centre.y)
+			<= actor.getObjectUsageDistance();
+	}
+
+	shared_ptr<const BoothWindow> World::ownedBoothWindowControl(InteractionPointId id, InteractionPoint const& point) const
+	{
+		auto booth = lookupBoothWindow(point.mBoothWindowOwner);
+		return booth && !booth->getDumbwaiterOwner() && booth->getPanel() == id ? booth : nullptr;
+	}
+
+	optional<AccessPanel::Action> World::ownedAccessPanelAction(InteractionPointId id, InteractionPoint const& point) const
+	{
+		auto panel = lookupAccessPanel(point.mAccessPanelOwner);
+		if (!panel || point.mBindings.empty()) return nullopt;
+		auto action = point.mBindings.front().command.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close;
+		// A binding is not ownership: only the generated applicable control may
+		// use the panel geometry and remote capability.
+		if (panel->getControl(action) != id || !all_of(point.mBindings.begin(), point.mBindings.end(), [&](auto const& binding)
+		{
+			return binding.command.type == DeviceCommandType::SetAccessPanelState
+				&& binding.command.accessPanel == panel->getId()
+				&& binding.command.desiredState == (action == AccessPanel::Action::Open);
+		})) return nullopt;
+		return action;
+	}
+
 	bool World::agentCanOperateInteraction(InteractionPointId pointId, Agent const& actor,
 		InteractionEvaluationContext context) const
 	{
 		auto point = mInteractionPoints.find(pointId);
-		if (!point || !point->mSector || !actor.isActive() || agentForbidsButtons(&actor)
-			|| actor.getSector() != mSectors[point->mSector.value - 1].get()) return false;
+		if (!point || !agentCanOperateControlInSector(*point, actor)) return false;
 		if (actor.getObjectUsage() == ObjectUsage::RemoteControl)
 		{
 			if (point->mBoothWindowOwner)
 			{
 				// The owned back-side control is the authority; proximity to an
 				// aperture or an arbitrary binding must not grant another control.
-				auto booth = lookupBoothWindow(point->mBoothWindowOwner);
-				if (!booth || booth->getDumbwaiterOwner() || booth->getPanel() != pointId
-					|| !actor.getEffectiveRemoteBoothWindowShutters().value) return false;
-				auto centre = booth->getPosition() + booth->getSize() * .5f;
-				auto position = actor.getGlobalPosition();
-				return std::hypot(double(position.x) - centre.x, double(position.y) - centre.y)
-					<= actor.getObjectUsageDistance();
+				auto booth = ownedBoothWindowControl(pointId, *point);
+				return booth && actor.getEffectiveRemoteBoothWindowShutters().value
+					&& agentWithinRemoteControlRange(actor, booth->getPosition() + booth->getSize() * .5f);
 			}
 			if (point->mAccessPanelOwner)
 			{
 				// Only the panel's generated, applicable command qualifies. A generic
 				// point bound to a panel command cannot acquire remote eligibility.
 				auto panel = lookupAccessPanel(point->mAccessPanelOwner);
-				return panel && !point->mBindings.empty()
-					&& all_of(point->mBindings.begin(), point->mBindings.end(), [&](auto const& binding)
-					{
-						auto action = binding.command.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close;
-						return binding.command.type == DeviceCommandType::SetAccessPanelState
-							&& binding.command.accessPanel == panel->getId() && panel->getControl(action) == pointId
-							&& canRequestAccessPanel(panel->getId(), action, getAgentId(&actor));
-					});
+				auto action = ownedAccessPanelAction(pointId, *point);
+				return panel && action && accessPanelOperationEligible(*panel, *action, *point, actor);
 			}
 			auto centre = physicalButtonCentre(pointId);
 			if (!centre)
@@ -328,8 +351,7 @@ namespace core
 						&& agentCanRemotelySelectLiftDestination(binding.command.traversalResource, actor);
 				});
 			}
-			auto position = actor.getGlobalPosition();
-			return centre && std::hypot(double(position.x) - centre->x, double(position.y) - centre->y) <= actor.getObjectUsageDistance();
+			return agentWithinRemoteControlRange(actor, *centre);
 		}
 		return actor.getObjectUsage() == ObjectUsage::Arms
 			&& (!(context != InteractionEvaluationContext::AutonomousApproach || point->requiresReachAtRequest())
@@ -341,9 +363,14 @@ namespace core
 	{
 		auto point = mInteractionPoints.find(pointId);
 		auto actor = mAgents.find(actorId);
-		if (point && point->mAccessPanelOwner
-			&& !canRequestAccessPanel(point->mAccessPanelOwner,
-				point->mBindings.front().command.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close, actorId)) return false;
+		// Remote operation already includes panel policy. Arms request admission
+		// additionally checks action availability, Level and movement state.
+		if (point && actor && point->mAccessPanelOwner && actor->getObjectUsage() != ObjectUsage::RemoteControl)
+		{
+			auto panel = lookupAccessPanel(point->mAccessPanelOwner);
+			auto action = ownedAccessPanelAction(pointId, *point);
+			if (!panel || !action || !accessPanelOperationEligible(*panel, *action, *point, *actor)) return false;
+		}
 		// A finishing callback runs before physical movement commits, so the Agent
 		// is still standing at the usable point even though departure already set
 		// its movement state. Judge that one staged device request from the
@@ -1457,9 +1484,9 @@ namespace core
 				// not be overridden by earlier work, and cancellation must not resume
 				// that work later.
 				auto actor = mWorld.mAgents.find(request->mActor);
-				if (!actor || !mWorld.agentCanOperateInteraction(pointId, *actor, World::InteractionEvaluationContext::AutonomousApproach)
-					|| (actor->isPlayerControlled() && !mWorld.interactionRequestEligible(pointId, request->mActor,
-						World::InteractionEvaluationContext::ImmediatePress)))
+				if (!actor || !(actor->isPlayerControlled()
+					? mWorld.interactionRequestEligible(pointId, request->mActor, World::InteractionEvaluationContext::ImmediatePress)
+					: mWorld.agentCanOperateInteraction(pointId, *actor, World::InteractionEvaluationContext::AutonomousApproach)))
 				{
 					cancelInteraction(requestId);
 					continue;
@@ -1513,18 +1540,24 @@ namespace core
 					continue;
 				}
 			}
-			if (point->mAccessPanelOwner && !mWorld.canRequestAccessPanel(point->mAccessPanelOwner,
-				point->mBindings.front().command.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close,
-				request->mActor))
+			// Remote and Player evaluation below already includes owned-panel policy.
+			// Autonomous Arms work retains its separate pre-movement boundary.
+			if (point->mAccessPanelOwner && actor && !actor->isPlayerControlled()
+				&& actor->getObjectUsage() != ObjectUsage::RemoteControl)
 			{
-				cancelInteraction(point->mActiveRequest);
-				continue;
+				auto panel = mWorld.lookupAccessPanel(point->mAccessPanelOwner);
+				auto action = mWorld.ownedAccessPanelAction(pointId, *point);
+				if (!panel || !action || !mWorld.accessPanelOperationEligible(*panel, *action, *point, *actor))
+				{
+					cancelInteraction(point->mActiveRequest);
+					continue;
+				}
 			}
 			// Manual presses never chase the Button or execute while crossing.
 			// Walking away or shortening arm length cancels unpressed Player work.
-			if (!actor || !mWorld.agentCanOperateInteraction(pointId, *actor, World::InteractionEvaluationContext::AutonomousApproach)
-				|| (actor->isPlayerControlled() && !mWorld.interactionRequestEligible(pointId, request->mActor,
-					World::InteractionEvaluationContext::ImmediatePress)))
+			if (!actor || !(actor->isPlayerControlled()
+				? mWorld.interactionRequestEligible(pointId, request->mActor, World::InteractionEvaluationContext::ImmediatePress)
+				: mWorld.agentCanOperateInteraction(pointId, *actor, World::InteractionEvaluationContext::AutonomousApproach)))
 			{
 				// A deactivated Agent must not walk to the point or press it, and a
 				// Buttons-forbidden Agent must not press it either; the point must
@@ -1566,8 +1599,8 @@ namespace core
 							operation->mActivated = true;
 							auto action = operation->mCommand.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close;
 							auto control = panel ? mWorld.mInteractionPoints.find(panel->getControl(action)) : nullptr;
-							bool eligible = panel && control && mWorld.canRequestAccessPanel(panel->getId(), action, request->mActor)
-								&& mWorld.agentCanOperateInteraction(panel->getControl(action), *actor, World::InteractionEvaluationContext::ImmediatePress);
+							bool eligible = panel && control && mWorld.interactionRequestEligible(
+								panel->getControl(action), request->mActor, World::InteractionEvaluationContext::ImmediatePress);
 							operation->mState = eligible ? DeviceOperationState::Running : DeviceOperationState::Rejected;
 							if (eligible)
 							{

@@ -1652,6 +1652,13 @@ namespace core
 			RemoteActivation,    // Remote range is mandatory, including during movement.
 			FurnitureFinishEffects // Immediate reach, with the staged-departure exception.
 		};
+		bool agentCanOperateControlInSector(InteractionPoint const& point, Agent const& actor) const;
+		bool agentWithinRemoteControlRange(Agent const& actor, Vector2 const& centre) const;
+		std::shared_ptr<const BoothWindow> ownedBoothWindowControl(InteractionPointId id, InteractionPoint const& point) const;
+		std::optional<AccessPanel::Action> ownedAccessPanelAction(InteractionPointId id, InteractionPoint const& point) const;
+		// Composable panel policy; caller has checked capability, Mobility and Sector.
+		bool accessPanelOperationEligible(AccessPanel const& panel, AccessPanel::Action action,
+			InteractionPoint const& point, Agent const& actor) const;
 		bool agentCanOperateInteraction(InteractionPointId point, Agent const& actor,
 			InteractionEvaluationContext context) const;
 		bool agentCanRemotelySelectLiftDestination(TraversalResourceId resource, Agent const& actor,

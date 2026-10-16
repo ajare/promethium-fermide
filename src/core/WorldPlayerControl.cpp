@@ -256,16 +256,11 @@ namespace core
 		for (auto const& [pointId, point] : mInteractionPoints.entries())
 		{
 			auto placement = physicalControlPlacement(pointId);
-			auto booth = lookupBoothWindow(point->mBoothWindowOwner);
-			bool boothPanel = booth && !booth->getDumbwaiterOwner() && booth->getPanel() == pointId
-				&& booth->getBackSector().get() == agent->getSector();
-			bool accessPanelControl = false;
-			if (auto panel = lookupAccessPanel(point->mAccessPanelOwner))
-				for (auto action : panel->getActions())
-					if (panel->getControl(action) == pointId && canRequestAccessPanel(panel->getId(), action, id))
-						accessPanelControl = true;
+			auto booth = ownedBoothWindowControl(pointId, *point);
+			bool boothPanel = booth && booth->getBackSector().get() == agent->getSector();
+			bool accessPanelControl = ownedAccessPanelAction(pointId, *point).has_value();
 			if ((!placement && !boothPanel && !accessPanelControl) || std::abs(position.y - point->getPosition().y) > PoseFitTolerance
-				|| !agentCanOperateInteraction(pointId, *agent, InteractionEvaluationContext::ImmediatePress)
+				|| !interactionRequestEligible(pointId, id, InteractionEvaluationContext::ImmediatePress)
 				|| !missingInteractionPermissions(*point, *agent).empty()
 				|| isControlTargetBroken(pointId)) continue;
 			if (!boothPanel && !accessPanelControl)
