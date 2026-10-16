@@ -938,7 +938,7 @@ namespace core
 		float height = std::min(CORE_CORRIDOR_HEIGHT, sector->getPosition().y
 			+ sector->getLevelsHigh() - 1 + sector->getEffectiveTopLevelHeight() - position.y);
 		float left = sector->getPosition().x, right = left + sector->getSize().x;
-		if (auto stairs = dynamic_cast<StairwellTransit const*>(sector))
+		if (dynamic_cast<StairwellTransit const*>(sector))
 		{ left += CORE_DOOR_X_INSET; right -= CORE_DOOR_X_INSET; }
 		else if (sector->getType() == SectorType::Staircase)
 		{
