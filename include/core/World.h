@@ -1644,13 +1644,23 @@ namespace core
 		bool agentCanOperateObjects(Agent const& actor) const;
 		bool agentCanPhysicallyOperate(Agent const& actor, float distance, float geometryReach) const;
 		std::optional<Vector2> physicalButtonCentre(InteractionPointId point) const;
-		bool agentCanOperateInteraction(InteractionPointId point, Agent const& actor, bool requireReach) const;
+		// Internal evaluation policy, not a new capability or traversal permit.
+		enum class InteractionEvaluationContext
+		{
+			AutonomousApproach,   // Arms may approach; owned request-reach still applies.
+			ImmediatePress,      // Require current Arms reach; never chase a control.
+			RemoteActivation,    // Remote range is mandatory, including during movement.
+			FurnitureFinishEffects // Immediate reach, with the staged-departure exception.
+		};
+		bool agentCanOperateInteraction(InteractionPointId point, Agent const& actor,
+			InteractionEvaluationContext context) const;
 		bool agentCanRemotelySelectLiftDestination(TraversalResourceId resource, Agent const& actor,
 			bool requireOccupancy = true) const;
 		// Authorization-only policy for Permission adherence to usable transport.
 		bool agentSatisfiesTransportLandingPermission(TraversalResourceId resource,
 			SectorId approach, Vector2 const& endpoint, AgentId agent) const;
-		bool interactionRequestEligible(InteractionPointId point, AgentId actor, bool requireReach = false) const;
+		bool interactionRequestEligible(InteractionPointId point, AgentId actor,
+			InteractionEvaluationContext context) const;
 		InteractionRequestId requestInteractionForTraversal(InteractionPointId point, AgentId actor);
 
 		InteractionRequestId requestInteractionWhilePassing(InteractionPointId point, AgentId actor);

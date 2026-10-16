@@ -620,7 +620,9 @@ namespace core
 			{
 				InteractionPointId pointId{effect.point};
 				auto point = mInteractionPoints.find(pointId);
-				if ((device && device != pointId) || !interactionRequestEligible(pointId, agentId, true)
+				auto const context = finishing ? InteractionEvaluationContext::FurnitureFinishEffects
+					: InteractionEvaluationContext::ImmediatePress;
+				if ((device && device != pointId) || !interactionRequestEligible(pointId, agentId, context)
 					|| !missingInteractionPermissions(*point, *agent).empty() || point->mBindings.empty())
 				{ reject("Device Interaction point is not eligible or authorized"); return; }
 				for (auto const& binding : point->mBindings)

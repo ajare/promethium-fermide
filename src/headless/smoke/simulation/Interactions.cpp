@@ -183,6 +183,78 @@ namespace
 		}
 	}
 
+	// Public-seam matrix for the context policy (#617). Request eligibility
+	// precedes authorization; approach acceptance does not itself move an Agent.
+	void evaluationContextsPreserveAcceptance()
+	{
+		using namespace core;
+		using smoke::require;
+		for (auto mode : { ObjectUsage::Arms, ObjectUsage::RemoteControl, ObjectUsage::None })
+		for (bool inRange : { false, true })
+		for (int movement = 0; movement < 3; ++movement)
+		for (bool protectedControl : { false, true })
+		{
+			World world("Evaluation contexts", 12, 2);
+			auto room = world.addRoom("Room", 0, 0, 0, 12, 1);
+			auto control = world.addSectorLightSwitch(room, 4);
+			world.addSectorMarker(room, 0, 10.5f, "Destination");
+			world.finishBuild();
+			world.pauseSimulation();
+			auto id = world.createAgent("Operator", room, 0, .5f);
+			require(world.setAgentIndividualObjectUsageDistance(id, inRange ? 100.f : .05f)
+				&& world.setAgentIndividualObjectUsage(id, mode)
+				&& world.setAgentIndividualMinimumRoutePlanningTime(id, .1f)
+				&& world.setAgentIndividualMaximumRoutePlanningTime(id, .1f), "Context fixture capability refused");
+			AccessPermissionId permission;
+			if (protectedControl)
+			{
+				permission = world.addAccessPermission("Control key");
+				require(world.setInteractionPointPermissionRequirement(control.interactionPoint, { permission }),
+					"Context fixture permission refused");
+			}
+			require(world.resumeSimulation(), "Context fixture did not resume");
+			auto actor = world.lookupAgent(id).entity;
+			if (movement)
+			{
+				require(world.moveAgentToNamedMarker(id, "Destination").accepted(), "Context fixture move refused");
+				if (movement == 2)
+				{
+					for (unsigned tick = 0; tick < 120 && actor->getState() == Agent::State::RoutePlanning; ++tick)
+						world.advanceTick();
+					require(actor->getState() != Agent::State::Idle && actor->getState() != Agent::State::RoutePlanning,
+						"Context fixture did not begin movement");
+				}
+				else require(actor->getState() == Agent::State::RoutePlanning, "Context fixture did not begin planning");
+			}
+			auto position = actor->getGlobalPosition();
+			world.consumeSimulationEvents();
+			auto request = world.requestInteraction(control.interactionPoint, id);
+			bool eligible = (mode == ObjectUsage::Arms && movement == 0)
+				|| (mode == ObjectUsage::RemoteControl && inRange);
+			require(bool(request) == eligible && actor->getGlobalPosition() == position,
+				"Context changed request acceptance or request-time position");
+			auto events = world.consumeSimulationEvents();
+			if (!eligible)
+			{
+				require(events.empty(), "Ineligible request recorded a rejection or operation");
+				continue;
+			}
+			auto record = world.lookupInteractionRequest(request).entity;
+			require(record->getResult() == (protectedControl ? InteractionResult::Rejected : InteractionResult::Pending),
+				"Context changed refusal precedence");
+			if (protectedControl)
+				require(events.size() == 1 && events[0].type == SimulationEventType::InteractionRequestAdded
+					&& record->getOperations().empty()
+					&& record->getMissingPermissions() == std::vector<AccessPermissionId>{ permission },
+					"Context changed recorded rejection trace");
+			else
+				require(events.size() == 2 && events[0].type == SimulationEventType::DeviceOperationAdded
+					&& events[1].type == SimulationEventType::InteractionRequestAdded
+					&& events[0].tick == events[1].tick && events[0].sequence + 1 == events[1].sequence,
+					"Context changed accepted request trace");
+		}
+	}
+
 	void terminalCleanupPreservesOwnershipAndTrace()
 	{
 		using namespace core;
@@ -461,6 +533,7 @@ void registerInteractions(std::vector<smoke::Check>& checks)
 		{
 			deviceCommandClassificationPreservesCreation();
 			requestEntryPointsPreserveTrace();
+			evaluationContextsPreserveAcceptance();
 			terminalCleanupPreservesOwnershipAndTrace();
 			smoke::require(typedLightingInteractionCoalescesAndCancelsByRequester(), "typed lighting interaction, coalescing, or requester cancellation failed");
 		} });

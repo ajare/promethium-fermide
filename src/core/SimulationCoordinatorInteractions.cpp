@@ -281,7 +281,8 @@ namespace core
 		});
 	}
 
-	bool World::agentCanOperateInteraction(InteractionPointId pointId, Agent const& actor, bool requireReach) const
+	bool World::agentCanOperateInteraction(InteractionPointId pointId, Agent const& actor,
+		InteractionEvaluationContext context) const
 	{
 		auto point = mInteractionPoints.find(pointId);
 		if (!point || !point->mSector || !actor.isActive() || agentForbidsButtons(&actor)
@@ -331,11 +332,12 @@ namespace core
 			return centre && std::hypot(double(position.x) - centre->x, double(position.y) - centre->y) <= actor.getObjectUsageDistance();
 		}
 		return actor.getObjectUsage() == ObjectUsage::Arms
-			&& (!(requireReach || point->requiresReachAtRequest())
+			&& (!(context != InteractionEvaluationContext::AutonomousApproach || point->requiresReachAtRequest())
 				|| agentCanPhysicallyOperate(actor, actor.getGlobalPosition().distanceTo(point->mPosition), point->mReach));
 	}
 
-	bool World::interactionRequestEligible(InteractionPointId pointId, AgentId actorId, bool requireReach) const
+	bool World::interactionRequestEligible(InteractionPointId pointId, AgentId actorId,
+		InteractionEvaluationContext context) const
 	{
 		auto point = mInteractionPoints.find(pointId);
 		auto actor = mAgents.find(actorId);
@@ -347,7 +349,7 @@ namespace core
 		// its movement state. Judge that one staged device request from the
 		// physical position rather than rejecting it merely because departure began.
 		bool const finishing = actorId == mFinishingFurnitureUseAgent;
-		return point && actor && agentCanOperateInteraction(pointId, *actor, requireReach)
+		return point && actor && agentCanOperateInteraction(pointId, *actor, context)
 			&& (actor->getObjectUsage() == ObjectUsage::RemoteControl || finishing
 				|| actor->getState() == Agent::State::Idle || actor->getState() == Agent::State::WaitingForTraversal);
 	}
@@ -395,7 +397,10 @@ namespace core
 		// than a route preference (ADR 0011), so a forbidden Agent is refused
 		// here too (#193); agentForbidsButtons keeps individual-over-tag
 		// precedence (ADR 0012) and never consults ordinary Door restrictions.
-		if (!mWorld.interactionRequestEligible(pointId, actorId))
+		auto const context = actor && actor->getObjectUsage() == ObjectUsage::RemoteControl
+			? World::InteractionEvaluationContext::RemoteActivation
+			: World::InteractionEvaluationContext::AutonomousApproach;
+		if (!mWorld.interactionRequestEligible(pointId, actorId, context))
 		{
 			return {};
 		}
@@ -436,7 +441,7 @@ namespace core
 		// A route may need a Button beyond the current range. Approach only as
 		// far as the inclusive range boundary, never the physical control point.
 		if (agent && agent->getObjectUsage() == ObjectUsage::RemoteControl
-			&& !mWorld.agentCanOperateInteraction(point, *agent, true))
+			&& !mWorld.agentCanOperateInteraction(point, *agent, World::InteractionEvaluationContext::RemoteActivation))
 		{
 			auto control = mWorld.mInteractionPoints.find(point);
 			auto centre = mWorld.physicalButtonCentre(point);
@@ -545,7 +550,7 @@ namespace core
 		{
 			if (request->mActor != id || request->mResult != InteractionResult::Pending) continue;
 			auto point = mWorld.mInteractionPoints.find(request->mPoint);
-			if (!point || !mWorld.agentCanOperateInteraction(request->mPoint, *actor, false))
+			if (!point || !mWorld.agentCanOperateInteraction(request->mPoint, *actor, World::InteractionEvaluationContext::AutonomousApproach))
 				cancelled.push_back(requestId);
 		}
 		for (auto request : cancelled) cancelInteraction(request);
@@ -1313,7 +1318,7 @@ namespace core
 			}
 			for (auto pointId : controls)
 			{
-				if (!mWorld.agentCanOperateInteraction(pointId, agent, true)) continue;
+				if (!mWorld.agentCanOperateInteraction(pointId, agent, World::InteractionEvaluationContext::RemoteActivation)) continue;
 				if (auto request = requestInteraction(pointId, actor, true))
 				{
 					agent.mAnticipatoryInteraction.retainRequest(request);
@@ -1452,8 +1457,9 @@ namespace core
 				// not be overridden by earlier work, and cancellation must not resume
 				// that work later.
 				auto actor = mWorld.mAgents.find(request->mActor);
-				if (!actor || !mWorld.agentCanOperateInteraction(pointId, *actor, false)
-					|| (actor->isPlayerControlled() && !mWorld.interactionRequestEligible(pointId, request->mActor, true)))
+				if (!actor || !mWorld.agentCanOperateInteraction(pointId, *actor, World::InteractionEvaluationContext::AutonomousApproach)
+					|| (actor->isPlayerControlled() && !mWorld.interactionRequestEligible(pointId, request->mActor,
+						World::InteractionEvaluationContext::ImmediatePress)))
 				{
 					cancelInteraction(requestId);
 					continue;
@@ -1516,8 +1522,9 @@ namespace core
 			}
 			// Manual presses never chase the Button or execute while crossing.
 			// Walking away or shortening arm length cancels unpressed Player work.
-			if (!actor || !mWorld.agentCanOperateInteraction(pointId, *actor, false)
-				|| (actor->isPlayerControlled() && !mWorld.interactionRequestEligible(pointId, request->mActor, true)))
+			if (!actor || !mWorld.agentCanOperateInteraction(pointId, *actor, World::InteractionEvaluationContext::AutonomousApproach)
+				|| (actor->isPlayerControlled() && !mWorld.interactionRequestEligible(pointId, request->mActor,
+					World::InteractionEvaluationContext::ImmediatePress)))
 			{
 				// A deactivated Agent must not walk to the point or press it, and a
 				// Buttons-forbidden Agent must not press it either; the point must
@@ -1560,7 +1567,7 @@ namespace core
 							auto action = operation->mCommand.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close;
 							auto control = panel ? mWorld.mInteractionPoints.find(panel->getControl(action)) : nullptr;
 							bool eligible = panel && control && mWorld.canRequestAccessPanel(panel->getId(), action, request->mActor)
-								&& mWorld.agentCanOperateInteraction(panel->getControl(action), *actor, true);
+								&& mWorld.agentCanOperateInteraction(panel->getControl(action), *actor, World::InteractionEvaluationContext::ImmediatePress);
 							operation->mState = eligible ? DeviceOperationState::Running : DeviceOperationState::Rejected;
 							if (eligible)
 							{

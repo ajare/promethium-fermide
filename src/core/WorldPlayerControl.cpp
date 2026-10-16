@@ -265,7 +265,7 @@ namespace core
 					if (panel->getControl(action) == pointId && canRequestAccessPanel(panel->getId(), action, id))
 						accessPanelControl = true;
 			if ((!placement && !boothPanel && !accessPanelControl) || std::abs(position.y - point->getPosition().y) > PoseFitTolerance
-				|| !agentCanOperateInteraction(pointId, *agent, true)
+				|| !agentCanOperateInteraction(pointId, *agent, InteractionEvaluationContext::ImmediatePress)
 				|| !missingInteractionPermissions(*point, *agent).empty()
 				|| isControlTargetBroken(pointId)) continue;
 			if (!boothPanel && !accessPanelControl)
