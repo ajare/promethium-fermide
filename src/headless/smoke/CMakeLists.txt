@@ -91,6 +91,7 @@ pf_add_smoke_module(pf-smoke-simulation
         simulation/Dumbwaiters.cpp
         simulation/Furniture.cpp
         simulation/MarkerActions.cpp
+        simulation/UsablePointResolution.cpp
     LIBRARIES promethium-fermide-core pf-pause-position-support
     LABELS core
     TIMEOUT 60

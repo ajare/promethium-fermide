@@ -287,14 +287,17 @@ namespace core
 
 	bool World::actionAvailable(MarkerId marker, std::string_view action) const
 	{
+		// Only the Furniture-use branch needs the instance chain; resolve it
+		// through the shared single-pass resolver (#627).
+		if (action == UseFurnitureAction) return actionAvailable(marker, action, resolveUsablePoint(marker));
+		return actionAvailable(marker, action, ResolvedUsablePoint{});
+	}
+
+	bool World::actionAvailable(MarkerId marker, std::string_view action, ResolvedUsablePoint const& point) const
+	{
 		if (!lookupMarker(marker)) return false;
 		if (action == IdleAction) return true;
-		if (action == UseFurnitureAction)
-		{
-			auto instance = furnitureForMarker(marker);
-			auto definition = instance && mFurnitureCatalogue ? mFurnitureCatalogue->definition(instance->definitionKey) : nullptr;
-			return definition && definition->hasUse;
-		}
+		if (action == UseFurnitureAction) return point && point.definition->hasUse;
 		if (!mActionRegistry || !mActionRegistry->find(action)) return false;
 		auto found = mMarkerActions.find(marker);
 		return found != mMarkerActions.end()
@@ -325,13 +328,9 @@ namespace core
 		{
 			auto const& use = *agent.mFurnitureUse;
 			auto definition = use.catalogue->definition(use.definition);
-			float support = 0;
-			if (auto instance = furnitureForMarker(use.marker))
-				for (auto const& destination : instance->destinations)
-					if (destination.marker == use.marker)
-						for (auto const& point : definition->usablePoints)
-							if (point.key == destination.key) support = point.supportElevation;
-			return fits(definition->usePose, support) && fits(definition->finishUsePose, 0);
+			// Support comes from the same single-pass resolution the use-side
+			auto const point = resolveUsablePoint(use.marker, use.catalogue);
+			return fits(definition->usePose, point.supportElevation()) && fits(definition->finishUsePose, 0);
 		}
 		if (agent.mRetainedActionPose || (agent.mTraversalTask && agent.mTraversalTask->crossingPose))
 			return fits(agent.getPose(), agent.getSupportElevation());
@@ -340,23 +339,53 @@ namespace core
 		return false;
 	}
 
+	World::ResolvedUsablePoint World::resolveUsablePoint(MarkerId marker,
+		std::shared_ptr<const FurnitureCatalogue> const& catalogue) const
+	{
+		// One pass over the instances resolves the whole Marker -> instance,
+		// definition, destination, usable-point support and Sector chain.
+		// The result borrows from the current World and catalogue and is
+		// meant to live only inside the calling evaluation (#627).
+		ResolvedUsablePoint resolved;
+		auto const& activeCatalogue = catalogue ? catalogue : mFurnitureCatalogue;
+		if (!marker || !activeCatalogue) return resolved;
+		for (auto const& instance : mFurniture)
+		{
+			++mUsablePointResolveVisits;
+			auto const destination = std::find_if(instance.destinations.begin(), instance.destinations.end(),
+				[&](auto const& point) { return point.marker == marker; });
+			if (destination == instance.destinations.end()) continue;
+			auto const definition = activeCatalogue->definition(instance.definitionKey);
+			if (!definition) return resolved;
+			auto const point = std::find_if(definition->usablePoints.begin(), definition->usablePoints.end(),
+				[&](auto const& candidate) { return candidate.key == destination->key; });
+			resolved.marker = marker;
+			resolved.instance = &instance;
+			resolved.definition = definition;
+			resolved.destination = &*destination;
+			resolved.point = point != definition->usablePoints.end() ? &*point : nullptr;
+			resolved.sector = mSectors.at(instance.sector).get();
+			return resolved;
+		}
+		return resolved;
+	}
+
 	bool World::furniturePoseFits(AgentId id, MarkerId marker, Pose pose, bool usingSupport,
+		std::string* diagnostic) const
+	{
+		return furniturePoseFits(id, resolveUsablePoint(marker), pose, usingSupport, diagnostic);
+	}
+
+	bool World::furniturePoseFits(AgentId id, ResolvedUsablePoint const& point, Pose pose, bool usingSupport,
 		std::string* diagnostic) const
 	{
 		auto reject = [&](std::string message) { if (diagnostic) *diagnostic = std::move(message); return false; };
 		auto agent = mAgents.find(id);
-		auto instance = furnitureForMarker(marker);
-		if (!agent || !instance || !mFurnitureCatalogue) return reject("Unknown Agent or Furniture usable point");
+		if (!agent || !point) return reject("Unknown Agent or Furniture usable point");
 		if (!agent->supportsPose(pose)) return reject(std::string("Agent does not support Furniture pose ") + poseName(pose));
-		auto definition = mFurnitureCatalogue->definition(instance->definitionKey);
-		auto sector = mSectors.at(instance->sector);
-		float support = 0;
-		for (auto const& destination : instance->destinations)
-			if (destination.marker == marker)
-				for (auto const& point : definition->usablePoints)
-					if (point.key == destination.key && usingSupport) support = point.supportElevation;
-		auto clearance = sector->isRoom()
-			? sector->getLevelsHigh() - 1 + sector->getEffectiveTopLevelHeight() - instance->y
+		float support = usingSupport ? point.supportElevation() : 0;
+		auto clearance = point.sector->isRoom()
+			? point.sector->getLevelsHigh() - 1 + point.sector->getEffectiveTopLevelHeight() - point.instance->y
 			: std::numeric_limits<float>::infinity();
 		if (!agent->poseFits(pose, clearance, support))
 			return reject(std::string("Furniture ") + (usingSupport ? "use" : "finish") + " pose " + poseName(pose) + " does not fit target space");
@@ -366,25 +395,27 @@ namespace core
 
 	bool World::furnitureUseEligible(AgentId id, MarkerId marker, std::string* diagnostic) const
 	{
+		return furnitureUseEligible(id, resolveUsablePoint(marker), diagnostic);
+	}
+
+	bool World::furnitureUseEligible(AgentId id, ResolvedUsablePoint const& point, std::string* diagnostic) const
+	{
 		auto reject = [&](std::string message) { if (diagnostic) *diagnostic = std::move(message); return false; };
-		if (!actionAvailable(marker, UseFurnitureAction)) return reject("Furniture definition has no use");
-		if (auto owner = usablePointOccupant(marker); owner && owner != id) return reject("Usable point is occupied by another Agent");
-		auto instance = furnitureForMarker(marker);
-		auto definition = mFurnitureCatalogue->definition(instance->definitionKey);
+		if (!point || !lookupMarker(point.marker) || !point.definition->hasUse) return reject("Furniture definition has no use");
+		if (auto owner = usablePointOccupant(point.marker); owner && owner != id) return reject("Usable point is occupied by another Agent");
 		// Use begins from the Sector floor: an Agent that cannot stand in the
 		// Furniture's Sector (capability and clearance at the Furniture) cannot
 		// begin use, however well the declared poses themselves would fit.
 		if (auto agent = mAgents.find(id))
 		{
-			auto sector = mSectors.at(instance->sector);
-			auto const clearance = sector->isRoom()
-				? sector->getLevelsHigh() - 1 + sector->getEffectiveTopLevelHeight() - instance->y
+			auto const clearance = point.sector->isRoom()
+				? point.sector->getLevelsHigh() - 1 + point.sector->getEffectiveTopLevelHeight() - point.instance->y
 				: std::numeric_limits<float>::infinity();
 			if (!agent->poseFits(Pose::Standing, clearance))
 				return reject("Agent cannot stand in the Furniture's Sector");
 		}
-		return furniturePoseFits(id, marker, definition->usePose, true, diagnostic)
-			&& furniturePoseFits(id, marker, definition->finishUsePose, false, diagnostic);
+		return furniturePoseFits(id, point, point.definition->usePose, true, diagnostic)
+			&& furniturePoseFits(id, point, point.definition->finishUsePose, false, diagnostic);
 	}
 
 	std::string World::agentActionDisplayName(std::string_view action) const
@@ -422,6 +453,11 @@ namespace core
 	void World::executeMarkerAction(AgentId agentId, MarkerId markerId, std::string_view action, SimulationEvent& event)
 	{
 		auto agent = mAgents.find(agentId);
+		// Resolve the target usable point once (#627): availability,
+		// eligibility, Action views, use execution and the committed use
+		// record all share this single resolution.
+		ResolvedUsablePoint target;
+		if (action == UseFurnitureAction) target = resolveUsablePoint(markerId);
 		if (auto occupant = usablePointOccupant(markerId); occupant && occupant != agentId)
 		{
 			event.type = SimulationEventType::ActionFailed;
@@ -429,12 +465,17 @@ namespace core
 			return;
 		}
 		bool const replacingUse = agent && agent->mFurnitureUse.has_value();
+		// The seat being replaced resolves against the catalogue its use
+		// began with, not the currently installed one (#627).
+		ResolvedUsablePoint current;
+		Pose currentFinishPose{ Pose::Standing };
 		if (replacingUse)
 		{
 			if (action == UseFurnitureAction && agent->mFurnitureUse->marker == markerId) return;
-			auto const& use = *agent->mFurnitureUse;
-			if (!furniturePoseFits(agentId, use.marker, use.catalogue->definition(use.definition)->finishUsePose,
-				false, &event.diagnostic)) { event.type = SimulationEventType::ActionFailed; return; }
+			current = resolveUsablePoint(agent->mFurnitureUse->marker, agent->mFurnitureUse->catalogue);
+			currentFinishPose = agent->mFurnitureUse->catalogue->definition(agent->mFurnitureUse->definition)->finishUsePose;
+			if (!furniturePoseFits(agentId, current, currentFinishPose, false, &event.diagnostic))
+			{ event.type = SimulationEventType::ActionFailed; return; }
 		}
 		if (action == IdleAction)
 		{
@@ -443,28 +484,26 @@ namespace core
 			return;
 		}
 		auto marker = lookupMarker(markerId);
-		if (!agent || !marker || !actionAvailable(markerId, action))
+		if (!agent || !marker || !actionAvailable(markerId, action, target))
 		{
 			event.type = SimulationEventType::MovementCancelled;
 			event.movementCancellationReason = MovementCancellationReason::ActionUnavailable;
 			event.diagnostic = "Selected Action is no longer available";
 			return;
 		}
-		if (action == UseFurnitureAction && !furnitureUseEligible(agentId, markerId, &event.diagnostic))
+		if (action == UseFurnitureAction && !furnitureUseEligible(agentId, target, &event.diagnostic))
 		{
 			event.type = SimulationEventType::ActionFailed;
 			return;
 		}
-		auto views = actionViews(agentId, markerId);
-		if (replacingUse) views.pose = poseName(agent->mFurnitureUse->catalogue
-			->definition(agent->mFurnitureUse->definition)->finishUsePose);
-		auto instance = furnitureForMarker(markerId);
+		auto views = actionViews(agentId, markerId, target);
+		if (replacingUse) views.pose = poseName(currentFinishPose);
 		auto result = action == UseFurnitureAction
-			? mFurnitureCatalogue->executeUse(instance->definitionKey, false, views)
+			? mFurnitureCatalogue->executeUse(target.instance->definitionKey, false, views)
 			: mActionRegistry->execute(action, views);
 		if (action == UseFurnitureAction && result.succeeded)
 			result.effects.insert(result.effects.begin(), {ActionEffectType::Pose,
-				static_cast<int>(mFurnitureCatalogue->definition(instance->definitionKey)->usePose)});
+				static_cast<int>(target.definition->usePose)});
 		if (replacingUse)
 		{
 			// Validate replacement before invoking finish, then stage both batches
@@ -473,17 +512,16 @@ namespace core
 			applyActionResult(agentId, markerId, result, event, false, true, true);
 			if (event.type != SimulationEventType::DestinationReached) return;
 			auto const use = *agent->mFurnitureUse;
-			auto finishPose = use.catalogue->definition(use.definition)->finishUsePose;
-			auto finished = use.catalogue->executeUse(use.definition, true, actionViews(agentId, use.marker));
+			auto finished = use.catalogue->executeUse(use.definition, true, actionViews(agentId, use.marker, current));
 			if (!finished.succeeded)
 			{
 				applyActionResult(agentId, use.marker, std::move(finished), event, true);
 				agent->mFurnitureUse.reset();
-				restoreFurnitureFinishPose(*agent, finishPose);
+				restoreFurnitureFinishPose(*agent, currentFinishPose);
 				event.agent = mSimulationCoordinator.makeAgentSnapshot(agent);
 				return;
 			}
-			finished.effects.insert(finished.effects.begin(), {ActionEffectType::Pose, static_cast<int>(finishPose)});
+			finished.effects.insert(finished.effects.begin(), {ActionEffectType::Pose, static_cast<int>(currentFinishPose)});
 			finished.effects.push_back({ActionEffectType::Release});
 			finished.effects.insert(finished.effects.end(), result.effects.begin(), result.effects.end());
 			finished.logs.insert(finished.logs.end(), result.logs.begin(), result.logs.end());
@@ -495,7 +533,7 @@ namespace core
 		}
 		else applyActionResult(agentId, markerId, std::move(result), event);
 		if (action == UseFurnitureAction && event.type == SimulationEventType::DestinationReached)
-			agent->mFurnitureUse = Agent::FurnitureUse{markerId, instance->id, instance->definitionKey, mFurnitureCatalogue};
+			agent->mFurnitureUse = Agent::FurnitureUse{markerId, target.instance->id, target.instance->definitionKey, mFurnitureCatalogue};
 	}
 
 	FurnitureInstance const* World::furnitureForMarker(MarkerId marker) const
@@ -508,19 +546,23 @@ namespace core
 
 	ActionViews World::actionViews(AgentId agentId, MarkerId markerId) const
 	{
+		return actionViews(agentId, markerId, resolveUsablePoint(markerId));
+	}
+
+	ActionViews World::actionViews(AgentId agentId, MarkerId markerId, ResolvedUsablePoint const& point) const
+	{
 		auto agent = mAgents.find(agentId);
 		auto marker = lookupMarker(markerId);
 		auto position = agent->getGlobalPosition();
 		ActionViews views{agent->getName(), getName(), marker ? marker->getName() : "", agentId.value, markerId.value,
 			getSimulationTick(), position.x, position.y, {}, {}, {},
 			poseName(agent->mPose), 0};
-		if (auto instance = furnitureForMarker(markerId))
+		if (point)
 		{
-			views.furnitureId = instance->id;
-			views.furnitureName = instance->name;
-			views.definitionKey = instance->definitionKey;
-			for (auto const& point : instance->destinations)
-				if (point.marker == markerId) views.usablePointKey = point.key;
+			views.furnitureId = point.instance->id;
+			views.furnitureName = point.instance->name;
+			views.definitionKey = point.instance->definitionKey;
+			views.usablePointKey = point.destination->key;
 		}
 		return views;
 	}

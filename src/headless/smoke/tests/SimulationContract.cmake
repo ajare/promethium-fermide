@@ -211,6 +211,12 @@ set(core_names
     markerActions/furnitureUseCompetition
     markerActions/furnitureUseAtomicity
     markerActions/furnitureUseDocuments
+    usablePointResolution/wholeChain
+    usablePointResolution/onePassPerEvaluation
+    usablePointResolution/viewsParity
+    usablePointResolution/effectFreeEligibility
+    usablePointResolution/catalogueReload
+    usablePointResolution/topologyMutation
     mixedCrawling/journeys
     mixedCrawling/costs
     mixedCrawling/gates

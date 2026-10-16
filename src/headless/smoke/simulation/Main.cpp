@@ -35,6 +35,7 @@ int main(int argc, char** argv)
 	registerDumbwaiters(checks);
 	registerFurniture(checks);
 	registerMarkerActions(checks);
+	registerUsablePointResolution(checks);
 	registerMixedCrawling(checks);
 	registerRoomHeights(checks);
 	registerScale(checks);

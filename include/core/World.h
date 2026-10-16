@@ -63,6 +63,7 @@ namespace core
 		friend struct WorldAgentRestorationTestAccess;
 		friend struct PhysicalControlLookupTestAccess;
 		friend struct QueuedPressLookupTestAccess;
+		friend struct UsablePointResolutionTestAccess;
 		// Headless diagnostic driver dispatches validated Actions at a traversal
 		// boundary, never edits fields or introduces retained-Pose locomotion.
 		friend struct DoorClearanceDiagnostic;
@@ -655,6 +656,44 @@ namespace core
 		void clearUnavailableResetRequests();
 		void executeMarkerAction(AgentId agent, MarkerId marker, std::string_view action, SimulationEvent& event);
 		FurnitureInstance const* furnitureForMarker(MarkerId marker) const;
+		// Short-lived resolved Furniture usable-point context (#627): the
+		// Marker -> instance, definition, destination, usable-point support
+		// and Sector chain is resolved once per evaluation and reused by
+		// eligibility, pose-fit and Action-view construction instead of each
+		// repeating nested scans. Every reference is borrowed from the
+		// current World and catalogue: the context never leaves the
+		// evaluation that created it and cannot survive a catalogue swap or
+		// topology mutation.
+		struct ResolvedUsablePoint
+		{
+			MarkerId marker{};
+			FurnitureInstance const* instance{ nullptr };
+			FurnitureDefinition const* definition{ nullptr };
+			FurnitureDestination const* destination{ nullptr };
+			FurnitureUsablePoint const* point{ nullptr };
+			Sector const* sector{ nullptr };
+			explicit operator bool() const { return instance != nullptr; }
+			// An unmatched usable-point key resolves to floor support, the
+			// default the previous nested scans applied.
+			float supportElevation() const { return point ? point->supportElevation : 0.f; }
+		};
+		// One pass over the Furniture instances resolves the whole chain.
+		// An explicit catalogue serves live finishing, which keeps the
+		// catalogue its use began with even while a replacement is being
+		// installed; absent means the currently installed catalogue.
+		ResolvedUsablePoint resolveUsablePoint(MarkerId marker,
+			std::shared_ptr<const FurnitureCatalogue> const& catalogue = nullptr) const;
+		// Resolved-context variants: same rules and diagnostics, no re-scan.
+		bool furnitureUseEligible(AgentId agent, ResolvedUsablePoint const& point,
+			std::string* diagnostic) const;
+		bool furniturePoseFits(AgentId agent, ResolvedUsablePoint const& point, Pose pose, bool usingSupport,
+			std::string* diagnostic) const;
+		bool actionAvailable(MarkerId marker, std::string_view action, ResolvedUsablePoint const& point) const;
+		ActionViews actionViews(AgentId agent, MarkerId marker, ResolvedUsablePoint const& point) const;
+		// Query-operation evidence: Furniture instances visited while
+		// resolving. One evaluation must visit the instance list at most
+		// once, never once per nested pose/view check (#627).
+		mutable uint64_t mUsablePointResolveVisits{ 0 };
 		ActionViews actionViews(AgentId agent, MarkerId marker) const;
 		void applyActionResult(AgentId agent, MarkerId marker, ActionExecutionResult result, SimulationEvent& event,
 			bool finishing = false, bool validateOnly = false, bool replacingUse = false);
