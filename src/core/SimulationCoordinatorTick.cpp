@@ -604,19 +604,12 @@ namespace core
 				if (approachingResource && agent->getObjectUsage() == ObjectUsage::RemoteControl)
 					tryAnticipatoryInteraction(*agent, movementStart, movementStart);
 				// A remote press retains the ordinary control queue and duration.
-				// Hold position during that physical operation, not during device travel.
-				bool pressingRemote = false;
-				if (agent->getObjectUsage() == ObjectUsage::RemoteControl)
-					for (auto const& [pointId, point] : mWorld.mInteractionPoints.entries())
-					{
-						(void)pointId;
-						for (auto requestId : point->mQueue)
-						{
-							auto request = mWorld.mInteractionRequests.find(requestId);
-							if (request && request->mActor == id && request->mResult == InteractionResult::Pending)
-								pressingRemote = true;
-						}
-					}
+				// Hold position during that physical operation, not during device
+				// travel. #626: the derived per-Agent queued-press index answers
+				// the question directly instead of scanning every point and queue
+				// for each remote Agent every tick.
+				bool const pressingRemote = agent->getObjectUsage() == ObjectUsage::RemoteControl
+					&& hasQueuedPressWork(id);
 				if (!pressingRemote) agent->update(timestep);
 				if (approachingResource)
 					tryAnticipatoryInteraction(*agent, movementStart, agent->getGlobalPosition());

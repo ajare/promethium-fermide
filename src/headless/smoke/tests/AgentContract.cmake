@@ -154,6 +154,16 @@ set(agent_checks
     remoteMixedWorld
     remoteMixedControls
     remoteMixedCosts
+    queuedPressHoldsForExactlyThePressInterval
+    queuedPressDeviceTravelDoesNotHold
+    queuedPressSharedOperationRelease
+    queuedPressCancellationClears
+    queuedPressCancelBehindActive
+    queuedPressCoalesceAndRefusal
+    queuedPressRejectedNotQueued
+    queuedPressRemovalPathsClear
+    queuedPressQueryScalingEvidence
+    queuedPressRetirementClean
 )
 
 function(invoke status expected)

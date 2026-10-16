@@ -185,6 +185,7 @@ pf_add_smoke_module(pf-smoke-agent
         agent/AgentTypes.cpp
         agent/NoneUsage.cpp
         agent/RemoteIntegration.cpp
+        agent/QueuedPressLookup.cpp
     LIBRARIES promethium-fermide-core
     LABELS core
     TIMEOUT 30
@@ -219,6 +220,15 @@ set_tests_properties(agent-type-reserved-behaviour PROPERTIES LABELS "core;funct
 foreach(check agentTypesRemoteApproachBoundaries remoteMixedWorld remoteMixedControls remoteMixedCosts agentTypesRemoteBoothWindowShutters agentTypesRemoteShutterProperties agentTypesRemoteShutterDeclarations agentTypesRemoteAccessPanels agentTypesRemotePanelProperties agentTypesRemotePanelDeclarations agentTypesRemoteOnboardJourneys agentTypesRemoteOrdinaryDoors agentTypesRemoteDoorGates agentTypesRemoteTightDoor agentTypesRemoteDeclarations agentTypesRemoteGeometry agentTypesRemoteJourneys agentTypesRemotePendingEdits agentTypesRemoteLandingButtons agentTypesInheritedObjectUsage agentTypesInheritedObjectUsageRoutes agentTypesObjectUsageOverrides agentTypesObjectUsageCommittedCrossing agentTypesNoneDeclarations agentTypesNoneInvalidDeclarations agentTypesNoneDirectRefusals agentTypesNoneDoors agentTypesNoneOtherResources agentTypesNoneSharedAirlock agentTypesNoneLifetimes agentTypesNoneSharedJourneys)
     add_test(NAME object-usage-${check} COMMAND pf-smoke-agent --check ${check})
     set_tests_properties(object-usage-${check} PROPERTIES LABELS "agent;functional;validation-fast" TIMEOUT 60)
+endforeach()
+
+# Derived queued-press lookup by Agent (#626).
+foreach(check queuedPressHoldsForExactlyThePressInterval queuedPressDeviceTravelDoesNotHold
+        queuedPressSharedOperationRelease queuedPressCancellationClears queuedPressCancelBehindActive
+        queuedPressCoalesceAndRefusal queuedPressRejectedNotQueued queuedPressRemovalPathsClear
+        queuedPressQueryScalingEvidence queuedPressRetirementClean)
+    add_test(NAME agent-${check} COMMAND pf-smoke-agent --check ${check})
+    set_tests_properties(agent-${check} PROPERTIES LABELS "agent;functional;validation-fast" TIMEOUT 60)
 endforeach()
 
 foreach(check agentTypesArmsDeclarations agentTypesArmsPhysicalOperations agentTypesArmsManualDoor agentTypesArmsOnboardSelector)

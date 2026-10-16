@@ -26,5 +26,6 @@ int main(int argc, char** argv)
 	agent_smoke::registerAgentTypes(checks);
 	agent_smoke::registerNoneUsage(checks);
 	agent_smoke::registerRemoteIntegration(checks);
+	agent_smoke::registerQueuedPressLookup(checks);
 	return smoke::main("agent", checks, argc, argv);
 }

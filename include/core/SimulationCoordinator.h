@@ -238,6 +238,21 @@ namespace core
 		void tryPressUpcomingDoorButton(Agent& agent, Vector2 const& start, Vector2 const& end)
 		{ tryAnticipatoryInteraction(agent, start, end); }
 
+		// Direct query for queued press work owned by an Agent (#626): true
+		// when the Agent has an InteractionRequest sitting in some
+		// InteractionPoint queue that is still Pending - the exact condition the
+		// Movement phase used to find by scanning every point and queue each
+		// tick. Backed by the World's derived per-Agent index, which mirrors
+		// queue membership; the request record stays authoritative for the
+		// actor and the Pending result.
+		bool hasQueuedPressWork(AgentId id) const;
+
+		// Index maintenance: mirror of InteractionPoint queue membership by
+		// actor. Every queue insert and removal runs through these so the
+		// derived index stays in step with the queues (#626).
+		void indexQueuedPress(AgentId actor, InteractionRequestId id);
+		void unindexQueuedPress(AgentId actor, InteractionRequestId id);
+
 		// ------------------------------------------------------------------
 		// Door and extensible traversal preparation (ADR 0004 stage 3)
 		//

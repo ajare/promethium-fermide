@@ -888,6 +888,10 @@ namespace core
 		// and cannot veto removal.
 		mWorld.mAgentBehaviourRuntime->removeInstance(mWorld, id,
 			AgentBehaviourTeardownReason::Unassignment);
+		// The derived queued-press index must not outlive its Agent (#626):
+		// pending work was cancelled above, and any terminal residue keyed by
+		// this handle goes with the handle.
+		mWorld.mQueuedPressesByAgent.erase(id);
 		mWorld.mAgentIds.erase(found.entity);
 		mWorld.mAgents.remove(id);
 

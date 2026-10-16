@@ -158,6 +158,12 @@ namespace core
 		{
 			cancelInteraction(requestId);
 		}
+		// The point's whole queue leaves with it: drop every derived press
+		// entry the queue still holds (#626). Pending requests were cancelled
+		// above and are already unindexed; this sweeps any terminal residue.
+		for (auto const requestId : found.entity->mQueue)
+			if (auto request = mWorld.mInteractionRequests.find(requestId))
+				unindexQueuedPress(request->mActor, requestId);
 		auto snapshot = makeInteractionPointSnapshot(id, *found.entity);
 		mWorld.mInteractionPoints.remove(id);
 
@@ -470,6 +476,7 @@ namespace core
 			bindInteractionOperation(*request, command, binding.requirement);
 		}
 		point->mQueue.push_back(id);
+		indexQueuedPress(actorId, id); // Derived queued-press index mirrors the queue (#626).
 
 		publishInteractionRequestAdded(id, *request);
 		return id;
@@ -635,6 +642,41 @@ namespace core
 			}
 			point->mQueue.erase(remove(point->mQueue.begin(), point->mQueue.end(), id), point->mQueue.end());
 		}
+		// Leaving the queue leaves the derived press index with it (#626).
+		if (auto request = mWorld.mInteractionRequests.find(id))
+			unindexQueuedPress(request->mActor, id);
+	}
+
+	bool SimulationCoordinator::hasQueuedPressWork(AgentId id) const
+	{
+		// Direct query over the derived index (#626): only the queried Agent's
+		// own entries are visited. The index mirrors queue membership; the
+		// request record stays authoritative for the actor and the Pending
+		// result, so a stale entry can never fabricate a pause.
+		auto const found = mWorld.mQueuedPressesByAgent.find(id);
+		if (found == mWorld.mQueuedPressesByAgent.end()) return false;
+		for (auto const requestId : found->second)
+		{
+			++mWorld.mQueuedPressQueryVisits;
+			auto request = mWorld.mInteractionRequests.find(requestId);
+			if (request && request->mActor == id && request->mResult == InteractionResult::Pending)
+				return true;
+		}
+		return false;
+	}
+
+	void SimulationCoordinator::indexQueuedPress(AgentId actor, InteractionRequestId id)
+	{
+		if (!actor || !id) return;
+		mWorld.mQueuedPressesByAgent[actor].insert(id);
+	}
+
+	void SimulationCoordinator::unindexQueuedPress(AgentId actor, InteractionRequestId id)
+	{
+		auto const found = mWorld.mQueuedPressesByAgent.find(actor);
+		if (found == mWorld.mQueuedPressesByAgent.end()) return;
+		found->second.erase(id);
+		if (found->second.empty()) mWorld.mQueuedPressesByAgent.erase(found);
 	}
 
 	void SimulationCoordinator::publishInteractionOutcome(InteractionRequestId id, InteractionRequest const& request)
@@ -662,6 +704,9 @@ namespace core
 			return { false, found.diagnostic };
 		}
 		auto snapshot = makeInteractionRequestSnapshot(id, *found.entity);
+		// An explicitly removed request must not linger in the derived index,
+		// even while its stale handle stays in a point queue until dequeue (#626).
+		unindexQueuedPress(found.entity->mActor, id);
 		mWorld.mInteractionRequests.remove(id);
 
 		SimulationEvent event;
@@ -1485,6 +1530,9 @@ namespace core
 				auto request = mWorld.mInteractionRequests.find(requestId);
 				if (!request || request->mResult != InteractionResult::Pending)
 				{
+					// A removed request was already unindexed at removal; a
+					// terminal one still holds its index entry until dequeued (#626).
+					if (request) unindexQueuedPress(request->mActor, requestId);
 					point->mQueue.erase(point->mQueue.begin());
 					continue;
 				}
@@ -1514,6 +1562,7 @@ namespace core
 				}
 				if (reusedActiveWork)
 				{
+					unindexQueuedPress(request->mActor, requestId);
 					point->mQueue.erase(point->mQueue.begin());
 					continue;
 				}
@@ -1632,6 +1681,9 @@ namespace core
 						else operation->mActivated = true;
 					}
 				}
+				// The pressed request leaves the queue and the derived index
+				// together; device travel that follows holds neither (#626).
+				unindexQueuedPress(request->mActor, point->mActiveRequest);
 				point->mQueue.erase(remove(point->mQueue.begin(), point->mQueue.end(), point->mActiveRequest), point->mQueue.end());
 				point->mActiveRequest = {};
 			}

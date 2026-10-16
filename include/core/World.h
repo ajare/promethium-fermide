@@ -62,6 +62,7 @@ namespace core
 		friend class SimulationCoordinator;
 		friend struct WorldAgentRestorationTestAccess;
 		friend struct PhysicalControlLookupTestAccess;
+		friend struct QueuedPressLookupTestAccess;
 		// Headless diagnostic driver dispatches validated Actions at a traversal
 		// boundary, never edits fields or introduces retained-Pose locomotion.
 		friend struct DoorClearanceDiagnostic;
@@ -924,6 +925,20 @@ namespace core
 		EntityRegistry<InteractionPointId, InteractionPoint> mInteractionPoints;
 
 		EntityRegistry<InteractionRequestId, InteractionRequest> mInteractionRequests;
+
+		// Derived Agent -> queued press work index (#626): the interaction
+		// requests currently sitting in an InteractionPoint queue for that
+		// Agent. Maintained by the request/queue lifecycle transitions in
+		// SimulationCoordinator so the Movement phase can ask a remote Agent's
+		// press question directly instead of scanning every point and queue.
+		// It is an accelerator only: the query re-checks each request's actor
+		// and Pending result against the record, so a stale entry can never
+		// fabricate a pause.
+		std::map<AgentId, std::set<InteractionRequestId>> mQueuedPressesByAgent;
+		// Query-operation evidence: request records visited by direct queries.
+		// A query only ever visits the queried Agent's own index entries; it
+		// must never scale with the point or queue registries.
+		mutable uint64_t mQueuedPressQueryVisits{ 0 };
 
 		EntityRegistry<DeviceOperationId, DeviceOperation> mDeviceOperations;
 		// Runtime-only device identities, independent of movement admission.

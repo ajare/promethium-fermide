@@ -3024,6 +3024,7 @@ namespace core
 		mConstructionRecords.clear();
 		mPhysicalControlPlacements.clear();
 		mPhysicalControlByPoint.clear(); // Derived index follows the placements it indexes (#625).
+		mQueuedPressesByAgent.clear(); // Derived queued-press index follows the queues it mirrors (#626).
 
 		mName = std::move(name);
 		mCellsWide = cellsWide;

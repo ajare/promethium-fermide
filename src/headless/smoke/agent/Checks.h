@@ -30,6 +30,7 @@ namespace agent_smoke
 	void registerAgentTypes(std::vector<smoke::Check>& checks);
 	void registerNoneUsage(std::vector<smoke::Check>& checks);
 	void registerRemoteIntegration(std::vector<smoke::Check>& checks);
+	void registerQueuedPressLookup(std::vector<smoke::Check>& checks);
 	void registerAgentTypeEditor(std::vector<smoke::Check>& checks);
 	void registerGroupEditor(std::vector<smoke::Check>& checks);
 	void registerGroupAssignmentEditor(std::vector<smoke::Check>& checks);
