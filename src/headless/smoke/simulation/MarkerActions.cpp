@@ -756,13 +756,25 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 		std::string const use(core::UseFurnitureAction);
 		auto path = context.temporaryRoot() / "replacement.actions.lua";
 		write(path, package("{key='hello',name='Replacement',run=function(a,w,m) w.release() end},"
-			"{key='other',name='Observe Standing',run=function(a,w,m) assert(a.pose == 'standing'); w.log('replacement') end}"));
+			"{key='other',name='Observe Standing',run=function(a,w,m) "
+			"assert(a.pose == 'standing'); "
+			"assert(m.furniture ~= nil, 'Custom Action lost Furniture metadata'); "
+			"assert(m.furniture.id == " + std::to_string(world->furniture()[0].id) + "); "
+			"assert(m.furniture.name == 'Chair' and m.furniture.definition == 'chair'); "
+			"assert(m.usable_point == 'seat'); w.log('replacement') end}"));
 		require(world->selectActionRegistry(path) && world->setMarkerActions(chair, {second, use, second, "idle"}), "Use assignment refused");
 		require(world->availableAgentActions(chair) == std::vector<std::string>{"idle", use, second}, "Derived use ordering/deduplication changed");
 		require(world->availableAgentActions(desk) == std::vector<std::string>{"idle"}, "Desk invented derived use");
 		require(!world->setMarkerActions(desk, {use}) && world->markerActions(desk).empty(), "Desk accepted an unavailable built-in use assignment");
 		require(runAction(*world, owner, chair, "idle").type == core::SimulationEventType::DestinationReached
 			&& world->lookupAgent(owner).entity->getPose() == core::Pose::Standing && !world->usablePointOccupant(chair), "Idle implicitly used chair");
+		// Exercise real custom Action dispatch, not just Action-view helpers.
+		// The same metadata assertions also run during the same-seat replacement below.
+		auto custom = runAction(*world, owner, chair, second);
+		require(custom.type == core::SimulationEventType::DestinationReached,
+			"Custom Action at a free Furniture Marker failed: " + custom.diagnostic);
+		require(world->lookupAgent(owner).entity->getPose() == core::Pose::Standing
+			&& !world->usablePointOccupant(chair), "Custom metadata query changed pose/occupancy");
 		core::consumeLogMessages();
 		require(runAction(*world, owner, chair, use).type == core::SimulationEventType::DestinationReached, "Explicit use failed");
 		require(world->lookupAgent(owner).entity->getPose() == core::Pose::Sitting && world->usablePointOccupant(chair) == owner, "Chair use did not sit/claim");

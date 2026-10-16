@@ -473,9 +473,10 @@ namespace core
 		auto agent = mAgents.find(agentId);
 		// Resolve the target usable point once (#627): availability,
 		// eligibility, Action views, use execution and the committed use
-		// record all share this single resolution.
+		// record all share this single resolution. Custom Actions also receive
+		// Furniture metadata; only Idle skips Action-view construction.
 		ResolvedUsablePoint target;
-		if (action == UseFurnitureAction) target = resolveUsablePoint(markerId);
+		if (action != IdleAction) target = resolveUsablePoint(markerId);
 		if (auto occupant = usablePointOccupant(markerId); occupant && occupant != agentId)
 		{
 			event.type = SimulationEventType::ActionFailed;
