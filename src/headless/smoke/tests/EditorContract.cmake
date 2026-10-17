@@ -263,9 +263,14 @@ set(editor_names
     roomHeightScale/history
     roomHeightScale/occupiedPoseHistory
     station/windowWorkflow
+    station/configurationDocument
     station/removalWorkflow
     station/storeWorkflow
     station/flowLinkWorkflow
+    station/flowCascadeDeleteWorkflow
+    station/flowGrowablePortsWorkflow
+    station/flowInspectorWorkflow
+    station/flowPowerChainWorkflow
     station/transferWorkflow
     station/compoundWorkflow
     station/powerWorkflow

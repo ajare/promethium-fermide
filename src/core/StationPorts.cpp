@@ -110,6 +110,38 @@ namespace
 			}
 			return false;
 		}
+		// A power or conversion chain connector (#647) owns the reference
+		// field its port names on the draft entry: the machine side of the
+		// oriented pair is the owner, and the Store face or the Reservoir
+		// heat-in face is the peer. The field name comes from the same
+		// table the enumeration and the write resolve through, so a link,
+		// its identity and its clearing can never disagree.
+		if (auto const field = stationMachineField(link.from.nodeType, link.from.portName);
+			!field.empty())
+		{
+			bool const heat = field == "Heat sink";
+			bool const peerMatches = heat
+				? (link.to.nodeType == "Reservoir" && link.to.portName == "Heat in")
+				: (link.to.nodeType == "Store" && link.to.portName == "Inventory in");
+			if (peerMatches)
+			{
+				mapping = {std::string(link.from.nodeType), link.from.nodeId,
+					std::string(field), link.to};
+				return true;
+			}
+			return false;
+		}
+		if (link.from.nodeType == "Store" && link.from.portName == "Inventory out")
+		{
+			if (auto const field = stationMachineField(link.to.nodeType, link.to.portName);
+				!field.empty() && field != "Heat sink")
+			{
+				mapping = {std::string(link.to.nodeType), link.to.nodeId,
+					std::string(field), link.from};
+				return true;
+			}
+			return false;
+		}
 		return false;
 	}
 
@@ -121,6 +153,194 @@ namespace
 	std::string linkIdentity(char const* ownerType, std::string const& ownerId, std::string const& field)
 	{
 		return std::string(ownerType) + ":" + ownerId + ":" + field;
+	}
+
+	// "Material in 2" with prefix "Material in " -> 1 (zero-based slot on
+	// that face); -1 when the field carries no 1-based slot number. The
+	// slot counts exchanges of that direction in vector order, so a pin
+	// never depends on the other face's entries.
+	int loadExchangeSlot(std::string_view field, std::string_view prefix)
+	{
+		if (field.substr(0, std::min(field.size(), prefix.size())) != prefix) return -1;
+		auto const digits = field.substr(prefix.size());
+		if (digits.empty() || digits.size() > 1) return -1;
+		int const index = digits[0] - '0';
+		if (index < 1 || index > static_cast<int>(MaxStationLoadMaterialExchanges)) return -1;
+		return index - 1;
+	}
+
+	bool isMachineOwnerType(std::string const& ownerType)
+	{
+		return ownerType == "Equipment" || ownerType == "Generator" || ownerType == "Fuel cell"
+			|| ownerType == "Sabatier" || ownerType == "Methane processor";
+	}
+
+	// The reference field a machine link names, as a pointer into the draft
+	// entry. Returns nullptr when the entry or the field does not exist,
+	// leaving the draft untouched. The field names are the ones
+	// stationMachineField() declares, so write, clear, enumeration and the
+	// scoped rule all resolve the same connector to the same member.
+	// Templated so the scoped rule can read through it with a const draft.
+	template <typename SettingsT>
+	auto machineField(SettingsT& settings, std::string const& ownerType,
+		std::string const& ownerId, std::string const& field)
+		-> std::remove_reference_t<decltype((settings.equipmentLoads[0].heatSinkId))>*
+	{
+		if (ownerType == "Equipment")
+		{
+			auto const found = std::find_if(settings.equipmentLoads.begin(),
+				settings.equipmentLoads.end(),
+				[&](EquipmentLoadSettings const& entry) { return entry.id == ownerId; });
+			if (found == settings.equipmentLoads.end()) return nullptr;
+			if (field == "Heat sink") return &found->heatSinkId;
+			if (auto const slot = loadExchangeSlot(field, "Material in "); slot >= 0)
+			{
+				int seen = 0;
+				for (auto& exchange : found->materialExchanges)
+					if (exchange.consumes && seen++ == slot) return &exchange.storeId;
+				return nullptr;
+			}
+			if (auto const slot = loadExchangeSlot(field, "Material return "); slot >= 0)
+			{
+				int seen = 0;
+				for (auto& exchange : found->materialExchanges)
+					if (!exchange.consumes && seen++ == slot) return &exchange.storeId;
+				return nullptr;
+			}
+			return nullptr;
+		}
+		if (ownerType == "Generator")
+		{
+			auto const found = std::find_if(settings.generators.begin(), settings.generators.end(),
+				[&](GeneratorSettings const& entry) { return entry.id == ownerId; });
+			if (found == settings.generators.end()) return nullptr;
+			static constexpr std::pair<char const*, std::string GeneratorSettings::*> const members[] = {
+				{"Fuel store", &GeneratorSettings::fuelStoreId},
+				{"Heat sink", &GeneratorSettings::heatSinkId}};
+			for (auto const& [name, member] : members)
+				if (field == name) return &((*found).*member);
+			return nullptr;
+		}
+		if (ownerType == "Fuel cell")
+		{
+			auto const found = std::find_if(settings.fuelCells.begin(), settings.fuelCells.end(),
+				[&](FuelCellSettings const& entry) { return entry.id == ownerId; });
+			if (found == settings.fuelCells.end()) return nullptr;
+			static constexpr std::pair<char const*, std::string FuelCellSettings::*> const members[] = {
+				{"Hydrogen store", &FuelCellSettings::hydrogenStoreId},
+				{"Oxygen store", &FuelCellSettings::oxygenStoreId},
+				{"Water store", &FuelCellSettings::waterStoreId},
+				{"Heat sink", &FuelCellSettings::heatSinkId}};
+			for (auto const& [name, member] : members)
+				if (field == name) return &((*found).*member);
+			return nullptr;
+		}
+		if (ownerType == "Sabatier")
+		{
+			auto const found = std::find_if(settings.sabatierReactors.begin(),
+				settings.sabatierReactors.end(),
+				[&](SabatierReactorSettings const& entry) { return entry.id == ownerId; });
+			if (found == settings.sabatierReactors.end()) return nullptr;
+			static constexpr std::pair<char const*, std::string SabatierReactorSettings::*> const members[] = {
+				{"CO2 store", &SabatierReactorSettings::co2StoreId},
+				{"Hydrogen store", &SabatierReactorSettings::hydrogenStoreId},
+				{"Methane store", &SabatierReactorSettings::methaneStoreId},
+				{"Water store", &SabatierReactorSettings::waterStoreId},
+				{"Heat sink", &SabatierReactorSettings::heatSinkId}};
+			for (auto const& [name, member] : members)
+				if (field == name) return &((*found).*member);
+			return nullptr;
+		}
+		if (ownerType == "Methane processor")
+		{
+			auto const found = std::find_if(settings.methaneProcessors.begin(),
+				settings.methaneProcessors.end(),
+				[&](MethaneProcessorSettings const& entry) { return entry.id == ownerId; });
+			if (found == settings.methaneProcessors.end()) return nullptr;
+			static constexpr std::pair<char const*, std::string MethaneProcessorSettings::*> const members[] = {
+				{"Methane store", &MethaneProcessorSettings::methaneStoreId},
+				{"Hydrogen store", &MethaneProcessorSettings::hydrogenStoreId},
+				{"Carbon store", &MethaneProcessorSettings::carbonStoreId},
+				{"Heat sink", &MethaneProcessorSettings::heatSinkId}};
+			for (auto const& [name, member] : members)
+				if (field == name) return &((*found).*member);
+			return nullptr;
+		}
+		return nullptr;
+	}
+
+	ResourceStoreSettings const* findStoreById(StationSystemsSettings const& settings,
+		std::string const& storeId)
+	{
+		auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+			[&](ResourceStoreSettings const& store) { return store.id == storeId; });
+		return found == settings.stores.end() ? nullptr : &*found;
+	}
+
+	ThermalReservoirSettings const* findReservoirById(StationSystemsSettings const& settings,
+		std::string const& reservoirId)
+	{
+		auto const found = std::find_if(settings.thermalReservoirs.begin(),
+			settings.thermalReservoirs.end(),
+			[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == reservoirId; });
+		return found == settings.thermalReservoirs.end() ? nullptr : &*found;
+	}
+
+	// The heat-sink rules one link can break, in the whole-config
+	// validator's own wording: the sink must exist and share the machine's
+	// thermal service class - spare capacity in one class is never usable
+	// by another. Returns the refusal text, empty when the sink is
+	// satisfied or not yet named.
+	std::string scopedHeatSinkWiring(StationSystemsSettings const& settings,
+		std::string const& where, std::string const& heatSinkId,
+		std::string const& thermalClass, bool fuelCellWorded)
+	{
+		if (heatSinkId.empty()) return {};
+		auto const* sink = findReservoirById(settings, heatSinkId);
+		if (!sink)
+			return where + (fuelCellWorded ? " heat sink is unknown thermal reservoir '"
+				: " heat sink references unknown thermal reservoir '") + heatSinkId + "'";
+		if (sink->thermalClass != thermalClass)
+		{
+			if (fuelCellWorded)
+				return where + " thermal class '" + thermalClass
+					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
+					+ sink->thermalClass + "'; spare capacity in one class is never usable by another";
+			return where + " thermal class '" + thermalClass
+				+ "' is incompatible with heat sink reservoir '" + sink->id + "' of class '"
+				+ sink->thermalClass + "'; heat routes only to the same service class";
+		}
+		return {};
+	}
+
+	// The store-role rules one link can break, mirroring the whole-config
+	// validator's wording for the family: the store must exist, be plain
+	// mass where the family demands it, and carry the family's own hazard
+	// class - a process may only touch stores of its own class. Empty
+	// hazardClass skips the hazard rule (equipment exchanges carry no
+	// class of their own). Returns the refusal text, empty when satisfied.
+	std::string scopedRoleStoreWiring(StationSystemsSettings const& settings,
+		std::string const& where, std::string const& role, std::string const& storeId,
+		std::string const& hazardClass, bool massDenominated, char const* massPhrase,
+		char const* hazardFamily)
+	{
+		if (storeId.empty()) return {};
+		auto const* store = findStoreById(settings, storeId);
+		if (!store)
+			return where + " " + role + " store '" + storeId + "' does not exist";
+		if (massDenominated && store->unit != "g" && store->unit != "kg")
+			return where + " " + role + " store '" + store->id
+				+ "' must be a mass unit; " + massPhrase;
+		if (massDenominated && store->composition)
+			return where + " " + role + " store '" + store->id
+				+ (std::string_view(hazardFamily) == "water"
+					? "' declares a composition; recovered water streams are plain mass stores, so no dry constituent can be created from pure condensate"
+					: "' declares a composition; handled gas streams are plain mass stores, so no dry constituent can be created from pure gas");
+		if (!hazardClass.empty() && store->hazardClass != hazardClass)
+			return where + " " + role + " store '" + store->id + "' is authored "
+				+ store->hazardClass + "-class but this is a " + hazardClass + "-class "
+				+ hazardFamily + " process; a process may only touch stores of its own hazard class";
+		return {};
 	}
 
 	// The peers already joined to one connector, for a refusal that names
@@ -274,6 +494,175 @@ namespace
 			if (!text.empty()) diagnostic = std::move(text);
 			return true;
 		}
+		if (mapping.ownerType == "Equipment")
+		{
+			auto const found = std::find_if(settings.equipmentLoads.begin(),
+				settings.equipmentLoads.end(),
+				[&](EquipmentLoadSettings const& entry) { return entry.id == mapping.ownerId; });
+			if (found == settings.equipmentLoads.end()) return false;
+			auto const where = "Station equipment load '" + found->id + "'";
+			if (mapping.field == "Heat sink")
+			{
+				// A cooling-service load needs a cooling service of its
+				// class, not a passive sink: the validator refuses the
+				// combination itself, before the sink is even resolved.
+				if (!found->heatSinkId.empty()
+					&& found->coolingDisposition != StationCoolingDisposition::Exported)
+					diagnostic = where + " declares a heat sink but requires a cooling service; a cooling-service load needs a cooling service of its class, not a heat sink";
+				else diagnostic = scopedHeatSinkWiring(settings, where, found->heatSinkId,
+						found->thermalClass, false);
+				return true;
+			}
+			if (mapping.field.rfind("Material in ", 0) == 0
+				|| mapping.field.rfind("Material return ", 0) == 0)
+			{
+				auto const* storeId = machineField(settings, mapping.ownerType,
+					mapping.ownerId, mapping.field);
+				if (!storeId) return true;
+				if (storeId->empty()) return true;
+				if (!findStoreById(settings, *storeId))
+				{
+					diagnostic = where + " material exchange references unknown store '"
+						+ *storeId + "'";
+					return true;
+				}
+				// One store may stand for one exchange of this load only:
+				// two exchanges against the same inventory spend the same
+				// stock twice against rates that expect separate pools.
+				for (auto const& exchange : found->materialExchanges)
+					if (&exchange.storeId != storeId && exchange.storeId == *storeId)
+					{
+						diagnostic = where + " exchanges with store '" + *storeId
+							+ "' more than once";
+						return true;
+					}
+				return true;
+			}
+			return true;
+		}
+		if (mapping.ownerType == "Generator")
+		{
+			auto const found = std::find_if(settings.generators.begin(), settings.generators.end(),
+				[&](GeneratorSettings const& entry) { return entry.id == mapping.ownerId; });
+			if (found == settings.generators.end()) return false;
+			auto const where = "Station generator '" + found->id + "'";
+			if (mapping.field == "Fuel store")
+			{
+				if (found->fuelStoreId.empty()) return true;
+				auto const* fuel = findStoreById(settings, found->fuelStoreId);
+				if (!fuel)
+				{
+					diagnostic = where + " fuel inventory references unknown Resource store '"
+						+ found->fuelStoreId + "'";
+					return true;
+				}
+				if (fuel->unit != "kJ" && fuel->unit != "MJ" && fuel->unit != "Wh"
+					&& fuel->unit != "kWh")
+				{
+					diagnostic = where + " fuel store unit '" + fuel->unit
+						+ "' is not an energy unit; fuelled generators burn kJ, MJ, Wh or kWh";
+					return true;
+				}
+				return true;
+			}
+			if (mapping.field == "Heat sink")
+			{
+				diagnostic = scopedHeatSinkWiring(settings, where, found->heatSinkId,
+					found->thermalClass, false);
+				return true;
+			}
+			return true;
+		}
+		if (mapping.ownerType == "Fuel cell" || mapping.ownerType == "Sabatier"
+			|| mapping.ownerType == "Methane processor")
+		{
+			// The chain families: every store the machine touches carries
+			// the machine's own hazard class, the streams are chemically
+			// distinct roles that may not alias one store, and the heat
+			// sink shares the machine's thermal service class.
+			std::string where;
+			std::string hazardClass;
+			std::string thermalClass;
+			struct RoleRef
+			{
+				char const* field;
+				char const* role;
+				std::string const* value;
+			};
+			std::vector<RoleRef> roles;
+			if (mapping.ownerType == "Fuel cell")
+			{
+				auto const found = std::find_if(settings.fuelCells.begin(), settings.fuelCells.end(),
+					[&](FuelCellSettings const& entry) { return entry.id == mapping.ownerId; });
+				if (found == settings.fuelCells.end()) return false;
+				where = "Station fuel cell '" + found->id + "'";
+				hazardClass = found->hazardClass;
+				thermalClass = found->thermalClass;
+				roles = {{"Hydrogen store", "hydrogen reactant", &found->hydrogenStoreId},
+					{"Oxygen store", "oxygen reactant", &found->oxygenStoreId},
+					{"Water store", "product water", &found->waterStoreId}};
+			}
+			else if (mapping.ownerType == "Sabatier")
+			{
+				auto const found = std::find_if(settings.sabatierReactors.begin(),
+					settings.sabatierReactors.end(),
+					[&](SabatierReactorSettings const& entry) { return entry.id == mapping.ownerId; });
+				if (found == settings.sabatierReactors.end()) return false;
+				where = "Station Sabatier reactor '" + found->id + "'";
+				hazardClass = found->hazardClass;
+				thermalClass = found->thermalClass;
+				roles = {{"CO2 store", "CO2 feed", &found->co2StoreId},
+					{"Hydrogen store", "hydrogen feed", &found->hydrogenStoreId},
+					{"Methane store", "methane", &found->methaneStoreId},
+					{"Water store", "product water", &found->waterStoreId}};
+			}
+			else
+			{
+				auto const found = std::find_if(settings.methaneProcessors.begin(),
+					settings.methaneProcessors.end(),
+					[&](MethaneProcessorSettings const& entry) { return entry.id == mapping.ownerId; });
+				if (found == settings.methaneProcessors.end()) return false;
+				where = "Station methane processor '" + found->id + "'";
+				hazardClass = found->hazardClass;
+				thermalClass = found->thermalClass;
+				roles = {{"Methane store", "methane feed", &found->methaneStoreId},
+					{"Hydrogen store", "recovered hydrogen", &found->hydrogenStoreId},
+					{"Carbon store", "solid carbon", &found->carbonStoreId}};
+			}
+			if (mapping.field == "Heat sink")
+			{
+				auto const* sinkField = machineField(settings, mapping.ownerType,
+					mapping.ownerId, mapping.field);
+				diagnostic = sinkField
+					? scopedHeatSinkWiring(settings, where, *sinkField, thermalClass, true)
+					: std::string{};
+				return true;
+			}
+			for (auto const& entry : roles)
+			{
+				if (mapping.field != entry.field) continue;
+				auto const role = std::string(entry.role);
+				auto const& value = *entry.value;
+				if (value.empty()) return true;
+				// Aliased roles: one store may not stand for two chemically
+				// distinct streams the ledger books separately.
+				for (auto const& other : roles)
+					if (other.value != entry.value && !other.value->empty() && *other.value == value)
+					{
+						diagnostic = where + " names the same store '" + value
+							+ "' for the " + role + " and the " + other.role
+							+ ": chemically distinct streams may not share one store";
+						return true;
+					}
+				bool const water = role == "product water";
+				diagnostic = scopedRoleStoreWiring(settings, where, role, value, hazardClass,
+						true, water ? "water recovery is mass-denominated (g or kg)"
+							: "gas handling is mass-denominated (g or kg)",
+						water ? "water" : "gas");
+				return true;
+			}
+			return true;
+		}
 		if (mapping.ownerType != "Transfer") return false;
 		auto const found = std::find_if(settings.transfers.begin(), settings.transfers.end(),
 			[&](ResourceTransferSettings const& transfer) { return transfer.id == mapping.ownerId; });
@@ -322,6 +711,112 @@ std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& set
 				{"Store", conversion.outputs[slot].storeId, "Inventory in"}});
 		}
 	}
+	// The power and conversion chain (#647): every authored reference of
+	// the six machine types is presented as the connector pair that writes
+	// it. An equipment load's exchange slots are counted per face, so a
+	// producing exchange never shifts the numbering of a consuming one.
+	for (auto const& load : settings.equipmentLoads)
+	{
+		size_t inSlot = 0;
+		size_t outSlot = 0;
+		for (auto const& exchange : load.materialExchanges)
+		{
+			if (exchange.consumes)
+			{
+				++inSlot;
+				if (exchange.storeId.empty()) continue;
+				auto const suffix = std::to_string(inSlot);
+				links.push_back({linkIdentity("Equipment", load.id, "Material in " + suffix),
+					{"Store", exchange.storeId, "Inventory out"},
+					{"Equipment", load.id, "Equipment input " + suffix}});
+			}
+			else
+			{
+				++outSlot;
+				if (exchange.storeId.empty()) continue;
+				auto const suffix = std::to_string(outSlot);
+				links.push_back({linkIdentity("Equipment", load.id, "Material return " + suffix),
+					{"Equipment", load.id, "Equipment return " + suffix},
+					{"Store", exchange.storeId, "Inventory in"}});
+			}
+		}
+		if (!load.heatSinkId.empty())
+			links.push_back({linkIdentity("Equipment", load.id, "Heat sink"),
+				{"Equipment", load.id, "Heat out"},
+				{"Reservoir", load.heatSinkId, "Heat in"}});
+	}
+	for (auto const& generator : settings.generators)
+	{
+		if (!generator.fuelStoreId.empty())
+			links.push_back({linkIdentity("Generator", generator.id, "Fuel store"),
+				{"Store", generator.fuelStoreId, "Inventory out"},
+				{"Generator", generator.id, "Fuel in"}});
+		if (!generator.heatSinkId.empty())
+			links.push_back({linkIdentity("Generator", generator.id, "Heat sink"),
+				{"Generator", generator.id, "Heat out"},
+				{"Reservoir", generator.heatSinkId, "Heat in"}});
+	}
+	for (auto const& cell : settings.fuelCells)
+	{
+		if (!cell.hydrogenStoreId.empty())
+			links.push_back({linkIdentity("Fuel cell", cell.id, "Hydrogen store"),
+				{"Store", cell.hydrogenStoreId, "Inventory out"},
+				{"Fuel cell", cell.id, "Hydrogen in"}});
+		if (!cell.oxygenStoreId.empty())
+			links.push_back({linkIdentity("Fuel cell", cell.id, "Oxygen store"),
+				{"Store", cell.oxygenStoreId, "Inventory out"},
+				{"Fuel cell", cell.id, "Oxygen in"}});
+		if (!cell.waterStoreId.empty())
+			links.push_back({linkIdentity("Fuel cell", cell.id, "Water store"),
+				{"Fuel cell", cell.id, "Water out"},
+				{"Store", cell.waterStoreId, "Inventory in"}});
+		if (!cell.heatSinkId.empty())
+			links.push_back({linkIdentity("Fuel cell", cell.id, "Heat sink"),
+				{"Fuel cell", cell.id, "Heat out"},
+				{"Reservoir", cell.heatSinkId, "Heat in"}});
+	}
+	for (auto const& reactor : settings.sabatierReactors)
+	{
+		if (!reactor.co2StoreId.empty())
+			links.push_back({linkIdentity("Sabatier", reactor.id, "CO2 store"),
+				{"Store", reactor.co2StoreId, "Inventory out"},
+				{"Sabatier", reactor.id, "CO2 in"}});
+		if (!reactor.hydrogenStoreId.empty())
+			links.push_back({linkIdentity("Sabatier", reactor.id, "Hydrogen store"),
+				{"Store", reactor.hydrogenStoreId, "Inventory out"},
+				{"Sabatier", reactor.id, "Hydrogen in"}});
+		if (!reactor.methaneStoreId.empty())
+			links.push_back({linkIdentity("Sabatier", reactor.id, "Methane store"),
+				{"Sabatier", reactor.id, "Methane out"},
+				{"Store", reactor.methaneStoreId, "Inventory in"}});
+		if (!reactor.waterStoreId.empty())
+			links.push_back({linkIdentity("Sabatier", reactor.id, "Water store"),
+				{"Sabatier", reactor.id, "Water out"},
+				{"Store", reactor.waterStoreId, "Inventory in"}});
+		if (!reactor.heatSinkId.empty())
+			links.push_back({linkIdentity("Sabatier", reactor.id, "Heat sink"),
+				{"Sabatier", reactor.id, "Heat out"},
+				{"Reservoir", reactor.heatSinkId, "Heat in"}});
+	}
+	for (auto const& processor : settings.methaneProcessors)
+	{
+		if (!processor.methaneStoreId.empty())
+			links.push_back({linkIdentity("Methane processor", processor.id, "Methane store"),
+				{"Store", processor.methaneStoreId, "Inventory out"},
+				{"Methane processor", processor.id, "Methane in"}});
+		if (!processor.hydrogenStoreId.empty())
+			links.push_back({linkIdentity("Methane processor", processor.id, "Hydrogen store"),
+				{"Methane processor", processor.id, "Hydrogen out"},
+				{"Store", processor.hydrogenStoreId, "Inventory in"}});
+		if (!processor.carbonStoreId.empty())
+			links.push_back({linkIdentity("Methane processor", processor.id, "Carbon store"),
+				{"Methane processor", processor.id, "Carbon out"},
+				{"Store", processor.carbonStoreId, "Inventory in"}});
+		if (!processor.heatSinkId.empty())
+			links.push_back({linkIdentity("Methane processor", processor.id, "Heat sink"),
+				{"Methane processor", processor.id, "Heat out"},
+				{"Reservoir", processor.heatSinkId, "Heat in"}});
+	}
 	return links;
 }
 
@@ -332,6 +827,13 @@ bool applyStationLink(StationSystemsSettings& settings, CandidateLink const& lin
 	if (mapping.ownerType == "Conversion")
 	{
 		auto* field = conversionFlowField(settings, mapping.ownerId, mapping.field);
+		if (!field) return false;
+		*field = mapping.peer.nodeId;
+		return true;
+	}
+	if (isMachineOwnerType(mapping.ownerType))
+	{
+		auto* field = machineField(settings, mapping.ownerType, mapping.ownerId, mapping.field);
 		if (!field) return false;
 		*field = mapping.peer.nodeId;
 		return true;
@@ -360,6 +862,13 @@ bool clearStationLink(StationSystemsSettings& settings, std::string const& ident
 		target->clear();
 		return true;
 	}
+	if (isMachineOwnerType(ownerType))
+	{
+		auto* target = machineField(settings, ownerType, ownerId, field);
+		if (!target) return false;
+		target->clear();
+		return true;
+	}
 	if (ownerType != "Transfer") return false;
 	for (auto& transfer : settings.transfers)
 	{
@@ -374,28 +883,47 @@ bool clearStationLink(StationSystemsSettings& settings, std::string const& ident
 bool planStationNodeRemoval(StationSystemsSettings const& settings,
 	std::string const& nodeType, std::string const& nodeId, StationNodeRemoval& plan)
 {
-	bool exists = false;
-	if (nodeType == "Store")
-		exists = std::any_of(settings.stores.begin(), settings.stores.end(),
+	auto const exists = [&](auto const& entries)
+	{
+		return std::any_of(entries.begin(), entries.end(),
 			[&](auto const& entry) { return entry.id == nodeId; });
-	else if (nodeType == "Transfer")
-		exists = std::any_of(settings.transfers.begin(), settings.transfers.end(),
-			[&](auto const& entry) { return entry.id == nodeId; });
-	if (!exists) return false;
-	// #640 currently maps only Transfer endpoints. Other authored entries
-	// can also name Stores (or installations); without their mappings a
-	// cascade would silently strand references. Refuse such drafts until
-	// those families have core-owned connector mappings, even if a given
-	// entry might not reference this particular node.
-	if (!settings.conversions.empty() || !settings.deliveries.empty()
-		|| !settings.wasteEjections.empty() || !settings.equipmentLoads.empty()
+	};
+	bool const isStore = nodeType == "Store";
+	bool const isTransfer = nodeType == "Transfer";
+	bool const isEquipment = nodeType == "Equipment";
+	bool const isBattery = nodeType == "Battery";
+	bool const isGenerator = nodeType == "Generator";
+	bool const isFuelCell = nodeType == "Fuel cell";
+	bool const isSabatier = nodeType == "Sabatier";
+	bool const isMethaneProcessor = nodeType == "Methane processor";
+	bool const isMachine = isEquipment || isBattery || isGenerator || isFuelCell
+		|| isSabatier || isMethaneProcessor;
+	if (!isStore && !isTransfer && !isMachine) return false;
+	if (isStore && !exists(settings.stores)) return false;
+	if (isTransfer && !exists(settings.transfers)) return false;
+	if (isEquipment && !exists(settings.equipmentLoads)) return false;
+	if (isBattery && !exists(settings.batteries)) return false;
+	if (isGenerator && !exists(settings.generators)) return false;
+	if (isFuelCell && !exists(settings.fuelCells)) return false;
+	if (isSabatier && !exists(settings.sabatierReactors)) return false;
+	if (isMethaneProcessor && !exists(settings.methaneProcessors)) return false;
+	// #640 mapped only Transfer endpoints; #647 added the power and
+	// conversion chain families. Other authored entries can also name
+	// Stores or installations; without their mappings a cascade would
+	// silently strand references, so such drafts are refused until those
+	// families have core-owned connector mappings, even if a given entry
+	// might not reference this particular node.
+	if (!settings.deliveries.empty() || !settings.wasteEjections.empty()
 		|| !settings.crews.empty() || !settings.waterCollectors.empty()
 		|| !settings.waterTreatments.empty() || !settings.electrolyzers.empty()
-		|| !settings.co2Captures.empty() || !settings.fuelCells.empty()
-		|| !settings.sabatierReactors.empty() || !settings.methaneProcessors.empty()
-		|| !settings.microbialProcessors.empty() || !settings.cropPopulations.empty()
-		|| !settings.algaeCultures.empty() || !settings.generators.empty()
-		|| !settings.maintenanceJobs.empty() || !settings.outages.empty()) return false;
+		|| !settings.co2Captures.empty() || !settings.microbialProcessors.empty()
+		|| !settings.cropPopulations.empty() || !settings.algaeCultures.empty()) return false;
+	// A generator is a registered installation: scheduled outages and
+	// maintenance jobs name it by installation id, and that family is
+	// not part of the connector seam yet, so removing a generator from
+	// such a draft is refused until those references are mapped too.
+	if (isGenerator && (!settings.outages.empty() || !settings.maintenanceJobs.empty()))
+		return false;
 	StationNodeRemoval candidate{nodeType, nodeId, {}};
 	for (auto const& link : stationAuthoredLinks(settings))
 		if ((link.from.nodeType == nodeType && link.from.nodeId == nodeId)
@@ -421,12 +949,49 @@ bool removeStationNode(StationSystemsSettings& settings, StationNodeRemoval cons
 		stores.erase(std::remove_if(stores.begin(), stores.end(),
 			[&](auto const& entry) { return entry.id == plan.nodeId; }), stores.end());
 	}
-	else
+	else if (plan.nodeType == "Transfer")
 	{
 		auto& transfers = candidate.transfers;
 		transfers.erase(std::remove_if(transfers.begin(), transfers.end(),
 			[&](auto const& entry) { return entry.id == plan.nodeId; }), transfers.end());
 	}
+	else if (plan.nodeType == "Equipment")
+	{
+		auto& loads = candidate.equipmentLoads;
+		loads.erase(std::remove_if(loads.begin(), loads.end(),
+			[&](auto const& entry) { return entry.id == plan.nodeId; }), loads.end());
+	}
+	else if (plan.nodeType == "Battery")
+	{
+		auto& batteries = candidate.batteries;
+		batteries.erase(std::remove_if(batteries.begin(), batteries.end(),
+			[&](auto const& entry) { return entry.id == plan.nodeId; }), batteries.end());
+	}
+	else if (plan.nodeType == "Generator")
+	{
+		auto& generators = candidate.generators;
+		generators.erase(std::remove_if(generators.begin(), generators.end(),
+			[&](auto const& entry) { return entry.id == plan.nodeId; }), generators.end());
+	}
+	else if (plan.nodeType == "Fuel cell")
+	{
+		auto& cells = candidate.fuelCells;
+		cells.erase(std::remove_if(cells.begin(), cells.end(),
+			[&](auto const& entry) { return entry.id == plan.nodeId; }), cells.end());
+	}
+	else if (plan.nodeType == "Sabatier")
+	{
+		auto& reactors = candidate.sabatierReactors;
+		reactors.erase(std::remove_if(reactors.begin(), reactors.end(),
+			[&](auto const& entry) { return entry.id == plan.nodeId; }), reactors.end());
+	}
+	else if (plan.nodeType == "Methane processor")
+	{
+		auto& processors = candidate.methaneProcessors;
+		processors.erase(std::remove_if(processors.begin(), processors.end(),
+			[&](auto const& entry) { return entry.id == plan.nodeId; }), processors.end());
+	}
+	else return false;
 	settings = std::move(candidate);
 	return true;
 }
@@ -528,6 +1093,34 @@ bool stationPortSetStatus(StationSystemsSettings const& settings,
 	std::string const& nodeType, std::string const& nodeId,
 	StationPortSet set, StationPortSetStatus& status)
 {
+	if (nodeType == "Equipment")
+	{
+		if (set != StationPortSet::LoadExchangesIn && set != StationPortSet::LoadExchangesOut)
+			return false;
+		auto const found = std::find_if(settings.equipmentLoads.begin(),
+			settings.equipmentLoads.end(),
+			[&](EquipmentLoadSettings const& entry) { return entry.id == nodeId; });
+		if (found == settings.equipmentLoads.end()) return false;
+		size_t inCount = 0;
+		for (auto const& exchange : found->materialExchanges)
+			if (exchange.consumes) ++inCount;
+		size_t const total = found->materialExchanges.size();
+		bool const input = set == StationPortSet::LoadExchangesIn;
+		status = {};
+		status.count = input ? inCount : total - inCount;
+		// A load may run with no material exchange at all: the floor is
+		// zero, so the set can always be emptied. The ceiling is shared:
+		// both faces together carry at most MaxStationLoadMaterialExchanges.
+		status.minimum = 0;
+		status.maximum = MaxStationLoadMaterialExchanges;
+		status.canGrow = total < MaxStationLoadMaterialExchanges;
+		status.canShrink = status.count > 0;
+		if (!status.canGrow)
+			status.growReason = "a load carries at most "
+				+ std::to_string(MaxStationLoadMaterialExchanges)
+				+ " material exchanges across both faces - the set is full.";
+		return true;
+	}
 	if (nodeType != "Conversion") return false;
 	auto const found = std::find_if(settings.conversions.begin(), settings.conversions.end(),
 		[&](ResourceConversionSettings const& conversion) { return conversion.id == nodeId; });
@@ -560,13 +1153,26 @@ bool growStationPortSet(StationSystemsSettings& settings,
 	if (!stationPortSetStatus(settings, nodeType, nodeId, set, status))
 	{
 		reason = "'" + nodeId + "' has no growable "
-			+ (set == StationPortSet::ConversionInputs ? "input" : "output") + " set.";
+			+ (stationPortSetIsInputSide(set) ? "input" : "output") + " set.";
 		return false;
 	}
 	if (!status.canGrow)
 	{
 		reason = status.growReason;
 		return false;
+	}
+	if (nodeType == "Equipment")
+	{
+		auto& load = *std::find_if(settings.equipmentLoads.begin(),
+			settings.equipmentLoads.end(),
+			[&](EquipmentLoadSettings const& entry) { return entry.id == nodeId; });
+		// The new connector is a real exchange: empty until the user wires
+		// it, with the rate left for the entry's own fields. The face the
+		// affordance sits on decides the direction of the exchange.
+		EquipmentMaterialExchangeSettings exchange;
+		exchange.consumes = set == StationPortSet::LoadExchangesIn;
+		load.materialExchanges.push_back(exchange);
+		return true;
 	}
 	auto& conversion = *std::find_if(settings.conversions.begin(), settings.conversions.end(),
 		[&](ResourceConversionSettings const& entry) { return entry.id == nodeId; });
@@ -586,13 +1192,30 @@ bool shrinkStationPortSet(StationSystemsSettings& settings,
 	if (!stationPortSetStatus(settings, nodeType, nodeId, set, status))
 	{
 		reason = "'" + nodeId + "' has no shrinkable "
-			+ (set == StationPortSet::ConversionInputs ? "input" : "output") + " set.";
+			+ (stationPortSetIsInputSide(set) ? "input" : "output") + " set.";
 		return false;
 	}
 	if (!status.canShrink)
 	{
 		reason = status.shrinkReason;
 		return false;
+	}
+	if (nodeType == "Equipment")
+	{
+		auto& load = *std::find_if(settings.equipmentLoads.begin(),
+			settings.equipmentLoads.end(),
+			[&](EquipmentLoadSettings const& entry) { return entry.id == nodeId; });
+		// The newest connector on this face goes, wired or not: its
+		// reference leaves with it, as one undoable change owned by the
+		// caller's history.
+		bool const input = set == StationPortSet::LoadExchangesIn;
+		for (auto it = load.materialExchanges.rbegin(); it != load.materialExchanges.rend(); ++it)
+			if (it->consumes == input)
+			{
+				load.materialExchanges.erase(std::next(it).base());
+				break;
+			}
+		return true;
 	}
 	auto& conversion = *std::find_if(settings.conversions.begin(), settings.conversions.end(),
 		[&](ResourceConversionSettings const& entry) { return entry.id == nodeId; });

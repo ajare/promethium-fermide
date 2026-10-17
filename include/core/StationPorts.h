@@ -58,15 +58,109 @@ namespace core
 			PortDescriptor{"Conversion", "Conversion output 1", StationPortDirection::Output, "material", "inventory", 1, {}, false},
 			PortDescriptor{"Conversion", "Conversion output 2", StationPortDirection::Output, "material", "inventory", 1, {}, true},
 			PortDescriptor{"Conversion", "Conversion output 3", StationPortDirection::Output, "material", "inventory", 1, {}, true},
-			PortDescriptor{"Conversion", "Conversion output 4", StationPortDirection::Output, "material", "inventory", 1, {}, true}};
+			PortDescriptor{"Conversion", "Conversion output 4", StationPortDirection::Output, "material", "inventory", 1, {}, true},
+			// The power and conversion chain (#647). Each machine's material
+			// connectors name the reference field they write on the draft
+			// entry; the heat connector names its declared sink. The table
+			// stays structurally coarse - hazard class, thermal service
+			// class, unit and role aliasing remain the validator's call.
+			// An equipment load's material-exchange set is growable 0-2
+			// across both faces together: the two input slots and the two
+			// return slots share one ceiling of MaxStationLoadMaterialExchanges,
+			// and every slot is optional until wired because a load may run
+			// with no material exchange at all.
+			PortDescriptor{"Equipment", "Equipment input 1", StationPortDirection::Input, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Equipment", "Equipment input 2", StationPortDirection::Input, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Equipment", "Equipment return 1", StationPortDirection::Output, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Equipment", "Equipment return 2", StationPortDirection::Output, "material", "inventory", 1, {}, true},
+			// An exported-disposition load may leave its heat at the export
+			// boundary instead of a declared sink, so the heat connector is
+			// optional; a cooling-service load that wires one is refused by
+			// the validator's own rule.
+			PortDescriptor{"Equipment", "Heat out", StationPortDirection::Output, "heat", "heat-sink", 1, {}, true},
+			// A battery owns no authored connector: its relation to the
+			// shared electrical pool is implicit in the projection, exactly
+			// like the pool's other members, so it declares no ports.
+			// A generator always burns into a declared sink: its waste,
+			// startup and decay heat must route somewhere, so both
+			// connectors are required.
+			PortDescriptor{"Generator", "Fuel in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Generator", "Heat out", StationPortDirection::Output, "heat", "heat-sink", 1, {}, false},
+			PortDescriptor{"Fuel cell", "Hydrogen in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Fuel cell", "Oxygen in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Fuel cell", "Water out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Fuel cell", "Heat out", StationPortDirection::Output, "heat", "heat-sink", 1, {}, false},
+			PortDescriptor{"Sabatier", "CO2 in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Sabatier", "Hydrogen in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Sabatier", "Methane out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Sabatier", "Water out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Sabatier", "Heat out", StationPortDirection::Output, "heat", "heat-sink", 1, {}, false},
+			PortDescriptor{"Methane processor", "Methane in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Methane processor", "Hydrogen out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Methane processor", "Carbon out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Methane processor", "Heat out", StationPortDirection::Output, "heat", "heat-sink", 1, {}, false},
+			// A thermal reservoir collects heat from as many machines as the
+			// design wires to it; the face is unbounded, and the class
+			// match is judged by the validator on every link.
+			PortDescriptor{"Reservoir", "Heat in", StationPortDirection::Input, "heat-sink", "heat", 0, {}}};
 		return descriptors;
 	}
 
+	// The reference field one machine connector writes on its draft entry.
+	// Returns empty for a connector that is not a machine reference face.
+	// The field name is part of the authored-link identity, so it is the
+	// one spelling every surface shares: the draw pass, the write, the
+	// enumeration and the clear all resolve through this table.
+	inline std::string_view stationMachineField(std::string_view nodeType,
+		std::string_view portName)
+	{
+		static constexpr std::array<std::pair<std::array<std::string_view, 2>, std::string_view>, 20> fields{{
+			{{"Equipment", "Equipment input 1"}, "Material in 1"},
+			{{"Equipment", "Equipment input 2"}, "Material in 2"},
+			{{"Equipment", "Equipment return 1"}, "Material return 1"},
+			{{"Equipment", "Equipment return 2"}, "Material return 2"},
+			{{"Equipment", "Heat out"}, "Heat sink"},
+			{{"Generator", "Fuel in"}, "Fuel store"},
+			{{"Generator", "Heat out"}, "Heat sink"},
+			{{"Fuel cell", "Hydrogen in"}, "Hydrogen store"},
+			{{"Fuel cell", "Oxygen in"}, "Oxygen store"},
+			{{"Fuel cell", "Water out"}, "Water store"},
+			{{"Fuel cell", "Heat out"}, "Heat sink"},
+			{{"Sabatier", "CO2 in"}, "CO2 store"},
+			{{"Sabatier", "Hydrogen in"}, "Hydrogen store"},
+			{{"Sabatier", "Methane out"}, "Methane store"},
+			{{"Sabatier", "Water out"}, "Water store"},
+			{{"Sabatier", "Heat out"}, "Heat sink"},
+			{{"Methane processor", "Methane in"}, "Methane store"},
+			{{"Methane processor", "Hydrogen out"}, "Hydrogen store"},
+			{{"Methane processor", "Carbon out"}, "Carbon store"},
+			{{"Methane processor", "Heat out"}, "Heat sink"},
+		}};
+		for (auto const& entry : fields)
+			if (entry.first[0] == nodeType && entry.first[1] == portName) return entry.second;
+		return {};
+	}
+
 	// Growable port sets: a Conversion's input and output flow sets, one to
-	// MaxStationConversionFlows connectors each. The floor of one is the
-	// configuration validator's own rule, so the set can never be shrunk
-	// into a shape the validator would reject.
-	enum class StationPortSet { ConversionInputs, ConversionOutputs };
+	// MaxStationConversionFlows connectors each, and an equipment load's
+	// material-exchange faces, which share one ceiling of
+	// MaxStationLoadMaterialExchanges across both sides and have a floor of
+	// zero - a load may run with no material exchange at all. The
+	// conversion's floor of one is the configuration validator's own rule,
+	// so the set can never be shrunk into a shape the validator would
+	// reject.
+	enum class StationPortSet
+	{
+		ConversionInputs,
+		ConversionOutputs,
+		LoadExchangesIn,
+		LoadExchangesOut
+	};
+
+	inline bool stationPortSetIsInputSide(StationPortSet set)
+	{
+		return set == StationPortSet::ConversionInputs || set == StationPortSet::LoadExchangesIn;
+	}
 
 	struct StationPortSetDescriptor
 	{
@@ -78,8 +172,25 @@ namespace core
 	{
 		static constexpr std::array sets{
 			StationPortSetDescriptor{"Conversion", StationPortSet::ConversionInputs, "inputs"},
-			StationPortSetDescriptor{"Conversion", StationPortSet::ConversionOutputs, "outputs"}};
+			StationPortSetDescriptor{"Conversion", StationPortSet::ConversionOutputs, "outputs"},
+			StationPortSetDescriptor{"Equipment", StationPortSet::LoadExchangesIn, "material in"},
+			StationPortSetDescriptor{"Equipment", StationPortSet::LoadExchangesOut, "material returns"}};
 		return sets;
+	}
+
+	// Resolve the growable set a node type owns on one face, so no caller
+	// re-derives the set from the side by hand.
+	inline bool stationPortSetFor(std::string_view nodeType, bool inputSide,
+		StationPortSet& set)
+	{
+		for (auto const& descriptor : stationPortSetDescriptors())
+			if (descriptor.nodeType == nodeType
+				&& stationPortSetIsInputSide(descriptor.set) == inputSide)
+			{
+				set = descriptor.set;
+				return true;
+			}
+		return false;
 	}
 
 	struct StationPortSetStatus
@@ -110,19 +221,28 @@ namespace core
 		StationPortSet set, std::string& reason);
 
 	// Node types the Flow combobox offers, with the prefix their generated
-	// ids start from. Derived service nodes are absent: they are never
-	// authored, so they never appear as a placement choice.
+	// ids start from and the subsystem grouping they sit under in the
+	// combobox. Derived service nodes are absent: they are never authored,
+	// so they never appear as a placement choice. The table is ordered by
+	// group so the combobox renders each grouping as one contiguous block.
 	struct StationPlaceableType
 	{
 		std::string_view nodeType;
 		std::string_view idPrefix;
+		std::string_view group;
 	};
 	inline std::span<StationPlaceableType const> stationPlaceableTypes()
 	{
 		static constexpr std::array placeable{
-			StationPlaceableType{"Store", "store"},
-			StationPlaceableType{"Conversion", "conversion"},
-			StationPlaceableType{"Solar", "solar"}};
+			StationPlaceableType{"Store", "store", "Resources"},
+			StationPlaceableType{"Conversion", "conversion", "Resources"},
+			StationPlaceableType{"Solar", "solar", "Power"},
+			StationPlaceableType{"Equipment", "load", "Power"},
+			StationPlaceableType{"Battery", "battery", "Power"},
+			StationPlaceableType{"Generator", "generator", "Power"},
+			StationPlaceableType{"Fuel cell", "fuelcell", "Power"},
+			StationPlaceableType{"Sabatier", "sabatier", "Conversion chain"},
+			StationPlaceableType{"Methane processor", "methaneprocessor", "Conversion chain"}};
 		return placeable;
 	}
 

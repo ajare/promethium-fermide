@@ -467,13 +467,14 @@ namespace
 				ImVec2 a{}, b{};
 				if (!window.flowPinPosition(fromType, fromId, fromPort, &a)) return false;
 				if (!window.flowPinPosition(toType, toId, toPort, &b)) return false;
+				ctx->MouseTeleportToPos(a); ctx->Yield(3);
 				ctx->MouseTeleportToPos(a); ctx->Yield(2);
-				ctx->MouseDown(); ctx->Yield(2);
+				ctx->MouseDown(); ctx->Yield(3);
 				ctx->MouseTeleportToPos({(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f}); ctx->Yield(2);
 				ctx->MouseTeleportToPos(b); ctx->Yield(2);
 				ImVec2 live{};
 				if (window.flowPinPosition(toType, toId, toPort, &live))
-				{ ctx->MouseTeleportToPos(live); ctx->Yield(2); }
+				{ ctx->MouseTeleportToPos(live); ctx->Yield(3); }
 				ctx->MouseUp(); ctx->Yield(3);
 				return true;
 			};
@@ -688,6 +689,13 @@ namespace
 		battery.startingStoredKWh = 8.0; battery.maxChargeKW = 2.0;
 		battery.maxDischargeKW = 4.0;
 		seed.batteries = {battery};
+		// A projected type whose entry editor has not been extracted yet:
+		// the inspector must name it rather than show nothing (#647 keeps
+		// the Battery editor as the extracted case).
+		core::ThermalReservoirSettings reservoir;
+		reservoir.id = "res1"; reservoir.thermalClass = "low";
+		reservoir.heatCapacityKJPerK = 1000.0;
+		seed.thermalReservoirs = {reservoir};
 		std::string diagnostic;
 		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
 		world->markSaved();
@@ -865,14 +873,25 @@ namespace
 			REQ(driver.contains("Node: Transfer 't1'")
 				&& ctx->ItemInfo("**/Transfer 0 rate per second", ImGuiTestOpFlags_NoError)->ID != 0,
 				"selecting a Transfer did not render its shared entry editor");
-			// --- A type with no extracted editor names itself instead of showing nothing.
+			// --- #647: the Battery now has an extracted shared entry editor.
 			ImVec4 batteryRect{};
 			REQ(window.flowNodeRect("Battery", "bat1", &batteryRect), "the battery node is not on screen");
 			ctx->MouseTeleportToPos({(batteryRect.x + batteryRect.z) * 0.5f,
 				(batteryRect.y + batteryRect.w) * 0.5f});
 			ctx->MouseClick(); ctx->Yield(3);
 			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->Yield(2);
-			REQ(driver.contains("No settings editor for 'Battery' nodes yet."),
+			REQ(driver.contains("Node: Battery 'bat1'")
+				&& ctx->ItemInfo("**/Battery 0 nameplate kWh", ImGuiTestOpFlags_NoError)->ID != 0,
+				"selecting the Battery did not render its shared entry editor");
+			// --- A type with no extracted editor names itself instead of showing nothing.
+			ImVec4 reservoirRect{};
+			REQ(window.flowNodeRect("Reservoir", "res1", &reservoirRect),
+				"the reservoir node is not on screen");
+			ctx->MouseTeleportToPos({(reservoirRect.x + reservoirRect.z) * 0.5f,
+				(reservoirRect.y + reservoirRect.w) * 0.5f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->Yield(2);
+			REQ(driver.contains("No settings editor for 'Reservoir' nodes yet."),
 				"a type without an extracted editor showed nothing instead of naming itself");
 			// --- Deselecting leaves nothing claiming a selection.
 			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->MouseClick(); ctx->Yield(3);
@@ -897,6 +916,336 @@ namespace
 		});
 		#undef REQ
 		require(driver.passed(), "Flow inspector workflow failed on the Test Engine");
+	}
+
+	// #647: the power and conversion chain in the Flow view. The combobox
+	// offers every authored type under its subsystem header and never a
+	// derived service node; each placed machine draws exactly its declared
+	// connectors; a legal drag commits the reference through the shared
+	// seam while a semantic refusal (thermal service class) says why and
+	// commits nothing; the inspector renders the existing settings editor
+	// for each selected machine; and the projection wires every machine to
+	// the shared pool it implicitly draws from.
+	void flowPowerChainBody()
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory worldHistory;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Power chain flow", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		auto store = [](std::string const& id, std::string const& unit,
+			std::string const& hazard = "normal")
+		{
+			core::ResourceStoreSettings entry;
+			entry.id = id; entry.unit = unit; entry.capacity = 1000.0;
+			entry.startingQualified = 500.0; entry.hazardClass = hazard;
+			return entry;
+		};
+		auto reservoir = [](std::string const& id, std::string const& thermalClass)
+		{
+			core::ThermalReservoirSettings entry;
+			entry.id = id; entry.thermalClass = thermalClass;
+			entry.heatCapacityKJPerK = 1000.0;
+			return entry;
+		};
+		core::StationSystemsSettings seed;
+		seed.enabled = true;
+		seed.observationIntervalSeconds = 1.0f;
+		seed.stores = {store("water", "kg"), store("brine", "kg", "hazardous"),
+			store("diesel", "kJ"), store("co2", "kg"), store("h2", "kg"),
+			store("o2", "kg"), store("ch4", "kg"), store("rawwater", "kg"),
+			store("carbon", "kg")};
+		seed.thermalReservoirs = {reservoir("warmSink", "moderate"),
+			reservoir("genSink", "generation"), reservoir("coldSink", "low")};
+		// The equipment load is seeded with its heat sink left empty - the
+		// one connector a valid configuration may leave open - so the
+		// canvas drag has a real reference to commit or refuse.
+		core::EquipmentLoadSettings load;
+		load.id = "load1"; load.thermalClass = "moderate";
+		load.materialExchanges.push_back({"water", 1.0, true});
+		seed.equipmentLoads = {load};
+		core::BatterySettings battery;
+		battery.id = "bat1"; battery.nameplateKWh = 10.0; battery.usableKWh = 8.0;
+		battery.startingStoredKWh = 8.0; battery.maxChargeKW = 2.0;
+		battery.maxDischargeKW = 4.0;
+		seed.batteries = {battery};
+		core::GeneratorSettings generator;
+		generator.id = "gen1"; generator.thermalClass = "generation";
+		generator.fuelStoreId = "diesel"; generator.heatSinkId = "genSink";
+		generator.ratedOutputKW = 10.0; generator.efficiency = 0.4;
+		generator.maxRampKWPerSecond = 2.0;
+		seed.generators = {generator};
+		core::FuelCellSettings cell;
+		cell.id = "cell1"; cell.hazardClass = "normal"; cell.thermalClass = "low";
+		cell.ratedOutputKW = 10.0; cell.efficiency = 0.6;
+		cell.hydrogenStoreId = "h2"; cell.oxygenStoreId = "o2";
+		cell.waterStoreId = "rawwater"; cell.heatSinkId = "coldSink";
+		seed.fuelCells = {cell};
+		core::SabatierReactorSettings reactor;
+		reactor.id = "sab1"; reactor.hazardClass = "normal"; reactor.thermalClass = "low";
+		reactor.rateKgPerS = 0.001;
+		reactor.co2StoreId = "co2"; reactor.hydrogenStoreId = "h2";
+		reactor.methaneStoreId = "ch4"; reactor.waterStoreId = "rawwater";
+		reactor.heatSinkId = "coldSink";
+		seed.sabatierReactors = {reactor};
+		core::MethaneProcessorSettings processor;
+		processor.id = "mp1"; processor.hazardClass = "normal";
+		processor.thermalClass = "low"; processor.rateKgPerS = 0.001;
+		processor.specificEnergyKWhPerKgCH4 = 2.0;
+		processor.methaneStoreId = "ch4"; processor.hydrogenStoreId = "h2";
+		processor.carbonStoreId = "carbon"; processor.heatSinkId = "coldSink";
+		seed.methaneProcessors = {processor};
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration");
+			window.renderFlowContents(world);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "flowPowerChain", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			// Every declared connector of every placed machine is drawn,
+			// and nothing undeclared is: the battery authors none, and the
+			// equipment's ungrown exchange slots do not appear.
+			auto pinExists = [&](char const* type, char const* id, char const* port)
+			{
+				ImVec2 point{};
+				return window.flowPinPosition(type, id, port, &point);
+			};
+			REQ(pinExists("Equipment", "load1", "Equipment input 1")
+				&& pinExists("Equipment", "load1", "Heat out"),
+				"the equipment load does not draw its declared connectors");
+			REQ(!pinExists("Equipment", "load1", "Equipment return 1")
+				&& !pinExists("Equipment", "load1", "Equipment input 2"),
+				"the equipment load drew exchange slots that were never grown");
+			REQ(!pinExists("Battery", "bat1", "Charge"),
+				"a battery drew a connector though it authors none");
+			REQ(pinExists("Generator", "gen1", "Fuel in")
+				&& pinExists("Generator", "gen1", "Heat out"),
+				"the generator does not draw its declared connectors");
+			REQ(pinExists("Fuel cell", "cell1", "Hydrogen in")
+				&& pinExists("Fuel cell", "cell1", "Oxygen in")
+				&& pinExists("Fuel cell", "cell1", "Water out")
+				&& pinExists("Fuel cell", "cell1", "Heat out"),
+				"the fuel cell does not draw its declared connectors");
+			REQ(pinExists("Sabatier", "sab1", "CO2 in")
+				&& pinExists("Sabatier", "sab1", "Hydrogen in")
+				&& pinExists("Sabatier", "sab1", "Methane out")
+				&& pinExists("Sabatier", "sab1", "Water out")
+				&& pinExists("Sabatier", "sab1", "Heat out"),
+				"the Sabatier reactor does not draw its declared connectors");
+			REQ(pinExists("Methane processor", "mp1", "Methane in")
+				&& pinExists("Methane processor", "mp1", "Hydrogen out")
+				&& pinExists("Methane processor", "mp1", "Carbon out")
+				&& pinExists("Methane processor", "mp1", "Heat out"),
+				"the methane processor does not draw its declared connectors");
+			// A legal drag commits the reference through the same seam the
+			// core verdict answers with: the equipment's open heat sink.
+			auto drag = [&](char const* fromType, char const* fromId, char const* fromPort,
+				char const* toType, char const* toId, char const* toPort) -> bool
+			{
+				ImVec2 a{}, b{};
+				if (!window.flowPinPosition(fromType, fromId, fromPort, &a)) return false;
+				if (!window.flowPinPosition(toType, toId, toPort, &b)) return false;
+				ctx->MouseTeleportToPos(a); ctx->Yield(3);
+				ctx->MouseTeleportToPos(a); ctx->Yield(2);
+				ctx->MouseDown(); ctx->Yield(3);
+				ctx->MouseTeleportToPos({(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f}); ctx->Yield(2);
+				ctx->MouseTeleportToPos(b); ctx->Yield(2);
+				ImVec2 live{};
+				if (window.flowPinPosition(toType, toId, toPort, &live))
+				{ ctx->MouseTeleportToPos(live); ctx->Yield(3); }
+				ctx->MouseUp(); ctx->Yield(3);
+				return true;
+			};
+			// A semantic refusal - thermal service class mismatch - says
+			// why on the status line and commits nothing. Tried first,
+			// while the sink is still open, so the class rule answers
+			// before any cardinality rule could.
+			REQ(drag("Equipment", "load1", "Heat out", "Reservoir", "coldSink", "Heat in"),
+				"the heat sink connectors were not drawn");
+			REQ(window.flowLinkRejection().find("thermal class") != std::string::npos
+				&& window.draft().equipmentLoads.at(0).heatSinkId.empty()
+				&& window.draftHistory().undoCount() == 0,
+				("the class-mismatched heat drag was not refused cleanly: "
+					+ window.flowLinkRejection()).c_str());
+			REQ(driver.contains("Link refused"), "the refusal was not shown to the user");
+			// The matching sink commits through the same seam.
+			REQ(drag("Equipment", "load1", "Heat out", "Reservoir", "warmSink", "Heat in"),
+				"the heat sink connectors were not drawn");
+			REQ(window.draft().equipmentLoads.at(0).heatSinkId == "warmSink"
+				&& window.draftHistory().undoCount() == 1,
+				("the legal heat drag did not commit the reference: "
+					+ window.flowLinkRejection()).c_str());
+			// The inspector renders the existing settings editor for each
+			// selected machine, addressed by its occurrence index.
+			struct InspectorCase
+			{
+				char const* type; char const* id; char const* field;
+				std::function<double()> value;
+			};
+			for (auto const& probe : {InspectorCase{"Generator", "gen1", "Generator 0 rated output kW",
+					[&] { return window.draft().generators[0].ratedOutputKW; }},
+				InspectorCase{"Fuel cell", "cell1", "Fuel cell 0 rated output kW",
+					[&] { return window.draft().fuelCells[0].ratedOutputKW; }},
+				InspectorCase{"Sabatier", "sab1", "Sabatier 0 max sink temperature C",
+					[&] { return window.draft().sabatierReactors[0].maxSinkTemperatureC; }},
+				InspectorCase{"Methane processor", "mp1", "Methane processor 0 max sink temperature C",
+					[&] { return window.draft().methaneProcessors[0].maxSinkTemperatureC; }},
+				InspectorCase{"Equipment", "load1", "Load 0 electrical demand kW",
+					[&] { return window.draft().equipmentLoads[0].electricalDemandKW; }},
+				InspectorCase{"Battery", "bat1", "Battery 0 nameplate kWh",
+					[&] { return window.draft().batteries[0].nameplateKWh; }}})
+			{
+				// Filter the canvas to the one node by its unique id: the
+				// crowded layout makes a bare click unreliable at this
+				// zoom, but a lone visible node is unambiguous.
+				driver.click(ctx, "**/Find node");
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+				ctx->KeyChars(probe.id);
+				ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+				ImVec4 rect{};
+				REQ(window.flowNodeRect(probe.type, probe.id, &rect),
+					(std::string(probe.type) + " node is not on screen").c_str());
+				ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+				ctx->Yield(2);
+				ctx->MouseClick(); ctx->Yield(4);
+				// Clear the filter again for the next probe.
+				driver.click(ctx, "**/Find node");
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+				ctx->KeyPress(ImGuiKey_Delete); ctx->Yield(3);
+				// Move off the node so its hover tooltip cannot shadow the
+				// inspector text in the captured log.
+				ctx->MouseTeleportToPos({20, 20}); ctx->Yield(2);
+				std::string const missing = std::string("selecting the ") + probe.type
+					+ " did not render its settings editor field " + probe.field;
+				REQ(driver.contains(probe.field), missing.c_str());
+				auto const beforeEdit = window.draft();
+				auto const historyCount = window.draftHistory().undoCount();
+				driver.typeValue(ctx, (std::string("**/") + probe.field).c_str(), "12.5");
+				ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+				REQ(probe.value() == 12.5 && window.draftHistory().undoCount() == historyCount + 1,
+					"inspector edit did not change the selected machine as one history entry");
+				driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+				REQ(window.draft() == beforeEdit, "undo did not restore the machine inspector edit");
+			}
+			// The projection wires every machine to the shared pool it
+			// implicitly draws from or feeds.
+			auto const graph = station_flow::build(window.draft());
+			auto const hasNode = [&](char const* type, char const* id)
+			{
+				return std::any_of(graph.nodes.begin(), graph.nodes.end(),
+					[&](station_flow::Node const& node) { return node.type == type && node.id == id; });
+			};
+			for (auto const& probe : {std::pair<char const*, char const*>{"Equipment", "load1"},
+				{"Battery", "bat1"}, {"Generator", "gen1"}, {"Fuel cell", "cell1"},
+				{"Sabatier", "sab1"}, {"Methane processor", "mp1"}})
+				REQ(hasNode(probe.first, probe.second),
+					(std::string("the projection lost the ") + probe.first + " node").c_str());
+			struct PoolEdge { char const* type; char const* id; char const* label; bool produces; };
+			for (auto const& expected : {
+				PoolEdge{"Equipment", "load1", "Electrical supply", false},
+				PoolEdge{"Battery", "bat1", "Discharge", true},
+				PoolEdge{"Battery", "bat1", "Charge", false},
+				PoolEdge{"Generator", "gen1", "Generation", true},
+				PoolEdge{"Generator", "gen1", "Startup", false},
+				PoolEdge{"Fuel cell", "cell1", "Backup generation", true},
+				PoolEdge{"Sabatier", "sab1", "Electrical supply", false},
+				PoolEdge{"Methane processor", "mp1", "Electrical supply", false}})
+				REQ(std::any_of(graph.links.begin(), graph.links.end(), [&](station_flow::Link const& link) {
+					auto const& machine = graph.nodes[expected.produces ? link.from : link.to];
+					auto const& pool = graph.nodes[expected.produces ? link.to : link.from];
+					return link.label == expected.label && machine.type == expected.type && machine.id == expected.id
+						&& pool.type == "Power" && pool.id == "Shared electrical pool";
+				}), "the projection lost or reversed a machine's shared-pool relationship");
+			// The Equipment exchange buttons share a ceiling across both
+			// faces, shrink to zero, and preserve wired references on undo.
+			driver.click(ctx, "**/Find node");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A); ctx->KeyChars("load1");
+			ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			auto exchangeButton = [&](core::StationPortSet set, bool grow) {
+				ImVec4 rect{};
+				if (!window.flowPortButtonRect("Equipment", "load1", set, grow, &rect)) return false;
+				ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+				ctx->MouseClick(); ctx->Yield(3);
+				return true;
+			};
+			auto const inputs = core::StationPortSet::LoadExchangesIn;
+			auto const outputs = core::StationPortSet::LoadExchangesOut;
+			REQ(exchangeButton(outputs, true), "Equipment return growth was not offered");
+			REQ(window.draft().equipmentLoads[0].materialExchanges.size() == 2
+				&& pinExists("Equipment", "load1", "Equipment return 1"),
+				"Equipment growth did not draw a real return connector");
+			REQ(!window.flowPortButtonRect("Equipment", "load1", inputs, true, nullptr)
+				&& !window.flowPortButtonRect("Equipment", "load1", outputs, true, nullptr),
+				"Equipment offered growth beyond the shared ceiling");
+			REQ(exchangeButton(outputs, false) && exchangeButton(inputs, false),
+				"Equipment could not shrink both faces to zero");
+			REQ(window.draft().equipmentLoads[0].materialExchanges.empty()
+				&& !pinExists("Equipment", "load1", "Equipment input 1")
+				&& !pinExists("Equipment", "load1", "Equipment return 1")
+				&& !window.flowPortButtonRect("Equipment", "load1", inputs, false, nullptr)
+				&& !window.flowPortButtonRect("Equipment", "load1", outputs, false, nullptr),
+				"Equipment retained connectors or shrink buttons below its zero floor");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().equipmentLoads[0].materialExchanges.size() == 1
+				&& window.draft().equipmentLoads[0].materialExchanges[0].storeId == "water",
+				"undo did not restore the removed Equipment connector and its reference");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().equipmentLoads[0].materialExchanges.empty(),
+				"redo did not remove the Equipment connector again");
+			driver.click(ctx, "**/Find node");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A); ctx->KeyPress(ImGuiKey_Delete); ctx->Yield(3);
+			struct PlacementCase { char const* type; std::function<size_t()> count; };
+			for (auto const& probe : {
+				PlacementCase{"Equipment", [&] { return window.draft().equipmentLoads.size(); }},
+				PlacementCase{"Battery", [&] { return window.draft().batteries.size(); }},
+				PlacementCase{"Generator", [&] { return window.draft().generators.size(); }},
+				PlacementCase{"Fuel cell", [&] { return window.draft().fuelCells.size(); }},
+				PlacementCase{"Sabatier", [&] { return window.draft().sabatierReactors.size(); }},
+				PlacementCase{"Methane processor", [&] { return window.draft().methaneProcessors.size(); }}})
+			{
+				auto const beforePlace = window.draft();
+				auto const count = probe.count();
+				auto const historyCount = window.draftHistory().undoCount();
+				ctx->ComboClick((std::string("Place node/") + probe.type).c_str()); ctx->Yield(2);
+				REQ(driver.contains((std::string(probe.type) + " placement armed").c_str()),
+					"combobox selection did not arm machine placement");
+				auto* placeCanvas = flowCanvasWindow("Configuration");
+				ctx->MouseTeleportToPos({placeCanvas->Pos.x + 520, placeCanvas->Pos.y + 420});
+				ctx->MouseClick(); ctx->Yield(3);
+				REQ(probe.count() == count + 1 && window.draftHistory().undoCount() == historyCount + 1,
+					"a canvas click did not place exactly one machine entry");
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+				REQ(window.draft() == beforePlace, "undo did not remove the placed machine");
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+				REQ(probe.count() == count + 1, "redo did not restore the placed machine");
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			}
+
+			// BeginCombo does not report the Opened status flag that
+			// ItemOpen requires; open it with a real click instead.
+			driver.click(ctx, "Place node"); ctx->Yield(3);
+			REQ(driver.contains("Conversion chain"),
+				"the combobox did not render the conversion-chain grouping");
+			REQ(driver.contains("Power"),
+				"the combobox did not render the power grouping");
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+		});
+		#undef REQ
+		require(driver.passed(), "Flow power chain workflow failed on the Test Engine");
+	}
+
+	void flowPowerChainWorkflow(smoke::Context const&)
+	{
+		flowPowerChainBody();
 	}
 
 	void storeWorkflow(smoke::Context const&)
@@ -4834,6 +5183,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/flowCascadeDeleteWorkflow", flowCascadeDeleteWorkflow});
 	checks.push_back({"station/flowGrowablePortsWorkflow", flowGrowablePortsWorkflow});
 	checks.push_back({"station/flowInspectorWorkflow", flowInspectorWorkflow});
+	checks.push_back({"station/flowPowerChainWorkflow", flowPowerChainWorkflow});
 	checks.push_back({"station/transferWorkflow", transferWorkflow});
 	checks.push_back({"station/compoundWorkflow", compoundWorkflow});
 	checks.push_back({"station/powerWorkflow", powerWorkflow});

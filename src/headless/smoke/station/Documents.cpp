@@ -11,6 +11,7 @@
 
 #include "core/World.h"
 #include "core/StationConfigurationDocument.h"
+#include "core/StationPorts.h"
 #include "core/TransactionalFileWriter.h"
 #include <yaml-cpp/yaml.h>
 #include "core/AgentTagRegistryDocument.h"
@@ -18,6 +19,7 @@
 #include "core/YamlSerializer.h"
 
 #include <array>
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -4038,6 +4040,132 @@ void biologicalCapacityFiles(smoke::Context const& context)
 	}
 }
 
+// #647: the power and conversion chain survives the headless file
+// round trip. Every machine type is authored with its references wired,
+// saved through both the YAML and binary World writers, and reloaded:
+// the settings come back byte-equal and the authored link table - the
+// identity of every reference the Flow view draws - enumerates the
+// same set on both sides.
+void powerChainFiles(smoke::Context const& context)
+{
+	namespace filesystem = std::filesystem;
+	auto const directory = context.temporaryRoot() / "station-power-chain";
+	filesystem::create_directories(directory);
+	auto store = [](std::string const& id, std::string const& unit,
+		std::string const& hazard = "normal")
+	{
+		core::ResourceStoreSettings entry;
+		entry.id = id; entry.unit = unit; entry.capacity = 1000.0;
+		entry.startingQualified = 500.0; entry.hazardClass = hazard;
+		return entry;
+	};
+	auto reservoir = [](std::string const& id, std::string const& thermalClass)
+	{
+		core::ThermalReservoirSettings entry;
+		entry.id = id; entry.thermalClass = thermalClass;
+		entry.heatCapacityKJPerK = 1000.0;
+		return entry;
+	};
+	core::StationSystemsSettings settings;
+	settings.enabled = true;
+	settings.observationIntervalSeconds = 1.0f;
+	settings.stores = {store("water", "kg"), store("diesel", "kJ"),
+		store("co2", "kg"), store("h2", "kg"), store("o2", "kg"),
+		store("ch4", "kg"), store("rawwater", "kg"), store("carbon", "kg")};
+	settings.thermalReservoirs = {reservoir("warmSink", "moderate"),
+		reservoir("genSink", "generation"), reservoir("coldSink", "low")};
+	core::EquipmentLoadSettings load;
+	load.id = "load1"; load.thermalClass = "moderate";
+	load.electricalDemandKW = 2.0; load.heatOutputKW = 1.0;
+	load.heatSinkId = "warmSink";
+	load.materialExchanges.push_back({"water", 1.0, true});
+	load.materialExchanges.push_back({"rawwater", 1.0, false});
+	settings.equipmentLoads = {load};
+	core::BatterySettings battery;
+	battery.id = "bat1"; battery.nameplateKWh = 10.0; battery.usableKWh = 8.0;
+	battery.startingStoredKWh = 8.0; battery.maxChargeKW = 2.0;
+	battery.maxDischargeKW = 4.0;
+	settings.batteries = {battery};
+	core::GeneratorSettings generator;
+	generator.id = "gen1"; generator.thermalClass = "generation";
+	generator.fuelStoreId = "diesel"; generator.heatSinkId = "genSink";
+	generator.ratedOutputKW = 10.0; generator.efficiency = 0.4;
+	generator.maxRampKWPerSecond = 2.0;
+	settings.generators = {generator};
+	core::FuelCellSettings cell;
+	cell.id = "cell1"; cell.hazardClass = "normal"; cell.thermalClass = "low";
+	cell.ratedOutputKW = 10.0; cell.efficiency = 0.6;
+	cell.hydrogenStoreId = "h2"; cell.oxygenStoreId = "o2";
+	cell.waterStoreId = "rawwater"; cell.heatSinkId = "coldSink";
+	settings.fuelCells = {cell};
+	core::SabatierReactorSettings reactor;
+	reactor.id = "sab1"; reactor.hazardClass = "normal"; reactor.thermalClass = "low";
+	reactor.rateKgPerS = 0.001;
+	reactor.co2StoreId = "co2"; reactor.hydrogenStoreId = "h2";
+	reactor.methaneStoreId = "ch4"; reactor.waterStoreId = "rawwater";
+	reactor.heatSinkId = "coldSink";
+	settings.sabatierReactors = {reactor};
+	core::MethaneProcessorSettings processor;
+	processor.id = "mp1"; processor.hazardClass = "normal";
+	processor.thermalClass = "low"; processor.rateKgPerS = 0.001;
+	processor.specificEnergyKWhPerKgCH4 = 2.0;
+	processor.methaneStoreId = "ch4"; processor.hydrogenStoreId = "h2";
+	processor.carbonStoreId = "carbon"; processor.heatSinkId = "coldSink";
+	settings.methaneProcessors = {processor};
+	// Rebuild every reference through the same link seam as canvas drags,
+	// rather than only testing serialization of pre-filled fields.
+	auto const plannedLinks = core::stationAuthoredLinks(settings);
+	for (auto const& authored : plannedLinks)
+		require(core::clearStationLink(settings, authored.identity), "could not clear a chain reference");
+	require(core::stationAuthoredLinks(settings).empty(), "the new chain retained authored references");
+	for (auto const& authored : plannedLinks)
+	{
+		core::CandidateLink const candidate{authored.from, authored.to};
+		auto const verdict = core::evaluateStationLink(settings, candidate);
+		require(verdict.allowed, ("building the chain refused a legal link: " + verdict.reason).c_str());
+		require(core::applyStationLink(settings, candidate), "building the chain failed to write a reference");
+	}
+	core::World original("Power Chain Round Trip", 2, 2);
+	original.pauseSimulation(); original.finishBuild();
+	std::string diagnostic;
+	require(original.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+	original.markSaved();
+	// The authored link table is the Flow view's view of the references;
+	// capture it before the round trip so the reloaded one can be
+	// compared as a set of identities.
+	auto const beforeLinks = core::stationAuthoredLinks(original.getStationSystemsSettings());
+	require(beforeLinks.size() >= 14,
+		("the wired chain enumerated too few references: "
+			+ std::to_string(beforeLinks.size())).c_str());
+	for (auto const* suffix : {".world.yaml", ".world"})
+	{
+		auto const path = directory / (std::string("power-chain") + suffix);
+		original.saveTo(path.string());
+		auto const reopened = core::loadWorldDocument(path);
+		require(reopened != nullptr, "power chain document failed to load");
+		require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+			("power chain settings did not survive the " + std::string(suffix) + " round trip").c_str());
+		auto const afterLinks = core::stationAuthoredLinks(reopened->getStationSystemsSettings());
+		auto const identities = [](std::vector<core::AuthoredLink> const& links)
+		{
+			std::vector<std::string> out;
+			for (auto const& entry : links) out.push_back(entry.identity);
+			std::sort(out.begin(), out.end());
+			return out;
+		};
+		require(identities(afterLinks) == identities(beforeLinks),
+			("the authored link table changed across the " + std::string(suffix) + " round trip").c_str());
+		// Every machine's own reference fields came back populated.
+		auto const& back = reopened->getStationSystemsSettings();
+		require(back.equipmentLoads.front().heatSinkId == "warmSink"
+			&& back.generators.front().fuelStoreId == "diesel"
+			&& back.fuelCells.front().oxygenStoreId == "o2"
+			&& back.sabatierReactors.front().methaneStoreId == "ch4"
+			&& back.methaneProcessors.front().carbonStoreId == "carbon",
+			("a machine reference was lost across the " + std::string(suffix) + " round trip").c_str());
+	}
+}
+
 void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"configurationFile", configurationFile});
@@ -4048,6 +4176,7 @@ void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"structuralReplay", structuralReplay});
 	checks.push_back({"compoundFiles", compoundFiles});
 	checks.push_back({"powerFiles", powerFiles});
+	checks.push_back({"powerChainFiles", powerChainFiles});
 	checks.push_back({"batteryFiles", batteryFiles});
 	checks.push_back({"deliveryFiles", deliveryFiles});
 	checks.push_back({"wasteEjectionFiles", wasteEjectionFiles});

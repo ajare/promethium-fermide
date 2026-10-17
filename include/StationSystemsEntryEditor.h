@@ -39,6 +39,35 @@ namespace station_editor
 	void renderStoreList(core::StationSystemsSettings& draft);
 	void renderTransferList(core::StationSystemsSettings& draft);
 
+	// #647: the power and conversion chain entry editors. Same label and
+	// deferred-removal contract as renderStoreEntry; the Flow inspector
+	// and the Station Systems form tab render one entry's full settings
+	// through these against the same draft.
+	bool renderEquipmentLoadEntry(core::StationSystemsSettings& draft,
+		core::EquipmentLoadSettings& load,
+		std::string const& label, std::string const& removeLabel);
+	bool renderBatteryEntry(core::StationSystemsSettings& draft,
+		core::BatterySettings& battery,
+		std::string const& label, std::string const& removeLabel);
+	bool renderGeneratorEntry(core::StationSystemsSettings& draft,
+		core::GeneratorSettings& generator,
+		std::string const& label, std::string const& removeLabel);
+	bool renderFuelCellEntry(core::StationSystemsSettings& draft,
+		core::FuelCellSettings& cell,
+		std::string const& label, std::string const& removeLabel);
+	bool renderSabatierReactorEntry(core::StationSystemsSettings& draft,
+		core::SabatierReactorSettings& reactor,
+		std::string const& label, std::string const& removeLabel);
+	bool renderMethaneProcessorEntry(core::StationSystemsSettings& draft,
+		core::MethaneProcessorSettings& processor,
+		std::string const& label, std::string const& removeLabel);
+	void renderEquipmentLoadList(core::StationSystemsSettings& draft);
+	void renderBatteryList(core::StationSystemsSettings& draft);
+	void renderGeneratorList(core::StationSystemsSettings& draft);
+	void renderFuelCellList(core::StationSystemsSettings& draft);
+	void renderSabatierList(core::StationSystemsSettings& draft);
+	void renderMethaneProcessorList(core::StationSystemsSettings& draft);
+
 	// Descriptor registry keyed by the Flow node type name. A type absent
 	// here has no extracted editor yet; the index addresses the entry in
 	// the draft vector the type owns. The registered renderer presents

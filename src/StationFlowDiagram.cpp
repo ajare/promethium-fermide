@@ -534,16 +534,36 @@ namespace
 				outputLimit = found->outputs.size();
 			}
 		}
+		else if (nodeType == "Equipment")
+		{
+			// The load's exchange set is shared across both faces: each face
+			// shows only the connectors its draft entry actually carries, so
+			// the affordance and the drawn pins can never disagree.
+			inputLimit = 0;
+			outputLimit = 0;
+			auto const found = std::find_if(draft.equipmentLoads.begin(), draft.equipmentLoads.end(),
+				[&](core::EquipmentLoadSettings const& load) { return load.id == nodeId; });
+			if (found != draft.equipmentLoads.end())
+			{
+				for (auto const& exchange : found->materialExchanges)
+					if (exchange.consumes) ++inputLimit;
+					else ++outputLimit;
+			}
+		}
 		std::vector<FlowPort> inputs, outputs;
 		size_t seenInputs = 0, seenOutputs = 0;
 		for (auto const& descriptor : core::stationPortDescriptors())
 		{
 			if (descriptor.nodeType != nodeType) continue;
+			// A machine's heat output is not part of any growable exchange
+			// set: it is always drawn, even on an equipment load whose
+			// producing face is empty.
+			bool const heat = descriptor.name == "Heat out";
 			if (descriptor.direction == core::StationPortDirection::Input)
 			{
 				if (seenInputs++ < inputLimit) inputs.push_back({&descriptor, {}});
 			}
-			else if (seenOutputs++ < outputLimit) outputs.push_back({&descriptor, {}});
+			else if (heat || seenOutputs++ < outputLimit) outputs.push_back({&descriptor, {}});
 		}
 		auto spread = [](std::vector<FlowPort>& ports, float x)
 		{
@@ -666,7 +686,7 @@ bool StationFlowDiagram::portButtonScreenRect(std::string const& nodeType, std::
 	core::StationPortSet set, bool grow, ImVec4* out) const
 {
 	auto const found = mPortButtons.find(nodeType + keySeparator + nodeId + keySeparator
-		+ (set == core::StationPortSet::ConversionInputs ? "in" : "out") + keySeparator + (grow ? "+" : "-"));
+		+ (core::stationPortSetIsInputSide(set) ? "in" : "out") + keySeparator + (grow ? "+" : "-"));
 	if (found == mPortButtons.end()) return false;
 	if (out) *out = found->second;
 	return true;
@@ -752,7 +772,9 @@ std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode
 	// include nodes of other types. Count preceding nodes of this type to
 	// address its own draft vector (not the entire graph).
 	if (view.type == "Store" || view.type == "Transfer" || view.type == "Conversion"
-		|| view.type == "Solar")
+		|| view.type == "Solar" || view.type == "Equipment" || view.type == "Battery"
+		|| view.type == "Generator" || view.type == "Fuel cell" || view.type == "Sabatier"
+		|| view.type == "Methane processor")
 	{
 		view.index = 0;
 		for (int i = 0; i < mSelected; ++i)
@@ -819,11 +841,20 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	if (ImGui::BeginCombo("Place node", mPlacingType.empty() ? "Choose type..." : mPlacingType.c_str()))
 	{
 		// The combobox lists the authored types from the core placeable
-		// table; derived service nodes are absent because they are never
-		// authored.
+		// table, grouped by subsystem so one of many types is findable
+		// without reading the whole list. Derived service nodes are absent
+		// because they are never authored.
+		std::string_view shownGroup;
 		for (auto const& placeable : core::stationPlaceableTypes())
+		{
+			if (placeable.group != shownGroup)
+			{
+				shownGroup = placeable.group;
+				ImGui::TextDisabled("%s", std::string(shownGroup).c_str());
+			}
 			if (ImGui::Selectable(placeable.nodeType.data(), mPlacingType == placeable.nodeType))
 				mPlacingType = placeable.nodeType;
+		}
 		ImGui::EndCombo();
 	}
 	if (!mPlacingType.empty())
@@ -1166,6 +1197,123 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			draft.solarArrays.push_back(std::move(array));
 			mFitRequested = false;
 		}
+		// The power and conversion chain (#647): each machine arrives with
+		// its scalar defaults and its reference connectors left empty, the
+		// same "empty until the user wires it" shape a placed conversion
+		// takes. Pre-filling references from whatever store happens to be
+		// first would draw links the user never chose and, for the chain
+		// families, alias chemically distinct roles against one store.
+		else if (mPlacingType == "Equipment" && draft.equipmentLoads.size() < core::MaxStationEquipmentLoads)
+		{
+			core::EquipmentLoadSettings load;
+			load.electricalDemandKW = 5.0;
+			load.thermalClass = "moderate";
+			for (size_t candidate = 1;; ++candidate)
+			{
+				load.id = "load" + std::to_string(candidate);
+				if (std::none_of(draft.equipmentLoads.begin(), draft.equipmentLoads.end(),
+					[&](auto const& entry) { return entry.id == load.id; })) break;
+			}
+			mLayout["Equipment:" + load.id + ":0"] = placeAt;
+			draft.equipmentLoads.push_back(std::move(load));
+			mFitRequested = false;
+		}
+		else if (mPlacingType == "Battery" && draft.batteries.size() < core::MaxStationBatteries)
+		{
+			core::BatterySettings battery;
+			battery.nameplateKWh = 10.0;
+			battery.usableKWh = 8.0;
+			battery.startingStoredKWh = 8.0;
+			battery.maxChargeKW = 2.0;
+			battery.maxDischargeKW = 4.0;
+			for (size_t candidate = 1;; ++candidate)
+			{
+				battery.id = "battery" + std::to_string(candidate);
+				if (std::none_of(draft.batteries.begin(), draft.batteries.end(),
+					[&](auto const& entry) { return entry.id == battery.id; })) break;
+			}
+			mLayout["Battery:" + battery.id + ":0"] = placeAt;
+			draft.batteries.push_back(std::move(battery));
+			mFitRequested = false;
+		}
+		else if (mPlacingType == "Generator" && draft.generators.size() < core::MaxStationGenerators)
+		{
+			core::GeneratorSettings generator;
+			generator.thermalClass = "generation";
+			generator.ratedOutputKW = 10.0;
+			generator.efficiency = 0.4;
+			generator.maxRampKWPerSecond = 2.0;
+			generator.commandedOutputKW = 10.0;
+			generator.startupPowerKW = 1.0;
+			generator.startupSeconds = 5.0;
+			generator.shutdownHeatKW = 0.5;
+			generator.shutdownSeconds = 10.0;
+			generator.maxSinkTemperatureC = 90.0;
+			for (size_t candidate = 1;; ++candidate)
+			{
+				generator.id = "generator" + std::to_string(candidate);
+				if (std::none_of(draft.generators.begin(), draft.generators.end(),
+					[&](auto const& entry) { return entry.id == generator.id; })) break;
+			}
+			mLayout["Generator:" + generator.id + ":0"] = placeAt;
+			draft.generators.push_back(std::move(generator));
+			mFitRequested = false;
+		}
+		else if (mPlacingType == "Fuel cell" && draft.fuelCells.size() < core::MaxStationFuelCells)
+		{
+			core::FuelCellSettings cell;
+			cell.hazardClass = "normal";
+			cell.thermalClass = "low";
+			cell.ratedOutputKW = 10.0;
+			cell.efficiency = 0.6;
+			cell.maxSinkTemperatureC = 80.0;
+			for (size_t candidate = 1;; ++candidate)
+			{
+				cell.id = "fuelcell" + std::to_string(candidate);
+				if (std::none_of(draft.fuelCells.begin(), draft.fuelCells.end(),
+					[&](auto const& entry) { return entry.id == cell.id; })) break;
+			}
+			mLayout["Fuel cell:" + cell.id + ":0"] = placeAt;
+			draft.fuelCells.push_back(std::move(cell));
+			mFitRequested = false;
+		}
+		else if (mPlacingType == "Sabatier" && draft.sabatierReactors.size() < core::MaxStationSabatierReactors)
+		{
+			core::SabatierReactorSettings reactor;
+			reactor.hazardClass = "normal";
+			reactor.thermalClass = "low";
+			reactor.rateKgPerS = 0.001;
+			reactor.specificEnergyKWhPerKgCO2 = 1.0;
+			reactor.maxSinkTemperatureC = 60.0;
+			for (size_t candidate = 1;; ++candidate)
+			{
+				reactor.id = "sabatier" + std::to_string(candidate);
+				if (std::none_of(draft.sabatierReactors.begin(), draft.sabatierReactors.end(),
+					[&](auto const& entry) { return entry.id == reactor.id; })) break;
+			}
+			mLayout["Sabatier:" + reactor.id + ":0"] = placeAt;
+			draft.sabatierReactors.push_back(std::move(reactor));
+			mFitRequested = false;
+		}
+		else if (mPlacingType == "Methane processor"
+			&& draft.methaneProcessors.size() < core::MaxStationMethaneProcessors)
+		{
+			core::MethaneProcessorSettings processor;
+			processor.hazardClass = "normal";
+			processor.thermalClass = "low";
+			processor.rateKgPerS = 0.001;
+			processor.specificEnergyKWhPerKgCH4 = 2.0;
+			processor.maxSinkTemperatureC = 60.0;
+			for (size_t candidate = 1;; ++candidate)
+			{
+				processor.id = "methaneprocessor" + std::to_string(candidate);
+				if (std::none_of(draft.methaneProcessors.begin(), draft.methaneProcessors.end(),
+					[&](auto const& entry) { return entry.id == processor.id; })) break;
+			}
+			mLayout["Methane processor:" + processor.id + ":0"] = placeAt;
+			draft.methaneProcessors.push_back(std::move(processor));
+			mFitRequested = false;
+		}
 	}
 	ImNodes::SetCurrentContext(previousContext);
 	updateBounds();
@@ -1321,7 +1469,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 				if (decl.nodeType != n.type) continue;
 				core::StationPortSetStatus status;
 				if (!core::stationPortSetStatus(draft, n.type, n.id, decl.set, status)) continue;
-				bool const inputs = decl.set == core::StationPortSet::ConversionInputs;
+				bool const inputs = core::stationPortSetIsInputSide(decl.set);
 				float const bx = inputs ? a.x : d.x - 35.0f;
 				float const by = d.y + 3.0f;
 				auto drawAffordance = [&](bool grow, char const* glyph)
@@ -1386,8 +1534,11 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 				std::string const side = mPressedPortButton.substr(p2 + 1, p3 - p2 - 1);
 				bool const grow = mPressedPortButton.size() > p3 + 1
 					&& mPressedPortButton[p3 + 1] == '+';
-				auto const set = side == "in" ? core::StationPortSet::ConversionInputs
-					: core::StationPortSet::ConversionOutputs;
+				auto const set = [&]() -> core::StationPortSet {
+					core::StationPortSet resolved{};
+					core::stationPortSetFor(type, side == "in", resolved);
+					return resolved;
+				}();
 				std::string reason;
 				bool const done = grow ? core::growStationPortSet(draft, type, id, set, reason)
 					: core::shrinkStationPortSet(draft, type, id, set, reason);
@@ -1404,7 +1555,14 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	{
 		bool const atLimit = (mPlacingType == "Store" && draft.stores.size() >= core::MaxStationResourceStores)
 			|| (mPlacingType == "Conversion" && draft.conversions.size() >= core::MaxStationResourceConversions)
-			|| (mPlacingType == "Solar" && draft.solarArrays.size() >= core::MaxStationSolarArrays);
+			|| (mPlacingType == "Solar" && draft.solarArrays.size() >= core::MaxStationSolarArrays)
+			|| (mPlacingType == "Equipment" && draft.equipmentLoads.size() >= core::MaxStationEquipmentLoads)
+			|| (mPlacingType == "Battery" && draft.batteries.size() >= core::MaxStationBatteries)
+			|| (mPlacingType == "Generator" && draft.generators.size() >= core::MaxStationGenerators)
+			|| (mPlacingType == "Fuel cell" && draft.fuelCells.size() >= core::MaxStationFuelCells)
+			|| (mPlacingType == "Sabatier" && draft.sabatierReactors.size() >= core::MaxStationSabatierReactors)
+			|| (mPlacingType == "Methane processor"
+				&& draft.methaneProcessors.size() >= core::MaxStationMethaneProcessors);
 		auto a = io.MousePos;
 		ImVec2 b{a.x + nodeWidth * mZoom, a.y + nodeHeight * mZoom};
 		draw->AddRectFilled(a, b, IM_COL32(80, 130, 170, 100), 5);
