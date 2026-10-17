@@ -550,6 +550,12 @@ namespace
 					else ++outputLimit;
 			}
 		}
+		else if (nodeType == "Maintenance")
+		{
+			inputLimit = 0;
+			for (auto const& job : draft.maintenanceJobs)
+				if (job.id == nodeId) { inputLimit = job.requirements.size(); break; }
+		}
 		std::vector<FlowPort> inputs, outputs;
 		size_t seenInputs = 0, seenOutputs = 0;
 		for (auto const& descriptor : core::stationPortDescriptors())
@@ -778,7 +784,8 @@ std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode
 		|| view.type == "Methane processor" || view.type == "Reservoir" || view.type == "Radiator"
 		|| view.type == "Water collector" || view.type == "Water treatment" || view.type == "Electrolyzer"
 		|| view.type == "CO2 capture" || view.type == "Atmosphere" || view.type == "Airlock cycle"
-		|| view.type == "Coolant loop" || view.type == "Chiller" || view.type == "Thermal buffer")
+		|| view.type == "Coolant loop" || view.type == "Chiller" || view.type == "Thermal buffer"
+		|| view.type == "Delivery" || view.type == "Waste ejection" || view.type == "Outage" || view.type == "Maintenance")
 	{
 		view.index = 0;
 		for (int i = 0; i < mSelected; ++i)
@@ -1472,6 +1479,44 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			draft.coolantLoops.push_back(std::move(loop));
 			mFitRequested = false;
 		}
+		else if (mPlacingType == "Delivery" || mPlacingType == "Waste ejection"
+			|| mPlacingType == "Outage" || mPlacingType == "Maintenance")
+		{
+			auto place = [&](auto& entries, size_t maximum, auto entry, char const* prefix) {
+				if (entries.size() >= maximum) return;
+				for (size_t candidate = 1;; ++candidate)
+				{
+					entry.id = prefix + std::to_string(candidate);
+					if (std::none_of(entries.begin(), entries.end(),
+						[&](auto const& existing) { return existing.id == entry.id; })) break;
+				}
+				mLayout[mPlacingType + ":" + entry.id + ":0"] = placeAt;
+				entries.push_back(std::move(entry));
+				mFitRequested = false;
+			};
+			if (mPlacingType == "Delivery")
+			{
+				core::ResourceDeliverySettings entry; entry.quantity = 10; entry.unit = "kg";
+				place(draft.deliveries, core::MaxStationResourceDeliveries, entry, "delivery");
+			}
+			else if (mPlacingType == "Waste ejection")
+			{
+				core::WasteEjectionSettings entry; entry.quantity = 10; entry.unit = "kg";
+				place(draft.wasteEjections, core::MaxStationWasteEjections, entry, "ejection");
+			}
+			else if (mPlacingType == "Outage")
+			{
+				core::InstallationOutageSettings entry;
+				entry.capacityFraction = 0.5; entry.durationSeconds = 30;
+				place(draft.outages, core::MaxStationInstallationOutages, entry, "outage");
+			}
+			else
+			{
+				core::MaintenanceJobSettings entry; entry.durationSeconds = 30;
+				entry.requirements.push_back({"", 1.0, false});
+				place(draft.maintenanceJobs, core::MaxStationMaintenanceJobs, entry, "maintenance");
+			}
+		}
 		else if (mPlacingType == "Thermal buffer" && draft.thermalBuffers.size() < core::MaxStationThermalBuffers)
 		{
 			core::ThermalBufferSettings buffer;
@@ -1777,7 +1822,11 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			|| (mPlacingType == "Electrolyzer" && draft.electrolyzers.size() >= core::MaxStationElectrolyzers)
 			|| (mPlacingType == "CO2 capture" && draft.co2Captures.size() >= core::MaxStationCo2Captures)
 			|| (mPlacingType == "Atmosphere" && draft.atmospheres.size() >= core::MaxStationAtmospheres)
-			|| (mPlacingType == "Airlock cycle" && draft.airlockCycles.size() >= core::MaxStationAirlockCycles);
+			|| (mPlacingType == "Airlock cycle" && draft.airlockCycles.size() >= core::MaxStationAirlockCycles)
+			|| (mPlacingType == "Delivery" && draft.deliveries.size() >= core::MaxStationResourceDeliveries)
+			|| (mPlacingType == "Waste ejection" && draft.wasteEjections.size() >= core::MaxStationWasteEjections)
+			|| (mPlacingType == "Outage" && draft.outages.size() >= core::MaxStationInstallationOutages)
+			|| (mPlacingType == "Maintenance" && draft.maintenanceJobs.size() >= core::MaxStationMaintenanceJobs);
 		auto a = io.MousePos;
 		ImVec2 b{a.x + nodeWidth * mZoom, a.y + nodeHeight * mZoom};
 		draw->AddRectFilled(a, b, IM_COL32(80, 130, 170, 100), 5);

@@ -717,33 +717,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	{
 		auto& delivery = mDraft.deliveries[index];
 		auto const row = std::to_string(index);
-		bool removeDelivery = false;
-		ImGui::PushItemWidth(220);
-		char deliveryIdBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(deliveryIdBuffer, delivery.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Delivery " + row + " id").c_str(), deliveryIdBuffer, sizeof(deliveryIdBuffer)))
-			delivery.id = deliveryIdBuffer;
-		char deliveryStoreBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(deliveryStoreBuffer, delivery.storeId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Delivery " + row + " store").c_str(),
-			deliveryStoreBuffer, sizeof(deliveryStoreBuffer)))
-			delivery.storeId = deliveryStoreBuffer;
-		char deliveryUnitBuffer[8]{};
-		std::strncpy(deliveryUnitBuffer, delivery.unit.c_str(), sizeof(deliveryUnitBuffer) - 1);
-		if (ImGui::InputText(("Delivery " + row + " unit").c_str(), deliveryUnitBuffer, sizeof(deliveryUnitBuffer)))
-			delivery.unit = deliveryUnitBuffer;
-		ImGui::InputDouble(("Delivery " + row + " quantity").c_str(), &delivery.quantity, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Delivery " + row + " first occurrence seconds").c_str(),
-			&delivery.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Delivery " + row + " recurrence seconds").c_str(),
-			&delivery.recurrenceSeconds, 0.0, 0.0, "%.3f");
-		ImGui::Checkbox(("Delivery " + row + " arrives usable").c_str(), &delivery.arrivesQualified);
-		ImGui::SameLine();
-		ImGui::InputInt(("Delivery " + row + " priority").c_str(), &delivery.priority);
-		ImGui::SameLine();
-		if (ImGui::Button(("Remove delivery " + row).c_str()))
-			removeDelivery = true;
-		ImGui::PopItemWidth();
+		bool const removeDelivery = station_editor::renderDeliveryEntry(mDraft, delivery,
+			"Delivery " + row, "Remove delivery " + row);
 		if (removeDelivery)
 			mDraft.deliveries.erase(mDraft.deliveries.begin() + static_cast<std::ptrdiff_t>(index));
 		else
@@ -772,32 +747,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	{
 		auto& ejection = mDraft.wasteEjections[index];
 		auto const row = std::to_string(index);
-		bool removeEjection = false;
-		ImGui::PushItemWidth(220);
-		char ejectionIdBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(ejectionIdBuffer, ejection.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Waste ejection " + row + " id").c_str(), ejectionIdBuffer, sizeof(ejectionIdBuffer)))
-			ejection.id = ejectionIdBuffer;
-		char ejectionStoreBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(ejectionStoreBuffer, ejection.storeId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Waste ejection " + row + " store").c_str(),
-			ejectionStoreBuffer, sizeof(ejectionStoreBuffer)))
-			ejection.storeId = ejectionStoreBuffer;
-		char ejectionUnitBuffer[8]{};
-		std::strncpy(ejectionUnitBuffer, ejection.unit.c_str(), sizeof(ejectionUnitBuffer) - 1);
-		if (ImGui::InputText(("Waste ejection " + row + " unit").c_str(), ejectionUnitBuffer, sizeof(ejectionUnitBuffer)))
-			ejection.unit = ejectionUnitBuffer;
-		ImGui::InputDouble(("Waste ejection " + row + " quantity").c_str(), &ejection.quantity, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Waste ejection " + row + " first occurrence seconds").c_str(),
-			&ejection.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Waste ejection " + row + " recurrence seconds").c_str(),
-			&ejection.recurrenceSeconds, 0.0, 0.0, "%.3f");
-		ImGui::SameLine();
-		ImGui::InputInt(("Waste ejection " + row + " priority").c_str(), &ejection.priority);
-		ImGui::SameLine();
-		if (ImGui::Button(("Remove waste ejection " + row).c_str()))
-			removeEjection = true;
-		ImGui::PopItemWidth();
+		bool const removeEjection = station_editor::renderWasteEjectionEntry(mDraft, ejection,
+			"Waste ejection " + row, "Remove waste ejection " + row);
 		if (removeEjection)
 			mDraft.wasteEjections.erase(mDraft.wasteEjections.begin() + static_cast<std::ptrdiff_t>(index));
 		else
@@ -918,31 +869,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	{
 		auto& outage = mDraft.outages[index];
 		auto const row = std::to_string(index);
-		bool removeOutage = false;
-		ImGui::PushItemWidth(220);
-		char outageIdBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(outageIdBuffer, outage.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Outage " + row + " id").c_str(),
-			outageIdBuffer, sizeof(outageIdBuffer)))
-			outage.id = outageIdBuffer;
-		char outageTargetBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(outageTargetBuffer, outage.installationId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Outage " + row + " installation id").c_str(),
-			outageTargetBuffer, sizeof(outageTargetBuffer)))
-			outage.installationId = outageTargetBuffer;
-		ImGui::InputDouble(("Outage " + row + " capacity fraction (0..1)").c_str(),
-			&outage.capacityFraction, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Outage " + row + " first occurrence seconds").c_str(),
-			&outage.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Outage " + row + " duration seconds").c_str(),
-			&outage.durationSeconds, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Outage " + row + " recurrence seconds (0 = one-off)").c_str(),
-			&outage.recurrenceSeconds, 0.0, 0.0, "%.3f");
-		ImGui::InputInt(("Outage " + row + " priority").c_str(), &outage.priority);
-		ImGui::SameLine();
-		if (ImGui::Button(("Remove outage " + row).c_str()))
-			removeOutage = true;
-		ImGui::PopItemWidth();
+		bool const removeOutage = station_editor::renderOutageEntry(mDraft, outage,
+			"Outage " + row, "Remove outage " + row);
 		if (removeOutage)
 			mDraft.outages.erase(mDraft.outages.begin() + static_cast<std::ptrdiff_t>(index));
 		else
@@ -977,59 +905,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	{
 		auto& job = mDraft.maintenanceJobs[index];
 		auto const row = std::to_string(index);
-		bool removeJob = false;
-		ImGui::PushItemWidth(220);
-		char jobIdBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(jobIdBuffer, job.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Maintenance job " + row + " id").c_str(),
-			jobIdBuffer, sizeof(jobIdBuffer)))
-			job.id = jobIdBuffer;
-		char jobTargetBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(jobTargetBuffer, job.installationId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Maintenance job " + row + " installation id").c_str(),
-			jobTargetBuffer, sizeof(jobTargetBuffer)))
-			job.installationId = jobTargetBuffer;
-		ImGui::InputDouble(("Maintenance job " + row + " first occurrence seconds").c_str(),
-			&job.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Maintenance job " + row + " duration seconds").c_str(),
-			&job.durationSeconds, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Maintenance job " + row + " recurrence seconds (0 = one-off)").c_str(),
-			&job.recurrenceSeconds, 0.0, 0.0, "%.3f");
-		ImGui::InputInt(("Maintenance job " + row + " priority").c_str(), &job.priority);
-		char jobWasteBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(jobWasteBuffer, job.wasteStoreId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Maintenance job " + row + " waste store id").c_str(),
-			jobWasteBuffer, sizeof(jobWasteBuffer)))
-			job.wasteStoreId = jobWasteBuffer;
-		for (size_t requirementIndex = 0; requirementIndex < job.requirements.size(); )
-		{
-			auto& requirement = job.requirements[requirementIndex];
-			auto const requirementRow = row + "." + std::to_string(requirementIndex);
-			bool removeRequirement = false;
-			char requirementStoreBuffer[core::MaxStationStoreIdLength + 1]{};
-			std::strncpy(requirementStoreBuffer, requirement.storeId.c_str(),
-				core::MaxStationStoreIdLength);
-			if (ImGui::InputText(("Maintenance requirement " + requirementRow + " store id").c_str(),
-				requirementStoreBuffer, sizeof(requirementStoreBuffer)))
-				requirement.storeId = requirementStoreBuffer;
-			ImGui::InputDouble(("Maintenance requirement " + requirementRow + " quantity").c_str(),
-				&requirement.quantity, 0.0, 0.0, "%.3f");
-			ImGui::Checkbox(("Maintenance requirement " + requirementRow
-				+ " consumed (unchecked = reusable tool)").c_str(), &requirement.consumed);
-			if (ImGui::Button(("Remove requirement " + requirementRow).c_str()))
-				removeRequirement = true;
-			if (removeRequirement)
-				job.requirements.erase(
-					job.requirements.begin() + static_cast<std::ptrdiff_t>(requirementIndex));
-			else
-				++requirementIndex;
-		}
-		if (job.requirements.size() < core::MaxStationMaintenanceRequirements
-			&& ImGui::Button(("Add requirement to maintenance job " + row).c_str()))
-			job.requirements.push_back({});
-		ImGui::PopItemWidth();
-		if (ImGui::Button(("Remove maintenance job " + row).c_str()))
-			removeJob = true;
+		bool const removeJob = station_editor::renderMaintenanceEntry(mDraft, job,
+			"Maintenance job " + row, "Remove maintenance job " + row);
 		if (removeJob)
 			mDraft.maintenanceJobs.erase(
 				mDraft.maintenanceJobs.begin() + static_cast<std::ptrdiff_t>(index));

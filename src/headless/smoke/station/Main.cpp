@@ -1641,6 +1641,139 @@ namespace
 			("water recovery round trip: " + reason).c_str());
 	}
 
+
+	void schedulesSeam(smoke::Context const&)
+	{
+		core::StationSystemsSettings base;
+		base.enabled = true;
+		for (auto id : {"stock", "waste"})
+		{
+			core::ResourceStoreSettings store; store.id = id; store.unit = "kg";
+			store.capacity = 100; base.stores.push_back(store);
+		}
+		core::GeneratorSettings generator; generator.id = "gen";
+		base.generators.push_back(generator);
+		core::CoolantLoopSettings loop; loop.id = "loop"; base.coolantLoops.push_back(loop);
+		core::ChillerSettings chiller; chiller.id = "chiller"; base.chillers.push_back(chiller);
+		core::ResourceDeliverySettings delivery; delivery.id = "delivery"; delivery.unit = "kg"; delivery.quantity = 1;
+		base.deliveries.push_back(delivery);
+		core::WasteEjectionSettings ejection; ejection.id = "ejection"; ejection.unit = "kg"; ejection.quantity = 1;
+		base.wasteEjections.push_back(ejection);
+		core::InstallationOutageSettings outage; outage.id = "outage"; outage.durationSeconds = 10;
+		base.outages.push_back(outage);
+		core::MaintenanceJobSettings job; job.id = "job"; job.durationSeconds = 10;
+		job.requirements.push_back({"", 1.0, true}); base.maintenanceJobs.push_back(job);
+		auto nodeId = [](std::string_view type) -> std::string {
+			if (type == "Delivery") return "delivery";
+			if (type == "Waste ejection") return "ejection";
+			if (type == "Outage") return "outage";
+			if (type == "Maintenance") return "job";
+			if (type == "Generator") return "gen";
+			if (type == "Coolant loop") return "loop";
+			if (type == "Chiller") return "chiller";
+			return "stock";
+		};
+		std::string reason;
+		for (size_t i = 1; i < 8; ++i)
+			require(core::growStationPortSet(base, "Maintenance", "job", core::StationPortSet::MaintenanceRequirements, reason), reason.c_str());
+		auto full = base;
+		require(!core::growStationPortSet(base, "Maintenance", "job", core::StationPortSet::MaintenanceRequirements, reason)
+			&& base == full && !reason.empty(), "maintenance ceiling changed the draft");
+		// Cartesian matrix: each scheduled face against every descriptor, both
+		// drag orders. Expectations enumerate the legal families independently.
+		for (auto const& port : core::stationPortDescriptors())
+		{
+			bool const schedule = port.nodeType == "Delivery" || port.nodeType == "Waste ejection"
+				|| port.nodeType == "Outage" || port.nodeType == "Maintenance";
+			if (!schedule) continue;
+			for (auto const& other : core::stationPortDescriptors())
+			{
+				bool const target = port.name == "Target installation";
+				bool const input = port.nodeType == "Waste ejection" || port.name.starts_with("Requirement ");
+				bool const legal = target ? (other.name == "Supervision" && (other.nodeType == "Generator"
+					|| other.nodeType == "Coolant loop" || other.nodeType == "Chiller"))
+					: (other.nodeType == "Store" && other.name == (input ? "Inventory out" : "Inventory in"));
+				core::CandidateLink candidate{{std::string(port.nodeType), nodeId(port.nodeType), std::string(port.name)},
+					{std::string(other.nodeType), nodeId(other.nodeType), std::string(other.name)}};
+				for (bool reverse : {false, true})
+				{
+					auto link = candidate; if (reverse) std::swap(link.from, link.to);
+					auto draft = base;
+					auto verdict = core::evaluateStationLink(draft, link);
+					require(verdict.allowed == legal, ("schedule matrix " + link.from.nodeType + "/" + link.from.portName
+						+ " -> " + link.to.nodeType + "/" + link.to.portName + ": " + verdict.reason).c_str());
+					if (!legal) { require(!verdict.reason.empty(), "refusal lacked reason"); continue; }
+					require(core::applyStationLink(draft, link), "schedule write failed");
+					bool found = false;
+					for (auto const& authored : core::stationAuthoredLinks(draft))
+						if ((authored.from == link.from && authored.to == link.to) || (authored.from == link.to && authored.to == link.from))
+						{
+							found = true;
+							require(!core::evaluateStationLink(draft, link).allowed, "schedule cardinality ignored");
+							require(core::clearStationLink(draft, authored.identity) && draft == base, "schedule clear wrote wrong field");
+						}
+					require(found, "schedule enumeration lost link");
+					auto ghost = link;
+					if (ghost.from.nodeType == other.nodeType) ghost.from.nodeId = "ghost";
+					else ghost.to.nodeId = "ghost";
+					verdict = core::evaluateStationLink(base, ghost);
+					require(!verdict.allowed && verdict.reason.find("unknown") != std::string::npos,
+						("missing schedule peer accepted: " + verdict.reason).c_str());
+				}
+			}
+		}
+		for (size_t i = 8; i > 1; --i)
+			require(core::shrinkStationPortSet(base, "Maintenance", "job", core::StationPortSet::MaintenanceRequirements, reason), reason.c_str());
+		auto floor = base;
+		require(!core::shrinkStationPortSet(base, "Maintenance", "job", core::StationPortSet::MaintenanceRequirements, reason)
+			&& base == floor && !reason.empty(), "maintenance floor changed the draft");
+		// Unrelated half-built installations cannot hide reference diagnostics.
+		auto wire = [&](core::StationSystemsSettings& draft, core::CandidateLink const& link) {
+			auto verdict = core::evaluateStationLink(draft, link);
+			require(verdict.allowed, verdict.reason.c_str()); require(core::applyStationLink(draft, link), "schedule write failed");
+		};
+		wire(base, {{"Delivery", "delivery", "Destination"}, {"Store", "stock", "Inventory in"}});
+		wire(base, {{"Store", "waste", "Inventory out"}, {"Waste ejection", "ejection", "Source"}});
+		wire(base, {{"Outage", "outage", "Target installation"}, {"Generator", "gen", "Supervision"}});
+		wire(base, {{"Maintenance", "job", "Target installation"}, {"Generator", "gen", "Supervision"}});
+		wire(base, {{"Store", "stock", "Inventory out"}, {"Maintenance", "job", "Requirement 1"}});
+		wire(base, {{"Maintenance", "job", "Waste out"}, {"Store", "waste", "Inventory in"}});
+		// The validator's unit / hazard / compound and self-source rules remain
+		// authoritative even before the rest of the station is wired.
+		for (int defect = 0; defect < 4; ++defect)
+		{
+			auto draft = floor; draft.maintenanceJobs[0].wasteStoreId = "waste";
+			if (defect == 0) draft.stores[1].unit = "g";
+			if (defect == 1) draft.stores[1].hazardClass = "hazardous";
+			if (defect == 2) draft.stores[1].composition = core::ResourceCompositionSettings{};
+			if (defect == 3) draft.maintenanceJobs[0].wasteStoreId = "stock";
+			auto verdict = core::evaluateStationLink(draft, {{"Store", "stock", "Inventory out"}, {"Maintenance", "job", "Requirement 1"}});
+			require(!verdict.allowed && !verdict.reason.empty(), "maintenance material boundary accepted");
+		}
+		// Complete the supporting installation before saving the authored set.
+		base.coolantLoops.clear(); base.chillers.clear();
+		core::ResourceStoreSettings fuel; fuel.id = "fuel"; fuel.unit = "kJ"; fuel.capacity = 1000;
+		base.stores.push_back(fuel);
+		core::ThermalReservoirSettings sink; sink.id = "sink";
+		sink.thermalClass = "generation"; sink.heatCapacityKJPerK = 1000;
+		base.thermalReservoirs.push_back(sink);
+		base.generators[0].thermalClass = "generation";
+		base.generators[0].maxRampKWPerSecond = 1;
+		wire(base, {{"Store", "fuel", "Inventory out"}, {"Generator", "gen", "Fuel in"}});
+		wire(base, {{"Generator", "gen", "Heat out"}, {"Reservoir", "sink", "Heat in"}});
+		auto const valid = core::validateStationSystemsSettings(base, reason);
+		require(valid, reason.c_str());
+		core::StationConfigurationDocument document; document.settings = base;
+		document.positions = {{"Maintenance:job:0", {25, 50}}, {"Outage:outage:0", {100, 150}}};
+		auto path = std::filesystem::temp_directory_path() / "pf-schedules-651.station.yaml";
+		core::saveStationConfiguration(path, document);
+		core::StationConfigurationDocument loaded;
+		auto const loadedOk = core::loadStationConfiguration(path, loaded, &reason);
+		require(loadedOk, reason.c_str());
+		std::filesystem::remove(path);
+		require(loaded.settings == document.settings && loaded.positions == document.positions, "schedule document round trip changed data");
+	}
+
 	void thermalBufferSeam(smoke::Context const&)
 	{
 		auto reservoir = [](char const* id) { core::ThermalReservoirSettings r; r.id = id;
@@ -1842,6 +1975,7 @@ namespace
 		// a missing field mapping from making the matrix vacuously pass.
 		for (auto const& port : core::stationPortDescriptors())
 		{
+			if (port.name == "Supervision") continue; // #651 owns the control-face matrix.
 			std::string id;
 			std::string thermalClass = "low";
 			if (port.nodeType == "Equipment") { id = "load1"; thermalClass = "moderate"; }
@@ -26233,7 +26367,7 @@ void recovery(smoke::Context const& context)
 
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"completeThermalChain", completeThermalChain}, {"biologySeam", biologySeam}, {"waterGasSeam", waterGasSeam}, {"thermalBufferSeam", thermalBufferSeam}, {"powerChainSeam", powerChainSeam}, {"thermalReservoirSeam", thermalReservoirSeam}, {"radiatorSeam", radiatorSeam}, {"coolantLoopSeam", coolantLoopSeam}, {"chillerSeam", chillerSeam}, {"compounds", compounds}, {"power", power},
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"completeThermalChain", completeThermalChain}, {"biologySeam", biologySeam}, {"waterGasSeam", waterGasSeam}, {"schedulesSeam", schedulesSeam}, {"thermalBufferSeam", thermalBufferSeam}, {"powerChainSeam", powerChainSeam}, {"thermalReservoirSeam", thermalReservoirSeam}, {"radiatorSeam", radiatorSeam}, {"coolantLoopSeam", coolantLoopSeam}, {"chillerSeam", chillerSeam}, {"compounds", compounds}, {"power", power},
 		// Split out of the former `batteries` check: the hour-scale legs are
 		// independent worlds, so each is its own test and they run in parallel
 		// instead of as one ~182s serial chain.

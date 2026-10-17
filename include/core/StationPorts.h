@@ -189,8 +189,47 @@ namespace core
 			PortDescriptor{"Microbial processor", "Heat out", StationPortDirection::Output, "heat", "heat-sink", 1, {}, false},
 			PortDescriptor{"Atmosphere", "Biology out", StationPortDirection::Output, "biological-atmosphere", "biological-exchange", 0, {}},
 			PortDescriptor{"Atmosphere", "Biology in", StationPortDirection::Input, "biological-atmosphere", "biological-exchange", 0, {}},
+			PortDescriptor{"Delivery", "Destination", StationPortDirection::Output, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Waste ejection", "Source", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Outage", "Target installation", StationPortDirection::Output, "supervision", "installation", 1, {}, false},
+			PortDescriptor{"Maintenance", "Target installation", StationPortDirection::Output, "supervision", "installation", 1, {}, false},
+			PortDescriptor{"Maintenance", "Waste out", StationPortDirection::Output, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Maintenance", "Requirement 1", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Maintenance", "Requirement 2", StationPortDirection::Input, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Maintenance", "Requirement 3", StationPortDirection::Input, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Maintenance", "Requirement 4", StationPortDirection::Input, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Maintenance", "Requirement 5", StationPortDirection::Input, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Maintenance", "Requirement 6", StationPortDirection::Input, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Maintenance", "Requirement 7", StationPortDirection::Input, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Maintenance", "Requirement 8", StationPortDirection::Input, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Generator", "Supervision", StationPortDirection::Input, "installation", "supervision", 0, {}, false},
+			PortDescriptor{"Coolant loop", "Supervision", StationPortDirection::Input, "installation", "supervision", 0, {}, false},
+			PortDescriptor{"Chiller", "Supervision", StationPortDirection::Input, "installation", "supervision", 0, {}, false},
 			PortDescriptor{"Chiller", "Condenser heat", StationPortDirection::Output, "heat", "heat-sink", 1, {}}};
 		return descriptors;
+	}
+
+	// One reference mapping for scheduled operations, shared by link writes,
+	// enumeration and clearing. Installation peers use the availability identity.
+	template<class Settings, class F>
+	void visitStationScheduleReferences(Settings& settings, F fn)
+	{
+		for (auto& e : settings.deliveries)
+			fn("Delivery", e.id, "Destination", "storeId", e.storeId, false, "Store", "Inventory in");
+		for (auto& e : settings.wasteEjections)
+			fn("Waste ejection", e.id, "Source", "storeId", e.storeId, true, "Store", "Inventory out");
+		for (auto& e : settings.outages)
+			fn("Outage", e.id, "Target installation", "installationId", e.installationId, false, "Installation", "Supervision");
+		for (auto& e : settings.maintenanceJobs)
+		{
+			fn("Maintenance", e.id, "Target installation", "installationId", e.installationId, false, "Installation", "Supervision");
+			fn("Maintenance", e.id, "Waste out", "wasteStoreId", e.wasteStoreId, false, "Store", "Inventory in");
+			for (size_t i = 0; i < e.requirements.size(); ++i)
+			{
+				auto name = "Requirement " + std::to_string(i + 1);
+				fn("Maintenance", e.id, name, name, e.requirements[i].storeId, true, "Store", "Inventory out");
+			}
+		}
 	}
 
 	// One reference mapping shared by biology link writes, enumeration and clearing.
@@ -316,12 +355,13 @@ namespace core
 		ConversionInputs,
 		ConversionOutputs,
 		LoadExchangesIn,
-		LoadExchangesOut
+		LoadExchangesOut,
+		MaintenanceRequirements
 	};
 
 	inline bool stationPortSetIsInputSide(StationPortSet set)
 	{
-		return set == StationPortSet::ConversionInputs || set == StationPortSet::LoadExchangesIn;
+		return set == StationPortSet::MaintenanceRequirements || set == StationPortSet::ConversionInputs || set == StationPortSet::LoadExchangesIn;
 	}
 
 	struct StationPortSetDescriptor
@@ -333,6 +373,7 @@ namespace core
 	inline std::span<StationPortSetDescriptor const> stationPortSetDescriptors()
 	{
 		static constexpr std::array sets{
+			StationPortSetDescriptor{"Maintenance", StationPortSet::MaintenanceRequirements, "requirements"},
 			StationPortSetDescriptor{"Conversion", StationPortSet::ConversionInputs, "inputs"},
 			StationPortSetDescriptor{"Conversion", StationPortSet::ConversionOutputs, "outputs"},
 			StationPortSetDescriptor{"Equipment", StationPortSet::LoadExchangesIn, "material in"},
@@ -424,7 +465,11 @@ namespace core
 			StationPlaceableType{"Electrolyzer", "electrolyzer", "Gas"},
 			StationPlaceableType{"CO2 capture", "capture", "Gas"},
 			StationPlaceableType{"Atmosphere", "atmosphere", "Gas"},
-			StationPlaceableType{"Airlock cycle", "cycle", "Gas"}};
+			StationPlaceableType{"Airlock cycle", "cycle", "Gas"},
+			StationPlaceableType{"Delivery", "delivery", "Schedules"},
+			StationPlaceableType{"Waste ejection", "ejection", "Schedules"},
+			StationPlaceableType{"Outage", "outage", "Schedules"},
+			StationPlaceableType{"Maintenance", "maintenance", "Schedules"}};
 		return placeable;
 	}
 

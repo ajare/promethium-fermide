@@ -2208,6 +2208,147 @@ namespace core
 		return true;
 	}
 
+	bool validateStationScheduleWiring(StationSystemsSettings const& settings,
+		ResourceDeliverySettings const& delivery, std::string& diagnostic, bool allowIncomplete, std::vector<std::string>* brokenReferences)
+	{
+		diagnostic.clear();
+		auto refuse = [&](std::string reason) { diagnostic = std::move(reason); return false; };
+		auto missing = [&](std::string text) -> bool {
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			throw BrokenDraftEntry{};
+		};
+		auto const where = "Station resupply delivery '" + delivery.id + "'";
+		if (allowIncomplete && delivery.storeId.empty()) return true;
+		auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
+			[&](ResourceStoreSettings const& store) { return store.id == delivery.storeId; });
+		if (it == settings.stores.end())
+			return missing(where + " targets unknown Resource store '" + delivery.storeId + "'");
+		// A delivery brings a store's own material in; it never converts
+		// units on the way through the boundary.
+		if (delivery.unit != it->unit)
+			return refuse(where + " unit '" + delivery.unit
+				+ "' does not match destination store unit '" + it->unit + "'");
+		return true;
+	}
+	bool validateStationScheduleWiring(StationSystemsSettings const& settings,
+		WasteEjectionSettings const& ejection, std::string& diagnostic, bool allowIncomplete, std::vector<std::string>* brokenReferences)
+	{
+		diagnostic.clear();
+		auto refuse = [&](std::string reason) { diagnostic = std::move(reason); return false; };
+		auto missing = [&](std::string text) -> bool {
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			throw BrokenDraftEntry{};
+		};
+		auto const where = "Station waste ejection '" + ejection.id + "'";
+		if (allowIncomplete && ejection.storeId.empty()) return true;
+		auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
+			[&](ResourceStoreSettings const& store) { return store.id == ejection.storeId; });
+		if (it == settings.stores.end())
+			return missing(where + " targets unknown Resource store '" + ejection.storeId + "'");
+		// Ejection carries a store's own material out; it never
+		// converts units on the way through the boundary.
+		if (ejection.unit != it->unit)
+			return refuse(where + " unit '" + ejection.unit
+				+ "' does not match target store unit '" + it->unit + "'");
+		return true;
+	}
+	bool validateStationScheduleWiring(StationSystemsSettings const& settings,
+		InstallationOutageSettings const& outage, std::string& diagnostic, bool allowIncomplete, std::vector<std::string>* brokenReferences)
+	{
+		diagnostic.clear();
+		auto refuse = [&](std::string reason) { diagnostic = std::move(reason); return false; };
+		auto missing = [&](std::string text) -> bool {
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			throw BrokenDraftEntry{};
+		};
+		auto const where = "Station installation outage '" + outage.id + "'";
+		auto const registeredInstallations = stationInstallationIdentities(settings);
+		if (!(outage.installationId.empty() && allowIncomplete) && std::none_of(registeredInstallations.begin(), registeredInstallations.end(),
+			[&](StationInstallationIdentity const& installation) {
+				return installation.id == outage.installationId;
+			}))
+			return missing(where + " targets unknown installation '" + outage.installationId
+				+ "'; only installations registered with the availability contract can be outaged");
+
+		return true;
+	}
+	bool validateStationScheduleWiring(StationSystemsSettings const& settings,
+		MaintenanceJobSettings const& job, std::string& diagnostic, bool allowIncomplete, std::vector<std::string>* brokenReferences)
+	{
+		diagnostic.clear();
+		auto refuse = [&](std::string reason) { diagnostic = std::move(reason); return false; };
+		auto missing = [&](std::string text) -> bool {
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			throw BrokenDraftEntry{};
+		};
+		auto const where = "Station maintenance job '" + job.id + "'";
+		auto const registeredInstallations = stationInstallationIdentities(settings);
+		if (!(job.installationId.empty() && allowIncomplete) && std::none_of(registeredInstallations.begin(), registeredInstallations.end(),
+			[&](StationInstallationIdentity const& installation) {
+				return installation.id == job.installationId;
+			}))
+			return missing(where + " targets unknown installation '" + job.installationId
+				+ "'; only installations registered with the availability contract can be maintained");
+		auto const findStore = [&](std::string const& id) -> ResourceStoreSettings const*
+		{
+			auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
+					[&](ResourceStoreSettings const& store) { return store.id == id; });
+			return it == settings.stores.end() ? nullptr : &*it;
+		};
+		ResourceStoreSettings const* waste = nullptr;
+		if (!job.wasteStoreId.empty())
+		{
+			waste = findStore(job.wasteStoreId);
+			if (!waste)
+				return missing(where + " references unknown waste store '" + job.wasteStoreId + "'");
+		}
+		bool anyConsumed = false;
+		std::set<std::string> requirementStores;
+		for (auto const& requirement : job.requirements)
+		{
+			auto const item = where + " requirement '" + requirement.storeId + "'";
+			if (allowIncomplete && requirement.storeId.empty()) continue;
+			if (requirement.storeId.empty())
+				return refuse(where + " requirement store id must not be empty");
+			if (!requirementStores.insert(requirement.storeId).second)
+				return refuse(item + " is duplicated within the job");
+			auto const* source = findStore(requirement.storeId);
+			if (!source) return missing(item + " references unknown store");
+			if (!allowIncomplete && (!std::isfinite(requirement.quantity) || requirement.quantity <= 0.0))
+				return refuse(item + " quantity must be finite and positive");
+			if (!requirement.consumed) continue;
+			anyConsumed = true;
+			if (!waste && allowIncomplete) continue;
+			if (!waste)
+				return refuse(where + " consumes from " + item
+					+ " but declares no waste store; removed parts and used material must be booked into appropriate waste");
+			if (requirement.storeId == job.wasteStoreId)
+				return refuse(item + " is consumed into itself; the waste store may not also be its own source");
+			if (source->unit != waste->unit)
+				return refuse(item + " unit '" + source->unit
+					+ "' does not match the waste store unit '" + waste->unit + "'");
+			if (source->composition || waste->composition)
+			{
+				if (!source->composition || !waste->composition
+					|| !compositionsClose(*source->composition, *waste->composition))
+					return refuse(item
+						+ " crosses a compound-material boundary into the waste store; consumed material may only land in a store with the same declared composition");
+			}
+			if (source->hazardClass != waste->hazardClass)
+				return refuse(item + " crosses the hazard-class boundary ('"
+					+ source->hazardClass + "' -> '" + waste->hazardClass
+					+ "'); consumed material may not cross the containment boundary");
+		}
+		if (!allowIncomplete && !anyConsumed && !job.wasteStoreId.empty())
+			return refuse(where + " declares a waste store but consumes nothing; the waste store would never receive material");
+		return true;
+	}
+
+
 	bool validateStationSystemsSettings(StationSystemsSettings const& settings, std::string& diagnostic,
 		std::vector<std::string>* brokenReferences)
 	{
@@ -2843,15 +2984,9 @@ namespace core
 				return refuse("Station resupply delivery id exceeds "
 					+ std::to_string(MaxStationStoreIdLength) + " characters");
 			if (!deliveryIds.insert(delivery.id).second) return refuse(where + " id is duplicated");
-			auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
-				[&](ResourceStoreSettings const& store) { return store.id == delivery.storeId; });
-			if (it == settings.stores.end())
-				return missing(where + " targets unknown Resource store '" + delivery.storeId + "'");
-			// A delivery brings a store's own material in; it never converts
-			// units on the way through the boundary.
-			if (delivery.unit != it->unit)
-				return refuse(where + " unit '" + delivery.unit
-					+ "' does not match destination store unit '" + it->unit + "'");
+			std::string wiringReason;
+			if (!validateStationScheduleWiring(settings, delivery, wiringReason, false, brokenReferences))
+				return refuse(wiringReason);
 			// A delivery that brings nothing specifies nothing; refusing it
 			// keeps every fired occurrence a real inflow.
 			if (!std::isfinite(delivery.quantity) || delivery.quantity <= 0.0)
@@ -2889,15 +3024,9 @@ namespace core
 				return refuse("Station waste ejection id exceeds "
 					+ std::to_string(MaxStationStoreIdLength) + " characters");
 			if (!ejectionIds.insert(ejection.id).second) return refuse(where + " id is duplicated");
-			auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
-				[&](ResourceStoreSettings const& store) { return store.id == ejection.storeId; });
-			if (it == settings.stores.end())
-				return missing(where + " targets unknown Resource store '" + ejection.storeId + "'");
-			// Ejection carries a store's own material out; it never
-			// converts units on the way through the boundary.
-			if (ejection.unit != it->unit)
-				return refuse(where + " unit '" + ejection.unit
-					+ "' does not match target store unit '" + it->unit + "'");
+			std::string wiringReason;
+			if (!validateStationScheduleWiring(settings, ejection, wiringReason, false, brokenReferences))
+				return refuse(wiringReason);
 			// An ejection that removes nothing specifies nothing; refusing
 			// it keeps every fired occurrence a real outflow.
 			if (!std::isfinite(ejection.quantity) || ejection.quantity <= 0.0)
@@ -2963,12 +3092,9 @@ namespace core
 			if (outage.installationId.size() > MaxStationStoreIdLength)
 				return refuse(where + " installation id exceeds "
 					+ std::to_string(MaxStationStoreIdLength) + " characters");
-			if (std::none_of(registeredInstallations.begin(), registeredInstallations.end(),
-				[&](StationInstallationIdentity const& installation) {
-					return installation.id == outage.installationId;
-				}))
-				return missing(where + " targets unknown installation '" + outage.installationId
-					+ "'; only installations registered with the availability contract can be outaged");
+			std::string wiringReason;
+			if (!validateStationScheduleWiring(settings, outage, wiringReason, false, brokenReferences))
+				return refuse(wiringReason);
 			if (!std::isfinite(outage.capacityFraction) || outage.capacityFraction < 0.0
 				|| outage.capacityFraction >= 1.0)
 				return refuse(where + " capacity fraction must be finite and from 0 up to but not including 1"
@@ -3019,12 +3145,9 @@ namespace core
 			if (job.installationId.size() > MaxStationStoreIdLength)
 				return refuse(where + " installation id exceeds "
 					+ std::to_string(MaxStationStoreIdLength) + " characters");
-			if (std::none_of(registeredInstallations.begin(), registeredInstallations.end(),
-				[&](StationInstallationIdentity const& installation) {
-					return installation.id == job.installationId;
-				}))
-				return missing(where + " targets unknown installation '" + job.installationId
-					+ "'; only installations registered with the availability contract can be maintained");
+			std::string wiringReason;
+			if (!validateStationScheduleWiring(settings, job, wiringReason, false, brokenReferences))
+				return refuse(wiringReason);
 			if (!std::isfinite(job.firstOccurrenceSeconds)
 				|| job.firstOccurrenceSeconds < 0.0)
 				return refuse(where + " first occurrence must be finite and non-negative");
@@ -3045,56 +3168,7 @@ namespace core
 			if (job.requirements.size() > MaxStationMaintenanceRequirements)
 				return refuse(where + " requirements are limited to "
 					+ std::to_string(MaxStationMaintenanceRequirements) + " entries");
-			auto const findStore = [&](std::string const& id) -> ResourceStoreSettings const*
-			{
-				auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
-						[&](ResourceStoreSettings const& store) { return store.id == id; });
-				return it == settings.stores.end() ? nullptr : &*it;
-			};
-			ResourceStoreSettings const* waste = nullptr;
-			if (!job.wasteStoreId.empty())
-			{
-				waste = findStore(job.wasteStoreId);
-				if (!waste)
-					return missing(where + " references unknown waste store '" + job.wasteStoreId + "'");
-			}
-			bool anyConsumed = false;
-			std::set<std::string> requirementStores;
-			for (auto const& requirement : job.requirements)
-			{
-				auto const item = where + " requirement '" + requirement.storeId + "'";
-				if (requirement.storeId.empty())
-					return refuse(where + " requirement store id must not be empty");
-				if (!requirementStores.insert(requirement.storeId).second)
-					return refuse(item + " is duplicated within the job");
-				auto const* source = findStore(requirement.storeId);
-				if (!source) return missing(item + " references unknown store");
-				if (!std::isfinite(requirement.quantity) || requirement.quantity <= 0.0)
-					return refuse(item + " quantity must be finite and positive");
-				if (!requirement.consumed) continue;
-				anyConsumed = true;
-				if (!waste)
-					return refuse(where + " consumes from " + item
-						+ " but declares no waste store; removed parts and used material must be booked into appropriate waste");
-				if (requirement.storeId == job.wasteStoreId)
-					return refuse(item + " is consumed into itself; the waste store may not also be its own source");
-				if (source->unit != waste->unit)
-					return refuse(item + " unit '" + source->unit
-						+ "' does not match the waste store unit '" + waste->unit + "'");
-				if (source->composition || waste->composition)
-				{
-					if (!source->composition || !waste->composition
-						|| !compositionsClose(*source->composition, *waste->composition))
-						return refuse(item
-							+ " crosses a compound-material boundary into the waste store; consumed material may only land in a store with the same declared composition");
-				}
-				if (source->hazardClass != waste->hazardClass)
-					return refuse(item + " crosses the hazard-class boundary ('"
-						+ source->hazardClass + "' -> '" + waste->hazardClass
-						+ "'); consumed material may not cross the containment boundary");
-			}
-			if (!anyConsumed && !job.wasteStoreId.empty())
-				return refuse(where + " declares a waste store but consumes nothing; the waste store would never receive material");
+
 		} catch (BrokenDraftEntry const&) {}
 		// Compartment atmosphere contracts (#400): a fixed volume with a
 		// finite owned gas inventory, an authored effective thermal

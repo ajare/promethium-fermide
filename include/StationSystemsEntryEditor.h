@@ -117,6 +117,18 @@ namespace station_editor
 		core::ChillerSettings& chiller,
 		std::string const& label, std::string const& removeLabel);
 
+	bool renderDeliveryEntry(core::StationSystemsSettings&, core::ResourceDeliverySettings&,
+		std::string const& label, std::string const& removeLabel);
+
+	bool renderWasteEjectionEntry(core::StationSystemsSettings&, core::WasteEjectionSettings&,
+		std::string const& label, std::string const& removeLabel);
+
+	bool renderOutageEntry(core::StationSystemsSettings&, core::InstallationOutageSettings&,
+		std::string const& label, std::string const& removeLabel);
+
+	bool renderMaintenanceEntry(core::StationSystemsSettings&, core::MaintenanceJobSettings&,
+		std::string const& label, std::string const& removeLabel);
+
 	// Descriptor registry keyed by the Flow node type name. A type absent
 	// here has no extracted editor yet; the index addresses the entry in
 	// the draft vector the type owns. The registered renderer presents

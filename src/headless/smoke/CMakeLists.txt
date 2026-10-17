@@ -81,7 +81,7 @@ pf_add_smoke_module(pf-smoke-station
     TIMEOUT 600
     DEFAULT_CHECK lifecycle
 )
-foreach(check lifecycle batching eventBound persistence stores transfers linkSeam growablePorts completeThermalChain biologySeam waterGasSeam powerChainSeam thermalReservoirSeam radiatorSeam coolantLoopSeam chillerSeam compounds power
+foreach(check lifecycle batching eventBound persistence stores transfers linkSeam growablePorts completeThermalChain schedulesSeam biologySeam waterGasSeam powerChainSeam thermalReservoirSeam radiatorSeam coolantLoopSeam chillerSeam compounds power
         batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
@@ -867,3 +867,6 @@ set_tests_properties(transport-stop-names-editor PROPERTIES
 # #650: biology placement, shared inspectors, optional inputs and real drag/drop.
 add_test(NAME station-editor-flow-biology COMMAND pf-smoke-editor --check station/flowBiologyWorkflow)
 set_tests_properties(station-editor-flow-biology PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+
+add_test(NAME station-editor-flow-schedules COMMAND pf-smoke-editor --check station/flowSchedulesWorkflow)
+set_tests_properties(station-editor-flow-schedules PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)

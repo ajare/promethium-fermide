@@ -1743,6 +1743,18 @@ namespace core
 	// Shared biology rules: Flow tolerates empty, not dangling, references while wiring.
 	bool validateStationBiologyWiring(StationSystemsSettings const&, std::string& diagnostic,
 		bool allowUnwired = false, std::vector<std::string>* brokenReferences = nullptr);
+	// Shared reference rules for full configuration validation and Flow links.
+	// Incomplete authoring tolerates unwired endpoints, but never unknown peers
+	// or unit, composition, hazard and consumed-source boundary violations.
+	bool validateStationScheduleWiring(StationSystemsSettings const&, ResourceDeliverySettings const&,
+		std::string& diagnostic, bool allowIncomplete = false, std::vector<std::string>* brokenReferences = nullptr);
+	bool validateStationScheduleWiring(StationSystemsSettings const&, WasteEjectionSettings const&,
+		std::string& diagnostic, bool allowIncomplete = false, std::vector<std::string>* brokenReferences = nullptr);
+	bool validateStationScheduleWiring(StationSystemsSettings const&, InstallationOutageSettings const&,
+		std::string& diagnostic, bool allowIncomplete = false, std::vector<std::string>* brokenReferences = nullptr);
+	bool validateStationScheduleWiring(StationSystemsSettings const&, MaintenanceJobSettings const&,
+		std::string& diagnostic, bool allowIncomplete = false, std::vector<std::string>* brokenReferences = nullptr);
+
 	bool validateStationSystemsSettings(StationSystemsSettings const&, std::string& diagnostic,
 		std::vector<std::string>* brokenReferences = nullptr);
 	// The endpoint half of the transfer entry check (#640): the rules a link

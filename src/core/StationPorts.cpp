@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <utility>
+#include <cctype>
 
 namespace core
 {
@@ -65,6 +66,27 @@ namespace
 		StationPinRef peer;
 	};
 
+	bool isScheduleType(std::string_view type)
+	{
+		return type == "Delivery" || type == "Waste ejection" || type == "Outage" || type == "Maintenance";
+	}
+	bool isInstallationType(std::string_view type)
+	{
+		return type == "Generator" || type == "Coolant loop" || type == "Chiller";
+	}
+	std::string installationNodeType(StationSystemsSettings const& settings, std::string const& id)
+	{
+		std::string type = "Installation";
+		for (auto const& identity : stationInstallationIdentities(settings))
+			if (identity.id == id)
+			{
+				type = identity.kind;
+				type[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(type[0])));
+				break;
+			}
+		return type;
+	}
+
 	bool mapLink(CandidateLink const& link, LinkMapping& mapping)
 	{
 		auto const* from = findPort(link.from.nodeType, link.from.portName);
@@ -75,6 +97,21 @@ namespace
 			return mapLink({link.to, link.from}, mapping);
 		if (from->direction != StationPortDirection::Output
 			|| to->direction != StationPortDirection::Input) return false;
+		StationSystemsSettings schedules;
+		schedules.deliveries.emplace_back(); schedules.wasteEjections.emplace_back();
+		schedules.outages.emplace_back(); schedules.maintenanceJobs.emplace_back();
+		schedules.maintenanceJobs.back().requirements.resize(MaxStationMaintenanceRequirements);
+		bool scheduled = false;
+		visitStationScheduleReferences(schedules, [&](auto type, auto const&, auto port, auto field,
+			auto&, bool input, std::string_view peerType, auto peerPort) {
+			auto const& owner = input ? link.to : link.from;
+			auto const& peer = input ? link.from : link.to;
+			if (owner.nodeType == type && owner.portName == port
+				&& (peer.nodeType == peerType || (peerType == "Installation" && isInstallationType(peer.nodeType)))
+				&& peer.portName == peerPort)
+			{ mapping = {type, owner.nodeId, std::string(field), peer}; scheduled = true; }
+		});
+		if (scheduled) return true;
 		StationSystemsSettings probe;
 		probe.crews.emplace_back(); probe.cropPopulations.emplace_back();
 		probe.algaeCultures.emplace_back(); probe.microbialProcessors.emplace_back();
@@ -326,7 +363,7 @@ namespace
 		// The radiator (#657) is not a machine, but its host mount routes
 		// through the same field resolver for write and clear, so it shares
 		// the routing predicate.
-		return ownerType == "Crew" || ownerType == "Crops" || ownerType == "Algae" || ownerType == "Microbial processor"
+		return isScheduleType(ownerType) || ownerType == "Crew" || ownerType == "Crops" || ownerType == "Algae" || ownerType == "Microbial processor"
 			|| ownerType == "Water collector" || ownerType == "Water treatment" || ownerType == "Electrolyzer" || ownerType == "CO2 capture" || ownerType == "Atmosphere" || ownerType == "Airlock cycle"
 			|| ownerType == "Equipment" || ownerType == "Generator" || ownerType == "Fuel cell"
 			|| ownerType == "Sabatier" || ownerType == "Methane processor" || ownerType == "Radiator"
@@ -345,6 +382,12 @@ namespace
 		-> std::remove_reference_t<decltype((settings.equipmentLoads[0].heatSinkId))>*
 	{
 		using Pointer = std::remove_reference_t<decltype((settings.crews[0].atmosphereId))>*;
+		Pointer scheduled = nullptr;
+		visitStationScheduleReferences(settings, [&](auto type, auto const& id, auto, auto name,
+			auto& reference, bool, auto, auto) {
+			if (ownerType == type && ownerId == id && field == name) scheduled = &reference;
+		});
+		if (scheduled) return scheduled;
 		Pointer biological = nullptr;
 		visitStationBiologyReferences(settings, [&](auto type, auto const& id, auto, auto name,
 			auto& reference, bool, auto, auto) {
@@ -794,6 +837,19 @@ namespace
 		std::string& diagnostic)
 	{
 		diagnostic.clear();
+		if (isScheduleType(mapping.ownerType))
+		{
+			auto validate = [&](auto const& entries) {
+				for (auto const& entry : entries)
+					if (entry.id == mapping.ownerId)
+					{ validateStationScheduleWiring(settings, entry, diagnostic, true); return true; }
+				return false;
+			};
+			if (mapping.ownerType == "Delivery") return validate(settings.deliveries);
+			if (mapping.ownerType == "Waste ejection") return validate(settings.wasteEjections);
+			if (mapping.ownerType == "Outage") return validate(settings.outages);
+			return validate(settings.maintenanceJobs);
+		}
 		if (mapping.ownerType == "Crew" || mapping.ownerType == "Crops"
 			|| mapping.ownerType == "Algae" || mapping.ownerType == "Microbial processor")
 		{
@@ -1383,6 +1439,14 @@ std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& set
 				{"Chiller", chiller.id, "Condenser heat"},
 				{"Reservoir", chiller.condenserReservoirId, "Heat in"}});
 	}
+	visitStationScheduleReferences(settings, [&](auto type, auto const& id, auto port, auto field,
+		auto const& reference, bool input, std::string_view peerType, auto peerPort) {
+		if (reference.empty()) return;
+		StationPinRef owner{type, id, std::string(port)};
+		StationPinRef peer{peerType == "Installation" ? installationNodeType(settings, reference)
+			: std::string(peerType), reference, peerPort};
+		links.push_back({linkIdentity(type, id, std::string(field)), input ? peer : owner, input ? owner : peer});
+	});
 	return links;
 }
 
@@ -1636,6 +1700,7 @@ LinkVerdict evaluateStationLink(StationSystemsSettings const& settings, Candidat
 	{
 		scopedWiringRule(settings, mapping, beforeWiring);
 		if (!afterWiring.empty() && (afterWiring != beforeWiring
+			|| isScheduleType(mapping.ownerType)
 			|| mapping.ownerType == "Crew" || mapping.ownerType == "Crops"
 			|| mapping.ownerType == "Algae" || mapping.ownerType == "Microbial processor"
 			|| mapping.ownerType == "Chiller" || mapping.ownerType == "Coolant loop"
@@ -1666,6 +1731,21 @@ bool stationPortSetStatus(StationSystemsSettings const& settings,
 	std::string const& nodeType, std::string const& nodeId,
 	StationPortSet set, StationPortSetStatus& status)
 {
+	if (nodeType == "Maintenance")
+	{
+		if (set != StationPortSet::MaintenanceRequirements) return false;
+		auto const found = std::find_if(settings.maintenanceJobs.begin(), settings.maintenanceJobs.end(),
+			[&](auto const& entry) { return entry.id == nodeId; });
+		if (found == settings.maintenanceJobs.end()) return false;
+		status = {};
+		status.count = found->requirements.size();
+		status.maximum = MaxStationMaintenanceRequirements;
+		status.canGrow = status.count < status.maximum;
+		status.canShrink = status.count > status.minimum;
+		if (!status.canGrow) status.growReason = "A maintenance job takes at most eight requirements.";
+		if (!status.canShrink) status.shrinkReason = "A maintenance job needs at least one requirement.";
+		return true;
+	}
 	if (nodeType == "Equipment")
 	{
 		if (set != StationPortSet::LoadExchangesIn && set != StationPortSet::LoadExchangesOut)
@@ -1734,6 +1814,13 @@ bool growStationPortSet(StationSystemsSettings& settings,
 		reason = status.growReason;
 		return false;
 	}
+	if (nodeType == "Maintenance")
+	{
+		auto& job = *std::find_if(settings.maintenanceJobs.begin(), settings.maintenanceJobs.end(),
+			[&](auto const& entry) { return entry.id == nodeId; });
+		job.requirements.emplace_back();
+		return true;
+	}
 	if (nodeType == "Equipment")
 	{
 		auto& load = *std::find_if(settings.equipmentLoads.begin(),
@@ -1772,6 +1859,13 @@ bool shrinkStationPortSet(StationSystemsSettings& settings,
 	{
 		reason = status.shrinkReason;
 		return false;
+	}
+	if (nodeType == "Maintenance")
+	{
+		auto& job = *std::find_if(settings.maintenanceJobs.begin(), settings.maintenanceJobs.end(),
+			[&](auto const& entry) { return entry.id == nodeId; });
+		job.requirements.pop_back();
+		return true;
 	}
 	if (nodeType == "Equipment")
 	{

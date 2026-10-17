@@ -816,6 +816,131 @@ namespace
 		}
 	}
 
+	void flowSchedulesWorkflow(smoke::Context const&)
+	{
+		struct Probe { char const* type; char const* id; char const* label; char const* port; };
+		for (auto const& probe : {
+			Probe{"Delivery", "delivery1", "Delivery 0 id", "Destination"},
+			Probe{"Waste ejection", "ejection1", "Waste ejection 0 id", "Source"},
+			Probe{"Outage", "outage1", "Outage 0 id", "Target installation"},
+			Probe{"Maintenance", "maintenance1", "Maintenance job 0 id", "Requirement 1"}})
+		{
+			headless::ScopedImGuiContext context;
+			auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+			io.Fonts->AddFontDefault(); io.Fonts->Build();
+			StationSystemsWindow window;
+			auto world = std::make_shared<core::World>("Scheduled Flow", 2, 2);
+			world->pauseSimulation(); world->finishBuild();
+
+			headless::TestEngineDriver driver([&] {
+				ImGui::SetNextWindowPos({10,10}); ImGui::SetNextWindowSize({1100,980});
+				ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
+			});
+			driver.frame(); driver.frame();
+			#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+			driver.run("station", "flowSchedules", [&](ImGuiTestContext* ctx) {
+				ctx->SetRef("Configuration");
+				ctx->ComboClick((std::string("Place node/") + probe.type).c_str()); ctx->Yield(2);
+				auto* canvas = findFlowCanvas(ImGui::FindWindowByName("Configuration"));
+				ctx->MouseTeleportToPos({canvas->Pos.x + 300, canvas->Pos.y + 180});
+				ctx->MouseClick(); ctx->Yield(3);
+				REQ(window.draftHistory().undoCount() == 1, "scheduled placement did not commit once");
+				ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+				ImVec4 rect{}; ImVec2 pin{};
+				REQ(window.flowNodeRect(probe.type, probe.id, &rect), "placed scheduled node is missing");
+				REQ(window.flowPinPosition(probe.type, probe.id, probe.port, &pin), "scheduled connector is missing");
+				ctx->MouseTeleportToPos({(rect.x+rect.z)*.5f, (rect.y+rect.w)*.5f});
+				ctx->MouseClick(); ctx->Yield(3);
+				ctx->MouseTeleportToPos({40,40}); ctx->Yield(2);
+				REQ(driver.contains((std::string("Node: ") + probe.type + " '" + probe.id + "'").c_str()), "scheduled selection did not resolve");
+
+				driver.click(ctx, (std::string("**/") + probe.label).c_str()); ctx->Yield(2);
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A); ctx->KeyChars("renamed");
+				ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+				REQ(window.draftHistory().undoCount() == 2, "scheduled inspector edit did not commit once");
+				REQ(window.flowNodeRect(probe.type, "renamed", &rect), "inspector did not rename selected scheduled entry");
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+				REQ(window.flowNodeRect(probe.type, probe.id, &rect), "undo did not restore scheduled identity");
+				bool const outage = std::string(probe.type) == "Outage";
+				char const* peerType = outage ? "Generator" : "Store";
+				char const* peerId = outage ? "generator1" : "store1";
+				ctx->ComboClick((std::string("Place node/") + peerType).c_str()); ctx->Yield(2);
+				canvas = findFlowCanvas(ImGui::FindWindowByName("Configuration"));
+				ctx->MouseTeleportToPos({canvas->Pos.x + 150, canvas->Pos.y + 380});
+				ctx->MouseClick(); ctx->Yield(3);
+				ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+				REQ(window.draftHistory().undoCount() == 2, "peer placement did not commit once");
+				bool const output = outage || std::string(probe.type) == "Delivery";
+				ImVec2 a{}, b{};
+				REQ(window.flowPinPosition(probe.type, probe.id, probe.port, &a)
+					&& window.flowPinPosition(peerType, peerId, outage ? "Supervision" : output ? "Inventory in" : "Inventory out", &b),
+					"scheduled link endpoints missing");
+				ctx->MouseTeleportToPos(a); ctx->Yield(2); ctx->MouseDown(); ctx->Yield(2);
+				ctx->MouseTeleportToPos(b); ctx->Yield(2); ctx->MouseUp(); ctx->Yield(3);
+				REQ(window.draftHistory().undoCount() == 3 && window.flowLinkRejection().empty(),
+					("scheduled drag refused: " + window.flowLinkRejection()).c_str());
+				if (outage) REQ(window.draft().outages[0].installationId == peerId, "outage target not written");
+				else if (std::string(probe.type) == "Delivery") REQ(window.draft().deliveries[0].storeId == peerId, "delivery target not written");
+				else if (std::string(probe.type) == "Waste ejection") REQ(window.draft().wasteEjections[0].storeId == peerId, "ejection source not written");
+				else
+				{
+					REQ(window.draft().maintenanceJobs[0].requirements[0].storeId == peerId, "maintenance source not written");
+					auto clickPortButton = [&](bool grow) {
+						ImVec4 button{};
+						if (!window.flowPortButtonRect("Maintenance", "maintenance1", core::StationPortSet::MaintenanceRequirements, grow, &button)) return false;
+						ctx->MouseTeleportToPos({(button.x + button.z)*.5f, (button.y + button.w)*.5f});
+						ctx->MouseClick(); ctx->Yield(3); return true;
+					};
+					for (size_t count = 2; count <= 8; ++count)
+					{
+						REQ(clickPortButton(true), "maintenance grow button missing");
+						REQ(window.draft().maintenanceJobs[0].requirements.size() == count, "maintenance grow did not add a connector");
+						REQ(window.flowPinPosition("Maintenance", "maintenance1", "Requirement " + std::to_string(count), &a), "grown pin missing");
+					}
+					REQ(!clickPortButton(true) && window.draft().maintenanceJobs[0].requirements.size() == 8, "maintenance offered growth above eight");
+					for (size_t count = 8; count > 1; --count)
+						REQ(clickPortButton(false) && window.draft().maintenanceJobs[0].requirements.size() == count - 1, "maintenance shrink failed");
+					REQ(!clickPortButton(false) && window.draft().maintenanceJobs[0].requirements.size() == 1, "maintenance offered removal below one");
+					// Rewind the fourteen grow/shrink actions; refused bounds made no entries.
+					for (int i = 0; i < 14; ++i) { ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(2); }
+				}
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+				REQ(window.draftHistory().undoCount() == 2, "scheduled wire undo failed");
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+				REQ(window.draftHistory().undoCount() == 1, "peer undo failed");
+
+
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+				REQ(!window.flowNodeRect(probe.type, probe.id, &rect), "undo did not remove scheduled placement");
+			});
+			#undef REQ
+			smoke::require(driver.passed(), "scheduled Flow placement/inspector workflow failed");
+		}
+		core::StationSystemsSettings projection;
+		core::GeneratorSettings generator; generator.id = "gen"; projection.generators.push_back(generator);
+		core::CoolantLoopSettings loop; loop.id = "loop"; projection.coolantLoops.push_back(loop);
+		core::ChillerSettings chiller; chiller.id = "chiller"; projection.chillers.push_back(chiller);
+		for (auto id : {"gen", "loop", "chiller"})
+		{
+			core::InstallationOutageSettings outage; outage.id = std::string("outage-") + id;
+			outage.installationId = id; projection.outages.push_back(outage);
+			core::MaintenanceJobSettings job; job.id = std::string("job-") + id;
+			job.installationId = id; projection.maintenanceJobs.push_back(job);
+		}
+		auto graph = station_flow::build(projection);
+		for (auto const& link : core::stationAuthoredLinks(projection))
+		{
+			if (link.from.nodeType != "Outage" && link.from.nodeType != "Maintenance") continue;
+			bool found = false;
+			for (auto const& edge : graph.links)
+				if (graph.nodes[edge.from].type == link.from.nodeType && graph.nodes[edge.from].id == link.from.nodeId
+					&& graph.nodes[edge.to].type == link.to.nodeType && graph.nodes[edge.to].id == link.to.nodeId)
+					found = edge.kind == station_flow::LinkKind::Control && edge.medium == station_flow::Medium::Control;
+			smoke::require(found, "scheduled editable link disagrees with installation control projection");
+		}
+
+	}
+
 	// #653: shared entry editors occupy a reserved column; field commits
 	// and selection changes must not resize or move the canvas.
 	void flowInspectorWorkflow(smoke::Context const&)
@@ -6298,6 +6423,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/flowGrowablePortsWorkflow", flowGrowablePortsWorkflow});
 	checks.push_back({"station/flowWaterGasWorkflow", flowWaterGasWorkflow});
 	checks.push_back({"station/flowBiologyWorkflow", flowBiologyWorkflow});
+	checks.push_back({"station/flowSchedulesWorkflow", flowSchedulesWorkflow});
 	checks.push_back({"station/flowInspectorWorkflow", flowInspectorWorkflow});
 	checks.push_back({"station/flowPowerChainWorkflow", flowPowerChainWorkflow});
 	checks.push_back({"station/flowThermalReservoirWorkflow", flowThermalReservoirWorkflow});
