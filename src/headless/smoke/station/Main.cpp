@@ -878,6 +878,289 @@ namespace
 		}
 	}
 
+	// #645: growable port sets and the derived-node refusal rule at the
+	// pure seam. A conversion's input and output sets grow to four real
+	// connectors each and shrink to the floor of one; every grown connector
+	// writes its own flow through the same mapping the editor uses; a
+	// derived service node is refused by name, never as "unknown".
+	void growablePorts(smoke::Context const&)
+	{
+		auto store = [](std::string const& id, std::string const& unit,
+			std::string const& hazard = "normal", bool compound = false)
+		{
+			core::ResourceStoreSettings entry;
+			entry.id = id; entry.unit = unit; entry.capacity = 100.0;
+			entry.startingQualified = 50.0; entry.hazardClass = hazard;
+			if (compound)
+			{
+				entry.composition = core::ResourceCompositionSettings{};
+				entry.composition->moisture = 0.5;
+			}
+			return entry;
+		};
+		auto pin = [](char const* type, char const* id, char const* port)
+		{
+			return core::StationPinRef{type, id, port};
+		};
+		auto link = [](core::StationPinRef from, core::StationPinRef to)
+		{
+			return core::CandidateLink{std::move(from), std::move(to)};
+		};
+		auto base = [&]
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {store("silage", "kg", "normal", true),
+				store("grain", "kg", "normal", true),
+				store("meal", "kg", "normal", true),
+				store("brine", "kg", "hazardous", true),
+				store("plain", "kg")};
+			core::ResourceConversionSettings conversion;
+			conversion.id = "c1";
+			conversion.inputs.push_back(core::ResourceConversionInputSettings{});
+			conversion.outputs.push_back(core::ResourceConversionOutputSettings{});
+			settings.conversions = {conversion};
+			return settings;
+		};
+		auto requireAllowed = [](core::StationSystemsSettings const& settings,
+			core::CandidateLink const& candidate, char const* what)
+		{
+			auto const verdict = core::evaluateStationLink(settings, candidate);
+			require(verdict.allowed,
+				(std::string("expected this link to be allowed: ") + what + " | refused: " + verdict.reason).c_str());
+			require(verdict.reason.empty(),
+				(std::string("an allowed link carried a reason: ") + what).c_str());
+		};
+		auto requireRefused = [](core::StationSystemsSettings const& settings,
+			core::CandidateLink const& candidate, char const* needle, char const* what)
+		{
+			auto const verdict = core::evaluateStationLink(settings, candidate);
+			require(!verdict.allowed, (std::string("expected this link to be refused: ") + what).c_str());
+			require(verdict.reason.find(needle) != std::string::npos,
+				(std::string("refusal for ") + what + " did not carry '" + needle + "' but said: "
+					+ verdict.reason).c_str());
+		};
+		// The descriptor table carries the four growable slots per side,
+		// each a single-link connector; the grown slots are optional, the
+		// required floor slot is not.
+		for (size_t slot = 1; slot <= core::MaxStationConversionFlows; ++slot)
+		{
+			auto const inName = "Conversion input " + std::to_string(slot);
+			auto const outName = "Conversion output " + std::to_string(slot);
+			core::PortDescriptor const* input = nullptr;
+			core::PortDescriptor const* output = nullptr;
+			for (auto const& descriptor : core::stationPortDescriptors())
+			{
+				if (descriptor.nodeType != "Conversion") continue;
+				if (descriptor.name == inName) input = &descriptor;
+				if (descriptor.name == outName) output = &descriptor;
+			}
+			require(input && output,
+				("growable conversion slot " + std::to_string(slot) + " has no descriptor").c_str());
+			require(input->direction == core::StationPortDirection::Input
+				&& output->direction == core::StationPortDirection::Output
+				&& input->maximumLinks == 1 && output->maximumLinks == 1,
+				"conversion slot direction or cardinality is not the declared shape");
+			require(input->optional == (slot > 1) && output->optional == (slot > 1),
+				("grown-slot optionality is wrong at slot " + std::to_string(slot)).c_str());
+		}
+		// The combobox table offers the authored types and never a derived one.
+		{
+			auto offered = [](std::string const& type)
+			{
+				for (auto const& placeable : core::stationPlaceableTypes())
+					if (placeable.nodeType == type) return true;
+				return false;
+			};
+			require(offered("Store") && offered("Conversion") && offered("Solar"),
+				"the placeable table lost a tracer-bullet type");
+			require(!offered("Power") && !offered("Cooling service"),
+				"a derived service node is offered as placeable");
+			require(core::stationIsDerivedNodeType("Power")
+				&& core::stationIsDerivedNodeType("Cooling service"),
+				"derived service node types are not recognised");
+			require(!core::stationIsDerivedNodeType("Store")
+				&& !core::stationIsDerivedNodeType("Conversion")
+				&& !core::stationIsDerivedNodeType("Solar"),
+				"an authored type is treated as derived");
+		}
+		// A grown connector is a real connector: it joins a store through
+		// the same evaluation, in either drag order, while the sibling
+		// flows the user has not wired yet stay tolerated.
+		{
+			requireAllowed(base(), link(pin("Store", "silage", "Inventory out"),
+				pin("Conversion", "c1", "Conversion input 1")),
+				"a compound store into the conversion's first input");
+			requireAllowed(base(), link(pin("Conversion", "c1", "Conversion input 1"),
+				pin("Store", "silage", "Inventory out")),
+				"the same pair dragged the other way round");
+			requireAllowed(base(), link(pin("Conversion", "c1", "Conversion output 1"),
+				pin("Store", "grain", "Inventory in")),
+				"the conversion's first output into a store");
+			std::string reason;
+			auto grown = base();
+			for (size_t extra = 1; extra < core::MaxStationConversionFlows; ++extra)
+				require(core::growStationPortSet(grown, "Conversion", "c1",
+					core::StationPortSet::ConversionInputs, reason), reason.c_str());
+			require(grown.conversions.front().inputs.size() == core::MaxStationConversionFlows,
+				"growing did not add the declared connectors");
+			requireAllowed(grown, link(pin("Store", "grain", "Inventory out"),
+				pin("Conversion", "c1", "Conversion input 4")),
+				"a store into the fourth grown input");
+			// The ceiling: growth past four is refused with a reason.
+			require(!core::growStationPortSet(grown, "Conversion", "c1",
+					core::StationPortSet::ConversionInputs, reason)
+				&& reason.find("at most") != std::string::npos,
+				("growing past the ceiling was not refused with a reason: " + reason).c_str());
+			// The floor: shrinking below one is refused, so the user cannot
+			// strip the conversion into a shape the validator rejects.
+			auto floor = grown;
+			for (size_t shrink = 1; shrink < core::MaxStationConversionFlows; ++shrink)
+				require(core::shrinkStationPortSet(floor, "Conversion", "c1",
+					core::StationPortSet::ConversionInputs, reason), reason.c_str());
+			require(floor.conversions.front().inputs.size() == 1, "shrinking went past the floor");
+			require(!core::shrinkStationPortSet(floor, "Conversion", "c1",
+					core::StationPortSet::ConversionInputs, reason)
+				&& reason.find("at least") != std::string::npos,
+				("shrinking below the floor was not refused with a reason: " + reason).c_str());
+			// The output set grows the same way.
+			require(core::growStationPortSet(grown, "Conversion", "c1",
+					core::StationPortSet::ConversionOutputs, reason), reason.c_str());
+			require(grown.conversions.front().outputs.size() == 2, "output growth missed the flow");
+			// A set the node does not carry is refused outright.
+			auto const baseSnapshot = base();
+			auto unshrinkable = baseSnapshot;
+			require(!core::growStationPortSet(unshrinkable, "Store", "grain",
+					core::StationPortSet::ConversionInputs, reason)
+				&& unshrinkable == baseSnapshot,
+				"a store was grown a conversion port set");
+			require(!core::shrinkStationPortSet(unshrinkable, "Conversion", "ghost",
+					core::StationPortSet::ConversionInputs, reason)
+				&& unshrinkable == baseSnapshot,
+				"a conversion that does not exist was shrunk");
+		}
+		// Both sides enforce the same bounds, and failed mutations are
+		// atomic. Exercise every slot through evaluation and reversed writes.
+		for (auto const set : {core::StationPortSet::ConversionInputs,
+			core::StationPortSet::ConversionOutputs})
+		{
+			auto settings = base();
+			std::string reason;
+			bool const input = set == core::StationPortSet::ConversionInputs;
+			for (size_t count = 1; count <= core::MaxStationConversionFlows; ++count)
+			{
+				auto const name = std::string(input ? "Conversion input " : "Conversion output ")
+					+ std::to_string(count);
+				core::StationPinRef flow{"Conversion", "c1", name};
+				auto candidate = input ? link(pin("Store", "silage", "Inventory out"), flow)
+					: link(flow, pin("Store", "grain", "Inventory in"));
+				requireAllowed(settings, candidate, "every grown slot");
+				auto written = settings;
+				require(core::applyStationLink(written, {candidate.to, candidate.from}),
+					"reversed drag could be evaluated but not applied");
+				auto const& flows = core::stationAuthoredLinks(written);
+				require(flows.size() == 1 && flows[0].from == candidate.from && flows[0].to == candidate.to,
+					"reversed write did not round-trip the grown slot");
+				if (count < core::MaxStationConversionFlows)
+					require(core::growStationPortSet(settings, "Conversion", "c1", set, reason)
+						&& reason.empty(), "growth failed or retained a stale reason");
+			}
+			auto snapshot = settings;
+			require(!core::growStationPortSet(settings, "Conversion", "c1", set, reason)
+				&& settings == snapshot && !reason.empty(), "ceiling refusal mutated the draft");
+			for (size_t count = core::MaxStationConversionFlows; count > 1; --count)
+				require(core::shrinkStationPortSet(settings, "Conversion", "c1", set, reason)
+					&& reason.empty(), "shrink failed or retained a stale reason");
+			snapshot = settings;
+			require(!core::shrinkStationPortSet(settings, "Conversion", "c1", set, reason)
+				&& settings == snapshot && !reason.empty(), "floor refusal mutated the draft");
+		}
+		// The semantic rules a single conversion link can break, judged
+		// with the unwired siblings tolerated.
+		{
+			requireRefused(base(), link(pin("Store", "plain", "Inventory out"),
+				pin("Conversion", "c1", "Conversion input 1")), "no declared composition",
+				"a plain store into a conversion input");
+			auto wired = base();
+			wired.conversions.front().inputs[0].storeId = "silage";
+			requireRefused(wired, link(pin("Store", "silage", "Inventory in"),
+				pin("Conversion", "c1", "Conversion output 1")), "more than once",
+				"the same store on both ends of one conversion");
+			requireRefused(wired, link(pin("Store", "brine", "Inventory in"),
+				pin("Conversion", "c1", "Conversion output 1")), "hazard-class boundary",
+				"a hazardous output beside a normal input of the same conversion");
+			requireRefused(wired, link(pin("Store", "grain", "Inventory out"),
+				pin("Conversion", "c1", "Conversion input 1")), "already joins",
+				"a second store on an occupied input slot");
+			requireRefused(wired, link(pin("Store", "brine", "Inventory out"),
+				pin("Conversion", "c1", "Conversion input 2")), "names no entry",
+				"a link into a slot that was never grown");
+			auto mixed = base();
+			mixed.conversions[0].inputs = {{"silage", 1.0}, {"brine", 1.0}, {}};
+			requireRefused(mixed, link(pin("Store", "meal", "Inventory out"),
+				pin("Conversion", "c1", "Conversion input 3")), "hazard-class boundary",
+				"a new link must agree with every sibling, not just the first");
+			// Wiring the last open slot of a half-built conversion is still
+			// possible: the remaining open flows are the user's next action.
+			auto nearlyDone = base();
+			nearlyDone.conversions.front().inputs[0].storeId = "silage";
+			requireAllowed(nearlyDone, link(pin("Store", "grain", "Inventory in"),
+				pin("Conversion", "c1", "Conversion output 1")),
+				"the last open endpoint of a half-wired conversion");
+		}
+		// The derived-node refusal rule: naming the pool or a cooling
+		// service refuses as derived, in either drag order, before any
+		// unknown-connector wording.
+		{
+			requireRefused(base(), link(pin("Store", "silage", "Inventory out"),
+				pin("Power", "Shared electrical pool", "Supply")), "derived",
+				"a store output dropped on the shared electrical pool");
+			requireRefused(base(), link(pin("Power", "Shared electrical pool", "Supply"),
+				pin("Store", "silage", "Inventory in")), "derived",
+				"a drag started from the shared electrical pool");
+			requireRefused(base(), link(pin("Conversion", "c1", "Conversion output 1"),
+				pin("Cooling service", "primary", "Capacity")), "derived",
+				"a conversion output dropped on a cooling service");
+			requireRefused(base(), link(pin("Solar", "s1", "Output"),
+				pin("Power", "Shared electrical pool", "Supply")), "derived",
+				"a solar-shaped drag onto the derived pool");
+		}
+		// The write/clear round trip through the growable mapping.
+		{
+			std::string reason;
+			auto written = base();
+			require(core::growStationPortSet(written, "Conversion", "c1",
+				core::StationPortSet::ConversionInputs, reason), reason.c_str());
+			require(core::applyStationLink(written, link(pin("Store", "silage", "Inventory out"),
+					pin("Conversion", "c1", "Conversion input 2"))),
+				"applying a grown input link was refused");
+			require(written.conversions.front().inputs[1].storeId == "silage"
+				&& written.conversions.front().inputs[0].storeId.empty(),
+				"applying a grown input link wrote the wrong flow");
+			auto const authored = core::stationAuthoredLinks(written);
+			require(authored.size() == 1
+				&& authored[0].identity == "Conversion:c1:Input 2"
+				&& authored[0].from == pin("Store", "silage", "Inventory out")
+				&& authored[0].to == pin("Conversion", "c1", "Conversion input 2"),
+				"the grown input reference is not presented as its connector pair");
+			require(core::clearStationLink(written, "Conversion:c1:Input 2")
+				&& written.conversions.front().inputs[1].storeId.empty(),
+				"clearing the grown input link did not clear exactly it");
+			require(!core::clearStationLink(written, "Conversion:c1:Input 5")
+				&& !core::clearStationLink(written, "Conversion:ghost:Input 1"),
+				"clearing a reference that does not exist claimed success");
+			// Shrinking removes the newest connector and its reference with it.
+			require(core::applyStationLink(written, link(pin("Store", "grain", "Inventory out"),
+					pin("Conversion", "c1", "Conversion input 2"))),
+				"rewiring the grown input failed");
+			require(core::shrinkStationPortSet(written, "Conversion", "c1",
+				core::StationPortSet::ConversionInputs, reason), reason.c_str());
+			require(written.conversions.front().inputs.size() == 1
+				&& core::stationAuthoredLinks(written).empty(),
+				"shrinking left the removed connector's reference behind");
+		}
+	}
+
 	void compounds(smoke::Context const&)
 	{
 		// #391: compound Resource stores carry declared constituent
@@ -24175,7 +24458,7 @@ void recovery(smoke::Context const& context)
 
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"compounds", compounds}, {"power", power},
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"compounds", compounds}, {"power", power},
 		// Split out of the former `batteries` check: the hour-scale legs are
 		// independent worlds, so each is its own test and they run in parallel
 		// instead of as one ~182s serial chain.

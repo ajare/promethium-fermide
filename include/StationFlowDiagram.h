@@ -89,6 +89,14 @@ public:
 		std::string const& nodeId, std::string const& portName) const;
 	// Why the last link attempt was refused; empty when nothing is outstanding.
 	std::string const& linkRejection() const { return mLinkRejection; }
+	// Why the last grow/shrink affordance was refused; empty when nothing
+	// is outstanding. Shown on the same status line as a link refusal.
+	std::string const& notice() const { return mNotice; }
+	// Last rendered frame's screen rect of a grow/shrink affordance for a
+	// growable port set. False when the affordance is not offered (past the
+	// limit, the node is not visible, or placement is armed).
+	bool portButtonScreenRect(std::string const& nodeType, std::string const& nodeId,
+		core::StationPortSet set, bool grow, ImVec4* out) const;
 private:
 	std::optional<core::StationSystemsSettings> mCached;
 	station_flow::Graph mGraph;
@@ -103,7 +111,17 @@ private:
 	// positional slot that a rebuild could reshuffle.
 	std::string mSelectedType, mSelectedId;
 	float mTemperature{};
-	bool mPlaceStore{false};
+	// The type armed in the "Place node" combobox; empty when unarmed. The
+	// combobox is built from the core placeable table, so derived service
+	// nodes are never offered.
+	std::string mPlacingType;
+	// Grow/shrink affordances recorded by the last drawn frame, keyed by
+	// type\x1fid\x1fin|out\x1f+|-, and the press tracked between frames so
+	// a release only fires the affordance it started on.
+	std::map<std::string, ImVec4> mPortButtons;
+	std::string mPressedPortButton;
+	ImVec2 mPressedPortButtonPos{};
+	std::string mNotice;
 	ImNodesContext* mNodeContext{};
 	std::map<std::string, int> mNodeIds;
 	std::map<std::string, ImVec2> mLayout;

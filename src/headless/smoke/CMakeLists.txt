@@ -81,7 +81,7 @@ pf_add_smoke_module(pf-smoke-station
     TIMEOUT 600
     DEFAULT_CHECK lifecycle
 )
-foreach(check lifecycle batching eventBound persistence stores transfers linkSeam compounds power
+foreach(check lifecycle batching eventBound persistence stores transfers linkSeam growablePorts compounds power
         batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
@@ -728,6 +728,10 @@ add_test(NAME station-editor-flow-links COMMAND pf-smoke-editor --check station/
 set_tests_properties(station-editor-flow-links PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
 add_test(NAME station-editor-flow-cascade-delete COMMAND pf-smoke-editor --check station/flowCascadeDeleteWorkflow)
 set_tests_properties(station-editor-flow-cascade-delete PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
+# #645: growable conversion port sets, optional-port reading and the inert
+# derived electrical pool, driven through the real Flow canvas controls.
+add_test(NAME station-editor-flow-growable-ports COMMAND pf-smoke-editor --check station/flowGrowablePortsWorkflow)
+set_tests_properties(station-editor-flow-growable-ports PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
 add_test(NAME station-editor-flow-inspector COMMAND pf-smoke-editor --check station/flowInspectorWorkflow)
 set_tests_properties(station-editor-flow-inspector PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
 add_test(NAME station-editor-transfers COMMAND pf-smoke-editor --check station/transferWorkflow)

@@ -2,6 +2,7 @@
 
 #include "core/StationSystems.h"
 
+#include <algorithm>
 #include <array>
 #include <span>
 #include <string>
@@ -25,6 +26,10 @@ namespace core
 		// What the user has to insert when two ports of this family cannot
 		// join directly ("a Transfer or Conversion"). Empty: no hint given.
 		std::string_view intermediary{};
+		// An optional port is one the node may or may not wire: it is always
+		// drawn and reads as unused until connected, so an unwired optional
+		// port reads as a choice rather than an omission.
+		bool optional{false};
 	};
 	inline std::span<PortDescriptor const> stationPortDescriptors()
 	{
@@ -37,8 +42,98 @@ namespace core
 			PortDescriptor{"Store", "Inventory out", StationPortDirection::Output, "inventory", "material", 0,
 				"a Transfer or Conversion"},
 			PortDescriptor{"Transfer", "Source", StationPortDirection::Input, "material", "inventory", 1, {}},
-			PortDescriptor{"Transfer", "Destination", StationPortDirection::Output, "material", "inventory", 1, {}}};
+			PortDescriptor{"Transfer", "Destination", StationPortDirection::Output, "material", "inventory", 1, {}},
+			// A Conversion's growable port sets: up to MaxStationConversionFlows
+			// connectors per side, each one a real connector writing one flow
+			// of the authored entry. The first slot on each side is required
+			// (the validator refuses a conversion without one); the slots the
+			// user grows in are optional until wired, so an unwired grown slot
+			// reads as a choice rather than an omission. Names carry the 1-based
+			// flow position, so a pin never depends on container order of the
+			// draft's other entries.
+			PortDescriptor{"Conversion", "Conversion input 1", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Conversion", "Conversion input 2", StationPortDirection::Input, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Conversion", "Conversion input 3", StationPortDirection::Input, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Conversion", "Conversion input 4", StationPortDirection::Input, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Conversion", "Conversion output 1", StationPortDirection::Output, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Conversion", "Conversion output 2", StationPortDirection::Output, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Conversion", "Conversion output 3", StationPortDirection::Output, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Conversion", "Conversion output 4", StationPortDirection::Output, "material", "inventory", 1, {}, true}};
 		return descriptors;
+	}
+
+	// Growable port sets: a Conversion's input and output flow sets, one to
+	// MaxStationConversionFlows connectors each. The floor of one is the
+	// configuration validator's own rule, so the set can never be shrunk
+	// into a shape the validator would reject.
+	enum class StationPortSet { ConversionInputs, ConversionOutputs };
+
+	struct StationPortSetDescriptor
+	{
+		std::string_view nodeType;
+		StationPortSet set;
+		std::string_view label; // "inputs" / "outputs", for affordance wording
+	};
+	inline std::span<StationPortSetDescriptor const> stationPortSetDescriptors()
+	{
+		static constexpr std::array sets{
+			StationPortSetDescriptor{"Conversion", StationPortSet::ConversionInputs, "inputs"},
+			StationPortSetDescriptor{"Conversion", StationPortSet::ConversionOutputs, "outputs"}};
+		return sets;
+	}
+
+	struct StationPortSetStatus
+	{
+		size_t count{0};
+		size_t minimum{1};
+		size_t maximum{MaxStationConversionFlows};
+		bool canGrow{false};
+		bool canShrink{false};
+		std::string growReason;   // why growing is refused; empty when allowed
+		std::string shrinkReason; // why shrinking is refused; empty when allowed
+	};
+
+	// False when the node type carries no such set or names no entry.
+	bool stationPortSetStatus(StationSystemsSettings const& settings,
+		std::string const& nodeType, std::string const& nodeId,
+		StationPortSet set, StationPortSetStatus& status);
+	// Add one real connector to the set: an empty flow the user then wires.
+	// Refused, with a reason, at the ceiling or for an unknown node.
+	bool growStationPortSet(StationSystemsSettings& settings,
+		std::string const& nodeType, std::string const& nodeId,
+		StationPortSet set, std::string& reason);
+	// Remove the newest connector from the set, wired or not. Refused at the
+	// floor of one, so a conversion cannot be stripped below what the
+	// validator accepts.
+	bool shrinkStationPortSet(StationSystemsSettings& settings,
+		std::string const& nodeType, std::string const& nodeId,
+		StationPortSet set, std::string& reason);
+
+	// Node types the Flow combobox offers, with the prefix their generated
+	// ids start from. Derived service nodes are absent: they are never
+	// authored, so they never appear as a placement choice.
+	struct StationPlaceableType
+	{
+		std::string_view nodeType;
+		std::string_view idPrefix;
+	};
+	inline std::span<StationPlaceableType const> stationPlaceableTypes()
+	{
+		static constexpr std::array placeable{
+			StationPlaceableType{"Store", "store"},
+			StationPlaceableType{"Conversion", "conversion"},
+			StationPlaceableType{"Solar", "solar"}};
+		return placeable;
+	}
+
+	// Derived service nodes: aggregate services with no configuration entry
+	// of their own - the shared electrical pool and the per-class cooling
+	// services. They draw inert, own no authored connector, and a link
+	// naming one is refused as derived rather than as unknown.
+	inline bool stationIsDerivedNodeType(std::string_view nodeType)
+	{
+		static constexpr std::array<std::string_view, 2> derived{"Power", "Cooling service"};
+		return std::find(derived.begin(), derived.end(), nodeType) != derived.end();
 	}
 
 	// One connector of one authored node, named by configuration identity

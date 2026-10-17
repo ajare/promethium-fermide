@@ -176,8 +176,12 @@ Graph build(core::StationSystemsSettings const& s)
 	b.connect(s.transfers, "Transfer", [&](size_t n, auto const& p) {
 		b.input(n, p.sourceId, "Source"); b.output(n, p.destinationId, "Destination"); });
 	b.connect(s.conversions, "Conversion", [&](size_t n, auto const& p) {
-		for (auto const& input : p.inputs) b.input(n, input.storeId, "Conversion input");
-		for (auto const& output : p.outputs) b.output(n, output.storeId, "Conversion output"); });
+		// A grown-but-unwired flow names no store yet: it is an unused
+		// connector, not a broken reference, so it draws no edge.
+		for (auto const& input : p.inputs)
+			b.input(n, input.storeId, "Conversion input", "Store", LinkKind::Material, true);
+		for (auto const& output : p.outputs)
+			b.output(n, output.storeId, "Conversion output", "Store", LinkKind::Material, true); });
 	b.connect(s.deliveries, "Delivery", [&](size_t n, auto const& p) {
 		b.output(n, p.storeId, "Scheduled delivery"); });
 	b.connect(s.wasteEjections, "Waste ejection", [&](size_t n, auto const& p) {
@@ -504,23 +508,42 @@ namespace
 
 	// One connector of a node type, placed in graph space relative to the
 	// node's top-left: inputs on the left face, outputs on the right, spread
-	// evenly so a node shows every port it declares.
+	// evenly so a node shows every port it declares. A growable port set
+	// shows only the connectors its draft entry actually carries: a
+	// conversion with two inputs draws input 1 and 2, never 3 or 4, so the
+	// `+` affordance and the connector count can never disagree.
 	struct FlowPort
 	{
 		core::PortDescriptor const* descriptor;
 		ImVec2 offset{};
 	};
 
-	std::vector<FlowPort> nodePorts(std::string const& nodeType)
+	std::vector<FlowPort> nodePorts(std::string const& nodeType, std::string const& nodeId,
+		core::StationSystemsSettings const& draft)
 	{
+		size_t inputLimit = SIZE_MAX, outputLimit = SIZE_MAX;
+		if (nodeType == "Conversion")
+		{
+			inputLimit = 0;
+			outputLimit = 0;
+			auto const found = std::find_if(draft.conversions.begin(), draft.conversions.end(),
+				[&](core::ResourceConversionSettings const& conversion) { return conversion.id == nodeId; });
+			if (found != draft.conversions.end())
+			{
+				inputLimit = found->inputs.size();
+				outputLimit = found->outputs.size();
+			}
+		}
 		std::vector<FlowPort> inputs, outputs;
+		size_t seenInputs = 0, seenOutputs = 0;
 		for (auto const& descriptor : core::stationPortDescriptors())
 		{
 			if (descriptor.nodeType != nodeType) continue;
 			if (descriptor.direction == core::StationPortDirection::Input)
-				inputs.push_back({&descriptor, {}});
-			else
-				outputs.push_back({&descriptor, {}});
+			{
+				if (seenInputs++ < inputLimit) inputs.push_back({&descriptor, {}});
+			}
+			else if (seenOutputs++ < outputLimit) outputs.push_back({&descriptor, {}});
 		}
 		auto spread = [](std::vector<FlowPort>& ports, float x)
 		{
@@ -595,6 +618,29 @@ namespace
 			{curve.d.x - tangent.x * 8 - tangent.y * 4, curve.d.y - tangent.y * 8 + tangent.x * 4},
 			{curve.d.x - tangent.x * 8 + tangent.y * 4, curve.d.y - tangent.y * 8 - tangent.x * 4}, colour);
 	}
+
+	// A dashed rectangle: the inert treatment of a derived service node,
+	// visibly not-authored rather than merely differently coloured.
+	void drawDashedRect(ImDrawList* draw, ImVec2 const& a, ImVec2 const& b, ImU32 colour,
+		float thickness)
+	{
+		auto edge = [&](ImVec2 const& p, ImVec2 const& q)
+		{
+			float const length = std::hypot(q.x - p.x, q.y - p.y);
+			if (length <= 0.01f) return;
+			float const dash = 7.0f;
+			for (float d = 0.0f; d < length; d += dash * 2.0f)
+			{
+				float const end = std::min(d + dash, length);
+				draw->AddLine({p.x + (q.x - p.x) * d / length, p.y + (q.y - p.y) * d / length},
+					{p.x + (q.x - p.x) * end / length, p.y + (q.y - p.y) * end / length}, colour, thickness);
+			}
+		};
+		edge(a, {b.x, a.y});
+		edge({b.x, a.y}, b);
+		edge(b, {a.x, b.y});
+		edge({a.x, b.y}, a);
+	}
 }
 
 StationFlowDiagram::~StationFlowDiagram()
@@ -604,7 +650,7 @@ StationFlowDiagram::~StationFlowDiagram()
 
 void StationFlowDiagram::reset()
 {
-	mPlaceStore = false; mLayout.clear(); mNodeIds.clear(); mNextNodeId = 1;
+	mPlacingType.clear(); mLayout.clear(); mNodeIds.clear(); mNextNodeId = 1;
 	if (mNodeContext) { ImNodes::DestroyContext(mNodeContext); mNodeContext = nullptr; }
 	mCached.reset(); mGraph = {}; mPositions.clear(); mPan = {24, 24};
 	mZoom = 0.8f; mFitRequested = true; mSelected = -1; mConnectedOnly = false; mSearch[0] = 0;
@@ -613,6 +659,17 @@ void StationFlowDiagram::reset()
 	mLinks.clear(); mPinIds.clear(); mPinRefs.clear(); mPinScreen.clear(); mNodeScreen.clear();
 	mActiveLinkPin.reset(); mPinEligibility.clear();
 	mLinkRejection.clear(); mPendingRemoval.reset();
+	mPortButtons.clear(); mPressedPortButton.clear(); mNotice.clear();
+}
+
+bool StationFlowDiagram::portButtonScreenRect(std::string const& nodeType, std::string const& nodeId,
+	core::StationPortSet set, bool grow, ImVec4* out) const
+{
+	auto const found = mPortButtons.find(nodeType + keySeparator + nodeId + keySeparator
+		+ (set == core::StationPortSet::ConversionInputs ? "in" : "out") + keySeparator + (grow ? "+" : "-"));
+	if (found == mPortButtons.end()) return false;
+	if (out) *out = found->second;
+	return true;
 }
 
 void StationFlowDiagram::exportLayout(core::StationConfigurationDocument& document) const
@@ -694,7 +751,8 @@ std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode
 	// The builder emits each type in declaration order, but graph indices
 	// include nodes of other types. Count preceding nodes of this type to
 	// address its own draft vector (not the entire graph).
-	if (view.type == "Store" || view.type == "Transfer")
+	if (view.type == "Store" || view.type == "Transfer" || view.type == "Conversion"
+		|| view.type == "Solar")
 	{
 		view.index = 0;
 		for (int i = 0; i < mSelected; ++i)
@@ -758,25 +816,30 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	ImGui::TextUnformatted("Draft configuration flow (not live rates)");
 	ImGui::TextDisabled("Left-drag nodes; right/middle-drag to pan; wheel to zoom. Placement edits only the draft.");
 	ImGui::SetNextItemWidth(160);
-	if (ImGui::BeginCombo("Place node", mPlaceStore ? "Store" : "Choose type..."))
+	if (ImGui::BeginCombo("Place node", mPlacingType.empty() ? "Choose type..." : mPlacingType.c_str()))
 	{
-		std::set<std::string_view> types;
-		for (auto const& port : core::stationPortDescriptors())
-			if (types.insert(port.nodeType).second && ImGui::Selectable(port.nodeType.data(), mPlaceStore))
-				mPlaceStore = port.nodeType == "Store";
+		// The combobox lists the authored types from the core placeable
+		// table; derived service nodes are absent because they are never
+		// authored.
+		for (auto const& placeable : core::stationPlaceableTypes())
+			if (ImGui::Selectable(placeable.nodeType.data(), mPlacingType == placeable.nodeType))
+				mPlacingType = placeable.nodeType;
 		ImGui::EndCombo();
 	}
-	if (mPlaceStore) ImGui::TextDisabled("Store placement armed - Esc or right-click to cancel.");
+	if (!mPlacingType.empty())
+		ImGui::TextDisabled("%s placement armed - Esc or right-click to cancel.", mPlacingType.c_str());
 	// The status line keeps its height whether or not a refusal is showing:
 	// a message appearing must not shove the canvas out from under the
 	// pointer in the middle of a drag.
 	ImGui::BeginChild("Link status", {0, ImGui::GetTextLineHeightWithSpacing() * 2.0f}, false);
 	if (!mLinkRejection.empty())
 		ImGui::TextColored({1.0f, 0.55f, 0.45f, 1.0f}, "Link refused: %s", mLinkRejection.c_str());
+	else if (!mNotice.empty())
+		ImGui::TextDisabled("%s", mNotice.c_str());
 	ImGui::EndChild();
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
 		&& (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsMouseClicked(ImGuiMouseButton_Right)))
-		mPlaceStore = false;
+		mPlacingType.clear();
 	ImGui::SameLine();
 	if (ImGui::Button("Auto-arrange"))
 	{
@@ -868,7 +931,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		auto local = ImVec2(io.MousePos.x - origin.x, io.MousePos.y - origin.y);
 		mPan = {local.x - (local.x - mPan.x) * mZoom / old, local.y - (local.y - mPan.y) * mZoom / old};
 	}
-	if (hovered && !mPlaceStore && (ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0)
+	if (hovered && mPlacingType.empty() && (ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0)
 		|| ImGui::IsMouseDragging(ImGuiMouseButton_Right, 0)))
 	{ mPan.x += io.MouseDelta.x; mPan.y += io.MouseDelta.y; }
 	auto point = [&](ImVec2 p) { return ImVec2(origin.x + mPan.x + p.x * mZoom, origin.y + mPan.y + p.y * mZoom); };
@@ -925,7 +988,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		// link on. They sit inside the node body so the node's own rect, which
 		// the library derives from this group, stays the size we draw.
 		auto const nodeScreen = point(mPositions[i]);
-		for (auto const& port : nodePorts(n.type))
+		for (auto const& port : nodePorts(n.type, n.id, draft))
 		{
 			auto const centre = point({mPositions[i].x + port.offset.x,
 				mPositions[i].y + port.offset.y});
@@ -950,7 +1013,8 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			mPinScreen[key] = placed;
 		}
 		ImNodes::EndNode();
-		ImNodes::SetNodeDraggable(ids[i], !mPlaceStore && n.type != "Power" && n.type != "Cooling service");
+		ImNodes::SetNodeDraggable(ids[i], mPlacingType.empty()
+			&& !core::stationIsDerivedNodeType(n.type));
 	}
 	ImNodes::EndNodeEditor();
 	int hoveredPin = -1;
@@ -987,8 +1051,15 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	}
 	// End feedback on the release frame, whether the link was accepted,
 	// refused, or dropped in empty space. No stale glow survives a drag.
+	// The pin the drag started from is kept for one more step: a drop that
+	// lands on a derived service node's body must be refused as derived even
+	// though the library never saw a pin there.
+	std::optional<core::StationPinRef> endedLinkPin;
 	if (linkCreated || ImNodes::IsLinkDropped() || !io.MouseDown[ImGuiMouseButton_Left])
+	{
+		if (mActiveLinkPin) endedLinkPin = mActiveLinkPin;
 		mActiveLinkPin.reset();
+	}
 	if (mActiveLinkPin)
 		for (auto const& [key, position] : framePins)
 		{
@@ -1014,34 +1085,95 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		}
 		mLayout[keys[i]] = mPositions[i];
 	}
-	if (!mPlaceStore && canvasHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hoveredPin < 0)
+	// A press that lands on a grow/shrink affordance belongs to the
+	// affordance, not to selection; the release handler acts on it and the
+	// selection stays exactly as it was. The rects are the previous frame's,
+	// which is where they were drawn under the pointer.
+	auto const overPortButton = [this](ImVec2 const& pos)
 	{
-		if (hoveredNode != mSelected && beforeSelectionChange) beforeSelectionChange();
-		mSelected = hoveredNode;
-		// Record the identity the inspector follows across rebuilds (#653).
-		mSelectedType = hoveredNode >= 0 ? mGraph.nodes[size_t(hoveredNode)].type : "";
-		mSelectedId = hoveredNode >= 0 ? mGraph.nodes[size_t(hoveredNode)].id : "";
+		for (auto const& [key, rect] : mPortButtons)
+			if (pos.x >= rect.x && pos.x <= rect.z && pos.y >= rect.y && pos.y <= rect.w) return true;
+		return false;
+	};
+	if (mPlacingType.empty() && canvasHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hoveredPin < 0
+		&& !overPortButton(io.MousePos))
+	{
+		// A derived service node is never selected: touching it says why,
+		// through the same core rule a dropped link is refused by.
+		if (hoveredNode >= 0 && core::stationIsDerivedNodeType(mGraph.nodes[size_t(hoveredNode)].type))
+		{
+			auto const& touched = mGraph.nodes[size_t(hoveredNode)];
+			core::CandidateLink probe{{"Store", "?", "Inventory out"}, {touched.type, touched.id, "Service"}};
+			auto const verdict = core::evaluateStationLink(draft, probe);
+			mLinkRejection = verdict.allowed
+				? touched.id + " is a derived service node and cannot be wired." : verdict.reason;
+		}
+		else
+		{
+			if (hoveredNode != mSelected && beforeSelectionChange) beforeSelectionChange();
+			mSelected = hoveredNode;
+			// Record the identity the inspector follows across rebuilds (#653).
+			mSelectedType = hoveredNode >= 0 ? mGraph.nodes[size_t(hoveredNode)].type : "";
+			mSelectedId = hoveredNode >= 0 ? mGraph.nodes[size_t(hoveredNode)].id : "";
+		}
 	}
-	if (mPlaceStore && canvasHovered && hoveredPin < 0
-		&& draft.stores.size() < core::MaxStationResourceStores
+	if (!mPlacingType.empty() && canvasHovered && hoveredPin < 0
 		&& ImGui::IsMouseClicked(ImGuiMouseButton_Left))
 	{
-		core::ResourceStoreSettings store;
-		store.unit = "kg"; store.capacity = 100;
-		for (size_t candidate = 1;; ++candidate)
-		{
-			store.id = "store" + std::to_string(candidate);
-			if (std::none_of(draft.stores.begin(), draft.stores.end(), [&](auto const& s) { return s.id == store.id; })) break;
-		}
-		mLayout["Store:" + store.id + ":0"] = {(io.MousePos.x - origin.x - mPan.x) / mZoom,
+		auto const placeAt = ImVec2{(io.MousePos.x - origin.x - mPan.x) / mZoom,
 			(io.MousePos.y - origin.y - mPan.y) / mZoom};
-		draft.stores.push_back(std::move(store));
-		mFitRequested = false;
+		if (mPlacingType == "Store" && draft.stores.size() < core::MaxStationResourceStores)
+		{
+			core::ResourceStoreSettings store;
+			store.unit = "kg"; store.capacity = 100;
+			for (size_t candidate = 1;; ++candidate)
+			{
+				store.id = "store" + std::to_string(candidate);
+				if (std::none_of(draft.stores.begin(), draft.stores.end(), [&](auto const& s) { return s.id == store.id; })) break;
+			}
+			mLayout["Store:" + store.id + ":0"] = placeAt;
+			draft.stores.push_back(std::move(store));
+			mFitRequested = false;
+		}
+		else if (mPlacingType == "Conversion" && draft.conversions.size() < core::MaxStationResourceConversions)
+		{
+			// A placed conversion arrives at the floor of its growable sets:
+			// one input and one output, empty until the user wires them.
+			core::ResourceConversionSettings conversion;
+			conversion.inputs.push_back(core::ResourceConversionInputSettings{});
+			conversion.outputs.push_back(core::ResourceConversionOutputSettings{});
+			for (size_t candidate = 1;; ++candidate)
+			{
+				conversion.id = "conversion" + std::to_string(candidate);
+				if (std::none_of(draft.conversions.begin(), draft.conversions.end(),
+					[&](auto const& entry) { return entry.id == conversion.id; })) break;
+			}
+			mLayout["Conversion:" + conversion.id + ":0"] = placeAt;
+			draft.conversions.push_back(std::move(conversion));
+			mFitRequested = false;
+		}
+		else if (mPlacingType == "Solar" && draft.solarArrays.size() < core::MaxStationSolarArrays)
+		{
+			core::SolarArraySettings array;
+			array.capacityKW = 1.0;
+			for (size_t candidate = 1;; ++candidate)
+			{
+				array.id = "solar" + std::to_string(candidate);
+				if (std::none_of(draft.solarArrays.begin(), draft.solarArrays.end(),
+					[&](auto const& entry) { return entry.id == array.id; })) break;
+			}
+			mLayout["Solar:" + array.id + ":0"] = placeAt;
+			draft.solarArrays.push_back(std::move(array));
+			mFitRequested = false;
+		}
 	}
 	ImNodes::SetCurrentContext(previousContext);
 	updateBounds();
 	auto* draw = canvasDraw;
 	draw->PushClipRect(origin, {origin.x + available.x, origin.y + available.y}, true);
+	// The affordance rects are rebuilt every drawn frame; the selection
+	// handler earlier in this frame already read the previous frame's set.
+	mPortButtons.clear();
 	// Links the user can edit are drawn between their connectors, not box to
 	// box, so the curve on screen is the curve the drag and the delete hit.
 	std::set<std::pair<size_t, size_t>> authoredPairs;
@@ -1125,18 +1257,28 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		mNodeScreen[n.type + keySeparator + n.id] = {a.x, a.y, d.x, d.y};
 		bool const over = hovered && ImGui::IsMouseHoveringRect(a, d);
 		if (over) hoveredNode = int(i);
-		auto fill = station_flow::nodeColor(n, over);
+		// A derived service node is visibly inert: a flat, desaturated body
+		// with a dashed outline and a "derived" marker, so it can never be
+		// mistaken for something the user authored.
+		bool const derived = core::stationIsDerivedNodeType(n.type);
+		auto fill = derived ? ImU32(IM_COL32(46, 50, 58, 255)) : station_flow::nodeColor(n, over);
 		auto tint = ImGui::ColorConvertU32ToFloat4(station_flow::nodeColor(n, true));
 		tint.x = std::min(1.0f, tint.x * 1.8f); tint.y = std::min(1.0f, tint.y * 1.8f); tint.z = std::min(1.0f, tint.z * 1.8f);
 		auto border = n.unresolved ? IM_COL32(255, 80, 80, 255)
 			: i == size_t(mSelected) ? IM_COL32(255, 255, 255, 255) : ImGui::ColorConvertFloat4ToU32(tint);
 		draw->AddRectFilled(a, d, fill, 5);
-		draw->AddRect(a, d, border, 5, 0, i == size_t(mSelected) ? 2.5f : 1.0f);
+		if (derived)
+			drawDashedRect(draw, a, d, i == size_t(mSelected)
+				? IM_COL32(255, 255, 255, 255) : IM_COL32(168, 176, 190, 205),
+				i == size_t(mSelected) ? 2.0f : 1.4f);
+		else
+			draw->AddRect(a, d, border, 5, 0, i == size_t(mSelected) ? 2.5f : 1.0f);
 		ImVec4 clip{a.x + 3, a.y + 3, d.x - 3, d.y - 3};
-		auto label = n.type + "\n" + n.id + (n.detail.empty() ? "" : "\n" + n.detail);
+		auto label = n.type + "\n" + n.id + (n.detail.empty() ? "" : "\n" + n.detail)
+			+ (derived ? " (derived)" : "");
 		draw->AddText(ImGui::GetFont(), ImGui::GetFontSize() * mZoom, {a.x + 8 * mZoom, a.y + 6 * mZoom},
 			IM_COL32(235, 240, 245, 255), label.c_str(), nullptr, (nodeWidth - 16) * mZoom, &clip);
-		for (auto const& port : nodePorts(n.type))
+		for (auto const& port : nodePorts(n.type, n.id, draft))
 		{
 			auto const key = pinKey(n.type, n.id, std::string(port.descriptor->name));
 			auto const pin = framePins.find(key);
@@ -1155,23 +1297,123 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 					: IM_COL32(65, 70, 78, 115))
 				: near ? IM_COL32(255, 255, 255, 255)
 				: connected ? IM_COL32(150, 200, 240, 235) : IM_COL32(125, 135, 155, 215);
-			draw->AddCircleFilled(pin->second, pinSize * 0.5f, pinColour, 20);
+			// An unwired optional port reads as a deliberate choice rather
+			// than an omission: an empty ring until something is connected
+			// or the pointer engages it.
+			bool const optionalUnused = port.descriptor->optional && !connected;
+			bool const engaged = eligibility != mPinEligibility.end() || near || connected;
+			if (!optionalUnused || engaged)
+				draw->AddCircleFilled(pin->second, pinSize * 0.5f, pinColour, 20);
+			if (optionalUnused && !engaged)
+				draw->AddCircle(pin->second, pinSize * 0.5f, IM_COL32(150, 160, 182, 225), 20, 1.8f);
 			if (eligibility != mPinEligibility.end() && eligibility->second)
 				draw->AddCircle(pin->second, pinSize * 0.75f, IM_COL32(105, 255, 170, 165), 20, 2.0f);
 			draw->AddCircle(pin->second, pinSize * 0.5f, IM_COL32(24, 28, 34, 255), 20, 1.0f);
 		}
+		// Growable port set affordances: `+` adds a real connector to the
+		// set, `-` removes the newest one. They are not offered past the
+		// limits, so the ceiling never has to be refused and the floor of
+		// one cannot be stripped. They sit just below the node body so a
+		// press never fights the node's own drag.
+		if (mPlacingType.empty())
+			for (auto const& decl : core::stationPortSetDescriptors())
+			{
+				if (decl.nodeType != n.type) continue;
+				core::StationPortSetStatus status;
+				if (!core::stationPortSetStatus(draft, n.type, n.id, decl.set, status)) continue;
+				bool const inputs = decl.set == core::StationPortSet::ConversionInputs;
+				float const bx = inputs ? a.x : d.x - 35.0f;
+				float const by = d.y + 3.0f;
+				auto drawAffordance = [&](bool grow, char const* glyph)
+				{
+					ImVec2 ba{bx + (grow ? 0.0f : 19.0f), by};
+					ImVec2 bb{ba.x + 16.0f, ba.y + 16.0f};
+					mPortButtons[n.type + keySeparator + n.id + keySeparator
+						+ (inputs ? "in" : "out") + keySeparator + (grow ? "+" : "-")] =
+						{ba.x, ba.y, bb.x, bb.y};
+					bool const hot = hovered && ImGui::IsMouseHoveringRect(ba, bb);
+					draw->AddRectFilled(ba, bb, hot ? IM_COL32(78, 96, 120, 255) : IM_COL32(45, 50, 58, 235), 3);
+					draw->AddRect(ba, bb, IM_COL32(150, 170, 200, 220), 3);
+					auto* font = ImGui::GetFont();
+					float const fontSize = ImGui::GetFontSize();
+					auto const size = font->CalcTextSizeA(fontSize, std::numeric_limits<float>::max(), 0.0f, glyph);
+					draw->AddText(font, fontSize, {ba.x + (16.0f - size.x) * 0.5f, ba.y + (16.0f - size.y) * 0.5f},
+						IM_COL32(235, 240, 245, 255), glyph);
+				};
+				if (status.canGrow) drawAffordance(true, "+");
+				if (status.canShrink) drawAffordance(false, "-");
+			}
 	}
-	if (mPlaceStore && canvasHovered)
+	// A link drag released over a derived service node's body is refused
+	// through the same core rule, naming it as derived. The library never
+	// saw a pin there, so the drop is judged against the drawn rects.
+	if (endedLinkPin)
+		for (auto const& [key, rect] : mNodeScreen)
+		{
+			auto const sep = key.find(keySeparator);
+			std::string const derivedType = key.substr(0, sep);
+			if (!core::stationIsDerivedNodeType(derivedType)) continue;
+			std::string const derivedId = key.substr(sep + 1);
+			if (ImGui::IsMouseHoveringRect({rect.x, rect.y}, {rect.z, rect.w}))
+			{
+				core::CandidateLink probe{*endedLinkPin, {derivedType, derivedId, "Service"}};
+				mLinkRejection = core::evaluateStationLink(draft, probe).reason;
+				break;
+			}
+		}
+	// Grow/shrink interaction: press and release on the same affordance
+	// with the pointer barely moved. A drag that moved the node, or slid
+	// off the button, never fires it.
+	if (canvasHovered && mPlacingType.empty())
 	{
+		std::string hoveredButton;
+		for (auto const& [key, rect] : mPortButtons)
+			if (ImGui::IsMouseHoveringRect({rect.x, rect.y}, {rect.z, rect.w}))
+			{ hoveredButton = key; break; }
+		if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !hoveredButton.empty())
+		{ mPressedPortButton = hoveredButton; mPressedPortButtonPos = io.MousePos; }
+		if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && !mPressedPortButton.empty())
+		{
+			if (hoveredButton == mPressedPortButton
+				&& std::hypot(io.MousePos.x - mPressedPortButtonPos.x,
+					io.MousePos.y - mPressedPortButtonPos.y) <= 6.0f)
+			{
+				auto const p1 = mPressedPortButton.find(keySeparator);
+				auto const p2 = mPressedPortButton.find(keySeparator, p1 + 1);
+				auto const p3 = mPressedPortButton.find(keySeparator, p2 + 1);
+				std::string const type = mPressedPortButton.substr(0, p1);
+				std::string const id = mPressedPortButton.substr(p1 + 1, p2 - p1 - 1);
+				std::string const side = mPressedPortButton.substr(p2 + 1, p3 - p2 - 1);
+				bool const grow = mPressedPortButton.size() > p3 + 1
+					&& mPressedPortButton[p3 + 1] == '+';
+				auto const set = side == "in" ? core::StationPortSet::ConversionInputs
+					: core::StationPortSet::ConversionOutputs;
+				std::string reason;
+				bool const done = grow ? core::growStationPortSet(draft, type, id, set, reason)
+					: core::shrinkStationPortSet(draft, type, id, set, reason);
+				if (!done) mNotice = reason;
+				else mNotice.clear();
+			}
+			mPressedPortButton.clear();
+		}
+	}
+	// Releasing outside the canvas (or after arming placement) cancels
+	// the press too; it must not fire on a later, unrelated release.
+	if (!io.MouseDown[ImGuiMouseButton_Left]) mPressedPortButton.clear();
+	if (!mPlacingType.empty() && canvasHovered)
+	{
+		bool const atLimit = (mPlacingType == "Store" && draft.stores.size() >= core::MaxStationResourceStores)
+			|| (mPlacingType == "Conversion" && draft.conversions.size() >= core::MaxStationResourceConversions)
+			|| (mPlacingType == "Solar" && draft.solarArrays.size() >= core::MaxStationSolarArrays);
 		auto a = io.MousePos;
 		ImVec2 b{a.x + nodeWidth * mZoom, a.y + nodeHeight * mZoom};
 		draw->AddRectFilled(a, b, IM_COL32(80, 130, 170, 100), 5);
 		draw->AddRect(a, b, IM_COL32(180, 220, 255, 200), 5);
 		draw->AddText({a.x + 8, a.y + 6}, IM_COL32(235, 240, 245, 255),
-			draft.stores.size() < core::MaxStationResourceStores ? "Store (click to place)" : "Store limit reached");
+			(mPlacingType + (atLimit ? " limit reached" : " (click to place)")).c_str());
 	}
 	draw->PopClipRect();
-	if (hoveredNode >= 0 && !mPlaceStore)
+	if (hoveredNode >= 0 && mPlacingType.empty())
 	{
 		auto const& n = mGraph.nodes[hoveredNode];
 		ImGui::BeginTooltip();
@@ -1201,16 +1443,19 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			if (ImGui::BeginChild("Connections", {0, 170}, true))
 			{
 				if (!n.detail.empty()) ImGui::TextUnformatted(n.detail.c_str());
-				auto const ports = nodePorts(n.type);
+				auto const ports = nodePorts(n.type, n.id, draft);
 				for (auto const& port : ports)
 				{
 					auto const self = pinKey(n.type, n.id, std::string(port.descriptor->name));
 					bool const connected = std::any_of(mLinks.begin(), mLinks.end(),
 						[&](FlowLink const& link) { return pinKey(link.authored.from) == self
 							|| pinKey(link.authored.to) == self; });
+					// An unwired optional port reads as "unused": the node may
+					// go without it, and the user chose not to wire it (yet).
 					ImGui::Text("%s (%s) - %s", std::string(port.descriptor->name).c_str(),
 						port.descriptor->direction == core::StationPortDirection::Input
-							? "input" : "output", connected ? "connected" : "unconnected");
+							? "input" : "output",
+						connected ? "connected" : (port.descriptor->optional ? "unused" : "unconnected"));
 				}
 				for (auto const& link : mLinks)
 				{

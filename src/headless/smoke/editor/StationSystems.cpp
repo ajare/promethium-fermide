@@ -414,6 +414,245 @@ namespace
 		require(driver.passed(), "Flow cascade delete workflow failed");
 	}
 
+	// #645: growable port sets and the derived pool on the live canvas.
+	// Placement, growth, shrinkage, wiring and refusal are driven through
+	// the real controls; every assertion is about the draft and the shared
+	// history, never about the editor's bookkeeping.
+	void flowGrowablePortsWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory worldHistory;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Growable ports", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		auto compoundStore = [](std::string const& id, std::string const& hazard = "normal")
+		{
+			core::ResourceStoreSettings entry;
+			entry.id = id; entry.unit = "kg"; entry.capacity = 1000.0;
+			entry.startingQualified = 500.0; entry.hazardClass = hazard;
+			entry.composition = core::ResourceCompositionSettings{};
+			entry.composition->moisture = 0.5;
+			return entry;
+		};
+		core::StationSystemsSettings seed;
+		seed.enabled = true;
+		seed.stores = {compoundStore("silage"), compoundStore("grain"),
+			compoundStore("brine", "hazardous")};
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+		bool flow = true;
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration");
+			if (flow) window.renderFlowContents(world);
+			else window.renderContents(world, worldHistory);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "flowGrowablePorts", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			auto canvasPoint = [](float dx, float dy) {
+				auto* canvas = flowCanvasWindow("Configuration");
+				return ImVec2(canvas->Pos.x + dx, canvas->Pos.y + dy);
+			};
+			auto clickAt = [&](ImVec2 p) { ctx->MouseTeleportToPos(p); ctx->MouseClick(); ctx->Yield(3); };
+			auto drag = [&](char const* fromType, char const* fromId, char const* fromPort,
+				char const* toType, char const* toId, char const* toPort) -> bool
+			{
+				ImVec2 a{}, b{};
+				if (!window.flowPinPosition(fromType, fromId, fromPort, &a)) return false;
+				if (!window.flowPinPosition(toType, toId, toPort, &b)) return false;
+				ctx->MouseTeleportToPos(a); ctx->Yield(2);
+				ctx->MouseDown(); ctx->Yield(2);
+				ctx->MouseTeleportToPos({(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f}); ctx->Yield(2);
+				ctx->MouseTeleportToPos(b); ctx->Yield(2);
+				ImVec2 live{};
+				if (window.flowPinPosition(toType, toId, toPort, &live))
+				{ ctx->MouseTeleportToPos(live); ctx->Yield(2); }
+				ctx->MouseUp(); ctx->Yield(3);
+				return true;
+			};
+			auto grow = core::StationPortSet::ConversionInputs;
+			auto growOut = core::StationPortSet::ConversionOutputs;
+			auto clickButton = [&](core::StationPortSet set, bool growDirection) -> bool
+			{
+				ImVec4 rect{};
+				if (!window.flowPortButtonRect("Conversion", "conversion1", set, growDirection, &rect))
+					return false;
+				clickAt({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+				return true;
+			};
+			// Conversion is placeable from the combobox and arrives at the
+			// floor of its growable sets: one input, one output, one entry.
+			ctx->ComboClick("Place node/Conversion"); ctx->Yield(2);
+			REQ(driver.contains("Conversion placement armed"), "conversion placement did not arm");
+			clickAt(canvasPoint(300, 160));
+			REQ(window.draft().conversions.size() == 1
+				&& window.draft().conversions[0].id == "conversion1"
+				&& window.draft().conversions[0].inputs.size() == 1
+				&& window.draft().conversions[0].outputs.size() == 1
+				&& window.draftHistory().undoCount() == 1,
+				"placing a conversion did not commit one entry at the floor");
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			// Select the conversion so the inspector reads its ports.
+			ImVec4 conversionRect{};
+			REQ(window.flowNodeRect("Conversion", "conversion1", &conversionRect),
+				"the placed conversion is not on screen");
+			clickAt({(conversionRect.x + conversionRect.z) * 0.5f,
+				(conversionRect.y + conversionRect.w) * 0.5f});
+			REQ(driver.contains("Selected: Conversion 'conversion1'"),
+				"clicking the conversion did not select it");
+			// The input set grows via + up to four real connectors, and +
+			// is not offered past the ceiling.
+			for (int extra = 0; extra < 3; ++extra)
+				REQ(clickButton(grow, true), "the grow affordance vanished before the ceiling");
+			REQ(window.draft().conversions[0].inputs.size() == 4
+				&& window.draftHistory().undoCount() == 4,
+				"growing the input set did not add the connectors as separate entries");
+			REQ(!window.flowPortButtonRect("Conversion", "conversion1", grow, true, nullptr),
+				"growing past the ceiling was still offered");
+			// The grown, unwired slots read as unused, not missing.
+			REQ(driver.contains("Conversion input 4 (input) - unused"),
+				"an unwired grown slot did not read as unused");
+			REQ(driver.contains("Conversion input 1 (input) - unconnected"),
+				"the required floor slot read as optional");
+			// Undo and redo rewind and restore the growth one entry at a time.
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().conversions[0].inputs.size() == 3
+				&& window.draftHistory().redoCount() == 1,
+				"undo did not rewind exactly one grown connector");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().conversions[0].inputs.size() == 4,
+				"redo did not restore the grown connector");
+			// Shrink back toward the floor; - is not offered below one.
+			for (int shrink = 0; shrink < 3; ++shrink)
+				REQ(clickButton(grow, false), "the shrink affordance vanished above the floor");
+			REQ(window.draft().conversions[0].inputs.size() == 1
+				&& window.draftHistory().undoCount() == 7,
+				"shrinking did not remove the connectors as entries");
+			REQ(!window.flowPortButtonRect("Conversion", "conversion1", grow, false, nullptr),
+				"shrinking below the floor was still offered");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().conversions[0].inputs.size() == 2,
+				"undo did not restore the shrunk connector");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().conversions[0].inputs.size() == 1,
+				"redo did not remove the shrunk connector");
+			// The output set grows too.
+			REQ(clickButton(growOut, true), "the output grow affordance is missing");
+			REQ(window.draft().conversions[0].outputs.size() == 2
+				&& window.draftHistory().undoCount() == 8,
+				"output growth did not land as one entry");
+			// Each added connector is real: a store drags onto input 2 and
+			// the reference lands as one history entry, readable in the
+			// inspector as connected.
+			REQ(clickButton(grow, true), "second input grow missing");
+			REQ(drag("Store", "silage", "Inventory out", "Conversion", "conversion1", "Conversion input 2"),
+				"the grown input connector was not drawn for dragging");
+			REQ(window.draft().conversions[0].inputs.size() == 2
+				&& window.draft().conversions[0].inputs[1].storeId == "silage"
+				&& window.draftHistory().undoCount() == 10,
+				"a grown connector did not take the link as one entry");
+			ctx->MouseTeleportToPos(canvasPoint(60, 60)); ctx->Yield(3);
+			REQ(driver.contains("Conversion input 2 (input) - connected"),
+				"the wired grown slot did not read as connected");
+			// A hazard-crossing link into the same conversion is refused by
+			// the core rule and writes nothing.
+			REQ(drag("Store", "brine", "Inventory out", "Conversion", "conversion1", "Conversion input 1"),
+				"the floor input connector was not drawn for dragging");
+			REQ(window.flowLinkRejection().find("hazard-class boundary") != std::string::npos
+				&& window.draft().conversions[0].inputs[0].storeId.empty()
+				&& window.draftHistory().undoCount() == 10,
+				"a hazard-crossing conversion link was not refused without writing");
+			// Undo rewinds the wiring, redo restores it.
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().conversions[0].inputs[1].storeId.empty(),
+				"undo did not rewind the conversion link");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().conversions[0].inputs[1].storeId == "silage",
+				"redo did not restore the conversion link");
+			// The Solar array is placeable and its implicit edge to the
+			// shared electrical pool is visible in the projection.
+			ctx->ComboClick("Place node/Solar"); ctx->Yield(2);
+			REQ(driver.contains("Solar placement armed"), "solar placement did not arm");
+			clickAt(canvasPoint(300, 420));
+			REQ(window.draft().solarArrays.size() == 1
+				&& window.draft().solarArrays[0].id == "solar1"
+				&& window.draftHistory().undoCount() == 11,
+				"placing the solar array did not commit one entry");
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			ImVec4 poolRect{};
+			REQ(window.flowNodeRect("Power", "Shared electrical pool", &poolRect),
+				"the shared electrical pool is not drawn once a producer exists");
+			auto const projection = station_flow::build(window.draft());
+			bool sawImplicitEdge = false;
+			for (auto const& edge : projection.links)
+				if (projection.nodes[edge.from].type == "Solar"
+					&& projection.nodes[edge.to].type == "Power")
+					sawImplicitEdge = true;
+			REQ(sawImplicitEdge, "the solar array's implicit edge to the shared pool is missing");
+			// The pool is inert: touching it never selects it and says why.
+			clickAt({(poolRect.x + poolRect.z) * 0.5f, (poolRect.y + poolRect.w) * 0.5f});
+			REQ(window.flowLinkRejection().find("derived") != std::string::npos
+				&& !driver.contains("Selected: Power"),
+				"touching the derived pool selected it or gave no derived refusal");
+			// Clear the earlier refusal with a successful grown-output link,
+			// so the drop below must produce a fresh derived refusal.
+			REQ(drag("Conversion", "conversion1", "Conversion output 2",
+				"Store", "grain", "Inventory in"), "grown output connector missing");
+			REQ(window.draft().conversions[0].outputs[1].storeId == "grain"
+				&& window.flowLinkRejection().empty()
+				&& window.draftHistory().undoCount() == 12,
+				"grown output wiring failed to commit once or clear the refusal");
+			// A link drag dropped on the pool body is refused as derived and
+			// writes nothing.
+			ImVec2 originPin{};
+			REQ(window.flowPinPosition("Store", "silage", "Inventory out", &originPin),
+				"the silage connector is not on screen");
+			ctx->MouseTeleportToPos(originPin); ctx->Yield(2);
+			ctx->MouseDown(); ctx->Yield(2);
+			ctx->MouseTeleportToPos({(poolRect.x + poolRect.z) * 0.5f,
+				(poolRect.y + poolRect.w) * 0.5f}); ctx->Yield(2);
+			ctx->MouseUp(); ctx->Yield(3);
+			REQ(window.flowLinkRejection().find("derived") != std::string::npos
+				&& window.flowLinkRejection().find("Shared electrical pool") != std::string::npos,
+				("a link dropped on the derived pool was not refused by name: "
+					+ window.flowLinkRejection()).c_str());
+			REQ(window.draftHistory().undoCount() == 12,
+				"a dropped derived link changed the history");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().conversions[0].outputs[1].storeId.empty(),
+				"undo did not clear the grown output wiring");
+			// Undo/redo the solar placement as one entry.
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().solarArrays.empty() && window.draftHistory().redoCount() == 2,
+				"undo did not remove the solar array as one entry");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().solarArrays.size() == 1, "redo did not restore the solar array");
+			// The shared history is the form tab's history: switching tabs
+			// rewinds the same draft through the same shortcut.
+			flow = false; ctx->Yield(3);
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().solarArrays.empty(), "the form tab did not share the Flow history");
+			flow = true; ctx->Yield(3);
+			// Authoring never touched the World.
+			world->resumeSimulation();
+			auto const tick = world->getSimulationTick();
+			REQ(world->getStationSystemsSettings().conversions.empty()
+				&& world->getStationSystemsSettings().solarArrays.empty()
+				&& worldHistory.undoCount() == 0 && !world->isModified()
+				&& world->getSimulationTick() == tick,
+				"growable-port authoring mutated or advanced the World");
+		});
+		#undef REQ
+		require(driver.passed(), "Flow growable ports workflow failed on the Test Engine");
+	}
+
 	// #653: the Flow inspector. Selecting a node opens that type's shared
 	// entry editor (#652) in a column reserved beside the canvas; the node
 	// body stays compact, the field commits once rather than per keystroke,
@@ -4593,6 +4832,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/storeWorkflow", storeWorkflow});
 	checks.push_back({"station/flowLinkWorkflow", flowLinkWorkflow});
 	checks.push_back({"station/flowCascadeDeleteWorkflow", flowCascadeDeleteWorkflow});
+	checks.push_back({"station/flowGrowablePortsWorkflow", flowGrowablePortsWorkflow});
 	checks.push_back({"station/flowInspectorWorkflow", flowInspectorWorkflow});
 	checks.push_back({"station/transferWorkflow", transferWorkflow});
 	checks.push_back({"station/compoundWorkflow", compoundWorkflow});
