@@ -8,6 +8,10 @@ class ViewWindow
 public:
 	enum class Tab { World, StationSystems, StationFlow };
 	Tab selectedTab() const { return mSelected; }
+	bool flowModified() const { return mStation.flowModified(); }
+	void initializeRecentStationFiles(std::filesystem::path path) { mStation.initializeRecentFiles(std::move(path)); }
+	void setStationFilePicker(std::function<std::optional<std::string>(bool)> picker)
+	{ mStation.setFilePicker(std::move(picker)); }
 	void select(Tab tab)
 	{
 		if (tab != Tab::World && !mStationVisible) return;
@@ -54,7 +58,8 @@ public:
 					ImGui::EndChild();
 					ImGui::EndTabItem();
 				}
-				if (mStationVisible && ImGui::BeginTabItem("Station Flow", nullptr, flags(Tab::StationFlow)))
+				if (mStationVisible && ImGui::BeginTabItem("Station Flow", nullptr, flags(Tab::StationFlow)
+					| (mStation.flowModified() ? ImGuiTabItemFlags_UnsavedDocument : 0)))
 				{
 					mSelected = Tab::StationFlow;
 					mStation.renderFlowContents(world);

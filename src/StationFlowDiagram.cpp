@@ -607,6 +607,33 @@ void StationFlowDiagram::reset()
 	mLinkRejection.clear();
 }
 
+void StationFlowDiagram::exportLayout(core::StationConfigurationDocument& document) const
+{
+	document.positions.clear();
+	if (mGraph.nodes.empty() && !mCached)
+		for (auto const& [key, position] : mLayout)
+			document.positions.emplace(key, std::pair{position.x, position.y});
+	// A freshly auto-laid-out node must persist even without a drag.
+	std::map<std::string, size_t> occurrences;
+	for (size_t i = 0; i < mGraph.nodes.size(); ++i)
+	{
+		auto const& node = mGraph.nodes[i];
+		auto base = node.type + ":" + node.id;
+		document.positions[base + ":" + std::to_string(occurrences[base]++)]
+			= {mPositions[i].x, mPositions[i].y};
+	}
+	document.panX = mPan.x; document.panY = mPan.y; document.zoom = mZoom;
+}
+
+void StationFlowDiagram::importLayout(core::StationConfigurationDocument const& document)
+{
+	reset();
+	for (auto const& [key, position] : document.positions)
+		mLayout[key] = {position.first, position.second};
+	mPan = {document.panX, document.panY}; mZoom = document.zoom;
+	mFitRequested = document.positions.empty();
+}
+
 bool StationFlowDiagram::pinScreenPosition(std::string const& nodeType, std::string const& nodeId,
 	std::string const& portName, ImVec2* out) const
 {

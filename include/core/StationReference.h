@@ -14,10 +14,12 @@ namespace core
 	// scope with the authoritative World document reader (#422). Shared by
 	// the World document reader and the packaged reference station parser
 	// so the authored station configuration format has exactly one
-	// reader; the map is validated on close and a malformed or physically
-	// inconsistent map throws SerializationException.
+	// reader; the map is validated on close by default and a malformed or
+	// physically inconsistent map throws SerializationException. Draft loading
+	// defers validation to tolerate unconnected Store/Transfer references.
+	void writeStationSystemsSettingsMap(Serializer& serializer, StationSystemsSettings const& settings);
 	void readStationSystemsSettingsMap(Serializer& serializer,
-		std::uint32_t version, StationSystemsSettings& settings);
+		std::uint32_t version, StationSystemsSettings& settings, bool validate = true);
 
 	// One documented coefficient of the packaged reference station: what
 	// the coefficient is, the value as authored, the units it is read in,

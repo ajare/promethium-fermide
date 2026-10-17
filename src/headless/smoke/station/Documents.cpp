@@ -10,6 +10,9 @@
 #include "Documents.h"
 
 #include "core/World.h"
+#include "core/StationConfigurationDocument.h"
+#include "core/TransactionalFileWriter.h"
+#include <yaml-cpp/yaml.h>
 #include "core/AgentTagRegistryDocument.h"
 #include "core/BinarySerializer.h"
 #include "core/YamlSerializer.h"
@@ -77,6 +80,69 @@ namespace
 		require(world.configureStationSystems({true, intervalSeconds, std::move(stores), std::move(transfers)},
 			false, &diagnostic),
 			"Could not enable Station systems: " + diagnostic);
+	}
+
+	void configurationFile(smoke::Context const& context)
+	{
+		auto const path = context.temporaryRoot() / "draft.station.yaml";
+		core::StationConfigurationDocument empty;
+		core::StationConfigurationDocument blank;
+		std::string diagnostic;
+		require(core::parseStationConfiguration(core::serializeStationConfiguration(empty), blank,
+			&diagnostic) && blank.settings == empty.settings,
+			"Empty Station configuration did not round trip");
+		core::StationConfigurationDocument original;
+		original.settings.enabled = true;
+		original.settings.stores.push_back({"supply", "kg", 100.0, 25.0});
+		original.settings.transfers.push_back({"pump", "supply", "missing", "kg", 1.0, 1});
+		original.positions["Store:supply:0"] = {135.0f, -42.0f};
+		original.panX = -12; original.panY = 78; original.zoom = 0.6f;
+		core::saveStationConfiguration(path.string(), original);
+		auto const bytes = readFile(path);
+		core::StationConfigurationDocument restored;
+		require(core::loadStationConfiguration(path.string(), restored, &diagnostic), diagnostic);
+		require(restored.settings == original.settings && restored.positions == original.positions
+			&& restored.panX == original.panX && restored.panY == original.panY
+			&& restored.zoom == original.zoom, "Configuration round trip lost authored data or layout");
+		require(bytes == core::serializeStationConfiguration(restored),
+			"Station configuration YAML changed during round trip");
+		core::World world("Portable", 2, 2);
+		world.pauseSimulation(); world.finishBuild();
+		std::string ignored;
+		auto valid = original.settings; valid.transfers.clear();
+		require(world.configureStationSystems(valid, false, &ignored), ignored);
+		auto const worldYaml = YAML::Load(serializeYaml(world));
+		auto comparable = original; comparable.settings = valid;
+		auto const documentYaml = YAML::Load(core::serializeStationConfiguration(comparable));
+		require(YAML::Dump(worldYaml["stationSystems"]) == YAML::Dump(documentYaml["stationSystems"]),
+			"World and Station configuration writer disagreed");
+		auto layoutless = documentYaml;
+		layoutless.remove("layout");
+		require(core::parseStationConfiguration(YAML::Dump(layoutless), restored, &diagnostic)
+			&& restored.positions.empty(), "Layout-less document did not auto-layout");
+		auto beforeInvalid = restored;
+		auto invalidTransfer = bytes;
+		auto invalidRate = invalidTransfer.find("ratePerSecond: 1");
+		require(invalidRate != std::string::npos, "Expected transfer rate missing");
+		invalidTransfer.replace(invalidRate, std::string("ratePerSecond: 1").size(), "ratePerSecond: -1");
+		require(!core::parseStationConfiguration(invalidTransfer, restored, &diagnostic),
+			"Broken transfer hid an invalid rate: " + diagnostic);
+		require(restored.settings == beforeInvalid.settings,
+			"Invalid transfer changed the previously loaded settings");
+		auto invalid = bytes;
+		auto at = invalid.find("capacity: 100");
+		require(at != std::string::npos, "Expected capacity field missing");
+		invalid.replace(at, std::string("capacity: 100").size(), "capacity: -1");
+		auto before = restored;
+		require(!core::parseStationConfiguration(invalid, restored, &diagnostic)
+			&& restored.settings == before.settings && restored.positions == before.positions
+			&& !diagnostic.empty(), "Invalid document partially replaced draft");
+		core::setTransactionalWriteFailureAfterBytesForTesting(12);
+		bool failed = false;
+		try { core::saveStationConfiguration(path.string(), original); }
+		catch (std::exception const&) { failed = true; }
+		core::setTransactionalWriteFailureAfterBytesForTesting(0);
+		require(failed && readFile(path) == bytes, "Failed save replaced previous file");
 	}
 
 	// Nothing but the authored settings may reach the document: no live tick
@@ -3860,6 +3926,7 @@ void biologicalCapacityFiles(smoke::Context const& context)
 
 void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"configurationFile", configurationFile});
 	checks.push_back({"fileRoundTrip", fileRoundTrip});
 	checks.push_back({"writeFailure", writeFailure});
 	checks.push_back({"legacyFiles", legacyAndMalformedFiles});

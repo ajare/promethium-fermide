@@ -6,6 +6,7 @@
 #include "DocumentEdit.h"
 #include "../CoupledRig.h"
 #include "core/StationReference.h"
+#include "core/TransactionalFileWriter.h"
 #include "core/World.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
@@ -972,6 +973,74 @@ namespace
 		});
 		#undef REQ
 		require(driver.passed(), "Tabbed View workflow failed on the Test Engine");
+	}
+
+	void configurationDocumentWorkflow(smoke::Context const& smokeContext)
+	{
+		using smoke::require;
+		auto const path = smokeContext.temporaryRoot() / "flow.station.yaml";
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		ViewWindow view;
+		view.setStationFilePicker([&](bool) -> std::optional<std::string> { return path.string(); });
+		auto world = std::make_shared<core::World>("First", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings initial;
+		initial.stores.push_back({"tank", "kg", 100, 10});
+		require(world->configureStationSystems(initial, false), "Could not configure source World");
+		world->markSaved();
+		view.setStationSystemsVisible(true); view.select(ViewWindow::Tab::StationFlow);
+		headless::TestEngineDriver driver([&]
+		{
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 850});
+			view.render(world, history, [] {});
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "configurationDocument", [&](ImGuiTestContext* ctx)
+		{
+			ctx->SetRef("View");
+			REQ(driver.contains("1 nodes, 0 connections") && view.selectedTab() == ViewWindow::Tab::StationFlow,
+				"Initial World settings did not seed the draft");
+			ctx->ItemClick("Views/Station Flow/Save configuration"); ctx->Yield(3);
+			REQ(std::filesystem::exists(path) && !view.flowModified(), "Save did not clear the modified indicator");
+			core::setTransactionalWriteFailureAfterBytesForTesting(10);
+			ctx->ItemClick("Views/Station Flow/Save configuration"); ctx->Yield(3);
+			core::setTransactionalWriteFailureAfterBytesForTesting(0);
+			REQ(view.flowModified(), "Failed save marked the draft clean");
+			ctx->ItemClick("Views/Station Flow/Save configuration"); ctx->Yield(3);
+			REQ(!view.flowModified(), "Successful retry did not clear the modified indicator");
+			ctx->ItemClick("Views/Station Flow/New configuration"); ctx->Yield(3);
+			REQ(driver.contains("No systems configured in the draft"), "New did not clear the draft");
+			ctx->ItemClick("Views/Station Flow/Open configuration"); ctx->Yield(3);
+			REQ(driver.contains("1 nodes, 0 connections"), "Open did not restore the saved draft");
+			ctx->ItemClick("Views/Station Systems"); ctx->Yield(3);
+			ctx->SetRef(ImGui::FindWindowByName("View")->DC.ChildWindows.back());
+			ctx->ItemClick("Add store"); ctx->Yield(3);
+			ctx->SetRef("View");
+			ctx->ItemClick("Views/Station Flow"); ctx->Yield(3);
+			REQ(driver.contains("2 nodes, 0 connections"), "Draft edit was not visible in Flow");
+			ctx->ItemClick("Views/Station Flow/New configuration"); ctx->Yield(3);
+			REQ(driver.contains("Discard unsaved Station configuration changes?"),
+				"Dirty New did not ask for confirmation");
+			ctx->ItemClick("Views/Station Flow/Keep configuration"); ctx->Yield(3);
+			REQ(driver.contains("2 nodes, 0 connections"), "Cancel discarded the draft");
+			ctx->ItemClick("Views/Station Flow/New configuration"); ctx->Yield(3);
+			ctx->ItemClick("Views/Station Flow/Discard configuration changes"); ctx->Yield(3);
+			REQ(driver.contains("No systems configured in the draft"), "Confirmed New did not clear the draft");
+			REQ(world->getStationSystemsSettings() == initial && history.undoCount() == 0
+				&& world->getSimulationTick() == 0, "Draft file actions touched source World state");
+			world = std::make_shared<core::World>("Destination", 2, 2);
+			world->pauseSimulation(); world->finishBuild(); world->markSaved(); ctx->Yield(3);
+			ctx->ItemClick("Views/Station Flow/Open configuration"); ctx->Yield(3);
+			REQ(driver.contains("1 nodes, 0 connections") && world->getStationSystemsSettings().stores.empty()
+				&& !world->isModified() && history.undoCount() == 0,
+				"Opening into another World changed its settings or failed to restore draft");
+		});
+		#undef REQ
+		require(driver.passed(), "Station configuration document workflow failed");
 	}
 
 	void workflow(smoke::Context const&)
@@ -4402,6 +4471,7 @@ void cropWorkflow(smoke::Context const&)
 	void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"station/windowWorkflow", workflow});
+	checks.push_back({"station/configurationDocument", configurationDocumentWorkflow});
 	checks.push_back({"station/removalWorkflow", removalWorkflow});
 	checks.push_back({"station/storeWorkflow", storeWorkflow});
 	checks.push_back({"station/flowLinkWorkflow", flowLinkWorkflow});

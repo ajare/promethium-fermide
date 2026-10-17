@@ -85,7 +85,7 @@ foreach(check lifecycle batching eventBound persistence stores transfers linkSea
         batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
-        deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres crews water containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance fileRoundTrip writeFailure legacyFiles structuralReplay
+        deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres crews water containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance configurationFile fileRoundTrip writeFailure legacyFiles structuralReplay
         compoundFiles powerFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles outageFiles maintenanceFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles
         # #571: harvest, algae and the nutrient-conservation closure were
         # reachable through the binary but never registered here, so they
@@ -716,6 +716,8 @@ pf_add_smoke_module(pf-smoke-editor
     TIMEOUT 300
 )
 
+add_test(NAME station-editor-document COMMAND pf-smoke-editor --check station/configurationDocument)
+set_tests_properties(station-editor-document PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
 add_test(NAME station-editor-window COMMAND pf-smoke-editor --check station/windowWorkflow)
 set_tests_properties(station-editor-window PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
 add_test(NAME station-editor-stores COMMAND pf-smoke-editor --check station/storeWorkflow)

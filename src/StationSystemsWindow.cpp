@@ -1,6 +1,8 @@
 #include "StationSystemsWindow.h"
 #include "StationSystemsEntryEditor.h"
 #include "core/StationReference.h"
+#include "core/StationConfigurationDocument.h"
+#include <filesystem>
 #include "core/World.h"
 #include "DocumentEdit.h"
 #include "imgui/imgui.h"
@@ -86,13 +88,143 @@ bool StationSystemsWindow::syncWorld(std::shared_ptr<core::World> const& world)
 		mDiagnostic.clear(); mConfirmReset = false; mPendingActivation.reset();
 		mFlow.reset(); mDraftHistory.clear(); mPendingDraftEdit.reset();
 		mDraftHistory.markSaved();
+		mFilepath.clear(); mHasSavedDocument = false; mSaveFailed = false;
 	}
 	return true;
+}
+
+bool StationSystemsWindow::draftDirty() const
+{
+	if (mSaveFailed) return true;
+	core::StationConfigurationDocument document;
+	document.settings = mDraft;
+	mFlow.exportLayout(document);
+	if (!mHasSavedDocument)
+		return mDraftHistory.isModified() || document.settings != core::StationSystemsSettings{}
+			|| !document.positions.empty() || document.panX != 24 || document.panY != 24
+			|| document.zoom != 0.8f;
+	return document.settings != mSavedDocument.settings
+		|| document.positions != mSavedDocument.positions
+		|| document.panX != mSavedDocument.panX || document.panY != mSavedDocument.panY
+		|| document.zoom != mSavedDocument.zoom;
+}
+
+bool StationSystemsWindow::saveDraft(bool saveAs)
+{
+	std::string path = mFilepath;
+	if (saveAs || path.empty())
+	{
+		if (!mFilePicker) return false;
+		std::optional<std::string> chosen;
+		try { chosen = mFilePicker(true); }
+		catch (std::exception const& error) { mDiagnostic = error.what(); return false; }
+		if (!chosen) return false;
+		path = *chosen;
+	}
+	core::StationConfigurationDocument document;
+	document.settings = mDraft;
+	mFlow.exportLayout(document);
+	try
+	{
+		core::saveStationConfiguration(path, document);
+		mFilepath = std::move(path);
+		mSavedDocument = std::move(document); mHasSavedDocument = true;
+		mDraftHistory.markSaved(); mSaveFailed = false;
+		mDiagnostic.clear();
+		try { mRecent.add(mFilepath); }
+		catch (std::exception const& error) { mDiagnostic = error.what(); }
+		return true;
+	}
+	catch (std::exception const& error) { mDiagnostic = error.what(); mSaveFailed = true; return false; }
+}
+
+void StationSystemsWindow::openDraft(std::string const& path)
+{
+	core::StationConfigurationDocument candidate;
+	if (!core::loadStationConfiguration(path, candidate, &mDiagnostic))
+	{
+		try { (void)mRecent.removeUnavailable(path); } catch (std::exception const&) {}
+		return;
+	}
+	mDraft = candidate.settings;
+	mFlow.importLayout(candidate);
+	mDraftHistory.clear(); mPendingDraftEdit.reset(); mDraftHistory.markSaved();
+	mFilepath = path;
+	mSavedDocument = std::move(candidate); mHasSavedDocument = true; mSaveFailed = false;
+	try { mRecent.add(path); } catch (std::exception const& error) { mDiagnostic = error.what(); }
+}
+
+void StationSystemsWindow::newDraft()
+{
+	mDraft = core::StationSystemsSettings{};
+	mFlow.reset(); mDraftHistory.clear(); mPendingDraftEdit.reset();
+	mDraftHistory.markSaved(); mFilepath.clear(); mHasSavedDocument = false;
+	mSaveFailed = false; mDiagnostic.clear();
+}
+
+void StationSystemsWindow::renderFileToolbar()
+{
+	if (ImGui::Button("New configuration"))
+	{
+		commitDraftChanges(true);
+		if (draftDirty()) { mPendingNew = true; mConfirmDiscard = true; }
+		else newDraft();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Open configuration"))
+	{
+		if (mFilePicker)
+		{
+			std::optional<std::string> chosen;
+			try { chosen = mFilePicker(false); }
+			catch (std::exception const& error) { mDiagnostic = error.what(); }
+			if (chosen)
+			{
+				commitDraftChanges(true);
+				if (draftDirty()) { mPendingOpen = *chosen; mConfirmDiscard = true; }
+				else openDraft(*chosen);
+			}
+		}
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Save configuration")) { commitDraftChanges(true); saveDraft(false); }
+	ImGui::SameLine();
+	if (ImGui::Button("Save configuration as...")) { commitDraftChanges(true); saveDraft(true); }
+	ImGui::SameLine(); ImGui::TextDisabled("%s%s", mFilepath.empty() ? "Untitled" : mFilepath.c_str(),
+		draftDirty() ? " *" : "");
+	if (ImGui::BeginCombo("Recent configurations", "Open recent..."))
+	{
+		for (auto const& path : mRecent.entries())
+			if (ImGui::MenuItem(path.c_str()))
+			{
+				commitDraftChanges(true);
+				if (draftDirty()) { mPendingOpen = path; mConfirmDiscard = true; }
+				else openDraft(path);
+				break;
+			}
+		ImGui::EndCombo();
+	}
+	if (mConfirmDiscard)
+	{
+		ImGui::TextWrapped("Discard unsaved Station configuration changes?");
+		if (ImGui::Button("Discard configuration changes"))
+		{
+			mConfirmDiscard = false;
+			if (mPendingNew) newDraft();
+			else if (mPendingOpen) openDraft(*mPendingOpen);
+			mPendingNew = false; mPendingOpen.reset();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Keep configuration"))
+		{ mConfirmDiscard = false; mPendingNew = false; mPendingOpen.reset(); }
+	}
+	if (!mDiagnostic.empty()) ImGui::TextWrapped("Configuration: %s", mDiagnostic.c_str());
 }
 
 void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const& world)
 {
 	if (!syncWorld(world)) return;
+	renderFileToolbar();
 	renderDraftHistory();
 	mFlow.render(mDraft, [this](core::StationSystemsSettings& draft) {
 		renderFlowInspectorContents(draft);

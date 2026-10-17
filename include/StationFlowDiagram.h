@@ -1,5 +1,6 @@
 #pragma once
 #include "core/StationSystems.h"
+#include "core/StationConfigurationDocument.h"
 #include "core/StationPorts.h"
 #include "imgui/imgui.h"
 #include <functional>
@@ -69,6 +70,8 @@ public:
 	// "Transfer"); shared service nodes carry -1.
 	std::optional<SelectedNode> selectedNode() const;
 	void reset();
+	void exportLayout(core::StationConfigurationDocument& document) const;
+	void importLayout(core::StationConfigurationDocument const& document);
 	// Screen-space geometry recorded by the last rendered frame. Presentation
 	// state, exposed read-only so a caller — including a headless check that
 	// drives the real controls — can address a connector without guessing

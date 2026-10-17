@@ -1,10 +1,12 @@
 #pragma once
 #include <memory>
+#include <functional>
 #include <optional>
 #include <string>
 #include "core/StationSystems.h"
 #include "StationFlowDiagram.h"
 #include "DocumentHistory.h"
+#include "RecentFiles.h"
 namespace core { class World; }
 
 // One editor session owns its visibility/draft. Observation never ticks Lua.
@@ -12,6 +14,9 @@ class StationSystemsWindow
 {
 public:
 	bool visible{false};
+	void initializeRecentFiles(std::filesystem::path path) { mRecent.initialize(std::move(path)); }
+	void setFilePicker(std::function<std::optional<std::string>(bool)> picker) { mFilePicker = std::move(picker); }
+	bool flowModified() const { return draftDirty(); }
 	void render(std::shared_ptr<core::World> const& world, DocumentHistory& history);
 	// Embedded presentation; the caller owns the window and scrolling region.
 	void renderContents(std::shared_ptr<core::World> const& world, DocumentHistory& history);
@@ -43,6 +48,20 @@ private:
 	void renderDraftHistory();
 	void commitDraftChanges(bool force = false);
 	DocumentHistory mDraftHistory;
+	RecentFiles mRecent;
+	std::function<std::optional<std::string>(bool)> mFilePicker;
+	std::string mFilepath;
+	core::StationConfigurationDocument mSavedDocument;
+	bool mHasSavedDocument{false};
+	std::optional<std::string> mPendingOpen;
+	bool mPendingNew{false};
+	bool mConfirmDiscard{false};
+	bool mSaveFailed{false};
+	bool draftDirty() const;
+	bool saveDraft(bool saveAs);
+	void openDraft(std::string const& path);
+	void newDraft();
+	void renderFileToolbar();
 	std::optional<DocumentSnapshot> mPendingDraftEdit;
 	StationFlowDiagram mFlow;
 	std::weak_ptr<void const> mWorld;

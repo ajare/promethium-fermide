@@ -5066,6 +5066,19 @@ namespace imgui
 void initializeRecentFiles(filesystem::path const& filepath)
 {
 	gRecentFiles.initialize(filepath);
+	gViewWindow.initializeRecentStationFiles(filepath.parent_path() / "recent-station-configurations.txt");
+	gViewWindow.setStationFilePicker([](bool save) -> std::optional<std::string>
+	{
+		nfdu8char_t* selected = nullptr;
+		constexpr nfdu8filteritem_t filter[] = {{"Station configuration", "yaml"}};
+		auto const result = save
+			? NFD_SaveDialogU8(&selected, filter, 1, nullptr, "station.station.yaml")
+			: NFD_OpenDialogU8(&selected, filter, 1, nullptr);
+		std::unique_ptr<nfdu8char_t, decltype(&NFD_FreePathU8)> chosen(selected, NFD_FreePathU8);
+		if (result == NFD_CANCEL) return std::nullopt;
+		if (result == NFD_ERROR) throw std::runtime_error(NFD_GetError());
+		return std::string(selected);
+	});
 }
 
 ImVec2 gMainMenuWindowSize;
