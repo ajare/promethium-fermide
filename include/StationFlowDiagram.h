@@ -68,7 +68,8 @@ public:
 	};
 	void render(core::StationSystemsSettings& draft,
 		std::function<void(core::StationSystemsSettings&)> const& renderInspector = {},
-		std::function<void()> const& beforeSelectionChange = {});
+		std::function<void()> const& beforeSelectionChange = {},
+		std::function<void()> const& beforeNodeRemoval = {});
 	// Empty when nothing is selected. The index addresses the entry inside the
 	// node type's own draft vector (stores for "Store", transfers for
 	// "Transfer"); shared service nodes carry -1.
@@ -127,4 +128,5 @@ private:
 	std::map<std::string, bool> mPinEligibility;
 	std::map<std::string, ImVec4> mNodeScreen;
 	std::string mLinkRejection;
+	std::optional<core::StationNodeRemoval> mPendingRemoval;
 };

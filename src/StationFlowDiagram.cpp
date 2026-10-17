@@ -612,7 +612,7 @@ void StationFlowDiagram::reset()
 	mDragging = -1; mLastFrame = -1; mTemperature = 0;
 	mLinks.clear(); mPinIds.clear(); mPinRefs.clear(); mPinScreen.clear(); mNodeScreen.clear();
 	mActiveLinkPin.reset(); mPinEligibility.clear();
-	mLinkRejection.clear();
+	mLinkRejection.clear(); mPendingRemoval.reset();
 }
 
 void StationFlowDiagram::exportLayout(core::StationConfigurationDocument& document) const
@@ -705,7 +705,8 @@ std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode
 
 void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	std::function<void(core::StationSystemsSettings&)> const& renderInspector,
-	std::function<void()> const& beforeSelectionChange)
+	std::function<void()> const& beforeSelectionChange,
+	std::function<void()> const& beforeNodeRemoval)
 {
 	if (mLastFrame != ImGui::GetFrameCount() - 1)
 	{ mDragging = -1; mTemperature = 0; mActiveLinkPin.reset(); }
@@ -1107,11 +1108,14 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		if (hot) colour = IM_COL32(255, 255, 255, 240);
 		drawLinkCurve(draw, curve, colour, hot ? 3.0f : touchesSelection ? 2.4f : 1.6f);
 	}
-	if (hoveredLink >= 0 && hovered && ImGui::IsKeyPressed(ImGuiKey_Delete))
+	bool const deleteKey = hovered && ImGui::IsKeyPressed(ImGuiKey_Delete)
+		&& !ImGui::IsAnyItemActive();
+	if (hoveredLink >= 0 && deleteKey)
 	{
 		core::clearStationLink(draft, mLinks[hoveredLink].authored.identity);
 		mLinkRejection.clear();
 	}
+	bool deleteSelected = deleteKey && hoveredLink < 0 && mSelected >= 0;
 	for (size_t i = 0; i < mGraph.nodes.size(); ++i)
 	{
 		if (!visible[i]) continue;
@@ -1235,8 +1239,65 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			}
 			ImGui::EndChild();
 		}
+		if (mSelected >= 0)
+		{
+			ImGui::Separator();
+			// Only node types whose reference mapping lives in core are
+			// deletable here. Other projected nodes may carry references the
+			// current connector seam cannot yet resolve safely.
+			core::StationNodeRemoval available;
+			bool const canRemove = core::planStationNodeRemoval(draft,
+				mSelectedType, mSelectedId, available);
+			ImGui::BeginDisabled(!canRemove);
+			if (ImGui::Button("Delete selected node")) deleteSelected = true;
+			ImGui::EndDisabled();
+			if (!canRemove)
+				ImGui::TextDisabled("Deletion unavailable: reference mapping is incomplete for this draft.");
+		}
 		if (renderInspector) renderInspector(draft);
 		else ImGui::TextDisabled("No inspector for this surface.");
 	}
 	ImGui::EndChild();
+	if (deleteSelected)
+	{
+		core::StationNodeRemoval plan;
+		if (core::planStationNodeRemoval(draft, mSelectedType, mSelectedId, plan))
+		{
+			if (plan.linkIdentities.empty())
+			{
+				if (beforeNodeRemoval) beforeNodeRemoval();
+				if (core::removeStationNode(draft, plan))
+				{ mSelected = -1; mSelectedType.clear(); mSelectedId.clear(); }
+			}
+			else
+			{
+				mPendingRemoval = std::move(plan);
+				ImGui::OpenPopup("Delete Station node?");
+			}
+		}
+	}
+	if (ImGui::BeginPopupModal("Delete Station node?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		if (mPendingRemoval)
+		{
+			ImGui::Text("This removes %zu connections", mPendingRemoval->linkIdentities.size());
+			ImGui::Text("Delete %s '%s'?", mPendingRemoval->nodeType.c_str(), mPendingRemoval->nodeId.c_str());
+			if (ImGui::Button("Confirm node deletion"))
+			{
+				core::StationNodeRemoval current;
+				if (core::planStationNodeRemoval(draft, mPendingRemoval->nodeType,
+					mPendingRemoval->nodeId, current) && current.linkIdentities == mPendingRemoval->linkIdentities)
+				{
+					if (beforeNodeRemoval) beforeNodeRemoval();
+					if (core::removeStationNode(draft, current))
+					{ mSelected = -1; mSelectedType.clear(); mSelectedId.clear(); }
+				}
+				mPendingRemoval.reset(); ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel node deletion"))
+			{ mPendingRemoval.reset(); ImGui::CloseCurrentPopup(); }
+		}
+		ImGui::EndPopup();
+	}
 }

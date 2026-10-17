@@ -163,6 +163,66 @@ bool clearStationLink(StationSystemsSettings& settings, std::string const& ident
 	return false;
 }
 
+bool planStationNodeRemoval(StationSystemsSettings const& settings,
+	std::string const& nodeType, std::string const& nodeId, StationNodeRemoval& plan)
+{
+	bool exists = false;
+	if (nodeType == "Store")
+		exists = std::any_of(settings.stores.begin(), settings.stores.end(),
+			[&](auto const& entry) { return entry.id == nodeId; });
+	else if (nodeType == "Transfer")
+		exists = std::any_of(settings.transfers.begin(), settings.transfers.end(),
+			[&](auto const& entry) { return entry.id == nodeId; });
+	if (!exists) return false;
+	// #640 currently maps only Transfer endpoints. Other authored entries
+	// can also name Stores (or installations); without their mappings a
+	// cascade would silently strand references. Refuse such drafts until
+	// those families have core-owned connector mappings, even if a given
+	// entry might not reference this particular node.
+	if (!settings.conversions.empty() || !settings.deliveries.empty()
+		|| !settings.wasteEjections.empty() || !settings.equipmentLoads.empty()
+		|| !settings.crews.empty() || !settings.waterCollectors.empty()
+		|| !settings.waterTreatments.empty() || !settings.electrolyzers.empty()
+		|| !settings.co2Captures.empty() || !settings.fuelCells.empty()
+		|| !settings.sabatierReactors.empty() || !settings.methaneProcessors.empty()
+		|| !settings.microbialProcessors.empty() || !settings.cropPopulations.empty()
+		|| !settings.algaeCultures.empty() || !settings.generators.empty()
+		|| !settings.maintenanceJobs.empty() || !settings.outages.empty()) return false;
+	StationNodeRemoval candidate{nodeType, nodeId, {}};
+	for (auto const& link : stationAuthoredLinks(settings))
+		if ((link.from.nodeType == nodeType && link.from.nodeId == nodeId)
+			|| (link.to.nodeType == nodeType && link.to.nodeId == nodeId))
+			candidate.linkIdentities.push_back(link.identity);
+	plan = std::move(candidate);
+	return true;
+}
+
+bool removeStationNode(StationSystemsSettings& settings, StationNodeRemoval const& plan)
+{
+	StationNodeRemoval current;
+	if (!planStationNodeRemoval(settings, plan.nodeType, plan.nodeId, current)
+		|| current.linkIdentities != plan.linkIdentities) return false;
+	// Preflight and apply on a copy: even a stale or malformed reference must
+	// not leave a partially cleared configuration behind.
+	auto candidate = settings;
+	for (auto const& identity : current.linkIdentities)
+		if (!clearStationLink(candidate, identity)) return false;
+	if (plan.nodeType == "Store")
+	{
+		auto& stores = candidate.stores;
+		stores.erase(std::remove_if(stores.begin(), stores.end(),
+			[&](auto const& entry) { return entry.id == plan.nodeId; }), stores.end());
+	}
+	else
+	{
+		auto& transfers = candidate.transfers;
+		transfers.erase(std::remove_if(transfers.begin(), transfers.end(),
+			[&](auto const& entry) { return entry.id == plan.nodeId; }), transfers.end());
+	}
+	settings = std::move(candidate);
+	return true;
+}
+
 LinkVerdict evaluateStationLink(StationSystemsSettings const& settings, CandidateLink const& link)
 {
 	// Structural layer: the descriptor table.

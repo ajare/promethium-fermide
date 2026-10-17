@@ -837,6 +837,35 @@ namespace
 				&& !core::clearStationLink(written, "nonsense")
 				&& !core::clearStationLink(written, "Transfer:missing:Source"),
 				"clearing an identity that names no reference claimed success");
+			// Removal resolves through precisely the same authored references.
+			core::StationNodeRemoval removal;
+			auto unmapped = reordered;
+			unmapped.deliveries.emplace_back();
+			require(!core::planStationNodeRemoval(unmapped, "Store", "tank", removal),
+				"a store with unmapped reference families was offered an unsafe cascade");
+			require(core::planStationNodeRemoval(reordered, "Store", "tank", removal)
+				&& removal.linkIdentities.size() == 2, "store referrer count missed a transfer endpoint");
+			auto stale = reordered;
+			stale.transfers.front().destinationId.clear();
+			auto const staleSnapshot = stale;
+			require(!core::removeStationNode(stale, removal) && stale == staleSnapshot,
+				"stale cascade changed a draft before refusing");
+			require(core::removeStationNode(reordered, removal)
+				&& reordered.stores.size() == 6
+				&& reordered.transfers[0].destinationId.empty()
+				&& reordered.transfers[1].destinationId.empty(),
+				"cascade did not remove the store and all referencing links");
+			for (auto const& remaining : core::stationAuthoredLinks(reordered))
+				require(remaining.from.nodeId != "tank" && remaining.to.nodeId != "tank",
+					"cascade left an authored link to the removed store");
+			core::StationNodeRemoval transferRemoval;
+			require(core::planStationNodeRemoval(reordered, "Transfer", "t1", transferRemoval)
+				&& transferRemoval.linkIdentities.size() == 1
+				&& core::removeStationNode(reordered, transferRemoval)
+				&& reordered.transfers.size() == 1,
+				"transfer removal did not consume its remaining reference");
+			require(!core::planStationNodeRemoval(reordered, "Power", "Shared electrical pool", removal),
+				"derived service node was considered removable");
 			// A pair with no reference behind it never writes anything.
 			auto untouched = base();
 			auto const snapshot = untouched;

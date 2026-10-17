@@ -332,6 +332,88 @@ namespace
 		require(driver.passed(), "Flow link workflow failed on the Test Engine");
 	}
 
+	void flowCascadeDeleteWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory worldHistory;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Flow removal", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed;
+		for (auto const* id : {"a", "b", "c", "d"})
+		{
+			core::ResourceStoreSettings store;
+			store.id = id; store.unit = "kg"; store.capacity = 100;
+			seed.stores.push_back(store);
+		}
+		for (auto const* id : {"t1", "t2"})
+		{
+			core::ResourceTransferSettings transfer;
+			transfer.id = id; transfer.sourceId = "a";
+			transfer.destinationId = id == std::string("t1") ? "b" : "c";
+			transfer.unit = "kg"; transfer.ratePerSecond = 1;
+			seed.transfers.push_back(transfer);
+		}
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "flowCascadeDelete", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			auto select = [&](char const* id) {
+				ImVec4 rect{};
+				if (!window.flowNodeRect("Store", id, &rect)) return false;
+				ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+				ctx->MouseClick(); ctx->Yield(3);
+				return true;
+			};
+			REQ(select("a"), "source store not visible");
+			driver.click(ctx, "**/Delete selected node"); ctx->Yield(3);
+			REQ(driver.contains("This removes 2 connections") && window.draft() == seed
+				&& window.draftHistory().undoCount() == 0,
+				"confirmation did not count references before mutation");
+			driver.click(ctx, "**/Cancel node deletion"); ctx->Yield(3);
+			REQ(window.draft() == seed && window.draftHistory().undoCount() == 0,
+				"cancel mutated draft or history");
+			driver.click(ctx, "**/Delete selected node"); ctx->Yield(2);
+			driver.click(ctx, "**/Confirm node deletion"); ctx->Yield(3);
+			REQ(window.draft().stores.size() == 3 && window.draft().transfers.size() == 2
+				&& window.draft().transfers[0].sourceId.empty()
+				&& window.draft().transfers[1].sourceId.empty()
+				&& window.draft().transfers[0].destinationId == "b"
+				&& window.draft().transfers[1].destinationId == "c"
+				&& window.draftHistory().undoCount() == 1,
+				"cascade left a dangling reference or did not commit once");
+			for (auto const& link : core::stationAuthoredLinks(window.draft()))
+				REQ(link.from.nodeId != "a" && link.to.nodeId != "a", "dangling authored link");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft() == seed && window.draftHistory().redoCount() == 1,
+				"one undo did not restore the node and both links");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().stores.size() == 3, "redo did not reapply cascade");
+			REQ(select("d"), "unreferenced store not visible");
+			ctx->KeyPress(ImGuiKey_Delete); ctx->Yield(3);
+			REQ(!driver.contains("This removes") && window.draft().stores.size() == 2
+				&& window.draftHistory().undoCount() == 2,
+				"unreferenced deletion asked confirmation or did not commit once");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().stores.size() == 3 && window.draftHistory().undoCount() == 1,
+				"unlinked deletion did not restore in one undo");
+			REQ(world->getStationSystemsSettings() == seed && worldHistory.undoCount() == 0,
+				"draft removal touched the World");
+		});
+		#undef REQ
+		require(driver.passed(), "Flow cascade delete workflow failed");
+	}
+
 	// #653: the Flow inspector. Selecting a node opens that type's shared
 	// entry editor (#652) in a column reserved beside the canvas; the node
 	// body stays compact, the field commits once rather than per keystroke,
@@ -4510,6 +4592,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/removalWorkflow", removalWorkflow});
 	checks.push_back({"station/storeWorkflow", storeWorkflow});
 	checks.push_back({"station/flowLinkWorkflow", flowLinkWorkflow});
+	checks.push_back({"station/flowCascadeDeleteWorkflow", flowCascadeDeleteWorkflow});
 	checks.push_back({"station/flowInspectorWorkflow", flowInspectorWorkflow});
 	checks.push_back({"station/transferWorkflow", transferWorkflow});
 	checks.push_back({"station/compoundWorkflow", compoundWorkflow});

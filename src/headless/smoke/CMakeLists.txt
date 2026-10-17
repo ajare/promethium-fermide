@@ -726,6 +726,8 @@ set_tests_properties(station-editor-stores PROPERTIES LABELS "smoke;functional;v
 # history that records each link created, refused or removed.
 add_test(NAME station-editor-flow-links COMMAND pf-smoke-editor --check station/flowLinkWorkflow)
 set_tests_properties(station-editor-flow-links PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
+add_test(NAME station-editor-flow-cascade-delete COMMAND pf-smoke-editor --check station/flowCascadeDeleteWorkflow)
+set_tests_properties(station-editor-flow-cascade-delete PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
 add_test(NAME station-editor-flow-inspector COMMAND pf-smoke-editor --check station/flowInspectorWorkflow)
 set_tests_properties(station-editor-flow-inspector PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
 add_test(NAME station-editor-transfers COMMAND pf-smoke-editor --check station/transferWorkflow)

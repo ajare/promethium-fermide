@@ -228,7 +228,10 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 	renderDraftHistory();
 	mFlow.render(mDraft, [this](core::StationSystemsSettings& draft) {
 		renderFlowInspectorContents(draft);
-	}, [this] { commitDraftChanges(true); });
+	}, [this] { commitDraftChanges(true); }, [this] {
+		commitDraftChanges(true);
+		mPendingDraftEdit = captureDraft();
+	});
 	// Placement is one action, including on the mouse-down frame. An
 	// inspector field edit is not: while a field is still being edited the
 	// pending snapshot stays open, so typing "1250" is one commit at field
