@@ -670,6 +670,99 @@ namespace
 		require(driver.passed(), "Flow cascade delete workflow failed");
 	}
 
+	// #670: exercise the real rename controls without schedules or biology
+	// masking an installation collision behind an unrelated refusal.
+	void flowInstallationRenameWorkflow(smoke::Context const& smokeContext)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		StationSystemsWindow window;
+		auto const path = smokeContext.temporaryRoot() / "installation-rename.station.yaml";
+		window.setFilePicker([&](bool) -> std::optional<std::string> { return path.string(); });
+		auto world = std::make_shared<core::World>("Installation rename", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed;
+		auto& fuel = seed.stores.emplace_back();
+		fuel.id = "fuel"; fuel.unit = "kJ"; fuel.capacity = 100;
+		for (auto const* id : {"cold", "hot"})
+		{
+			auto& sink = seed.thermalReservoirs.emplace_back();
+			sink.id = id; sink.thermalClass = "low"; sink.heatCapacityKJPerK = 1000;
+		}
+		auto& generator = seed.generators.emplace_back();
+		generator.id = "generator"; generator.fuelStoreId = "fuel";
+		generator.heatSinkId = "hot"; generator.thermalClass = "low";
+		generator.maxRampKWPerSecond = 1;
+		auto& loop = seed.coolantLoops.emplace_back();
+		loop.id = "loop"; loop.hazardClass = "normal"; loop.reservoirId = "cold";
+		loop.coolantCapacityKg = loop.startingCoolantKg = 100;
+		loop.specificHeatKJPerKgK = 4; loop.ratedFlowKgPerS = 1;
+		auto& chiller = seed.chillers.emplace_back();
+		chiller.id = "chiller"; chiller.coldLoopId = "loop";
+		chiller.thermalClass = "low"; chiller.condenserReservoirId = "hot";
+		chiller.ratedCoolingCapacityKW = 5; chiller.cop = 2;
+		std::string diagnostic;
+		auto const configured = world->configureStationSystems(seed, false, &diagnostic);
+		require(configured, diagnostic.c_str());
+		world->markSaved();
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "flowInstallationRename", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			struct Installation { char const* type; char const* id; };
+			Installation const installations[] = {{"Generator", "generator"},
+				{"Coolant loop", "loop"}, {"Chiller", "chiller"}};
+			for (auto const& source : installations)
+			{
+				ImVec4 original{}, moved{};
+				REQ(window.flowNodeRect(source.type, source.id, &original), "installation node missing");
+				auto const start = ImVec2{(original.x + original.z) * 0.5f, (original.y + original.w) * 0.5f};
+				ctx->MouseTeleportToPos(start); ctx->MouseClick(); ctx->Yield(3);
+				ctx->MouseDown(); ctx->Yield(2);
+				ctx->MouseTeleportToPos({start.x + 40, start.y + 35}); ctx->Yield(3);
+				ctx->MouseUp(); ctx->Yield(3);
+				REQ(window.flowNodeRect(source.type, source.id, &moved)
+					&& std::abs(moved.x - original.x - 40) < 0.1f,
+					"installation did not move before collision check");
+				driver.click(ctx, "Save configuration"); ctx->Yield(3);
+				core::StationConfigurationDocument before;
+				REQ(core::loadStationConfiguration(path.string(), before), "baseline layout did not save");
+				auto const undoCount = window.draftHistory().undoCount();
+				auto const redoCount = window.draftHistory().redoCount();
+				for (auto const& target : installations)
+				{
+					if (std::string(source.type) == target.type) continue;
+					driver.click(ctx, "**/New node name"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+					ctx->KeyChars(target.id); ctx->Yield(3);
+					REQ(driver.contains(("An installation named '" + std::string(target.id)
+						+ "' already exists.").c_str()), "collision diagnostic did not identify the installation");
+					// The disabled action must also remain harmless when clicked.
+					REQ(driver.clickDisabled(ctx, "**/Rename selected node", "installation collision"),
+						"colliding rename action was not disabled");
+					ctx->Yield(3);
+					REQ(window.draft() == before.settings, "refused rename changed draft settings");
+					REQ(window.draftHistory().undoCount() == undoCount
+						&& window.draftHistory().redoCount() == redoCount, "refused rename changed history");
+					driver.click(ctx, "Save configuration"); ctx->Yield(3);
+					core::StationConfigurationDocument saved;
+					REQ(core::loadStationConfiguration(path.string(), saved)
+						&& saved.settings == before.settings && saved.positions == before.positions,
+						"refused installation rename changed persisted layout or settings");
+				}
+			}
+			REQ(world->getStationSystemsSettings() == seed && !world->isModified(),
+				"refused draft rename changed the World");
+		});
+		#undef REQ
+		require(driver.passed(), "Flow installation rename workflow failed");
+	}
+
 	// #645: growable port sets and the derived pool on the live canvas.
 	// Placement, growth, shrinkage, wiring and refusal are driven through
 	// the real controls; every assertion is about the draft and the shared
@@ -7092,6 +7185,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/flowTransferPlacementWorkflow", flowTransferPlacementWorkflow});
 	checks.push_back({"station/flowLinkWorkflow", flowLinkWorkflow});
 	checks.push_back({"station/flowCascadeDeleteWorkflow", flowCascadeDeleteWorkflow});
+	checks.push_back({"station/flowInstallationRenameWorkflow", flowInstallationRenameWorkflow});
 	checks.push_back({"station/flowGrowablePortsWorkflow", flowGrowablePortsWorkflow});
 	checks.push_back({"station/flowWaterGasWorkflow", flowWaterGasWorkflow});
 	checks.push_back({"station/flowBiologyWorkflow", flowBiologyWorkflow});

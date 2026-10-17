@@ -728,6 +728,8 @@ add_test(NAME station-editor-flow-links COMMAND pf-smoke-editor --check station/
 set_tests_properties(station-editor-flow-links PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
 add_test(NAME station-editor-flow-transfer-placement COMMAND pf-smoke-editor --check station/flowTransferPlacementWorkflow)
 set_tests_properties(station-editor-flow-transfer-placement PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
+add_test(NAME station-editor-flow-installation-rename COMMAND pf-smoke-editor --check station/flowInstallationRenameWorkflow)
+set_tests_properties(station-editor-flow-installation-rename PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
 add_test(NAME station-editor-flow-cascade-delete COMMAND pf-smoke-editor --check station/flowCascadeDeleteWorkflow)
 set_tests_properties(station-editor-flow-cascade-delete PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
 # #645: growable conversion port sets, optional-port reading and the inert

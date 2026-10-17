@@ -983,9 +983,41 @@ namespace
 				allTypes.maintenanceJobs[0].installationId = installation;
 				for (auto const& type : types) checkCascade(allTypes, type);
 			}
-			core::StationNodeRename collision;
-			require(!core::planStationNodeRename(allTypes, "Generator", "Generator", "Chiller", collision),
-				"rename collided with another installation type");
+			// #670: every installation kind shares the untyped supervision ID
+			// namespace. Check both preflight and application, even for an
+			// unlinked node and a plan whose target was claimed after preflight.
+			for (auto const* source : {"Generator", "Coolant loop", "Chiller"})
+				for (auto const* target : {"Generator", "Coolant loop", "Chiller"})
+				{
+					if (std::string(source) == target) continue;
+					core::StationSystemsSettings installations;
+					installations.generators.emplace_back().id = "Generator";
+					installations.coolantLoops.emplace_back().id = "Coolant loop";
+					installations.chillers.emplace_back().id = "Chiller";
+					auto const snapshot = installations;
+					core::StationNodeRename collision;
+					std::string diagnostic;
+					require(!core::planStationNodeRename(installations, source, source, target,
+						collision, &diagnostic) && diagnostic.find(target) != std::string::npos
+						&& diagnostic.find("installation") != std::string::npos,
+						"cross-kind installation collision lacked a useful refusal");
+					collision = {source, source, target, {}};
+					require(!core::renameStationNode(installations, collision) && installations == snapshot,
+						"application accepted a forged installation collision or changed the draft");
+					require(core::planStationNodeRename(installations, source, source, "available", collision),
+						"unused installation name was refused");
+					if (std::string(target) == "Generator") installations.generators.emplace_back().id = "available";
+					else if (std::string(target) == "Coolant loop") installations.coolantLoops.emplace_back().id = "available";
+					else installations.chillers.emplace_back().id = "available";
+					auto const staleSnapshot = installations;
+					require(!core::renameStationNode(installations, collision) && installations == staleSnapshot,
+						"stale rename plan bypassed the installation namespace");
+					installations = snapshot;
+					installations.stores.emplace_back().id = "available";
+					require(core::planStationNodeRename(installations, source, source, "available", collision)
+						&& core::renameStationNode(installations, collision),
+						"a name outside the installation namespace blocked a legal rename");
+				}
 			// Removal resolves through precisely the same authored references.
 			core::StationNodeRemoval removal;
 			auto unmapped = reordered;
