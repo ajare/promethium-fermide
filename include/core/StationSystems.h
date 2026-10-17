@@ -1719,6 +1719,27 @@ namespace core
 	// list and that entry stops being validated, so a draft can open with
 	// the reference shown as broken. Every other rule stays strict, and
 	// with no list supplied (the World path) behaviour is unchanged.
+	// Shared full-validation / interactive-wiring rules. Interactive wiring
+	// ignores only empty references, never named incompatible endpoints.
+	bool validateStationWaterGasWiring(StationSystemsSettings const&, AtmosphereSettings const&,
+		std::string& diagnostic, bool allowIncomplete = false,
+		std::vector<std::string>* brokenReferences = nullptr);
+	bool validateStationWaterGasWiring(StationSystemsSettings const&, AirlockCycleSettings const&,
+		std::string& diagnostic, bool allowIncomplete = false,
+		std::vector<std::string>* brokenReferences = nullptr);
+	bool validateStationWaterGasWiring(StationSystemsSettings const&, WaterCollectorSettings const&,
+		std::string& diagnostic, bool allowIncomplete = false,
+		std::vector<std::string>* brokenReferences = nullptr);
+	bool validateStationWaterGasWiring(StationSystemsSettings const&, WaterTreatmentSettings const&,
+		std::string& diagnostic, bool allowIncomplete = false,
+		std::vector<std::string>* brokenReferences = nullptr);
+	bool validateStationWaterGasWiring(StationSystemsSettings const&, ElectrolyzerSettings const&,
+		std::string& diagnostic, bool allowIncomplete = false,
+		std::vector<std::string>* brokenReferences = nullptr);
+	bool validateStationWaterGasWiring(StationSystemsSettings const&, Co2CaptureSettings const&,
+		std::string& diagnostic, bool allowIncomplete = false,
+		std::vector<std::string>* brokenReferences = nullptr);
+
 	bool validateStationSystemsSettings(StationSystemsSettings const&, std::string& diagnostic,
 		std::vector<std::string>* brokenReferences = nullptr);
 	// The endpoint half of the transfer entry check (#640): the rules a link

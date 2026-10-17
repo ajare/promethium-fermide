@@ -121,6 +121,27 @@ namespace core
 			PortDescriptor{"Coolant loop", "Buffer gates", StationPortDirection::Output, "circulation-gate", "circulation-gate", 0, {}},
 			PortDescriptor{"Thermal buffer", "Circulation gate", StationPortDirection::Input, "circulation-gate", "circulation-gate", 1, {}, true},
 			PortDescriptor{"Chiller", "Cold loop", StationPortDirection::Input, "evaporator", "cold-loop", 1, {}},
+			PortDescriptor{"Atmosphere", "Gas out", StationPortDirection::Output, "atmosphere-source", "gas-draw", 0, {}},
+			PortDescriptor{"Atmosphere", "Oxygen in", StationPortDirection::Input, "oxygen-target", "oxygen-delivery", 0, {}},
+			PortDescriptor{"Coolant loop", "Cold surfaces", StationPortDirection::Output, "cold-surface", "condensation", 0, {}},
+			PortDescriptor{"Water collector", "Atmosphere", StationPortDirection::Input, "gas-draw", "atmosphere-source", 1, {}, false},
+			PortDescriptor{"Water collector", "Cooling loop", StationPortDirection::Input, "condensation", "cold-surface", 1, {}, false},
+			PortDescriptor{"Water collector", "Raw water out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Water treatment", "Raw water in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Water treatment", "Treated water out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Water treatment", "Concentrate out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Water treatment", "Consumable in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Water treatment", "Clearance in", StationPortDirection::Input, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Electrolyzer", "Water in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Electrolyzer", "Oxygen out", StationPortDirection::Output, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Electrolyzer", "Hydrogen out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Electrolyzer", "Compartment oxygen", StationPortDirection::Output, "oxygen-delivery", "oxygen-target", 1, {}, true},
+			PortDescriptor{"Electrolyzer", "Heat out", StationPortDirection::Output, "heat", "heat-sink", 1, {}, false},
+			PortDescriptor{"CO2 capture", "Atmosphere", StationPortDirection::Input, "gas-draw", "atmosphere-source", 1, {}, false},
+			PortDescriptor{"CO2 capture", "Captured CO2 out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
+			PortDescriptor{"CO2 capture", "Consumable in", StationPortDirection::Input, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Atmosphere", "Heat out", StationPortDirection::Output, "heat", "heat-sink", 1, {}, true},
+			PortDescriptor{"Airlock cycle", "Atmosphere", StationPortDirection::Input, "gas-draw", "atmosphere-source", 1, {}, false},
 			PortDescriptor{"Chiller", "Condenser heat", StationPortDirection::Output, "heat", "heat-sink", 1, {}}};
 		return descriptors;
 	}
@@ -280,7 +301,13 @@ namespace core
 			StationPlaceableType{"Radiator", "radiator", "Thermal"},
 			StationPlaceableType{"Coolant loop", "coolantLoop", "Thermal"},
 			StationPlaceableType{"Chiller", "chiller", "Thermal"},
-			StationPlaceableType{"Thermal buffer", "buffer", "Thermal"}};
+			StationPlaceableType{"Thermal buffer", "buffer", "Thermal"},
+			StationPlaceableType{"Water collector", "collector", "Water"},
+			StationPlaceableType{"Water treatment", "treatment", "Water"},
+			StationPlaceableType{"Electrolyzer", "electrolyzer", "Gas"},
+			StationPlaceableType{"CO2 capture", "capture", "Gas"},
+			StationPlaceableType{"Atmosphere", "atmosphere", "Gas"},
+			StationPlaceableType{"Airlock cycle", "cycle", "Gas"}};
 		return placeable;
 	}
 

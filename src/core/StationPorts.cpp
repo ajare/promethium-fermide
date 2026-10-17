@@ -75,6 +75,114 @@ namespace
 			return mapLink({link.to, link.from}, mapping);
 		if (from->direction != StationPortDirection::Output
 			|| to->direction != StationPortDirection::Input) return false;
+		if (link.to.nodeType == "Water collector" && link.to.portName == "Atmosphere"
+			&& link.from.nodeType == "Atmosphere" && link.from.portName == "Gas out")
+		{
+			mapping = {"Water collector", link.to.nodeId, "atmosphereId", link.from};
+			return true;
+		}
+		if (link.to.nodeType == "Water collector" && link.to.portName == "Cooling loop"
+			&& link.from.nodeType == "Coolant loop" && link.from.portName == "Cold surfaces")
+		{
+			mapping = {"Water collector", link.to.nodeId, "coolingLoopId", link.from};
+			return true;
+		}
+		if (link.from.nodeType == "Water collector" && link.from.portName == "Raw water out"
+			&& link.to.nodeType == "Store" && link.to.portName == "Inventory in")
+		{
+			mapping = {"Water collector", link.from.nodeId, "destStoreId", link.to};
+			return true;
+		}
+		if (link.to.nodeType == "Water treatment" && link.to.portName == "Raw water in"
+			&& link.from.nodeType == "Store" && link.from.portName == "Inventory out")
+		{
+			mapping = {"Water treatment", link.to.nodeId, "sourceStoreId", link.from};
+			return true;
+		}
+		if (link.from.nodeType == "Water treatment" && link.from.portName == "Treated water out"
+			&& link.to.nodeType == "Store" && link.to.portName == "Inventory in")
+		{
+			mapping = {"Water treatment", link.from.nodeId, "treatedStoreId", link.to};
+			return true;
+		}
+		if (link.from.nodeType == "Water treatment" && link.from.portName == "Concentrate out"
+			&& link.to.nodeType == "Store" && link.to.portName == "Inventory in")
+		{
+			mapping = {"Water treatment", link.from.nodeId, "concentrateStoreId", link.to};
+			return true;
+		}
+		if (link.to.nodeType == "Water treatment" && link.to.portName == "Consumable in"
+			&& link.from.nodeType == "Store" && link.from.portName == "Inventory out")
+		{
+			mapping = {"Water treatment", link.to.nodeId, "consumableStoreId", link.from};
+			return true;
+		}
+		if (link.to.nodeType == "Water treatment" && link.to.portName == "Clearance in"
+			&& link.from.nodeType == "Store" && link.from.portName == "Inventory out")
+		{
+			mapping = {"Water treatment", link.to.nodeId, "clearanceStoreId", link.from};
+			return true;
+		}
+		if (link.to.nodeType == "Electrolyzer" && link.to.portName == "Water in"
+			&& link.from.nodeType == "Store" && link.from.portName == "Inventory out")
+		{
+			mapping = {"Electrolyzer", link.to.nodeId, "waterStoreId", link.from};
+			return true;
+		}
+		if (link.from.nodeType == "Electrolyzer" && link.from.portName == "Oxygen out"
+			&& link.to.nodeType == "Store" && link.to.portName == "Inventory in")
+		{
+			mapping = {"Electrolyzer", link.from.nodeId, "oxygenStoreId", link.to};
+			return true;
+		}
+		if (link.from.nodeType == "Electrolyzer" && link.from.portName == "Hydrogen out"
+			&& link.to.nodeType == "Store" && link.to.portName == "Inventory in")
+		{
+			mapping = {"Electrolyzer", link.from.nodeId, "hydrogenStoreId", link.to};
+			return true;
+		}
+		if (link.from.nodeType == "Electrolyzer" && link.from.portName == "Compartment oxygen"
+			&& link.to.nodeType == "Atmosphere" && link.to.portName == "Oxygen in")
+		{
+			mapping = {"Electrolyzer", link.from.nodeId, "atmosphereId", link.to};
+			return true;
+		}
+		if (link.from.nodeType == "Electrolyzer" && link.from.portName == "Heat out"
+			&& link.to.nodeType == "Reservoir" && link.to.portName == "Heat in")
+		{
+			mapping = {"Electrolyzer", link.from.nodeId, "heatSinkId", link.to};
+			return true;
+		}
+		if (link.to.nodeType == "CO2 capture" && link.to.portName == "Atmosphere"
+			&& link.from.nodeType == "Atmosphere" && link.from.portName == "Gas out")
+		{
+			mapping = {"CO2 capture", link.to.nodeId, "atmosphereId", link.from};
+			return true;
+		}
+		if (link.from.nodeType == "CO2 capture" && link.from.portName == "Captured CO2 out"
+			&& link.to.nodeType == "Store" && link.to.portName == "Inventory in")
+		{
+			mapping = {"CO2 capture", link.from.nodeId, "captureStoreId", link.to};
+			return true;
+		}
+		if (link.to.nodeType == "CO2 capture" && link.to.portName == "Consumable in"
+			&& link.from.nodeType == "Store" && link.from.portName == "Inventory out")
+		{
+			mapping = {"CO2 capture", link.to.nodeId, "consumableStoreId", link.from};
+			return true;
+		}
+		if (link.from.nodeType == "Atmosphere" && link.from.portName == "Heat out"
+			&& link.to.nodeType == "Reservoir" && link.to.portName == "Heat in")
+		{
+			mapping = {"Atmosphere", link.from.nodeId, "reservoirId", link.to};
+			return true;
+		}
+		if (link.to.nodeType == "Airlock cycle" && link.to.portName == "Atmosphere"
+			&& link.from.nodeType == "Atmosphere" && link.from.portName == "Gas out")
+		{
+			mapping = {"Airlock cycle", link.to.nodeId, "atmosphereId", link.from};
+			return true;
+		}
 		if (link.to.nodeType == "Transfer" && link.to.portName == "Source" && link.from.nodeType == "Store")
 		{
 			mapping = {"Transfer", link.to.nodeId, "Source", link.from};
@@ -205,7 +313,8 @@ namespace
 		// The radiator (#657) is not a machine, but its host mount routes
 		// through the same field resolver for write and clear, so it shares
 		// the routing predicate.
-		return ownerType == "Equipment" || ownerType == "Generator" || ownerType == "Fuel cell"
+		return ownerType == "Water collector" || ownerType == "Water treatment" || ownerType == "Electrolyzer" || ownerType == "CO2 capture" || ownerType == "Atmosphere" || ownerType == "Airlock cycle"
+			|| ownerType == "Equipment" || ownerType == "Generator" || ownerType == "Fuel cell"
 			|| ownerType == "Sabatier" || ownerType == "Methane processor" || ownerType == "Radiator"
 			|| ownerType == "Coolant loop" || ownerType == "Chiller" || ownerType == "Thermal buffer";
 	}
@@ -221,6 +330,66 @@ namespace
 		std::string const& ownerId, std::string const& field)
 		-> std::remove_reference_t<decltype((settings.equipmentLoads[0].heatSinkId))>*
 	{
+		if (ownerType == "Water collector")
+		{
+			auto found = std::find_if(settings.waterCollectors.begin(), settings.waterCollectors.end(),
+				[&](auto const& entry) { return entry.id == ownerId; });
+			if (found == settings.waterCollectors.end()) return nullptr;
+			if (field == "atmosphereId") return &found->atmosphereId;
+			if (field == "coolingLoopId") return &found->coolingLoopId;
+			if (field == "destStoreId") return &found->destStoreId;
+			return nullptr;
+		}
+		if (ownerType == "Water treatment")
+		{
+			auto found = std::find_if(settings.waterTreatments.begin(), settings.waterTreatments.end(),
+				[&](auto const& entry) { return entry.id == ownerId; });
+			if (found == settings.waterTreatments.end()) return nullptr;
+			if (field == "sourceStoreId") return &found->sourceStoreId;
+			if (field == "treatedStoreId") return &found->treatedStoreId;
+			if (field == "concentrateStoreId") return &found->concentrateStoreId;
+			if (field == "consumableStoreId") return &found->consumableStoreId;
+			if (field == "clearanceStoreId") return &found->clearanceStoreId;
+			return nullptr;
+		}
+		if (ownerType == "Electrolyzer")
+		{
+			auto found = std::find_if(settings.electrolyzers.begin(), settings.electrolyzers.end(),
+				[&](auto const& entry) { return entry.id == ownerId; });
+			if (found == settings.electrolyzers.end()) return nullptr;
+			if (field == "waterStoreId") return &found->waterStoreId;
+			if (field == "oxygenStoreId") return &found->oxygenStoreId;
+			if (field == "hydrogenStoreId") return &found->hydrogenStoreId;
+			if (field == "atmosphereId") return &found->atmosphereId;
+			if (field == "heatSinkId") return &found->heatSinkId;
+			return nullptr;
+		}
+		if (ownerType == "CO2 capture")
+		{
+			auto found = std::find_if(settings.co2Captures.begin(), settings.co2Captures.end(),
+				[&](auto const& entry) { return entry.id == ownerId; });
+			if (found == settings.co2Captures.end()) return nullptr;
+			if (field == "atmosphereId") return &found->atmosphereId;
+			if (field == "captureStoreId") return &found->captureStoreId;
+			if (field == "consumableStoreId") return &found->consumableStoreId;
+			return nullptr;
+		}
+		if (ownerType == "Atmosphere")
+		{
+			auto found = std::find_if(settings.atmospheres.begin(), settings.atmospheres.end(),
+				[&](auto const& entry) { return entry.id == ownerId; });
+			if (found == settings.atmospheres.end()) return nullptr;
+			if (field == "reservoirId") return &found->reservoirId;
+			return nullptr;
+		}
+		if (ownerType == "Airlock cycle")
+		{
+			auto found = std::find_if(settings.airlockCycles.begin(), settings.airlockCycles.end(),
+				[&](auto const& entry) { return entry.id == ownerId; });
+			if (found == settings.airlockCycles.end()) return nullptr;
+			if (field == "atmosphereId") return &found->atmosphereId;
+			return nullptr;
+		}
 		if (ownerType == "Equipment")
 		{
 			auto const found = std::find_if(settings.equipmentLoads.begin(),
@@ -604,6 +773,54 @@ namespace
 		std::string& diagnostic)
 	{
 		diagnostic.clear();
+		if (mapping.ownerType == "Water collector")
+		{
+			auto found = std::find_if(settings.waterCollectors.begin(), settings.waterCollectors.end(),
+				[&](auto const& entry) { return entry.id == mapping.ownerId; });
+			if (found == settings.waterCollectors.end()) return false;
+			validateStationWaterGasWiring(settings, *found, diagnostic, true);
+			return true;
+		}
+		if (mapping.ownerType == "Water treatment")
+		{
+			auto found = std::find_if(settings.waterTreatments.begin(), settings.waterTreatments.end(),
+				[&](auto const& entry) { return entry.id == mapping.ownerId; });
+			if (found == settings.waterTreatments.end()) return false;
+			validateStationWaterGasWiring(settings, *found, diagnostic, true);
+			return true;
+		}
+		if (mapping.ownerType == "Electrolyzer")
+		{
+			auto found = std::find_if(settings.electrolyzers.begin(), settings.electrolyzers.end(),
+				[&](auto const& entry) { return entry.id == mapping.ownerId; });
+			if (found == settings.electrolyzers.end()) return false;
+			validateStationWaterGasWiring(settings, *found, diagnostic, true);
+			return true;
+		}
+		if (mapping.ownerType == "CO2 capture")
+		{
+			auto found = std::find_if(settings.co2Captures.begin(), settings.co2Captures.end(),
+				[&](auto const& entry) { return entry.id == mapping.ownerId; });
+			if (found == settings.co2Captures.end()) return false;
+			validateStationWaterGasWiring(settings, *found, diagnostic, true);
+			return true;
+		}
+		if (mapping.ownerType == "Atmosphere")
+		{
+			auto found = std::find_if(settings.atmospheres.begin(), settings.atmospheres.end(),
+				[&](auto const& entry) { return entry.id == mapping.ownerId; });
+			if (found == settings.atmospheres.end()) return false;
+			validateStationWaterGasWiring(settings, *found, diagnostic, true);
+			return true;
+		}
+		if (mapping.ownerType == "Airlock cycle")
+		{
+			auto found = std::find_if(settings.airlockCycles.begin(), settings.airlockCycles.end(),
+				[&](auto const& entry) { return entry.id == mapping.ownerId; });
+			if (found == settings.airlockCycles.end()) return false;
+			validateStationWaterGasWiring(settings, *found, diagnostic, true);
+			return true;
+		}
 		if (mapping.ownerType == "Conversion")
 		{
 			auto const found = std::find_if(settings.conversions.begin(), settings.conversions.end(),
@@ -819,8 +1036,8 @@ namespace
 		}
 		if (mapping.ownerType == "Coolant loop")
 		{
-			// Unused loops accept any declared host. A referenced loop must
-			// also preserve its chiller's interface constraints.
+			// Referenced loops preserve both chiller and collector interfaces,
+			// whichever end of the processing line was wired first.
 			auto const* host = machineField(settings, mapping.ownerType,
 				mapping.ownerId, mapping.field);
 			if (!host) return false;
@@ -834,6 +1051,10 @@ namespace
 						diagnostic = scopedChillerWiring(settings, chiller);
 						if (!diagnostic.empty()) break;
 					}
+			if (diagnostic.empty())
+				for (auto const& collector : settings.waterCollectors)
+					if (collector.coolingLoopId == mapping.ownerId
+						&& !validateStationWaterGasWiring(settings, collector, diagnostic, true)) break;
 			return true;
 		}
 		if (mapping.ownerType == "Radiator")
@@ -866,6 +1087,78 @@ namespace
 std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& settings)
 {
 	std::vector<AuthoredLink> links;
+	for (auto const& entry : settings.waterCollectors)
+	{
+		if (!entry.atmosphereId.empty())
+			links.push_back({linkIdentity("Water collector", entry.id, "atmosphereId"),
+				{"Atmosphere", entry.atmosphereId, "Gas out"}, {"Water collector", entry.id, "Atmosphere"}});
+		if (!entry.coolingLoopId.empty())
+			links.push_back({linkIdentity("Water collector", entry.id, "coolingLoopId"),
+				{"Coolant loop", entry.coolingLoopId, "Cold surfaces"}, {"Water collector", entry.id, "Cooling loop"}});
+		if (!entry.destStoreId.empty())
+			links.push_back({linkIdentity("Water collector", entry.id, "destStoreId"),
+				{"Water collector", entry.id, "Raw water out"}, {"Store", entry.destStoreId, "Inventory in"}});
+	}
+	for (auto const& entry : settings.waterTreatments)
+	{
+		if (!entry.sourceStoreId.empty())
+			links.push_back({linkIdentity("Water treatment", entry.id, "sourceStoreId"),
+				{"Store", entry.sourceStoreId, "Inventory out"}, {"Water treatment", entry.id, "Raw water in"}});
+		if (!entry.treatedStoreId.empty())
+			links.push_back({linkIdentity("Water treatment", entry.id, "treatedStoreId"),
+				{"Water treatment", entry.id, "Treated water out"}, {"Store", entry.treatedStoreId, "Inventory in"}});
+		if (!entry.concentrateStoreId.empty())
+			links.push_back({linkIdentity("Water treatment", entry.id, "concentrateStoreId"),
+				{"Water treatment", entry.id, "Concentrate out"}, {"Store", entry.concentrateStoreId, "Inventory in"}});
+		if (!entry.consumableStoreId.empty())
+			links.push_back({linkIdentity("Water treatment", entry.id, "consumableStoreId"),
+				{"Store", entry.consumableStoreId, "Inventory out"}, {"Water treatment", entry.id, "Consumable in"}});
+		if (!entry.clearanceStoreId.empty())
+			links.push_back({linkIdentity("Water treatment", entry.id, "clearanceStoreId"),
+				{"Store", entry.clearanceStoreId, "Inventory out"}, {"Water treatment", entry.id, "Clearance in"}});
+	}
+	for (auto const& entry : settings.electrolyzers)
+	{
+		if (!entry.waterStoreId.empty())
+			links.push_back({linkIdentity("Electrolyzer", entry.id, "waterStoreId"),
+				{"Store", entry.waterStoreId, "Inventory out"}, {"Electrolyzer", entry.id, "Water in"}});
+		if (!entry.oxygenStoreId.empty())
+			links.push_back({linkIdentity("Electrolyzer", entry.id, "oxygenStoreId"),
+				{"Electrolyzer", entry.id, "Oxygen out"}, {"Store", entry.oxygenStoreId, "Inventory in"}});
+		if (!entry.hydrogenStoreId.empty())
+			links.push_back({linkIdentity("Electrolyzer", entry.id, "hydrogenStoreId"),
+				{"Electrolyzer", entry.id, "Hydrogen out"}, {"Store", entry.hydrogenStoreId, "Inventory in"}});
+		if (!entry.atmosphereId.empty())
+			links.push_back({linkIdentity("Electrolyzer", entry.id, "atmosphereId"),
+				{"Electrolyzer", entry.id, "Compartment oxygen"}, {"Atmosphere", entry.atmosphereId, "Oxygen in"}});
+		if (!entry.heatSinkId.empty())
+			links.push_back({linkIdentity("Electrolyzer", entry.id, "heatSinkId"),
+				{"Electrolyzer", entry.id, "Heat out"}, {"Reservoir", entry.heatSinkId, "Heat in"}});
+	}
+	for (auto const& entry : settings.co2Captures)
+	{
+		if (!entry.atmosphereId.empty())
+			links.push_back({linkIdentity("CO2 capture", entry.id, "atmosphereId"),
+				{"Atmosphere", entry.atmosphereId, "Gas out"}, {"CO2 capture", entry.id, "Atmosphere"}});
+		if (!entry.captureStoreId.empty())
+			links.push_back({linkIdentity("CO2 capture", entry.id, "captureStoreId"),
+				{"CO2 capture", entry.id, "Captured CO2 out"}, {"Store", entry.captureStoreId, "Inventory in"}});
+		if (!entry.consumableStoreId.empty())
+			links.push_back({linkIdentity("CO2 capture", entry.id, "consumableStoreId"),
+				{"Store", entry.consumableStoreId, "Inventory out"}, {"CO2 capture", entry.id, "Consumable in"}});
+	}
+	for (auto const& entry : settings.atmospheres)
+	{
+		if (!entry.reservoirId.empty())
+			links.push_back({linkIdentity("Atmosphere", entry.id, "reservoirId"),
+				{"Atmosphere", entry.id, "Heat out"}, {"Reservoir", entry.reservoirId, "Heat in"}});
+	}
+	for (auto const& entry : settings.airlockCycles)
+	{
+		if (!entry.atmosphereId.empty())
+			links.push_back({linkIdentity("Airlock cycle", entry.id, "atmosphereId"),
+				{"Atmosphere", entry.atmosphereId, "Gas out"}, {"Airlock cycle", entry.id, "Atmosphere"}});
+	}
 	for (auto const& transfer : settings.transfers)
 	{
 		// An empty reference is an unconnected connector, not a link to an
@@ -1301,7 +1594,10 @@ LinkVerdict evaluateStationLink(StationSystemsSettings const& settings, Candidat
 	{
 		scopedWiringRule(settings, mapping, beforeWiring);
 		if (!afterWiring.empty() && (afterWiring != beforeWiring
-			|| mapping.ownerType == "Chiller" || mapping.ownerType == "Coolant loop"))
+			|| mapping.ownerType == "Chiller" || mapping.ownerType == "Coolant loop"
+			|| mapping.ownerType == "Water collector" || mapping.ownerType == "Water treatment"
+			|| mapping.ownerType == "Electrolyzer" || mapping.ownerType == "CO2 capture"
+			|| mapping.ownerType == "Atmosphere" || mapping.ownerType == "Airlock cycle"))
 			return refuse(afterWiring);
 	}
 	// The whole-configuration pass is the outer net: it says whether the link

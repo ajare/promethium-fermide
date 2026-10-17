@@ -1072,69 +1072,11 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	ImGui::SeparatorText("Draft atmospheres (m3/kg/C/kPa; ideal-gas partial pressures; occupancy is an authored load assignment; vapour caps at saturation and condenses with latent heat; leak is a constant total-mass rate; limits are reported, never clamped)");
 	for (size_t index = 0; index < mDraft.atmospheres.size(); )
 	{
-		auto& atmosphere = mDraft.atmospheres[index];
 		auto const row = std::to_string(index);
-		bool removeAtmosphere = false;
-		ImGui::PushItemWidth(220);
-		char atmosphereIdBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(atmosphereIdBuffer, atmosphere.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Atmosphere " + row + " id").c_str(),
-			atmosphereIdBuffer, sizeof(atmosphereIdBuffer)))
-			atmosphere.id = atmosphereIdBuffer;
-		char hazardBuffer[16]{};
-		std::strncpy(hazardBuffer, atmosphere.hazardClass.c_str(), sizeof(hazardBuffer) - 1);
-		if (ImGui::InputText(("Atmosphere " + row + " hazard class").c_str(),
-			hazardBuffer, sizeof(hazardBuffer)))
-			atmosphere.hazardClass = hazardBuffer;
-		ImGui::InputDouble(("Atmosphere " + row + " volume m3").c_str(),
-			&atmosphere.volumeM3, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Atmosphere " + row + " starting oxygen kg").c_str(),
-			&atmosphere.startingOxygenKg, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(("Atmosphere " + row + " starting nitrogen kg").c_str(),
-			&atmosphere.startingNitrogenKg, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(("Atmosphere " + row + " starting CO2 kg").c_str(),
-			&atmosphere.startingCarbonDioxideKg, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(("Atmosphere " + row + " starting water vapour kg").c_str(),
-			&atmosphere.startingWaterVapourKg, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(("Atmosphere " + row + " starting temperature C").c_str(),
-			&atmosphere.startingTemperatureC, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Atmosphere " + row + " thermal capacity kJ/K").c_str(),
-			&atmosphere.thermalCapacityKJPerK, 0.0, 0.0, "%.3f");
-		char atmosphereReservoirBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(atmosphereReservoirBuffer, atmosphere.reservoirId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Atmosphere " + row + " reservoir (empty = adiabatic)").c_str(),
-			atmosphereReservoirBuffer, sizeof(atmosphereReservoirBuffer)))
-			atmosphere.reservoirId = atmosphereReservoirBuffer;
-		ImGui::InputDouble(("Atmosphere " + row + " exchanger conductance kW/K").c_str(),
-			&atmosphere.exchangerConductanceKWPerK, 0.0, 0.0, "%.4f");
-		ImGui::InputInt(("Atmosphere " + row + " occupants").c_str(),
-			&atmosphere.occupants, 1, 0);
-		ImGui::InputDouble(("Atmosphere " + row + " O2 use per occupant kg/s").c_str(),
-			&atmosphere.oxygenUsePerOccupantKgPerS, 0.0, 0.0, "%.6f");
-		ImGui::InputDouble(("Atmosphere " + row + " CO2 produced per occupant kg/s").c_str(),
-			&atmosphere.co2ProductionPerOccupantKgPerS, 0.0, 0.0, "%.6f");
-		ImGui::InputDouble(("Atmosphere " + row + " sensible heat per occupant kW").c_str(),
-			&atmosphere.sensibleHeatPerOccupantKW, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(("Atmosphere " + row + " moisture added per occupant kg/s").c_str(),
-			&atmosphere.moistureAdditionPerOccupantKgPerS, 0.0, 0.0, "%.6f");
-		ImGui::InputDouble(("Atmosphere " + row + " leak rate kg/s").c_str(),
-			&atmosphere.leakRateKgPerS, 0.0, 0.0, "%.6f");
-		ImGui::InputDouble(("Atmosphere " + row + " min pressure kPa").c_str(),
-			&atmosphere.minPressureKPa, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Atmosphere " + row + " max pressure kPa").c_str(),
-			&atmosphere.maxPressureKPa, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Atmosphere " + row + " min O2 partial pressure kPa").c_str(),
-			&atmosphere.minOxygenPartialPressureKPa, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Atmosphere " + row + " max CO2 partial pressure kPa").c_str(),
-			&atmosphere.maxCarbonDioxidePartialPressureKPa, 0.0, 0.0, "%.3f");
-		ImGui::SameLine();
-		if (ImGui::Button(("Remove atmosphere " + row).c_str()))
-			removeAtmosphere = true;
-		ImGui::PopItemWidth();
-		if (removeAtmosphere)
+		if (station_editor::renderAtmosphereEntry(mDraft, mDraft.atmospheres[index],
+			"Atmosphere " + row, "Remove atmosphere " + row))
 			mDraft.atmospheres.erase(mDraft.atmospheres.begin() + static_cast<std::ptrdiff_t>(index));
-		else
-			++index;
+		else ++index;
 	}
 	if (mDraft.atmospheres.size() < core::MaxStationAtmospheres && ImGui::Button("Add atmosphere"))
 	{
@@ -1163,38 +1105,11 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	ImGui::SeparatorText("Draft airlock cycles (kg/seconds; scheduled removals on the shared scenario schedule order; the recovered fraction is retained in the receiver, the remainder is lost through the outer hatch)");
 	for (size_t index = 0; index < mDraft.airlockCycles.size(); )
 	{
-		auto& cycle = mDraft.airlockCycles[index];
 		auto const row = std::to_string(index);
-		bool removeCycle = false;
-		ImGui::PushItemWidth(220);
-		char cycleIdBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(cycleIdBuffer, cycle.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Airlock cycle " + row + " id").c_str(),
-			cycleIdBuffer, sizeof(cycleIdBuffer)))
-			cycle.id = cycleIdBuffer;
-		char cycleAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(cycleAtmosphereBuffer, cycle.atmosphereId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Airlock cycle " + row + " atmosphere").c_str(),
-			cycleAtmosphereBuffer, sizeof(cycleAtmosphereBuffer)))
-			cycle.atmosphereId = cycleAtmosphereBuffer;
-		ImGui::InputDouble(("Airlock cycle " + row + " gas mass kg").c_str(),
-			&cycle.gasMassKg, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(("Airlock cycle " + row + " first occurrence s").c_str(),
-			&cycle.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Airlock cycle " + row + " recurrence s (0 = one-off)").c_str(),
-			&cycle.recurrenceSeconds, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Airlock cycle " + row + " recovered fraction").c_str(),
-			&cycle.recoveredFraction, 0.0, 0.0, "%.3f");
-		ImGui::InputInt(("Airlock cycle " + row + " priority").c_str(),
-			&cycle.priority, 1, 0);
-		ImGui::SameLine();
-		if (ImGui::Button(("Remove airlock cycle " + row).c_str()))
-			removeCycle = true;
-		ImGui::PopItemWidth();
-		if (removeCycle)
+		if (station_editor::renderAirlockCycleEntry(mDraft, mDraft.airlockCycles[index],
+			"Airlock cycle " + row, "Remove airlock cycle " + row))
 			mDraft.airlockCycles.erase(mDraft.airlockCycles.begin() + static_cast<std::ptrdiff_t>(index));
-		else
-			++index;
+		else ++index;
 	}
 	if (mDraft.airlockCycles.size() < core::MaxStationAirlockCycles && ImGui::Button("Add airlock cycle"))
 	{
@@ -1347,52 +1262,11 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	ImGui::SeparatorText("Draft water collectors (#402; condensate inherits the compartment's hazard class; the cold surface needs coolant circulation and must be colder than the compartment air; latent heat routes into the coolant loop once; destination must be a plain mass store)");
 	for (size_t index = 0; index < mDraft.waterCollectors.size(); )
 	{
-		auto& collector = mDraft.waterCollectors[index];
 		auto const row = std::to_string(index);
-		bool removeCollector = false;
-		char collectorIdBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(collectorIdBuffer, collector.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Collector " + row + " id").c_str(),
-			collectorIdBuffer, sizeof(collectorIdBuffer)))
-			collector.id = collectorIdBuffer;
-		char collectorHazardBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(collectorHazardBuffer, collector.hazardClass.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Collector " + row + " hazard class").c_str(),
-			collectorHazardBuffer, sizeof(collectorHazardBuffer)))
-			collector.hazardClass = collectorHazardBuffer;
-		char collectorAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(collectorAtmosphereBuffer, collector.atmosphereId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Collector " + row + " atmosphere").c_str(),
-			collectorAtmosphereBuffer, sizeof(collectorAtmosphereBuffer)))
-			collector.atmosphereId = collectorAtmosphereBuffer;
-		char collectorLoopBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(collectorLoopBuffer, collector.coolingLoopId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Collector " + row + " cooling loop").c_str(),
-			collectorLoopBuffer, sizeof(collectorLoopBuffer)))
-			collector.coolingLoopId = collectorLoopBuffer;
-		char collectorClassBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(collectorClassBuffer, collector.thermalClass.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Collector " + row + " thermal class").c_str(),
-			collectorClassBuffer, sizeof(collectorClassBuffer)))
-			collector.thermalClass = collectorClassBuffer;
-		char collectorDestBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(collectorDestBuffer, collector.destStoreId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Collector " + row + " raw water store").c_str(),
-			collectorDestBuffer, sizeof(collectorDestBuffer)))
-			collector.destStoreId = collectorDestBuffer;
-		ImGui::PushItemWidth(140.0f);
-		ImGui::InputDouble(("Collector " + row + " max rate kg/s").c_str(),
-			&collector.maxRateKgPerS, 0.0, 0.0, "%.6f");
-		ImGui::InputDouble(("Collector " + row + " target RH").c_str(),
-			&collector.targetRelativeHumidity, 0.0, 0.0, "%.3f");
-		ImGui::SameLine();
-		if (ImGui::Button(("Remove collector " + row).c_str()))
-			removeCollector = true;
-		ImGui::PopItemWidth();
-		if (removeCollector)
+		if (station_editor::renderWaterCollectorEntry(mDraft, mDraft.waterCollectors[index],
+			"Collector " + row, "Remove collector " + row))
 			mDraft.waterCollectors.erase(mDraft.waterCollectors.begin() + static_cast<std::ptrdiff_t>(index));
-		else
-			++index;
+		else ++index;
 	}
 	if (mDraft.waterCollectors.size() < core::MaxStationWaterCollectors && ImGui::Button("Add water collector"))
 	{
@@ -1419,64 +1293,11 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	ImGui::SeparatorText("Draft water treatments (#402; raw water splits into treated water plus retained concentrate for declared electricity and consumables; full rated power qualifies the output, curtailed power holds it unqualified; water stores must be plain mass stores, the consumable store may be compound)");
 	for (size_t index = 0; index < mDraft.waterTreatments.size(); )
 	{
-		auto& treatment = mDraft.waterTreatments[index];
 		auto const row = std::to_string(index);
-		bool removeTreatment = false;
-		char treatmentIdBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(treatmentIdBuffer, treatment.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Treatment " + row + " id").c_str(),
-			treatmentIdBuffer, sizeof(treatmentIdBuffer)))
-			treatment.id = treatmentIdBuffer;
-		char treatmentHazardBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(treatmentHazardBuffer, treatment.hazardClass.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Treatment " + row + " hazard class").c_str(),
-			treatmentHazardBuffer, sizeof(treatmentHazardBuffer)))
-			treatment.hazardClass = treatmentHazardBuffer;
-		char treatmentSourceBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(treatmentSourceBuffer, treatment.sourceStoreId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Treatment " + row + " raw water store").c_str(),
-			treatmentSourceBuffer, sizeof(treatmentSourceBuffer)))
-			treatment.sourceStoreId = treatmentSourceBuffer;
-		char treatmentTreatedBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(treatmentTreatedBuffer, treatment.treatedStoreId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Treatment " + row + " treated store").c_str(),
-			treatmentTreatedBuffer, sizeof(treatmentTreatedBuffer)))
-			treatment.treatedStoreId = treatmentTreatedBuffer;
-		char treatmentConcentrateBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(treatmentConcentrateBuffer, treatment.concentrateStoreId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Treatment " + row + " concentrate store").c_str(),
-			treatmentConcentrateBuffer, sizeof(treatmentConcentrateBuffer)))
-			treatment.concentrateStoreId = treatmentConcentrateBuffer;
-		char treatmentConsumableBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(treatmentConsumableBuffer, treatment.consumableStoreId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Treatment " + row + " consumable store").c_str(),
-			treatmentConsumableBuffer, sizeof(treatmentConsumableBuffer)))
-			treatment.consumableStoreId = treatmentConsumableBuffer;
-		char treatmentClearanceBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(treatmentClearanceBuffer, treatment.clearanceStoreId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Treatment " + row + " release-clearance store").c_str(),
-			treatmentClearanceBuffer, sizeof(treatmentClearanceBuffer)))
-			treatment.clearanceStoreId = treatmentClearanceBuffer;
-		ImGui::PushItemWidth(140.0f);
-		ImGui::InputDouble(("Treatment " + row + " clearance per kg").c_str(),
-			&treatment.clearancePerKg, 0.0, 0.0, "%.6f");
-		ImGui::InputDouble(("Treatment " + row + " throughput kg/s").c_str(),
-			&treatment.throughputKgPerS, 0.0, 0.0, "%.6f");
-		ImGui::InputDouble(("Treatment " + row + " recovery ratio").c_str(),
-			&treatment.recoveryRatio, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Treatment " + row + " specific energy kWh/kg").c_str(),
-			&treatment.specificEnergyKWhPerKg, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(("Treatment " + row + " consumable per kg").c_str(),
-			&treatment.consumablePerKg, 0.0, 0.0, "%.6f");
-		ImGui::InputInt(("Treatment " + row + " priority").c_str(), &treatment.priority, 1, 0);
-		ImGui::SameLine();
-		if (ImGui::Button(("Remove treatment " + row).c_str()))
-			removeTreatment = true;
-		ImGui::PopItemWidth();
-		if (removeTreatment)
+		if (station_editor::renderWaterTreatmentEntry(mDraft, mDraft.waterTreatments[index],
+			"Treatment " + row, "Remove treatment " + row))
 			mDraft.waterTreatments.erase(mDraft.waterTreatments.begin() + static_cast<std::ptrdiff_t>(index));
-		else
-			++index;
+		else ++index;
 	}
 	if (mDraft.waterTreatments.size() < core::MaxStationWaterTreatments && ImGui::Button("Add water treatment"))
 	{
@@ -1505,65 +1326,11 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	ImGui::SeparatorText("Draft electrolyzers (#404; qualified water splits into oxygen plus hydrogen at the declared stoichiometry; the electrical dose must cover the chemical energy the hydrogen retains, the difference is process heat into the class-matched sink; oxygen goes to a gas store OR a compartment, never both; product stores cap production instead of venting)");
 	for (size_t index = 0; index < mDraft.electrolyzers.size(); )
 	{
-		auto& cell = mDraft.electrolyzers[index];
 		auto const row = std::to_string(index);
-		bool removeCell = false;
-		char cellIdBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(cellIdBuffer, cell.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Electrolyzer " + row + " id").c_str(),
-			cellIdBuffer, sizeof(cellIdBuffer)))
-			cell.id = cellIdBuffer;
-		char cellHazardBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(cellHazardBuffer, cell.hazardClass.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Electrolyzer " + row + " hazard class").c_str(),
-			cellHazardBuffer, sizeof(cellHazardBuffer)))
-			cell.hazardClass = cellHazardBuffer;
-		char cellWaterBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(cellWaterBuffer, cell.waterStoreId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Electrolyzer " + row + " feed water store").c_str(),
-			cellWaterBuffer, sizeof(cellWaterBuffer)))
-			cell.waterStoreId = cellWaterBuffer;
-		char cellOxygenBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(cellOxygenBuffer, cell.oxygenStoreId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Electrolyzer " + row + " oxygen store (or leave empty for the compartment)").c_str(),
-			cellOxygenBuffer, sizeof(cellOxygenBuffer)))
-			cell.oxygenStoreId = cellOxygenBuffer;
-		char cellHydrogenBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(cellHydrogenBuffer, cell.hydrogenStoreId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Electrolyzer " + row + " hydrogen store").c_str(),
-			cellHydrogenBuffer, sizeof(cellHydrogenBuffer)))
-			cell.hydrogenStoreId = cellHydrogenBuffer;
-		char cellAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(cellAtmosphereBuffer, cell.atmosphereId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Electrolyzer " + row + " delivery compartment (or leave empty for the store)").c_str(),
-			cellAtmosphereBuffer, sizeof(cellAtmosphereBuffer)))
-			cell.atmosphereId = cellAtmosphereBuffer;
-		char cellThermalBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(cellThermalBuffer, cell.thermalClass.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Electrolyzer " + row + " heat sink thermal class").c_str(),
-			cellThermalBuffer, sizeof(cellThermalBuffer)))
-			cell.thermalClass = cellThermalBuffer;
-		char cellSinkBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(cellSinkBuffer, cell.heatSinkId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Electrolyzer " + row + " heat sink reservoir").c_str(),
-			cellSinkBuffer, sizeof(cellSinkBuffer)))
-			cell.heatSinkId = cellSinkBuffer;
-		ImGui::PushItemWidth(140.0f);
-		ImGui::InputDouble(("Electrolyzer " + row + " rated split kg/s").c_str(),
-			&cell.rateKgPerS, 0.0, 0.0, "%.6f");
-		ImGui::InputDouble(("Electrolyzer " + row + " specific energy kWh/kg water").c_str(),
-			&cell.specificEnergyKWhPerKgWater, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(("Electrolyzer " + row + " max sink temperature C").c_str(),
-			&cell.maxSinkTemperatureC, 0.0, 0.0, "%.2f");
-		ImGui::InputInt(("Electrolyzer " + row + " priority").c_str(), &cell.priority, 1, 0);
-		ImGui::SameLine();
-		if (ImGui::Button(("Remove electrolyzer " + row).c_str()))
-			removeCell = true;
-		ImGui::PopItemWidth();
-		if (removeCell)
+		if (station_editor::renderElectrolyzerEntry(mDraft, mDraft.electrolyzers[index],
+			"Electrolyzer " + row, "Remove electrolyzer " + row))
 			mDraft.electrolyzers.erase(mDraft.electrolyzers.begin() + static_cast<std::ptrdiff_t>(index));
-		else
-			++index;
+		else ++index;
 	}
 	if (mDraft.electrolyzers.size() < core::MaxStationElectrolyzers && ImGui::Button("Add electrolyzer"))
 	{
@@ -1593,50 +1360,11 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	ImGui::SeparatorText("Draft CO2 capture machines (#404; a compartment's carbon dioxide is scrubbed into a finite capture store as inventory; capture is finite on rate, available CO2, store headroom and consumable; the unmet atmospheric service stays visible; a tick with no power scrubs nothing)");
 	for (size_t index = 0; index < mDraft.co2Captures.size(); )
 	{
-		auto& capture = mDraft.co2Captures[index];
 		auto const row = std::to_string(index);
-		bool removeCapture = false;
-		char captureIdBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(captureIdBuffer, capture.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("CO2 capture " + row + " id").c_str(),
-			captureIdBuffer, sizeof(captureIdBuffer)))
-			capture.id = captureIdBuffer;
-		char captureHazardBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(captureHazardBuffer, capture.hazardClass.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("CO2 capture " + row + " hazard class").c_str(),
-			captureHazardBuffer, sizeof(captureHazardBuffer)))
-			capture.hazardClass = captureHazardBuffer;
-		char captureAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(captureAtmosphereBuffer, capture.atmosphereId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("CO2 capture " + row + " compartment").c_str(),
-			captureAtmosphereBuffer, sizeof(captureAtmosphereBuffer)))
-			capture.atmosphereId = captureAtmosphereBuffer;
-		char captureStoreBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(captureStoreBuffer, capture.captureStoreId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("CO2 capture " + row + " capture store").c_str(),
-			captureStoreBuffer, sizeof(captureStoreBuffer)))
-			capture.captureStoreId = captureStoreBuffer;
-		char captureConsumableBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(captureConsumableBuffer, capture.consumableStoreId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("CO2 capture " + row + " consumable store (empty: none)").c_str(),
-			captureConsumableBuffer, sizeof(captureConsumableBuffer)))
-			capture.consumableStoreId = captureConsumableBuffer;
-		ImGui::PushItemWidth(140.0f);
-		ImGui::InputDouble(("CO2 capture " + row + " max rate kg/s").c_str(),
-			&capture.maxRateKgPerS, 0.0, 0.0, "%.6f");
-		ImGui::InputDouble(("CO2 capture " + row + " specific energy kWh/kg").c_str(),
-			&capture.specificEnergyKWhPerKg, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(("CO2 capture " + row + " consumable per kg").c_str(),
-			&capture.consumablePerKg, 0.0, 0.0, "%.6f");
-		ImGui::InputInt(("CO2 capture " + row + " priority").c_str(), &capture.priority, 1, 0);
-		ImGui::SameLine();
-		if (ImGui::Button(("Remove CO2 capture " + row).c_str()))
-			removeCapture = true;
-		ImGui::PopItemWidth();
-		if (removeCapture)
+		if (station_editor::renderCo2CaptureEntry(mDraft, mDraft.co2Captures[index],
+			"CO2 capture " + row, "Remove CO2 capture " + row))
 			mDraft.co2Captures.erase(mDraft.co2Captures.begin() + static_cast<std::ptrdiff_t>(index));
-		else
-			++index;
+		else ++index;
 	}
 	if (mDraft.co2Captures.size() < core::MaxStationCo2Captures && ImGui::Button("Add CO2 capture machine"))
 	{

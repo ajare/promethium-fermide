@@ -81,7 +81,7 @@ pf_add_smoke_module(pf-smoke-station
     TIMEOUT 600
     DEFAULT_CHECK lifecycle
 )
-foreach(check lifecycle batching eventBound persistence stores transfers linkSeam growablePorts completeThermalChain powerChainSeam thermalReservoirSeam radiatorSeam coolantLoopSeam chillerSeam compounds power
+foreach(check lifecycle batching eventBound persistence stores transfers linkSeam growablePorts completeThermalChain waterGasSeam powerChainSeam thermalReservoirSeam radiatorSeam coolantLoopSeam chillerSeam compounds power
         batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
@@ -734,6 +734,9 @@ add_test(NAME station-editor-flow-growable-ports COMMAND pf-smoke-editor --check
 set_tests_properties(station-editor-flow-growable-ports PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
 add_test(NAME station-editor-flow-inspector COMMAND pf-smoke-editor --check station/flowInspectorWorkflow)
 set_tests_properties(station-editor-flow-inspector PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
+# #649: water/gas placement, shared inspectors and optional consumable wiring.
+add_test(NAME station-editor-flow-water-gas COMMAND pf-smoke-editor --check station/flowWaterGasWorkflow)
+set_tests_properties(station-editor-flow-water-gas PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-power-chain COMMAND pf-smoke-editor --check station/flowPowerChainWorkflow)
 set_tests_properties(station-editor-flow-power-chain PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 # #656: thermal reservoir authoring - combobox placement, shared inspector

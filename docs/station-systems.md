@@ -57,6 +57,29 @@ capacity/admission prediction, or a physical distribution network. Ambient losse
 and implicit process internals are not expanded into individual nodes. Changing
 Worlds starts a fresh diagram and draft; switching/hiding tabs retains the draft.
 
+### Water and gas authoring (#649)
+
+**Place node** offers **Water collector** and **Water treatment** under Water,
+and **Electrolyzer**, **CO2 capture**, **Atmosphere**, and **Airlock cycle** under
+Gas. Click the canvas to place an unwired entry; select it to edit the same
+settings used by the Station Systems form. Placement, links and field edits
+share draft undo/redo and do not alter the World until Apply.
+
+A water recovery line connects an Atmosphere's **Gas out** and a Coolant loop's
+**Cold surfaces** to a collector, its **Raw water out** to a Store, and that
+Store to a treatment's **Raw water in**. Wire separate treated and concentrate
+stores and the treatment consumable. Electrolyzer oxygen goes to either its
+**Oxygen out** Store or its **Compartment oxygen** destination, never both.
+CO2 capture draws from an Atmosphere into a finite Store. Airlock cycles draw
+from an Atmosphere; Atmosphere heat coupling to a Reservoir is optional.
+
+Unused optional connectors are hollow rings, including capture consumables,
+treatment clearance, and the alternative oxygen destinations. They become real
+links when wired. Hazardous treatment requires release clearance; normal
+water treatment refuses it. Hazard, thermal-class, unknown-reference and
+exclusive-destination refusals use the configuration validator's reasons.
+Configuration documents preserve the resulting processing line and layout.
+
 ### Chiller authoring (#659)
 
 Choose **Thermal > Chiller** in **Place node**, then click the canvas. The

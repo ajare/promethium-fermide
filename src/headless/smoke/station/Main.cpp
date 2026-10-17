@@ -1312,6 +1312,186 @@ namespace
 	// #660: Thermal buffers are authored through one fixed host connector and
 	// one optional circulation gate.  The seam retains the validator's host
 	// and same-reservoir rules while incomplete drafts remain wireable.
+	void waterGasSeam(smoke::Context const& context)
+	{
+		auto base = [] {
+			core::StationSystemsSettings s;
+			s.enabled = true;
+			for (auto id : {"raw", "treated", "concentrate", "kit", "oxygen", "hydrogen", "co2"})
+			{
+				core::ResourceStoreSettings store;
+				store.id = id; store.unit = "kg"; store.hazardClass = "normal"; store.capacity = 100;
+				s.stores.push_back(store);
+			}
+			core::ThermalReservoirSettings reservoir;
+			reservoir.id = "sink"; reservoir.thermalClass = "moderate"; reservoir.heatCapacityKJPerK = 100;
+			s.thermalReservoirs.push_back(reservoir);
+			core::CoolantLoopSettings loop;
+			loop.id = "loop"; loop.reservoirId = "sink"; loop.hazardClass = "normal";
+			loop.coolantCapacityKg = loop.startingCoolantKg = 100;
+			loop.specificHeatKJPerKgK = 4; loop.ratedFlowKgPerS = 1;
+			s.coolantLoops.push_back(loop);
+			core::AtmosphereSettings atmosphere;
+			atmosphere.id = "air"; atmosphere.hazardClass = "normal";
+			atmosphere.volumeM3 = atmosphere.thermalCapacityKJPerK = 100;
+			atmosphere.minPressureKPa = 80; atmosphere.maxPressureKPa = 120;
+			s.atmospheres.push_back(atmosphere);
+			core::WaterCollectorSettings collector;
+			collector.id = "collector"; collector.hazardClass = "normal"; collector.thermalClass = "moderate";
+			s.waterCollectors.push_back(collector);
+			core::WaterTreatmentSettings treatment;
+			treatment.id = "treatment"; treatment.hazardClass = "normal";
+			s.waterTreatments.push_back(treatment);
+			core::ElectrolyzerSettings electrolyzer;
+			electrolyzer.id = "cell"; electrolyzer.hazardClass = "normal"; electrolyzer.thermalClass = "moderate";
+			s.electrolyzers.push_back(electrolyzer);
+			core::Co2CaptureSettings capture;
+			capture.id = "capture"; capture.hazardClass = "normal";
+			s.co2Captures.push_back(capture);
+			core::AirlockCycleSettings cycle;
+			cycle.id = "cycle"; cycle.gasMassKg = 1;
+			s.airlockCycles.push_back(cycle);
+			return s;
+		};
+		auto pin = [](char const* type, char const* id, char const* port) { return core::StationPinRef{type, id, port}; };
+		std::vector<core::CandidateLink> legal{
+			{pin("Atmosphere", "air", "Gas out"), pin("Water collector", "collector", "Atmosphere")},
+			{pin("Coolant loop", "loop", "Cold surfaces"), pin("Water collector", "collector", "Cooling loop")},
+			{pin("Water collector", "collector", "Raw water out"), pin("Store", "raw", "Inventory in")},
+			{pin("Store", "raw", "Inventory out"), pin("Water treatment", "treatment", "Raw water in")},
+			{pin("Water treatment", "treatment", "Treated water out"), pin("Store", "treated", "Inventory in")},
+			{pin("Water treatment", "treatment", "Concentrate out"), pin("Store", "concentrate", "Inventory in")},
+			{pin("Store", "kit", "Inventory out"), pin("Water treatment", "treatment", "Consumable in")},
+			{pin("Store", "treated", "Inventory out"), pin("Electrolyzer", "cell", "Water in")},
+			{pin("Electrolyzer", "cell", "Oxygen out"), pin("Store", "oxygen", "Inventory in")},
+			{pin("Electrolyzer", "cell", "Hydrogen out"), pin("Store", "hydrogen", "Inventory in")},
+			{pin("Electrolyzer", "cell", "Heat out"), pin("Reservoir", "sink", "Heat in")},
+			{pin("Atmosphere", "air", "Gas out"), pin("CO2 capture", "capture", "Atmosphere")},
+			{pin("CO2 capture", "capture", "Captured CO2 out"), pin("Store", "co2", "Inventory in")},
+			{pin("Store", "kit", "Inventory out"), pin("CO2 capture", "capture", "Consumable in")},
+			{pin("Atmosphere", "air", "Heat out"), pin("Reservoir", "sink", "Heat in")},
+			{pin("Atmosphere", "air", "Gas out"), pin("Airlock cycle", "cycle", "Atmosphere")}};
+		auto oxygenCompartment = core::CandidateLink{pin("Electrolyzer", "cell", "Compartment oxygen"), pin("Atmosphere", "air", "Oxygen in")};
+		auto clearance = core::CandidateLink{pin("Store", "kit", "Inventory out"), pin("Water treatment", "treatment", "Clearance in")};
+		auto allowed = [](auto const& settings, auto const& link) {
+			auto verdict = core::evaluateStationLink(settings, link);
+			require(verdict.allowed, ("water/gas link refused: " + verdict.reason).c_str());
+		};
+		auto refused = [](auto const& settings, auto const& link, char const* reason) {
+			auto verdict = core::evaluateStationLink(settings, link);
+			require(!verdict.allowed && verdict.reason.find(reason) != std::string::npos,
+				("expected " + std::string(reason) + ", got " + verdict.reason).c_str());
+		};
+		// Every new connector participates in the matrix, including both optional
+		// oxygen destinations and hazardous release clearance. Every other pair
+		// of these pins must refuse, in either drag direction.
+		auto all = legal; all.push_back(oxygenCompartment); all.push_back(clearance);
+		std::vector<core::StationPinRef> pins;
+		for (auto const& link : all)
+			for (auto const& p : {link.from, link.to})
+				if (std::find(pins.begin(), pins.end(), p) == pins.end()) pins.push_back(p);
+		for (auto const& a : pins) for (auto const& b : pins)
+		{
+			auto settings = base();
+			bool expected = false;
+			for (auto const& link : all)
+				if ((link.from == a && link.to == b) || (link.from == b && link.to == a)) expected = true;
+			// Store faces may join any machine material role, not only the
+			// particular store selected in the complete recovery line above.
+			auto material = [](auto const& p) {
+				for (auto const& d : core::stationPortDescriptors())
+					if (d.nodeType == p.nodeType && d.name == p.portName) return d.kind == "material";
+				return false;
+			};
+			if ((a.nodeType == "Store" && material(b)) || (b.nodeType == "Store" && material(a)))
+			{
+				auto const& store = a.nodeType == "Store" ? a : b;
+				auto const& machine = a.nodeType == "Store" ? b : a;
+				for (auto const& d : core::stationPortDescriptors())
+					if (d.nodeType == machine.nodeType && d.name == machine.portName)
+						expected = (store.portName == "Inventory out") == (d.direction == core::StationPortDirection::Input);
+			}
+			if (a.portName == "Clearance in" || b.portName == "Clearance in")
+			{
+				settings.waterTreatments[0].hazardClass = "hazardous";
+				settings.waterTreatments[0].clearancePerKg = .01;
+				for (auto& store : settings.stores) store.hazardClass = "hazardous";
+			}
+			auto verdict = core::evaluateStationLink(settings, {a,b});
+			require(verdict.allowed == expected, ("matrix: " + a.nodeType + "/" + a.portName + " -> " + b.nodeType + "/" + b.portName + ": " + verdict.reason).c_str());
+		}
+		// Wire the processing line from an empty-reference draft. Enumeration,
+		// cardinality, clearing and rewiring use the same production mapping.
+		auto wired = base();
+		for (auto const& link : legal)
+		{
+			allowed(wired, link);
+			require(core::applyStationLink(wired, link), "water/gas mapping did not write");
+			refused(wired, link, "already joined");
+		}
+		std::string reason;
+		require(core::validateStationSystemsSettings(wired, reason), reason.c_str());
+		auto links = core::stationAuthoredLinks(wired);
+		for (auto const& link : links)
+		{
+			auto copy = wired;
+			require(core::clearStationLink(copy, link.identity), "water/gas reference did not clear");
+			allowed(copy, core::CandidateLink{link.to, link.from});
+			require(core::applyStationLink(copy, {link.to, link.from}) && copy == wired, "water/gas rewire changed another field");
+		}
+		refused(wired, oxygenCompartment, "exactly one oxygen destination");
+		auto compartment = wired;
+		compartment.electrolyzers[0].oxygenStoreId.clear();
+		allowed(compartment, oxygenCompartment);
+		compartment.atmospheres[0].hazardClass = "hazardous";
+		refused(compartment, oxygenCompartment, "does not match compartment");
+		auto incomplete = base();
+		incomplete.atmospheres[0].hazardClass = "hazardous";
+		refused(incomplete, legal[0], "does not match compartment");
+		refused(incomplete, legal[11], "does not match compartment");
+		refused(base(), core::CandidateLink{pin("Atmosphere", "missing", "Gas out"), legal[0].to}, "unknown atmosphere compartment");
+		refused(base(), core::CandidateLink{pin("Coolant loop", "missing", "Cold surfaces"), legal[1].to}, "unknown coolant loop");
+		refused(base(), clearance, "normal-class but configures release-clearance");
+		// Every material role is validated, even while other required
+		// references on the same machine are still empty.
+		for (auto const& link : legal)
+		{
+			auto const* storePin = link.from.nodeType == "Store" ? &link.from
+				: link.to.nodeType == "Store" ? &link.to : nullptr;
+			if (!storePin) continue;
+			auto malformed = base();
+			auto store = std::find_if(malformed.stores.begin(), malformed.stores.end(),
+				[&](auto const& entry) { return entry.id == storePin->nodeId; });
+			store->unit = "kWh";
+			refused(malformed, link, "must be a mass unit");
+			store->unit = "kg"; store->hazardClass = "hazardous";
+			refused(malformed, link, "hazard class");
+		}
+		auto alias = base(); alias.waterTreatments[0].sourceStoreId = "treated";
+		refused(alias, legal[4], "same store");
+		alias = base(); alias.electrolyzers[0].hydrogenStoreId = "oxygen";
+		refused(alias, legal[8], "same store");
+		auto occupied = base(); occupied.waterCollectors[0].destStoreId = "treated";
+		refused(occupied, legal[2], "at most 1");
+		auto badHeat = base(); badHeat.thermalReservoirs[0].thermalClass = "low";
+		refused(badHeat, legal[1], "does not match coolant loop");
+		refused(badHeat, legal[10], "does not match heat sink");
+		auto loopFirst = base(); loopFirst.coolantLoops[0].reservoirId.clear();
+		allowed(loopFirst, legal[1]);
+		require(core::applyStationLink(loopFirst, legal[1]), "collector-first loop link failed");
+		core::CandidateLink hostLink{pin("Coolant loop", "loop", "Heat exchanger"), pin("Reservoir", "sink", "Heat in")};
+		allowed(loopFirst, hostLink);
+		loopFirst.thermalReservoirs[0].thermalClass = "low";
+		refused(loopFirst, hostLink, "does not match coolant loop");
+		core::StationConfigurationDocument document;
+		document.settings = wired;
+		auto path = (context.temporaryRoot() / "water-recovery.station.yaml").string();
+		core::saveStationConfiguration(path, document);
+		core::StationConfigurationDocument restored;
+		require(core::loadStationConfiguration(path, restored, &reason) && restored.settings == document.settings,
+			("water recovery round trip: " + reason).c_str());
+	}
+
 	void thermalBufferSeam(smoke::Context const&)
 	{
 		auto reservoir = [](char const* id) { core::ThermalReservoirSettings r; r.id = id;
@@ -25904,7 +26084,7 @@ void recovery(smoke::Context const& context)
 
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"completeThermalChain", completeThermalChain}, {"thermalBufferSeam", thermalBufferSeam}, {"powerChainSeam", powerChainSeam}, {"thermalReservoirSeam", thermalReservoirSeam}, {"radiatorSeam", radiatorSeam}, {"coolantLoopSeam", coolantLoopSeam}, {"chillerSeam", chillerSeam}, {"compounds", compounds}, {"power", power},
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"completeThermalChain", completeThermalChain}, {"waterGasSeam", waterGasSeam}, {"thermalBufferSeam", thermalBufferSeam}, {"powerChainSeam", powerChainSeam}, {"thermalReservoirSeam", thermalReservoirSeam}, {"radiatorSeam", radiatorSeam}, {"coolantLoopSeam", coolantLoopSeam}, {"chillerSeam", chillerSeam}, {"compounds", compounds}, {"power", power},
 		// Split out of the former `batteries` check: the hour-scale legs are
 		// independent worlds, so each is its own test and they run in parallel
 		// instead of as one ~182s serial chain.

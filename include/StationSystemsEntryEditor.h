@@ -30,6 +30,19 @@ namespace station_editor
 
 	// Renders one transfer's settings widgets, mutating the entry in
 	// place. Same label and deferred-removal contract as renderStoreEntry.
+	bool renderWaterCollectorEntry(core::StationSystemsSettings&, core::WaterCollectorSettings&,
+		std::string const& label, std::string const& removeLabel);
+	bool renderWaterTreatmentEntry(core::StationSystemsSettings&, core::WaterTreatmentSettings&,
+		std::string const& label, std::string const& removeLabel);
+	bool renderElectrolyzerEntry(core::StationSystemsSettings&, core::ElectrolyzerSettings&,
+		std::string const& label, std::string const& removeLabel);
+	bool renderCo2CaptureEntry(core::StationSystemsSettings&, core::Co2CaptureSettings&,
+		std::string const& label, std::string const& removeLabel);
+	bool renderAtmosphereEntry(core::StationSystemsSettings&, core::AtmosphereSettings&,
+		std::string const& label, std::string const& removeLabel);
+	bool renderAirlockCycleEntry(core::StationSystemsSettings&, core::AirlockCycleSettings&,
+		std::string const& label, std::string const& removeLabel);
+
 	bool renderTransferEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 		core::ResourceTransferSettings& transfer,
 		std::string const& label, std::string const& removeLabel);

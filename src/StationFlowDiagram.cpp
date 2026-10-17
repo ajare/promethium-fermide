@@ -775,6 +775,8 @@ std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode
 		|| view.type == "Solar" || view.type == "Equipment" || view.type == "Battery"
 		|| view.type == "Generator" || view.type == "Fuel cell" || view.type == "Sabatier"
 		|| view.type == "Methane processor" || view.type == "Reservoir" || view.type == "Radiator"
+		|| view.type == "Water collector" || view.type == "Water treatment" || view.type == "Electrolyzer"
+		|| view.type == "CO2 capture" || view.type == "Atmosphere" || view.type == "Airlock cycle"
 		|| view.type == "Coolant loop" || view.type == "Chiller" || view.type == "Thermal buffer")
 	{
 		view.index = 0;
@@ -996,6 +998,8 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	// The connector is drawn by this view, not the library: keep the library's
 	// hover generous enough that a small zoomed connector is still grabbable.
 	float const pinSize = std::max(7.0f, 13.0f * mZoom);
+	// Draw connectors at imnodes' actual node-edge pin centres.
+	ImNodes::GetStyle().PinOffset = 0.0f;
 	ImNodes::GetStyle().PinHoverRadius = std::max(9.0f, pinSize * 0.75f + 3.0f);
 	std::map<std::string, ImVec2> framePins;
 	ImNodes::BeginNodeEditor();
@@ -1040,7 +1044,11 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			ImGui::Dummy({pinSize, pinSize});
 			if (isInput) ImNodes::EndInputAttribute();
 			else ImNodes::EndOutputAttribute();
-			auto const placed = ImVec2{topLeft.x + pinSize * 0.5f, topLeft.y + pinSize * 0.5f};
+			// Attribute groups snap to pixel geometry. Use that actual centre,
+			// rounded to the nearest pointer-addressable pixel, rather than an
+			// ideal fractional position that rounds into the neighbouring pin.
+			auto const placed = ImVec2{std::round(isInput ? nodeScreen.x : nodeScreen.x + nodeWidth * mZoom),
+				std::round((ImGui::GetItemRectMin().y + ImGui::GetItemRectMax().y) * 0.5f)};
 			framePins[key] = placed;
 			mPinScreen[key] = placed;
 		}
@@ -1218,6 +1226,66 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			mLayout["Equipment:" + load.id + ":0"] = placeAt;
 			draft.equipmentLoads.push_back(std::move(load));
 			mFitRequested = false;
+		}
+		else if (mPlacingType == "Water collector" || mPlacingType == "Water treatment" || mPlacingType == "Electrolyzer" || mPlacingType == "CO2 capture" || mPlacingType == "Atmosphere" || mPlacingType == "Airlock cycle")
+		{
+			auto place = [&](auto& entries, auto entry, size_t maximum, std::string const& prefix) {
+				if (entries.size() >= maximum) return;
+				for (size_t candidate = 1;; ++candidate)
+				{
+					entry.id = prefix + std::to_string(candidate);
+					if (std::none_of(entries.begin(), entries.end(),
+						[&](auto const& other) { return entry.id == other.id; })) break;
+				}
+				mLayout[mPlacingType + ":" + entry.id + ":0"] = placeAt;
+				entries.push_back(std::move(entry));
+				mFitRequested = false;
+			};
+			if (mPlacingType == "Water collector")
+			{
+				core::WaterCollectorSettings entry;
+				entry.hazardClass = "normal";
+				entry.thermalClass = "moderate";
+				place(draft.waterCollectors, entry, core::MaxStationWaterCollectors, "collector");
+			}
+			else if (mPlacingType == "Water treatment")
+			{
+				core::WaterTreatmentSettings entry;
+				entry.hazardClass = "normal";
+				place(draft.waterTreatments, entry, core::MaxStationWaterTreatments, "treatment");
+			}
+			else if (mPlacingType == "Electrolyzer")
+			{
+				core::ElectrolyzerSettings entry;
+				entry.hazardClass = "normal";
+				entry.thermalClass = "moderate";
+				place(draft.electrolyzers, entry, core::MaxStationElectrolyzers, "electrolyzer");
+			}
+			else if (mPlacingType == "CO2 capture")
+			{
+				core::Co2CaptureSettings entry;
+				entry.hazardClass = "normal";
+				place(draft.co2Captures, entry, core::MaxStationCo2Captures, "capture");
+			}
+			else if (mPlacingType == "Atmosphere")
+			{
+				core::AtmosphereSettings entry;
+				entry.hazardClass = "normal";
+				entry.volumeM3 = entry.thermalCapacityKJPerK = 100.0;
+				entry.startingOxygenKg = 20.0;
+				entry.startingNitrogenKg = 80.0;
+				entry.minPressureKPa = 80.0;
+				entry.maxPressureKPa = 120.0;
+				place(draft.atmospheres, entry, core::MaxStationAtmospheres, "atmosphere");
+			}
+			else if (mPlacingType == "Airlock cycle")
+			{
+				core::AirlockCycleSettings entry;
+				entry.gasMassKg = 1.0;
+				entry.recurrenceSeconds = 60.0;
+				entry.recoveredFraction = 0.95;
+				place(draft.airlockCycles, entry, core::MaxStationAirlockCycles, "cycle");
+			}
 		}
 		else if (mPlacingType == "Battery" && draft.batteries.size() < core::MaxStationBatteries)
 		{
@@ -1678,7 +1746,13 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			|| (mPlacingType == "Coolant loop"
 				&& draft.coolantLoops.size() >= core::MaxStationCoolantLoops)
 			|| (mPlacingType == "Chiller" && draft.chillers.size() >= core::MaxStationChillers)
-			|| (mPlacingType == "Thermal buffer" && draft.thermalBuffers.size() >= core::MaxStationThermalBuffers);
+			|| (mPlacingType == "Thermal buffer" && draft.thermalBuffers.size() >= core::MaxStationThermalBuffers)
+			|| (mPlacingType == "Water collector" && draft.waterCollectors.size() >= core::MaxStationWaterCollectors)
+			|| (mPlacingType == "Water treatment" && draft.waterTreatments.size() >= core::MaxStationWaterTreatments)
+			|| (mPlacingType == "Electrolyzer" && draft.electrolyzers.size() >= core::MaxStationElectrolyzers)
+			|| (mPlacingType == "CO2 capture" && draft.co2Captures.size() >= core::MaxStationCo2Captures)
+			|| (mPlacingType == "Atmosphere" && draft.atmospheres.size() >= core::MaxStationAtmospheres)
+			|| (mPlacingType == "Airlock cycle" && draft.airlockCycles.size() >= core::MaxStationAirlockCycles);
 		auto a = io.MousePos;
 		ImVec2 b{a.x + nodeWidth * mZoom, a.y + nodeHeight * mZoom};
 		draw->AddRectFilled(a, b, IM_COL32(80, 130, 170, 100), 5);

@@ -654,10 +654,88 @@ namespace
 		require(driver.passed(), "Flow growable ports workflow failed on the Test Engine");
 	}
 
-	// #653: the Flow inspector. Selecting a node opens that type's shared
-	// entry editor (#652) in a column reserved beside the canvas; the node
-	// body stays compact, the field commits once rather than per keystroke,
-	// and the canvas never moves when the selection changes.
+	// #649: all six types use the production placement and shared inspector
+	// controls; capture's optional consumable is a real undoable link.
+	void flowWaterGasWorkflow(smoke::Context const&)
+	{
+		struct Probe { char const* type; char const* id; char const* label; char const* port; };
+		for (auto const& probe : {
+			Probe{"Water collector", "collector1", "Collector 0 id", "Raw water out"},
+			Probe{"Water treatment", "treatment1", "Treatment 0 id", "Clearance in"},
+			Probe{"Electrolyzer", "electrolyzer1", "Electrolyzer 0 id", "Compartment oxygen"},
+			Probe{"CO2 capture", "capture1", "CO2 capture 0 id", "Consumable in"},
+			Probe{"Atmosphere", "atmosphere1", "Atmosphere 0 id", "Gas out"},
+			Probe{"Airlock cycle", "cycle1", "Airlock cycle 0 id", "Atmosphere"}})
+		{
+			headless::ScopedImGuiContext context;
+			auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+			io.Fonts->AddFontDefault(); io.Fonts->Build();
+			StationSystemsWindow window;
+			auto world = std::make_shared<core::World>("Water gas Flow", 2, 2);
+			world->pauseSimulation(); world->finishBuild();
+			if (std::string(probe.type) == "CO2 capture")
+			{
+				core::StationSystemsSettings seed; seed.enabled = true;
+				core::ResourceStoreSettings kit;
+				kit.id = "kit"; kit.unit = "kg"; kit.capacity = 100; kit.hazardClass = "normal";
+				seed.stores.push_back(kit);
+				smoke::require(world->configureStationSystems(seed, false), "capture consumable seed failed");
+			}
+			headless::TestEngineDriver driver([&] {
+				ImGui::SetNextWindowPos({10,10}); ImGui::SetNextWindowSize({1100,980});
+				ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
+			});
+			driver.frame(); driver.frame();
+			#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+			driver.run("station", "flowWaterGas", [&](ImGuiTestContext* ctx) {
+				ctx->SetRef("Configuration");
+				ctx->ComboClick((std::string("Place node/") + probe.type).c_str()); ctx->Yield(2);
+				auto* canvas = findFlowCanvas(ImGui::FindWindowByName("Configuration"));
+				ctx->MouseTeleportToPos({canvas->Pos.x + 300, canvas->Pos.y + 180});
+				ctx->MouseClick(); ctx->Yield(3);
+				REQ(window.draftHistory().undoCount() == 1, "water/gas placement did not commit once");
+				ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+				ImVec4 rect{}; ImVec2 pin{};
+				REQ(window.flowNodeRect(probe.type, probe.id, &rect), "placed water/gas node is missing");
+				REQ(window.flowPinPosition(probe.type, probe.id, probe.port, &pin), "water/gas connector is missing");
+				ctx->MouseTeleportToPos({(rect.x+rect.z)*.5f, (rect.y+rect.w)*.5f});
+				ctx->MouseClick(); ctx->Yield(3);
+				ctx->MouseTeleportToPos({40,40}); ctx->Yield(2);
+				REQ(driver.contains((std::string("Node: ") + probe.type + " '" + probe.id + "'").c_str()), "water/gas selection did not resolve");
+				if (std::string(probe.type) == "CO2 capture")
+					REQ(driver.contains("Consumable in (input) - unused"), "optional consumable was drawn as required");
+				if (std::string(probe.type) == "Water treatment")
+					REQ(driver.contains("Clearance in (input) - unused"), "optional clearance was drawn as required");
+				driver.click(ctx, (std::string("**/") + probe.label).c_str()); ctx->Yield(2);
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A); ctx->KeyChars("renamed");
+				ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+				REQ(window.draftHistory().undoCount() == 2, "water/gas inspector edit did not commit once");
+				REQ(window.flowNodeRect(probe.type, "renamed", &rect), "inspector did not rename selected water/gas entry");
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+				REQ(window.flowNodeRect(probe.type, probe.id, &rect), "undo did not restore water/gas identity");
+				if (std::string(probe.type) == "CO2 capture")
+				{
+					ImVec2 source{}, target{};
+					REQ(window.flowPinPosition("Store", "kit", "Inventory out", &source)
+						&& window.flowPinPosition(probe.type, probe.id, "Consumable in", &target),
+						"optional capture connector is not on screen");
+					ctx->MouseTeleportToPos(source); ctx->Yield(2); ctx->MouseDown(); ctx->Yield(2);
+					ctx->MouseTeleportToPos(target); ctx->Yield(2); ctx->MouseUp(); ctx->Yield(3);
+					REQ(window.draft().co2Captures[0].consumableStoreId == "kit"
+						&& window.draftHistory().undoCount() == 2, "optional connector did not wire as a real link");
+					ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+					REQ(window.draft().co2Captures[0].consumableStoreId.empty(), "optional link undo failed");
+				}
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+				REQ(!window.flowNodeRect(probe.type, probe.id, &rect), "undo did not remove water/gas placement");
+			});
+			#undef REQ
+			smoke::require(driver.passed(), "water/gas Flow placement/inspector workflow failed");
+		}
+	}
+
+	// #653: shared entry editors occupy a reserved column; field commits
+	// and selection changes must not resize or move the canvas.
 	void flowInspectorWorkflow(smoke::Context const&)
 	{
 		using smoke::require;
@@ -696,8 +774,7 @@ namespace
 		reservoir.id = "res1"; reservoir.thermalClass = "low";
 		reservoir.heatCapacityKJPerK = 1000.0;
 		seed.thermalReservoirs = {reservoir};
-		// #656 extracted the reservoir's own editor and #657 the radiator's,
-		// so the thermal buffer stays the projected type without one.
+		// The thermal buffer also has a shared editor after #660.
 		core::ThermalBufferSettings buffer;
 		buffer.id = "buf1"; buffer.reservoirId = "res1";
 		buffer.accessMode = "passive"; buffer.capacityKJ = 1000.0;
@@ -909,7 +986,7 @@ namespace
 				"reservoir shared editor capacity label missing");
 			REQ(ctx->ItemInfo("**/Reservoir 0 thermal class", ImGuiTestOpFlags_NoError)->ID != 0,
 				"reservoir shared editor field missing");
-			// --- A type with no extracted editor names itself instead of showing nothing.
+			// --- Thermal buffers now use the shared entry editor (#660).
 			ImVec4 bufferRect{};
 			REQ(window.flowNodeRect("Thermal buffer", "buf1", &bufferRect),
 				"the thermal buffer node is not on screen");
@@ -917,8 +994,8 @@ namespace
 				(bufferRect.y + bufferRect.w) * 0.5f});
 			ctx->MouseClick(); ctx->Yield(3);
 			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->Yield(2);
-			REQ(driver.contains("No settings editor for 'Thermal buffer' nodes yet."),
-				"a type without an extracted editor showed nothing instead of naming itself");
+			REQ(driver.contains("Buffer 0 capacity kJ"),
+				"the thermal buffer shared settings editor is missing");
 			// --- Deselecting leaves nothing claiming a selection.
 			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->MouseClick(); ctx->Yield(3);
 			REQ(driver.contains("Nothing selected."),
@@ -6137,6 +6214,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/flowLinkWorkflow", flowLinkWorkflow});
 	checks.push_back({"station/flowCascadeDeleteWorkflow", flowCascadeDeleteWorkflow});
 	checks.push_back({"station/flowGrowablePortsWorkflow", flowGrowablePortsWorkflow});
+	checks.push_back({"station/flowWaterGasWorkflow", flowWaterGasWorkflow});
 	checks.push_back({"station/flowInspectorWorkflow", flowInspectorWorkflow});
 	checks.push_back({"station/flowPowerChainWorkflow", flowPowerChainWorkflow});
 	checks.push_back({"station/flowThermalReservoirWorkflow", flowThermalReservoirWorkflow});
