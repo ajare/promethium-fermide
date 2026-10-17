@@ -1641,9 +1641,32 @@ namespace core
 				+ "'); hazardous and normal material may not share a generic transfer");
 		return true;
 	}
-	bool validateStationSystemsSettings(StationSystemsSettings const& settings, std::string& diagnostic)
+	namespace
+	{
+		// Unwind signal for draft-tolerant validation (#642): an entry whose
+		// reference cannot be resolved raises this so the enclosing per-entry
+		// loop can record the entry as broken and carry on. It never escapes
+		// the validator.
+		struct BrokenDraftEntry
+		{
+		};
+	}
+	bool validateStationSystemsSettings(StationSystemsSettings const& settings, std::string& diagnostic,
+		std::vector<std::string>* brokenReferences)
 	{
 		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
+		// Draft-tolerant mode (#642): with a brokenReferences list supplied,
+		// an unresolvable reference is recorded and the entry carrying it
+		// stops being validated, so the draft opens with the reference shown
+		// as broken instead of the whole configuration being refused. Every
+		// other rule keeps its full strictness; without the list (the World
+		// path) this behaves exactly as refuse.
+		auto missing = [&](std::string text) -> bool
+		{
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			throw BrokenDraftEntry{};
+		};
 		if (!std::isfinite(settings.observationIntervalSeconds)
 			|| settings.observationIntervalSeconds < 0.1f || settings.observationIntervalSeconds > 60.0f)
 			return refuse("Station observation interval must be finite, from 0.1 to 60 seconds");
@@ -1727,7 +1750,7 @@ namespace core
 			return refuse("Station resource conversions are limited to "
 				+ std::to_string(MaxStationResourceConversions) + " entries");
 		std::set<std::string> conversionIds;
-		for (auto const& conversion : settings.conversions)
+		for (auto const& conversion : settings.conversions) try
 		{
 			auto const where = "Station resource conversion '" + conversion.id + "'";
 			if (conversion.id.empty()) return refuse("Station resource conversion id must not be empty");
@@ -1754,7 +1777,7 @@ namespace core
 				auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
 						[&](ResourceStoreSettings const& store) { return store.id == storeId; });
 				if (it == settings.stores.end())
-					return refuse(where + " references unknown " + (input ? "input" : "output")
+					return missing(where + " references unknown " + (input ? "input" : "output")
 						+ " store '" + storeId + "'");
 				if (!endpoints.insert(storeId).second)
 					return refuse(where + " uses store '" + storeId + "' more than once");
@@ -1791,7 +1814,7 @@ namespace core
 						+ "': declared output " + std::to_string(produced)
 						+ " exceeds declared input " + std::to_string(supplied));
 			}
-		}
+		} catch (BrokenDraftEntry const&) {}
 		if (settings.solarArrays.size() > MaxStationSolarArrays)
 			return refuse("Station solar arrays are limited to "
 				+ std::to_string(MaxStationSolarArrays) + " entries");
@@ -1815,7 +1838,7 @@ namespace core
 			return refuse("Station external equipment loads are limited to "
 				+ std::to_string(MaxStationEquipmentLoads) + " entries");
 		std::set<std::string> loadIds;
-		for (auto const& load : settings.equipmentLoads)
+		for (auto const& load : settings.equipmentLoads) try
 		{
 			auto const where = "Station equipment load '" + load.id + "'";
 			if (load.id.empty()) return refuse("Station equipment load id must not be empty");
@@ -1867,7 +1890,7 @@ namespace core
 				auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
 						[&](ResourceStoreSettings const& store) { return store.id == exchange.storeId; });
 				if (it == settings.stores.end())
-					return refuse(where + " material exchange references unknown store '" + exchange.storeId + "'");
+					return missing(where + " material exchange references unknown store '" + exchange.storeId + "'");
 				if (!exchangeStores.insert(exchange.storeId).second)
 					return refuse(where + " exchanges with store '" + exchange.storeId + "' more than once");
 				if (!std::isfinite(exchange.ratePerSecond) || exchange.ratePerSecond <= 0.0)
@@ -1887,13 +1910,13 @@ namespace core
 					settings.thermalReservoirs.end(),
 					[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == load.heatSinkId; });
 				if (sink == settings.thermalReservoirs.end())
-					return refuse(where + " heat sink references unknown thermal reservoir '" + load.heatSinkId + "'");
+					return missing(where + " heat sink references unknown thermal reservoir '" + load.heatSinkId + "'");
 				if (sink->thermalClass != load.thermalClass)
 					return refuse(where + " thermal class '" + load.thermalClass
 						+ "' is incompatible with heat sink reservoir '" + sink->id + "' of class '"
 						+ sink->thermalClass + "'; heat routes only to the same service class");
 			}
-		}
+		} catch (BrokenDraftEntry const&) {}
 		if (settings.batteries.size() > MaxStationBatteries)
 			return refuse("Station batteries are limited to "
 				+ std::to_string(MaxStationBatteries) + " entries");
@@ -1969,7 +1992,7 @@ namespace core
 			return refuse("Station radiators are limited to "
 				+ std::to_string(MaxStationRadiators) + " entries");
 		std::set<std::string> radiatorIds;
-		for (auto const& radiator : settings.radiators)
+		for (auto const& radiator : settings.radiators) try
 		{
 			auto const where = "Station radiator '" + radiator.id + "'";
 			if (radiator.id.empty()) return refuse("Station radiator id must not be empty");
@@ -1981,7 +2004,7 @@ namespace core
 				settings.thermalReservoirs.end(),
 				[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == radiator.reservoirId; });
 			if (host == settings.thermalReservoirs.end())
-				return refuse(where + " is attached to unknown thermal reservoir '" + radiator.reservoirId + "'");
+				return missing(where + " is attached to unknown thermal reservoir '" + radiator.reservoirId + "'");
 			if (!std::isfinite(radiator.areaM2) || radiator.areaM2 <= 0.0)
 				return refuse(where + " area must be finite and positive");
 			if (!std::isfinite(radiator.emissivity) || radiator.emissivity <= 0.0 || radiator.emissivity > 1.0)
@@ -1991,12 +2014,12 @@ namespace core
 			if (!std::isfinite(radiator.sinkTemperatureC)
 				|| radiator.sinkTemperatureC <= -StationCelsiusOffset)
 				return refuse(where + " sink temperature must be finite and above absolute zero (-273.15 C)");
-		}
+		} catch (BrokenDraftEntry const&) {}
 		if (settings.coolantLoops.size() > MaxStationCoolantLoops)
 			return refuse("Station coolant loops are limited to "
 				+ std::to_string(MaxStationCoolantLoops) + " entries");
 		std::set<std::string> loopIds;
-		for (auto const& loop : settings.coolantLoops)
+		for (auto const& loop : settings.coolantLoops) try
 		{
 			auto const where = "Station coolant loop '" + loop.id + "'";
 			if (loop.id.empty()) return refuse("Station coolant loop id must not be empty");
@@ -2015,7 +2038,7 @@ namespace core
 				settings.thermalReservoirs.end(),
 				[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == loop.reservoirId; });
 			if (host == settings.thermalReservoirs.end())
-				return refuse(where + " is coupled to unknown thermal reservoir '" + loop.reservoirId + "'");
+				return missing(where + " is coupled to unknown thermal reservoir '" + loop.reservoirId + "'");
 			if (!std::isfinite(loop.coolantCapacityKg) || loop.coolantCapacityKg <= 0.0)
 				return refuse(where + " coolant capacity must be finite and positive");
 			if (!std::isfinite(loop.startingCoolantKg) || loop.startingCoolantKg < 0.0)
@@ -2038,7 +2061,7 @@ namespace core
 				return refuse(where + " exchanger conductance must be finite and non-negative");
 			if (!std::isfinite(loop.heaterCapacityKW) || loop.heaterCapacityKW < 0.0)
 				return refuse(where + " heater capacity must be finite and non-negative");
-		}
+		} catch (BrokenDraftEntry const&) {}
 		// Chiller contracts (#397): the cold-side interface is a declared
 		// coolant loop and the hot-side sink a declared thermal reservoir,
 		// both of the chiller's own service class — spare capacity in
@@ -2051,7 +2074,7 @@ namespace core
 				+ std::to_string(MaxStationChillers) + " entries");
 		std::set<std::string> chillerIds;
 		std::set<std::string> chilledLoops;
-		for (auto const& chiller : settings.chillers)
+		for (auto const& chiller : settings.chillers) try
 		{
 			auto const where = "Station chiller '" + chiller.id + "'";
 			if (chiller.id.empty()) return refuse("Station chiller id must not be empty");
@@ -2067,7 +2090,7 @@ namespace core
 				settings.coolantLoops.end(),
 				[&](CoolantLoopSettings const& candidate) { return candidate.id == chiller.coldLoopId; });
 			if (loop == settings.coolantLoops.end())
-				return refuse(where + " cold-side interface references unknown coolant loop '"
+				return missing(where + " cold-side interface references unknown coolant loop '"
 					+ chiller.coldLoopId + "'");
 			if (!chilledLoops.insert(chiller.coldLoopId).second)
 				return refuse(where + " shares cold loop '" + chiller.coldLoopId
@@ -2076,7 +2099,7 @@ namespace core
 				settings.thermalReservoirs.end(),
 				[&](ThermalReservoirSettings const& candidate) { return candidate.id == chiller.condenserReservoirId; });
 			if (sink == settings.thermalReservoirs.end())
-				return refuse(where + " condenser sink references unknown thermal reservoir '"
+				return missing(where + " condenser sink references unknown thermal reservoir '"
 					+ chiller.condenserReservoirId + "'");
 			// Class compatibility on both interfaces: the cold loop's host
 			// reservoir and the condenser sink must each declare the
@@ -2110,7 +2133,7 @@ namespace core
 				return refuse(where + " maximum condensing temperature must be finite and above absolute zero (-273.15 C)");
 			if (chiller.chilledSetpointC >= chiller.maxCondensingTemperatureC)
 				return refuse(where + " chilled setpoint must be below the maximum condensing temperature");
-		}
+		} catch (BrokenDraftEntry const&) {}
 		// Thermal buffer contracts (#398): the buffer couples to a declared
 		// host reservoir; a circulation-access buffer additionally names a
 		// coolant loop coupled to that same host, because the buffer's
@@ -2125,7 +2148,7 @@ namespace core
 			return refuse("Station thermal buffers are limited to "
 				+ std::to_string(MaxStationThermalBuffers) + " entries");
 		std::set<std::string> thermalBufferIds;
-		for (auto const& buffer : settings.thermalBuffers)
+		for (auto const& buffer : settings.thermalBuffers) try
 		{
 			auto const where = "Station thermal buffer '" + buffer.id + "'";
 			if (buffer.id.empty()) return refuse("Station thermal buffer id must not be empty");
@@ -2137,7 +2160,7 @@ namespace core
 				settings.thermalReservoirs.end(),
 				[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == buffer.reservoirId; });
 			if (host == settings.thermalReservoirs.end())
-				return refuse(where + " references unknown host thermal reservoir '" + buffer.reservoirId + "'");
+				return missing(where + " references unknown host thermal reservoir '" + buffer.reservoirId + "'");
 			if (std::find(StationThermalBufferAccessModes.begin(),
 				StationThermalBufferAccessModes.end(), buffer.accessMode)
 				== StationThermalBufferAccessModes.end())
@@ -2149,7 +2172,7 @@ namespace core
 					settings.coolantLoops.end(),
 					[&](CoolantLoopSettings const& loop) { return loop.id == buffer.circulationLoopId; });
 				if (gate == settings.coolantLoops.end())
-					return refuse(where + " circulation access references unknown coolant loop '"
+					return missing(where + " circulation access references unknown coolant loop '"
 						+ buffer.circulationLoopId + "'");
 				if (gate->reservoirId != buffer.reservoirId)
 					return refuse(where + " circulation loop '" + gate->id
@@ -2181,7 +2204,7 @@ namespace core
 				return refuse(where + " discharge rate must be finite and non-negative");
 			if (buffer.maxChargeKW <= 0.0 && buffer.maxDischargeKW <= 0.0)
 				return refuse(where + " that can neither charge nor discharge is not a buffer");
-		}
+		} catch (BrokenDraftEntry const&) {}
 		// Generator contracts (#399): the fuel inventory is an energy-unit
 		// Resource store, the waste-heat sink a declared thermal reservoir
 		// of the generator's own service class - spare capacity in another
@@ -2191,7 +2214,7 @@ namespace core
 			return refuse("Station generators are limited to "
 				+ std::to_string(MaxStationGenerators) + " entries");
 		std::set<std::string> generatorIds;
-		for (auto const& generator : settings.generators)
+		for (auto const& generator : settings.generators) try
 		{
 			auto const where = "Station generator '" + generator.id + "'";
 			if (generator.id.empty()) return refuse("Station generator id must not be empty");
@@ -2209,7 +2232,7 @@ namespace core
 			auto const fuel = std::find_if(settings.stores.begin(), settings.stores.end(),
 				[&](ResourceStoreSettings const& store) { return store.id == generator.fuelStoreId; });
 			if (fuel == settings.stores.end())
-				return refuse(where + " fuel inventory references unknown Resource store '"
+				return missing(where + " fuel inventory references unknown Resource store '"
 					+ generator.fuelStoreId + "'");
 			if (fuel->unit != "kJ" && fuel->unit != "MJ" && fuel->unit != "Wh" && fuel->unit != "kWh")
 				return refuse(where + " fuel store unit '" + fuel->unit
@@ -2218,7 +2241,7 @@ namespace core
 				settings.thermalReservoirs.end(),
 				[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == generator.heatSinkId; });
 			if (sink == settings.thermalReservoirs.end())
-				return refuse(where + " heat sink references unknown thermal reservoir '"
+				return missing(where + " heat sink references unknown thermal reservoir '"
 					+ generator.heatSinkId + "'");
 			if (sink->thermalClass != generator.thermalClass)
 				return refuse(where + " thermal class '" + generator.thermalClass
@@ -2250,12 +2273,12 @@ namespace core
 			if (!std::isfinite(generator.maxSinkTemperatureC)
 				|| generator.maxSinkTemperatureC <= -StationCelsiusOffset)
 				return refuse(where + " maximum sink temperature must be finite and above absolute zero (-273.15 C)");
-		}
+		} catch (BrokenDraftEntry const&) {}
 		if (settings.deliveries.size() > MaxStationResourceDeliveries)
 			return refuse("Station resupply deliveries are limited to "
 				+ std::to_string(MaxStationResourceDeliveries) + " entries");
 		std::set<std::string> deliveryIds;
-		for (auto const& delivery : settings.deliveries)
+		for (auto const& delivery : settings.deliveries) try
 		{
 			auto const where = "Station resupply delivery '" + delivery.id + "'";
 			if (delivery.id.empty()) return refuse("Station resupply delivery id must not be empty");
@@ -2266,7 +2289,7 @@ namespace core
 			auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
 				[&](ResourceStoreSettings const& store) { return store.id == delivery.storeId; });
 			if (it == settings.stores.end())
-				return refuse(where + " targets unknown Resource store '" + delivery.storeId + "'");
+				return missing(where + " targets unknown Resource store '" + delivery.storeId + "'");
 			// A delivery brings a store's own material in; it never converts
 			// units on the way through the boundary.
 			if (delivery.unit != it->unit)
@@ -2289,7 +2312,7 @@ namespace core
 					< static_cast<double>(World::getFixedTimestep()))
 				return refuse(where + " recurrence must be zero or at least one World fixed tick ("
 					+ std::to_string(World::getFixedTimestep()) + " seconds)");
-		}
+		} catch (BrokenDraftEntry const&) {}
 		// Terminal-waste ejection schedules (#403): a scenario removal of
 		// disposal-ready (qualified) material from one waste store at
 		// authored times. The same schedule discipline as resupply
@@ -2301,7 +2324,7 @@ namespace core
 			return refuse("Station waste ejections are limited to "
 				+ std::to_string(MaxStationWasteEjections) + " entries");
 		std::set<std::string> ejectionIds;
-		for (auto const& ejection : settings.wasteEjections)
+		for (auto const& ejection : settings.wasteEjections) try
 		{
 			auto const where = "Station waste ejection '" + ejection.id + "'";
 			if (ejection.id.empty()) return refuse("Station waste ejection id must not be empty");
@@ -2312,7 +2335,7 @@ namespace core
 			auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
 				[&](ResourceStoreSettings const& store) { return store.id == ejection.storeId; });
 			if (it == settings.stores.end())
-				return refuse(where + " targets unknown Resource store '" + ejection.storeId + "'");
+				return missing(where + " targets unknown Resource store '" + ejection.storeId + "'");
 			// Ejection carries a store's own material out; it never
 			// converts units on the way through the boundary.
 			if (ejection.unit != it->unit)
@@ -2335,7 +2358,7 @@ namespace core
 					< static_cast<double>(World::getFixedTimestep()))
 				return refuse(where + " recurrence must be zero or at least one World fixed tick ("
 					+ std::to_string(World::getFixedTimestep()) + " seconds)");
-		}
+		} catch (BrokenDraftEntry const&) {}
 		// Installation outage and capacity-reduction schedules (#413): a
 		// scenario change to one registered installation's available rated
 		// capacity at authored times. The outage must name an installation
@@ -2370,7 +2393,7 @@ namespace core
 					+ "; installation ids must be unique across generators, coolant loops and chillers");
 		}
 		std::set<std::string> outageIds;
-		for (auto const& outage : settings.outages)
+		for (auto const& outage : settings.outages) try
 		{
 			auto const where = "Station installation outage '" + outage.id + "'";
 			if (outage.id.empty()) return refuse("Station installation outage id must not be empty");
@@ -2387,7 +2410,7 @@ namespace core
 				[&](StationInstallationIdentity const& installation) {
 					return installation.id == outage.installationId;
 				}))
-				return refuse(where + " targets unknown installation '" + outage.installationId
+				return missing(where + " targets unknown installation '" + outage.installationId
 					+ "'; only installations registered with the availability contract can be outaged");
 			if (!std::isfinite(outage.capacityFraction) || outage.capacityFraction < 0.0
 				|| outage.capacityFraction >= 1.0)
@@ -2408,7 +2431,7 @@ namespace core
 			if (outage.recurrenceSeconds > 0.0
 				&& outage.recurrenceSeconds + StationScheduleTolerance < outage.durationSeconds)
 				return refuse(where + " recurrence must be at least the outage duration so its windows never overlap");
-		}
+		} catch (BrokenDraftEntry const&) {}
 		// Authored scheduled maintenance jobs (#414): timed work whose
 		// completion must be paid for with declared tools, spare parts and
 		// consumables. The target must be a registered installation, every
@@ -2426,7 +2449,7 @@ namespace core
 			return refuse("Station maintenance jobs are limited to "
 				+ std::to_string(MaxStationMaintenanceJobs) + " entries");
 		std::set<std::string> maintenanceIds;
-		for (auto const& job : settings.maintenanceJobs)
+		for (auto const& job : settings.maintenanceJobs) try
 		{
 			auto const where = "Station maintenance job '" + job.id + "'";
 			if (job.id.empty()) return refuse("Station maintenance job id must not be empty");
@@ -2443,7 +2466,7 @@ namespace core
 				[&](StationInstallationIdentity const& installation) {
 					return installation.id == job.installationId;
 				}))
-				return refuse(where + " targets unknown installation '" + job.installationId
+				return missing(where + " targets unknown installation '" + job.installationId
 					+ "'; only installations registered with the availability contract can be maintained");
 			if (!std::isfinite(job.firstOccurrenceSeconds)
 				|| job.firstOccurrenceSeconds < 0.0)
@@ -2476,7 +2499,7 @@ namespace core
 			{
 				waste = findStore(job.wasteStoreId);
 				if (!waste)
-					return refuse(where + " references unknown waste store '" + job.wasteStoreId + "'");
+					return missing(where + " references unknown waste store '" + job.wasteStoreId + "'");
 			}
 			bool anyConsumed = false;
 			std::set<std::string> requirementStores;
@@ -2488,7 +2511,7 @@ namespace core
 				if (!requirementStores.insert(requirement.storeId).second)
 					return refuse(item + " is duplicated within the job");
 				auto const* source = findStore(requirement.storeId);
-				if (!source) return refuse(item + " references unknown store");
+				if (!source) return missing(item + " references unknown store");
 				if (!std::isfinite(requirement.quantity) || requirement.quantity <= 0.0)
 					return refuse(item + " quantity must be finite and positive");
 				if (!requirement.consumed) continue;
@@ -2515,7 +2538,7 @@ namespace core
 			}
 			if (!anyConsumed && !job.wasteStoreId.empty())
 				return refuse(where + " declares a waste store but consumes nothing; the waste store would never receive material");
-		}
+		} catch (BrokenDraftEntry const&) {}
 		// Compartment atmosphere contracts (#400): a fixed volume with a
 		// finite owned gas inventory, an authored effective thermal
 		// capacity, an optional heat-only reservoir coupling and an
@@ -2527,7 +2550,7 @@ namespace core
 			return refuse("Station atmospheres are limited to "
 				+ std::to_string(MaxStationAtmospheres) + " entries");
 		std::set<std::string> atmosphereIds;
-		for (auto const& atmosphere : settings.atmospheres)
+		for (auto const& atmosphere : settings.atmospheres) try
 		{
 			auto const where = "Station atmosphere '" + atmosphere.id + "'";
 			if (atmosphere.id.empty()) return refuse("Station atmosphere id must not be empty");
@@ -2558,7 +2581,7 @@ namespace core
 					settings.thermalReservoirs.end(),
 					[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == atmosphere.reservoirId; });
 				if (host == settings.thermalReservoirs.end())
-					return refuse(where + " is coupled to unknown thermal reservoir '" + atmosphere.reservoirId + "'");
+					return missing(where + " is coupled to unknown thermal reservoir '" + atmosphere.reservoirId + "'");
 			}
 			if (!std::isfinite(atmosphere.exchangerConductanceKWPerK) || atmosphere.exchangerConductanceKWPerK < 0.0)
 				return refuse(where + " exchanger conductance must be finite and non-negative");
@@ -2606,7 +2629,7 @@ namespace core
 						+ startingCarbonDioxideKPa + startingVapourKPa))
 					return refuse(where + " starting inventory in this volume and temperature derives a non-finite pressure");
 			}
-		}
+		} catch (BrokenDraftEntry const&) {}
 		// Scheduled airlock cycle contracts (#400): each cycle draws from
 		// one declared compartment on the shared scenario schedule rule
 		// and splits its removal into recovered and lost by the authored
@@ -2615,7 +2638,7 @@ namespace core
 			return refuse("Station airlock cycles are limited to "
 				+ std::to_string(MaxStationAirlockCycles) + " entries");
 		std::set<std::string> airlockCycleIds;
-		for (auto const& cycle : settings.airlockCycles)
+		for (auto const& cycle : settings.airlockCycles) try
 		{
 			auto const where = "Station airlock cycle '" + cycle.id + "'";
 			if (cycle.id.empty()) return refuse("Station airlock cycle id must not be empty");
@@ -2626,7 +2649,7 @@ namespace core
 			auto const it = std::find_if(settings.atmospheres.begin(), settings.atmospheres.end(),
 				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == cycle.atmosphereId; });
 			if (it == settings.atmospheres.end())
-				return refuse(where + " draws from unknown atmosphere compartment '" + cycle.atmosphereId + "'");
+				return missing(where + " draws from unknown atmosphere compartment '" + cycle.atmosphereId + "'");
 			if (!std::isfinite(cycle.gasMassKg) || cycle.gasMassKg <= 0.0)
 				return refuse(where + " cycled gas mass must be finite and positive");
 			if (!std::isfinite(cycle.firstOccurrenceSeconds) || cycle.firstOccurrenceSeconds < 0.0)
@@ -2641,7 +2664,7 @@ namespace core
 			if (!std::isfinite(cycle.recoveredFraction) || cycle.recoveredFraction < 0.0
 				|| cycle.recoveredFraction > 1.0)
 				return refuse(where + " recovered fraction must be finite and from 0 to 1");
-		}
+		} catch (BrokenDraftEntry const&) {}
 		// Crew contracts (#401): the crew is an authored population and
 		// activity assignment, never derived from World Agents. All four
 		// matter stores must be compound mass stores so the declared
@@ -2661,7 +2684,7 @@ namespace core
 			return refuse("Station crews are limited to "
 				+ std::to_string(MaxStationCrews) + " entries");
 		std::set<std::string> crewIds;
-		for (auto const& crew : settings.crews)
+		for (auto const& crew : settings.crews) try
 		{
 			auto const where = "Station crew '" + crew.id + "'";
 			if (crew.id.empty()) return refuse("Station crew id must not be empty");
@@ -2673,7 +2696,7 @@ namespace core
 				settings.atmospheres.end(),
 				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == crew.atmosphereId; });
 			if (habitat == settings.atmospheres.end())
-				return refuse(where + " breathes in unknown atmosphere compartment '" + crew.atmosphereId + "'");
+				return missing(where + " breathes in unknown atmosphere compartment '" + crew.atmosphereId + "'");
 			if (crew.crewCount < 0) return refuse(where + " crew count must not be negative");
 			if (!validateStationProfile(crew.activityProfile, where + " activity profile", diagnostic))
 				return false;
@@ -2692,7 +2715,7 @@ namespace core
 				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
 					[&](ResourceStoreSettings const& store) { return store.id == streamIds[stream]; });
 				if (found == settings.stores.end())
-					return refuse(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
+					return missing(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
 						+ "' does not exist");
 				if (!isMassUnit(found->unit))
 					return refuse(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
@@ -2775,7 +2798,7 @@ namespace core
 			if (crew.metabolicHeatPerCrewKW > releasedKJPerS
 				+ StationBalanceTolerance * std::max(1.0, std::abs(releasedKJPerS)))
 				return refuse(where + " metabolic heat exceeds the consumed food energy minus the energy still bound in the waste streams: heat may not be created from nothing");
-		}
+		} catch (BrokenDraftEntry const&) {}
 		// Water recovery contracts (#402). A collector condenses vapour out
 		// of one compartment onto a coolant-loop cold surface; a treatment
 		// turns raw water into treated water plus retained concentrate. Both
@@ -2802,7 +2825,7 @@ namespace core
 			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
 				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
 			if (found == settings.stores.end())
-				return refuse(where + " " + role + " store '" + storeId + "' does not exist");
+				return missing(where + " " + role + " store '" + storeId + "' does not exist");
 			if (!isMassUnit(found->unit))
 				return refuse(where + " " + role + " store '" + storeId
 					+ "' must be a mass unit; water recovery is mass-denominated (g or kg)");
@@ -2822,7 +2845,7 @@ namespace core
 			return true;
 		};
 		std::set<std::string> waterIds;
-		for (auto const& collector : settings.waterCollectors)
+		for (auto const& collector : settings.waterCollectors) try
 		{
 			auto const where = "Station water collector '" + collector.id + "'";
 			if (collector.id.empty()) return refuse("Station water collector id must not be empty");
@@ -2847,7 +2870,7 @@ namespace core
 				settings.atmospheres.end(), [&](AtmosphereSettings const& atmosphere)
 				{ return atmosphere.id == collector.atmosphereId; });
 			if (compartment == settings.atmospheres.end())
-				return refuse(where + " condenses from unknown atmosphere compartment '" + collector.atmosphereId + "'");
+				return missing(where + " condenses from unknown atmosphere compartment '" + collector.atmosphereId + "'");
 			if (compartment->hazardClass != collector.hazardClass)
 				return refuse(where + " hazard class '" + collector.hazardClass + "' does not match compartment '"
 					+ compartment->id + "' hazard class '" + compartment->hazardClass
@@ -2855,12 +2878,12 @@ namespace core
 			auto const loop = std::find_if(settings.coolantLoops.begin(), settings.coolantLoops.end(),
 				[&](CoolantLoopSettings const& candidate) { return candidate.id == collector.coolingLoopId; });
 			if (loop == settings.coolantLoops.end())
-				return refuse(where + " cold surface is served by unknown coolant loop '" + collector.coolingLoopId + "'");
+				return missing(where + " cold surface is served by unknown coolant loop '" + collector.coolingLoopId + "'");
 			auto const host = std::find_if(settings.thermalReservoirs.begin(),
 				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
 				{ return reservoir.id == loop->reservoirId; });
 			if (host == settings.thermalReservoirs.end())
-				return refuse(where + " coolant loop '" + loop->id + "' has no known host reservoir");
+				return missing(where + " coolant loop '" + loop->id + "' has no known host reservoir");
 			if (host->thermalClass != collector.thermalClass)
 				return refuse(where + " thermal class '" + collector.thermalClass + "' does not match coolant loop '"
 					+ loop->id + "' host reservoir class '" + host->thermalClass
@@ -2868,8 +2891,8 @@ namespace core
 			if (!declareWaterStore(collector.destStoreId, "raw water destination", where,
 				collector.hazardClass, false))
 				return false;
-		}
-		for (auto const& treatment : settings.waterTreatments)
+		} catch (BrokenDraftEntry const&) {}
+		for (auto const& treatment : settings.waterTreatments) try
 		{
 			auto const where = "Station water treatment '" + treatment.id + "'";
 			if (treatment.id.empty()) return refuse("Station water treatment id must not be empty");
@@ -2938,7 +2961,7 @@ namespace core
 			}
 			else if (!treatment.clearanceStoreId.empty() || treatment.clearancePerKg != 0.0)
 				return refuse(where + " is normal-class but configures release-clearance testing; release clearance is the hazardous-class containment boundary and does not apply to normal water treatment");
-		}
+		} catch (BrokenDraftEntry const&) {}
 		// Oxygen production and CO2 capture contracts (#404). An
 		// electrolyzer splits qualified water into oxygen and hydrogen: the
 		// split is stoichiometric, so the authored electrical dose must at
@@ -2974,7 +2997,7 @@ namespace core
 			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
 				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
 			if (found == settings.stores.end())
-				return refuse(where + " " + role + " store '" + storeId + "' does not exist");
+				return missing(where + " " + role + " store '" + storeId + "' does not exist");
 			if (!isMassUnit(found->unit))
 				return refuse(where + " " + role + " store '" + storeId
 					+ "' must be a mass unit; gas handling is mass-denominated (g or kg)");
@@ -2994,7 +3017,7 @@ namespace core
 			return true;
 		};
 		std::set<std::string> gasIds;
-		for (auto const& electrolyzer : settings.electrolyzers)
+		for (auto const& electrolyzer : settings.electrolyzers) try
 		{
 			auto const where = "Station electrolyzer '" + electrolyzer.id + "'";
 			if (electrolyzer.id.empty()) return refuse("Station electrolyzer id must not be empty");
@@ -3033,7 +3056,7 @@ namespace core
 					settings.atmospheres.end(), [&](AtmosphereSettings const& atmosphere)
 					{ return atmosphere.id == electrolyzer.atmosphereId; });
 				if (compartment == settings.atmospheres.end())
-					return refuse(where + " delivers oxygen to unknown atmosphere compartment '" + electrolyzer.atmosphereId + "'");
+					return missing(where + " delivers oxygen to unknown atmosphere compartment '" + electrolyzer.atmosphereId + "'");
 				if (compartment->hazardClass != electrolyzer.hazardClass)
 					return refuse(where + " hazard class '" + electrolyzer.hazardClass
 						+ "' does not match compartment '" + compartment->id
@@ -3068,13 +3091,13 @@ namespace core
 				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
 				{ return reservoir.id == electrolyzer.heatSinkId; });
 			if (sink == settings.thermalReservoirs.end())
-				return refuse(where + " heat sink is unknown thermal reservoir '" + electrolyzer.heatSinkId + "'");
+				return missing(where + " heat sink is unknown thermal reservoir '" + electrolyzer.heatSinkId + "'");
 			if (sink->thermalClass != electrolyzer.thermalClass)
 				return refuse(where + " thermal class '" + electrolyzer.thermalClass
 					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
 					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
-		}
-		for (auto const& capture : settings.co2Captures)
+		} catch (BrokenDraftEntry const&) {}
+		for (auto const& capture : settings.co2Captures) try
 		{
 			auto const where = "Station CO2 capture machine '" + capture.id + "'";
 			if (capture.id.empty()) return refuse("Station CO2 capture machine id must not be empty");
@@ -3098,7 +3121,7 @@ namespace core
 				settings.atmospheres.end(), [&](AtmosphereSettings const& atmosphere)
 				{ return atmosphere.id == capture.atmosphereId; });
 			if (compartment == settings.atmospheres.end())
-				return refuse(where + " scrubs unknown atmosphere compartment '" + capture.atmosphereId + "'");
+				return missing(where + " scrubs unknown atmosphere compartment '" + capture.atmosphereId + "'");
 			if (compartment->hazardClass != capture.hazardClass)
 				return refuse(where + " hazard class '" + capture.hazardClass
 					+ "' does not match compartment '" + compartment->id
@@ -3111,7 +3134,7 @@ namespace core
 				&& !declareGasStore(capture.consumableStoreId, "consumable", where,
 					capture.hazardClass, true))
 				return false;
-		}
+		} catch (BrokenDraftEntry const&) {}
 		// Fuel-cell backup contracts (#406). A cell generates electrical
 		// power from two dedicated reactant stores and can only ever see
 		// its own stores, so protected breathing oxygen is never drawn
@@ -3124,7 +3147,7 @@ namespace core
 		// not exceed the installed rating. All three stores in the chain
 		// are plain mass stores carrying the cell's own hazard class, and
 		// the heat sink must share the cell's thermal service class.
-		for (auto const& cell : settings.fuelCells)
+		for (auto const& cell : settings.fuelCells) try
 		{
 			auto const where = "Station fuel cell '" + cell.id + "'";
 			if (cell.id.empty()) return refuse("Station fuel cell id must not be empty");
@@ -3170,12 +3193,12 @@ namespace core
 				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
 				{ return reservoir.id == cell.heatSinkId; });
 			if (sink == settings.thermalReservoirs.end())
-				return refuse(where + " heat sink is unknown thermal reservoir '" + cell.heatSinkId + "'");
+				return missing(where + " heat sink is unknown thermal reservoir '" + cell.heatSinkId + "'");
 			if (sink->thermalClass != cell.thermalClass)
 				return refuse(where + " thermal class '" + cell.thermalClass
 					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
 					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
-		}
+		} catch (BrokenDraftEntry const&) {}
 		// Carbon recovery contracts (#405). A Sabatier reactor converts
 		// captured CO2 and hydrogen into methane and water; the conversion
 		// is stoichiometric under the declared molar masses, so the mass
@@ -3197,7 +3220,7 @@ namespace core
 		if (settings.methaneProcessors.size() > MaxStationMethaneProcessors)
 			return refuse("Station methane processors are limited to "
 				+ std::to_string(MaxStationMethaneProcessors) + " entries");
-		for (auto const& reactor : settings.sabatierReactors)
+		for (auto const& reactor : settings.sabatierReactors) try
 		{
 			auto const where = "Station Sabatier reactor '" + reactor.id + "'";
 			if (reactor.id.empty()) return refuse("Station Sabatier reactor id must not be empty");
@@ -3265,13 +3288,13 @@ namespace core
 				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
 				{ return reservoir.id == reactor.heatSinkId; });
 			if (sink == settings.thermalReservoirs.end())
-				return refuse(where + " heat sink is unknown thermal reservoir '" + reactor.heatSinkId + "'");
+				return missing(where + " heat sink is unknown thermal reservoir '" + reactor.heatSinkId + "'");
 			if (sink->thermalClass != reactor.thermalClass)
 				return refuse(where + " thermal class '" + reactor.thermalClass
 					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
 					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
-		}
-		for (auto const& processor : settings.methaneProcessors)
+		} catch (BrokenDraftEntry const&) {}
+		for (auto const& processor : settings.methaneProcessors) try
 		{
 			auto const where = "Station methane processor '" + processor.id + "'";
 			if (processor.id.empty()) return refuse("Station methane processor id must not be empty");
@@ -3332,12 +3355,12 @@ namespace core
 				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
 				{ return reservoir.id == processor.heatSinkId; });
 			if (sink == settings.thermalReservoirs.end())
-				return refuse(where + " heat sink is unknown thermal reservoir '" + processor.heatSinkId + "'");
+				return missing(where + " heat sink is unknown thermal reservoir '" + processor.heatSinkId + "'");
 			if (sink->thermalClass != processor.thermalClass)
 				return refuse(where + " thermal class '" + processor.thermalClass
 					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
 					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
-		}
+		} catch (BrokenDraftEntry const&) {}
 		// Nutrient recovery contracts (#407). A microbial processor digests
 		// a compound organic-waste feedstock and recovers its bound
 		// nutrients per constituent: the recovery yields are fractions of
@@ -3370,7 +3393,7 @@ namespace core
 			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
 				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
 			if (found == settings.stores.end())
-				return refuse(where + " " + role + " store '" + storeId + "' does not exist");
+				return missing(where + " " + role + " store '" + storeId + "' does not exist");
 			if (!isMassUnit(found->unit))
 				return refuse(where + " " + role + " store '" + storeId
 					+ "' must be a mass unit; nutrient recovery is mass-denominated (g or kg)");
@@ -3393,7 +3416,7 @@ namespace core
 			return true;
 		};
 		std::set<std::string> microbialIds;
-		for (auto const& processor : settings.microbialProcessors)
+		for (auto const& processor : settings.microbialProcessors) try
 		{
 			auto const where = "Station microbial processor '" + processor.id + "'";
 			if (processor.id.empty()) return refuse("Station microbial processor id must not be empty");
@@ -3487,7 +3510,7 @@ namespace core
 				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
 					[&](ResourceStoreSettings const& store) { return store.id == processor.consumableStoreId; });
 				if (found == settings.stores.end())
-					return refuse(where + " consumable store '" + processor.consumableStoreId
+					return missing(where + " consumable store '" + processor.consumableStoreId
 						+ "' does not exist");
 				// #592: the consumable is a consumed input like the feed: its
 				// authored hazard class must match the processor's own class,
@@ -3529,7 +3552,7 @@ namespace core
 				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
 						[&](ResourceStoreSettings const& store) { return store.id == processor.stockStoreId; });
 				if (found == settings.stores.end())
-					return refuse(where + " replacement biological stock store '"
+					return missing(where + " replacement biological stock store '"
 						+ processor.stockStoreId + "' does not exist");
 				if (found->hazardClass != processor.hazardClass)
 					return refuse(where + " replacement biological stock store '"
@@ -3566,12 +3589,12 @@ namespace core
 				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
 				{ return reservoir.id == processor.heatSinkId; });
 			if (sink == settings.thermalReservoirs.end())
-				return refuse(where + " heat sink is unknown thermal reservoir '" + processor.heatSinkId + "'");
+				return missing(where + " heat sink is unknown thermal reservoir '" + processor.heatSinkId + "'");
 			if (sink->thermalClass != processor.thermalClass)
 				return refuse(where + " thermal class '" + processor.thermalClass
 					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
 					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
-		}
+		} catch (BrokenDraftEntry const&) {}
 		// Crop production contracts (#409). A crop population grows a dry
 		// Living biomass inside one Atmosphere compartment under the
 		// resources actually delivered: lamp power through the declared
@@ -3597,7 +3620,7 @@ namespace core
 			return refuse("Station crop populations are limited to "
 				+ std::to_string(MaxStationCropPopulations) + " entries");
 		std::set<std::string> cropIds;
-		for (auto const& crop : settings.cropPopulations)
+		for (auto const& crop : settings.cropPopulations) try
 		{
 			auto const where = "Station crop population '" + crop.id + "'";
 			if (crop.id.empty()) return refuse("Station crop population id must not be empty");
@@ -3609,7 +3632,7 @@ namespace core
 				settings.atmospheres.end(),
 				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == crop.atmosphereId; });
 			if (compartment == settings.atmospheres.end())
-				return refuse(where + " grows in unknown atmosphere compartment '" + crop.atmosphereId + "'");
+				return missing(where + " grows in unknown atmosphere compartment '" + crop.atmosphereId + "'");
 			std::string const uptakeIds[5]{crop.waterStoreId, crop.nitrogenStoreId,
 				crop.phosphorusStoreId, crop.potassiumStoreId, crop.mineralsStoreId};
 			char const* uptakeRoles[5]{"irrigation water", "nitrogen", "phosphorus",
@@ -3621,7 +3644,7 @@ namespace core
 				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
 					[&](ResourceStoreSettings const& store) { return store.id == uptakeIds[stream]; });
 				if (found == settings.stores.end())
-					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
+					return missing(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
 						+ "' does not exist");
 				if (!isMassUnit(found->unit))
 					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
@@ -3744,7 +3767,7 @@ namespace core
 				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
 						[&](ResourceStoreSettings const& store) { return store.id == destinationIds[stream]; });
 				if (found == settings.stores.end())
-					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
+					return missing(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
 						+ "' does not exist");
 				if (!isMassUnit(found->unit))
 					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
@@ -3760,7 +3783,7 @@ namespace core
 						+ "' is authored " + found->hazardClass + "-class but the population grows in '"
 						+ compartment->id + "', a " + compartment->hazardClass + "-class compartment: a crop may only take up and harvest material of its compartment's hazard class; harvest and death residue never relabel material across the hazard boundary");
 			}
-		}
+		} catch (BrokenDraftEntry const&) {}
 		// Algae culture contracts (#411). A separate Biological population
 		// with its own installation limits: the Growing capacity here is the
 		// active culture volume times the supported dry-mass density per
@@ -3782,7 +3805,7 @@ namespace core
 			return refuse("Station algae cultures are limited to "
 				+ std::to_string(MaxStationAlgaeCultures) + " entries");
 		std::set<std::string> algaeIds;
-		for (auto const& algae : settings.algaeCultures)
+		for (auto const& algae : settings.algaeCultures) try
 		{
 			auto const where = "Station algae culture '" + algae.id + "'";
 			if (algae.id.empty()) return refuse("Station algae culture id must not be empty");
@@ -3794,7 +3817,7 @@ namespace core
 				settings.atmospheres.end(),
 				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == algae.atmosphereId; });
 			if (compartment == settings.atmospheres.end())
-				return refuse(where + " runs in unknown atmosphere compartment '" + algae.atmosphereId + "'");
+				return missing(where + " runs in unknown atmosphere compartment '" + algae.atmosphereId + "'");
 			std::string const uptakeIds[5]{algae.waterStoreId, algae.nitrogenStoreId,
 				algae.phosphorusStoreId, algae.potassiumStoreId, algae.mineralsStoreId};
 			char const* uptakeRoles[5]{"culture water", "nitrogen", "phosphorus",
@@ -3806,7 +3829,7 @@ namespace core
 				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
 					[&](ResourceStoreSettings const& store) { return store.id == uptakeIds[stream]; });
 				if (found == settings.stores.end())
-					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
+					return missing(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
 						+ "' does not exist");
 				if (!isMassUnit(found->unit))
 					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
@@ -3926,7 +3949,7 @@ namespace core
 				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
 						[&](ResourceStoreSettings const& store) { return store.id == destinationIds[stream]; });
 				if (found == settings.stores.end())
-					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
+					return missing(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
 						+ "' does not exist");
 				if (!isMassUnit(found->unit))
 					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
@@ -3944,7 +3967,7 @@ namespace core
 						+ "' is authored " + found->hazardClass + "-class but the culture runs in '"
 						+ compartment->id + "', a " + compartment->hazardClass + "-class compartment: an algae culture may only take up and harvest material of its compartment's hazard class; the harvest partition and death residue never relabel material across the hazard boundary");
 			}
-		}
+		} catch (BrokenDraftEntry const&) {}
 		diagnostic.clear(); return true;
 	}
 	void setStationSystemsSourceLoader(StationSystemsSourceLoader loader) { sourceLoader = std::move(loader); }

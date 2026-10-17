@@ -84,7 +84,13 @@ namespace core
 				else ++it;
 			}
 			std::string validationError;
-			if (!validateStationSystemsSettings(validated, validationError))
+			// Draft-tolerant validation (#642): entries whose references do
+			// not resolve are recorded and skipped rather than refusing the
+			// file; the draft keeps them and the Flow canvas shows them as
+			// broken. Every other rule still refuses, and Apply settings
+			// re-validates the whole configuration strictly against the World.
+			std::vector<std::string> brokenReferences;
+			if (!validateStationSystemsSettings(validated, validationError, &brokenReferences))
 				throw SerializationException(validationError);
 			if (input->hasField("layout"))
 			{

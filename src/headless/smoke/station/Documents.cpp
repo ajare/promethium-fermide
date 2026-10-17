@@ -145,6 +145,120 @@ namespace
 		require(failed && readFile(path) == bytes, "Failed save replaced previous file");
 	}
 
+	// #642: a file with broken references opens with those references
+	// shown as broken, not refused. Draft-tolerant validation skips the
+	// entry carrying an unresolvable reference while every other rule keeps
+	// its full strictness: an invalid value anywhere else, or on the broken
+	// entry's own fields checked before the reference, still refuses the
+	// file. The broken entries survive in the draft byte-stably, and the
+	// strict World path still refuses the same settings at Apply time.
+	void brokenReferenceDocument(smoke::Context const& context)
+	{
+		auto const path = context.temporaryRoot() / "broken-references.station.yaml";
+		core::StationConfigurationDocument draft;
+		draft.settings.enabled = true;
+		draft.settings.stores.push_back({"supply", "kg", 100.0, 50.0});
+		// One broken reference per target kind: store, reservoir, coolant
+		// loop, installation and atmosphere compartment.
+		draft.settings.transfers.push_back({"pump", "supply", "ghostStore", "kg", 1.0, 1});
+		draft.settings.conversions.push_back({"make",
+			{{"ghostIn", 1.0}}, {{"supply", 0.5}}, 0});
+		core::EquipmentLoadSettings loader;
+		loader.id = "loader";
+		loader.electricalDemandKW = 1.0;
+		loader.thermalClass = "low";
+		loader.materialExchanges.push_back({"ghostExchange", 1.0, true});
+		draft.settings.equipmentLoads.push_back(loader);
+		core::RadiatorSettings fin;
+		fin.id = "fin";
+		fin.reservoirId = "ghostReservoir";
+		draft.settings.radiators.push_back(fin);
+		core::ChillerSettings chiller;
+		chiller.id = "chiller";
+		chiller.thermalClass = "low";
+		chiller.coldLoopId = "ghostLoop";
+		draft.settings.chillers.push_back(chiller);
+		core::GeneratorSettings generator;
+		generator.id = "gen";
+		generator.thermalClass = "low";
+		generator.fuelStoreId = "ghostFuel";
+		draft.settings.generators.push_back(generator);
+		core::ResourceDeliverySettings delivery;
+		delivery.id = "drop";
+		delivery.storeId = "ghostDrop";
+		delivery.unit = "kg";
+		delivery.quantity = 5.0;
+		delivery.firstOccurrenceSeconds = 1.0;
+		draft.settings.deliveries.push_back(delivery);
+		core::InstallationOutageSettings outage;
+		outage.id = "down";
+		outage.installationId = "ghostInstallation";
+		outage.capacityFraction = 0.0;
+		outage.firstOccurrenceSeconds = 1.0;
+		outage.durationSeconds = 10.0;
+		draft.settings.outages.push_back(outage);
+		core::CrewSettings crew;
+		crew.id = "crew";
+		crew.atmosphereId = "ghostAtmosphere";
+		draft.settings.crews.push_back(crew);
+		core::CropPopulationSettings crop;
+		crop.id = "crop";
+		crop.atmosphereId = "ghostCompartment";
+		draft.settings.cropPopulations.push_back(crop);
+		core::WaterTreatmentSettings plant;
+		plant.id = "plant";
+		plant.hazardClass = "normal";
+		plant.recoveryRatio = 0.8;
+		plant.sourceStoreId = "ghostSource";
+		plant.treatedStoreId = "ghostTreated";
+		plant.concentrateStoreId = "ghostConcentrate";
+		draft.settings.waterTreatments.push_back(plant);
+		draft.positions["Store:supply:0"] = {10.0f, 20.0f};
+
+		auto const bytes = core::serializeStationConfiguration(draft);
+		core::StationConfigurationDocument restored;
+		std::string diagnostic;
+		require(core::parseStationConfiguration(bytes, restored, &diagnostic),
+			"Broken references refused the whole file: " + diagnostic);
+		require(restored.settings == draft.settings && restored.positions == draft.positions,
+			"Broken-reference load lost authored entries or layout");
+		require(bytes == core::serializeStationConfiguration(restored),
+			"Broken-reference document changed during round trip");
+		// The strict World path still refuses the same settings: Apply
+		// settings remains the gate where broken wiring cannot pass.
+		std::string strictError;
+		require(!core::validateStationSystemsSettings(restored.settings, strictError),
+			"Strict validation wrongly accepted the broken-reference settings");
+
+		// An invalid value in a non-broken entry still refuses the file.
+		auto invalidElsewhere = draft;
+		core::BatterySettings badBattery;
+		badBattery.id = "bank";
+		badBattery.nameplateKWh = 5.0;
+		badBattery.usableKWh = 9.0;
+		invalidElsewhere.settings.batteries.push_back(badBattery);
+		require(!core::parseStationConfiguration(
+			core::serializeStationConfiguration(invalidElsewhere), restored, &diagnostic),
+			"An invalid value alongside broken references was accepted");
+		require(restored.settings == draft.settings,
+			"A refused broken-reference file disturbed the previously loaded draft");
+		// A broken entry whose own field is checked before its reference is
+		// still refused: the generator's thermal class is judged first.
+		auto invalidOwnField = draft;
+		invalidOwnField.settings.generators[0].thermalClass = "plasma";
+		require(!core::parseStationConfiguration(
+			core::serializeStationConfiguration(invalidOwnField), restored, &diagnostic),
+			"An invalid own field on a broken-reference entry was accepted");
+		require(restored.settings == draft.settings,
+			"A refused own-field file disturbed the previously loaded draft");
+		// The file seam keeps the same contract: a saved broken-reference
+		// document loads through the real path unchanged.
+		core::saveStationConfiguration(path.string(), draft);
+		core::StationConfigurationDocument fromFile;
+		require(core::loadStationConfiguration(path.string(), fromFile, &diagnostic)
+			&& fromFile.settings == draft.settings, "Broken-reference file load failed: " + diagnostic);
+	}
+
 	// Nothing but the authored settings may reach the document: no live tick
 	// counts, no elapsed time, no event history and no Lua source or state.
 	void requireSettingsOnly(std::string const& document)
@@ -3927,6 +4041,7 @@ void biologicalCapacityFiles(smoke::Context const& context)
 void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"configurationFile", configurationFile});
+	checks.push_back({"brokenReferenceDocument", brokenReferenceDocument});
 	checks.push_back({"fileRoundTrip", fileRoundTrip});
 	checks.push_back({"writeFailure", writeFailure});
 	checks.push_back({"legacyFiles", legacyAndMalformedFiles});

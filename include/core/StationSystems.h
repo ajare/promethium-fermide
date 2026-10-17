@@ -1713,7 +1713,14 @@ namespace core
 	bool validateStationProfile(ProfileSettings const&, std::string const& where,
 		std::string& diagnostic);
 	double evaluateStationProfile(ProfileSettings const&, double elapsedSeconds);
-	bool validateStationSystemsSettings(StationSystemsSettings const&, std::string& diagnostic);
+	// Draft-tolerant mode (#642): when a brokenReferences list is supplied,
+	// an entry whose reference cannot be resolved within the settings does
+	// not reject the whole configuration: the refusal is recorded in the
+	// list and that entry stops being validated, so a draft can open with
+	// the reference shown as broken. Every other rule stays strict, and
+	// with no list supplied (the World path) behaviour is unchanged.
+	bool validateStationSystemsSettings(StationSystemsSettings const&, std::string& diagnostic,
+		std::vector<std::string>* brokenReferences = nullptr);
 	// The endpoint half of the transfer entry check (#640): the rules a link
 	// between a store connector and a transfer connector can violate — the
 	// endpoints exist, differ, and agree on unit, declared composition and
