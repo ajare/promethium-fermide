@@ -706,6 +706,14 @@ if(BUILD_TESTING)
     set_tests_properties(simulation-step-timing PROPERTIES
         LABELS "smoke;standalone;core" TIMEOUT 30)
 
+    add_executable(pf-agent-group-registry-checks src/headless/AgentGroupRegistryChecks.cpp)
+    target_include_directories(pf-agent-group-registry-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-agent-group-registry-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-agent-group-registry-checks)
+    add_test(NAME agent-group-registry COMMAND pf-agent-group-registry-checks)
+    set_tests_properties(agent-group-registry PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
     add_executable(pf-occupant-packing-checks src/headless/OccupantPackingChecks.cpp)
     target_include_directories(pf-occupant-packing-checks PRIVATE "${PF_INCLUDE_DIR}")
     pf_apply_headless_verification_policy(pf-occupant-packing-checks)

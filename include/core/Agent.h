@@ -294,6 +294,7 @@ namespace core
 		friend struct AgentPoseTestAccess;
 		friend class World;
 		friend class AgentBehaviourRegistry;
+		friend class AgentGroupRegistry;
 		friend class SimulationCoordinator;
 		friend class Sector;
 
