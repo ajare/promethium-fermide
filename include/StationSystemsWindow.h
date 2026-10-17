@@ -72,6 +72,7 @@ private:
 	void newDraft();
 	void renderFileToolbar();
 	std::optional<DocumentSnapshot> mPendingDraftEdit;
+	bool mPendingLayoutEdit{false};
 	StationFlowDiagram mFlow;
 	std::weak_ptr<void const> mWorld;
 	core::StationSystemsSettings mDraft;

@@ -720,6 +720,13 @@ void StationFlowDiagram::exportLayout(core::StationConfigurationDocument& docume
 void StationFlowDiagram::importLayout(core::StationConfigurationDocument const& document)
 {
 	reset();
+	restoreLayout(document);
+}
+
+void StationFlowDiagram::restoreLayout(core::StationConfigurationDocument const& document)
+{
+	mLayout.clear(); mCached.reset(); mGraph = {}; mPositions.clear();
+	mDragging = -1; mTemperature = 0; mActiveLinkPin.reset();
 	for (auto const& [key, position] : document.positions)
 		mLayout[key] = {position.first, position.second};
 	mPan = {document.panX, document.panY}; mZoom = document.zoom;
@@ -798,7 +805,8 @@ std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode
 void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	std::function<void(core::StationSystemsSettings&)> const& renderInspector,
 	std::function<void()> const& beforeSelectionChange,
-	std::function<void()> const& beforeNodeRemoval)
+	std::function<void()> const& beforeNodeRemoval,
+	std::function<void()> const& beforeLayoutChange)
 {
 	if (mLastFrame != ImGui::GetFrameCount() - 1)
 	{ mDragging = -1; mTemperature = 0; mActiveLinkPin.reset(); }
@@ -886,6 +894,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	ImGui::SameLine();
 	if (ImGui::Button("Auto-arrange"))
 	{
+		if (beforeLayoutChange) beforeLayoutChange();
 		mPositions = station_flow::forceLayout(mGraph);
 		updateBounds(); mFitRequested = true;
 	}
@@ -1124,6 +1133,17 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	ImNodes::PopStyleVar();
 	int hoveredId = -1, hoveredNode = -1;
 	ImNodes::IsNodeHovered(&hoveredId);
+	// imnodes owns its mouse interaction, not an ImGui active item. Capture
+	// the authored positions before copying the first changed drag frame.
+	bool layoutChanged = false;
+	for (size_t i = 0; i < ids.size(); ++i)
+		if (visible[i])
+		{
+			auto const p = ImNodes::GetNodeGridSpacePos(ids[i]);
+			layoutChanged = layoutChanged || std::abs(p.x / mZoom - mPositions[i].x) > 0.01f
+				|| std::abs(p.y / mZoom - mPositions[i].y) > 0.01f;
+		}
+	if (layoutChanged && beforeLayoutChange) beforeLayoutChange();
 	for (size_t i = 0; i < ids.size(); ++i)
 	{
 		if (ids[i] == hoveredId) hoveredNode = int(i);

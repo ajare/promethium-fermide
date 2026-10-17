@@ -51,7 +51,7 @@ namespace
 		return window;
 	}
 
-	void flowPlacementWorkflow()
+	void flowPlacementWorkflow(smoke::Context const& smokeContext)
 	{
 		using smoke::require;
 		headless::ScopedImGuiContext context;
@@ -61,6 +61,8 @@ namespace
 		StationSystemsWindow window;
 		auto world = std::make_shared<core::World>("Flow authoring", 2, 2);
 		world->pauseSimulation(); world->finishBuild(); world->markSaved();
+		auto const path = smokeContext.temporaryRoot() / "layout-history.station.yaml";
+		window.setFilePicker([&](bool) -> std::optional<std::string> { return path.string(); });
 		bool flow = true;
 		headless::TestEngineDriver driver([&] {
 			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
@@ -112,8 +114,51 @@ namespace
 			flow = true; ctx->Yield(3);
 			ctx->ItemClick("Undo configuration"); ctx->Yield(3);
 			REQ(window.draft().stores.size() == 1, "Flow undo did not rewind the form edit");
+			ctx->ItemClick("Save configuration"); ctx->Yield(3);
+			REQ(!window.flowModified(), "Saving the layout did not clear dirty state");
+			core::StationConfigurationDocument saved;
+			REQ(core::loadStationConfiguration(path.string(), saved), "Could not read saved layout");
+			auto const id = window.draft().stores[0].id;
+			ImVec4 rect;
+			REQ(window.flowNodeRect("Store", id, &rect), "Store body is missing");
+			auto const start = ImVec2{(rect.x + rect.z) * 0.5f, rect.y + 12};
+			ctx->MouseTeleportToPos(start); ctx->Yield(2); ctx->MouseDown(); ctx->Yield(2);
+			ctx->MouseTeleportToPos({start.x + 40, start.y + 35}); ctx->Yield(3);
+			ctx->MouseTeleportToPos({start.x + 80, start.y + 70}); ctx->Yield(3);
+			REQ(window.draftHistory().undoCount() == 1, "Drag committed before release");
+			ctx->MouseUp(); ctx->Yield(3);
+			ImVec4 movedRect;
+			REQ(window.flowNodeRect("Store", id, &movedRect)
+				&& std::abs(movedRect.x - rect.x - 80) < 0.1f
+				&& std::abs(movedRect.y - rect.y - 70) < 0.1f,
+				"Real node body did not follow the (80,70) drag");
+			REQ(window.draftHistory().undoCount() == 2 && window.flowModified(),
+				"Node drag did not commit exactly once or mark the document dirty");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(!window.flowModified() && window.draft().stores.size() == 1,
+				"Move undo did not restore saved layout or changed settings");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.flowModified() && window.draftHistory().undoCount() == 2,
+				"Move redo did not restore layout");
+			ctx->ItemClick("Save configuration"); ctx->Yield(3);
+			core::StationConfigurationDocument moved;
+			REQ(core::loadStationConfiguration(path.string(), moved)
+				&& moved.positions != saved.positions && !window.flowModified(),
+				"Moved positions were not saved");
+			auto const key = "Store:" + id + ":0";
+			REQ(std::abs((moved.positions.at(key).first - saved.positions.at(key).first) * saved.zoom - 80) < 0.1f
+				&& std::abs((moved.positions.at(key).second - saved.positions.at(key).second) * saved.zoom - 70) < 0.1f,
+				"Redo/save did not retain the exact authored move");
 			ctx->ItemClick("Auto-arrange"); ctx->Yield(3);
-			REQ(window.draftHistory().undoCount() == 1, "Auto-arrange changed configuration history");
+			REQ(window.draftHistory().undoCount() == 3 && window.flowModified(),
+				"Auto-arrange did not commit one layout action");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(!window.flowModified(), "Auto-arrange undo did not restore saved moved layout");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.flowModified(), "Auto-arrange redo did not restore arranged layout");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draftHistory().undoCount() == 1, "Layout actions wiped earlier settings history");
 			world->resumeSimulation(); auto const tick = world->getSimulationTick();
 			arm(); clickCanvas();
 			REQ(window.draft().stores.size() == 2, "Running World blocked draft-only placement");
@@ -2826,9 +2871,9 @@ namespace
 		require(driver.passed(), "Flow radiator workflow failed on the Test Engine");
 	}
 
-	void storeWorkflow(smoke::Context const&)
+	void storeWorkflow(smoke::Context const& smokeContext)
 	{
-		flowPlacementWorkflow();
+		flowPlacementWorkflow(smokeContext);
 		using smoke::require;
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};

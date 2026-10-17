@@ -19,6 +19,7 @@ namespace
 	struct StationDraftSnapshot : DocumentSnapshotContext
 	{
 		core::StationSystemsSettings settings;
+		core::StationConfigurationDocument layout;
 		explicit StationDraftSnapshot(core::StationSystemsSettings const& value) : settings(value) {}
 	};
 }
@@ -26,16 +27,23 @@ namespace
 DocumentSnapshot StationSystemsWindow::captureDraft() const
 {
 	auto snapshot = mDraftHistory.capture({});
-	snapshot.context = std::make_shared<StationDraftSnapshot>(mDraft);
+	auto state = std::make_shared<StationDraftSnapshot>(mDraft);
+	mFlow.exportLayout(state->layout);
+	snapshot.context = std::move(state);
 	return snapshot;
 }
 
 void StationSystemsWindow::commitDraftChanges(bool force)
 {
-	if (!mPendingDraftEdit || (!force && ImGui::IsAnyItemActive())) return;
+	if (!mPendingDraftEdit || (!force && (ImGui::IsAnyItemActive()
+		|| (mPendingLayoutEdit && ImGui::IsMouseDown(ImGuiMouseButton_Left))))) return;
 	auto const before = std::static_pointer_cast<StationDraftSnapshot>(mPendingDraftEdit->context);
-	if (before->settings != mDraft) mDraftHistory.commit(std::move(mPendingDraftEdit));
+	core::StationConfigurationDocument layout;
+	mFlow.exportLayout(layout);
+	if (before->settings != mDraft || (mPendingLayoutEdit && before->layout.positions != layout.positions))
+		mDraftHistory.commit(std::move(mPendingDraftEdit));
 	mPendingDraftEdit.reset();
+	mPendingLayoutEdit = false;
 }
 
 void StationSystemsWindow::renderDraftHistory()
@@ -45,6 +53,8 @@ void StationSystemsWindow::renderDraftHistory()
 		auto state = std::dynamic_pointer_cast<StationDraftSnapshot>(snapshot.context);
 		if (!state) return false;
 		mDraft = state->settings;
+		mFlow.restoreLayout(state->layout);
+		mPendingLayoutEdit = false;
 		mConfirmReset = false;
 		mDiagnostic.clear();
 		return true;
@@ -79,12 +89,14 @@ bool StationSystemsWindow::syncWorld(std::shared_ptr<core::World> const& world)
 	if (!world)
 	{
 		mWorld.reset(); mConfirmReset = false; mPendingActivation.reset();
+		mPendingLayoutEdit = false;
 		mFlow.reset(); mDraftHistory.clear(); mPendingDraftEdit.reset();
 		ImGui::TextDisabled("No World is open."); return false;
 	}
 	if (mWorld.lock() != world->getLifetimeToken().lock())
 	{
 		mWorld = world->getLifetimeToken(); mDraft = world->getStationSystemsSettings();
+		mPendingLayoutEdit = false;
 		mDiagnostic.clear(); mConfirmReset = false; mPendingActivation.reset();
 		mFlow.reset(); mDraftHistory.clear(); mPendingDraftEdit.reset();
 		mDraftHistory.markSaved();
@@ -148,6 +160,7 @@ void StationSystemsWindow::openDraft(std::string const& path)
 	}
 	mDraft = candidate.settings;
 	mFlow.importLayout(candidate);
+	mPendingLayoutEdit = false;
 	mDraftHistory.clear(); mPendingDraftEdit.reset(); mDraftHistory.markSaved();
 	mFilepath = path;
 	mSavedDocument = std::move(candidate); mHasSavedDocument = true; mSaveFailed = false;
@@ -157,6 +170,7 @@ void StationSystemsWindow::openDraft(std::string const& path)
 void StationSystemsWindow::newDraft()
 {
 	mDraft = core::StationSystemsSettings{};
+	mPendingLayoutEdit = false;
 	mFlow.reset(); mDraftHistory.clear(); mPendingDraftEdit.reset();
 	mDraftHistory.markSaved(); mFilepath.clear(); mHasSavedDocument = false;
 	mSaveFailed = false; mDiagnostic.clear();
@@ -231,6 +245,11 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 	}, [this] { commitDraftChanges(true); }, [this] {
 		commitDraftChanges(true);
 		mPendingDraftEdit = captureDraft();
+	}, [this] {
+		if (mPendingLayoutEdit) return;
+		commitDraftChanges(true);
+		mPendingDraftEdit = captureDraft();
+		mPendingLayoutEdit = true;
 	});
 	// Placement is one action, including on the mouse-down frame. An
 	// inspector field edit is not: while a field is still being edited the

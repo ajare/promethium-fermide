@@ -69,7 +69,8 @@ public:
 	void render(core::StationSystemsSettings& draft,
 		std::function<void(core::StationSystemsSettings&)> const& renderInspector = {},
 		std::function<void()> const& beforeSelectionChange = {},
-		std::function<void()> const& beforeNodeRemoval = {});
+		std::function<void()> const& beforeNodeRemoval = {},
+		std::function<void()> const& beforeLayoutChange = {});
 	// Empty when nothing is selected. The index addresses the entry inside the
 	// node type's own draft vector (stores for "Store", transfers for
 	// "Transfer"); shared service nodes carry -1.
@@ -77,6 +78,8 @@ public:
 	void reset();
 	void exportLayout(core::StationConfigurationDocument& document) const;
 	void importLayout(core::StationConfigurationDocument const& document);
+	// History restores positions without discarding selection or canvas filters.
+	void restoreLayout(core::StationConfigurationDocument const& document);
 	// Screen-space geometry recorded by the last rendered frame. Presentation
 	// state, exposed read-only so a caller — including a headless check that
 	// drives the real controls — can address a connector without guessing
