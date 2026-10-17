@@ -557,59 +557,9 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	ImGui::SeparatorText("Draft conversions (compound material; declared yields may lose but never create constituents)");
 	for (size_t index = 0; index < mDraft.conversions.size(); )
 	{
-		auto& conversion = mDraft.conversions[index];
 		auto const row = std::to_string(index);
-		bool removeConversion = false;
-		ImGui::PushItemWidth(220);
-		char conversionIdBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(conversionIdBuffer, conversion.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Conversion " + row + " id").c_str(), conversionIdBuffer, sizeof(conversionIdBuffer)))
-			conversion.id = conversionIdBuffer;
-		ImGui::InputInt(("Conversion " + row + " priority").c_str(), &conversion.priority);
-		ImGui::SameLine();
-		if (ImGui::Button(("Remove conversion " + row).c_str()))
-			removeConversion = true;
-		for (size_t flow = 0; flow < conversion.inputs.size(); )
-		{
-			auto& input = conversion.inputs[flow];
-			auto const flowRow = "Conversion " + row + " input " + std::to_string(flow);
-			char storeBuffer[core::MaxStationStoreIdLength + 1]{};
-			std::strncpy(storeBuffer, input.storeId.c_str(), core::MaxStationStoreIdLength);
-			if (ImGui::InputText((flowRow + " store").c_str(), storeBuffer, sizeof(storeBuffer)))
-				input.storeId = storeBuffer;
-			ImGui::SameLine();
-			ImGui::InputDouble((flowRow + " rate").c_str(), &input.ratePerSecond, 0.0, 0.0, "%.3f");
-			ImGui::SameLine();
-			bool const removeInput = ImGui::Button(("Remove " + flowRow).c_str());
-			if (removeInput)
-				conversion.inputs.erase(conversion.inputs.begin() + static_cast<std::ptrdiff_t>(flow));
-			else
-				++flow;
-		}
-		if (conversion.inputs.size() < core::MaxStationConversionFlows
-			&& ImGui::Button(("Add input to conversion " + row).c_str()))
-			conversion.inputs.push_back({});
-		for (size_t flow = 0; flow < conversion.outputs.size(); )
-		{
-			auto& output = conversion.outputs[flow];
-			auto const flowRow = "Conversion " + row + " output " + std::to_string(flow);
-			char storeBuffer[core::MaxStationStoreIdLength + 1]{};
-			std::strncpy(storeBuffer, output.storeId.c_str(), core::MaxStationStoreIdLength);
-			if (ImGui::InputText((flowRow + " store").c_str(), storeBuffer, sizeof(storeBuffer)))
-				output.storeId = storeBuffer;
-			ImGui::SameLine();
-			ImGui::InputDouble((flowRow + " yield").c_str(), &output.yieldPerSecond, 0.0, 0.0, "%.3f");
-			ImGui::SameLine();
-			bool const removeOutput = ImGui::Button(("Remove " + flowRow).c_str());
-			if (removeOutput)
-				conversion.outputs.erase(conversion.outputs.begin() + static_cast<std::ptrdiff_t>(flow));
-			else
-				++flow;
-		}
-		if (conversion.outputs.size() < core::MaxStationConversionFlows
-			&& ImGui::Button(("Add output to conversion " + row).c_str()))
-			conversion.outputs.push_back({});
-		ImGui::PopItemWidth();
+		bool const removeConversion = station_editor::renderConversionEntry(mDraft, mDraft.conversions[index],
+			"Conversion " + row, "Remove conversion " + row);
 		if (removeConversion)
 			mDraft.conversions.erase(mDraft.conversions.begin() + static_cast<std::ptrdiff_t>(index));
 		else
@@ -635,61 +585,9 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	ImGui::SeparatorText("Draft solar arrays (kW; illumination is a fraction of full sun, 0..1)");
 	for (size_t index = 0; index < mDraft.solarArrays.size(); )
 	{
-		auto& array = mDraft.solarArrays[index];
 		auto const row = std::to_string(index);
-		bool removeArray = false;
-		ImGui::PushItemWidth(220);
-		char solarIdBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(solarIdBuffer, array.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Solar " + row + " id").c_str(), solarIdBuffer, sizeof(solarIdBuffer)))
-			array.id = solarIdBuffer;
-		ImGui::InputDouble(("Solar " + row + " capacity kW").c_str(), &array.capacityKW, 0.0, 0.0, "%.3f");
-		bool solarPeriodic = array.illumination.periodSeconds > 0.0;
-		if (ImGui::Checkbox(("Solar " + row + " periodic illumination").c_str(), &solarPeriodic))
-		{
-			if (solarPeriodic)
-			{
-				if (array.illumination.periodSeconds <= 0.0) array.illumination.periodSeconds = 120.0;
-				if (array.illumination.segments.empty())
-					array.illumination.segments.push_back({0.0, 1.0});
-			}
-			else
-			{
-				array.illumination.periodSeconds = 0.0;
-				array.illumination.segments.clear();
-			}
-		}
-		if (!solarPeriodic)
-			ImGui::InputDouble(("Solar " + row + " constant illumination").c_str(),
-				&array.illumination.constantLevel, 0.0, 0.0, "%.3f");
-		else
-		{
-			ImGui::InputDouble(("Solar " + row + " period seconds").c_str(),
-				&array.illumination.periodSeconds, 0.0, 0.0, "%.1f");
-			for (size_t segment = 0; segment < array.illumination.segments.size(); )
-			{
-				auto& stretch = array.illumination.segments[segment];
-				auto const segmentRow = "Solar " + row + " segment " + std::to_string(segment);
-				ImGui::InputDouble((segmentRow + " start").c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
-				ImGui::SameLine();
-				ImGui::InputDouble((segmentRow + " level").c_str(), &stretch.level, 0.0, 0.0, "%.3f");
-				ImGui::SameLine();
-				bool const removeSegment = ImGui::Button(("Remove " + segmentRow).c_str());
-				if (removeSegment)
-					array.illumination.segments.erase(
-						array.illumination.segments.begin() + static_cast<std::ptrdiff_t>(segment));
-				else
-					++segment;
-				}
-			if (array.illumination.segments.size() < core::MaxStationProfileSegments
-				&& ImGui::Button(("Add segment to solar " + row).c_str()))
-				array.illumination.segments.push_back(
-					{array.illumination.periodSeconds * 0.5, 0.0});
-			}
-		ImGui::SameLine();
-		if (ImGui::Button(("Remove solar array " + row).c_str()))
-			removeArray = true;
-		ImGui::PopItemWidth();
+		bool const removeArray = station_editor::renderSolarEntry(mDraft, mDraft.solarArrays[index],
+			"Solar " + row, "Remove solar array " + row);
 		if (removeArray)
 			mDraft.solarArrays.erase(mDraft.solarArrays.begin() + static_cast<std::ptrdiff_t>(index));
 		else

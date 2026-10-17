@@ -8,6 +8,124 @@
 
 namespace station_editor
 {
+bool renderConversionEntry([[maybe_unused]] core::StationSystemsSettings& draft, core::ResourceConversionSettings& conversion,
+	std::string const& label, std::string const& removeLabel)
+{
+	bool removeConversion = false;
+	auto const row = label.substr(label.find_last_of(' ') + 1);
+	ImGui::PushItemWidth(220);
+	char conversionIdBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(conversionIdBuffer, conversion.id.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " id").c_str(), conversionIdBuffer, sizeof(conversionIdBuffer)))
+		conversion.id = conversionIdBuffer;
+	ImGui::InputInt((label + " priority").c_str(), &conversion.priority);
+	ImGui::SameLine();
+	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
+		removeConversion = true;
+	for (size_t flow = 0; flow < conversion.inputs.size(); )
+	{
+		auto& input = conversion.inputs[flow];
+		auto const flowRow = label + " input " + std::to_string(flow);
+		char storeBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(storeBuffer, input.storeId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText((flowRow + " store").c_str(), storeBuffer, sizeof(storeBuffer)))
+			input.storeId = storeBuffer;
+		ImGui::SameLine();
+		ImGui::InputDouble((flowRow + " rate").c_str(), &input.ratePerSecond, 0.0, 0.0, "%.3f");
+		ImGui::SameLine();
+		bool const removeInput = ImGui::Button(("Remove " + flowRow).c_str());
+		if (removeInput)
+			conversion.inputs.erase(conversion.inputs.begin() + static_cast<std::ptrdiff_t>(flow));
+		else
+			++flow;
+	}
+	if (conversion.inputs.size() < core::MaxStationConversionFlows
+		&& ImGui::Button(("Add input to conversion " + row).c_str()))
+		conversion.inputs.push_back({});
+	for (size_t flow = 0; flow < conversion.outputs.size(); )
+	{
+		auto& output = conversion.outputs[flow];
+		auto const flowRow = label + " output " + std::to_string(flow);
+		char storeBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(storeBuffer, output.storeId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText((flowRow + " store").c_str(), storeBuffer, sizeof(storeBuffer)))
+			output.storeId = storeBuffer;
+		ImGui::SameLine();
+		ImGui::InputDouble((flowRow + " yield").c_str(), &output.yieldPerSecond, 0.0, 0.0, "%.3f");
+		ImGui::SameLine();
+		bool const removeOutput = ImGui::Button(("Remove " + flowRow).c_str());
+		if (removeOutput)
+			conversion.outputs.erase(conversion.outputs.begin() + static_cast<std::ptrdiff_t>(flow));
+		else
+			++flow;
+	}
+	if (conversion.outputs.size() < core::MaxStationConversionFlows
+		&& ImGui::Button(("Add output to conversion " + row).c_str()))
+		conversion.outputs.push_back({});
+	ImGui::PopItemWidth();
+	return removeConversion;
+}
+
+bool renderSolarEntry([[maybe_unused]] core::StationSystemsSettings& draft, core::SolarArraySettings& array,
+	std::string const& label, std::string const& removeLabel)
+{
+	bool removeArray = false;
+	auto const row = label.substr(label.find_last_of(' ') + 1);
+	ImGui::PushItemWidth(220);
+	char solarIdBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(solarIdBuffer, array.id.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " id").c_str(), solarIdBuffer, sizeof(solarIdBuffer)))
+		array.id = solarIdBuffer;
+	ImGui::InputDouble((label + " capacity kW").c_str(), &array.capacityKW, 0.0, 0.0, "%.3f");
+	bool solarPeriodic = array.illumination.periodSeconds > 0.0;
+	if (ImGui::Checkbox((label + " periodic illumination").c_str(), &solarPeriodic))
+	{
+		if (solarPeriodic)
+		{
+			if (array.illumination.periodSeconds <= 0.0) array.illumination.periodSeconds = 120.0;
+			if (array.illumination.segments.empty())
+				array.illumination.segments.push_back({0.0, 1.0});
+		}
+		else
+		{
+			array.illumination.periodSeconds = 0.0;
+			array.illumination.segments.clear();
+		}
+	}
+	if (!solarPeriodic)
+		ImGui::InputDouble((label + " constant illumination").c_str(),
+			&array.illumination.constantLevel, 0.0, 0.0, "%.3f");
+	else
+	{
+		ImGui::InputDouble((label + " period seconds").c_str(),
+			&array.illumination.periodSeconds, 0.0, 0.0, "%.1f");
+		for (size_t segment = 0; segment < array.illumination.segments.size(); )
+		{
+			auto& stretch = array.illumination.segments[segment];
+			auto const segmentRow = label + " segment " + std::to_string(segment);
+			ImGui::InputDouble((segmentRow + " start").c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+			ImGui::SameLine();
+			ImGui::InputDouble((segmentRow + " level").c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+			ImGui::SameLine();
+			bool const removeSegment = ImGui::Button(("Remove " + segmentRow).c_str());
+			if (removeSegment)
+				array.illumination.segments.erase(
+					array.illumination.segments.begin() + static_cast<std::ptrdiff_t>(segment));
+			else
+				++segment;
+		}
+		if (array.illumination.segments.size() < core::MaxStationProfileSegments
+			&& ImGui::Button(("Add segment to solar " + row).c_str()))
+			array.illumination.segments.push_back(
+				{array.illumination.periodSeconds * 0.5, 0.0});
+	}
+	ImGui::SameLine();
+	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
+		removeArray = true;
+	ImGui::PopItemWidth();
+	return removeArray;
+}
+
 // The draft is carried into the per-entry editors as the shared seam's
 // context: the entry is always one of the draft's own elements, so a
 // surface that only holds the draft can edit any entry without owning
@@ -2151,8 +2269,22 @@ bool renderMaintenanceEntryAt(core::StationSystemsSettings& draft, size_t index)
 	return renderMaintenanceEntry(draft, draft.maintenanceJobs[index], "Maintenance job " + std::to_string(index), {});
 }
 
+bool renderSolarEntryAt(core::StationSystemsSettings& draft, size_t index)
+{
+	if (index >= draft.solarArrays.size()) return false;
+	return renderSolarEntry(draft, draft.solarArrays[index], "Solar " + std::to_string(index), {});
+}
+
+bool renderConversionEntryAt(core::StationSystemsSettings& draft, size_t index)
+{
+	if (index >= draft.conversions.size()) return false;
+	return renderConversionEntry(draft, draft.conversions[index], "Conversion " + std::to_string(index), {});
+}
+
 // Keyed by the Flow node type names in core::stationPortDescriptors().
-constexpr std::array<StationEntryEditor, 27> kEntryEditors{{
+constexpr std::array<StationEntryEditor, 29> kEntryEditors{{
+	{"Solar", &renderSolarEntryAt},
+	{"Conversion", &renderConversionEntryAt},
 	{"Delivery", &renderDeliveryEntryAt},
 	{"Waste ejection", &renderWasteEjectionEntryAt},
 	{"Outage", &renderOutageEntryAt},

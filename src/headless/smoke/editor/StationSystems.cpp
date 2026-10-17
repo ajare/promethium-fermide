@@ -989,10 +989,130 @@ namespace
 
 	}
 
+	// #671: Solar and Conversion use the same controls on both surfaces.
+	void flowSolarConversionInspector(smoke::Context const& smokeContext)
+	{
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory worldHistory;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Solar conversion inspector", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed;
+		seed.enabled = true;
+		core::SolarArraySettings solar; solar.id = "solar1"; solar.capacityKW = 10;
+		seed.solarArrays = {solar};
+		core::ResourceStoreSettings store;
+		store.id = "feed"; store.unit = "kg"; store.capacity = 100;
+		store.composition = core::ResourceCompositionSettings{};
+		seed.stores.push_back(store); store.id = "product"; seed.stores.push_back(store);
+		core::ResourceConversionSettings conversion;
+		conversion.id = "conversion1";
+		conversion.inputs.push_back({"feed", 1.0});
+		conversion.outputs.push_back({"product", 0.5});
+		seed.conversions = {conversion};
+		std::string diagnostic;
+		smoke::require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+		bool flow = true;
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration");
+			if (flow) window.renderFlowContents(world);
+			else window.renderContents(world, worldHistory);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "solarConversionInspector", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			for (auto const* type : {"Solar", "Conversion"})
+			{
+				auto const id = std::string(type) == "Solar" ? "solar1" : "conversion1";
+				driver.click(ctx, "**/Find node");
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A); ctx->KeyChars(id);
+				ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+				ImVec4 rect{};
+				REQ(window.flowNodeRect(type, id, &rect), "inspector node missing");
+				ctx->MouseTeleportToPos({(rect.x + rect.z) / 2, (rect.y + rect.w) / 2});
+				ctx->MouseClick(); ctx->Yield(3);
+				ctx->MouseTeleportToPos({20, 20}); ctx->Yield(2);
+				auto const solarSelected = std::string(type) == "Solar";
+				auto const field = solarSelected ? "**/Solar 0 capacity kW" : "**/Conversion 0 input 0 rate";
+				auto value = [&] { return solarSelected ? window.draft().solarArrays[0].capacityKW
+					: window.draft().conversions[0].inputs[0].ratePerSecond; };
+				auto const before = value();
+				auto const history = window.draftHistory().undoCount();
+				driver.typeValue(ctx, field, "25"); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+				REQ(value() == 25 && window.draftHistory().undoCount() == history + 1,
+					"inspector field did not commit once");
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+				REQ(value() == before, "inspector undo failed");
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+				REQ(value() == 25, "inspector redo failed");
+				REQ(driver.contains((std::string("Node: ") + type + " '" + id + "'").c_str()), "selection lost after history");
+				flow = false; ctx->Yield(3);
+				driver.typeValue(ctx, field, "30"); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+				REQ(value() == 30 && window.draftHistory().undoCount() == history + 2,
+					"form did not share field and history");
+				flow = true; ctx->Yield(3);
+				REQ(value() == 30, "tab switch lost edit");
+				if (solarSelected)
+				{
+					driver.typeValue(ctx, "**/Solar 0 constant illumination", "0.8");
+					ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+					driver.click(ctx, "**/Solar 0 periodic illumination"); ctx->Yield(3);
+					REQ(window.draft().solarArrays[0].illumination.segments.size() == 1,
+						"periodic illumination did not initialize a segment");
+					driver.typeValue(ctx, "**/Solar 0 period seconds", "240");
+					ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+					driver.click(ctx, "**/Add segment to solar 0"); ctx->Yield(3);
+					REQ(window.draft().solarArrays[0].illumination.segments.size() == 2,
+						"solar segment add failed");
+					driver.typeValue(ctx, "**/Solar 0 segment 1 level", "0.2");
+					ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+					REQ(window.draft().solarArrays[0].illumination.periodSeconds == 240
+						&& window.draft().solarArrays[0].illumination.segments[1].level == 0.2,
+						"solar profile fields not editable");
+					driver.click(ctx, "**/Remove Solar 0 segment 1"); ctx->Yield(3);
+					REQ(window.draft().solarArrays[0].illumination.segments.size() == 1,
+						"solar segment remove failed");
+				}
+				else
+				{
+					driver.typeValue(ctx, "**/Conversion 0 output 0 yield", "0.75");
+					ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+					driver.typeValue(ctx, "**/Conversion 0 priority", "3");
+					ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+					REQ(window.draft().conversions[0].outputs[0].yieldPerSecond == 0.75
+						&& window.draft().conversions[0].priority == 3, "conversion fields not editable");
+					driver.click(ctx, "**/Add input to conversion 0"); ctx->Yield(3);
+					REQ(window.draft().conversions[0].inputs.size() == 2, "conversion input add failed");
+					driver.click(ctx, "**/Remove Conversion 0 input 1"); ctx->Yield(3);
+					REQ(window.draft().conversions[0].inputs.size() == 1, "conversion input remove failed");
+				}
+			}
+			core::StationConfigurationDocument document; document.settings = window.draft();
+			core::StationConfigurationDocument loaded;
+			REQ(core::parseStationConfiguration(core::serializeStationConfiguration(document), loaded, &diagnostic), diagnostic.c_str());
+			REQ(loaded.settings == window.draft(), "configuration round trip lost inspector fields");
+			auto const path = (smokeContext.temporaryRoot() / "solar-conversion.station.yaml").string();
+			core::saveStationConfiguration(path, document);
+			REQ(core::loadStationConfiguration(path, loaded, &diagnostic), diagnostic.c_str());
+			REQ(loaded.settings == window.draft(), "configuration save/load lost inspector fields");
+			REQ(world->getStationSystemsSettings() == seed && !world->isModified()
+				&& worldHistory.undoCount() == 0, "inspector mutated World");
+		});
+		#undef REQ
+		smoke::require(driver.passed(), "Solar/Conversion inspector workflow failed");
+	}
+
 	// #653: shared entry editors occupy a reserved column; field commits
 	// and selection changes must not resize or move the canvas.
-	void flowInspectorWorkflow(smoke::Context const&)
+	void flowInspectorWorkflow(smoke::Context const& smokeContext)
 	{
+		flowSolarConversionInspector(smokeContext);
 		using smoke::require;
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
