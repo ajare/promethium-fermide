@@ -44,6 +44,7 @@ for source in sorted(cmake_owners.keys() - actual_module_sources):
 
 standalone_owners = {
     "OccupantPackingChecks.cpp": "pf-occupant-packing-checks",
+    "PlacementValidatorChecks.cpp": "pf-placement-validator-checks",
     "SectorTilesetChecks.cpp": "pf-sector-tileset-checks",
     "SimulationStepTimingChecks.cpp": "pf-simulation-step-timing-checks",
     "WorldRenderSlotChecks.cpp": "pf-world-render-slot-checks",

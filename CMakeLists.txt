@@ -713,6 +713,14 @@ if(BUILD_TESTING)
     set_tests_properties(occupant-packing PROPERTIES
         LABELS "smoke;standalone;core" TIMEOUT 30)
 
+    add_executable(pf-placement-validator-checks src/headless/PlacementValidatorChecks.cpp)
+    target_include_directories(pf-placement-validator-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-placement-validator-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-placement-validator-checks)
+    add_test(NAME placement-validator COMMAND pf-placement-validator-checks)
+    set_tests_properties(placement-validator PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
     add_executable(pf-world-render-slot-checks src/headless/WorldRenderSlotChecks.cpp)
     target_include_directories(pf-world-render-slot-checks PRIVATE "${PF_INCLUDE_DIR}")
     pf_apply_headless_verification_policy(pf-world-render-slot-checks)

@@ -30,6 +30,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/agent/DoorClearance.cpp` | module-owned | `pf-smoke-agent` |
 | `smoke/agent/BulkheadCrawling.cpp` | module-owned | `pf-smoke-agent` |
 | `OccupantPackingChecks.cpp` | retained standalone | `pf-occupant-packing-checks` |
+| `PlacementValidatorChecks.cpp` | retained standalone | `pf-placement-validator-checks` |
 | `SectorTilesetChecks.cpp` | retained standalone | `pf-sector-tileset-checks` |
 | `SimulationStepTimingChecks.cpp` | retained standalone | `pf-simulation-step-timing-checks` |
 | `WorldRenderSlotChecks.cpp` | retained standalone | `pf-world-render-slot-checks` |

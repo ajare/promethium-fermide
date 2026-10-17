@@ -49,6 +49,7 @@ namespace core
 
 	class AgentTagRegistry;
 	class AgentBehaviourRegistry;
+	class PlacementValidator;
 
 	class World : public Serializable
 	{
@@ -60,6 +61,10 @@ namespace core
 		// The coordinator owns no entities; it drives the registries below and
 		// the private machinery beside them on the World's behalf (ADR 0004).
 		friend class SimulationCoordinator;
+		// The placement validator owns no state; it reads the registries below
+		// and the private helper seams beside them on the World's behalf
+		// (ADR 0022).
+		friend class PlacementValidator;
 		friend struct WorldAgentRestorationTestAccess;
 		friend struct PhysicalControlLookupTestAccess;
 		friend struct QueuedPressLookupTestAccess;
@@ -577,6 +582,13 @@ namespace core
 		// caller, Agent included, reaches it; the coordinator owns no entities
 		// and reaches the registries below through this World.
 		SimulationCoordinator mSimulationCoordinator;
+
+		// The read-only validation family lives in the placement validator
+		// (ADR 0022). World owns it and stays the facade (design pattern)
+		// through which every caller reaches these checks; the validator owns
+		// no state and reaches the registries below through this World. Held
+		// by pointer because its header needs World's nested option types.
+		std::unique_ptr<PlacementValidator> mPlacementValidator;
 
 		// Every World owns one sandboxed Lua runtime for its Agent types. It is
 		// declared before mAgents so Agent destruction (which releases live Lua

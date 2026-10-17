@@ -29,6 +29,7 @@ namespace core
 	class Lift;
 	class Shuttle;
 	class SimulationCoordinator;
+	class PlacementValidator;
 	class Stairwell;
 	class Window;
 
@@ -139,6 +140,7 @@ namespace core
 	{
 		friend class World;
 		friend class SimulationCoordinator;
+		friend class PlacementValidator;
 
 		std::string mName;
 		BoothWindowId mBoothWindowOwner;
@@ -201,6 +203,7 @@ namespace core
 	{
 		friend class World;
 		friend class SimulationCoordinator;
+		friend class PlacementValidator;
 
 		std::string mName;
 		AgentId mRequester;
@@ -240,6 +243,7 @@ namespace core
 	{
 		friend class World;
 		friend class SimulationCoordinator;
+		friend class PlacementValidator;
 
 		InteractionPointId mPoint;
 		AgentId mActor;
@@ -334,6 +338,7 @@ namespace core
 	{
 		friend class World;
 		friend class SimulationCoordinator;
+		friend class PlacementValidator;
 		std::string mName;
 		std::shared_ptr<Door> mDoor;
 		std::shared_ptr<Window> mWindow;
@@ -580,6 +585,7 @@ namespace core
 	{
 		friend class World;
 		friend class SimulationCoordinator;
+		friend class PlacementValidator;
 		AgentId mOwner;
 		EdgeType mEdgeType;
 		SectorId mSourceSector;
@@ -661,6 +667,7 @@ namespace core
 	{
 		friend class World;
 		friend class SimulationCoordinator;
+		friend class PlacementValidator;
 		TraversalRequestId mRequest;
 		AgentId mOwner;
 		TraversalPermitState mState{ TraversalPermitState::Active };
