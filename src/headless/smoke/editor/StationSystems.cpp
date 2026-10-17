@@ -488,7 +488,7 @@ namespace
 		require(driver.passed(), "Flow link workflow failed on the Test Engine");
 	}
 
-	void flowCascadeDeleteWorkflow(smoke::Context const&)
+	void flowCascadeDeleteWorkflow(smoke::Context const& smokeContext)
 	{
 		using smoke::require;
 		headless::ScopedImGuiContext context;
@@ -496,6 +496,8 @@ namespace
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
 		DocumentHistory worldHistory;
 		StationSystemsWindow window;
+		auto const path = smokeContext.temporaryRoot() / "rename-layout.station.yaml";
+		window.setFilePicker([&](bool) -> std::optional<std::string> { return path.string(); });
 		auto world = std::make_shared<core::World>("Flow removal", 2, 2);
 		world->pauseSimulation(); world->finishBuild();
 		core::StationSystemsSettings seed;
@@ -574,14 +576,28 @@ namespace
 			REQ(window.draft() == seed && window.draftHistory().undoCount() == 0,
 				"second undo did not restore the source store for rename");
 			REQ(select("a"), "source store not visible after restoration");
+			ImVec4 original{}, moved{};
+			REQ(window.flowNodeRect("Store", "a", &original), "rename source missing");
+			auto const start = ImVec2{(original.x + original.z) * 0.5f, (original.y + original.w) * 0.5f};
+			ctx->MouseTeleportToPos(start); ctx->Yield(2); ctx->MouseDown(); ctx->Yield(2);
+			ctx->MouseTeleportToPos({start.x + 80, start.y + 70}); ctx->Yield(3);
+			ctx->MouseUp(); ctx->Yield(3);
+			REQ(window.flowNodeRect("Store", "a", &moved)
+				&& std::abs(moved.x - original.x - 80) < 0.1f
+				&& std::abs(moved.y - original.y - 70) < 0.1f, "source did not move before rename");
+			auto atMovedPosition = [&](char const* id) {
+				ImVec4 rect{};
+				return window.flowNodeRect("Store", id, &rect)
+					&& std::abs(rect.x - moved.x) < 0.1f && std::abs(rect.y - moved.y) < 0.1f;
+			};
 			driver.click(ctx, "**/New node name"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
 			ctx->KeyChars("renamed"); ctx->Yield(2);
 			driver.click(ctx, "**/Rename selected node"); ctx->Yield(3);
 			REQ(driver.contains("Rename this store? 3 links will be updated") && window.draft() == seed
-				&& window.draftHistory().undoCount() == 0,
+				&& window.draftHistory().undoCount() == 1 && atMovedPosition("a"),
 				"rename confirmation did not preserve the draft or name its referrers");
 			driver.click(ctx, "**/Cancel node rename"); ctx->Yield(3);
-			REQ(window.draft() == seed && window.draftHistory().undoCount() == 0,
+			REQ(window.draft() == seed && window.draftHistory().undoCount() == 1 && atMovedPosition("a"),
 				"cancelling a rename changed the draft or history");
 			driver.click(ctx, "**/Rename selected node"); ctx->Yield(2);
 			driver.click(ctx, "**/Confirm node rename"); ctx->Yield(3);
@@ -589,14 +605,21 @@ namespace
 				&& window.draft().transfers[0].sourceId == "renamed"
 				&& window.draft().transfers[1].sourceId == "renamed"
 				&& window.draft().deliveries[0].storeId == "renamed"
-				&& window.draftHistory().undoCount() == 1,
+				&& window.draftHistory().undoCount() == 2,
 				"confirmed rename did not update every referrer in one history entry");
+			REQ(atMovedPosition("renamed"), "confirmed rename discarded the authored position");
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
-			REQ(window.draft() == seed && window.draftHistory().redoCount() == 1,
+			REQ(window.draft() == seed && window.draftHistory().redoCount() == 1 && atMovedPosition("a"),
 				"one undo did not restore the old name and every reference");
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
-			REQ(window.draft().deliveries[0].storeId == "renamed",
-				"redo did not restore the full rename cascade");
+			REQ(window.draft().deliveries[0].storeId == "renamed" && atMovedPosition("renamed"),
+				"redo did not restore the full rename cascade and position");
+			driver.click(ctx, "Save configuration"); ctx->Yield(3);
+			core::StationConfigurationDocument saved;
+			REQ(core::loadStationConfiguration(path.string(), saved)
+				&& saved.positions.count("Store:renamed:0") == 1
+				&& saved.positions.count("Store:a:0") == 0, "saved layout retained the old identity");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
 			ImVec4 rect{};
 			REQ(window.flowNodeRect("Delivery", "supply", &rect), "delivery node not visible");
@@ -613,6 +636,34 @@ namespace
 			REQ(window.draft().deliveries.empty(), "redo did not remove delivery again");
 			REQ(world->getStationSystemsSettings() == seed && worldHistory.undoCount() == 0,
 				"draft removal touched the World");
+			driver.click(ctx, "Open configuration"); ctx->Yield(3);
+			if (driver.contains("Discard configuration changes"))
+			{ driver.click(ctx, "Discard configuration changes"); ctx->Yield(3); }
+			REQ(window.draft() == saved.settings, "configuration round trip lost renamed settings");
+			driver.click(ctx, "Save configuration"); ctx->Yield(3);
+			core::StationConfigurationDocument reloaded;
+			REQ(core::loadStationConfiguration(path.string(), reloaded)
+				&& reloaded.positions == saved.positions,
+				"configuration round trip lost renamed node geometry");
+			// The no-referrer path skips confirmation but must transfer layout too.
+			REQ(select("d"), "unreferenced rename source missing");
+			ImVec4 isolated{};
+			REQ(window.flowNodeRect("Store", "d", &isolated), "unreferenced node missing");
+			auto const isolatedStart = ImVec2{(isolated.x + isolated.z) * 0.5f,
+				(isolated.y + isolated.w) * 0.5f};
+			ctx->MouseTeleportToPos(isolatedStart); ctx->Yield(2); ctx->MouseDown(); ctx->Yield(2);
+			ctx->MouseTeleportToPos({isolatedStart.x + 40, isolatedStart.y + 35}); ctx->Yield(3);
+			ctx->MouseUp(); ctx->Yield(3);
+			REQ(window.flowNodeRect("Store", "d", &isolated), "moved unreferenced node missing");
+			driver.click(ctx, "**/New node name"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+			ctx->KeyChars("isolated"); ctx->Yield(2);
+			driver.click(ctx, "**/Rename selected node"); ctx->Yield(3);
+			ImVec4 renamedIsolated{};
+			REQ(window.flowNodeRect("Store", "isolated", &renamedIsolated)
+				&& std::abs(renamedIsolated.x - isolated.x) < 0.1f
+				&& std::abs(renamedIsolated.y - isolated.y) < 0.1f
+				&& window.draftHistory().undoCount() == 2,
+				"unreferenced rename discarded geometry or did not commit once");
 		});
 		#undef REQ
 		require(driver.passed(), "Flow cascade delete workflow failed");

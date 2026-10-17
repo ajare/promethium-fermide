@@ -1981,6 +1981,24 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		else ImGui::TextDisabled("No inspector for this surface.");
 	}
 	ImGui::EndChild();
+	// Settings and authored geometry belong to the same history action. Clear
+	// the old graph too: an immediate history/save snapshot must export the
+	// renamed identity, not the graph from the preceding draw pass.
+	auto renameNode = [&](core::StationNodeRename const& plan) {
+		if (beforeNodeRemoval) beforeNodeRemoval();
+		if (!core::renameStationNode(draft, plan)) return;
+		core::StationConfigurationDocument layout;
+		exportLayout(layout);
+		auto position = layout.positions.extract(plan.nodeType + ":" + plan.oldNodeId + ":0");
+		if (!position.empty())
+		{
+			position.key() = plan.nodeType + ":" + plan.newNodeId + ":0";
+			layout.positions.insert_or_assign(position.key(), position.mapped());
+		}
+		restoreLayout(layout);
+		mSelectedId = plan.newNodeId;
+		mNotice.clear();
+	};
 	if (renameSelected)
 	{
 		core::StationNodeRename plan;
@@ -1988,12 +2006,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		{
 			if (plan.linkIdentities.empty())
 			{
-				if (beforeNodeRemoval) beforeNodeRemoval();
-				if (core::renameStationNode(draft, plan))
-				{
-					mSelectedId = plan.newNodeId;
-					mNotice.clear();
-				}
+				renameNode(plan);
 			}
 			else
 			{
@@ -2034,8 +2047,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 					mPendingRename->oldNodeId, mPendingRename->newNodeId, current)
 					&& current.linkIdentities == mPendingRename->linkIdentities)
 				{
-					if (beforeNodeRemoval) beforeNodeRemoval();
-					if (core::renameStationNode(draft, current)) mSelectedId = current.newNodeId;
+					renameNode(current);
 				}
 				mPendingRename.reset(); ImGui::CloseCurrentPopup();
 			}
