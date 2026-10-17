@@ -1725,12 +1725,31 @@ LinkVerdict evaluateStationLink(StationSystemsSettings const& settings, Candidat
 	auto candidate = settings;
 	if (!applyStationLink(candidate, oriented))
 		return refuse("Connector pair names no entry in the draft: " + linkIdentity(mapping) + ".");
+	// In the scoped pass, dangling references are unwired draft connectors,
+	// not failures of this drop. Clear them only in validation copies, before
+	// applying the candidate: a new missing endpoint must still be refused.
+	// This also lets first-failure validators reach new semantic violations
+	// beyond a broken sibling (including dependants of a rewired loop).
+	auto wiringBefore = settings;
+	for (auto const& existing : stationAuthoredLinks(settings))
+	{
+		auto exists = [&](StationPinRef const& pin) {
+			return withNodeEntries(settings, pin.nodeType, [&](auto const& entries) {
+				return std::any_of(entries.begin(), entries.end(),
+					[&](auto const& entry) { return entry.id == pin.nodeId; });
+			});
+		};
+		if (!exists(existing.from) || !exists(existing.to))
+			clearStationLink(wiringBefore, existing.identity);
+	}
+	auto wiringAfter = wiringBefore;
+	applyStationLink(wiringAfter, oriented);
 	std::string beforeWiring;
 	std::string afterWiring;
-	bool const scoped = scopedWiringRule(candidate, mapping, afterWiring);
+	bool const scoped = scopedWiringRule(wiringAfter, mapping, afterWiring);
 	if (scoped)
 	{
-		scopedWiringRule(settings, mapping, beforeWiring);
+		scopedWiringRule(wiringBefore, mapping, beforeWiring);
 		if (!afterWiring.empty() && (afterWiring != beforeWiring
 			|| isScheduleType(mapping.ownerType)
 			|| mapping.ownerType == "Crew" || mapping.ownerType == "Crops"

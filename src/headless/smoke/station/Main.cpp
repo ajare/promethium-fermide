@@ -6,6 +6,7 @@
 #include "Stability.h"
 #include "core/World.h"
 #include "core/StationPorts.h"
+#include "core/StationReference.h"
 #include "core/StationConfigurationDocument.h"
 #include "core/StationSystems.h"
 #include "core/AgentTagRegistryDocument.h"
@@ -3088,8 +3089,66 @@ namespace
 		require(placeable, "loop missing from thermal placement group");
 	}
 
+	void danglingSiblingLinks()
+	{
+		// #669: use the reconciled reference to exercise every authored family,
+		// including growable requirements and dependants of coolant loops.
+		auto const base = core::bundledStationReference().settings;
+		auto const links = core::stationAuthoredLinks(base);
+		size_t checked = 0;
+		for (auto const& link : links)
+		for (auto const& sibling : links)
+		{
+			auto owner = [](auto const& entry) {
+				return entry.identity.substr(0, entry.identity.rfind(':'));
+			};
+			if (link.identity == sibling.identity || owner(link) != owner(sibling)) continue;
+			auto draft = base;
+			require(core::clearStationLink(draft, link.identity), "candidate disconnect failed");
+			auto broken = sibling;
+			auto const prefix = owner(sibling);
+			if (prefix == sibling.from.nodeType + ":" + sibling.from.nodeId)
+				broken.to.nodeId = "missing";
+			else broken.from.nodeId = "missing";
+			require(core::applyStationLink(draft, {broken.from, broken.to}), "broken sibling write failed");
+			auto cleared = draft;
+			require(core::clearStationLink(cleared, sibling.identity), "sibling disconnect failed");
+			for (bool reverse : {false, true})
+			{
+				core::CandidateLink candidate = reverse ? core::CandidateLink{link.to, link.from}
+					: core::CandidateLink{link.from, link.to};
+				auto const before = draft;
+				auto const expected = core::evaluateStationLink(cleared, candidate);
+				auto const actual = core::evaluateStationLink(draft, candidate);
+				require(expected.allowed, ("reference reconnect refused: " + link.identity + ": " + expected.reason).c_str());
+				require(actual.allowed, ("dangling sibling blocked " + link.identity + " beside "
+					+ sibling.identity + ": " + actual.reason).c_str());
+				require(draft == before, "link evaluation repaired the actual draft");
+				// A new semantic error must remain visible beyond that sibling.
+				auto invalid = draft;
+				for (auto& store : invalid.stores)
+					if ((candidate.from.nodeType == "Store" && store.id == candidate.from.nodeId)
+						|| (candidate.to.nodeType == "Store" && store.id == candidate.to.nodeId))
+						store.hazardClass = store.hazardClass == "normal" ? "hazardous" : "normal";
+				for (auto& reservoir : invalid.thermalReservoirs)
+					if ((candidate.from.nodeType == "Reservoir" && reservoir.id == candidate.from.nodeId)
+						|| (candidate.to.nodeType == "Reservoir" && reservoir.id == candidate.to.nodeId))
+						reservoir.thermalClass = reservoir.thermalClass == "warm" ? "moderate" : "warm";
+				auto invalidCleared = invalid;
+				core::clearStationLink(invalidCleared, sibling.identity);
+				auto const invalidExpected = core::evaluateStationLink(invalidCleared, candidate);
+				auto const invalidActual = core::evaluateStationLink(invalid, candidate);
+				require(invalidActual.allowed == invalidExpected.allowed,
+					("dangling sibling masked new violation: " + link.identity).c_str());
+				++checked;
+			}
+		}
+		require(checked > 100, "dangling sibling matrix lost coverage");
+	}
+
 	void chillerSeam(smoke::Context const&)
 	{
+		danglingSiblingLinks();
 		using smoke::require;
 		core::StationSystemsSettings base;
 		base.enabled = true;
@@ -3167,6 +3226,16 @@ namespace
 			check(draft, ghost, "unknown coolant loop 'ghost'");
 			ghost = condenser; ghost.to.nodeId = "ghost";
 			check(draft, ghost, "unknown thermal reservoir 'ghost'");
+			// The ticket's minimal reproduction, and the opposite drag order.
+			bad = draft; bad.chillers[0].coldLoopId = "missing";
+			check(bad, condenser, "");
+			bad = draft; bad.chillers[0].condenserReservoirId = "missing";
+			check(bad, cold, "");
+			bad = draft; bad.chillers[0].coldLoopId = "loop";
+			bad.chillers[0].condenserReservoirId = "missing";
+			bad.coolantLoops[0].reservoirId.clear();
+			check(bad, {{"Coolant loop", "loop", "Heat exchanger"},
+				{"Reservoir", "cold", "Heat in"}}, "");
 			// A missing opposite interface cannot hide these link-local rules.
 			bad = draft; bad.thermalReservoirs[0].thermalClass = "warm";
 			check(bad, cold, "cold services are class-matched");

@@ -6,6 +6,7 @@
 #include "DocumentEdit.h"
 #include "../CoupledRig.h"
 #include "core/StationReference.h"
+#include "StationFlowDiagram.h"
 #include "core/StationConfigurationDocument.h"
 #include "core/StationPorts.h"
 #include "core/TransactionalFileWriter.h"
@@ -2372,6 +2373,31 @@ namespace
 	void flowChillerWorkflow(smoke::Context const&)
 	{
 		using smoke::require;
+		// #669: highlighting and drop acceptance must agree even with a
+		// dangling sibling, without allowing it to mask a class violation.
+		{
+			auto draft = core::bundledStationReference().settings;
+			auto const chiller = draft.chillers.front();
+			draft.chillers.front().coldLoopId = "missing";
+			draft.chillers.front().condenserReservoirId.clear();
+			core::StationPinRef const from{"Chiller", chiller.id, "Condenser heat"};
+			core::StationPinRef const to{"Reservoir", chiller.condenserReservoirId, "Heat in"};
+			for (bool valid : {true, false})
+			{
+				if (!valid)
+					for (auto& reservoir : draft.thermalReservoirs)
+						if (reservoir.id == to.nodeId)
+							reservoir.thermalClass = chiller.thermalClass == "warm" ? "moderate" : "warm";
+				for (bool reverse : {false, true})
+				{
+					auto const a = reverse ? to : from, b = reverse ? from : to;
+					require(station_flow::connectorEligibility(draft, a, b) == valid,
+						"dangling sibling changed connector highlighting");
+					require(core::evaluateStationLink(draft, {a, b}).allowed == valid,
+						"highlighting and drop acceptance disagree");
+				}
+			}
+		}
 		headless::ScopedImGuiContext context;
 		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
