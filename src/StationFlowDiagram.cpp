@@ -775,7 +775,7 @@ std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode
 		|| view.type == "Solar" || view.type == "Equipment" || view.type == "Battery"
 		|| view.type == "Generator" || view.type == "Fuel cell" || view.type == "Sabatier"
 		|| view.type == "Methane processor" || view.type == "Reservoir" || view.type == "Radiator"
-		|| view.type == "Coolant loop" || view.type == "Chiller")
+		|| view.type == "Coolant loop" || view.type == "Chiller" || view.type == "Thermal buffer")
 	{
 		view.index = 0;
 		for (int i = 0; i < mSelected; ++i)
@@ -1383,6 +1383,26 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			draft.coolantLoops.push_back(std::move(loop));
 			mFitRequested = false;
 		}
+		else if (mPlacingType == "Thermal buffer" && draft.thermalBuffers.size() < core::MaxStationThermalBuffers)
+		{
+			core::ThermalBufferSettings buffer;
+			buffer.accessMode = "circulation";
+			buffer.capacityKJ = 1000.0;
+			buffer.minUsableTemperatureC = 0.0;
+			buffer.maxUsableTemperatureC = 100.0;
+			buffer.maxChargeKW = 10.0;
+			buffer.maxDischargeKW = 10.0;
+			buffer.transferConductanceKWPerK = 1.0;
+			for (size_t candidate = 1;; ++candidate)
+			{
+				buffer.id = "buffer" + std::to_string(candidate);
+				if (std::none_of(draft.thermalBuffers.begin(), draft.thermalBuffers.end(),
+					[&](auto const& entry) { return entry.id == buffer.id; })) break;
+			}
+			mLayout["Thermal buffer:" + buffer.id + ":0"] = placeAt;
+			draft.thermalBuffers.push_back(std::move(buffer));
+			mFitRequested = false;
+		}
 		else if (mPlacingType == "Chiller" && draft.chillers.size() < core::MaxStationChillers)
 		{
 			core::ChillerSettings chiller;
@@ -1657,7 +1677,8 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 				&& draft.radiators.size() >= core::MaxStationRadiators)
 			|| (mPlacingType == "Coolant loop"
 				&& draft.coolantLoops.size() >= core::MaxStationCoolantLoops)
-			|| (mPlacingType == "Chiller" && draft.chillers.size() >= core::MaxStationChillers);
+			|| (mPlacingType == "Chiller" && draft.chillers.size() >= core::MaxStationChillers)
+			|| (mPlacingType == "Thermal buffer" && draft.thermalBuffers.size() >= core::MaxStationThermalBuffers);
 		auto a = io.MousePos;
 		ImVec2 b{a.x + nodeWidth * mZoom, a.y + nodeHeight * mZoom};
 		draw->AddRectFilled(a, b, IM_COL32(80, 130, 170, 100), 5);

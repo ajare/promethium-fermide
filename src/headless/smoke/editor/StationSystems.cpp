@@ -1773,6 +1773,40 @@ namespace
 		require(driver.passed(), "Flow chiller workflow failed");
 	}
 
+
+	void flowThermalBufferWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000}; io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory worldHistory; StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Buffer flow", 2, 2); world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed; seed.enabled = true;
+		core::ThermalReservoirSettings host; host.id = "host"; host.thermalClass = "moderate"; host.heatCapacityKJPerK = 100;
+		seed.thermalReservoirs = {host}; host.id = "other"; seed.thermalReservoirs.push_back(host);
+		core::CoolantLoopSettings loop; loop.id = "loop"; loop.reservoirId = "host"; loop.hazardClass = "normal";
+		loop.coolantCapacityKg = loop.startingCoolantKg = 100; loop.specificHeatKJPerKgK = 4; loop.ratedFlowKgPerS = 1; seed.coolantLoops = {loop};
+		std::string diagnostic; require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str()); world->markSaved();
+		bool flow = true;
+		headless::TestEngineDriver driver([&] { ImGui::SetNextWindowPos({10,10}); ImGui::SetNextWindowSize({1100,980}); ImGui::Begin("Configuration"); if (flow) window.renderFlowContents(world); else window.renderContents(world, worldHistory); ImGui::End(); });
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "flowThermalBuffer", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration"); ctx->ComboClick("Place node/Thermal buffer"); ctx->Yield(3);
+			REQ(driver.contains("Thermal buffer placement armed"), "buffer placement was not armed");
+			auto* canvas = flowCanvasWindow("Configuration"); ctx->MouseTeleportToPos({canvas->Pos.x + 300, canvas->Pos.y + 180}); ctx->MouseClick(); ctx->Yield(3); ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			REQ(window.draft().thermalBuffers.size() == 1 && window.draft().thermalBuffers[0].id == "buffer1" && window.draftHistory().undoCount() == 1, "buffer placement/history failed");
+			driver.click(ctx, "**/Find node"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A); ctx->KeyChars("buffer1"); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			ImVec4 r{}; REQ(window.flowNodeRect("Thermal buffer", "buffer1", &r), "placed buffer missing"); ctx->MouseTeleportToPos({(r.x+r.z)*.5f,(r.y+r.w)*.5f}); ctx->MouseClick(); ctx->Yield(3);
+			driver.typeValue(ctx, "**/Buffer 0 capacity kJ", "2000"); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			REQ(window.draft().thermalBuffers[0].capacityKJ == 2000 && window.draftHistory().undoCount() == 2, "buffer inspector edit failed");
+			flow = false; ctx->Yield(3); REQ(ctx->ItemInfo("**/Buffer 0 capacity kJ", ImGuiTestOpFlags_NoError)->ID != 0, "form does not share buffer editor"); flow = true; ctx->Yield(3); driver.click(ctx, "Fit all"); ctx->Yield(3);
+			REQ(world->getStationSystemsSettings() == seed && !world->isModified() && worldHistory.undoCount() == 0, "draft buffer editing mutated World");
+		});
+		#undef REQ
+		require(driver.passed(), "Flow thermal buffer workflow failed");
+	}
+
 	void flowCoolantLoopWorkflow(smoke::Context const&)
 	{
 		using smoke::require;
@@ -6109,6 +6143,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/flowRadiatorWorkflow", flowRadiatorWorkflow});
 	checks.push_back({"station/flowCoolantLoopWorkflow", flowCoolantLoopWorkflow});
 	checks.push_back({"station/flowChillerWorkflow", flowChillerWorkflow});
+	checks.push_back({"station/flowThermalBufferWorkflow", flowThermalBufferWorkflow});
 	checks.push_back({"station/transferWorkflow", transferWorkflow});
 	checks.push_back({"station/compoundWorkflow", compoundWorkflow});
 	checks.push_back({"station/powerWorkflow", powerWorkflow});

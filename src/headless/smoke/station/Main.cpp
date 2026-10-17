@@ -1218,6 +1218,57 @@ namespace
 		}
 	}
 
+
+	// #660: Thermal buffers are authored through one fixed host connector and
+	// one optional circulation gate.  The seam retains the validator's host
+	// and same-reservoir rules while incomplete drafts remain wireable.
+	void thermalBufferSeam(smoke::Context const&)
+	{
+		auto reservoir = [](char const* id) { core::ThermalReservoirSettings r; r.id = id;
+			r.thermalClass = "moderate"; r.heatCapacityKJPerK = 100.0; return r; };
+		auto loop = [](char const* id, char const* host) { core::CoolantLoopSettings l; l.id = id;
+			l.reservoirId = host; l.hazardClass = "normal"; l.coolantCapacityKg = 100.0;
+			l.startingCoolantKg = 100.0; l.specificHeatKJPerKgK = 4.0; l.ratedFlowKgPerS = 1.0; return l; };
+		auto base = [&] { core::StationSystemsSettings s; s.enabled = true;
+			s.thermalReservoirs = {reservoir("host"), reservoir("other")};
+			s.coolantLoops = {loop("hostLoop", "host"), loop("otherLoop", "other")};
+			core::ThermalBufferSettings b; b.id = "buffer"; b.accessMode = "circulation";
+			b.capacityKJ = 1000; b.maxChargeKW = b.maxDischargeKW = 10;
+			b.maxUsableTemperatureC = 100; b.transferConductanceKWPerK = 1;
+			s.thermalBuffers = {b}; return s; };
+		auto pin = [](char const* type, char const* id, char const* port) { return core::StationPinRef{type,id,port}; };
+		auto host = [&] { return core::CandidateLink{pin("Reservoir", "host", "Hosted buffers"), pin("Thermal buffer", "buffer", "Host reservoir")}; };
+		auto gate = [&] { return core::CandidateLink{pin("Coolant loop", "hostLoop", "Buffer gates"), pin("Thermal buffer", "buffer", "Circulation gate")}; };
+		auto allowed = [](auto const& s, auto const& link) { auto v=core::evaluateStationLink(s,link); require(v.allowed, ("allowed link refused: " + v.reason).c_str()); };
+		auto refused = [](auto const& s, auto const& link, char const* text) { auto v=core::evaluateStationLink(s,link); require(!v.allowed && v.reason.find(text)!=std::string::npos, ("expected rejection '" + std::string(text) + "', got '" + v.reason + "'").c_str()); };
+		// The descriptor table exposes both fields and keeps the gate visibly optional.
+		auto const descriptors = core::stationPortDescriptors();
+		auto find = [&](char const* type, char const* name) { return std::find_if(descriptors.begin(), descriptors.end(),
+			[&](auto const& d) { return d.nodeType == type && d.name == name; }); };
+		auto const bufferHost = find("Thermal buffer", "Host reservoir"), bufferGate = find("Thermal buffer", "Circulation gate");
+		require(bufferHost != descriptors.end() && bufferGate != descriptors.end()
+			&& bufferHost->direction == core::StationPortDirection::Input && bufferHost->maximumLinks == 1
+			&& bufferGate->optional && bufferGate->maximumLinks == 1, "thermal-buffer descriptors are incomplete");
+		auto const placeable = core::stationPlaceableTypes();
+		require(std::any_of(placeable.begin(), placeable.end(),
+			[](auto const& type) { return type.nodeType == "Thermal buffer" && type.group == "Thermal"; }), "thermal buffer is not placeable");
+		// Host-first and gate-first both work, even though each half-built circulation entry is invalid globally.
+		auto wired = base(); allowed(wired, host()); require(core::applyStationLink(wired, host()), "host write failed");
+		allowed(wired, gate()); require(core::applyStationLink(wired, gate()), "gate write failed");
+		require(wired.thermalBuffers[0].reservoirId == "host" && wired.thermalBuffers[0].circulationLoopId == "hostLoop", "links wrote wrong buffer references");
+		auto gateFirst = base(); allowed(gateFirst, gate()); require(core::applyStationLink(gateFirst, gate()), "gate-first write failed");
+		allowed(gateFirst, host());
+		auto links = core::stationAuthoredLinks(wired);
+		require(std::count_if(links.begin(), links.end(), [](core::AuthoredLink const& link)
+			{ return link.identity.rfind("Thermal buffer:buffer:", 0) == 0; }) == 2
+			&& core::clearStationLink(wired, "Thermal buffer:buffer:Circulation gate")
+			&& wired.thermalBuffers[0].circulationLoopId.empty() && core::clearStationLink(wired, "Thermal buffer:buffer:Host reservoir")
+			&& wired.thermalBuffers[0].reservoirId.empty(), "buffer link enumeration or clearing failed");
+		// Existing semantic reasons win over unrelated incomplete entries.
+		auto conflictingGate = base(); conflictingGate.thermalBuffers[0].reservoirId = "host";
+		refused(conflictingGate, core::CandidateLink{pin("Coolant loop", "otherLoop", "Buffer gates"), pin("Thermal buffer", "buffer", "Circulation gate")}, "not the buffer's host reservoir");
+	}
+
 	// #647: the power and conversion chain at the pure link seam. Every
 	// legal and illegal connector pair for equipment loads, batteries,
 	// generators, fuel cells, Sabatier reactors and methane processors is
@@ -25763,7 +25814,7 @@ void recovery(smoke::Context const& context)
 
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"powerChainSeam", powerChainSeam}, {"thermalReservoirSeam", thermalReservoirSeam}, {"radiatorSeam", radiatorSeam}, {"coolantLoopSeam", coolantLoopSeam}, {"chillerSeam", chillerSeam}, {"compounds", compounds}, {"power", power},
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"thermalBufferSeam", thermalBufferSeam}, {"powerChainSeam", powerChainSeam}, {"thermalReservoirSeam", thermalReservoirSeam}, {"radiatorSeam", radiatorSeam}, {"coolantLoopSeam", coolantLoopSeam}, {"chillerSeam", chillerSeam}, {"compounds", compounds}, {"power", power},
 		// Split out of the former `batteries` check: the hour-scale legs are
 		// independent worlds, so each is its own test and they run in parallel
 		// instead of as one ~182s serial chain.

@@ -88,6 +88,10 @@ namespace station_editor
 		core::CoolantLoopSettings& loop,
 		std::string const& label, std::string const& removeLabel);
 
+	bool renderThermalBufferEntry(core::StationSystemsSettings& draft,
+		core::ThermalBufferSettings& buffer,
+		std::string const& label, std::string const& removeLabel);
+
 	bool renderChillerEntry(core::StationSystemsSettings& draft,
 		core::ChillerSettings& chiller,
 		std::string const& label, std::string const& removeLabel);

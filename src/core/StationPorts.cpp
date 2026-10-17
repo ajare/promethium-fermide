@@ -110,6 +110,18 @@ namespace
 			}
 			return false;
 		}
+		if (link.from.nodeType == "Reservoir" && link.from.portName == "Hosted buffers"
+			&& link.to.nodeType == "Thermal buffer" && link.to.portName == "Host reservoir")
+		{
+			mapping = {"Thermal buffer", link.to.nodeId, "Host reservoir", link.from};
+			return true;
+		}
+		if (link.from.nodeType == "Coolant loop" && link.from.portName == "Buffer gates"
+			&& link.to.nodeType == "Thermal buffer" && link.to.portName == "Circulation gate")
+		{
+			mapping = {"Thermal buffer", link.to.nodeId, "Circulation gate", link.from};
+			return true;
+		}
 		if (link.from.nodeType == "Coolant loop" && link.from.portName == "Cold interface"
 			&& link.to.nodeType == "Chiller" && link.to.portName == "Cold loop")
 		{
@@ -195,7 +207,7 @@ namespace
 		// the routing predicate.
 		return ownerType == "Equipment" || ownerType == "Generator" || ownerType == "Fuel cell"
 			|| ownerType == "Sabatier" || ownerType == "Methane processor" || ownerType == "Radiator"
-			|| ownerType == "Coolant loop" || ownerType == "Chiller";
+			|| ownerType == "Coolant loop" || ownerType == "Chiller" || ownerType == "Thermal buffer";
 	}
 
 	// The reference field a machine link names, as a pointer into the draft
@@ -287,6 +299,15 @@ namespace
 				{"Heat sink", &MethaneProcessorSettings::heatSinkId}};
 			for (auto const& [name, member] : members)
 				if (field == name) return &((*found).*member);
+			return nullptr;
+		}
+		if (ownerType == "Thermal buffer")
+		{
+			auto const found = std::find_if(settings.thermalBuffers.begin(), settings.thermalBuffers.end(),
+				[&](ThermalBufferSettings const& entry) { return entry.id == ownerId; });
+			if (found == settings.thermalBuffers.end()) return nullptr;
+			if (field == "Host reservoir") return &found->reservoirId;
+			if (field == "Circulation gate") return &found->circulationLoopId;
 			return nullptr;
 		}
 		if (ownerType == "Chiller")
@@ -762,6 +783,32 @@ namespace
 			}
 			return true;
 		}
+		if (mapping.ownerType == "Thermal buffer")
+		{
+			auto const found = std::find_if(settings.thermalBuffers.begin(), settings.thermalBuffers.end(),
+				[&](ThermalBufferSettings const& entry) { return entry.id == mapping.ownerId; });
+			if (found == settings.thermalBuffers.end()) return false;
+			auto const where = "Station thermal buffer '" + found->id + "'";
+			if (mapping.field == "Host reservoir")
+			{
+				if (!found->reservoirId.empty() && !findReservoirById(settings, found->reservoirId))
+					diagnostic = where + " references unknown host thermal reservoir '" + found->reservoirId + "'";
+				return true;
+			}
+			if (mapping.field == "Circulation gate")
+			{
+				auto const loop = std::find_if(settings.coolantLoops.begin(), settings.coolantLoops.end(),
+					[&](CoolantLoopSettings const& entry) { return entry.id == found->circulationLoopId; });
+				if (!found->circulationLoopId.empty() && loop == settings.coolantLoops.end())
+					diagnostic = where + " circulation access references unknown coolant loop '" + found->circulationLoopId + "'";
+				else if (loop != settings.coolantLoops.end() && !found->reservoirId.empty()
+					&& loop->reservoirId != found->reservoirId)
+					diagnostic = where + " circulation loop '" + loop->id + "' is coupled to reservoir '"
+						+ loop->reservoirId + "', not the buffer's host reservoir '" + found->reservoirId + "'";
+				return true;
+			}
+			return true;
+		}
 		if (mapping.ownerType == "Chiller")
 		{
 			auto const found = std::find_if(settings.chillers.begin(), settings.chillers.end(),
@@ -978,6 +1025,17 @@ std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& set
 		links.push_back({linkIdentity("Coolant loop", loop.id, "Host reservoir"),
 			{"Coolant loop", loop.id, "Heat exchanger"},
 			{"Reservoir", loop.reservoirId, "Heat in"}});
+	}
+	for (auto const& buffer : settings.thermalBuffers)
+	{
+		if (!buffer.reservoirId.empty())
+			links.push_back({linkIdentity("Thermal buffer", buffer.id, "Host reservoir"),
+				{"Reservoir", buffer.reservoirId, "Hosted buffers"},
+				{"Thermal buffer", buffer.id, "Host reservoir"}});
+		if (!buffer.circulationLoopId.empty())
+			links.push_back({linkIdentity("Thermal buffer", buffer.id, "Circulation gate"),
+				{"Coolant loop", buffer.circulationLoopId, "Buffer gates"},
+				{"Thermal buffer", buffer.id, "Circulation gate"}});
 	}
 	for (auto const& chiller : settings.chillers)
 	{

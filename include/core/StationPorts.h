@@ -112,10 +112,14 @@ namespace core
 			// incomplete entry, not a multi-homed one.
 			PortDescriptor{"Reservoir", "Hosted radiators", StationPortDirection::Output, "thermal-host", "thermal-host", 0, {}},
 			PortDescriptor{"Radiator", "Host reservoir", StationPortDirection::Input, "thermal-host", "thermal-host", 1, {}, false},
+			PortDescriptor{"Reservoir", "Hosted buffers", StationPortDirection::Output, "thermal-buffer-host", "thermal-buffer-host", 0, {}},
+			PortDescriptor{"Thermal buffer", "Host reservoir", StationPortDirection::Input, "thermal-buffer-host", "thermal-buffer-host", 1, {}, false},
 			// Heat-only coupling: coolant inventory is internal to the loop.
 			PortDescriptor{"Coolant loop", "Heat exchanger", StationPortDirection::Output, "heat", "heat-sink", 1, {}, false},
 			// Exclusivity is semantic so refusal retains the validator's reason.
 			PortDescriptor{"Coolant loop", "Cold interface", StationPortDirection::Output, "cold-loop", "evaporator", 0, {}},
+			PortDescriptor{"Coolant loop", "Buffer gates", StationPortDirection::Output, "circulation-gate", "circulation-gate", 0, {}},
+			PortDescriptor{"Thermal buffer", "Circulation gate", StationPortDirection::Input, "circulation-gate", "circulation-gate", 1, {}, true},
 			PortDescriptor{"Chiller", "Cold loop", StationPortDirection::Input, "evaporator", "cold-loop", 1, {}},
 			PortDescriptor{"Chiller", "Condenser heat", StationPortDirection::Output, "heat", "heat-sink", 1, {}}};
 		return descriptors;
@@ -275,7 +279,8 @@ namespace core
 			// its heat to the environment.
 			StationPlaceableType{"Radiator", "radiator", "Thermal"},
 			StationPlaceableType{"Coolant loop", "coolantLoop", "Thermal"},
-			StationPlaceableType{"Chiller", "chiller", "Thermal"}};
+			StationPlaceableType{"Chiller", "chiller", "Thermal"},
+			StationPlaceableType{"Thermal buffer", "buffer", "Thermal"}};
 		return placeable;
 	}
 

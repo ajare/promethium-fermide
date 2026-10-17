@@ -631,6 +631,36 @@ bool renderCoolantLoopEntry([[maybe_unused]] core::StationSystemsSettings& draft
 	return remove;
 }
 
+bool renderThermalBufferEntry([[maybe_unused]] core::StationSystemsSettings& draft,
+	core::ThermalBufferSettings& buffer, std::string const& label, std::string const& removeLabel)
+{
+	bool removeRequested = false;
+	ImGui::PushItemWidth(220);
+	char id[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(id, buffer.id.c_str(), sizeof(id) - 1);
+	if (ImGui::InputText((label + " id").c_str(), id, sizeof(id))) buffer.id = id;
+	char host[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(host, buffer.reservoirId.c_str(), sizeof(host) - 1);
+	if (ImGui::InputText((label + " host reservoir id").c_str(), host, sizeof(host))) buffer.reservoirId = host;
+	char access[16]{};
+	std::strncpy(access, buffer.accessMode.c_str(), sizeof(access) - 1);
+	if (ImGui::InputText((label + " access mode (circulation|passive)").c_str(), access, sizeof(access))) buffer.accessMode = access;
+	char loop[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(loop, buffer.circulationLoopId.c_str(), sizeof(loop) - 1);
+	if (ImGui::InputText((label + " circulation loop id").c_str(), loop, sizeof(loop))) buffer.circulationLoopId = loop;
+	ImGui::InputDouble((label + " capacity kJ").c_str(), &buffer.capacityKJ, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " starting energy kJ").c_str(), &buffer.startingEnergyKJ, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " min usable temperature C").c_str(), &buffer.minUsableTemperatureC, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " max usable temperature C").c_str(), &buffer.maxUsableTemperatureC, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " max charge kW").c_str(), &buffer.maxChargeKW, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " max discharge kW").c_str(), &buffer.maxDischargeKW, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " transfer conductance kW/K").c_str(), &buffer.transferConductanceKWPerK, 0.0, 0.0, "%.3f");
+	ImGui::SameLine();
+	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str())) removeRequested = true;
+	ImGui::PopItemWidth();
+	return removeRequested;
+}
+
 bool renderChillerEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::ChillerSettings& chiller, std::string const& label, std::string const& removeLabel)
 {
@@ -1052,6 +1082,12 @@ bool renderThermalReservoirEntryAt(core::StationSystemsSettings& draft, size_t i
 		"Reservoir " + std::to_string(index), {});
 }
 
+bool renderThermalBufferEntryAt(core::StationSystemsSettings& draft, size_t index)
+{
+	if (index >= draft.thermalBuffers.size()) return false;
+	return renderThermalBufferEntry(draft, draft.thermalBuffers[index], "Buffer " + std::to_string(index), {});
+}
+
 bool renderChillerEntryAt(core::StationSystemsSettings& draft, size_t index)
 {
 	if (index >= draft.chillers.size()) return false;
@@ -1073,7 +1109,7 @@ bool renderRadiatorEntryAt(core::StationSystemsSettings& draft, size_t index)
 }
 
 // Keyed by the Flow node type names in core::stationPortDescriptors().
-constexpr std::array<StationEntryEditor, 12> kEntryEditors{{
+constexpr std::array<StationEntryEditor, 13> kEntryEditors{{
 	{"Store", &renderStoreEntryAt},
 	{"Transfer", &renderTransferEntryAt},
 	{"Equipment", &renderEquipmentLoadEntryAt},
@@ -1086,6 +1122,7 @@ constexpr std::array<StationEntryEditor, 12> kEntryEditors{{
 	{"Radiator", &renderRadiatorEntryAt},
 	{"Coolant loop", &renderCoolantLoopEntryAt},
 	{"Chiller", &renderChillerEntryAt},
+	{"Thermal buffer", &renderThermalBufferEntryAt},
 }};
 }
 

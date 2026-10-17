@@ -2176,55 +2176,14 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		}
 		mDraft.algaeCultures.push_back(std::move(algae));
 	}
-	ImGui::SeparatorText("Draft thermal buffers (kJ; finite phase-change store that rides through a cooling deficit: charge is capped by the host reservoir's deficit, discharge by its rejection surplus; access is circulation-gated or passive; the usable band maps stored energy to buffer temperature)");
+	ImGui::SeparatorText("Draft thermal buffers (kJ; finite phase-change store that rides through a cooling deficit)");
 	for (size_t index = 0; index < mDraft.thermalBuffers.size(); )
 	{
-		auto& buffer = mDraft.thermalBuffers[index];
 		auto const row = std::to_string(index);
-		bool removeBuffer = false;
-		ImGui::PushItemWidth(220);
-		char bufferIdBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(bufferIdBuffer, buffer.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Buffer " + row + " id").c_str(),
-			bufferIdBuffer, sizeof(bufferIdBuffer)))
-			buffer.id = bufferIdBuffer;
-		char bufferReservoirBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(bufferReservoirBuffer, buffer.reservoirId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Buffer " + row + " host reservoir id").c_str(),
-			bufferReservoirBuffer, sizeof(bufferReservoirBuffer)))
-			buffer.reservoirId = bufferReservoirBuffer;
-		char bufferAccessBuffer[16]{};
-		std::strncpy(bufferAccessBuffer, buffer.accessMode.c_str(), sizeof(bufferAccessBuffer) - 1);
-		if (ImGui::InputText(("Buffer " + row + " access mode (circulation|passive)").c_str(),
-			bufferAccessBuffer, sizeof(bufferAccessBuffer)))
-			buffer.accessMode = bufferAccessBuffer;
-		char bufferLoopBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(bufferLoopBuffer, buffer.circulationLoopId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Buffer " + row + " circulation loop id").c_str(),
-			bufferLoopBuffer, sizeof(bufferLoopBuffer)))
-			buffer.circulationLoopId = bufferLoopBuffer;
-		ImGui::InputDouble(("Buffer " + row + " capacity kJ").c_str(),
-			&buffer.capacityKJ, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Buffer " + row + " starting energy kJ").c_str(),
-			&buffer.startingEnergyKJ, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Buffer " + row + " min usable temperature C").c_str(),
-			&buffer.minUsableTemperatureC, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Buffer " + row + " max usable temperature C").c_str(),
-			&buffer.maxUsableTemperatureC, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Buffer " + row + " max charge kW").c_str(),
-			&buffer.maxChargeKW, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Buffer " + row + " max discharge kW").c_str(),
-			&buffer.maxDischargeKW, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Buffer " + row + " transfer conductance kW/K").c_str(),
-			&buffer.transferConductanceKWPerK, 0.0, 0.0, "%.3f");
-		ImGui::SameLine();
-		if (ImGui::Button(("Remove buffer " + row).c_str()))
-			removeBuffer = true;
-		ImGui::PopItemWidth();
-		if (removeBuffer)
-			mDraft.thermalBuffers.erase(mDraft.thermalBuffers.begin() + static_cast<std::ptrdiff_t>(index));
-		else
-			++index;
+		bool const remove = station_editor::renderThermalBufferEntry(mDraft,
+			mDraft.thermalBuffers[index], "Buffer " + row, "Remove buffer " + row);
+		if (remove) mDraft.thermalBuffers.erase(mDraft.thermalBuffers.begin() + static_cast<std::ptrdiff_t>(index));
+		else ++index;
 	}
 	if (mDraft.thermalBuffers.size() < core::MaxStationThermalBuffers && ImGui::Button("Add thermal buffer"))
 	{
