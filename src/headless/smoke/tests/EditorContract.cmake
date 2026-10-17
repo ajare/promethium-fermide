@@ -273,6 +273,7 @@ set(editor_names
     station/flowPowerChainWorkflow
     station/flowThermalReservoirWorkflow
     station/flowRadiatorWorkflow
+    station/flowCoolantLoopWorkflow
     station/transferWorkflow
     station/compoundWorkflow
     station/powerWorkflow

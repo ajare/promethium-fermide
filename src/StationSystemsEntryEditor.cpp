@@ -599,6 +599,38 @@ bool renderRadiatorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	return removeRequested;
 }
 
+bool renderCoolantLoopEntry([[maybe_unused]] core::StationSystemsSettings& draft,
+	core::CoolantLoopSettings& loop,
+	std::string const& label, std::string const& removeLabel)
+{
+	ImGui::PushItemWidth(220);
+	char id[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(id, loop.id.c_str(), sizeof(id) - 1);
+	if (ImGui::InputText((label + " id").c_str(), id, sizeof(id))) loop.id = id;
+	char hazard[16]{};
+	std::strncpy(hazard, loop.hazardClass.c_str(), sizeof(hazard) - 1);
+	if (ImGui::InputText((label + " hazard class").c_str(), hazard, sizeof(hazard))) loop.hazardClass = hazard;
+	char host[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(host, loop.reservoirId.c_str(), sizeof(host) - 1);
+	if (ImGui::InputText((label + " reservoir").c_str(), host, sizeof(host))) loop.reservoirId = host;
+	ImGui::InputDouble((label + " coolant capacity kg").c_str(), &loop.coolantCapacityKg, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " starting coolant kg").c_str(), &loop.startingCoolantKg, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " specific heat kJ/kg K").c_str(), &loop.specificHeatKJPerKgK, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " starting temperature C").c_str(), &loop.startingTemperatureC, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " freeze setpoint C").c_str(), &loop.freezeProtectionSetpointC, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " pump power kW").c_str(), &loop.pumpPowerKW, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " rated flow kg/s").c_str(), &loop.ratedFlowKgPerS, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " exchanger conductance kW/K").c_str(), &loop.exchangerConductanceKWPerK, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " heater capacity kW").c_str(), &loop.heaterCapacityKW, 0.0, 0.0, "%.3f");
+	ImGui::Checkbox((label + " protected critical service"
+		+ (loop.hazardClass == "hazardous" ? " (hazardous loops are always protected)"
+			: " (circulation and freeze heat drawn ahead of discretionary loads)")).c_str(), &loop.criticalService);
+	ImGui::SameLine();
+	bool const remove = !removeLabel.empty() && ImGui::Button(removeLabel.c_str());
+	ImGui::PopItemWidth();
+	return remove;
+}
+
 void renderEquipmentLoadList(core::StationSystemsSettings& draft)
 {
 	for (size_t index = 0; index < draft.equipmentLoads.size(); )
@@ -970,6 +1002,13 @@ bool renderThermalReservoirEntryAt(core::StationSystemsSettings& draft, size_t i
 		"Reservoir " + std::to_string(index), {});
 }
 
+bool renderCoolantLoopEntryAt(core::StationSystemsSettings& draft, size_t index)
+{
+	if (index >= draft.coolantLoops.size()) return false;
+	return renderCoolantLoopEntry(draft, draft.coolantLoops[index],
+		"Coolant loop " + std::to_string(index), {});
+}
+
 bool renderRadiatorEntryAt(core::StationSystemsSettings& draft, size_t index)
 {
 	if (index >= draft.radiators.size()) return false;
@@ -978,7 +1017,7 @@ bool renderRadiatorEntryAt(core::StationSystemsSettings& draft, size_t index)
 }
 
 // Keyed by the Flow node type names in core::stationPortDescriptors().
-constexpr std::array<StationEntryEditor, 10> kEntryEditors{{
+constexpr std::array<StationEntryEditor, 11> kEntryEditors{{
 	{"Store", &renderStoreEntryAt},
 	{"Transfer", &renderTransferEntryAt},
 	{"Equipment", &renderEquipmentLoadEntryAt},
@@ -989,6 +1028,7 @@ constexpr std::array<StationEntryEditor, 10> kEntryEditors{{
 	{"Methane processor", &renderMethaneProcessorEntryAt},
 	{"Reservoir", &renderThermalReservoirEntryAt},
 	{"Radiator", &renderRadiatorEntryAt},
+	{"Coolant loop", &renderCoolantLoopEntryAt},
 }};
 }
 

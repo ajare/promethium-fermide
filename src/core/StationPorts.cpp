@@ -119,7 +119,7 @@ namespace
 		if (auto const field = stationMachineField(link.from.nodeType, link.from.portName);
 			!field.empty())
 		{
-			bool const heat = field == "Heat sink";
+			bool const heat = field == "Heat sink" || field == "Host reservoir";
 			bool const peerMatches = heat
 				? (link.to.nodeType == "Reservoir" && link.to.portName == "Heat in")
 				: (link.to.nodeType == "Store" && link.to.portName == "Inventory in");
@@ -188,7 +188,8 @@ namespace
 		// through the same field resolver for write and clear, so it shares
 		// the routing predicate.
 		return ownerType == "Equipment" || ownerType == "Generator" || ownerType == "Fuel cell"
-			|| ownerType == "Sabatier" || ownerType == "Methane processor" || ownerType == "Radiator";
+			|| ownerType == "Sabatier" || ownerType == "Methane processor" || ownerType == "Radiator"
+			|| ownerType == "Coolant loop";
 	}
 
 	// The reference field a machine link names, as a pointer into the draft
@@ -280,6 +281,14 @@ namespace
 				{"Heat sink", &MethaneProcessorSettings::heatSinkId}};
 			for (auto const& [name, member] : members)
 				if (field == name) return &((*found).*member);
+			return nullptr;
+		}
+		if (ownerType == "Coolant loop")
+		{
+			auto const found = std::find_if(settings.coolantLoops.begin(), settings.coolantLoops.end(),
+				[&](CoolantLoopSettings const& entry) { return entry.id == ownerId; });
+			if (found == settings.coolantLoops.end()) return nullptr;
+			if (field == "Host reservoir") return &found->reservoirId;
 			return nullptr;
 		}
 		if (ownerType == "Radiator")
@@ -700,6 +709,18 @@ namespace
 			}
 			return true;
 		}
+		if (mapping.ownerType == "Coolant loop")
+		{
+			// No loop thermal class or host exclusivity: the existing validator
+			// requires only a declared host for this heat-only coupling.
+			auto const* host = machineField(settings, mapping.ownerType,
+				mapping.ownerId, mapping.field);
+			if (!host) return false;
+			if (!host->empty() && !findReservoirById(settings, *host))
+				diagnostic = "Station coolant loop '" + mapping.ownerId
+					+ "' is coupled to unknown thermal reservoir '" + *host + "'";
+			return true;
+		}
 		if (mapping.ownerType == "Radiator")
 		{
 			// #657: the radiator's host must be a declared reservoir. The
@@ -882,6 +903,13 @@ std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& set
 		links.push_back({linkIdentity("Radiator", radiator.id, "Host reservoir"),
 			{"Reservoir", radiator.reservoirId, "Hosted radiators"},
 			{"Radiator", radiator.id, "Host reservoir"}});
+	}
+	for (auto const& loop : settings.coolantLoops)
+	{
+		if (loop.reservoirId.empty()) continue;
+		links.push_back({linkIdentity("Coolant loop", loop.id, "Host reservoir"),
+			{"Coolant loop", loop.id, "Heat exchanger"},
+			{"Reservoir", loop.reservoirId, "Heat in"}});
 	}
 	return links;
 }

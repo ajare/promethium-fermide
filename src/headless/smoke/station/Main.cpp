@@ -2239,6 +2239,97 @@ namespace
 		}
 	}
 
+	void coolantLoopSeam(smoke::Context const&)
+	{
+		using smoke::require;
+		core::StationSystemsSettings base;
+		base.enabled = true;
+		core::ThermalReservoirSettings host;
+		host.id = "host"; host.thermalClass = "warm"; host.heatCapacityKJPerK = 100.0;
+		base.thermalReservoirs = {host};
+		host.id = "other"; base.thermalReservoirs.push_back(host);
+		core::CoolantLoopSettings loop;
+		loop.id = "loop"; loop.hazardClass = "normal";
+		loop.coolantCapacityKg = 100.0; loop.specificHeatKJPerKgK = 4.0;
+		base.coolantLoops = {loop};
+		loop.id = "second"; loop.hazardClass = "hazardous";
+		base.coolantLoops.push_back(loop);
+		core::ResourceStoreSettings store;
+		store.id = "water"; store.unit = "kg"; store.capacity = 100.0;
+		base.stores = {store};
+		auto const pin = core::StationPinRef{"Coolant loop", "loop", "Heat exchanger"};
+		auto const sink = core::StationPinRef{"Reservoir", "host", "Heat in"};
+		for (bool unfinished : {false, true})
+		{
+			auto draft = base;
+			if (unfinished)
+			{
+				core::ResourceTransferSettings transfer;
+				transfer.id = "unfinished";
+				draft.transfers.push_back(transfer);
+				draft.coolantLoops[0].coolantCapacityKg = 0.0;
+			}
+			for (bool reverse : {false, true})
+			{
+				auto candidate = [&](core::StationPinRef peer) {
+					return reverse ? core::CandidateLink{peer, pin} : core::CandidateLink{pin, peer};
+				};
+				auto verdict = core::evaluateStationLink(draft, candidate(sink));
+				require(verdict.allowed && verdict.reason.empty(), verdict.reason.c_str());
+				auto wired = draft;
+				require(core::applyStationLink(wired, candidate(sink))
+					&& wired.coolantLoops[0].reservoirId == "host", "loop link wrote the wrong field");
+				auto const links = core::stationAuthoredLinks(wired);
+				require(std::any_of(links.begin(), links.end(), [&](auto const& entry) {
+					return entry.identity == "Coolant loop:loop:Host reservoir"
+						&& entry.from == pin && entry.to == sink;
+				}), "loop host link did not enumerate");
+				require(!core::evaluateStationLink(wired, candidate(sink)).allowed,
+					"duplicate coupling accepted");
+				require(!core::evaluateStationLink(wired,
+					candidate({"Reservoir", "other", "Heat in"})).allowed,
+					"second host accepted on one loop");
+				auto shared = core::CandidateLink{{"Coolant loop", "second", "Heat exchanger"}, sink};
+				if (reverse) std::swap(shared.from, shared.to);
+				require(core::evaluateStationLink(wired, shared).allowed
+					&& core::applyStationLink(wired, shared), "shared normal/hazardous host refused");
+				require(core::clearStationLink(wired, "Coolant loop:loop:Host reservoir")
+					&& wired.coolantLoops[0].reservoirId.empty()
+					&& wired.coolantLoops[1].reservoirId == "host", "disconnect disturbed shared host");
+				verdict = core::evaluateStationLink(draft, candidate({"Reservoir", "ghost", "Heat in"}));
+				require(!verdict.allowed && verdict.reason.find("coupled to unknown thermal reservoir 'ghost'")
+					!= std::string::npos, verdict.reason.c_str());
+				for (auto const& peer : std::vector<core::StationPinRef>{
+					{"Store", "water", "Inventory in"}, {"Store", "water", "Inventory out"},
+					{"Coolant loop", "second", "Heat exchanger"},
+					{"Reservoir", "host", "Hosted radiators"},
+					{"Radiator", "rad", "Host reservoir"}})
+				{
+					auto const before = draft;
+					verdict = core::evaluateStationLink(draft, candidate(peer));
+					require(!verdict.allowed && !verdict.reason.empty() && draft == before,
+						"illegal loop counterpart accepted or changed draft");
+				}
+			}
+		}
+		// The loop inherits its host's class, not a synthetic loop class.
+		for (auto const* thermalClass : core::StationThermalServiceClasses)
+		{
+			auto draft = base;
+			draft.thermalReservoirs[0].thermalClass = thermalClass;
+			draft.coolantLoops[1].reservoirId = "host";
+			require(core::evaluateStationLink(draft, {pin, sink}).allowed
+				&& core::applyStationLink(draft, {pin, sink}), "legal host class refused");
+			std::string diagnostic;
+			require(core::validateStationSystemsSettings(draft, diagnostic), diagnostic.c_str());
+		}
+		bool placeable = false;
+		for (auto const& type : core::stationPlaceableTypes())
+			if (type.nodeType == "Coolant loop")
+				placeable = type.group == "Thermal" && type.idPrefix == "coolantLoop";
+		require(placeable, "loop missing from thermal placement group");
+	}
+
 	void compounds(smoke::Context const&)
 	{
 		// #391: compound Resource stores carry declared constituent
@@ -25536,7 +25627,7 @@ void recovery(smoke::Context const& context)
 
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"powerChainSeam", powerChainSeam}, {"thermalReservoirSeam", thermalReservoirSeam}, {"radiatorSeam", radiatorSeam}, {"compounds", compounds}, {"power", power},
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"powerChainSeam", powerChainSeam}, {"thermalReservoirSeam", thermalReservoirSeam}, {"radiatorSeam", radiatorSeam}, {"coolantLoopSeam", coolantLoopSeam}, {"compounds", compounds}, {"power", power},
 		// Split out of the former `batteries` check: the hour-scale legs are
 		// independent worlds, so each is its own test and they run in parallel
 		// instead of as one ~182s serial chain.

@@ -111,7 +111,9 @@ namespace core
 			// face, and takes exactly one host: a radiator without one is an
 			// incomplete entry, not a multi-homed one.
 			PortDescriptor{"Reservoir", "Hosted radiators", StationPortDirection::Output, "thermal-host", "thermal-host", 0, {}},
-			PortDescriptor{"Radiator", "Host reservoir", StationPortDirection::Input, "thermal-host", "thermal-host", 1, {}, false}};
+			PortDescriptor{"Radiator", "Host reservoir", StationPortDirection::Input, "thermal-host", "thermal-host", 1, {}, false},
+			// Heat-only coupling: coolant inventory is internal to the loop.
+			PortDescriptor{"Coolant loop", "Heat exchanger", StationPortDirection::Output, "heat", "heat-sink", 1, {}, false}};
 		return descriptors;
 	}
 
@@ -123,7 +125,7 @@ namespace core
 	inline std::string_view stationMachineField(std::string_view nodeType,
 		std::string_view portName)
 	{
-		static constexpr std::array<std::pair<std::array<std::string_view, 2>, std::string_view>, 21> fields{{
+		static constexpr std::array<std::pair<std::array<std::string_view, 2>, std::string_view>, 22> fields{{
 			{{"Equipment", "Equipment input 1"}, "Material in 1"},
 			{{"Equipment", "Equipment input 2"}, "Material in 2"},
 			{{"Equipment", "Equipment return 1"}, "Material return 1"},
@@ -150,6 +152,7 @@ namespace core
 			// machine-output branch; the field name still comes from this one
 			// table so write, clear and enumeration cannot disagree.
 			{{"Radiator", "Host reservoir"}, "Host reservoir"},
+			{{"Coolant loop", "Heat exchanger"}, "Host reservoir"},
 		}};
 		for (auto const& entry : fields)
 			if (entry.first[0] == nodeType && entry.first[1] == portName) return entry.second;
@@ -264,7 +267,8 @@ namespace core
 			StationPlaceableType{"Reservoir", "reservoir", "Thermal"},
 			// #657: the radiator mounts on one host reservoir and rejects
 			// its heat to the environment.
-			StationPlaceableType{"Radiator", "radiator", "Thermal"}};
+			StationPlaceableType{"Radiator", "radiator", "Thermal"},
+			StationPlaceableType{"Coolant loop", "coolantLoop", "Thermal"}};
 		return placeable;
 	}
 

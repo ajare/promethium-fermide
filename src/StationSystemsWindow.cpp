@@ -836,53 +836,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	{
 		auto& loop = mDraft.coolantLoops[index];
 		auto const row = std::to_string(index);
-		bool removeLoop = false;
-		ImGui::PushItemWidth(220);
-		char loopIdBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(loopIdBuffer, loop.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Coolant loop " + row + " id").c_str(),
-			loopIdBuffer, sizeof(loopIdBuffer)))
-			loop.id = loopIdBuffer;
-		char hazardBuffer[16]{};
-		std::strncpy(hazardBuffer, loop.hazardClass.c_str(), sizeof(hazardBuffer) - 1);
-		if (ImGui::InputText(("Coolant loop " + row + " hazard class").c_str(),
-			hazardBuffer, sizeof(hazardBuffer)))
-			loop.hazardClass = hazardBuffer;
-		char loopReservoirBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(loopReservoirBuffer, loop.reservoirId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Coolant loop " + row + " reservoir").c_str(),
-			loopReservoirBuffer, sizeof(loopReservoirBuffer)))
-			loop.reservoirId = loopReservoirBuffer;
-		ImGui::InputDouble(("Coolant loop " + row + " coolant capacity kg").c_str(),
-			&loop.coolantCapacityKg, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Coolant loop " + row + " starting coolant kg").c_str(),
-			&loop.startingCoolantKg, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Coolant loop " + row + " specific heat kJ/kg K").c_str(),
-			&loop.specificHeatKJPerKgK, 0.0, 0.0, "%.4f");
-		ImGui::InputDouble(("Coolant loop " + row + " starting temperature C").c_str(),
-			&loop.startingTemperatureC, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Coolant loop " + row + " freeze setpoint C").c_str(),
-			&loop.freezeProtectionSetpointC, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Coolant loop " + row + " pump power kW").c_str(),
-			&loop.pumpPowerKW, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Coolant loop " + row + " rated flow kg/s").c_str(),
-			&loop.ratedFlowKgPerS, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Coolant loop " + row + " exchanger conductance kW/K").c_str(),
-			&loop.exchangerConductanceKWPerK, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Coolant loop " + row + " heater capacity kW").c_str(),
-			&loop.heaterCapacityKW, 0.0, 0.0, "%.3f");
-		// #416: protected critical service flag. Hazardous loops are
-		// protected by their hazard class regardless; this flag protects a
-		// normal loop's circulation and freeze heating ahead of every
-		// discretionary external load.
-		ImGui::Checkbox(("Coolant loop " + row + " protected critical service"
-			+ (loop.hazardClass == "hazardous" ? " (hazardous loops are always protected)"
-				: " (circulation and freeze heat drawn ahead of discretionary loads)")).c_str(),
-			&loop.criticalService);
-		ImGui::SameLine();
-		if (ImGui::Button(("Remove coolant loop " + row).c_str()))
-			removeLoop = true;
-		ImGui::PopItemWidth();
+		bool const removeLoop = station_editor::renderCoolantLoopEntry(mDraft, loop,
+			"Coolant loop " + row, "Remove coolant loop " + row);
 		if (removeLoop)
 			mDraft.coolantLoops.erase(mDraft.coolantLoops.begin() + static_cast<std::ptrdiff_t>(index));
 		else

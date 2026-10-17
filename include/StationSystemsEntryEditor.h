@@ -84,6 +84,9 @@ namespace station_editor
 	void renderMethaneProcessorList(core::StationSystemsSettings& draft);
 	void renderThermalReservoirList(core::StationSystemsSettings& draft);
 	void renderRadiatorList(core::StationSystemsSettings& draft);
+	bool renderCoolantLoopEntry(core::StationSystemsSettings& draft,
+		core::CoolantLoopSettings& loop,
+		std::string const& label, std::string const& removeLabel);
 
 	// Descriptor registry keyed by the Flow node type name. A type absent
 	// here has no extracted editor yet; the index addresses the entry in

@@ -1653,6 +1653,132 @@ namespace
 	// inspector/form editor, the host connector's write/disconnect/reattach
 	// and its exactly-one cardinality, and the structurally-invalid refusal -
 	// all against the one draft, with the World left untouched.
+	void flowCoolantLoopWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory worldHistory;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Coolant flow", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed;
+		seed.enabled = true;
+		core::ThermalReservoirSettings host;
+		host.id = "host"; host.thermalClass = "warm"; host.heatCapacityKJPerK = 100.0;
+		seed.thermalReservoirs = {host};
+		core::ResourceStoreSettings store;
+		store.id = "water"; store.unit = "kg"; store.capacity = 100.0;
+		seed.stores = {store};
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+		bool flow = true;
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration");
+			if (flow) window.renderFlowContents(world);
+			else window.renderContents(world, worldHistory);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "flowCoolantLoop", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			ctx->ComboClick("Place node/Coolant loop"); ctx->Yield(3);
+			REQ(driver.contains("Coolant loop placement armed"), "loop placement not armed");
+			auto* canvas = flowCanvasWindow("Configuration");
+			for (int i = 0; i < 2; ++i)
+			{
+				ctx->MouseTeleportToPos({canvas->Pos.x + 300.0f + i * 40.0f, canvas->Pos.y + 180.0f + i * 40.0f});
+				ctx->MouseClick(); ctx->Yield(3);
+			}
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			REQ(window.draft().coolantLoops.size() == 2
+				&& window.draft().coolantLoops[0].id == "coolantLoop1"
+				&& window.draft().coolantLoops[1].id == "coolantLoop2"
+				&& window.draft().coolantLoops[0].reservoirId.empty()
+				&& window.draft().coolantLoops[0].hazardClass == "normal"
+				&& window.draftHistory().undoCount() == 2, "placement defaults/identity/history incorrect");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().coolantLoops.size() == 1, "undo placement failed");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().coolantLoops.size() == 2, "redo placement failed");
+			auto select = [&] {
+				driver.click(ctx, "**/Find node"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+				ctx->KeyChars("coolantLoop1"); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+				ImVec4 r{};
+				if (!window.flowNodeRect("Coolant loop", "coolantLoop1", &r)) return false;
+				ctx->MouseTeleportToPos({(r.x + r.z) * 0.5f, (r.y + r.w) * 0.5f});
+				ctx->MouseClick(); ctx->Yield(3);
+				driver.click(ctx, "**/Find node"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+				ctx->KeyPress(ImGuiKey_Delete); ctx->Yield(3);
+				ctx->MouseTeleportToPos({20, 20}); ctx->Yield(2);
+				return true;
+			};
+			REQ(select(), "loop node missing");
+			REQ(driver.contains("Heat exchanger (output) - unconnected"), "required loop connector missing");
+			auto const count = window.draftHistory().undoCount();
+			driver.typeValue(ctx, "**/Coolant loop 0 pump power kW", "3");
+			ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			REQ(window.draft().coolantLoops[0].pumpPowerKW == 3.0
+				&& window.draftHistory().undoCount() == count + 1, "inspector edit not one action");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().coolantLoops[0].pumpPowerKW == 1.0, "undo field edit failed");
+			flow = false; ctx->Yield(3);
+			driver.typeValue(ctx, "**/Coolant loop 0 pump power kW", "4");
+			ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			REQ(window.draft().coolantLoops[0].pumpPowerKW == 4.0
+				&& window.draftHistory().undoCount() == count + 1, "shared form edit/history failed");
+			flow = true; ctx->Yield(3);
+			driver.click(ctx, "Fit all"); ctx->Yield(3);
+			auto drag = [&](core::StationPinRef const& from, core::StationPinRef const& to) {
+				ImVec2 a{}, b{};
+				if (!window.flowPinPosition(from.nodeType, from.nodeId, from.portName, &a)
+					|| !window.flowPinPosition(to.nodeType, to.nodeId, to.portName, &b)) return false;
+				ctx->MouseTeleportToPos(a); ctx->Yield(3); ctx->MouseDown(); ctx->Yield(3);
+				ctx->MouseTeleportToPos({(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f}); ctx->Yield(2);
+				ctx->MouseTeleportToPos(b); ctx->Yield(2);
+				if (window.flowPinPosition(to.nodeType, to.nodeId, to.portName, &b))
+				{ ctx->MouseTeleportToPos(b); ctx->Yield(3); }
+				ctx->MouseUp(); ctx->Yield(3);
+				return true;
+			};
+			auto const loopPin = core::StationPinRef{"Coolant loop", "coolantLoop1", "Heat exchanger"};
+			auto const hostPin = core::StationPinRef{"Reservoir", "host", "Heat in"};
+			auto const before = window.draft();
+			auto const history = window.draftHistory().undoCount();
+			REQ(drag(loopPin, {"Store", "water", "Inventory in"}), "store/loop pins missing");
+			REQ(!window.flowLinkRejection().empty() && window.draft() == before
+				&& window.draftHistory().undoCount() == history, "illegal material link changed draft/history");
+			REQ(drag(loopPin, hostPin), "heat coupling pins missing");
+			REQ(window.draft().coolantLoops[0].reservoirId == "host"
+				&& window.draftHistory().undoCount() == history + 1, window.flowLinkRejection().c_str());
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().coolantLoops[0].reservoirId.empty(), "undo wiring failed");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().coolantLoops[0].reservoirId == "host", "redo wiring failed");
+			REQ(drag(hostPin, {"Coolant loop", "coolantLoop2", "Heat exchanger"}), "reverse coupling pins missing");
+			REQ(window.draft().coolantLoops[1].reservoirId == "host"
+				&& window.draftHistory().undoCount() == history + 2, "shared host reverse drag failed");
+			REQ(select(), "loop selection failed");
+			REQ(driver.contains("Disconnect Heat exchanger host"), "loop disconnect button missing");
+			driver.click(ctx, "**/Disconnect Heat exchanger host"); ctx->Yield(3);
+			REQ(window.draft().coolantLoops[0].reservoirId.empty()
+				&& window.draft().coolantLoops[1].reservoirId == "host"
+				&& window.draftHistory().undoCount() == history + 3, "disconnect not one action");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().coolantLoops[0].reservoirId == "host", "undo disconnect failed");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().coolantLoops[0].reservoirId.empty(), "redo disconnect failed");
+			REQ(world->getStationSystemsSettings() == seed && !world->isModified()
+				&& worldHistory.undoCount() == 0, "draft editing mutated World");
+		});
+		#undef REQ
+		require(driver.passed(), "Flow coolant loop workflow failed");
+	}
+
 	void flowRadiatorWorkflow(smoke::Context const&)
 	{
 		using smoke::require;
@@ -5861,6 +5987,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/flowPowerChainWorkflow", flowPowerChainWorkflow});
 	checks.push_back({"station/flowThermalReservoirWorkflow", flowThermalReservoirWorkflow});
 	checks.push_back({"station/flowRadiatorWorkflow", flowRadiatorWorkflow});
+	checks.push_back({"station/flowCoolantLoopWorkflow", flowCoolantLoopWorkflow});
 	checks.push_back({"station/transferWorkflow", transferWorkflow});
 	checks.push_back({"station/compoundWorkflow", compoundWorkflow});
 	checks.push_back({"station/powerWorkflow", powerWorkflow});

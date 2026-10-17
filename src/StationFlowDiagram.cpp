@@ -774,7 +774,8 @@ std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode
 	if (view.type == "Store" || view.type == "Transfer" || view.type == "Conversion"
 		|| view.type == "Solar" || view.type == "Equipment" || view.type == "Battery"
 		|| view.type == "Generator" || view.type == "Fuel cell" || view.type == "Sabatier"
-		|| view.type == "Methane processor" || view.type == "Reservoir" || view.type == "Radiator")
+		|| view.type == "Methane processor" || view.type == "Reservoir" || view.type == "Radiator"
+		|| view.type == "Coolant loop")
 	{
 		view.index = 0;
 		for (int i = 0; i < mSelected; ++i)
@@ -1358,6 +1359,30 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			draft.radiators.push_back(std::move(radiator));
 			mFitRequested = false;
 		}
+		else if (mPlacingType == "Coolant loop" && draft.coolantLoops.size() < core::MaxStationCoolantLoops)
+		{
+			core::CoolantLoopSettings loop;
+			loop.hazardClass = "normal";
+			loop.coolantCapacityKg = 100.0;
+			loop.startingCoolantKg = 100.0;
+			loop.specificHeatKJPerKgK = 4.0;
+			loop.startingTemperatureC = 20.0;
+			loop.freezeProtectionSetpointC = 5.0;
+			loop.pumpPowerKW = 1.0;
+			loop.ratedFlowKgPerS = 1.0;
+			loop.exchangerConductanceKWPerK = 2.0;
+			loop.heaterCapacityKW = 1.0;
+			// Leave the host unwired until the user connects it.
+			for (size_t candidate = 1;; ++candidate)
+			{
+				loop.id = "coolantLoop" + std::to_string(candidate);
+				if (std::none_of(draft.coolantLoops.begin(), draft.coolantLoops.end(),
+					[&](auto const& entry) { return entry.id == loop.id; })) break;
+			}
+			mLayout["Coolant loop:" + loop.id + ":0"] = placeAt;
+			draft.coolantLoops.push_back(std::move(loop));
+			mFitRequested = false;
+		}
 	}
 	ImNodes::SetCurrentContext(previousContext);
 	updateBounds();
@@ -1610,7 +1635,9 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			|| (mPlacingType == "Reservoir"
 				&& draft.thermalReservoirs.size() >= core::MaxStationThermalReservoirs)
 			|| (mPlacingType == "Radiator"
-				&& draft.radiators.size() >= core::MaxStationRadiators);
+				&& draft.radiators.size() >= core::MaxStationRadiators)
+			|| (mPlacingType == "Coolant loop"
+				&& draft.coolantLoops.size() >= core::MaxStationCoolantLoops);
 		auto a = io.MousePos;
 		ImVec2 b{a.x + nodeWidth * mZoom, a.y + nodeHeight * mZoom};
 		draw->AddRectFilled(a, b, IM_COL32(80, 130, 170, 100), 5);
