@@ -995,7 +995,10 @@ namespace
 						// #656: the thermal reservoir is offered under the
 						// Thermal grouping with the id prefix its placed
 						// entries start from.
-						ExpectedPlaceable{"Reservoir", "reservoir", "Thermal"}})
+						ExpectedPlaceable{"Reservoir", "reservoir", "Thermal"},
+						// #657: the radiator joins it under the same Thermal
+						// grouping.
+						ExpectedPlaceable{"Radiator", "radiator", "Thermal"}})
 				{
 					bool found = false;
 					for (auto const& placeable : core::stationPlaceableTypes())
@@ -1994,6 +1997,245 @@ namespace
 			requireRefused(coolingLoad, link(pin("Equipment", "load1", "Heat out"),
 				pin("Reservoir", "coldSink", "Heat in")), "requires a cooling service",
 				"a cooling-service load wired to a passive reservoir");
+		}
+	}
+
+	// #657: the radiator's host-reservoir connector. Every legal and illegal
+	// pairing of the fixed host mount, its exactly-one cardinality on the
+	// radiator face and unbounded many-to-one on the reservoir face, the
+	// write/clear/enumerate round trip, and the validator's own reason for
+	// an unknown host - all judged through the same core seam the editor
+	// drives, with no radiator simulation involved.
+	void radiatorSeam(smoke::Context const&)
+	{
+		auto store = [](std::string const& id, std::string const& unit)
+		{
+			core::ResourceStoreSettings entry;
+			entry.id = id; entry.unit = unit; entry.capacity = 1000.0;
+			entry.startingQualified = 500.0; entry.hazardClass = "normal";
+			return entry;
+		};
+		auto reservoir = [](std::string const& id, std::string const& thermalClass)
+		{
+			core::ThermalReservoirSettings entry;
+			entry.id = id; entry.thermalClass = thermalClass;
+			entry.heatCapacityKJPerK = 1000.0;
+			return entry;
+		};
+		auto radiator = [](std::string const& id, std::string const& host)
+		{
+			core::RadiatorSettings entry;
+			entry.id = id; entry.reservoirId = host;
+			entry.areaM2 = 100.0; entry.emissivity = 0.9;
+			entry.viewFactor = 1.0; entry.sinkTemperatureC = -270.0;
+			return entry;
+		};
+		auto pin = [](char const* type, char const* id, char const* port)
+		{
+			return core::StationPinRef{type, id, port};
+		};
+		auto link = [](core::StationPinRef from, core::StationPinRef to)
+		{
+			return core::CandidateLink{std::move(from), std::move(to)};
+		};
+		// One host reservoir, a second reservoir for the reattach case, and
+		// a radiator with no host yet: the host link under test stays the
+		// user's next action.
+		auto base = [&]
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {store("water", "kg")};
+			settings.thermalReservoirs = {reservoir("host", "low"), reservoir("other", "low")};
+			settings.radiators = {radiator("rad1", "")};
+			core::EquipmentLoadSettings load;
+			load.id = "load1"; load.thermalClass = "low";
+			settings.equipmentLoads = {load};
+			return settings;
+		};
+		auto requireAllowed = [](core::StationSystemsSettings const& settings,
+			core::CandidateLink const& candidate, char const* what)
+		{
+			auto const verdict = core::evaluateStationLink(settings, candidate);
+			require(verdict.allowed,
+				(std::string("expected this link to be allowed: ") + what + " | refused: " + verdict.reason).c_str());
+			require(verdict.reason.empty(),
+				(std::string("an allowed link carried a reason: ") + what).c_str());
+		};
+		auto requireRefused = [](core::StationSystemsSettings const& settings,
+			core::CandidateLink const& candidate, char const* needle, char const* what)
+		{
+			auto const verdict = core::evaluateStationLink(settings, candidate);
+			require(!verdict.allowed, (std::string("expected this link to be refused: ") + what).c_str());
+			require(!verdict.reason.empty(),
+				(std::string("a refused link gave no reason: ") + what).c_str());
+			require(verdict.reason.find(needle) != std::string::npos,
+				(std::string("refusal for ") + what + " did not carry '" + needle + "' but said: "
+					+ verdict.reason).c_str());
+		};
+		// A radiator attaches to a valid host in either drag order, the write
+		// lands on reservoirId, the enumeration presents the same authored
+		// link, and clearing it returns the radiator to an unconnected host.
+		{
+			auto wired = base();
+			requireAllowed(wired, link(pin("Radiator", "rad1", "Host reservoir"),
+				pin("Reservoir", "host", "Hosted radiators")),
+				"a radiator onto its host reservoir");
+			require(core::applyStationLink(wired,
+				link(pin("Radiator", "rad1", "Host reservoir"),
+					pin("Reservoir", "host", "Hosted radiators")))
+				&& wired.radiators.front().reservoirId == "host",
+				"the host link did not write the radiator's reservoirId");
+			auto const links = core::stationAuthoredLinks(wired);
+			require(links.size() == 1
+				&& links.front().identity == "Radiator:rad1:Host reservoir"
+				&& links.front().from == pin("Reservoir", "host", "Hosted radiators")
+				&& links.front().to == pin("Radiator", "rad1", "Host reservoir"),
+				"the host mount did not enumerate as the authored link it writes");
+			require(core::clearStationLink(wired, "Radiator:rad1:Host reservoir")
+				&& wired.radiators.front().reservoirId.empty(),
+				"clearing the host link left the reservoirId behind");
+			require(core::stationAuthoredLinks(wired).empty(),
+				"the cleared host still enumerated");
+			// The same pair dragged the other way round writes the same field.
+			requireAllowed(base(), link(pin("Reservoir", "host", "Hosted radiators"),
+				pin("Radiator", "rad1", "Host reservoir")),
+				"the host mount dragged from the reservoir side");
+			auto reversed = base();
+			require(core::applyStationLink(reversed,
+				link(pin("Reservoir", "host", "Hosted radiators"),
+					pin("Radiator", "rad1", "Host reservoir")))
+				&& reversed.radiators.front().reservoirId == "host",
+				"the reversed host drag wrote a different field");
+		}
+		// Many radiators share one host: the reservoir's hosted-radiators face
+		// is unbounded, so a second and third radiator onto the same host are
+		// each their own authored link and none displaces another.
+		{
+			auto many = base();
+			many.radiators.push_back(radiator("rad2", ""));
+			many.radiators.push_back(radiator("rad3", ""));
+			requireAllowed(many, link(pin("Radiator", "rad1", "Host reservoir"),
+				pin("Reservoir", "host", "Hosted radiators")), "the first radiator onto the shared host");
+			many.radiators[0].reservoirId = "host";
+			requireAllowed(many, link(pin("Radiator", "rad2", "Host reservoir"),
+				pin("Reservoir", "host", "Hosted radiators")), "a second radiator onto the same host");
+			many.radiators[1].reservoirId = "host";
+			requireAllowed(many, link(pin("Radiator", "rad3", "Host reservoir"),
+				pin("Reservoir", "host", "Hosted radiators")), "a third radiator onto the same host");
+			many.radiators[2].reservoirId = "host";
+			auto const links = core::stationAuthoredLinks(many);
+			require(links.size() == 3,
+				("the shared host did not enumerate every radiator mounted on it: "
+					+ std::to_string(links.size())).c_str());
+			for (auto const& entry : links)
+				require(entry.from == pin("Reservoir", "host", "Hosted radiators"),
+					"a shared-host link did not enumerate out of the reservoir face");
+			require(core::clearStationLink(many, "Radiator:rad2:Host reservoir")
+				&& many.radiators[1].reservoirId.empty()
+				&& many.radiators[0].reservoirId == "host"
+				&& many.radiators[2].reservoirId == "host",
+				"clearing one radiator disturbed the others sharing the host");
+		}
+		// Exactly-one host on the radiator face: a radiator already mounted
+		// refuses a second host and names the reservoir already in the way.
+		{
+			auto hosted = base();
+			hosted.radiators.front().reservoirId = "host";
+			requireRefused(hosted, link(pin("Radiator", "rad1", "Host reservoir"),
+				pin("Reservoir", "other", "Hosted radiators")), "already joins", "a second host on an already-mounted radiator");
+			requireRefused(hosted, link(pin("Reservoir", "other", "Hosted radiators"),
+				pin("Radiator", "rad1", "Host reservoir")), "host", "a second host dragged from the reservoir side");
+		}
+		// An unknown host answers with the whole-config validator's own
+		// wording: a link naming a reservoir that does not exist is refused
+		// as attached to an unknown thermal reservoir.
+		{
+			requireRefused(base(), link(pin("Radiator", "rad1", "Host reservoir"),
+				pin("Reservoir", "ghost", "Hosted radiators")),
+				"attached to unknown thermal reservoir", "a host link naming a nonexistent reservoir");
+			requireRefused(base(), link(pin("Reservoir", "ghost", "Hosted radiators"),
+				pin("Radiator", "rad1", "Host reservoir")),
+				"attached to unknown thermal reservoir", "the unknown host dragged from the reservoir side");
+		}
+		// A radiator whose host is a dangling reference still occupies its
+		// exactly-one host face: the broken mount enumerates (so the
+		// inspector can offer its Disconnect), a second host is refused as
+		// already joined, and only after the broken mount is cleared can a
+		// real reservoir take it.
+		{
+			auto dangling = base();
+			dangling.radiators.front().reservoirId = "ghost";
+			auto const links = core::stationAuthoredLinks(dangling);
+			require(links.size() == 1
+				&& links.front().from == pin("Reservoir", "ghost", "Hosted radiators"),
+				"the dangling host did not enumerate as the authored mount to clear");
+			requireRefused(dangling, link(pin("Radiator", "rad1", "Host reservoir"),
+				pin("Reservoir", "host", "Hosted radiators")), "already joins",
+				"a real host onto a radiator whose face is held by a dangling mount");
+			require(core::clearStationLink(dangling, "Radiator:rad1:Host reservoir")
+				&& dangling.radiators.front().reservoirId.empty(),
+				"clearing the dangling mount left the reservoirId behind");
+			requireAllowed(dangling, link(pin("Radiator", "rad1", "Host reservoir"),
+				pin("Reservoir", "host", "Hosted radiators")),
+				"the real host after the dangling mount was disconnected");
+		}
+		// Structurally invalid pairings are refused by the descriptor table:
+		// the host mount only joins a reservoir's hosted-radiators face.
+		{
+			requireRefused(base(), link(pin("Radiator", "rad1", "Host reservoir"),
+				pin("Store", "water", "Inventory out")), "Transfer or Conversion",
+				"a radiator host mount dropped on a store");
+			requireRefused(base(), link(pin("Store", "water", "Inventory out"),
+				pin("Radiator", "rad1", "Host reservoir")), "Transfer or Conversion",
+				"a store output dropped on a radiator host mount");
+			requireRefused(base(), link(pin("Equipment", "load1", "Heat out"),
+				pin("Radiator", "rad1", "Host reservoir")), "cannot join",
+				"a machine heat output dropped on a radiator host mount");
+			requireRefused(base(), link(pin("Reservoir", "host", "Hosted radiators"),
+				pin("Equipment", "load1", "Heat out")), "cannot join",
+				"a hosted-radiators output dropped on a machine heat output");
+			// Two inputs cannot join: the host mount and the reservoir's
+			// heat-in face are both inputs.
+			requireRefused(base(), link(pin("Radiator", "rad1", "Host reservoir"),
+				pin("Reservoir", "host", "Heat in")), "cannot join",
+				"a host mount dropped on the reservoir heat-in face");
+		}
+		// A half-built radiator - an unrelated invalid field - never stands
+		// in as the refusal for a legal host link; the invalid field stays
+		// the whole-config validator's to report.
+		{
+			auto brokenElsewhere = base();
+			brokenElsewhere.radiators.front().areaM2 = 0.0;
+			requireAllowed(brokenElsewhere, link(pin("Radiator", "rad1", "Host reservoir"),
+				pin("Reservoir", "host", "Hosted radiators")),
+				"a legal host link while the radiator's own area is invalid");
+			std::string diagnostic;
+			brokenElsewhere.radiators.front().reservoirId = "host";
+			require(!core::validateStationSystemsSettings(brokenElsewhere, diagnostic)
+				&& diagnostic.find("area") != std::string::npos,
+				"the whole-config validator missed the invalid radiator area");
+		}
+		// The radiator owns no thermal-class field: the host link is judged
+		// only on the host existing, never on a class the radiator does not
+		// declare, and the radiator is offered as placeable under Thermal.
+		{
+			auto mismatched = base();
+			mismatched.thermalReservoirs.front().thermalClass = "warm";
+			requireAllowed(mismatched, link(pin("Radiator", "rad1", "Host reservoir"),
+				pin("Reservoir", "host", "Hosted radiators")),
+				"a radiator onto a host of a different thermal class (radiators carry no class)");
+			bool sawRadiator = false;
+			for (auto const& placeable : core::stationPlaceableTypes())
+				if (placeable.nodeType == "Radiator")
+				{
+					sawRadiator = true;
+					require(placeable.group == "Thermal" && placeable.idPrefix == "radiator",
+						"the radiator is not offered under the Thermal group with its id prefix");
+				}
+			require(sawRadiator, "the radiator is not offered as placeable");
+			require(!core::stationIsDerivedNodeType("Radiator"),
+				"the authored radiator is treated as derived");
 		}
 	}
 
@@ -25294,7 +25536,7 @@ void recovery(smoke::Context const& context)
 
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"powerChainSeam", powerChainSeam}, {"thermalReservoirSeam", thermalReservoirSeam}, {"compounds", compounds}, {"power", power},
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"powerChainSeam", powerChainSeam}, {"thermalReservoirSeam", thermalReservoirSeam}, {"radiatorSeam", radiatorSeam}, {"compounds", compounds}, {"power", power},
 		// Split out of the former `batteries` check: the hour-scale legs are
 		// independent worlds, so each is its own test and they run in parallel
 		// instead of as one ~182s serial chain.

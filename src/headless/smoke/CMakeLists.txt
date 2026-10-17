@@ -81,7 +81,7 @@ pf_add_smoke_module(pf-smoke-station
     TIMEOUT 600
     DEFAULT_CHECK lifecycle
 )
-foreach(check lifecycle batching eventBound persistence stores transfers linkSeam growablePorts powerChainSeam thermalReservoirSeam compounds power
+foreach(check lifecycle batching eventBound persistence stores transfers linkSeam growablePorts powerChainSeam thermalReservoirSeam radiatorSeam compounds power
         batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick

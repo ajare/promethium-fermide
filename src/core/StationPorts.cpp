@@ -142,6 +142,19 @@ namespace
 			}
 			return false;
 		}
+		// #657: the radiator's host mount. The radiator owns the reference
+		// on the input side of the oriented pair (reservoir -> radiator),
+		// so it resolves through this explicit branch rather than the
+		// machine-output branch above; the field name still comes from the
+		// shared stationMachineField table so write, clear and enumeration
+		// resolve the same connector to the same member.
+		if (link.from.nodeType == "Reservoir" && link.from.portName == "Hosted radiators"
+			&& link.to.nodeType == "Radiator" && link.to.portName == "Host reservoir")
+		{
+			mapping = {"Radiator", link.to.nodeId,
+				std::string(stationMachineField("Radiator", "Host reservoir")), link.from};
+			return true;
+		}
 		return false;
 	}
 
@@ -171,8 +184,11 @@ namespace
 
 	bool isMachineOwnerType(std::string const& ownerType)
 	{
+		// The radiator (#657) is not a machine, but its host mount routes
+		// through the same field resolver for write and clear, so it shares
+		// the routing predicate.
 		return ownerType == "Equipment" || ownerType == "Generator" || ownerType == "Fuel cell"
-			|| ownerType == "Sabatier" || ownerType == "Methane processor";
+			|| ownerType == "Sabatier" || ownerType == "Methane processor" || ownerType == "Radiator";
 	}
 
 	// The reference field a machine link names, as a pointer into the draft
@@ -264,6 +280,16 @@ namespace
 				{"Heat sink", &MethaneProcessorSettings::heatSinkId}};
 			for (auto const& [name, member] : members)
 				if (field == name) return &((*found).*member);
+			return nullptr;
+		}
+		if (ownerType == "Radiator")
+		{
+			// #657: the host mount writes the radiator's own reservoirId.
+			// One field, one connector; the radiator owns no other reference.
+			auto const found = std::find_if(settings.radiators.begin(), settings.radiators.end(),
+				[&](RadiatorSettings const& entry) { return entry.id == ownerId; });
+			if (found == settings.radiators.end()) return nullptr;
+			if (field == "Host reservoir") return &found->reservoirId;
 			return nullptr;
 		}
 		return nullptr;
@@ -674,6 +700,23 @@ namespace
 			}
 			return true;
 		}
+		if (mapping.ownerType == "Radiator")
+		{
+			// #657: the radiator's host must be a declared reservoir. The
+			// wording mirrors the whole-config validator's own entry rule, so
+			// the same boundary reads the same from either seam. Many radiators
+			// may share one host; there is no radiator thermal class, so no
+			// class rule applies here.
+			auto const found = std::find_if(settings.radiators.begin(), settings.radiators.end(),
+				[&](RadiatorSettings const& entry) { return entry.id == mapping.ownerId; });
+			if (found == settings.radiators.end()) return false;
+			auto const where = "Station radiator '" + found->id + "'";
+			if (found->reservoirId.empty()) return true;
+			if (!findReservoirById(settings, found->reservoirId))
+				diagnostic = where + " is attached to unknown thermal reservoir '"
+					+ found->reservoirId + "'";
+			return true;
+		}
 		if (mapping.ownerType != "Transfer") return false;
 		auto const found = std::find_if(settings.transfers.begin(), settings.transfers.end(),
 			[&](ResourceTransferSettings const& transfer) { return transfer.id == mapping.ownerId; });
@@ -827,6 +870,18 @@ std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& set
 			links.push_back({linkIdentity("Methane processor", processor.id, "Heat sink"),
 				{"Methane processor", processor.id, "Heat out"},
 				{"Reservoir", processor.heatSinkId, "Heat in"}});
+	}
+	// #657: each radiator's host mount is one authored link, named by the
+	// radiator that owns it. An empty reservoirId is an unconnected
+	// connector, not a link to an empty reservoir. The link is enumerated
+	// even when the named reservoir does not exist, so the inspector can
+	// present a Disconnect for a broken host rather than hide it.
+	for (auto const& radiator : settings.radiators)
+	{
+		if (radiator.reservoirId.empty()) continue;
+		links.push_back({linkIdentity("Radiator", radiator.id, "Host reservoir"),
+			{"Reservoir", radiator.reservoirId, "Hosted radiators"},
+			{"Radiator", radiator.id, "Host reservoir"}});
 	}
 	return links;
 }

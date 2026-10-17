@@ -568,6 +568,37 @@ bool renderThermalReservoirEntry([[maybe_unused]] core::StationSystemsSettings& 
 	return removeRequested;
 }
 
+bool renderRadiatorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
+	core::RadiatorSettings& radiator,
+	std::string const& label, std::string const& removeLabel)
+{
+	bool removeRequested = false;
+	ImGui::PushItemWidth(220);
+	char radiatorIdBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(radiatorIdBuffer, radiator.id.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " id").c_str(),
+		radiatorIdBuffer, sizeof(radiatorIdBuffer)))
+		radiator.id = radiatorIdBuffer;
+	char radiatorHostBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(radiatorHostBuffer, radiator.reservoirId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " reservoir").c_str(),
+		radiatorHostBuffer, sizeof(radiatorHostBuffer)))
+		radiator.reservoirId = radiatorHostBuffer;
+	ImGui::InputDouble((label + " area m2").c_str(),
+		&radiator.areaM2, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " emissivity").c_str(),
+		&radiator.emissivity, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " view factor").c_str(),
+		&radiator.viewFactor, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " sink temperature C").c_str(),
+		&radiator.sinkTemperatureC, 0.0, 0.0, "%.3f");
+	ImGui::SameLine();
+	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
+		removeRequested = true;
+	ImGui::PopItemWidth();
+	return removeRequested;
+}
+
 void renderEquipmentLoadList(core::StationSystemsSettings& draft)
 {
 	for (size_t index = 0; index < draft.equipmentLoads.size(); )
@@ -838,6 +869,39 @@ void renderThermalReservoirList(core::StationSystemsSettings& draft)
 	}
 }
 
+void renderRadiatorList(core::StationSystemsSettings& draft)
+{
+	for (size_t index = 0; index < draft.radiators.size(); )
+	{
+		auto const row = std::to_string(index);
+		bool const removeRadiator = renderRadiatorEntry(draft, draft.radiators[index],
+			"Radiator " + row, "Remove radiator " + row);
+		if (removeRadiator)
+			draft.radiators.erase(
+				draft.radiators.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
+	if (draft.radiators.size() < core::MaxStationRadiators && ImGui::Button("Add radiator"))
+	{
+		core::RadiatorSettings radiator;
+		radiator.areaM2 = 100.0;
+		radiator.emissivity = 0.9;
+		radiator.viewFactor = 1.0;
+		radiator.sinkTemperatureC = -270.0;
+		if (!draft.thermalReservoirs.empty())
+			radiator.reservoirId = draft.thermalReservoirs.front().id;
+		for (size_t candidate = draft.radiators.size() + 1;; ++candidate)
+		{
+			radiator.id = "radiator" + std::to_string(candidate);
+			auto const taken = std::any_of(draft.radiators.begin(), draft.radiators.end(),
+				[&](core::RadiatorSettings const& existing) { return existing.id == radiator.id; });
+			if (!taken) break;
+		}
+		draft.radiators.push_back(std::move(radiator));
+	}
+}
+
 namespace
 {
 // The registry seam renders fields only: removal is a list-surface
@@ -906,8 +970,15 @@ bool renderThermalReservoirEntryAt(core::StationSystemsSettings& draft, size_t i
 		"Reservoir " + std::to_string(index), {});
 }
 
+bool renderRadiatorEntryAt(core::StationSystemsSettings& draft, size_t index)
+{
+	if (index >= draft.radiators.size()) return false;
+	return renderRadiatorEntry(draft, draft.radiators[index],
+		"Radiator " + std::to_string(index), {});
+}
+
 // Keyed by the Flow node type names in core::stationPortDescriptors().
-constexpr std::array<StationEntryEditor, 9> kEntryEditors{{
+constexpr std::array<StationEntryEditor, 10> kEntryEditors{{
 	{"Store", &renderStoreEntryAt},
 	{"Transfer", &renderTransferEntryAt},
 	{"Equipment", &renderEquipmentLoadEntryAt},
@@ -917,6 +988,7 @@ constexpr std::array<StationEntryEditor, 9> kEntryEditors{{
 	{"Sabatier", &renderSabatierEntryAt},
 	{"Methane processor", &renderMethaneProcessorEntryAt},
 	{"Reservoir", &renderThermalReservoirEntryAt},
+	{"Radiator", &renderRadiatorEntryAt},
 }};
 }
 

@@ -827,57 +827,10 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	// draft; the form keeps only the section heading.
 	station_editor::renderThermalReservoirList(mDraft);
 	ImGui::SeparatorText("Draft radiators (m2; rejection = emissivity x view factor x area x sigma x (T^4 - T_sink^4))");
-	for (size_t index = 0; index < mDraft.radiators.size(); )
-	{
-		auto& radiator = mDraft.radiators[index];
-		auto const row = std::to_string(index);
-		bool removeRadiator = false;
-		ImGui::PushItemWidth(220);
-		char radiatorIdBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(radiatorIdBuffer, radiator.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Radiator " + row + " id").c_str(),
-			radiatorIdBuffer, sizeof(radiatorIdBuffer)))
-			radiator.id = radiatorIdBuffer;
-		char radiatorHostBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(radiatorHostBuffer, radiator.reservoirId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Radiator " + row + " reservoir").c_str(),
-			radiatorHostBuffer, sizeof(radiatorHostBuffer)))
-			radiator.reservoirId = radiatorHostBuffer;
-		ImGui::InputDouble(("Radiator " + row + " area m2").c_str(),
-			&radiator.areaM2, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Radiator " + row + " emissivity").c_str(),
-			&radiator.emissivity, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Radiator " + row + " view factor").c_str(),
-			&radiator.viewFactor, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Radiator " + row + " sink temperature C").c_str(),
-			&radiator.sinkTemperatureC, 0.0, 0.0, "%.3f");
-		ImGui::SameLine();
-		if (ImGui::Button(("Remove radiator " + row).c_str()))
-			removeRadiator = true;
-		ImGui::PopItemWidth();
-		if (removeRadiator)
-			mDraft.radiators.erase(mDraft.radiators.begin() + static_cast<std::ptrdiff_t>(index));
-		else
-			++index;
-	}
-	if (mDraft.radiators.size() < core::MaxStationRadiators && ImGui::Button("Add radiator"))
-	{
-		core::RadiatorSettings radiator;
-		radiator.areaM2 = 100.0;
-		radiator.emissivity = 0.9;
-		radiator.viewFactor = 1.0;
-		radiator.sinkTemperatureC = -270.0;
-		if (!mDraft.thermalReservoirs.empty())
-			radiator.reservoirId = mDraft.thermalReservoirs.front().id;
-		for (size_t candidate = mDraft.radiators.size() + 1;; ++candidate)
-		{
-			radiator.id = "radiator" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.radiators.begin(), mDraft.radiators.end(),
-				[&](core::RadiatorSettings const& existing) { return existing.id == radiator.id; });
-			if (!taken) break;
-		}
-		mDraft.radiators.push_back(std::move(radiator));
-	}
+	// #657: the radiator's settings live in the shared entry editor so
+	// the Flow inspector renders the exact same fields against the same
+	// draft; the form keeps only the section heading.
+	station_editor::renderRadiatorList(mDraft);
 	ImGui::SeparatorText("Draft coolant loops (kg coolant; finite loop-specific inventory, normal/hazardous segregated, heat-only reservoir coupling; zero starting coolant disables the loop)");
 	for (size_t index = 0; index < mDraft.coolantLoops.size(); )
 	{

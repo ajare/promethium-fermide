@@ -774,7 +774,7 @@ std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode
 	if (view.type == "Store" || view.type == "Transfer" || view.type == "Conversion"
 		|| view.type == "Solar" || view.type == "Equipment" || view.type == "Battery"
 		|| view.type == "Generator" || view.type == "Fuel cell" || view.type == "Sabatier"
-		|| view.type == "Methane processor" || view.type == "Reservoir")
+		|| view.type == "Methane processor" || view.type == "Reservoir" || view.type == "Radiator")
 	{
 		view.index = 0;
 		for (int i = 0; i < mSelected; ++i)
@@ -1336,6 +1336,28 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			draft.thermalReservoirs.push_back(std::move(reservoir));
 			mFitRequested = false;
 		}
+		// #657: the radiator arrives with its scalar defaults and no host.
+		// The host-reservoir relationship is authored through the connector,
+		// so placement alone is a complete entry shape; the host is left
+		// empty rather than defaulted to the first reservoir so the
+		// connector stays the only place the relationship is written.
+		else if (mPlacingType == "Radiator" && draft.radiators.size() < core::MaxStationRadiators)
+		{
+			core::RadiatorSettings radiator;
+			radiator.areaM2 = 100.0;
+			radiator.emissivity = 0.9;
+			radiator.viewFactor = 1.0;
+			radiator.sinkTemperatureC = -270.0;
+			for (size_t candidate = 1;; ++candidate)
+			{
+				radiator.id = "radiator" + std::to_string(candidate);
+				if (std::none_of(draft.radiators.begin(), draft.radiators.end(),
+					[&](auto const& entry) { return entry.id == radiator.id; })) break;
+			}
+			mLayout["Radiator:" + radiator.id + ":0"] = placeAt;
+			draft.radiators.push_back(std::move(radiator));
+			mFitRequested = false;
+		}
 	}
 	ImNodes::SetCurrentContext(previousContext);
 	updateBounds();
@@ -1586,7 +1608,9 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			|| (mPlacingType == "Methane processor"
 				&& draft.methaneProcessors.size() >= core::MaxStationMethaneProcessors)
 			|| (mPlacingType == "Reservoir"
-				&& draft.thermalReservoirs.size() >= core::MaxStationThermalReservoirs);
+				&& draft.thermalReservoirs.size() >= core::MaxStationThermalReservoirs)
+			|| (mPlacingType == "Radiator"
+				&& draft.radiators.size() >= core::MaxStationRadiators);
 		auto a = io.MousePos;
 		ImVec2 b{a.x + nodeWidth * mZoom, a.y + nodeHeight * mZoom};
 		draw->AddRectFilled(a, b, IM_COL32(80, 130, 170, 100), 5);
@@ -1643,16 +1667,23 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 				{
 					if (link.fromNode != size_t(mSelected) && link.toNode != size_t(mSelected)) continue;
 					bool const outgoing = link.fromNode == size_t(mSelected);
-					auto const& peer = mGraph.nodes[outgoing ? link.toNode : link.fromNode];
+					// The peer is named from the authored pin reference, not a
+					// graph-node lookup: a link whose other endpoint does not
+					// resolve (a broken host reference, say) still has to offer
+					// its Disconnect, and indexing the graph by SIZE_MAX would
+					// read out of bounds. The selected node's own port names the
+					// connection; the peer pin carries the type and id the
+					// configuration named, resolved or not.
 					auto const& port = outgoing ? link.authored.from : link.authored.to;
-					auto const label = std::string("Disconnect ") + port.portName + " " + peer.id;
+					auto const& peerPin = outgoing ? link.authored.to : link.authored.from;
+					auto const label = std::string("Disconnect ") + port.portName + " " + peerPin.nodeId;
 					if (ImGui::SmallButton(label.c_str()))
 					{
 						core::clearStationLink(draft, link.authored.identity);
 						mLinkRejection.clear();
 					}
 					ImGui::SameLine();
-					ImGui::Text("%s %s '%s'", outgoing ? "->" : "<-", peer.type.c_str(), peer.id.c_str());
+					ImGui::Text("%s %s '%s'", outgoing ? "->" : "<-", peerPin.nodeType.c_str(), peerPin.nodeId.c_str());
 				}
 				for (auto const& link : mGraph.links)
 					if (link.from == size_t(mSelected) || link.to == size_t(mSelected))

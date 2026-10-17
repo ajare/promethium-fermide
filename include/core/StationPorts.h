@@ -102,7 +102,16 @@ namespace core
 			// A thermal reservoir collects heat from as many machines as the
 			// design wires to it; the face is unbounded, and the class
 			// match is judged by the validator on every link.
-			PortDescriptor{"Reservoir", "Heat in", StationPortDirection::Input, "heat-sink", "heat", 0, {}}};
+			PortDescriptor{"Reservoir", "Heat in", StationPortDirection::Input, "heat-sink", "heat", 0, {}},
+			// #657: the radiator's host mount. The reservoir drains its heat
+			// out through the radiators attached to it, so the reservoir side
+			// is the output and it carries as many radiators as the design
+			// wires - many radiators may share one host. The radiator owns
+			// the reference (RadiatorSettings::reservoirId) on its input
+			// face, and takes exactly one host: a radiator without one is an
+			// incomplete entry, not a multi-homed one.
+			PortDescriptor{"Reservoir", "Hosted radiators", StationPortDirection::Output, "thermal-host", "thermal-host", 0, {}},
+			PortDescriptor{"Radiator", "Host reservoir", StationPortDirection::Input, "thermal-host", "thermal-host", 1, {}, false}};
 		return descriptors;
 	}
 
@@ -114,7 +123,7 @@ namespace core
 	inline std::string_view stationMachineField(std::string_view nodeType,
 		std::string_view portName)
 	{
-		static constexpr std::array<std::pair<std::array<std::string_view, 2>, std::string_view>, 20> fields{{
+		static constexpr std::array<std::pair<std::array<std::string_view, 2>, std::string_view>, 21> fields{{
 			{{"Equipment", "Equipment input 1"}, "Material in 1"},
 			{{"Equipment", "Equipment input 2"}, "Material in 2"},
 			{{"Equipment", "Equipment return 1"}, "Material return 1"},
@@ -135,6 +144,12 @@ namespace core
 			{{"Methane processor", "Hydrogen out"}, "Hydrogen store"},
 			{{"Methane processor", "Carbon out"}, "Carbon store"},
 			{{"Methane processor", "Heat out"}, "Heat sink"},
+			// #657: the radiator's host mount names its own field. The owner
+			// sits on the input side of the oriented pair, so mapLink resolves
+			// it through the explicit radiator branch rather than the
+			// machine-output branch; the field name still comes from this one
+			// table so write, clear and enumeration cannot disagree.
+			{{"Radiator", "Host reservoir"}, "Host reservoir"},
 		}};
 		for (auto const& entry : fields)
 			if (entry.first[0] == nodeType && entry.first[1] == portName) return entry.second;
@@ -246,7 +261,10 @@ namespace core
 			// #656: the thermal foundation. The reservoir is the first
 			// authored thermal type; the radiator, coolant loop, chiller and
 			// thermal buffer join this grouping with their own tickets.
-			StationPlaceableType{"Reservoir", "reservoir", "Thermal"}};
+			StationPlaceableType{"Reservoir", "reservoir", "Thermal"},
+			// #657: the radiator mounts on one host reservoir and rejects
+			// its heat to the environment.
+			StationPlaceableType{"Radiator", "radiator", "Thermal"}};
 		return placeable;
 	}
 
