@@ -774,7 +774,7 @@ std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode
 	if (view.type == "Store" || view.type == "Transfer" || view.type == "Conversion"
 		|| view.type == "Solar" || view.type == "Equipment" || view.type == "Battery"
 		|| view.type == "Generator" || view.type == "Fuel cell" || view.type == "Sabatier"
-		|| view.type == "Methane processor")
+		|| view.type == "Methane processor" || view.type == "Reservoir")
 	{
 		view.index = 0;
 		for (int i = 0; i < mSelected; ++i)
@@ -1314,6 +1314,28 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			draft.methaneProcessors.push_back(std::move(processor));
 			mFitRequested = false;
 		}
+		// #656: the thermal reservoir arrives with its scalar defaults and
+		// no references of its own - heat flows into it through the machines
+		// that name it as their sink, so placement alone is a complete,
+		// valid entry shape.
+		else if (mPlacingType == "Reservoir" && draft.thermalReservoirs.size() < core::MaxStationThermalReservoirs)
+		{
+			core::ThermalReservoirSettings reservoir;
+			reservoir.thermalClass = "moderate";
+			reservoir.heatCapacityKJPerK = 100.0;
+			reservoir.startingTemperatureC = 20.0;
+			reservoir.minTemperatureC = 0.0;
+			reservoir.maxTemperatureC = 40.0;
+			for (size_t candidate = 1;; ++candidate)
+			{
+				reservoir.id = "reservoir" + std::to_string(candidate);
+				if (std::none_of(draft.thermalReservoirs.begin(), draft.thermalReservoirs.end(),
+					[&](auto const& entry) { return entry.id == reservoir.id; })) break;
+			}
+			mLayout["Reservoir:" + reservoir.id + ":0"] = placeAt;
+			draft.thermalReservoirs.push_back(std::move(reservoir));
+			mFitRequested = false;
+		}
 	}
 	ImNodes::SetCurrentContext(previousContext);
 	updateBounds();
@@ -1562,7 +1584,9 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			|| (mPlacingType == "Fuel cell" && draft.fuelCells.size() >= core::MaxStationFuelCells)
 			|| (mPlacingType == "Sabatier" && draft.sabatierReactors.size() >= core::MaxStationSabatierReactors)
 			|| (mPlacingType == "Methane processor"
-				&& draft.methaneProcessors.size() >= core::MaxStationMethaneProcessors);
+				&& draft.methaneProcessors.size() >= core::MaxStationMethaneProcessors)
+			|| (mPlacingType == "Reservoir"
+				&& draft.thermalReservoirs.size() >= core::MaxStationThermalReservoirs);
 		auto a = io.MousePos;
 		ImVec2 b{a.x + nodeWidth * mZoom, a.y + nodeHeight * mZoom};
 		draw->AddRectFilled(a, b, IM_COL32(80, 130, 170, 100), 5);

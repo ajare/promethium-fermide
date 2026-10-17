@@ -271,6 +271,7 @@ set(editor_names
     station/flowGrowablePortsWorkflow
     station/flowInspectorWorkflow
     station/flowPowerChainWorkflow
+    station/flowThermalReservoirWorkflow
     station/transferWorkflow
     station/compoundWorkflow
     station/powerWorkflow

@@ -822,58 +822,10 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		mDraft.wasteEjections.push_back(std::move(ejection));
 	}
 	ImGui::SeparatorText("Draft thermal reservoirs (kJ/K, degrees C; limits are declared service limits, absorbed heat is environmental)");
-	for (size_t index = 0; index < mDraft.thermalReservoirs.size(); )
-	{
-		auto& thermalReservoir = mDraft.thermalReservoirs[index];
-		auto const row = std::to_string(index);
-		bool removeReservoir = false;
-		ImGui::PushItemWidth(220);
-		char reservoirIdBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(reservoirIdBuffer, thermalReservoir.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Reservoir " + row + " id").c_str(),
-			reservoirIdBuffer, sizeof(reservoirIdBuffer)))
-			thermalReservoir.id = reservoirIdBuffer;
-		char reservoirClassBuffer[16]{};
-		std::strncpy(reservoirClassBuffer, thermalReservoir.thermalClass.c_str(), sizeof(reservoirClassBuffer) - 1);
-		if (ImGui::InputText(("Reservoir " + row + " thermal class").c_str(),
-			reservoirClassBuffer, sizeof(reservoirClassBuffer)))
-			thermalReservoir.thermalClass = reservoirClassBuffer;
-		ImGui::InputDouble(("Reservoir " + row + " heat capacity kJ/K").c_str(),
-			&thermalReservoir.heatCapacityKJPerK, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Reservoir " + row + " starting temperature C").c_str(),
-			&thermalReservoir.startingTemperatureC, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Reservoir " + row + " min temperature C").c_str(),
-			&thermalReservoir.minTemperatureC, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Reservoir " + row + " max temperature C").c_str(),
-			&thermalReservoir.maxTemperatureC, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Reservoir " + row + " absorbed heat kW").c_str(),
-			&thermalReservoir.absorbedHeatKW, 0.0, 0.0, "%.3f");
-		ImGui::SameLine();
-		if (ImGui::Button(("Remove reservoir " + row).c_str()))
-			removeReservoir = true;
-		ImGui::PopItemWidth();
-		if (removeReservoir)
-			mDraft.thermalReservoirs.erase(mDraft.thermalReservoirs.begin() + static_cast<std::ptrdiff_t>(index));
-		else
-			++index;
-	}
-	if (mDraft.thermalReservoirs.size() < core::MaxStationThermalReservoirs && ImGui::Button("Add thermal reservoir"))
-	{
-		core::ThermalReservoirSettings thermalReservoir;
-		thermalReservoir.thermalClass = "moderate";
-		thermalReservoir.heatCapacityKJPerK = 100.0;
-		thermalReservoir.startingTemperatureC = 20.0;
-		thermalReservoir.minTemperatureC = 0.0;
-		thermalReservoir.maxTemperatureC = 40.0;
-		for (size_t candidate = mDraft.thermalReservoirs.size() + 1;; ++candidate)
-		{
-			thermalReservoir.id = "reservoir" + std::to_string(candidate);
-			auto const taken = std::any_of(mDraft.thermalReservoirs.begin(), mDraft.thermalReservoirs.end(),
-				[&](core::ThermalReservoirSettings const& existing) { return existing.id == thermalReservoir.id; });
-			if (!taken) break;
-		}
-		mDraft.thermalReservoirs.push_back(std::move(thermalReservoir));
-	}
+	// #656: the reservoir's settings live in the shared entry editor so
+	// the Flow inspector renders the exact same fields against the same
+	// draft; the form keeps only the section heading.
+	station_editor::renderThermalReservoirList(mDraft);
 	ImGui::SeparatorText("Draft radiators (m2; rejection = emissivity x view factor x area x sigma x (T^4 - T_sink^4))");
 	for (size_t index = 0; index < mDraft.radiators.size(); )
 	{

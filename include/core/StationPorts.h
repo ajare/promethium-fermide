@@ -242,7 +242,11 @@ namespace core
 			StationPlaceableType{"Generator", "generator", "Power"},
 			StationPlaceableType{"Fuel cell", "fuelcell", "Power"},
 			StationPlaceableType{"Sabatier", "sabatier", "Conversion chain"},
-			StationPlaceableType{"Methane processor", "methaneprocessor", "Conversion chain"}};
+			StationPlaceableType{"Methane processor", "methaneprocessor", "Conversion chain"},
+			// #656: the thermal foundation. The reservoir is the first
+			// authored thermal type; the radiator, coolant loop, chiller and
+			// thermal buffer join this grouping with their own tickets.
+			StationPlaceableType{"Reservoir", "reservoir", "Thermal"}};
 		return placeable;
 	}
 

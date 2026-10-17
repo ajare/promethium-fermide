@@ -991,7 +991,11 @@ namespace
 						ExpectedPlaceable{"Generator", "generator", "Power"},
 						ExpectedPlaceable{"Fuel cell", "fuelcell", "Power"},
 						ExpectedPlaceable{"Sabatier", "sabatier", "Conversion chain"},
-						ExpectedPlaceable{"Methane processor", "methaneprocessor", "Conversion chain"}})
+						ExpectedPlaceable{"Methane processor", "methaneprocessor", "Conversion chain"},
+						// #656: the thermal reservoir is offered under the
+						// Thermal grouping with the id prefix its placed
+						// entries start from.
+						ExpectedPlaceable{"Reservoir", "reservoir", "Thermal"}})
 				{
 					bool found = false;
 					for (auto const& placeable : core::stationPlaceableTypes())
@@ -1008,7 +1012,7 @@ namespace
 				}
 				// Each grouping appears exactly once, so the combobox renders
 				// one contiguous block per subsystem rather than scattering.
-				for (auto const* group : {"Resources", "Power", "Conversion chain"})
+				for (auto const* group : {"Resources", "Power", "Conversion chain", "Thermal"})
 				{
 					size_t blocks = 0;
 					std::string_view previous;
@@ -1795,6 +1799,201 @@ namespace
 				&& chain.stores.size() == 7
 				&& chain.fuelCells.front().hydrogenStoreId.empty(),
 				"store removal did not clear the chain reference with it");
+		}
+	}
+
+	// #656: the thermal reservoir at the pure link seam. The reservoir's
+	// one declared face is the unbounded heat-in: many machines may name
+	// the same reservoir as their sink at once, each reference a distinct
+	// authored link that clears on its own. An unknown thermal service
+	// class refuses with the whole-config validator's own reason, in
+	// either drag order, while an unrelated invalid field elsewhere in a
+	// half-built draft never stands in as this link's refusal. The
+	// per-class cooling service stays derived: refused as derived, never
+	// placeable, and a cooling-service load may not dump into a passive
+	// reservoir instead.
+	void thermalReservoirSeam(smoke::Context const&)
+	{
+		auto store = [](std::string const& id, std::string const& unit,
+			std::string const& hazard = "normal")
+		{
+			core::ResourceStoreSettings entry;
+			entry.id = id; entry.unit = unit; entry.capacity = 1000.0;
+			entry.startingQualified = 500.0; entry.hazardClass = hazard;
+			return entry;
+		};
+		auto reservoir = [](std::string const& id, std::string const& thermalClass)
+		{
+			core::ThermalReservoirSettings entry;
+			entry.id = id; entry.thermalClass = thermalClass;
+			entry.heatCapacityKJPerK = 1000.0;
+			return entry;
+		};
+		auto pin = [](char const* type, char const* id, char const* port)
+		{
+			return core::StationPinRef{type, id, port};
+		};
+		auto link = [](core::StationPinRef from, core::StationPinRef to)
+		{
+			return core::CandidateLink{std::move(from), std::move(to)};
+		};
+		// Three low-class machines whose heat all legally lands in one
+		// reservoir, with their other references left open: the heat
+		// link under test stays the user's next action.
+		auto base = [&]
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.stores = {store("h2", "kg"), store("o2", "kg"),
+				store("co2", "kg"), store("ch4", "kg"), store("rawwater", "kg"),
+				store("carbon", "kg")};
+			settings.thermalReservoirs = {reservoir("coldSink", "low")};
+			core::EquipmentLoadSettings load;
+			load.id = "load1"; load.thermalClass = "low";
+			settings.equipmentLoads = {load};
+			core::FuelCellSettings cell;
+			cell.id = "cell1"; cell.hazardClass = "normal"; cell.thermalClass = "low";
+			cell.ratedOutputKW = 10.0; cell.efficiency = 0.6;
+			settings.fuelCells = {cell};
+			core::SabatierReactorSettings reactor;
+			reactor.id = "sab1"; reactor.hazardClass = "normal"; reactor.thermalClass = "low";
+			reactor.rateKgPerS = 0.001;
+			settings.sabatierReactors = {reactor};
+			core::MethaneProcessorSettings processor;
+			processor.id = "mp1"; processor.hazardClass = "normal";
+			processor.thermalClass = "low"; processor.rateKgPerS = 0.001;
+			processor.specificEnergyKWhPerKgCH4 = 2.0;
+			settings.methaneProcessors = {processor};
+			return settings;
+		};
+		auto requireAllowed = [](core::StationSystemsSettings const& settings,
+			core::CandidateLink const& candidate, char const* what)
+		{
+			auto const verdict = core::evaluateStationLink(settings, candidate);
+			require(verdict.allowed,
+				(std::string("expected this link to be allowed: ") + what + " | refused: " + verdict.reason).c_str());
+			require(verdict.reason.empty(),
+				(std::string("an allowed link carried a reason: ") + what).c_str());
+		};
+		auto requireRefused = [](core::StationSystemsSettings const& settings,
+			core::CandidateLink const& candidate, char const* needle, char const* what)
+		{
+			auto const verdict = core::evaluateStationLink(settings, candidate);
+			require(!verdict.allowed, (std::string("expected this link to be refused: ") + what).c_str());
+			require(!verdict.reason.empty(),
+				(std::string("a refused link gave no reason: ") + what).c_str());
+			require(verdict.reason.find(needle) != std::string::npos,
+				(std::string("refusal for ") + what + " did not carry '" + needle + "' but said: "
+					+ verdict.reason).c_str());
+		};
+		// Referenced by many: the unbounded face takes every machine that
+		// names it, each as its own authored link, and clearing one
+		// reference never disturbs the others.
+		{
+			auto wired = base();
+			requireAllowed(wired, link(pin("Equipment", "load1", "Heat out"),
+				pin("Reservoir", "coldSink", "Heat in")),
+				"the first machine onto the shared heat-in face");
+			wired.equipmentLoads.front().heatSinkId = "coldSink";
+			requireAllowed(wired, link(pin("Fuel cell", "cell1", "Heat out"),
+				pin("Reservoir", "coldSink", "Heat in")),
+				"a second machine onto the same face");
+			wired.fuelCells.front().heatSinkId = "coldSink";
+			requireAllowed(wired, link(pin("Reservoir", "coldSink", "Heat in"),
+				pin("Sabatier", "sab1", "Heat out")),
+				"a third machine, dragged the other way round");
+			wired.sabatierReactors.front().heatSinkId = "coldSink";
+			requireAllowed(wired, link(pin("Methane processor", "mp1", "Heat out"),
+				pin("Reservoir", "coldSink", "Heat in")),
+				"a fourth machine onto the same face");
+			wired.methaneProcessors.front().heatSinkId = "coldSink";
+			auto const links = core::stationAuthoredLinks(wired);
+			require(links.size() == 4,
+				("the shared face did not enumerate every referencing machine: "
+					+ std::to_string(links.size())).c_str());
+			for (auto const& entry : links)
+				require(entry.to == pin("Reservoir", "coldSink", "Heat in"),
+					"a shared-face link did not enumerate into the reservoir face");
+			require(core::clearStationLink(wired, "Equipment:load1:Heat sink")
+				&& wired.equipmentLoads.front().heatSinkId.empty()
+				&& wired.fuelCells.front().heatSinkId == "coldSink"
+				&& wired.sabatierReactors.front().heatSinkId == "coldSink"
+				&& wired.methaneProcessors.front().heatSinkId == "coldSink",
+				"clearing one reference disturbed the machines sharing the reservoir");
+			require(core::stationAuthoredLinks(wired).size() == 3,
+				"the enumeration still counted the cleared reference");
+		}
+		// An unknown thermal service class on the machine answers with
+		// the validator's own unknown-class reason once the link names a
+		// sink - whether the sink shares the same unknown class or a
+		// known one, and in either drag order. With the sink still
+		// unnamed the class defect is not this link's reason, and an
+		// unrelated legal link stays allowed.
+		{
+			auto unknown = base();
+			unknown.equipmentLoads.front().thermalClass = "plasma";
+			unknown.thermalReservoirs.push_back(reservoir("plasmaSink", "plasma"));
+			requireRefused(unknown, link(pin("Equipment", "load1", "Heat out"),
+				pin("Reservoir", "plasmaSink", "Heat in")), "unknown thermal service class",
+				"a heat link between two entries of the same unknown class");
+			requireRefused(unknown, link(pin("Reservoir", "plasmaSink", "Heat in"),
+				pin("Equipment", "load1", "Heat out")), "unknown thermal service class",
+				"the same pair dragged the other way round");
+			requireRefused(unknown, link(pin("Equipment", "load1", "Heat out"),
+				pin("Reservoir", "coldSink", "Heat in")), "unknown thermal service class",
+				"an unknown-class machine against a known-class sink");
+			requireAllowed(unknown, link(pin("Store", "h2", "Inventory out"),
+				pin("Fuel cell", "cell1", "Hydrogen in")),
+				"an unrelated legal link in the unknown-class draft");
+			// The unknown class on the sink side, with a known-class
+			// machine, still answers through the class-compatibility rule.
+			requireRefused(unknown, link(pin("Fuel cell", "cell1", "Heat out"),
+				pin("Reservoir", "plasmaSink", "Heat in")), "thermal class",
+				"a known-class machine against an unknown-class sink");
+		}
+		// A half-built draft with an unrelated invalid field never
+		// stands in as the refusal for a legal class-matched heat link;
+		// the invalid field stays the whole-config validator's to report.
+		{
+			auto brokenElsewhere = base();
+			brokenElsewhere.thermalReservoirs.push_back(reservoir("brokenSink", "low"));
+			brokenElsewhere.thermalReservoirs.back().heatCapacityKJPerK = 0.0;
+			requireAllowed(brokenElsewhere, link(pin("Equipment", "load1", "Heat out"),
+				pin("Reservoir", "coldSink", "Heat in")),
+				"a legal heat link while an unrelated reservoir is invalid");
+			std::string diagnostic;
+			require(!core::validateStationSystemsSettings(brokenElsewhere, diagnostic),
+				"the whole-config validator missed the unrelated invalid field");
+			// The same draft with the link already carried: rewiring to
+			// another legal sink is still allowed while the unrelated
+			// field stays broken.
+			brokenElsewhere.equipmentLoads.front().heatSinkId = "coldSink";
+			requireAllowed(brokenElsewhere, link(pin("Fuel cell", "cell1", "Heat out"),
+				pin("Reservoir", "coldSink", "Heat in")),
+				"a second legal link in the same broken-elsewhere draft");
+		}
+		// The per-class cooling service stays derived: refused as
+		// derived in either drag order, never offered as placeable, and
+		// a cooling-service load may not dump into a passive reservoir.
+		{
+			requireRefused(base(), link(pin("Equipment", "load1", "Heat out"),
+				pin("Cooling service", "low", "Capacity")), "derived",
+				"a heat output dropped on a cooling service");
+			requireRefused(base(), link(pin("Cooling service", "low", "Capacity"),
+				pin("Reservoir", "coldSink", "Heat in")), "derived",
+				"a drag started from a cooling service");
+			require(!core::stationIsDerivedNodeType("Reservoir"),
+				"the authored reservoir is treated as derived");
+			for (auto const& placeable : core::stationPlaceableTypes())
+				require(placeable.nodeType != "Cooling service"
+					&& placeable.nodeType != "Power",
+					"a derived service node is offered as placeable");
+			auto coolingLoad = base();
+			coolingLoad.equipmentLoads.front().coolingDisposition
+				= core::StationCoolingDisposition::CoolingService;
+			requireRefused(coolingLoad, link(pin("Equipment", "load1", "Heat out"),
+				pin("Reservoir", "coldSink", "Heat in")), "requires a cooling service",
+				"a cooling-service load wired to a passive reservoir");
 		}
 	}
 
@@ -25095,7 +25294,7 @@ void recovery(smoke::Context const& context)
 
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"powerChainSeam", powerChainSeam}, {"compounds", compounds}, {"power", power},
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"powerChainSeam", powerChainSeam}, {"thermalReservoirSeam", thermalReservoirSeam}, {"compounds", compounds}, {"power", power},
 		// Split out of the former `batteries` check: the hour-scale legs are
 		// independent worlds, so each is its own test and they run in parallel
 		// instead of as one ~182s serial chain.

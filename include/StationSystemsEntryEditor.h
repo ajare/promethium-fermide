@@ -61,12 +61,20 @@ namespace station_editor
 	bool renderMethaneProcessorEntry(core::StationSystemsSettings& draft,
 		core::MethaneProcessorSettings& processor,
 		std::string const& label, std::string const& removeLabel);
+	// #656: the thermal reservoir entry editor. Same label and
+	// deferred-removal contract as renderStoreEntry; the Flow inspector
+	// and the Station Systems form tab render one reservoir's full
+	// settings through this against the same draft.
+	bool renderThermalReservoirEntry(core::StationSystemsSettings& draft,
+		core::ThermalReservoirSettings& reservoir,
+		std::string const& label, std::string const& removeLabel);
 	void renderEquipmentLoadList(core::StationSystemsSettings& draft);
 	void renderBatteryList(core::StationSystemsSettings& draft);
 	void renderGeneratorList(core::StationSystemsSettings& draft);
 	void renderFuelCellList(core::StationSystemsSettings& draft);
 	void renderSabatierList(core::StationSystemsSettings& draft);
 	void renderMethaneProcessorList(core::StationSystemsSettings& draft);
+	void renderThermalReservoirList(core::StationSystemsSettings& draft);
 
 	// Descriptor registry keyed by the Flow node type name. A type absent
 	// here has no extracted editor yet; the index addresses the entry in

@@ -532,6 +532,42 @@ bool renderMethaneProcessorEntry([[maybe_unused]] core::StationSystemsSettings& 
 	return removeRequested;
 }
 
+// #656: the thermal reservoir entry editor, extracted from the Station
+// Systems form tab so the Flow inspector renders the exact same fields,
+// labels and deferred-removal behaviour against the same draft.
+bool renderThermalReservoirEntry([[maybe_unused]] core::StationSystemsSettings& draft,
+	core::ThermalReservoirSettings& reservoir,
+	std::string const& label, std::string const& removeLabel)
+{
+	bool removeRequested = false;
+	ImGui::PushItemWidth(220);
+	char reservoirIdBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(reservoirIdBuffer, reservoir.id.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " id").c_str(),
+		reservoirIdBuffer, sizeof(reservoirIdBuffer)))
+		reservoir.id = reservoirIdBuffer;
+	char reservoirClassBuffer[16]{};
+	std::strncpy(reservoirClassBuffer, reservoir.thermalClass.c_str(), sizeof(reservoirClassBuffer) - 1);
+	if (ImGui::InputText((label + " thermal class").c_str(),
+		reservoirClassBuffer, sizeof(reservoirClassBuffer)))
+		reservoir.thermalClass = reservoirClassBuffer;
+	ImGui::InputDouble((label + " heat capacity kJ/K").c_str(),
+		&reservoir.heatCapacityKJPerK, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " starting temperature C").c_str(),
+		&reservoir.startingTemperatureC, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " min temperature C").c_str(),
+		&reservoir.minTemperatureC, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " max temperature C").c_str(),
+		&reservoir.maxTemperatureC, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " absorbed heat kW").c_str(),
+		&reservoir.absorbedHeatKW, 0.0, 0.0, "%.3f");
+	ImGui::SameLine();
+	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
+		removeRequested = true;
+	ImGui::PopItemWidth();
+	return removeRequested;
+}
+
 void renderEquipmentLoadList(core::StationSystemsSettings& draft)
 {
 	for (size_t index = 0; index < draft.equipmentLoads.size(); )
@@ -767,6 +803,41 @@ void renderMethaneProcessorList(core::StationSystemsSettings& draft)
 	}
 }
 
+void renderThermalReservoirList(core::StationSystemsSettings& draft)
+{
+	for (size_t index = 0; index < draft.thermalReservoirs.size(); )
+	{
+		auto const row = std::to_string(index);
+		bool const removeReservoir = renderThermalReservoirEntry(draft,
+			draft.thermalReservoirs[index],
+			"Reservoir " + row, "Remove reservoir " + row);
+		if (removeReservoir)
+			draft.thermalReservoirs.erase(
+				draft.thermalReservoirs.begin() + static_cast<std::ptrdiff_t>(index));
+		else
+			++index;
+	}
+	if (draft.thermalReservoirs.size() < core::MaxStationThermalReservoirs
+		&& ImGui::Button("Add thermal reservoir"))
+	{
+		core::ThermalReservoirSettings reservoir;
+		reservoir.thermalClass = "moderate";
+		reservoir.heatCapacityKJPerK = 100.0;
+		reservoir.startingTemperatureC = 20.0;
+		reservoir.minTemperatureC = 0.0;
+		reservoir.maxTemperatureC = 40.0;
+		for (size_t candidate = draft.thermalReservoirs.size() + 1;; ++candidate)
+		{
+			reservoir.id = "reservoir" + std::to_string(candidate);
+			auto const taken = std::any_of(draft.thermalReservoirs.begin(),
+				draft.thermalReservoirs.end(),
+				[&](core::ThermalReservoirSettings const& existing) { return existing.id == reservoir.id; });
+			if (!taken) break;
+		}
+		draft.thermalReservoirs.push_back(std::move(reservoir));
+	}
+}
+
 namespace
 {
 // The registry seam renders fields only: removal is a list-surface
@@ -828,8 +899,15 @@ bool renderMethaneProcessorEntryAt(core::StationSystemsSettings& draft, size_t i
 		"Methane processor " + std::to_string(index), {});
 }
 
+bool renderThermalReservoirEntryAt(core::StationSystemsSettings& draft, size_t index)
+{
+	if (index >= draft.thermalReservoirs.size()) return false;
+	return renderThermalReservoirEntry(draft, draft.thermalReservoirs[index],
+		"Reservoir " + std::to_string(index), {});
+}
+
 // Keyed by the Flow node type names in core::stationPortDescriptors().
-constexpr std::array<StationEntryEditor, 8> kEntryEditors{{
+constexpr std::array<StationEntryEditor, 9> kEntryEditors{{
 	{"Store", &renderStoreEntryAt},
 	{"Transfer", &renderTransferEntryAt},
 	{"Equipment", &renderEquipmentLoadEntryAt},
@@ -838,6 +916,7 @@ constexpr std::array<StationEntryEditor, 8> kEntryEditors{{
 	{"Fuel cell", &renderFuelCellEntryAt},
 	{"Sabatier", &renderSabatierEntryAt},
 	{"Methane processor", &renderMethaneProcessorEntryAt},
+	{"Reservoir", &renderThermalReservoirEntryAt},
 }};
 }
 

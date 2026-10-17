@@ -696,6 +696,12 @@ namespace
 		reservoir.id = "res1"; reservoir.thermalClass = "low";
 		reservoir.heatCapacityKJPerK = 1000.0;
 		seed.thermalReservoirs = {reservoir};
+		// #656 extracted the reservoir's own editor, so the radiator
+		// stays the projected type without one.
+		core::RadiatorSettings radiator;
+		radiator.id = "rad1"; radiator.reservoirId = "res1";
+		radiator.areaM2 = 100.0;
+		seed.radiators = {radiator};
 		std::string diagnostic;
 		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
 		world->markSaved();
@@ -733,6 +739,7 @@ namespace
 				for (auto const& probe : std::vector<std::pair<std::string, std::string>>{
 					{"Store", "store1"}, {"Store", "tank"}, {"Store", "sink"},
 					{"Transfer", "t1"}, {"Battery", "bat1"},
+					{"Reservoir", "res1"}, {"Radiator", "rad1"},
 					{"Power", "Shared electrical pool"}})
 				{
 					ImVec4 r{};
@@ -883,7 +890,7 @@ namespace
 			REQ(driver.contains("Node: Battery 'bat1'")
 				&& ctx->ItemInfo("**/Battery 0 nameplate kWh", ImGuiTestOpFlags_NoError)->ID != 0,
 				"selecting the Battery did not render its shared entry editor");
-			// --- A type with no extracted editor names itself instead of showing nothing.
+			// --- #656: the Reservoir now renders its extracted shared editor.
 			ImVec4 reservoirRect{};
 			REQ(window.flowNodeRect("Reservoir", "res1", &reservoirRect),
 				"the reservoir node is not on screen");
@@ -891,7 +898,23 @@ namespace
 				(reservoirRect.y + reservoirRect.w) * 0.5f});
 			ctx->MouseClick(); ctx->Yield(3);
 			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->Yield(2);
-			REQ(driver.contains("No settings editor for 'Reservoir' nodes yet."),
+			REQ(driver.contains("Node: Reservoir 'res1'"), "reservoir selection not named");
+			// The heat-capacity label carries a slash ("kJ/K"), which the
+			// test-engine ref parser reads as a path separator; assert on
+			// the slash-free fields instead and the capacity by text.
+			REQ(driver.contains("Reservoir 0 heat capacity kJ/K"),
+				"reservoir shared editor capacity label missing");
+			REQ(ctx->ItemInfo("**/Reservoir 0 thermal class", ImGuiTestOpFlags_NoError)->ID != 0,
+				"reservoir shared editor field missing");
+			// --- A type with no extracted editor names itself instead of showing nothing.
+			ImVec4 radiatorRect{};
+			REQ(window.flowNodeRect("Radiator", "rad1", &radiatorRect),
+				"the radiator node is not on screen");
+			ctx->MouseTeleportToPos({(radiatorRect.x + radiatorRect.z) * 0.5f,
+				(radiatorRect.y + radiatorRect.w) * 0.5f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->Yield(2);
+			REQ(driver.contains("No settings editor for 'Radiator' nodes yet."),
 				"a type without an extracted editor showed nothing instead of naming itself");
 			// --- Deselecting leaves nothing claiming a selection.
 			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->MouseClick(); ctx->Yield(3);
@@ -1246,6 +1269,380 @@ namespace
 	void flowPowerChainWorkflow(smoke::Context const&)
 	{
 		flowPowerChainBody();
+	}
+
+	// #656: authoring the thermal foundation in the Flow view. The
+	// combobox offers the reservoir under the Thermal grouping; placement
+	// is armed, repeatable and cancellable; the inspector renders the
+	// same settings editor the form tab uses against the same draft and
+	// history; heat links from supported equipment commit, refuse a
+	// class mismatch and an unknown service class with the validator's
+	// own reason, are referenced by many machines at one face, and
+	// disconnect through the inspector as single undoable actions; and
+	// the per-class cooling service stays an inert derived node beside
+	// the newly authored reservoirs.
+	void flowThermalReservoirBody()
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory worldHistory;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Thermal reservoir flow", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		auto store = [](std::string const& id, std::string const& unit)
+		{
+			core::ResourceStoreSettings entry;
+			entry.id = id; entry.unit = unit; entry.capacity = 1000.0;
+			entry.startingQualified = 500.0; entry.hazardClass = "normal";
+			return entry;
+		};
+		auto reservoir = [](std::string const& id, std::string const& thermalClass)
+		{
+			core::ThermalReservoirSettings entry;
+			entry.id = id; entry.thermalClass = thermalClass;
+			entry.heatCapacityKJPerK = 1000.0;
+			return entry;
+		};
+		core::StationSystemsSettings seed;
+		seed.enabled = true;
+		seed.observationIntervalSeconds = 1.0f;
+		seed.stores = {store("water", "kg")};
+		// A moderate-class sink the equipment may legally join, and a
+		// low-class sink standing as the wrong-class drag target.
+		seed.thermalReservoirs = {reservoir("matchSink", "moderate"),
+			reservoir("coldSink", "low"), reservoir("loopHost", "low")};
+		// Two moderate-class loads with their heat sinks left open, so the
+		// canvas drags have real references to commit and the shared
+		// referenced-by-many face is exercised by two machines at once.
+		core::EquipmentLoadSettings load;
+		load.id = "load1"; load.thermalClass = "moderate";
+		core::EquipmentLoadSettings otherLoad;
+		otherLoad.id = "load2"; otherLoad.thermalClass = "moderate";
+		seed.equipmentLoads = {load, otherLoad};
+		// A chiller on a coolant loop puts a per-class cooling service
+		// node on the canvas: the derived projection the authored
+		// reservoirs must not disturb.
+		core::CoolantLoopSettings loop;
+		loop.id = "loop1"; loop.hazardClass = "normal"; loop.reservoirId = "loopHost";
+		loop.coolantCapacityKg = 100.0; loop.startingCoolantKg = 100.0;
+		loop.specificHeatKJPerKgK = 4.0; loop.ratedFlowKgPerS = 1.0;
+		seed.coolantLoops = {loop};
+		core::ChillerSettings chiller;
+		chiller.id = "chill1"; chiller.thermalClass = "low";
+		chiller.coldLoopId = "loop1"; chiller.condenserReservoirId = "coldSink";
+		chiller.ratedCoolingCapacityKW = 5.0; chiller.cop = 2.0;
+		seed.chillers = {chiller};
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+		bool flow = true;
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration");
+			if (flow) window.renderFlowContents(world);
+			else window.renderContents(world, worldHistory);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "flowThermalReservoir", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			// The combobox renders the Thermal grouping and offering the
+			// reservoir arms placement.
+			driver.click(ctx, "Place node"); ctx->Yield(3);
+			REQ(driver.contains("Thermal"), "the combobox did not render the thermal grouping");
+			ctx->ComboClick("Place node/Reservoir"); ctx->Yield(2);
+			REQ(driver.contains("Reservoir placement armed"),
+				"choosing the reservoir did not arm placement");
+			auto* placeCanvas = flowCanvasWindow("Configuration");
+			auto const placeAt = [&](float dx, float dy)
+			{
+				ctx->MouseTeleportToPos({placeCanvas->Pos.x + dx, placeCanvas->Pos.y + dy});
+				ctx->MouseClick(); ctx->Yield(3);
+			};
+			// Placement is armed and repeatable: two clicks, two entries,
+			// each its own history action, with generated unique ids.
+			placeAt(300.0f, 180.0f);
+			REQ(window.draft().thermalReservoirs.size() == 4
+				&& window.draft().thermalReservoirs.back().id == "reservoir1"
+				&& window.draftHistory().undoCount() == 1,
+				"the first placement did not add exactly one reservoir");
+			placeAt(340.0f, 220.0f);
+			REQ(window.draft().thermalReservoirs.size() == 5
+				&& window.draft().thermalReservoirs.back().id == "reservoir2"
+				&& window.draftHistory().undoCount() == 2,
+				"placement did not stay armed for a repeated click");
+			// Esc cancels: the next click places nothing.
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			placeAt(380.0f, 260.0f);
+			REQ(window.draft().thermalReservoirs.size() == 5
+				&& window.draftHistory().undoCount() == 2,
+				"Esc did not cancel armed placement");
+			// Right-click cancels too.
+			ctx->ComboClick("Place node/Reservoir"); ctx->Yield(2);
+			ctx->MouseTeleportToPos({placeCanvas->Pos.x + 300, placeCanvas->Pos.y + 320});
+			ctx->MouseClick(ImGuiMouseButton_Right); ctx->Yield(2);
+			placeAt(420.0f, 300.0f);
+			REQ(window.draft().thermalReservoirs.size() == 5
+				&& window.draftHistory().undoCount() == 2,
+				"right-click did not cancel armed placement");
+			// Undo and redo each take and restore one placement.
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().thermalReservoirs.size() == 3, "undo did not remove the placements");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().thermalReservoirs.size() == 5
+				&& window.draft().thermalReservoirs.back().id == "reservoir2",
+				"redo did not restore the placements");
+			// A point on empty canvas: inside the canvas, clear of every
+			// node body and of the grow/shrink strip drawn beneath them.
+			auto canvasRect = [] {
+				auto* canvas = findFlowCanvas(ImGui::FindWindowByName("Configuration"));
+				return ImRect(canvas->Pos, ImVec2(canvas->Pos.x + canvas->Size.x,
+					canvas->Pos.y + canvas->Size.y));
+			};
+			auto emptyCanvasPoint = [&] {
+				auto const box = canvasRect();
+				std::vector<ImVec4> nodes;
+				for (auto const& probe : std::vector<std::pair<std::string, std::string>>{
+					{"Reservoir", "reservoir1"}, {"Reservoir", "reservoir2"},
+					{"Reservoir", "matchSink"}, {"Reservoir", "coldSink"},
+					{"Reservoir", "loopHost"}, {"Equipment", "load1"},
+					{"Equipment", "load2"}, {"Coolant loop", "loop1"},
+					{"Chiller", "chill1"}, {"Cooling service", "low"},
+					{"Store", "water"}, {"Power", "Shared electrical pool"}})
+				{
+					ImVec4 r{};
+					if (window.flowNodeRect(probe.first, probe.second, &r)) nodes.push_back(r);
+				}
+				for (int y = 36; y < 400; y += 12)
+				{
+					for (int x = 36; x < 400; x += 12)
+					{
+						ImVec2 p{box.Min.x + float(x), box.Min.y + float(y)};
+						bool clear = true;
+						for (auto const& n : nodes)
+							if (p.x >= n.x - 4 && p.x <= n.z + 4 && p.y >= n.y - 4 && p.y <= n.w + 28)
+								clear = false;
+						if (clear) return p;
+					}
+				}
+				return ImVec2{box.Min.x + 4.0f, box.Min.y + 4.0f};
+			};
+			auto selectByFilter = [&](char const* text)
+			{
+				driver.click(ctx, "**/Find node");
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+				ctx->KeyChars(text);
+				ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			};
+			auto clearFilter = [&]
+			{
+				driver.click(ctx, "**/Find node");
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+				ctx->KeyPress(ImGuiKey_Delete); ctx->Yield(3);
+			};
+			auto clickNode = [&](char const* type, char const* id)
+			{
+				ImVec4 rect{};
+				if (!window.flowNodeRect(type, id, &rect)) return false;
+				ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+				ctx->Yield(2);
+				ctx->MouseClick(); ctx->Yield(4);
+				return true;
+			};
+			// --- Inspector editing. reservoir1 is draft index 3.
+			selectByFilter("reservoir1");
+			REQ(clickNode("Reservoir", "reservoir1"), "the placed reservoir is not on screen");
+			clearFilter();
+			// Move off the node so its hover tooltip cannot shadow the
+			// inspector text in the captured log.
+			ctx->MouseTeleportToPos({20, 20}); ctx->Yield(2);
+			REQ(driver.contains("Node: Reservoir 'reservoir1'"), "placed reservoir selection not named");
+			// The heat-capacity label carries a slash ("kJ/K"), which the
+			// test-engine ref parser reads as a path separator; assert on
+			// the slash-free fields instead and the capacity by text.
+			REQ(driver.contains("Reservoir 3 heat capacity kJ/K"),
+				"placed reservoir shared editor capacity label missing");
+			REQ(ctx->ItemInfo("**/Reservoir 3 max temperature C", ImGuiTestOpFlags_NoError)->ID != 0,
+				"placed reservoir shared editor field missing");
+			// The reservoir draws exactly its declared connector: the
+			// unbounded heat-in face, and nothing else.
+			ImVec2 heatIn{};
+			REQ(window.flowPinPosition("Reservoir", "reservoir1", "Heat in", &heatIn),
+				"the placed reservoir does not draw its heat-in connector");
+			auto const limitBefore = window.draft().thermalReservoirs[3].maxTemperatureC;
+			auto const historyBefore = window.draftHistory().undoCount();
+			driver.typeValue(ctx, "**/Reservoir 3 max temperature C", "55");
+			ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			REQ(window.draft().thermalReservoirs[3].maxTemperatureC == 55.0
+				&& window.draftHistory().undoCount() == historyBefore + 1,
+				"the inspector edit did not commit the field as one history entry");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().thermalReservoirs[3].maxTemperatureC == limitBefore,
+				"undo did not restore the field edit");
+			// The form tab renders the same editor against the same draft:
+			// an edit made there lands in the Flow history and is visible
+			// from the Flow side.
+			flow = false; ctx->Yield(3);
+			REQ(driver.contains("Reservoir 3 heat capacity kJ/K"),
+				"the form tab did not render the shared reservoir editor");
+			driver.typeValue(ctx, "**/Reservoir 3 max temperature C", "60");
+			ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			// The inspector edit was undone above, so the form's commit
+			// lands one entry past the shared baseline, not two.
+			REQ(window.draft().thermalReservoirs[3].maxTemperatureC == 60.0
+				&& window.draftHistory().undoCount() == historyBefore + 1,
+				"the form edit did not reach the shared draft and history");
+			flow = true; ctx->Yield(3);
+			REQ(window.draft().thermalReservoirs[3].maxTemperatureC == 60.0,
+				"the form edit did not survive the switch back to Flow");
+			// The form's text field keeps ImGui's text focus across the tab
+			// switch; one throwaway click releases it so the drag's
+			// mouse-down reaches the connector instead of being consumed
+			// by deactivation.
+			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->MouseClick(); ctx->Yield(3);
+			// --- Heat links. The find-node pans earlier in this run left
+			// part of the graph off screen; frame everything so both the
+			// drag's connectors are actually under the pointer.
+			driver.click(ctx, "Fit all"); ctx->Yield(3);
+			// A class-mismatched target is refused with
+			// the validator's reason and commits nothing.
+			auto drag = [&](char const* fromType, char const* fromId, char const* fromPort,
+				char const* toType, char const* toId, char const* toPort) -> bool
+			{
+				ImVec2 a{}, b{};
+				if (!window.flowPinPosition(fromType, fromId, fromPort, &a)) return false;
+				if (!window.flowPinPosition(toType, toId, toPort, &b)) return false;
+				ctx->MouseTeleportToPos(a); ctx->Yield(3);
+				ctx->MouseTeleportToPos(a); ctx->Yield(2);
+				ctx->MouseDown(); ctx->Yield(3);
+				ctx->MouseTeleportToPos({(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f}); ctx->Yield(2);
+				ctx->MouseTeleportToPos(b); ctx->Yield(2);
+				ImVec2 live{};
+				if (window.flowPinPosition(toType, toId, toPort, &live))
+				{ ctx->MouseTeleportToPos(live); ctx->Yield(3); }
+				ctx->MouseUp(); ctx->Yield(3);
+				return true;
+			};
+			REQ(drag("Equipment", "load1", "Heat out", "Reservoir", "coldSink", "Heat in"),
+				"the heat connectors were not drawn");
+			REQ(window.flowLinkRejection().find("thermal class") != std::string::npos
+				&& window.draft().equipmentLoads[0].heatSinkId.empty()
+				&& window.draftHistory().undoCount() == historyBefore + 1,
+				("the class-mismatched heat drag was not refused cleanly: "
+					+ window.flowLinkRejection()).c_str());
+			// An unknown service class on the machine answers with the
+			// validator's own unknown-class reason once a sink is named.
+			selectByFilter("load1");
+			REQ(clickNode("Equipment", "load1"), "the equipment node is not on screen");
+			clearFilter();
+			// Refit so the drag target is on screen again after the
+			// find-node pan; the inspector edit needs no canvas geometry.
+			driver.click(ctx, "Fit all"); ctx->Yield(3);
+			ctx->MouseTeleportToPos({20, 20}); ctx->Yield(2);
+			driver.typeValue(ctx, "**/Load 0 thermal class", "plasma");
+			ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			REQ(window.draft().equipmentLoads[0].thermalClass == "plasma",
+				"the class edit did not reach the draft");
+			REQ(drag("Equipment", "load1", "Heat out", "Reservoir", "reservoir1", "Heat in"),
+				"the heat connectors were not drawn");
+			REQ(window.flowLinkRejection().find("unknown thermal service class") != std::string::npos
+				&& window.draft().equipmentLoads[0].heatSinkId.empty(),
+				("the unknown-class heat drag was not refused with the validator's reason: "
+					+ window.flowLinkRejection()).c_str());
+			// Undo the class edit; the same drag is now legal and commits
+			// the reference through the shared seam.
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().equipmentLoads[0].thermalClass == "moderate",
+				"undo did not restore the load's thermal class");
+			REQ(drag("Equipment", "load1", "Heat out", "Reservoir", "reservoir1", "Heat in"),
+				"the heat connectors were not drawn");
+			REQ(window.draft().equipmentLoads[0].heatSinkId == "reservoir1"
+				&& window.flowLinkRejection().empty(),
+				("the legal heat drag did not commit the reference: "
+					+ window.flowLinkRejection()).c_str());
+			// Referenced by many: a second load joins the same reservoir
+			// face without displacing the first reference.
+			REQ(drag("Equipment", "load2", "Heat out", "Reservoir", "reservoir1", "Heat in"),
+				"the heat connectors were not drawn");
+			REQ(window.draft().equipmentLoads[1].heatSinkId == "reservoir1"
+				&& window.draft().equipmentLoads[0].heatSinkId == "reservoir1",
+				"the shared heat-in face refused a second referencing machine");
+			// Disconnect through the inspector: the selected load's
+			// connection row offers the disconnect, which clears exactly
+			// that reference and leaves the other machine's link alone.
+			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->Yield(2);
+			REQ(driver.contains("Disconnect Heat out reservoir1"),
+				"the selected load's connection row did not offer the heat disconnect");
+			driver.click(ctx, "**/Disconnect Heat out reservoir1"); ctx->Yield(3);
+			REQ(window.draft().equipmentLoads[0].heatSinkId.empty()
+				&& window.draft().equipmentLoads[1].heatSinkId == "reservoir1",
+				"the disconnect cleared the wrong reference or more than one");
+			// The disconnect is one undoable action with a redo that puts
+			// the link back.
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().equipmentLoads[0].heatSinkId == "reservoir1",
+				"undo did not restore the disconnected heat link");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().equipmentLoads[0].heatSinkId.empty(),
+				"redo did not disconnect the heat link again");
+			// --- The per-class cooling service stays inert: clicking it
+			// refuses as derived and selects nothing.
+			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->MouseClick(); ctx->Yield(3);
+			REQ(driver.contains("Nothing selected."), "could not clear the selection");
+			ImVec4 serviceRect{};
+			REQ(window.flowNodeRect("Cooling service", "low", &serviceRect),
+				"the derived cooling service node is not on screen");
+			ctx->MouseTeleportToPos({(serviceRect.x + serviceRect.z) * 0.5f,
+				(serviceRect.y + serviceRect.w) * 0.5f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->Yield(2);
+			REQ(window.flowLinkRejection().find("derived") != std::string::npos
+				&& !driver.contains("Node: Cooling service")
+				&& driver.contains("Nothing selected."),
+				"clicking the derived cooling service selected it instead of refusing it");
+			// A link drag released over the derived node's body is refused
+			// as derived and records nothing: load2 keeps its real sink.
+			auto dragToBody = [&](char const* fromType, char const* fromId, char const* fromPort,
+				char const* toType, char const* toId) -> bool
+			{
+				ImVec2 a{};
+				if (!window.flowPinPosition(fromType, fromId, fromPort, &a)) return false;
+				ImVec4 rect{};
+				if (!window.flowNodeRect(toType, toId, &rect)) return false;
+				ImVec2 const b{(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f};
+				ctx->MouseTeleportToPos(a); ctx->Yield(2);
+				ctx->MouseDown(); ctx->Yield(3);
+				ctx->MouseTeleportToPos({(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f}); ctx->Yield(2);
+				ctx->MouseTeleportToPos(b); ctx->Yield(3);
+				ctx->MouseUp(); ctx->Yield(3);
+				return true;
+			};
+			REQ(dragToBody("Equipment", "load2", "Heat out", "Cooling service", "low"),
+				"the drag start was not drawn");
+			REQ(window.flowLinkRejection().find("derived") != std::string::npos
+				&& window.draft().equipmentLoads[1].heatSinkId == "reservoir1",
+				("a link dropped on the derived service was not refused as derived: "
+					+ window.flowLinkRejection()).c_str());
+			// Authoring never touched the World.
+			world->resumeSimulation();
+			auto const tick = world->getSimulationTick();
+			REQ(world->getStationSystemsSettings().thermalReservoirs.size() == 3
+				&& worldHistory.undoCount() == 0 && !world->isModified()
+				&& world->getSimulationTick() == tick,
+				"thermal reservoir authoring mutated or advanced the World");
+		});
+		#undef REQ
+		require(driver.passed(), "Flow thermal reservoir workflow failed on the Test Engine");
+	}
+
+	void flowThermalReservoirWorkflow(smoke::Context const&)
+	{
+		flowThermalReservoirBody();
 	}
 
 	void storeWorkflow(smoke::Context const&)
@@ -5184,6 +5581,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/flowGrowablePortsWorkflow", flowGrowablePortsWorkflow});
 	checks.push_back({"station/flowInspectorWorkflow", flowInspectorWorkflow});
 	checks.push_back({"station/flowPowerChainWorkflow", flowPowerChainWorkflow});
+	checks.push_back({"station/flowThermalReservoirWorkflow", flowThermalReservoirWorkflow});
 	checks.push_back({"station/transferWorkflow", transferWorkflow});
 	checks.push_back({"station/compoundWorkflow", compoundWorkflow});
 	checks.push_back({"station/powerWorkflow", powerWorkflow});

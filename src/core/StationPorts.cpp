@@ -287,15 +287,26 @@ namespace
 	}
 
 	// The heat-sink rules one link can break, in the whole-config
-	// validator's own wording: the sink must exist and share the machine's
-	// thermal service class - spare capacity in one class is never usable
-	// by another. Returns the refusal text, empty when the sink is
-	// satisfied or not yet named.
+	// validator's own wording: the machine's thermal service class must
+	// be one of the declared classes, the sink must exist and share the
+	// machine's thermal service class - spare capacity in one class is
+	// never usable by another. Returns the refusal text, empty when the
+	// sink is satisfied or not yet named.
 	std::string scopedHeatSinkWiring(StationSystemsSettings const& settings,
 		std::string const& where, std::string const& heatSinkId,
 		std::string const& thermalClass, bool fuelCellWorded)
 	{
 		if (heatSinkId.empty()) return {};
+		// A heat link routes under the machine's declared service class;
+		// if that class is not one the configuration declares, the link
+		// would route into a service that cannot exist. Mirrors the whole-
+		// config validator's own entry rule, checked before the sink is
+		// resolved so the more fundamental defect answers first.
+		if (std::find(StationThermalServiceClasses.begin(),
+				StationThermalServiceClasses.end(), thermalClass)
+			== StationThermalServiceClasses.end())
+			return where + " has unknown thermal service class '" + thermalClass
+				+ "'; declared classes are: low, moderate, warm, generation";
 		auto const* sink = findReservoirById(settings, heatSinkId);
 		if (!sink)
 			return where + (fuelCellWorded ? " heat sink is unknown thermal reservoir '"
