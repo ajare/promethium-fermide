@@ -1,5 +1,6 @@
 #include "StationFlowDiagram.h"
 #include "core/StationPorts.h"
+#include "core/World.h"
 #include "imgui/imnodes.h"
 #include <algorithm>
 #include <limits>
@@ -575,7 +576,7 @@ namespace
 		auto spread = [](std::vector<FlowPort>& ports, float x)
 		{
 			for (size_t i = 0; i < ports.size(); ++i)
-				ports[i].offset = {x, nodeHeight * float(i + 1) / float(ports.size() + 1)};
+				ports[i].offset = {x, 80.0f + 180.0f * float(i + 1) / float(ports.size() + 1)};
 		};
 		spread(inputs, 0.0f);
 		spread(outputs, nodeWidth);
@@ -584,6 +585,44 @@ namespace
 		all.insert(all.end(), inputs.begin(), inputs.end());
 		all.insert(all.end(), outputs.begin(), outputs.end());
 		return all;
+	}
+
+	// Electrical membership is implicit configuration, not a user-wirable
+	// reference. Show dedicated service ports without inventing editable pins
+	// or allowing connections to the derived electrical pool.
+	ImVec2 powerPortOffset(bool input)
+	{
+		return {input ? 0.0f : nodeWidth, 68.0f};
+	}
+
+	void drawPortLabel(ImDrawList* draw, ImVec2 centre, bool input,
+		std::string_view name, float zoom, ImU32 colour, std::string_view rate = {})
+	{
+		float const fontSize = 13.5f * zoom;
+		float const width = (nodeWidth * 0.5f - 22.0f) * zoom;
+		auto* font = ImGui::GetFont();
+		auto const size = font->CalcTextSizeA(fontSize, std::numeric_limits<float>::max(),
+			0.0f, name.data(), name.data() + name.size());
+		float const x = input ? centre.x + 12.0f * zoom
+			: centre.x - 12.0f * zoom - std::min(size.x, width);
+		ImVec4 clip{x, centre.y - fontSize * 0.5f, x + width, centre.y + fontSize * 0.5f};
+		if (!rate.empty())
+		{
+			float const rateSize = 11.5f * zoom;
+			auto const rateWidth = font->CalcTextSizeA(rateSize, std::numeric_limits<float>::max(),
+				0.0f, rate.data(), rate.data() + rate.size()).x;
+			// Keep the value visible; a long connector name is clipped and
+			// remains available in the connector tooltip.
+			float const right = input ? centre.x + nodeWidth * 0.5f * zoom - 10.0f * zoom
+				: centre.x - 12.0f * zoom;
+			float const left = input ? centre.x + 12.0f * zoom
+				: centre.x - nodeWidth * 0.5f * zoom + 10.0f * zoom;
+			clip.x = left; clip.z = std::max(left, right - rateWidth - 5.0f * zoom);
+			draw->AddText(font, rateSize, {right - rateWidth, centre.y - rateSize * 0.5f},
+				IM_COL32(180, 220, 235, 255), rate.data(), rate.data() + rate.size());
+		}
+		draw->AddText(font, fontSize, {clip.x, clip.y}, colour,
+			name.data(), name.data() + name.size(), 0.0f, &clip);
 	}
 
 	std::string pinKey(std::string const& nodeType, std::string const& nodeId,
@@ -680,6 +719,7 @@ void StationFlowDiagram::reset()
 	mPlacingType.clear(); mLayout.clear(); mNodeIds.clear(); mNextNodeId = 1;
 	if (mNodeContext) { ImNodes::DestroyContext(mNodeContext); mNodeContext = nullptr; }
 	mCached.reset(); mGraph = {}; mPositions.clear(); mPan = {24, 24};
+	mTelemetry.clear(); mTelemetryTick = UINT64_MAX;
 	mZoom = 0.8f; mFitRequested = true; mSelected = -1; mConnectedOnly = false; mSearch[0] = 0;
 	mSelectedType.clear(); mSelectedId.clear();
 	mDragging = -1; mLastFrame = -1; mTemperature = 0;
@@ -802,11 +842,19 @@ std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode
 	return view;
 }
 
+std::optional<station_flow::NodeTelemetry> StationFlowDiagram::nodeTelemetry(
+	std::string const& type, std::string const& id) const
+{
+	auto const found = mTelemetry.find(type + keySeparator + id);
+	return found == mTelemetry.end() ? std::nullopt : std::optional{found->second};
+}
+
 void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	std::function<void(core::StationSystemsSettings&)> const& renderInspector,
 	std::function<void()> const& beforeSelectionChange,
 	std::function<void()> const& beforeNodeRemoval,
-	std::function<void()> const& beforeLayoutChange)
+	std::function<void()> const& beforeLayoutChange,
+	core::StationSystemsSnapshot const* live, bool draftMatchesLive, bool paused)
 {
 	if (mLastFrame != ImGui::GetFrameCount() - 1)
 	{ mDragging = -1; mTemperature = 0; mActiveLinkPin.reset(); }
@@ -815,6 +863,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	if (!mCached || *mCached != draft)
 	{
 		mGraph = station_flow::build(draft); mCached = draft;
+		mTelemetryTick = UINT64_MAX;
 		// A rebuild must not silently drop the selection: re-resolve the
 		// remembered node by identity so editing a field in the inspector
 		// keeps the node it belongs to selected (until it disappears).
@@ -855,7 +904,25 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		}
 		updateBounds();
 	}
-	ImGui::TextUnformatted("Draft configuration flow (not live rates)");
+	bool const showLive = live && live->enabled && draftMatchesLive;
+	if (!showLive)
+	{
+		mTelemetry.clear(); mTelemetryTick = UINT64_MAX;
+	}
+	else if (mTelemetryTick != live->worldTick || mTelemetryHealthy != live->healthy)
+	{
+		mTelemetry.clear(); mTelemetryTick = live->worldTick; mTelemetryHealthy = live->healthy;
+		for (auto const& node : mGraph.nodes)
+			if (auto values = station_flow::telemetry(node, *live, core::World::getFixedTimestep(), &draft))
+				mTelemetry[node.type + keySeparator + node.id] = std::move(*values);
+	}
+	if (live && !draftMatchesLive)
+		ImGui::TextUnformatted("Draft configuration flow | unapplied changes - live readouts hidden (apply or revert draft).");
+	else if (showLive)
+		ImGui::Text("Draft configuration flow | applied simulation: %s | %.2f s | 4 Hz",
+			!live->healthy ? "FAILED - last committed state" : paused ? "Paused" : "Running", live->elapsedSeconds);
+	else
+		ImGui::TextUnformatted("Draft configuration flow - simulation disabled; no live rates.");
 	ImGui::TextDisabled("Left-drag nodes; right/middle-drag to pan; wheel to zoom. Placement edits only the draft.");
 	ImGui::SetNextItemWidth(160);
 	if (ImGui::BeginCombo("Place node", mPlacingType.empty() ? "Choose type..." : mPlacingType.c_str()))
@@ -1612,7 +1679,8 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	for (auto const& link : mGraph.links)
 	{
 		if (!visible[link.from] || !visible[link.to]) continue;
-		if (authoredPairs.contains({link.from, link.to})) continue;
+		if (link.kind != station_flow::LinkKind::Power
+			&& authoredPairs.contains({link.from, link.to})) continue;
 		auto from = mPositions[link.from], to = mPositions[link.to];
 		from.x += nodeWidth / 2; from.y += nodeHeight / 2;
 		to.x += nodeWidth / 2; to.y += nodeHeight / 2;
@@ -1632,6 +1700,23 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		ImVec2 normal{-direction.y * offset, direction.x * offset};
 		ImVec2 c1{a.x + direction.x * bend + normal.x, a.y + direction.y * bend + normal.y};
 		ImVec2 c2{d.x - direction.x * bend + normal.x, d.y - direction.y * bend + normal.y};
+		if (link.kind == station_flow::LinkKind::Power)
+		{
+			// Shared service nodes remain inert; authored machines expose
+			// their own electrical input/output at a dedicated connector.
+			if (!core::stationIsDerivedNodeType(mGraph.nodes[link.from].type))
+			{
+				auto const offset = powerPortOffset(false);
+				a = point({mPositions[link.from].x + offset.x, mPositions[link.from].y + offset.y});
+			}
+			if (!core::stationIsDerivedNodeType(mGraph.nodes[link.to].type))
+			{
+				auto const offset = powerPortOffset(true);
+				d = point({mPositions[link.to].x + offset.x, mPositions[link.to].y + offset.y});
+			}
+			auto const curve = linkCurve(a, d);
+			c1 = curve.b; c2 = curve.c;
+		}
 		auto color = station_flow::edgeColor(link.medium);
 		if (mGraph.nodes[link.from].unresolved || mGraph.nodes[link.to].unresolved) color = IM_COL32(255, 80, 80, 230);
 		bool const selected = mSelected >= 0 && (link.from == size_t(mSelected) || link.to == size_t(mSelected));
@@ -1702,16 +1787,47 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 				i == size_t(mSelected) ? 2.0f : 1.4f);
 		else
 			draw->AddRect(a, d, border, 5, 0, i == size_t(mSelected) ? 2.5f : 1.0f);
-		ImVec4 clip{a.x + 3, a.y + 3, d.x - 3, d.y - 3};
+		// Long IDs/details must not wrap into the electrical or material rows.
+		ImVec4 clip{a.x + 3, a.y + 3, d.x - 3, a.y + 54.0f * mZoom};
 		auto label = n.type + "\n" + n.id + (n.detail.empty() ? "" : "\n" + n.detail)
 			+ (derived ? " (derived)" : "");
-		draw->AddText(ImGui::GetFont(), ImGui::GetFontSize() * mZoom, {a.x + 8 * mZoom, a.y + 6 * mZoom},
+		draw->AddText(ImGui::GetFont(), ImGui::GetFontSize() * 1.1f * mZoom, {a.x + 8 * mZoom, a.y + 6 * mZoom},
 			IM_COL32(235, 240, 245, 255), label.c_str(), nullptr, (nodeWidth - 16) * mZoom, &clip);
+		auto const liveNode = mTelemetry.find(n.type + keySeparator + n.id);
+		auto portRate = [&](std::string const& name) -> std::string_view {
+			if (liveNode == mTelemetry.end()) return {};
+			auto const found = liveNode->second.ports.find(name);
+			return found == liveNode->second.ports.end() ? std::string_view{} : found->second;
+		};
+		if (!derived)
+			for (bool input : {true, false})
+			{
+				bool const powered = std::any_of(mGraph.links.begin(), mGraph.links.end(),
+					[&](station_flow::Link const& link) {
+						return link.kind == station_flow::LinkKind::Power
+							&& (input ? link.to : link.from) == i;
+					});
+				if (!powered) continue;
+				auto const offset = powerPortOffset(input);
+				auto const centre = point({mPositions[i].x + offset.x, mPositions[i].y + offset.y});
+				mPinScreen[pinKey(n.type, n.id, input ? "Power in" : "Power out")] = centre;
+				auto const colour = station_flow::edgeColor(station_flow::Medium::Electricity);
+				draw->AddCircleFilled(centre, pinSize * 0.5f, colour, 20);
+				draw->AddCircle(centre, pinSize * 0.5f, IM_COL32(24, 28, 34, 255), 20);
+				drawPortLabel(draw, centre, input, input ? "Power in" : "Power out", mZoom, colour,
+					portRate(input ? "Power in" : "Power out"));
+				if (over && std::hypot(centre.x - io.MousePos.x, centre.y - io.MousePos.y) < 14.0f)
+					ImGui::SetTooltip("%s: shared electrical pool (automatic connection)", input ? "Power in" : "Power out");
+			}
 		for (auto const& port : nodePorts(n.type, n.id, draft))
 		{
 			auto const key = pinKey(n.type, n.id, std::string(port.descriptor->name));
 			auto const pin = framePins.find(key);
 			if (pin == framePins.end()) continue;
+			drawPortLabel(draw, pin->second,
+				port.descriptor->direction == core::StationPortDirection::Input,
+				port.descriptor->name, mZoom, IM_COL32(235, 240, 245, 255),
+				portRate(std::string(port.descriptor->name)));
 			bool const connected = std::any_of(mLinks.begin(), mLinks.end(), [&](FlowLink const& wired)
 			{
 				return pinKey(wired.authored.from) == key || pinKey(wired.authored.to) == key;
@@ -1738,6 +1854,27 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			if (eligibility != mPinEligibility.end() && eligibility->second)
 				draw->AddCircle(pin->second, pinSize * 0.75f, IM_COL32(105, 255, 170, 165), 20, 2.0f);
 			draw->AddCircle(pin->second, pinSize * 0.5f, IM_COL32(24, 28, 34, 255), 20, 1.0f);
+		}
+		if (liveNode != mTelemetry.end())
+		{
+			auto const& values = liveNode->second;
+			ImU32 const statusColour = values.state == station_flow::TelemetryState::Error ? IM_COL32(255, 110, 100, 255)
+				: values.state == station_flow::TelemetryState::Warning ? IM_COL32(255, 210, 100, 255)
+				: values.state == station_flow::TelemetryState::Idle ? IM_COL32(165, 175, 190, 255)
+				: IM_COL32(140, 230, 175, 255);
+			auto const start = point({mPositions[i].x + 10.0f, mPositions[i].y + station_flow::TelemetryTop});
+			draw->AddLine({start.x, start.y - 5.0f * mZoom}, {d.x - 10.0f * mZoom, start.y - 5.0f * mZoom},
+				IM_COL32(150, 160, 180, 110));
+			ImVec4 footerClip{a.x + 8.0f * mZoom, start.y, d.x - 8.0f * mZoom, d.y - 5.0f * mZoom};
+			float y = start.y;
+			for (auto const& line : values.values)
+			{
+				draw->AddText(ImGui::GetFont(), 14.0f * mZoom, {start.x, y}, IM_COL32(235, 240, 245, 255),
+					line.c_str(), nullptr, 0.0f, &footerClip);
+				y += station_flow::TelemetryLineHeight * mZoom;
+			}
+			draw->AddText(ImGui::GetFont(), 14.0f * mZoom, {start.x, y}, statusColour,
+				values.status.c_str(), nullptr, 0.0f, &footerClip);
 		}
 		// Growable port set affordances: `+` adds a real connector to the
 		// set, `-` removes the newest one. They are not offered past the
@@ -1880,6 +2017,14 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		auto const& n = mGraph.nodes[hoveredNode];
 		ImGui::BeginTooltip();
 		ImGui::Text("%s: %s", n.type.c_str(), n.id.c_str());
+		if (auto values = nodeTelemetry(n.type, n.id))
+		{
+			ImGui::TextDisabled("Applied simulation");
+			for (auto const& line : values->values) ImGui::TextUnformatted(line.c_str());
+			ImGui::TextWrapped("Status: %s", values->status.c_str());
+			for (auto const& line : values->details) ImGui::TextWrapped("%s", line.c_str());
+			for (auto const& [name, value] : values->ports) ImGui::Text("%s: %s", name.c_str(), value.c_str());
+		}
 		for (auto const& e : mGraph.links)
 			if (e.from == size_t(hoveredNode) || e.to == size_t(hoveredNode))
 			{
@@ -1955,6 +2100,15 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		}
 		if (mSelected >= 0)
 		{
+			auto const& node = mGraph.nodes[mSelected];
+			if (auto values = nodeTelemetry(node.type, node.id);
+				values && ImGui::CollapsingHeader("Applied simulation readout"))
+			{
+				for (auto const& line : values->values) ImGui::TextWrapped("%s", line.c_str());
+				ImGui::TextWrapped("Status: %s", values->status.c_str());
+				for (auto const& line : values->details) ImGui::TextWrapped("%s", line.c_str());
+				for (auto const& [name, value] : values->ports) ImGui::TextWrapped("%s: %s", name.c_str(), value.c_str());
+			}
 			ImGui::Separator();
 			ImGui::InputText("New node name", mRenameBuffer, sizeof(mRenameBuffer));
 			core::StationNodeRename renamePlan;

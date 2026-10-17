@@ -741,6 +741,8 @@ set_tests_properties(station-editor-flow-inspector PROPERTIES LABELS "smoke;func
 # #649: water/gas placement, shared inspectors and optional consumable wiring.
 add_test(NAME station-editor-flow-water-gas COMMAND pf-smoke-editor --check station/flowWaterGasWorkflow)
 set_tests_properties(station-editor-flow-water-gas PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+add_test(NAME station-editor-flow-telemetry COMMAND pf-smoke-editor --check station/flowTelemetryWorkflow)
+set_tests_properties(station-editor-flow-telemetry PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-power-chain COMMAND pf-smoke-editor --check station/flowPowerChainWorkflow)
 set_tests_properties(station-editor-flow-power-chain PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 # #656: thermal reservoir authoring - combobox placement, shared inspector

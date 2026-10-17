@@ -14,6 +14,7 @@
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
 #include <cmath>
+#include <limits>
 #include <set>
 
 namespace
@@ -176,7 +177,8 @@ namespace
 	{
 		using smoke::require;
 		headless::ScopedImGuiContext context;
-		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		// Keep the explicitly placed, labelled nodes disjoint while wiring.
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1800, 1000};
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
 		StationSystemsWindow window;
 		auto const path = smokeContext.temporaryRoot() / "transfer-placement.station.yaml";
@@ -184,7 +186,7 @@ namespace
 		auto world = std::make_shared<core::World>("Transfer placement", 2, 2);
 		world->pauseSimulation(); world->finishBuild(); world->markSaved();
 		headless::TestEngineDriver driver([&] {
-			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1700, 980});
 			ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
 		});
 		driver.frame(); driver.frame();
@@ -205,7 +207,7 @@ namespace
 				if (vertex.col == IM_COL32(80, 130, 170, 100)) previewDrawn = true;
 			REQ(previewDrawn && window.draft().transfers.empty() && window.draftHistory().undoCount() == 0,
 				"Transfer ghost preview is missing or mutated the draft before placement");
-			place(300, 180); place(300, 360);
+			place(550, 180); place(550, 360);
 			REQ(window.draft().transfers.size() == 2 && window.draftHistory().undoCount() == 2,
 				"persistent Transfer placement did not commit once per click");
 			auto const first = window.draft().transfers[0];
@@ -222,7 +224,7 @@ namespace
 			REQ(window.draft().transfers.size() == 1 && window.draft().transfers[0] == first,
 				"redo did not restore the placed Transfer");
 			ctx->ComboClick("Place node/Store"); ctx->Yield(2);
-			place(40, 100); place(480, 300);
+			place(40, 100); place(1050, 300);
 			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
 			auto drag = [&](char const* fromType, char const* fromId, char const* fromPort,
 				char const* toType, char const* toId, char const* toPort) {
@@ -841,7 +843,9 @@ namespace
 			// floor of its growable sets: one input, one output, one entry.
 			ctx->ComboClick("Place node/Conversion"); ctx->Yield(2);
 			REQ(driver.contains("Conversion placement armed"), "conversion placement did not arm");
-			clickAt(canvasPoint(300, 160));
+			// Leave room for the automatically projected electrical pool;
+			// its body must not cover the output being tested later.
+			clickAt(canvasPoint(480, 160));
 			REQ(window.draft().conversions.size() == 1
 				&& window.draft().conversions[0].id == "conversion1"
 				&& window.draft().conversions[0].inputs.size() == 1
@@ -930,7 +934,9 @@ namespace
 			// shared electrical pool is visible in the projection.
 			ctx->ComboClick("Place node/Solar"); ctx->Yield(2);
 			REQ(driver.contains("Solar placement armed"), "solar placement did not arm");
-			clickAt(canvasPoint(300, 420));
+			// Keep the new body clear of the existing conversion's output
+			// connector now that nodes reserve room for live readouts.
+			clickAt(canvasPoint(600, 420));
 			REQ(window.draft().solarArrays.size() == 1
 				&& window.draft().solarArrays[0].id == "solar1"
 				&& window.draftHistory().undoCount() == 11,
@@ -958,7 +964,8 @@ namespace
 			REQ(window.draft().conversions[0].outputs[1].storeId == "grain"
 				&& window.flowLinkRejection().empty()
 				&& window.draftHistory().undoCount() == 12,
-				"grown output wiring failed to commit once or clear the refusal");
+				("grown output wiring failed: " + window.flowLinkRejection()
+					+ " history=" + std::to_string(window.draftHistory().undoCount())).c_str());
 			// A link drag dropped on the pool body is refused as derived and
 			// writes nothing.
 			ImVec2 originPin{};
@@ -1850,9 +1857,29 @@ namespace
 		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
 		driver.run("station", "flowPowerChain", [&](ImGuiTestContext* ctx) {
 			ctx->SetRef("Configuration");
-			// Every declared connector of every placed machine is drawn,
-			// and nothing undeclared is: the battery authors none, and the
-			// equipment's ungrown exchange slots do not appear.
+			// Electrical service ports are visible separately from authored
+			// material references, including charging and generator startup.
+			REQ(window.draft() == seed, "drawing electrical ports changed the draft");
+			for (auto const& [type, id] : std::vector<std::pair<std::string, std::string>>{
+				{"Equipment", "load1"}, {"Battery", "bat1"}, {"Generator", "gen1"},
+				{"Sabatier", "sab1"}, {"Methane processor", "mp1"}})
+			{
+				ImVec2 power{};
+				ImVec4 body{};
+				REQ(window.flowPinPosition(type, id, "Power in", &power)
+					&& window.flowNodeRect(type, id, &body), "power input is missing");
+				REQ(std::abs(power.x - body.x) < 1.0f && power.y > body.y && power.y < body.w,
+					"power input is not on the node's input face");
+			}
+			ImVec2 power{}, material{};
+			REQ(window.flowPinPosition("Equipment", "load1", "Power in", &power)
+				&& window.flowPinPosition("Equipment", "load1", "Equipment input 1", &material)
+				&& material.y > power.y, "power and material inputs overlap");
+			REQ(window.flowPinPosition("Fuel cell", "cell1", "Power out", &power)
+				&& !window.flowPinPosition("Fuel cell", "cell1", "Power in", &power),
+				"generation-only equipment has the wrong power ports");
+			// Every authored connector is drawn, but equipment's ungrown
+			// exchange slots do not appear.
 			auto pinExists = [&](char const* type, char const* id, char const* port)
 			{
 				ImVec2 point{};
@@ -3141,6 +3168,212 @@ namespace
 		});
 		#undef REQ
 		require(driver.passed(), "Store workflow failed on the Test Engine");
+	}
+
+	void flowTelemetryChecks()
+	{
+		using smoke::require;
+		core::StationSystemsSnapshot s;
+		s.enabled = true; s.worldTick = 10; s.elapsedSeconds = 5;
+		auto add = [](auto& entries) { entries.emplace_back(); entries.back().id = "node"; };
+		add(s.stores); add(s.transfers); add(s.conversions); add(s.power.loads);
+		add(s.power.sources); add(s.power.batteries); add(s.power.generators); add(s.fuelCells);
+		add(s.thermal.reservoirs); add(s.thermal.radiators); add(s.coolantLoops);
+		add(s.chillers); add(s.thermalBuffers); add(s.atmospheres); add(s.crews);
+		add(s.waterCollectors); add(s.waterTreatments); add(s.electrolyzers); add(s.co2Captures);
+		add(s.sabatierReactors); add(s.methaneProcessors); add(s.microbialProcessors);
+		add(s.cropPopulations); add(s.algaeCultures); add(s.deliveries); add(s.wasteEjections);
+		add(s.airlockCycles); add(s.outages); add(s.maintenanceJobs);
+		s.thermal.coolingByClass.emplace_back(); s.thermal.coolingByClass.back().thermalClass = "node";
+		auto const before = s;
+		for (auto const& type : core::stationPlaceableTypes())
+		{
+			auto value = station_flow::telemetry({std::string(type.nodeType), "node"}, s, 0.5);
+			require(value && !value->values.empty() && value->values.size() <= 5 && !value->status.empty(),
+				("Missing compact telemetry for " + std::string(type.nodeType)).c_str());
+			require(station_flow::TelemetryTop + (value->values.size() + 1) * station_flow::TelemetryLineHeight
+				< station_flow::NodeHeight - 5, "Telemetry metrics/status do not fit inside the node");
+			for (auto const& line : value->values)
+				require(line.find(" / ") == std::string::npos && line.find(" | ") == std::string::npos,
+					("Telemetry combines multiple metrics: " + line).c_str());
+		}
+		require(station_flow::telemetry({"Power", "node"}, s, 0.5).has_value()
+			&& station_flow::telemetry({"Cooling service", "node"}, s, 0.5).has_value(),
+			"Derived services have no telemetry");
+		require(s == before, "Telemetry formatting mutated the snapshot");
+		s.power.batteryChargeKW = 3.5; s.power.batteryDischargeKW = 7.5;
+		auto electrical = station_flow::telemetry({"Power", "node"}, s, 0.5);
+		require(electrical->values[2] == "Battery charging 3.5 kW"
+			&& electrical->values[3] == "Battery discharging 7.5 kW",
+			"Electrical pool battery labels lost charging/discharging direction");
+		s.power.batteries[0].lastChargeKW = 1.5; s.power.batteries[0].lastDischargeKW = 2.5;
+		auto battery = station_flow::telemetry({"Battery", "node"}, s, 0.5);
+		require(battery->values[2] == "Battery charging 1.5 kW"
+			&& battery->values[3] == "Battery discharging 2.5 kW",
+			"Battery node did not split and label its power metrics");
+		require(!station_flow::telemetry({"Store", "missing"}, s, 0.5), "Missing node borrowed another node's telemetry");
+		s.transfers[0].unit = "L"; s.transfers[0].lastRequested = 4;
+		s.transfers[0].lastCompleted = 2; s.transfers[0].lastUnmet = 2;
+		s.transfers[0].status = core::StationTransferStatus::Partial;
+		auto transfer = station_flow::telemetry({"Transfer", "node"}, s, 0.5);
+		require(transfer->ports.at("Source") == "4 L/s" && transfer->ports.at("Destination") == "4 L/s"
+			&& transfer->state == station_flow::TelemetryState::Warning,
+			"Transfer telemetry confuses actual rates, units or unmet demand");
+		require(station_flow::telemetry({"Transfer", "node"}, s, 0)->ports.at("Source") == "--",
+			"Unknown tick duration fabricated a rate");
+		s.stores[0].unit = "kg"; s.stores[0].lastTickIn = 3; s.stores[0].lastTickOut = 1;
+		s.stores[0].currentQualified = 10; s.stores[0].protectedReserve = 10;
+		auto inventory = station_flow::telemetry({"Store", "node"}, s, 0.5);
+		require(inventory->values[2] == "Net 4 kg/s" && inventory->status == "At protected reserve",
+			"Store telemetry loses net-flow sign or reserve warning");
+		s.chillers[0].blockReason = "sink too hot";
+		require(station_flow::telemetry({"Chiller", "node"}, s, 0.5)->status == "sink too hot",
+			"Chiller telemetry hides the authoritative block reason");
+		s.coolantLoops[0].exchangeIntoLoopKW = 3;
+		require(station_flow::telemetry({"Coolant loop", "node"}, s, 0.5)->ports.at("Heat exchanger") == "-3 kW",
+			"Coolant port reversed signed heat exchange");
+		s.deliveries[0].hasNextOccurrence = true; s.deliveries[0].nextOccurrenceSeconds = 8;
+		s.deliveries[0].lastAccepted = 20; s.deliveries[0].unit = "kg";
+		auto delivery = station_flow::telemetry({"Delivery", "node"}, s, 0.5);
+		require(delivery->values[0] == "Next in 3 s" && delivery->ports.at("Destination") == "20 kg last event",
+			"Delivery telemetry presents event quantities as continuous rates");
+		s.endurance.emplace_back(); s.endurance.back().id = "node"; s.endurance.back().kind = "store";
+		s.endurance.back().basis = core::StationEnduranceBasis::Depleting; s.endurance.back().estimateSeconds = 30;
+		auto storeReadout = station_flow::telemetry({"Store", "node"}, s, 0.5);
+		require(std::any_of(storeReadout->details.begin(), storeReadout->details.end(), [](auto const& line) {
+			return line.find("at current net rate") != std::string::npos;
+		}), "Endurance estimate omitted its assumption");
+		s.cropPopulations[0].lastAssimilationWaterKg = 1;
+		s.cropPopulations[0].lastTranspiredKg = 2;
+		s.cropPopulations[0].lastGrowthKg = 3;
+		s.cropPopulations[0].lastHarvestedKg = 1;
+		s.cropPopulations[0].lastRespirationKg = 0.5;
+		auto crop = station_flow::telemetry({"Crops", "node"}, s, 0.5);
+		require(crop->ports.at("Water in") == "6 kg/s" && crop->values[2] == "Net biomass 3 kg/s",
+			"Biological telemetry omitted transpiration draw or harvest losses");
+		s.electrolyzers[0].blockReason = "sink too hot";
+		s.electrolyzers[0].lastPowerUnmetKW = 10;
+		require(station_flow::telemetry({"Electrolyzer", "node"}, s, 0.5)->status == "sink too hot",
+			"Unallocated power hid the actual process block reason");
+		core::StationSystemsSettings applied;
+		applied.equipmentLoads.emplace_back(); applied.equipmentLoads.back().id = "node";
+		applied.equipmentLoads.back().materialExchanges = {{"feed", 1, true}, {"return", 1, false}};
+		s.power.loads[0].materialExchanges = {{"feed", "g", 4, 2}, {"return", "kg", 2, 1}};
+		s.power.loads[0].suppliedKW = 2; s.power.loads[0].recoverySurgeKW = 3;
+		auto equipment = station_flow::telemetry({"Equipment", "node"}, s, 0.5, &applied);
+		require(equipment->ports.at("Equipment input 1") == "4 g/s"
+			&& equipment->ports.at("Equipment return 1") == "2 kg/s"
+			&& equipment->ports.at("Power in") == "5 kW",
+			"Equipment telemetry lost exchange direction/units or restart surge power");
+		s.cropPopulations[0].disabled = true;
+		require(station_flow::telemetry({"Crops", "node"}, s, 0.5)->state == station_flow::TelemetryState::Idle,
+			"Disabled crops were reported as temperature failures");
+		// Trace formatting is shared by node values, port rates and details.
+		auto tiny = s;
+		tiny.transfers[0].unit = "kg";
+		for (auto const& [actual, expected] : std::vector<std::pair<double, std::string>>{
+			{0.0, "0 kg/s"}, {-0.0, "0 kg/s"}, {0.0005, "trace kg/s"},
+			{-0.0005, "-trace kg/s"}, {0.001, "0.001 kg/s"}, {-0.001, "-0.001 kg/s"},
+			{std::numeric_limits<double>::infinity(), "-- kg/s"}})
+		{
+			tiny.transfers[0].lastCompleted = actual * 0.5;
+			auto value = station_flow::telemetry({"Transfer", "node"}, tiny, 0.5);
+			require(value->ports.at("Source") == expected && value->values[0] == "Actual " + expected,
+				("Trace formatting lost its boundary, zero or sign: " + expected).c_str());
+		}
+		tiny.power.batteryChargeKW = 0.0005;
+		require(station_flow::telemetry({"Power", "node"}, tiny, 0.5)->values[2] == "Battery charging trace kW",
+			"Power readout omitted trace formatting");
+		tiny.power.batteries[0].stateOfCharge = 0.000005;
+		require(station_flow::telemetry({"Battery", "node"}, tiny, 0.5)->values[0] == "State of charge trace%",
+			"Percentage trace threshold was not applied in displayed units");
+		tiny.stores[0].protectedReserve = 0.0005;
+		require(station_flow::telemetry({"Store", "node"}, tiny, 0.5)->details[0] == "Protected reserve trace kg",
+			"Inspector details omitted trace formatting");
+		s.healthy = false;
+		require(station_flow::telemetry({"Transfer", "node"}, s, 0.5)->state == station_flow::TelemetryState::Error,
+			"Failed station presented old values as healthy");
+		s.healthy = true; s.worldTick = 0;
+		require(station_flow::telemetry({"Transfer", "node"}, s, 0.5)->ports.empty(),
+			"An unstarted station displayed last-tick flow rates");
+		s.worldTick = 10; s.stores.push_back(s.stores.front());
+		require(!station_flow::telemetry({"Store", "node"}, s, 0.5), "Ambiguous identity silently selected a snapshot");
+	}
+
+	void flowTelemetryWorkflow(smoke::Context const&)
+	{
+		flowTelemetryChecks();
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		io.DeltaTime = 1.0f / 60.0f;
+		auto world = std::make_shared<core::World>("Live flow", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed; seed.enabled = true;
+		seed.stores = {{"a", "kg", 100, 50}, {"b", "kg", 100}};
+		core::ResourceTransferSettings transfer;
+		transfer.id = "move"; transfer.sourceId = "a"; transfer.destinationId = "b";
+		transfer.unit = "kg"; transfer.ratePerSecond = 2; seed.transfers = {transfer};
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+		StationSystemsWindow window;
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "flowTelemetry", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			auto initial = window.flowTelemetry("Store", "a");
+			REQ(initial && initial->status == "Ready - no completed tick", "Flow lacks initial live inventory");
+			world->resumeSimulation();
+			REQ(world->advanceTicks(30), "Live telemetry fixture failed to advance");
+			ctx->Yield(20);
+			auto moving = window.flowTelemetry("Transfer", "move");
+			REQ(moving && moving->ports.at("Source") == "2 kg/s", "Flow did not update actual transfer rates");
+			auto observed = world->getStationSystemsSnapshot();
+			ctx->Sleep(0.3f);
+			REQ(world->getStationSystemsSnapshot() == observed && !world->isModified()
+				&& window.draftHistory().undoCount() == 0, "Live rendering advanced or mutated the World/draft");
+			ctx->ComboClick("Place node/Store"); ctx->Yield(2);
+			auto* canvas = flowCanvasWindow("Configuration");
+			ctx->MouseTeleportToPos({canvas->Pos.x + 50, canvas->Pos.y + 400});
+			ctx->Yield(2); ctx->MouseClick(); ctx->Yield(3);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			REQ(window.draft().stores.size() == 3 && !window.flowTelemetry("Store", "a")
+				&& driver.contains("live readouts hidden"), "Draft edits retained misleading live telemetry");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.flowTelemetry("Store", "a").has_value(), "Reverting the draft did not restore live telemetry");
+			world->pauseSimulation(); ctx->Yield(2);
+			REQ(driver.contains("Paused"), "Flow omitted paused simulation state");
+			world->resumeSimulation(); ctx->Yield(2);
+			auto cachedValues = window.flowTelemetry("Store", "a")->values;
+			REQ(world->advanceTicks(30), "Second telemetry fixture advance failed");
+			ctx->Yield(1);
+			REQ(window.flowTelemetry("Store", "a")->values == cachedValues,
+				"Telemetry refresh was not throttled");
+			// Fast Test Engine mode skips Sleep waits; advance UI frames
+			// explicitly to cross the real ImGui-time refresh interval.
+			ctx->Yield(20);
+			REQ(window.flowTelemetry("Store", "a")->values != cachedValues,
+				"Throttled telemetry never refreshed");
+			world->pauseSimulation(); ctx->Yield(2);
+			world->resetSimulation(); ctx->Yield(2);
+			REQ(window.flowTelemetry("Transfer", "move")->ports.empty()
+				&& window.flowTelemetry("Store", "a")->values == initial->values, "Reset left stale live values");
+			auto replacement = std::make_shared<core::World>("Replacement live flow", 2, 2);
+			replacement->pauseSimulation(); replacement->finishBuild();
+			seed.stores[0].id = "new"; seed.transfers.clear();
+			REQ(replacement->configureStationSystems(seed, false), "Replacement station configuration failed");
+			world = replacement; ctx->Yield(2);
+			REQ(!window.flowTelemetry("Store", "a") && window.flowTelemetry("Store", "new"),
+				"World switch reused the previous World's telemetry");
+		});
+		#undef REQ
+		require(driver.passed(), "Live Flow telemetry workflow failed");
 	}
 
 	void flowProjectionChecks()
@@ -7192,6 +7425,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/flowSchedulesWorkflow", flowSchedulesWorkflow});
 	checks.push_back({"station/flowInspectorWorkflow", flowInspectorWorkflow});
 	checks.push_back({"station/flowPowerChainWorkflow", flowPowerChainWorkflow});
+	checks.push_back({"station/flowTelemetryWorkflow", flowTelemetryWorkflow});
 	checks.push_back({"station/flowThermalReservoirWorkflow", flowThermalReservoirWorkflow});
 	checks.push_back({"station/flowRadiatorWorkflow", flowRadiatorWorkflow});
 	checks.push_back({"station/flowCoolantLoopWorkflow", flowCoolantLoopWorkflow});

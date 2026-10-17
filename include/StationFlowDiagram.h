@@ -32,11 +32,26 @@ namespace station_flow
 	};
 	struct Graph { std::vector<Node> nodes; std::vector<Link> links; };
 	Graph build(core::StationSystemsSettings const& draft);
+	enum class TelemetryState { Normal, Idle, Warning, Error };
+	struct NodeTelemetry
+	{
+		std::vector<std::string> values;
+		std::vector<std::string> details;
+		std::string status;
+		TelemetryState state{TelemetryState::Normal};
+		// Actual rates only; a missing value is unknown, never an invented zero.
+		std::map<std::string, std::string> ports;
+	};
+	std::optional<NodeTelemetry> telemetry(Node const& node,
+		core::StationSystemsSnapshot const& snapshot, double tickSeconds,
+		core::StationSystemsSettings const* applied = nullptr);
 	// Null for the drag origin; every other connector is judged by the
 	// same core verdict used when the link is dropped.
 	std::optional<bool> connectorEligibility(core::StationSystemsSettings const& draft,
 		core::StationPinRef const& origin, core::StationPinRef const& target);
-	inline constexpr float NodeWidth = 250, NodeHeight = 76;
+	// Reserve a header and separate, readable columns of port labels.
+	inline constexpr float NodeWidth = 420, NodeHeight = 380;
+	inline constexpr float TelemetryTop = 266, TelemetryLineHeight = 18;
 	// #653: the inspector column beside the canvas keeps a fixed width
 	// whether or not a node is selected, so selecting or deselecting never
 	// resizes the canvas or moves the node under the pointer.
@@ -70,7 +85,12 @@ public:
 		std::function<void(core::StationSystemsSettings&)> const& renderInspector = {},
 		std::function<void()> const& beforeSelectionChange = {},
 		std::function<void()> const& beforeNodeRemoval = {},
-		std::function<void()> const& beforeLayoutChange = {});
+		std::function<void()> const& beforeLayoutChange = {},
+		core::StationSystemsSnapshot const* live = nullptr,
+		bool draftMatchesLive = true, bool paused = false);
+	// Last displayed readout, also used by headless UI checks.
+	std::optional<station_flow::NodeTelemetry> nodeTelemetry(std::string const& type,
+		std::string const& id) const;
 	// Empty when nothing is selected. The index addresses the entry inside the
 	// node type's own draft vector (stores for "Store", transfers for
 	// "Transfer"); shared service nodes carry -1.
@@ -101,6 +121,9 @@ public:
 	bool portButtonScreenRect(std::string const& nodeType, std::string const& nodeId,
 		core::StationPortSet set, bool grow, ImVec4* out) const;
 private:
+	std::map<std::string, station_flow::NodeTelemetry> mTelemetry;
+	uint64_t mTelemetryTick{UINT64_MAX};
+	bool mTelemetryHealthy{true};
 	std::optional<core::StationSystemsSettings> mCached;
 	station_flow::Graph mGraph;
 	std::vector<ImVec2> mPositions;

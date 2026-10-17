@@ -52,10 +52,61 @@ World simulation, or document history.
   the node selection and reframes the
   graph, including after panning it off-screen.
 
-This is a configuration topology, **not live flow rates**, a schedule timeline,
+This remains a configuration topology, not a schedule timeline,
 capacity/admission prediction, or a physical distribution network. Ambient losses
 and implicit process internals are not expanded into individual nodes. Changing
 Worlds starts a fresh diagram and draft; switching/hiding tabs retains the draft.
+
+### Live node readouts
+
+When the Configuration draft matches the applied, enabled Station systems,
+node footers show one metric per line (up to five values), plus a status/limiting
+reason. Supplied/requested quantities have separate lines. **Battery charging**
+means power flowing into batteries; **Battery discharging** means power supplied
+by batteries to the shared electrical pool.
+The heading identifies the applied simulation, elapsed time, and running,
+paused, or failed state. Snapshot polling is capped at four updates per second;
+pause transitions, resets, configuration changes, and World switches refresh
+immediately. Viewing readouts never advances or edits the simulation.
+
+- Stores show qualified inventory/capacity, net flow, and unqualified inventory;
+  batteries show charge, energy, and charge/discharge power.
+- Transfers and conversions show actual throughput; equipment and processing
+  nodes show delivered power/service, production, and shortages or blocking reasons.
+- Generators show phase/output/startup progress, solar arrays available supply,
+  and fuel cells output/reactant draw. Shared electrical and cooling services
+  show supply versus demand and unmet demand.
+- Thermal nodes show temperatures, heat exchange, cooling/circulation, or finite
+  buffer absorption headroom. Atmospheres show temperature, humidity, pressure,
+  and O2/CO2 partial pressures.
+- Crews show supplied/requested food and water and oxygen demand. Biological
+  populations show biomass/capacity, net biomass change (including harvest/loss),
+  power, and limiting conditions; microbial processors also show culture condition.
+- Scheduled nodes show time to the next event, last-event quantities, active
+  outage capacity, or maintenance progress/remaining time.
+
+Port labels include actual rates where the authoritative snapshot provides them.
+Material rates use the simulation tick duration, **not** the display refresh
+interval. Scheduled transfers are labelled **last event**, not treated as steady
+flow. Non-zero magnitudes below `0.001` in the displayed unit read **trace**
+(**-trace** for negative values); exact zero remains `0`. This also applies to
+percentages and inspector details, without changing simulation values or warnings.
+Unknown rates are omitted; solar output is explicitly available generation,
+not a fabricated per-array allocation. Power ports remain automatically connected
+to the shared electrical pool, not user-wirable references.
+
+Status text is grey for idle/disabled, green for normal operation, amber for
+limitations, and red for failed/unsafe conditions; numerical fluctuations alone
+do not change node colours. Hover a node or expand **Applied simulation readout**
+in its inspector for untruncated values and port rates. Available endurance
+estimates are labelled **at current net rate (not a forecast)**.
+
+**Unapplied draft changes hide all live readouts**, rather than attaching applied
+values to edited or newly placed nodes. Apply in Station Systems, or revert the
+draft, to restore them. Disabled systems show no live rates. Before the first
+completed tick the footer says Ready and omits port rates; failed systems mark
+values as the last committed state. Readouts and their refresh cache are never
+saved in configuration documents or undo history.
 
 ### Water and gas authoring (#649)
 

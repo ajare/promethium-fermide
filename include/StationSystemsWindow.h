@@ -41,6 +41,8 @@ public:
 	{
 		return mFlow.nodeScreenRect(nodeType, nodeId, out);
 	}
+	std::optional<station_flow::NodeTelemetry> flowTelemetry(std::string const& type,
+		std::string const& id) const { return mFlow.nodeTelemetry(type, id); }
 	std::string const& flowLinkRejection() const { return mFlow.linkRejection(); }
 	std::string const& flowNotice() const { return mFlow.notice(); }
 	bool flowPortButtonRect(std::string const& nodeType, std::string const& nodeId,
@@ -74,6 +76,10 @@ private:
 	std::optional<DocumentSnapshot> mPendingDraftEdit;
 	bool mPendingLayoutEdit{false};
 	StationFlowDiagram mFlow;
+	std::optional<core::StationSystemsSnapshot> mFlowSnapshot;
+	core::StationSystemsSettings mFlowApplied;
+	double mFlowRefreshTime{-1.0};
+	bool mFlowWasPaused{true};
 	std::weak_ptr<void const> mWorld;
 	core::StationSystemsSettings mDraft;
 	std::string mDiagnostic;

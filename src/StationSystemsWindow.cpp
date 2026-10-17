@@ -89,6 +89,7 @@ bool StationSystemsWindow::syncWorld(std::shared_ptr<core::World> const& world)
 	if (!world)
 	{
 		mWorld.reset(); mConfirmReset = false; mPendingActivation.reset();
+		mFlowSnapshot.reset();
 		mPendingLayoutEdit = false;
 		mFlow.reset(); mDraftHistory.clear(); mPendingDraftEdit.reset();
 		ImGui::TextDisabled("No World is open."); return false;
@@ -96,6 +97,7 @@ bool StationSystemsWindow::syncWorld(std::shared_ptr<core::World> const& world)
 	if (mWorld.lock() != world->getLifetimeToken().lock())
 	{
 		mWorld = world->getLifetimeToken(); mDraft = world->getStationSystemsSettings();
+		mFlowSnapshot.reset();
 		mPendingLayoutEdit = false;
 		mDiagnostic.clear(); mConfirmReset = false; mPendingActivation.reset();
 		mFlow.reset(); mDraftHistory.clear(); mPendingDraftEdit.reset();
@@ -240,6 +242,20 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 	if (!syncWorld(world)) return;
 	renderFileToolbar();
 	renderDraftHistory();
+	bool const paused = world->isSimulationPaused();
+	auto const& applied = world->getStationSystemsSettings();
+	double const now = ImGui::GetTime();
+	// Poll the authoritative snapshot at 4 Hz. Reset, configuration changes,
+	// and pausing bypass the throttle so old-run values cannot linger.
+	if (!mFlowSnapshot || now < mFlowRefreshTime || now - mFlowRefreshTime >= 0.25
+		|| applied != mFlowApplied || paused != mFlowWasPaused
+		|| world->getSimulationTick() < mFlowSnapshot->worldTick)
+	{
+		mFlowSnapshot = world->getStationSystemsSnapshot();
+		mFlowApplied = applied;
+		mFlowRefreshTime = now;
+		mFlowWasPaused = paused;
+	}
 	mFlow.render(mDraft, [this](core::StationSystemsSettings& draft) {
 		renderFlowInspectorContents(draft);
 	}, [this] { commitDraftChanges(true); }, [this] {
@@ -250,7 +266,7 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 		commitDraftChanges(true);
 		mPendingDraftEdit = captureDraft();
 		mPendingLayoutEdit = true;
-	});
+	}, &*mFlowSnapshot, mDraft == applied, paused);
 	// Placement is one action, including on the mouse-down frame. An
 	// inspector field edit is not: while a field is still being edited the
 	// pending snapshot stays open, so typing "1250" is one commit at field
