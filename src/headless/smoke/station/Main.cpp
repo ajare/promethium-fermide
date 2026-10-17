@@ -6,6 +6,7 @@
 #include "Stability.h"
 #include "core/World.h"
 #include "core/StationPorts.h"
+#include "core/StationConfigurationDocument.h"
 #include "core/StationSystems.h"
 #include "core/AgentTagRegistryDocument.h"
 #include "core/YamlSerializer.h"
@@ -1218,6 +1219,95 @@ namespace
 		}
 	}
 
+
+	// #661: the five independently-authored thermal node types form one
+	// connection matrix.  Exercise each legal connector in both directions,
+	// link-local semantic refusals, authored-link projection, and the standalone
+	// configuration document rather than a World persistence round trip.
+	void completeThermalChain(smoke::Context const&)
+	{
+		auto reservoir = [](char const* id) { core::ThermalReservoirSettings r; r.id = id;
+			r.thermalClass = "moderate"; r.heatCapacityKJPerK = 100.0; return r; };
+		auto loop = [](char const* id, char const* host) { core::CoolantLoopSettings l; l.id = id;
+			l.reservoirId = host; l.hazardClass = "normal"; l.coolantCapacityKg = 100.0;
+			l.startingCoolantKg = 100.0; l.specificHeatKJPerKgK = 4.0; l.ratedFlowKgPerS = 1.0; return l; };
+		auto pin = [](char const* type, char const* id, char const* port)
+			{ return core::StationPinRef{type, id, port}; };
+		auto link = [](core::StationPinRef from, core::StationPinRef to)
+			{ return core::CandidateLink{std::move(from), std::move(to)}; };
+		auto base = [&] {
+			core::StationSystemsSettings s; s.enabled = true;
+			s.thermalReservoirs = {reservoir("cold"), reservoir("hot"), reservoir("other")};
+			s.thermalReservoirs.back().thermalClass = "low";
+			s.coolantLoops = {loop("loop", "cold"), loop("otherLoop", "other")};
+			core::RadiatorSettings radiator; radiator.id = "radiator"; radiator.reservoirId = "hot";
+			radiator.areaM2 = 10.0; radiator.emissivity = .9; radiator.viewFactor = 1.0; radiator.sinkTemperatureC = -270.0;
+			s.radiators = {radiator};
+			core::ChillerSettings chiller; chiller.id = "chiller"; chiller.thermalClass = "moderate";
+			chiller.coldLoopId = "loop"; chiller.condenserReservoirId = "hot"; chiller.cop = 3.0;
+			s.chillers = {chiller};
+			core::ThermalBufferSettings buffer; buffer.id = "buffer"; buffer.reservoirId = "cold";
+			buffer.circulationLoopId = "loop"; buffer.accessMode = "circulation"; buffer.capacityKJ = 1000.0;
+			buffer.maxChargeKW = buffer.maxDischargeKW = 10.0; buffer.maxUsableTemperatureC = 100.0;
+			buffer.transferConductanceKWPerK = 1.0; s.thermalBuffers = {buffer}; return s; };
+		auto allowed = [&](core::StationSystemsSettings const& s, core::CandidateLink const& candidate) {
+			auto const verdict = core::evaluateStationLink(s, candidate);
+			require(verdict.allowed, ("legal thermal connector refused: " + verdict.reason).c_str()); };
+		auto refused = [&](core::StationSystemsSettings const& s, core::CandidateLink const& candidate, char const* reason) {
+			auto const verdict = core::evaluateStationLink(s, candidate);
+			require(!verdict.allowed && verdict.reason.find(reason) != std::string::npos,
+				("thermal refusal did not preserve validator reason: " + verdict.reason).c_str()); };
+		auto s = base();
+		// Every legal pair accepts either drag orientation, including cardinality
+		// owners that are already populated only after their link is cleared.
+		s.thermalBuffers[0].reservoirId.clear(); s.thermalBuffers[0].circulationLoopId.clear();
+		s.chillers[0].coldLoopId.clear(); s.chillers[0].condenserReservoirId.clear();
+		s.coolantLoops[0].reservoirId.clear(); s.coolantLoops[1].reservoirId.clear(); s.radiators[0].reservoirId.clear();
+		auto const legal = std::vector<core::CandidateLink>{
+			link(pin("Reservoir", "hot", "Hosted radiators"), pin("Radiator", "radiator", "Host reservoir")),
+			link(pin("Coolant loop", "loop", "Heat exchanger"), pin("Reservoir", "cold", "Heat in")),
+			link(pin("Coolant loop", "loop", "Cold interface"), pin("Chiller", "chiller", "Cold loop")),
+			link(pin("Chiller", "chiller", "Condenser heat"), pin("Reservoir", "hot", "Heat in")),
+			link(pin("Reservoir", "cold", "Hosted buffers"), pin("Thermal buffer", "buffer", "Host reservoir")),
+			link(pin("Coolant loop", "loop", "Buffer gates"), pin("Thermal buffer", "buffer", "Circulation gate"))};
+		for (auto const& candidate : legal)
+		{
+			allowed(s, candidate); allowed(s, link(candidate.to, candidate.from));
+		}
+		for (auto const& candidate : legal)
+			require(core::applyStationLink(s, candidate), "legal thermal connector did not write its reference");
+		// Structural pairs do not silently become links, and semantic checks are
+		// not masked by the intentionally incomplete unrelated references.
+		refused(s, link(pin("Radiator", "radiator", "Host reservoir"), pin("Coolant loop", "loop", "Heat exchanger")), "cannot join");
+		auto before = s;
+		refused(s, link(pin("Coolant loop", "otherLoop", "Cold interface"), pin("Chiller", "chiller", "Cold loop")), "already joins");
+		require(s == before, "refused cardinality link mutated the thermal draft");
+		auto duplicateLoop = s; duplicateLoop.chillers.push_back(duplicateLoop.chillers[0]); duplicateLoop.chillers.back().id = "second";
+		duplicateLoop.chillers.back().coldLoopId.clear();
+		refused(duplicateLoop, link(pin("Coolant loop", "loop", "Cold interface"), pin("Chiller", "second", "Cold loop")), "one evaporator serves one chiller");
+		auto wrongHost = s; wrongHost.coolantLoops[0].reservoirId.clear();
+		refused(wrongHost, link(pin("Coolant loop", "loop", "Heat exchanger"), pin("Reservoir", "other", "Heat in")), "class-matched");
+		auto sameHost = s; sameHost.chillers[0].condenserReservoirId.clear();
+		refused(sameHost, link(pin("Chiller", "chiller", "Condenser heat"), pin("Reservoir", "cold", "Heat in")), "that is a heater");
+		auto wrongGate = s; wrongGate.thermalBuffers[0].circulationLoopId.clear();
+		wrongGate.coolantLoops[1].reservoirId = "other";
+		refused(wrongGate, link(pin("Coolant loop", "otherLoop", "Buffer gates"), pin("Thermal buffer", "buffer", "Circulation gate")), "not the buffer's host reservoir");
+		// Only explicit authored references project; derived cooling services are
+		// inert and never become a serialised or offered connector.
+		auto const links = core::stationAuthoredLinks(s);
+		require(links.size() == 6 && std::none_of(links.begin(), links.end(), [](auto const& entry)
+			{ return entry.from.nodeType == "Cooling service" || entry.to.nodeType == "Cooling service"; }),
+			"thermal projection lost an authored link or serialised an implicit service edge");
+		core::StationConfigurationDocument document; document.settings = s;
+		document.positions = {{"Chiller:chiller", {12, 24}}, {"Thermal buffer:buffer", {48, 96}}};
+		document.panX = 7; document.panY = -3; document.zoom = .9f;
+		core::StationConfigurationDocument reopened; std::string diagnostic;
+		require(core::parseStationConfiguration(core::serializeStationConfiguration(document), reopened, &diagnostic), diagnostic.c_str());
+		require(reopened.settings == s && reopened.positions == document.positions && reopened.panX == 7
+			&& reopened.panY == -3 && reopened.zoom == .9f
+			&& core::stationAuthoredLinks(reopened.settings) == links,
+			"standalone thermal configuration did not preserve settings, layout, view or links");
+	}
 
 	// #660: Thermal buffers are authored through one fixed host connector and
 	// one optional circulation gate.  The seam retains the validator's host
@@ -25814,7 +25904,7 @@ void recovery(smoke::Context const& context)
 
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"thermalBufferSeam", thermalBufferSeam}, {"powerChainSeam", powerChainSeam}, {"thermalReservoirSeam", thermalReservoirSeam}, {"radiatorSeam", radiatorSeam}, {"coolantLoopSeam", coolantLoopSeam}, {"chillerSeam", chillerSeam}, {"compounds", compounds}, {"power", power},
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"completeThermalChain", completeThermalChain}, {"thermalBufferSeam", thermalBufferSeam}, {"powerChainSeam", powerChainSeam}, {"thermalReservoirSeam", thermalReservoirSeam}, {"radiatorSeam", radiatorSeam}, {"coolantLoopSeam", coolantLoopSeam}, {"chillerSeam", chillerSeam}, {"compounds", compounds}, {"power", power},
 		// Split out of the former `batteries` check: the hour-scale legs are
 		// independent worlds, so each is its own test and they run in parallel
 		// instead of as one ~182s serial chain.
