@@ -1186,6 +1186,21 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			draft.stores.push_back(std::move(store));
 			mFitRequested = false;
 		}
+		else if (mPlacingType == "Transfer" && draft.transfers.size() < core::MaxStationResourceTransfers)
+		{
+			core::ResourceTransferSettings transfer;
+			transfer.unit = "kg";
+			transfer.ratePerSecond = 1.0;
+			for (size_t candidate = 1;; ++candidate)
+			{
+				transfer.id = "transfer" + std::to_string(candidate);
+				if (std::none_of(draft.transfers.begin(), draft.transfers.end(),
+					[&](auto const& entry) { return entry.id == transfer.id; })) break;
+			}
+			mLayout["Transfer:" + transfer.id + ":0"] = placeAt;
+			draft.transfers.push_back(std::move(transfer));
+			mFitRequested = false;
+		}
 		else if (mPlacingType == "Conversion" && draft.conversions.size() < core::MaxStationResourceConversions)
 		{
 			// A placed conversion arrives at the floor of its growable sets:
@@ -1800,6 +1815,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	if (!mPlacingType.empty() && canvasHovered)
 	{
 		bool const atLimit = (mPlacingType == "Store" && draft.stores.size() >= core::MaxStationResourceStores)
+			|| (mPlacingType == "Transfer" && draft.transfers.size() >= core::MaxStationResourceTransfers)
 			|| (mPlacingType == "Conversion" && draft.conversions.size() >= core::MaxStationResourceConversions)
 			|| (mPlacingType == "Solar" && draft.solarArrays.size() >= core::MaxStationSolarArrays)
 			|| (mPlacingType == "Equipment" && draft.equipmentLoads.size() >= core::MaxStationEquipmentLoads)

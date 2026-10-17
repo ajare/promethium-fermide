@@ -438,6 +438,7 @@ namespace core
 	{
 		static constexpr std::array placeable{
 			StationPlaceableType{"Store", "store", "Resources"},
+			StationPlaceableType{"Transfer", "transfer", "Resources"},
 			StationPlaceableType{"Conversion", "conversion", "Resources"},
 			StationPlaceableType{"Solar", "solar", "Power"},
 			StationPlaceableType{"Equipment", "load", "Power"},

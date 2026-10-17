@@ -266,6 +266,7 @@ set(editor_names
     station/configurationDocument
     station/removalWorkflow
     station/storeWorkflow
+    station/flowTransferPlacementWorkflow
     station/flowLinkWorkflow
     station/flowCascadeDeleteWorkflow
     station/flowGrowablePortsWorkflow

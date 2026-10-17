@@ -123,6 +123,115 @@ namespace
 		require(driver.passed(), "Flow placement workflow failed on the Test Engine");
 	}
 
+	// #665: Transfer must be authorable from an empty Flow configuration.
+	void flowTransferPlacementWorkflow(smoke::Context const& smokeContext)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		StationSystemsWindow window;
+		auto const path = smokeContext.temporaryRoot() / "transfer-placement.station.yaml";
+		window.setFilePicker([&](bool) -> std::optional<std::string> { return path.string(); });
+		auto world = std::make_shared<core::World>("Transfer placement", 2, 2);
+		world->pauseSimulation(); world->finishBuild(); world->markSaved();
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "flowTransferPlacement", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			auto place = [&](float x, float y) {
+				auto* canvas = flowCanvasWindow("Configuration");
+				ctx->MouseTeleportToPos({canvas->Pos.x + x, canvas->Pos.y + y});
+				ctx->Yield(2); ctx->MouseClick(); ctx->Yield(3);
+			};
+			ctx->ComboClick("Place node/Transfer"); ctx->Yield(2);
+			REQ(driver.contains("Transfer placement armed"), "Transfer is missing from the placement menu");
+			auto* canvas = flowCanvasWindow("Configuration");
+			ctx->MouseTeleportToPos({canvas->Pos.x + 300, canvas->Pos.y + 180}); ctx->Yield(3);
+			bool previewDrawn = false;
+			for (auto const& vertex : canvas->DrawList->VtxBuffer)
+				if (vertex.col == IM_COL32(80, 130, 170, 100)) previewDrawn = true;
+			REQ(previewDrawn && window.draft().transfers.empty() && window.draftHistory().undoCount() == 0,
+				"Transfer ghost preview is missing or mutated the draft before placement");
+			place(300, 180); place(300, 360);
+			REQ(window.draft().transfers.size() == 2 && window.draftHistory().undoCount() == 2,
+				"persistent Transfer placement did not commit once per click");
+			auto const first = window.draft().transfers[0];
+			REQ(first.id == "transfer1" && window.draft().transfers[1].id == "transfer2"
+				&& first.sourceId.empty() && first.destinationId.empty() && first.unit == "kg"
+				&& first.ratePerSecond == 1.0 && first.priority == 0,
+				"Transfer placement did not generate unique IDs and sensible unwired defaults");
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().transfers.empty() && window.draftHistory().undoCount() == 0,
+				"placement undo did not remove each Transfer independently");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().transfers.size() == 1 && window.draft().transfers[0] == first,
+				"redo did not restore the placed Transfer");
+			ctx->ComboClick("Place node/Store"); ctx->Yield(2);
+			place(40, 100); place(480, 300);
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			auto drag = [&](char const* fromType, char const* fromId, char const* fromPort,
+				char const* toType, char const* toId, char const* toPort) {
+				ImVec2 a{}, b{};
+				if (!window.flowPinPosition(fromType, fromId, fromPort, &a)
+					|| !window.flowPinPosition(toType, toId, toPort, &b)) return false;
+				auto* canvas = flowCanvasWindow("Configuration");
+				if (!driver.require(canvas->InnerClipRect.Contains(a) && canvas->InnerClipRect.Contains(b),
+					("connectors outside canvas: " + std::to_string(a.x) + "," + std::to_string(a.y)
+						+ " -> " + std::to_string(b.x) + "," + std::to_string(b.y)).c_str())) return false;
+				ctx->MouseTeleportToPos(a); ctx->Yield(3);
+				ctx->MouseTeleportToPos(a); ctx->Yield(2); ctx->MouseDown(); ctx->Yield(3);
+				ctx->MouseTeleportToPos({(a.x + b.x) * .5f, (a.y + b.y) * .5f}); ctx->Yield(2);
+				ctx->MouseTeleportToPos(b); ctx->Yield(2);
+				if (window.flowPinPosition(toType, toId, toPort, &b))
+				{ ctx->MouseTeleportToPos(b); ctx->Yield(3); }
+				ctx->MouseUp(); ctx->Yield(3);
+				return true;
+			};
+			REQ(drag("Store", "store1", "Inventory out", "Transfer", "transfer1", "Source"),
+				"source connectors missing");
+			REQ(window.draft().transfers[0].sourceId == "store1",
+				("source link failed: " + window.flowLinkRejection()).c_str());
+			REQ(drag("Transfer", "transfer1", "Destination", "Store", "store2", "Inventory in"),
+				"destination connectors missing");
+			REQ(window.draft().transfers[0].sourceId == "store1"
+				&& window.draft().transfers[0].destinationId == "store2"
+				&& window.draftHistory().undoCount() == 5,
+				("Transfer wiring failed or committed extra history: source=" + window.draft().transfers[0].sourceId
+					+ " destination=" + window.draft().transfers[0].destinationId
+					+ " history=" + std::to_string(window.draftHistory().undoCount())
+					+ " rejection=" + window.flowLinkRejection()).c_str());
+			auto const wired = window.draft();
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().transfers[0].destinationId.empty(), "undo did not remove destination link");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft() == wired, "redo did not restore Transfer wiring");
+			driver.click(ctx, "Save configuration"); ctx->Yield(3);
+			REQ(std::filesystem::exists(path) && !window.flowModified(), "wired Transfer failed to save");
+			driver.click(ctx, "New configuration"); ctx->Yield(3);
+			REQ(window.draft().transfers.empty(), "New did not clear Transfer draft");
+			driver.click(ctx, "Open configuration"); ctx->Yield(3);
+			REQ(window.draft() == wired, "configuration round trip lost placed Transfer or its links");
+			ImVec4 rect{};
+			REQ(window.flowNodeRect("Transfer", "transfer1", &rect), "loaded Transfer is absent from canvas");
+			ctx->ComboClick("Place node/Transfer"); ctx->Yield(2);
+			ctx->MouseClick(ImGuiMouseButton_Right); ctx->Yield(2);
+			place(300, 360);
+			REQ(window.draft() == wired && !driver.contains("Transfer placement armed"),
+				"right-click did not cancel Transfer placement");
+			REQ(world->getStationSystemsSettings().transfers.empty() && !world->isModified(),
+				"Transfer authoring mutated the World");
+		});
+		#undef REQ
+		require(driver.passed(), "Transfer placement workflow failed");
+	}
+
 	// #640: wiring the Flow canvas. The real controls are driven — a
 	// connector is dragged onto another, the inspector's disconnect is
 	// clicked, a hovered link is deleted — and every assertion is about the
@@ -6586,6 +6695,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/configurationDocument", configurationDocumentWorkflow});
 	checks.push_back({"station/removalWorkflow", removalWorkflow});
 	checks.push_back({"station/storeWorkflow", storeWorkflow});
+	checks.push_back({"station/flowTransferPlacementWorkflow", flowTransferPlacementWorkflow});
 	checks.push_back({"station/flowLinkWorkflow", flowLinkWorkflow});
 	checks.push_back({"station/flowCascadeDeleteWorkflow", flowCascadeDeleteWorkflow});
 	checks.push_back({"station/flowGrowablePortsWorkflow", flowGrowablePortsWorkflow});
