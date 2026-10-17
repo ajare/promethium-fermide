@@ -866,7 +866,11 @@ namespace
 				driver.click(ctx, (std::string("**/") + probe.label).c_str()); ctx->Yield(2);
 				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A); ctx->KeyChars("renamed");
 				ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
-				REQ(window.draftHistory().undoCount() == 2, "water/gas inspector edit did not commit once");
+				REQ(window.draftHistory().undoCount() == 1, "raw water/gas identity remained writable");
+				driver.click(ctx, "**/New node name"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+				ctx->KeyChars("renamed"); ctx->Yield(2);
+				driver.click(ctx, "**/Rename selected node"); ctx->Yield(3);
+				REQ(window.draftHistory().undoCount() == 2, "water/gas rename did not commit once");
 				REQ(window.flowNodeRect(probe.type, "renamed", &rect), "inspector did not rename selected water/gas entry");
 				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
 				REQ(window.flowNodeRect(probe.type, probe.id, &rect), "undo did not restore water/gas identity");
@@ -945,7 +949,11 @@ namespace
 				driver.click(ctx, (std::string("**/") + probe.label).c_str()); ctx->Yield(2);
 				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A); ctx->KeyChars("renamed");
 				ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
-				REQ(window.draftHistory().undoCount() == 2, "biology inspector edit did not commit once");
+				REQ(window.draftHistory().undoCount() == 1, "raw biology identity remained writable");
+				driver.click(ctx, "**/New node name"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+				ctx->KeyChars("renamed"); ctx->Yield(2);
+				driver.click(ctx, "**/Rename selected node"); ctx->Yield(3);
+				REQ(window.draftHistory().undoCount() == 2, "biology rename did not commit once");
 				REQ(window.flowNodeRect(probe.type, "renamed", &rect), "inspector did not rename selected biology entry");
 				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
 				REQ(window.flowNodeRect(probe.type, probe.id, &rect), "undo did not restore biology identity");
@@ -1014,7 +1022,11 @@ namespace
 				driver.click(ctx, (std::string("**/") + probe.label).c_str()); ctx->Yield(2);
 				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A); ctx->KeyChars("renamed");
 				ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
-				REQ(window.draftHistory().undoCount() == 2, "scheduled inspector edit did not commit once");
+				REQ(window.draftHistory().undoCount() == 1, "raw schedule identity remained writable");
+				driver.click(ctx, "**/New node name"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+				ctx->KeyChars("renamed"); ctx->Yield(2);
+				driver.click(ctx, "**/Rename selected node"); ctx->Yield(3);
+				REQ(window.draftHistory().undoCount() == 2, "scheduled rename did not commit once");
 				REQ(window.flowNodeRect(probe.type, "renamed", &rect), "inspector did not rename selected scheduled entry");
 				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
 				REQ(window.flowNodeRect(probe.type, probe.id, &rect), "undo did not restore scheduled identity");
@@ -1327,6 +1339,33 @@ namespace
 			auto const idleCanvas = canvasRect();
 			REQ(driver.contains("Nothing selected."),
 				"the inspector column is not there, empty, before a selection");
+			// #664: raw identity fields must not bypass cascade rename.
+			auto refuseRawIdEdit = [&](char const* field) {
+				auto const before = window.draft();
+				auto const undo = window.draftHistory().undoCount();
+				driver.click(ctx, field);
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+				ctx->KeyChars("unsafe"); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+				ctx->MouseTeleportToPos({40, 40}); ctx->Yield(2);
+				return window.draft() == before && window.draftHistory().undoCount() == undo;
+			};
+			ImVec4 tankRect{};
+			REQ(window.flowNodeRect("Store", "tank", &tankRect), "referenced Store missing");
+			ctx->MouseTeleportToPos({(tankRect.x + tankRect.z) * 0.5f,
+				(tankRect.y + tankRect.w) * 0.5f});
+			ctx->MouseClick(); ctx->Yield(3);
+			REQ(refuseRawIdEdit("**/Store 0 id"), "raw Store ID edit bypassed cascade rename");
+			REQ(window.draft().transfers[0].sourceId == "tank"
+				&& driver.contains("Node: Store 'tank'"), "raw ID edit lost references or selection");
+			for (auto const* invalid : {"", "sink"})
+			{
+				driver.click(ctx, "**/New node name"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+				ctx->KeyPress(ImGuiKey_Backspace); ctx->KeyChars(invalid);
+				ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(2);
+				REQ(driver.contains("Rename unavailable:") && window.draft().stores[0].id == "tank"
+					&& window.draft().transfers[0].sourceId == "tank"
+					&& window.draftHistory().undoCount() == 1, "invalid rename changed draft or history");
+			}
 			// --- Selecting a Store renders its shared editor.
 			ImVec4 storeRect{};
 			REQ(window.flowNodeRect("Store", "store1", &storeRect), "the store node is not on screen");
@@ -1400,6 +1439,8 @@ namespace
 				"selection switch lost or duplicated the pending store edit");
 			flow = false; ctx->Yield(3);
 			REQ(driver.contains("Store 2 capacity"), "form did not show the inspector's store");
+			REQ(refuseRawIdEdit("**/Store 0 id"), "form raw Store ID remained writable");
+			REQ(refuseRawIdEdit("**/Battery 0 id"), "form raw installation ID remained writable");
 			ctx->ItemClick("Undo configuration"); ctx->Yield(3);
 			REQ(window.draft().stores.at(2).capacity == 100.0
 				&& window.draftHistory().undoCount() == 1,
@@ -1463,6 +1504,9 @@ namespace
 			ctx->MouseClick(); ctx->Yield(3);
 			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->Yield(2);
 			REQ(driver.contains("Node: Reservoir 'res1'"), "reservoir selection not named");
+			REQ(refuseRawIdEdit("**/Reservoir 0 id"), "raw installation ID edit bypassed cascade rename");
+			REQ(window.draft().thermalBuffers[0].reservoirId == "res1"
+				&& driver.contains("Node: Reservoir 'res1'"), "installation ID edit lost references or selection");
 			// The heat-capacity label carries a slash ("kJ/K"), which the
 			// test-engine ref parser reads as a path separator; assert on
 			// the slash-free fields instead and the capacity by text.
@@ -1470,6 +1514,22 @@ namespace
 				"reservoir shared editor capacity label missing");
 			REQ(ctx->ItemInfo("**/Reservoir 0 thermal class", ImGuiTestOpFlags_NoError)->ID != 0,
 				"reservoir shared editor field missing");
+			// The sole rename path confirms and updates installation references too.
+			auto const beforeRename = window.draft();
+			auto const undoBeforeRename = window.draftHistory().undoCount();
+			driver.click(ctx, "**/New node name"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+			ctx->KeyChars("renamed-reservoir"); ctx->Yield(2);
+			driver.click(ctx, "**/Rename selected node"); ctx->Yield(3);
+			REQ(driver.contains("Rename this node? 1 links will be updated")
+				&& window.draft() == beforeRename, "installation rename bypassed confirmation");
+			driver.click(ctx, "**/Confirm node rename"); ctx->Yield(3);
+			REQ(window.draft().thermalReservoirs[0].id == "renamed-reservoir"
+				&& window.draft().thermalBuffers[0].reservoirId == "renamed-reservoir"
+				&& driver.contains("Node: Reservoir 'renamed-reservoir'")
+				&& window.draftHistory().undoCount() == undoBeforeRename + 1,
+				"installation rename lost its reference, selection, or atomic history");
+			ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+			REQ(window.draft() == beforeRename, "undo did not restore installation rename atomically");
 			// --- Thermal buffers now use the shared entry editor (#660).
 			ImVec4 bufferRect{};
 			REQ(window.flowNodeRect("Thermal buffer", "buf1", &bufferRect),
@@ -3037,6 +3097,7 @@ namespace
 				&& driver.contains("Active World: Tabbed station"), "Station tab did not open");
 			ctx->SetRef(ImGui::FindWindowByName("View")->DC.ChildWindows.back());
 			ctx->ItemClick("Add store");
+			ctx->MouseTeleportToPos({40,40});
 			ctx->Sleep(1);
 			REQ(driver.contains("Draft differs from the authored start conditions"), "Draft edit missing");
 			ctx->SetRef("View");
@@ -3520,6 +3581,7 @@ namespace
 				&& history.undoCount() == 2, "Recovery composition edit did not apply");
 			// Author the harvest conversion through the real controls.
 			ctx->ItemClick("Add conversion");
+			// #664: the generated identity is read-only on the form surface.
 			ctx->ItemInputValue("Conversion 0 id", "harvest");
 			ctx->ItemInputValue("Conversion 0 input 0 store", "food");
 			ctx->ItemInputValue("Conversion 0 input 0 rate", "60");
@@ -3530,7 +3592,7 @@ namespace
 			ctx->ItemInputValue("Conversion 0 output 1 yield", "24");
 			ctx->ItemClick("Apply settings");
 			REQ(world->getStationSystemsSettings().conversions.size() == 1
-				&& world->getStationSystemsSettings().conversions[0].id == "harvest"
+				&& world->getStationSystemsSettings().conversions[0].id == "conversion1"
 				&& world->getStationSystemsSettings().conversions[0].outputs.size() == 2
 				&& history.undoCount() == 3, "Authored conversion did not apply");
 			// A yield that would create nutrient nitrogen is refused before the
@@ -3554,7 +3616,7 @@ namespace
 			world->resumeSimulation();
 			REQ(world->advanceTicks(30), "Compound editor run failed");
 			ctx->Sleep(1);
-			REQ(driver.contains("harvest: full (scale 1.000, priority 0)")
+			REQ(driver.contains("conversion1: full (scale 1.000, priority 0)")
 				&& driver.contains("consumes food (kg): requested 1.000, completed 1.000")
 				&& driver.contains("produces waste (kg): requested 0.400, completed 0.400"),
 				"Live conversion status not displayed");
@@ -3569,12 +3631,12 @@ namespace
 			world->resumeSimulation();
 			REQ(world->advanceTicks(5), "Blocked run failed");
 			ctx->Sleep(1);
-			REQ(driver.contains("harvest: rejected (scale 0.000, priority 0)")
+			REQ(driver.contains("conversion1: rejected (scale 0.000, priority 0)")
 				&& driver.contains("consumes food (kg): requested 1.000, completed 0.000"),
 				"Conversion refusal not displayed");
 			bool sawRefusalReason = false;
 			for (auto const& event : world->getStationSystemsEvents())
-				if (event.message.find("Conversion 'harvest' rejected: output store 'biomass' headroom limits throughput")
+				if (event.message.find("Conversion 'conversion1' rejected: output store 'biomass' headroom limits throughput")
 					!= std::string::npos) sawRefusalReason = true;
 			REQ(sawRefusalReason, "Conversion refusal reason missing from the event log");
 			for (auto const& entry : world->getStationSystemsSnapshot().constituentBalances)

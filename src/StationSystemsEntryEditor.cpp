@@ -8,16 +8,27 @@
 
 namespace station_editor
 {
+namespace
+{
+// Identity changes must use Flow's preflight/confirmation/atomic cascade.
+// Shared by the inspector and forms so neither can write a dangling ID.
+void renderIdentity(std::string const& label, std::string const& id)
+{
+	char buffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(buffer, id.c_str(), sizeof(buffer) - 1);
+	ImGui::InputText((label + " id").c_str(), buffer, sizeof(buffer), ImGuiInputTextFlags_ReadOnly);
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("To rename, select this node in Flow and use 'New node name' / 'Rename selected node'.");
+}
+}
+
 bool renderConversionEntry([[maybe_unused]] core::StationSystemsSettings& draft, core::ResourceConversionSettings& conversion,
 	std::string const& label, std::string const& removeLabel)
 {
 	bool removeConversion = false;
 	auto const row = label.substr(label.find_last_of(' ') + 1);
 	ImGui::PushItemWidth(220);
-	char conversionIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(conversionIdBuffer, conversion.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(), conversionIdBuffer, sizeof(conversionIdBuffer)))
-		conversion.id = conversionIdBuffer;
+	renderIdentity(label, conversion.id);
 	ImGui::InputInt((label + " priority").c_str(), &conversion.priority);
 	ImGui::SameLine();
 	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
@@ -72,10 +83,7 @@ bool renderSolarEntry([[maybe_unused]] core::StationSystemsSettings& draft, core
 	bool removeArray = false;
 	auto const row = label.substr(label.find_last_of(' ') + 1);
 	ImGui::PushItemWidth(220);
-	char solarIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(solarIdBuffer, array.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(), solarIdBuffer, sizeof(solarIdBuffer)))
-		array.id = solarIdBuffer;
+	renderIdentity(label, array.id);
 	ImGui::InputDouble((label + " capacity kW").c_str(), &array.capacityKW, 0.0, 0.0, "%.3f");
 	bool solarPeriodic = array.illumination.periodSeconds > 0.0;
 	if (ImGui::Checkbox((label + " periodic illumination").c_str(), &solarPeriodic))
@@ -136,10 +144,7 @@ bool renderCrewEntry([[maybe_unused]] core::StationSystemsSettings& draft, core:
 {
 	bool removeCrew = false;
 	ImGui::PushItemWidth(220);
-	char crewIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(crewIdBuffer, crew.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(), crewIdBuffer, sizeof(crewIdBuffer)))
-		crew.id = crewIdBuffer;
+	renderIdentity(label, crew.id);
 	char crewAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(crewAtmosphereBuffer, crew.atmosphereId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " atmosphere").c_str(),
@@ -232,11 +237,7 @@ bool renderMicrobialProcessorEntry([[maybe_unused]] core::StationSystemsSettings
 	std::string const& label, std::string const& removeLabel)
 {
 	bool removeProcessor = false;
-	char processorIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(processorIdBuffer, processor.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(),
-		processorIdBuffer, sizeof(processorIdBuffer)))
-		processor.id = processorIdBuffer;
+	renderIdentity(label, processor.id);
 	char processorHazardBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorHazardBuffer, processor.hazardClass.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " hazard class").c_str(),
@@ -353,10 +354,7 @@ bool renderCropPopulationEntry([[maybe_unused]] core::StationSystemsSettings& dr
 {
 	bool removeCrop = false;
 	ImGui::PushItemWidth(220);
-	char cropIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(cropIdBuffer, crop.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(), cropIdBuffer, sizeof(cropIdBuffer)))
-		crop.id = cropIdBuffer;
+	renderIdentity(label, crop.id);
 	char cropAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cropAtmosphereBuffer, crop.atmosphereId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " atmosphere").c_str(),
@@ -496,10 +494,7 @@ bool renderAlgaeCultureEntry([[maybe_unused]] core::StationSystemsSettings& draf
 {
 	bool removeAlgae = false;
 	ImGui::PushItemWidth(220);
-	char algaeIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(algaeIdBuffer, algae.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(), algaeIdBuffer, sizeof(algaeIdBuffer)))
-		algae.id = algaeIdBuffer;
+	renderIdentity(label, algae.id);
 	char algaeAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(algaeAtmosphereBuffer, algae.atmosphereId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " atmosphere").c_str(),
@@ -641,10 +636,7 @@ bool renderStoreEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 {
 	bool removeRequested = false;
 	ImGui::PushItemWidth(220);
-	char idBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(idBuffer, store.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(), idBuffer, sizeof(idBuffer)))
-		store.id = idBuffer;
+	renderIdentity(label, store.id);
 	char unitBuffer[8]{};
 	std::strncpy(unitBuffer, store.unit.c_str(), sizeof(unitBuffer) - 1);
 	if (ImGui::InputText((label + " unit").c_str(), unitBuffer, sizeof(unitBuffer)))
@@ -686,11 +678,7 @@ bool renderWaterCollectorEntry([[maybe_unused]] core::StationSystemsSettings& dr
 	core::WaterCollectorSettings& collector, std::string const& label, std::string const& removeLabel)
 {
 	bool removeCollector = false;
-	char collectorIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(collectorIdBuffer, collector.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(),
-		collectorIdBuffer, sizeof(collectorIdBuffer)))
-		collector.id = collectorIdBuffer;
+	renderIdentity(label, collector.id);
 	char collectorHazardBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(collectorHazardBuffer, collector.hazardClass.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " hazard class").c_str(),
@@ -732,11 +720,7 @@ bool renderWaterTreatmentEntry([[maybe_unused]] core::StationSystemsSettings& dr
 	core::WaterTreatmentSettings& treatment, std::string const& label, std::string const& removeLabel)
 {
 	bool removeTreatment = false;
-	char treatmentIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(treatmentIdBuffer, treatment.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(),
-		treatmentIdBuffer, sizeof(treatmentIdBuffer)))
-		treatment.id = treatmentIdBuffer;
+	renderIdentity(label, treatment.id);
 	char treatmentHazardBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(treatmentHazardBuffer, treatment.hazardClass.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " hazard class").c_str(),
@@ -790,11 +774,7 @@ bool renderElectrolyzerEntry([[maybe_unused]] core::StationSystemsSettings& draf
 	core::ElectrolyzerSettings& cell, std::string const& label, std::string const& removeLabel)
 {
 	bool removeCell = false;
-	char cellIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(cellIdBuffer, cell.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(),
-		cellIdBuffer, sizeof(cellIdBuffer)))
-		cell.id = cellIdBuffer;
+	renderIdentity(label, cell.id);
 	char cellHazardBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cellHazardBuffer, cell.hazardClass.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " hazard class").c_str(),
@@ -849,11 +829,7 @@ bool renderCo2CaptureEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::Co2CaptureSettings& capture, std::string const& label, std::string const& removeLabel)
 {
 	bool removeCapture = false;
-	char captureIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(captureIdBuffer, capture.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(),
-		captureIdBuffer, sizeof(captureIdBuffer)))
-		capture.id = captureIdBuffer;
+	renderIdentity(label, capture.id);
 	char captureHazardBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(captureHazardBuffer, capture.hazardClass.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " hazard class").c_str(),
@@ -894,11 +870,7 @@ bool renderAtmosphereEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 {
 	bool removeAtmosphere = false;
 	ImGui::PushItemWidth(220);
-	char atmosphereIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(atmosphereIdBuffer, atmosphere.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(),
-		atmosphereIdBuffer, sizeof(atmosphereIdBuffer)))
-		atmosphere.id = atmosphereIdBuffer;
+	renderIdentity(label, atmosphere.id);
 	char hazardBuffer[16]{};
 	std::strncpy(hazardBuffer, atmosphere.hazardClass.c_str(), sizeof(hazardBuffer) - 1);
 	if (ImGui::InputText((label + " hazard class").c_str(),
@@ -957,11 +929,7 @@ bool renderAirlockCycleEntry([[maybe_unused]] core::StationSystemsSettings& draf
 {
 	bool removeCycle = false;
 	ImGui::PushItemWidth(220);
-	char cycleIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(cycleIdBuffer, cycle.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(),
-		cycleIdBuffer, sizeof(cycleIdBuffer)))
-		cycle.id = cycleIdBuffer;
+	renderIdentity(label, cycle.id);
 	char cycleAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cycleAtmosphereBuffer, cycle.atmosphereId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " atmosphere").c_str(),
@@ -990,10 +958,7 @@ bool renderTransferEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 {
 	bool removeRequested = false;
 	ImGui::PushItemWidth(220);
-	char transferIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(transferIdBuffer, transfer.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(), transferIdBuffer, sizeof(transferIdBuffer)))
-		transfer.id = transferIdBuffer;
+	renderIdentity(label, transfer.id);
 	char sourceBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(sourceBuffer, transfer.sourceId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " source").c_str(), sourceBuffer, sizeof(sourceBuffer)))
@@ -1098,10 +1063,7 @@ bool renderEquipmentLoadEntry([[maybe_unused]] core::StationSystemsSettings& dra
 {
 	bool removeRequested = false;
 	ImGui::PushItemWidth(220);
-	char loadIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(loadIdBuffer, load.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(), loadIdBuffer, sizeof(loadIdBuffer)))
-		load.id = loadIdBuffer;
+	renderIdentity(label, load.id);
 	ImGui::InputDouble((label + " electrical demand kW").c_str(),
 		&load.electricalDemandKW, 0.0, 0.0, "%.3f");
 	bool loadPeriodic = load.operatingProfile.periodSeconds > 0.0;
@@ -1212,10 +1174,7 @@ bool renderBatteryEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 {
 	bool removeRequested = false;
 	ImGui::PushItemWidth(220);
-	char batteryIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(batteryIdBuffer, battery.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(), batteryIdBuffer, sizeof(batteryIdBuffer)))
-		battery.id = batteryIdBuffer;
+	renderIdentity(label, battery.id);
 	ImGui::InputDouble((label + " nameplate kWh").c_str(),
 		&battery.nameplateKWh, 0.0, 0.0, "%.3f");
 	ImGui::InputDouble((label + " usable kWh").c_str(),
@@ -1243,11 +1202,7 @@ bool renderGeneratorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 {
 	bool removeRequested = false;
 	ImGui::PushItemWidth(220);
-	char generatorIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(generatorIdBuffer, generator.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(),
-		generatorIdBuffer, sizeof(generatorIdBuffer)))
-		generator.id = generatorIdBuffer;
+	renderIdentity(label, generator.id);
 	char fuelStoreBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(fuelStoreBuffer, generator.fuelStoreId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " fuel store").c_str(),
@@ -1293,11 +1248,7 @@ bool renderFuelCellEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	std::string const& label, std::string const& removeLabel)
 {
 	bool removeRequested = false;
-	char cellIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(cellIdBuffer, cell.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(),
-		cellIdBuffer, sizeof(cellIdBuffer)))
-		cell.id = cellIdBuffer;
+	renderIdentity(label, cell.id);
 	char cellHazardBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cellHazardBuffer, cell.hazardClass.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " hazard class").c_str(),
@@ -1346,11 +1297,7 @@ bool renderSabatierReactorEntry([[maybe_unused]] core::StationSystemsSettings& d
 	std::string const& label, std::string const& removeLabel)
 {
 	bool removeRequested = false;
-	char reactorIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(reactorIdBuffer, reactor.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(),
-		reactorIdBuffer, sizeof(reactorIdBuffer)))
-		reactor.id = reactorIdBuffer;
+	renderIdentity(label, reactor.id);
 	char reactorHazardBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(reactorHazardBuffer, reactor.hazardClass.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " hazard class").c_str(),
@@ -1406,11 +1353,7 @@ bool renderMethaneProcessorEntry([[maybe_unused]] core::StationSystemsSettings& 
 	std::string const& label, std::string const& removeLabel)
 {
 	bool removeRequested = false;
-	char processorIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(processorIdBuffer, processor.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(),
-		processorIdBuffer, sizeof(processorIdBuffer)))
-		processor.id = processorIdBuffer;
+	renderIdentity(label, processor.id);
 	char processorHazardBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorHazardBuffer, processor.hazardClass.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " hazard class").c_str(),
@@ -1465,11 +1408,7 @@ bool renderThermalReservoirEntry([[maybe_unused]] core::StationSystemsSettings& 
 {
 	bool removeRequested = false;
 	ImGui::PushItemWidth(220);
-	char reservoirIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(reservoirIdBuffer, reservoir.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(),
-		reservoirIdBuffer, sizeof(reservoirIdBuffer)))
-		reservoir.id = reservoirIdBuffer;
+	renderIdentity(label, reservoir.id);
 	char reservoirClassBuffer[16]{};
 	std::strncpy(reservoirClassBuffer, reservoir.thermalClass.c_str(), sizeof(reservoirClassBuffer) - 1);
 	if (ImGui::InputText((label + " thermal class").c_str(),
@@ -1498,11 +1437,7 @@ bool renderRadiatorEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 {
 	bool removeRequested = false;
 	ImGui::PushItemWidth(220);
-	char radiatorIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(radiatorIdBuffer, radiator.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(),
-		radiatorIdBuffer, sizeof(radiatorIdBuffer)))
-		radiator.id = radiatorIdBuffer;
+	renderIdentity(label, radiator.id);
 	char radiatorHostBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(radiatorHostBuffer, radiator.reservoirId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " reservoir").c_str(),
@@ -1528,9 +1463,7 @@ bool renderCoolantLoopEntry([[maybe_unused]] core::StationSystemsSettings& draft
 	std::string const& label, std::string const& removeLabel)
 {
 	ImGui::PushItemWidth(220);
-	char id[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(id, loop.id.c_str(), sizeof(id) - 1);
-	if (ImGui::InputText((label + " id").c_str(), id, sizeof(id))) loop.id = id;
+	renderIdentity(label, loop.id);
 	char hazard[16]{};
 	std::strncpy(hazard, loop.hazardClass.c_str(), sizeof(hazard) - 1);
 	if (ImGui::InputText((label + " hazard class").c_str(), hazard, sizeof(hazard))) loop.hazardClass = hazard;
@@ -1560,9 +1493,7 @@ bool renderThermalBufferEntry([[maybe_unused]] core::StationSystemsSettings& dra
 {
 	bool removeRequested = false;
 	ImGui::PushItemWidth(220);
-	char id[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(id, buffer.id.c_str(), sizeof(id) - 1);
-	if (ImGui::InputText((label + " id").c_str(), id, sizeof(id))) buffer.id = id;
+	renderIdentity(label, buffer.id);
 	char host[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(host, buffer.reservoirId.c_str(), sizeof(host) - 1);
 	if (ImGui::InputText((label + " host reservoir id").c_str(), host, sizeof(host))) buffer.reservoirId = host;
@@ -1590,11 +1521,7 @@ bool renderChillerEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 {
 	bool removeChiller = false;
 	ImGui::PushItemWidth(220);
-	char chillerIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(chillerIdBuffer, chiller.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(),
-		chillerIdBuffer, sizeof(chillerIdBuffer)))
-		chiller.id = chillerIdBuffer;
+	renderIdentity(label, chiller.id);
 	char chillerClassBuffer[16]{};
 	std::strncpy(chillerClassBuffer, chiller.thermalClass.c_str(), sizeof(chillerClassBuffer) - 1);
 	if (ImGui::InputText((label + " thermal class").c_str(),
@@ -1943,10 +1870,7 @@ bool renderDeliveryEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 {
 	bool removeDelivery = false;
 	ImGui::PushItemWidth(220);
-	char deliveryIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(deliveryIdBuffer, delivery.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(), deliveryIdBuffer, sizeof(deliveryIdBuffer)))
-		delivery.id = deliveryIdBuffer;
+	renderIdentity(label, delivery.id);
 	char deliveryStoreBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(deliveryStoreBuffer, delivery.storeId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " store").c_str(),
@@ -1976,10 +1900,7 @@ bool renderWasteEjectionEntry([[maybe_unused]] core::StationSystemsSettings& dra
 {
 	bool removeEjection = false;
 	ImGui::PushItemWidth(220);
-	char ejectionIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(ejectionIdBuffer, ejection.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(), ejectionIdBuffer, sizeof(ejectionIdBuffer)))
-		ejection.id = ejectionIdBuffer;
+	renderIdentity(label, ejection.id);
 	char ejectionStoreBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(ejectionStoreBuffer, ejection.storeId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " store").c_str(),
@@ -2008,11 +1929,7 @@ bool renderOutageEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 {
 	bool removeOutage = false;
 	ImGui::PushItemWidth(220);
-	char outageIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(outageIdBuffer, outage.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(),
-		outageIdBuffer, sizeof(outageIdBuffer)))
-		outage.id = outageIdBuffer;
+	renderIdentity(label, outage.id);
 	char outageTargetBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(outageTargetBuffer, outage.installationId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " installation id").c_str(),
@@ -2040,11 +1957,7 @@ bool renderMaintenanceEntry([[maybe_unused]] core::StationSystemsSettings& draft
 	auto const row = label.substr(label.find_last_of(' ') + 1);
 	bool removeJob = false;
 	ImGui::PushItemWidth(220);
-	char jobIdBuffer[core::MaxStationStoreIdLength + 1]{};
-	std::strncpy(jobIdBuffer, job.id.c_str(), core::MaxStationStoreIdLength);
-	if (ImGui::InputText((label + " id").c_str(),
-		jobIdBuffer, sizeof(jobIdBuffer)))
-		job.id = jobIdBuffer;
+	renderIdentity(label, job.id);
 	char jobTargetBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(jobTargetBuffer, job.installationId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " installation id").c_str(),
