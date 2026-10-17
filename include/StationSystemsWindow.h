@@ -41,7 +41,7 @@ private:
 	bool syncWorld(std::shared_ptr<core::World> const& world);
 	DocumentSnapshot captureDraft() const;
 	void renderDraftHistory();
-	void commitDraftChanges();
+	void commitDraftChanges(bool force = false);
 	DocumentHistory mDraftHistory;
 	std::optional<DocumentSnapshot> mPendingDraftEdit;
 	StationFlowDiagram mFlow;

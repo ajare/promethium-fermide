@@ -439,6 +439,65 @@ namespace
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
 			REQ(window.draft().stores.at(2).capacity == 100.0,
 				"undo did not restore the capacity");
+			// Switch nodes while the field is still active: the outgoing
+			// node's value must be committed before selection changes.
+			driver.click(ctx, "**/Store 2 capacity"); ctx->Yield(2);
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+			ctx->KeyChars("1450"); ctx->Yield(2);
+			REQ(window.draftHistory().undoCount() == 1,
+				"the active field committed before switching selection");
+			ImVec4 sinkRect{};
+			REQ(window.flowNodeRect("Store", "sink", &sinkRect), "sink is not on screen");
+			ctx->MouseTeleportToPos({(sinkRect.x + sinkRect.z) * 0.5f,
+				(sinkRect.y + sinkRect.w) * 0.5f});
+			ctx->MouseClick(); ctx->Yield(3);
+			REQ(window.draft().stores.at(2).capacity == 1450.0
+				&& window.draftHistory().undoCount() == 2,
+				"leaving the active field did not commit its pending edit");
+			// ImGui consumes the first click to release text focus; the next
+			// one is the canvas selection gesture.
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->Yield(2);
+			REQ(window.draft().stores.at(2).capacity == 1450.0
+				&& window.draftHistory().undoCount() == 2
+				&& driver.contains("Node: Store 'sink'"),
+				"selection switch lost or duplicated the pending store edit");
+			flow = false; ctx->Yield(3);
+			REQ(driver.contains("Store 2 capacity"), "form did not show the inspector's store");
+			ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+			REQ(window.draft().stores.at(2).capacity == 100.0
+				&& window.draftHistory().undoCount() == 1,
+				"form undo did not rewind the inspector edit");
+			driver.click(ctx, "**/Store 0 capacity"); ctx->Yield(2);
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+			ctx->KeyChars("1200"); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			REQ(window.draft().stores.at(0).capacity == 1200.0
+				&& window.draftHistory().undoCount() == 2
+				&& window.draftHistory().redoCount() == 0,
+				"form change was not committed to the shared draft/history");
+			flow = true; ctx->Yield(3);
+			REQ(driver.contains("Node: Store 'sink'"), "tab switch lost selection");
+			ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+			REQ(window.draft().stores.at(0).capacity == 1000.0
+				&& window.draftHistory().undoCount() == 1,
+				"Flow undo did not rewind the form change");
+			// Undo the selected placement, then redo it. The inspector must
+			// not retain a selection for a node absent from the draft.
+			ImVec4 placedRect{};
+			REQ(window.flowNodeRect("Store", "store1", &placedRect), "placed store missing");
+			ctx->MouseTeleportToPos({(placedRect.x + placedRect.z) * 0.5f,
+				(placedRect.y + placedRect.w) * 0.5f});
+			ctx->MouseClick(); ctx->Yield(2);
+			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->Yield(2);
+			REQ(driver.contains("Node: Store 'store1'"), "placement was not selected before undo");
+			ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+			REQ(window.draft().stores.size() == 2 && window.draftHistory().undoCount() == 0
+				&& driver.contains("Nothing selected.") && !window.flowNodeRect("Store", "store1", &placedRect),
+				"undo of selected placement left a ghost inspector");
+			ctx->ItemClick("Redo configuration"); ctx->Yield(3);
+			REQ(window.draft().stores.size() == 3 && window.draftHistory().undoCount() == 1
+				&& window.flowNodeRect("Store", "store1", &placedRect) && driver.contains("Nothing selected."),
+				"redo restored stale inspector selection");
 			// Transfer uses the other shared entry editor, with the same draft.
 			ImVec4 transferRect{};
 			REQ(window.flowNodeRect("Transfer", "t1", &transferRect), "the transfer node is not on screen");

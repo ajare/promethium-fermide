@@ -661,7 +661,8 @@ std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode
 }
 
 void StationFlowDiagram::render(core::StationSystemsSettings& draft,
-	std::function<void(core::StationSystemsSettings&)> const& renderInspector)
+	std::function<void(core::StationSystemsSettings&)> const& renderInspector,
+	std::function<void()> const& beforeSelectionChange)
 {
 	if (mLastFrame != ImGui::GetFrameCount() - 1) { mDragging = -1; mTemperature = 0; }
 	mLastFrame = ImGui::GetFrameCount();
@@ -673,6 +674,9 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		// keeps the node it belongs to selected (until it disappears).
 		mSelected = mSelectedType.empty()
 			? -1 : findNodeByTypeAndId(mGraph, mSelectedType, mSelectedId);
+		// Once the entry is gone, its identity must not reselect a later redo
+		// (or another entry with the same name).
+		if (mSelected < 0) { mSelectedType.clear(); mSelectedId.clear(); }
 		mPositions = station_flow::forceLayout(mGraph);
 		std::map<std::string, size_t> occurrences;
 		for (size_t i = 0; i < mGraph.nodes.size(); ++i)
@@ -944,6 +948,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	}
 	if (!mPlaceStore && canvasHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hoveredPin < 0)
 	{
+		if (hoveredNode != mSelected && beforeSelectionChange) beforeSelectionChange();
 		mSelected = hoveredNode;
 		// Record the identity the inspector follows across rebuilds (#653).
 		mSelectedType = hoveredNode >= 0 ? mGraph.nodes[size_t(hoveredNode)].type : "";

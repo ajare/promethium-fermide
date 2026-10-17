@@ -62,7 +62,8 @@ public:
 		int index{-1};
 	};
 	void render(core::StationSystemsSettings& draft,
-		std::function<void(core::StationSystemsSettings&)> const& renderInspector = {});
+		std::function<void(core::StationSystemsSettings&)> const& renderInspector = {},
+		std::function<void()> const& beforeSelectionChange = {});
 	// Empty when nothing is selected. The index addresses the entry inside the
 	// node type's own draft vector (stores for "Store", transfers for
 	// "Transfer"); shared service nodes carry -1.
