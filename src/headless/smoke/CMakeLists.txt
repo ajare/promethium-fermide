@@ -75,13 +75,13 @@ endfunction()
 
 pf_add_smoke_module(pf-smoke-station
     NAME station
-    SOURCES station/Main.cpp station/Documents.cpp station/Coupled.cpp station/Reference.cpp station/Scenarios.cpp station/Stability.cpp
+    SOURCES station/Main.cpp station/Documents.cpp station/Connections.cpp station/Coupled.cpp station/Reference.cpp station/Scenarios.cpp station/Stability.cpp
     LIBRARIES promethium-fermide-core
     LABELS "core;station"
     TIMEOUT 600
     DEFAULT_CHECK lifecycle
 )
-foreach(check lifecycle batching eventBound persistence stores transfers linkSeam growablePorts completeThermalChain schedulesSeam biologySeam waterGasSeam powerChainSeam thermalReservoirSeam radiatorSeam coolantLoopSeam chillerSeam compounds power
+foreach(check connectionTransfers connectionConversions connectionPower connectionThermal connectionProcesses connectionLifecycle connectionForecast connectionMaterialDiagnostics connectionBlockedZeroEfficiency connectionBatteryTelemetry lifecycle batching eventBound persistence stores transfers linkSeam growablePorts completeThermalChain schedulesSeam biologySeam waterGasSeam powerChainSeam thermalReservoirSeam radiatorSeam coolantLoopSeam chillerSeam compounds power
         batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
@@ -658,7 +658,7 @@ set_tests_properties(smoke-harness-contract PROPERTIES LABELS "harness;core" TIM
 pf_add_smoke_module(pf-smoke-editor
     NAME editor
     SOURCES
-        editor/StationSystems.cpp editor/ScaledDoors.cpp editor/RoomHeightScale.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/TransportStopNames.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
+        editor/StationSystems.cpp editor/StationConnections.cpp editor/ScaledDoors.cpp editor/RoomHeightScale.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/TransportStopNames.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
         agent/ActivationEditor.cpp
         agent/GroupEditor.cpp
         agent/GroupAssignmentEditor.cpp
@@ -741,6 +741,12 @@ set_tests_properties(station-editor-flow-inspector PROPERTIES LABELS "smoke;func
 # #649: water/gas placement, shared inspectors and optional consumable wiring.
 add_test(NAME station-editor-flow-water-gas COMMAND pf-smoke-editor --check station/flowWaterGasWorkflow)
 set_tests_properties(station-editor-flow-water-gas PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+add_test(NAME station-editor-connection-design COMMAND pf-smoke-editor --check station/connectionDesign)
+set_tests_properties(station-editor-connection-design PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+add_test(NAME station-editor-flow-connections COMMAND pf-smoke-editor --check station/flowConnectionsWorkflow)
+set_tests_properties(station-editor-flow-connections PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+add_test(NAME station-editor-flow-connection-telemetry COMMAND pf-smoke-editor --check station/flowConnectionTelemetryWorkflow)
+set_tests_properties(station-editor-flow-connection-telemetry PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-telemetry COMMAND pf-smoke-editor --check station/flowTelemetryWorkflow)
 set_tests_properties(station-editor-flow-telemetry PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-power-chain COMMAND pf-smoke-editor --check station/flowPowerChainWorkflow)
@@ -800,6 +806,8 @@ set_tests_properties(station-editor-crew-alias PROPERTIES LABELS "smoke;function
 add_test(NAME station-editor-trends COMMAND pf-smoke-editor --check station/trendsWorkflow)
 set_tests_properties(station-editor-trends PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 # #420: the bounded scenario forecast observed through the separate window.
+add_test(NAME station-editor-connection-forecast COMMAND pf-smoke-editor --check station/connectionForecastWorkflow)
+set_tests_properties(station-editor-connection-forecast PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-forecast COMMAND pf-smoke-editor --check station/forecastWorkflow)
 set_tests_properties(station-editor-forecast PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
 # #423: the packaged emergency/recovery scenarios observed through the

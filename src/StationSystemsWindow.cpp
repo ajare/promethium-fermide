@@ -38,6 +38,7 @@ void StationSystemsWindow::commitDraftChanges(bool force)
 	if (!mPendingDraftEdit || (!force && (ImGui::IsAnyItemActive()
 		|| (mPendingLayoutEdit && ImGui::IsMouseDown(ImGuiMouseButton_Left))))) return;
 	auto const before = std::static_pointer_cast<StationDraftSnapshot>(mPendingDraftEdit->context);
+	if (before->settings != mDraft) station_flow::pruneConnectionProperties(mDraft);
 	core::StationConfigurationDocument layout;
 	mFlow.exportLayout(layout);
 	if (before->settings != mDraft || (mPendingLayoutEdit && before->layout.positions != layout.positions))
@@ -2384,7 +2385,9 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		// rendering never ticks, mutates or re-runs anything.
 		auto const& forecast = snapshot.forecast;
 		if (!forecast.available)
-			ImGui::TextDisabled("No scenario forecast: Station systems are disabled.");
+			ImGui::TextWrapped("No scenario forecast: %s", forecast.unavailableReason.empty()
+				? (snapshot.enabled ? "Projection is unavailable." : "Station systems are disabled.")
+				: forecast.unavailableReason.c_str());
 		else
 		{
 			ImGui::TextWrapped("Scenario: %s", forecast.scenarioLabel.c_str());

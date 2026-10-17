@@ -4057,9 +4057,12 @@ namespace
 				&& history.undoCount() == 2,
 				"Confirmed setting did not reset World and commit history");
 			world->resumeSimulation();
+			core::StationSystemsSnapshot disabled;
+			disabled.forecast.unavailableReason = "Station systems are disabled.";
 			REQ(world->advanceTicks(60) && !world->getStationSystemsSnapshot().enabled
-				&& world->getStationSystemsSnapshot() == core::StationSystemsSnapshot{}
-				&& world->getStationSystemsEvents().empty(), "Deactivated station continued simulating");
+				&& world->getStationSystemsSnapshot() == disabled
+				&& world->getStationSystemsEvents().empty()
+				&& world->getStationSystemsDiagnostics().empty(), "Deactivated station continued simulating");
 			world->pauseSimulation();
 			auto restore = [&](DocumentSnapshot const& snapshot)
 			{ world = deserializeDocumentSnapshot(snapshot, world, {}); world->pauseSimulation(); return true; };
@@ -7411,6 +7414,7 @@ void cropWorkflow(smoke::Context const&)
 
 	void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
+	editor_smoke::registerStationConnections(checks);
 	checks.push_back({"station/windowWorkflow", workflow});
 	checks.push_back({"station/configurationDocument", configurationDocumentWorkflow});
 	checks.push_back({"station/removalWorkflow", removalWorkflow});

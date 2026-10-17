@@ -549,6 +549,7 @@ add_library(pf-agent-editing STATIC
     src/StationSystemsEntryEditor.cpp
     src/StationFlowDiagram.cpp
     src/StationFlowTelemetry.cpp
+    src/StationFlowConnections.cpp
     src/imgui/imnodes.cpp
     src/LocationPlan.cpp
     src/PermissionsPanel.cpp

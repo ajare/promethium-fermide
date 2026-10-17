@@ -33,6 +33,25 @@ namespace core
 		serializer.writeString("dispatchMode",
 			settings.dispatchMode == StationDispatchMode::Automatic
 				? "automatic" : "manual");
+		if (!settings.connections.empty())
+		{
+			serializer.beginArray("connections");
+			for (auto const& [key, properties] : settings.connections)
+			{
+				serializer.beginMap("");
+				serializer.writeString("ownerType", key.ownerType);
+				serializer.writeString("ownerId", key.ownerId);
+				serializer.writeString("reference", key.reference);
+				serializer.writeString("relation", key.relation);
+				serializer.writeString("peerType", key.peerType);
+				serializer.writeString("peerId", key.peerId);
+				serializer.writeString("physicalType", StationPhysicalConnectionNames.at(static_cast<size_t>(properties.physicalType)));
+				serializer.writeDouble("maximumThroughput", properties.maximumThroughput);
+				serializer.writeDouble("efficiency", properties.efficiency);
+				serializer.endMap();
+			}
+			serializer.endArray();
+		}
 		if (!settings.stores.empty())
 		{
 			// Only authored starting conditions travel; current inventory is
@@ -915,6 +934,33 @@ namespace core
 		serializer.beginMap("stationSystems");
 		stationSettings.enabled = serializer.readBool("enabled");
 		stationSettings.observationIntervalSeconds = serializer.readFloat("observationIntervalSeconds");
+		if (serializer.hasField("connections"))
+		{
+			if (version < 97) throw SerializationException("Station connection properties require schema 97");
+			serializer.beginArray("connections");
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				StationConnectionKey key{serializer.readString("ownerType"), serializer.readString("ownerId"),
+					serializer.readString("reference"), serializer.readString("relation"),
+					serializer.readString("peerType"), serializer.readString("peerId")};
+				StationConnectionProperties properties;
+				auto type = serializer.readString("physicalType");
+				auto found = std::find(StationPhysicalConnectionNames.begin(), StationPhysicalConnectionNames.end(), type);
+				if (found == StationPhysicalConnectionNames.end()) throw SerializationException("Unknown physical connection type: " + type);
+				properties.physicalType = static_cast<StationPhysicalConnection>(found - StationPhysicalConnectionNames.begin());
+				properties.maximumThroughput = serializer.readDouble("maximumThroughput");
+				if (serializer.hasField("efficiency")) properties.efficiency = serializer.readDouble("efficiency");
+				if (key.ownerType.empty() || key.ownerId.empty() || key.reference.empty() || key.relation.empty()
+					|| key.peerType.empty() || key.peerId.empty()
+					|| !std::isfinite(properties.maximumThroughput) || properties.maximumThroughput <= 0
+					|| !std::isfinite(properties.efficiency) || properties.efficiency < 0 || properties.efficiency > 1
+					|| !stationSettings.connections.emplace(std::move(key), properties).second)
+					throw SerializationException("Invalid or duplicate Station connection properties");
+				serializer.endMap();
+			}
+			serializer.endArray();
+		}
 		// Guard ordering: the dispatch mode field is read before the
 		// cultures array, so a pre-89 document carrying algae cultures
 		// would otherwise be refused with the dispatch schema message
@@ -1956,8 +2002,8 @@ namespace core
 			// systems, the upper bound is the newest schema this reader
 			// knows. A reference outside that range is refused rather than
 			// read under assumptions the reader has not been checked for.
-			if (document.schemaVersion < 65 || document.schemaVersion > 96)
-				return refuse("Reference station schema version must be from 65 to 96");
+			if (document.schemaVersion < 65 || document.schemaVersion > 97)
+				return refuse("Reference station schema version must be from 65 to 97");
 			if (serializer->hasField("provenance"))
 			{
 				serializer->beginArray("provenance");

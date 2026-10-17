@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <vector>
 #include "core/ScriptExecution.h"
 
@@ -1646,6 +1647,30 @@ namespace core
 	inline constexpr std::array<char const*, 2> StationDispatchModeNames{
 		"manual", "automatic"};
 
+	// Authored connection design attributes, never an additional simulation budget.
+	enum class StationPhysicalConnection { Automatic, Unspecified, PowerCable, DataCable,
+		LiquidPipe, GasPipe, AirDuct, CoolantCircuit, MaterialHandling, Thermal, NonPhysical };
+	inline constexpr std::array<char const*, 11> StationPhysicalConnectionNames{
+		"Automatic", "Unspecified", "Power cable", "Data cable", "Liquid pipe", "Gas pipe",
+		"Air duct", "Coolant circuit", "Material handling", "Thermal connection", "Non-physical"};
+	struct StationConnectionKey
+	{
+		std::string ownerType, ownerId, reference, relation, peerType, peerId;
+		bool operator==(StationConnectionKey const&) const = default;
+		bool operator<(StationConnectionKey const& other) const
+		{
+			return std::tie(ownerType, ownerId, reference, relation, peerType, peerId)
+				< std::tie(other.ownerType, other.ownerId, other.reference, other.relation, other.peerType, other.peerId);
+		}
+	};
+	struct StationConnectionProperties
+	{
+		StationPhysicalConnection physicalType{StationPhysicalConnection::Automatic};
+		double maximumThroughput{1e12}; // physical connection input cap, in its displayed rate unit
+		double efficiency{1.0}; // finite [0, 1] fraction delivered after the input cap; informational on non-physical relationships
+		bool operator==(StationConnectionProperties const&) const = default;
+	};
+
 	struct StationSystemsSettings
 	{
 		bool enabled{false};
@@ -1697,6 +1722,8 @@ namespace core
 		// how long or how fast the World runs. Declared last so positional
 		// initialization of every earlier field is unchanged.
 		float trendRetentionSeconds{3600.0f};
+		// Sparse overrides: every connection has independent default properties.
+		std::map<StationConnectionKey, StationConnectionProperties> connections;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	// The installations registered with the shared availability contract
@@ -2026,6 +2053,8 @@ namespace core
 	struct StationForecastSnapshot
 	{
 		bool available{false};
+		// Derived explanation when disabled or outside the projection's supported scope.
+		std::string unavailableReason;
 		double asOfSeconds{0.0};
 		double horizonSeconds{0.0};
 		// #604: the time through which the projection is complete: every
@@ -2036,6 +2065,7 @@ namespace core
 		// segment cap stopped the integration), and the range beyond it is
 		// explicitly unavailable - no result there may be read as covering
 		// the full horizon.
+		// An unavailable projection completes no range beyond asOfSeconds.
 		double completeThroughSeconds{0.0};
 		std::uint32_t segmentsComputed{0};
 		bool truncated{false};
@@ -2409,15 +2439,15 @@ namespace core
 		double maxDischargeKW{0.0};
 		double chargeEfficiency{1.0};
 		double dischargeEfficiency{1.0};
-		double lastChargeKW{0.0};        // bus power taken for charging this tick
-		double lastDischargeKW{0.0};    // power delivered to the bus this tick
-		double lastDischargeRequestedKW{0.0};   // discharge routed to this battery
-		double lastDischargeShortfallKW{0.0};    // routed but not delivered this tick
+		double lastChargeKW{0.0};        // battery-terminal input, after charge cable losses
+		double lastDischargeKW{0.0};    // battery-terminal output, before discharge cable losses
+		double lastDischargeRequestedKW{0.0};   // discharge requested at the battery terminal
+		double lastDischargeShortfallKW{0.0};    // requested but not supplied at that terminal
 		double chargedKWh{0.0};         // cumulative energy added to storage
 		double dischargedKWh{0.0};     // cumulative energy drawn from storage
-		double deliveredKWh{0.0};      // cumulative energy delivered to the bus
-		double chargeInputKWh{0.0};    // cumulative bus energy consumed by charging
-		double lossesKWh{0.0};         // cumulative charge + discharge losses
+		double deliveredKWh{0.0};      // cumulative battery-terminal output energy
+		double chargeInputKWh{0.0};    // cumulative battery-terminal charging input energy
+		double lossesKWh{0.0};         // intrinsic charge/discharge losses, excluding cables
 		double residualKWh{0.0};       // starting - discharged + charged - stored
 		bool disabled{false};          // zero usable capacity
 		bool atReserve{false};         // stored is at the reserve floor
@@ -2522,6 +2552,10 @@ namespace core
 
 	struct StationPowerSnapshot
 	{
+		// Network-side availability and actual physical connection losses.
+		double poolGenerationKW{0.0};
+		double connectionLossKW{0.0};
+		double poolResidualKW{0.0};
 		double availableGenerationKW{0.0};
 		double totalRequestedKW{0.0};
 		double totalSuppliedKW{0.0};
@@ -2529,7 +2563,7 @@ namespace core
 		double unmetCriticalKW{0.0};
 		double surplusKW{0.0};
 		double exportedHeatKW{0.0};
-		double batteryDischargeKW{0.0};   // power delivered from batteries this tick
+		double batteryDischargeKW{0.0};   // bus power received from battery discharge cables this tick
 		double batteryChargeKW{0.0};      // bus power taken by charging this tick
 		double batteryShortfallKW{0.0};   // routed to batteries but not delivered
 		// #415: the dispatch controller's own account for this tick. The
@@ -3032,6 +3066,8 @@ namespace core
 		double co2CapturedKg{0.0}; // cumulative CO2 removed by capture (#404)
 		double recoveredKg{0.0};
 		double lostKg{0.0};
+		double connectionCarbonDioxideLostKg{0.0};
+		double connectionWaterVapourLostKg{0.0};
 		double startingEnergyKJ{0.0};
 		double currentEnergyKJ{0.0};
 		double occupantHeatEnergyKJ{0.0};
@@ -3894,6 +3930,21 @@ namespace core
 		StationTransferStatus status{StationTransferStatus::Idle};
 		bool operator==(StationAlgaeCultureSnapshot const&) const = default;
 	};
+	// Authoritative transport account. Rates use rateUnit; totals use the
+	// corresponding quantity unit (kJ for kW, native Store units otherwise).
+	struct StationConnectionSnapshot
+	{
+		StationConnectionKey key;
+		std::string rateUnit;
+		double lastInputRate{}, lastDeliveredRate{}, lastLossRate{};
+		double inputTotal{}, deliveredTotal{}, lostTotal{};
+		// Produced heat that could not enter the connection is retained at
+		// its source, never erased or confused with transmission loss.
+		double retainedHeatKJ{}, producedHeatKJ{};
+		bool heatProducer{false};
+		bool reversed{false};
+		bool operator==(StationConnectionSnapshot const&) const = default;
+	};
 	struct StationSystemsSnapshot
 	{
 		bool enabled{false};
@@ -3903,6 +3954,7 @@ namespace core
 		std::array<uint64_t, 4> completedTicks{};
 		std::vector<StationSystemsStoreSnapshot> stores;
 		std::vector<StationTransferSnapshot> transfers;
+		std::vector<StationConnectionSnapshot> connections;
 		std::vector<StationConversionSnapshot> conversions;
 		std::vector<StationBalanceSnapshot> balances;
 		std::vector<StationConstituentBalanceSnapshot> constituentBalances;

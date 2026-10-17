@@ -1,5 +1,6 @@
 #include "Smoke.h"
 #include "Documents.h"
+#include "Connections.h"
 #include "Coupled.h"
 #include "Reference.h"
 #include "Scenarios.h"
@@ -9,6 +10,7 @@
 #include "core/StationReference.h"
 #include "core/StationConfigurationDocument.h"
 #include "core/StationSystems.h"
+#include "core/StationConnections.h"
 #include "core/AgentTagRegistryDocument.h"
 #include "core/YamlSerializer.h"
 #include "core/BinarySerializer.h"
@@ -156,7 +158,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 96"), 11, "version: 65");
+		text.replace(text.find("version: 97"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -6662,10 +6664,32 @@ namespace
 		core::World handled("Handled", 2, 2); enable(handled); handled.resumeSimulation();
 		require(handled.advanceTicks(120) && handled.getStationSystemsDiagnostics().empty()
 			&& handled.getStationSystemsSnapshot().healthy, "Caught application error triggered software pause");
+		// A real host-only fault: each authored power demand is finite,
+		// but their sum overflows in the final host audit, after inventory,
+		// battery, connection and incident changes have been staged. A
+		// transfer between near-equal compositions is no longer a fault:
+		// actual-constituent transport now conserves that material correctly.
+		auto addHostOverflow = [](core::StationSystemsSettings& settings,
+			std::string const& thermalClass, double atSeconds = 0.0)
+		{
+			for (unsigned index = 0; index < 2; ++index)
+			{
+				core::EquipmentLoadSettings load;
+				load.id = "overflow-" + std::to_string(index);
+				load.electricalDemandKW = 1e308;
+				load.thermalClass = thermalClass;
+				load.maxCurtailment = 1.0;
+				if (atSeconds > 0.0)
+				{
+					load.operatingProfile.periodSeconds = atSeconds * 2;
+					load.operatingProfile.segments = {{0.0, 0.0}, {atSeconds, 1.0}};
+				}
+				settings.equipmentLoads.push_back(load);
+			}
+		};
 		// Host-ledger failure containment (#555): every sandbox step
-		// succeeds with valid completed counts, but the host's own
-		// accounting audit fails because the sandbox never mirrored the
-		// host ledger. No partial mutation may become visible: the entire
+		// succeeds with valid completed counts, but the host's final
+		// finite-result audit fails. No partial mutation may become visible: the entire
 		// public snapshot, the event log and the World clock must be
 		// exactly what they were before the failed tick, apart from the
 		// failure status and its diagnostic.
@@ -6685,20 +6709,28 @@ namespace
 			core::ResourceStoreSettings destination;
 			destination.id = "b"; destination.unit = "kg"; destination.capacity = 100.0;
 			destination.composition = core::ResourceCompositionSettings{};
-			// Close enough to pass the composition-closeness admission yet
-			// far enough that moving dry mass into it creates measurable
-			// water: the host's constituent audit must fail the tick.
-			destination.composition->moisture = 5e-10;
 			settings.stores = {source, destination};
 			settings.transfers = {{"a-to-b", "a", "b", "kg", 3000.0, 0}};
 			core::EquipmentLoadSettings lamp;
 			lamp.id = "lamp"; lamp.electricalDemandKW = 1.0;
 			lamp.thermalClass = "low";
 			settings.equipmentLoads = {lamp};
+			addHostOverflow(settings, "low");
 			settings.batteries = {{"battery", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}};
 			std::string diagnostic;
-			require(hostFailure.configureStationSystems(settings, false, &diagnostic),
-				diagnostic.c_str());
+			// Positive control: the old composition trap is now legitimate
+			// transport. Only adding the overflowing demands must cause failure.
+			auto control = settings; control.equipmentLoads = {lamp};
+			control.stores[1].composition->moisture = 5e-10;
+			core::World conserved("ConservedTransfer", 2, 2);
+			conserved.pauseSimulation(); conserved.finishBuild();
+			auto const controlConfigured = conserved.configureStationSystems(control, false, &diagnostic);
+			require(controlConfigured, diagnostic.c_str()); conserved.resumeSimulation();
+			require(conserved.advanceTick() && conserved.getStationSystemsSnapshot().healthy
+				&& conserved.getStationSystemsSnapshot().transfers[0].lastCompleted > 0.0,
+				"Near-equal-composition transport was mistaken for a host-ledger fault");
+			auto const configured = hostFailure.configureStationSystems(settings, false, &diagnostic);
+			require(configured, diagnostic.c_str());
 		}
 		hostFailure.resumeSimulation();
 		auto const before = hostFailure.getStationSystemsSnapshot();
@@ -6731,11 +6763,12 @@ namespace
 		require(hostFailure.getStationSystemsEvents() == beforeEvents,
 			"Failed host tick published events");
 		auto const hostDiagnostics = hostFailure.getStationSystemsDiagnostics();
-		require(hostDiagnostics.size() == 1 && hostDiagnostics[0].system == "Resource transfer"
+		require(hostDiagnostics.size() == 1 && hostDiagnostics[0].system == "Power allocation"
 			&& hostDiagnostics[0].failure == Failure::ConversionError
 			&& hostDiagnostics[0].worldTick == 1
-			&& hostDiagnostics[0].message.find("constituent") != std::string::npos,
-			"Host ledger failure diagnostic missing or wrong");
+			&& hostDiagnostics[0].message == "non-finite total requested power is not a publishable physical result",
+			("Host ledger failure diagnostic missing or wrong: " + (hostDiagnostics.empty()
+				? std::string("none") : hostDiagnostics[0].system + ": " + hostDiagnostics[0].message)).c_str());
 		// Terminal retry refusal: the failed runtime never runs again and
 		// never mutates further.
 		require(!hostFailure.advanceTicks(10), "Failed host ledger retried after failure");
@@ -6767,7 +6800,7 @@ namespace
 		// audits that can still fail the tick - and an append into a full
 		// bounded history evicts previously committed events. This fixture
 		// schedules every one of those transitions onto the tick whose
-		// constituent audit fails: an outage restoration and a fresh
+		// finite-result audit fails: an outage restoration and a fresh
 		// outage start, a maintenance completion, and a maintenance
 		// interruption, with the event history already pinned at its
 		// 256-entry bound. The complete public snapshot and the complete
@@ -6798,15 +6831,12 @@ namespace
 				store.startingQualified = qualified;
 				return store;
 			};
-			// The #555 constituent trap, gated behind a delivery: the dry
-			// source starts empty, so the transfer moves nothing until
-			// material arrives, and the audit failure lands exactly on
-			// the delivery tick rather than on tick one.
+			// The source starts empty so the delivery tick stages inventory
+			// and transfer changes alongside the scheduled overflow fault.
 			core::ResourceStoreSettings source = plainStore("a", "kg", 100.0, 0.0);
 			source.composition = core::ResourceCompositionSettings{};
 			core::ResourceStoreSettings destination = plainStore("b", "kg", 100.0, 0.0);
 			destination.composition = core::ResourceCompositionSettings{};
-			destination.composition->moisture = 5e-10;
 			settings.stores = {source, destination,
 				plainStore("tools", "kg", 100.0, 10.0),
 				plainStore("parts", "kg", 100.0, 10.0),
@@ -6842,6 +6872,7 @@ namespace
 			generator.startupSeconds = 1.0;
 			generator.maxSinkTemperatureC = 90.0;
 			settings.generators = {generator};
+			addHostOverflow(settings, "generation", 120.0);
 			// One outage window closes on the failing tick (its
 			// restoration would be announced there) and another opens on
 			// it (its start would be announced there).
@@ -6890,9 +6921,9 @@ namespace
 			starter.priority = 1;
 			starter.requirements = {{"tools", 2.0, false}};
 			settings.maintenanceJobs = {completer, interrupted, starter};
-			// The failing tick: the first delivery feeds the transfer the
-			// mass that trips the constituent audit; the second eats the
-			// waste headroom the lower job's reservation stands on.
+			// The failing tick: the first delivery feeds a real transfer;
+			// the second eats the lower job's reserved waste headroom.
+			// Both must roll back when the scheduled aggregate overflows.
 			settings.deliveries = {
 				{"resupply-a", "a", "kg", 50.0, 120.0, 0.0, true, 0},
 				{"resupply-waste", "waste", "kg", 1.0, 120.0, 0.0, true, 0}};
@@ -6973,10 +7004,10 @@ namespace
 		}
 		auto const incidentDiagnostics = hostIncidents.getStationSystemsDiagnostics();
 		require(incidentDiagnostics.size() == 1
-			&& incidentDiagnostics[0].system == "Resource transfer"
+			&& incidentDiagnostics[0].system == "Power allocation"
 			&& incidentDiagnostics[0].failure == Failure::ConversionError
 			&& incidentDiagnostics[0].worldTick == 7200
-			&& incidentDiagnostics[0].message.find("constituent") != std::string::npos,
+			&& incidentDiagnostics[0].message == "non-finite total requested power is not a publishable physical result",
 			"incident host failure diagnostic missing or wrong");
 		// Terminal retry refusal across the incident state.
 		require(!hostIncidents.advanceTicks(10),
@@ -7013,6 +7044,13 @@ namespace
 		// at the last committed tick apart from the failure status, no
 		// event is published, and a machine-visible non-finite
 		// diagnostic is recorded.
+		auto allowExtremeSolar = [](core::StationSystemsSettings& settings)
+		{
+			// The default 1e12 cable cap would safely mask these intentionally
+			// extreme generation magnitudes before they reach the pool audit.
+			for (auto const& link : core::station_connections::build(settings).links)
+				if (link.designKey.ownerType == "Solar") settings.connections[link.designKey].maximumThroughput = 1e308;
+		};
 		core::setStationSystemsSourceLoader({});
 		core::World overflow("Overflow", 2, 2);
 		overflow.pauseSimulation(); overflow.finishBuild();
@@ -7021,6 +7059,7 @@ namespace
 			settings.enabled = true;
 			settings.solarArrays = {{"array-a", 1e308, {}}, {"array-b", 1e308, {}}};
 			std::string diagnostic;
+			allowExtremeSolar(settings);
 			require(overflow.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
 		}
 		overflow.resumeSimulation();
@@ -7056,6 +7095,7 @@ namespace
 			settings.enabled = true;
 			settings.solarArrays = {{"array-a", 1e308, {}}, {"array-b", 1e308, {}}};
 			std::string diagnostic;
+			allowExtremeSolar(settings);
 			require(hostOverflow.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
 		}
 		hostOverflow.resumeSimulation();
@@ -7088,6 +7128,7 @@ namespace
 			lamp.id = "lamp"; lamp.electricalDemandKW = 1.0; lamp.thermalClass = "low";
 			settings.equipmentLoads = {lamp};
 			std::string diagnostic;
+			allowExtremeSolar(settings);
 			require(huge.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
 		}
 		huge.resumeSimulation();
@@ -19129,9 +19170,9 @@ void buffers(smoke::Context const&)
 			// than silently dropping the cultures.
 			{
 				auto stale = text;
-				size_t const position = stale.find("version: 96");
+				size_t const position = stale.find("version: 97");
 				require(position != std::string::npos, "the fixture document carries no version line");
-				stale.replace(position, std::string("version: 96").size(), "version: 88");
+				stale.replace(position, std::string("version: 97").size(), "version: 88");
 				require(stale.find("algaeCultures") != std::string::npos,
 					"the fixture document carries no algae cultures to test the guard with");
 				bool refused = false;
@@ -21063,13 +21104,13 @@ void dispatch(smoke::Context const&)
 			== core::StationDispatchMode::Automatic,
 			"automatic dispatch mode did not survive the round trip");
 		auto stale = text;
-		require(stale.find("version: 96") != std::string::npos,
+		require(stale.find("version: 97") != std::string::npos,
 			"the fixture document carries no version line");
 		require(stale.find("dispatchMode: automatic") != std::string::npos,
 			"the fixture document lost the dispatch mode before the guard test");
 		// A pre-91 document that still carries the dispatch mode is refused
 		// rather than silently dropping the controller setting.
-		stale = replaceAll(stale, "version: 96", "version: 90");
+		stale = replaceAll(stale, "version: 97", "version: 90");
 		bool refused = false;
 		try
 		{
@@ -22082,9 +22123,9 @@ void protectedServices(smoke::Context const&)
 		require(loaded.getStationSystemsSnapshot().worldTick == 0,
 			"the loaded world restored live station state instead of the authored start");
 		auto stale = text;
-		require(stale.find("version: 96") != std::string::npos,
+		require(stale.find("version: 97") != std::string::npos,
 			"the fixture document carries no version line");
-		stale.replace(stale.find("version: 96"), std::string("version: 96").size(),
+		stale.replace(stale.find("version: 97"), std::string("version: 97").size(),
 			"version: 91");
 		bool refused = false;
 		try
@@ -24067,7 +24108,7 @@ void recovery(smoke::Context const& context)
 				"the saved document does not carry the authored retention");
 			// A pre-95 document carrying the field is refused, not silently
 			// dropped, and the refusal names the schema it needs.
-			auto stale = replaceAll(text, "version: 96", "version: 94");
+			auto stale = replaceAll(text, "version: 97", "version: 94");
 			bool refused = false;
 			std::string refusal;
 			try
@@ -26634,6 +26675,7 @@ int main(int argc, char** argv)
 		{"batteriesQuick", batteriesQuick},
 		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"nutrientConservation", nutrientConservation}, {"bioContainment", bioContainment}, {"outages", outages}, {"maintenance", maintenance}, {"failures", failures}, {"dispatch", dispatch}, {"protectedServices", protectedServices}, {"recovery", recovery}, {"trends", trends}, {"endurance", endurance}, {"forecast", forecast}};
 	registerStationDocumentChecks(checks);
+	registerStationConnectionChecks(checks);
 	registerCoupledStationChecks(checks);
 	registerReferenceStationChecks(checks);
 	registerScenarioChecks(checks);

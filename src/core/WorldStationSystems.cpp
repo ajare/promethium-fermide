@@ -28,7 +28,10 @@ namespace core
 	}
 	StationSystemsSnapshot World::getStationSystemsSnapshot() const
 	{
-		return mStationSystemsRuntime ? mStationSystemsRuntime->snapshot() : StationSystemsSnapshot{};
+		if (mStationSystemsRuntime) return mStationSystemsRuntime->snapshot();
+		StationSystemsSnapshot result;
+		result.forecast.unavailableReason = "Station systems are disabled.";
+		return result;
 	}
 	std::vector<StationSystemsEvent> World::getStationSystemsEvents() const
 	{

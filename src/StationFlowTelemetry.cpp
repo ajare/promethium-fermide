@@ -7,9 +7,7 @@
 
 namespace station_flow
 {
-namespace
-{
-	std::string number(double value)
+	std::string formatTelemetryNumber(double value)
 	{
 		if (!std::isfinite(value)) return "--";
 		// Presentation only: retain true zero and the direction of tiny flows.
@@ -21,6 +19,9 @@ namespace
 		out << std::setprecision(3) << std::defaultfloat << value;
 		return out.str();
 	}
+namespace
+{
+	std::string number(double value) { return formatTelemetryNumber(value); }
 	std::string quantity(double value, std::string const& unit) { return number(value) + " " + unit; }
 	std::string percent(double value) { return number(value * 100.0) + "%"; }
 	template<class T> T const* find(std::vector<T> const& entries, std::string const& id)
@@ -73,8 +74,23 @@ namespace
 	}
 }
 
+std::vector<std::string> connectionTelemetry(core::StationConnectionSnapshot const& flow)
+{
+	std::vector<std::string> lines{
+		"Input " + quantity(flow.lastInputRate, flow.rateUnit),
+		"Delivered " + quantity(flow.lastDeliveredRate, flow.rateUnit),
+		"Loss " + quantity(flow.lastLossRate, flow.rateUnit)};
+	auto const unit = flow.rateUnit == "kW" ? "kJ" : flow.rateUnit.ends_with("/s")
+		? flow.rateUnit.substr(0, flow.rateUnit.size() - 2) : flow.rateUnit;
+	lines.push_back("Total loss " + quantity(flow.lostTotal, unit));
+	if (flow.heatProducer) lines.push_back("Heat retained at source " + quantity(flow.retainedHeatKJ, "kJ"));
+	if (flow.reversed) lines.push_back("Flow reversed relative to diagram");
+	return lines;
+}
+
 std::optional<NodeTelemetry> telemetry(Node const& node,
-	core::StationSystemsSnapshot const& s, double dt, core::StationSystemsSettings const* applied)
+	core::StationSystemsSnapshot const& s, double dt, core::StationSystemsSettings const* applied,
+	std::span<core::AuthoredLink const> authored)
 {
 	NodeTelemetry out;
 	// Per-tick amounts must use the simulation's tick duration, not the UI's
@@ -202,7 +218,7 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 	}
 	else if (node.type == "Power")
 	{
-		out.values = {"Generation available " + quantity(s.power.availableGenerationKW, "kW"),
+		out.values = {"Generation available " + quantity(s.connections.empty() ? s.power.availableGenerationKW : s.power.poolGenerationKW, "kW"),
 			"Power demand " + quantity(s.power.totalRequestedKW, "kW"),
 			"Battery charging " + quantity(s.power.batteryChargeKW, "kW"),
 			"Battery discharging " + quantity(s.power.batteryDischargeKW, "kW"),
@@ -423,6 +439,57 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 		if (p->blockReason.empty()) out.status = core::StationMaintenancePhaseNames[static_cast<size_t>(p->phase)];
 	}
 	else return {};
+	if (!s.connections.empty())
+	{
+		std::vector<core::AuthoredLink> localAuthored;
+		if (applied && authored.empty()) { localAuthored = core::stationAuthoredLinks(*applied); authored = localAuthored; }
+		std::map<std::string, std::pair<double, std::string>> physicalPorts;
+		std::map<std::string, double> losses;
+		double retained = 0.0;
+		for (auto const& flow : s.connections)
+		{
+			if (flow.key.ownerType != node.type || flow.key.ownerId != node.id) continue;
+			retained += flow.retainedHeatKJ;
+			losses[flow.rateUnit] += flow.lastLossRate;
+			if (flow.key.peerType == "Power")
+			{
+				bool const input = flow.key.relation == "Electrical supply" || flow.key.relation == "Startup" || flow.key.relation == "Charge";
+				physicalPorts[input ? "Power in" : "Power out"] = {input ? flow.lastDeliveredRate : flow.lastInputRate, flow.rateUnit};
+				continue;
+			}
+			auto const identity = flow.key.ownerType + ":" + flow.key.ownerId + ":" + flow.key.reference;
+			for (auto const& link : authored)
+			{
+				if (link.identity != identity) continue;
+				auto const& pin = link.from.nodeType == node.type && link.from.nodeId == node.id ? link.from : link.to;
+				auto const descriptors = core::stationPortDescriptors();
+				auto const descriptor = std::find_if(descriptors.begin(), descriptors.end(), [&](auto const& item) {
+					return item.nodeType == pin.nodeType && item.name == pin.portName;
+				});
+				if (descriptor == descriptors.end()) break;
+				bool const nominalInput = descriptor->direction == core::StationPortDirection::Input;
+				bool actualInput = nominalInput;
+				// Bidirectional relationships have one authored reference.
+				if (node.type == "Atmosphere") actualInput = flow.key.relation == "Heat exchange";
+				else if (node.type == "Thermal buffer") actualInput = flow.key.relation == "Absorb heat";
+				if (flow.reversed) actualInput = !actualInput;
+				auto& rate = physicalPorts[pin.portName]; rate.second = flow.rateUnit;
+				rate.first += (actualInput == nominalInput ? 1.0 : -1.0)
+					* (actualInput ? flow.lastDeliveredRate : flow.lastInputRate);
+				break;
+			}
+		}
+		for (auto const& [name, value] : physicalPorts) out.ports[name] = quantity(value.first, value.second);
+		for (auto const& [unit, value] : losses) if (value > 0.0) out.details.push_back("Connection losses " + quantity(value, unit));
+		if (retained > 0.0) out.details.push_back("Heat retained at source " + quantity(retained, "kJ"));
+		if (retained > 1e-8)
+		{
+			if (out.values.size() < 5) out.values.push_back("Heat retained " + quantity(retained, "kJ"));
+			warn(out, "Heat connection constrained");
+		}
+		if (node.type == "Power")
+			out.details.push_back("Connection losses " + quantity(s.power.connectionLossKW, "kW"));
+	}
 	if (node.type == "Store" || node.type == "Battery")
 		for (auto const& endurance : s.endurance)
 			if (endurance.id == id && endurance.kind == (node.type == "Store" ? "store" : "battery")

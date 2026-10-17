@@ -1,5 +1,6 @@
 #pragma once
 #include "core/StationSystems.h"
+#include "core/StationConnections.h"
 #include "core/StationConfigurationDocument.h"
 #include "core/StationPorts.h"
 #include "imgui/imgui.h"
@@ -13,25 +14,19 @@ struct ImNodesContext;
 // An editor-only projection of authored draft references, never a simulation.
 namespace station_flow
 {
-	enum class LinkKind { Material, Power, Heat, Control };
-	enum class Medium { Unspecified, Water, Oxygen, CarbonDioxide, Hydrogen, Methane,
-		Carbon, Food, OrganicWaste, Urine, Nutrients, Consumables, Fuel, Atmosphere,
-		Heat, Cooling, Electricity, Control };
-	struct Node
-	{
-		std::string type, id, detail;
-		int lane{};
-		bool unresolved{};
-	};
-	struct Link
-	{
-		size_t from{}, to{};
-		std::string label;
-		LinkKind kind{LinkKind::Material};
-		Medium medium{Medium::Unspecified};
-	};
-	struct Graph { std::vector<Node> nodes; std::vector<Link> links; };
-	Graph build(core::StationSystemsSettings const& draft);
+	using core::station_connections::LinkKind;
+	using core::station_connections::Medium;
+	using core::station_connections::Node;
+	using core::station_connections::Link;
+	using core::station_connections::Graph;
+	using core::station_connections::build;
+	using core::station_connections::automaticConnectionType;
+	using core::station_connections::connectionProperties;
+	using core::station_connections::connectionType;
+	using core::station_connections::connectionThroughputUnit;
+	// Form edits can change references directly; discard annotations of vanished instances.
+	void pruneConnectionProperties(core::StationSystemsSettings& draft);
+	char const* connectionStyleName(core::StationPhysicalConnection type);
 	enum class TelemetryState { Normal, Idle, Warning, Error };
 	struct NodeTelemetry
 	{
@@ -42,9 +37,13 @@ namespace station_flow
 		// Actual rates only; a missing value is unknown, never an invented zero.
 		std::map<std::string, std::string> ports;
 	};
+	// Shared display formatting: exact zero, signed trace, and non-finite --.
+	std::string formatTelemetryNumber(double value);
+	std::vector<std::string> connectionTelemetry(core::StationConnectionSnapshot const& flow);
 	std::optional<NodeTelemetry> telemetry(Node const& node,
 		core::StationSystemsSnapshot const& snapshot, double tickSeconds,
-		core::StationSystemsSettings const* applied = nullptr);
+		core::StationSystemsSettings const* applied = nullptr,
+		std::span<core::AuthoredLink const> authored = {});
 	// Null for the drag origin; every other connector is judged by the
 	// same core verdict used when the link is dropped.
 	std::optional<bool> connectorEligibility(core::StationSystemsSettings const& draft,
@@ -95,6 +94,9 @@ public:
 	// node type's own draft vector (stores for "Store", transfers for
 	// "Transfer"); shared service nodes carry -1.
 	std::optional<SelectedNode> selectedNode() const;
+	std::optional<core::StationConnectionKey> selectedConnection() const { return mSelectedConnection; }
+	// A visible point on the rendered curve, for headless interaction checks.
+	bool connectionScreenPosition(core::StationConnectionKey const& key, ImVec2* out) const;
 	void reset();
 	void exportLayout(core::StationConfigurationDocument& document) const;
 	void importLayout(core::StationConfigurationDocument const& document);
@@ -136,6 +138,8 @@ private:
 	// draft rebuilds so the inspector follows the same entry rather than a
 	// positional slot that a rebuild could reshuffle.
 	std::string mSelectedType, mSelectedId;
+	std::optional<core::StationConnectionKey> mSelectedConnection;
+	std::map<core::StationConnectionKey, ImVec2> mConnectionScreen;
 	float mTemperature{};
 	// The type armed in the "Place node" combobox; empty when unarmed. The
 	// combobox is built from the core placeable table, so derived service
@@ -162,6 +166,7 @@ private:
 		core::AuthoredLink authored;
 		size_t fromNode{0}, toNode{0};
 		bool drawable{false};
+		size_t graphLink{SIZE_MAX};
 	};
 	std::vector<FlowLink> mLinks;
 	std::map<std::string, int> mPinIds;

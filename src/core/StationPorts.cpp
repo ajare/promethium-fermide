@@ -8,6 +8,15 @@ namespace core
 {
 namespace
 {
+	void eraseConnectionProperties(StationSystemsSettings& settings, std::string const& type,
+		std::string const& id, std::string const& reference)
+	{
+		std::erase_if(settings.connections, [&](auto const& item) {
+			auto const& key = item.first;
+			return key.ownerType == type && key.ownerId == id && key.reference == reference;
+		});
+	}
+
 	PortDescriptor const* findPort(std::string_view nodeType, std::string_view portName)
 	{
 		for (auto const& descriptor : stationPortDescriptors())
@@ -1491,27 +1500,28 @@ bool applyStationLink(StationSystemsSettings& settings, CandidateLink const& lin
 {
 	LinkMapping mapping;
 	if (!mapLink(link, mapping)) return false;
+	auto write = [&](std::string& target) {
+		if (target != mapping.peer.nodeId)
+			eraseConnectionProperties(settings, mapping.ownerType, mapping.ownerId, mapping.field);
+		target = mapping.peer.nodeId;
+		return true;
+	};
 	if (mapping.ownerType == "Conversion")
 	{
 		auto* field = conversionFlowField(settings, mapping.ownerId, mapping.field);
-		if (!field) return false;
-		*field = mapping.peer.nodeId;
-		return true;
+		return field && write(*field);
 	}
 	if (isMachineOwnerType(mapping.ownerType))
 	{
 		auto* field = machineField(settings, mapping.ownerType, mapping.ownerId, mapping.field);
-		if (!field) return false;
-		*field = mapping.peer.nodeId;
-		return true;
+		return field && write(*field);
 	}
 	auto const found = std::find_if(settings.transfers.begin(), settings.transfers.end(),
 		[&](ResourceTransferSettings const& transfer) { return transfer.id == mapping.ownerId; });
 	if (found == settings.transfers.end()) return false;
-	if (mapping.field == "Source") found->sourceId = mapping.peer.nodeId;
-	else if (mapping.field == "Destination") found->destinationId = mapping.peer.nodeId;
-	else return false;
-	return true;
+	if (mapping.field == "Source") return write(found->sourceId);
+	if (mapping.field == "Destination") return write(found->destinationId);
+	return false;
 }
 
 bool clearStationLink(StationSystemsSettings& settings, std::string const& identity)
@@ -1522,26 +1532,29 @@ bool clearStationLink(StationSystemsSettings& settings, std::string const& ident
 	auto const ownerType = identity.substr(0, first);
 	auto const field = identity.substr(last + 1);
 	auto const ownerId = identity.substr(first + 1, last - first - 1);
+	auto clear = [&](std::string& target) {
+		eraseConnectionProperties(settings, ownerType, ownerId, field);
+		target.clear();
+		return true;
+	};
 	if (ownerType == "Conversion")
 	{
 		auto* target = conversionFlowField(settings, ownerId, field);
 		if (!target) return false;
-		target->clear();
-		return true;
+		return clear(*target);
 	}
 	if (isMachineOwnerType(ownerType))
 	{
 		auto* target = machineField(settings, ownerType, ownerId, field);
 		if (!target) return false;
-		target->clear();
-		return true;
+		return clear(*target);
 	}
 	if (ownerType != "Transfer") return false;
 	for (auto& transfer : settings.transfers)
 	{
 		if (transfer.id != ownerId) continue;
-		if (field == "Source") { transfer.sourceId.clear(); return true; }
-		if (field == "Destination") { transfer.destinationId.clear(); return true; }
+		if (field == "Source") return clear(transfer.sourceId);
+		if (field == "Destination") return clear(transfer.destinationId);
 		return false;
 	}
 	return false;
@@ -1580,6 +1593,10 @@ bool removeStationNode(StationSystemsSettings& settings, StationNodeRemoval cons
 			[&](auto const& entry) { return entry.id == plan.nodeId; }), entries.end());
 		return true;
 	})) return false;
+	std::erase_if(candidate.connections, [&](auto const& item) {
+		return (item.first.ownerType == plan.nodeType && item.first.ownerId == plan.nodeId)
+			|| (item.first.peerType == plan.nodeType && item.first.peerId == plan.nodeId);
+	});
 	settings = std::move(candidate);
 	return true;
 }
@@ -1653,6 +1670,18 @@ bool renameStationNode(StationSystemsSettings& settings, StationNodeRename const
 		if (link.to.nodeType == current.nodeType && link.to.nodeId == current.oldNodeId)
 			link.to.nodeId = current.newNodeId;
 		if (!applyStationLink(candidate, {link.from, link.to})) return false;
+	}
+	// Clearing/reapplying references is an implementation detail of rename,
+	// not a disconnect: carry every design attribute through the operation.
+	candidate.connections.clear();
+	for (auto const& [oldKey, properties] : settings.connections)
+	{
+		auto key = oldKey;
+		if (key.ownerType == current.nodeType && key.ownerId == current.oldNodeId)
+			key.ownerId = current.newNodeId;
+		if (key.peerType == current.nodeType && key.peerId == current.oldNodeId)
+			key.peerId = current.newNodeId;
+		candidate.connections.emplace(std::move(key), properties);
 	}
 	settings = std::move(candidate);
 	return true;
@@ -1911,6 +1940,11 @@ bool shrinkStationPortSet(StationSystemsSettings& settings,
 		reason = status.shrinkReason;
 		return false;
 	}
+	// Drop the removed face's ratings even if it was already unwired.
+	auto const reference = nodeType == "Maintenance" ? "Requirement "
+		: nodeType == "Equipment" ? (set == StationPortSet::LoadExchangesIn ? "Material in " : "Material return ")
+		: (set == StationPortSet::ConversionInputs ? "Input " : "Output ");
+	eraseConnectionProperties(settings, nodeType, nodeId, reference + std::to_string(status.count));
 	if (nodeType == "Maintenance")
 	{
 		auto& job = *std::find_if(settings.maintenanceJobs.begin(), settings.maintenanceJobs.end(),

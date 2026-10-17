@@ -946,7 +946,8 @@ namespace core
 		// fields are read by name rather than by version, so trunk documents
 		// written at 65-68 still load, and 96 is simply the first schema that
 		// carries both families together.
-		serializer.writeUint32("version", 96);
+		// Schema 97 adds authored Station connection carrier, throughput and efficiency properties.
+		serializer.writeUint32("version", 97);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
 		serializer.writeString("furnitureImageSet", mFurnitureImageSetResourceName);
@@ -1848,7 +1849,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 96)
+		if (version < 1 || version > 97)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}

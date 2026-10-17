@@ -616,6 +616,27 @@ _Avoid_: Real node, editable node
 A station diagram node representing an aggregate service with no configuration entry of its own: the shared electrical pool, and one cooling service per Thermal service class. Drawn for legibility only — never authored, selected, or connected by the user.
 _Avoid_: Bus node, virtual node, pseudo-node
 
+**Station connection**:
+An individually identifiable relationship between Station systems endpoints, representing a material flow, energy flow, or service relationship. A connection's design properties are distinct from the resource or service actually supplied.
+
+**Connection medium**:
+The material, energy, or service represented by a Station connection, distinct from the physical means of carrying it.
+
+**Physical connection type**:
+The physical means represented by a Station connection, such as a power cable, gas pipe, liquid pipe, air duct, or material-handling route. An abstract service relationship or ambient biological exchange does not imply a physical carrier.
+
+**Maximum connection throughput**:
+The upper bound on a physical Station connection's input rate, expressed in units appropriate to its flow. It is distinct from the delivered rate after connection losses and from a consumer's requested rate.
+
+**Connection efficiency**:
+The fraction of a physical Station connection's accepted input delivered to its destination, from zero to one, distinct from equipment conversion efficiency. On non-physical relationships the saved value is informational.
+
+**Connection transport loss**:
+Material or energy leaving the modeled Station through an inefficient physical connection, equal to accepted input minus delivered output. It is distinct from heat retained at its source because a connection cannot accept it.
+
+**Retained source heat**:
+Produced heat still held at its source because a physical connection cannot accept it. It is neither delivered heat nor connection transport loss.
+
 **Port**:
 One declared input or output requirement of an Authored node, shown as a connector. A Port is the visible face of a reference the underlying configuration entry carries, not a separate object.
 _Avoid_: Pin, socket, slot

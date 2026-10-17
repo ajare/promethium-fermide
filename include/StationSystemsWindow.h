@@ -43,6 +43,8 @@ public:
 	}
 	std::optional<station_flow::NodeTelemetry> flowTelemetry(std::string const& type,
 		std::string const& id) const { return mFlow.nodeTelemetry(type, id); }
+	bool flowConnectionPosition(core::StationConnectionKey const& key, ImVec2* out) const
+	{ return mFlow.connectionScreenPosition(key, out); }
 	std::string const& flowLinkRejection() const { return mFlow.linkRejection(); }
 	std::string const& flowNotice() const { return mFlow.notice(); }
 	bool flowPortButtonRect(std::string const& nodeType, std::string const& nodeId,

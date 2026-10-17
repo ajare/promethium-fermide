@@ -57,13 +57,68 @@ capacity/admission prediction, or a physical distribution network. Ambient losse
 and implicit process internals are not expanded into individual nodes. Changing
 Worlds starts a fresh diagram and draft; switching/hiding tabs retains the draft.
 
+### Physical connection types
+
+Connection **colour identifies the medium** (water, oxygen, electricity, etc.);
+its **line pattern/marker identifies the physical carrier**. Expand **Connection
+types** for the visual legend, hover a curve for its classification, or click it
+for the **Connection properties** inspector.
+
+| Flow / relationship | Automatic type | Line style |
+| --- | --- | --- |
+| Electrical power | Power cable | Solid with square marker |
+| Water or urine | Liquid pipe | Double solid |
+| Oxygen, CO2, hydrogen, methane | Gas pipe | Dashed |
+| Compartment air extraction / water vapour collection | Air duct | Heavy dashed with square marker |
+| Heat exchange involving a coolant loop | Coolant circuit | Double dashed (supply/return) |
+| Food or solid carbon | Material handling | Dash-dot with square marker |
+| Other physical heat exchange | Thermal connection | Dash-dot |
+| Fuel, nutrients, consumables, organic waste or unknown material phase | Unspecified | Long dashed |
+| Cooling-service allocations, controls, schedules, circulation gates, delivery/waste-ejection and airlock events, maintenance, outages, ambient breathing/photosynthesis | Non-physical | Fine dotted |
+
+Ambiguous flows can be classified explicitly per connection; phase is never
+guessed from a Store's name. A **Data cable** override is also available, shown as
+dots with a diamond marker, but scheduling dependencies do not automatically
+become data cables. A coolant circuit symbol describes supply/return plumbing;
+it does not introduce another simulated flow or coolant inventory.
+
+Each connection has its own saved properties. A positive, finite **Maximum
+throughput** defaults to **1e12** in the displayed rate unit: kW for electrical or
+thermal transport, a Store's native unit per second for its material connections,
+and kg/s for other material flows. Every connection also has **Efficiency**,
+default **1.0**, accepting finite values from **0 to 1 inclusive**. Older entries
+omitting efficiency load lossless. Both properties are saved and undoable.
+
+Applied physical material, electrical, and thermal connections are enforced by
+the authoritative allocator: **cap connection input first, then apply efficiency**.
+An input cap of 10 kg/s and efficiency 0.9 delivers at most 9 kg/s. Receiver demand
+is compensated upstream within available supply and the input cap; existing
+priority, protected inventory, and equipment limits still apply. At zero
+efficiency, actively requested input is consumed entirely as loss; idle or blocked
+demand does not create an unsolicited flow.
+
+Undelivered input is an explicit **external connection loss**, accounted in the
+native-unit/constituent material balances or electrical/thermal accounts. It is
+not silently returned or deposited as waste heat/material elsewhere. Produced
+heat that cannot enter a capped connection remains at its source and can drain
+in later ticks: produced heat equals cumulative connection input plus retained
+source heat, while connection input equals delivered heat plus transport loss.
+
+Non-physical relationships in the table remain **informational only**, including
+their efficiency values; they have no editable carrier or throughput field.
+Carrier overrides change drawing style, not enforcement: choosing a Non-physical
+style for a physical exchange does not disable its limits or losses. Automatic
+power links remain automatic and cannot be disconnected manually. Draft edits do
+not affect the running World until applied.
+See [connection persistence and lifecycle](station-configuration-documents.md#connection-design-properties).
+
 ### Live node readouts
 
 When the Configuration draft matches the applied, enabled Station systems,
 node footers show one metric per line (up to five values), plus a status/limiting
 reason. Supplied/requested quantities have separate lines. **Battery charging**
-means power flowing into batteries; **Battery discharging** means power supplied
-by batteries to the shared electrical pool.
+and **Battery discharging** are battery-side power on Battery nodes and pool-side
+power on the shared electrical node; cable losses can make these readings differ.
 The heading identifies the applied simulation, elapsed time, and running,
 paused, or failed state. Snapshot polling is capped at four updates per second;
 pause transitions, resets, configuration changes, and World switches refresh
@@ -91,9 +146,12 @@ interval. Scheduled transfers are labelled **last event**, not treated as steady
 flow. Non-zero magnitudes below `0.001` in the displayed unit read **trace**
 (**-trace** for negative values); exact zero remains `0`. This also applies to
 percentages and inspector details, without changing simulation values or warnings.
-Unknown rates are omitted; solar output is explicitly available generation,
-not a fabricated per-array allocation. Power ports remain automatically connected
-to the shared electrical pool, not user-wirable references.
+Unknown rates are omitted; available solar generation is potential supply, not
+necessarily actual transmitted power. Physical port rates use the connection's
+node-side endpoint: delivered input at a receiver, accepted connection input at a
+sender. Reversed heat exchange has a signed rate relative to the displayed port.
+Power ports remain automatically connected to the shared electrical pool, not
+user-wirable references.
 
 Status text is grey for idle/disabled, green for normal operation, amber for
 limitations, and red for failed/unsafe conditions; numerical fluctuations alone
@@ -107,6 +165,20 @@ draft, to restore them. Disabled systems show no live rates. Before the first
 completed tick the footer says Ready and omits port rates; failed systems mark
 values as the last committed state. Readouts and their refresh cache are never
 saved in configuration documents or undo history.
+
+### Live connection readouts
+
+Connection tooltips and the connection inspector show **Input**, **Delivered**,
+**Loss**, and cumulative **Total loss**, one metric per line, from the authoritative
+transport snapshot. Input/delivery/loss are rates; cumulative quantities use the
+native unit, or kJ for kW transport. Heat producers also show **Heat retained at
+source**, distinct from connection loss; reversed exchanges are explicitly marked.
+Nodes with retained producer heat warn that their heat connection is constrained.
+
+These readouts follow the same applied-draft, pause, reset, failure, and trace
+formatting rules as node telemetry. Before a completed tick they show Ready, not
+invented flow; non-physical or unknown connection accounts do not fabricate zero
+rates. Readouts are not persisted and never advance the simulation.
 
 ### Water and gas authoring (#649)
 
@@ -2019,6 +2091,19 @@ live inventory, advances no World clock, consumes no deterministic
 stream, touches no Lua sandbox state, and is never persisted - Reset
 and load re-derive it from the initial state like every other
 observability.
+
+The projection does **not** implement connection-aware transport allocation.
+If any resolved physical connection has maximum throughput or efficiency different
+from the defaults (1e12 and 1.0), the entire forecast is **unavailable**, with an
+explicit reason rather than unconstrained inventory, shortfall, or resupply
+promises. It completes no range beyond the snapshot instant and publishes no
+store projections. This is deliberately conservative even for an idle connection
+or a cap unlikely to bind. A carrier override, including a Non-physical drawing
+style on a physical exchange, cannot bypass this check. Explicit default properties
+and informational non-physical ratings leave the existing forecast unchanged.
+Disabled systems have a separate unavailable reason. Exact forecasts under
+non-default physical constraints remain unsupported; the default declared-profile
+scenario assumes the standard, very large connection caps are non-binding.
 
 The projection is a declared-profile scenario carried with explicit
 labels. It continues the authored transfer rates, crew activity

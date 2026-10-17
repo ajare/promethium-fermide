@@ -1,4 +1,6 @@
 #include "StationSystemsRuntime.h"
+#include "core/StationConnectionLedger.h"
+#include "core/StationMaterialConnections.h"
 #include "core/World.h"
 #include "core/SerializationException.h"
 #include "BundledStationSystemsSource.h"
@@ -1409,6 +1411,81 @@ namespace core
 	{
 		return leaf.weightKJPerK * (coupledReservoirTemperatureC - leaf.temperatureC);
 	}
+	// Lossy, input-capped passive exchange is still one implicit star solve.
+	// F(T) is monotone. Its sign at each leaf and at its cap threshold
+	// identifies the exact linear segment containing the common solution.
+	// Relative-temperature sums avoid subtracting nearly equal temperatures
+	// after a stiff zero-efficiency interface has pinned the hub temperature.
+	struct TransportExchange
+	{
+		StationConnectionLedger::Port forward{}, backward{};
+		double leafKJ{}, hubKJ{};
+	};
+	void solveTransportExchange(std::vector<PassiveExchangeLeaf> const& leaves,
+		std::vector<TransportExchange>& ports, double hubCapacity, double hubTemperature,
+		double dt, StationConnectionLedger& connections)
+	{
+		struct Term { double forwardWeight{}, backwardWeight{}, forwardCap{}, backwardCap{}, forwardEta{}, backwardEta{}, slope{}, constant{}; bool forward{}, saturated{}; };
+		std::vector<Term> terms(leaves.size());
+		for (size_t i = 0; i < leaves.size(); ++i)
+		{
+			auto const& leaf = leaves[i]; auto& term = terms[i];
+			auto const kd = dt * leaf.conductanceKWPerK;
+			term.forwardEta = connections.efficiency(ports[i].forward);
+			term.backwardEta = connections.efficiency(ports[i].backward);
+			term.forwardCap = connections.remaining(ports[i].forward) * dt;
+			term.backwardCap = connections.remaining(ports[i].backward) * dt;
+			auto const weight = [&](double eta) {
+				if (kd <= 0.0 || leaf.capacityKJPerK <= 0.0) return 0.0;
+				if (eta == 0.0) return kd;
+				return kd <= leaf.capacityKJPerK ? kd / (1.0 + eta * (kd / leaf.capacityKJPerK))
+					: leaf.capacityKJPerK / (eta + leaf.capacityKJPerK / kd); };
+			term.forwardWeight = weight(term.forwardEta);
+			term.backwardWeight = weight(1.0);
+		}
+		auto const residual = [&](double origin, double offset) {
+			double result = hubCapacity * ((origin - hubTemperature) + offset);
+			for (size_t j = 0; j < leaves.size(); ++j)
+			{
+				auto const gap = (origin - leaves[j].temperatureC) + offset;
+				auto const& term = terms[j];
+				result += gap >= 0.0 ? std::min(term.forwardCap, term.forwardWeight * gap)
+					: -term.backwardEta * std::min(term.backwardCap, term.backwardWeight * -gap);
+			}
+			return result;
+		};
+		double normalization = hubCapacity;
+		for (size_t i = 0; i < leaves.size(); ++i)
+		{
+			auto& term = terms[i];
+			term.forward = residual(leaves[i].temperatureC, 0.0) <= 0.0;
+			auto const weight = term.forward ? term.forwardWeight : term.backwardWeight;
+			auto const cap = term.forward ? term.forwardCap : term.backwardCap;
+			auto const atCap = weight > 0.0 ? residual(leaves[i].temperatureC,
+				(term.forward ? 1.0 : -1.0) * cap / weight) : 0.0;
+			term.saturated = weight > 0.0 && (term.forward ? atCap <= 0.0 : atCap >= 0.0);
+			term.slope = term.saturated ? 0.0 : term.forward ? weight : weight * term.backwardEta;
+			term.constant = term.saturated ? (term.forward ? -cap : cap * term.backwardEta) : 0.0;
+			normalization = std::max(normalization, term.slope);
+		}
+		double denominator = hubCapacity / normalization, constants = 0.0;
+		for (auto const& term : terms) { denominator += term.slope / normalization; constants += term.constant / normalization; }
+		for (size_t i = 0; i < leaves.size(); ++i)
+		{
+			auto const& term = terms[i];
+			double gapNumerator = (hubCapacity / normalization) * (hubTemperature - leaves[i].temperatureC) + constants;
+			for (size_t j = 0; j < leaves.size(); ++j)
+				gapNumerator += (terms[j].slope / normalization) * (leaves[j].temperatureC - leaves[i].temperatureC);
+			auto const cap = term.forward ? term.forwardCap : term.backwardCap;
+			auto const energy = term.saturated ? cap : std::clamp(
+				(term.forward ? term.forwardWeight : -term.backwardWeight) * (gapNumerator / denominator), 0.0, cap);
+			auto const port = term.forward ? ports[i].forward : ports[i].backward;
+			connections.direction(port, term.forward && ports[i].forward == ports[i].backward);
+			auto const flow = connections.send(port, energy / dt);
+			ports[i].leafKJ = (term.forward ? flow.delivered : -flow.input) * dt;
+			ports[i].hubKJ = (term.forward ? -flow.input : flow.delivered) * dt;
+		}
+	}
 	double stationSaturatedVapourMassKg(double saturationKPa,
 		double volumeM3, double temperatureC)
 	{
@@ -2371,6 +2448,16 @@ namespace core
 			brokenReferences->push_back(std::move(text));
 			throw BrokenDraftEntry{};
 		};
+		for (auto const& [key, properties] : settings.connections)
+		{
+			if (key.ownerType.empty() || key.ownerId.empty() || key.reference.empty() || key.relation.empty()
+				|| key.peerType.empty() || key.peerId.empty()
+				|| static_cast<size_t>(properties.physicalType) >= StationPhysicalConnectionNames.size()
+				|| !std::isfinite(properties.maximumThroughput) || properties.maximumThroughput <= 0)
+				return refuse("Station connection properties require a valid type and positive finite maximum throughput");
+			if (!std::isfinite(properties.efficiency) || properties.efficiency < 0 || properties.efficiency > 1)
+				return refuse("Station connection efficiency must be finite, from 0 to 1 inclusive");
+		}
 		if (!std::isfinite(settings.observationIntervalSeconds)
 			|| settings.observationIntervalSeconds < 0.1f || settings.observationIntervalSeconds > 60.0f)
 			return refuse("Station observation interval must be finite, from 0.1 to 60 seconds");
@@ -4411,6 +4498,9 @@ namespace core
 	}
 	struct StationSystemsRuntime::Impl
 	{
+		station_connections::Graph connectionGraph;
+		std::vector<StationConnectionSnapshot> connectionFlows;
+		double lastPoolGenerationKW{}, lastConnectionPowerLossKW{}, lastPoolResidualKW{};
 		// Current inventory is runtime state only: it is initialised from the
 		// authored starting quantities when the runtime is constructed and is
 		// never written back into the authored settings or the document.
@@ -4918,6 +5008,8 @@ namespace core
 			// CO2 removed by a capture machine (#404): a booked removal
 			// pathway into the capture store, so no carbon vanishes.
 			double capturedCarbonDioxideKg{0.0};
+			double connectionCarbonDioxideLostKg{0.0};
+			double connectionWaterVapourLostKg{0.0};
 			double lastCo2CapturedKg{0.0};
 			double recoveredKg{0.0};
 			double lostKg{0.0};
@@ -5980,7 +6072,30 @@ namespace core
 				"commanded generator fuel are not projected either - stores they drain carry processConsumptionPossible or "
 				"biologyConsumptionPossible, and a Sustained basis beside those flags does not rule out an earlier live "
 				"shortfall from the omitted draw";
-			if (!settings.enabled) return result;
+			if (!settings.enabled)
+			{
+				result.unavailableReason = "Station systems are disabled.";
+				return result;
+			}
+			// This declared-profile projection is not the authoritative transport
+			// allocator. Do not promise inventory/resupply outcomes that ignore
+			// authored caps or losses, or duplicate the allocator here. Use the
+			// same relationship classification as the live connection ledger:
+			// carrier styling and non-physical annotations do not change eligibility.
+			StationConnectionProperties const defaults;
+			for (auto const& link : connectionGraph.links)
+			{
+				if (station_connections::automaticConnectionType(connectionGraph, link)
+					== StationPhysicalConnection::NonPhysical) continue;
+				auto const properties = station_connections::connectionProperties(settings, link);
+				if (properties.maximumThroughput != defaults.maximumThroughput
+					|| properties.efficiency != defaults.efficiency)
+				{
+					result.unavailableReason = "Physical connection throughput or efficiency differs from defaults; "
+						"the declared-profile projection does not model connection caps and losses.";
+					return result;
+				}
+			}
 			result.available = true;
 			auto const horizonEnd = asOfSeconds + StationForecastHorizonSeconds;
 			// The projection runs on a local copy of the store inventory:
@@ -7311,6 +7426,7 @@ namespace core
 		// restores the live ledger state this pass mutated in place (#555).
 		bool runLedger(uint64_t tick, float seconds, std::string& system, std::string& violation)
 		{
+			StationConnectionLedger connections(settings, connectionGraph, seconds, connectionFlows);
 			std::vector<StationTransferStatus> previousStatus;
 			previousStatus.reserve(transfers.size());
 			for (auto const& transfer : transfers) previousStatus.push_back(transfer.status);
@@ -7543,6 +7659,44 @@ namespace core
 					entry.second *= 1.0 - share;
 				}
 			};
+			bool materialConnectionsValid = true;
+			auto materialPorts = [&](std::string const& type, std::string const& id)
+			{
+				auto const biological = type == "Crops" || type == "Algae";
+				return StationMaterialConnections(connections, settings, type, id, seconds,
+					flowIn, flowOut, qualified, materialConnectionsValid, stagedDrift,
+					[&](size_t index, double lost)
+					{
+						if (lost <= 0.0) return;
+						auto const& store = stores[index].authored;
+						addLedger(stagedLoss, drawStoreActual(index, massToKg(store.unit,
+							qualified[index] + unqualified[index]), massToKg(store.unit, lost)), 1.0);
+						qualified[index] -= lost; flowOut[index] += lost;
+						stagedUnitLoss[store.unit] += lost;
+					},
+					[&, biological, type, id](size_t index, double produced, double lost, ConstituentLedger const& before)
+					{
+						if (lost <= 0.0) return;
+						auto const& store = stores[index].authored;
+						bool isQualified = true;
+						for (auto const& treatment : waterTreatments)
+						{
+							if (type != "Water treatment" || treatment.authored.id != id) continue;
+							if (treatment.concentrateIndex == index) isQualified = false;
+							if (treatment.treatedIndex == index) isQualified = treatment.lastQualityAccepted;
+						}
+						(isQualified ? qualified[index] : unqualified[index]) -= lost;
+						flowIn[index] -= lost;
+						stagedUnitLoss[store.unit] += lost;
+						if (store.composition) addComposition(stagedLoss, *store.composition, massToKg(store.unit, lost), 1.0);
+						if (biological && produced > 0.0)
+						{
+							auto delta = stagedDrift[index]; addLedger(delta, before, -1.0);
+							addLedger(stagedLoss, delta, lost / produced);
+							addLedger(stagedDrift[index], delta, -lost / produced);
+						}
+					});
+			};
 			// Solar supply and external equipment allocation run before the
 			// resource ledger: the electrical service a load receives bounds
 			// its heat and material exchanges, and allocated power can never
@@ -7704,6 +7858,7 @@ namespace core
 				array.lastAvailableKW = array.lastDisabled
 					? 0.0 : array.authored.capacityKW * array.lastIllumination;
 				array.lastEclipse = !array.lastDisabled && array.lastAvailableKW <= 0.0;
+				array.lastAvailableKW = connections.available(connections.port("Solar", array.authored.id, "Solar generation"), array.lastAvailableKW);
 				availableGeneration += array.lastAvailableKW;
 				// #553: finite installed capacities do not guarantee a
 				// finite total — two finite arrays can sum past the largest
@@ -7718,6 +7873,7 @@ namespace core
 					return violation = "solar generation sum overflows to a non-finite magnitude", false;
 				}
 			}
+			double poolGenerationKW = availableGeneration;
 			std::vector<double> supplied(loads.size(), 0.0);
 			// Battery discharge feeds the same allocation pool as generation,
 			// never a second budget: it covers the remainder of a load's
@@ -7730,7 +7886,7 @@ namespace core
 			{ return battery.authored.usableKWh <= 0.0; };
 			// dtHours is the crossing duration in HOURS: the energy drawable
 			// above the reserve converts into a power ceiling only through it.
-			auto const deliverableKW = [&](BatteryState const& battery, double dtHours)
+			auto const nativeDeliverableKW = [&](BatteryState const& battery, double dtHours)
 			{
 				if (batteryDisabled(battery)) return 0.0;
 				auto const drawable = std::max(0.0, battery.stored - batteryReserve(battery));
@@ -7740,6 +7896,11 @@ namespace core
 				// allocation passes can never jointly exceed the cap.
 				auto const byPower = battery.authored.maxDischargeKW - battery.lastDischargeKW;
 				return std::max(0.0, std::min(byPower, byEnergy));
+			};
+			auto const deliverableKW = [&](BatteryState const& battery, double dtHours)
+			{
+				return connections.available(connections.port("Battery", battery.authored.id, "Discharge"),
+					nativeDeliverableKW(battery, dtHours));
 			};
 			// What the whole bank could deliver this tick before any of it is
 			// routed: the pool a protected critical claim is measured
@@ -7775,27 +7936,46 @@ namespace core
 					auto& battery = batteries[batteryIndex];
 					if (remaining <= 1e-15) break;
 					if (batteryDisabled(battery)) continue;
-					auto const cap = deliverableKW(battery, hours);
-					auto const give = std::min(remaining, cap);
-					if (give > 0.0)
+					auto const port = connections.port("Battery", battery.authored.id, "Discharge");
+					auto const request = connections.required(port, remaining);
+					auto const transport = connections.receive(port, remaining, nativeDeliverableKW(battery, hours));
+					auto const give = transport.delivered;
+					if (transport.input > 0.0)
 					{
-						auto const drawn = give * hours
+						auto const drawn = transport.input * hours
 							/ battery.authored.dischargeEfficiency;
 						battery.stored -= drawn;
 						battery.dischargedKWh += drawn;
-						battery.deliveredKWh += give * hours;
-						battery.lastDischargeKW += give;
+						battery.deliveredKWh += transport.input * hours;
+						battery.lastDischargeKW += transport.input;
 						if (contributions != nullptr)
 							contributions->push_back({batteryIndex, give});
 					}
-					battery.lastDischargeRequestedKW += remaining;
-					battery.lastDischargeShortfallKW += remaining - give;
+					battery.lastDischargeRequestedKW += request;
+					battery.lastDischargeShortfallKW += request - transport.input;
 					remaining -= give;
 				}
 				return needKW - remaining;
 			};
 			double batterySuppliedKW{0.0};
 			double batteryShortfallKW{0.0};
+			auto const powerPort = [&](std::string const& type, std::string const& id) {
+				return connections.port(type, id, type == "Generator" ? "Startup" : "Electrical supply"); };
+			auto const powerAvailable = [&](std::string const& type, std::string const& id) {
+				return connections.available(powerPort(type, id), availableGeneration + batteryDeliverableKW()); };
+			auto const drawPower = [&](std::string const& type, std::string const& id, double needKW,
+				std::vector<std::pair<size_t, double>>* contributions = nullptr, double* generation = nullptr)
+			{
+				auto const port = powerPort(type, id);
+				auto const grossNeed = connections.required(port, needKW);
+				auto const fromGeneration = std::min(grossNeed, availableGeneration);
+				availableGeneration -= fromGeneration;
+				auto const fromBattery = drawBatteries(grossNeed - fromGeneration, contributions);
+				batterySuppliedKW += fromBattery;
+				batteryShortfallKW += grossNeed - fromGeneration - fromBattery;
+				if (generation) *generation = fromGeneration;
+				return connections.send(port, fromGeneration + fromBattery).delivered;
+			};
 			// Installation availability factors are resolved from the outage
 			// schedules before any installation reads its rated capacity
 			// (#413). Each outage window is a pure function of the elapsed
@@ -8360,6 +8540,7 @@ namespace core
 			for (auto& generator : generators)
 			{
 				generator.dispatchCommandKW = 0.0;
+				auto ports = materialPorts("Generator", generator.authored.id);
 				if (!dispatchAutomatic) continue;
 				auto const effectiveRatedKW = generator.authored.ratedOutputKW
 					* generator.availabilityFactor;
@@ -8370,7 +8551,7 @@ namespace core
 				if (!coolingAvailable) continue;
 				auto const kwhPerUnit = energyUnitsToKWh(stores[generator.fuelStoreIndex].authored.unit);
 				auto const drawableKWh = std::max(0.0,
-					qualified[generator.fuelStoreIndex] - stores[generator.fuelStoreIndex].authored.protectedReserve)
+					ports.input(generator.fuelStoreIndex, qualified[generator.fuelStoreIndex] - stores[generator.fuelStoreIndex].authored.protectedReserve))
 					* kwhPerUnit;
 				if (drawableKWh <= 0.0) continue;
 				// The fuel cap is the output the drawable fuel can pay for at
@@ -8385,8 +8566,10 @@ namespace core
 				// whether or not it is still commanded - the crank runs on at
 				// zero output, and the load must not be left blind to it.
 				if (generator.phase == StationGeneratorPhase::Starting)
-					dispatchStartupSupportKW += startupDrawForKW(generator, startupRequiredKJ);
-				auto const commandKW = std::min(capKW, dispatchRemainingKW);
+					dispatchStartupSupportKW += connections.inputDemand(powerPort("Generator", generator.authored.id), startupDrawForKW(generator, startupRequiredKJ));
+				auto const generationPort = connections.port("Generator", generator.authored.id, "Generation");
+				if (connections.efficiency(generationPort) == 0.0) continue;
+				auto const commandKW = std::min(capKW, connections.required(generationPort, dispatchRemainingKW));
 				if (commandKW <= 0.0) continue;
 				generator.dispatchCommandKW = commandKW;
 				if (generator.phase == StationGeneratorPhase::Running)
@@ -8398,7 +8581,7 @@ namespace core
 					auto const deliverableKW = std::min(commandKW,
 						generator.outputKW
 							+ generator.authored.maxRampKWPerSecond * dispatchDtSeconds);
-					dispatchRemainingKW -= std::max(0.0, deliverableKW);
+					dispatchRemainingKW -= connections.available(generationPort, std::max(0.0, deliverableKW));
 				}
 				else if (generator.phase == StationGeneratorPhase::Stopped)
 				{
@@ -8406,7 +8589,7 @@ namespace core
 					// output this tick, so its startup draw rides the target
 					// for the backup to fund beside the load it cannot yet
 					// serve.
-					dispatchStartupSupportKW += startupDrawForKW(generator, startupRequiredKJ);
+					dispatchStartupSupportKW += connections.inputDemand(powerPort("Generator", generator.authored.id), startupDrawForKW(generator, startupRequiredKJ));
 				}
 				// A machine in shutdown decay is commanded but serves
 				// nothing this tick; its residual flows on untouched.
@@ -8421,6 +8604,7 @@ namespace core
 			for (auto& cell : fuelCells)
 			{
 				cell.dispatchCommandKW = 0.0;
+				auto ports = materialPorts("Fuel cell", cell.authored.id);
 				if (!dispatchAutomatic) continue;
 				if (cell.authored.ratedOutputKW <= 0.0) continue;
 				auto const sinkTemperatureC = reservoirs[cell.sinkIndex].temperatureC;
@@ -8432,12 +8616,12 @@ namespace core
 				auto const& oxygen = stores[cell.oxygenStoreIndex].authored;
 				auto const& water = stores[cell.waterStoreIndex].authored;
 				auto const h2DrawableKg = std::max(0.0, massToKg(hydrogen.unit,
-					qualified[cell.hydrogenStoreIndex] - hydrogen.protectedReserve));
+					ports.input(cell.hydrogenStoreIndex, qualified[cell.hydrogenStoreIndex] - hydrogen.protectedReserve)));
 				auto const o2DrawableKg = std::max(0.0, massToKg(oxygen.unit,
-					qualified[cell.oxygenStoreIndex] - oxygen.protectedReserve));
+					ports.input(cell.oxygenStoreIndex, qualified[cell.oxygenStoreIndex] - oxygen.protectedReserve)));
 				auto const waterHeadroomKg = std::max(0.0, massToKg(water.unit,
-					water.capacity - (qualified[cell.waterStoreIndex]
-						+ unqualified[cell.waterStoreIndex])));
+					ports.output(cell.waterStoreIndex, water.capacity - (qualified[cell.waterStoreIndex]
+						+ unqualified[cell.waterStoreIndex]))));
 				// Every finite axis caps the backup the same way: the largest
 				// output the reactants and the product-water headroom can
 				// sustain this tick. A cell with nothing drawable above its
@@ -8450,11 +8634,13 @@ namespace core
 				capKW = std::min(capKW, (waterHeadroomKg / (1.0 + o2PerH2)) * elecKJPerKgH2
 					/ static_cast<double>(seconds));
 				if (capKW <= 0.0) continue;
-				auto const commandKW = std::min(capKW, dispatchRemainingKW);
+				auto const generationPort = connections.port("Fuel cell", cell.authored.id, "Backup generation");
+				if (connections.efficiency(generationPort) == 0.0) continue;
+				auto const commandKW = std::min(capKW, connections.required(generationPort, dispatchRemainingKW));
 				if (commandKW <= 0.0) continue;
 				cell.dispatchCommandKW = commandKW;
 				backupEngaged = true;
-				dispatchRemainingKW -= commandKW;
+				dispatchRemainingKW -= connections.available(generationPort, commandKW);
 			}
 			lastDispatchTargetKW = dispatchLoadTargetKW + dispatchStartupSupportKW;
 			lastDispatchCommittedKW = lastDispatchTargetKW - dispatchRemainingKW;
@@ -8486,6 +8672,7 @@ namespace core
 			double totalFuelCellOutputKW{0.0}, totalFuelCellWasteKW{0.0};
 			for (auto& cell : fuelCells)
 			{
+				auto ports = materialPorts("Fuel cell", cell.authored.id);
 				auto const disabled = cell.authored.ratedOutputKW <= 0.0;
 				// #415: under automatic dispatch the dispatcher's command for
 				// this tick replaces the authored setpoint; the cell still
@@ -8519,11 +8706,13 @@ namespace core
 				// is not running. Protected oxygen never counts toward it.
 				auto const publishEndurance = [&]()
 				{
+					ports.finish();
 					auto const remainingH2Kg = std::max(0.0, massToKg(hydrogen.unit,
 						qualified[cell.hydrogenStoreIndex] - hydrogen.protectedReserve));
 					auto const remainingO2Kg = std::max(0.0, massToKg(oxygen.unit,
 						qualified[cell.oxygenStoreIndex] - oxygen.protectedReserve));
-					auto const usableH2Kg = std::min(remainingH2Kg, remainingO2Kg / o2PerH2);
+					auto const usableH2Kg = std::min(remainingH2Kg * connections.efficiency(connections.port("Fuel cell", cell.authored.id, "Hydrogen")),
+						remainingO2Kg * connections.efficiency(connections.port("Fuel cell", cell.authored.id, "Oxygen")) / o2PerH2);
 					auto const referenceKW = cell.lastOutputKW > 0.0
 						? cell.lastOutputKW : cell.authored.ratedOutputKW;
 					cell.enduranceSeconds = referenceKW > 0.0
@@ -8552,20 +8741,27 @@ namespace core
 					cell.status = StationTransferStatus::Idle;
 					continue;
 				}
+				auto const hydrogenNeed = kgToMass(hydrogen.unit, commanded * dtSeconds / elecKJPerKgH2);
+				auto const oxygenNeed = kgToMass(oxygen.unit, commanded * dtSeconds * o2PerH2 / elecKJPerKgH2);
+				ports.limitDemand(ports.request(cell.hydrogenStoreIndex,
+					ports.input(cell.hydrogenStoreIndex, qualified[cell.hydrogenStoreIndex] - hydrogen.protectedReserve), hydrogenNeed), hydrogenNeed);
+				ports.limitDemand(ports.request(cell.oxygenStoreIndex,
+					ports.input(cell.oxygenStoreIndex, qualified[cell.oxygenStoreIndex] - oxygen.protectedReserve), oxygenNeed), oxygenNeed);
 				// Every finite axis caps the output the same way: the
 				// largest output the axis can sustain this tick. The
 				// binding one names itself; nothing is silently clamped.
 				auto const h2DrawableKg = std::max(0.0, massToKg(hydrogen.unit,
-					qualified[cell.hydrogenStoreIndex] - hydrogen.protectedReserve));
+					ports.input(cell.hydrogenStoreIndex, qualified[cell.hydrogenStoreIndex] - hydrogen.protectedReserve)));
 				auto const o2DrawableKg = std::max(0.0, massToKg(oxygen.unit,
-					qualified[cell.oxygenStoreIndex] - oxygen.protectedReserve));
+					ports.input(cell.oxygenStoreIndex, qualified[cell.oxygenStoreIndex] - oxygen.protectedReserve)));
 				auto const waterHeadroomKg = std::max(0.0, massToKg(water.unit,
-					water.capacity - (qualified[cell.waterStoreIndex]
-						+ unqualified[cell.waterStoreIndex])));
+					ports.output(cell.waterStoreIndex, water.capacity - (qualified[cell.waterStoreIndex]
+						+ unqualified[cell.waterStoreIndex]))));
 				auto const byH2KW = h2DrawableKg * elecKJPerKgH2 / dtSeconds;
 				auto const byO2KW = (o2DrawableKg / o2PerH2) * elecKJPerKgH2 / dtSeconds;
 				auto const byWaterKW = (waterHeadroomKg / (1.0 + o2PerH2))
 					* elecKJPerKgH2 / dtSeconds;
+				ports.limitDemand(byWaterKW, commanded);
 				double scale = 1.0;
 				std::string limiter;
 				auto const constrain = [&](double capKW, std::string const& reason)
@@ -8574,6 +8770,8 @@ namespace core
 					scale = capKW / commanded;
 					limiter = reason;
 				};
+				constrain(connections.remaining(connections.port("Fuel cell", cell.authored.id, "Backup generation")),
+					"electrical generation connection throughput");
 				constrain(byH2KW, "hydrogen store '" + hydrogen.id
 					+ "' has nothing drawable above its protected reserve");
 				constrain(byO2KW, "oxygen store '" + oxygen.id
@@ -8613,14 +8811,14 @@ namespace core
 				auto const electricalKJ = outputKW * dtSeconds;
 				auto const wasteKJ = chemicalKJ - electricalKJ;
 				auto const h2Units = std::min(kgToMass(hydrogen.unit, h2Kg),
-					std::max(0.0, qualified[cell.hydrogenStoreIndex] - hydrogen.protectedReserve));
+					std::max(0.0, ports.input(cell.hydrogenStoreIndex, qualified[cell.hydrogenStoreIndex] - hydrogen.protectedReserve)));
 				auto const h2ActualKg = massToKg(hydrogen.unit, h2Units);
 				auto const o2Units = std::min(kgToMass(oxygen.unit, o2Kg),
-					std::max(0.0, qualified[cell.oxygenStoreIndex] - oxygen.protectedReserve));
+					std::max(0.0, ports.input(cell.oxygenStoreIndex, qualified[cell.oxygenStoreIndex] - oxygen.protectedReserve)));
 				auto const o2ActualKg = massToKg(oxygen.unit, o2Units);
 				auto const waterUnits = std::min(kgToMass(water.unit, waterKg),
-					std::max(0.0, water.capacity
-						- (qualified[cell.waterStoreIndex] + unqualified[cell.waterStoreIndex])));
+					std::max(0.0, ports.output(cell.waterStoreIndex, water.capacity
+						- (qualified[cell.waterStoreIndex] + unqualified[cell.waterStoreIndex]))));
 				auto const waterActualKg = massToKg(water.unit, waterUnits);
 				qualified[cell.hydrogenStoreIndex] -= h2Units;
 				flowOut[cell.hydrogenStoreIndex] += h2Units;
@@ -8634,8 +8832,9 @@ namespace core
 				// Energy: the reactants' chemical energy left as
 				// electricity into the shared pool or as waste heat into
 				// the sink - booked once, never a third destination.
-				fuelCellHeatByReservoir[cell.sinkIndex] += wasteKJ / dtSeconds;
-				availableGeneration += outputKW;
+				fuelCellHeatByReservoir[cell.sinkIndex] += connections.routeHeat(connections.port("Fuel cell", cell.authored.id, "Heat"), wasteKJ / dtSeconds);
+				auto const toPoolKW = connections.send(connections.port("Fuel cell", cell.authored.id, "Backup generation"), outputKW).delivered;
+				availableGeneration += toPoolKW; poolGenerationKW += toPoolKW;
 				cell.lastOutputKW = outputKW;
 				cell.lastHydrogenKg = h2ActualKg;
 				cell.lastOxygenKg = o2ActualKg;
@@ -8657,6 +8856,7 @@ namespace core
 			}
 			for (auto& generator : generators)
 			{
+				auto ports = materialPorts("Generator", generator.authored.id);
 				auto const disabled = generator.authored.ratedOutputKW <= 0.0;
 				// The availability factor from the outage contract (#413) is
 				// a hard ceiling on the deliverable rated capacity this tick:
@@ -8685,8 +8885,19 @@ namespace core
 				auto const coolingAvailable = !disabled
 					&& sinkTemperatureC + 1e-9 < generator.authored.maxSinkTemperatureC;
 				auto const kwhPerUnit = energyUnitsToKWh(stores[generator.fuelStoreIndex].authored.unit);
+				if (coolingAvailable && commanded > 0.0)
+				{
+					auto const need = std::min(commanded, effectiveRatedKW) * hours / generator.authored.efficiency / kwhPerUnit;
+					ports.limitDemand(ports.request(generator.fuelStoreIndex,
+						ports.input(generator.fuelStoreIndex, qualified[generator.fuelStoreIndex]
+							- stores[generator.fuelStoreIndex].authored.protectedReserve), need), need);
+					if (generator.phase == StationGeneratorPhase::Shutdown
+						|| (generator.phase != StationGeneratorPhase::Running && generator.authored.startupSeconds > 0.0
+							&& powerAvailable("Generator", generator.authored.id) + 1e-9 < generator.authored.startupPowerKW))
+						ports.limitDemand(0.0, 1.0);
+				}
 				auto const drawableKWh = std::max(0.0,
-					qualified[generator.fuelStoreIndex] - stores[generator.fuelStoreIndex].authored.protectedReserve)
+					ports.input(generator.fuelStoreIndex, qualified[generator.fuelStoreIndex] - stores[generator.fuelStoreIndex].authored.protectedReserve))
 					* kwhPerUnit;
 				auto const startupRequiredKJ = generator.authored.startupPowerKW * generator.authored.startupSeconds;
 				generator.lastFuelDrawKWh = 0.0;
@@ -8719,7 +8930,7 @@ namespace core
 						else if (drawableKWh <= 0.0)
 							generator.lastBlockReason = "no fuel is drawable above the protected reserve";
 						else if (startupRequiredKJ > 0.0
-							&& availableGeneration + batteryDeliverableKW() + 1e-9
+							&& powerAvailable("Generator", generator.authored.id) + 1e-9
 								< generator.authored.startupPowerKW)
 							generator.lastBlockReason = "the pool cannot supply the startup energy draw";
 						else
@@ -8765,7 +8976,7 @@ namespace core
 							? std::min(generator.authored.startupPowerKW,
 								remainingStartupKJ / dtSeconds)
 							: generator.authored.startupPowerKW;
-						auto const poolKW = availableGeneration + batteryDeliverableKW();
+						auto const poolKW = powerAvailable("Generator", generator.authored.id);
 						if (poolKW + 1e-9 < requestKW)
 						{
 							// The startup energy support that qualified the
@@ -8776,17 +8987,11 @@ namespace core
 							generator.lastBlockReason = "startup energy support lost mid-crank";
 							break;
 						}
-						auto const fromGeneration = std::min(requestKW, availableGeneration);
-						availableGeneration -= fromGeneration;
-						auto const ask = requestKW - fromGeneration;
-						auto const fromBattery = drawBatteries(ask);
-						batterySuppliedKW += fromBattery;
-						batteryShortfallKW += ask - fromBattery;
-						auto const suppliedKW = fromGeneration + fromBattery;
+						auto const suppliedKW = drawPower("Generator", generator.authored.id, requestKW);
 						generator.lastStartupDrawKW = suppliedKW;
 						// Cranking energy dissipates into the same sink
 						// the running machine will use: booked once here.
-						generatorHeatBySink[generator.sinkIndex] += suppliedKW;
+						generatorHeatBySink[generator.sinkIndex] += connections.routeHeat(connections.port("Generator", generator.authored.id, "Heat"), suppliedKW);
 						generator.startupHeatKJ += suppliedKW * dtSeconds;
 						generator.startupReceivedKJ += suppliedKW * dtSeconds;
 						if (generator.startupReceivedKJ + 1e-9 >= startupRequiredKJ)
@@ -8818,7 +9023,8 @@ namespace core
 						// no tick commands an instantaneous step the
 						// machine cannot physically make.
 						auto const maxStepKW = generator.authored.maxRampKWPerSecond * dtSeconds;
-						auto const targetKW = std::min(commanded, effectiveRatedKW);
+						auto const targetKW = std::min({commanded, effectiveRatedKW,
+							connections.remaining(connections.port("Generator", generator.authored.id, "Generation"))});
 						generator.outputKW += std::max(-maxStepKW,
 							std::min(maxStepKW, targetKW - generator.outputKW));
 						// The outage ceiling is hard: a window that opens while
@@ -8863,11 +9069,12 @@ namespace core
 						generator.wasteHeatKJ += wasteKJ;
 						auto const wasteKW = wasteKJ / dtSeconds;
 						generator.lastWasteHeatKW = wasteKW;
-						generatorHeatBySink[generator.sinkIndex] += wasteKW;
+						generatorHeatBySink[generator.sinkIndex] += connections.routeHeat(connections.port("Generator", generator.authored.id, "Heat"), wasteKW);
 						// The generator's output joins the shared pool the
 						// loads allocate against this tick - generation
 						// earned with fuel, not sunshine.
-						availableGeneration += generator.outputKW;
+						auto const toPoolKW = connections.send(connections.port("Generator", generator.authored.id, "Generation"), generator.outputKW).delivered;
+						availableGeneration += toPoolKW; poolGenerationKW += toPoolKW;
 						totalGeneratorOutputKW += generator.outputKW;
 						totalGeneratorWasteKW += wasteKW;
 					}
@@ -8910,7 +9117,7 @@ namespace core
 						// sink actually received this tick even on the
 						// prorated final interval.
 						generator.lastDecayHeatKW = bookedKJ / dtSeconds;
-						generatorHeatBySink[generator.sinkIndex] += generator.lastDecayHeatKW;
+						generatorHeatBySink[generator.sinkIndex] += connections.routeHeat(connections.port("Generator", generator.authored.id, "Heat"), generator.lastDecayHeatKW);
 						generator.decayHeatKJ += bookedKJ;
 						totalGeneratorDecayKW += generator.lastDecayHeatKW;
 						generator.shutdownElapsedSeconds += intervalSeconds;
@@ -8921,8 +9128,11 @@ namespace core
 				// actually produces decay heat - including the tick on
 				// which the last of it is booked, whatever phase that tick
 				// ends in - and while the machine is running (#563).
+				auto const heatPort = connections.port("Generator", generator.authored.id, "Heat");
+				generatorHeatBySink[generator.sinkIndex] += connections.routeHeat(heatPort, 0.0);
+				auto const* heat = connections.snapshot(heatPort);
 				generator.lastCoolingRequired = generator.phase == StationGeneratorPhase::Running
-					|| decayedThisTick;
+					|| decayedThisTick || (heat && (heat->retainedHeatKJ > 0.0 || heat->lastInputRate > 0.0));
 				totalGeneratorStartupKW += generator.lastStartupDrawKW;
 				// Publish the per-generator service status against the
 				// commanded output: full at command, partial under ramp
@@ -8951,65 +9161,129 @@ namespace core
 			{
 				return exchange.ratePerSecond * static_cast<double>(seconds) * profileLevel;
 			};
-			auto const materialFeasible = [&](LoadState const& load, std::string& limiter)
+			auto const exchangePort = [&](LoadState const& load, LoadExchangeState const& exchange)
+			{
+				size_t ordinal = 0;
+				for (auto const& item : load.exchanges)
+				{
+					if (item.consumes == exchange.consumes) ++ordinal;
+					if (&item == &exchange) break;
+				}
+				return connections.port("Equipment", load.authored.id,
+					std::string(exchange.consumes ? "Material in " : "Material return ") + std::to_string(ordinal));
+			};
+			auto const materialFeasible = [&](LoadState const& load, std::string& limiter, bool requesting = false)
 			{
 				double fraction = 1.0;
+				auto const feedLimiter = [&](size_t index, double drawable) {
+					auto const& store = stores[index].authored;
+					return drawable <= 1e-12
+						? (store.protectedReserve > 0.0
+							? "feed store '" + store.id + "' is at its protected reserve"
+							: (unqualified[index] > 1e-12
+								? "feed store '" + store.id + "' holds only unqualified material"
+								: "feed store '" + store.id + "' is empty"))
+						: "feed store '" + store.id + "' supply limits the operating level";
+				};
+				std::map<size_t, double> feedClaims, returnClaims;
 				for (auto const& exchange : load.exchanges)
 				{
 					auto const& store = stores[exchange.storeIndex].authored;
 					auto const full = exchangeFullAmount(exchange, load.lastProfileLevel);
 					if (full <= 0.0) continue;
+					auto const port = exchangePort(load, exchange);
+					auto const eta = connections.efficiency(port);
 					if (exchange.consumes)
 					{
-						auto const drawable = std::max(0.0,
-							qualified[exchange.storeIndex] - store.protectedReserve);
-						if (drawable / full < fraction)
+						auto const drawable = std::max(0.0, qualified[exchange.storeIndex] - store.protectedReserve);
+						auto const available = connections.available(port, drawable / seconds) * seconds;
+						auto const requestAvailable = requesting && eta == 0.0
+							? std::min(drawable, connections.remaining(port) * seconds) : available;
+						if (requestAvailable / full < fraction)
 						{
-							fraction = drawable / full;
-							limiter = drawable <= 1e-12
-								? (store.protectedReserve > 0.0
-									? "feed store '" + store.id + "' is at its protected reserve"
-									: (unqualified[exchange.storeIndex] > 1e-12
-										? "feed store '" + store.id
-											+ "' holds only unqualified material"
-										: "feed store '" + store.id + "' is empty"))
-								: "feed store '" + store.id + "' supply limits the operating level";
+							fraction = requestAvailable / full;
+							// A per-port claim may bind before the shared-store pass
+							// sees the same ratio; preserve the inventory diagnosis.
+							limiter = drawable <= 1e-12 || (eta > 0.0 && drawable <= connections.remaining(port) * seconds)
+								? feedLimiter(exchange.storeIndex, drawable)
+								: "feed store '" + store.id + "' physical connection limits the operating level";
 						}
+						if (eta > 0.0 || requesting) feedClaims[exchange.storeIndex] += full / (eta > 0.0 ? eta : 1.0);
 					}
 					else
 					{
-						auto const headroom = std::max(0.0, store.capacity
-							- (qualified[exchange.storeIndex]
-								+ unqualified[exchange.storeIndex]));
-						if (headroom / full < fraction)
+						auto const capacity = connections.remaining(port) * seconds;
+						if (capacity / full < fraction)
 						{
-							fraction = headroom / full;
-							limiter = headroom <= 1e-12
-								? "destination store '" + store.id + "' is full"
-								: "destination store '" + store.id
-									+ "' headroom limits the operating level";
+							fraction = capacity / full;
+							limiter = "destination physical connection throughput limits the operating level";
 						}
+						returnClaims[exchange.storeIndex] += full * eta;
 					}
 				}
-				return std::max(0.0, std::min(1.0, fraction));
+				for (auto const& [index, full] : feedClaims)
+				{
+					auto const& store = stores[index].authored;
+					auto const drawable = std::max(0.0, qualified[index] - store.protectedReserve);
+					auto const ratio = drawable / full;
+					if (ratio < fraction) { fraction = ratio; limiter = feedLimiter(index, drawable); }
+				}
+				for (auto const& [index, full] : returnClaims)
+				{
+					auto const& store = stores[index].authored;
+					auto const room = std::max(0.0, store.capacity - qualified[index] - unqualified[index]);
+					auto const ratio = room <= 0.0 ? 0.0 : full > 0.0 ? room / full : 1.0;
+					if (ratio < fraction)
+					{
+						fraction = ratio;
+						limiter = room <= 1e-12 ? "destination store '" + store.id + "' is full"
+							: "destination store '" + store.id + "' headroom limits the operating level";
+					}
+				}
+				return std::clamp(fraction, 0.0, 1.0);
 			};
-			// Reserve the capped level's material against the staged inventory
-			// when a grant is made: a feed draw and a destination claim that
-			// later loads in the allocation order must see, so competing loads
-			// never double-book the same kilograms (#554).
 			auto const reserveMaterial = [&](LoadState& load, double fraction)
 			{
 				for (auto& exchange : load.exchanges)
 				{
-					auto const reserved = exchangeFullAmount(exchange, load.lastProfileLevel)
-						* fraction;
-					if (exchange.consumes)
-						qualified[exchange.storeIndex] -= reserved;
-					else
-						qualified[exchange.storeIndex] += reserved;
+					auto const port = exchangePort(load, exchange);
+					auto const device = exchangeFullAmount(exchange, load.lastProfileLevel) * fraction;
+					auto const reserved = exchange.consumes ? connections.required(port, device / seconds) * seconds
+						: device * connections.efficiency(port);
+					qualified[exchange.storeIndex] += (exchange.consumes ? -1.0 : 1.0) * reserved;
 					exchange.lastReserved = reserved;
 				}
 				load.lastMaterialReserved = true;
+			};
+			auto const leakZeroMaterial = [&](LoadState const& load)
+			{
+				if (std::none_of(load.exchanges.begin(), load.exchanges.end(), [&](auto const& exchange) {
+					return exchange.consumes && connections.efficiency(exchangePort(load, exchange)) == 0.0;
+				})) return;
+				std::string ignored;
+				auto const material = materialFeasible(load, ignored, true);
+				auto const minimum = load.lastRequestedKW * (1.0 - load.authored.maxCurtailment);
+				auto const power = powerAvailable("Equipment", load.authored.id);
+				if (load.lastRequestedKW <= 0.0 || power <= 0.0 || material <= 0.0
+					|| material * load.lastRequestedKW + 1e-12 < minimum || power + 1e-12 < minimum) return;
+				auto const demandScale = std::min(material, power / load.lastRequestedKW);
+				for (auto const& exchange : load.exchanges)
+				{
+					auto const port = exchangePort(load, exchange);
+					if (!exchange.consumes || connections.efficiency(port) > 0.0) continue;
+					auto const index = exchange.storeIndex;
+					auto const& store = stores[index].authored;
+					auto const drawable = std::max(0.0, qualified[index] - store.protectedReserve);
+					auto const lost = std::min(drawable, connections.receive(port,
+						exchange.ratePerSecond * load.lastProfileLevel * demandScale, drawable / seconds).input * seconds);
+					double pending = 0.0;
+					for (auto const& other : loads)
+						for (auto const& item : other.exchanges)
+							if (item.storeIndex == index) pending += (item.consumes ? 1.0 : -1.0) * item.lastReserved;
+					addLedger(stagedLoss, drawStoreActual(index, massToKg(store.unit,
+						qualified[index] + unqualified[index] + pending), massToKg(store.unit, lost)), 1.0);
+					qualified[index] -= lost; flowOut[index] += lost; stagedUnitLoss[store.unit] += lost;
+				}
 			};
 			// #416: protected critical service admission. Containment
 			// circulation (hazardous coolant loops, protected by their hazard
@@ -9052,15 +9326,6 @@ namespace core
 			std::vector<StationProtectedServiceSnapshot> protectedServices;
 			double protectedDemandKW{0.0};
 			double protectedSuppliedKW{0.0};
-			auto const drawProtected = [&](double needKW)
-			{
-				if (needKW <= 0.0) return 0.0;
-				auto const fromGeneration = std::min(needKW, availableGeneration);
-				availableGeneration -= fromGeneration;
-				auto const fromBattery = drawBatteries(needKW - fromGeneration);
-				batterySuppliedKW += fromBattery;
-				return fromGeneration + fromBattery;
-			};
 			auto const recordProtected = [&](std::string id, std::string kind,
 				double requestedKW, double suppliedKW, std::string reason)
 			{
@@ -9098,7 +9363,7 @@ namespace core
 					? loop.authored.heaterCapacityKW : 0.0;
 				auto const requestedKW = pumpDemandKW + heaterDemandKW;
 				if (requestedKW <= 0.0) continue;
-				auto const suppliedKW = drawProtected(requestedKW);
+				auto const suppliedKW = drawPower("Coolant loop", loop.authored.id, requestedKW);
 				protectedLoopPumpKW[loopIndex] = std::min(pumpDemandKW, suppliedKW);
 				protectedLoopHeaterKW[loopIndex] = std::max(0.0,
 					std::min(heaterDemandKW, suppliedKW - protectedLoopPumpKW[loopIndex]));
@@ -9174,7 +9439,7 @@ namespace core
 						&& loop.authored.hazardClass != "hazardous"
 						&& loopPumpDemandKW > 0.0)
 					{
-						auto const pumpSuppliedKW = drawProtected(loopPumpDemandKW);
+						auto const pumpSuppliedKW = drawPower("Coolant loop", loop.authored.id, loopPumpDemandKW);
 						protectedLoopPumpKW[chiller.loopIndex] = pumpSuppliedKW;
 						recordProtected(loop.authored.id, "critical-cooling-circulation",
 							loopPumpDemandKW, pumpSuppliedKW,
@@ -9200,7 +9465,8 @@ namespace core
 					/ static_cast<double>(seconds);
 				auto const potentialKW = std::min(effectiveCoolingCapacityKW
 					* fillFraction * loop.availabilityFactor, thermalTermKW);
-				auto const deliverableKW = potentialKW * circulationFraction;
+				auto const deliverableKW = std::min(potentialKW * circulationFraction,
+					connections.available(connections.port("Chiller", chiller.authored.id, "Evaporator heat"), thermalTermKW));
 				auto const requestedKW = potentialKW <= 1e-12 ? 0.0
 					: potentialKW / chiller.authored.cop + chiller.authored.auxiliaryPowerKW;
 				auto const usableWorkKW = deliverableKW <= 1e-12 ? 0.0
@@ -9214,13 +9480,10 @@ namespace core
 				// drawProtected, but tracked (#580): the chiller pass owns
 				// the reservation from here and refunds whatever the real
 				// heat calculation leaves unused instead of stranding it.
-				auto const creditFromGenerationKW = std::min(usableWorkKW, availableGeneration);
-				availableGeneration -= creditFromGenerationKW;
+				double creditFromGenerationKW = 0.0;
 				std::vector<std::pair<size_t, double>> creditFromBatteryKW;
-				auto const creditFromBatteryTotalKW = drawBatteries(
-					usableWorkKW - creditFromGenerationKW, &creditFromBatteryKW);
-				batterySuppliedKW += creditFromBatteryTotalKW;
-				auto const suppliedKW = creditFromGenerationKW + creditFromBatteryTotalKW;
+				auto const suppliedKW = drawPower("Chiller", chiller.authored.id, usableWorkKW,
+					&creditFromBatteryKW, &creditFromGenerationKW);
 				protectedChillerPowerKW[chillerIndex] = suppliedKW;
 				protectedChillerDraws[chillerIndex].fromGenerationKW = creditFromGenerationKW;
 				protectedChillerDraws[chillerIndex].fromBatteryKW = std::move(creditFromBatteryKW);
@@ -9246,7 +9509,7 @@ namespace core
 				if (crop.dead || crop.authored.growingAreaM2 <= 0.0) continue;
 				auto const requestedKW = crop.authored.circulationPowerKW;
 				if (requestedKW <= 0.0) continue;
-				auto const suppliedKW = drawProtected(requestedKW);
+				auto const suppliedKW = drawPower("Crops", crop.authored.id, requestedKW);
 				protectedCropCirculationKW[cropIndex] = suppliedKW;
 				recordProtected(crop.authored.id, "biological-circulation", requestedKW,
 					suppliedKW, suppliedKW + 1e-12 < requestedKW
@@ -9260,7 +9523,7 @@ namespace core
 				if (culture.dead || culture.authored.cultureVolumeL <= 0.0) continue;
 				auto const requestedKW = culture.authored.circulationPowerKW;
 				if (requestedKW <= 0.0) continue;
-				auto const suppliedKW = drawProtected(requestedKW);
+				auto const suppliedKW = drawPower("Algae", culture.authored.id, requestedKW);
 				protectedAlgaeCirculationKW[cultureIndex] = suppliedKW;
 				recordProtected(culture.authored.id, "biological-circulation", requestedKW,
 					suppliedKW, suppliedKW + 1e-12 < requestedKW
@@ -9278,12 +9541,15 @@ namespace core
 			for (auto const& generator : generators)
 			{
 				if (!generator.lastCoolingRequired) continue;
-				if (generator.phase != StationGeneratorPhase::Shutdown) continue;
-				if (generator.lastDecayHeatKW <= 0.0) continue;
+				if (generator.phase == StationGeneratorPhase::Running) continue;
+				auto const* heat = connections.snapshot(connections.port("Generator", generator.authored.id, "Heat"));
+				if (!heat) continue;
+				auto const heldKW = heat->retainedHeatKJ / seconds;
+				if (heldKW + heat->lastInputRate <= 0.0) continue;
 				protectedServices.push_back({generator.authored.id, "shutdown-cooling",
-					generator.lastDecayHeatKW, generator.lastDecayHeatKW, 0.0,
-					"decay heat books unconditionally: removal adequacy is tracked by "
-					"the sink temperature alarms"});
+					heat->lastInputRate + heldKW, heat->lastInputRate, heldKW,
+					heldKW > 0.0 ? "heat connection is constrained: unrejected heat remains at the source"
+						: "decay heat books unconditionally: removal adequacy is tracked by the sink temperature alarms"});
 			}
 			if (!std::isfinite(protectedDemandKW) || !std::isfinite(protectedSuppliedKW))
 			{
@@ -9352,6 +9618,7 @@ namespace core
 				if (floor <= 0.0) continue;
 				auto const minOperating = load.lastRequestedKW * (1.0 - load.authored.maxCurtailment);
 				std::string materialLimiter;
+				leakZeroMaterial(load);
 				auto const material = materialFeasible(load, materialLimiter);
 				load.lastMaterialFraction = material;
 				load.lastCappedRequestKW = load.lastRequestedKW * material;
@@ -9375,7 +9642,7 @@ namespace core
 				// rather than buying power the equipment cannot use.
 				auto const claim = std::min(std::max(floor, minOperating),
 					load.lastCappedRequestKW);
-				auto const reachable = std::min(claim, availableGeneration + batteryDeliverableKW());
+				auto const reachable = std::min(claim, powerAvailable("Equipment", load.authored.id));
 				if (reachable + 1e-12 < minOperating)
 				{
 					// The pools cannot run this load at all: it is refused
@@ -9387,14 +9654,7 @@ namespace core
 						"critical floor cannot reach the minimum operable supply level";
 					continue;
 				}
-				auto const fromGeneration = std::min(reachable, availableGeneration);
-				supplied[index] += fromGeneration;
-				availableGeneration -= fromGeneration;
-				auto const stillNeeded = reachable - fromGeneration;
-				auto const fromBattery = drawBatteries(stillNeeded);
-				supplied[index] += fromBattery;
-				batterySuppliedKW += fromBattery;
-				batteryShortfallKW += stillNeeded - fromBattery;
+				supplied[index] += drawPower("Equipment", load.authored.id, reachable);
 				reserveMaterial(load, material);
 				load.lastUnmetCriticalKW = std::max(0.0, floor - supplied[index]);
 			}
@@ -9423,6 +9683,7 @@ namespace core
 				if (!load.lastMaterialComputed)
 				{
 					std::string materialLimiter;
+					leakZeroMaterial(load);
 					auto const material = materialFeasible(load, materialLimiter);
 					load.lastMaterialFraction = material;
 					load.lastCappedRequestKW = load.lastRequestedKW * material;
@@ -9437,6 +9698,11 @@ namespace core
 				}
 				auto const remaining = load.lastCappedRequestKW - supplied[index];
 				if (remaining <= 0.0) continue;
+				if (connections.efficiency(powerPort("Equipment", load.authored.id)) == 0.0)
+				{
+					drawPower("Equipment", load.authored.id, remaining);
+					continue;
+				}
 				// #588: the surge slice still owed this tick. A Restoring
 				// load must pay its whole startup surge together with its
 				// operable demand before any normal service commits: the
@@ -9458,7 +9724,7 @@ namespace core
 					: load.authored.restartSurgePowerKW * surgeWindowSeconds / dtSeconds;
 				if (surgeKW > 0.0)
 				{
-					auto const poolKW = availableGeneration + batteryDeliverableKW();
+					auto const poolKW = powerAvailable("Equipment", load.authored.id);
 					if (poolKW + 1e-12 < minOperating + surgeKW)
 					{
 						load.recoveryStage = StationLoadRecoveryStage::Shed;
@@ -9476,21 +9742,10 @@ namespace core
 					// the pool, and both draw generation first, then the
 					// batteries, so stored energy is still preserved.
 					auto const normalGrant = std::min(remaining, poolKW - surgeKW);
-					auto const normalFromGeneration = std::min(normalGrant, availableGeneration);
-					supplied[index] += normalFromGeneration;
-					availableGeneration -= normalFromGeneration;
-					auto const normalFromBattery = drawBatteries(normalGrant - normalFromGeneration);
-					supplied[index] += normalFromBattery;
-					batterySuppliedKW += normalFromBattery;
-					batteryShortfallKW += normalGrant - normalFromGeneration - normalFromBattery;
+					supplied[index] += drawPower("Equipment", load.authored.id, normalGrant);
 					if (!load.lastMaterialReserved)
 						reserveMaterial(load, load.lastMaterialFraction);
-					auto const surgeFromGeneration = std::min(surgeKW, availableGeneration);
-					availableGeneration -= surgeFromGeneration;
-					auto const surgeFromBattery = drawBatteries(surgeKW - surgeFromGeneration);
-					batterySuppliedKW += surgeFromBattery;
-					batteryShortfallKW += surgeKW - surgeFromGeneration - surgeFromBattery;
-					load.lastSurgeKW = surgeFromGeneration + surgeFromBattery;
+					load.lastSurgeKW = drawPower("Equipment", load.authored.id, surgeKW);
 					recoverySurgeTotalKW += load.lastSurgeKW;
 					load.surgeRemainingSeconds -= surgeWindowSeconds;
 					if (load.surgeRemainingSeconds <= 0.0)
@@ -9501,24 +9756,10 @@ namespace core
 					}
 					continue;
 				}
-				auto const fromGeneration = std::min(remaining, availableGeneration);
-				auto const afterGeneration = remaining - fromGeneration;
-				auto const batteryAsk = std::min(afterGeneration, batteryDeliverableKW());
-				if (supplied[index] + fromGeneration + batteryAsk + 1e-12 >= minOperating)
+				auto const reachable = std::min(remaining, powerAvailable("Equipment", load.authored.id));
+				if (supplied[index] + reachable + 1e-12 >= minOperating)
 				{
-					supplied[index] += fromGeneration;
-					availableGeneration -= fromGeneration;
-					// Route the full remaining need, not just the capped ask,
-					// so each battery's recorded request and shortfall show the
-					// limitation the allocation actually ran into; the bank
-					// still delivers no more than it was capable of.
-					auto const drawn = drawBatteries(afterGeneration);
-					supplied[index] += drawn;
-					batterySuppliedKW += drawn;
-					// The shortfall is what the load needed beyond generation
-					// that the battery bank could not deliver, not merely what
-					// was asked of it after capping by capability.
-					batteryShortfallKW += afterGeneration - drawn;
+					supplied[index] += drawPower("Equipment", load.authored.id, remaining);
 					if (!load.lastMaterialReserved)
 						reserveMaterial(load, load.lastMaterialFraction);
 				}
@@ -9559,7 +9800,8 @@ namespace core
 				auto const producedHeatKW = load.lastAdmitted
 					? load.authored.heatOutputKW * load.lastProfileLevel
 					* load.lastDeliveredFraction : 0.0;
-				load.lastHeatRoutedKW = load.hasHeatSink ? producedHeatKW : 0.0;
+				load.lastHeatRoutedKW = load.hasHeatSink
+					? connections.routeHeat(connections.port("Equipment", load.authored.id, "Heat"), producedHeatKW) : 0.0;
 				load.lastHeatExportedKW = load.hasHeatSink ? 0.0 : producedHeatKW;
 				load.lastUnmetCoolingKW = load.lastAdmitted
 					? 0.0 : load.authored.heatOutputKW * load.lastProfileLevel;
@@ -9591,8 +9833,14 @@ namespace core
 				{
 					auto const& exchangeStore = stores[exchange.storeIndex].authored;
 					auto const requested = exchangeFullAmount(exchange, load.lastProfileLevel);
-					auto const completed = std::min(requested * load.lastDeliveredFraction,
-						exchange.lastReserved);
+					auto const port = exchangePort(load, exchange);
+					auto const deviceAmount = requested * load.lastDeliveredFraction;
+					auto const transport = exchange.consumes
+						? connections.receive(port, deviceAmount / seconds, exchange.lastReserved / seconds)
+						: connections.send(port, deviceAmount / seconds);
+					auto const storeAmount = std::min(exchange.lastReserved,
+						(exchange.consumes ? transport.input : transport.delivered) * seconds);
+					auto const completed = exchange.consumes ? transport.delivered * seconds : storeAmount;
 					auto const exchangeStoreKgBefore = massToKg(exchangeStore.unit,
 						qualified[exchange.storeIndex] + unqualified[exchange.storeIndex]
 							+ pendingExchangeUnits[exchange.storeIndex]);
@@ -9600,19 +9848,19 @@ namespace core
 						(exchange.consumes ? 1.0 : -1.0) * exchange.lastReserved;
 					if (exchange.consumes)
 					{
-						qualified[exchange.storeIndex] += exchange.lastReserved - completed;
-						flowOut[exchange.storeIndex] += completed;
+						qualified[exchange.storeIndex] += exchange.lastReserved - storeAmount;
+						flowOut[exchange.storeIndex] += storeAmount;
 					}
 					else
 					{
-						qualified[exchange.storeIndex] -= exchange.lastReserved - completed;
-						flowIn[exchange.storeIndex] += completed;
+						qualified[exchange.storeIndex] -= exchange.lastReserved - storeAmount;
+						flowIn[exchange.storeIndex] += storeAmount;
 					}
 					exchange.lastRequested = requested;
 					exchange.lastCompleted = completed;
 					exchange.lastUnmet = requested - completed;
 					exchange.lastReserved = 0.0;
-					stagedUnitLoss[exchangeStore.unit] += exchange.consumes ? completed : -completed;
+					stagedUnitLoss[exchangeStore.unit] += exchange.consumes ? storeAmount : -storeAmount;
 					if (exchangeStore.composition)
 					{
 						// A consumed exchange spends the material the store
@@ -9623,7 +9871,7 @@ namespace core
 						if (exchange.consumes)
 							addLedger(delta, drawStoreActual(exchange.storeIndex,
 								exchangeStoreKgBefore,
-								massToKg(exchangeStore.unit, completed)), -1.0);
+								massToKg(exchangeStore.unit, storeAmount)), -1.0);
 						else
 							addComposition(delta, *exchangeStore.composition,
 								massToKg(exchangeStore.unit, completed), 1.0);
@@ -9686,7 +9934,8 @@ namespace core
 					? 0.0
 					: loop.authored.pumpPowerKW * fillFraction * loop.availabilityFactor;
 				double pumpSuppliedKW = 0.0;
-				if (protectedLoopPumpKW[loopIndex] > 0.0)
+				if (protectedLoopPumpKW[loopIndex] > 0.0 || loop.authored.criticalService
+					|| loop.authored.hazardClass == "hazardous" || chillerCirculationResolved[loopIndex])
 				{
 					// #416: a protected loop's pump draw was already taken
 					// from the pool ahead of the discretionary external
@@ -9696,20 +9945,14 @@ namespace core
 				}
 				else
 				{
-					auto const fromGeneration = std::min(pumpDemandKW, availableGeneration);
-					pumpSuppliedKW += fromGeneration;
-					availableGeneration -= fromGeneration;
-					auto const ask = pumpDemandKW - fromGeneration;
-					auto const fromBattery = drawBatteries(ask);
-					pumpSuppliedKW += fromBattery;
-					batterySuppliedKW += fromBattery;
-					batteryShortfallKW += ask - fromBattery;
+					pumpSuppliedKW += drawPower("Coolant loop", loop.authored.id, pumpDemandKW);
 				}
 				double heaterDemandKW = 0.0;
 				if (!disabled && loop.temperatureC < loop.authored.freezeProtectionSetpointC)
 					heaterDemandKW = loop.authored.heaterCapacityKW;
 				double heaterSuppliedKW = 0.0;
-				if (protectedLoopHeaterKW[loopIndex] > 0.0)
+				if (protectedLoopHeaterKW[loopIndex] > 0.0 || loop.authored.criticalService
+					|| loop.authored.hazardClass == "hazardous")
 				{
 					// #416: the protected freeze-heater draw was taken
 					// ahead of the discretionary loads; consume the credit.
@@ -9717,14 +9960,7 @@ namespace core
 				}
 				else
 				{
-					auto const fromGeneration = std::min(heaterDemandKW, availableGeneration);
-					heaterSuppliedKW += fromGeneration;
-					availableGeneration -= fromGeneration;
-					auto const ask = heaterDemandKW - fromGeneration;
-					auto const fromBattery = drawBatteries(ask);
-					heaterSuppliedKW += fromBattery;
-					batterySuppliedKW += fromBattery;
-					batteryShortfallKW += ask - fromBattery;
+					heaterSuppliedKW += drawPower("Coolant loop", loop.authored.id, heaterDemandKW);
 				}
 				// Circulation is capped by the fluid present, the
 				// electricity supplied and the pump's rated flow: the
@@ -9782,6 +10018,7 @@ namespace core
 			{
 				auto const& reservoir = reservoirs[reservoirIndex];
 				std::vector<PassiveExchangeLeaf> leaves;
+				std::vector<TransportExchange> exchangePorts;
 				std::vector<size_t> loopIndexes;
 				std::vector<size_t> atmosphereIndexes;
 				for (size_t loopIndex = 0; loopIndex < coolantLoops.size(); ++loopIndex)
@@ -9792,6 +10029,8 @@ namespace core
 					if (conductanceKWPerK <= 0.0) continue;
 					leaves.push_back({loop.coolantKg * loop.authored.specificHeatKJPerKgK,
 						conductanceKWPerK, loop.temperatureC, 0.0});
+					auto const port = connections.port("Coolant loop", loop.authored.id, "Heat exchanger");
+					exchangePorts.push_back({port, port});
 					loopIndexes.push_back(loopIndex);
 				}
 				for (size_t atmosphereIndex = 0; atmosphereIndex < atmospheres.size(); ++atmosphereIndex)
@@ -9802,29 +10041,50 @@ namespace core
 					leaves.push_back({compartment.authored.thermalCapacityKJPerK,
 						compartment.authored.exchangerConductanceKWPerK,
 						compartment.temperatureC, 0.0});
+					exchangePorts.push_back({connections.port("Atmosphere", compartment.authored.id, "Heat exchange"),
+						connections.port("Atmosphere", compartment.authored.id, "Heat")});
 					atmosphereIndexes.push_back(atmosphereIndex);
 				}
 				if (leaves.empty()) continue;
 				auto const coupledTemperatureC = solvePassiveExchange(leaves,
 					reservoir.authored.heatCapacityKJPerK, reservoir.temperatureC, exchangeDt);
+				bool constrained = false;
+				for (size_t i = 0; i < leaves.size(); ++i)
+				{
+					auto const heat = passiveExchangeHeatKJ(leaves[i], coupledTemperatureC);
+					auto const port = heat >= 0.0 ? exchangePorts[i].forward : exchangePorts[i].backward;
+					if (connections.efficiency(port) != 1.0 || std::abs(heat) / exchangeDt > connections.remaining(port)) constrained = true;
+					exchangePorts[i].leafKJ = heat; exchangePorts[i].hubKJ = -heat;
+				}
+				if (constrained)
+					solveTransportExchange(leaves, exchangePorts, reservoir.authored.heatCapacityKJPerK,
+						reservoir.temperatureC, exchangeDt, connections);
+				else
+					for (size_t i = 0; i < leaves.size(); ++i)
+					{
+						auto const forward = exchangePorts[i].leafKJ >= 0.0;
+						auto const port = forward ? exchangePorts[i].forward : exchangePorts[i].backward;
+						connections.direction(port, forward && exchangePorts[i].forward == exchangePorts[i].backward);
+						connections.send(port, std::abs(exchangePorts[i].leafKJ) / exchangeDt);
+					}
 				// Each leaf's heat is booked on the leaf as a rate over the
 				// tick and negated onto the reservoir, so the two ledgers
 				// close on one number rather than two rounded ones.
 				for (size_t position = 0; position < leaves.size(); ++position)
 				{
-					auto const heatKJ = passiveExchangeHeatKJ(leaves[position], coupledTemperatureC);
+					auto const heatKJ = exchangePorts[position].leafKJ;
 					if (position < loopIndexes.size())
 					{
 						auto const index = loopIndexes[position];
 						loopExchangeKJ[index] = heatKJ;
 						coolantLoops[index].lastExchangeIntoLoopKW = heatKJ / exchangeDt;
-						loopHeatIntoReservoir[reservoirIndex] -= heatKJ / exchangeDt;
+						loopHeatIntoReservoir[reservoirIndex] += exchangePorts[position].hubKJ / exchangeDt;
 					}
 					else
 					{
 						auto const index = atmosphereIndexes[position - loopIndexes.size()];
 						atmosphereExchangeKJ[index] = heatKJ;
-						atmosphereHeatByReservoir[reservoirIndex] -= heatKJ / exchangeDt;
+						atmosphereHeatByReservoir[reservoirIndex] += exchangePorts[position].hubKJ / exchangeDt;
 					}
 				}
 			}
@@ -9864,6 +10124,11 @@ namespace core
 			auto const refundChillerCredit = [&](size_t chillerIndex, double refundKW)
 			{
 				if (refundKW <= 1e-15) return;
+				auto const port = powerPort("Chiller", chillers[chillerIndex].authored.id);
+				auto const eta = connections.efficiency(port);
+				if (eta <= 0.0) return;
+				refundKW /= eta;
+				connections.refund(port, refundKW);
 				auto& draw = protectedChillerDraws[chillerIndex];
 				for (auto it = draw.fromBatteryKW.rbegin();
 					it != draw.fromBatteryKW.rend() && refundKW > 1e-15; ++it)
@@ -9871,11 +10136,14 @@ namespace core
 					auto const give = std::min(refundKW, it->second);
 					if (give <= 0.0) continue;
 					auto& battery = batteries[it->first];
-					auto const storedKWh = give * hours / battery.authored.dischargeEfficiency;
+					auto const dischargePort = connections.port("Battery", battery.authored.id, "Discharge");
+					auto const nativeGive = give / connections.efficiency(dischargePort);
+					connections.refund(dischargePort, nativeGive);
+					auto const storedKWh = nativeGive * hours / battery.authored.dischargeEfficiency;
 					battery.stored += storedKWh;
 					battery.dischargedKWh -= storedKWh;
-					battery.deliveredKWh -= give * hours;
-					battery.lastDischargeKW -= give;
+					battery.deliveredKWh -= nativeGive * hours;
+					battery.lastDischargeKW -= nativeGive;
 					batterySuppliedKW -= give;
 					it->second -= give;
 					refundKW -= give;
@@ -9990,8 +10258,12 @@ namespace core
 					+ loopExchangeKJ[chiller.loopIndex]);
 				auto const circulationCappedKW = effectiveCoolingCapacityKW
 					* loop.lastCirculationFraction;
+				auto const evaporatorPort = connections.port("Chiller", chiller.authored.id, "Evaporator heat");
+				if (connections.efficiency(evaporatorPort) == 0.0 && circulationCappedKW > 0.0)
+					chillerExtractionByLoop[chiller.loopIndex] += connections.receive(evaporatorPort,
+						circulationCappedKW, extractableKJ / tickSeconds).input;
 				chiller.lastDeliverableKW = std::min(circulationCappedKW,
-					extractableKJ / tickSeconds);
+					connections.available(evaporatorPort, extractableKJ / tickSeconds));
 				if (chiller.lastDeliverableKW <= 1e-12)
 				{
 					// Nothing can move through the evaporator this tick:
@@ -10027,13 +10299,10 @@ namespace core
 				// not spent work - return it to the pool instead of dropping
 				// it, so the reservation never strands bus energy.
 				refundChillerCredit(chillerIndex, creditKW);
-				auto const fromGeneration = std::min(remainingDemandKW, availableGeneration);
-				availableGeneration -= fromGeneration;
-				auto const ask = remainingDemandKW - fromGeneration;
-				auto const fromBattery = drawBatteries(ask);
-				auto const suppliedKW = fromCreditKW + fromGeneration + fromBattery;
-				batterySuppliedKW += fromBattery;
-				batteryShortfallKW += ask - fromBattery;
+				auto const repeatZeroCredit = chillerProtectedServiceIndex[chillerIndex] != static_cast<size_t>(-1)
+					&& connections.efficiency(powerPort("Chiller", chiller.authored.id)) == 0.0;
+				auto const suppliedKW = fromCreditKW + (repeatZeroCredit ? 0.0
+					: drawPower("Chiller", chiller.authored.id, remainingDemandKW));
 				chiller.lastPowerSuppliedKW = suppliedKW;
 				auto const deliveredFraction = chiller.lastPowerDemandKW > 0.0
 					? suppliedKW / chiller.lastPowerDemandKW : 0.0;
@@ -10043,8 +10312,9 @@ namespace core
 				// Condenser heat equals extracted heat plus the work and
 				// auxiliaries actually supplied: one boundary, booked once.
 				chiller.lastCondenserKW = coolingKW + suppliedKW;
-				chillerExtractionByLoop[chiller.loopIndex] += coolingKW;
-				condenserHeatBySink[chiller.sinkIndex] += chiller.lastCondenserKW;
+				chillerExtractionByLoop[chiller.loopIndex] += connections.receive(evaporatorPort,
+					coolingKW, extractableKJ / tickSeconds).input;
+				condenserHeatBySink[chiller.sinkIndex] += connections.routeHeat(connections.port("Chiller", chiller.authored.id, "Condenser heat"), chiller.lastCondenserKW);
 				chiller.extractedKJ += coolingKW * static_cast<double>(seconds);
 				chiller.workKJ += suppliedKW * static_cast<double>(seconds);
 				chiller.condenserKJ += chiller.lastCondenserKW * static_cast<double>(seconds);
@@ -10083,6 +10353,9 @@ namespace core
 			for (size_t orderIndex : waterTreatmentOrder)
 			{
 				auto& treatment = waterTreatments[orderIndex];
+				auto ports = materialPorts("Water treatment", treatment.authored.id);
+				ports.used("consumableStoreId", [&] { return treatment.lastConsumableUsed; });
+				ports.used("clearanceStoreId", [&] { return treatment.lastClearanceUsed; });
 				auto& source = stores[treatment.sourceIndex];
 				auto& treated = stores[treatment.treatedIndex];
 				auto& concentrate = stores[treatment.concentrateIndex];
@@ -10112,14 +10385,14 @@ namespace core
 				auto const tickSeconds = static_cast<double>(seconds);
 				auto const fullKg = treatment.authored.throughputKgPerS * tickSeconds;
 				auto const drawableSourceUnits = std::max(0.0,
-					qualified[treatment.sourceIndex] - source.authored.protectedReserve);
-				auto const treatedHeadroomUnits = std::max(0.0, treated.authored.capacity
-					- (qualified[treatment.treatedIndex] + unqualified[treatment.treatedIndex]));
-				auto const concentrateHeadroomUnits = std::max(0.0, concentrate.authored.capacity
+					ports.input(treatment.sourceIndex, qualified[treatment.sourceIndex] - source.authored.protectedReserve));
+				auto const treatedHeadroomUnits = std::max(0.0, ports.output(treatment.treatedIndex, treated.authored.capacity
+					- (qualified[treatment.treatedIndex] + unqualified[treatment.treatedIndex])));
+				auto const concentrateHeadroomUnits = std::max(0.0, ports.output(treatment.concentrateIndex, concentrate.authored.capacity
 					- (qualified[treatment.concentrateIndex]
-						+ unqualified[treatment.concentrateIndex]));
+						+ unqualified[treatment.concentrateIndex])));
 				auto const drawableConsumableUnits = std::max(0.0,
-					qualified[treatment.consumableIndex] - consumable.authored.protectedReserve);
+					ports.input("consumableStoreId", qualified[treatment.consumableIndex] - consumable.authored.protectedReserve));
 				// #574: the release-clearance kit may be the same store as
 				// the treatment consumable. One kilogram of a shared kit
 				// cannot pay both roles twice, so the tick reserves the
@@ -10134,21 +10407,19 @@ namespace core
 				auto const hazardous = treatment.authored.hazardClass == "hazardous";
 				auto const sharedKit = hazardous
 					&& treatment.clearanceIndex == treatment.consumableIndex;
-				auto const kitDemandUnits = sharedKit
-					? (treatment.authored.consumablePerKg
-						+ treatment.authored.clearancePerKg * treatment.authored.recoveryRatio)
-						* fullKg
-					: treatment.authored.consumablePerKg * fullKg;
+				auto const kitDemandUnits = treatment.authored.consumablePerKg * fullKg;
+				auto const clearanceFullUnits = treatment.authored.clearancePerKg * treatment.authored.recoveryRatio * fullKg;
 				double scale = 1.0;
 				std::string limiter;
-				auto const constrain = [&](double available, double required,
+				auto const constrain = [&](auto available, double required,
 					std::string const& reason)
 				{
 					if (required <= 0.0) return;
+					ports.limitDemand(available, required);
 					auto const fraction = available / required;
 					if (fraction < scale) { scale = fraction; limiter = reason; }
 				};
-				constrain(drawableSourceUnits, kgToMass(source.authored.unit, fullKg),
+				constrain(ports.request(treatment.sourceIndex, drawableSourceUnits, kgToMass(source.authored.unit, fullKg)), kgToMass(source.authored.unit, fullKg),
 					"raw water store '" + source.authored.id
 					+ "' has nothing drawable above its protected reserve");
 				constrain(treatedHeadroomUnits,
@@ -10159,14 +10430,27 @@ namespace core
 						fullKg * (1.0 - treatment.authored.recoveryRatio)),
 					"concentrate store '" + concentrate.authored.id
 					+ "' is full: the retained stream has nowhere to go");
-				constrain(drawableConsumableUnits, kitDemandUnits,
+				constrain(ports.request("consumableStoreId", drawableConsumableUnits, kitDemandUnits), kitDemandUnits,
 					sharedKit
 						? "shared treatment-consumable and release-clearance store '"
 							+ consumable.authored.id
 							+ "' cannot cover the combined treatment and clearance draw"
 						: "treatment consumable store '" + consumable.authored.id
 							+ "' is exhausted");
+				if (sharedKit)
+				{
+					auto const rawKit = std::max(0.0, qualified[treatment.consumableIndex] - consumable.authored.protectedReserve);
+					constrain(ports.request("clearanceStoreId", ports.input("clearanceStoreId", rawKit), clearanceFullUnits),
+						clearanceFullUnits, "shared release-clearance connection limits throughput");
+					auto const treatmentEta = connections.efficiency(connections.port("Water treatment", treatment.authored.id, "consumableStoreId"));
+					auto const clearanceEta = connections.efficiency(connections.port("Water treatment", treatment.authored.id, "clearanceStoreId"));
+					if (treatmentEta > 0.0 && clearanceEta > 0.0)
+						constrain(rawKit, kitDemandUnits / treatmentEta + clearanceFullUnits / clearanceEta,
+							"shared treatment-consumable and release-clearance store cannot cover the combined draw");
+				}
 				scale = std::max(0.0, std::min(1.0, scale));
+				ports.limitDemand(powerAvailable("Water treatment", treatment.authored.id),
+					treatment.authored.throughputKgPerS * treatment.authored.specificEnergyKWhPerKg * 3600.0);
 				treatment.lastScale = scale;
 				treatment.lastLimiter = limiter;
 				if (scale <= 0.0)
@@ -10180,13 +10464,7 @@ namespace core
 				// mirroring the electrolysis contract (#404, #566).
 				treatment.lastPowerDemandKW = scale * treatment.authored.throughputKgPerS
 					* treatment.authored.specificEnergyKWhPerKg * 3600.0;
-				auto const fromGeneration = std::min(treatment.lastPowerDemandKW, availableGeneration);
-				availableGeneration -= fromGeneration;
-				auto const ask = treatment.lastPowerDemandKW - fromGeneration;
-				auto const fromBattery = drawBatteries(ask);
-				auto const suppliedKW = fromGeneration + fromBattery;
-				batterySuppliedKW += fromBattery;
-				batteryShortfallKW += ask - fromBattery;
+				auto const suppliedKW = drawPower("Water treatment", treatment.authored.id, treatment.lastPowerDemandKW);
 				treatment.lastPowerSuppliedKW = suppliedKW;
 				if (treatment.lastPowerDemandKW > 1e-12 && suppliedKW <= 1e-12)
 				{
@@ -10248,9 +10526,10 @@ namespace core
 				auto const clearanceDemandUnits = hazardous
 					? treatment.authored.clearancePerKg * treatedKg : 0.0;
 				auto const drawableClearanceUnits = hazardous
-					? std::max(0.0, qualified[treatment.clearanceIndex]
-						- stores[treatment.clearanceIndex].authored.protectedReserve)
+					? std::max(0.0, ports.input("clearanceStoreId", qualified[treatment.clearanceIndex]
+						- stores[treatment.clearanceIndex].authored.protectedReserve))
 					: 0.0;
+				if (!curtailed && hazardous) ports.demand("clearanceStoreId", clearanceDemandUnits);
 				auto const clearanceSatisfied = clearanceDemandUnits <= 1e-12
 					|| drawableClearanceUnits + 1e-12 >= clearanceDemandUnits;
 				auto const released = !curtailed && clearanceSatisfied;
@@ -10342,6 +10621,7 @@ namespace core
 			std::vector<double> collectorHeatByLoop(coolantLoops.size(), 0.0);
 			for (auto& collector : waterCollectors)
 			{
+				auto ports = materialPorts("Water collector", collector.authored.id);
 				auto& compartment = atmospheres[collector.atmosphereIndex];
 				auto& loop = coolantLoops[collector.loopIndex];
 				auto& dest = stores[collector.destStoreIndex];
@@ -10381,10 +10661,22 @@ namespace core
 					collector.status = StationTransferStatus::Rejected;
 					continue;
 				}
-				auto const destHeadroomUnits = std::max(0.0, dest.authored.capacity
-					- (qualified[collector.destStoreIndex] + unqualified[collector.destStoreIndex]));
+				auto const destHeadroomUnits = std::max(0.0, ports.output(collector.destStoreIndex, dest.authored.capacity
+					- (qualified[collector.destStoreIndex] + unqualified[collector.destStoreIndex])));
+				auto const vapourPort = connections.port("Water collector", collector.authored.id, "Water vapour");
+				auto const heatPort = connections.port("Water collector", collector.authored.id, "Condensation heat");
+				if (connections.efficiency(vapourPort) == 0.0 && destHeadroomUnits > 0.0)
+				{
+					auto const lost = connections.receive(vapourPort, requestedKg / tickSeconds, condensableKg / tickSeconds).input * tickSeconds;
+					compartment.waterVapourKg -= lost;
+					compartment.connectionWaterVapourLostKg += lost;
+					collector.status = StationTransferStatus::Rejected;
+					continue;
+				}
+				auto const feedKg = connections.available(vapourPort, condensableKg / tickSeconds) * tickSeconds;
+				auto const thermalKg = connections.remaining(heatPort) * tickSeconds / StationLatentHeatVaporizationKJPerKg;
 				auto const collectedUnits = std::min(
-					kgToMass(dest.authored.unit, std::min(requestedKg, condensableKg)),
+					kgToMass(dest.authored.unit, std::min({requestedKg, feedKg, thermalKg})),
 					destHeadroomUnits);
 				if (collectedUnits <= 0.0)
 				{
@@ -10394,7 +10686,9 @@ namespace core
 					continue;
 				}
 				auto const collectedKg = massToKg(dest.authored.unit, collectedUnits);
-				compartment.waterVapourKg -= collectedKg;
+				auto const vapourFlow = connections.receive(vapourPort, collectedKg / tickSeconds, condensableKg / tickSeconds);
+				compartment.waterVapourKg -= vapourFlow.input * tickSeconds;
+				compartment.connectionWaterVapourLostKg += std::max(0.0, vapourFlow.input * tickSeconds - collectedKg);
 				compartment.lastCollectedKg = collectedKg;
 				compartment.collectedKg += collectedKg;
 				qualified[collector.destStoreIndex] += collectedUnits;
@@ -10403,9 +10697,10 @@ namespace core
 				// The latent heat leaves the gas and enters the coolant, once.
 				auto const latentHeatKJ = collectedKg * StationLatentHeatVaporizationKJPerKg;
 				auto const latentHeatKW = latentHeatKJ / tickSeconds;
-				collectorHeatByLoop[collector.loopIndex] += latentHeatKW;
-				collector.lastLatentHeatKW = latentHeatKW;
-				collector.latentHeatRoutedKJ += latentHeatKJ;
+				auto const deliveredHeatKW = connections.send(heatPort, latentHeatKW).delivered;
+				collectorHeatByLoop[collector.loopIndex] += deliveredHeatKW;
+				collector.lastLatentHeatKW = deliveredHeatKW;
+				collector.latentHeatRoutedKJ += deliveredHeatKW * tickSeconds;
 				collector.collectedTotalKg += collectedKg;
 				if (collectedKg + 1e-12 >= requestedKg) collector.status = StationTransferStatus::Full;
 				else collector.status = StationTransferStatus::Partial;
@@ -10429,6 +10724,7 @@ namespace core
 			for (size_t orderIndex : electrolyzerOrder)
 			{
 				auto& cell = electrolyzers[orderIndex];
+				auto ports = materialPorts("Electrolyzer", cell.authored.id);
 				auto& water = stores[cell.waterStoreIndex];
 				auto& hydrogen = stores[cell.hydrogenStoreIndex];
 				cell.lastScale = 0.0;
@@ -10462,23 +10758,24 @@ namespace core
 					continue;
 				}
 				auto const drawableWaterUnits = std::max(0.0,
-					qualified[cell.waterStoreIndex] - water.authored.protectedReserve);
-				auto const hydrogenHeadroomUnits = std::max(0.0, hydrogen.authored.capacity
-					- (qualified[cell.hydrogenStoreIndex] + unqualified[cell.hydrogenStoreIndex]));
+					ports.input(cell.waterStoreIndex, qualified[cell.waterStoreIndex] - water.authored.protectedReserve));
+				auto const hydrogenHeadroomUnits = std::max(0.0, ports.output(cell.hydrogenStoreIndex, hydrogen.authored.capacity
+					- (qualified[cell.hydrogenStoreIndex] + unqualified[cell.hydrogenStoreIndex])));
 				double oxygenHeadroomUnits{0.0};
 				if (cell.oxygenStoreIndex != SIZE_MAX)
-					oxygenHeadroomUnits = std::max(0.0, stores[cell.oxygenStoreIndex].authored.capacity
-						- (qualified[cell.oxygenStoreIndex] + unqualified[cell.oxygenStoreIndex]));
+					oxygenHeadroomUnits = std::max(0.0, ports.output(cell.oxygenStoreIndex, stores[cell.oxygenStoreIndex].authored.capacity
+						- (qualified[cell.oxygenStoreIndex] + unqualified[cell.oxygenStoreIndex])));
 				double scale = 1.0;
 				std::string limiter;
-				auto const constrain = [&](double available, double required,
+				auto const constrain = [&](auto available, double required,
 					std::string const& reason)
 				{
 					if (required <= 0.0) return;
+					ports.limitDemand(available, required);
 					auto const fraction = available / required;
 					if (fraction < scale) { scale = fraction; limiter = reason; }
 				};
-				constrain(drawableWaterUnits, kgToMass(water.authored.unit, fullKg),
+				constrain(ports.request(cell.waterStoreIndex, drawableWaterUnits, kgToMass(water.authored.unit, fullKg)), kgToMass(water.authored.unit, fullKg),
 					"feed water store '" + water.authored.id
 					+ "' has nothing drawable above its protected reserve");
 				if (cell.oxygenStoreIndex != SIZE_MAX)
@@ -10487,12 +10784,17 @@ namespace core
 							fullKg * StationElectrolysisOxygenMassPerWaterKg),
 						"oxygen store '" + stores[cell.oxygenStoreIndex].authored.id
 						+ "' is full: the product has nowhere to go");
+				if (cell.oxygenStoreIndex == SIZE_MAX)
+					constrain(connections.remaining(connections.port("Electrolyzer", cell.authored.id, "Oxygen")) * tickSeconds,
+						fullKg * StationElectrolysisOxygenMassPerWaterKg, "oxygen connection throughput");
 				constrain(hydrogenHeadroomUnits,
 					kgToMass(hydrogen.authored.unit,
 						fullKg * (1.0 - StationElectrolysisOxygenMassPerWaterKg)),
 					"hydrogen store '" + hydrogen.authored.id
 					+ "' is full: the product has nowhere to go");
 				scale = std::max(0.0, std::min(1.0, scale));
+				ports.limitDemand(powerAvailable("Electrolyzer", cell.authored.id),
+					cell.authored.rateKgPerS * cell.authored.specificEnergyKWhPerKgWater * 3600.0);
 				cell.lastScale = scale;
 				cell.lastLimiter = limiter;
 				cell.lastRequestedKg = fullKg;
@@ -10510,13 +10812,7 @@ namespace core
 				// floor guarantees (#404).
 				cell.lastPowerDemandKW = scale * cell.authored.rateKgPerS
 					* cell.authored.specificEnergyKWhPerKgWater * 3600.0;
-				auto const fromGeneration = std::min(cell.lastPowerDemandKW, availableGeneration);
-				availableGeneration -= fromGeneration;
-				auto const ask = cell.lastPowerDemandKW - fromGeneration;
-				auto const fromBattery = drawBatteries(ask);
-				auto const suppliedKW = fromGeneration + fromBattery;
-				batterySuppliedKW += fromBattery;
-				batteryShortfallKW += ask - fromBattery;
+				auto const suppliedKW = drawPower("Electrolyzer", cell.authored.id, cell.lastPowerDemandKW);
 				cell.lastPowerSuppliedKW = suppliedKW;
 				if (cell.lastPowerDemandKW > 1e-12 && suppliedKW <= 1e-12)
 				{
@@ -10564,9 +10860,11 @@ namespace core
 					// already nets the delivered mass out of the store
 					// boundary; nothing vanishes.
 					auto& compartment = atmospheres[cell.atmosphereIndex];
-					compartment.oxygenKg += oxygenKg;
-					compartment.electrolysisOxygenKg += oxygenKg;
-					compartment.lastElectrolysisOxygenKg = oxygenKg;
+					auto const deliveredKg = connections.send(connections.port("Electrolyzer", cell.authored.id, "Oxygen"),
+						oxygenKg / tickSeconds).delivered * tickSeconds;
+					compartment.oxygenKg += deliveredKg;
+					compartment.electrolysisOxygenKg += deliveredKg;
+					compartment.lastElectrolysisOxygenKg = deliveredKg;
 				}
 				auto const hydrogenKg = splitKg - oxygenActualKg;
 				auto const hydrogenUnits = std::min(
@@ -10584,7 +10882,7 @@ namespace core
 				auto const chemicalKJ = hydrogenActualKg
 					* StationElectrolysisChemicalEnergyHydrogenKJPerKg;
 				auto const heatKJ = std::max(0.0, energySuppliedKJ - chemicalKJ);
-				electrolysisHeatByReservoir[cell.sinkIndex] += heatKJ / tickSeconds;
+				electrolysisHeatByReservoir[cell.sinkIndex] += connections.routeHeat(connections.port("Electrolyzer", cell.authored.id, "Heat"), heatKJ / tickSeconds);
 				cell.lastSplitKg = splitKg;
 				cell.lastOxygenKg = oxygenActualKg;
 				cell.lastHydrogenKg = hydrogenActualKg;
@@ -10615,6 +10913,7 @@ namespace core
 			for (size_t orderIndex : co2CaptureOrder)
 			{
 				auto& capture = co2Captures[orderIndex];
+				auto ports = materialPorts("CO2 capture", capture.authored.id);
 				auto& compartment = atmospheres[capture.atmosphereIndex];
 				auto& destination = stores[capture.captureStoreIndex];
 				capture.lastScale = 0.0;
@@ -10633,36 +10932,51 @@ namespace core
 				}
 				auto const tickSeconds = static_cast<double>(seconds);
 				auto const fullKg = capture.authored.maxRateKgPerS * tickSeconds;
-				auto const co2AvailableKg = std::max(0.0, compartment.carbonDioxideKg);
-				auto const captureHeadroomUnits = std::max(0.0, destination.authored.capacity
+				auto const co2Port = connections.port("CO2 capture", capture.authored.id, "CO2");
+				auto const co2AvailableKg = connections.available(co2Port,
+					std::max(0.0, compartment.carbonDioxideKg) / tickSeconds) * tickSeconds;
+				auto const captureHeadroomUnits = std::max(0.0, ports.output(capture.captureStoreIndex, destination.authored.capacity
 					- (qualified[capture.captureStoreIndex]
-						+ unqualified[capture.captureStoreIndex]));
+						+ unqualified[capture.captureStoreIndex])));
 				double drawableConsumableUnits{0.0};
 				if (capture.consumableStoreIndex != SIZE_MAX)
-					drawableConsumableUnits = std::max(0.0, qualified[capture.consumableStoreIndex]
-						- stores[capture.consumableStoreIndex].authored.protectedReserve);
+					drawableConsumableUnits = std::max(0.0, ports.input(capture.consumableStoreIndex, qualified[capture.consumableStoreIndex]
+						- stores[capture.consumableStoreIndex].authored.protectedReserve));
 				double scale = 1.0;
 				std::string limiter;
-				auto const constrain = [&](double available, double required,
+				auto const constrain = [&](auto available, double required,
 					std::string const& reason)
 				{
 					if (required <= 0.0) return;
+					ports.limitDemand(available, required);
 					auto const fraction = available / required;
 					if (fraction < scale) { scale = fraction; limiter = reason; }
 				};
-				constrain(co2AvailableKg, fullKg,
+				auto const co2DemandAvailable = connections.efficiency(co2Port) == 0.0
+					? std::min(std::max(0.0, compartment.carbonDioxideKg), connections.remaining(co2Port) * tickSeconds)
+					: co2AvailableKg;
+				constrain(StationMaterialConnections::Request{co2AvailableKg, co2DemandAvailable}, fullKg,
 					"compartment '" + compartment.authored.id
 					+ "' holds no carbon dioxide to capture");
 				constrain(captureHeadroomUnits, kgToMass(destination.authored.unit, fullKg),
 					"capture store '" + destination.authored.id
 					+ "' is full: the captured gas has nowhere to go");
 				if (capture.consumableStoreIndex != SIZE_MAX)
-					constrain(drawableConsumableUnits,
+					constrain(ports.request(capture.consumableStoreIndex, drawableConsumableUnits, capture.authored.consumablePerKg * fullKg),
 						capture.authored.consumablePerKg * fullKg,
 						"capture consumable store '"
 						+ stores[capture.consumableStoreIndex].authored.id
 						+ "' is exhausted");
 				scale = std::max(0.0, std::min(1.0, scale));
+				ports.limitDemand(powerAvailable("CO2 capture", capture.authored.id),
+					capture.authored.maxRateKgPerS * capture.authored.specificEnergyKWhPerKg * 3600.0);
+				if (connections.efficiency(co2Port) == 0.0)
+				{
+					auto const lost = connections.receive(co2Port, fullKg * ports.demandScale() / tickSeconds,
+						std::max(0.0, compartment.carbonDioxideKg) / tickSeconds).input * tickSeconds;
+					compartment.carbonDioxideKg -= lost;
+					compartment.connectionCarbonDioxideLostKg += lost;
+				}
 				capture.lastScale = scale;
 				capture.lastLimiter = limiter;
 				capture.lastRequestedKg = fullKg;
@@ -10677,13 +10991,7 @@ namespace core
 				// mirroring the electrolysis contract (#404, #567).
 				capture.lastPowerDemandKW = scale * capture.authored.maxRateKgPerS
 					* capture.authored.specificEnergyKWhPerKg * 3600.0;
-				auto const fromGeneration = std::min(capture.lastPowerDemandKW, availableGeneration);
-				availableGeneration -= fromGeneration;
-				auto const ask = capture.lastPowerDemandKW - fromGeneration;
-				auto const fromBattery = drawBatteries(ask);
-				auto const suppliedKW = fromGeneration + fromBattery;
-				batterySuppliedKW += fromBattery;
-				batteryShortfallKW += ask - fromBattery;
+				auto const suppliedKW = drawPower("CO2 capture", capture.authored.id, capture.lastPowerDemandKW);
 				capture.lastPowerSuppliedKW = suppliedKW;
 				if (capture.lastPowerDemandKW > 1e-12 && suppliedKW <= 1e-12)
 				{
@@ -10697,7 +11005,10 @@ namespace core
 				auto const capturedUnits = std::min(
 					kgToMass(destination.authored.unit, wantedKg), captureHeadroomUnits);
 				auto const capturedKg = massToKg(destination.authored.unit, capturedUnits);
-				compartment.carbonDioxideKg -= capturedKg;
+				auto const gasFlow = connections.receive(co2Port, capturedKg / tickSeconds,
+					std::max(0.0, compartment.carbonDioxideKg) / tickSeconds);
+				compartment.carbonDioxideKg -= gasFlow.input * tickSeconds;
+				compartment.connectionCarbonDioxideLostKg += std::max(0.0, gasFlow.input * tickSeconds - capturedKg);
 				compartment.capturedCarbonDioxideKg += capturedKg;
 				compartment.lastCo2CapturedKg = capturedKg;
 				qualified[capture.captureStoreIndex] += capturedUnits;
@@ -10760,6 +11071,7 @@ namespace core
 			for (size_t orderIndex : sabatierOrder)
 			{
 				auto& reactor = sabatierReactors[orderIndex];
+				auto ports = materialPorts("Sabatier", reactor.authored.id);
 				auto& co2 = stores[reactor.co2StoreIndex];
 				auto& hydrogen = stores[reactor.hydrogenStoreIndex];
 				auto& methane = stores[reactor.methaneStoreIndex];
@@ -10797,26 +11109,28 @@ namespace core
 					continue;
 				}
 				auto const drawableCo2Units = std::max(0.0,
-					qualified[reactor.co2StoreIndex] - co2.authored.protectedReserve);
+					ports.input(reactor.co2StoreIndex, qualified[reactor.co2StoreIndex] - co2.authored.protectedReserve));
 				auto const drawableHydrogenUnits = std::max(0.0,
-					qualified[reactor.hydrogenStoreIndex] - hydrogen.authored.protectedReserve);
-				auto const methaneHeadroomUnits = std::max(0.0, methane.authored.capacity
-					- (qualified[reactor.methaneStoreIndex] + unqualified[reactor.methaneStoreIndex]));
-				auto const waterHeadroomUnits = std::max(0.0, water.authored.capacity
-					- (qualified[reactor.waterStoreIndex] + unqualified[reactor.waterStoreIndex]));
+					ports.input(reactor.hydrogenStoreIndex, qualified[reactor.hydrogenStoreIndex] - hydrogen.authored.protectedReserve));
+				auto const methaneHeadroomUnits = std::max(0.0, ports.output(reactor.methaneStoreIndex, methane.authored.capacity
+					- (qualified[reactor.methaneStoreIndex] + unqualified[reactor.methaneStoreIndex])));
+				auto const waterHeadroomUnits = std::max(0.0, ports.output(reactor.waterStoreIndex, water.authored.capacity
+					- (qualified[reactor.waterStoreIndex] + unqualified[reactor.waterStoreIndex])));
 				double scale = 1.0;
 				std::string limiter;
-				auto const constrain = [&](double available, double required,
+				auto const constrain = [&](auto available, double required,
 					std::string const& reason)
 				{
 					if (required <= 0.0) return;
+					ports.limitDemand(available, required);
 					auto const fraction = available / required;
 					if (fraction < scale) { scale = fraction; limiter = reason; }
 				};
-				constrain(drawableCo2Units, kgToMass(co2.authored.unit, fullKg),
+				constrain(ports.request(reactor.co2StoreIndex, drawableCo2Units, kgToMass(co2.authored.unit, fullKg)), kgToMass(co2.authored.unit, fullKg),
 					"CO2 feed store '" + co2.authored.id
 					+ "' has nothing drawable above its protected reserve");
-				constrain(drawableHydrogenUnits,
+				constrain(ports.request(reactor.hydrogenStoreIndex, drawableHydrogenUnits, kgToMass(hydrogen.authored.unit,
+						fullKg * StationSabatierHydrogenMassPerCarbonDioxideKg)),
 					kgToMass(hydrogen.authored.unit,
 						fullKg * StationSabatierHydrogenMassPerCarbonDioxideKg),
 					"hydrogen feed store '" + hydrogen.authored.id
@@ -10832,6 +11146,8 @@ namespace core
 					"product water store '" + water.authored.id
 					+ "' is full: the water has nowhere to go");
 				scale = std::max(0.0, std::min(1.0, scale));
+				ports.limitDemand(powerAvailable("Sabatier", reactor.authored.id),
+					reactor.authored.rateKgPerS * reactor.authored.specificEnergyKWhPerKgCO2 * 3600.0);
 				reactor.lastScale = scale;
 				reactor.lastLimiter = limiter;
 				reactor.lastRequestedKg = fullKg;
@@ -10847,13 +11163,7 @@ namespace core
 				// mirroring the electrolysis contract (#404).
 				reactor.lastPowerDemandKW = scale * reactor.authored.rateKgPerS
 					* reactor.authored.specificEnergyKWhPerKgCO2 * 3600.0;
-				auto const fromGeneration = std::min(reactor.lastPowerDemandKW, availableGeneration);
-				availableGeneration -= fromGeneration;
-				auto const ask = reactor.lastPowerDemandKW - fromGeneration;
-				auto const fromBattery = drawBatteries(ask);
-				auto const suppliedKW = fromGeneration + fromBattery;
-				batterySuppliedKW += fromBattery;
-				batteryShortfallKW += ask - fromBattery;
+				auto const suppliedKW = drawPower("Sabatier", reactor.authored.id, reactor.lastPowerDemandKW);
 				reactor.lastPowerSuppliedKW = suppliedKW;
 				if (reactor.lastPowerDemandKW > 1e-12 && suppliedKW <= 1e-12)
 				{
@@ -10921,7 +11231,7 @@ namespace core
 				auto const reactionHeatKJ = extentActualKg
 					* StationSabatierReactionHeatKJPerKgCarbonDioxide;
 				auto const heatKJ = energySuppliedKJ + reactionHeatKJ;
-				sabatierHeatByReservoir[reactor.sinkIndex] += heatKJ / tickSeconds;
+				sabatierHeatByReservoir[reactor.sinkIndex] += connections.routeHeat(connections.port("Sabatier", reactor.authored.id, "Heat"), heatKJ / tickSeconds);
 				reactor.lastReactionHeatKW = reactionHeatKJ / tickSeconds;
 				reactor.lastCo2ConsumedKg = co2ActualKg;
 				reactor.lastHydrogenConsumedKg = hydrogenActualKg;
@@ -10945,6 +11255,7 @@ namespace core
 			for (size_t orderIndex : methaneProcessorOrder)
 			{
 				auto& processor = methaneProcessors[orderIndex];
+				auto ports = materialPorts("Methane processor", processor.authored.id);
 				auto& methane = stores[processor.methaneStoreIndex];
 				auto& hydrogen = stores[processor.hydrogenStoreIndex];
 				auto& carbon = stores[processor.carbonStoreIndex];
@@ -10977,21 +11288,22 @@ namespace core
 					continue;
 				}
 				auto const drawableMethaneUnits = std::max(0.0,
-					qualified[processor.methaneStoreIndex] - methane.authored.protectedReserve);
-				auto const hydrogenHeadroomUnits = std::max(0.0, hydrogen.authored.capacity
-					- (qualified[processor.hydrogenStoreIndex] + unqualified[processor.hydrogenStoreIndex]));
-				auto const carbonHeadroomUnits = std::max(0.0, carbon.authored.capacity
-					- (qualified[processor.carbonStoreIndex] + unqualified[processor.carbonStoreIndex]));
+					ports.input(processor.methaneStoreIndex, qualified[processor.methaneStoreIndex] - methane.authored.protectedReserve));
+				auto const hydrogenHeadroomUnits = std::max(0.0, ports.output(processor.hydrogenStoreIndex, hydrogen.authored.capacity
+					- (qualified[processor.hydrogenStoreIndex] + unqualified[processor.hydrogenStoreIndex])));
+				auto const carbonHeadroomUnits = std::max(0.0, ports.output(processor.carbonStoreIndex, carbon.authored.capacity
+					- (qualified[processor.carbonStoreIndex] + unqualified[processor.carbonStoreIndex])));
 				double scale = 1.0;
 				std::string limiter;
-				auto const constrain = [&](double available, double required,
+				auto const constrain = [&](auto available, double required,
 					std::string const& reason)
 				{
 					if (required <= 0.0) return;
+					ports.limitDemand(available, required);
 					auto const fraction = available / required;
 					if (fraction < scale) { scale = fraction; limiter = reason; }
 				};
-				constrain(drawableMethaneUnits, kgToMass(methane.authored.unit, fullKg),
+				constrain(ports.request(processor.methaneStoreIndex, drawableMethaneUnits, kgToMass(methane.authored.unit, fullKg)), kgToMass(methane.authored.unit, fullKg),
 					"methane feed store '" + methane.authored.id
 					+ "' has nothing drawable above its protected reserve");
 				constrain(hydrogenHeadroomUnits,
@@ -11004,6 +11316,8 @@ namespace core
 						fullKg * StationMethaneProcessingCarbonMassPerMethaneKg),
 					"carbon store '" + carbon.authored.id
 					+ "' is full: the solid carbon has nowhere to go");
+				ports.limitDemand(powerAvailable("Methane processor", processor.authored.id),
+					processor.authored.rateKgPerS * processor.authored.specificEnergyKWhPerKgCH4 * 3600.0);
 				scale = std::max(0.0, std::min(1.0, scale));
 				processor.lastScale = scale;
 				processor.lastLimiter = limiter;
@@ -11016,13 +11330,7 @@ namespace core
 				}
 				processor.lastPowerDemandKW = scale * processor.authored.rateKgPerS
 					* processor.authored.specificEnergyKWhPerKgCH4 * 3600.0;
-				auto const fromGeneration = std::min(processor.lastPowerDemandKW, availableGeneration);
-				availableGeneration -= fromGeneration;
-				auto const ask = processor.lastPowerDemandKW - fromGeneration;
-				auto const fromBattery = drawBatteries(ask);
-				auto const suppliedKW = fromGeneration + fromBattery;
-				batterySuppliedKW += fromBattery;
-				batteryShortfallKW += ask - fromBattery;
+				auto const suppliedKW = drawPower("Methane processor", processor.authored.id, processor.lastPowerDemandKW);
 				processor.lastPowerSuppliedKW = suppliedKW;
 				if (processor.lastPowerDemandKW > 1e-12 && suppliedKW <= 1e-12)
 				{
@@ -11066,7 +11374,7 @@ namespace core
 				auto const reactionHeatKJ = methaneActualKg
 					* StationMethaneProcessingReactionHeatKJPerKgMethane;
 				auto const heatKJ = std::max(0.0, energySuppliedKJ - reactionHeatKJ);
-				methaneHeatByReservoir[processor.sinkIndex] += heatKJ / tickSeconds;
+				methaneHeatByReservoir[processor.sinkIndex] += connections.routeHeat(connections.port("Methane processor", processor.authored.id, "Heat"), heatKJ / tickSeconds);
 				processor.lastReactionHeatKW = reactionHeatKJ / tickSeconds;
 				processor.lastMethaneConsumedKg = methaneActualKg;
 				processor.lastHydrogenReturnedKg = hydrogenActualKg;
@@ -11111,6 +11419,7 @@ namespace core
 			for (size_t orderIndex : microbialProcessorOrder)
 			{
 				auto& processor = microbialProcessors[orderIndex];
+				auto ports = materialPorts("Microbial processor", processor.authored.id);
 				auto& feed = stores[processor.feedStoreIndex];
 				auto& oxygen = stores[processor.oxygenStoreIndex];
 				auto& water = stores[processor.waterStoreIndex];
@@ -11170,11 +11479,11 @@ namespace core
 				// can never spend replacement stock to heal.
 				auto const hours = tickSeconds / 3600.0;
 				auto const& sink = reservoirs[processor.sinkIndex];
-				auto const starving = std::max(0.0, qualified[processor.feedStoreIndex]
-					- feed.authored.protectedReserve) <= 0.0;
+				auto const starving = std::max(0.0, ports.input(processor.feedStoreIndex, qualified[processor.feedStoreIndex]
+					- feed.authored.protectedReserve)) <= 0.0;
 				auto const mediaExhausted = std::max(0.0,
-					qualified[processor.consumableStoreIndex]
-					- consumable.authored.protectedReserve) <= 0.0;
+					ports.input(processor.consumableStoreIndex, qualified[processor.consumableStoreIndex]
+					- consumable.authored.protectedReserve)) <= 0.0;
 				auto const coldStressed = sink.temperatureC + 1e-9
 					< processor.authored.minOperatingTemperatureC;
 				auto const heatStressed = sink.temperatureC + 1e-9
@@ -11210,9 +11519,10 @@ namespace core
 					if (processor.hasStock && points > 0.0)
 					{
 						auto& stock = stores[processor.stockStoreIndex];
+						ports.demand(processor.stockStoreIndex, points * processor.authored.stockUnitsPerConditionPoint, true);
 						auto const drawableStock = std::max(0.0,
-							qualified[processor.stockStoreIndex]
-							- stock.authored.protectedReserve);
+							ports.input(processor.stockStoreIndex, qualified[processor.stockStoreIndex]
+							- stock.authored.protectedReserve));
 						auto const stockCapPoints = drawableStock
 							/ processor.authored.stockUnitsPerConditionPoint;
 						points = std::min(points, stockCapPoints);
@@ -11314,45 +11624,48 @@ namespace core
 					continue;
 				}
 				auto const drawableFeedUnits = std::max(0.0,
-					qualified[processor.feedStoreIndex] - feed.authored.protectedReserve);
+					ports.input(processor.feedStoreIndex, qualified[processor.feedStoreIndex] - feed.authored.protectedReserve));
 				auto const drawableOxygenUnits = std::max(0.0,
-					qualified[processor.oxygenStoreIndex] - oxygen.authored.protectedReserve);
+					ports.input(processor.oxygenStoreIndex, qualified[processor.oxygenStoreIndex] - oxygen.authored.protectedReserve));
 				auto const drawableWaterUnits = std::max(0.0,
-					qualified[processor.waterStoreIndex] - water.authored.protectedReserve);
+					ports.input(processor.waterStoreIndex, qualified[processor.waterStoreIndex] - water.authored.protectedReserve));
 				auto const drawableConsumableUnits = std::max(0.0,
-					qualified[processor.consumableStoreIndex] - consumable.authored.protectedReserve);
-				auto const nutrientHeadroomUnits = std::max(0.0, nutrient.authored.capacity
-					- (qualified[processor.nutrientStoreIndex] + unqualified[processor.nutrientStoreIndex]));
+					ports.input(processor.consumableStoreIndex, qualified[processor.consumableStoreIndex] - consumable.authored.protectedReserve));
+				auto const nutrientHeadroomUnits = std::max(0.0, ports.output(processor.nutrientStoreIndex, nutrient.authored.capacity
+					- (qualified[processor.nutrientStoreIndex] + unqualified[processor.nutrientStoreIndex])));
 				auto const recoveredWaterHeadroomUnits = std::max(0.0,
-					recoveredWater.authored.capacity - (qualified[processor.recoveredWaterStoreIndex]
-						+ unqualified[processor.recoveredWaterStoreIndex]));
-				auto const co2HeadroomUnits = std::max(0.0, co2.authored.capacity
-					- (qualified[processor.co2StoreIndex] + unqualified[processor.co2StoreIndex]));
-				auto const residueHeadroomUnits = std::max(0.0, residue.authored.capacity
-					- (qualified[processor.residueStoreIndex] + unqualified[processor.residueStoreIndex]));
+					ports.output(processor.recoveredWaterStoreIndex, recoveredWater.authored.capacity - (qualified[processor.recoveredWaterStoreIndex]
+						+ unqualified[processor.recoveredWaterStoreIndex])));
+				auto const co2HeadroomUnits = std::max(0.0, ports.output(processor.co2StoreIndex, co2.authored.capacity
+					- (qualified[processor.co2StoreIndex] + unqualified[processor.co2StoreIndex])));
+				auto const residueHeadroomUnits = std::max(0.0, ports.output(processor.residueStoreIndex, residue.authored.capacity
+					- (qualified[processor.residueStoreIndex] + unqualified[processor.residueStoreIndex])));
 				double scale = 1.0;
 				std::string limiter;
-				auto const constrain = [&](double available, double required,
+				auto const constrain = [&](auto available, double required,
 					std::string const& reason)
 				{
 					if (required <= 0.0) return;
+					ports.limitDemand(available, required);
 					auto const fraction = available / required;
 					if (fraction < scale) { scale = fraction; limiter = reason; }
 				};
-				constrain(drawableFeedUnits, kgToMass(feed.authored.unit, fullKg),
+				constrain(ports.request(processor.feedStoreIndex, drawableFeedUnits, kgToMass(feed.authored.unit, fullKg)), kgToMass(feed.authored.unit, fullKg),
 					"organic waste feed store '" + feed.authored.id
 					+ "' has nothing drawable above its protected reserve");
-				constrain(drawableOxygenUnits,
+				constrain(ports.request(processor.oxygenStoreIndex, drawableOxygenUnits, kgToMass(oxygen.authored.unit,
+						fullKg * processor.authored.oxygenPerKgFeedKg)),
 					kgToMass(oxygen.authored.unit,
 						fullKg * processor.authored.oxygenPerKgFeedKg),
 					"oxygen store '" + oxygen.authored.id
 					+ "' has nothing drawable above its protected reserve");
-				constrain(drawableWaterUnits,
+				constrain(ports.request(processor.waterStoreIndex, drawableWaterUnits, kgToMass(water.authored.unit,
+						fullKg * processor.authored.processWaterPerKgFeedKg)),
 					kgToMass(water.authored.unit,
 						fullKg * processor.authored.processWaterPerKgFeedKg),
 					"process water store '" + water.authored.id
 					+ "' has nothing drawable above its protected reserve");
-				constrain(drawableConsumableUnits,
+				constrain(ports.request(processor.consumableStoreIndex, drawableConsumableUnits, fullKg * processor.authored.consumablePerKgFeed),
 					fullKg * processor.authored.consumablePerKgFeed,
 					"consumable store '" + consumable.authored.id
 					+ "' has nothing drawable above its protected reserve");
@@ -11378,6 +11691,8 @@ namespace core
 				constrain(processor.condition * fullKg, fullKg,
 					"culture condition degraded to " + std::to_string(processor.condition)
 					+ ": the stressed culture cannot process the full rated feed");
+				ports.limitDemand(powerAvailable("Microbial processor", processor.authored.id),
+					processor.authored.rateKgPerS * processor.authored.specificEnergyKWhPerKgFeed * 3600.0);
 				scale = std::max(0.0, std::min(1.0, scale));
 				processor.lastScale = scale;
 				processor.lastLimiter = limiter;
@@ -11390,13 +11705,7 @@ namespace core
 				}
 				processor.lastPowerDemandKW = scale * processor.authored.rateKgPerS
 					* processor.authored.specificEnergyKWhPerKgFeed * 3600.0;
-				auto const fromGeneration = std::min(processor.lastPowerDemandKW, availableGeneration);
-				availableGeneration -= fromGeneration;
-				auto const ask = processor.lastPowerDemandKW - fromGeneration;
-				auto const fromBattery = drawBatteries(ask);
-				auto const suppliedKW = fromGeneration + fromBattery;
-				batterySuppliedKW += fromBattery;
-				batteryShortfallKW += ask - fromBattery;
+				auto const suppliedKW = drawPower("Microbial processor", processor.authored.id, processor.lastPowerDemandKW);
 				processor.lastPowerSuppliedKW = suppliedKW;
 				if (processor.lastPowerDemandKW > 1e-12 && suppliedKW <= 1e-12)
 				{
@@ -11518,7 +11827,7 @@ namespace core
 				auto const reactionHeatKJ = feedActualKg
 					* processor.authored.reactionHeatKJPerKgFeed;
 				auto const heatKJ = energySuppliedKJ + reactionHeatKJ;
-				microbialHeatByReservoir[processor.sinkIndex] += heatKJ / tickSeconds;
+				microbialHeatByReservoir[processor.sinkIndex] += connections.routeHeat(connections.port("Microbial processor", processor.authored.id, "Heat"), heatKJ / tickSeconds);
 				processor.lastReactionHeatKW = reactionHeatKJ / tickSeconds;
 				// Per-constituent recovery: each recovered nutrient is the
 				// feed's bound content times its recovery fraction, so the
@@ -11595,6 +11904,7 @@ namespace core
 			for (size_t orderIndex : cropOrder)
 			{
 				auto& crop = cropPopulations[orderIndex];
+				auto ports = materialPorts("Crops", crop.authored.id);
 				auto& compartment = atmospheres[crop.atmosphereIndex];
 				auto& water = stores[crop.waterStoreIndex];
 				auto& nitrogen = stores[crop.nitrogenStoreIndex];
@@ -11670,11 +11980,7 @@ namespace core
 				// depends on.
 				crop.lastCirculationSuppliedKW = protectedCropCirculationKW[orderIndex];
 				batteryShortfallKW += crop.lastCirculationRequestedKW - crop.lastCirculationSuppliedKW;
-				auto const lightFromGeneration = std::min(crop.lastLightRequestedKW, availableGeneration);
-				availableGeneration -= lightFromGeneration;
-				auto const lightFromBattery = drawBatteries(crop.lastLightRequestedKW - lightFromGeneration);
-				crop.lastLightSuppliedKW = lightFromGeneration + lightFromBattery;
-				batterySuppliedKW += lightFromBattery;
+				crop.lastLightSuppliedKW = drawPower("Crops", crop.authored.id, crop.lastLightRequestedKW);
 				batteryShortfallKW += crop.lastLightRequestedKW - crop.lastLightSuppliedKW;
 				auto const circulationFraction = crop.lastCirculationRequestedKW > 1e-12
 					? crop.lastCirculationSuppliedKW / crop.lastCirculationRequestedKW : 1.0;
@@ -11710,21 +12016,22 @@ namespace core
 					* StationPhotosynthesisWaterPerOrganicKg;
 				auto const oxygenPerKgGrowth = organicFraction * StationPhotosynthesisO2PerOrganicKg;
 				auto const drawableWaterUnits = std::max(0.0,
-					qualified[crop.waterStoreIndex] - water.authored.protectedReserve);
+					ports.input(crop.waterStoreIndex, qualified[crop.waterStoreIndex] - water.authored.protectedReserve));
 				auto const drawableNitrogenUnits = std::max(0.0,
-					qualified[crop.nitrogenStoreIndex] - nitrogen.authored.protectedReserve);
+					ports.input(crop.nitrogenStoreIndex, qualified[crop.nitrogenStoreIndex] - nitrogen.authored.protectedReserve));
 				auto const drawablePhosphorusUnits = std::max(0.0,
-					qualified[crop.phosphorusStoreIndex] - phosphorus.authored.protectedReserve);
+					ports.input(crop.phosphorusStoreIndex, qualified[crop.phosphorusStoreIndex] - phosphorus.authored.protectedReserve));
 				auto const drawablePotassiumUnits = std::max(0.0,
-					qualified[crop.potassiumStoreIndex] - potassium.authored.protectedReserve);
+					ports.input(crop.potassiumStoreIndex, qualified[crop.potassiumStoreIndex] - potassium.authored.protectedReserve));
 				auto const drawableMineralsUnits = std::max(0.0,
-					qualified[crop.mineralsStoreIndex] - minerals.authored.protectedReserve);
+					ports.input(crop.mineralsStoreIndex, qualified[crop.mineralsStoreIndex] - minerals.authored.protectedReserve));
 				auto const capacityHeadroomKg = std::max(0.0, crop.capacityKg - crop.livingBiomassKg);
 				double scale = 1.0;
 				std::string limiter;
-				auto const constrain = [&](double available, double required, std::string const& reason)
+				auto const constrain = [&](auto available, double required, std::string const& reason)
 				{
 					if (required <= 0.0) return;
+					ports.limitDemand(available, required);
 					auto const fraction = available / required;
 					if (fraction < scale) { scale = fraction; limiter = reason; }
 				};
@@ -11755,27 +12062,32 @@ namespace core
 					constrain(std::max(0.0, compartment.carbonDioxideKg),
 						crop.lastGrowthPotentialKg * co2PerKgGrowth,
 						"compartment '" + compartment.authored.id + "' holds no carbon dioxide to fix");
-					constrain(drawableWaterUnits,
+					constrain(ports.request(crop.waterStoreIndex, drawableWaterUnits, kgToMass(water.authored.unit, crop.lastGrowthPotentialKg
+							* (assimilationWaterPerKgGrowth + crop.authored.transpirationKgPerKgGrowth))),
 						kgToMass(water.authored.unit, crop.lastGrowthPotentialKg
 							* (assimilationWaterPerKgGrowth + crop.authored.transpirationKgPerKgGrowth)),
 						"irrigation water store '" + water.authored.id
 							+ "' has nothing drawable above its protected reserve");
-					constrain(drawableNitrogenUnits,
+					constrain(ports.request(crop.nitrogenStoreIndex, drawableNitrogenUnits, kgToMass(nitrogen.authored.unit, crop.lastGrowthPotentialKg
+							* composition.nutrientNitrogen)),
 						kgToMass(nitrogen.authored.unit, crop.lastGrowthPotentialKg
 							* composition.nutrientNitrogen),
 						"nitrogen store '" + nitrogen.authored.id
 							+ "' has nothing drawable above its protected reserve");
-					constrain(drawablePhosphorusUnits,
+					constrain(ports.request(crop.phosphorusStoreIndex, drawablePhosphorusUnits, kgToMass(phosphorus.authored.unit, crop.lastGrowthPotentialKg
+							* composition.phosphorus)),
 						kgToMass(phosphorus.authored.unit, crop.lastGrowthPotentialKg
 							* composition.phosphorus),
 						"phosphorus store '" + phosphorus.authored.id
 							+ "' has nothing drawable above its protected reserve");
-					constrain(drawablePotassiumUnits,
+					constrain(ports.request(crop.potassiumStoreIndex, drawablePotassiumUnits, kgToMass(potassium.authored.unit, crop.lastGrowthPotentialKg
+							* composition.potassium)),
 						kgToMass(potassium.authored.unit, crop.lastGrowthPotentialKg
 							* composition.potassium),
 						"potassium store '" + potassium.authored.id
 							+ "' has nothing drawable above its protected reserve");
-					constrain(drawableMineralsUnits,
+					constrain(ports.request(crop.mineralsStoreIndex, drawableMineralsUnits, kgToMass(minerals.authored.unit, crop.lastGrowthPotentialKg
+							* composition.otherMinerals)),
 						kgToMass(minerals.authored.unit, crop.lastGrowthPotentialKg
 							* composition.otherMinerals),
 						"minerals store '" + minerals.authored.id
@@ -11947,8 +12259,8 @@ namespace core
 					if (!crop.authored.wasteStoreId.empty())
 					{
 						auto& waste = stores[crop.wasteStoreIndex];
-						auto const wasteHeadroomUnits = std::max(0.0, waste.authored.capacity
-							- qualified[crop.wasteStoreIndex] - unqualified[crop.wasteStoreIndex]);
+						auto const wasteHeadroomUnits = std::max(0.0, ports.output(crop.wasteStoreIndex, waste.authored.capacity
+							- qualified[crop.wasteStoreIndex] - unqualified[crop.wasteStoreIndex]));
 						auto const routedUnits = std::min(
 							kgToMass(waste.authored.unit, residueKg), wasteHeadroomUnits);
 						routedKg = massToKg(waste.authored.unit, routedUnits);
@@ -12022,10 +12334,10 @@ namespace core
 					auto const inedibleRequestedKg = requestedKg - edibleRequestedKg;
 					auto& food = stores[crop.foodStoreIndex];
 					auto& waste = stores[crop.wasteStoreIndex];
-					auto const foodHeadroomUnits = std::max(0.0, food.authored.capacity
-						- qualified[crop.foodStoreIndex] - unqualified[crop.foodStoreIndex]);
-					auto const wasteHeadroomUnits = std::max(0.0, waste.authored.capacity
-						- qualified[crop.wasteStoreIndex] - unqualified[crop.wasteStoreIndex]);
+					auto const foodHeadroomUnits = std::max(0.0, ports.output(crop.foodStoreIndex, food.authored.capacity
+						- qualified[crop.foodStoreIndex] - unqualified[crop.foodStoreIndex]));
+					auto const wasteHeadroomUnits = std::max(0.0, ports.output(crop.wasteStoreIndex, waste.authored.capacity
+						- qualified[crop.wasteStoreIndex] - unqualified[crop.wasteStoreIndex]));
 					auto const foodAcceptedUnits = std::min(
 						kgToMass(food.authored.unit, edibleRequestedKg), foodHeadroomUnits);
 					auto const foodAcceptedKg = massToKg(food.authored.unit, foodAcceptedUnits);
@@ -12200,6 +12512,7 @@ namespace core
 			for (size_t orderIndex : algaeOrder)
 			{
 				auto& culture = algaeCultures[orderIndex];
+				auto ports = materialPorts("Algae", culture.authored.id);
 				auto& compartment = atmospheres[culture.atmosphereIndex];
 				auto& water = stores[culture.waterStoreIndex];
 				auto& nitrogen = stores[culture.nitrogenStoreIndex];
@@ -12270,11 +12583,7 @@ namespace core
 				// and never draws the same watts twice.
 				culture.lastCirculationSuppliedKW = protectedAlgaeCirculationKW[orderIndex];
 				batteryShortfallKW += culture.lastCirculationRequestedKW - culture.lastCirculationSuppliedKW;
-				auto const lightFromGeneration = std::min(culture.lastLightRequestedKW, availableGeneration);
-				availableGeneration -= lightFromGeneration;
-				auto const lightFromBattery = drawBatteries(culture.lastLightRequestedKW - lightFromGeneration);
-				culture.lastLightSuppliedKW = lightFromGeneration + lightFromBattery;
-				batterySuppliedKW += lightFromBattery;
+				culture.lastLightSuppliedKW = drawPower("Algae", culture.authored.id, culture.lastLightRequestedKW);
 				batteryShortfallKW += culture.lastLightRequestedKW - culture.lastLightSuppliedKW;
 				auto const circulationFraction = culture.lastCirculationRequestedKW > 1e-12
 					? culture.lastCirculationSuppliedKW / culture.lastCirculationRequestedKW : 1.0;
@@ -12304,21 +12613,22 @@ namespace core
 					* StationPhotosynthesisWaterPerOrganicKg;
 				auto const oxygenPerKgGrowth = organicFraction * StationPhotosynthesisO2PerOrganicKg;
 				auto const drawableWaterUnits = std::max(0.0,
-					qualified[culture.waterStoreIndex] - water.authored.protectedReserve);
+					ports.input(culture.waterStoreIndex, qualified[culture.waterStoreIndex] - water.authored.protectedReserve));
 				auto const drawableNitrogenUnits = std::max(0.0,
-					qualified[culture.nitrogenStoreIndex] - nitrogen.authored.protectedReserve);
+					ports.input(culture.nitrogenStoreIndex, qualified[culture.nitrogenStoreIndex] - nitrogen.authored.protectedReserve));
 				auto const drawablePhosphorusUnits = std::max(0.0,
-					qualified[culture.phosphorusStoreIndex] - phosphorus.authored.protectedReserve);
+					ports.input(culture.phosphorusStoreIndex, qualified[culture.phosphorusStoreIndex] - phosphorus.authored.protectedReserve));
 				auto const drawablePotassiumUnits = std::max(0.0,
-					qualified[culture.potassiumStoreIndex] - potassium.authored.protectedReserve);
+					ports.input(culture.potassiumStoreIndex, qualified[culture.potassiumStoreIndex] - potassium.authored.protectedReserve));
 				auto const drawableMineralsUnits = std::max(0.0,
-					qualified[culture.mineralsStoreIndex] - minerals.authored.protectedReserve);
+					ports.input(culture.mineralsStoreIndex, qualified[culture.mineralsStoreIndex] - minerals.authored.protectedReserve));
 				auto const capacityHeadroomKg = std::max(0.0, culture.capacityKg - culture.livingBiomassKg);
 				double scale = 1.0;
 				std::string limiter;
-				auto const constrain = [&](double available, double required, std::string const& reason)
+				auto const constrain = [&](auto available, double required, std::string const& reason)
 				{
 					if (required <= 0.0) return;
+					ports.limitDemand(available, required);
 					auto const fraction = available / required;
 					if (fraction < scale) { scale = fraction; limiter = reason; }
 				};
@@ -12349,27 +12659,32 @@ namespace core
 					constrain(std::max(0.0, compartment.carbonDioxideKg),
 						culture.lastGrowthPotentialKg * co2PerKgGrowth,
 						"compartment '" + compartment.authored.id + "' holds no carbon dioxide to fix");
-					constrain(drawableWaterUnits,
+					constrain(ports.request(culture.waterStoreIndex, drawableWaterUnits, kgToMass(water.authored.unit, culture.lastGrowthPotentialKg
+							* (assimilationWaterPerKgGrowth + culture.authored.evaporationKgPerKgGrowth))),
 						kgToMass(water.authored.unit, culture.lastGrowthPotentialKg
 							* (assimilationWaterPerKgGrowth + culture.authored.evaporationKgPerKgGrowth)),
 						"culture water store '" + water.authored.id
 							+ "' has nothing drawable above its protected reserve");
-					constrain(drawableNitrogenUnits,
+					constrain(ports.request(culture.nitrogenStoreIndex, drawableNitrogenUnits, kgToMass(nitrogen.authored.unit, culture.lastGrowthPotentialKg
+							* composition.nutrientNitrogen)),
 						kgToMass(nitrogen.authored.unit, culture.lastGrowthPotentialKg
 							* composition.nutrientNitrogen),
 						"nitrogen store '" + nitrogen.authored.id
 							+ "' has nothing drawable above its protected reserve");
-					constrain(drawablePhosphorusUnits,
+					constrain(ports.request(culture.phosphorusStoreIndex, drawablePhosphorusUnits, kgToMass(phosphorus.authored.unit, culture.lastGrowthPotentialKg
+							* composition.phosphorus)),
 						kgToMass(phosphorus.authored.unit, culture.lastGrowthPotentialKg
 							* composition.phosphorus),
 						"phosphorus store '" + phosphorus.authored.id
 							+ "' has nothing drawable above its protected reserve");
-					constrain(drawablePotassiumUnits,
+					constrain(ports.request(culture.potassiumStoreIndex, drawablePotassiumUnits, kgToMass(potassium.authored.unit, culture.lastGrowthPotentialKg
+							* composition.potassium)),
 						kgToMass(potassium.authored.unit, culture.lastGrowthPotentialKg
 							* composition.potassium),
 						"potassium store '" + potassium.authored.id
 							+ "' has nothing drawable above its protected reserve");
-					constrain(drawableMineralsUnits,
+					constrain(ports.request(culture.mineralsStoreIndex, drawableMineralsUnits, kgToMass(minerals.authored.unit, culture.lastGrowthPotentialKg
+							* composition.otherMinerals)),
 						kgToMass(minerals.authored.unit, culture.lastGrowthPotentialKg
 							* composition.otherMinerals),
 						"minerals store '" + minerals.authored.id
@@ -12537,8 +12852,8 @@ namespace core
 					if (!culture.authored.wasteStoreId.empty())
 					{
 						auto& waste = stores[culture.wasteStoreIndex];
-						auto const wasteHeadroomUnits = std::max(0.0, waste.authored.capacity
-							- qualified[culture.wasteStoreIndex] - unqualified[culture.wasteStoreIndex]);
+						auto const wasteHeadroomUnits = std::max(0.0, ports.output(culture.wasteStoreIndex, waste.authored.capacity
+							- qualified[culture.wasteStoreIndex] - unqualified[culture.wasteStoreIndex]));
 						auto const routedUnits = std::min(
 							kgToMass(waste.authored.unit, residueKg), wasteHeadroomUnits);
 						routedKg = massToKg(waste.authored.unit, routedUnits);
@@ -12600,12 +12915,12 @@ namespace core
 					auto& food = stores[culture.foodStoreIndex];
 					auto& recovery = stores[culture.recoveryStoreIndex];
 					auto& waste = stores[culture.wasteStoreIndex];
-					auto const foodHeadroomUnits = std::max(0.0, food.authored.capacity
-						- qualified[culture.foodStoreIndex] - unqualified[culture.foodStoreIndex]);
-					auto const recoveryHeadroomUnits = std::max(0.0, recovery.authored.capacity
-						- qualified[culture.recoveryStoreIndex] - unqualified[culture.recoveryStoreIndex]);
-					auto const wasteHeadroomUnits = std::max(0.0, waste.authored.capacity
-						- qualified[culture.wasteStoreIndex] - unqualified[culture.wasteStoreIndex]);
+					auto const foodHeadroomUnits = std::max(0.0, ports.output(culture.foodStoreIndex, food.authored.capacity
+						- qualified[culture.foodStoreIndex] - unqualified[culture.foodStoreIndex]));
+					auto const recoveryHeadroomUnits = std::max(0.0, ports.output(culture.recoveryStoreIndex, recovery.authored.capacity
+						- qualified[culture.recoveryStoreIndex] - unqualified[culture.recoveryStoreIndex]));
+					auto const wasteHeadroomUnits = std::max(0.0, ports.output(culture.wasteStoreIndex, waste.authored.capacity
+						- qualified[culture.wasteStoreIndex] - unqualified[culture.wasteStoreIndex]));
 					auto const foodAcceptedUnits = std::min(
 						kgToMass(food.authored.unit, foodRequestedKg), foodHeadroomUnits);
 					auto const foodAcceptedKg = massToKg(food.authored.unit, foodAcceptedUnits);
@@ -12934,6 +13249,7 @@ namespace core
 				auto const dt = static_cast<double>(seconds);
 				for (auto& crew : crews)
 				{
+					auto ports = materialPorts("Crew", crew.authored.id);
 					auto& compartment = atmospheres[crew.atmosphereIndex];
 					auto const activity = evaluateStationProfile(crew.authored.activityProfile, elapsed);
 					auto const crewSeconds = static_cast<double>(crew.authored.crewCount) * activity * dt;
@@ -12964,9 +13280,10 @@ namespace core
 					auto const capSupply = [&](size_t storeIndex, double requested, char const* label)
 					{
 						if (requested <= 0.0) return;
-						auto const drawable = std::max(0.0, qualified[storeIndex]
-							- stores[storeIndex].authored.protectedReserve);
+						auto const drawable = std::max(0.0, ports.input(storeIndex, qualified[storeIndex]
+							- stores[storeIndex].authored.protectedReserve, requested));
 						auto const fraction = drawable / requested;
+						ports.limitDemand(ports.request(storeIndex, drawable, requested), requested);
 						if (fraction < scale)
 						{
 							scale = fraction;
@@ -12979,9 +13296,10 @@ namespace core
 					auto const capHeadroom = [&](size_t storeIndex, double produced, char const* label)
 					{
 						if (produced <= 0.0) return;
-						auto const headroom = stores[storeIndex].authored.capacity
-							- (qualified[storeIndex] + unqualified[storeIndex]);
+						auto const headroom = ports.output(storeIndex, stores[storeIndex].authored.capacity
+							- (qualified[storeIndex] + unqualified[storeIndex]));
 						auto const fraction = headroom / produced;
+						ports.limitDemand(headroom, produced);
 						if (fraction < scale)
 						{
 							scale = fraction;
@@ -12994,6 +13312,7 @@ namespace core
 					if (oxygenRequestedKg > 0.0)
 					{
 						auto const fraction = std::max(0.0, compartment.oxygenKg) / oxygenRequestedKg;
+						ports.limitDemand(compartment.oxygenKg, oxygenRequestedKg);
 						if (fraction < scale)
 						{
 							scale = fraction;
@@ -13019,6 +13338,7 @@ namespace core
 					{
 						scale = 0.0;
 						limiter = "actual feed cannot fund declared crew returns/heat: " + missing;
+						ports.limitDemand(0.0, 1.0);
 					}
 					if (!(scale > 0.0)) scale = 0.0;
 					if (scale > 1.0) scale = 1.0;
@@ -13027,8 +13347,8 @@ namespace core
 					// roundoff never draws below zero or pushes over capacity.
 					auto const drawCapped = [&](size_t storeIndex, double requested)
 					{
-						auto const drawable = std::max(0.0, qualified[storeIndex]
-							- stores[storeIndex].authored.protectedReserve);
+						auto const drawable = std::max(0.0, ports.input(storeIndex, qualified[storeIndex]
+							- stores[storeIndex].authored.protectedReserve, requested));
 						auto const completed = std::min(requested * scale, drawable);
 						qualified[storeIndex] -= completed;
 						flowOut[storeIndex] += completed;
@@ -13036,8 +13356,8 @@ namespace core
 					};
 					auto const deliverCapped = [&](size_t storeIndex, double requested)
 					{
-						auto const headroom = stores[storeIndex].authored.capacity
-							- (qualified[storeIndex] + unqualified[storeIndex]);
+						auto const headroom = ports.output(storeIndex, stores[storeIndex].authored.capacity
+							- (qualified[storeIndex] + unqualified[storeIndex]));
 						auto const completed = std::min(requested * scale, headroom);
 						qualified[storeIndex] += completed;
 						flowIn[storeIndex] += completed;
@@ -13296,6 +13616,23 @@ namespace core
 			// the terms that moved.
 			{
 				auto const dt = static_cast<double>(seconds);
+				// Unavoidable/unrejected producer heat remains at its source.
+				// Drain it on later ticks even when that producer has stopped.
+				for (auto const& [key, delivered] : connections.drainHeat())
+				{
+					auto found = std::find_if(reservoirs.begin(), reservoirs.end(), [&](auto const& body) { return body.authored.id == key.peerId; });
+					if (found == reservoirs.end()) continue;
+					auto const index = static_cast<size_t>(found - reservoirs.begin());
+					if (key.ownerType == "Generator") generatorHeatBySink[index] += delivered;
+					else if (key.ownerType == "Fuel cell") fuelCellHeatByReservoir[index] += delivered;
+					else if (key.ownerType == "Electrolyzer") electrolysisHeatByReservoir[index] += delivered;
+					else if (key.ownerType == "Sabatier") sabatierHeatByReservoir[index] += delivered;
+					else if (key.ownerType == "Methane processor") methaneHeatByReservoir[index] += delivered;
+					else if (key.ownerType == "Microbial processor") microbialHeatByReservoir[index] += delivered;
+					else if (key.ownerType == "Chiller") condenserHeatBySink[index] += delivered;
+					else if (key.ownerType == "Equipment")
+						for (auto& load : loads) if (load.authored.id == key.ownerId) load.lastHeatRoutedKW += delivered;
+				}
 				std::vector<double> routedIn(reservoirs.size(), 0.0);
 				for (auto const& load : loads)
 					if (load.hasHeatSink) routedIn[load.heatSinkIndex] += load.lastHeatRoutedKW;
@@ -13327,7 +13664,7 @@ namespace core
 					// the radiator/view assumption is the declared
 					// emissivity-times-view-factor product. No distribution
 					// modelling is promised beyond these declared factors.
-					std::vector<double> rawRejections;
+					std::vector<double> rawRejections, radiatorInputs;
 					rawRejections.reserve(reservoir.radiatorIndices.size());
 					double rejectedKW = 0.0;
 					double minSinkC = reservoir.temperatureC;
@@ -13341,8 +13678,13 @@ namespace core
 							* StationStefanBoltzmannKWPerM2K4
 							* (temperatureK * temperatureK * temperatureK * temperatureK
 								- sinkK * sinkK * sinkK * sinkK);
-						rawRejections.push_back(rejection);
-						rejectedKW += rejection;
+						auto const port = connections.port("Radiator", radiator.authored.id, "Heat rejection to environment");
+						auto const input = rejection >= 0.0 ? connections.required(port, rejection)
+							: std::min(connections.remaining(port), -rejection);
+						auto const removed = rejection >= 0.0 ? input : -input * connections.efficiency(port);
+						radiatorInputs.push_back(input);
+						rawRejections.push_back(removed);
+						rejectedKW += removed;
 						minSinkC = std::min(minSinkC, radiator.authored.sinkTemperatureC);
 						maxSinkC = std::max(maxSinkC, radiator.authored.sinkTemperatureC);
 					}
@@ -13366,7 +13708,15 @@ namespace core
 						}
 					}
 					for (size_t r = 0; r < reservoir.radiatorIndices.size(); ++r)
-						radiators[reservoir.radiatorIndices[r]].lastRejectedKW = rawRejections[r] * scale;
+					{
+						auto& radiator = radiators[reservoir.radiatorIndices[r]];
+						auto const port = connections.port("Radiator", radiator.authored.id, "Heat rejection to environment");
+						// A warmer environment reverses the same physical mount.
+						auto const reversed = radiator.authored.sinkTemperatureC > reservoir.temperatureC;
+						connections.direction(port, reversed);
+						auto const flow = connections.send(port, radiatorInputs[r] * scale);
+						radiator.lastRejectedKW = reversed ? -flow.delivered : flow.delivered;
+					}
 					rejectedKW *= scale;
 					// Phase-change buffers ride through the deficit (#398):
 					// the running imbalance after rejection is what the
@@ -13401,6 +13751,8 @@ namespace core
 						auto const imbalanceKW = remainingKW > 0.0 ? remainingKW : -remainingKW;
 						auto chargeKW = 0.0;
 						auto dischargeKW = 0.0;
+						auto const chargePort = connections.port("Thermal buffer", buffer.authored.id, "Absorb heat");
+						auto const dischargePort = connections.port("Thermal buffer", buffer.authored.id, "Release heat");
 						std::string limiter;
 						auto const accessible = buffer.authored.accessMode != "circulation"
 							|| coolantLoops[buffer.gateLoopIndex].lastCirculating;
@@ -13416,7 +13768,9 @@ namespace core
 										buffer.authored.transferConductanceKWPerK
 											* (reservoir.temperatureC - bufferTemperatureC));
 								auto const headroomKW = (buffer.authored.capacityKJ - buffer.storedKJ) / dt;
-								chargeKW = std::min({limitKW, remainingKW, headroomKW});
+								auto const eta = connections.efficiency(chargePort);
+								chargeKW = headroomKW <= 0.0 ? 0.0 : std::min({limitKW, remainingKW,
+									connections.remaining(chargePort), eta > 0.0 ? headroomKW / eta : limitKW});
 								if (chargeKW <= 0.0)
 									limiter = "buffer is full: no headroom left to absorb";
 								else if (chargeKW < remainingKW)
@@ -13437,7 +13791,7 @@ namespace core
 										buffer.authored.transferConductanceKWPerK
 											* (bufferTemperatureC - reservoir.temperatureC));
 								auto const drawableKW = buffer.storedKJ / dt;
-								dischargeKW = std::min({limitKW, -remainingKW, drawableKW});
+								dischargeKW = std::min({limitKW, connections.required(dischargePort, -remainingKW), drawableKW});
 								if (dischargeKW <= 0.0)
 									limiter = "buffer is depleted: nothing left to return";
 								else if (dischargeKW < -remainingKW)
@@ -13448,29 +13802,31 @@ namespace core
 							else
 								limiter = "buffer is not hotter than the reservoir: no discharge direction";
 						}
-						buffer.storedKJ += (chargeKW - dischargeKW) * dt;
+						auto const chargeFlow = connections.send(chargePort, chargeKW);
+						auto const dischargeFlow = connections.send(dischargePort, dischargeKW);
+						buffer.storedKJ += (chargeFlow.delivered - dischargeFlow.input) * dt;
 						// Roundoff never leaves the finite bounds: the store is
 						// clamped to [0, capacity] so a one-ulp overshoot
 						// cannot accumulate (#556 discipline).
 						if (buffer.storedKJ < 0.0) buffer.storedKJ = 0.0;
 						if (buffer.storedKJ > buffer.authored.capacityKJ)
 							buffer.storedKJ = buffer.authored.capacityKJ;
-						buffer.chargedKJ += chargeKW * dt;
+						buffer.chargedKJ += chargeFlow.delivered * dt;
 						buffer.dischargedKJ += dischargeKW * dt;
 						buffer.lastAccessible = accessible;
-						buffer.lastChargeKW = chargeKW;
+						buffer.lastChargeKW = chargeFlow.delivered;
 						buffer.lastDischargeKW = dischargeKW;
 						buffer.lastFull = buffer.storedKJ >= buffer.authored.capacityKJ - 1e-9;
 						buffer.lastDepleted = buffer.storedKJ <= 1e-9;
 						buffer.lastLimiter = limiter;
-						auto const movedKW = chargeKW + dischargeKW;
+						auto const movedKW = chargeFlow.delivered + dischargeFlow.delivered;
 						if (imbalanceKW <= 0.0) buffer.status = StationTransferStatus::Idle;
 						else if (!accessible) buffer.status = StationTransferStatus::Rejected;
 						else if (movedKW + 1e-12 >= imbalanceKW) buffer.status = StationTransferStatus::Full;
 						else buffer.status = StationTransferStatus::Partial;
-						remainingKW = remainingKW - chargeKW + dischargeKW;
-						bufferChargeKW += chargeKW;
-						bufferDischargeKW += dischargeKW;
+						remainingKW = remainingKW - chargeFlow.input + dischargeFlow.delivered;
+						bufferChargeKW += chargeFlow.input;
+						bufferDischargeKW += dischargeFlow.delivered;
 					}
 					auto const netKW = remainingKW;
 					auto const newTemperatureC = reservoir.temperatureC + netKW * dt / capacity;
@@ -13599,7 +13955,7 @@ namespace core
 			// heat sink or a feed that cannot sustain the minimum operable
 			// level - is never fed, so no fuel is burned for equipment that
 			// cannot run.
-			double pendingRecoveryDispatchKW{0.0};
+			std::map<std::string, double> pendingRecoveryDispatchKW;
 			for (auto const index : loadOrder)
 			{
 				auto& load = loads[index];
@@ -13639,9 +13995,9 @@ namespace core
 						restartFeasible = false;
 				}
 				if (restartFeasible)
-					pendingRecoveryDispatchKW += std::max(headroom, restartNeed);
+					pendingRecoveryDispatchKW[load.authored.id] += std::max(headroom, restartNeed);
 				if (!restartSlotOpen) continue;
-				auto const poolKW = availableGeneration + batteryDeliverableKW();
+				auto const poolKW = powerAvailable("Equipment", load.authored.id);
 				if (poolKW + 1e-12 < headroom)
 				{
 					load.lastRecoveryHoldReason =
@@ -13689,7 +14045,7 @@ namespace core
 					// fall back to Shed the tick after it started.
 					if (load.lastRequestedKW > 0.0 && load.surgeRemainingSeconds > 0.0
 						&& load.lastAdmitted && !load.lastMaterialRefused)
-						pendingRecoveryDispatchKW += load.authored.restartSurgePowerKW;
+						pendingRecoveryDispatchKW[load.authored.id] += load.authored.restartSurgePowerKW;
 				}
 			}
 			lastRecoveryPending = recoveryPending;
@@ -13717,19 +14073,17 @@ namespace core
 				// the firm generation a waiting load needs to restart.
 				auto const chargeableKW = std::max(0.0, availableGeneration - recoveryChargeReserveKW);
 				if (chargeableKW <= 0.0) continue;
-				auto const busKW = std::min(battery.authored.maxChargeKW, chargeableKW);
-				if (busKW <= 0.0) continue;
-				auto const storedGain = std::min(busKW * hours
-					* battery.authored.chargeEfficiency, headroom);
-				if (storedGain <= 0.0) continue;
-				auto const busUsed = storedGain / battery.authored.chargeEfficiency;
+				auto const wantedKW = std::min(battery.authored.maxChargeKW, headroom / hours / battery.authored.chargeEfficiency);
+				auto const transport = connections.receive(connections.port("Battery", battery.authored.id, "Charge"), wantedKW, chargeableKW);
+				auto const storedGain = std::min(transport.delivered * hours * battery.authored.chargeEfficiency, headroom);
+				auto const busUsed = transport.delivered * hours;
 				battery.stored += storedGain;
 				battery.chargedKWh += storedGain;
 				battery.chargeInputKWh += busUsed;
 				battery.lastChargeKW = busUsed / hours;
 				// The pool is in power units: subtract the bus power the
 				// battery actually took, not the tick's energy.
-				availableGeneration -= busUsed / hours;
+				availableGeneration -= transport.input;
 			}
 			// Publish each battery's observable state for this tick: the
 			// reserve and saturation flags and the discharge service status.
@@ -13774,29 +14128,52 @@ namespace core
 			// Restoring load with a surge still owed, are real demand the
 			// dispatcher must see, or automatic dispatch never starts the
 			// sources the restart needs to stop waiting for.
-			dispatchDemandKW += pendingRecoveryDispatchKW;
+			std::map<std::pair<std::string, std::string>, double> dispatchRequests;
 			for (auto const& load : loads)
-				if (load.lastAdmitted && !load.lastMaterialRefused)
-					dispatchDemandKW += load.lastCappedRequestKW;
+				dispatchRequests[{"Equipment", load.authored.id}] += pendingRecoveryDispatchKW[load.authored.id]
+					+ (load.lastAdmitted && !load.lastMaterialRefused ? load.lastCappedRequestKW : 0.0);
 			for (auto const& loop : coolantLoops)
-				dispatchDemandKW += loop.lastPumpDemandKW + loop.lastHeaterDemandKW;
-			for (auto const& chiller : chillers) dispatchDemandKW += chiller.lastPowerDemandKW;
-			for (auto const& treatment : waterTreatments) dispatchDemandKW += treatment.lastPowerDemandKW;
-			for (auto const& cell : electrolyzers) dispatchDemandKW += cell.lastPowerDemandKW;
-			for (auto const& capture : co2Captures) dispatchDemandKW += capture.lastPowerDemandKW;
-			for (auto const& reactor : sabatierReactors) dispatchDemandKW += reactor.lastPowerDemandKW;
-			for (auto const& processor : methaneProcessors) dispatchDemandKW += processor.lastPowerDemandKW;
-			for (auto const& processor : microbialProcessors) dispatchDemandKW += processor.lastPowerDemandKW;
-			for (auto const& crop : cropPopulations)
-				dispatchDemandKW += crop.lastLightRequestedKW + crop.lastCirculationRequestedKW;
-			for (auto const& culture : algaeCultures)
-				dispatchDemandKW += culture.lastLightRequestedKW + culture.lastCirculationRequestedKW;
+				dispatchRequests[{"Coolant loop", loop.authored.id}] += loop.lastPumpDemandKW + loop.lastHeaterDemandKW;
+			for (auto const& item : chillers) dispatchRequests[{"Chiller", item.authored.id}] += item.lastPowerDemandKW;
+			for (auto const& item : waterTreatments) dispatchRequests[{"Water treatment", item.authored.id}] += item.lastPowerDemandKW;
+			for (auto const& item : electrolyzers) dispatchRequests[{"Electrolyzer", item.authored.id}] += item.lastPowerDemandKW;
+			for (auto const& item : co2Captures) dispatchRequests[{"CO2 capture", item.authored.id}] += item.lastPowerDemandKW;
+			for (auto const& item : sabatierReactors) dispatchRequests[{"Sabatier", item.authored.id}] += item.lastPowerDemandKW;
+			for (auto const& item : methaneProcessors) dispatchRequests[{"Methane processor", item.authored.id}] += item.lastPowerDemandKW;
+			for (auto const& item : microbialProcessors) dispatchRequests[{"Microbial processor", item.authored.id}] += item.lastPowerDemandKW;
+			for (auto const& item : cropPopulations) dispatchRequests[{"Crops", item.authored.id}] += item.lastLightRequestedKW + item.lastCirculationRequestedKW;
+			for (auto const& item : algaeCultures) dispatchRequests[{"Algae", item.authored.id}] += item.lastLightRequestedKW + item.lastCirculationRequestedKW;
+			for (auto const& [owner, request] : dispatchRequests)
+				dispatchDemandKW += connections.inputDemand(powerPort(owner.first, owner.second), request);
 			if (!std::isfinite(dispatchDemandKW))
 			{
 				system = "Power allocation";
 				return violation = "dispatch demand signal is not finite", false;
 			}
 			lastDispatchDemandKW = dispatchDemandKW;
+			// Solar is availability, not compulsory generation: only requested
+			// input is transmitted (and lost) on its cable. Commanded fuelled
+			// generation was already transmitted when it entered the pool.
+			auto solarUsedKW = std::max(0.0, poolGenerationKW - availableGeneration);
+			for (auto const& array : solarArrays)
+			{
+				auto const port = connections.port("Solar", array.authored.id, "Solar generation");
+				auto const need = connections.efficiency(port) == 0.0 ? dispatchDemandKW
+					: std::min(solarUsedKW, array.lastAvailableKW);
+				auto const flow = connections.receive(port, need, array.authored.capacityKW * array.lastIllumination);
+				solarUsedKW = std::max(0.0, solarUsedKW - flow.delivered);
+			}
+			double consumerInputKW = 0.0, connectionPowerLossKW = 0.0;
+			connections.forEachSnapshot([&](auto const& flow) {
+				if (flow.key.peerType != "Power") return;
+				connectionPowerLossKW += flow.lastLossRate;
+				if (flow.key.relation == "Electrical supply" || flow.key.relation == "Startup" || flow.key.relation == "Charge")
+					consumerInputKW += flow.lastInputRate;
+			});
+			auto const poolResidualKW = poolGenerationKW + batterySuppliedKW - consumerInputKW - availableGeneration;
+			if (!std::isfinite(poolResidualKW) || std::abs(poolResidualKW) > StationBalanceTolerance
+				* std::max(1.0, poolGenerationKW + batterySuppliedKW))
+				return violation = "electrical connection pool residual exceeds tolerance", false;
 			// The reserve-exhausted alarm: a bank that has fallen to its
 			// protected reserve floor while the station runs. The floor is
 			// never dischargeable (#394); the alarm reports that the
@@ -13815,20 +14192,30 @@ namespace core
 				auto const drawable = std::max(0.0, qualified[transfer.sourceIndex] - source.authored.protectedReserve);
 				auto const headroom = destination.authored.capacity
 					- (qualified[transfer.destinationIndex] + unqualified[transfer.destinationIndex]);
-				auto const completed = std::min({requested, drawable, headroom});
-				// #601: the endpoints declare the same material (the
-				// configuration refuses any other transfer), so the
-				// moved share of the source's actual-constituent drift
-				// rides with the material instead of being left behind
-				// to mislabel the destination.
-				auto const transferSourceKgBefore = massToKg(source.authored.unit,
-					qualified[transfer.sourceIndex] + unqualified[transfer.sourceIndex]);
-				qualified[transfer.sourceIndex] -= completed;
+				auto const input = connections.port("Transfer", transfer.authored.id, "Source");
+				auto const output = connections.port("Transfer", transfer.authored.id, "Destination");
+				auto const dt = static_cast<double>(seconds);
+				auto const eta = connections.efficiency(output);
+				auto const demand = headroom <= 0.0 ? 0.0 : std::min(
+					connections.required(output, transfer.authored.ratePerSecond),
+					eta > 0.0 ? headroom / dt / eta : transfer.authored.ratePerSecond);
+				auto const feed = connections.receive(input, demand, drawable / dt);
+				auto const product = connections.send(output, feed.delivered);
+				auto const drawn = std::min(drawable, feed.input * dt);
+				auto const completed = std::min(std::max(0.0, headroom), product.delivered * dt);
+				auto actual = drawStoreActual(transfer.sourceIndex,
+					massToKg(source.authored.unit, qualified[transfer.sourceIndex] + unqualified[transfer.sourceIndex]),
+					massToKg(source.authored.unit, drawn));
+				qualified[transfer.sourceIndex] -= drawn;
 				qualified[transfer.destinationIndex] += completed;
-				flowOut[transfer.sourceIndex] += completed;
+				flowOut[transfer.sourceIndex] += drawn;
 				flowIn[transfer.destinationIndex] += completed;
-				moveStoreDrift(transfer.sourceIndex, transfer.destinationIndex,
-					transferSourceKgBefore, massToKg(source.authored.unit, completed));
+				auto deliveredActual = actual;
+				for (auto& [name, value] : deliveredActual) value *= drawn > 0.0 ? completed / drawn : 0.0;
+				depositStoreDrift(transfer.destinationIndex, massToKg(destination.authored.unit, completed), deliveredActual);
+				stagedUnitLoss[source.authored.unit] += drawn - completed;
+				addLedger(stagedLoss, actual, 1.0);
+				addLedger(stagedLoss, deliveredActual, -1.0);
 				transfer.lastRequested = requested;
 				transfer.lastCompleted = completed;
 				transfer.lastUnmet = requested - completed;
@@ -13845,13 +14232,33 @@ namespace core
 			for (auto const index : conversionOrder)
 			{
 				auto& conversion = conversions[index];
+				auto const inputPort = [&](ConversionFlowState const& flow) {
+					return connections.port("Conversion", conversion.authored.id,
+						"Input " + std::to_string(&flow - conversion.inputs.data() + 1)); };
+				auto const outputPort = [&](ConversionFlowState const& flow) {
+					return connections.port("Conversion", conversion.authored.id,
+						"Output " + std::to_string(&flow - conversion.outputs.data() + 1)); };
+				auto const inputAvailable = [&](ConversionFlowState const& flow) {
+					return connections.available(inputPort(flow), std::max(0.0, qualified[flow.storeIndex]
+						- stores[flow.storeIndex].authored.protectedReserve) / seconds) * seconds; };
+				auto const outputCapacity = [&](ConversionFlowState const& flow) {
+					auto const room = std::max(0.0, stores[flow.storeIndex].authored.capacity
+						- qualified[flow.storeIndex] - unqualified[flow.storeIndex]);
+					auto const port = outputPort(flow);
+					auto const eta = connections.efficiency(port);
+					return room <= 0.0 ? 0.0 : std::min(connections.remaining(port) * seconds,
+						eta > 0.0 ? room / eta : std::numeric_limits<double>::max()); };
+				double demandScale = 1.0;
 				double scale = 1.0;
 				std::string limiter;
 				for (auto const& flow : conversion.inputs)
 				{
 					auto const requested = flow.ratePerSecond * static_cast<double>(seconds);
-					auto const drawable = std::max(0.0, qualified[flow.storeIndex]
-						- stores[flow.storeIndex].authored.protectedReserve);
+					auto const drawable = inputAvailable(flow);
+					auto const demandAvailable = connections.efficiency(inputPort(flow)) == 0.0
+						? std::min(std::max(0.0, qualified[flow.storeIndex] - stores[flow.storeIndex].authored.protectedReserve),
+							connections.remaining(inputPort(flow)) * seconds) : drawable;
+					demandScale = std::min(demandScale, demandAvailable / requested);
 					auto const ratio = drawable / requested;
 					if (ratio < scale)
 					{
@@ -13865,9 +14272,9 @@ namespace core
 				for (auto const& flow : conversion.outputs)
 				{
 					auto const produced = flow.ratePerSecond * static_cast<double>(seconds);
-					auto const headroom = stores[flow.storeIndex].authored.capacity
-						- (qualified[flow.storeIndex] + unqualified[flow.storeIndex]);
+					auto const headroom = outputCapacity(flow);
 					auto const ratio = headroom / produced;
+					demandScale = std::min(demandScale, ratio);
 					if (ratio < scale)
 					{
 						scale = ratio;
@@ -13886,6 +14293,7 @@ namespace core
 				if (!missing.empty())
 				{
 					scale = 0.0;
+					demandScale = 0.0;
 					limiter = "actual feed cannot fund declared conversion outputs: " + missing;
 				}
 				if (!(scale > 0.0))
@@ -13894,6 +14302,18 @@ namespace core
 					{
 						flow.lastRequested = flow.ratePerSecond * static_cast<double>(seconds);
 						flow.lastCompleted = 0.0;
+						auto const port = inputPort(flow);
+						if (connections.efficiency(port) == 0.0)
+						{
+							auto const drawable = std::max(0.0, qualified[flow.storeIndex] - stores[flow.storeIndex].authored.protectedReserve);
+							auto const lost = std::min(drawable, connections.receive(port,
+								flow.ratePerSecond * std::clamp(demandScale, 0.0, 1.0), drawable / seconds).input * seconds);
+							auto const& store = stores[flow.storeIndex].authored;
+							addLedger(stagedLoss, drawStoreActual(flow.storeIndex, massToKg(store.unit,
+								qualified[flow.storeIndex] + unqualified[flow.storeIndex]), massToKg(store.unit, lost)), 1.0);
+							qualified[flow.storeIndex] -= lost; flowOut[flow.storeIndex] += lost;
+							stagedUnitLoss[store.unit] += lost;
+						}
 					}
 					for (auto& flow : conversion.outputs)
 					{
@@ -13921,7 +14341,9 @@ namespace core
 					auto const requested = flow.ratePerSecond * static_cast<double>(seconds);
 					auto const drawable = std::max(0.0, qualified[flow.storeIndex]
 						- stores[flow.storeIndex].authored.protectedReserve);
-					auto const completed = std::min(requested * scale, drawable);
+					auto const transported = connections.receive(inputPort(flow), flow.ratePerSecond * scale, drawable / seconds);
+					auto const drawn = std::min(drawable, transported.input * seconds);
+					auto const completed = transported.delivered * seconds;
 					// #601: the conversion spends the input store's actual
 					// blend, measured before the draw; the drift it
 					// consumes is carried into the declared-loss side of
@@ -13930,13 +14352,14 @@ namespace core
 						massToKg(stores[flow.storeIndex].authored.unit,
 							qualified[flow.storeIndex]
 								+ unqualified[flow.storeIndex]),
-						massToKg(stores[flow.storeIndex].authored.unit, completed));
-					qualified[flow.storeIndex] -= completed;
+						massToKg(stores[flow.storeIndex].authored.unit, drawn));
+					qualified[flow.storeIndex] -= drawn;
+					stagedUnitLoss[stores[flow.storeIndex].authored.unit] += drawn;
 					// Conversion draws and deliveries are store outflow/inflow
 					// just like transfers and equipment exchanges: the public
 					// per-store last-tick fields describe every flow the tick
 					// moved through the store, not transfers only (#552).
-					flowOut[flow.storeIndex] += completed;
+					flowOut[flow.storeIndex] += drawn;
 					flow.lastRequested = requested;
 					flow.lastCompleted = completed;
 					addLedger(netChange, conversionDrawnActual, -1.0);
@@ -13946,8 +14369,11 @@ namespace core
 					auto const requested = flow.ratePerSecond * static_cast<double>(seconds);
 					auto const headroom = stores[flow.storeIndex].authored.capacity
 						- (qualified[flow.storeIndex] + unqualified[flow.storeIndex]);
-					auto const completed = std::min(requested * scale, headroom);
+					auto const transported = connections.send(outputPort(flow), std::min(flow.ratePerSecond * scale,
+						outputCapacity(flow) / seconds));
+					auto const completed = std::min(std::max(0.0, headroom), transported.delivered * seconds);
 					qualified[flow.storeIndex] += completed;
+					stagedUnitLoss[stores[flow.storeIndex].authored.unit] -= completed;
 					flowIn[flow.storeIndex] += completed;
 					flow.lastRequested = requested;
 					flow.lastCompleted = completed;
@@ -13958,16 +14384,14 @@ namespace core
 				// carry away; it stays accounted for instead of vanishing.
 				for (auto const& [constituent, change] : netChange)
 					stagedLoss[constituent] -= change;
-				for (auto const& flow : conversion.inputs)
-					stagedUnitLoss[stores[flow.storeIndex].authored.unit] += flow.lastCompleted;
-				for (auto const& flow : conversion.outputs)
-					stagedUnitLoss[stores[flow.storeIndex].authored.unit] -= flow.lastCompleted;
 				conversion.lastScale = scale;
 				conversion.status = scale >= 1.0 - 1e-12
 					? StationTransferStatus::Full : StationTransferStatus::Partial;
 				if (conversion.status == StationTransferStatus::Partial)
 					conversion.stallReason = limiter;
 			}
+			if (!materialConnectionsValid)
+				return violation = "process exceeded its physical connection allocation", false;
 			std::map<std::string, double> currentTotals;
 			for (size_t index = 0; index < stores.size(); ++index)
 			{
@@ -14480,6 +14904,8 @@ namespace core
 				if (!requireFinite(compartment.lastLatentHeatKW, where + "latent heat")) return false;
 				if (!requireFinite(compartment.lastExchangeIntoCompartmentKW, where + "reservoir exchange")) return false;
 				if (!requireFinite(compartment.leakedKg, where + "cumulative leaked mass")) return false;
+				if (!requireFinite(compartment.connectionCarbonDioxideLostKg, where + "connection carbon dioxide loss")) return false;
+				if (!requireFinite(compartment.connectionWaterVapourLostKg, where + "connection vapour loss")) return false;
 				if (!requireFinite(compartment.recoveredKg, where + "cumulative recovered mass")) return false;
 				if (!requireFinite(compartment.lostKg, where + "cumulative lost mass")) return false;
 				if (!requireFinite(compartment.condensedKg, where + "cumulative condensed mass")) return false;
@@ -14546,13 +14972,13 @@ namespace core
 							+ compartment.algaeCarbonDioxideAddedKg,
 						compartment.leakCarbonDioxideKg + compartment.cycleCarbonDioxideKg
 							+ compartment.capturedCarbonDioxideKg + compartment.cropCarbonDioxideDrawnKg
-							+ compartment.algaeCarbonDioxideDrawnKg,
+							+ compartment.algaeCarbonDioxideDrawnKg + compartment.connectionCarbonDioxideLostKg,
 						compartment.carbonDioxideKg},
 					{"waterVapour", compartment.authored.startingWaterVapourKg,
 						compartment.vapourAddedKg + compartment.cropVapourAddedKg
 							+ compartment.algaeVapourAddedKg,
 						compartment.condensedKg + compartment.leakWaterVapourKg
-							+ compartment.cycleWaterVapourKg + compartment.collectedKg,
+							+ compartment.cycleWaterVapourKg + compartment.collectedKg + compartment.connectionWaterVapourLostKg,
 						compartment.waterVapourKg}}};
 				for (auto const& closure : closures)
 				{
@@ -15316,6 +15742,7 @@ namespace core
 				if (!requireFinite(battery.deliveredKWh, where + "cumulative delivered energy")) return false;
 				if (!requireFinite(battery.chargeInputKWh, where + "cumulative charge input energy")) return false;
 			}
+			if (!connections.finite()) return violation = "connection transport account is not finite", false;
 			if (!requireFinite(availableGeneration, "surplus generation pool")) return false;
 			if (!requireFinite(batteryShortfallKW, "battery shortfall")) return false;
 			// The snapshot publishes station-wide totals summed from the
@@ -15368,6 +15795,10 @@ namespace core
 				stores[index].lastTickOut = flowOut[index];
 				stores[index].constituentDrift = stagedDrift[index];
 			}
+			connectionFlows = connections.takeSnapshots();
+			lastPoolGenerationKW = poolGenerationKW;
+			lastConnectionPowerLossKW = connectionPowerLossKW;
+			lastPoolResidualKW = poolResidualKW;
 			constituentLoss = stagedLoss;
 			unitLoss = stagedUnitLoss;
 			unitDelivered = stagedUnitDelivered;
@@ -16035,6 +16466,7 @@ namespace core
 		std::string diagnostic;
 		if (!validateStationSystemsSettings(settings, diagnostic)) throw SerializationException(diagnostic);
 		mImpl->settings = settings; mImpl->snapshot.enabled = settings.enabled;
+		mImpl->connectionGraph = station_connections::build(settings);
 		for (auto const& store : settings.stores)
 		{
 			mImpl->stores.push_back({store, store.startingQualified, store.startingUnqualified,
@@ -16854,6 +17286,10 @@ namespace core
 	StationSystemsSnapshot StationSystemsRuntime::snapshot() const
 	{
 		auto result = mImpl->snapshot;
+		result.connections = mImpl->connectionFlows;
+		result.power.poolGenerationKW = mImpl->lastPoolGenerationKW;
+		result.power.connectionLossKW = mImpl->lastConnectionPowerLossKW;
+		result.power.poolResidualKW = mImpl->lastPoolResidualKW;
 		std::map<std::string, double> currentTotals;
 		ConstituentLedger currentConstituents;
 		for (auto const& store : mImpl->stores)
@@ -17034,9 +17470,15 @@ namespace core
 			batteryResult.atReserve = battery.lastAtReserve;
 			batteryResult.saturated = battery.lastSaturated;
 			batteryResult.status = battery.status;
-			totalBatteryDischarge += battery.lastDischargeKW;
-			totalBatteryCharge += battery.lastChargeKW;
 			result.power.batteries.push_back(std::move(batteryResult));
+		}
+		// Aggregates describe the shared pool, not the battery terminals:
+		// charging takes gross cable input; discharging contributes net delivery.
+		for (auto const& flow : result.connections)
+		{
+			if (flow.key.ownerType != "Battery" || flow.key.peerType != "Power") continue;
+			if (flow.key.relation == "Charge") totalBatteryCharge += flow.lastInputRate;
+			else if (flow.key.relation == "Discharge") totalBatteryDischarge += flow.lastDeliveredRate;
 		}
 		result.power.batteryDischargeKW = totalBatteryDischarge;
 		result.power.batteryChargeKW = totalBatteryCharge;
@@ -17467,6 +17909,8 @@ namespace core
 			atmosphereResult.leakedKg = compartment.leakedKg;
 			atmosphereResult.recoveredKg = compartment.recoveredKg;
 			atmosphereResult.lostKg = compartment.lostKg;
+			atmosphereResult.connectionCarbonDioxideLostKg = compartment.connectionCarbonDioxideLostKg;
+			atmosphereResult.connectionWaterVapourLostKg = compartment.connectionWaterVapourLostKg;
 			atmosphereResult.startingEnergyKJ = authored.thermalCapacityKJPerK
 				* authored.startingTemperatureC;
 			atmosphereResult.currentEnergyKJ = authored.thermalCapacityKJPerK

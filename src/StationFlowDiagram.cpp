@@ -11,277 +11,11 @@
 
 namespace station_flow
 {
-namespace
-{
-	struct Builder
-	{
-		Graph graph;
-		std::map<std::pair<std::string, std::string>, std::vector<size_t>> ids;
-		size_t node(std::string type, std::string id, int lane, std::string detail = {})
-		{
-			auto index = graph.nodes.size();
-			ids[{type, id}].push_back(index);
-			if (type == "Generator" || type == "Coolant loop" || type == "Chiller")
-				ids[{"Installation", id}].push_back(index);
-			graph.nodes.push_back({std::move(type), std::move(id), std::move(detail), lane, false});
-			return index;
-		}
-		size_t resolve(std::string const& type, std::string const& id)
-		{
-			auto const found = ids.find({type, id});
-			if (found != ids.end() && found->second.size() == 1) return found->second.front();
-			std::string problem = found == ids.end() ? "Missing " : "Ambiguous ";
-			auto key = std::make_pair(problem + type, id);
-			if (auto existing = ids.find(key); existing != ids.end()) return existing->second.front();
-			auto index = node(key.first, id.empty() ? "<empty>" : id, 0, "Unresolved draft reference");
-			// Use the original reference as the cache key, including an empty ID.
-			ids[key] = {index};
-			graph.nodes[index].unresolved = true;
-			return index;
-		}
-		void edge(size_t from, size_t to, std::string label, LinkKind kind = LinkKind::Material,
-			Medium medium = Medium::Unspecified)
-		{
-			if (medium == Medium::Unspecified)
-			{
-				if (kind == LinkKind::Power) medium = Medium::Electricity;
-				if (kind == LinkKind::Heat) medium = Medium::Heat;
-				if (kind == LinkKind::Control) medium = Medium::Control;
-			}
-			graph.links.push_back({from, to, std::move(label), kind, medium});
-		}
-		void input(size_t process, std::string const& id, char const* label,
-			char const* type = "Store", LinkKind kind = LinkKind::Material, bool optional = false,
-			Medium medium = Medium::Unspecified)
-		{
-			if (!optional || !id.empty()) edge(resolve(type, id), process, label, kind, medium);
-		}
-		void output(size_t process, std::string const& id, char const* label,
-			char const* type = "Store", LinkKind kind = LinkKind::Material, bool optional = false,
-			Medium medium = Medium::Unspecified)
-		{
-			if (!optional || !id.empty()) edge(process, resolve(type, id), label, kind, medium);
-		}
-		void feed(size_t process, std::string const& id, char const* label, Medium medium, bool optional = false)
-		{ input(process, id, label, "Store", LinkKind::Material, optional, medium); }
-		void product(size_t process, std::string const& id, char const* label, Medium medium)
-		{ output(process, id, label, "Store", LinkKind::Material, false, medium); }
-		void heat(size_t process, std::string const& id)
-		{ output(process, id, "Heat", "Reservoir", LinkKind::Heat, true); }
-		template<class T> void add(std::vector<T> const& entries, char const* type, int lane)
-		{ for (auto const& item : entries) node(type, item.id, lane); }
-		template<class T, class F> void connect(std::vector<T> const& entries, char const* type, F fn)
-		{
-			// Index by declaration order: duplicate IDs remain distinct nodes.
-			std::map<std::string, size_t> occurrence;
-			for (auto const& item : entries)
-				fn(ids.at({type, item.id}).at(occurrence[item.id]++), item);
-		}
-		size_t installation(std::string const& id)
-		{
-			std::vector<size_t> matches;
-			for (auto type : {"Generator", "Coolant loop", "Chiller"})
-				if (auto found = ids.find({type, id}); found != ids.end())
-					matches.insert(matches.end(), found->second.begin(), found->second.end());
-			if (matches.size() == 1) return matches.front();
-			return resolve("Installation", id);
-		}
-	};
-
-	void inferStoreMedia(Graph& graph)
-	{
-		// Transfer paths preserve material; conversions/processes do not. Infer
-		// only from typed process ports, never user-chosen IDs or arbitrary labels.
-		std::vector<size_t> roots(graph.nodes.size());
-		for (size_t i = 0; i < roots.size(); ++i) roots[i] = i;
-		auto root = [&](size_t i) {
-			while (roots[i] != i) { roots[i] = roots[roots[i]]; i = roots[i]; }
-			return i;
-		};
-		auto carriesInventory = [&](size_t i) {
-			return graph.nodes[i].type == "Store" || graph.nodes[i].type == "Transfer";
-		};
-		for (auto const& e : graph.links)
-			if (e.kind == LinkKind::Material && carriesInventory(e.from) && carriesInventory(e.to))
-				roots[root(e.from)] = root(e.to);
-		std::vector<std::set<Medium>> known(graph.nodes.size());
-		for (auto const& e : graph.links)
-			if (e.kind == LinkKind::Material && e.medium != Medium::Unspecified)
-				for (auto n : {e.from, e.to})
-					if (carriesInventory(n)) known[root(n)].insert(e.medium);
-		for (auto& e : graph.links)
-			if (e.kind == LinkKind::Material && e.medium == Medium::Unspecified)
-			{
-				std::set<Medium> candidates;
-				for (auto n : {e.from, e.to})
-					if (carriesInventory(n))
-						candidates.insert(known[root(n)].begin(), known[root(n)].end());
-				if (candidates.size() == 1) e.medium = *candidates.begin();
-			}
-	}
-}
-
 std::optional<bool> connectorEligibility(core::StationSystemsSettings const& draft,
 	core::StationPinRef const& origin, core::StationPinRef const& target)
 {
 	if (origin == target) return std::nullopt;
 	return core::evaluateStationLink(draft, {origin, target}).allowed;
-}
-
-Graph build(core::StationSystemsSettings const& s)
-{
-	Builder b;
-	for (auto const& store : s.stores)
-		b.node("Store", store.id, 0, store.unit + " | " + store.hazardClass
-			+ (store.composition ? " | compound" : " | plain"));
-	b.add(s.transfers, "Transfer", 1); b.add(s.conversions, "Conversion", 1);
-	b.add(s.deliveries, "Delivery", 3); b.add(s.wasteEjections, "Waste ejection", 3);
-	b.add(s.equipmentLoads, "Equipment", 1); b.add(s.crews, "Crew", 1);
-	b.add(s.waterCollectors, "Water collector", 1); b.add(s.waterTreatments, "Water treatment", 1);
-	b.add(s.electrolyzers, "Electrolyzer", 1); b.add(s.co2Captures, "CO2 capture", 1);
-	b.add(s.fuelCells, "Fuel cell", 1); b.add(s.sabatierReactors, "Sabatier", 1);
-	b.add(s.methaneProcessors, "Methane processor", 1); b.add(s.microbialProcessors, "Microbial processor", 1);
-	b.add(s.cropPopulations, "Crops", 1); b.add(s.algaeCultures, "Algae", 1);
-	b.add(s.thermalReservoirs, "Reservoir", 2); b.add(s.atmospheres, "Atmosphere", 2);
-	b.add(s.coolantLoops, "Coolant loop", 2); b.add(s.chillers, "Chiller", 2);
-	b.add(s.radiators, "Radiator", 2); b.add(s.thermalBuffers, "Thermal buffer", 2);
-	b.add(s.solarArrays, "Solar", 3); b.add(s.batteries, "Battery", 3);
-	b.add(s.generators, "Generator", 3); b.add(s.airlockCycles, "Airlock cycle", 3);
-	b.add(s.maintenanceJobs, "Maintenance", 3); b.add(s.outages, "Outage", 3);
-	bool const hasPower = !s.solarArrays.empty() || !s.batteries.empty() || !s.generators.empty()
-		|| !s.fuelCells.empty() || !s.equipmentLoads.empty() || !s.waterTreatments.empty()
-		|| !s.coolantLoops.empty() || !s.chillers.empty()
-		|| !s.waterCollectors.empty() || !s.electrolyzers.empty() || !s.co2Captures.empty()
-		|| !s.sabatierReactors.empty() || !s.methaneProcessors.empty()
-		|| !s.microbialProcessors.empty() || !s.cropPopulations.empty() || !s.algaeCultures.empty();
-	size_t bus{};
-	if (hasPower) bus = b.node("Power", "Shared electrical pool", 3,
-		s.dispatchMode == core::StationDispatchMode::Automatic ? "Automatic dispatch" : "Manual dispatch");
-	for (auto const& chiller : s.chillers)
-	{
-		auto key = std::make_pair(std::string("Cooling service"), chiller.thermalClass);
-		if (!b.ids.contains(key)) b.node(key.first, key.second, 2, "Shared thermal service class");
-	}
-	auto powerIn = [&](size_t n) { b.edge(bus, n, "Electrical supply", LinkKind::Power); };
-	auto atmosphereExchange = [&](size_t n, std::string const& id, bool biological = false)
-	{
-		b.input(n, id, "Oxygen uptake", "Atmosphere", LinkKind::Material, false, Medium::Oxygen);
-		b.output(n, id, "CO2 return", "Atmosphere", LinkKind::Material, false, Medium::CarbonDioxide);
-		b.output(n, id, "Moisture return", "Atmosphere", LinkKind::Material, false, Medium::Water);
-		b.output(n, id, "Metabolic heat", "Atmosphere", LinkKind::Heat);
-		if (biological)
-		{
-			b.input(n, id, "Photosynthesis CO2", "Atmosphere", LinkKind::Material, false, Medium::CarbonDioxide);
-			b.output(n, id, "Photosynthesis oxygen", "Atmosphere", LinkKind::Material, false, Medium::Oxygen);
-		}
-	};
-	b.connect(s.transfers, "Transfer", [&](size_t n, auto const& p) {
-		b.input(n, p.sourceId, "Source"); b.output(n, p.destinationId, "Destination"); });
-	b.connect(s.conversions, "Conversion", [&](size_t n, auto const& p) {
-		// A grown-but-unwired flow names no store yet: it is an unused
-		// connector, not a broken reference, so it draws no edge.
-		for (auto const& input : p.inputs)
-			b.input(n, input.storeId, "Conversion input", "Store", LinkKind::Material, true);
-		for (auto const& output : p.outputs)
-			b.output(n, output.storeId, "Conversion output", "Store", LinkKind::Material, true); });
-	b.connect(s.deliveries, "Delivery", [&](size_t n, auto const& p) {
-		b.output(n, p.storeId, "Scheduled delivery"); });
-	b.connect(s.wasteEjections, "Waste ejection", [&](size_t n, auto const& p) {
-		b.input(n, p.storeId, "Disposal-ready waste"); });
-	b.connect(s.solarArrays, "Solar", [&](size_t n, auto const&) {
-		b.edge(n, bus, "Solar generation", LinkKind::Power); });
-	b.connect(s.batteries, "Battery", [&](size_t n, auto const&) {
-		b.edge(n, bus, "Discharge", LinkKind::Power); b.edge(bus, n, "Charge", LinkKind::Power); });
-	b.connect(s.generators, "Generator", [&](size_t n, auto const& p) {
-		b.feed(n, p.fuelStoreId, "Fuel", Medium::Fuel); b.heat(n, p.heatSinkId);
-		b.edge(n, bus, "Generation", LinkKind::Power); b.edge(bus, n, "Startup", LinkKind::Power); });
-	b.connect(s.equipmentLoads, "Equipment", [&](size_t n, auto const& p) {
-		powerIn(n); b.heat(n, p.heatSinkId);
-		for (auto const& flow : p.materialExchanges)
-			if (flow.consumes) b.input(n, flow.storeId, "Equipment input");
-			else b.output(n, flow.storeId, "Equipment return");
-		if (p.coolingDisposition == core::StationCoolingDisposition::CoolingService)
-			b.input(n, p.thermalClass, "Required cooling service", "Cooling service", LinkKind::Heat, false, Medium::Cooling);
-	});
-	b.connect(s.crews, "Crew", [&](size_t n, auto const& p) {
-		b.feed(n, p.foodStoreId, "Food", Medium::Food); b.feed(n, p.waterStoreId, "Water", Medium::Water);
-		b.product(n, p.urineStoreId, "Urine", Medium::Urine); b.product(n, p.organicWasteStoreId, "Organic waste", Medium::OrganicWaste);
-		atmosphereExchange(n, p.atmosphereId); });
-	b.connect(s.waterCollectors, "Water collector", [&](size_t n, auto const& p) {
-		powerIn(n); b.input(n, p.atmosphereId, "Water vapour", "Atmosphere", LinkKind::Material, false, Medium::Water);
-		b.product(n, p.destStoreId, "Condensate", Medium::Water);
-		b.output(n, p.coolingLoopId, "Condensation heat", "Coolant loop", LinkKind::Heat); });
-	b.connect(s.waterTreatments, "Water treatment", [&](size_t n, auto const& p) {
-		powerIn(n); b.feed(n, p.sourceStoreId, "Raw water", Medium::Water);
-		b.feed(n, p.consumableStoreId, "Treatment consumable", Medium::Consumables, true);
-		b.feed(n, p.clearanceStoreId, "Clearance consumable", Medium::Consumables, true);
-		b.product(n, p.treatedStoreId, "Treated water", Medium::Water); b.output(n, p.concentrateStoreId, "Concentrate"); });
-	b.connect(s.electrolyzers, "Electrolyzer", [&](size_t n, auto const& p) {
-		powerIn(n); b.feed(n, p.waterStoreId, "Feed water", Medium::Water); b.product(n, p.hydrogenStoreId, "Hydrogen", Medium::Hydrogen);
-		if (p.oxygenStoreId.empty()) b.output(n, p.atmosphereId, "Oxygen", "Atmosphere", LinkKind::Material, false, Medium::Oxygen);
-		else b.product(n, p.oxygenStoreId, "Oxygen", Medium::Oxygen);
-		b.heat(n, p.heatSinkId); });
-	b.connect(s.co2Captures, "CO2 capture", [&](size_t n, auto const& p) {
-		powerIn(n); b.input(n, p.atmosphereId, "CO2", "Atmosphere", LinkKind::Material, false, Medium::CarbonDioxide);
-		b.product(n, p.captureStoreId, "Captured CO2", Medium::CarbonDioxide);
-		b.feed(n, p.consumableStoreId, "Consumable", Medium::Consumables, true); });
-	b.connect(s.fuelCells, "Fuel cell", [&](size_t n, auto const& p) {
-		b.feed(n, p.hydrogenStoreId, "Hydrogen", Medium::Hydrogen); b.feed(n, p.oxygenStoreId, "Oxygen", Medium::Oxygen);
-		b.product(n, p.waterStoreId, "Product water", Medium::Water); b.heat(n, p.heatSinkId);
-		b.edge(n, bus, "Backup generation", LinkKind::Power); });
-	b.connect(s.sabatierReactors, "Sabatier", [&](size_t n, auto const& p) {
-		powerIn(n); b.feed(n, p.co2StoreId, "CO2", Medium::CarbonDioxide); b.feed(n, p.hydrogenStoreId, "Hydrogen", Medium::Hydrogen);
-		b.product(n, p.methaneStoreId, "Methane", Medium::Methane); b.product(n, p.waterStoreId, "Product water", Medium::Water); b.heat(n, p.heatSinkId); });
-	b.connect(s.methaneProcessors, "Methane processor", [&](size_t n, auto const& p) {
-		powerIn(n); b.feed(n, p.methaneStoreId, "Methane", Medium::Methane); b.product(n, p.hydrogenStoreId, "Recovered hydrogen", Medium::Hydrogen);
-		b.product(n, p.carbonStoreId, "Solid carbon", Medium::Carbon); b.heat(n, p.heatSinkId); });
-	b.connect(s.microbialProcessors, "Microbial processor", [&](size_t n, auto const& p) {
-		powerIn(n); b.feed(n, p.feedStoreId, "Organic feed", Medium::OrganicWaste); b.feed(n, p.oxygenStoreId, "Oxygen", Medium::Oxygen);
-		b.feed(n, p.waterStoreId, "Process water", Medium::Water);
-		b.feed(n, p.consumableStoreId, "Culture medium", Medium::Consumables, true);
-		b.input(n, p.stockStoreId, "Replacement stock", "Store", LinkKind::Material, true);
-		b.product(n, p.nutrientStoreId, "Recovered nutrients", Medium::Nutrients); b.product(n, p.recoveredWaterStoreId, "Recovered water", Medium::Water);
-		b.product(n, p.co2StoreId, "CO2", Medium::CarbonDioxide); b.output(n, p.residueStoreId, "Residue"); b.heat(n, p.heatSinkId); });
-	auto biology = [&](size_t n, auto const& p) {
-		powerIn(n); atmosphereExchange(n, p.atmosphereId, true); b.feed(n, p.waterStoreId, "Water", Medium::Water);
-		b.feed(n, p.nitrogenStoreId, "Nutrient nitrogen", Medium::Nutrients); b.feed(n, p.phosphorusStoreId, "Phosphorus", Medium::Nutrients);
-		b.feed(n, p.potassiumStoreId, "Potassium", Medium::Nutrients); b.feed(n, p.mineralsStoreId, "Other minerals", Medium::Nutrients);
-		b.product(n, p.foodStoreId, "Harvest food", Medium::Food); b.product(n, p.wasteStoreId, "Harvest / biomass waste", Medium::OrganicWaste); };
-	b.connect(s.cropPopulations, "Crops", biology);
-	b.connect(s.algaeCultures, "Algae", [&](size_t n, auto const& p) {
-		biology(n, p); b.output(n, p.recoveryStoreId, "Recoverable harvest"); });
-	b.connect(s.atmospheres, "Atmosphere", [&](size_t n, auto const& p) {
-		b.heat(n, p.reservoirId); // heat exchange is bidirectional
-		if (!p.reservoirId.empty()) b.input(n, p.reservoirId, "Heat exchange", "Reservoir", LinkKind::Heat);
-	});
-	b.connect(s.coolantLoops, "Coolant loop", [&](size_t n, auto const& p) {
-		powerIn(n); b.output(n, p.reservoirId, "Heat exchanger", "Reservoir", LinkKind::Heat); });
-	b.connect(s.chillers, "Chiller", [&](size_t n, auto const& p) {
-		powerIn(n); b.input(n, p.coldLoopId, "Evaporator heat", "Coolant loop", LinkKind::Heat);
-		b.output(n, p.condenserReservoirId, "Condenser heat", "Reservoir", LinkKind::Heat);
-		// A class is a shared service, not a physical pipe or assigned chiller.
-		b.output(n, p.thermalClass, "Cooling capacity", "Cooling service", LinkKind::Heat, false, Medium::Cooling);
-	});
-	b.connect(s.radiators, "Radiator", [&](size_t n, auto const& p) {
-		b.input(n, p.reservoirId, "Heat rejection to environment", "Reservoir", LinkKind::Heat); });
-	b.connect(s.thermalBuffers, "Thermal buffer", [&](size_t n, auto const& p) {
-		b.input(n, p.reservoirId, "Absorb heat", "Reservoir", LinkKind::Heat);
-		b.output(n, p.reservoirId, "Release heat", "Reservoir", LinkKind::Heat);
-		b.input(n, p.circulationLoopId, "Circulation gate", "Coolant loop", LinkKind::Control, true); });
-	b.connect(s.airlockCycles, "Airlock cycle", [&](size_t n, auto const& p) {
-		b.input(n, p.atmosphereId, "Scheduled gas removal / recovery", "Atmosphere", LinkKind::Material, false, Medium::Atmosphere); });
-	b.connect(s.outages, "Outage", [&](size_t n, auto const& p) {
-		b.edge(n, b.installation(p.installationId), "Scheduled capacity reduction", LinkKind::Control); });
-	b.connect(s.maintenanceJobs, "Maintenance", [&](size_t n, auto const& p) {
-		b.edge(n, b.installation(p.installationId), "Maintenance / isolation", LinkKind::Control);
-		for (auto const& requirement : p.requirements)
-		{
-			b.input(n, requirement.storeId, requirement.consumed ? "Consumed maintenance supply" : "Reserve reusable tool");
-			if (!requirement.consumed) b.output(n, requirement.storeId, "Return reusable tool");
-		}
-		b.output(n, p.wasteStoreId, "Used supplies / removed parts", "Store", LinkKind::Material, true); });
-	inferStoreMedia(b.graph);
-	return std::move(b.graph);
 }
 
 std::vector<ImVec2> forceLayout(Graph const& graph)
@@ -659,6 +393,15 @@ namespace
 		return {from, {from.x + bend, from.y}, {to.x - bend, to.y}, to};
 	}
 
+	ImVec2 curvePoint(FlowCurve const& curve, float t)
+	{
+		auto u = 1.0f - t;
+		return {u * u * u * curve.a.x + 3 * u * u * t * curve.b.x
+			+ 3 * u * t * t * curve.c.x + t * t * t * curve.d.x,
+			u * u * u * curve.a.y + 3 * u * u * t * curve.b.y
+			+ 3 * u * t * t * curve.c.y + t * t * t * curve.d.y};
+	}
+
 	float curveDistance(FlowCurve const& curve, ImVec2 const& point)
 	{
 		float best = std::numeric_limits<float>::max();
@@ -683,6 +426,61 @@ namespace
 		draw->AddTriangleFilled(curve.d,
 			{curve.d.x - tangent.x * 8 - tangent.y * 4, curve.d.y - tangent.y * 8 + tangent.x * 4},
 			{curve.d.x - tangent.x * 8 + tangent.y * 4, curve.d.y - tangent.y * 8 - tangent.x * 4}, colour);
+	}
+
+	void drawConnectionCurve(ImDrawList* draw, FlowCurve const& curve, ImU32 colour,
+		float thickness, core::StationPhysicalConnection type)
+	{
+		using Type = core::StationPhysicalConnection;
+		if (type == Type::PowerCable) drawLinkCurve(draw, curve, colour, thickness);
+		else
+		{
+			float distance = 0;
+			auto previous = curve.a;
+			auto const polygonLength = std::hypot(curve.b.x - curve.a.x, curve.b.y - curve.a.y)
+				+ std::hypot(curve.c.x - curve.b.x, curve.c.y - curve.b.y)
+				+ std::hypot(curve.d.x - curve.c.x, curve.d.y - curve.c.y);
+			int const samples = int(std::clamp(std::ceil(polygonLength / 1.5f), 32.0f, 4096.0f));
+			for (int i = 1; i <= samples; ++i)
+			{
+				auto next = curvePoint(curve, float(i) / samples);
+				auto length = std::hypot(next.x - previous.x, next.y - previous.y);
+				if (length < 0.001f) continue;
+				float period = 18, on = 12;
+				if (type == Type::GasPipe || type == Type::CoolantCircuit) { period = 14; on = 8; }
+				if (type == Type::AirDuct) { period = 20; on = 14; }
+				if (type == Type::DataCable || type == Type::NonPhysical) { period = 6; on = 2; }
+				if (type == Type::MaterialHandling || type == Type::Thermal) { period = 22; on = 10; }
+				float phase = std::fmod(distance + length * 0.5f, period);
+				bool ink = type == Type::LiquidPipe || phase < on
+					|| ((type == Type::MaterialHandling || type == Type::Thermal) && phase > 15 && phase < 17);
+				if (ink)
+				{
+					float width = type == Type::NonPhysical ? thickness * 0.65f
+						: type == Type::AirDuct ? thickness + 2 : thickness;
+					if (type == Type::LiquidPipe || type == Type::CoolantCircuit)
+					{
+						ImVec2 normal{-(next.y - previous.y) * 2 / length, (next.x - previous.x) * 2 / length};
+						for (float sign : {-1.0f, 1.0f})
+							draw->AddLine({previous.x + sign * normal.x, previous.y + sign * normal.y},
+								{next.x + sign * normal.x, next.y + sign * normal.y}, colour, width);
+					}
+					else draw->AddLine(previous, next, colour, width);
+				}
+				distance += length; previous = next;
+			}
+			// The arrow conveys flow direction; coolant's paired line denotes a circuit,
+			// not two independently allocated simulation flows.
+			auto end = curvePoint(curve, 0.98f);
+			drawLinkCurve(draw, {end, end, end, curve.d}, colour, thickness);
+		}
+		auto mid = curvePoint(curve, 0.5f);
+		if (type == Type::PowerCable || type == Type::AirDuct || type == Type::MaterialHandling)
+			draw->AddRect({mid.x - 3, mid.y - 3}, {mid.x + 3, mid.y + 3}, colour, 0, 0, thickness);
+		if (type == Type::DataCable)
+		{
+			draw->AddQuad({mid.x, mid.y - 4}, {mid.x + 4, mid.y}, {mid.x, mid.y + 4}, {mid.x - 4, mid.y}, colour, thickness);
+		}
 	}
 
 	// A dashed rectangle: the inert treatment of a derived service node,
@@ -722,6 +520,7 @@ void StationFlowDiagram::reset()
 	mTelemetry.clear(); mTelemetryTick = UINT64_MAX;
 	mZoom = 0.8f; mFitRequested = true; mSelected = -1; mConnectedOnly = false; mSearch[0] = 0;
 	mSelectedType.clear(); mSelectedId.clear();
+	mSelectedConnection.reset(); mConnectionScreen.clear();
 	mDragging = -1; mLastFrame = -1; mTemperature = 0;
 	mLinks.clear(); mPinIds.clear(); mPinRefs.clear(); mPinScreen.clear(); mNodeScreen.clear();
 	mActiveLinkPin.reset(); mPinEligibility.clear();
@@ -771,6 +570,14 @@ void StationFlowDiagram::restoreLayout(core::StationConfigurationDocument const&
 		mLayout[key] = {position.first, position.second};
 	mPan = {document.panX, document.panY}; mZoom = document.zoom;
 	mFitRequested = document.positions.empty();
+}
+
+bool StationFlowDiagram::connectionScreenPosition(core::StationConnectionKey const& key, ImVec2* out) const
+{
+	auto found = mConnectionScreen.find(key);
+	if (found == mConnectionScreen.end()) return false;
+	if (out) *out = found->second;
+	return true;
 }
 
 bool StationFlowDiagram::pinScreenPosition(std::string const& nodeType, std::string const& nodeId,
@@ -900,8 +707,21 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			link.fromNode = locate(authored.from);
 			link.toNode = locate(authored.to);
 			link.drawable = link.fromNode != SIZE_MAX && link.toNode != SIZE_MAX;
+			for (size_t i = 0; i < mGraph.links.size(); ++i)
+			{
+				auto const& edge = mGraph.links[i];
+				auto const& key = edge.designKey;
+				if (key.ownerType + ":" + key.ownerId + ":" + key.reference != authored.identity
+					|| edge.from != link.fromNode || edge.to != link.toNode) continue;
+				if (link.graphLink == SIZE_MAX) link.graphLink = i;
+				if (edge.label == authored.from.portName || edge.label == authored.to.portName)
+				{ link.graphLink = i; break; }
+			}
 			mLinks.push_back(std::move(link));
 		}
+		if (mSelectedConnection && std::none_of(mGraph.links.begin(), mGraph.links.end(),
+			[&](auto const& edge) { return edge.designKey == *mSelectedConnection; }))
+			mSelectedConnection.reset();
 		updateBounds();
 	}
 	bool const showLive = live && live->enabled && draftMatchesLive;
@@ -912,8 +732,9 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	else if (mTelemetryTick != live->worldTick || mTelemetryHealthy != live->healthy)
 	{
 		mTelemetry.clear(); mTelemetryTick = live->worldTick; mTelemetryHealthy = live->healthy;
+		auto const authored = core::stationAuthoredLinks(draft);
 		for (auto const& node : mGraph.nodes)
-			if (auto values = station_flow::telemetry(node, *live, core::World::getFixedTimestep(), &draft))
+			if (auto values = station_flow::telemetry(node, *live, core::World::getFixedTimestep(), &draft, authored))
 				mTelemetry[node.type + keySeparator + node.id] = std::move(*values);
 	}
 	if (live && !draftMatchesLive)
@@ -975,9 +796,10 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	if (ImGui::Button("Reset view"))
 	{
 		mFitRequested = true; mSelected = -1; mSelectedType.clear(); mSelectedId.clear();
+		mSelectedConnection.reset();
 		mDragging = -1; mTemperature = 0;
 	}
-	ImGui::TextDisabled("Edges: material/service colours. Red = unresolved reference. Drag a connector to wire; hover a link and press Delete to disconnect.");
+	ImGui::TextDisabled("Edges: colour = medium; pattern = connection type. Click a link to inspect. Red = unresolved reference.");
 	if (ImGui::TreeNodeEx("Edge colours", ImGuiTreeNodeFlags_NoAutoOpenOnLog))
 	{
 		std::set<station_flow::Medium> media;
@@ -985,6 +807,20 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		for (auto medium : media)
 			ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(station_flow::edgeColor(medium)),
 				"%s", station_flow::mediumName(medium));
+		ImGui::TreePop();
+	}
+	if (ImGui::TreeNodeEx("Connection types", ImGuiTreeNodeFlags_NoAutoOpenOnLog))
+	{
+		for (size_t i = 1; i < core::StationPhysicalConnectionNames.size(); ++i)
+		{
+			auto type = static_cast<core::StationPhysicalConnection>(i);
+			auto p = ImGui::GetCursorScreenPos();
+			drawConnectionCurve(ImGui::GetWindowDrawList(), {{p.x, p.y + 7}, {p.x + 20, p.y + 7},
+				{p.x + 40, p.y + 7}, {p.x + 60, p.y + 7}}, IM_COL32(200, 200, 210, 255), 1.5f, type);
+			ImGui::Dummy({68, 16}); ImGui::SameLine();
+			ImGui::Text("%s: %s", core::StationPhysicalConnectionNames[i], station_flow::connectionStyleName(type));
+		}
+		ImGui::TextDisabled("Colours identify the medium. Physical flows enforce input caps, then efficiency.");
 		ImGui::TreePop();
 	}
 	if (ImGui::TreeNodeEx("Node type colours", ImGuiTreeNodeFlags_NoAutoOpenOnLog))
@@ -1002,7 +838,10 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	// Height-constant chrome: exactly one line whether or not a node is
 	// selected, so selecting never pushes the canvas (and the reserved
 	// inspector column) down a line and out from under the pointer.
-	if (mSelected >= 0)
+	if (mSelectedConnection)
+		ImGui::Text("Selected connection: %s '%s' - %s", mSelectedConnection->ownerType.c_str(),
+			mSelectedConnection->ownerId.c_str(), mSelectedConnection->relation.c_str());
+	else if (mSelected >= 0)
 		ImGui::Text("Selected: %s '%s'", mGraph.nodes[mSelected].type.c_str(),
 			mGraph.nodes[mSelected].id.c_str());
 	else
@@ -1248,6 +1087,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		{
 			if (hoveredNode != mSelected && beforeSelectionChange) beforeSelectionChange();
 			mSelected = hoveredNode;
+			mSelectedConnection.reset();
 			// Record the identity the inspector follows across rebuilds (#653).
 			mSelectedType = hoveredNode >= 0 ? mGraph.nodes[size_t(hoveredNode)].type : "";
 			mSelectedId = hoveredNode >= 0 ? mGraph.nodes[size_t(hoveredNode)].id : "";
@@ -1671,16 +1511,38 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	mPortButtons.clear();
 	// Links the user can edit are drawn between their connectors, not box to
 	// box, so the curve on screen is the curve the drag and the delete hit.
-	std::set<std::pair<size_t, size_t>> authoredPairs;
+	std::set<size_t> authoredEdges;
 	for (auto const& link : mLinks)
 		if (link.drawable && visible[link.fromNode] && visible[link.toNode])
-			authoredPairs.insert({link.fromNode, link.toNode});
+			authoredEdges.insert(link.graphLink);
+	mConnectionScreen.clear();
+	int hoveredGraphLink = -1;
+	auto recordCurve = [&](size_t index, FlowCurve const& curve) {
+		auto const& edge = mGraph.links[index];
+		for (float t : {0.5f, 0.375f, 0.625f, 0.25f, 0.75f, 0.125f, 0.875f})
+		{
+			auto sample = curvePoint(curve, t);
+			if (sample.x < origin.x || sample.y < origin.y || sample.x >= origin.x + available.x
+				|| sample.y >= origin.y + available.y) continue;
+			bool covered = false;
+			for (size_t i = 0; i < mPositions.size(); ++i)
+			{
+				if (!visible[i]) continue;
+				auto p = point(mPositions[i]);
+				if (sample.x >= p.x && sample.x <= p.x + nodeWidth * mZoom
+					&& sample.y >= p.y && sample.y <= p.y + nodeHeight * mZoom) { covered = true; break; }
+			}
+			if (!covered) { mConnectionScreen[edge.designKey] = sample; break; }
+		}
+		if (hovered && curveDistance(curve, io.MousePos) <= 8.0f)
+			hoveredGraphLink = int(index);
+	};
 	std::map<std::pair<size_t, size_t>, size_t> parallelSlot;
 	for (auto const& link : mGraph.links)
 	{
 		if (!visible[link.from] || !visible[link.to]) continue;
-		if (link.kind != station_flow::LinkKind::Power
-			&& authoredPairs.contains({link.from, link.to})) continue;
+		auto index = size_t(&link - mGraph.links.data());
+		if (authoredEdges.contains(index)) continue;
 		auto from = mPositions[link.from], to = mPositions[link.to];
 		from.x += nodeWidth / 2; from.y += nodeHeight / 2;
 		to.x += nodeWidth / 2; to.y += nodeHeight / 2;
@@ -1719,13 +1581,12 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		}
 		auto color = station_flow::edgeColor(link.medium);
 		if (mGraph.nodes[link.from].unresolved || mGraph.nodes[link.to].unresolved) color = IM_COL32(255, 80, 80, 230);
-		bool const selected = mSelected >= 0 && (link.from == size_t(mSelected) || link.to == size_t(mSelected));
-		draw->AddBezierCubic(a, c1, c2, d, color, selected ? 3.0f : 1.3f);
-		float tangentLength = std::max(std::hypot(d.x - c2.x, d.y - c2.y), 0.01f);
-		ImVec2 tangent{(d.x - c2.x) / tangentLength, (d.y - c2.y) / tangentLength};
-		draw->AddTriangleFilled(d,
-			{d.x - tangent.x * 8 - tangent.y * 4, d.y - tangent.y * 8 + tangent.x * 4},
-			{d.x - tangent.x * 8 + tangent.y * 4, d.y - tangent.y * 8 - tangent.x * 4}, color);
+		FlowCurve curve{a, c1, c2, d};
+		recordCurve(index, curve);
+		bool const selected = (mSelectedConnection && *mSelectedConnection == link.designKey)
+			|| (mSelected >= 0 && (link.from == size_t(mSelected) || link.to == size_t(mSelected)));
+		drawConnectionCurve(draw, curve, color, selected ? 3.0f : 1.3f,
+			station_flow::connectionType(mGraph, link, draft));
 	}
 	// Editable links, drawn connector to connector. The curve drawn here is
 	// the curve the pointer is measured against, so what the user sees is what
@@ -1740,18 +1601,21 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		if (from == framePins.end() || to == framePins.end()) continue;
 		auto const curve = linkCurve(from->second, to->second);
 		auto colour = IM_COL32(160, 160, 175, 225);
-		for (auto const& edge : mGraph.links)
-			if (edge.from == link.fromNode && edge.to == link.toNode)
-			{
-				colour = station_flow::edgeColor(edge.medium);
-				break;
-			}
+		auto const* edge = link.graphLink == SIZE_MAX ? nullptr : &mGraph.links[link.graphLink];
+		if (edge) colour = station_flow::edgeColor(edge->medium);
 		bool const touchesSelection = mSelected >= 0
 			&& (link.fromNode == size_t(mSelected) || link.toNode == size_t(mSelected));
 		bool const hot = hovered && curveDistance(curve, io.MousePos) <= 8.0f;
 		if (hot && hoveredLink < 0) hoveredLink = int(i);
 		if (hot) colour = IM_COL32(255, 255, 255, 240);
-		drawLinkCurve(draw, curve, colour, hot ? 3.0f : touchesSelection ? 2.4f : 1.6f);
+		bool const selected = edge && mSelectedConnection && *mSelectedConnection == edge->designKey;
+		if (edge)
+		{
+			recordCurve(link.graphLink, curve);
+			drawConnectionCurve(draw, curve, colour, hot || selected ? 3.0f : touchesSelection ? 2.4f : 1.6f,
+				station_flow::connectionType(mGraph, *edge, draft));
+		}
+		else drawLinkCurve(draw, curve, colour, hot ? 3.0f : touchesSelection ? 2.4f : 1.6f);
 	}
 	bool const deleteKey = hovered && ImGui::IsKeyPressed(ImGuiKey_Delete)
 		&& !ImGui::IsAnyItemActive();
@@ -2012,6 +1876,55 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			(mPlacingType + (atLimit ? " limit reached" : " (click to place)")).c_str());
 	}
 	draw->PopClipRect();
+	auto renderConnectionRules = [&](station_flow::Link const& edge) {
+		// Match the authoritative ledger: relationship semantics, not the
+		// user-selected carrier style, decide whether transport is enforced.
+		if (station_flow::automaticConnectionType(mGraph, edge) == core::StationPhysicalConnection::NonPhysical)
+			ImGui::TextWrapped("Informational only: throughput and efficiency do not affect simulation.");
+		else
+		{
+			ImGui::TextWrapped("Enforced when applied: input cap first, then efficiency.");
+			ImGui::TextWrapped("Undelivered input is an external connection loss.");
+			if (station_flow::connectionType(mGraph, edge, draft) == core::StationPhysicalConnection::NonPhysical)
+				ImGui::TextWrapped("Carrier style does not disable enforcement.");
+		}
+	};
+	auto renderConnectionTelemetry = [&](station_flow::Link const& edge) {
+		if (!showLive) return;
+		if (live->worldTick == 0)
+		{
+			ImGui::TextDisabled("Ready - no completed tick");
+			return;
+		}
+		auto const found = std::find_if(live->connections.begin(), live->connections.end(),
+			[&](auto const& flow) { return flow.key == edge.designKey; });
+		if (found == live->connections.end()) return; // Unknown/non-physical, not a fabricated zero.
+		ImGui::TextDisabled(live->healthy ? "Applied connection flow" : "Last committed connection flow");
+		for (auto const& line : station_flow::connectionTelemetry(*found)) ImGui::TextUnformatted(line.c_str());
+	};
+	if (hoveredGraphLink >= 0 && hoveredNode < 0 && mPlacingType.empty() && !mActiveLinkPin)
+	{
+		auto const& edge = mGraph.links[hoveredGraphLink];
+		if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+		{
+			if (beforeSelectionChange) beforeSelectionChange();
+			mSelectedConnection = edge.designKey;
+			mSelected = -1; mSelectedType.clear(); mSelectedId.clear();
+		}
+		auto properties = station_flow::connectionProperties(draft, edge);
+		auto type = station_flow::connectionType(mGraph, edge, draft);
+		auto unit = station_flow::connectionThroughputUnit(mGraph, edge, draft);
+		ImGui::BeginTooltip();
+		ImGui::TextUnformatted(edge.label.c_str());
+		ImGui::Text("Medium: %s", station_flow::mediumName(edge.medium));
+		ImGui::Text("Connection: %s", core::StationPhysicalConnectionNames[static_cast<size_t>(type)]);
+		if (!unit.empty()) ImGui::Text("Maximum throughput: %.6g %s (input cap)", properties.maximumThroughput, unit.c_str());
+		ImGui::Text("Efficiency: %.6g", properties.efficiency);
+		renderConnectionRules(edge);
+		renderConnectionTelemetry(edge);
+		ImGui::TextUnformatted("Click to inspect connection properties");
+		ImGui::EndTooltip();
+	}
 	if (hoveredNode >= 0 && mPlacingType.empty())
 	{
 		auto const& n = mGraph.nodes[hoveredNode];
@@ -2041,6 +1954,73 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	ImGui::SameLine();
 	if (ImGui::BeginChild("Flow inspector", {station_flow::InspectorColumnWidth, rowHeight}, true))
 	{
+		if (mSelectedConnection)
+		{
+			auto found = std::find_if(mGraph.links.begin(), mGraph.links.end(),
+				[&](auto const& edge) { return edge.designKey == *mSelectedConnection; });
+			if (found != mGraph.links.end())
+			{
+				auto const& edge = *found;
+				ImGui::SeparatorText("Connection properties");
+				ImGui::TextWrapped("%s", edge.label.c_str());
+				ImGui::TextWrapped("From: %s '%s'", mGraph.nodes[edge.from].type.c_str(), mGraph.nodes[edge.from].id.c_str());
+				ImGui::TextWrapped("To: %s '%s'", mGraph.nodes[edge.to].type.c_str(), mGraph.nodes[edge.to].id.c_str());
+				ImGui::Text("Medium: %s", station_flow::mediumName(edge.medium));
+				auto properties = station_flow::connectionProperties(draft, edge);
+				auto automatic = station_flow::automaticConnectionType(mGraph, edge);
+				auto type = station_flow::connectionType(mGraph, edge, draft);
+				ImGui::TextWrapped("Effective type: %s", core::StationPhysicalConnectionNames[static_cast<size_t>(type)]);
+				ImGui::TextWrapped("Line: %s", station_flow::connectionStyleName(type));
+				renderConnectionRules(edge);
+				bool changed = false;
+				if (automatic != core::StationPhysicalConnection::NonPhysical)
+				{
+					int choice = static_cast<int>(properties.physicalType);
+					ImGui::SetNextItemWidth(140);
+					if (ImGui::Combo("Physical connection type", &choice, core::StationPhysicalConnectionNames.data(),
+						int(core::StationPhysicalConnectionNames.size())))
+					{ properties.physicalType = static_cast<core::StationPhysicalConnection>(choice); changed = true; }
+				}
+				else ImGui::TextWrapped("Non-physical relationship; no cable or pipe is implied.");
+				// Scalar text edits can finish on the frame selection changes. Keep
+				// their ImGui state scoped to the connection, not the shared panel.
+				for (auto const* part : {&edge.designKey.ownerType, &edge.designKey.ownerId,
+					&edge.designKey.reference, &edge.designKey.relation, &edge.designKey.peerType, &edge.designKey.peerId})
+					ImGui::PushID(part->c_str());
+				auto unit = station_flow::connectionThroughputUnit(mGraph, edge, draft);
+				if (!unit.empty())
+				{
+					ImGui::SetNextItemWidth(140);
+					if (ImGui::InputDouble("Maximum throughput", &properties.maximumThroughput, 0, 0, "%.6g"))
+					{
+						if (std::isfinite(properties.maximumThroughput) && properties.maximumThroughput > 0) changed = true;
+						else ImGui::TextWrapped("Rating must be positive and finite.");
+					}
+					ImGui::TextWrapped("%s - maximum input rate", unit.c_str());
+				}
+				ImGui::SetNextItemWidth(140);
+				if (ImGui::InputDouble("Efficiency", &properties.efficiency, 0, 0, "%.6g"))
+				{
+					if (std::isfinite(properties.efficiency) && properties.efficiency >= 0 && properties.efficiency <= 1) changed = true;
+					else ImGui::TextWrapped("Efficiency must be finite, from 0 to 1 inclusive.");
+				}
+				ImGui::TextWrapped(automatic == core::StationPhysicalConnection::NonPhysical
+					? "0 to 1 - informational only"
+					: "0 to 1 - delivered fraction");
+				if (changed && std::isfinite(properties.maximumThroughput) && properties.maximumThroughput > 0
+					&& std::isfinite(properties.efficiency) && properties.efficiency >= 0 && properties.efficiency <= 1)
+					draft.connections[edge.designKey] = properties;
+				for (int i = 0; i < 6; ++i) ImGui::PopID();
+				if (ImGui::Button("Reset connection properties")) draft.connections.erase(edge.designKey);
+				auto const identity = edge.designKey.ownerType + ":" + edge.designKey.ownerId + ":" + edge.designKey.reference;
+				bool const authored = std::any_of(mLinks.begin(), mLinks.end(),
+					[&](auto const& link) { return link.authored.identity == identity; });
+				if (authored && ImGui::Button("Disconnect selected connection")) core::clearStationLink(draft, identity);
+				if (edge.kind == station_flow::LinkKind::Power)
+					ImGui::TextWrapped("Automatic shared electrical connection; it cannot be disconnected manually.");
+				renderConnectionTelemetry(edge);
+			}
+		}
 		// The diagram's own selection detail stays first: what the node is
 		// wired to. The caller's entry editor (the shared #652 seam) renders
 		// below it in the same reserved column.
@@ -2131,8 +2111,11 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			if (!canRemove)
 				ImGui::TextDisabled("Deletion unavailable: reference mapping is incomplete for this draft.");
 		}
-		if (renderInspector) renderInspector(draft);
-		else ImGui::TextDisabled("No inspector for this surface.");
+		if (!mSelectedConnection)
+		{
+			if (renderInspector) renderInspector(draft);
+			else ImGui::TextDisabled("No inspector for this surface.");
+		}
 	}
 	ImGui::EndChild();
 	// Settings and authored geometry belong to the same history action. Clear
