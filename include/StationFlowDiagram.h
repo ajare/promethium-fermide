@@ -147,4 +147,6 @@ private:
 	std::map<std::string, ImVec4> mNodeScreen;
 	std::string mLinkRejection;
 	std::optional<core::StationNodeRemoval> mPendingRemoval;
+	std::optional<core::StationNodeRename> mPendingRename;
+	char mRenameBuffer[core::MaxStationStoreIdLength + 1]{};
 };

@@ -1626,6 +1626,93 @@ bool removeStationNode(StationSystemsSettings& settings, StationNodeRemoval cons
 	return true;
 }
 
+bool planStationNodeRename(StationSystemsSettings const& settings,
+	std::string const& nodeType, std::string const& oldNodeId,
+	std::string const& newNodeId, StationNodeRename& plan, std::string* diagnostic)
+{
+	auto refuse = [&](std::string message) {
+		if (diagnostic) *diagnostic = std::move(message);
+		return false;
+	};
+	if (newNodeId.empty()) return refuse("A node name cannot be empty.");
+	if (newNodeId == oldNodeId) return refuse("Enter a different node name.");
+	if (newNodeId.size() > MaxStationStoreIdLength)
+		return refuse("A node name is too long.");
+	StationNodeRemoval removal;
+	if (!planStationNodeRemoval(settings, nodeType, oldNodeId, removal))
+		return refuse("This node cannot be renamed while reference mapping is incomplete.");
+	auto nameUsed = [&](auto const& entries) {
+		return std::any_of(entries.begin(), entries.end(), [&](auto const& entry) {
+			return entry.id == newNodeId && entry.id != oldNodeId;
+		});
+	};
+	bool used = false;
+	if (nodeType == "Store") used = nameUsed(settings.stores);
+	else if (nodeType == "Transfer") used = nameUsed(settings.transfers);
+	else if (nodeType == "Equipment") used = nameUsed(settings.equipmentLoads);
+	else if (nodeType == "Battery") used = nameUsed(settings.batteries);
+	else if (nodeType == "Generator") used = nameUsed(settings.generators);
+	else if (nodeType == "Fuel cell") used = nameUsed(settings.fuelCells);
+	else if (nodeType == "Sabatier") used = nameUsed(settings.sabatierReactors);
+	else if (nodeType == "Methane processor") used = nameUsed(settings.methaneProcessors);
+	else return refuse("This node cannot be renamed.");
+	if (used) return refuse("A " + nodeType + " named '" + newNodeId + "' already exists.");
+	plan = {nodeType, oldNodeId, newNodeId, std::move(removal.linkIdentities)};
+	if (diagnostic) diagnostic->clear();
+	return true;
+}
+
+bool renameStationNode(StationSystemsSettings& settings, StationNodeRename const& plan)
+{
+	StationNodeRename current;
+	if (!planStationNodeRename(settings, plan.nodeType, plan.oldNodeId, plan.newNodeId, current)
+		|| current.linkIdentities != plan.linkIdentities) return false;
+	// Preserve the complete links before clearing their mapped fields. Reapplying
+	// them after changing the owner identity updates both incoming references and
+	// references owned by the renamed node in one atomic candidate.
+	auto const authored = stationAuthoredLinks(settings);
+	std::vector<AuthoredLink> affected;
+	for (auto const& identity : current.linkIdentities)
+	{
+		auto found = std::find_if(authored.begin(), authored.end(), [&](AuthoredLink const& link) {
+			return link.identity == identity;
+		});
+		if (found == authored.end()) return false;
+		affected.push_back(*found);
+	}
+	auto candidate = settings;
+	for (auto const& link : affected)
+		if (!clearStationLink(candidate, link.identity)) return false;
+	auto rename = [&](auto& entries) {
+		auto found = std::find_if(entries.begin(), entries.end(), [&](auto const& entry) {
+			return entry.id == current.oldNodeId;
+		});
+		if (found == entries.end()) return false;
+		found->id = current.newNodeId;
+		return true;
+	};
+	bool renamed = false;
+	if (current.nodeType == "Store") renamed = rename(candidate.stores);
+	else if (current.nodeType == "Transfer") renamed = rename(candidate.transfers);
+	else if (current.nodeType == "Equipment") renamed = rename(candidate.equipmentLoads);
+	else if (current.nodeType == "Battery") renamed = rename(candidate.batteries);
+	else if (current.nodeType == "Generator") renamed = rename(candidate.generators);
+	else if (current.nodeType == "Fuel cell") renamed = rename(candidate.fuelCells);
+	else if (current.nodeType == "Sabatier") renamed = rename(candidate.sabatierReactors);
+	else if (current.nodeType == "Methane processor") renamed = rename(candidate.methaneProcessors);
+	if (!renamed) return false;
+	for (auto link : affected)
+	{
+		if (link.from.nodeType == current.nodeType && link.from.nodeId == current.oldNodeId)
+			link.from.nodeId = current.newNodeId;
+		if (link.to.nodeType == current.nodeType && link.to.nodeId == current.oldNodeId)
+			link.to.nodeId = current.newNodeId;
+		if (!applyStationLink(candidate, {link.from, link.to})) return false;
+	}
+	settings = std::move(candidate);
+	return true;
+}
+
 LinkVerdict evaluateStationLink(StationSystemsSettings const& settings, CandidateLink const& link)
 {
 	// A derived service node owns no authored connector: refuse by name before

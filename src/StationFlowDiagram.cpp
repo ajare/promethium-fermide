@@ -5,6 +5,7 @@
 #include <limits>
 #include <set>
 #include <cmath>
+#include <cstring>
 #include <map>
 
 namespace station_flow
@@ -1163,6 +1164,8 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			// Record the identity the inspector follows across rebuilds (#653).
 			mSelectedType = hoveredNode >= 0 ? mGraph.nodes[size_t(hoveredNode)].type : "";
 			mSelectedId = hoveredNode >= 0 ? mGraph.nodes[size_t(hoveredNode)].id : "";
+			std::strncpy(mRenameBuffer, mSelectedId.c_str(), sizeof(mRenameBuffer) - 1);
+			mRenameBuffer[sizeof(mRenameBuffer) - 1] = '\0';
 		}
 	}
 	if (!mPlacingType.empty() && canvasHovered && hoveredPin < 0
@@ -1638,6 +1641,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		mLinkRejection.clear();
 	}
 	bool deleteSelected = deleteKey && hoveredLink < 0 && mSelected >= 0;
+	bool renameSelected = false;
 	for (size_t i = 0; i < mGraph.nodes.size(); ++i)
 	{
 		if (!visible[i]) continue;
@@ -1916,6 +1920,15 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		if (mSelected >= 0)
 		{
 			ImGui::Separator();
+			ImGui::InputText("New node name", mRenameBuffer, sizeof(mRenameBuffer));
+			core::StationNodeRename renamePlan;
+			std::string renameDiagnostic;
+			bool const canRename = core::planStationNodeRename(draft, mSelectedType, mSelectedId,
+				mRenameBuffer, renamePlan, &renameDiagnostic);
+			ImGui::BeginDisabled(!canRename);
+			if (ImGui::Button("Rename selected node")) renameSelected = true;
+			ImGui::EndDisabled();
+			if (!canRename) ImGui::TextDisabled("Rename unavailable: %s", renameDiagnostic.c_str());
 			// Only node types whose reference mapping lives in core are
 			// deletable here. Other projected nodes may carry references the
 			// current connector seam cannot yet resolve safely.
@@ -1932,6 +1945,27 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		else ImGui::TextDisabled("No inspector for this surface.");
 	}
 	ImGui::EndChild();
+	if (renameSelected)
+	{
+		core::StationNodeRename plan;
+		if (core::planStationNodeRename(draft, mSelectedType, mSelectedId, mRenameBuffer, plan))
+		{
+			if (plan.linkIdentities.empty())
+			{
+				if (beforeNodeRemoval) beforeNodeRemoval();
+				if (core::renameStationNode(draft, plan))
+				{
+					mSelectedId = plan.newNodeId;
+					mNotice.clear();
+				}
+			}
+			else
+			{
+				mPendingRename = std::move(plan);
+				ImGui::OpenPopup("Rename Station node?");
+			}
+		}
+	}
 	if (deleteSelected)
 	{
 		core::StationNodeRemoval plan;
@@ -1949,6 +1983,31 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 				ImGui::OpenPopup("Delete Station node?");
 			}
 		}
+	}
+	if (ImGui::BeginPopupModal("Rename Station node?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		if (mPendingRename)
+		{
+			ImGui::Text("Rename this %s? %zu links will be updated",
+				mPendingRename->nodeType == "Store" ? "store" : "node",
+				mPendingRename->linkIdentities.size());
+			if (ImGui::Button("Confirm node rename"))
+			{
+				core::StationNodeRename current;
+				if (core::planStationNodeRename(draft, mPendingRename->nodeType,
+					mPendingRename->oldNodeId, mPendingRename->newNodeId, current)
+					&& current.linkIdentities == mPendingRename->linkIdentities)
+				{
+					if (beforeNodeRemoval) beforeNodeRemoval();
+					if (core::renameStationNode(draft, current)) mSelectedId = current.newNodeId;
+				}
+				mPendingRename.reset(); ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel node rename"))
+			{ mPendingRename.reset(); ImGui::CloseCurrentPopup(); }
+		}
+		ImGui::EndPopup();
 	}
 	if (ImGui::BeginPopupModal("Delete Station node?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
 	{

@@ -407,6 +407,29 @@ namespace
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
 			REQ(window.draft().stores.size() == 3 && window.draftHistory().undoCount() == 1,
 				"unlinked deletion did not restore in one undo");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft() == seed && window.draftHistory().undoCount() == 0,
+				"second undo did not restore the source store for rename");
+			REQ(select("a"), "source store not visible after restoration");
+			driver.click(ctx, "**/New node name"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+			ctx->KeyChars("renamed"); ctx->Yield(2);
+			driver.click(ctx, "**/Rename selected node"); ctx->Yield(3);
+			REQ(driver.contains("Rename this store? 2 links will be updated") && window.draft() == seed
+				&& window.draftHistory().undoCount() == 0,
+				"rename confirmation did not preserve the draft or name its referrers");
+			driver.click(ctx, "**/Cancel node rename"); ctx->Yield(3);
+			REQ(window.draft() == seed && window.draftHistory().undoCount() == 0,
+				"cancelling a rename changed the draft or history");
+			driver.click(ctx, "**/Rename selected node"); ctx->Yield(2);
+			driver.click(ctx, "**/Confirm node rename"); ctx->Yield(3);
+			REQ(window.draft().stores[0].id == "renamed"
+				&& window.draft().transfers[0].sourceId == "renamed"
+				&& window.draft().transfers[1].sourceId == "renamed"
+				&& window.draftHistory().undoCount() == 1,
+				"confirmed rename did not update every referrer in one history entry");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft() == seed && window.draftHistory().redoCount() == 1,
+				"one undo did not restore the old name and every reference");
 			REQ(world->getStationSystemsSettings() == seed && worldHistory.undoCount() == 0,
 				"draft removal touched the World");
 		});

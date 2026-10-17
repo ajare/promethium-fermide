@@ -555,4 +555,17 @@ namespace core
 	bool planStationNodeRemoval(StationSystemsSettings const& settings,
 		std::string const& nodeType, std::string const& nodeId, StationNodeRemoval& plan);
 	bool removeStationNode(StationSystemsSettings& settings, StationNodeRemoval const& plan);
+
+	// Rename an authored node and every mapped reference to it. The plan carries
+	// the same referrer identities as removal, so confirmation and mutation use
+	// one core-owned view of the draft.
+	struct StationNodeRename
+	{
+		std::string nodeType, oldNodeId, newNodeId;
+		std::vector<std::string> linkIdentities;
+	};
+	bool planStationNodeRename(StationSystemsSettings const& settings,
+		std::string const& nodeType, std::string const& oldNodeId,
+		std::string const& newNodeId, StationNodeRename& plan, std::string* diagnostic = nullptr);
+	bool renameStationNode(StationSystemsSettings& settings, StationNodeRename const& plan);
 }
