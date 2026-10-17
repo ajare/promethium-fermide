@@ -2,6 +2,7 @@
 #include "core/StationSystems.h"
 #include "core/StationPorts.h"
 #include "imgui/imgui.h"
+#include <functional>
 #include <optional>
 #include <map>
 struct ImNodesContext;
@@ -31,6 +32,10 @@ namespace station_flow
 	struct Graph { std::vector<Node> nodes; std::vector<Link> links; };
 	Graph build(core::StationSystemsSettings const& draft);
 	inline constexpr float NodeWidth = 250, NodeHeight = 76;
+	// #653: the inspector column beside the canvas keeps a fixed width
+	// whether or not a node is selected, so selecting or deselecting never
+	// resizes the canvas or moves the node under the pointer.
+	inline constexpr float InspectorColumnWidth = 320.0f;
 	// Bounded, deterministic spring/repulsion layout; returns node top-lefts.
 	std::vector<ImVec2> forceLayout(Graph const& graph);
 	// One UI-only relaxation step; pinned node (if any) stays at its position.
@@ -47,7 +52,21 @@ public:
 	~StationFlowDiagram();
 	StationFlowDiagram(StationFlowDiagram const&) = delete;
 	StationFlowDiagram& operator=(StationFlowDiagram const&) = delete;
-	void render(core::StationSystemsSettings& draft);
+	// The node the canvas selection currently points at. `index` is the
+	// entry's occurrence within its type, derived from the live graph; it is
+	// -1 when the node maps to no editable entry.
+	struct SelectedNode
+	{
+		std::string type;
+		std::string id;
+		int index{-1};
+	};
+	void render(core::StationSystemsSettings& draft,
+		std::function<void(core::StationSystemsSettings&)> const& renderInspector = {});
+	// Empty when nothing is selected. The index addresses the entry inside the
+	// node type's own draft vector (stores for "Store", transfers for
+	// "Transfer"); shared service nodes carry -1.
+	std::optional<SelectedNode> selectedNode() const;
 	void reset();
 	// Screen-space geometry recorded by the last rendered frame. Presentation
 	// state, exposed read-only so a caller — including a headless check that
@@ -67,6 +86,10 @@ private:
 	float mZoom{0.8f};
 	bool mFitRequested{true};
 	int mSelected{-1}, mDragging{-1}, mLastFrame{-1};
+	// Selection identity (#653): the type/id the user clicked, kept across
+	// draft rebuilds so the inspector follows the same entry rather than a
+	// positional slot that a rebuild could reshuffle.
+	std::string mSelectedType, mSelectedId;
 	float mTemperature{};
 	bool mPlaceStore{false};
 	ImNodesContext* mNodeContext{};

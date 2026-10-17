@@ -94,9 +94,15 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 {
 	if (!syncWorld(world)) return;
 	renderDraftHistory();
-	mFlow.render(mDraft);
-	// Placement is one action, including on the mouse-down frame.
-	if (mPendingDraftEdit)
+	mFlow.render(mDraft, [this](core::StationSystemsSettings& draft) {
+		renderFlowInspectorContents(draft);
+	});
+	// Placement is one action, including on the mouse-down frame. An
+	// inspector field edit is not: while a field is still being edited the
+	// pending snapshot stays open, so typing "1250" is one commit at field
+	// commit, not four (#653). The deactivation frame lands here once no
+	// item is active.
+	if (mPendingDraftEdit && !ImGui::IsAnyItemActive())
 	{
 		auto const before = std::static_pointer_cast<StationDraftSnapshot>(mPendingDraftEdit->context);
 		if (before->settings != mDraft)
@@ -105,6 +111,39 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 			mPendingDraftEdit.reset();
 		}
 	}
+}
+
+void StationSystemsWindow::renderFlowInspectorContents(core::StationSystemsSettings& draft)
+{
+	auto const selected = mFlow.selectedNode();
+	if (!selected)
+	{
+		ImGui::TextDisabled("Nothing selected.");
+		ImGui::TextDisabled("Click a node on the canvas to edit its settings.");
+		return;
+	}
+	ImGui::Text("Node: %s '%s'", selected->type.c_str(), selected->id.c_str());
+	auto const* editor = station_editor::findStationEntryEditor(selected->type);
+	if (!editor)
+	{
+		// A type with no extracted editor says so, by name, rather than
+		// showing nothing and leaving the user guessing whether the node or
+		// the editor is broken.
+		ImGui::TextDisabled("No settings editor for '%s' nodes yet.", selected->type.c_str());
+		ImGui::TextDisabled("Editing for this type arrives with its entry-editor extraction.");
+		return;
+	}
+	if (selected->index < 0)
+	{
+		ImGui::TextDisabled("This node does not map to a single editable entry.");
+		return;
+	}
+	ImGui::Separator();
+	// The same seam the form tab uses (#652), fields only: removal stays a
+	// list-surface operation, and the inspector owns no list.
+	editor->renderEntry(draft, size_t(selected->index));
+	ImGui::Separator();
+	ImGui::TextDisabled("Edits change the Configuration draft only. Nothing is applied to the World from here.");
 }
 
 void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& world, DocumentHistory& history)

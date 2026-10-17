@@ -14,9 +14,36 @@
 
 namespace
 {
+	// Child windows carry the parent in their name ("View/Flow canvas"), and
+	// the inspector column added by #653 is a sibling of the canvas, so
+	// "deepest last child" no longer identifies it. Find the canvas by the
+	// leaf of its name anywhere under the given root window.
+	ImGuiWindow* findFlowCanvas(ImGuiWindow* window)
+	{
+		if (!window) return nullptr;
+		auto const isCanvas = [](ImGuiWindow* w) {
+			if (!w->Name) return false;
+			// Child window names are "Root/Flow canvas_<hash>"; match the leaf.
+			std::string leaf(w->Name);
+			auto const slash = leaf.find_last_of('/');
+			if (slash != std::string::npos) leaf = leaf.substr(slash + 1);
+			return leaf.rfind("Flow canvas", 0) == 0;
+		};
+		for (auto* child : window->DC.ChildWindows)
+			if (isCanvas(child)) return child;
+		for (auto* child : window->DC.ChildWindows)
+			if (auto* found = findFlowCanvas(child)) return found;
+		return nullptr;
+	}
+
 	ImGuiWindow* flowCanvasWindow(char const* name)
 	{
 		auto* window = ImGui::FindWindowByName(name);
+		// The inspector column added by #653 is a sibling of the canvas, so
+		// the walk must anchor on the canvas itself rather than on the root's
+		// last child; the node drawing lives in the editor window nested
+		// inside it.
+		if (auto* canvas = findFlowCanvas(window)) window = canvas;
 		while (!window->DC.ChildWindows.empty()) window = window->DC.ChildWindows.back();
 		return window;
 	}
@@ -267,6 +294,193 @@ namespace
 		});
 		#undef REQ
 		require(driver.passed(), "Flow link workflow failed on the Test Engine");
+	}
+
+	// #653: the Flow inspector. Selecting a node opens that type's shared
+	// entry editor (#652) in a column reserved beside the canvas; the node
+	// body stays compact, the field commits once rather than per keystroke,
+	// and the canvas never moves when the selection changes.
+	void flowInspectorWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory worldHistory;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Flow inspector", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		auto store = [](std::string const& id, std::string const& unit)
+		{
+			core::ResourceStoreSettings entry;
+			entry.id = id; entry.unit = unit; entry.capacity = 1000.0;
+			entry.startingQualified = 500.0; entry.hazardClass = "normal";
+			return entry;
+		};
+		core::StationSystemsSettings seed;
+		seed.enabled = true;
+		seed.observationIntervalSeconds = 1.0f;
+		seed.stores = {store("tank", "kg"), store("sink", "kg")};
+		core::ResourceTransferSettings transfer;
+		transfer.id = "t1"; transfer.sourceId = "tank";
+		transfer.destinationId = "sink"; transfer.unit = "kg";
+		transfer.ratePerSecond = 1.0;
+		seed.transfers = {transfer};
+		core::BatterySettings battery;
+		battery.id = "bat1"; battery.nameplateKWh = 10.0; battery.usableKWh = 8.0;
+		battery.startingStoredKWh = 8.0; battery.maxChargeKW = 2.0;
+		battery.maxDischargeKW = 4.0;
+		seed.batteries = {battery};
+		std::string diagnostic;
+		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
+		world->markSaved();
+		bool flow = true;
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration");
+			if (flow) window.renderFlowContents(world);
+			else window.renderContents(world, worldHistory);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "flowInspector", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			ctx->ComboClick("Place node/Store"); ctx->Yield(2);
+			auto* placementCanvas = findFlowCanvas(ImGui::FindWindowByName("Configuration"));
+			ctx->MouseTeleportToPos({placementCanvas->Pos.x + 300.0f,
+				placementCanvas->Pos.y + 180.0f});
+			ctx->MouseClick(); ctx->Yield(3);
+			REQ(window.draft().stores.size() == 3
+				&& window.draftHistory().undoCount() == 1,
+				"placing a Store did not add one draft-history entry");
+			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			ctx->MouseTeleportToPos({40, 40}); ctx->Yield(2);
+			auto canvasRect = [] {
+				auto* canvas = findFlowCanvas(ImGui::FindWindowByName("Configuration"));
+				return ImRect(canvas->Pos, ImVec2(canvas->Pos.x + canvas->Size.x,
+					canvas->Pos.y + canvas->Size.y));
+			};
+			// A point on empty canvas: inside the canvas, outside every node.
+			auto emptyCanvasPoint = [&] {
+				auto const box = canvasRect();
+				std::vector<ImVec4> nodes;
+				for (auto const& probe : std::vector<std::pair<std::string, std::string>>{
+					{"Store", "store1"}, {"Store", "tank"}, {"Store", "sink"},
+					{"Transfer", "t1"}, {"Battery", "bat1"},
+					{"Power", "Shared electrical pool"}})
+				{
+					ImVec4 r{};
+					if (window.flowNodeRect(probe.first, probe.second, &r)) nodes.push_back(r);
+				}
+				for (int y = 36; y < 400; y += 12)
+				{
+					for (int x = 36; x < 400; x += 12)
+					{
+						ImVec2 p{box.Min.x + float(x), box.Min.y + float(y)};
+						bool clear = true;
+						for (auto const& n : nodes)
+							if (p.x >= n.x - 4 && p.x <= n.z + 4 && p.y >= n.y - 4 && p.y <= n.w + 4)
+								clear = false;
+						if (clear) return p;
+					}
+				}
+				return ImVec2{box.Min.x + 4.0f, box.Min.y + 4.0f};
+			};
+			// The inspector column is reserved before anything is selected.
+			auto const idleCanvas = canvasRect();
+			REQ(driver.contains("Nothing selected."),
+				"the inspector column is not there, empty, before a selection");
+			// --- Selecting a Store renders its shared editor.
+			ImVec4 storeRect{};
+			REQ(window.flowNodeRect("Store", "store1", &storeRect), "the store node is not on screen");
+			ImVec2 const storeSize{storeRect.z - storeRect.x, storeRect.w - storeRect.y};
+			ctx->MouseTeleportToPos({(storeRect.x + storeRect.z) * 0.5f,
+				(storeRect.y + storeRect.w) * 0.5f});
+			ctx->MouseClick(); ctx->Yield(3);
+			// Leave the node so its hover tooltip does not replace the
+			// inspector text in ImGui's clipboard log capture.
+			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->Yield(2);
+			REQ(driver.contains("Node: Store 'store1'"), "selecting the store did not name it");
+			REQ(driver.contains("Store 2 capacity"),
+				"the store's shared entry editor did not render in the inspector");
+			// The canvas did not move when the selection appeared.
+			auto const selectedCanvas = canvasRect();
+			REQ(selectedCanvas.Min.x == idleCanvas.Min.x && selectedCanvas.Min.y == idleCanvas.Min.y
+				&& selectedCanvas.GetWidth() == idleCanvas.GetWidth()
+				&& selectedCanvas.GetHeight() == idleCanvas.GetHeight(),
+				"selecting a node moved or resized the canvas");
+			// --- Field-granularity commit: typing "1250" is one entry, not four.
+			auto const undoBefore = window.draftHistory().undoCount();
+			driver.click(ctx, "**/Store 2 capacity"); ctx->Yield(2);
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+			for (auto const digit : std::string("1250"))
+			{
+				char const one[2] = {digit, '\0'};
+				ctx->KeyChars(one); ctx->Yield(2);
+				REQ(window.draftHistory().undoCount() == undoBefore,
+					("a keystroke in the inspector committed a history entry: " + std::string(one)).c_str());
+				REQ(window.draft().stores.at(2).capacity > 0.0,
+					"the keystroke did not reach the draft");
+			}
+			ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			REQ(window.draft().stores.at(2).capacity == 1250.0,
+				("field commit did not write the typed value: "
+					+ std::to_string(window.draft().stores.at(2).capacity)).c_str());
+			REQ(window.draftHistory().undoCount() == undoBefore + 1,
+				"typing 1250 did not produce exactly one history entry");
+			// The node body stayed compact: editing did not grow it.
+			ImVec4 grownRect{};
+			REQ(window.flowNodeRect("Store", "store1", &grownRect), "the store node vanished after the edit");
+			REQ(std::abs((grownRect.z - grownRect.x) - storeSize.x) < 0.5f
+				&& std::abs((grownRect.w - grownRect.y) - storeSize.y) < 0.5f,
+				"the node body grew while its settings were edited in the inspector");
+			// Undo rewinds the one entry; the selection survives the rebuild.
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().stores.at(2).capacity == 100.0,
+				"undo did not restore the capacity");
+			// Transfer uses the other shared entry editor, with the same draft.
+			ImVec4 transferRect{};
+			REQ(window.flowNodeRect("Transfer", "t1", &transferRect), "the transfer node is not on screen");
+			ctx->MouseTeleportToPos({(transferRect.x + transferRect.z) * 0.5f,
+				(transferRect.y + transferRect.w) * 0.5f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->Yield(2);
+			REQ(driver.contains("Node: Transfer 't1'")
+				&& ctx->ItemInfo("**/Transfer 0 rate per second", ImGuiTestOpFlags_NoError)->ID != 0,
+				"selecting a Transfer did not render its shared entry editor");
+			// --- A type with no extracted editor names itself instead of showing nothing.
+			ImVec4 batteryRect{};
+			REQ(window.flowNodeRect("Battery", "bat1", &batteryRect), "the battery node is not on screen");
+			ctx->MouseTeleportToPos({(batteryRect.x + batteryRect.z) * 0.5f,
+				(batteryRect.y + batteryRect.w) * 0.5f});
+			ctx->MouseClick(); ctx->Yield(3);
+			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->Yield(2);
+			REQ(driver.contains("No settings editor for 'Battery' nodes yet."),
+				"a type without an extracted editor showed nothing instead of naming itself");
+			// --- Deselecting leaves nothing claiming a selection.
+			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->MouseClick(); ctx->Yield(3);
+			REQ(driver.contains("Nothing selected."),
+				"deselecting left inspector content behind");
+			REQ(!driver.contains("Store 2 capacity"),
+				"the store editor survived the deselection");
+			REQ(canvasRect().Min.x == idleCanvas.Min.x
+				&& canvasRect().GetWidth() == idleCanvas.GetWidth(),
+				"deselecting moved or resized the canvas");
+			// --- Inspecting and editing never touched the World or the clock.
+			world->resumeSimulation(); auto const tick = world->getSimulationTick();
+			ctx->MouseTeleportToPos({(storeRect.x + storeRect.z) * 0.5f,
+				(storeRect.y + storeRect.w) * 0.5f});
+			ctx->MouseClick(); ctx->Yield(3);
+			driver.click(ctx, "**/Store 2 capacity"); ctx->Yield(2);
+			ctx->KeyChars("7"); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			REQ(world->getStationSystemsSettings().stores.at(0).capacity == 1000.0
+				&& worldHistory.undoCount() == 0 && !world->isModified()
+				&& world->getSimulationTick() == tick,
+				"inspector editing mutated or advanced the World");
+		});
+		#undef REQ
+		require(driver.passed(), "Flow inspector workflow failed on the Test Engine");
 	}
 
 	void storeWorkflow(smoke::Context const&)
@@ -561,10 +775,20 @@ namespace
 				return bounds;
 			};
 			auto const nodePoint = storeBounds().GetCenter();
+			// The pan delta stays inside the canvas: the reserved inspector
+			// column (#653) makes the canvas narrower, so a fixed 300px pan
+			// could push the node past the clip rect and the follow-up click
+			// would land on nothing. The intent - right-drag pans, does not
+			// select, and the node ends up under the pointer - is unchanged.
+			auto* panCanvas = flowCanvasWindow("View");
+			float const panX = std::max(40.0f, std::min(300.0f,
+				panCanvas->Pos.x + panCanvas->Size.x - nodePoint.x - 60.0f));
+			float const panY = std::max(40.0f, std::min(100.0f,
+				panCanvas->Pos.y + panCanvas->Size.y - nodePoint.y - 60.0f));
 			ctx->MouseTeleportToPos(nodePoint);
-			ctx->MouseDragWithDelta({300, 100}, ImGuiMouseButton_Right); ctx->Yield(3);
+			ctx->MouseDragWithDelta({panX, panY}, ImGuiMouseButton_Right); ctx->Yield(3);
 			REQ(!driver.contains("Selected: Store"), "Right-drag selected a flow node");
-			ctx->MouseTeleportToPos({nodePoint.x + 300, nodePoint.y + 100});
+			ctx->MouseTeleportToPos({nodePoint.x + panX, nodePoint.y + panY});
 			ctx->MouseClick(); ctx->Yield(3);
 			REQ(driver.contains("Selected: Store 'store1'"), "Right-drag did not pan the flow node to the expected position");
 			ctx->ItemClick("Views/Station Flow/Fit all");
@@ -660,9 +884,22 @@ namespace
 			}
 			ctx->ItemClick("Views/Station Flow/Fit all"); ctx->Yield(3);
 			REQ(graphInView(), "Fit all leaves graph nodes outside the viewport");
-			auto* flowCanvas = flowCanvasWindow("View");
-			ctx->MouseTeleportToPos({flowCanvas->Pos.x + 60, flowCanvas->Pos.y + 60});
-			ctx->MouseDragWithDelta({600, 400}, ImGuiMouseButton_Right); ctx->Yield(3);
+			// The pan starts on empty canvas just inside the viewport corner
+			// and repeats until the graph is clear. The reserved inspector
+			// column (#653) narrowed the canvas, so one drag can no longer
+			// travel far enough to push every node past the right edge, and
+			// a longer stroke would run the pointer off the canvas, where
+			// panning stops. Each stroke stays inside the canvas and the
+			// pan accumulates.
+			auto* panView = flowCanvasWindow("View");
+			float const stroke = panView->InnerClipRect.GetWidth() - 100.0f;
+			for (int pass = 0; pass < 3 && graphInView(); ++pass)
+			{
+				ctx->MouseTeleportToPos({panView->InnerClipRect.Min.x + 8.0f,
+					panView->InnerClipRect.Min.y + 8.0f});
+				ctx->MouseDragWithDelta({stroke, 0.0f}, ImGuiMouseButton_Right);
+				ctx->Yield(3);
+			}
 			REQ(!graphInView(), "Pan visibility regression did not move graph out of view");
 			ctx->ItemClick("Views/Station Flow/Reset view"); ctx->Yield(3);
 			REQ(graphInView(), "Reset view restored the blank corner instead of framing the graph");
@@ -3839,9 +4076,6 @@ void cropWorkflow(smoke::Context const&)
 			ctx->Sleep(1);
 			ctx->MouseMove("Apply settings");
 			ctx->Sleep(1);
-			{
-				auto* ai = ctx->ItemInfo("Apply settings", ImGuiTestOpFlags_NoError);
-				}
 			driver.click(ctx, "Apply settings");
 			ctx->Sleep(1);
 			REQ(world->getStationSystemsSettings() == resupply[0].document.settings,
@@ -4112,6 +4346,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/removalWorkflow", removalWorkflow});
 	checks.push_back({"station/storeWorkflow", storeWorkflow});
 	checks.push_back({"station/flowLinkWorkflow", flowLinkWorkflow});
+	checks.push_back({"station/flowInspectorWorkflow", flowInspectorWorkflow});
 	checks.push_back({"station/transferWorkflow", transferWorkflow});
 	checks.push_back({"station/compoundWorkflow", compoundWorkflow});
 	checks.push_back({"station/powerWorkflow", powerWorkflow});

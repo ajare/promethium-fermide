@@ -16,6 +16,12 @@ public:
 	// Embedded presentation; the caller owns the window and scrolling region.
 	void renderContents(std::shared_ptr<core::World> const& world, DocumentHistory& history);
 	void renderFlowContents(std::shared_ptr<core::World> const& world);
+	// #653: the Flow inspector's content for the currently selected node.
+	// Renders the type's shared entry editor (#652 seam) against the same
+	// draft; a type without an extracted editor shows a placeholder naming
+	// the type. Field edits mutate the draft only - they never touch the
+	// World, advance the simulation, or implicitly apply the draft.
+	void renderFlowInspectorContents(core::StationSystemsSettings& draft);
 	core::StationSystemsSettings const& draft() const { return mDraft; }
 	DocumentHistory const& draftHistory() const { return mDraftHistory; }
 	// The Flow view's last-frame geometry, forwarded so a caller — a headless

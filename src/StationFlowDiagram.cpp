@@ -535,6 +535,17 @@ namespace
 		return nodeType + keySeparator + nodeId + keySeparator + portName;
 	}
 
+	// First graph node of a type/id pair. Duplicate ids stay distinct nodes;
+	// the inspector edits the first occurrence, matching the resolver the
+	// link layer uses for unambiguous references.
+	int findNodeByTypeAndId(station_flow::Graph const& graph,
+		std::string const& type, std::string const& id)
+	{
+		for (size_t i = 0; i < graph.nodes.size(); ++i)
+			if (graph.nodes[i].type == type && graph.nodes[i].id == id) return int(i);
+		return -1;
+	}
+
 	std::string pinKey(core::StationPinRef const& pin)
 	{
 		return pinKey(pin.nodeType, pin.nodeId, pin.portName);
@@ -590,6 +601,7 @@ void StationFlowDiagram::reset()
 	if (mNodeContext) { ImNodes::DestroyContext(mNodeContext); mNodeContext = nullptr; }
 	mCached.reset(); mGraph = {}; mPositions.clear(); mPan = {24, 24};
 	mZoom = 0.8f; mFitRequested = true; mSelected = -1; mConnectedOnly = false; mSearch[0] = 0;
+	mSelectedType.clear(); mSelectedId.clear();
 	mDragging = -1; mLastFrame = -1; mTemperature = 0;
 	mLinks.clear(); mPinIds.clear(); mPinRefs.clear(); mPinScreen.clear(); mNodeScreen.clear();
 	mLinkRejection.clear();
@@ -627,13 +639,40 @@ void StationFlowDiagram::updateBounds()
 	mExtent = {maximum.x - mMinimum.x + nodeWidth, maximum.y - mMinimum.y + nodeHeight};
 }
 
-void StationFlowDiagram::render(core::StationSystemsSettings& draft)
+std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode() const
+{
+	if (mSelected < 0 || size_t(mSelected) >= mGraph.nodes.size()) return std::nullopt;
+	// Read from the live graph node, so what the inspector renders is what
+	// the canvas is pointing at right now.
+	auto const& node = mGraph.nodes[size_t(mSelected)];
+	SelectedNode view;
+	view.type = node.type;
+	view.id = node.id;
+	// The builder emits each type in declaration order, but graph indices
+	// include nodes of other types. Count preceding nodes of this type to
+	// address its own draft vector (not the entire graph).
+	if (view.type == "Store" || view.type == "Transfer")
+	{
+		view.index = 0;
+		for (int i = 0; i < mSelected; ++i)
+			if (mGraph.nodes[size_t(i)].type == view.type) ++view.index;
+	}
+	return view;
+}
+
+void StationFlowDiagram::render(core::StationSystemsSettings& draft,
+	std::function<void(core::StationSystemsSettings&)> const& renderInspector)
 {
 	if (mLastFrame != ImGui::GetFrameCount() - 1) { mDragging = -1; mTemperature = 0; }
 	mLastFrame = ImGui::GetFrameCount();
 	if (!mCached || *mCached != draft)
 	{
-		mGraph = station_flow::build(draft); mCached = draft; mSelected = -1;
+		mGraph = station_flow::build(draft); mCached = draft;
+		// A rebuild must not silently drop the selection: re-resolve the
+		// remembered node by identity so editing a field in the inspector
+		// keeps the node it belongs to selected (until it disappears).
+		mSelected = mSelectedType.empty()
+			? -1 : findNodeByTypeAndId(mGraph, mSelectedType, mSelectedId);
 		mPositions = station_flow::forceLayout(mGraph);
 		std::map<std::string, size_t> occurrences;
 		for (size_t i = 0; i < mGraph.nodes.size(); ++i)
@@ -701,7 +740,11 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft)
 	ImGui::Checkbox("Connected only", &mConnectedOnly); ImGui::SameLine();
 	if (ImGui::Button("Fit all")) { mFitRequested = true; mDragging = -1; mTemperature = 0; }
 	ImGui::SameLine();
-	if (ImGui::Button("Reset view")) { mFitRequested = true; mSelected = -1; mDragging = -1; mTemperature = 0; }
+	if (ImGui::Button("Reset view"))
+	{
+		mFitRequested = true; mSelected = -1; mSelectedType.clear(); mSelectedId.clear();
+		mDragging = -1; mTemperature = 0;
+	}
 	ImGui::TextDisabled("Edges: material/service colours. Red = unresolved reference. Drag a connector to wire; hover a link and press Delete to disconnect.");
 	if (ImGui::TreeNodeEx("Edge colours", ImGuiTreeNodeFlags_NoAutoOpenOnLog))
 	{
@@ -724,61 +767,27 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft)
 	{
 		ImGui::TextDisabled("No systems configured in the draft. Add stores/processes or load a reference station.");
 	}
+	// Height-constant chrome: exactly one line whether or not a node is
+	// selected, so selecting never pushes the canvas (and the reserved
+	// inspector column) down a line and out from under the pointer.
 	if (mSelected >= 0)
-	{
-		auto const& n = mGraph.nodes[mSelected];
-		ImGui::Text("Selected: %s '%s'", n.type.c_str(), n.id.c_str());
-		if (ImGui::BeginChild("Connections", {0, 170}, true))
-		{
-			if (!n.detail.empty()) ImGui::TextUnformatted(n.detail.c_str());
-			auto const ports = nodePorts(n.type);
-			for (auto const& port : ports)
-			{
-				auto const self = pinKey(n.type, n.id, std::string(port.descriptor->name));
-				bool const connected = std::any_of(mLinks.begin(), mLinks.end(),
-					[&](FlowLink const& link) { return pinKey(link.authored.from) == self
-						|| pinKey(link.authored.to) == self; });
-				ImGui::Text("%s (%s) - %s", std::string(port.descriptor->name).c_str(),
-					port.descriptor->direction == core::StationPortDirection::Input
-						? "input" : "output", connected ? "connected" : "unconnected");
-			}
-			for (auto const& link : mLinks)
-			{
-				if (link.fromNode != size_t(mSelected) && link.toNode != size_t(mSelected)) continue;
-				bool const outgoing = link.fromNode == size_t(mSelected);
-				auto const& peer = mGraph.nodes[outgoing ? link.toNode : link.fromNode];
-				auto const& port = outgoing ? link.authored.from : link.authored.to;
-				auto const label = std::string("Disconnect ") + port.portName + " " + peer.id;
-				if (ImGui::SmallButton(label.c_str()))
-				{
-					core::clearStationLink(draft, link.authored.identity);
-					mLinkRejection.clear();
-				}
-				ImGui::SameLine();
-				ImGui::Text("%s %s '%s'", outgoing ? "->" : "<-", peer.type.c_str(), peer.id.c_str());
-			}
-			for (auto const& link : mGraph.links)
-				if (link.from == size_t(mSelected) || link.to == size_t(mSelected))
-				{
-					bool const outgoing = link.from == size_t(mSelected);
-					auto const& other = mGraph.nodes[outgoing ? link.to : link.from];
-					ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(station_flow::edgeColor(link.medium)),
-						"%s %s '%s': %s [%s]", outgoing ? "->" : "<-", other.type.c_str(), other.id.c_str(),
-						link.label.c_str(), station_flow::mediumName(link.medium));
-				}
-		}
-		ImGui::EndChild();
-	}
+		ImGui::Text("Selected: %s '%s'", mGraph.nodes[mSelected].type.c_str(),
+			mGraph.nodes[mSelected].id.c_str());
 	else
-	{
-		// Reserve the inspector's height so selecting a node never moves the
-		// canvas out from under the pointer at the start of a drag.
-		ImGui::TextDisabled("Select a node to inspect its connections.");
-		ImGui::BeginChild("Connections", {0, 170}, true);
-		ImGui::TextDisabled("Node colours identify types. Left-drag a node to reshape the graph.");
-		ImGui::EndChild();
-	}
-	if (!ImGui::BeginChild("Flow canvas", {0, 0}, true,
+		ImGui::TextDisabled("Selected: no node");
+	// The canvas and the inspector sit side by side. The inspector column
+	// is reserved whether or not a node is selected (#653), so selecting
+	// or deselecting never resizes the canvas or moves the node under the
+	// pointer.
+	float const availableWidth = ImGui::GetContentRegionAvail().x;
+	float const availableHeight = ImGui::GetContentRegionAvail().y;
+	float const canvasWidth = std::max(48.0f,
+		availableWidth - station_flow::InspectorColumnWidth - 8.0f);
+	// Same fill-to-bottom height the canvas used before the split: the outer
+	// region's own available height, never a subtraction that can collapse
+	// when the content above the row is taller than the window.
+	float const rowHeight = std::max(1.0f, availableHeight);
+	if (!ImGui::BeginChild("Flow canvas", {canvasWidth, rowHeight}, true,
 		ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
 	{ ImGui::EndChild(); return; }
 	auto origin = ImGui::GetCursorScreenPos();
@@ -934,7 +943,12 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft)
 		mLayout[keys[i]] = mPositions[i];
 	}
 	if (!mPlaceStore && canvasHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hoveredPin < 0)
+	{
 		mSelected = hoveredNode;
+		// Record the identity the inspector follows across rebuilds (#653).
+		mSelectedType = hoveredNode >= 0 ? mGraph.nodes[size_t(hoveredNode)].type : "";
+		mSelectedId = hoveredNode >= 0 ? mGraph.nodes[size_t(hoveredNode)].id : "";
+	}
 	if (mPlaceStore && canvasHovered && hoveredPin < 0
 		&& draft.stores.size() < core::MaxStationResourceStores
 		&& ImGui::IsMouseClicked(ImGuiMouseButton_Left))
@@ -1088,6 +1102,62 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft)
 					e.label.c_str(), station_flow::mediumName(e.medium));
 			}
 		ImGui::EndTooltip();
+	}
+	ImGui::EndChild();
+	// The reserved inspector column (#653). It is always here, selected or
+	// not; what changes is only its contents, never the canvas geometry.
+	ImGui::SameLine();
+	if (ImGui::BeginChild("Flow inspector", {station_flow::InspectorColumnWidth, rowHeight}, true))
+	{
+		// The diagram's own selection detail stays first: what the node is
+		// wired to. The caller's entry editor (the shared #652 seam) renders
+		// below it in the same reserved column.
+		if (mSelected >= 0)
+		{
+			auto const& n = mGraph.nodes[mSelected];
+			if (ImGui::BeginChild("Connections", {0, 170}, true))
+			{
+				if (!n.detail.empty()) ImGui::TextUnformatted(n.detail.c_str());
+				auto const ports = nodePorts(n.type);
+				for (auto const& port : ports)
+				{
+					auto const self = pinKey(n.type, n.id, std::string(port.descriptor->name));
+					bool const connected = std::any_of(mLinks.begin(), mLinks.end(),
+						[&](FlowLink const& link) { return pinKey(link.authored.from) == self
+							|| pinKey(link.authored.to) == self; });
+					ImGui::Text("%s (%s) - %s", std::string(port.descriptor->name).c_str(),
+						port.descriptor->direction == core::StationPortDirection::Input
+							? "input" : "output", connected ? "connected" : "unconnected");
+				}
+				for (auto const& link : mLinks)
+				{
+					if (link.fromNode != size_t(mSelected) && link.toNode != size_t(mSelected)) continue;
+					bool const outgoing = link.fromNode == size_t(mSelected);
+					auto const& peer = mGraph.nodes[outgoing ? link.toNode : link.fromNode];
+					auto const& port = outgoing ? link.authored.from : link.authored.to;
+					auto const label = std::string("Disconnect ") + port.portName + " " + peer.id;
+					if (ImGui::SmallButton(label.c_str()))
+					{
+						core::clearStationLink(draft, link.authored.identity);
+						mLinkRejection.clear();
+					}
+					ImGui::SameLine();
+					ImGui::Text("%s %s '%s'", outgoing ? "->" : "<-", peer.type.c_str(), peer.id.c_str());
+				}
+				for (auto const& link : mGraph.links)
+					if (link.from == size_t(mSelected) || link.to == size_t(mSelected))
+					{
+						bool const outgoing = link.from == size_t(mSelected);
+						auto const& other = mGraph.nodes[outgoing ? link.to : link.from];
+						ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(station_flow::edgeColor(link.medium)),
+							"%s %s '%s': %s [%s]", outgoing ? "->" : "<-", other.type.c_str(), other.id.c_str(),
+							link.label.c_str(), station_flow::mediumName(link.medium));
+					}
+			}
+			ImGui::EndChild();
+		}
+		if (renderInspector) renderInspector(draft);
+		else ImGui::TextDisabled("No inspector for this surface.");
 	}
 	ImGui::EndChild();
 }
