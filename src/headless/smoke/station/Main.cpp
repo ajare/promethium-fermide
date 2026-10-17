@@ -839,12 +839,158 @@ namespace
 				&& !core::clearStationLink(written, "nonsense")
 				&& !core::clearStationLink(written, "Transfer:missing:Source"),
 				"clearing an identity that names no reference claimed success");
+			// #667: every Authored node supports isolated and mixed-draft cascades.
+			core::StationSystemsSettings allTypes;
+			std::vector<std::string> types;
+			auto checkCascade = [&](core::StationSystemsSettings mixed, std::string const& type) {
+				auto const before = core::stationAuthoredLinks(mixed);
+				auto incident = [&](core::StationPinRef const& pin) {
+					return pin.nodeType == type && pin.nodeId == type;
+				};
+				auto const count = std::count_if(before.begin(), before.end(), [&](auto const& link) {
+					return incident(link.from) || incident(link.to);
+				});
+				core::StationNodeRemoval plan;
+				require(core::planStationNodeRemoval(mixed, type, type, plan)
+					&& plan.linkIdentities.size() == static_cast<size_t>(count),
+					(type + " cannot be removed or has wrong incident count").c_str());
+				auto removed = mixed;
+				require(core::removeStationNode(removed, plan), "cascade removal failed");
+				auto const remaining = core::stationAuthoredLinks(removed);
+				require(remaining.size() == before.size() - count,
+					"removal changed unrelated links");
+				for (auto const& link : remaining)
+				{
+					require(!incident(link.from) && !incident(link.to), "cascade left a dangling link");
+					require(std::any_of(before.begin(), before.end(), [&](auto const& old) {
+						return old.identity == link.identity && old.from == link.from && old.to == link.to;
+					}), "removal rewrote an unrelated link");
+				}
+				require(!core::planStationNodeRemoval(removed, type, type, plan),
+					"removal left the configuration entry behind");
+				core::StationNodeRename rename;
+				require(core::planStationNodeRename(mixed, type, type, "renamed", rename)
+					&& rename.linkIdentities == plan.linkIdentities
+					&& core::renameStationNode(mixed, rename),
+					(type + " cannot be renamed").c_str());
+				auto const after = core::stationAuthoredLinks(mixed);
+				require(after.size() == before.size(), "rename lost links");
+				for (size_t i = 0; i < before.size(); ++i)
+				{
+					auto from = before[i].from, to = before[i].to;
+					if (incident(from)) from.nodeId = "renamed";
+					if (incident(to)) to.nodeId = "renamed";
+					require(after[i].from == from && after[i].to == to, "rename changed wrong endpoint");
+				}
+				require(core::planStationNodeRename(mixed, type, "renamed", type, rename)
+					&& core::renameStationNode(mixed, rename) && mixed == allTypes,
+					"rename round trip changed other settings");
+			};
+			auto checkType = [&](char const* type, auto& entries) {
+				entries.emplace_back().id = type;
+				types.emplace_back(type);
+				checkCascade(allTypes, type);
+			};
+			checkType("Store", allTypes.stores);
+			checkType("Transfer", allTypes.transfers);
+			checkType("Conversion", allTypes.conversions);
+			checkType("Solar", allTypes.solarArrays);
+			checkType("Equipment", allTypes.equipmentLoads);
+			checkType("Battery", allTypes.batteries);
+			checkType("Delivery", allTypes.deliveries);
+			checkType("Waste ejection", allTypes.wasteEjections);
+			checkType("Outage", allTypes.outages);
+			checkType("Reservoir", allTypes.thermalReservoirs);
+			checkType("Radiator", allTypes.radiators);
+			checkType("Coolant loop", allTypes.coolantLoops);
+			checkType("Chiller", allTypes.chillers);
+			checkType("Generator", allTypes.generators);
+			checkType("Atmosphere", allTypes.atmospheres);
+			checkType("Airlock cycle", allTypes.airlockCycles);
+			checkType("Crew", allTypes.crews);
+			checkType("Water collector", allTypes.waterCollectors);
+			checkType("Water treatment", allTypes.waterTreatments);
+			checkType("Electrolyzer", allTypes.electrolyzers);
+			checkType("CO2 capture", allTypes.co2Captures);
+			checkType("Fuel cell", allTypes.fuelCells);
+			checkType("Sabatier", allTypes.sabatierReactors);
+			checkType("Methane processor", allTypes.methaneProcessors);
+			checkType("Microbial processor", allTypes.microbialProcessors);
+			checkType("Thermal buffer", allTypes.thermalBuffers);
+			checkType("Crops", allTypes.cropPopulations);
+			checkType("Algae", allTypes.algaeCultures);
+			checkType("Maintenance", allTypes.maintenanceJobs);
+			// Cross-family references, including shared atmosphere fields, growable
+			// flows, and installation supervision. All entries remain in the draft.
+			allTypes.transfers[0].sourceId = allTypes.transfers[0].destinationId = "Store";
+			allTypes.conversions[0].inputs = {{"Store", 1.0}};
+			allTypes.conversions[0].outputs = {{"Store", 1.0}};
+			core::visitStationBiologyReferences(allTypes, [](auto, auto const&, auto, auto,
+				auto& reference, bool, std::string_view peerType, auto) { reference = peerType; });
+			core::visitStationScheduleReferences(allTypes, [](auto, auto const&, auto, auto,
+				auto& reference, bool, std::string_view peerType, auto) {
+					reference = peerType == "Installation" ? "Generator" : peerType;
+				});
+			allTypes.maintenanceJobs[0].requirements = {{"Store", 1.0}};
+			allTypes.generators[0].fuelStoreId = "Store";
+			allTypes.generators[0].heatSinkId = "Reservoir";
+			allTypes.equipmentLoads[0].heatSinkId = "Reservoir";
+			allTypes.equipmentLoads[0].materialExchanges.resize(2);
+			allTypes.equipmentLoads[0].materialExchanges[0].storeId = "Store";
+			allTypes.equipmentLoads[0].materialExchanges[1].storeId = "Store";
+			allTypes.equipmentLoads[0].materialExchanges[1].consumes = false;
+			allTypes.fuelCells[0].hydrogenStoreId = "Store";
+			allTypes.fuelCells[0].oxygenStoreId = "Store";
+			allTypes.fuelCells[0].waterStoreId = "Store";
+			allTypes.fuelCells[0].heatSinkId = "Reservoir";
+			allTypes.sabatierReactors[0].co2StoreId = "Store";
+			allTypes.sabatierReactors[0].hydrogenStoreId = "Store";
+			allTypes.sabatierReactors[0].methaneStoreId = "Store";
+			allTypes.sabatierReactors[0].waterStoreId = "Store";
+			allTypes.sabatierReactors[0].heatSinkId = "Reservoir";
+			allTypes.methaneProcessors[0].methaneStoreId = "Store";
+			allTypes.methaneProcessors[0].hydrogenStoreId = "Store";
+			allTypes.methaneProcessors[0].carbonStoreId = "Store";
+			allTypes.methaneProcessors[0].heatSinkId = "Reservoir";
+			allTypes.radiators[0].reservoirId = "Reservoir";
+			allTypes.coolantLoops[0].reservoirId = "Reservoir";
+			allTypes.chillers[0].coldLoopId = "Coolant loop";
+			allTypes.chillers[0].condenserReservoirId = "Reservoir";
+			allTypes.thermalBuffers[0].reservoirId = "Reservoir";
+			allTypes.thermalBuffers[0].circulationLoopId = "Coolant loop";
+			allTypes.atmospheres[0].reservoirId = "Reservoir";
+			allTypes.airlockCycles[0].atmosphereId = "Atmosphere";
+			allTypes.waterCollectors[0].atmosphereId = "Atmosphere";
+			allTypes.waterCollectors[0].coolingLoopId = "Coolant loop";
+			allTypes.waterCollectors[0].destStoreId = "Store";
+			allTypes.waterTreatments[0].sourceStoreId = "Store";
+			allTypes.waterTreatments[0].treatedStoreId = "Store";
+			allTypes.waterTreatments[0].concentrateStoreId = "Store";
+			allTypes.waterTreatments[0].consumableStoreId = "Store";
+			allTypes.waterTreatments[0].clearanceStoreId = "Store";
+			allTypes.electrolyzers[0].atmosphereId = "Atmosphere";
+			allTypes.electrolyzers[0].heatSinkId = "Reservoir";
+			allTypes.electrolyzers[0].waterStoreId = "Store";
+			allTypes.electrolyzers[0].oxygenStoreId = "Store";
+			allTypes.electrolyzers[0].hydrogenStoreId = "Store";
+			allTypes.co2Captures[0].atmosphereId = "Atmosphere";
+			allTypes.co2Captures[0].captureStoreId = "Store";
+			allTypes.co2Captures[0].consumableStoreId = "Store";
+			for (auto const* installation : {"Generator", "Coolant loop", "Chiller"})
+			{
+				allTypes.outages[0].installationId = installation;
+				allTypes.maintenanceJobs[0].installationId = installation;
+				for (auto const& type : types) checkCascade(allTypes, type);
+			}
+			core::StationNodeRename collision;
+			require(!core::planStationNodeRename(allTypes, "Generator", "Generator", "Chiller", collision),
+				"rename collided with another installation type");
 			// Removal resolves through precisely the same authored references.
 			core::StationNodeRemoval removal;
 			auto unmapped = reordered;
 			unmapped.deliveries.emplace_back();
-			require(!core::planStationNodeRemoval(unmapped, "Store", "tank", removal),
-				"a store with unmapped reference families was offered an unsafe cascade");
+			require(core::planStationNodeRemoval(unmapped, "Store", "tank", removal),
+				"an unrelated delivery disabled a store cascade");
 			require(core::planStationNodeRemoval(reordered, "Store", "tank", removal)
 				&& removal.linkIdentities.size() == 2, "store referrer count missed a transfer endpoint");
 			auto stale = reordered;
@@ -866,8 +1012,14 @@ namespace
 				&& core::removeStationNode(reordered, transferRemoval)
 				&& reordered.transfers.size() == 1,
 				"transfer removal did not consume its remaining reference");
-			require(!core::planStationNodeRemoval(reordered, "Power", "Shared electrical pool", removal),
-				"derived service node was considered removable");
+			for (auto const* derived : {"Power", "Cooling service"})
+			{
+				require(!core::planStationNodeRemoval(reordered, derived, "service", removal),
+					"derived service node was considered removable");
+				core::StationNodeRename rename;
+				require(!core::planStationNodeRename(reordered, derived, "service", "renamed", rename),
+					"derived service node was considered renamable");
+			}
 			// A pair with no reference behind it never writes anything.
 			auto untouched = base();
 			auto const snapshot = untouched;
@@ -2378,8 +2530,7 @@ namespace
 				&& core::removeStationNode(settings, removal)
 				&& settings.batteries.empty(),
 				"a battery with no references was not removable");
-			// A generator named by scheduled installation work is not
-			// removable until that family is mapped.
+			// Supervision references cascade with the installation.
 			auto withOutage = base();
 			core::InstallationOutageSettings outage;
 			outage.id = "down";
@@ -2388,8 +2539,11 @@ namespace
 			outage.firstOccurrenceSeconds = 1.0;
 			outage.durationSeconds = 10.0;
 			withOutage.outages.push_back(outage);
-			require(!core::planStationNodeRemoval(withOutage, "Generator", "gen1", removal),
-				"a generator with a scheduled outage was offered an unsafe removal");
+			require(core::planStationNodeRemoval(withOutage, "Generator", "gen1", removal)
+				&& removal.linkIdentities.size() == 1
+				&& core::removeStationNode(withOutage, removal)
+				&& withOutage.outages.front().installationId.empty(),
+				"a generator cascade did not clear its scheduled outage");
 			auto cleanGen = base();
 			require(core::planStationNodeRemoval(cleanGen, "Generator", "gen1", removal)
 				&& core::removeStationNode(cleanGen, removal)

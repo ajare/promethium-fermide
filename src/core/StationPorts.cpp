@@ -1173,6 +1173,43 @@ namespace
 		if (!validateStationTransferWiring(settings, *found, text, true)) diagnostic = std::move(text);
 		return true;
 	}
+
+	// Keep existence, removal, collision checks and rename on the same complete
+	// Authored-node dispatch. Derived service nodes own no configuration entry.
+	template<class Settings, class F>
+	bool withNodeEntries(Settings& settings, std::string_view type, F fn)
+	{
+		if (type == "Store") return fn(settings.stores);
+		if (type == "Transfer") return fn(settings.transfers);
+		if (type == "Conversion") return fn(settings.conversions);
+		if (type == "Solar") return fn(settings.solarArrays);
+		if (type == "Equipment") return fn(settings.equipmentLoads);
+		if (type == "Battery") return fn(settings.batteries);
+		if (type == "Delivery") return fn(settings.deliveries);
+		if (type == "Waste ejection") return fn(settings.wasteEjections);
+		if (type == "Outage") return fn(settings.outages);
+		if (type == "Reservoir") return fn(settings.thermalReservoirs);
+		if (type == "Radiator") return fn(settings.radiators);
+		if (type == "Coolant loop") return fn(settings.coolantLoops);
+		if (type == "Chiller") return fn(settings.chillers);
+		if (type == "Generator") return fn(settings.generators);
+		if (type == "Atmosphere") return fn(settings.atmospheres);
+		if (type == "Airlock cycle") return fn(settings.airlockCycles);
+		if (type == "Crew") return fn(settings.crews);
+		if (type == "Water collector") return fn(settings.waterCollectors);
+		if (type == "Water treatment") return fn(settings.waterTreatments);
+		if (type == "Electrolyzer") return fn(settings.electrolyzers);
+		if (type == "CO2 capture") return fn(settings.co2Captures);
+		if (type == "Fuel cell") return fn(settings.fuelCells);
+		if (type == "Sabatier") return fn(settings.sabatierReactors);
+		if (type == "Methane processor") return fn(settings.methaneProcessors);
+		if (type == "Microbial processor") return fn(settings.microbialProcessors);
+		if (type == "Thermal buffer") return fn(settings.thermalBuffers);
+		if (type == "Crops") return fn(settings.cropPopulations);
+		if (type == "Algae") return fn(settings.algaeCultures);
+		if (type == "Maintenance") return fn(settings.maintenanceJobs);
+		return false;
+	}
 }
 
 std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& settings)
@@ -1518,42 +1555,7 @@ bool planStationNodeRemoval(StationSystemsSettings const& settings,
 		return std::any_of(entries.begin(), entries.end(),
 			[&](auto const& entry) { return entry.id == nodeId; });
 	};
-	bool const isStore = nodeType == "Store";
-	bool const isTransfer = nodeType == "Transfer";
-	bool const isEquipment = nodeType == "Equipment";
-	bool const isBattery = nodeType == "Battery";
-	bool const isGenerator = nodeType == "Generator";
-	bool const isFuelCell = nodeType == "Fuel cell";
-	bool const isSabatier = nodeType == "Sabatier";
-	bool const isMethaneProcessor = nodeType == "Methane processor";
-	bool const isMachine = isEquipment || isBattery || isGenerator || isFuelCell
-		|| isSabatier || isMethaneProcessor;
-	if (!isStore && !isTransfer && !isMachine) return false;
-	if (isStore && !exists(settings.stores)) return false;
-	if (isTransfer && !exists(settings.transfers)) return false;
-	if (isEquipment && !exists(settings.equipmentLoads)) return false;
-	if (isBattery && !exists(settings.batteries)) return false;
-	if (isGenerator && !exists(settings.generators)) return false;
-	if (isFuelCell && !exists(settings.fuelCells)) return false;
-	if (isSabatier && !exists(settings.sabatierReactors)) return false;
-	if (isMethaneProcessor && !exists(settings.methaneProcessors)) return false;
-	// #640 mapped only Transfer endpoints; #647 added the power and
-	// conversion chain families. Other authored entries can also name
-	// Stores or installations; without their mappings a cascade would
-	// silently strand references, so such drafts are refused until those
-	// families have core-owned connector mappings, even if a given entry
-	// might not reference this particular node.
-	if (!settings.deliveries.empty() || !settings.wasteEjections.empty()
-		|| !settings.crews.empty() || !settings.waterCollectors.empty()
-		|| !settings.waterTreatments.empty() || !settings.electrolyzers.empty()
-		|| !settings.co2Captures.empty() || !settings.microbialProcessors.empty()
-		|| !settings.cropPopulations.empty() || !settings.algaeCultures.empty()) return false;
-	// A generator is a registered installation: scheduled outages and
-	// maintenance jobs name it by installation id, and that family is
-	// not part of the connector seam yet, so removing a generator from
-	// such a draft is refused until those references are mapped too.
-	if (isGenerator && (!settings.outages.empty() || !settings.maintenanceJobs.empty()))
-		return false;
+	if (!withNodeEntries(settings, nodeType, exists)) return false;
 	StationNodeRemoval candidate{nodeType, nodeId, {}};
 	for (auto const& link : stationAuthoredLinks(settings))
 		if ((link.from.nodeType == nodeType && link.from.nodeId == nodeId)
@@ -1573,55 +1575,11 @@ bool removeStationNode(StationSystemsSettings& settings, StationNodeRemoval cons
 	auto candidate = settings;
 	for (auto const& identity : current.linkIdentities)
 		if (!clearStationLink(candidate, identity)) return false;
-	if (plan.nodeType == "Store")
-	{
-		auto& stores = candidate.stores;
-		stores.erase(std::remove_if(stores.begin(), stores.end(),
-			[&](auto const& entry) { return entry.id == plan.nodeId; }), stores.end());
-	}
-	else if (plan.nodeType == "Transfer")
-	{
-		auto& transfers = candidate.transfers;
-		transfers.erase(std::remove_if(transfers.begin(), transfers.end(),
-			[&](auto const& entry) { return entry.id == plan.nodeId; }), transfers.end());
-	}
-	else if (plan.nodeType == "Equipment")
-	{
-		auto& loads = candidate.equipmentLoads;
-		loads.erase(std::remove_if(loads.begin(), loads.end(),
-			[&](auto const& entry) { return entry.id == plan.nodeId; }), loads.end());
-	}
-	else if (plan.nodeType == "Battery")
-	{
-		auto& batteries = candidate.batteries;
-		batteries.erase(std::remove_if(batteries.begin(), batteries.end(),
-			[&](auto const& entry) { return entry.id == plan.nodeId; }), batteries.end());
-	}
-	else if (plan.nodeType == "Generator")
-	{
-		auto& generators = candidate.generators;
-		generators.erase(std::remove_if(generators.begin(), generators.end(),
-			[&](auto const& entry) { return entry.id == plan.nodeId; }), generators.end());
-	}
-	else if (plan.nodeType == "Fuel cell")
-	{
-		auto& cells = candidate.fuelCells;
-		cells.erase(std::remove_if(cells.begin(), cells.end(),
-			[&](auto const& entry) { return entry.id == plan.nodeId; }), cells.end());
-	}
-	else if (plan.nodeType == "Sabatier")
-	{
-		auto& reactors = candidate.sabatierReactors;
-		reactors.erase(std::remove_if(reactors.begin(), reactors.end(),
-			[&](auto const& entry) { return entry.id == plan.nodeId; }), reactors.end());
-	}
-	else if (plan.nodeType == "Methane processor")
-	{
-		auto& processors = candidate.methaneProcessors;
-		processors.erase(std::remove_if(processors.begin(), processors.end(),
-			[&](auto const& entry) { return entry.id == plan.nodeId; }), processors.end());
-	}
-	else return false;
+	if (!withNodeEntries(candidate, plan.nodeType, [&](auto& entries) {
+		entries.erase(std::remove_if(entries.begin(), entries.end(),
+			[&](auto const& entry) { return entry.id == plan.nodeId; }), entries.end());
+		return true;
+	})) return false;
 	settings = std::move(candidate);
 	return true;
 }
@@ -1640,22 +1598,18 @@ bool planStationNodeRename(StationSystemsSettings const& settings,
 		return refuse("A node name is too long.");
 	StationNodeRemoval removal;
 	if (!planStationNodeRemoval(settings, nodeType, oldNodeId, removal))
-		return refuse("This node cannot be renamed while reference mapping is incomplete.");
+		return refuse("This node has no authored configuration entry to rename.");
 	auto nameUsed = [&](auto const& entries) {
 		return std::any_of(entries.begin(), entries.end(), [&](auto const& entry) {
 			return entry.id == newNodeId && entry.id != oldNodeId;
 		});
 	};
-	bool used = false;
-	if (nodeType == "Store") used = nameUsed(settings.stores);
-	else if (nodeType == "Transfer") used = nameUsed(settings.transfers);
-	else if (nodeType == "Equipment") used = nameUsed(settings.equipmentLoads);
-	else if (nodeType == "Battery") used = nameUsed(settings.batteries);
-	else if (nodeType == "Generator") used = nameUsed(settings.generators);
-	else if (nodeType == "Fuel cell") used = nameUsed(settings.fuelCells);
-	else if (nodeType == "Sabatier") used = nameUsed(settings.sabatierReactors);
-	else if (nodeType == "Methane processor") used = nameUsed(settings.methaneProcessors);
-	else return refuse("This node cannot be renamed.");
+	bool used = withNodeEntries(settings, nodeType, nameUsed);
+	// Supervision targets share an installation namespace across these types.
+	if (isInstallationType(nodeType))
+		for (auto const& identity : stationInstallationIdentities(settings))
+			if (identity.id == newNodeId)
+				return refuse("An installation named '" + newNodeId + "' already exists.");
 	if (used) return refuse("A " + nodeType + " named '" + newNodeId + "' already exists.");
 	plan = {nodeType, oldNodeId, newNodeId, std::move(removal.linkIdentities)};
 	if (diagnostic) diagnostic->clear();
@@ -1691,16 +1645,7 @@ bool renameStationNode(StationSystemsSettings& settings, StationNodeRename const
 		found->id = current.newNodeId;
 		return true;
 	};
-	bool renamed = false;
-	if (current.nodeType == "Store") renamed = rename(candidate.stores);
-	else if (current.nodeType == "Transfer") renamed = rename(candidate.transfers);
-	else if (current.nodeType == "Equipment") renamed = rename(candidate.equipmentLoads);
-	else if (current.nodeType == "Battery") renamed = rename(candidate.batteries);
-	else if (current.nodeType == "Generator") renamed = rename(candidate.generators);
-	else if (current.nodeType == "Fuel cell") renamed = rename(candidate.fuelCells);
-	else if (current.nodeType == "Sabatier") renamed = rename(candidate.sabatierReactors);
-	else if (current.nodeType == "Methane processor") renamed = rename(candidate.methaneProcessors);
-	if (!renamed) return false;
+	if (!withNodeEntries(candidate, current.nodeType, rename)) return false;
 	for (auto link : affected)
 	{
 		if (link.from.nodeType == current.nodeType && link.from.nodeId == current.oldNodeId)

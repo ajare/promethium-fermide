@@ -357,6 +357,12 @@ namespace
 			transfer.unit = "kg"; transfer.ratePerSecond = 1;
 			seed.transfers.push_back(transfer);
 		}
+		// #667: a schedule must neither disable unrelated store actions nor
+		// be omitted from a connected store's confirmation and cascade.
+		core::ResourceDeliverySettings delivery;
+		delivery.id = "supply"; delivery.storeId = "a";
+		delivery.unit = "kg"; delivery.quantity = 1;
+		seed.deliveries.push_back(delivery);
 		std::string diagnostic;
 		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
 		world->markSaved();
@@ -377,7 +383,7 @@ namespace
 			};
 			REQ(select("a"), "source store not visible");
 			driver.click(ctx, "**/Delete selected node"); ctx->Yield(3);
-			REQ(driver.contains("This removes 2 connections") && window.draft() == seed
+			REQ(driver.contains("This removes 3 connections") && window.draft() == seed
 				&& window.draftHistory().undoCount() == 0,
 				"confirmation did not count references before mutation");
 			driver.click(ctx, "**/Cancel node deletion"); ctx->Yield(3);
@@ -388,6 +394,7 @@ namespace
 			REQ(window.draft().stores.size() == 3 && window.draft().transfers.size() == 2
 				&& window.draft().transfers[0].sourceId.empty()
 				&& window.draft().transfers[1].sourceId.empty()
+				&& window.draft().deliveries[0].storeId.empty()
 				&& window.draft().transfers[0].destinationId == "b"
 				&& window.draft().transfers[1].destinationId == "c"
 				&& window.draftHistory().undoCount() == 1,
@@ -396,7 +403,7 @@ namespace
 				REQ(link.from.nodeId != "a" && link.to.nodeId != "a", "dangling authored link");
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
 			REQ(window.draft() == seed && window.draftHistory().redoCount() == 1,
-				"one undo did not restore the node and both links");
+				"one undo did not restore the node and all three links");
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
 			REQ(window.draft().stores.size() == 3, "redo did not reapply cascade");
 			REQ(select("d"), "unreferenced store not visible");
@@ -414,7 +421,7 @@ namespace
 			driver.click(ctx, "**/New node name"); ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
 			ctx->KeyChars("renamed"); ctx->Yield(2);
 			driver.click(ctx, "**/Rename selected node"); ctx->Yield(3);
-			REQ(driver.contains("Rename this store? 2 links will be updated") && window.draft() == seed
+			REQ(driver.contains("Rename this store? 3 links will be updated") && window.draft() == seed
 				&& window.draftHistory().undoCount() == 0,
 				"rename confirmation did not preserve the draft or name its referrers");
 			driver.click(ctx, "**/Cancel node rename"); ctx->Yield(3);
@@ -425,11 +432,29 @@ namespace
 			REQ(window.draft().stores[0].id == "renamed"
 				&& window.draft().transfers[0].sourceId == "renamed"
 				&& window.draft().transfers[1].sourceId == "renamed"
+				&& window.draft().deliveries[0].storeId == "renamed"
 				&& window.draftHistory().undoCount() == 1,
 				"confirmed rename did not update every referrer in one history entry");
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
 			REQ(window.draft() == seed && window.draftHistory().redoCount() == 1,
 				"one undo did not restore the old name and every reference");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().deliveries[0].storeId == "renamed",
+				"redo did not restore the full rename cascade");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			ImVec4 rect{};
+			REQ(window.flowNodeRect("Delivery", "supply", &rect), "delivery node not visible");
+			ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+			ctx->MouseClick(); ctx->Yield(3);
+			driver.click(ctx, "**/Delete selected node"); ctx->Yield(3);
+			REQ(driver.contains("This removes 1 connections"), "delivery deletion missed its link");
+			driver.click(ctx, "**/Confirm node deletion"); ctx->Yield(3);
+			REQ(window.draft().deliveries.empty() && window.draftHistory().undoCount() == 1,
+				"delivery deletion did not commit exactly once");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft() == seed, "undo did not restore delivery and link together");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
+			REQ(window.draft().deliveries.empty(), "redo did not remove delivery again");
 			REQ(world->getStationSystemsSettings() == seed && worldHistory.undoCount() == 0,
 				"draft removal touched the World");
 		});

@@ -544,8 +544,8 @@ namespace core
 	// when the identity names no entry, leaving the draft untouched.
 	bool clearStationLink(StationSystemsSettings& settings, std::string const& identity);
 
-	// Resolve and remove an authored Store or Transfer and all its connector
-	// references through the same mapping used for links. Unsupported or
+	// Resolve and remove any Authored node and all its connector references
+	// through the same mapping used for links. Derived service nodes and
 	// missing nodes are refused without changing the draft.
 	struct StationNodeRemoval
 	{
