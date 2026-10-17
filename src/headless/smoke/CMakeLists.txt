@@ -85,7 +85,7 @@ foreach(check lifecycle batching eventBound persistence stores transfers linkSea
         batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
-        deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres crews water containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance configurationFile fileRoundTrip writeFailure legacyFiles structuralReplay
+        deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres crews water containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay
         compoundFiles powerFiles powerChainFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles outageFiles maintenanceFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles
         # #571: harvest, algae and the nutrient-conservation closure were
         # reachable through the binary but never registered here, so they

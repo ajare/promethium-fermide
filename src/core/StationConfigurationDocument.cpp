@@ -68,7 +68,7 @@ namespace core
 				if (!exists(it->sourceId) || !exists(it->destinationId))
 				{
 					if (it->id.empty() || it->id.size() > MaxStationStoreIdLength
-						|| it->sourceId == it->destinationId
+						|| (!it->sourceId.empty() && it->sourceId == it->destinationId)
 						|| !std::isfinite(it->ratePerSecond) || it->ratePerSecond <= 0.0
 						|| std::find(StationStoreUnits.begin(), StationStoreUnits.end(), it->unit)
 							== StationStoreUnits.end())

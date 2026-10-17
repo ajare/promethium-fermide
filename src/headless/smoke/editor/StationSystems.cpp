@@ -6,6 +6,8 @@
 #include "DocumentEdit.h"
 #include "../CoupledRig.h"
 #include "core/StationReference.h"
+#include "core/StationConfigurationDocument.h"
+#include "core/StationPorts.h"
 #include "core/TransactionalFileWriter.h"
 #include "core/World.h"
 #include "imgui/imgui.h"
@@ -3257,8 +3259,215 @@ namespace
 		require(driver.passed(), "Tabbed View workflow failed on the Test Engine");
 	}
 
+	// Exercise every combination of absent, dangling and resolved connectors,
+	// starting with the defaults produced by the real placement controls.
+	void partialPlacementDocuments(core::StationConfigurationDocument document,
+		std::string_view type, std::filesystem::path const& path, bool alternative = false)
+	{
+		using smoke::require;
+		if (!alternative && (type == "Water treatment" || type == "Electrolyzer"))
+			partialPlacementDocuments(document, type, path, true);
+		std::vector<std::pair<std::string*, std::string>> endpoints;
+		auto& s = document.settings;
+		auto store = [&](std::string& reference, char const* id) {
+			s.stores.push_back({id, "kg", 100.0, 10.0});
+			endpoints.emplace_back(&reference, id);
+		};
+		auto sink = [&](std::string& reference, std::string const& thermalClass) {
+			core::ThermalReservoirSettings reservoir;
+			reservoir.id = "sink"; reservoir.thermalClass = thermalClass;
+			reservoir.heatCapacityKJPerK = 100;
+			s.thermalReservoirs.push_back(reservoir);
+			endpoints.emplace_back(&reference, reservoir.id);
+		};
+		auto installation = [&](std::string& reference) {
+			core::GeneratorSettings generator;
+			generator.id = "generator"; generator.fuelStoreId = "fuel";
+			generator.heatSinkId = "sink"; generator.thermalClass = "low";
+			generator.maxRampKWPerSecond = 1;
+			s.stores.push_back({"fuel", "kWh", 100.0, 10.0});
+			s.generators.push_back(generator);
+			std::string unused;
+			sink(unused, "low"); endpoints.pop_back();
+			endpoints.emplace_back(&reference, generator.id);
+		};
+		if (type == "Fuel cell")
+		{
+			auto& entry = s.fuelCells[0];
+			store(entry.hydrogenStoreId, "hydrogen"); store(entry.oxygenStoreId, "oxygen");
+			store(entry.waterStoreId, "water"); sink(entry.heatSinkId, entry.thermalClass);
+		}
+		else if (type == "Water treatment")
+		{
+			auto& entry = s.waterTreatments[0];
+			store(entry.sourceStoreId, "source"); store(entry.treatedStoreId, "treated");
+			store(entry.concentrateStoreId, "concentrate"); store(entry.consumableStoreId, "consumable");
+			if (alternative)
+			{
+				entry.hazardClass = "hazardous"; entry.clearancePerKg = 1;
+				store(entry.clearanceStoreId, "clearance");
+				for (auto& target : s.stores) target.hazardClass = "hazardous";
+			}
+		}
+		else if (type == "Electrolyzer")
+		{
+			auto& entry = s.electrolyzers[0];
+			store(entry.waterStoreId, "water");
+			if (alternative)
+			{
+				core::AtmosphereSettings atmosphere;
+				atmosphere.id = "atmosphere"; atmosphere.hazardClass = entry.hazardClass;
+				atmosphere.volumeM3 = 100; atmosphere.thermalCapacityKJPerK = 100;
+				atmosphere.minPressureKPa = 50; atmosphere.maxPressureKPa = 150;
+				s.atmospheres.push_back(atmosphere);
+				endpoints.emplace_back(&entry.atmosphereId, atmosphere.id);
+			}
+			else store(entry.oxygenStoreId, "oxygen");
+			store(entry.hydrogenStoreId, "hydrogen"); sink(entry.heatSinkId, entry.thermalClass);
+		}
+		else if (type == "Outage") installation(s.outages[0].installationId);
+		else if (type == "Maintenance")
+		{
+			auto& entry = s.maintenanceJobs[0];
+			installation(entry.installationId);
+			entry.requirements[0].consumed = true;
+			store(entry.requirements[0].storeId, "parts"); store(entry.wasteStoreId, "waste");
+		}
+		else return;
+		core::StationConfigurationDocument restored;
+		std::string diagnostic;
+		auto roundTrip = [&] {
+			auto const bytes = core::serializeStationConfiguration(document);
+			core::saveStationConfiguration(path.string(), document);
+			auto const loaded = core::loadStationConfiguration(path.string(), restored, &diagnostic);
+			require(loaded, std::string(type) + " partial wiring: " + diagnostic);
+			require(bytes == core::serializeStationConfiguration(restored), "Partial wiring changed on reopen");
+		};
+		size_t combinations = 1;
+		for (auto const& endpoint : endpoints) { (void)endpoint; combinations *= 3; }
+		for (size_t state = 0; state < combinations; ++state)
+		{
+			auto digits = state;
+			bool complete = true;
+			for (auto const& [reference, id] : endpoints)
+			{
+				auto const choice = digits % 3; digits /= 3;
+				*reference = choice == 0 ? "" : choice == 1 ? "missing-" + id : id;
+				complete &= choice == 2;
+			}
+			roundTrip();
+			if (!complete)
+				require(!core::validateStationSystemsSettings(s, diagnostic), "World Apply accepted incomplete wiring");
+			else
+				require(core::validateStationSystemsSettings(s, diagnostic), "Complete fixture is invalid: " + diagnostic);
+		}
+		// A missing first connector must not hide invalid later connectors or scalars.
+		*endpoints[0].first = "";
+		auto rejects = [&](core::StationConfigurationDocument const& invalid) {
+			require(!core::parseStationConfiguration(core::serializeStationConfiguration(invalid), restored, &diagnostic),
+				std::string(type) + " accepted invalid partially wired settings");
+		};
+		auto invalid = document;
+		if (type == "Fuel cell") invalid.settings.fuelCells[0].efficiency = 2;
+		else if (type == "Water treatment") invalid.settings.waterTreatments[0].recoveryRatio = 2;
+		else if (type == "Electrolyzer") invalid.settings.electrolyzers[0].specificEnergyKWhPerKgWater = 0;
+		else if (type == "Outage") invalid.settings.outages[0].durationSeconds = -1;
+		else invalid.settings.maintenanceJobs[0].requirements[0].quantity = -1;
+		rejects(invalid);
+		if (type != "Outage")
+		{
+			for (int error = 0; error < 3; ++error)
+			{
+				invalid = document;
+				// The last store is resolved even though the first connector is absent.
+				auto& target = type == "Water treatment" ? invalid.settings.stores[1] : invalid.settings.stores.back();
+				if (error == 0) target.unit = "L";
+				if (error == 1) target.hazardClass = target.hazardClass == "normal" ? "hazardous" : "normal";
+				if (error == 2) target.composition.emplace();
+				rejects(invalid);
+			}
+		}
+		invalid = document;
+		if (type == "Fuel cell") invalid.settings.fuelCells[0].hydrogenStoreId = s.fuelCells[0].oxygenStoreId;
+		else if (type == "Water treatment") invalid.settings.waterTreatments[0].sourceStoreId = s.waterTreatments[0].treatedStoreId;
+		else if (type == "Electrolyzer") invalid.settings.electrolyzers[0].waterStoreId = s.electrolyzers[0].hydrogenStoreId;
+		else if (type == "Maintenance") invalid.settings.maintenanceJobs[0].requirements[0].storeId = s.maintenanceJobs[0].wasteStoreId;
+		if (type != "Outage") rejects(invalid);
+		if (type == "Electrolyzer")
+		{
+			invalid = document;
+			invalid.settings.electrolyzers[0].oxygenStoreId = "missing-oxygen";
+			invalid.settings.electrolyzers[0].atmosphereId = "missing-atmosphere";
+			rejects(invalid); // Both destinations is illegal, even if neither resolves.
+		}
+		if (type == "Fuel cell" || type == "Electrolyzer")
+		{
+			invalid = document;
+			invalid.settings.thermalReservoirs[0].thermalClass =
+				invalid.settings.thermalReservoirs[0].thermalClass == "low" ? "moderate" : "low";
+			rejects(invalid);
+		}
+	}
+
+	void placedDefaultsDocumentWorkflow(smoke::Context const& smokeContext)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		StationSystemsWindow window;
+		auto const path = smokeContext.temporaryRoot() / "placed.station.yaml";
+		window.setFilePicker([&](bool) -> std::optional<std::string> { return path.string(); });
+		auto world = std::make_shared<core::World>("Placement", 2, 2);
+		world->pauseSimulation(); world->finishBuild(); world->markSaved();
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "placedDefaultsDocument", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			// Every catalogue default must survive the actual placement/save/open path.
+			for (auto const& type : core::stationPlaceableTypes())
+			{
+				ctx->ItemClick("New configuration"); ctx->Yield(3);
+				ctx->ComboClick((std::string("Place node/") + std::string(type.nodeType)).c_str()); ctx->Yield(2);
+				auto* canvas = flowCanvasWindow("Configuration");
+				REQ(driver.contains((std::string(type.nodeType) + " placement armed").c_str()), "Placement did not arm");
+				ctx->MouseTeleportToPos(canvas->InnerClipRect.GetCenter());
+				ctx->MouseClick(); ctx->Yield(3);
+				ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+				ctx->SetRef("Configuration");
+				REQ(!driver.contains("No systems configured in the draft"),
+					(std::string(type.nodeType) + ": catalogue placement did not create a node").c_str());
+				ctx->ItemClick("Save configuration"); ctx->Yield(3);
+				REQ(!window.flowModified(), "Placed default could not be saved");
+				core::StationConfigurationDocument saved;
+				std::string diagnostic;
+				auto const loaded = core::loadStationConfiguration(path.string(), saved, &diagnostic);
+				REQ(loaded, (std::string(type.nodeType) + ": " + diagnostic).c_str());
+				auto const bytes = core::serializeStationConfiguration(saved);
+				ctx->ItemClick("New configuration"); ctx->Yield(3);
+				ctx->ItemClick("Open configuration"); ctx->Yield(3);
+				REQ(!driver.contains("No systems configured in the draft") && !window.flowModified(),
+					"Saved catalogue default could not be reopened");
+				ctx->ItemClick("Save configuration"); ctx->Yield(3);
+				core::StationConfigurationDocument reopened;
+				REQ(core::loadStationConfiguration(path.string(), reopened, &diagnostic)
+					&& bytes == core::serializeStationConfiguration(reopened),
+					"Catalogue default changed after reopening");
+				partialPlacementDocuments(saved, type.nodeType,
+					smokeContext.temporaryRoot() / "partial.station.yaml");
+			}
+		});
+		#undef REQ
+		require(driver.passed(), "Placed defaults document workflow failed");
+	}
+
 	void configurationDocumentWorkflow(smoke::Context const& smokeContext)
 	{
+		placedDefaultsDocumentWorkflow(smokeContext);
 		using smoke::require;
 		auto const path = smokeContext.temporaryRoot() / "flow.station.yaml";
 		headless::ScopedImGuiContext context;
@@ -3320,6 +3529,7 @@ namespace
 			REQ(driver.contains("1 nodes, 0 connections") && world->getStationSystemsSettings().stores.empty()
 				&& !world->isModified() && history.undoCount() == 0,
 				"Opening into another World changed its settings or failed to restore draft");
+
 		});
 		#undef REQ
 		require(driver.passed(), "Station configuration document workflow failed");

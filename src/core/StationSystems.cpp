@@ -1882,7 +1882,7 @@ namespace core
 		auto missing = [&](std::string text) -> bool {
 			if (!brokenReferences) return refuse(std::move(text));
 			brokenReferences->push_back(std::move(text));
-			throw BrokenDraftEntry{};
+			return true;
 		};
 		std::map<std::string, std::string> waterStoreClass;
 		auto declareWaterStore = [&](std::string const& storeId, char const* role,
@@ -1935,7 +1935,7 @@ namespace core
 		for (size_t stream = 0; stream < 3; ++stream)
 		{
 			for (size_t other = stream + 1; other < 3; ++other)
-				if ((!allowIncomplete || !streamIds[stream].empty()) && streamIds[stream] == streamIds[other])
+				if (!streamIds[stream].empty() && streamIds[stream] == streamIds[other])
 					return refuse(where + " " + streamRoles[stream] + " store and " + streamRoles[other]
 						+ " store are the same store '" + streamIds[stream]
 						+ "'; the recovery split needs distinct source, treated and concentrate stores");
@@ -1956,7 +1956,7 @@ namespace core
 		// boundary that anything needs clearing into.
 		if (treatment.hazardClass == "hazardous")
 		{
-			if (!allowIncomplete && treatment.clearanceStoreId.empty())
+			if (!allowIncomplete && !brokenReferences && treatment.clearanceStoreId.empty())
 				return refuse(where + " is hazardous-class but declares no release-clearance consumable store: hazardous treated material is released only on a passed clearance test");
 			if ((!allowIncomplete || !treatment.clearanceStoreId.empty())
 				&& (!std::isfinite(treatment.clearancePerKg) || treatment.clearancePerKg <= 0.0))
@@ -1989,7 +1989,7 @@ namespace core
 		auto missing = [&](std::string text) -> bool {
 			if (!brokenReferences) return refuse(std::move(text));
 			brokenReferences->push_back(std::move(text));
-			throw BrokenDraftEntry{};
+			return true;
 		};
 		std::map<std::string, std::string> waterStoreClass;
 		auto declareWaterStore = [&](std::string const& storeId, char const* role,
@@ -2069,9 +2069,12 @@ namespace core
 		if (!std::isfinite(electrolyzer.maxSinkTemperatureC)
 			|| electrolyzer.maxSinkTemperatureC <= -StationCelsiusOffset)
 			return refuse(where + " maximum sink temperature must be finite and above absolute zero");
-		if ((!allowIncomplete || !electrolyzer.oxygenStoreId.empty() || !electrolyzer.atmosphereId.empty())
-			&& electrolyzer.oxygenStoreId.empty() == electrolyzer.atmosphereId.empty())
-			return refuse(where + " must configure exactly one oxygen destination: a qualified gas store or one compartment atmosphere");
+		auto const oxygenDestinationError = where
+			+ " must configure exactly one oxygen destination: a qualified gas store or one compartment atmosphere";
+		if (!electrolyzer.oxygenStoreId.empty() && !electrolyzer.atmosphereId.empty())
+			return refuse(oxygenDestinationError);
+		if (!allowIncomplete && electrolyzer.oxygenStoreId.empty() && electrolyzer.atmosphereId.empty()
+			&& !missing(oxygenDestinationError)) return false;
 		// The compartment boundary is checked before the stores so a
 		// hazardous cell pointed at a normal compartment names the
 		// compartment as the refusal reason (#412): the atmosphere it
@@ -2082,8 +2085,10 @@ namespace core
 				settings.atmospheres.end(), [&](AtmosphereSettings const& atmosphere)
 				{ return atmosphere.id == electrolyzer.atmosphereId; });
 			if (compartment == settings.atmospheres.end())
-				return missing(where + " delivers oxygen to unknown atmosphere compartment '" + electrolyzer.atmosphereId + "'");
-			if (compartment->hazardClass != electrolyzer.hazardClass)
+			{
+				if (!missing(where + " delivers oxygen to unknown atmosphere compartment '" + electrolyzer.atmosphereId + "'")) return false;
+			}
+			else if (compartment->hazardClass != electrolyzer.hazardClass)
 				return refuse(where + " hazard class '" + electrolyzer.hazardClass
 					+ "' does not match compartment '" + compartment->id
 					+ "' hazard class '" + compartment->hazardClass
@@ -2099,7 +2104,7 @@ namespace core
 			&& electrolyzer.oxygenStoreId == electrolyzer.hydrogenStoreId)
 			return refuse(where + " names the same store '" + electrolyzer.oxygenStoreId
 				+ "' for both the oxygen and the hydrogen product: the two products are chemically distinct streams and may not share one store, whose headroom the split would spend twice");
-		if ((!allowIncomplete || !electrolyzer.waterStoreId.empty())
+		if (!electrolyzer.waterStoreId.empty()
 			&& (electrolyzer.waterStoreId == electrolyzer.hydrogenStoreId
 			|| (!electrolyzer.oxygenStoreId.empty()
 				&& electrolyzer.waterStoreId == electrolyzer.oxygenStoreId)))
@@ -2262,7 +2267,7 @@ namespace core
 		auto missing = [&](std::string text) -> bool {
 			if (!brokenReferences) return refuse(std::move(text));
 			brokenReferences->push_back(std::move(text));
-			throw BrokenDraftEntry{};
+			return true;
 		};
 		auto const where = "Station installation outage '" + outage.id + "'";
 		auto const registeredInstallations = stationInstallationIdentities(settings);
@@ -2283,7 +2288,7 @@ namespace core
 		auto missing = [&](std::string text) -> bool {
 			if (!brokenReferences) return refuse(std::move(text));
 			brokenReferences->push_back(std::move(text));
-			throw BrokenDraftEntry{};
+			return true;
 		};
 		auto const where = "Station maintenance job '" + job.id + "'";
 		auto const registeredInstallations = stationInstallationIdentities(settings);
@@ -2291,8 +2296,8 @@ namespace core
 			[&](StationInstallationIdentity const& installation) {
 				return installation.id == job.installationId;
 			}))
-			return missing(where + " targets unknown installation '" + job.installationId
-				+ "'; only installations registered with the availability contract can be maintained");
+			if (!missing(where + " targets unknown installation '" + job.installationId
+				+ "'; only installations registered with the availability contract can be maintained")) return false;
 		auto const findStore = [&](std::string const& id) -> ResourceStoreSettings const*
 		{
 			auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
@@ -2304,30 +2309,31 @@ namespace core
 		{
 			waste = findStore(job.wasteStoreId);
 			if (!waste)
-				return missing(where + " references unknown waste store '" + job.wasteStoreId + "'");
+				if (!missing(where + " references unknown waste store '" + job.wasteStoreId + "'")) return false;
 		}
 		bool anyConsumed = false;
 		std::set<std::string> requirementStores;
 		for (auto const& requirement : job.requirements)
 		{
 			auto const item = where + " requirement '" + requirement.storeId + "'";
-			if (allowIncomplete && requirement.storeId.empty()) continue;
-			if (requirement.storeId.empty())
-				return refuse(where + " requirement store id must not be empty");
-			if (!requirementStores.insert(requirement.storeId).second)
-				return refuse(item + " is duplicated within the job");
-			auto const* source = findStore(requirement.storeId);
-			if (!source) return missing(item + " references unknown store");
 			if (!allowIncomplete && (!std::isfinite(requirement.quantity) || requirement.quantity <= 0.0))
 				return refuse(item + " quantity must be finite and positive");
+			if (allowIncomplete && requirement.storeId.empty()) continue;
+			if (requirement.storeId.empty() && !brokenReferences)
+				return refuse(where + " requirement store id must not be empty");
+			if (!requirement.storeId.empty() && !requirementStores.insert(requirement.storeId).second)
+				return refuse(item + " is duplicated within the job");
+			auto const* source = findStore(requirement.storeId);
+			if (!source && !missing(item + " references unknown store")) return false;
 			if (!requirement.consumed) continue;
 			anyConsumed = true;
-			if (!waste && allowIncomplete) continue;
+			if (!requirement.storeId.empty() && requirement.storeId == job.wasteStoreId)
+				return refuse(item + " is consumed into itself; the waste store may not also be its own source");
+			if (!waste && (allowIncomplete || brokenReferences)) continue;
 			if (!waste)
 				return refuse(where + " consumes from " + item
 					+ " but declares no waste store; removed parts and used material must be booked into appropriate waste");
-			if (requirement.storeId == job.wasteStoreId)
-				return refuse(item + " is consumed into itself; the waste store may not also be its own source");
+			if (!source) continue;
 			if (source->unit != waste->unit)
 				return refuse(item + " unit '" + source->unit
 					+ "' does not match the waste store unit '" + waste->unit + "'");
@@ -3087,7 +3093,7 @@ namespace core
 				return refuse("Station installation outage id exceeds "
 					+ std::to_string(MaxStationStoreIdLength) + " characters");
 			if (!outageIds.insert(outage.id).second) return refuse(where + " id is duplicated");
-			if (outage.installationId.empty())
+			if (outage.installationId.empty() && !brokenReferences)
 				return refuse(where + " installation id must not be empty");
 			if (outage.installationId.size() > MaxStationStoreIdLength)
 				return refuse(where + " installation id exceeds "
@@ -3140,7 +3146,7 @@ namespace core
 				return refuse("Station maintenance job id exceeds "
 					+ std::to_string(MaxStationStoreIdLength) + " characters");
 			if (!maintenanceIds.insert(job.id).second) return refuse(where + " id is duplicated");
-			if (job.installationId.empty())
+			if (job.installationId.empty() && !brokenReferences)
 				return refuse(where + " installation id must not be empty");
 			if (job.installationId.size() > MaxStationStoreIdLength)
 				return refuse(where + " installation id exceeds "
@@ -3222,6 +3228,13 @@ namespace core
 		if (settings.waterTreatments.size() > MaxStationWaterTreatments)
 			return refuse("Station water treatments are limited to "
 				+ std::to_string(MaxStationWaterTreatments) + " entries");
+		// Unlike an entry-level unwind, an unresolved store ends only that
+		// endpoint's check, so other resolved endpoints still undergo validation.
+		auto missingStore = [&](std::string text) -> bool {
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			return true;
+		};
 		std::map<std::string, std::string> waterStoreClass;
 		auto declareWaterStore = [&](std::string const& storeId, char const* role,
 			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
@@ -3229,7 +3242,7 @@ namespace core
 			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
 				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
 			if (found == settings.stores.end())
-				return missing(where + " " + role + " store '" + storeId + "' does not exist");
+				return missingStore(where + " " + role + " store '" + storeId + "' does not exist");
 			if (!isMassUnit(found->unit))
 				return refuse(where + " " + role + " store '" + storeId
 					+ "' must be a mass unit; water recovery is mass-denominated (g or kg)");
@@ -3298,7 +3311,7 @@ namespace core
 			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
 				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
 			if (found == settings.stores.end())
-				return missing(where + " " + role + " store '" + storeId + "' does not exist");
+				return missingStore(where + " " + role + " store '" + storeId + "' does not exist");
 			if (!isMassUnit(found->unit))
 				return refuse(where + " " + role + " store '" + storeId
 					+ "' must be a mass unit; gas handling is mass-denominated (g or kg)");
@@ -3374,7 +3387,7 @@ namespace core
 			// the cell draws each reactant from its own store's drawable
 			// stock, so one store named for both reactants spends the same
 			// stock twice against a stoichiometry that expects two.
-			if (cell.hydrogenStoreId == cell.oxygenStoreId)
+			if (!cell.hydrogenStoreId.empty() && cell.hydrogenStoreId == cell.oxygenStoreId)
 				return refuse(where + " names the same store '" + cell.hydrogenStoreId
 					+ "' for both the hydrogen and the oxygen reactant: the cell draws both reactants independently and may not spend one store's stock as both");
 			if (!declareGasStore(cell.hydrogenStoreId, "hydrogen reactant", where,
