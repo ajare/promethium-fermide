@@ -57,6 +57,23 @@ capacity/admission prediction, or a physical distribution network. Ambient losse
 and implicit process internals are not expanded into individual nodes. Changing
 Worlds starts a fresh diagram and draft; switching/hiding tabs retains the draft.
 
+### Chiller authoring (#659)
+
+Choose **Thermal > Chiller** in **Place node**, then click the canvas. The
+new Chiller starts with both interfaces unwired. Connect its **Cold loop**
+input to a Coolant loop's **Cold interface** output and its **Condenser heat**
+output to a Reservoir's **Heat in** input; either drag direction works.
+Both interfaces must match the Chiller's Thermal service class, each cold loop
+serves only one Chiller, and the condenser cannot be the cold loop's host.
+These constraints also apply when reconnecting a referenced loop's host;
+unused loops may still connect to any declared Reservoir.
+
+The inspector and form share the Chiller settings editor. Placement, each
+connection, disconnect, and committed field edit is individually undoable and
+redoable. Refused links change neither the Configuration draft nor history,
+even in incomplete drafts. Electrical and per-class cooling-service links remain
+implicit, not user-authored. **Apply settings** remains the only World mutation.
+
 ## Authored settings and lifecycle
 
 - **Activate Station systems**: global toggle at the top of the tab, default

@@ -872,50 +872,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 	{
 		auto& chiller = mDraft.chillers[index];
 		auto const row = std::to_string(index);
-		bool removeChiller = false;
-		ImGui::PushItemWidth(220);
-		char chillerIdBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(chillerIdBuffer, chiller.id.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Chiller " + row + " id").c_str(),
-			chillerIdBuffer, sizeof(chillerIdBuffer)))
-			chiller.id = chillerIdBuffer;
-		char chillerClassBuffer[16]{};
-		std::strncpy(chillerClassBuffer, chiller.thermalClass.c_str(), sizeof(chillerClassBuffer) - 1);
-		if (ImGui::InputText(("Chiller " + row + " thermal class").c_str(),
-			chillerClassBuffer, sizeof(chillerClassBuffer)))
-			chiller.thermalClass = chillerClassBuffer;
-		char coldLoopBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(coldLoopBuffer, chiller.coldLoopId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Chiller " + row + " cold loop").c_str(),
-			coldLoopBuffer, sizeof(coldLoopBuffer)))
-			chiller.coldLoopId = coldLoopBuffer;
-		char condenserBuffer[core::MaxStationStoreIdLength + 1]{};
-		std::strncpy(condenserBuffer, chiller.condenserReservoirId.c_str(), core::MaxStationStoreIdLength);
-		if (ImGui::InputText(("Chiller " + row + " condenser reservoir").c_str(),
-			condenserBuffer, sizeof(condenserBuffer)))
-			chiller.condenserReservoirId = condenserBuffer;
-		ImGui::InputDouble(("Chiller " + row + " rated cooling capacity kW").c_str(),
-			&chiller.ratedCoolingCapacityKW, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Chiller " + row + " COP").c_str(),
-			&chiller.cop, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Chiller " + row + " auxiliary power kW").c_str(),
-			&chiller.auxiliaryPowerKW, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Chiller " + row + " chilled setpoint C").c_str(),
-			&chiller.chilledSetpointC, 0.0, 0.0, "%.3f");
-		ImGui::InputDouble(("Chiller " + row + " max condensing temperature C").c_str(),
-			&chiller.maxCondensingTemperatureC, 0.0, 0.0, "%.3f");
-		// #416: a protected critical-service chiller's work is credited
-		// from the actual pool ahead of every discretionary external load,
-		// sized from its real tick-start state, so shutdown-cooling and
-		// containment-thermal chillers keep running when the experiments or
-		// generation they serve stop.
-		ImGui::Checkbox(("Chiller " + row
-			+ " protected critical service (work credited ahead of discretionary loads)").c_str(),
-			&chiller.criticalService);
-		ImGui::SameLine();
-		if (ImGui::Button(("Remove chiller " + row).c_str()))
-			removeChiller = true;
-		ImGui::PopItemWidth();
+		bool const removeChiller = station_editor::renderChillerEntry(mDraft, chiller,
+			"Chiller " + row, "Remove chiller " + row);
 		if (removeChiller)
 			mDraft.chillers.erase(mDraft.chillers.begin() + static_cast<std::ptrdiff_t>(index));
 		else

@@ -775,7 +775,7 @@ std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode
 		|| view.type == "Solar" || view.type == "Equipment" || view.type == "Battery"
 		|| view.type == "Generator" || view.type == "Fuel cell" || view.type == "Sabatier"
 		|| view.type == "Methane processor" || view.type == "Reservoir" || view.type == "Radiator"
-		|| view.type == "Coolant loop")
+		|| view.type == "Coolant loop" || view.type == "Chiller")
 	{
 		view.index = 0;
 		for (int i = 0; i < mSelected; ++i)
@@ -1383,6 +1383,25 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			draft.coolantLoops.push_back(std::move(loop));
 			mFitRequested = false;
 		}
+		else if (mPlacingType == "Chiller" && draft.chillers.size() < core::MaxStationChillers)
+		{
+			core::ChillerSettings chiller;
+			chiller.thermalClass = "moderate";
+			chiller.ratedCoolingCapacityKW = 5.0;
+			chiller.cop = 3.0;
+			chiller.auxiliaryPowerKW = 0.2;
+			chiller.chilledSetpointC = 5.0;
+			chiller.maxCondensingTemperatureC = 45.0;
+			for (size_t candidate = 1;; ++candidate)
+			{
+				chiller.id = "chiller" + std::to_string(candidate);
+				if (std::none_of(draft.chillers.begin(), draft.chillers.end(),
+					[&](auto const& entry) { return entry.id == chiller.id; })) break;
+			}
+			mLayout["Chiller:" + chiller.id + ":0"] = placeAt;
+			draft.chillers.push_back(std::move(chiller));
+			mFitRequested = false;
+		}
 	}
 	ImNodes::SetCurrentContext(previousContext);
 	updateBounds();
@@ -1637,7 +1656,8 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			|| (mPlacingType == "Radiator"
 				&& draft.radiators.size() >= core::MaxStationRadiators)
 			|| (mPlacingType == "Coolant loop"
-				&& draft.coolantLoops.size() >= core::MaxStationCoolantLoops);
+				&& draft.coolantLoops.size() >= core::MaxStationCoolantLoops)
+			|| (mPlacingType == "Chiller" && draft.chillers.size() >= core::MaxStationChillers);
 		auto a = io.MousePos;
 		ImVec2 b{a.x + nodeWidth * mZoom, a.y + nodeHeight * mZoom};
 		draw->AddRectFilled(a, b, IM_COL32(80, 130, 170, 100), 5);

@@ -2330,6 +2330,142 @@ namespace
 		require(placeable, "loop missing from thermal placement group");
 	}
 
+	void chillerSeam(smoke::Context const&)
+	{
+		using smoke::require;
+		core::StationSystemsSettings base;
+		base.enabled = true;
+		core::ThermalReservoirSettings reservoir;
+		reservoir.id = "cold"; reservoir.thermalClass = "moderate";
+		reservoir.heatCapacityKJPerK = 100.0;
+		base.thermalReservoirs = {reservoir};
+		reservoir.id = "sink"; base.thermalReservoirs.push_back(reservoir);
+		reservoir.id = "wrong"; reservoir.thermalClass = "warm";
+		base.thermalReservoirs.push_back(reservoir);
+		core::CoolantLoopSettings loop;
+		loop.id = "loop"; loop.reservoirId = "cold"; loop.hazardClass = "normal";
+		loop.coolantCapacityKg = 100.0; loop.specificHeatKJPerKgK = 4.0;
+		base.coolantLoops = {loop};
+		core::ChillerSettings chiller;
+		chiller.id = "chiller"; chiller.thermalClass = "moderate"; chiller.cop = 3.0;
+		base.chillers = {chiller};
+		auto const cold = core::CandidateLink{{"Coolant loop", "loop", "Cold interface"},
+			{"Chiller", "chiller", "Cold loop"}};
+		auto const condenser = core::CandidateLink{{"Chiller", "chiller", "Condenser heat"},
+			{"Reservoir", "sink", "Heat in"}};
+		for (bool unfinished : {false, true})
+		for (bool reverse : {false, true})
+		for (bool condenserFirst : {false, true})
+		{
+			auto draft = base;
+			if (unfinished)
+			{
+				core::ResourceTransferSettings missing; missing.id = "unfinished";
+				draft.transfers.push_back(missing);
+			}
+			auto orient = [&](core::CandidateLink link) {
+				if (reverse) std::swap(link.from, link.to);
+				return link;
+			};
+			auto check = [&](core::StationSystemsSettings const& settings, core::CandidateLink link,
+				std::string const& reason) {
+				auto const before = settings;
+				auto const verdict = core::evaluateStationLink(settings, orient(link));
+				require(settings == before, "evaluation mutated draft");
+				require(reason.empty() ? verdict.allowed : (!verdict.allowed
+					&& (reason == "refused" || verdict.reason.find(reason) != std::string::npos)), ("expected '" + reason + "', got '" + verdict.reason + "' for "
+					+ link.from.portName + " -> " + link.to.portName).c_str());
+			};
+			auto first = condenserFirst ? condenser : cold;
+			auto second = condenserFirst ? cold : condenser;
+			check(draft, first, "");
+			require(core::applyStationLink(draft, orient(first)), "first interface write failed");
+			check(draft, second, "");
+			auto bad = draft;
+			bad.chillers[0].thermalClass = "unknown";
+			check(bad, second, "unknown thermal service class");
+			bad = draft;
+			if (condenserFirst) bad.coolantLoops[0].reservoirId = "wrong";
+			else bad.thermalReservoirs[1].thermalClass = "warm";
+			check(bad, second, "incompatible");
+			bad = draft;
+			bad.coolantLoops[0].reservoirId = "sink";
+			check(bad, second, "that is a heater");
+			bad = draft;
+			chiller.id = "other"; chiller.coldLoopId = "loop";
+			bad.chillers.push_back(chiller);
+			if (condenserFirst) check(bad, second, "one evaporator serves one chiller");
+			require(core::applyStationLink(draft, orient(second)), "second interface write failed");
+			if (!unfinished)
+			{
+				std::string diagnostic;
+				require(core::validateStationSystemsSettings(draft, diagnostic), diagnostic.c_str());
+			}
+			require(core::clearStationLink(draft, "Chiller:chiller:Cold loop")
+				&& core::clearStationLink(draft, "Chiller:chiller:Condenser reservoir")
+				&& draft.chillers[0].coldLoopId.empty()
+				&& draft.chillers[0].condenserReservoirId.empty(), "clear interface failed");
+			auto ghost = cold; ghost.from.nodeId = "ghost";
+			check(draft, ghost, "unknown coolant loop 'ghost'");
+			ghost = condenser; ghost.to.nodeId = "ghost";
+			check(draft, ghost, "unknown thermal reservoir 'ghost'");
+			// A missing opposite interface cannot hide these link-local rules.
+			bad = draft; bad.thermalReservoirs[0].thermalClass = "warm";
+			check(bad, cold, "cold services are class-matched");
+			bad = draft; bad.thermalReservoirs[1].thermalClass = "warm";
+			check(bad, condenser, "heat routes only to the same service class");
+			bad = draft; bad.chillers.push_back(chiller);
+			check(bad, cold, "one evaporator serves one chiller");
+			bad.chillers[0].condenserReservoirId = "missing";
+			check(bad, cold, "one evaporator serves one chiller");
+			bad = draft; bad.chillers[0].condenserReservoirId = "missing";
+			bad.thermalReservoirs[0].thermalClass = "warm";
+			check(bad, cold, "cold services are class-matched");
+			bad = draft; bad.chillers[0].coldLoopId = "missing";
+			bad.thermalReservoirs[1].thermalClass = "warm";
+			check(bad, condenser, "heat routes only to the same service class");
+			// Host rewiring is constrained only for a loop a chiller uses.
+			bad = draft; bad.chillers[0].coldLoopId = "loop";
+			bad.chillers[0].condenserReservoirId = "sink";
+			bad.coolantLoops[0].reservoirId.clear();
+			auto host = core::CandidateLink{{"Coolant loop", "loop", "Heat exchanger"},
+				{"Reservoir", "wrong", "Heat in"}};
+			check(bad, host, "cold services are class-matched");
+			host.to.nodeId = "sink"; check(bad, host, "that is a heater");
+			bad.chillers.clear(); host.to.nodeId = "wrong"; check(bad, host, "");
+			for (auto const& descriptor : core::stationPortDescriptors())
+			{
+				core::StationPinRef peer{std::string(descriptor.nodeType), "unused", std::string(descriptor.name)};
+				// The only structural pairs introduced by this slice.
+				bool const coldPeer = peer.nodeType == "Coolant loop" && peer.portName == "Cold interface";
+				bool const sinkPeer = peer.nodeType == "Reservoir" && peer.portName == "Heat in";
+				if (!coldPeer) check(draft, {cold.to, peer}, "refused");
+				if (!sinkPeer) check(draft, {condenser.from, peer}, "refused");
+				if (!(peer.nodeType == "Chiller" && peer.portName == "Cold loop"))
+					check(draft, {cold.from, peer}, "refused");
+			}
+		}
+		for (auto const* thermalClass : core::StationThermalServiceClasses)
+		{
+			auto draft = base;
+			draft.chillers[0].thermalClass = thermalClass;
+			draft.thermalReservoirs[0].thermalClass = thermalClass;
+			draft.thermalReservoirs[1].thermalClass = thermalClass;
+			require(core::evaluateStationLink(draft, cold).allowed
+				&& core::applyStationLink(draft, cold)
+				&& core::evaluateStationLink(draft, condenser).allowed
+				&& core::applyStationLink(draft, condenser), "legal service class refused");
+			auto const links = core::stationAuthoredLinks(draft);
+			require(std::count_if(links.begin(), links.end(), [](auto const& link) {
+				return link.identity == "Chiller:chiller:Cold loop"
+					|| link.identity == "Chiller:chiller:Condenser reservoir";
+			}) == 2, "interface links did not enumerate");
+		}
+		require(std::any_of(core::stationPlaceableTypes().begin(), core::stationPlaceableTypes().end(),
+			[](auto const& type) { return type.nodeType == "Chiller" && type.group == "Thermal"; }),
+			"chiller missing from thermal placement group");
+	}
+
 	void compounds(smoke::Context const&)
 	{
 		// #391: compound Resource stores carry declared constituent
@@ -25627,7 +25763,7 @@ void recovery(smoke::Context const& context)
 
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"powerChainSeam", powerChainSeam}, {"thermalReservoirSeam", thermalReservoirSeam}, {"radiatorSeam", radiatorSeam}, {"coolantLoopSeam", coolantLoopSeam}, {"compounds", compounds}, {"power", power},
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"powerChainSeam", powerChainSeam}, {"thermalReservoirSeam", thermalReservoirSeam}, {"radiatorSeam", radiatorSeam}, {"coolantLoopSeam", coolantLoopSeam}, {"chillerSeam", chillerSeam}, {"compounds", compounds}, {"power", power},
 		// Split out of the former `batteries` check: the hour-scale legs are
 		// independent worlds, so each is its own test and they run in parallel
 		// instead of as one ~182s serial chain.

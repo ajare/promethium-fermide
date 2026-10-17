@@ -110,6 +110,12 @@ namespace
 			}
 			return false;
 		}
+		if (link.from.nodeType == "Coolant loop" && link.from.portName == "Cold interface"
+			&& link.to.nodeType == "Chiller" && link.to.portName == "Cold loop")
+		{
+			mapping = {"Chiller", link.to.nodeId, "Cold loop", link.from};
+			return true;
+		}
 		// A power or conversion chain connector (#647) owns the reference
 		// field its port names on the draft entry: the machine side of the
 		// oriented pair is the owner, and the Store face or the Reservoir
@@ -119,7 +125,7 @@ namespace
 		if (auto const field = stationMachineField(link.from.nodeType, link.from.portName);
 			!field.empty())
 		{
-			bool const heat = field == "Heat sink" || field == "Host reservoir";
+			bool const heat = field == "Heat sink" || field == "Host reservoir" || field == "Condenser reservoir";
 			bool const peerMatches = heat
 				? (link.to.nodeType == "Reservoir" && link.to.portName == "Heat in")
 				: (link.to.nodeType == "Store" && link.to.portName == "Inventory in");
@@ -189,7 +195,7 @@ namespace
 		// the routing predicate.
 		return ownerType == "Equipment" || ownerType == "Generator" || ownerType == "Fuel cell"
 			|| ownerType == "Sabatier" || ownerType == "Methane processor" || ownerType == "Radiator"
-			|| ownerType == "Coolant loop";
+			|| ownerType == "Coolant loop" || ownerType == "Chiller";
 	}
 
 	// The reference field a machine link names, as a pointer into the draft
@@ -281,6 +287,15 @@ namespace
 				{"Heat sink", &MethaneProcessorSettings::heatSinkId}};
 			for (auto const& [name, member] : members)
 				if (field == name) return &((*found).*member);
+			return nullptr;
+		}
+		if (ownerType == "Chiller")
+		{
+			auto const found = std::find_if(settings.chillers.begin(), settings.chillers.end(),
+				[&](ChillerSettings const& entry) { return entry.id == ownerId; });
+			if (found == settings.chillers.end()) return nullptr;
+			if (field == "Cold loop") return &found->coldLoopId;
+			if (field == "Condenser reservoir") return &found->condenserReservoirId;
 			return nullptr;
 		}
 		if (ownerType == "Coolant loop")
@@ -526,6 +541,44 @@ namespace
 	// is empty when the entry is satisfied and otherwise carries the rule's
 	// own wording. Returns false when the owner type has no scoped rule yet -
 	// a fan-out ticket adds its entry's rule here beside its descriptors.
+	// Link-local counterpart of the validator's chiller rules. Check each
+	// available interface independently: a missing draft reference must not
+	// mask a class, exclusivity or same-reservoir violation on another.
+	std::string scopedChillerWiring(StationSystemsSettings const& settings, ChillerSettings const& chiller)
+	{
+		auto const where = "Station chiller '" + chiller.id + "'";
+		if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+			chiller.thermalClass) == StationThermalServiceClasses.end())
+			return where + " has unknown thermal service class '" + chiller.thermalClass
+				+ "'; declared classes are: low, moderate, warm, generation";
+		auto const loop = std::find_if(settings.coolantLoops.begin(), settings.coolantLoops.end(),
+			[&](CoolantLoopSettings const& entry) { return entry.id == chiller.coldLoopId; });
+		if (loop != settings.coolantLoops.end())
+			for (auto const& other : settings.chillers)
+				if (&other != &chiller && other.coldLoopId == chiller.coldLoopId)
+					return where + " shares cold loop '" + chiller.coldLoopId
+						+ "' with another chiller; one evaporator serves one chiller";
+		auto const* sink = findReservoirById(settings, chiller.condenserReservoirId);
+		auto const* host = loop == settings.coolantLoops.end() ? nullptr
+			: findReservoirById(settings, loop->reservoirId);
+		if (host && host->thermalClass != chiller.thermalClass)
+			return where + " thermal class '" + chiller.thermalClass
+				+ "' is incompatible with cold loop '" + loop->id + "' serving reservoir '"
+				+ host->id + "' of class '" + host->thermalClass + "'; cold services are class-matched";
+		if (sink && sink->thermalClass != chiller.thermalClass)
+			return where + " thermal class '" + chiller.thermalClass
+				+ "' is incompatible with condenser sink reservoir '" + sink->id
+				+ "' of class '" + sink->thermalClass + "'; heat routes only to the same service class";
+		if (host && sink && host->id == sink->id)
+			return where + " rejects its condenser heat into reservoir '" + sink->id
+				+ "', the same reservoir its cold side cools; that is a heater, not a cooling service";
+		if (!chiller.coldLoopId.empty() && loop == settings.coolantLoops.end())
+			return where + " cold-side interface references unknown coolant loop '" + chiller.coldLoopId + "'";
+		if (!chiller.condenserReservoirId.empty() && !sink)
+			return where + " condenser sink references unknown thermal reservoir '" + chiller.condenserReservoirId + "'";
+		return {};
+	}
+
 	bool scopedWiringRule(StationSystemsSettings const& settings, LinkMapping const& mapping,
 		std::string& diagnostic)
 	{
@@ -709,16 +762,31 @@ namespace
 			}
 			return true;
 		}
+		if (mapping.ownerType == "Chiller")
+		{
+			auto const found = std::find_if(settings.chillers.begin(), settings.chillers.end(),
+				[&](ChillerSettings const& entry) { return entry.id == mapping.ownerId; });
+			if (found == settings.chillers.end()) return false;
+			diagnostic = scopedChillerWiring(settings, *found);
+			return true;
+		}
 		if (mapping.ownerType == "Coolant loop")
 		{
-			// No loop thermal class or host exclusivity: the existing validator
-			// requires only a declared host for this heat-only coupling.
+			// Unused loops accept any declared host. A referenced loop must
+			// also preserve its chiller's interface constraints.
 			auto const* host = machineField(settings, mapping.ownerType,
 				mapping.ownerId, mapping.field);
 			if (!host) return false;
 			if (!host->empty() && !findReservoirById(settings, *host))
 				diagnostic = "Station coolant loop '" + mapping.ownerId
 					+ "' is coupled to unknown thermal reservoir '" + *host + "'";
+			if (diagnostic.empty())
+				for (auto const& chiller : settings.chillers)
+					if (chiller.coldLoopId == mapping.ownerId)
+					{
+						diagnostic = scopedChillerWiring(settings, chiller);
+						if (!diagnostic.empty()) break;
+					}
 			return true;
 		}
 		if (mapping.ownerType == "Radiator")
@@ -910,6 +978,17 @@ std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& set
 		links.push_back({linkIdentity("Coolant loop", loop.id, "Host reservoir"),
 			{"Coolant loop", loop.id, "Heat exchanger"},
 			{"Reservoir", loop.reservoirId, "Heat in"}});
+	}
+	for (auto const& chiller : settings.chillers)
+	{
+		if (!chiller.coldLoopId.empty())
+			links.push_back({linkIdentity("Chiller", chiller.id, "Cold loop"),
+				{"Coolant loop", chiller.coldLoopId, "Cold interface"},
+				{"Chiller", chiller.id, "Cold loop"}});
+		if (!chiller.condenserReservoirId.empty())
+			links.push_back({linkIdentity("Chiller", chiller.id, "Condenser reservoir"),
+				{"Chiller", chiller.id, "Condenser heat"},
+				{"Reservoir", chiller.condenserReservoirId, "Heat in"}});
 	}
 	return links;
 }
@@ -1163,7 +1242,9 @@ LinkVerdict evaluateStationLink(StationSystemsSettings const& settings, Candidat
 	if (scoped)
 	{
 		scopedWiringRule(settings, mapping, beforeWiring);
-		if (!afterWiring.empty() && afterWiring != beforeWiring) return refuse(afterWiring);
+		if (!afterWiring.empty() && (afterWiring != beforeWiring
+			|| mapping.ownerType == "Chiller" || mapping.ownerType == "Coolant loop"))
+			return refuse(afterWiring);
 	}
 	// The whole-configuration pass is the outer net: it says whether the link
 	// changed the draft's standing at all.

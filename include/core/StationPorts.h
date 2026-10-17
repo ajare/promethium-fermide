@@ -113,7 +113,11 @@ namespace core
 			PortDescriptor{"Reservoir", "Hosted radiators", StationPortDirection::Output, "thermal-host", "thermal-host", 0, {}},
 			PortDescriptor{"Radiator", "Host reservoir", StationPortDirection::Input, "thermal-host", "thermal-host", 1, {}, false},
 			// Heat-only coupling: coolant inventory is internal to the loop.
-			PortDescriptor{"Coolant loop", "Heat exchanger", StationPortDirection::Output, "heat", "heat-sink", 1, {}, false}};
+			PortDescriptor{"Coolant loop", "Heat exchanger", StationPortDirection::Output, "heat", "heat-sink", 1, {}, false},
+			// Exclusivity is semantic so refusal retains the validator's reason.
+			PortDescriptor{"Coolant loop", "Cold interface", StationPortDirection::Output, "cold-loop", "evaporator", 0, {}},
+			PortDescriptor{"Chiller", "Cold loop", StationPortDirection::Input, "evaporator", "cold-loop", 1, {}},
+			PortDescriptor{"Chiller", "Condenser heat", StationPortDirection::Output, "heat", "heat-sink", 1, {}}};
 		return descriptors;
 	}
 
@@ -125,7 +129,7 @@ namespace core
 	inline std::string_view stationMachineField(std::string_view nodeType,
 		std::string_view portName)
 	{
-		static constexpr std::array<std::pair<std::array<std::string_view, 2>, std::string_view>, 22> fields{{
+		static constexpr std::array<std::pair<std::array<std::string_view, 2>, std::string_view>, 24> fields{{
 			{{"Equipment", "Equipment input 1"}, "Material in 1"},
 			{{"Equipment", "Equipment input 2"}, "Material in 2"},
 			{{"Equipment", "Equipment return 1"}, "Material return 1"},
@@ -153,6 +157,8 @@ namespace core
 			// table so write, clear and enumeration cannot disagree.
 			{{"Radiator", "Host reservoir"}, "Host reservoir"},
 			{{"Coolant loop", "Heat exchanger"}, "Host reservoir"},
+			{{"Chiller", "Cold loop"}, "Cold loop"},
+			{{"Chiller", "Condenser heat"}, "Condenser reservoir"},
 		}};
 		for (auto const& entry : fields)
 			if (entry.first[0] == nodeType && entry.first[1] == portName) return entry.second;
@@ -268,7 +274,8 @@ namespace core
 			// #657: the radiator mounts on one host reservoir and rejects
 			// its heat to the environment.
 			StationPlaceableType{"Radiator", "radiator", "Thermal"},
-			StationPlaceableType{"Coolant loop", "coolantLoop", "Thermal"}};
+			StationPlaceableType{"Coolant loop", "coolantLoop", "Thermal"},
+			StationPlaceableType{"Chiller", "chiller", "Thermal"}};
 		return placeable;
 	}
 

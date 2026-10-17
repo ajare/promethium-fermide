@@ -631,6 +631,56 @@ bool renderCoolantLoopEntry([[maybe_unused]] core::StationSystemsSettings& draft
 	return remove;
 }
 
+bool renderChillerEntry([[maybe_unused]] core::StationSystemsSettings& draft,
+	core::ChillerSettings& chiller, std::string const& label, std::string const& removeLabel)
+{
+	bool removeChiller = false;
+	ImGui::PushItemWidth(220);
+	char chillerIdBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(chillerIdBuffer, chiller.id.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " id").c_str(),
+		chillerIdBuffer, sizeof(chillerIdBuffer)))
+		chiller.id = chillerIdBuffer;
+	char chillerClassBuffer[16]{};
+	std::strncpy(chillerClassBuffer, chiller.thermalClass.c_str(), sizeof(chillerClassBuffer) - 1);
+	if (ImGui::InputText((label + " thermal class").c_str(),
+		chillerClassBuffer, sizeof(chillerClassBuffer)))
+		chiller.thermalClass = chillerClassBuffer;
+	char coldLoopBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(coldLoopBuffer, chiller.coldLoopId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " cold loop").c_str(),
+		coldLoopBuffer, sizeof(coldLoopBuffer)))
+		chiller.coldLoopId = coldLoopBuffer;
+	char condenserBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(condenserBuffer, chiller.condenserReservoirId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " condenser reservoir").c_str(),
+		condenserBuffer, sizeof(condenserBuffer)))
+		chiller.condenserReservoirId = condenserBuffer;
+	ImGui::InputDouble((label + " rated cooling capacity kW").c_str(),
+		&chiller.ratedCoolingCapacityKW, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " COP").c_str(),
+		&chiller.cop, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " auxiliary power kW").c_str(),
+		&chiller.auxiliaryPowerKW, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " chilled setpoint C").c_str(),
+		&chiller.chilledSetpointC, 0.0, 0.0, "%.3f");
+	ImGui::InputDouble((label + " max condensing temperature C").c_str(),
+		&chiller.maxCondensingTemperatureC, 0.0, 0.0, "%.3f");
+	// #416: a protected critical-service chiller's work is credited
+	// from the actual pool ahead of every discretionary external load,
+	// sized from its real tick-start state, so shutdown-cooling and
+	// containment-thermal chillers keep running when the experiments or
+	// generation they serve stop.
+	ImGui::Checkbox((label
+		+ " protected critical service (work credited ahead of discretionary loads)").c_str(),
+		&chiller.criticalService);
+	ImGui::SameLine();
+	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
+		removeChiller = true;
+	ImGui::PopItemWidth();
+	return removeChiller;
+}
+
 void renderEquipmentLoadList(core::StationSystemsSettings& draft)
 {
 	for (size_t index = 0; index < draft.equipmentLoads.size(); )
@@ -1002,6 +1052,12 @@ bool renderThermalReservoirEntryAt(core::StationSystemsSettings& draft, size_t i
 		"Reservoir " + std::to_string(index), {});
 }
 
+bool renderChillerEntryAt(core::StationSystemsSettings& draft, size_t index)
+{
+	if (index >= draft.chillers.size()) return false;
+	return renderChillerEntry(draft, draft.chillers[index], "Chiller " + std::to_string(index), {});
+}
+
 bool renderCoolantLoopEntryAt(core::StationSystemsSettings& draft, size_t index)
 {
 	if (index >= draft.coolantLoops.size()) return false;
@@ -1017,7 +1073,7 @@ bool renderRadiatorEntryAt(core::StationSystemsSettings& draft, size_t index)
 }
 
 // Keyed by the Flow node type names in core::stationPortDescriptors().
-constexpr std::array<StationEntryEditor, 11> kEntryEditors{{
+constexpr std::array<StationEntryEditor, 12> kEntryEditors{{
 	{"Store", &renderStoreEntryAt},
 	{"Transfer", &renderTransferEntryAt},
 	{"Equipment", &renderEquipmentLoadEntryAt},
@@ -1029,6 +1085,7 @@ constexpr std::array<StationEntryEditor, 11> kEntryEditors{{
 	{"Reservoir", &renderThermalReservoirEntryAt},
 	{"Radiator", &renderRadiatorEntryAt},
 	{"Coolant loop", &renderCoolantLoopEntryAt},
+	{"Chiller", &renderChillerEntryAt},
 }};
 }
 

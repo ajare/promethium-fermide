@@ -88,6 +88,10 @@ namespace station_editor
 		core::CoolantLoopSettings& loop,
 		std::string const& label, std::string const& removeLabel);
 
+	bool renderChillerEntry(core::StationSystemsSettings& draft,
+		core::ChillerSettings& chiller,
+		std::string const& label, std::string const& removeLabel);
+
 	// Descriptor registry keyed by the Flow node type name. A type absent
 	// here has no extracted editor yet; the index addresses the entry in
 	// the draft vector the type owns. The registered renderer presents
