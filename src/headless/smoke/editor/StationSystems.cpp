@@ -244,6 +244,41 @@ namespace
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
 			REQ(wired().empty() && window.draftHistory().undoCount() == 1,
 				"redo did not re-remove the link");
+			// The live draw pass classifies the same candidate the drop gate
+			// judges. Assert the classification, not pixel colours.
+			ImVec2 dragPin{}, legalPin{}, refusedPin{};
+			REQ(window.flowPinPosition("Store", "a", "Inventory out", &dragPin)
+				&& window.flowPinPosition("Transfer", "t1", "Source", &legalPin)
+				&& window.flowPinPosition("Store", "b", "Inventory in", &refusedPin),
+				"feedback connectors were not on screen");
+			REQ(!window.flowPinEligibility("Transfer", "t1", "Source"),
+				"idle connector retained an eligibility highlight");
+			ctx->MouseTeleportToPos(dragPin); ctx->Yield(2);
+			ctx->MouseDown(); ctx->Yield(2);
+			ctx->MouseTeleportToPos({(dragPin.x + legalPin.x) * 0.5f,
+				(dragPin.y + legalPin.y) * 0.5f}); ctx->Yield(2);
+			REQ(window.flowPinEligibility("Transfer", "t1", "Source") == true
+				&& window.flowPinEligibility("Store", "b", "Inventory in") == false
+				&& !window.flowPinEligibility("Store", "a", "Inventory out")
+				&& !window.flowPinEligibility("Power", "Shared electrical pool", "Supply"),
+				"active drag did not classify eligible, refused, origin and derived connectors");
+			ctx->MouseTeleportToPos(refusedPin); ctx->Yield(2);
+			REQ(window.flowPinEligibility("Store", "b", "Inventory in") == false,
+				"feedback stopped updating as the drag moved");
+			ctx->MouseUp(); ctx->Yield(3);
+			REQ(!window.flowPinEligibility("Transfer", "t1", "Source"),
+				"released drag left residual connector feedback");
+			ctx->MouseTeleportToPos(legalPin); ctx->Yield(2);
+			ctx->MouseDown(); ctx->Yield(2);
+			ctx->MouseTeleportToPos({(dragPin.x + legalPin.x) * 0.5f,
+				(dragPin.y + legalPin.y) * 0.5f}); ctx->Yield(2);
+			REQ(window.flowPinEligibility("Store", "a", "Inventory out") == true
+				&& window.flowPinEligibility("Store", "litres", "Inventory out") == false
+				&& window.flowPinEligibility("Store", "hazard", "Inventory out") == false,
+				"reverse drag feedback diverged from the core unit or hazard rules");
+			ctx->MouseUp(); ctx->Yield(3);
+			REQ(!window.flowPinEligibility("Store", "a", "Inventory out"),
+				"dropping a reverse drag in empty space retained feedback");
 			// Semantic refusals carry the validator's own words, not a generic
 			// "invalid connection".
 			REQ(drag("Store", "litres", "Inventory out", "Transfer", "t1", "Source"),

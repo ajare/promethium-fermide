@@ -119,6 +119,13 @@ namespace
 	}
 }
 
+std::optional<bool> connectorEligibility(core::StationSystemsSettings const& draft,
+	core::StationPinRef const& origin, core::StationPinRef const& target)
+{
+	if (origin == target) return std::nullopt;
+	return core::evaluateStationLink(draft, {origin, target}).allowed;
+}
+
 Graph build(core::StationSystemsSettings const& s)
 {
 	Builder b;
@@ -604,6 +611,7 @@ void StationFlowDiagram::reset()
 	mSelectedType.clear(); mSelectedId.clear();
 	mDragging = -1; mLastFrame = -1; mTemperature = 0;
 	mLinks.clear(); mPinIds.clear(); mPinRefs.clear(); mPinScreen.clear(); mNodeScreen.clear();
+	mActiveLinkPin.reset(); mPinEligibility.clear();
 	mLinkRejection.clear();
 }
 
@@ -641,6 +649,14 @@ bool StationFlowDiagram::pinScreenPosition(std::string const& nodeType, std::str
 	if (found == mPinScreen.end()) return false;
 	if (out) *out = found->second;
 	return true;
+}
+
+std::optional<bool> StationFlowDiagram::pinEligibility(std::string const& nodeType,
+	std::string const& nodeId, std::string const& portName) const
+{
+	auto const found = mPinEligibility.find(pinKey(nodeType, nodeId, portName));
+	if (found == mPinEligibility.end()) return std::nullopt;
+	return found->second;
 }
 
 bool StationFlowDiagram::nodeScreenRect(std::string const& nodeType, std::string const& nodeId,
@@ -691,7 +707,9 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	std::function<void(core::StationSystemsSettings&)> const& renderInspector,
 	std::function<void()> const& beforeSelectionChange)
 {
-	if (mLastFrame != ImGui::GetFrameCount() - 1) { mDragging = -1; mTemperature = 0; }
+	if (mLastFrame != ImGui::GetFrameCount() - 1)
+	{ mDragging = -1; mTemperature = 0; mActiveLinkPin.reset(); }
+	mPinEligibility.clear();
 	mLastFrame = ImGui::GetFrameCount();
 	if (!mCached || *mCached != draft)
 	{
@@ -713,7 +731,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			auto key = base + ":" + std::to_string(occurrences[base]++);
 			if (auto found = mLayout.find(key); found != mLayout.end()) mPositions[i] = found->second;
 		}
-		mDragging = -1; mTemperature = 0;
+		mDragging = -1; mTemperature = 0; mActiveLinkPin.reset();
 		// The editable links are the draft's own references, resolved to the
 		// nodes that carry them. Identity comes from configuration, so adding
 		// or removing another entry cannot renumber what is already wired.
@@ -939,12 +957,19 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	// A new drag starts clean: a previous refusal stays on screen only while
 	// it is the newest thing the user did.
 	int linkStartedFrom = -1;
-	if (ImNodes::IsLinkStarted(&linkStartedFrom)) mLinkRejection.clear();
+	if (ImNodes::IsLinkStarted(&linkStartedFrom))
+	{
+		mLinkRejection.clear();
+		auto const found = mPinRefs.find(linkStartedFrom);
+		mActiveLinkPin = found == mPinRefs.end()
+			? std::nullopt : std::optional{found->second};
+	}
 	// A dropped link goes through the same seam the headless constraint matrix
 	// calls: the library reports the pair, core decides, and the draft only
 	// changes when core allows it.
 	int linkStart = -1, linkEnd = -1;
-	if (ImNodes::IsLinkCreated(&linkStart, &linkEnd))
+	bool const linkCreated = ImNodes::IsLinkCreated(&linkStart, &linkEnd);
+	if (linkCreated)
 	{
 		auto const from = mPinRefs.find(linkStart);
 		auto const to = mPinRefs.find(linkEnd);
@@ -959,6 +984,21 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			else mLinkRejection = "That link could not be recorded in the draft. Please try again.";
 		}
 	}
+	// End feedback on the release frame, whether the link was accepted,
+	// refused, or dropped in empty space. No stale glow survives a drag.
+	if (linkCreated || ImNodes::IsLinkDropped() || !io.MouseDown[ImGuiMouseButton_Left])
+		mActiveLinkPin.reset();
+	if (mActiveLinkPin)
+		for (auto const& [key, position] : framePins)
+		{
+			(void)position;
+			auto const found = mPinIds.find(key);
+			if (found == mPinIds.end()) continue;
+			auto const ref = mPinRefs.find(found->second);
+			if (ref == mPinRefs.end()) continue;
+			if (auto eligible = station_flow::connectorEligibility(draft, *mActiveLinkPin, ref->second))
+				mPinEligibility.emplace(key, *eligible);
+		}
 	for (int c = 0; c < 4; ++c) ImNodes::PopColorStyle();
 	ImNodes::PopStyleVar();
 	int hoveredId = -1, hoveredNode = -1;
@@ -1104,9 +1144,16 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			bool const near = hovered
 				&& std::hypot(pin->second.x - io.MousePos.x, pin->second.y - io.MousePos.y)
 					<= pinSize * 0.75f + 2.0f;
-			auto const pinColour = near ? IM_COL32(255, 255, 255, 255)
+			auto const eligibility = mPinEligibility.find(key);
+			auto const pinColour = eligibility != mPinEligibility.end()
+				? (eligibility->second
+					? (near ? IM_COL32(210, 255, 225, 255) : IM_COL32(105, 255, 170, 255))
+					: IM_COL32(65, 70, 78, 115))
+				: near ? IM_COL32(255, 255, 255, 255)
 				: connected ? IM_COL32(150, 200, 240, 235) : IM_COL32(125, 135, 155, 215);
 			draw->AddCircleFilled(pin->second, pinSize * 0.5f, pinColour, 20);
+			if (eligibility != mPinEligibility.end() && eligibility->second)
+				draw->AddCircle(pin->second, pinSize * 0.75f, IM_COL32(105, 255, 170, 165), 20, 2.0f);
 			draw->AddCircle(pin->second, pinSize * 0.5f, IM_COL32(24, 28, 34, 255), 20, 1.0f);
 		}
 	}

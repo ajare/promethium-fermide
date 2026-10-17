@@ -32,6 +32,10 @@ namespace station_flow
 	};
 	struct Graph { std::vector<Node> nodes; std::vector<Link> links; };
 	Graph build(core::StationSystemsSettings const& draft);
+	// Null for the drag origin; every other connector is judged by the
+	// same core verdict used when the link is dropped.
+	std::optional<bool> connectorEligibility(core::StationSystemsSettings const& draft,
+		core::StationPinRef const& origin, core::StationPinRef const& target);
 	inline constexpr float NodeWidth = 250, NodeHeight = 76;
 	// #653: the inspector column beside the canvas keeps a fixed width
 	// whether or not a node is selected, so selecting or deselecting never
@@ -79,6 +83,9 @@ public:
 	bool pinScreenPosition(std::string const& nodeType, std::string const& nodeId,
 		std::string const& portName, ImVec2* out) const;
 	bool nodeScreenRect(std::string const& nodeType, std::string const& nodeId, ImVec4* out) const;
+	// Last rendered frame's eligibility, absent outside an active link drag.
+	std::optional<bool> pinEligibility(std::string const& nodeType,
+		std::string const& nodeId, std::string const& portName) const;
 	// Why the last link attempt was refused; empty when nothing is outstanding.
 	std::string const& linkRejection() const { return mLinkRejection; }
 private:
@@ -116,6 +123,8 @@ private:
 	int mNextPinId{1};
 	std::map<int, core::StationPinRef> mPinRefs;
 	std::map<std::string, ImVec2> mPinScreen;
+	std::optional<core::StationPinRef> mActiveLinkPin;
+	std::map<std::string, bool> mPinEligibility;
 	std::map<std::string, ImVec4> mNodeScreen;
 	std::string mLinkRejection;
 };

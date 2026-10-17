@@ -42,6 +42,9 @@ public:
 		return mFlow.nodeScreenRect(nodeType, nodeId, out);
 	}
 	std::string const& flowLinkRejection() const { return mFlow.linkRejection(); }
+	std::optional<bool> flowPinEligibility(std::string const& nodeType,
+		std::string const& nodeId, std::string const& portName) const
+	{ return mFlow.pinEligibility(nodeType, nodeId, portName); }
 private:
 	bool syncWorld(std::shared_ptr<core::World> const& world);
 	DocumentSnapshot captureDraft() const;
