@@ -13,6 +13,510 @@ namespace station_editor
 // surface that only holds the draft can edit any entry without owning
 // the list around it. Today's fields never read across the draft; the
 // parameter is the seam the fan-out tickets (#647-#651) extend.
+bool renderCrewEntry([[maybe_unused]] core::StationSystemsSettings& draft, core::CrewSettings& crew,
+	std::string const& label, std::string const& removeLabel)
+{
+	bool removeCrew = false;
+	ImGui::PushItemWidth(220);
+	char crewIdBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(crewIdBuffer, crew.id.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " id").c_str(), crewIdBuffer, sizeof(crewIdBuffer)))
+		crew.id = crewIdBuffer;
+	char crewAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(crewAtmosphereBuffer, crew.atmosphereId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " atmosphere").c_str(),
+		crewAtmosphereBuffer, sizeof(crewAtmosphereBuffer)))
+		crew.atmosphereId = crewAtmosphereBuffer;
+	ImGui::InputInt((label + " count").c_str(), &crew.crewCount, 1, 0);
+	bool crewPeriodic = crew.activityProfile.periodSeconds > 0.0;
+	if (ImGui::Checkbox((label + " periodic activity").c_str(), &crewPeriodic))
+	{
+		if (crewPeriodic)
+		{
+			if (crew.activityProfile.periodSeconds <= 0.0) crew.activityProfile.periodSeconds = 120.0;
+			if (crew.activityProfile.segments.empty())
+				crew.activityProfile.segments.push_back({0.0, 1.0});
+		}
+		else
+		{
+			crew.activityProfile.periodSeconds = 0.0;
+			crew.activityProfile.segments.clear();
+		}
+	}
+	if (!crewPeriodic)
+		ImGui::InputDouble((label + " constant activity level").c_str(),
+			&crew.activityProfile.constantLevel, 0.0, 0.0, "%.3f");
+	else
+	{
+		ImGui::InputDouble((label + " activity period seconds").c_str(),
+			&crew.activityProfile.periodSeconds, 0.0, 0.0, "%.1f");
+		for (size_t segment = 0; segment < crew.activityProfile.segments.size(); ++segment)
+		{
+			auto& stretch = crew.activityProfile.segments[segment];
+			auto const segmentRow = label + " activity segment " + std::to_string(segment);
+			ImGui::InputDouble((segmentRow + " start").c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+			ImGui::SameLine();
+			ImGui::InputDouble((segmentRow + " level").c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+			ImGui::SameLine();
+			if (ImGui::Button(("Remove " + segmentRow).c_str()))
+				crew.activityProfile.segments.erase(
+					crew.activityProfile.segments.begin() + static_cast<std::ptrdiff_t>(segment));
+			}
+		if (crew.activityProfile.segments.size() < core::MaxStationProfileSegments
+			&& ImGui::Button(("Add activity segment to " + label).c_str()))
+			crew.activityProfile.segments.push_back(
+				{crew.activityProfile.periodSeconds * 0.5, 0.0});
+	}
+	char crewFoodBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(crewFoodBuffer, crew.foodStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " food store").c_str(),
+		crewFoodBuffer, sizeof(crewFoodBuffer)))
+		crew.foodStoreId = crewFoodBuffer;
+	char crewWaterBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(crewWaterBuffer, crew.waterStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " water store").c_str(),
+		crewWaterBuffer, sizeof(crewWaterBuffer)))
+		crew.waterStoreId = crewWaterBuffer;
+	char crewUrineBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(crewUrineBuffer, crew.urineStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " urine store").c_str(),
+		crewUrineBuffer, sizeof(crewUrineBuffer)))
+		crew.urineStoreId = crewUrineBuffer;
+	char crewWasteBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(crewWasteBuffer, crew.organicWasteStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " organic waste store").c_str(),
+		crewWasteBuffer, sizeof(crewWasteBuffer)))
+		crew.organicWasteStoreId = crewWasteBuffer;
+	ImGui::InputDouble((label + " food per crew per s").c_str(),
+		&crew.foodPerCrewPerS, 0.0, 0.0, "%.6f");
+	ImGui::InputDouble((label + " water per crew per s").c_str(),
+		&crew.waterPerCrewPerS, 0.0, 0.0, "%.6f");
+	ImGui::InputDouble((label + " O2 per crew kg/s").c_str(),
+		&crew.oxygenPerCrewKgPerS, 0.0, 0.0, "%.6f");
+	ImGui::InputDouble((label + " CO2 per crew kg/s").c_str(),
+		&crew.co2PerCrewKgPerS, 0.0, 0.0, "%.6f");
+	ImGui::InputDouble((label + " moisture per crew kg/s").c_str(),
+		&crew.moisturePerCrewKgPerS, 0.0, 0.0, "%.6f");
+	ImGui::InputDouble((label + " urine per crew per s").c_str(),
+		&crew.urinePerCrewPerS, 0.0, 0.0, "%.6f");
+	ImGui::InputDouble((label + " organic waste per crew per s").c_str(),
+		&crew.organicWastePerCrewPerS, 0.0, 0.0, "%.6f");
+	ImGui::InputDouble((label + " metabolic heat per crew kW").c_str(),
+		&crew.metabolicHeatPerCrewKW, 0.0, 0.0, "%.4f");
+	ImGui::SameLine();
+	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
+		removeCrew = true;
+	ImGui::PopItemWidth();
+	return removeCrew;
+}
+
+bool renderMicrobialProcessorEntry([[maybe_unused]] core::StationSystemsSettings& draft, core::MicrobialProcessorSettings& processor,
+	std::string const& label, std::string const& removeLabel)
+{
+	bool removeProcessor = false;
+	char processorIdBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(processorIdBuffer, processor.id.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " id").c_str(),
+		processorIdBuffer, sizeof(processorIdBuffer)))
+		processor.id = processorIdBuffer;
+	char processorHazardBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(processorHazardBuffer, processor.hazardClass.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " hazard class").c_str(),
+		processorHazardBuffer, sizeof(processorHazardBuffer)))
+		processor.hazardClass = processorHazardBuffer;
+	char processorFeedBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(processorFeedBuffer, processor.feedStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " organic waste feed store").c_str(),
+		processorFeedBuffer, sizeof(processorFeedBuffer)))
+		processor.feedStoreId = processorFeedBuffer;
+	char processorOxygenBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(processorOxygenBuffer, processor.oxygenStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " oxygen store").c_str(),
+		processorOxygenBuffer, sizeof(processorOxygenBuffer)))
+		processor.oxygenStoreId = processorOxygenBuffer;
+	char processorWaterBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(processorWaterBuffer, processor.waterStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " process water store").c_str(),
+		processorWaterBuffer, sizeof(processorWaterBuffer)))
+		processor.waterStoreId = processorWaterBuffer;
+	char processorMediaBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(processorMediaBuffer, processor.consumableStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " culture medium store").c_str(),
+		processorMediaBuffer, sizeof(processorMediaBuffer)))
+		processor.consumableStoreId = processorMediaBuffer;
+	char processorNutrientBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(processorNutrientBuffer, processor.nutrientStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " recovered nutrient store").c_str(),
+		processorNutrientBuffer, sizeof(processorNutrientBuffer)))
+		processor.nutrientStoreId = processorNutrientBuffer;
+	char processorRecoveredWaterBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(processorRecoveredWaterBuffer, processor.recoveredWaterStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " recovered water store").c_str(),
+		processorRecoveredWaterBuffer, sizeof(processorRecoveredWaterBuffer)))
+		processor.recoveredWaterStoreId = processorRecoveredWaterBuffer;
+	char processorCo2Buffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(processorCo2Buffer, processor.co2StoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " CO2 store").c_str(),
+		processorCo2Buffer, sizeof(processorCo2Buffer)))
+		processor.co2StoreId = processorCo2Buffer;
+	char processorResidueBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(processorResidueBuffer, processor.residueStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " residue store").c_str(),
+		processorResidueBuffer, sizeof(processorResidueBuffer)))
+		processor.residueStoreId = processorResidueBuffer;
+	char processorStockBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(processorStockBuffer, processor.stockStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " replacement biological stock store").c_str(),
+		processorStockBuffer, sizeof(processorStockBuffer)))
+		processor.stockStoreId = processorStockBuffer;
+	char processorThermalBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(processorThermalBuffer, processor.thermalClass.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " heat sink thermal class").c_str(),
+		processorThermalBuffer, sizeof(processorThermalBuffer)))
+		processor.thermalClass = processorThermalBuffer;
+	char processorSinkBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(processorSinkBuffer, processor.heatSinkId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " heat sink reservoir").c_str(),
+		processorSinkBuffer, sizeof(processorSinkBuffer)))
+		processor.heatSinkId = processorSinkBuffer;
+	ImGui::PushItemWidth(140.0f);
+	ImGui::InputDouble((label + " rated feed processing kg/s").c_str(),
+		&processor.rateKgPerS, 0.0, 0.0, "%.6f");
+	ImGui::InputDouble((label + " specific energy kWh/kg feed").c_str(),
+		&processor.specificEnergyKWhPerKgFeed, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " oxygen per kg feed kg").c_str(),
+		&processor.oxygenPerKgFeedKg, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " process water per kg feed kg").c_str(),
+		&processor.processWaterPerKgFeedKg, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " medium units per kg feed").c_str(),
+		&processor.consumablePerKgFeed, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " CO2 per kg feed kg").c_str(),
+		&processor.co2PerKgFeedKg, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " nitrogen recovery").c_str(),
+		&processor.nitrogenRecovery, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " phosphorus recovery").c_str(),
+		&processor.phosphorusRecovery, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " potassium recovery").c_str(),
+		&processor.potassiumRecovery, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " minerals recovery").c_str(),
+		&processor.mineralsRecovery, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " water recovery").c_str(),
+		&processor.waterRecovery, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " reaction heat kJ/kg feed").c_str(),
+		&processor.reactionHeatKJPerKgFeed, 0.0, 0.0, "%.2f");
+	ImGui::InputDouble((label + " min operating temperature C").c_str(),
+		&processor.minOperatingTemperatureC, 0.0, 0.0, "%.2f");
+	ImGui::InputDouble((label + " max sink temperature C").c_str(),
+		&processor.maxSinkTemperatureC, 0.0, 0.0, "%.2f");
+	ImGui::InputDouble((label + " initial condition").c_str(),
+		&processor.initialCondition, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " starvation degrade per hour").c_str(),
+		&processor.starvationDegradePerHour, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " consumable exhaustion degrade per hour").c_str(),
+		&processor.consumableExhaustionDegradePerHour, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " cold stress degrade per hour").c_str(),
+		&processor.coldStressDegradePerHour, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " heat stress degrade per hour").c_str(),
+		&processor.heatStressDegradePerHour, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " recovery per hour").c_str(),
+		&processor.recoveryPerHour, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " stock units per condition point").c_str(),
+		&processor.stockUnitsPerConditionPoint, 0.0, 0.0, "%.4f");
+	ImGui::InputInt((label + " priority").c_str(), &processor.priority, 1, 0);
+	ImGui::SameLine();
+	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
+		removeProcessor = true;
+	ImGui::PopItemWidth();
+	return removeProcessor;
+}
+
+bool renderCropPopulationEntry([[maybe_unused]] core::StationSystemsSettings& draft, core::CropPopulationSettings& crop,
+	std::string const& label, std::string const& removeLabel)
+{
+	bool removeCrop = false;
+	ImGui::PushItemWidth(220);
+	char cropIdBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(cropIdBuffer, crop.id.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " id").c_str(), cropIdBuffer, sizeof(cropIdBuffer)))
+		crop.id = cropIdBuffer;
+	char cropAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(cropAtmosphereBuffer, crop.atmosphereId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " atmosphere").c_str(),
+		cropAtmosphereBuffer, sizeof(cropAtmosphereBuffer)))
+		crop.atmosphereId = cropAtmosphereBuffer;
+	char cropWaterBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(cropWaterBuffer, crop.waterStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " irrigation water store").c_str(),
+		cropWaterBuffer, sizeof(cropWaterBuffer)))
+		crop.waterStoreId = cropWaterBuffer;
+	char cropNitrogenBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(cropNitrogenBuffer, crop.nitrogenStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " nitrogen store").c_str(),
+		cropNitrogenBuffer, sizeof(cropNitrogenBuffer)))
+		crop.nitrogenStoreId = cropNitrogenBuffer;
+	char cropPhosphorusBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(cropPhosphorusBuffer, crop.phosphorusStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " phosphorus store").c_str(),
+		cropPhosphorusBuffer, sizeof(cropPhosphorusBuffer)))
+		crop.phosphorusStoreId = cropPhosphorusBuffer;
+	char cropPotassiumBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(cropPotassiumBuffer, crop.potassiumStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " potassium store").c_str(),
+		cropPotassiumBuffer, sizeof(cropPotassiumBuffer)))
+		crop.potassiumStoreId = cropPotassiumBuffer;
+	char cropMineralsBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(cropMineralsBuffer, crop.mineralsStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " minerals store").c_str(),
+		cropMineralsBuffer, sizeof(cropMineralsBuffer)))
+		crop.mineralsStoreId = cropMineralsBuffer;
+	// #581: the capacity-factor fields use %g so a large authored
+	// value round-trips through the 64-character InputScalar buffer.
+	// With %f a value above ~1e62 truncated to the buffer width and
+	// re-committing it silently changed the number; %g keeps every
+	// magnitude - including the overflow candidates the capacity
+	// contract now refuses - displayable and editable exactly.
+	ImGui::InputDouble((label + " growing area m2").c_str(),
+		&crop.growingAreaM2, 0.0, 0.0, "%.15g");
+	ImGui::InputDouble((label + " max biomass density kg/m2").c_str(),
+		&crop.maxBiomassDensityKgPerM2, 0.0, 0.0, "%.15g");
+	ImGui::InputDouble((label + " initial dry biomass kg").c_str(),
+		&crop.initialBiomassKg, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " lamp rated kW").c_str(),
+		&crop.lampRatedKW, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " circulation power kW (drawn before lamp)").c_str(),
+		&crop.circulationPowerKW, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " growth yield kg per kWh light").c_str(),
+		&crop.growthYieldKgPerKWh, 0.0, 0.0, "%.6f");
+	ImGui::InputDouble((label + " respiration per hour").c_str(),
+		&crop.respirationPerHour, 0.0, 0.0, "%.6f");
+	ImGui::InputDouble((label + " transpiration kg per kg growth").c_str(),
+		&crop.transpirationKgPerKgGrowth, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " min growing temperature C").c_str(),
+		&crop.minGrowingTemperatureC, 0.0, 0.0, "%.2f");
+	ImGui::InputDouble((label + " max growing temperature C").c_str(),
+		&crop.maxGrowingTemperatureC, 0.0, 0.0, "%.2f");
+	char cropFoodBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(cropFoodBuffer, crop.foodStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " food store").c_str(),
+		cropFoodBuffer, sizeof(cropFoodBuffer)))
+		crop.foodStoreId = cropFoodBuffer;
+	char cropWasteBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(cropWasteBuffer, crop.wasteStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " waste store").c_str(),
+		cropWasteBuffer, sizeof(cropWasteBuffer)))
+		crop.wasteStoreId = cropWasteBuffer;
+	ImGui::InputDouble((label + " harvest trigger kg (0 disables harvest)").c_str(),
+		&crop.harvestTriggerKg, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " harvest fraction of living biomass").c_str(),
+		&crop.harvestFraction, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " edible fraction of harvest").c_str(),
+		&crop.edibleFraction, 0.0, 0.0, "%.4f");
+	bool cropPeriodic = crop.illuminationProfile.periodSeconds > 0.0;
+	if (ImGui::Checkbox((label + " periodic illumination").c_str(), &cropPeriodic))
+	{
+		if (cropPeriodic)
+		{
+			if (crop.illuminationProfile.periodSeconds <= 0.0) crop.illuminationProfile.periodSeconds = 120.0;
+			if (crop.illuminationProfile.segments.empty())
+				crop.illuminationProfile.segments.push_back({0.0, 1.0});
+		}
+		else
+		{
+			crop.illuminationProfile.periodSeconds = 0.0;
+			crop.illuminationProfile.segments.clear();
+		}
+	}
+	if (!cropPeriodic)
+		ImGui::InputDouble((label + " constant illumination level").c_str(),
+			&crop.illuminationProfile.constantLevel, 0.0, 0.0, "%.3f");
+	else
+	{
+		ImGui::InputDouble((label + " illumination period seconds").c_str(),
+			&crop.illuminationProfile.periodSeconds, 0.0, 0.0, "%.1f");
+		for (size_t segment = 0; segment < crop.illuminationProfile.segments.size(); ++segment)
+		{
+			auto& stretch = crop.illuminationProfile.segments[segment];
+			auto const segmentRow = label + " illumination segment " + std::to_string(segment);
+			ImGui::InputDouble((segmentRow + " start").c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+			ImGui::SameLine();
+			ImGui::InputDouble((segmentRow + " level").c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+			ImGui::SameLine();
+			if (ImGui::Button(("Remove " + segmentRow).c_str()))
+				crop.illuminationProfile.segments.erase(
+					crop.illuminationProfile.segments.begin() + static_cast<std::ptrdiff_t>(segment));
+		}
+		if (crop.illuminationProfile.segments.size() < core::MaxStationProfileSegments
+			&& ImGui::Button(("Add illumination segment to " + label).c_str()))
+			crop.illuminationProfile.segments.push_back(
+				{crop.illuminationProfile.periodSeconds * 0.5, 0.0});
+	}
+	ImGui::Text("  declared dry-mass composition (moisture and atmospheric nitrogen must be 0 for crops):");
+	ImGui::InputDouble((label + " composition moisture fraction").c_str(),
+		&crop.composition.moisture, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " composition nutrient nitrogen fraction").c_str(),
+		&crop.composition.nutrientNitrogen, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " composition atmospheric nitrogen fraction").c_str(),
+		&crop.composition.atmosphericNitrogen, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " composition phosphorus fraction").c_str(),
+		&crop.composition.phosphorus, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " composition potassium fraction").c_str(),
+		&crop.composition.potassium, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " composition other minerals fraction").c_str(),
+		&crop.composition.otherMinerals, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " composition energy kJ per kg dry").c_str(),
+		&crop.composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
+	ImGui::InputInt((label + " priority").c_str(), &crop.priority, 1, 0);
+	ImGui::SameLine();
+	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
+		removeCrop = true;
+	ImGui::PopItemWidth();
+	return removeCrop;
+}
+
+bool renderAlgaeCultureEntry([[maybe_unused]] core::StationSystemsSettings& draft, core::AlgaeCultureSettings& algae,
+	std::string const& label, std::string const& removeLabel)
+{
+	bool removeAlgae = false;
+	ImGui::PushItemWidth(220);
+	char algaeIdBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(algaeIdBuffer, algae.id.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " id").c_str(), algaeIdBuffer, sizeof(algaeIdBuffer)))
+		algae.id = algaeIdBuffer;
+	char algaeAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(algaeAtmosphereBuffer, algae.atmosphereId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " atmosphere").c_str(),
+		algaeAtmosphereBuffer, sizeof(algaeAtmosphereBuffer)))
+		algae.atmosphereId = algaeAtmosphereBuffer;
+	char algaeWaterBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(algaeWaterBuffer, algae.waterStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " culture water store").c_str(),
+		algaeWaterBuffer, sizeof(algaeWaterBuffer)))
+		algae.waterStoreId = algaeWaterBuffer;
+	char algaeNitrogenBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(algaeNitrogenBuffer, algae.nitrogenStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " nitrogen store").c_str(),
+		algaeNitrogenBuffer, sizeof(algaeNitrogenBuffer)))
+		algae.nitrogenStoreId = algaeNitrogenBuffer;
+	char algaePhosphorusBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(algaePhosphorusBuffer, algae.phosphorusStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " phosphorus store").c_str(),
+		algaePhosphorusBuffer, sizeof(algaePhosphorusBuffer)))
+		algae.phosphorusStoreId = algaePhosphorusBuffer;
+	char algaePotassiumBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(algaePotassiumBuffer, algae.potassiumStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " potassium store").c_str(),
+		algaePotassiumBuffer, sizeof(algaePotassiumBuffer)))
+		algae.potassiumStoreId = algaePotassiumBuffer;
+	char algaeMineralsBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(algaeMineralsBuffer, algae.mineralsStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " minerals store").c_str(),
+		algaeMineralsBuffer, sizeof(algaeMineralsBuffer)))
+		algae.mineralsStoreId = algaeMineralsBuffer;
+	ImGui::InputDouble((label + " active culture volume L").c_str(),
+		&algae.cultureVolumeL, 0.0, 0.0, "%.15g");
+	ImGui::InputDouble((label + " max biomass density kg/L").c_str(),
+		&algae.maxBiomassDensityKgPerL, 0.0, 0.0, "%.15g");
+	ImGui::InputDouble((label + " initial dry biomass kg").c_str(),
+		&algae.initialBiomassKg, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " lamp rated kW").c_str(),
+		&algae.lampRatedKW, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " circulation power kW (drawn before lamp)").c_str(),
+		&algae.circulationPowerKW, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " growth yield kg per kWh light").c_str(),
+		&algae.growthYieldKgPerKWh, 0.0, 0.0, "%.6f");
+	ImGui::InputDouble((label + " respiration per hour").c_str(),
+		&algae.respirationPerHour, 0.0, 0.0, "%.6f");
+	ImGui::InputDouble((label + " evaporation kg per kg growth").c_str(),
+		&algae.evaporationKgPerKgGrowth, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " min growing temperature C").c_str(),
+		&algae.minGrowingTemperatureC, 0.0, 0.0, "%.2f");
+	ImGui::InputDouble((label + " max growing temperature C").c_str(),
+		&algae.maxGrowingTemperatureC, 0.0, 0.0, "%.2f");
+	char algaeFoodBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(algaeFoodBuffer, algae.foodStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " food store").c_str(),
+		algaeFoodBuffer, sizeof(algaeFoodBuffer)))
+		algae.foodStoreId = algaeFoodBuffer;
+	char algaeRecoveryBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(algaeRecoveryBuffer, algae.recoveryStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " recovery store").c_str(),
+		algaeRecoveryBuffer, sizeof(algaeRecoveryBuffer)))
+		algae.recoveryStoreId = algaeRecoveryBuffer;
+	char algaeWasteBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(algaeWasteBuffer, algae.wasteStoreId.c_str(), core::MaxStationStoreIdLength);
+	if (ImGui::InputText((label + " waste store").c_str(),
+		algaeWasteBuffer, sizeof(algaeWasteBuffer)))
+		algae.wasteStoreId = algaeWasteBuffer;
+	ImGui::InputDouble((label + " harvest trigger kg (0 disables harvest)").c_str(),
+		&algae.harvestTriggerKg, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " harvest fraction of living biomass").c_str(),
+		&algae.harvestFraction, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " food fraction of harvest").c_str(),
+		&algae.foodFraction, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " recovery fraction of harvest").c_str(),
+		&algae.recoveryFraction, 0.0, 0.0, "%.4f");
+	bool algaePeriodic = algae.illuminationProfile.periodSeconds > 0.0;
+	if (ImGui::Checkbox((label + " periodic illumination").c_str(), &algaePeriodic))
+	{
+		if (algaePeriodic)
+		{
+			if (algae.illuminationProfile.periodSeconds <= 0.0) algae.illuminationProfile.periodSeconds = 120.0;
+			if (algae.illuminationProfile.segments.empty())
+				algae.illuminationProfile.segments.push_back({0.0, 1.0});
+		}
+		else
+		{
+			algae.illuminationProfile.periodSeconds = 0.0;
+			algae.illuminationProfile.segments.clear();
+		}
+	}
+	if (!algaePeriodic)
+		ImGui::InputDouble((label + " constant illumination level").c_str(),
+			&algae.illuminationProfile.constantLevel, 0.0, 0.0, "%.3f");
+	else
+	{
+		ImGui::InputDouble((label + " illumination period seconds").c_str(),
+			&algae.illuminationProfile.periodSeconds, 0.0, 0.0, "%.1f");
+		for (size_t segment = 0; segment < algae.illuminationProfile.segments.size(); ++segment)
+		{
+			auto& stretch = algae.illuminationProfile.segments[segment];
+			auto const segmentRow = label + " illumination segment " + std::to_string(segment);
+			ImGui::InputDouble((segmentRow + " start").c_str(), &stretch.startSeconds, 0.0, 0.0, "%.1f");
+			ImGui::SameLine();
+			ImGui::InputDouble((segmentRow + " level").c_str(), &stretch.level, 0.0, 0.0, "%.3f");
+			ImGui::SameLine();
+			if (ImGui::Button(("Remove " + segmentRow).c_str()))
+				algae.illuminationProfile.segments.erase(
+					algae.illuminationProfile.segments.begin() + static_cast<std::ptrdiff_t>(segment));
+		}
+		if (algae.illuminationProfile.segments.size() < core::MaxStationProfileSegments
+			&& ImGui::Button(("Add illumination segment to " + label).c_str()))
+			algae.illuminationProfile.segments.push_back(
+				{algae.illuminationProfile.periodSeconds * 0.5, 0.0});
+	}
+	ImGui::Text("  declared dry-mass composition (moisture and atmospheric nitrogen must be 0 for cultures):");
+	ImGui::InputDouble((label + " composition moisture fraction").c_str(),
+		&algae.composition.moisture, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " composition nutrient nitrogen fraction").c_str(),
+		&algae.composition.nutrientNitrogen, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " composition atmospheric nitrogen fraction").c_str(),
+		&algae.composition.atmosphericNitrogen, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " composition phosphorus fraction").c_str(),
+		&algae.composition.phosphorus, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " composition potassium fraction").c_str(),
+		&algae.composition.potassium, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " composition other minerals fraction").c_str(),
+		&algae.composition.otherMinerals, 0.0, 0.0, "%.4f");
+	ImGui::InputDouble((label + " composition energy kJ per kg dry").c_str(),
+		&algae.composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
+	ImGui::InputInt((label + " priority").c_str(), &algae.priority, 1, 0);
+	ImGui::SameLine();
+	if ((!removeLabel.empty() && ImGui::Button(removeLabel.c_str())))
+		removeAlgae = true;
+	ImGui::PopItemWidth();
+	return removeAlgae;
+}
+
 bool renderStoreEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	core::ResourceStoreSettings& store,
 	std::string const& label, std::string const& removeLabel)
@@ -1446,9 +1950,37 @@ bool renderAirlockCycleEntryAt(core::StationSystemsSettings& draft, size_t index
 	return renderAirlockCycleEntry(draft, draft.airlockCycles[index], "Airlock cycle " + std::to_string(index), {});
 }
 
+bool renderCrewEntryAt(core::StationSystemsSettings& draft, size_t index)
+{
+	if (index >= draft.crews.size()) return false;
+	return renderCrewEntry(draft, draft.crews[index], "Crew " + std::to_string(index), {});
+}
+
+bool renderMicrobialProcessorEntryAt(core::StationSystemsSettings& draft, size_t index)
+{
+	if (index >= draft.microbialProcessors.size()) return false;
+	return renderMicrobialProcessorEntry(draft, draft.microbialProcessors[index], "Microbial processor " + std::to_string(index), {});
+}
+
+bool renderCropPopulationEntryAt(core::StationSystemsSettings& draft, size_t index)
+{
+	if (index >= draft.cropPopulations.size()) return false;
+	return renderCropPopulationEntry(draft, draft.cropPopulations[index], "Crop " + std::to_string(index), {});
+}
+
+bool renderAlgaeCultureEntryAt(core::StationSystemsSettings& draft, size_t index)
+{
+	if (index >= draft.algaeCultures.size()) return false;
+	return renderAlgaeCultureEntry(draft, draft.algaeCultures[index], "Algae " + std::to_string(index), {});
+}
+
 // Keyed by the Flow node type names in core::stationPortDescriptors().
-constexpr std::array<StationEntryEditor, 19> kEntryEditors{{
+constexpr std::array<StationEntryEditor, 23> kEntryEditors{{
 	{"Store", &renderStoreEntryAt},
+	{"Crew", &renderCrewEntryAt},
+	{"Crops", &renderCropPopulationEntryAt},
+	{"Algae", &renderAlgaeCultureEntryAt},
+	{"Microbial processor", &renderMicrobialProcessorEntryAt},
 	{"Water collector", &renderWaterCollectorEntryAt},
 	{"Water treatment", &renderWaterTreatmentEntryAt},
 	{"Electrolyzer", &renderElectrolyzerEntryAt},

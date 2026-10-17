@@ -80,6 +80,29 @@ water treatment refuses it. Hazard, thermal-class, unknown-reference and
 exclusive-destination refusals use the configuration validator's reasons.
 Configuration documents preserve the resulting processing line and layout.
 
+### Biology authoring (#650)
+
+**Place node > Biology** offers **Crew**, **Crops**, **Algae**, and
+**Microbial processor**. Place an unwired entry and select it to edit the same
+settings as the Station Systems form. Placement, connections, disconnects and
+field edits use draft undo/redo; only Apply changes the World.
+
+Crew food, water, urine and organic waste connect to Stores. Crops and Algae
+expose separate water and N/P/K/mineral inputs and harvest destinations; Algae
+also exposes its recovery destination. Their gas, moisture and heat faces connect
+to an Atmosphere's **Biology out/in** faces. These exchanges share one compartment
+reference: wiring or disconnecting any face connects or clears the whole bundle,
+so a population cannot accidentally draw oxygen from one compartment and return
+CO2 to another. Electrical service remains implicit.
+
+Microbial processors expose their material streams and Reservoir heat sink.
+**Culture medium** and **Replacement stock** draw as unused optional connectors
+until wired, and support ordinary link dragging and undo. Required process
+resources must still be supplied before Apply. Link refusals use the shared
+biology validator, including hazard boundaries, nutrient purity, distinct streams,
+unknown stores or compartments, and unknown replacement biological stock.
+Station configuration documents preserve the authored biological loop and layout.
+
 ### Chiller authoring (#659)
 
 Choose **Thermal > Chiller** in **Place node**, then click the canvas. The

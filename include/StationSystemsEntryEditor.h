@@ -24,6 +24,14 @@ namespace station_editor
 	// bound reference (and, for a compound store, its nested composition)
 	// while the rest of the row still reads it (#557). Returns true when
 	// the Remove button was pressed.
+	bool renderCrewEntry(core::StationSystemsSettings&, core::CrewSettings&,
+		std::string const& label, std::string const& removeLabel);
+	bool renderMicrobialProcessorEntry(core::StationSystemsSettings&, core::MicrobialProcessorSettings&,
+		std::string const& label, std::string const& removeLabel);
+	bool renderCropPopulationEntry(core::StationSystemsSettings&, core::CropPopulationSettings&,
+		std::string const& label, std::string const& removeLabel);
+	bool renderAlgaeCultureEntry(core::StationSystemsSettings&, core::AlgaeCultureSettings&,
+		std::string const& label, std::string const& removeLabel);
 	bool renderStoreEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 		core::ResourceStoreSettings& store,
 		std::string const& label, std::string const& removeLabel);

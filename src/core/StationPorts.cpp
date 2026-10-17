@@ -75,6 +75,19 @@ namespace
 			return mapLink({link.to, link.from}, mapping);
 		if (from->direction != StationPortDirection::Output
 			|| to->direction != StationPortDirection::Input) return false;
+		StationSystemsSettings probe;
+		probe.crews.emplace_back(); probe.cropPopulations.emplace_back();
+		probe.algaeCultures.emplace_back(); probe.microbialProcessors.emplace_back();
+		bool biological = false;
+		visitStationBiologyReferences(probe, [&](auto type, auto const&, auto port, auto field,
+			auto&, bool input, auto peerType, auto peerPort) {
+			auto const& owner = input ? link.to : link.from;
+			auto const& peer = input ? link.from : link.to;
+			if (owner.nodeType == type && owner.portName == port
+				&& peer.nodeType == peerType && peer.portName == peerPort)
+			{ mapping = {type, owner.nodeId, field, peer}; biological = true; }
+		});
+		if (biological) return true;
 		if (link.to.nodeType == "Water collector" && link.to.portName == "Atmosphere"
 			&& link.from.nodeType == "Atmosphere" && link.from.portName == "Gas out")
 		{
@@ -313,7 +326,8 @@ namespace
 		// The radiator (#657) is not a machine, but its host mount routes
 		// through the same field resolver for write and clear, so it shares
 		// the routing predicate.
-		return ownerType == "Water collector" || ownerType == "Water treatment" || ownerType == "Electrolyzer" || ownerType == "CO2 capture" || ownerType == "Atmosphere" || ownerType == "Airlock cycle"
+		return ownerType == "Crew" || ownerType == "Crops" || ownerType == "Algae" || ownerType == "Microbial processor"
+			|| ownerType == "Water collector" || ownerType == "Water treatment" || ownerType == "Electrolyzer" || ownerType == "CO2 capture" || ownerType == "Atmosphere" || ownerType == "Airlock cycle"
 			|| ownerType == "Equipment" || ownerType == "Generator" || ownerType == "Fuel cell"
 			|| ownerType == "Sabatier" || ownerType == "Methane processor" || ownerType == "Radiator"
 			|| ownerType == "Coolant loop" || ownerType == "Chiller" || ownerType == "Thermal buffer";
@@ -330,6 +344,13 @@ namespace
 		std::string const& ownerId, std::string const& field)
 		-> std::remove_reference_t<decltype((settings.equipmentLoads[0].heatSinkId))>*
 	{
+		using Pointer = std::remove_reference_t<decltype((settings.crews[0].atmosphereId))>*;
+		Pointer biological = nullptr;
+		visitStationBiologyReferences(settings, [&](auto type, auto const& id, auto, auto name,
+			auto& reference, bool, auto, auto) {
+			if (ownerType == type && ownerId == id && field == name) biological = &reference;
+		});
+		if (biological) return biological;
 		if (ownerType == "Water collector")
 		{
 			auto found = std::find_if(settings.waterCollectors.begin(), settings.waterCollectors.end(),
@@ -773,6 +794,20 @@ namespace
 		std::string& diagnostic)
 	{
 		diagnostic.clear();
+		if (mapping.ownerType == "Crew" || mapping.ownerType == "Crops"
+			|| mapping.ownerType == "Algae" || mapping.ownerType == "Microbial processor")
+		{
+			auto scoped = settings;
+			auto retain = [&](auto& entries, char const* type) {
+				std::erase_if(entries, [&](auto const& entry) {
+					return mapping.ownerType != type || entry.id != mapping.ownerId;
+				});
+			};
+			retain(scoped.crews, "Crew"); retain(scoped.cropPopulations, "Crops");
+			retain(scoped.algaeCultures, "Algae"); retain(scoped.microbialProcessors, "Microbial processor");
+			validateStationBiologyWiring(scoped, diagnostic, true);
+			return true;
+		}
 		if (mapping.ownerType == "Water collector")
 		{
 			auto found = std::find_if(settings.waterCollectors.begin(), settings.waterCollectors.end(),
@@ -1087,6 +1122,13 @@ namespace
 std::vector<AuthoredLink> stationAuthoredLinks(StationSystemsSettings const& settings)
 {
 	std::vector<AuthoredLink> links;
+	visitStationBiologyReferences(settings, [&](auto type, auto const& id, auto port, auto field,
+		auto const& reference, bool input, auto peerType, auto peerPort) {
+		if (reference.empty()) return;
+		StationPinRef owner{type, id, port}, peer{peerType, reference, peerPort};
+		links.push_back({linkIdentity(type, id, field), input ? peer : owner, input ? owner : peer});
+	});
+
 	for (auto const& entry : settings.waterCollectors)
 	{
 		if (!entry.atmosphereId.empty())
@@ -1594,6 +1636,8 @@ LinkVerdict evaluateStationLink(StationSystemsSettings const& settings, Candidat
 	{
 		scopedWiringRule(settings, mapping, beforeWiring);
 		if (!afterWiring.empty() && (afterWiring != beforeWiring
+			|| mapping.ownerType == "Crew" || mapping.ownerType == "Crops"
+			|| mapping.ownerType == "Algae" || mapping.ownerType == "Microbial processor"
 			|| mapping.ownerType == "Chiller" || mapping.ownerType == "Coolant loop"
 			|| mapping.ownerType == "Water collector" || mapping.ownerType == "Water treatment"
 			|| mapping.ownerType == "Electrolyzer" || mapping.ownerType == "CO2 capture"

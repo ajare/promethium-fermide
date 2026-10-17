@@ -771,7 +771,8 @@ std::optional<StationFlowDiagram::SelectedNode> StationFlowDiagram::selectedNode
 	// The builder emits each type in declaration order, but graph indices
 	// include nodes of other types. Count preceding nodes of this type to
 	// address its own draft vector (not the entire graph).
-	if (view.type == "Store" || view.type == "Transfer" || view.type == "Conversion"
+	if (view.type == "Crew" || view.type == "Crops" || view.type == "Algae" || view.type == "Microbial processor"
+		|| view.type == "Store" || view.type == "Transfer" || view.type == "Conversion"
 		|| view.type == "Solar" || view.type == "Equipment" || view.type == "Battery"
 		|| view.type == "Generator" || view.type == "Fuel cell" || view.type == "Sabatier"
 		|| view.type == "Methane processor" || view.type == "Reservoir" || view.type == "Radiator"
@@ -1227,7 +1228,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			draft.equipmentLoads.push_back(std::move(load));
 			mFitRequested = false;
 		}
-		else if (mPlacingType == "Water collector" || mPlacingType == "Water treatment" || mPlacingType == "Electrolyzer" || mPlacingType == "CO2 capture" || mPlacingType == "Atmosphere" || mPlacingType == "Airlock cycle")
+		else if (mPlacingType == "Crew" || mPlacingType == "Crops" || mPlacingType == "Algae" || mPlacingType == "Microbial processor" || mPlacingType == "Water collector" || mPlacingType == "Water treatment" || mPlacingType == "Electrolyzer" || mPlacingType == "CO2 capture" || mPlacingType == "Atmosphere" || mPlacingType == "Airlock cycle")
 		{
 			auto place = [&](auto& entries, auto entry, size_t maximum, std::string const& prefix) {
 				if (entries.size() >= maximum) return;
@@ -1241,7 +1242,27 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 				entries.push_back(std::move(entry));
 				mFitRequested = false;
 			};
-			if (mPlacingType == "Water collector")
+			if (mPlacingType == "Crew")
+				place(draft.crews, core::CrewSettings{}, core::MaxStationCrews, "crew");
+			else if (mPlacingType == "Crops")
+			{
+				core::CropPopulationSettings entry;
+				entry.composition.energyKJPerKgDry = 1700.0;
+				place(draft.cropPopulations, entry, core::MaxStationCropPopulations, "crop");
+			}
+			else if (mPlacingType == "Algae")
+			{
+				core::AlgaeCultureSettings entry;
+				entry.composition.energyKJPerKgDry = 1700.0;
+				place(draft.algaeCultures, entry, core::MaxStationAlgaeCultures, "algae");
+			}
+			else if (mPlacingType == "Microbial processor")
+			{
+				core::MicrobialProcessorSettings entry;
+				entry.hazardClass = "normal"; entry.thermalClass = "moderate";
+				place(draft.microbialProcessors, entry, core::MaxStationMicrobialProcessors, "microbial");
+			}
+			else if (mPlacingType == "Water collector")
 			{
 				core::WaterCollectorSettings entry;
 				entry.hazardClass = "normal";
@@ -1747,6 +1768,10 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 				&& draft.coolantLoops.size() >= core::MaxStationCoolantLoops)
 			|| (mPlacingType == "Chiller" && draft.chillers.size() >= core::MaxStationChillers)
 			|| (mPlacingType == "Thermal buffer" && draft.thermalBuffers.size() >= core::MaxStationThermalBuffers)
+			|| (mPlacingType == "Crew" && draft.crews.size() >= core::MaxStationCrews)
+			|| (mPlacingType == "Crops" && draft.cropPopulations.size() >= core::MaxStationCropPopulations)
+			|| (mPlacingType == "Algae" && draft.algaeCultures.size() >= core::MaxStationAlgaeCultures)
+			|| (mPlacingType == "Microbial processor" && draft.microbialProcessors.size() >= core::MaxStationMicrobialProcessors)
 			|| (mPlacingType == "Water collector" && draft.waterCollectors.size() >= core::MaxStationWaterCollectors)
 			|| (mPlacingType == "Water treatment" && draft.waterTreatments.size() >= core::MaxStationWaterTreatments)
 			|| (mPlacingType == "Electrolyzer" && draft.electrolyzers.size() >= core::MaxStationElectrolyzers)

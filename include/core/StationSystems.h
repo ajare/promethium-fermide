@@ -1740,6 +1740,9 @@ namespace core
 		std::string& diagnostic, bool allowIncomplete = false,
 		std::vector<std::string>* brokenReferences = nullptr);
 
+	// Shared biology rules: Flow tolerates empty, not dangling, references while wiring.
+	bool validateStationBiologyWiring(StationSystemsSettings const&, std::string& diagnostic,
+		bool allowUnwired = false, std::vector<std::string>* brokenReferences = nullptr);
 	bool validateStationSystemsSettings(StationSystemsSettings const&, std::string& diagnostic,
 		std::vector<std::string>* brokenReferences = nullptr);
 	// The endpoint half of the transfer entry check (#640): the rules a link

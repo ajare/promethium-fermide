@@ -734,6 +734,88 @@ namespace
 		}
 	}
 
+	void flowBiologyWorkflow(smoke::Context const&)
+	{
+		struct Probe { char const* type; char const* id; char const* label; char const* port; };
+		for (auto const& probe : {
+			Probe{"Crew", "crew1", "Crew 0 id", "Food in"},
+			Probe{"Crops", "crop1", "Crop 0 id", "Nitrogen in"},
+			Probe{"Algae", "algae1", "Algae 0 id", "Photosynthesis CO2"},
+			Probe{"Microbial processor", "microbial1", "Microbial processor 0 id", "Culture medium"}})
+		{
+			headless::ScopedImGuiContext context;
+			auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+			io.Fonts->AddFontDefault(); io.Fonts->Build();
+			StationSystemsWindow window;
+			auto world = std::make_shared<core::World>("Biology Flow", 2, 2);
+			world->pauseSimulation(); world->finishBuild();
+			if (std::string(probe.type) == "Microbial processor")
+			{
+				core::StationSystemsSettings seed; seed.enabled = true;
+				core::ResourceStoreSettings kit;
+				kit.id = "kit"; kit.unit = "kg"; kit.capacity = 100; kit.hazardClass = "normal";
+				seed.stores.push_back(kit);
+				smoke::require(world->configureStationSystems(seed, false), "capture consumable seed failed");
+			}
+			headless::TestEngineDriver driver([&] {
+				ImGui::SetNextWindowPos({10,10}); ImGui::SetNextWindowSize({1100,980});
+				ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
+			});
+			driver.frame(); driver.frame();
+			#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+			driver.run("station", "flowBiology", [&](ImGuiTestContext* ctx) {
+				ctx->SetRef("Configuration");
+				ctx->ComboClick((std::string("Place node/") + probe.type).c_str()); ctx->Yield(2);
+				auto* canvas = findFlowCanvas(ImGui::FindWindowByName("Configuration"));
+				ctx->MouseTeleportToPos({canvas->Pos.x + 300, canvas->Pos.y + 180});
+				ctx->MouseClick(); ctx->Yield(3);
+				REQ(window.draftHistory().undoCount() == 1, "biology placement did not commit once");
+				ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+				ImVec4 rect{}; ImVec2 pin{};
+				REQ(window.flowNodeRect(probe.type, probe.id, &rect), "placed biology node is missing");
+				REQ(window.flowPinPosition(probe.type, probe.id, probe.port, &pin), "biology connector is missing");
+				ctx->MouseTeleportToPos({(rect.x+rect.z)*.5f, (rect.y+rect.w)*.5f});
+				ctx->MouseClick(); ctx->Yield(3);
+				ctx->MouseTeleportToPos({40,40}); ctx->Yield(2);
+				REQ(driver.contains((std::string("Node: ") + probe.type + " '" + probe.id + "'").c_str()), "biology selection did not resolve");
+				if (std::string(probe.type) == "Microbial processor")
+					{
+					REQ(driver.contains("Culture medium (input) - unused"), "optional consumable was drawn as required");
+					REQ(driver.contains("Replacement stock (input) - unused"), "optional stock was drawn as required");
+				}
+				if (std::string(probe.type) == "Water treatment")
+					REQ(driver.contains("Clearance in (input) - unused"), "optional clearance was drawn as required");
+				driver.click(ctx, (std::string("**/") + probe.label).c_str()); ctx->Yield(2);
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A); ctx->KeyChars("renamed");
+				ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+				REQ(window.draftHistory().undoCount() == 2, "biology inspector edit did not commit once");
+				REQ(window.flowNodeRect(probe.type, "renamed", &rect), "inspector did not rename selected biology entry");
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+				REQ(window.flowNodeRect(probe.type, probe.id, &rect), "undo did not restore biology identity");
+				if (std::string(probe.type) == "Microbial processor")
+				{
+					for (auto port : {"Culture medium", "Replacement stock"})
+					{
+					ImVec2 source{}, target{};
+					REQ(window.flowPinPosition("Store", "kit", "Inventory out", &source)
+						&& window.flowPinPosition(probe.type, probe.id, port, &target),
+						"optional capture connector is not on screen");
+					ctx->MouseTeleportToPos(source); ctx->Yield(2); ctx->MouseDown(); ctx->Yield(2);
+					ctx->MouseTeleportToPos(target); ctx->Yield(2); ctx->MouseUp(); ctx->Yield(3);
+					REQ((std::string(port) == "Culture medium" ? window.draft().microbialProcessors[0].consumableStoreId : window.draft().microbialProcessors[0].stockStoreId) == "kit"
+						&& window.draftHistory().undoCount() == 2, "optional connector did not wire as a real link");
+					ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+					REQ(window.draft().microbialProcessors[0].consumableStoreId.empty() && window.draft().microbialProcessors[0].stockStoreId.empty(), "optional link undo failed");
+					}
+				}
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+				REQ(!window.flowNodeRect(probe.type, probe.id, &rect), "undo did not remove biology placement");
+			});
+			#undef REQ
+			smoke::require(driver.passed(), "biology Flow placement/inspector workflow failed");
+		}
+	}
+
 	// #653: shared entry editors occupy a reserved column; field commits
 	// and selection changes must not resize or move the canvas.
 	void flowInspectorWorkflow(smoke::Context const&)
@@ -6215,6 +6297,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/flowCascadeDeleteWorkflow", flowCascadeDeleteWorkflow});
 	checks.push_back({"station/flowGrowablePortsWorkflow", flowGrowablePortsWorkflow});
 	checks.push_back({"station/flowWaterGasWorkflow", flowWaterGasWorkflow});
+	checks.push_back({"station/flowBiologyWorkflow", flowBiologyWorkflow});
 	checks.push_back({"station/flowInspectorWorkflow", flowInspectorWorkflow});
 	checks.push_back({"station/flowPowerChainWorkflow", flowPowerChainWorkflow});
 	checks.push_back({"station/flowThermalReservoirWorkflow", flowThermalReservoirWorkflow});

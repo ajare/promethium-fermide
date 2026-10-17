@@ -1312,6 +1312,155 @@ namespace
 	// #660: Thermal buffers are authored through one fixed host connector and
 	// one optional circulation gate.  The seam retains the validator's host
 	// and same-reservoir rules while incomplete drafts remain wireable.
+	void biologySeam(smoke::Context const& context)
+	{
+		auto base = [] {
+			core::StationSystemsSettings s; s.enabled = true;
+			core::CrewSettings crew; crew.id = "crew"; s.crews.push_back(crew);
+			core::CropPopulationSettings crop; crop.id = "crop";
+			crop.composition.energyKJPerKgDry = 1700; s.cropPopulations.push_back(crop);
+			core::AlgaeCultureSettings algae; algae.id = "algae";
+			algae.composition = crop.composition; s.algaeCultures.push_back(algae);
+			core::MicrobialProcessorSettings microbial; microbial.id = "microbial";
+			microbial.hazardClass = "normal"; microbial.thermalClass = "moderate";
+			s.microbialProcessors.push_back(microbial);
+			core::AtmosphereSettings air; air.id = "air"; air.hazardClass = "normal";
+			air.volumeM3 = air.thermalCapacityKJPerK = 100;
+			air.minPressureKPa = 80; air.maxPressureKPa = 120;
+			s.atmospheres.push_back(air);
+			core::ThermalReservoirSettings sink; sink.id = "sink";
+			sink.thermalClass = "moderate"; sink.heatCapacityKJPerK = 100;
+			s.thermalReservoirs.push_back(sink);
+			for (auto id : {"plain", "compound"})
+			{
+				core::ResourceStoreSettings store;
+				store.id = id; store.unit = "kg"; store.capacity = 100; store.hazardClass = "normal";
+				if (store.id == "compound") store.composition = crop.composition;
+				s.stores.push_back(store);
+			}
+			return s;
+		};
+		auto allowed = [](auto const& s, auto const& link) {
+			auto verdict = core::evaluateStationLink(s, link);
+			require(verdict.allowed, ("biology link refused: " + verdict.reason).c_str());
+		};
+		auto refused = [](auto const& s, auto const& link, char const* reason) {
+			auto verdict = core::evaluateStationLink(s, link);
+			require(!verdict.allowed && verdict.reason.find(reason) != std::string::npos,
+				("expected " + std::string(reason) + ", got " + verdict.reason).c_str());
+		};
+		auto seed = base();
+		std::vector<core::StationPinRef> biologicalPins;
+		core::visitStationBiologyReferences(seed, [&](auto type, auto const& id, auto port, auto,
+			auto const&, bool, auto, auto) { biologicalPins.push_back({type,id,port}); });
+		std::vector<core::StationPinRef> peers{
+			{"Store","plain","Inventory in"}, {"Store","plain","Inventory out"},
+			{"Store","compound","Inventory in"}, {"Store","compound","Inventory out"},
+			{"Atmosphere","air","Biology in"}, {"Atmosphere","air","Biology out"},
+			{"Atmosphere","air","Gas out"}, {"Atmosphere","air","Oxygen in"},
+			{"Reservoir","sink","Heat in"}};
+		// Complete Cartesian constraint matrix for every new face, in both drag
+		// directions. Compound versus plain material is semantic, not a port kind.
+		core::visitStationBiologyReferences(seed, [&](auto type, auto const& id, auto port, auto field,
+			auto const&, bool input, auto peerType, auto peerPort) {
+			core::StationPinRef owner{type,id,port};
+			for (auto const& peer : peers)
+			{
+				bool expected = peer.nodeType == peerType && peer.portName == peerPort;
+				if (expected && peer.nodeType == "Store")
+				{
+					bool compound = peer.nodeId == "compound";
+					if (std::string(type) == "Crew") expected = compound;
+					else if (std::string(type) == "Microbial processor")
+					{
+						if (std::string(field) == "feedStoreId") expected = compound;
+						else if (std::string(field) != "consumableStoreId" && std::string(field) != "stockStoreId") expected = !compound;
+					}
+					else if (input) expected = !compound;
+				}
+				for (bool reverse : {false,true})
+				{
+					auto verdict = core::evaluateStationLink(seed, reverse ? core::CandidateLink{peer,owner} : core::CandidateLink{owner,peer});
+					require(verdict.allowed == expected, (std::string(type) + "/" + port + " vs " + peer.nodeType + "/" + peer.portName + ": " + verdict.reason).c_str());
+				}
+			}
+			for (auto const& other : biologicalPins)
+				require(!core::evaluateStationLink(seed, {owner,other}).allowed, "biology processes joined without a store or compartment");
+		});
+		for (auto type : {"Crew","Crops","Algae","Microbial processor"})
+		{
+			auto types = core::stationPlaceableTypes();
+			require(std::any_of(types.begin(), types.end(), [&](auto const& p) {
+				return p.nodeType == type && p.group == "Biology"; }), "biology type not grouped for placement");
+		}
+		// Build all four populations' material loop through real link writes,
+		// including every atmosphere face and both optional microbial inputs.
+		auto wired = base(); wired.stores.clear();
+		std::vector<core::CandidateLink> links;
+		core::visitStationBiologyReferences(seed, [&](auto type, auto const& id, auto port, auto field,
+			auto const&, bool input, auto peerType, auto peerPort) {
+			std::string peerId;
+			if (std::string(peerType) == "Store")
+			{
+				core::ResourceStoreSettings store; store.id = "stream" + std::to_string(wired.stores.size());
+				store.unit = "kg"; store.capacity = 100; store.hazardClass = "normal";
+				if (std::string(type) == "Crew" || std::string(field) == "feedStoreId")
+					store.composition = seed.cropPopulations[0].composition;
+				peerId = store.id; wired.stores.push_back(store);
+			}
+			else peerId = std::string(peerType) == "Atmosphere" ? "air" : "sink";
+			core::StationPinRef owner{type,id,port}, peer{peerType,peerId,peerPort};
+			links.push_back(input ? core::CandidateLink{peer,owner} : core::CandidateLink{owner,peer});
+		});
+		for (auto const& link : links)
+		{
+			// Several exchange faces deliberately name the same compartment
+			// reference: connecting one connects the complete exchange bundle.
+			auto existing = core::stationAuthoredLinks(wired);
+			if (std::any_of(existing.begin(), existing.end(), [&](auto const& e) { return e.from == link.from && e.to == link.to; })) continue;
+			allowed(wired, link);
+			require(core::applyStationLink(wired, link), "biology reference write failed");
+		}
+		std::string reason;
+		require(core::validateStationSystemsSettings(wired, reason), reason.c_str());
+		for (auto const& link : core::stationAuthoredLinks(wired))
+		{
+			auto copy = wired;
+			require(core::clearStationLink(copy, link.identity), "biology disconnect failed");
+			allowed(copy, core::CandidateLink{link.to,link.from});
+			require(core::applyStationLink(copy, {link.to,link.from}) && copy == wired, "biology reconnect changed another reference");
+		}
+		// Every material path refuses the validator's hazard and unknown-store
+		// reason even when the remaining references are still unwired.
+		for (auto const& link : links)
+		{
+			auto const& peer = link.from.nodeType == "Store" ? link.from : link.to;
+			if (peer.nodeType != "Store") continue;
+			auto s = wired;
+			auto authored = core::stationAuthoredLinks(wired);
+			auto found = std::find_if(authored.begin(), authored.end(), [&](auto const& e) { return e.from == link.from && e.to == link.to; });
+			require(found != authored.end() && core::clearStationLink(s, found->identity), "hazard probe disconnect failed");
+			auto store = std::find_if(s.stores.begin(), s.stores.end(), [&](auto const& e) { return e.id == peer.nodeId; });
+			store->hazardClass = "hazardous";
+			refused(s, link, "class");
+		}
+		core::CandidateLink stock{{"Store","absent","Inventory out"},{"Microbial processor","microbial","Replacement stock"}};
+		refused(seed, stock, "replacement biological stock store");
+		core::CandidateLink atmosphere{{"Atmosphere","absent","Biology out"},{"Crops","crop","Oxygen uptake"}};
+		refused(seed, atmosphere, "unknown atmosphere compartment");
+		core::CandidateLink water{{"Store","absent","Inventory out"},{"Algae","algae","Water in"}};
+		refused(seed, water, "does not exist");
+		for (auto const& d : core::stationPortDescriptors())
+			if (d.nodeType == "Microbial processor" && (d.name == "Culture medium" || d.name == "Replacement stock"))
+				require(d.optional && d.maximumLinks == 1, "microbial optional connector declaration lost");
+		core::StationConfigurationDocument document; document.settings = wired;
+		auto path = (context.temporaryRoot() / "biological-loop.station.yaml").string();
+		core::saveStationConfiguration(path, document);
+		core::StationConfigurationDocument restored;
+		require(core::loadStationConfiguration(path, restored, &reason) && restored.settings == wired,
+			("biological loop round trip: " + reason).c_str());
+	}
+
 	void waterGasSeam(smoke::Context const& context)
 	{
 		auto base = [] {
@@ -26084,7 +26233,7 @@ void recovery(smoke::Context const& context)
 
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"completeThermalChain", completeThermalChain}, {"waterGasSeam", waterGasSeam}, {"thermalBufferSeam", thermalBufferSeam}, {"powerChainSeam", powerChainSeam}, {"thermalReservoirSeam", thermalReservoirSeam}, {"radiatorSeam", radiatorSeam}, {"coolantLoopSeam", coolantLoopSeam}, {"chillerSeam", chillerSeam}, {"compounds", compounds}, {"power", power},
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"eventBound", eventBound}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"linkSeam", linkSeam}, {"growablePorts", growablePorts}, {"completeThermalChain", completeThermalChain}, {"biologySeam", biologySeam}, {"waterGasSeam", waterGasSeam}, {"thermalBufferSeam", thermalBufferSeam}, {"powerChainSeam", powerChainSeam}, {"thermalReservoirSeam", thermalReservoirSeam}, {"radiatorSeam", radiatorSeam}, {"coolantLoopSeam", coolantLoopSeam}, {"chillerSeam", chillerSeam}, {"compounds", compounds}, {"power", power},
 		// Split out of the former `batteries` check: the hour-scale legs are
 		// independent worlds, so each is its own test and they run in parallel
 		// instead of as one ~182s serial chain.

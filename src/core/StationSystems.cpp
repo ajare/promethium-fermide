@@ -3129,140 +3129,6 @@ namespace core
 			if (!validateStationWaterGasWiring(settings, cycle, reason, false, brokenReferences))
 				return refuse(reason);
 		} catch (BrokenDraftEntry const&) {}
-		// Crew contracts (#401): the crew is an authored population and
-		// activity assignment, never derived from World Agents. All four
-		// matter stores must be compound mass stores so the declared
-		// compositions can carry the nutrient/element closure: at full
-		// activity the emitted mass (CO2 + moisture + urine + organic
-		// waste) may not exceed the consumed mass (food + water +
-		// oxygen); every tracked constituent returned in the urine and
-		// organic-waste streams (plus respired moisture) must be funded
-		// by the consumed food and water; and the declared metabolic
-		// heat may not exceed the declared food energy minus the energy
-		// still bound in the waste streams. A crew that would create
-		// mass, constituents or energy out of nothing is refused before
-		// anything runs; a crew whose returns fall short of its
-		// consumption retains the difference as explicit body mass,
-		// reported in the ledger rather than discarded.
-		if (settings.crews.size() > MaxStationCrews)
-			return refuse("Station crews are limited to "
-				+ std::to_string(MaxStationCrews) + " entries");
-		std::set<std::string> crewIds;
-		for (auto const& crew : settings.crews) try
-		{
-			auto const where = "Station crew '" + crew.id + "'";
-			if (crew.id.empty()) return refuse("Station crew id must not be empty");
-			if (crew.id.size() > MaxStationStoreIdLength)
-				return refuse("Station crew id exceeds "
-					+ std::to_string(MaxStationStoreIdLength) + " characters");
-			if (!crewIds.insert(crew.id).second) return refuse(where + " id is duplicated");
-			auto const habitat = std::find_if(settings.atmospheres.begin(),
-				settings.atmospheres.end(),
-				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == crew.atmosphereId; });
-			if (habitat == settings.atmospheres.end())
-				return missing(where + " breathes in unknown atmosphere compartment '" + crew.atmosphereId + "'");
-			if (crew.crewCount < 0) return refuse(where + " crew count must not be negative");
-			if (!validateStationProfile(crew.activityProfile, where + " activity profile", diagnostic))
-				return false;
-			auto const rates = {crew.foodPerCrewPerS, crew.waterPerCrewPerS,
-				crew.oxygenPerCrewKgPerS, crew.co2PerCrewKgPerS, crew.moisturePerCrewKgPerS,
-				crew.urinePerCrewPerS, crew.organicWastePerCrewPerS, crew.metabolicHeatPerCrewKW};
-			for (auto const rate : rates)
-				if (!std::isfinite(rate) || rate < 0.0)
-					return refuse(where + " metabolic rates must be finite and non-negative");
-			ResourceStoreSettings const* streamStores[4]{nullptr, nullptr, nullptr, nullptr};
-			char const* streamRoles[4]{"food", "water", "urine", "organic waste"};
-			std::string const streamIds[4]{crew.foodStoreId, crew.waterStoreId,
-				crew.urineStoreId, crew.organicWasteStoreId};
-			for (size_t stream = 0; stream < 4; ++stream)
-			{
-				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
-					[&](ResourceStoreSettings const& store) { return store.id == streamIds[stream]; });
-				if (found == settings.stores.end())
-					return missing(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
-						+ "' does not exist");
-				if (!isMassUnit(found->unit))
-					return refuse(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
-						+ "' must be a mass unit; crew metabolism is mass-denominated (g or kg)");
-				if (!found->composition)
-					return refuse(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
-						+ "' has no declared composition; crew streams require compound stores to close the element balance");
-				// Hazard segregation (#573): the breathing compartment is the
-				// containment boundary, so every crew stream - food and water in,
-				// urine and organic waste out - is pinned to the compartment's
-				// own hazard class. A hazardous store can never feed or receive a
-				// normal population, and a normal store can never be claimed as
-				// the destination of a hazardous crew's returns: crossing that
-				// boundary is a release process with its own clearance contract,
-				// not metabolism.
-				if (found->hazardClass != habitat->hazardClass)
-					return refuse(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
-						+ "' is authored " + found->hazardClass + "-class but the crew breathes in '"
-						+ habitat->id + "', a " + habitat->hazardClass + "-class compartment: a crew may only consume and return material of its compartment's hazard class; crew returns never relabel material across the hazard boundary");
-				streamStores[stream] = &*found;
-			}
-			// Aliased stream roles are refused (#600), the same rule the
-			// electrolyzer and fuel cell carry (#585) and the carbon-recovery
-			// machines carry (#599): food, drinking water, urine and organic
-			// waste are four physically distinct streams the ledger books
-			// separately. The tick sizes every draw and return against the
-			// store's inventory or headroom measured from the same starting
-			// state, then books them sequentially, so one store named for two
-			// roles has the same inventory spent twice: with aliased inputs the
-			// second draw finds the store already drained while the returns
-			// still use the original scale, driving retained body mass
-			// negative and pausing the World at tick zero; with aliased outputs
-			// the second return is clipped after both inputs were consumed,
-			// silently changing the metabolic balance the author sized. Every
-			// pair of the crew's own stream roles must name a distinct store;
-			// sharing between different crews is untouched, because crews book
-			// sequentially against the live inventory.
-			for (size_t left = 0; left < 4; ++left)
-				for (size_t right = left + 1; right < 4; ++right)
-					if (!streamIds[left].empty() && streamIds[left] == streamIds[right])
-						return refuse(where + " names the same store '"
-							+ streamIds[left] + "' for the "
-							+ streamRoles[left] + " and the " + streamRoles[right]
-							+ ": chemically distinct streams may not share one store");
-			auto const* food = streamStores[0];
-			auto const* water = streamStores[1];
-			auto const* urine = streamStores[2];
-			auto const* waste = streamStores[3];
-			auto const foodKg = massToKg(food->unit, crew.foodPerCrewPerS);
-			auto const waterKg = massToKg(water->unit, crew.waterPerCrewPerS);
-			auto const urineKg = massToKg(urine->unit, crew.urinePerCrewPerS);
-			auto const wasteKg = massToKg(waste->unit, crew.organicWastePerCrewPerS);
-			auto const consumedKg = foodKg + waterKg + crew.oxygenPerCrewKgPerS;
-			auto const emittedKg = urineKg + wasteKg
-				+ crew.moisturePerCrewKgPerS + crew.co2PerCrewKgPerS;
-			if (emittedKg > consumedKg + StationBalanceTolerance * std::max(1.0, consumedKg))
-				return refuse(where + " declared returns exceed declared consumption: metabolism may not create mass");
-			ConstituentLedger funded;
-			addComposition(funded, *food->composition, foodKg, 1.0);
-			addComposition(funded, *water->composition, waterKg, 1.0);
-			ConstituentLedger returned;
-			addComposition(returned, *urine->composition, urineKg, 1.0);
-			addComposition(returned, *waste->composition, wasteKg, 1.0);
-			returned["water"] += crew.moisturePerCrewKgPerS;
-			for (auto const& entry : returned)
-			{
-				auto const available = funded.count(entry.first) ? funded.at(entry.first) : 0.0;
-				if (entry.second > available + StationBalanceTolerance
-					* std::max(1.0, std::abs(available)))
-					return refuse(where + " returns more '" + entry.first
-						+ "' than the consumed food and water carry: the element balance may not be created");
-			}
-			auto const streamEnergy = [](ResourceCompositionSettings const& composition, double wetKg)
-			{
-				return wetKg * (1.0 - composition.moisture) * composition.energyKJPerKgDry;
-			};
-			auto const releasedKJPerS = streamEnergy(*food->composition, foodKg)
-				- streamEnergy(*urine->composition, urineKg)
-				- streamEnergy(*waste->composition, wasteKg);
-			if (crew.metabolicHeatPerCrewKW > releasedKJPerS
-				+ StationBalanceTolerance * std::max(1.0, std::abs(releasedKJPerS)))
-				return refuse(where + " metabolic heat exceeds the consumed food energy minus the energy still bound in the waste streams: heat may not be created from nothing");
-		} catch (BrokenDraftEntry const&) {}
 		// Water recovery contracts (#402). A collector condenses vapour out
 		// of one compartment onto a coolant-loop cold surface; a treatment
 		// turns raw water into treated water plus retained concentrate. Both
@@ -3639,6 +3505,209 @@ namespace core
 		// paid for by the feed, never free - and the operating window
 		// must be a real window: minimum below maximum, both above
 		// absolute zero.
+		if (!validateStationBiologyWiring(settings, diagnostic, false, brokenReferences)) return false;
+		diagnostic.clear(); return true;
+	}
+	bool validateStationBiologyWiring(StationSystemsSettings const& settings, std::string& diagnostic,
+		bool allowUnwired, std::vector<std::string>* brokenReferences)
+	{
+		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
+		auto missing = [&](std::string text) -> bool {
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			throw BrokenDraftEntry{};
+		};
+		std::map<std::string, std::string> waterStoreClass;
+		auto declareWaterStore = [&](std::string const& storeId, char const* role,
+			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+		{
+			if (allowUnwired && storeId.empty()) return true;
+			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
+			if (found == settings.stores.end())
+				return missing(where + " " + role + " store '" + storeId + "' does not exist");
+			if (!isMassUnit(found->unit))
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' must be a mass unit; water recovery is mass-denominated (g or kg)");
+			if (found->composition && !allowCompound)
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' declares a composition; recovered water streams are plain mass stores, so no dry constituent can be created from pure condensate");
+			if (found->hazardClass != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is authored "
+					+ found->hazardClass + "-class but this is a " + hazardClass
+					+ "-class water process; a process may only touch stores of its own hazard class");
+			auto const existing = waterStoreClass.find(storeId);
+			if (existing == waterStoreClass.end())
+				waterStoreClass.emplace(storeId, hazardClass);
+			else if (existing->second != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
+					+ existing->second + "-class water process; hazardous and normal water streams may not share a store");
+			return true;
+		};
+		std::map<std::string, std::string> gasStoreClass;
+		auto declareGasStore = [&](std::string const& storeId, char const* role,
+			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+		{
+			if (allowUnwired && storeId.empty()) return true;
+			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
+			if (found == settings.stores.end())
+				return missing(where + " " + role + " store '" + storeId + "' does not exist");
+			if (!isMassUnit(found->unit))
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' must be a mass unit; gas handling is mass-denominated (g or kg)");
+			if (found->composition && !allowCompound)
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' declares a composition; handled gas streams are plain mass stores, so no dry constituent can be created from pure gas");
+			if (found->hazardClass != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is authored "
+					+ found->hazardClass + "-class but this is a " + hazardClass
+					+ "-class gas process; a process may only touch stores of its own hazard class");
+			auto const existing = gasStoreClass.find(storeId);
+			if (existing == gasStoreClass.end())
+				gasStoreClass.emplace(storeId, hazardClass);
+			else if (existing->second != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
+					+ existing->second + "-class gas process; hazardous and normal gas streams may not share a store");
+			return true;
+		};
+		// Crew contracts (#401): the crew is an authored population and
+		// activity assignment, never derived from World Agents. All four
+		// matter stores must be compound mass stores so the declared
+		// compositions can carry the nutrient/element closure: at full
+		// activity the emitted mass (CO2 + moisture + urine + organic
+		// waste) may not exceed the consumed mass (food + water +
+		// oxygen); every tracked constituent returned in the urine and
+		// organic-waste streams (plus respired moisture) must be funded
+		// by the consumed food and water; and the declared metabolic
+		// heat may not exceed the declared food energy minus the energy
+		// still bound in the waste streams. A crew that would create
+		// mass, constituents or energy out of nothing is refused before
+		// anything runs; a crew whose returns fall short of its
+		// consumption retains the difference as explicit body mass,
+		// reported in the ledger rather than discarded.
+		if (settings.crews.size() > MaxStationCrews)
+			return refuse("Station crews are limited to "
+				+ std::to_string(MaxStationCrews) + " entries");
+		std::set<std::string> crewIds;
+		for (auto const& crew : settings.crews) try
+		{
+			auto const where = "Station crew '" + crew.id + "'";
+			if (crew.id.empty()) return refuse("Station crew id must not be empty");
+			if (crew.id.size() > MaxStationStoreIdLength)
+				return refuse("Station crew id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!crewIds.insert(crew.id).second) return refuse(where + " id is duplicated");
+			auto const habitat = std::find_if(settings.atmospheres.begin(),
+				settings.atmospheres.end(),
+				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == crew.atmosphereId; });
+			if (habitat == settings.atmospheres.end() && !(allowUnwired && crew.atmosphereId.empty()))
+				return missing(where + " breathes in unknown atmosphere compartment '" + crew.atmosphereId + "'");
+			if (crew.crewCount < 0) return refuse(where + " crew count must not be negative");
+			if (!validateStationProfile(crew.activityProfile, where + " activity profile", diagnostic))
+				return false;
+			auto const rates = {crew.foodPerCrewPerS, crew.waterPerCrewPerS,
+				crew.oxygenPerCrewKgPerS, crew.co2PerCrewKgPerS, crew.moisturePerCrewKgPerS,
+				crew.urinePerCrewPerS, crew.organicWastePerCrewPerS, crew.metabolicHeatPerCrewKW};
+			for (auto const rate : rates)
+				if (!std::isfinite(rate) || rate < 0.0)
+					return refuse(where + " metabolic rates must be finite and non-negative");
+			ResourceStoreSettings const* streamStores[4]{nullptr, nullptr, nullptr, nullptr};
+			char const* streamRoles[4]{"food", "water", "urine", "organic waste"};
+			std::string const streamIds[4]{crew.foodStoreId, crew.waterStoreId,
+				crew.urineStoreId, crew.organicWasteStoreId};
+			for (size_t stream = 0; stream < 4; ++stream)
+			{
+				if (allowUnwired && streamIds[stream].empty()) continue;
+				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+					[&](ResourceStoreSettings const& store) { return store.id == streamIds[stream]; });
+				if (found == settings.stores.end())
+					return missing(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
+						+ "' does not exist");
+				if (!isMassUnit(found->unit))
+					return refuse(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
+						+ "' must be a mass unit; crew metabolism is mass-denominated (g or kg)");
+				if (!found->composition)
+					return refuse(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
+						+ "' has no declared composition; crew streams require compound stores to close the element balance");
+				// Hazard segregation (#573): the breathing compartment is the
+				// containment boundary, so every crew stream - food and water in,
+				// urine and organic waste out - is pinned to the compartment's
+				// own hazard class. A hazardous store can never feed or receive a
+				// normal population, and a normal store can never be claimed as
+				// the destination of a hazardous crew's returns: crossing that
+				// boundary is a release process with its own clearance contract,
+				// not metabolism.
+				if (habitat != settings.atmospheres.end() && found->hazardClass != habitat->hazardClass)
+					return refuse(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
+						+ "' is authored " + found->hazardClass + "-class but the crew breathes in '"
+						+ habitat->id + "', a " + habitat->hazardClass + "-class compartment: a crew may only consume and return material of its compartment's hazard class; crew returns never relabel material across the hazard boundary");
+				streamStores[stream] = &*found;
+			}
+			// Aliased stream roles are refused (#600), the same rule the
+			// electrolyzer and fuel cell carry (#585) and the carbon-recovery
+			// machines carry (#599): food, drinking water, urine and organic
+			// waste are four physically distinct streams the ledger books
+			// separately. The tick sizes every draw and return against the
+			// store's inventory or headroom measured from the same starting
+			// state, then books them sequentially, so one store named for two
+			// roles has the same inventory spent twice: with aliased inputs the
+			// second draw finds the store already drained while the returns
+			// still use the original scale, driving retained body mass
+			// negative and pausing the World at tick zero; with aliased outputs
+			// the second return is clipped after both inputs were consumed,
+			// silently changing the metabolic balance the author sized. Every
+			// pair of the crew's own stream roles must name a distinct store;
+			// sharing between different crews is untouched, because crews book
+			// sequentially against the live inventory.
+			for (size_t left = 0; left < 4; ++left)
+				for (size_t right = left + 1; right < 4; ++right)
+					if (!streamIds[left].empty() && streamIds[left] == streamIds[right])
+						return refuse(where + " names the same store '"
+							+ streamIds[left] + "' for the "
+							+ streamRoles[left] + " and the " + streamRoles[right]
+							+ ": chemically distinct streams may not share one store");
+			if (allowUnwired && std::any_of(std::begin(streamStores), std::end(streamStores),
+				[](auto store) { return store == nullptr; })) continue;
+			auto const* food = streamStores[0];
+			auto const* water = streamStores[1];
+			auto const* urine = streamStores[2];
+			auto const* waste = streamStores[3];
+			auto const foodKg = massToKg(food->unit, crew.foodPerCrewPerS);
+			auto const waterKg = massToKg(water->unit, crew.waterPerCrewPerS);
+			auto const urineKg = massToKg(urine->unit, crew.urinePerCrewPerS);
+			auto const wasteKg = massToKg(waste->unit, crew.organicWastePerCrewPerS);
+			auto const consumedKg = foodKg + waterKg + crew.oxygenPerCrewKgPerS;
+			auto const emittedKg = urineKg + wasteKg
+				+ crew.moisturePerCrewKgPerS + crew.co2PerCrewKgPerS;
+			if (emittedKg > consumedKg + StationBalanceTolerance * std::max(1.0, consumedKg))
+				return refuse(where + " declared returns exceed declared consumption: metabolism may not create mass");
+			ConstituentLedger funded;
+			addComposition(funded, *food->composition, foodKg, 1.0);
+			addComposition(funded, *water->composition, waterKg, 1.0);
+			ConstituentLedger returned;
+			addComposition(returned, *urine->composition, urineKg, 1.0);
+			addComposition(returned, *waste->composition, wasteKg, 1.0);
+			returned["water"] += crew.moisturePerCrewKgPerS;
+			for (auto const& entry : returned)
+			{
+				auto const available = funded.count(entry.first) ? funded.at(entry.first) : 0.0;
+				if (entry.second > available + StationBalanceTolerance
+					* std::max(1.0, std::abs(available)))
+					return refuse(where + " returns more '" + entry.first
+						+ "' than the consumed food and water carry: the element balance may not be created");
+			}
+			auto const streamEnergy = [](ResourceCompositionSettings const& composition, double wetKg)
+			{
+				return wetKg * (1.0 - composition.moisture) * composition.energyKJPerKgDry;
+			};
+			auto const releasedKJPerS = streamEnergy(*food->composition, foodKg)
+				- streamEnergy(*urine->composition, urineKg)
+				- streamEnergy(*waste->composition, wasteKg);
+			if (crew.metabolicHeatPerCrewKW > releasedKJPerS
+				+ StationBalanceTolerance * std::max(1.0, std::abs(releasedKJPerS)))
+				return refuse(where + " metabolic heat exceeds the consumed food energy minus the energy still bound in the waste streams: heat may not be created from nothing");
+		} catch (BrokenDraftEntry const&) {}
 		if (settings.microbialProcessors.size() > MaxStationMicrobialProcessors)
 			return refuse("Station microbial processors are limited to "
 				+ std::to_string(MaxStationMicrobialProcessors) + " entries");
@@ -3647,6 +3716,7 @@ namespace core
 			std::string const& where, std::string const& hazardClass,
 			bool requireCompound) -> bool
 		{
+			if (allowUnwired && storeId.empty()) return true;
 			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
 				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
 			if (found == settings.stores.end())
@@ -3763,6 +3833,7 @@ namespace core
 			if (!declareWaterStore(processor.waterStoreId, "process water", where,
 				processor.hazardClass, false))
 				return false;
+			if (!allowUnwired || !processor.consumableStoreId.empty())
 			{
 				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
 					[&](ResourceStoreSettings const& store) { return store.id == processor.consumableStoreId; });
@@ -3824,6 +3895,17 @@ namespace core
 						+ processor.stockStoreId + "' is already used by a "
 						+ existing->second + "-class nutrient process; hazardous and normal nutrient streams may not share a store");
 			}
+
+			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
+				{ return reservoir.id == processor.heatSinkId; });
+			if (sink == settings.thermalReservoirs.end() && !(allowUnwired && processor.heatSinkId.empty()))
+				return missing(where + " heat sink is unknown thermal reservoir '" + processor.heatSinkId + "'");
+			if (sink != settings.thermalReservoirs.end() && sink->thermalClass != processor.thermalClass)
+				return refuse(where + " thermal class '" + processor.thermalClass
+					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
+					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
+			if (allowUnwired && processor.feedStoreId.empty()) continue;
 			auto const feed = std::find_if(settings.stores.begin(), settings.stores.end(),
 				[&](ResourceStoreSettings const& store) { return store.id == processor.feedStoreId; });
 			auto const& composition = *feed->composition;
@@ -3842,15 +3924,6 @@ namespace core
 			if (processor.reactionHeatKJPerKgFeed > feedEnergyKJPerKgFeed
 				+ StationBalanceTolerance * std::max(1.0, std::abs(feedEnergyKJPerKgFeed)))
 				return refuse(where + " declared reaction heat exceeds the feedstock's declared chemical energy: the digestion may not release more heat than the feed carries");
-			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
-				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
-				{ return reservoir.id == processor.heatSinkId; });
-			if (sink == settings.thermalReservoirs.end())
-				return missing(where + " heat sink is unknown thermal reservoir '" + processor.heatSinkId + "'");
-			if (sink->thermalClass != processor.thermalClass)
-				return refuse(where + " thermal class '" + processor.thermalClass
-					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
-					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
 		} catch (BrokenDraftEntry const&) {}
 		// Crop production contracts (#409). A crop population grows a dry
 		// Living biomass inside one Atmosphere compartment under the
@@ -3888,7 +3961,7 @@ namespace core
 			auto const compartment = std::find_if(settings.atmospheres.begin(),
 				settings.atmospheres.end(),
 				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == crop.atmosphereId; });
-			if (compartment == settings.atmospheres.end())
+			if (compartment == settings.atmospheres.end() && !(allowUnwired && crop.atmosphereId.empty()))
 				return missing(where + " grows in unknown atmosphere compartment '" + crop.atmosphereId + "'");
 			std::string const uptakeIds[5]{crop.waterStoreId, crop.nitrogenStoreId,
 				crop.phosphorusStoreId, crop.potassiumStoreId, crop.mineralsStoreId};
@@ -3898,6 +3971,7 @@ namespace core
 				"phosphorus", "potassium", "other minerals"};
 			for (size_t stream = 0; stream < 5; ++stream)
 			{
+				if (allowUnwired && uptakeIds[stream].empty()) continue;
 				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
 					[&](ResourceStoreSettings const& store) { return store.id == uptakeIds[stream]; });
 				if (found == settings.stores.end())
@@ -3920,7 +3994,7 @@ namespace core
 				// normal store can never receive a hazardous population's
 				// harvest or death residue: relabelling across the boundary is
 				// a release process, not a harvest.
-				if (found->hazardClass != compartment->hazardClass)
+				if (compartment != settings.atmospheres.end() && found->hazardClass != compartment->hazardClass)
 					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
 						+ "' is authored " + found->hazardClass + "-class but the population grows in '"
 						+ compartment->id + "', a " + compartment->hazardClass + "-class compartment: a crop may only take up and harvest material of its compartment's hazard class; harvest and death residue never relabel material across the hazard boundary");
@@ -4016,7 +4090,7 @@ namespace core
 			{
 				if (destinationIds[stream].empty())
 				{
-					if (crop.harvestTriggerKg > 0.0)
+					if (!allowUnwired && crop.harvestTriggerKg > 0.0)
 						return refuse(where + " harvest is enabled but the " + destinationRoles[stream]
 							+ " destination store is not named: harvested living material must have a declared destination");
 					continue;
@@ -4035,7 +4109,7 @@ namespace core
 				if (found->composition && !compositionsClose(*found->composition, composition))
 					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
 						+ "' declares a composition different from the crop's declared dry-mass composition: harvested material enters a store exactly as declared, and a different compound material is a boundary only an explicit conversion may cross");
-				if (found->hazardClass != compartment->hazardClass)
+				if (compartment != settings.atmospheres.end() && found->hazardClass != compartment->hazardClass)
 					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
 						+ "' is authored " + found->hazardClass + "-class but the population grows in '"
 						+ compartment->id + "', a " + compartment->hazardClass + "-class compartment: a crop may only take up and harvest material of its compartment's hazard class; harvest and death residue never relabel material across the hazard boundary");
@@ -4073,7 +4147,7 @@ namespace core
 			auto const compartment = std::find_if(settings.atmospheres.begin(),
 				settings.atmospheres.end(),
 				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == algae.atmosphereId; });
-			if (compartment == settings.atmospheres.end())
+			if (compartment == settings.atmospheres.end() && !(allowUnwired && algae.atmosphereId.empty()))
 				return missing(where + " runs in unknown atmosphere compartment '" + algae.atmosphereId + "'");
 			std::string const uptakeIds[5]{algae.waterStoreId, algae.nitrogenStoreId,
 				algae.phosphorusStoreId, algae.potassiumStoreId, algae.mineralsStoreId};
@@ -4083,6 +4157,7 @@ namespace core
 				"phosphorus", "potassium", "other minerals"};
 			for (size_t stream = 0; stream < 5; ++stream)
 			{
+				if (allowUnwired && uptakeIds[stream].empty()) continue;
 				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
 					[&](ResourceStoreSettings const& store) { return store.id == uptakeIds[stream]; });
 				if (found == settings.stores.end())
@@ -4100,7 +4175,7 @@ namespace core
 				// Hazard segregation (#573): as with the crops, the culture
 				// compartment is the containment boundary and every uptake and
 				// harvest destination must carry its hazard class.
-				if (found->hazardClass != compartment->hazardClass)
+				if (compartment != settings.atmospheres.end() && found->hazardClass != compartment->hazardClass)
 					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
 						+ "' is authored " + found->hazardClass + "-class but the culture runs in '"
 						+ compartment->id + "', a " + compartment->hazardClass + "-class compartment: an algae culture may only take up and harvest material of its compartment's hazard class; the harvest partition and death residue never relabel material across the hazard boundary");
@@ -4198,7 +4273,7 @@ namespace core
 			{
 				if (destinationIds[stream].empty())
 				{
-					if (algae.harvestTriggerKg > 0.0)
+					if (!allowUnwired && algae.harvestTriggerKg > 0.0)
 						return refuse(where + " harvest is enabled but the " + destinationRoles[stream]
 							+ " destination store is not named: harvested living material must have a declared destination");
 					continue;
@@ -4219,7 +4294,7 @@ namespace core
 				if (found->composition && !compositionsClose(*found->composition, composition))
 					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
 						+ "' declares a composition different from the culture's declared dry-mass composition: harvested material enters a store exactly as declared, and a different compound material is a boundary only an explicit conversion may cross");
-				if (found->hazardClass != compartment->hazardClass)
+				if (compartment != settings.atmospheres.end() && found->hazardClass != compartment->hazardClass)
 					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
 						+ "' is authored " + found->hazardClass + "-class but the culture runs in '"
 						+ compartment->id + "', a " + compartment->hazardClass + "-class compartment: an algae culture may only take up and harvest material of its compartment's hazard class; the harvest partition and death residue never relabel material across the hazard boundary");
@@ -4227,6 +4302,7 @@ namespace core
 		} catch (BrokenDraftEntry const&) {}
 		diagnostic.clear(); return true;
 	}
+
 	void setStationSystemsSourceLoader(StationSystemsSourceLoader loader) { sourceLoader = std::move(loader); }
 	std::string bundledStationSystemsSource() { return std::string(kStationSystemsLua); }
 	// #418/#603: the public seam over the bounded trend-history

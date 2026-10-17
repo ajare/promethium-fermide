@@ -142,8 +142,121 @@ namespace core
 			PortDescriptor{"CO2 capture", "Consumable in", StationPortDirection::Input, "material", "inventory", 1, {}, true},
 			PortDescriptor{"Atmosphere", "Heat out", StationPortDirection::Output, "heat", "heat-sink", 1, {}, true},
 			PortDescriptor{"Airlock cycle", "Atmosphere", StationPortDirection::Input, "gas-draw", "atmosphere-source", 1, {}, false},
+			PortDescriptor{"Crew", "Food in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Crew", "Water in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Crew", "Urine out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Crew", "Organic waste out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Crew", "Oxygen uptake", StationPortDirection::Input, "biological-exchange", "biological-atmosphere", 1, {}, false},
+			PortDescriptor{"Crew", "CO2 return", StationPortDirection::Output, "biological-exchange", "biological-atmosphere", 1, {}, false},
+			PortDescriptor{"Crew", "Moisture return", StationPortDirection::Output, "biological-exchange", "biological-atmosphere", 1, {}, false},
+			PortDescriptor{"Crew", "Metabolic heat", StationPortDirection::Output, "biological-exchange", "biological-atmosphere", 1, {}, false},
+			PortDescriptor{"Crops", "Water in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Crops", "Nitrogen in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Crops", "Phosphorus in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Crops", "Potassium in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Crops", "Minerals in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Crops", "Food out", StationPortDirection::Output, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Crops", "Waste out", StationPortDirection::Output, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Crops", "Oxygen uptake", StationPortDirection::Input, "biological-exchange", "biological-atmosphere", 1, {}, false},
+			PortDescriptor{"Crops", "CO2 return", StationPortDirection::Output, "biological-exchange", "biological-atmosphere", 1, {}, false},
+			PortDescriptor{"Crops", "Moisture return", StationPortDirection::Output, "biological-exchange", "biological-atmosphere", 1, {}, false},
+			PortDescriptor{"Crops", "Metabolic heat", StationPortDirection::Output, "biological-exchange", "biological-atmosphere", 1, {}, false},
+			PortDescriptor{"Crops", "Photosynthesis CO2", StationPortDirection::Input, "biological-exchange", "biological-atmosphere", 1, {}, false},
+			PortDescriptor{"Crops", "Photosynthesis oxygen", StationPortDirection::Output, "biological-exchange", "biological-atmosphere", 1, {}, false},
+			PortDescriptor{"Algae", "Water in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Algae", "Nitrogen in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Algae", "Phosphorus in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Algae", "Potassium in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Algae", "Minerals in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Algae", "Food out", StationPortDirection::Output, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Algae", "Waste out", StationPortDirection::Output, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Algae", "Recovery out", StationPortDirection::Output, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Algae", "Oxygen uptake", StationPortDirection::Input, "biological-exchange", "biological-atmosphere", 1, {}, false},
+			PortDescriptor{"Algae", "CO2 return", StationPortDirection::Output, "biological-exchange", "biological-atmosphere", 1, {}, false},
+			PortDescriptor{"Algae", "Moisture return", StationPortDirection::Output, "biological-exchange", "biological-atmosphere", 1, {}, false},
+			PortDescriptor{"Algae", "Metabolic heat", StationPortDirection::Output, "biological-exchange", "biological-atmosphere", 1, {}, false},
+			PortDescriptor{"Algae", "Photosynthesis CO2", StationPortDirection::Input, "biological-exchange", "biological-atmosphere", 1, {}, false},
+			PortDescriptor{"Algae", "Photosynthesis oxygen", StationPortDirection::Output, "biological-exchange", "biological-atmosphere", 1, {}, false},
+			PortDescriptor{"Microbial processor", "Feed in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Microbial processor", "Oxygen in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Microbial processor", "Water in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Microbial processor", "Culture medium", StationPortDirection::Input, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Microbial processor", "Replacement stock", StationPortDirection::Input, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Microbial processor", "Nutrients out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Microbial processor", "Water out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Microbial processor", "CO2 out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Microbial processor", "Residue out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Microbial processor", "Heat out", StationPortDirection::Output, "heat", "heat-sink", 1, {}, false},
+			PortDescriptor{"Atmosphere", "Biology out", StationPortDirection::Output, "biological-atmosphere", "biological-exchange", 0, {}},
+			PortDescriptor{"Atmosphere", "Biology in", StationPortDirection::Input, "biological-atmosphere", "biological-exchange", 0, {}},
 			PortDescriptor{"Chiller", "Condenser heat", StationPortDirection::Output, "heat", "heat-sink", 1, {}}};
 		return descriptors;
+	}
+
+	// One reference mapping shared by biology link writes, enumeration and clearing.
+	// A population has one compartment: its separate gas, moisture and heat
+	// faces all bind atmosphereId. Wiring or disconnecting any face binds or
+	// clears the whole exchange bundle, never independent compartments.
+	template<class Settings, class F>
+	void visitStationBiologyReferences(Settings& settings, F fn)
+	{
+		for (auto& entry : settings.crews)
+		{
+			fn("Crew", entry.id, "Food in", "foodStoreId", entry.foodStoreId, true, "Store", "Inventory out");
+			fn("Crew", entry.id, "Water in", "waterStoreId", entry.waterStoreId, true, "Store", "Inventory out");
+			fn("Crew", entry.id, "Urine out", "urineStoreId", entry.urineStoreId, false, "Store", "Inventory in");
+			fn("Crew", entry.id, "Organic waste out", "organicWasteStoreId", entry.organicWasteStoreId, false, "Store", "Inventory in");
+			fn("Crew", entry.id, "Oxygen uptake", "atmosphereId", entry.atmosphereId, true, "Atmosphere", "Biology out");
+			fn("Crew", entry.id, "CO2 return", "atmosphereId", entry.atmosphereId, false, "Atmosphere", "Biology in");
+			fn("Crew", entry.id, "Moisture return", "atmosphereId", entry.atmosphereId, false, "Atmosphere", "Biology in");
+			fn("Crew", entry.id, "Metabolic heat", "atmosphereId", entry.atmosphereId, false, "Atmosphere", "Biology in");
+		}
+		for (auto& entry : settings.cropPopulations)
+		{
+			fn("Crops", entry.id, "Water in", "waterStoreId", entry.waterStoreId, true, "Store", "Inventory out");
+			fn("Crops", entry.id, "Nitrogen in", "nitrogenStoreId", entry.nitrogenStoreId, true, "Store", "Inventory out");
+			fn("Crops", entry.id, "Phosphorus in", "phosphorusStoreId", entry.phosphorusStoreId, true, "Store", "Inventory out");
+			fn("Crops", entry.id, "Potassium in", "potassiumStoreId", entry.potassiumStoreId, true, "Store", "Inventory out");
+			fn("Crops", entry.id, "Minerals in", "mineralsStoreId", entry.mineralsStoreId, true, "Store", "Inventory out");
+			fn("Crops", entry.id, "Food out", "foodStoreId", entry.foodStoreId, false, "Store", "Inventory in");
+			fn("Crops", entry.id, "Waste out", "wasteStoreId", entry.wasteStoreId, false, "Store", "Inventory in");
+			fn("Crops", entry.id, "Oxygen uptake", "atmosphereId", entry.atmosphereId, true, "Atmosphere", "Biology out");
+			fn("Crops", entry.id, "CO2 return", "atmosphereId", entry.atmosphereId, false, "Atmosphere", "Biology in");
+			fn("Crops", entry.id, "Moisture return", "atmosphereId", entry.atmosphereId, false, "Atmosphere", "Biology in");
+			fn("Crops", entry.id, "Metabolic heat", "atmosphereId", entry.atmosphereId, false, "Atmosphere", "Biology in");
+			fn("Crops", entry.id, "Photosynthesis CO2", "atmosphereId", entry.atmosphereId, true, "Atmosphere", "Biology out");
+			fn("Crops", entry.id, "Photosynthesis oxygen", "atmosphereId", entry.atmosphereId, false, "Atmosphere", "Biology in");
+		}
+		for (auto& entry : settings.algaeCultures)
+		{
+			fn("Algae", entry.id, "Water in", "waterStoreId", entry.waterStoreId, true, "Store", "Inventory out");
+			fn("Algae", entry.id, "Nitrogen in", "nitrogenStoreId", entry.nitrogenStoreId, true, "Store", "Inventory out");
+			fn("Algae", entry.id, "Phosphorus in", "phosphorusStoreId", entry.phosphorusStoreId, true, "Store", "Inventory out");
+			fn("Algae", entry.id, "Potassium in", "potassiumStoreId", entry.potassiumStoreId, true, "Store", "Inventory out");
+			fn("Algae", entry.id, "Minerals in", "mineralsStoreId", entry.mineralsStoreId, true, "Store", "Inventory out");
+			fn("Algae", entry.id, "Food out", "foodStoreId", entry.foodStoreId, false, "Store", "Inventory in");
+			fn("Algae", entry.id, "Waste out", "wasteStoreId", entry.wasteStoreId, false, "Store", "Inventory in");
+			fn("Algae", entry.id, "Recovery out", "recoveryStoreId", entry.recoveryStoreId, false, "Store", "Inventory in");
+			fn("Algae", entry.id, "Oxygen uptake", "atmosphereId", entry.atmosphereId, true, "Atmosphere", "Biology out");
+			fn("Algae", entry.id, "CO2 return", "atmosphereId", entry.atmosphereId, false, "Atmosphere", "Biology in");
+			fn("Algae", entry.id, "Moisture return", "atmosphereId", entry.atmosphereId, false, "Atmosphere", "Biology in");
+			fn("Algae", entry.id, "Metabolic heat", "atmosphereId", entry.atmosphereId, false, "Atmosphere", "Biology in");
+			fn("Algae", entry.id, "Photosynthesis CO2", "atmosphereId", entry.atmosphereId, true, "Atmosphere", "Biology out");
+			fn("Algae", entry.id, "Photosynthesis oxygen", "atmosphereId", entry.atmosphereId, false, "Atmosphere", "Biology in");
+		}
+		for (auto& entry : settings.microbialProcessors)
+		{
+			fn("Microbial processor", entry.id, "Feed in", "feedStoreId", entry.feedStoreId, true, "Store", "Inventory out");
+			fn("Microbial processor", entry.id, "Oxygen in", "oxygenStoreId", entry.oxygenStoreId, true, "Store", "Inventory out");
+			fn("Microbial processor", entry.id, "Water in", "waterStoreId", entry.waterStoreId, true, "Store", "Inventory out");
+			fn("Microbial processor", entry.id, "Culture medium", "consumableStoreId", entry.consumableStoreId, true, "Store", "Inventory out");
+			fn("Microbial processor", entry.id, "Replacement stock", "stockStoreId", entry.stockStoreId, true, "Store", "Inventory out");
+			fn("Microbial processor", entry.id, "Nutrients out", "nutrientStoreId", entry.nutrientStoreId, false, "Store", "Inventory in");
+			fn("Microbial processor", entry.id, "Water out", "recoveredWaterStoreId", entry.recoveredWaterStoreId, false, "Store", "Inventory in");
+			fn("Microbial processor", entry.id, "CO2 out", "co2StoreId", entry.co2StoreId, false, "Store", "Inventory in");
+			fn("Microbial processor", entry.id, "Residue out", "residueStoreId", entry.residueStoreId, false, "Store", "Inventory in");
+			fn("Microbial processor", entry.id, "Heat out", "heatSinkId", entry.heatSinkId, false, "Reservoir", "Heat in");
+		}
 	}
 
 	// The reference field one machine connector writes on its draft entry.
@@ -302,6 +415,10 @@ namespace core
 			StationPlaceableType{"Coolant loop", "coolantLoop", "Thermal"},
 			StationPlaceableType{"Chiller", "chiller", "Thermal"},
 			StationPlaceableType{"Thermal buffer", "buffer", "Thermal"},
+			StationPlaceableType{"Crew", "crew", "Biology"},
+			StationPlaceableType{"Crops", "crop", "Biology"},
+			StationPlaceableType{"Algae", "algae", "Biology"},
+			StationPlaceableType{"Microbial processor", "microbial", "Biology"},
 			StationPlaceableType{"Water collector", "collector", "Water"},
 			StationPlaceableType{"Water treatment", "treatment", "Water"},
 			StationPlaceableType{"Electrolyzer", "electrolyzer", "Gas"},
