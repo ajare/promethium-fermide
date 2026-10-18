@@ -3,6 +3,7 @@
 #include "CarbonObservationFixture.h"
 #include "MicrobialObservationFixture.h"
 #include "CropObservationFixture.h"
+#include "AlgaeObservationFixture.h"
 #include "core/World.h"
 #include <algorithm>
 #include <cmath>
@@ -152,6 +153,104 @@ namespace
 			auto const observations = core::stationExchangeObservations(metadata);
 			require(observations.size() == 4 && observations[0].metric.unit == canonical, "canonical rate unit missing");
 			close(observations[0].sourceToCanonicalScale, scale);
+		}
+	}
+
+	void algaeExchangeObservations(smoke::Context const&)
+	{
+		for (int scenario = 0; scenario < 13; ++scenario) {
+			auto s = smoke::station::algaeObservationFixture(scenario < 4 ? scenario : (scenario == 8 ? 1 : 0));
+			if (scenario == 4) s.stores[0].startingQualified = 0;
+			if (scenario == 5) s.algaeCultures[0].illuminationProfile.constantLevel = 0;
+			if (scenario == 6) s.algaeCultures[0].cultureVolumeL = 0, s.algaeCultures[0].initialBiomassKg = 0;
+			if (scenario == 7) s.solarArrays[0].capacityKW = 0;
+			if (scenario == 8) s.stores[5].capacity = 1e-6; // Food surplus cascades to recovery.
+			if (scenario == 9) s.algaeCultures.push_back(s.algaeCultures[0]), s.algaeCultures.back().id = "second";
+			if (scenario == 10) {
+				s.atmospheres[0].hazardClass = "hazardous";
+				for (auto& store : s.stores) store.hazardClass = "hazardous";
+			}
+			if (scenario == 11) s.solarArrays[0].capacityKW = 1.9; // Partial light, not a zero-growth case.
+			if (scenario == 12) s.stores[1].startingQualified = 0;
+			core::World world("Algae exchanges", 2, 2); world.pauseSimulation(); world.finishBuild();
+			std::string why; if (!world.configureStationSystems(s, true, &why)) throw std::runtime_error(why);
+			run(world, 300);
+			auto const snap = world.getStationSystemsSnapshot(); auto const& p = snap.algaeCultures[0];
+			auto const history = world.getStationSystemsMetricHistory(); auto const catalogue = world.getStationSystemsObservationCatalogue();
+			auto const dt = core::World::getFixedTimestep();
+			size_t measured = 0;
+			for (auto const& o : core::stationExchangeObservations(s)) if (o.metric.equipmentType == "Algae") {
+				++measured;
+				require(o.metric.hazardClass == s.atmospheres[0].hazardClass, "algae hazard grouping lost");
+				auto h = std::ranges::find(history, o.metric.id, [](auto const& h) { return h.descriptor.id; });
+				require(h != history.end() && !h->samples.empty(), "algae metric not recorded while hidden");
+				auto v = o.read(snap); require(v.actual.has_value(), "algae authority missing");
+				auto missing = snap; missing.algaeCultures.clear(); require(!o.read(missing).actual, "missing algae became zero");
+				if (o.cumulativeRate) {
+					double total = 0, previous = 0;
+					for (auto const& sample : h->samples) {
+						require(sample.actual.has_value(), "algae event window unavailable");
+						total += *sample.actual * (sample.elapsedSeconds - previous); previous = sample.elapsedSeconds;
+					}
+					close(total, *v.actual);
+				} else close(*h->samples.back().actual, *v.actual / (o.perTick ? dt : 1));
+				if (v.requested) close(*h->samples.back().requested, *v.requested / (o.perTick ? dt : 1));
+				require(v.requested.has_value() == (o.metric.exchangeRole == "Lamp electrical service"
+					|| o.metric.exchangeRole == "Circulation electrical service"), "invented algae request overlay");
+			}
+			require(measured == (scenario == 3 ? 35 : scenario == 9 ? 98 : 49), "algae role inventory incomplete");
+			for (auto const& def : catalogue) if (def.breakdown == "Aggregate" && def.id.starts_with("exchange/Algae/")) {
+				auto data = world.queryStationSystemsChart(def.id); require(!data.incomplete && !data.series[0].values.empty(), "algae chart incomplete");
+				auto stack = world.queryStationSystemsChart(def.id + "/instances");
+				auto last = std::find_if(stack.series.rbegin(), stack.series.rend(), [](auto const& l) { return l.stacked; });
+				require(last != stack.series.rend(), "algae stack missing"); close(last->upper.back(), data.series[0].values.back());
+				auto unavailable = history;
+				for (auto& h : unavailable) if (h.descriptor.id == def.series[0].contributors[0]) h.samples.back().actual.reset();
+				auto gap = core::queryStationChart(def, unavailable);
+				require(gap.incomplete && std::isnan(gap.series[0].values.back()), "missing algae hidden by aggregate");
+			}
+			close(s.algaeCultures[0].initialBiomassKg + p.growthKg - p.respirationKg - p.harvestedKg
+				- p.deadResidueToWasteKg - p.deadResidueLostKg, p.livingBiomassKg);
+			if (scenario != 9) {
+				close(s.stores[0].startingQualified - snap.stores[0].currentQualified, p.waterDrawnKg);
+				close(snap.stores[5].currentQualified, p.foodProducedKg);
+				close(snap.stores[6].currentQualified, p.wasteProducedKg + p.deadResidueToWasteKg);
+				close(snap.stores[7].currentQualified, p.recoveryProducedKg);
+			}
+			close(p.co2DrawnKg + p.waterDrawnKg + p.nitrogenDrawnKg + p.phosphorusDrawnKg + p.potassiumDrawnKg + p.mineralsDrawnKg
+				+ p.respirationO2DrawnKg - p.oxygenReleasedKg - p.respirationCo2ReturnedKg - p.respirationWaterKg - p.evaporatedKg,
+				p.livingBiomassKg - s.algaeCultures[0].initialBiomassKg + p.harvestedKg + p.deadResidueToWasteKg + p.deadResidueLostKg);
+			// Accounted inventories deliberately advertise partial station-wide coverage;
+			// require a finite measurement, not a claim of complete physical accounting.
+			auto inventory = [&](std::string const& id) {
+				auto data = world.queryStationSystemsChart(id);
+				if (data.series.empty() || data.series[0].values.empty()) throw std::runtime_error("algae inventory contribution missing: " + id);
+				require(std::isfinite(data.series[0].values.back()), "algae inventory contribution unavailable");
+				return data.series[0].values.back();
+			};
+			double biomass = 0, livingEnergy = 0, boundNitrogen = 0;
+			for (auto const& culture : snap.algaeCultures) {
+				biomass += culture.livingBiomassKg; livingEnergy += culture.livingChemicalEnergyKJ;
+				boundNitrogen += culture.livingConstituents.nutrientNitrogenKg;
+			}
+			close(inventory("accounted-material/living-biomass/kg"), biomass);
+			close(inventory("accounted-constituent/energy/kWh"), inventory("stored-constituent/energy/kWh") + livingEnergy / 3600);
+			close(inventory("accounted-constituent/nutrientNitrogen/kg"), inventory("stored-constituent/nutrientNitrogen/kg") + boundNitrogen);
+			close(p.harvestedKg, p.foodProducedKg + p.recoveryProducedKg + p.wasteProducedKg);
+			for (auto const& [ledger, mass] : {std::pair{p.harvestedToFoodConstituents, p.foodProducedKg},
+				std::pair{p.harvestedToRecoveryConstituents, p.recoveryProducedKg}, std::pair{p.harvestedToWasteConstituents, p.wasteProducedKg},
+				std::pair{p.deadResidueToWasteConstituents, p.deadResidueToWasteKg}, std::pair{p.deadResidueLostConstituents, p.deadResidueLostKg}})
+				close(ledger.organicKg + ledger.nutrientNitrogenKg + ledger.phosphorusKg + ledger.potassiumKg + ledger.mineralsKg, mass);
+			if (scenario == 0 || scenario == 9) require(p.growthKg > 0, "algae growth not exercised");
+			if (scenario == 1) require(p.foodProducedKg > 0 && p.recoveryProducedKg > 0 && p.wasteProducedKg > 0, "three-way harvest not exercised");
+			if (scenario == 2 || scenario == 3) require(p.dead && p.respirationKg > 0 && (scenario == 2 ? p.deadResidueToWasteKg : p.deadResidueLostKg) > 0, "algae mortality not exercised");
+			if (scenario >= 4 && scenario <= 7) close(p.growthKg, 0);
+			if (scenario == 8) require(p.foodSurplusToRecoveryKg > 0 && p.recoveryProducedKg > 0, "algae harvest cascade not exercised");
+			if (scenario == 10) require(p.growthKg > 0, "hazardous algae growth not exercised");
+			if (scenario == 11) require(p.growthKg > 0 && p.lastLightSuppliedKW < p.lastLightRequestedKW, "partial algae service not exercised");
+			if (scenario == 12) close(p.growthKg, 0);
+			require(world.getStationSystemsSnapshot() == snap, "algae viewing changed World");
+			world.resetSimulation(); run(world, 300); require(world.getStationSystemsSnapshot() == snap, "algae observation replay drift");
 		}
 	}
 
@@ -1277,6 +1376,7 @@ void registerMaterialObservationChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"waterGasExchangeObservations", waterGasExchangeObservations});
 	checks.push_back({"carbonExchangeObservations", carbonExchangeObservations});
 	checks.push_back({"cropExchangeObservations", cropExchangeObservations});
+	checks.push_back({"algaeExchangeObservations", algaeExchangeObservations});
 	checks.push_back({"microbialExchangeObservations", microbialExchangeObservations});
 	checks.push_back({"thermalExchangeObservations", thermalExchangeObservations});
 	checks.push_back({"electricalExchangeObservations", electricalExchangeObservations});
