@@ -3546,6 +3546,8 @@ namespace
 			{"water", "kg", 100, 3, 1}, {"unknown", "kg", 100, 7, 2}};
 		seed.stores[0].materialId = "water"; seed.stores[1].materialId = "water";
 		seed.stores[2].materialId = "oxygen";
+		seed.stores[1].hazardClass = "hazardous";
+		seed.stores[0].protectedReserve = 4;
 		require(world->configureStationSystems(seed, false), "material graph fixture refused");
 		world->markSaved(); world->resumeSimulation(); require(world->advanceTicks(60), "hidden material recording failed");
 		world->pauseSimulation();
@@ -3572,6 +3574,23 @@ namespace
 			REQ(water.series.size() == 3 && water.series[0].times.size() == 1
 				&& water.series[0].values[0] == 18 && water.incomplete,
 				"Material selection lost hidden history or miscounted qualified/unqualified stores");
+			ctx->ComboClick("Breakdown/Aggregate"); ctx->Yield(2);
+			REQ(window.selectedObservation() == "stored-material/water/kg/aggregate",
+				"Aggregate control did not select generic query");
+			ctx->ComboClick("Breakdown/Hazard class"); ctx->Yield(2);
+			REQ(window.selectedObservation() == "stored-material/water/kg/by-hazard"
+				&& driver.contains("hazardous") && driver.contains("normal"), "Hazard breakdown controls or legend missing");
+			auto const hazard = world->queryStationSystemsChart(window.selectedObservation());
+			REQ(hazard.series.back().upper[0] == water.series[0].values[0], "Hazard stack changed accounting population");
+			ctx->ComboClick("Breakdown/Instance"); ctx->Yield(2);
+			REQ(window.selectedObservation() == "stored-material/water/kg", "Instance control lost stable property identity");
+			ctx->ComboClick("##Station observation property/Usable stored material: water (kg; normal)"); ctx->Yield(2);
+			REQ(driver.contains("NOT discretionary drawability") && driver.contains("hazardous supply cannot meet normal demand")
+				&& world->queryStationSystemsChart(window.selectedObservation()).series[0].values[0] == 10,
+				"Usable graph included unqualified/hazardous material or hid reserve semantics");
+			ctx->ComboClick("##Station observation property/Usable stored material: water (kg; hazardous)"); ctx->Yield(2);
+			REQ(world->queryStationSystemsChart(window.selectedObservation()).series[0].values[0] == 2,
+				"Hazard-qualified inventory not separately visible");
 			ctx->ComboClick("##Station observation property/Stored material inventory: oxygen (kg)"); ctx->Yield(2);
 			REQ(world->queryStationSystemsChart("stored-material/oxygen/kg").series[0].values[0] == 4,
 				"Same-unit different materials merged through selector");

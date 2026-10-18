@@ -82,6 +82,22 @@ namespace
 			}
 			close(stack, water.series[0].values[row]);
 		}
+		auto const normal = world.queryStationSystemsChart("stored-usable/water/kg/normal");
+		auto const hazardous = world.queryStationSystemsChart("stored-usable/water/kg/hazardous");
+		auto const hazard = world.queryStationSystemsChart("stored-material/water/kg/by-hazard");
+		auto const aggregate = world.queryStationSystemsChart("stored-material/water/kg/aggregate");
+		require(aggregate.series.size() == 1 && hazard.series.size() == 3,
+			"generic aggregate or hazard grouping membership incorrect");
+		for (size_t row = 0; row < normal.series[0].values.size(); ++row)
+		{
+			close(normal.series[0].values[row], 11); // reserve remains qualified; unqualified never does
+			close(hazardous.series[0].values[row], 2); // never folded into normal supply
+			close(hazard.series[1].values[row], 3); close(hazard.series[2].values[row], 17);
+			close(hazard.series.back().upper[row], aggregate.series[0].values[row]);
+			close(normal.series.back().upper[row], normal.series[0].values[row]);
+		}
+		require(chart(world, "stored-usable/water/kg/normal").accountingNote.find("NOT discretionary drawability") != std::string::npos,
+			"usable inventory implied protected reserves were drawable");
 		require(before.stores[0].currentQualified < 10 && before.stores[1].currentQualified > 0,
 			"fixture did not exercise internal transfer");
 		require(world.getStationSystemsSnapshot() == before && !world.isModified()
@@ -91,17 +107,33 @@ namespace
 		auto history = world.getStationSystemsMetricHistory();
 		require(std::count_if(history.begin(), history.end(), [](auto const& h) {
 			return h.descriptor.equipmentType == "Resource store";
-		}) == static_cast<int>(settings.stores.size()), "store inventory registered more than once");
+		}) == static_cast<int>(2 * settings.stores.size()), "total and qualified observations not registered once per store");
 		for (auto const& h : history) if (h.descriptor.equipmentType == "Resource store")
 			require(!h.descriptor.requestedSemantics && !h.samples[0].requested, "inventory manufactured a requested value");
 		std::erase_if(history, [](auto const& h) { return h.descriptor.instanceId == "grams"; });
 		auto const missing = core::queryStationChart(waterDefinition, history);
 		require(missing.incomplete && std::isnan(missing.series[0].values[0])
 			&& std::isnan(missing.series[1].upper[0]), "missing inventory became zero or a complete stack");
+		for (auto const& id : {"stored-material/water/kg/by-hazard", "stored-usable/water/kg/normal"})
+		{
+			auto const gap = core::queryStationChart(chart(world, id), history);
+			require(gap.incomplete && std::isnan(gap.series[0].values[0]) && std::isnan(gap.series.back().upper[0]),
+				"grouped/usable missing contribution was concealed by zero filling");
+		}
 		run(world, 1800);
 		auto const coarse = world.queryStationSystemsChart("stored-material/water/kg");
 		require(coarse.truncated && coarse.series[0].values.size() <= 256, "material history did not remain bounded");
 		for (auto value : coarse.series[0].values) close(value, 20);
+		auto const coarseHazard = world.queryStationSystemsChart("stored-material/water/kg/by-hazard");
+		auto const coarseUsable = world.queryStationSystemsChart("stored-usable/water/kg/normal");
+		for (size_t row = 0; row < coarse.series[0].values.size(); ++row)
+		{
+			require(coarseHazard.series[0].times[row] == coarse.series[0].times[row]
+				&& coarseUsable.series[0].times[row] == coarse.series[0].times[row], "coarsened inventories lost alignment");
+			close(coarseHazard.series.back().upper[row], coarse.series[0].values[row]);
+			close(coarseUsable.series.back().upper[row], coarseUsable.series[0].values[row]);
+			close(coarseUsable.series[0].values[row], 11);
+		}
 		auto const oldRun = world.getStationSystemsObservationRevision().run;
 		settings.stores[5].materialId = "oxygen";
 		require(world.configureStationSystems(settings, true), "identity assignment apply failed");
@@ -137,8 +169,10 @@ namespace
 		close(world.queryStationSystemsChart("stored-material/test-material/kWh").series[0].values[0],
 			2 + 0.002 + 2.0 / 3600 + 2.0 / 3.6);
 		close(world.queryStationSystemsChart("stored-material/test-material/mol").series[0].values[0], 2);
-		require(world.getStationSystemsObservationCatalogue().size() == 5,
-			"compatible units were split or incompatible physical quantities were merged");
+		auto const catalogue = world.getStationSystemsObservationCatalogue();
+		require(std::count_if(catalogue.begin(), catalogue.end(), [](auto const& c) {
+			return c.id.starts_with("stored-material/") && c.id == c.propertyId;
+		}) == 4, "compatible units were split or incompatible physical quantities were merged");
 	}
 
 	void materialRelationshipObservations(smoke::Context const&)

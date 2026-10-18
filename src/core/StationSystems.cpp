@@ -5973,7 +5973,9 @@ namespace core
 			{
 				auto const total = (snap.stores[i].currentQualified + snap.stores[i].currentUnqualified)
 					* storeObservationScales[i];
-				put(storeStart + i, total, total);
+				put(storeStart + 2 * i, total, total);
+				auto const usable = snap.stores[i].currentQualified * storeObservationScales[i];
+				put(storeStart + 2 * i + 1, usable, usable);
 			}
 			history.observe(static_cast<double>(tick) * World::getFixedTimestep(), recordingValues);
 		}
@@ -16558,6 +16560,9 @@ namespace core
 		{
 			mImpl->storeObservationScales.push_back(observation.sourceToCanonicalScale);
 			StationRecordingSlot slot; slot.metric = std::move(observation.metric);
+			slots.push_back(slot);
+			slot.metric.id += "/usable";
+			slot.metric.exchangeRole = "usable-inventory";
 			slots.push_back(std::move(slot));
 		}
 		auto const slotCount = slots.size();

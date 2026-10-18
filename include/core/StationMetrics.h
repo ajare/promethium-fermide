@@ -51,6 +51,7 @@ namespace core
 		// the subset of measurements that happens to be available this frame.
 		std::vector<std::string> contributors, denominator;
 		bool stacked{false};
+		std::string hazardClass; // Optional grouping key of this contribution.
 	};
 	struct StationChartDefinition
 	{
@@ -60,6 +61,8 @@ namespace core
 		std::vector<StationChartSeriesDefinition> series;
 		std::string accountingNote;
 		bool partialAccounting{false};
+		// Generic presentation variants share one selector property.
+		std::string propertyId, breakdown;
 	};
 	struct StationChartSeries
 	{
@@ -84,6 +87,7 @@ namespace core
 	std::vector<StationStoreObservation> stationStoreObservations(StationSystemsSettings const& settings);
 	std::vector<StationChartDefinition> const& stationCharts();
 	std::vector<StationChartDefinition> stationCharts(std::vector<StationMetricDescriptor> const& descriptors);
+	void appendStationChartBreakdowns(std::vector<StationChartDefinition>& charts);
 	std::vector<std::string> stationChartMetricIds(StationChartDefinition const& chart);
 	char const* stationUnitLabel(StationCanonicalUnit unit);
 	StationChartData queryStationChart(StationChartDefinition const& chart,

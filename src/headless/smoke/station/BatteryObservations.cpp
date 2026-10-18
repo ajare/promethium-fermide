@@ -45,7 +45,7 @@ namespace
 			require(world.configureStationSystems(rig(charging), false, &diagnostic), diagnostic.c_str());
 			world.markSaved();
 			auto const catalogue = world.getStationSystemsObservationCatalogue();
-			require(catalogue.size() == 3 && catalogue[1].id == "battery-energy" && catalogue[2].id == "battery-charge",
+			require(catalogue.size() == 4 && catalogue[1].id == "battery-energy" && catalogue[2].id == "battery-charge",
 				"battery properties were not discovered before recording");
 			world.resumeSimulation(); require(world.advanceTicks(60), "battery observation run failed"); world.pauseSimulation();
 			require(world.getStationSystemsQueryWork().queries == 0, "recording built unselected views");

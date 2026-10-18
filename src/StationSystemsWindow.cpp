@@ -287,6 +287,7 @@ void StationSystemsWindow::renderObservationPlot(float height, core::World const
 		std::string group;
 		for (auto const& chart : charts)
 		{
+			if (!chart.propertyId.empty() && chart.id != chart.propertyId) continue;
 			if (group != chart.group) { ImGui::TextDisabled("%s", chart.group.c_str()); group = chart.group; }
 			ImGui::PushID(chart.id.c_str());
 			if (ImGui::Selectable(chart.label.c_str(), chart.id == mSelectedChart))
@@ -299,6 +300,22 @@ void StationSystemsWindow::renderObservationPlot(float height, core::World const
 			ImGui::PopID();
 		}
 		ImGui::EndCombo();
+	}
+	if (!selected->propertyId.empty())
+	{
+		ImGui::SetNextItemWidth(-1);
+		if (ImGui::BeginCombo("Breakdown", selected->breakdown.c_str()))
+		{
+			for (auto const& chart : charts) if (chart.propertyId == selected->propertyId)
+			{
+				if (ImGui::Selectable(chart.breakdown.c_str(), chart.id == mSelectedChart))
+				{
+					mSelectedChart = chart.id; selected = &chart;
+					prepareObservation(world);
+				}
+			}
+			ImGui::EndCombo();
+		}
 	}
 	ImGui::TextUnformatted(selected->title.c_str());
 	if (!selected->accountingNote.empty()) ImGui::TextWrapped("Accounting coverage: %s", selected->accountingNote.c_str());

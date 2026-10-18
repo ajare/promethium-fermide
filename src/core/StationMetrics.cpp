@@ -137,7 +137,8 @@ namespace core
 		using Key = std::tuple<std::string, StationPhysicalQuantity, StationCanonicalUnit>;
 		std::map<Key, std::vector<StationMetricDescriptor const*>> materials;
 		size_t unclassified = 0;
-		for (auto const& d : descriptors) if (d.equipmentType == "Resource store" && d.role == StationMetricRole::Inventory)
+		for (auto const& d : descriptors) if (d.equipmentType == "Resource store" && d.role == StationMetricRole::Inventory
+			&& d.exchangeRole == "stored-inventory")
 		{
 			if (d.materialId && d.unit != StationCanonicalUnit::Unspecified)
 				materials[{*d.materialId, d.quantity, d.unit}].push_back(&d);
@@ -159,10 +160,30 @@ namespace core
 			for (auto d : members) total.contributors.push_back(d->id);
 			chart.series.push_back(std::move(total));
 			for (auto d : members) chart.series.push_back({d->id, d->instanceId, StationMetricValue::Actual,
-				StationChartOperation::Value, {}, {}, true});
+				StationChartOperation::Value, {}, {}, true, d->hazardClass.value_or("unclassified")});
 			charts.push_back(std::move(chart));
+			// Qualified inventory is never summed across incompatible hazards.
+			std::map<std::string, std::vector<StationMetricDescriptor const*>> usable;
+			for (auto d : members) usable[d->hazardClass.value_or("unclassified")].push_back(d);
+			for (auto const& [hazard, contributions] : usable)
+			{
+				StationChartDefinition qualified{"stored-usable/" + material + "/" + stationUnitLabel(unit) + "/" + hazard,
+					"Material inventories", "Usable stored material: " + material + " (" + stationUnitLabel(unit) + "; " + hazard + ")",
+					"Qualified usable inventory: " + material + " — " + hazard + " (applied simulation)", quantity, unit, {}};
+				qualified.accountingNote = "Resource stores only; qualified contents only, excludes unqualified contents. Protected resource reserves remain included: usable is NOT discretionary drawability. Hazard classes are not interchangeable; hazardous supply cannot meet normal demand. "
+					+ std::to_string(unclassified) + " unclassified or non-canonical inventories excluded from material subtotals.";
+				qualified.partialAccounting = unclassified != 0;
+				StationChartSeriesDefinition subtotal;
+				subtotal.metricId = qualified.id + "/subtotal"; subtotal.label = "Classified qualified stores subtotal (" + hazard + ")";
+				subtotal.operation = StationChartOperation::Sum;
+				for (auto d : contributions) subtotal.contributors.push_back(d->id + "/usable");
+				qualified.series.push_back(std::move(subtotal));
+				for (auto d : contributions) qualified.series.push_back({d->id + "/usable", d->instanceId + " (" + hazard + ")",
+					StationMetricValue::Actual, StationChartOperation::Value, {}, {}, true, hazard});
+				charts.push_back(std::move(qualified));
+			}
 		}
-		for (auto const& d : descriptors) if (d.equipmentType == "Resource store"
+		for (auto const& d : descriptors) if (d.equipmentType == "Resource store" && d.exchangeRole == "stored-inventory"
 			&& (!d.materialId || d.unit == StationCanonicalUnit::Unspecified))
 		{
 			StationChartDefinition chart{"unclassified/" + d.instanceId, "Unclassified inventories",
@@ -171,7 +192,36 @@ namespace core
 			chart.accountingNote = note + " Missing, contradictory material evidence or unsupported canonical unit; no material inferred.";
 			chart.partialAccounting = true; charts.push_back(std::move(chart));
 		}
+		appendStationChartBreakdowns(charts);
 		return charts;
+	}
+
+	void appendStationChartBreakdowns(std::vector<StationChartDefinition>& charts)
+	{
+		auto const count = charts.size();
+		for (size_t i = 0; i < count; ++i)
+		{
+			auto& chart = charts[i];
+			if (std::none_of(chart.series.begin(), chart.series.end(), [](auto const& s) { return s.stacked; })) continue;
+			chart.propertyId = chart.id; chart.breakdown = "Instance";
+			auto aggregate = chart;
+			aggregate.id += "/aggregate"; aggregate.breakdown = "Aggregate";
+			std::erase_if(aggregate.series, [](auto const& s) { return s.stacked; });
+			auto hazard = aggregate;
+			hazard.id = chart.id + "/by-hazard"; hazard.breakdown = "Hazard class";
+			std::map<std::string, std::vector<std::string>> groups;
+			for (auto const& s : chart.series) if (s.stacked && !s.hazardClass.empty())
+			{
+				auto& ids = groups[s.hazardClass];
+				if (s.operation == StationChartOperation::Value) ids.push_back(s.metricId);
+				else ids.insert(ids.end(), s.contributors.begin(), s.contributors.end());
+			}
+			for (auto const& [key, ids] : groups)
+				hazard.series.push_back({chart.propertyId + "/hazard/" + key, key, StationMetricValue::Actual,
+					StationChartOperation::Sum, ids, {}, true, key});
+			charts.push_back(std::move(aggregate));
+			if (groups.size() > 1) charts.push_back(std::move(hazard));
+		}
 	}
 
 	std::vector<std::string> stationChartMetricIds(StationChartDefinition const& chart)

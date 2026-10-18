@@ -114,6 +114,7 @@ namespace
 
 		auto explicitSettings = legacy;
 		explicitSettings.stores[0].materialId = "water"; // deliberately misleading store name
+		explicitSettings.stores[0].protectedReserve = 6;
 		explicitSettings.stores[1].materialId = "custom-feedstock-2";
 		explicitSettings.stores[1].hazardClass = "hazardous";
 		explicitSettings.stores[1].composition = core::ResourceCompositionSettings{};
@@ -131,6 +132,13 @@ namespace
 				"World identity did not round trip");
 			restored->resetSimulation();
 			require(restored->getStationSystemsSettings() == explicitSettings, "Reset lost material identity");
+			restored->resumeSimulation(); require(restored->advanceTicks(60), "Restored inventory observation failed");
+			restored->pauseSimulation();
+			auto const usable = restored->queryStationSystemsChart("stored-usable/water/kg/normal/aggregate");
+			auto const hazardous = restored->queryStationSystemsChart("stored-usable/custom-feedstock-2/kg/hazardous/aggregate");
+			require(!usable.incomplete && usable.series[0].values[0] == 20
+				&& !hazardous.incomplete && hazardous.series[0].values[0] == 10,
+				"Restored qualified inventory lost identity/hazard/reserve semantics");
 		}
 		require(world.rebuildTraversalTopology()
 			&& world.getStationSystemsSettings() == explicitSettings, "Structural replay lost material identity");
