@@ -714,6 +714,14 @@ if(BUILD_TESTING)
     set_tests_properties(agent-group-registry PROPERTIES
         LABELS "smoke;standalone;core" TIMEOUT 30)
 
+    add_executable(pf-agent-type-catalog-checks src/headless/AgentTypeCatalogChecks.cpp)
+    target_include_directories(pf-agent-type-catalog-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-agent-type-catalog-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-agent-type-catalog-checks)
+    add_test(NAME agent-type-catalog COMMAND pf-agent-type-catalog-checks)
+    set_tests_properties(agent-type-catalog PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
     add_executable(pf-permission-requirement-store-checks src/headless/PermissionRequirementStoreChecks.cpp)
     target_include_directories(pf-permission-requirement-store-checks PRIVATE "${PF_INCLUDE_DIR}")
     target_link_libraries(pf-permission-requirement-store-checks PRIVATE promethium-fermide-core)

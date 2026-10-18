@@ -52,6 +52,7 @@ namespace core
 	class PlacementValidator;
 	class AgentGroupRegistry;
 	class PermissionRequirementStore;
+	class AgentTypeCatalog;
 
 	class World : public Serializable
 	{
@@ -74,6 +75,10 @@ namespace core
 		// the registries and authored requirement maps below on the World's
 		// behalf (ADR 0022).
 		friend class PermissionRequirementStore;
+		// The Agent type catalog owns no state; it reads and edits the
+		// Agent-type registry and preview-baseline cache below on the World's
+		// behalf (ADR 0022).
+		friend class AgentTypeCatalog;
 		friend struct WorldAgentRestorationTestAccess;
 		friend struct PhysicalControlLookupTestAccess;
 		friend struct QueuedPressLookupTestAccess;
@@ -614,6 +619,14 @@ namespace core
 		// these operations; the store owns no state and reaches them through
 		// this World.
 		std::unique_ptr<PermissionRequirementStore> mPermissionRequirementStore;
+
+		// The registered Agent-type behaviour lives in the Agent type catalog
+		// (ADR 0022). World keeps ownership of the Agent-type registry itself
+		// (ADR 0001) and stays the facade (design pattern) through which every
+		// caller reaches these operations; the catalog owns no state and reaches
+		// mAgentTypes, the preview-baseline cache, and the topology seam below
+		// through this World.
+		std::unique_ptr<AgentTypeCatalog> mAgentTypeCatalog;
 
 		// Every World owns one sandboxed Lua runtime for its Agent types. It is
 		// declared before mAgents so Agent destruction (which releases live Lua
