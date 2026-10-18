@@ -4,6 +4,7 @@
 #include "MicrobialObservationFixture.h"
 #include "CropObservationFixture.h"
 #include "AlgaeObservationFixture.h"
+#include "ScheduledObservationFixture.h"
 #include "core/World.h"
 #include <algorithm>
 #include <cmath>
@@ -154,6 +155,88 @@ namespace
 			require(observations.size() == 4 && observations[0].metric.unit == canonical, "canonical rate unit missing");
 			close(observations[0].sourceToCanonicalScale, scale);
 		}
+	}
+
+	void scheduledExchangeObservations(smoke::Context const&)
+	{
+		auto s = smoke::station::scheduledObservationFixture();
+		core::World world("Scheduled exchanges", 2, 2); world.pauseSimulation(); world.finishBuild();
+		std::string why; if (!world.configureStationSystems(s, true, &why)) throw std::runtime_error(why);
+		auto const catalogue = world.getStationSystemsObservationCatalogue();
+		require(std::count_if(catalogue.begin(), catalogue.end(), [](auto const& c) {
+			return c.breakdown == "Aggregate" && (c.id.starts_with("exchange/Resupply/")
+				|| c.id.starts_with("exchange/Waste ejection/") || c.id.starts_with("exchange/Maintenance/"));
+		}) == 5, "scheduled exchanges unavailable before first observation");
+		run(world, 60);
+		require(world.getStationSystemsQueryWork().queries == 0, "hidden event recording queried charts");
+		auto const snap = world.getStationSystemsSnapshot();
+		auto const histories = world.getStationSystemsMetricHistory();
+		size_t count = 0;
+		for (auto const& o : core::stationExchangeObservations(s)) {
+			if (o.metric.equipmentType != "Resupply" && o.metric.equipmentType != "Waste ejection" && o.metric.equipmentType != "Maintenance") continue;
+			++count; require(o.cumulativeRate && !o.perTick && !o.metric.requestedSemantics, "event treated as tick rate or invented request");
+			auto h = std::ranges::find(histories, o.metric.id, [](auto const& h) { return h.descriptor.id; });
+			require(h != histories.end() && h->samples.size() == 5, "event history missing before selection");
+			double total = 0, previous = 0;
+			for (auto const& v : h->samples) {
+				require(v.actual.has_value() && !v.requested, "scheduled measurement unavailable");
+				total += *v.actual * (v.elapsedSeconds - previous); previous = v.elapsedSeconds;
+			}
+			close(total, *o.read(snap).actual * o.sourceToCanonicalScale);
+			auto absent = snap; absent.deliveries.clear(); absent.wasteEjections.clear(); absent.maintenanceJobs.clear();
+			require(!o.read(absent).actual, "missing schedule authority became zero");
+			if (o.metric.equipmentType != "Resupply" || o.metric.exchangeRole == "Accepted") close(*h->samples.back().actual, 0);
+		}
+		require(count == 8, "missing scheduled metrics or reusable tools graphed as consumption");
+		auto get = [&](std::string id) { auto d = world.queryStationSystemsChart(id); require(!d.incomplete && !d.series.empty(), "event chart missing"); return d; };
+		std::string const accepted = "exchange/Resupply/Input/Accepted/water/kg/s/normal";
+		auto data = get(accepted); close(data.series[0].values[0], 0.005 / data.series[0].times[0]);
+		// First window includes time zero, two recurrences and the exact-boundary one-off.
+		close(get("exchange/Resupply/Input/Delivered/water/kg/s/normal").series[0].values[0], 0.007 / data.series[0].times[0]);
+		close(get("exchange/Resupply/Output/Rejected/water/kg/s/normal").series[0].values[0], 0.002 / data.series[0].times[0]);
+		auto stack = get(accepted + "/instances"); close(stack.series.back().upper[0], data.series[0].values[0]);
+		close(snap.stores[0].currentQualified, 5);
+		close(snap.stores[1].currentQualified, 0); close(snap.stores[1].currentUnqualified, 4);
+		close(snap.wasteEjections[0].ejectedTotal, 2); require(snap.wasteEjections[0].unmetTotal > 0, "held waste was ejected");
+		close(snap.stores[2].currentQualified, 0.5); close(snap.stores[3].currentQualified, 1); close(snap.stores[4].currentQualified, 2);
+		close(snap.maintenanceJobs[0].requirements[1].consumedTotal, 2);
+		require(snap.maintenanceJobs[0].occurrencesCompleted == 2, "material-limited maintenance completed without resources");
+		// Inventories are existing owners, not stock plus event throughput.
+		close(get("stored-material/water/kg/aggregate").series[0].values.back(), 0.005);
+		close(get("stored-material/parts/kg/aggregate").series[0].values.back(), 2.5);
+		auto const revision = world.getStationSystemsObservationRevision();
+		require(world.getStationSystemsSnapshot() == snap, "event viewing changed simulation");
+		world.pauseSimulation(); require(!world.advanceTicks(12) && world.getStationSystemsObservationRevision() == revision, "pause recorded events");
+		auto missing = histories;
+		for (auto& h : missing) if (h.descriptor.id == "exchange/Resupply/boundary/Accepted") h.samples[0].actual.reset();
+		auto gap = core::queryStationChart(chart(world, accepted), missing);
+		require(gap.incomplete && std::isnan(gap.series[0].values[0]), "missing event contribution hidden by aggregate");
+		world.resetSimulation(); run(world, 60);
+		require(world.getStationSystemsMetricHistory().size() == histories.size(), "event reset changed catalogue");
+		auto replay = world.queryStationSystemsChart(accepted);
+		require(replay.series[0].values == data.series[0].values, "event windows not deterministic on replay");
+		require(world.getStationSystemsSnapshot() == snap, "scheduled ledgers drifted on reset");
+		for (int mode : {1, 2}) {
+			auto treatment = smoke::station::scheduledObservationFixture(mode);
+			core::World gated("Treatment-gated ejection", 2, 2); gated.pauseSimulation(); gated.finishBuild();
+			if (!gated.configureStationSystems(treatment, true, &why)) throw std::runtime_error(why);
+			run(gated, 60);
+			auto observed = gated.getStationSystemsSnapshot();
+			auto ejected = gated.queryStationSystemsChart("exchange/Waste ejection/Loss/Ejected material/water/kg/s/hazardous");
+			require(!ejected.incomplete && !ejected.series.empty(), "treatment-gated ejection not graphed");
+			double total = 0, previous = 0;
+			for (size_t i = 0; i < ejected.series[0].times.size(); ++i) {
+				total += ejected.series[0].values[i] * (ejected.series[0].times[i] - previous); previous = ejected.series[0].times[i];
+			}
+			close(total, observed.wasteEjections[1].ejectedTotal);
+			if (mode == 1) {
+				close(total, 0); require(observed.stores[7].currentUnqualified > 0, "failed clearance did not hold treatment output");
+			} else require(total > 0, "passed treatment clearance never permitted ejection");
+		}
+		// Schedules without physical spend do not fabricate material exchanges.
+		s.deliveries.clear(); s.wasteEjections.clear(); s.maintenanceJobs[0].requirements.pop_back(); s.maintenanceJobs[0].wasteStoreId.clear();
+		for (auto const& o : core::stationExchangeObservations(s)) require(o.metric.equipmentType != "Resupply"
+			&& o.metric.equipmentType != "Waste ejection" && o.metric.equipmentType != "Maintenance", "non-consuming schedule manufactured a graph");
 	}
 
 	void algaeExchangeObservations(smoke::Context const&)
@@ -1376,6 +1459,7 @@ void registerMaterialObservationChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"waterGasExchangeObservations", waterGasExchangeObservations});
 	checks.push_back({"carbonExchangeObservations", carbonExchangeObservations});
 	checks.push_back({"cropExchangeObservations", cropExchangeObservations});
+	checks.push_back({"scheduledExchangeObservations", scheduledExchangeObservations});
 	checks.push_back({"algaeExchangeObservations", algaeExchangeObservations});
 	checks.push_back({"microbialExchangeObservations", microbialExchangeObservations});
 	checks.push_back({"thermalExchangeObservations", thermalExchangeObservations});

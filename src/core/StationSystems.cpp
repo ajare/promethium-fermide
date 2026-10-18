@@ -5773,6 +5773,7 @@ namespace core
 				size_t storeIndex{0};
 				double reserved{0.0};
 				double lastConsumed{0.0};
+				double consumedTotal{0.0};
 			};
 			std::vector<RequirementState> requirements;
 			// The waste store index, or SIZE_MAX when the job consumes
@@ -8424,6 +8425,7 @@ namespace core
 								stores[requirement.storeIndex].authored.unit, spent));
 						consumedTotal += spent;
 						requirement.lastConsumed = spent;
+						requirement.consumedTotal += spent;
 						requirement.reserved = 0.0;
 					}
 					job.phase = StationMaintenancePhase::Completed;
@@ -19164,6 +19166,7 @@ namespace core
 				requirementResult.consumed = authored.consumed;
 				requirementResult.reserved = requirement.reserved > 0.0;
 				requirementResult.lastConsumed = requirement.lastConsumed;
+				requirementResult.consumedTotal = requirement.consumedTotal;
 				jobResult.requirements.push_back(std::move(requirementResult));
 			}
 			jobResult.occurrencesStarted = job.occurrencesStarted;

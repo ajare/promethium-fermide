@@ -2310,6 +2310,7 @@ namespace core
 		bool consumed{false};
 		bool reserved{false};   // held by this job's live reservation this tick
 		double lastConsumed{0.0}; // spent by the most recent completion
+		double consumedTotal{0.0}; // committed spend across completions; observation only
 		bool operator==(StationMaintenanceRequirementSnapshot const&) const = default;
 	};
 	// One authored maintenance job as of the most recent tick (#414):

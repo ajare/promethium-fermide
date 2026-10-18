@@ -1,5 +1,10 @@
 # Station Flow observations
 
+Scheduled external and maintenance exchange catalogue (#714): see
+[Scheduled exchange observations](station-scheduled-exchange-observations.md)
+for event-window rates, resupply boundary accounts, ejection losses and committed
+maintenance spend.
+
 Microbial processor exchange catalogue (#711): see
 [Microbial processor exchange observations](station-microbial-exchange-observations.md)
 for compound feed, consumables, recovered products, heat and loss boundaries.
