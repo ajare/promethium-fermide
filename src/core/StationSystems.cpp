@@ -5935,6 +5935,13 @@ namespace core
 				put(2 + i, snap.power.loads[i].suppliedKW, snap.power.loads[i].requestedKW);
 			for (size_t i = 0; i < snap.transfers.size() && i < settings.transfers.size(); ++i)
 				put(2 + settings.equipmentLoads.size() + i, snap.transfers[i].lastCompleted, snap.transfers[i].lastRequested);
+			auto const batteryStart = 2 + settings.equipmentLoads.size() + settings.transfers.size();
+			for (size_t i = 0; i < snap.power.batteries.size() && i < settings.batteries.size(); ++i)
+			{
+				auto const& battery = snap.power.batteries[i];
+				put(batteryStart + 2 * i, battery.storedKWh, battery.storedKWh);
+				put(batteryStart + 2 * i + 1, battery.nameplateKWh, battery.nameplateKWh);
+			}
 			history.observe(static_cast<double>(tick) * World::getFixedTimestep(), recordingValues);
 		}
 		// #419: the endurance observation windows. One window per Resource
@@ -16502,6 +16509,18 @@ namespace core
 			if (source->unit == "m3") { d.quantity = StationPhysicalQuantity::Volume; d.unit = StationCanonicalUnit::CubicMetre; }
 			if (source->unit == "kWh") { d.quantity = StationPhysicalQuantity::Energy; d.unit = StationCanonicalUnit::KilowattHour; }
 		}
+		for (auto const& battery : settings.batteries)
+			for (bool capacity : {false, true})
+			{
+				StationRecordingSlot slot;
+				auto& d = slot.metric;
+				d.id = "battery/" + battery.id + (capacity ? "/capacity" : "/stored-energy");
+				d.equipmentType = "Battery"; d.instanceId = battery.id;
+				d.exchangeRole = capacity ? "capacity" : "stored-energy";
+				d.role = capacity ? StationMetricRole::Capacity : StationMetricRole::Inventory;
+				d.quantity = StationPhysicalQuantity::Energy; d.unit = StationCanonicalUnit::KilowattHour;
+				slots.push_back(std::move(slot));
+			}
 		auto const slotCount = slots.size();
 		auto const cadenceTicks = std::max(1.0f, std::ceil(settings.observationIntervalSeconds / World::getFixedTimestep()));
 		mImpl->history = StationHistory(std::move(slots), cadenceTicks * World::getFixedTimestep(), settings.trendRetentionSeconds);

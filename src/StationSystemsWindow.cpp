@@ -308,6 +308,10 @@ void StationSystemsWindow::renderObservationPlot(float height, core::World const
 		ImGui::TextDisabled("RECORDING LIMIT: complete catalogue cannot fit; no metrics recorded.");
 	else if (empty)
 		ImGui::TextDisabled("No samples yet; run the simulation.");
+	else if (std::none_of(mFlowChart.series.begin(), mFlowChart.series.end(), [](auto const& line) {
+		return std::any_of(line.values.begin(), line.values.end(), [](double v) { return std::isfinite(v); });
+	}))
+		ImGui::TextDisabled("Unavailable: incomplete observations or zero denominator.");
 	else
 		ImGui::TextDisabled("%sSimulation time; stride %.2f s%s%s", mFlowWasPaused ? "Paused; " : "",
 			mFlowChart.sampleIntervalSeconds, mFlowChart.truncated ? " (interval summaries; history merged or dropped)" : "",
@@ -343,7 +347,13 @@ void StationSystemsWindow::renderObservationPlot(float height, core::World const
 			ImPlot::SetNextLineStyle(ImPlot::GetColormapColor(static_cast<int>(colour % ImPlot::GetColormapSize())), 2);
 			ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 2);
 			ImGui::LogText("%s\n", line.label.c_str());
-			ImPlot::PlotLine(mObservationLabels[lineIndex++].c_str(), line.times.data(), line.values.data(), static_cast<int>(line.times.size()));
+			auto const* label = mObservationLabels[lineIndex++].c_str();
+			if (line.stacked)
+			{
+				ImPlot::SetNextFillStyle(ImPlot::GetColormapColor(static_cast<int>(colour % ImPlot::GetColormapSize())), 0.55f);
+				ImPlot::PlotShaded(label, line.times.data(), line.lower.data(), line.upper.data(), static_cast<int>(line.times.size()));
+			}
+			else ImPlot::PlotLine(label, line.times.data(), line.values.data(), static_cast<int>(line.times.size()));
 		}
 		ImPlot::EndPlot();
 	}

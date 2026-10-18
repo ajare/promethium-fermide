@@ -3437,6 +3437,84 @@ namespace
 		require(driver.passed(), "Live Flow telemetry workflow failed");
 	}
 
+	void batteryObservationWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build(); io.DeltaTime = 1.0f / 60.0f;
+		auto world = std::make_shared<core::World>("Battery graphs", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed; seed.enabled = true;
+		seed.batteries = {{"z-small", 2, 2, 2, 4, 4}, {"a-large", 8, 8, 0, 4, 4}};
+		core::SolarArraySettings sun; sun.id = "sun"; sun.capacityKW = 4;
+		sun.illumination.periodSeconds = 4; sun.illumination.segments = {{0, 1}, {2, 0}};
+		seed.solarArrays = {sun};
+		core::EquipmentLoadSettings load; load.id = "load"; load.electricalDemandKW = 2;
+		load.thermalClass = "low"; load.coolingDisposition = core::StationCoolingDisposition::Exported;
+		seed.equipmentLoads = {load};
+		require(world->configureStationSystems(seed, false), "battery graph fixture refused");
+		world->markSaved(); world->resumeSimulation();
+		require(world->advanceTicks(60), "hidden battery recording failed");
+		StationSystemsWindow window;
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Battery configuration"); window.renderFlowContents(world); ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "batteryObservations", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Battery configuration");
+			auto const observed = world->getStationSystemsSnapshot();
+			auto const draft = window.draft();
+			ctx->ComboClick("##Station observation property/battery-energy/Stored battery energy"); ctx->Yield(2);
+			REQ(window.selectedObservation() == "battery-energy" && driver.contains("Station total")
+				&& driver.contains("a-large") && driver.contains("z-small")
+				&& driver.contains("Stored battery energy (kWh)"), "Generic stack omitted its total, contributions or energy unit");
+			auto const energy = world->queryStationSystemsChart("battery-energy");
+			REQ(energy.series.size() == 3 && energy.series[0].times.size() == 1
+				&& energy.series[1].stacked && energy.series[2].stacked
+				&& energy.series[2].upper.back() == energy.series[0].values.back(),
+				"Selecting energy did not reveal the pre-recorded stack/total");
+			ctx->ComboClick("##Station observation property/battery-charge/Battery state of charge"); ctx->Yield(2);
+			REQ(driver.contains("Capacity-weighted charge") && driver.contains("Battery state of charge (%)"),
+				"Charge plot omitted weighting or percentage units");
+			auto const charge = world->queryStationSystemsChart("battery-charge");
+			REQ(charge.series[0].times == energy.series[0].times
+				&& std::abs(charge.series[0].values[0] - energy.series[0].values[0] * 10) < 1e-8
+				&& world->getStationSystemsSnapshot() == observed && !world->isModified()
+				&& window.draft() == draft && window.draftHistory().undoCount() == 0,
+				"Property switching lost history, averaged percentages or mutated authoring/simulation");
+			auto const preparations = window.observationPreparations();
+			ctx->Yield(20);
+			REQ(window.observationPreparations() == preparations, "Unchanged battery plot rebuilt its buffers");
+			REQ(world->advanceTicks(60), "battery charging continuation failed"); ctx->Yield(20);
+			auto const charged = world->queryStationSystemsChart("battery-charge").series[0].values.back();
+			REQ(charged > charge.series[0].values.back(), "Charge view did not follow charging");
+			REQ(world->advanceTicks(60), "battery discharge continuation failed"); ctx->Yield(20);
+			REQ(world->queryStationSystemsChart("battery-charge").series[0].values.back() < charged,
+				"Charge view did not follow discharge");
+			world->pauseSimulation(); ctx->Yield(2);
+			world->resetSimulation(); ctx->Yield(2);
+			REQ(window.selectedObservation() == "battery-charge" && driver.contains("No samples yet"),
+				"Reset lost applicable battery selection or kept old history");
+			seed.batteries.clear();
+			REQ(world->configureStationSystems(seed, false), "removing batteries failed"); ctx->Yield(2);
+			REQ(window.selectedObservation() == "power" && driver.contains("Selected property unavailable; showing Power."),
+				"Disappearing battery view did not visibly fall back to Power");
+			seed.batteries = {{"zero", 0, 0, 0}};
+			REQ(world->configureStationSystems(seed, false), "zero-capacity configuration failed");
+			world->resumeSimulation(); REQ(world->advanceTicks(60), "zero-capacity observation failed");
+			world->pauseSimulation(); ctx->Yield(2);
+			ctx->ComboClick("##Station observation property/battery-charge/Battery state of charge"); ctx->Yield(2);
+			REQ(driver.contains("Unavailable: incomplete observations or zero denominator.")
+				&& world->queryStationSystemsChart("battery-charge").incomplete,
+				"Zero-capacity percentage looked available");
+		});
+		#undef REQ
+		require(driver.passed(), "Battery observation editor workflow failed");
+	}
+
 	void flowProjectionChecks()
 	{
 		using smoke::require;
@@ -7497,6 +7575,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/flowInspectorWorkflow", flowInspectorWorkflow});
 	checks.push_back({"station/flowPowerChainWorkflow", flowPowerChainWorkflow});
 	checks.push_back({"station/flowTelemetryWorkflow", flowTelemetryWorkflow});
+	checks.push_back({"station/batteryObservationWorkflow", batteryObservationWorkflow});
 	checks.push_back({"station/flowThermalReservoirWorkflow", flowThermalReservoirWorkflow});
 	checks.push_back({"station/flowRadiatorWorkflow", flowRadiatorWorkflow});
 	checks.push_back({"station/flowCoolantLoopWorkflow", flowCoolantLoopWorkflow});

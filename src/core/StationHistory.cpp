@@ -35,20 +35,15 @@ namespace core
 		mPending.resize(mSlots.size());
 		mStatus.recordingBytes = overhead + mStatus.sampleLimit * rowBytes;
 		mStatus.resolutionSeconds = cadence;
-		std::erase_if(mCatalogue, [&](auto const& chart) {
-			return chart.id != "power" && !std::all_of(chart.series.begin(), chart.series.end(), [&](auto const& line) {
-				return std::any_of(mSlots.begin(), mSlots.end(), [&](auto const& slot) {
-					return slot.metric.id == line.metricId && slot.metric.quantity == chart.quantity
-						&& slot.metric.unit == chart.unit;
-				});
-			});
-		});
+		std::vector<StationMetricDescriptor> descriptors;
+		for (auto const& slot : mSlots) descriptors.push_back(slot.metric);
+		mCatalogue = stationCharts(descriptors);
 		for (auto const& chart : mCatalogue)
 		{
 			auto& indices = mChartSlots.emplace_back();
-			for (auto const& line : chart.series)
+			for (auto const& id : stationChartMetricIds(chart))
 			{
-				auto slot = std::find_if(mSlots.begin(), mSlots.end(), [&](auto const& s) { return s.metric.id == line.metricId; });
+				auto slot = std::find_if(mSlots.begin(), mSlots.end(), [&](auto const& s) { return s.metric.id == id; });
 				if (slot != mSlots.end()) indices.push_back(static_cast<size_t>(slot - mSlots.begin()));
 			}
 		}
@@ -177,6 +172,9 @@ namespace core
 		{
 			if (!mCount) break;
 			auto const& slot = mSlots[col];
+			// Typed-only measurements share the recorder without changing the
+			// legacy trend population or manufacturing requested values.
+			if (slot.subsystem.empty()) continue;
 			StationTrendSeries s;
 			s.subsystem = slot.subsystem; s.id = slot.id; s.unit = slot.unit;
 			s.sampleIntervalSeconds = mStatus.resolutionSeconds;

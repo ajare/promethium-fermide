@@ -1,6 +1,7 @@
 #include "Smoke.h"
 #include "Documents.h"
 #include "Connections.h"
+#include "BatteryObservations.h"
 #include "Coupled.h"
 #include "Reference.h"
 #include "Scenarios.h"
@@ -26823,6 +26824,7 @@ int main(int argc, char** argv)
 		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"nutrientConservation", nutrientConservation}, {"bioContainment", bioContainment}, {"outages", outages}, {"maintenance", maintenance}, {"failures", failures}, {"dispatch", dispatch}, {"protectedServices", protectedServices}, {"recovery", recovery}, {"trends", trends}, {"endurance", endurance}, {"forecast", forecast}};
 	registerStationDocumentChecks(checks);
 	registerStationConnectionChecks(checks);
+	registerBatteryObservationChecks(checks);
 	registerCoupledStationChecks(checks);
 	registerReferenceStationChecks(checks);
 	registerScenarioChecks(checks);

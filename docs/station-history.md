@@ -73,6 +73,42 @@ not an unapplied Configuration draft. `getStationSystemsQueryWork()` and the
 editor's preparation counter expose deterministic work evidence without timing
 assertions or changing World/document state.
 
+## Battery observations (#698)
+
+Each applied battery registers stored energy and installed nameplate capacity in
+kWh, both read from the committed battery snapshot at the same observation
+boundary as power. Stored energy includes retained reserve energy; it is not
+available discharge energy. Capacity is nameplate capacity (the denominator used
+by the authoritative battery state of charge), not usable/cyclable capacity.
+These measurements are typed-only slots in the same recorder, not additional
+legacy trend series; legacy trend membership is unchanged.
+
+Applied descriptors generate `battery-energy` and `battery-charge` entries under
+Batteries. No batteries means no applicable battery properties. Energy uses the
+generic sum operation for the Station total and stable identity-sorted individual
+contributions for the stack. Values remain individual energies; separately
+prepared lower/upper buffers describe their cumulative filled regions. Charge
+uses the generic ratio of summed stored energy to summed capacity, displayed in
+percent. It never averages individual battery percentages. Zero total capacity
+produces unavailable points and an explicit unavailable message, not zero percent
+or infinity. A zero-energy store with positive capacity remains a valid zero.
+
+The query definitions retain the expected descriptor population. Missing,
+invalid, unit-incompatible or timestamp-misaligned contributors produce gaps and
+incomplete status; they cannot silently shrink a sum or ratio. Any missing stack
+contribution gaps the complete stack at that time, so an available subset cannot
+look like a complete total. The renderer dispatches only on generic line/stack
+presentation, never on battery/equipment identity. Sum, ratio and stack operands
+all use the shared coordinated coarsening grid; capacity remains recorded on that
+grid rather than taken from a later configuration or the current UI draft.
+
+`station-batteryObservations` covers public World charging/discharging, unequal
+capacities, pre-selection history, read-only queries, descriptor membership,
+aggregate/stack equivalence, zero capacity, aligned coarsening, and invalid spans.
+`station-editor-battery-observations` drives the real grouped selector and generic
+plot, including switching to already-recorded history, units/legends, cached
+frames, Reset, disappearing-property fallback, and unavailable percentage data.
+
 The existing `station-trends` public World workflow checks hidden-window sampling,
 aligned bounded history, retention, pause/reset and deterministic replay, plus
 small recorder budgets and invalid intervals. `station-editor-trends` covers the

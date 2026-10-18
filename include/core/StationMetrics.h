@@ -8,8 +8,8 @@ namespace core
 {
 	// Observation metadata is independent of diagram nodes and presentation.
 	enum class StationPhysicalQuantity { Power, Energy, Mass, Volume, Temperature, Fraction, MassRate, VolumeRate, Unspecified };
-	enum class StationCanonicalUnit { Kilowatt, KilowattHour, Kilogram, CubicMetre, Kelvin, Fraction, KilogramPerSecond, CubicMetrePerSecond, Unspecified };
-	enum class StationMetricRole { Demand, Generation, Inventory, Input, Output, Loss, InventoryChange, StateOfCharge };
+	enum class StationCanonicalUnit { Kilowatt, KilowattHour, Kilogram, CubicMetre, Kelvin, Fraction, KilogramPerSecond, CubicMetrePerSecond, Percent, Unspecified };
+	enum class StationMetricRole { Demand, Generation, Inventory, Input, Output, Loss, InventoryChange, StateOfCharge, Capacity };
 	enum class StationRequestedSemantics { Demand };
 	enum class StationMetricValidity { Valid, Unavailable, Invalid };
 	enum class StationMetricCoverage { Complete, Partial, Unclassified };
@@ -41,10 +41,16 @@ namespace core
 		bool truncated{false};
 	};
 	enum class StationMetricValue { Actual, Requested };
+	enum class StationChartOperation { Value, Sum, Ratio };
 	struct StationChartSeriesDefinition
 	{
 		std::string metricId, label;
 		StationMetricValue value{StationMetricValue::Actual};
+		StationChartOperation operation{StationChartOperation::Value};
+		// Expected membership, compiled from applied descriptors, never from
+		// the subset of measurements that happens to be available this frame.
+		std::vector<std::string> contributors, denominator;
+		bool stacked{false};
 	};
 	struct StationChartDefinition
 	{
@@ -58,6 +64,8 @@ namespace core
 		std::string id, label;
 		std::vector<double> coverage;
 		std::vector<double> times, values; // Missing/invalid measurements are NaN gaps, never zero.
+		bool stacked{false};
+		std::vector<double> lower, upper; // Prepared cumulative stack bounds; values remain individual contributions.
 	};
 	struct StationChartData
 	{
@@ -66,6 +74,8 @@ namespace core
 		bool truncated{false}, incomplete{false};
 	};
 	std::vector<StationChartDefinition> const& stationCharts();
+	std::vector<StationChartDefinition> stationCharts(std::vector<StationMetricDescriptor> const& descriptors);
+	std::vector<std::string> stationChartMetricIds(StationChartDefinition const& chart);
 	char const* stationUnitLabel(StationCanonicalUnit unit);
 	StationChartData queryStationChart(StationChartDefinition const& chart,
 		std::vector<StationMetricHistory> const& history);
