@@ -43,8 +43,10 @@ Thermal reservoirs and buffers retain energy, not separately identified fluids.
   and renderer; grouping does not change the population.
 
 Broader views deliberately say **Accounted**, not complete system total. Their
-partial accounting diagnostic remains visible while biological adapters are
-pending. Compound store constituents now have a separate accounting boundary;
+partial accounting diagnostic remains visible for unmodelled ownership and
+unclassified inventories. [Crop and algae living owners](station-living-inventory-observations.md)
+now participate; biological water, culture liquid and other unmodelled holdup
+are not inferred. Compound store constituents have a separate accounting boundary;
 see [compound inventory observations](station-compound-inventory-observations.md). Unclassified/non-canonical stores are counted
 in that diagnostic, never assigned to a guessed material. Incompatible physical
 quantities remain separate: no density or molar conversion is inferred. Bound

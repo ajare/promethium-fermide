@@ -6017,6 +6017,24 @@ namespace core
 					constituentSlot += 2;
 				}
 			}
+			// Living biomass is dry mass. Read the conserved living inventories,
+			// not nominal composition (respiration changes the actual blend).
+			auto recordLiving = [&](auto const& authored, auto const& populations) {
+				for (size_t i = 0; i < authored.size(); ++i)
+				{
+					if (i < populations.size())
+					{
+						auto const& p = populations[i];
+						auto const& c = p.livingConstituents;
+						double const values[] = {p.livingBiomassKg, c.organicKg, c.nutrientNitrogenKg,
+							c.phosphorusKg, c.potassiumKg, c.mineralsKg, p.livingChemicalEnergyKJ / 3600};
+						for (size_t j = 0; j < 7; ++j) put(constituentSlot + j, values[j], values[j]);
+					}
+					constituentSlot += 7;
+				}
+			};
+			recordLiving(settings.cropPopulations, snap.cropPopulations);
+			recordLiving(settings.algaeCultures, snap.algaeCultures);
 			history.observe(static_cast<double>(tick) * World::getFixedTimestep(), recordingValues);
 		}
 		// #419: the endurance observation windows. One window per Resource
@@ -16641,6 +16659,31 @@ namespace core
 				d.id += "/usable"; d.exchangeRole = "usable-constituent";
 				slots.push_back(std::move(slot));
 			}
+		// Only crops and algae have independent living inventory ledgers.
+		// Culture volume is Growing capacity, not an inventory of water.
+		auto living = [&](auto const& populations, std::string const& owner, std::string const& type) {
+			for (auto const& p : populations)
+			{
+				auto const atmosphere = std::ranges::find(settings.atmospheres, p.atmosphereId, &AtmosphereSettings::id);
+				auto const& hazard = atmosphere->hazardClass;
+				retained(owner, type, p.id, "living-biomass", hazard);
+				for (auto const* key : {"dryOrganics", "nutrientNitrogen", "phosphorus", "potassium", "otherMinerals", "energy"})
+				{
+					StationRecordingSlot slot;
+					auto& d = slot.metric;
+					d.id = owner + "/" + p.id + "/constituent/" + key;
+					d.equipmentType = type; d.instanceId = p.id;
+					d.constituentId = key; d.hazardClass = hazard;
+					d.exchangeRole = "retained-constituent"; d.role = StationMetricRole::Inventory;
+					bool const energy = std::string_view(key) == "energy";
+					d.quantity = energy ? StationPhysicalQuantity::Energy : StationPhysicalQuantity::Mass;
+					d.unit = energy ? StationCanonicalUnit::KilowattHour : StationCanonicalUnit::Kilogram;
+					slots.push_back(std::move(slot));
+				}
+			}
+		};
+		living(settings.cropPopulations, "crop-population", "Crop population");
+		living(settings.algaeCultures, "algae-culture", "Algae culture");
 		auto const slotCount = slots.size();
 		auto const cadenceTicks = std::max(1.0f, std::ceil(settings.observationIntervalSeconds / World::getFixedTimestep()));
 		mImpl->history = StationHistory(std::move(slots), cadenceTicks * World::getFixedTimestep(), settings.trendRetentionSeconds);

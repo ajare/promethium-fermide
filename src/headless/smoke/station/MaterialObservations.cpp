@@ -308,6 +308,118 @@ namespace
 		require(world.getStationSystemsSnapshot() == snap, "compound recording altered deterministic replay");
 	}
 
+	void livingInventoryObservations(smoke::Context const&)
+	{
+		for (int scenario = 0; scenario < 4; ++scenario)
+		{
+			core::StationSystemsSettings s; s.enabled = true; s.observationIntervalSeconds = 0.1f;
+			core::ResourceCompositionSettings composition;
+			composition.nutrientNitrogen = 0.5; composition.phosphorus = 0.1;
+			composition.potassium = 0.1; composition.otherMinerals = 0.1;
+			composition.energyKJPerKgDry = 3600;
+			s.stores = {store("water", "kg", 1000, 100, 0, "water")};
+			for (auto id : {"N", "P", "K", "minerals", "food", "waste", "recovery"})
+			{
+				s.stores.push_back(store(id, "kg", 100, s.stores.size() < 5 ? 10 : 0, 0, "compound"));
+				s.stores.back().composition = composition;
+			}
+			for (size_t i = 1; i <= 4; ++i)
+			{
+				core::ResourceCompositionSettings pure;
+				if (i == 1) pure.nutrientNitrogen = 1;
+				if (i == 2) pure.phosphorus = 1;
+				if (i == 3) pure.potassium = 1;
+				if (i == 4) pure.otherMinerals = 1;
+				s.stores[i].composition = pure;
+			}
+			core::AtmosphereSettings air;
+			air.id = "habitat"; air.hazardClass = "normal"; air.volumeM3 = 100;
+			air.startingOxygenKg = 40; air.startingNitrogenKg = 80; air.startingCarbonDioxideKg = 5;
+			air.startingWaterVapourKg = 1; air.startingTemperatureC = 22;
+			air.thermalCapacityKJPerK = 20000; air.minPressureKPa = 1; air.maxPressureKPa = 200;
+			s.atmospheres = {air};
+			core::SolarArraySettings solar; solar.id = "sun"; solar.capacityKW = 100; s.solarArrays = {solar};
+			auto configure = [&](auto& p) {
+				p.id = "same-id"; p.atmosphereId = "habitat"; p.waterStoreId = "water";
+				p.nitrogenStoreId = "N"; p.phosphorusStoreId = "P";
+				p.potassiumStoreId = "K"; p.mineralsStoreId = "minerals";
+				p.composition = composition; p.initialBiomassKg = 1;
+				p.lampRatedKW = 3.6; p.circulationPowerKW = 0.1; p.growthYieldKgPerKWh = 0.5;
+				p.illuminationProfile.constantLevel = scenario >= 2 ? 0 : 1;
+				p.respirationPerHour = scenario >= 2 ? 600 : 0;
+				p.foodStoreId = "food"; p.wasteStoreId = scenario == 3 ? "" : "waste";
+				p.harvestTriggerKg = scenario == 1 ? 1 : 0; p.harvestFraction = 0.5;
+			};
+			core::CropPopulationSettings crop; configure(crop); crop.growingAreaM2 = 10;
+			core::AlgaeCultureSettings algae; configure(algae); algae.cultureVolumeL = 10000;
+			algae.recoveryStoreId = "recovery";
+			s.cropPopulations = {crop}; s.algaeCultures = {algae};
+			core::World world("Living inventories", 2, 2); world.pauseSimulation(); world.finishBuild();
+			std::string diagnostic;
+			if (!world.configureStationSystems(s, false, &diagnostic)) throw std::runtime_error(diagnostic);
+			run(world, 300);
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& c = snap.cropPopulations[0]; auto const& a = snap.algaeCultures[0];
+			auto value = [&](std::string const& id) {
+				auto const q = world.queryStationSystemsChart(id);
+				require(!q.series.empty() && !q.series[0].values.empty(), "living chart missing");
+				return q.series[0].values.back();
+			};
+			std::string const biomass = "accounted-material/living-biomass/kg";
+			close(value(biomass), c.livingBiomassKg + a.livingBiomassKg);
+			close(c.livingConstituents.organicKg + c.livingConstituents.nutrientNitrogenKg
+				+ c.livingConstituents.phosphorusKg + c.livingConstituents.potassiumKg
+				+ c.livingConstituents.mineralsKg, c.livingBiomassKg);
+			close(a.livingConstituents.organicKg + a.livingConstituents.nutrientNitrogenKg
+				+ a.livingConstituents.phosphorusKg + a.livingConstituents.potassiumKg
+				+ a.livingConstituents.mineralsKg, a.livingBiomassKg);
+			// Uptake and harvest only move bound nitrogen between owners;
+			// uncontained death is the sole loss from this closed boundary.
+			close(value("accounted-constituent/nutrientNitrogen/kg"), scenario == 3 ? 10 : 11);
+			close(value(biomass + "/aggregate"), value(biomass));
+			close(value(biomass + "/by-equipment"), value(biomass));
+			auto const stack = world.queryStationSystemsChart(biomass + "/by-equipment");
+			close(stack.series.back().upper.back(), value(biomass));
+			core::StationBiologicalConstituents living = c.livingConstituents;
+			living += a.livingConstituents;
+			double const masses[] = {living.organicKg, living.nutrientNitrogenKg, living.phosphorusKg,
+				living.potassiumKg, living.mineralsKg};
+			char const* keys[] = {"dryOrganics", "nutrientNitrogen", "phosphorus", "potassium", "otherMinerals"};
+			for (size_t i = 0; i < 5; ++i)
+			{
+				auto id = std::string("accounted-constituent/") + keys[i] + "/kg";
+				double expected = masses[i];
+				for (auto const& owner : snap.stores) if (!owner.actualConstituents.empty())
+					expected += owner.actualConstituents.at(keys[i]);
+				close(value(id), expected); close(value(id + "/aggregate"), expected);
+				close(world.queryStationSystemsChart(id + "/by-equipment").series.back().upper.back(), expected);
+				close(value(id), value(std::string("stored-constituent/") + keys[i] + "/kg") + masses[i]);
+			}
+			close(value("accounted-constituent/energy/kWh"), value("stored-constituent/energy/kWh")
+				+ (c.livingChemicalEnergyKJ + a.livingChemicalEnergyKJ) / 3600);
+			// No inferred culture liquid or biological moisture; free water and
+			// compound water remain their existing, disjoint boundaries.
+			close(value("accounted-constituent/water/kg"), 0);
+			for (auto const& h : world.getStationSystemsMetricHistory())
+				if (h.descriptor.equipmentType == "Crop population" || h.descriptor.equipmentType == "Algae culture")
+					require(h.descriptor.materialId == "living-biomass" || h.descriptor.constituentId,
+						"biology invented a water or capacity inventory");
+			if (scenario == 0) require(c.livingBiomassKg > 1 && a.livingBiomassKg > 1, "biology did not grow");
+			if (scenario == 1) require(c.harvestedKg > 0 && a.harvestedKg > 0, "biology did not harvest");
+			if (scenario >= 2) require(c.dead && a.dead, "biology did not starve");
+			auto const definition = chart(world, "accounted-constituent/nutrientNitrogen/kg");
+			require(definition.partialAccounting && definition.accountingNote.find("biological water") != std::string::npos,
+				"biological coverage not declared");
+			auto history = world.getStationSystemsMetricHistory();
+			std::erase_if(history, [](auto const& h) { return h.descriptor.equipmentType == "Algae culture"; });
+			auto const missing = core::queryStationChart(definition, history);
+			require(std::isnan(missing.series[0].values.back()) && std::isnan(missing.series.back().upper.back()),
+				"unavailable biological owner silently shrank membership");
+			world.resetSimulation(); run(world, 300);
+			require(world.getStationSystemsSnapshot() == snap, "living observation changed deterministic Reset");
+		}
+	}
+
 	void materialCanonicalUnits(smoke::Context const&)
 	{
 		core::StationSystemsSettings s; s.enabled = true; s.observationIntervalSeconds = 0.1f;
@@ -369,6 +481,7 @@ void registerMaterialObservationChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"materialObservations", materialObservations});
 	checks.push_back({"fluidInventoryObservations", fluidInventoryObservations});
 	checks.push_back({"compoundInventoryObservations", compoundInventoryObservations});
+	checks.push_back({"livingInventoryObservations", livingInventoryObservations});
 	checks.push_back({"materialCanonicalUnits", materialCanonicalUnits});
 	checks.push_back({"materialRelationshipObservations", materialRelationshipObservations});
 }

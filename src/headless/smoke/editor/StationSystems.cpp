@@ -3556,7 +3556,24 @@ namespace
 		air.startingTemperatureC = 25; air.thermalCapacityKJPerK = 10000;
 		air.minPressureKPa = 1; air.maxPressureKPa = 200;
 		seed.atmospheres = {air};
-		require(world->configureStationSystems(seed, false), "material graph fixture refused");
+		for (auto const* id : {"bio-N", "bio-P", "bio-K", "bio-minerals"})
+		{
+			core::ResourceStoreSettings nutrient;
+			nutrient.id = id; nutrient.materialId = "biological-nutrient"; nutrient.unit = "kg"; nutrient.capacity = 10;
+			seed.stores.push_back(nutrient);
+		}
+		auto living = [&](auto& p) {
+			p.id = "living"; p.atmosphereId = "cabin"; p.waterStoreId = seed.stores[0].id;
+			p.nitrogenStoreId = "bio-N"; p.phosphorusStoreId = "bio-P";
+			p.potassiumStoreId = "bio-K"; p.mineralsStoreId = "bio-minerals";
+			p.initialBiomassKg = 1; p.respirationPerHour = 0;
+			p.composition.nutrientNitrogen = 0.5; p.composition.energyKJPerKgDry = 3600;
+		};
+		core::CropPopulationSettings crop; living(crop); crop.growingAreaM2 = 10;
+		core::AlgaeCultureSettings algae; living(algae); algae.cultureVolumeL = 1000;
+		seed.cropPopulations = {crop}; seed.algaeCultures = {algae};
+		std::string diagnostic;
+		if (!world->configureStationSystems(seed, false, &diagnostic)) throw std::runtime_error(diagnostic);
 		world->markSaved(); world->resumeSimulation(); require(world->advanceTicks(60), "hidden material recording failed");
 		world->pauseSimulation();
 		StationSystemsWindow window; DocumentHistory history; bool form = false;
@@ -3628,6 +3645,23 @@ namespace
 			REQ(std::abs(bound - 0.675) < 1e-8
 				&& std::abs(world->queryStationSystemsChart(window.selectedObservation()).series[0].values[0] - 1.35) < 1e-8,
 				"Constituent selector conflated nitrogen chemical forms");
+			ctx->ComboClick("##Station observation property/Accounted material inventory: living-biomass (kg)"); ctx->Yield(2);
+			REQ(window.selectedObservation() == "accounted-material/living-biomass/kg"
+				&& driver.contains("dry Living biomass") && driver.contains("biological water"),
+				"Living biomass selector lost its dry-mass accounting boundary");
+			REQ(world->queryStationSystemsChart(window.selectedObservation()).series[0].values[0] == 2,
+				"Living biomass graph counted Growing capacity or duplicated owners");
+			ctx->ComboClick("Breakdown/Equipment type"); ctx->Yield(2);
+			REQ(driver.contains("Crop population") && driver.contains("Algae culture")
+				&& world->queryStationSystemsChart(window.selectedObservation()).series.back().upper[0] == 2,
+				"Generic biological owner breakdown missing or inconsistent");
+			ctx->ComboClick("##Station observation property/Accounted constituent inventory: nutrientNitrogen (kg)"); ctx->Yield(2);
+			REQ(driver.contains("actual conserved blend") && driver.contains("not a system total")
+				&& std::abs(world->queryStationSystemsChart(window.selectedObservation()).series[0].values[0] - (bound + 1)) < 1e-8,
+				"Accounted constituent selector omitted living owners or duplicated stored material");
+			ctx->ComboClick("Breakdown/Aggregate"); ctx->Yield(2);
+			REQ(std::abs(world->queryStationSystemsChart(window.selectedObservation()).series[0].values[0] - (bound + 1)) < 1e-8,
+				"Biological aggregate changed contributor population");
 			ctx->ComboClick("##Station observation property/Unclassified inventory: unknown"); ctx->Yield(2);
 			REQ(window.selectedObservation() == "unclassified/unknown" && driver.contains("no material inferred")
 				&& world->queryStationSystemsChart("unclassified/unknown").series[0].values[0] == 9,
@@ -3664,6 +3698,49 @@ namespace
 			world->resetSimulation(); ctx->Yield(3);
 			REQ(window.selectedObservation() == "stored-material/water/kg" && driver.contains("No samples yet"),
 				"Reset lost applicable material selection or retained previous samples");
+			// Observe real ownership transitions through the same selector and
+			// generic stack controls, with history collected before selection.
+			for (size_t i = 4; i < 8; ++i) seed.stores[i].startingQualified = 10;
+			for (auto id : {"bio-food", "bio-waste", "bio-recovery"})
+			{
+				core::ResourceStoreSettings output;
+				output.id = id; output.materialId = "harvested-material"; output.unit = "kg"; output.capacity = 100;
+				output.composition = crop.composition; seed.stores.push_back(output);
+			}
+			core::SolarArraySettings solar; solar.id = "sun"; solar.capacityKW = 100; seed.solarArrays = {solar};
+			seed.atmospheres[0].startingCarbonDioxideKg = 5;
+			for (int phase = 0; phase < 3; ++phase)
+			{
+				auto configure = [&](auto& p) {
+					p.lampRatedKW = 3.6; p.illuminationProfile.constantLevel = phase == 2 ? 0 : 1;
+					p.respirationPerHour = phase == 2 ? 6000 : 0;
+					p.harvestTriggerKg = phase == 1 ? 1 : 0; p.harvestFraction = 0.5;
+					p.foodStoreId = "bio-food"; p.wasteStoreId = phase == 2 ? "" : "bio-waste";
+				};
+				configure(seed.cropPopulations[0]); configure(seed.algaeCultures[0]);
+				seed.algaeCultures[0].recoveryStoreId = "bio-recovery";
+				REQ(world->configureStationSystems(seed, true), "Graph ownership transition fixture refused");
+				world->resumeSimulation(); REQ(world->advanceTicks(60), "Graph ownership transition failed");
+				world->pauseSimulation(); ctx->Yield(3);
+				auto const snap = world->getStationSystemsSnapshot();
+				auto const& c = snap.cropPopulations[0]; auto const& a = snap.algaeCultures[0];
+				REQ(phase == 0 ? c.livingBiomassKg > 1 && a.livingBiomassKg > 1
+					: phase == 1 ? c.harvestedKg > 0 && a.harvestedKg > 0 : c.dead && a.dead,
+					"Graph fixture did not exercise growth, harvest or starvation loss");
+				ctx->ComboClick("##Station observation property/Accounted material inventory: living-biomass (kg)"); ctx->Yield(2);
+				auto const biomass = world->queryStationSystemsChart(window.selectedObservation());
+				REQ(std::abs(biomass.series[0].values.back() - c.livingBiomassKg - a.livingBiomassKg) < 1e-8,
+					"Graph did not follow living ownership transition");
+				ctx->ComboClick("##Station observation property/Accounted constituent inventory: nutrientNitrogen (kg)"); ctx->Yield(2);
+				double nitrogen = c.livingConstituents.nutrientNitrogenKg + a.livingConstituents.nutrientNitrogenKg;
+				for (auto const& owner : snap.stores) if (!owner.actualConstituents.empty())
+					nitrogen += owner.actualConstituents.at("nutrientNitrogen");
+				REQ(std::abs(world->queryStationSystemsChart(window.selectedObservation()).series[0].values.back() - nitrogen) < 1e-8,
+					"Graph duplicated living and receiving constituent ownership");
+				ctx->ComboClick("Breakdown/Equipment type"); ctx->Yield(2);
+				REQ(std::abs(world->queryStationSystemsChart(window.selectedObservation()).series.back().upper.back() - nitrogen) < 1e-8,
+					"Ownership stack diverged from aggregate through biological transition");
+			}
 		});
 		#undef REQ
 		require(driver.passed(), "Material observation editor workflow failed");

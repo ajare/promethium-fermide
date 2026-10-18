@@ -211,8 +211,8 @@ namespace core
 			// Material ownership and constituent decomposition are independent
 			// populations. Never add compound constituents to this material sum.
 			chart.partialAccounting = true;
-			chart.accountingNote = "Accounted owners: Resource stores (qualified + unqualified), atmosphere gases and water vapour, closed-loop coolant. "
-				"Partial system accounting: biological inventory adapters pending; compound constituents are separate views, not additional material ownership. No inferred bound materials, culture liquid, or equipment holdup. "
+			chart.accountingNote = "Accounted owners: Resource stores (qualified + unqualified), atmosphere gases and water vapour, closed-loop coolant, crop and algae dry Living biomass. "
+				"Partial system accounting: compound constituents are separate views, not additional material ownership. No inferred bound materials, biological water, culture liquid, crew body mass, microbial biomass or equipment holdup. "
 				+ std::to_string(unclassified) + " unclassified or non-canonical stores excluded. Different canonical quantities are separate; no inferred density or molar conversion. Not usable supply or discretionary drawability.";
 			StationChartSeriesDefinition total;
 			total.metricId = chart.id + "/subtotal"; total.label = "Accounted owners subtotal";
@@ -235,17 +235,19 @@ namespace core
 		{
 			if (d.exchangeRole == "stored-inventory" && d.equipmentType == "Resource store"
 				&& !characterised.contains(d.instanceId)) ++uncharacterised;
-			if (d.role == StationMetricRole::Inventory && d.exchangeRole == "stored-constituent" && d.constituentId)
+			if (d.role == StationMetricRole::Inventory
+				&& (d.exchangeRole == "stored-constituent" || d.exchangeRole == "retained-constituent") && d.constituentId)
 				constituents[{*d.constituentId, d.quantity, d.unit}].push_back(&d);
 		}
 		for (auto& [key, members] : constituents)
 		{
 			auto const& [constituent, quantity, unit] = key;
 			std::sort(members.begin(), members.end(), [](auto a, auto b) { return a->id < b->id; });
-			auto make = [&](std::vector<StationMetricDescriptor const*> const& population, std::string hazard) {
+			auto make = [&](std::vector<StationMetricDescriptor const*> const& population, std::string hazard, bool accounted = false) {
+				if (population.empty()) return;
 				bool const usable = !hazard.empty();
-				std::string const prefix = usable ? "stored-usable-constituent/" : "stored-constituent/";
-				std::string const label = usable ? "Usable stored constituent: " : "Stored constituent inventory: ";
+				std::string const prefix = accounted ? "accounted-constituent/" : usable ? "stored-usable-constituent/" : "stored-constituent/";
+				std::string const label = accounted ? "Accounted constituent inventory: " : usable ? "Usable stored constituent: " : "Stored constituent inventory: ";
 				StationChartDefinition chart{prefix + constituent + "/" + stationUnitLabel(unit) + (usable ? "/" + hazard : ""),
 					"Constituent inventories", label + constituent + " (" + stationUnitLabel(unit) + (usable ? "; " + hazard : "") + ")",
 					label + constituent + " (applied simulation)", quantity, unit, {}};
@@ -254,11 +256,15 @@ namespace core
 					"Actual blended constituents: water is wet-mass moisture; other mass constituents partition dry mass; energy is chemical energy, not mass. "
 					"Bound nutrient nitrogen and atmospheric nitrogen remain distinct. Material ownership totals and constituent decomposition are separate, never added together. "
 					"Excludes living biomass, free gases/liquids and uncharacterised stores (" + std::to_string(uncharacterised) + "). ";
+				if (accounted) chart.accountingNote = "Accounted constituents: compound Resource stores (including retained waste) and crop/algae dry Living biomass; not a system total. "
+					"Living constituents use the actual conserved blend, not nominal composition; no biological water or culture liquid inventory is modelled. "
+					"Chemical energy is not mass. Bound nutrient nitrogen is distinct from atmospheric nitrogen. Material ownership and constituent decomposition are separate views. "
+					"Partial system accounting: excludes free gases/liquids, crew body mass, microbial biomass and uncharacterised stores (" + std::to_string(uncharacterised) + "). ";
 				chart.accountingNote += usable
 					? "Qualified blend only; excludes unqualified contents. Protected reserves remain included: NOT discretionary drawability. Hazard classes are not interchangeable."
 					: "Includes qualified and unqualified contents; hazard totals do not imply interchangeability or usable supply.";
 				StationChartSeriesDefinition total;
-				total.metricId = chart.id + "/subtotal"; total.label = "Characterised stores subtotal";
+				total.metricId = chart.id + "/subtotal"; total.label = accounted ? "Accounted constituents subtotal" : "Characterised stores subtotal";
 				total.operation = StationChartOperation::Sum;
 				for (auto d : population) total.contributors.push_back(d->id + (usable ? "/usable" : ""));
 				chart.series.push_back(std::move(total));
@@ -267,9 +273,12 @@ namespace core
 					d->hazardClass.value_or("unclassified"), d->equipmentType});
 				charts.push_back(std::move(chart));
 			};
-			make(members, {});
+			make(members, {}, true);
+			std::vector<StationMetricDescriptor const*> stores;
+			for (auto d : members) if (d->exchangeRole == "stored-constituent") stores.push_back(d);
+			make(stores, {});
 			std::map<std::string, std::vector<StationMetricDescriptor const*>> hazards;
-			for (auto d : members) hazards[d->hazardClass.value_or("unclassified")].push_back(d);
+			for (auto d : stores) hazards[d->hazardClass.value_or("unclassified")].push_back(d);
 			for (auto const& [hazard, population] : hazards) make(population, hazard);
 		}
 		appendStationChartBreakdowns(charts);

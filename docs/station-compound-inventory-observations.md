@@ -42,7 +42,8 @@ breakdowns reuse the generic query/stack machinery and expected membership.
   Ejected waste and connection/conversion losses have left the boundary: their
   cumulative ledgers are not retained inventories.
 - Crew retained-body mass has no authoritative constituent decomposition and is
-  not guessed from intake; biological living inventories remain a later slice.
+  not guessed from intake. Biological living inventories are now covered by the
+  separate [living inventory adapter](station-living-inventory-observations.md).
 - Plain uncharacterised stores have no constituent ledger. Their count is visible,
   and no composition is inferred from labels, unit, or material identity.
 
@@ -51,6 +52,8 @@ They remain partial for the stated broader system boundary even when all their
 expected characterised-store contributions are valid. Free gases/liquids and
 living biomass are outside this constituent boundary. Existing broader material
 views likewise remain labelled Accounted and partial, not complete totals.
+`accounted-constituent/...` now extends the store constituent boundary with crop
+and algae living constituents; the stored-only selectors above remain unchanged.
 
 ## Verification
 
