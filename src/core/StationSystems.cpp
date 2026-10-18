@@ -319,7 +319,10 @@ namespace core
 					lua_pushstring(state, transfer.sourceId.c_str()); lua_setfield(state, -2, "source");
 					lua_pushstring(state, transfer.destinationId.c_str()); lua_setfield(state, -2, "destination");
 					lua_pushstring(state, transfer.unit.c_str()); lua_setfield(state, -2, "unit");
-					lua_pushnumber(state, transfer.ratePerSecond); lua_setfield(state, -2, "rate");
+					lua_pushnumber(state, transfer.mode == ResourceTransferMode::Continuous ? transfer.ratePerSecond : 0.0); lua_setfield(state, -2, "rate");
+					lua_pushboolean(state, transfer.mode == ResourceTransferMode::Scheduled); lua_setfield(state, -2, "scheduled");
+					lua_pushnumber(state, transfer.quantity); lua_setfield(state, -2, "quantity");
+					lua_pushnumber(state, transfer.firstOccurrenceSeconds); lua_setfield(state, -2, "firstOccurrenceSeconds");
 					lua_pushinteger(state, transfer.priority); lua_setfield(state, -2, "priority");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
@@ -1678,6 +1681,21 @@ namespace core
 	// boundaries — are judged once both ends are connected. The whole-
 	// configuration validator never sets it: an incomplete transfer is
 	// invalid as a configuration.
+	bool validateStationTransferSettings(ResourceTransferSettings const& transfer, std::string& diagnostic)
+	{
+		auto refuse = [&](char const* reason) { diagnostic = "Station resource transfer '" + transfer.id + "' " + reason; return false; };
+		if (!std::isfinite(transfer.ratePerSecond) || !std::isfinite(transfer.quantity)
+			|| !std::isfinite(transfer.firstOccurrenceSeconds) || !std::isfinite(transfer.recurrenceSeconds))
+			return refuse("numbers must be finite");
+		if (transfer.mode == ResourceTransferMode::Continuous)
+			return transfer.ratePerSecond > 0.0 || refuse("rate must be positive");
+		if (transfer.mode != ResourceTransferMode::Scheduled) return refuse("mode is invalid");
+		if (transfer.quantity <= 0.0) return refuse("quantity must be positive");
+		if (transfer.firstOccurrenceSeconds < 0.0) return refuse("first occurrence must be non-negative");
+		if (transfer.recurrenceSeconds != 0.0) return refuse("recurrence must be zero (one-off only)");
+		return true;
+	}
+
 	bool validateStationTransferWiring(StationSystemsSettings const& settings,
 		ResourceTransferSettings const& transfer, std::string& diagnostic,
 		bool ignoreUnconnected)
@@ -2560,8 +2578,7 @@ namespace core
 					+ std::to_string(MaxStationStoreIdLength) + " characters");
 			if (!transferIds.insert(transfer.id).second) return refuse(where + " id is duplicated");
 			if (!validateStationTransferWiring(settings, transfer, diagnostic)) return false;
-			if (!std::isfinite(transfer.ratePerSecond) || transfer.ratePerSecond <= 0.0)
-				return refuse(where + " rate must be finite and positive");
+			if (!validateStationTransferSettings(transfer, diagnostic)) return false;
 		}
 		if (settings.conversions.size() > MaxStationResourceConversions)
 			return refuse("Station resource conversions are limited to "
@@ -4560,6 +4577,9 @@ namespace core
 			double lastCompleted{0.0};
 			double lastUnmet{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
+			uint64_t occurrencesFired{0};
+			uint64_t lastFiredTick{0};
+			std::string limitingReason;
 		};
 		// The authoritative ledger of one authored conversion. Inputs are
 		// consumed and outputs produced at a common completed scale: the
@@ -5965,7 +5985,11 @@ namespace core
 			for (size_t i = 0; i < snap.power.loads.size() && i < settings.equipmentLoads.size(); ++i)
 				put(2 + i, snap.power.loads[i].suppliedKW, snap.power.loads[i].requestedKW);
 			for (size_t i = 0; i < snap.transfers.size() && i < settings.transfers.size(); ++i)
-				put(2 + settings.equipmentLoads.size() + i, snap.transfers[i].lastCompleted, snap.transfers[i].lastRequested);
+			{
+				auto const& transfer = snap.transfers[i];
+				bool const current = transfer.mode == ResourceTransferMode::Continuous || transfer.lastFiredTick == snap.worldTick;
+				put(2 + settings.equipmentLoads.size() + i, current ? transfer.lastCompleted : 0.0, current ? transfer.lastRequested : 0.0);
+			}
 			auto const batteryStart = 2 + settings.equipmentLoads.size() + settings.transfers.size();
 			for (size_t i = 0; i < snap.power.batteries.size() && i < settings.batteries.size(); ++i)
 			{
@@ -6075,6 +6099,7 @@ namespace core
 					{
 						auto t = observationIndex.find(snap.transfers, o.connection.ownerId, &StationTransferSnapshot::id);
 						if (t == snap.transfers.end()) continue;
+						if (t->mode == ResourceTransferMode::Scheduled && t->lastFiredTick != snap.worldTick) continue;
 						actual = t->lastCompleted / World::getFixedTimestep();
 						requested = t->lastRequested / World::getFixedTimestep();
 					}
@@ -6260,6 +6285,27 @@ namespace core
 				}
 			}
 			result.available = true;
+			// Exclude the complete material-connected component, not just the
+			// two endpoints: downstream Crew/transfer projections depend on it.
+			std::vector<bool> scheduledAffected(connectionGraph.nodes.size(), false);
+			for (size_t n = 0; n < connectionGraph.nodes.size(); ++n)
+				if (connectionGraph.nodes[n].type == "Transfer")
+					for (auto const& transfer : settings.transfers)
+						if (transfer.id == connectionGraph.nodes[n].id && transfer.mode == ResourceTransferMode::Scheduled)
+							scheduledAffected[n] = true;
+			for (bool changed = true; changed; )
+			{
+				changed = false;
+				for (auto const& link : connectionGraph.links)
+				{
+					if (link.kind != station_connections::LinkKind::Material && link.designKey.ownerType != "Transfer") continue;
+					if (scheduledAffected[link.from] == scheduledAffected[link.to]) continue;
+					scheduledAffected[link.from] = scheduledAffected[link.to] = true; changed = true;
+				}
+			}
+			std::set<std::string> scheduledStores;
+			for (size_t n = 0; n < connectionGraph.nodes.size(); ++n)
+				if (scheduledAffected[n] && connectionGraph.nodes[n].type == "Store") scheduledStores.insert(connectionGraph.nodes[n].id);
 			auto const horizonEnd = asOfSeconds + StationForecastHorizonSeconds;
 			// The projection runs on a local copy of the store inventory:
 			// the live committed state is read, never written.
@@ -6581,8 +6627,8 @@ namespace core
 				std::vector<double> supplyCapped(stores.size(), 0.0);
 				std::vector<double> resolvedRate(transfers.size(), 0.0);
 				for (size_t index = 0; index < transfers.size(); ++index)
-					resolvedRate[index] = transfers[index].authored.ratePerSecond
-						> 0.0 ? transfers[index].authored.ratePerSecond : 0.0;
+					resolvedRate[index] = transfers[index].authored.mode == ResourceTransferMode::Continuous
+						? transfers[index].authored.ratePerSecond : 0.0;
 				// Candidate rates for the non-transfer pathways at this
 				// instant's profile level. A stopped load or crew stops
 				// whole and its consuming demand is recorded uncovered
@@ -7005,7 +7051,7 @@ namespace core
 				for (size_t index = 0; index < transfers.size(); ++index)
 				{
 					auto const& transfer = transfers[index];
-					if (transfer.authored.ratePerSecond <= 0.0) continue;
+					if (transfer.authored.mode == ResourceTransferMode::Scheduled || transfer.authored.ratePerSecond <= 0.0) continue;
 					outflowDemand[transfer.sourceIndex]
 						+= transfer.authored.ratePerSecond;
 					auto const rate = resolvedRate[index];
@@ -7440,6 +7486,15 @@ namespace core
 					- (projected[index].inflowMoved + projected[index].acceptedQualified
 						+ projected[index].acceptedUnqualified)
 					+ projected[index].outflowMoved;
+				if (scheduledStores.contains(entry.storeId))
+				{
+					StationForecastEntry unavailable;
+					unavailable.storeId = entry.storeId; unavailable.unit = entry.unit;
+					unavailable.asOfSeconds = asOfSeconds;
+					unavailable.drawableAtStart = entry.drawableAtStart; unavailable.physicalAtStart = entry.physicalAtStart;
+					unavailable.unavailableReason = "Scheduled transfers are not modelled by the declared-profile forecast.";
+					entry = std::move(unavailable);
+				}
 				result.stores.push_back(std::move(entry));
 			}
 			result.segmentsComputed = segments;
@@ -7880,6 +7935,7 @@ namespace core
 				StationScenarioEventKey key;
 				uint64_t occurrence{0};
 				bool isEjection{false};
+				bool isTransfer{false};
 			};
 			std::vector<DueArrival> arrivals;
 			for (size_t index = 0; index < deliveries.size(); ++index)
@@ -7920,6 +7976,13 @@ namespace core
 					arrivals.push_back({{when, ejection.authored.priority, index}, occurrence, true});
 				}
 			}
+			for (size_t index = 0; index < transfers.size(); ++index)
+			{
+				auto const& transfer = transfers[index];
+				if (transfer.authored.mode != ResourceTransferMode::Scheduled || transfer.occurrencesFired) continue;
+				if (stationScheduleOccurrencesDue(transfer.authored.firstOccurrenceSeconds, 0.0, elapsed))
+					arrivals.push_back({{transfer.authored.firstOccurrenceSeconds, transfer.authored.priority, index}, 0, false, true});
+			}
 			std::sort(arrivals.begin(), arrivals.end(),
 				[](DueArrival const& left, DueArrival const& right)
 				{
@@ -7931,12 +7994,49 @@ namespace core
 					// ejection runs, so material delivered this tick is
 					// disposal-ready for the ejection that follows it,
 					// whatever the two schedules' declaration order (#403).
-					if (left.isEjection != right.isEjection)
-						return !left.isEjection;
+					auto kind = [](DueArrival const& event) { return event.isEjection ? 2 : event.isTransfer ? 1 : 0; };
+					if (kind(left) != kind(right)) return kind(left) < kind(right);
 					return left.key.declarationIndex < right.key.declarationIndex;
 				});
 			for (auto const& arrival : arrivals)
 			{
+				if (arrival.isTransfer)
+				{
+					auto& transfer = transfers[arrival.key.declarationIndex];
+					auto const source = transfer.sourceIndex, destination = transfer.destinationIndex;
+					double reserved = 0.0, claimed = 0.0;
+					// Existing Active jobs own these claims before the event pass.
+					// Jobs starting this tick reserve only the post-event inventory.
+					for (auto const& job : maintenanceJobs)
+						for (size_t r = 0; r < job.requirements.size(); ++r)
+						{
+							auto const& requirement = job.requirements[r];
+							if (requirement.storeIndex == source) reserved += requirement.reserved;
+							if (job.wasteStoreIndex == destination && job.authored.requirements[r].consumed) claimed += requirement.reserved;
+						}
+					auto const drawable = std::max(0.0, qualified[source] - stores[source].authored.protectedReserve - reserved);
+					auto const headroom = std::max(0.0, stores[destination].authored.capacity
+						- qualified[destination] - unqualified[destination] - claimed);
+					auto const requested = transfer.authored.quantity;
+					auto const moved = std::min({requested, drawable, headroom});
+					moveStoreDrift(source, destination, massToKg(stores[source].authored.unit,
+						qualified[source] + unqualified[source]), massToKg(stores[source].authored.unit, moved));
+					qualified[source] -= moved; qualified[destination] += moved;
+					flowOut[source] += moved; flowIn[destination] += moved;
+					transfer.lastRequested = requested; transfer.lastCompleted = moved;
+					transfer.lastUnmet = requested - moved; transfer.occurrencesFired = 1; transfer.lastFiredTick = tick;
+					transfer.status = moved <= 0.0 ? StationTransferStatus::Rejected
+						: moved < requested ? StationTransferStatus::Partial : StationTransferStatus::Full;
+					transfer.limitingReason = moved >= requested ? "" : headroom < requested && headroom <= drawable
+						? "destination capacity (including held material and maintenance claims)"
+						: "eligible source inventory (qualified, above reserve and unreserved)";
+					stallReason[arrival.key.declarationIndex] = transfer.limitingReason;
+					appendBoundedEvent(events, tick, "transfer", "Scheduled transfer '" + transfer.authored.id
+						+ "' completed: requested " + std::to_string(requested) + ", moved " + std::to_string(moved)
+						+ ", unmet " + std::to_string(requested - moved) + " " + transfer.authored.unit
+						+ (transfer.limitingReason.empty() ? "" : "; " + transfer.limitingReason));
+					continue;
+				}
 				if (arrival.isEjection)
 				{
 					auto& ejection = wasteEjections[arrival.key.declarationIndex];
@@ -14349,6 +14449,7 @@ namespace core
 			for (auto const index : transferOrder)
 			{
 				auto& transfer = transfers[index];
+				if (transfer.authored.mode == ResourceTransferMode::Scheduled) continue;
 				auto const& source = stores[transfer.sourceIndex];
 				auto const& destination = stores[transfer.destinationIndex];
 				auto const requested = transfer.authored.ratePerSecond * static_cast<double>(seconds);
@@ -15977,6 +16078,7 @@ namespace core
 			for (auto const index : transferOrder)
 			{
 				auto const& transfer = transfers[index];
+				if (transfer.authored.mode == ResourceTransferMode::Scheduled) continue;
 				if (transfer.status == previousStatus[index]) continue;
 				if (transfer.status == StationTransferStatus::Full)
 				{
@@ -17625,7 +17727,8 @@ namespace core
 			result.transfers.push_back({transfer.authored.id, transfer.authored.sourceId,
 				transfer.authored.destinationId, transfer.authored.unit,
 				transfer.authored.ratePerSecond, transfer.authored.priority,
-				transfer.lastRequested, transfer.lastCompleted, transfer.lastUnmet, transfer.status});
+				transfer.lastRequested, transfer.lastCompleted, transfer.lastUnmet, transfer.status,
+				transfer.authored.mode, transfer.authored.firstOccurrenceSeconds, transfer.occurrencesFired, transfer.lastFiredTick, transfer.limitingReason});
 		}
 		for (auto const index : mImpl->conversionOrder)
 		{

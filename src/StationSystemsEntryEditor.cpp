@@ -980,7 +980,16 @@ bool renderTransferEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	std::strncpy(transferUnitBuffer, transfer.unit.c_str(), sizeof(transferUnitBuffer) - 1);
 	if (ImGui::InputText((label + " unit").c_str(), transferUnitBuffer, sizeof(transferUnitBuffer)))
 		transfer.unit = transferUnitBuffer;
-	ImGui::InputDouble((label + " rate per second").c_str(), &transfer.ratePerSecond, 0.0, 0.0, "%.3f");
+	int mode = static_cast<int>(transfer.mode);
+	if (ImGui::Combo((label + " mode").c_str(), &mode, "Continuous\0Scheduled\0"))
+		transfer.mode = static_cast<core::ResourceTransferMode>(mode);
+	if (transfer.mode == core::ResourceTransferMode::Scheduled)
+	{
+		ImGui::InputDouble((label + " quantity").c_str(), &transfer.quantity, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble((label + " first occurrence seconds").c_str(), &transfer.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");
+		ImGui::TextWrapped("One-off only (recurrence must be zero). Lossless Non-physical inventory event; connection ratings are informational.");
+	}
+	else ImGui::InputDouble((label + " rate per second").c_str(), &transfer.ratePerSecond, 0.0, 0.0, "%.3f");
 	ImGui::InputInt((label + " priority").c_str(), &transfer.priority);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))

@@ -195,7 +195,14 @@ Graph build(core::StationSystemsSettings const& s)
 		}
 	};
 	b.connect(s.transfers, "Transfer", [&](size_t n, auto const& p) {
-		b.input(n, p.sourceId, "Source"); b.output(n, p.destinationId, "Destination"); });
+		b.input(n, p.sourceId, "Source"); b.output(n, p.destinationId, "Destination");
+		if (p.mode == core::ResourceTransferMode::Scheduled)
+		{
+			b.graph.nodes[n].detail = "Scheduled one-off transfer (lossless Non-physical inventory event)";
+			b.graph.links[b.graph.links.size() - 2].scheduledTransfer = true;
+			b.graph.links.back().scheduledTransfer = true;
+		}
+	});
 	b.connect(s.conversions, "Conversion", [&](size_t n, auto const& p) {
 		// A grown-but-unwired flow names no store yet: it is an unused
 		// connector, not a broken reference, so it draws no edge.
@@ -325,7 +332,7 @@ core::StationPhysicalConnection automaticConnectionType(Graph const& graph, Link
 	auto const& to = graph.nodes[link.to];
 	auto is = [&](char const* type) { return from.type == type || to.type == type; };
 	// These lines express relationships, not installed cables or plumbing.
-	if (link.kind == LinkKind::Control || link.medium == Medium::Cooling || is("Airlock cycle")
+	if (link.scheduledTransfer || link.kind == LinkKind::Control || link.medium == Medium::Cooling || is("Airlock cycle")
 		|| is("Delivery") || is("Waste ejection") || is("Maintenance") || is("Outage"))
 		return Type::NonPhysical;
 	if (is("Atmosphere") && (is("Crew") || is("Crops") || is("Algae")))

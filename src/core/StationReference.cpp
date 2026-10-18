@@ -98,6 +98,14 @@ namespace core
 				serializer.writeString("destinationId", transfer.destinationId);
 				serializer.writeString("unit", transfer.unit);
 				serializer.writeDouble("ratePerSecond", transfer.ratePerSecond);
+				if (transfer.mode != ResourceTransferMode::Continuous || transfer.quantity != 1.0
+					|| transfer.firstOccurrenceSeconds != 0.0 || transfer.recurrenceSeconds != 0.0)
+				{
+					serializer.writeString("mode", transfer.mode == ResourceTransferMode::Scheduled ? "Scheduled" : "Continuous");
+					serializer.writeDouble("quantity", transfer.quantity);
+					serializer.writeDouble("firstOccurrenceSeconds", transfer.firstOccurrenceSeconds);
+					serializer.writeDouble("recurrenceSeconds", transfer.recurrenceSeconds);
+				}
 				serializer.writeInt32("priority", transfer.priority);
 				serializer.endMap();
 			}
@@ -1048,7 +1056,19 @@ namespace core
 				transfer.sourceId = serializer.readString("sourceId");
 				transfer.destinationId = serializer.readString("destinationId");
 				transfer.unit = serializer.readString("unit");
-				transfer.ratePerSecond = serializer.readDouble("ratePerSecond");
+				transfer.ratePerSecond = serializer.hasField("ratePerSecond") ? serializer.readDouble("ratePerSecond") : 0.0;
+				if (version < 99 && (serializer.hasField("mode") || serializer.hasField("quantity")
+					|| serializer.hasField("firstOccurrenceSeconds") || serializer.hasField("recurrenceSeconds")))
+					throw SerializationException("Scheduled transfer fields require schema 99");
+				if (serializer.hasField("mode"))
+				{
+					auto const mode = serializer.readString("mode");
+					if (mode != "Continuous" && mode != "Scheduled") throw SerializationException("Invalid transfer mode");
+					transfer.mode = mode == "Scheduled" ? ResourceTransferMode::Scheduled : ResourceTransferMode::Continuous;
+				}
+				if (serializer.hasField("quantity")) transfer.quantity = serializer.readDouble("quantity");
+				if (serializer.hasField("firstOccurrenceSeconds")) transfer.firstOccurrenceSeconds = serializer.readDouble("firstOccurrenceSeconds");
+				if (serializer.hasField("recurrenceSeconds")) transfer.recurrenceSeconds = serializer.readDouble("recurrenceSeconds");
 				transfer.priority = serializer.readInt32("priority");
 				stationSettings.transfers.push_back(std::move(transfer));
 				serializer.endMap();
@@ -2008,8 +2028,8 @@ namespace core
 			// systems, the upper bound is the newest schema this reader
 			// knows. A reference outside that range is refused rather than
 			// read under assumptions the reader has not been checked for.
-			if (document.schemaVersion < 65 || document.schemaVersion > 98)
-				return refuse("Reference station schema version must be from 65 to 98");
+			if (document.schemaVersion < 65 || document.schemaVersion > 99)
+				return refuse("Reference station schema version must be from 65 to 99");
 			if (serializer->hasField("provenance"))
 			{
 				serializer->beginArray("provenance");

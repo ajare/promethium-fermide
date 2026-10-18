@@ -38,10 +38,14 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/render/Furniture.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/editor/Furniture.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/StationSystems.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/editor/StationObservations.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/StationConnections.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/station/Documents.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/Connections.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/BatteryObservations.cpp` | module-owned | `pf-smoke-station` |
+| `smoke/station/MaterialObservations.cpp` | module-owned | `pf-smoke-station` |
+| `smoke/station/ObservationIntegration.cpp` | module-owned | `pf-smoke-station` |
+| `smoke/station/ScheduledTransfers.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/Coupled.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/Reference.cpp` | module-owned | `pf-smoke-station` |
 | `smoke/station/Scenarios.cpp` | module-owned | `pf-smoke-station` |

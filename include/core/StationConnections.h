@@ -24,6 +24,7 @@ namespace core::station_connections
 		LinkKind kind{LinkKind::Material};
 		Medium medium{Medium::Unspecified};
 		core::StationConnectionKey designKey;
+		bool scheduledTransfer{false};
 	};
 	struct Graph { std::vector<Node> nodes; std::vector<Link> links; };
 	Graph build(core::StationSystemsSettings const& draft);

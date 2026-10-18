@@ -421,6 +421,54 @@ Reset reconstruct the ledger from the authored starting conditions, and
 replaying the same World tick sequence reproduces the outcomes exactly,
 including which competing request won the last kilogram.
 
+### One-off Scheduled Resource transfers (#690)
+
+In both Station Systems and the Station Flow Transfer inspector, choose
+**Continuous** (the rate-based behavior above) or **Scheduled**. Scheduled
+fields are `quantity` (positive, in store units), `firstOccurrenceSeconds`
+(non-negative scenario time), and `recurrenceSeconds` (must be **zero**;
+recurring batches are not supported yet). Source, destination, unit, priority,
+compatibility rules and the combined 32-transfer limit are shared. Incomplete
+wiring stays visible in drafts; Apply requires valid complete wiring. Placement,
+wiring and field changes use Configuration draft undo/redo and do not change
+the World until paused Apply (with reset confirmation for an existing run).
+
+A Scheduled transfer is an instantaneous, lossless internal inventory event,
+not an Agent hauling task or a physical carrier. It attempts its quantity once,
+moving only qualified source stock above protected reserves and existing
+maintenance reservations, within destination capacity after held material and
+maintenance waste claims. Partial or zero movement **completes the occurrence**:
+unmet stock stays at source, with no retry or carry-over. Reservations for jobs
+starting later in the tick use the inventory left by the scenario-event pass.
+
+Before continuous processing, due events sort by occurrence time, priority
+(highest first), then **Delivery → Scheduled transfer → Waste ejection**, then
+declaration order within each kind. Chains forward newly arrived stock only
+when that order permits: there is no repeated settling pass. Time-zero events
+run on the first committed tick, not during Apply. Pause freezes time; batching
+and time scaling preserve outcomes for the same committed ticks. Reset replays
+the authored starting inventories and schedule. A failed tick publishes neither
+movement nor advanced occurrence accounting; per-unit and constituent audits
+count no external import or loss for this internal move.
+
+Scheduled links are **Non-physical**. Carrier and throughput are not editable;
+retained connection design properties, including efficiency, are informational
+and do not cap or lose batch material. Continuous enforcement is unchanged.
+Readouts show Scheduled waiting/completed/blocked outcomes, occurrence count,
+and last requested/moved/unmet **amounts**, not instantaneous rates. The bounded
+event log reports each occurrence. Scheduled batches do not appear in the
+continuous exchange-rate charts; inventory charts still show their inventory
+changes. With one occurrence, last amounts are also the cumulative totals.
+Runtime state is never saved.
+
+World and standalone Station configuration schema **99** preserve mode and
+one-off fields; missing mode defaults to Continuous. Older declared schemas
+carrying the new fields are refused rather than silently discarding semantics.
+Non-finite supplied numbers are refused even for inactive mode fields. Affected
+material-connected Resource forecasts explicitly report Scheduled-transfer
+unavailability; independent projections remain available. Exact Scheduled
+forecasting is not implemented.
+
 ### Compound resources and constituent accounting (#391)
 
 A Resource store may declare a constituent composition, making it a

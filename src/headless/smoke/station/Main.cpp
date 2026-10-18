@@ -3,6 +3,7 @@
 #include "Connections.h"
 #include "BatteryObservations.h"
 void registerObservationIntegrationChecks(std::vector<smoke::Check>& checks);
+void registerScheduledTransferChecks(std::vector<smoke::Check>& checks);
 #include "MaterialObservations.h"
 #include "Coupled.h"
 #include "Reference.h"
@@ -166,7 +167,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 98"), 11, "version: 65");
+		text.replace(text.find("version: 99"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -19197,9 +19198,9 @@ void buffers(smoke::Context const&)
 			// than silently dropping the cultures.
 			{
 				auto stale = text;
-				size_t const position = stale.find("version: 98");
+				size_t const position = stale.find("version: 99");
 				require(position != std::string::npos, "the fixture document carries no version line");
-				stale.replace(position, std::string("version: 98").size(), "version: 88");
+				stale.replace(position, std::string("version: 99").size(), "version: 88");
 				require(stale.find("algaeCultures") != std::string::npos,
 					"the fixture document carries no algae cultures to test the guard with");
 				bool refused = false;
@@ -21131,13 +21132,13 @@ void dispatch(smoke::Context const&)
 			== core::StationDispatchMode::Automatic,
 			"automatic dispatch mode did not survive the round trip");
 		auto stale = text;
-		require(stale.find("version: 98") != std::string::npos,
+		require(stale.find("version: 99") != std::string::npos,
 			"the fixture document carries no version line");
 		require(stale.find("dispatchMode: automatic") != std::string::npos,
 			"the fixture document lost the dispatch mode before the guard test");
 		// A pre-91 document that still carries the dispatch mode is refused
 		// rather than silently dropping the controller setting.
-		stale = replaceAll(stale, "version: 98", "version: 90");
+		stale = replaceAll(stale, "version: 99", "version: 90");
 		bool refused = false;
 		try
 		{
@@ -22150,9 +22151,9 @@ void protectedServices(smoke::Context const&)
 		require(loaded.getStationSystemsSnapshot().worldTick == 0,
 			"the loaded world restored live station state instead of the authored start");
 		auto stale = text;
-		require(stale.find("version: 98") != std::string::npos,
+		require(stale.find("version: 99") != std::string::npos,
 			"the fixture document carries no version line");
-		stale.replace(stale.find("version: 98"), std::string("version: 98").size(),
+		stale.replace(stale.find("version: 99"), std::string("version: 99").size(),
 			"version: 91");
 		bool refused = false;
 		try
@@ -24267,7 +24268,7 @@ void recovery(smoke::Context const& context)
 				"the saved document does not carry the authored retention");
 			// A pre-95 document carrying the field is refused, not silently
 			// dropped, and the refusal names the schema it needs.
-			auto stale = replaceAll(text, "version: 98", "version: 94");
+			auto stale = replaceAll(text, "version: 99", "version: 94");
 			bool refused = false;
 			std::string refusal;
 			try
@@ -26845,6 +26846,7 @@ int main(int argc, char** argv)
 		{"batteriesQuick", batteriesQuick},
 		{"deliveries", deliveries}, {"wasteEjections", wasteEjections}, {"thermal", thermal}, {"coolant", coolant}, {"chillers", chillers}, {"generators", generators}, {"atmospheres", atmospheres}, {"crews", crews}, {"water", water}, {"containment", containment}, {"gas", gas}, {"fuelCells", fuelCells}, {"buffers", buffers}, {"carbonRecovery", carbonRecovery}, {"nutrientRecovery", nutrientRecovery}, {"microbialConditionRecovery", microbialConditionRecovery}, {"crops", crops}, {"harvest", harvest}, {"algae", algae}, {"nutrientConservation", nutrientConservation}, {"bioContainment", bioContainment}, {"outages", outages}, {"maintenance", maintenance}, {"failures", failures}, {"dispatch", dispatch}, {"protectedServices", protectedServices}, {"recovery", recovery}, {"trends", trends}, {"endurance", endurance}, {"forecast", forecast}};
 	registerStationDocumentChecks(checks);
+	registerScheduledTransferChecks(checks);
 	registerStationConnectionChecks(checks);
 	registerBatteryObservationChecks(checks);
 	registerObservationIntegrationChecks(checks);

@@ -41,6 +41,19 @@ older documents does not dirty or rewrite them. Identity is observation metadata
 it does not change allocation, transfer compatibility, hazard segregation or
 chemistry, nor claim a complete material accounting boundary.
 
+## One-off Scheduled transfers
+
+Schema 99 adds Transfer `mode` (`Continuous` or `Scheduled`), `quantity`,
+`firstOccurrenceSeconds`, and `recurrenceSeconds` (zero only). Older records
+without mode retain Continuous behavior; older schema declarations with these
+fields are refused. Both editors share the same draft fields and history;
+incomplete Scheduled wiring can be saved and inspected but cannot be applied.
+Only authored settings persist, never occurrence counters or moved quantities.
+Scheduled connection design properties are informational and retained; these
+lossless Non-physical events have no carrier or throughput controls.
+See [Station systems](station-systems.md#one-off-scheduled-resource-transfers-690)
+for execution order, reservation protection and forecast exclusions.
+
 ## Connection design properties
 
 Click a connection curve to show **Connection properties** in the reserved

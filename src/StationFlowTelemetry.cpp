@@ -132,9 +132,23 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 	else if (node.type == "Transfer")
 	{
 		auto p = find(s.transfers, id); if (!p) return {}; state(out, *p);
-		out.values = {"Actual " + rate(p->lastCompleted, p->unit), "Requested " + rate(p->lastRequested, p->unit)};
-		port("Source", p->lastCompleted, p->unit); port("Destination", p->lastCompleted, p->unit);
-		if (p->lastUnmet > 0) warn(out, "Source reserve or destination headroom limited");
+		if (p->mode == core::ResourceTransferMode::Scheduled)
+		{
+			out.status = !p->occurrencesFired ? "Scheduled: waiting" : p->lastUnmet > 0 ? "Scheduled: completed (blocked/partial)" : "Scheduled: completed";
+			out.values = {"Moved " + quantity(p->lastCompleted, p->unit),
+				"Requested " + quantity(p->lastRequested, p->unit), "Unmet " + quantity(p->lastUnmet, p->unit)};
+			if (p->lastUnmet > 0)
+			{
+				out.state = TelemetryState::Warning;
+				out.values.push_back(p->limitingReason);
+			}
+		}
+		else
+		{
+			out.values = {"Actual " + rate(p->lastCompleted, p->unit), "Requested " + rate(p->lastRequested, p->unit)};
+			port("Source", p->lastCompleted, p->unit); port("Destination", p->lastCompleted, p->unit);
+			if (p->lastUnmet > 0) warn(out, "Source reserve or destination headroom limited");
+		}
 	}
 	else if (node.type == "Conversion")
 	{

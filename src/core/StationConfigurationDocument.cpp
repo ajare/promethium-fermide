@@ -15,7 +15,7 @@ namespace core
 	{
 		auto output = YamlSerializer::toString();
 		output->beginMap("stationConfiguration");
-		output->writeUint32("schemaVersion", 98);
+		output->writeUint32("schemaVersion", 99);
 		writeStationSystemsSettingsMap(*output, document.settings);
 		output->beginMap("layout");
 		output->writeFloat("panX", document.panX);
@@ -48,7 +48,7 @@ namespace core
 				throw SerializationException("Missing stationSystems map");
 			input->beginMap("stationConfiguration");
 			auto const version = input->readUint32("schemaVersion");
-			if (version < 96 || version > 98) throw SerializationException("Unsupported Station configuration schemaVersion");
+			if (version < 96 || version > 99) throw SerializationException("Unsupported Station configuration schemaVersion");
 			StationConfigurationDocument candidate;
 			readStationSystemsSettingsMap(*input, version, candidate.settings, false);
 			// Incomplete wiring is valid draft state, but all surviving entries
@@ -67,9 +67,10 @@ namespace core
 					throw SerializationException("Duplicate Station transfer id");
 				if (!exists(it->sourceId) || !exists(it->destinationId))
 				{
+					std::string diagnosticForTransfer;
 					if (it->id.empty() || it->id.size() > MaxStationStoreIdLength
 						|| (!it->sourceId.empty() && it->sourceId == it->destinationId)
-						|| !std::isfinite(it->ratePerSecond) || it->ratePerSecond <= 0.0
+						|| !validateStationTransferSettings(*it, diagnosticForTransfer)
 						|| std::find(StationStoreUnits.begin(), StationStoreUnits.end(), it->unit)
 							== StationStoreUnits.end())
 						throw SerializationException("Invalid broken Station transfer");

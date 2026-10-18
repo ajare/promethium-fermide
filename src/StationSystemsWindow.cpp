@@ -1516,6 +1516,16 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		case core::StationTransferStatus::Rejected: status = "rejected"; break;
 		case core::StationTransferStatus::Idle: break;
 		}
+		if (transfer.mode == core::ResourceTransferMode::Scheduled)
+		{
+			ImGui::Text("%s: Scheduled %s -> %s | %s | requested %.3f, moved %.3f, unmet %.3f %s (priority %d)",
+				transfer.id.c_str(), transfer.sourceId.c_str(), transfer.destinationId.c_str(),
+				!transfer.occurrencesFired ? "waiting" : transfer.lastUnmet > 0 ? "completed (blocked/partial)" : "completed",
+				transfer.lastRequested, transfer.lastCompleted, transfer.lastUnmet, transfer.unit.c_str(), transfer.priority);
+			ImGui::Text("  occurrence at %.3f s | count %llu | %s", transfer.firstOccurrenceSeconds,
+				static_cast<unsigned long long>(transfer.occurrencesFired), transfer.limitingReason.c_str());
+			continue;
+		}
 		ImGui::Text("%s: %s -> %s (%s) %s | requested %.3f, completed %.3f, unmet %.3f (rate %.3f/s, priority %d)",
 			transfer.id.c_str(), transfer.sourceId.c_str(), transfer.destinationId.c_str(),
 			transfer.unit.c_str(), status, transfer.lastRequested, transfer.lastCompleted,
@@ -2577,6 +2587,11 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 				ImGui::TextDisabled("No Resource stores authored.");
 			for (auto const& entry : forecast.stores)
 			{
+				if (!entry.unavailableReason.empty())
+				{
+					ImGui::TextWrapped("Store '%s': forecast unavailable: %s", entry.storeId.c_str(), entry.unavailableReason.c_str());
+					continue;
+				}
 				auto const basisIndex = std::min(static_cast<size_t>(entry.basis),
 					core::StationForecastBasisNames.size() - 1);
 				ImGui::Text("store '%s' (%s): drawable %.3f of physical %.3f | projected net %+.6f %s/s | [%s]",

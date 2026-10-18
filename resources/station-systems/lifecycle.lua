@@ -680,7 +680,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         assert(source.hazardClass == destination.hazardClass,
             "transfer crosses the hazard-class boundary: hazardous and normal material may not share a generic transfer")
         assert(type(transfer.rate) == "number" and transfer.rate == transfer.rate
-            and transfer.rate > 0 and transfer.rate < math.huge,
+            and (transfer.rate > 0 or transfer.scheduled) and transfer.rate < math.huge,
             "transfer rate must be finite and positive")
         assert(type(transfer.priority) == "number" and transfer.priority == transfer.priority
             and transfer.priority == math.tointeger(transfer.priority),
@@ -704,6 +704,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             destination = destination,
             unit = transfer.unit,
             rate = transfer.rate,
+            scheduled = transfer.scheduled,
+            quantity = transfer.quantity,
+            firstSeconds = transfer.firstOccurrenceSeconds,
+            fired = false,
             priority = transfer.priority,
         }
     end
@@ -3935,16 +3939,42 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 end
             end
         end
+        for index, transfer in ipairs(self.transfers) do
+            if transfer.scheduled and not transfer.fired and occurrencesDue(transfer.firstSeconds, 0, elapsed) > 0 then
+                arrivals[#arrivals + 1] = {when = transfer.firstSeconds, priority = transfer.priority,
+                    declaration = index, transfer = true}
+            end
+        end
         table.sort(arrivals, function(left, right)
             if left.when ~= right.when then return left.when < right.when end
             if left.priority ~= right.priority then return left.priority > right.priority end
-            local leftEjection = left.ejection and 1 or 0
-            local rightEjection = right.ejection and 1 or 0
+            local leftEjection = left.ejection and 2 or left.transfer and 1 or 0
+            local rightEjection = right.ejection and 2 or right.transfer and 1 or 0
             if leftEjection ~= rightEjection then return leftEjection < rightEjection end
             return left.declaration < right.declaration
         end)
         for _, arrival in ipairs(arrivals) do
-            if arrival.ejection then
+            if arrival.transfer then
+                local transfer = self.transfers[arrival.declaration]
+                local source, destination = transfer.source, transfer.destination
+                local reserved, claimed = 0, 0
+                for _, job in ipairs(self.maintenance) do
+                    for _, requirement in ipairs(job.requirements) do
+                        if self.stores[requirement.storeIndex] == source then reserved = reserved + requirement.reserved end
+                        if self.stores[job.wasteStoreIndex] == destination and requirement.consumed then
+                            claimed = claimed + requirement.reserved
+                        end
+                    end
+                end
+                local moved = math.min(transfer.quantity,
+                    math.max(0, source.qualified - source.protected_reserve - reserved),
+                    math.max(0, destination.capacity - destination.qualified - destination.unqualified - claimed))
+                local before = toKg(source.unit, source.qualified + source.unqualified)
+                source.qualified = source.qualified - moved
+                destination.qualified = destination.qualified + moved
+                moveStoreDrift(source, destination, before, toKg(source.unit, moved))
+                transfer.fired = true
+            elseif arrival.ejection then
                 local ejection = self.waste_ejections[arrival.declaration]
                 local store = ejection.store
                 -- Only disposal-ready (qualified) material is eligible:

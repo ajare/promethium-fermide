@@ -104,6 +104,7 @@ namespace core
 	// A rate-limited authored transfer of qualified material between two
 	// same-unit Resource stores. Competing transfers are allocated in priority
 	// order (higher first), ties resolved by declaration order (#390).
+	enum class ResourceTransferMode : std::uint8_t { Continuous, Scheduled };
 	struct ResourceTransferSettings
 	{
 		std::string id;
@@ -112,6 +113,10 @@ namespace core
 		std::string unit;
 		double ratePerSecond{0.0};
 		int priority{0};
+		ResourceTransferMode mode{ResourceTransferMode::Continuous};
+		double quantity{1.0};
+		double firstOccurrenceSeconds{0.0};
+		double recurrenceSeconds{0.0}; // one-off only; positive recurrence is refused
 		bool operator==(ResourceTransferSettings const&) const = default;
 	};
 
@@ -1805,6 +1810,7 @@ namespace core
 	// not write, so a half-built transfer stays buildable; the whole-
 	// configuration validator leaves it false and reports an incomplete
 	// transfer as the invalid configuration it is.
+	bool validateStationTransferSettings(ResourceTransferSettings const& transfer, std::string& diagnostic);
 	bool validateStationTransferWiring(StationSystemsSettings const& settings,
 		ResourceTransferSettings const& transfer, std::string& diagnostic,
 		bool ignoreUnconnected = false);
@@ -2053,6 +2059,7 @@ namespace core
 		// balance tolerance scaled by the store size; a larger residual is
 		// a forecast defect, never silent creation or loss of material.
 		double conservationResidual{0.0};
+		std::string unavailableReason; // nonempty means no projected range for this store
 		bool operator==(StationForecastEntry const&) const = default;
 	};
 	// The station-wide scenario forecast (#420): every Resource store's
@@ -2099,6 +2106,11 @@ namespace core
 		double lastCompleted{0.0};
 		double lastUnmet{0.0};
 		StationTransferStatus status{StationTransferStatus::Idle};
+		ResourceTransferMode mode{ResourceTransferMode::Continuous};
+		double firstOccurrenceSeconds{0.0};
+		uint64_t occurrencesFired{0};
+		uint64_t lastFiredTick{0};
+		std::string limitingReason;
 		bool operator==(StationTransferSnapshot const&) const = default;
 	};
 

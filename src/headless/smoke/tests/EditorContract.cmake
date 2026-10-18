@@ -262,20 +262,40 @@ set(editor_names
     scaled-doors/crossing-history
     roomHeightScale/history
     roomHeightScale/occupiedPoseHistory
+    station/connectionDesign
+    station/connectionForecastWorkflow
+    station/flowConnectionTelemetryWorkflow
+    station/flowConnectionsWorkflow
+    station/mixedObservationWorkflow
     station/windowWorkflow
+    station/materialIdentityWorkflow
     station/configurationDocument
     station/removalWorkflow
     station/storeWorkflow
     station/flowTransferPlacementWorkflow
     station/flowLinkWorkflow
     station/flowCascadeDeleteWorkflow
+    station/flowInstallationRenameWorkflow
     station/flowGrowablePortsWorkflow
+    station/flowWaterGasWorkflow
+    station/flowBiologyWorkflow
+    station/flowSchedulesWorkflow
     station/flowInspectorWorkflow
     station/flowPowerChainWorkflow
+    station/flowTelemetryWorkflow
+    station/batteryObservationWorkflow
+    station/materialObservationWorkflow
+    station/waterGasObservationWorkflow
+    station/carbonObservationWorkflow
+    station/cropObservationWorkflow
+    station/scheduledObservationWorkflow
+    station/algaeObservationWorkflow
+    station/microbialObservationWorkflow
     station/flowThermalReservoirWorkflow
     station/flowRadiatorWorkflow
     station/flowCoolantLoopWorkflow
     station/flowChillerWorkflow
+    station/flowThermalBufferWorkflow
     station/transferWorkflow
     station/compoundWorkflow
     station/powerWorkflow

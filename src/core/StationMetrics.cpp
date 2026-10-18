@@ -131,6 +131,10 @@ namespace core
 		};
 		for (auto const& t : settings.transfers)
 		{
+			// These charts describe continuous exchange rates. Scheduled batches
+			// expose occurrence amounts in their snapshot and bounded event log,
+			// not a quantity divided by tick duration masquerading as a rate.
+			if (t.mode == ResourceTransferMode::Scheduled) continue;
 			add("Transfer", t.id, "Source", t.sourceId, true, 0, false);
 			add("Transfer", t.id, "Destination", t.destinationId, false, 0, true);
 		}

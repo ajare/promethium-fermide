@@ -1710,6 +1710,42 @@ namespace
 			REQ(driver.contains("Node: Transfer 't1'")
 				&& ctx->ItemInfo("**/Transfer 0 rate per second", ImGuiTestOpFlags_NoError)->ID != 0,
 				"selecting a Transfer did not render its shared entry editor");
+			// #690: Flow and form use the same mode-specific draft fields.
+			auto const transferUndo = window.draftHistory().undoCount();
+			// BeginCombo has geometry hooks but no label hook in bundled ImGui;
+			// resolve its ID in the same inspector window as the rate field.
+			auto* rateInfo = ctx->ItemInfo("**/Transfer 0 rate per second");
+			REQ(rateInfo->Window != nullptr, "Transfer inspector window not found");
+			auto const modeId = ImHashStr("Transfer 0 mode", 0, rateInfo->ParentID);
+			ctx->ItemClick(modeId); ctx->Yield(2);
+			REQ(!ctx->IsError(), "Could not click Flow mode combo by ID");
+			REQ(driver.contains("Scheduled"), "Flow mode popup did not open");
+			auto* popup = ctx->GetWindowByRef("//$FOCUSED");
+			REQ(popup != nullptr, "Flow mode popup has no focused window");
+			ctx->ItemClick(("//" + std::string(popup->Name) + "/**/Scheduled").c_str()); ctx->Yield(3);
+			REQ(!ctx->IsError(), "Could not select Scheduled in Flow popup");
+			driver.typeValue(ctx, "**/Transfer 0 quantity", "7");
+			driver.typeValue(ctx, "**/Transfer 0 first occurrence seconds", "12");
+			REQ(window.draft().transfers[0].mode == core::ResourceTransferMode::Scheduled
+				&& window.draft().transfers[0].quantity == 7 && window.draft().transfers[0].firstOccurrenceSeconds == 12
+				&& world->getStationSystemsSettings() == seed,
+				("Flow schedule fields bypassed draft isolation: mode=" + std::to_string(static_cast<int>(window.draft().transfers[0].mode))
+				+ " quantity=" + std::to_string(window.draft().transfers[0].quantity)
+				+ " first=" + std::to_string(window.draft().transfers[0].firstOccurrenceSeconds)
+				+ " world=" + std::to_string(world->getStationSystemsSettings() == seed)).c_str());
+			REQ(ctx->ItemInfo("**/Transfer 0 rate per second", ImGuiTestOpFlags_NoError)->ID == 0,
+				"Scheduled inspector exposed a continuous rate");
+			flow = false; ctx->Yield(3);
+			REQ(driver.contains("Transfer 0 quantity") && driver.contains("Transfer 0 first occurrence seconds"),
+				"Form did not expose the same scheduled draft fields");
+			flow = true; ctx->Yield(3);
+			for (int step = 0; step < 3; ++step) { ctx->ItemClick("Undo configuration"); ctx->Yield(2); }
+			REQ(window.draft().transfers[0] == transfer && window.draftHistory().undoCount() == transferUndo,
+				"Scheduled field edits did not undo independently");
+			for (int step = 0; step < 3; ++step) { ctx->ItemClick("Redo configuration"); ctx->Yield(2); }
+			REQ(window.draft().transfers[0].quantity == 7 && window.draft().transfers[0].firstOccurrenceSeconds == 12,
+				"Scheduled field edits did not redo");
+			for (int step = 0; step < 3; ++step) { ctx->ItemClick("Undo configuration"); ctx->Yield(2); }
 			// --- #647: the Battery now has an extracted shared entry editor.
 			ImVec4 batteryRect{};
 			REQ(window.flowNodeRect("Battery", "bat1", &batteryRect), "the battery node is not on screen");
@@ -5086,6 +5122,19 @@ namespace
 			driver.click(ctx, "Apply settings");
 			REQ(world->getStationSystemsSettings().transfers.size() == 1 && history.undoCount() == 2,
 				"Transfer removal did not apply");
+			// Author a new Scheduled transfer through the form, then observe the
+			// same one-off outcome displayed by the live readout.
+			driver.click(ctx, "Add transfer");
+			ctx->ComboClick("Transfer 1 mode/Scheduled"); ctx->Yield(2);
+			driver.typeValue(ctx, "Transfer 1 quantity", "3");
+			driver.click(ctx, "Apply settings"); ctx->Yield(2);
+			REQ(world->getStationSystemsSettings().transfers[1].mode == core::ResourceTransferMode::Scheduled,
+				"Form failed to Apply a new Scheduled transfer");
+			world->resumeSimulation(); REQ(world->advanceTicks(1), "Scheduled editor tick failed");
+			world->pauseSimulation(); ctx->Yield(2);
+			REQ(world->getStationSystemsSnapshot().transfers[1].lastCompleted == 3
+				&& driver.contains("Scheduled src -> dst") && driver.contains("completed"),
+				"Scheduled form outcome was not shown as a batch quantity");
 				});
 		#undef REQ
 		require(driver.passed(), "transferWorkflow failed on the Test Engine");
