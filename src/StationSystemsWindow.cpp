@@ -259,7 +259,8 @@ void StationSystemsWindow::prepareObservation(core::World const& world)
 	++mObservationPreparations;
 	auto const selected = std::find_if(mObservationCatalogue.begin(), mObservationCatalogue.end(),
 		[&](auto const& chart) { return chart.id == mSelectedChart; });
-	mObservationAxis = selected->label + " (" + core::stationUnitLabel(selected->unit) + ")";
+	auto const unitSuffix = std::string(" (") + core::stationUnitLabel(selected->unit) + ")";
+	mObservationAxis = selected->label.ends_with(unitSuffix) ? selected->label : selected->label + unitSuffix;
 	mObservationLabels.clear();
 	for (auto const& line : mFlowChart.series) mObservationLabels.push_back(line.label + "###" + line.id);
 }
@@ -300,6 +301,7 @@ void StationSystemsWindow::renderObservationPlot(float height, core::World const
 		ImGui::EndCombo();
 	}
 	ImGui::TextUnformatted(selected->title.c_str());
+	if (!selected->accountingNote.empty()) ImGui::TextWrapped("Accounting coverage: %s", selected->accountingNote.c_str());
 	bool const empty = std::all_of(mFlowChart.series.begin(), mFlowChart.series.end(),
 		[](auto const& line) { return line.times.empty(); });
 	if (!mFlowSnapshot || !mFlowSnapshot->enabled)
@@ -321,7 +323,7 @@ void StationSystemsWindow::renderObservationPlot(float height, core::World const
 		ImGui::TextDisabled("Retained %.2f - %.2f s | %zu samples maximum | %zu bytes | coarsening %u%s",
 			mFlowRecording.retainedFromSeconds, mFlowRecording.retainedUntilSeconds,
 			mFlowRecording.sampleLimit, mFlowRecording.recordingBytes, mFlowRecording.coarseningLevel,
-			mFlowChart.incomplete ? " | gaps: incomplete observations" : " | no gaps");
+			mFlowChart.incomplete ? " | incomplete accounting or observations" : " | no gaps");
 
 	// A private context also makes this production view usable by CPU-only
 	// editor workflows, without depending on the Launcher's global context.

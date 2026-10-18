@@ -5943,6 +5943,7 @@ namespace core
 		// nothing here feeds back into the ledger or the sandbox.
 		StationHistory history;
 		std::vector<StationMetricSample> recordingValues;
+		std::vector<double> storeObservationScales;
 		void recordTrends(uint64_t tick, StationSystemsSnapshot const& snap)
 		{
 			if (history.status().limited) return;
@@ -5966,6 +5967,13 @@ namespace core
 				auto const& battery = snap.power.batteries[i];
 				put(batteryStart + 2 * i, battery.storedKWh, battery.storedKWh);
 				put(batteryStart + 2 * i + 1, battery.nameplateKWh, battery.nameplateKWh);
+			}
+			auto const storeStart = batteryStart + 2 * settings.batteries.size();
+			for (size_t i = 0; i < snap.stores.size() && i < settings.stores.size(); ++i)
+			{
+				auto const total = (snap.stores[i].currentQualified + snap.stores[i].currentUnqualified)
+					* storeObservationScales[i];
+				put(storeStart + i, total, total);
 			}
 			history.observe(static_cast<double>(tick) * World::getFixedTimestep(), recordingValues);
 		}
@@ -16546,6 +16554,12 @@ namespace core
 				d.quantity = StationPhysicalQuantity::Energy; d.unit = StationCanonicalUnit::KilowattHour;
 				slots.push_back(std::move(slot));
 			}
+		for (auto& observation : stationStoreObservations(settings))
+		{
+			mImpl->storeObservationScales.push_back(observation.sourceToCanonicalScale);
+			StationRecordingSlot slot; slot.metric = std::move(observation.metric);
+			slots.push_back(std::move(slot));
+		}
 		auto const slotCount = slots.size();
 		auto const cadenceTicks = std::max(1.0f, std::ceil(settings.observationIntervalSeconds / World::getFixedTimestep()));
 		mImpl->history = StationHistory(std::move(slots), cadenceTicks * World::getFixedTimestep(), settings.trendRetentionSeconds);

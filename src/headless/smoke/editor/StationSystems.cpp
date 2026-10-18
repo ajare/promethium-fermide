@@ -3533,6 +3533,89 @@ namespace
 		require(driver.passed(), "Battery observation editor workflow failed");
 	}
 
+	void materialObservationWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1100};
+		io.Fonts->AddFontDefault(); io.Fonts->Build(); io.DeltaTime = 1.0f / 60.0f;
+		auto world = std::make_shared<core::World>("Material graphs", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings seed; seed.enabled = true;
+		seed.stores = {{"oxygen", "kg", 100, 10, 5}, {"spare", "kg", 100, 2, 1},
+			{"water", "kg", 100, 3, 1}, {"unknown", "kg", 100, 7, 2}};
+		seed.stores[0].materialId = "water"; seed.stores[1].materialId = "water";
+		seed.stores[2].materialId = "oxygen";
+		require(world->configureStationSystems(seed, false), "material graph fixture refused");
+		world->markSaved(); world->resumeSimulation(); require(world->advanceTicks(60), "hidden material recording failed");
+		world->pauseSimulation();
+		StationSystemsWindow window; DocumentHistory history; bool form = false;
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 1080});
+			ImGui::Begin("Material configuration");
+			if (form) window.renderContents(world, history); else window.renderFlowContents(world);
+			ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "materialObservations", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Material configuration");
+			auto const observed = world->getStationSystemsSnapshot();
+			auto const revision = world->getStationSystemsObservationRevision();
+			ctx->ComboClick("##Station observation property/Stored material inventory: water (kg)"); ctx->Yield(2);
+			REQ(window.selectedObservation() == "stored-material/water/kg", "Material selector did not select the material identity");
+			REQ(driver.contains("Resource stores only"), "Material view omitted its stored-only accounting boundary");
+			REQ(driver.contains("unqualified"), "Material view omitted unqualified inventory coverage");
+			REQ(driver.contains("unclassified"), "Material view omitted unclassified inventory coverage");
+			REQ(driver.contains("Classified stores subtotal"), "Material view omitted subtotal semantics");
+			auto const water = world->queryStationSystemsChart("stored-material/water/kg");
+			REQ(water.series.size() == 3 && water.series[0].times.size() == 1
+				&& water.series[0].values[0] == 18 && water.incomplete,
+				"Material selection lost hidden history or miscounted qualified/unqualified stores");
+			ctx->ComboClick("##Station observation property/Stored material inventory: oxygen (kg)"); ctx->Yield(2);
+			REQ(world->queryStationSystemsChart("stored-material/oxygen/kg").series[0].values[0] == 4,
+				"Same-unit different materials merged through selector");
+			ctx->ComboClick("##Station observation property/Unclassified inventory: unknown"); ctx->Yield(2);
+			REQ(window.selectedObservation() == "unclassified/unknown" && driver.contains("no material inferred")
+				&& world->queryStationSystemsChart("unclassified/unknown").series[0].values[0] == 9,
+				"Unclassified selector guessed a material or hid its quantity");
+			REQ(world->getStationSystemsSnapshot() == observed && world->getStationSystemsObservationRevision() == revision
+				&& !world->isModified() && history.undoCount() == 0 && window.draftHistory().undoCount() == 0,
+				"Viewing material history mutated World or document history");
+			auto const preparations = window.observationPreparations(); ctx->Yield(10);
+			REQ(window.observationPreparations() == preparations, "Unchanged material view rebuilt prepared buffers");
+			// Author the previously unknown identity through the existing form,
+			// keeping the plot bound to the applied configuration until Apply.
+			form = true; ctx->Yield(3);
+			driver.click(ctx, "**/Store 3 material identity");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A); ctx->KeyPress(ImGuiKey_Backspace);
+			ctx->KeyChars("water"); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			REQ(world->getStationSystemsSettings() == seed && world->getStationSystemsObservationRevision() == revision,
+				"Unapplied identity draft changed catalogue/history");
+			form = false; ctx->Yield(3);
+			REQ(window.selectedObservation() == "unclassified/unknown", "Unapplied draft removed selected view");
+			form = true; ctx->Yield(3); driver.click(ctx, "Apply settings"); ctx->Yield(3);
+			driver.click(ctx, "Confirm World reset"); ctx->Yield(3);
+			REQ(world->getStationSystemsSettings().stores[3].materialId == "water" && history.undoCount() == 1,
+				"Identity assignment did not apply through reset confirmation");
+			form = false; ctx->Yield(3);
+			REQ(window.selectedObservation() == "power" && driver.contains("Selected property unavailable; showing Power."),
+				"Resolved unclassified view did not visibly fall back");
+			ctx->ComboClick("##Station observation property/Stored material inventory: water (kg)"); ctx->Yield(2);
+			REQ(driver.contains("No samples yet"), "Changed application retained incompatible history");
+			world->resumeSimulation(); REQ(world->advanceTicks(60), "identified material recording failed");
+			world->pauseSimulation(); ctx->Yield(3);
+			auto const assigned = world->queryStationSystemsChart("stored-material/water/kg");
+			REQ(!assigned.incomplete && assigned.series[0].values.size() == 1 && assigned.series[0].values[0] == 27
+				&& driver.contains("0 unclassified"), "Assigned inventory absent from fresh accounting");
+			world->resetSimulation(); ctx->Yield(3);
+			REQ(window.selectedObservation() == "stored-material/water/kg" && driver.contains("No samples yet"),
+				"Reset lost applicable material selection or retained previous samples");
+		});
+		#undef REQ
+		require(driver.passed(), "Material observation editor workflow failed");
+	}
+
 	void flowProjectionChecks()
 	{
 		using smoke::require;
@@ -7647,6 +7730,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/flowPowerChainWorkflow", flowPowerChainWorkflow});
 	checks.push_back({"station/flowTelemetryWorkflow", flowTelemetryWorkflow});
 	checks.push_back({"station/batteryObservationWorkflow", batteryObservationWorkflow});
+	checks.push_back({"station/materialObservationWorkflow", materialObservationWorkflow});
 	checks.push_back({"station/flowThermalReservoirWorkflow", flowThermalReservoirWorkflow});
 	checks.push_back({"station/flowRadiatorWorkflow", flowRadiatorWorkflow});
 	checks.push_back({"station/flowCoolantLoopWorkflow", flowCoolantLoopWorkflow});

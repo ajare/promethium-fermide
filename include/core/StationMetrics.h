@@ -7,8 +7,8 @@
 namespace core
 {
 	// Observation metadata is independent of diagram nodes and presentation.
-	enum class StationPhysicalQuantity { Power, Energy, Mass, Volume, Temperature, Fraction, MassRate, VolumeRate, Unspecified };
-	enum class StationCanonicalUnit { Kilowatt, KilowattHour, Kilogram, CubicMetre, Kelvin, Fraction, KilogramPerSecond, CubicMetrePerSecond, Percent, Unspecified };
+	enum class StationPhysicalQuantity { Power, Energy, Mass, Volume, Temperature, Fraction, MassRate, VolumeRate, Unspecified, AmountOfSubstance };
+	enum class StationCanonicalUnit { Kilowatt, KilowattHour, Kilogram, CubicMetre, Kelvin, Fraction, KilogramPerSecond, CubicMetrePerSecond, Percent, Unspecified, Mole };
 	enum class StationMetricRole { Demand, Generation, Inventory, Input, Output, Loss, InventoryChange, StateOfCharge, Capacity };
 	enum class StationRequestedSemantics { Demand };
 	enum class StationMetricValidity { Valid, Unavailable, Invalid };
@@ -58,6 +58,8 @@ namespace core
 		StationPhysicalQuantity quantity;
 		StationCanonicalUnit unit;
 		std::vector<StationChartSeriesDefinition> series;
+		std::string accountingNote;
+		bool partialAccounting{false};
 	};
 	struct StationChartSeries
 	{
@@ -73,6 +75,13 @@ namespace core
 		double sampleIntervalSeconds{0};
 		bool truncated{false}, incomplete{false};
 	};
+	struct StationStoreObservation
+	{
+		StationMetricDescriptor metric;
+		double sourceToCanonicalScale{1};
+	};
+	// Applied configuration must already have passed domain validation.
+	std::vector<StationStoreObservation> stationStoreObservations(StationSystemsSettings const& settings);
 	std::vector<StationChartDefinition> const& stationCharts();
 	std::vector<StationChartDefinition> stationCharts(std::vector<StationMetricDescriptor> const& descriptors);
 	std::vector<std::string> stationChartMetricIds(StationChartDefinition const& chart);

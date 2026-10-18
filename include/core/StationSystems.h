@@ -95,7 +95,8 @@ namespace core
 		// touches the store must carry the store's own class.
 		std::string hazardClass{"normal"};
 		// Observation metadata only: does not grant compatibility or alter
-		// allocation. Legacy omission stays unclassified, without inference.
+		// allocation. Legacy omission remains empty in authored settings;
+		// observations may resolve it through unambiguous validated relationships.
 		std::string materialId{};
 		bool operator==(ResourceStoreSettings const&) const = default;
 	};

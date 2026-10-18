@@ -113,3 +113,49 @@ The existing `station-trends` public World workflow checks hidden-window samplin
 aligned bounded history, retention, pause/reset and deterministic replay, plus
 small recorder budgets and invalid intervals. `station-editor-trends` covers the
 production headless editor presentation.
+
+## Stored material inventories (#700)
+
+Each Resource store registers one inventory ownership contribution, containing
+qualified **plus** unqualified contents. The adapter reads the committed store
+snapshot at the shared observation cadence, even when its property is unselected
+or the editor is closed. Internal transfers are not extra inventory contributions.
+Protected reserves remain included; this is inventory, not usable supply or
+discretionary availability. Compound composition is not added a second time.
+
+Applied-run compilation resolves identity from explicit material IDs and
+unambiguous validated relationships, never from names, units, hazard classes or
+constituent fractions. Material-preserving transfers connect identity evidence;
+water/gas processes and population input roles provide intrinsic material
+evidence. All evidence is collected before resolving a connected component.
+Missing or contradictory evidence leaves inventories unclassified, including
+explicit identities conflicting with another explicit ID or intrinsic role.
+Resolution never rewrites authored settings or changes physics validation.
+Unspecified compound food, waste, consumables and other non-intrinsic roles are
+not guessed from their purpose or constituent composition.
+
+The catalogue groups classified stores by material identity, physical quantity
+and canonical unit. Mass uses kg, volume m3, energy kWh and amount of substance
+mol. Applied units g, mL, L, kJ, MJ and Wh are converted before recording; no
+mass/volume, chemical or density conversion is inferred. Incompatible quantities
+of the same material receive separate properties. Hazard classes may contribute
+to this inventory sum without implying interchangeability or usable normal supply.
+
+Material properties are labelled **Stored material inventory**, with a classified
+stores subtotal and identity-sorted instance stack using the generic query and
+renderer. Accounting coverage explicitly excludes atmospheres, living biomass
+and other non-store inventories. Each unclassified store has its own selectable
+quantity view; its amount is not assigned to any material subtotal. If any store
+is unclassified, material results retain a partial-accounting status even when
+the classified subtotal is numerically available. Missing expected measurements
+instead produce gaps in the sum and entire stack, never a smaller apparent total.
+
+Identity assignment becomes observable only after application, which starts fresh
+history. A disappearing unclassified view visibly falls back to Power. Reset
+retains an applicable selection but clears samples. Observation never edits the
+Configuration draft, authored identity, document history or simulation state.
+
+Coverage: `station-materialObservations`,
+`station-materialRelationshipObservations`, `station-materialCanonicalUnits`, and
+`station-editor-material-observations`, alongside existing identity persistence
+and editor-history checks from #699.

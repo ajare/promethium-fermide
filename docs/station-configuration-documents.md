@@ -25,8 +25,12 @@ The same ID identifies the same material across stores. It is independent of
 the store ID, unit, hazard class and compound composition. A compound's material
 ID names the compound, not its constituent decomposition. No identity is guessed
 from any of those fields: even a legacy store named `oxygen` in `kg` remains
-unclassified. This slice does not resolve identities from equipment relationships
-or change intrinsically identified atmospheric gases or Biological populations.
+unclassified without further evidence. The stored-material observation adapter
+(#700) may resolve an omitted identity through unambiguous validated equipment
+or transfer relationships, without filling in the authored field. Conflicting
+evidence remains unclassified in observations. See [Station history](station-history.md)
+for accounting coverage; intrinsic atmospheric and Biological inventories are
+outside this stored-only slice.
 
 Assignment changes only the Configuration draft until **Apply settings**.
 Draft undo/redo, applied World history, Reset and structural restoration retain

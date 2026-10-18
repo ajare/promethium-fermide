@@ -2,6 +2,7 @@
 #include "Documents.h"
 #include "Connections.h"
 #include "BatteryObservations.h"
+#include "MaterialObservations.h"
 #include "Coupled.h"
 #include "Reference.h"
 #include "Scenarios.h"
@@ -24078,7 +24079,7 @@ void recovery(smoke::Context const& context)
 				&& chart.series[0].values.size() == 1 && approx(chart.series[0].values[0], 6.0)
 				&& chart.series[1].values.size() == 1 && approx(chart.series[1].values[0], 10.0),
 				"declarative Power query lost surplus generation, demand or simulation time");
-			require(metrics.size() == 4 && metrics[0].descriptor.requestedSemantics
+			require(metrics.size() == 4 + settings.stores.size() && metrics[0].descriptor.requestedSemantics
 				&& !metrics[1].descriptor.requestedSemantics && !metrics[1].samples[0].requested,
 				"catalogue manufactured requested generation semantics");
 			auto const* transfer = findSeries(trends, "transfer", "pump");
@@ -26825,6 +26826,7 @@ int main(int argc, char** argv)
 	registerStationDocumentChecks(checks);
 	registerStationConnectionChecks(checks);
 	registerBatteryObservationChecks(checks);
+	registerMaterialObservationChecks(checks);
 	registerCoupledStationChecks(checks);
 	registerReferenceStationChecks(checks);
 	registerScenarioChecks(checks);
