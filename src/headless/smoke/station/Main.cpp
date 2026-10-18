@@ -23925,8 +23925,8 @@ void recovery(smoke::Context const& context)
 			world.resumeSimulation();
 			runOrDiagnose(world, 3600, "trend cadence"); // t = 60 s: one boundary
 			auto const trends = world.getStationSystemsTrends();
-			require(trends.size() == 3,
-				"expected exactly the power, equipment-load and transfer trend series");
+			require(trends.size() == 4,
+				"expected exactly the power, power-generation, equipment-load and transfer trend series");
 			for (auto const& series : trends)
 			{
 				require(series.samples.size() == 1,
@@ -23944,6 +23944,21 @@ void recovery(smoke::Context const& context)
 			require(approx(power->samples[0].requested, 6.0)
 				&& approx(power->samples[0].actual, 6.0),
 				"the power trend did not record requested versus actual supply");
+			auto const* generation = findSeries(trends, "power-generation", "");
+			require(generation && generation->unit == "kW"
+				&& approx(generation->samples[0].actual, 10.0)
+				&& approx(generation->samples[0].requested, 10.0),
+				"generation history must retain 10 kW generation, not 6 kW supplied service");
+			auto const metrics = world.getStationSystemsMetricHistory();
+			auto const chart = core::queryStationChart(core::stationCharts().front(), metrics);
+			require(chart.series.size() == 2 && !chart.incomplete
+				&& chart.series[0].times.size() == 1 && approx(chart.series[0].times[0], 60.0, 1e-5)
+				&& chart.series[0].values.size() == 1 && approx(chart.series[0].values[0], 6.0)
+				&& chart.series[1].values.size() == 1 && approx(chart.series[1].values[0], 10.0),
+				"declarative Power query lost surplus generation, demand or simulation time");
+			require(metrics.size() == 2 && metrics[0].descriptor.requestedSemantics
+				&& !metrics[1].descriptor.requestedSemantics && !metrics[1].samples[0].requested,
+				"catalogue manufactured requested generation semantics");
 			auto const* transfer = findSeries(trends, "transfer", "pump");
 			require(transfer != nullptr && transfer->unit == "kg",
 				"transfer trend identity or unit missing");
@@ -23972,7 +23987,7 @@ void recovery(smoke::Context const& context)
 			world.resumeSimulation();
 			runOrDiagnose(world, 78000, "trend long run"); // t = 1300 s, 1300 raw samples
 			auto const trends = world.getStationSystemsTrends();
-			require(trends.size() == 3, "long run lost a trend series");
+			require(trends.size() == 4, "long run lost a trend series");
 			for (auto const& series : trends)
 			{
 				require(series.samples.size() <= 256,
@@ -24205,7 +24220,7 @@ void recovery(smoke::Context const& context)
 			world.resumeSimulation();
 			runOrDiagnose(world, 270000, "trend stride truth run"); // t = 4500 s
 			auto const trends = world.getStationSystemsTrends();
-			require(trends.size() == 3, "the 4500 s run lost a trend series");
+			require(trends.size() == 4, "the 4500 s run lost a trend series");
 			for (auto const& series : trends)
 			{
 				require(series.samples.size() <= 256,
@@ -24273,7 +24288,7 @@ void recovery(smoke::Context const& context)
 			world.resumeSimulation();
 			runOrDiagnose(world, 300000, "retention-bound coarsened run"); // t = 5000 s
 			auto const trends = world.getStationSystemsTrends();
-			require(trends.size() == 3, "the retention-bound run lost a trend series");
+			require(trends.size() == 4, "the retention-bound run lost a trend series");
 			for (auto const& series : trends)
 			{
 				require(series.downsampleLevel >= 1,
@@ -24311,7 +24326,7 @@ void recovery(smoke::Context const& context)
 			world.resumeSimulation();
 			runOrDiagnose(world, 33000, "replay pre-reset run"); // t = 550 s: coarsened once
 			auto const firstRun = world.getStationSystemsTrends();
-			require(firstRun.size() == 3, "the pre-reset replay run produced no trends");
+			require(firstRun.size() == 4, "the pre-reset replay run produced no trends");
 			require(firstRun.front().downsampleLevel >= 1,
 				"the pre-reset run did not coarsen, so the replay proves nothing");
 			world.resetSimulation();

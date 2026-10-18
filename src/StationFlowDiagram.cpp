@@ -661,7 +661,8 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	std::function<void()> const& beforeSelectionChange,
 	std::function<void()> const& beforeNodeRemoval,
 	std::function<void()> const& beforeLayoutChange,
-	core::StationSystemsSnapshot const* live, bool draftMatchesLive, bool paused)
+	core::StationSystemsSnapshot const* live, bool draftMatchesLive, bool paused,
+	std::function<void()> const& finishHeader)
 {
 	if (mLastFrame != ImGui::GetFrameCount() - 1)
 	{ mDragging = -1; mTemperature = 0; mActiveLinkPin.reset(); }
@@ -846,6 +847,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 			mGraph.nodes[mSelected].id.c_str());
 	else
 		ImGui::TextDisabled("Selected: no node");
+	if (finishHeader) finishHeader();
 	// The canvas and the inspector sit side by side. The inspector column
 	// is reserved whether or not a node is selected (#653), so selecting
 	// or deselecting never resizes the canvas or moves the node under the

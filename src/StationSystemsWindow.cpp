@@ -7,6 +7,7 @@
 #include "DocumentEdit.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
+#include "implot.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -238,9 +239,96 @@ void StationSystemsWindow::renderFileToolbar()
 	if (!mDiagnostic.empty()) ImGui::TextWrapped("Configuration: %s", mDiagnostic.c_str());
 }
 
+void StationSystemsWindow::renderObservationPlot(float height)
+{
+	auto const& charts = core::stationCharts();
+	auto const found = std::find_if(charts.begin(), charts.end(), [&](auto const& chart) {
+		return chart.id == mSelectedChart;
+	});
+	auto const* selected = found == charts.end() ? &charts.front() : &*found;
+	if (found == charts.end())
+	{
+		mSelectedChart = selected->id;
+		mFlowChart = core::queryStationChart(*selected, mFlowMetrics);
+		ImGui::TextDisabled("Selected property unavailable; showing Power.");
+	}
+	ImGui::SetNextItemWidth(-1);
+	if (ImGui::BeginCombo("##Station observation property", selected->label.c_str()))
+	{
+		std::string group;
+		for (auto const& chart : charts)
+		{
+			if (group != chart.group) { ImGui::TextDisabled("%s", chart.group.c_str()); group = chart.group; }
+			ImGui::PushID(chart.id.c_str());
+			if (ImGui::Selectable(chart.label.c_str(), chart.id == mSelectedChart))
+			{
+				mSelectedChart = chart.id;
+				selected = &chart;
+				mFlowChart = core::queryStationChart(chart, mFlowMetrics);
+			}
+			ImGui::PopID();
+		}
+		ImGui::EndCombo();
+	}
+	ImGui::TextUnformatted(selected->title.c_str());
+	bool const empty = std::all_of(mFlowChart.series.begin(), mFlowChart.series.end(),
+		[](auto const& line) { return line.times.empty(); });
+	if (!mFlowSnapshot || !mFlowSnapshot->enabled)
+		ImGui::TextDisabled("Simulation disabled; no live history.");
+	else if (empty)
+		ImGui::TextDisabled("No samples yet; run the simulation.");
+	else
+		ImGui::TextDisabled("%sSimulation time; stride %.2f s%s%s", mFlowWasPaused ? "Paused; " : "",
+			mFlowChart.sampleIntervalSeconds, mFlowChart.truncated ? " (interval summaries; history merged or dropped)" : "",
+			mFlowChart.incomplete ? " (incomplete coverage)" : "");
+
+	// A private context also makes this production view usable by CPU-only
+	// editor workflows, without depending on the Launcher's global context.
+	auto* previous = ImPlot::GetCurrentContext();
+	if (!mPowerPlotContext)
+		mPowerPlotContext = std::shared_ptr<ImPlotContext>(ImPlot::CreateContext(),
+			[](ImPlotContext* context) { ImPlot::DestroyContext(context); });
+	ImPlot::SetCurrentContext(mPowerPlotContext.get());
+	if (ImPlot::BeginPlot("##Station power history", { -1, std::max(130.0f,
+		height - 3 * ImGui::GetTextLineHeightWithSpacing() - ImGui::GetFrameHeightWithSpacing()) }, ImPlotFlags_NoMenus))
+	{
+		std::string const axis = selected->label + " (" + core::stationUnitLabel(selected->unit) + ")";
+		ImPlot::SetupAxes("Simulation time (s)", axis.c_str(),
+			ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+		// ImPlot draws text directly, bypassing ImGui's normal text logging.
+		// Include chart labels in the same read-only UI log as other widgets.
+		ImGui::LogText("Simulation time (s) | %s\n", axis.c_str());
+		for (auto const& line : mFlowChart.series)
+		{
+			// Colour and legend identity derive from the metric, not its vector position.
+			unsigned colour = 2166136261u;
+			for (unsigned char c : line.id) colour = (colour ^ c) * 16777619u;
+			ImPlot::SetNextLineStyle(ImPlot::GetColormapColor(static_cast<int>(colour % ImPlot::GetColormapSize())), 2);
+			ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 2);
+			ImGui::LogText("%s\n", line.label.c_str());
+			std::string const label = line.label + "###" + line.id;
+			ImPlot::PlotLine(label.c_str(), line.times.data(), line.values.data(), static_cast<int>(line.times.size()));
+		}
+		ImPlot::EndPlot();
+	}
+	ImPlot::SetCurrentContext(previous);
+}
+
 void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const& world)
 {
 	if (!syncWorld(world)) return;
+	// Groups keep the existing control IDs (tables introduce an ID scope).
+	// Narrow the header's work region only; restore it before the canvas.
+	auto* host = ImGui::GetCurrentWindow();
+	auto const workRight = host->WorkRect.Max.x;
+	auto const contentRight = host->ContentRegionRect.Max.x;
+	auto const headerOrigin = ImGui::GetCursorScreenPos();
+	float const width = ImGui::GetContentRegionAvail().x;
+	float const controlsWidth = std::max(1.0f, width * 0.62f);
+	ImGui::BeginGroup();
+	ImGui::BeginGroup();
+	host->WorkRect.Max.x = headerOrigin.x + controlsWidth;
+	host->ContentRegionRect.Max.x = host->WorkRect.Max.x;
 	renderFileToolbar();
 	renderDraftHistory();
 	bool const paused = world->isSimulationPaused();
@@ -248,11 +336,16 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 	double const now = ImGui::GetTime();
 	// Poll the authoritative snapshot at 4 Hz. Reset, configuration changes,
 	// and pausing bypass the throttle so old-run values cannot linger.
-	if (!mFlowSnapshot || now < mFlowRefreshTime || now - mFlowRefreshTime >= 0.25
+	if (!mFlowSnapshot || now < mFlowRefreshTime
+		|| (now - mFlowRefreshTime >= 0.25 && world->getSimulationTick() != mFlowSnapshot->worldTick)
 		|| applied != mFlowApplied || paused != mFlowWasPaused
 		|| world->getSimulationTick() < mFlowSnapshot->worldTick)
 	{
 		mFlowSnapshot = world->getStationSystemsSnapshot();
+		mFlowMetrics = world->getStationSystemsMetricHistory();
+		auto const& charts = core::stationCharts();
+		auto selected = std::find_if(charts.begin(), charts.end(), [&](auto const& chart) { return chart.id == mSelectedChart; });
+		mFlowChart = core::queryStationChart(selected == charts.end() ? charts.front() : *selected, mFlowMetrics);
 		mFlowApplied = applied;
 		mFlowRefreshTime = now;
 		mFlowWasPaused = paused;
@@ -267,7 +360,19 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 		commitDraftChanges(true);
 		mPendingDraftEdit = captureDraft();
 		mPendingLayoutEdit = true;
-	}, &*mFlowSnapshot, mDraft == applied, paused);
+	}, &*mFlowSnapshot, mDraft == applied, paused, [&] {
+		float const height = std::max(180.0f, ImGui::GetCursorScreenPos().y - headerOrigin.y);
+		host->WorkRect.Max.x = workRight;
+		host->ContentRegionRect.Max.x = contentRight;
+		ImGui::EndGroup();
+		ImGui::SameLine();
+		ImGui::SetCursorScreenPos({headerOrigin.x + controlsWidth + ImGui::GetStyle().ItemSpacing.x,
+			headerOrigin.y});
+		ImGui::BeginGroup();
+		renderObservationPlot(height);
+		ImGui::EndGroup();
+		ImGui::EndGroup();
+	});
 	// Placement is one action, including on the mouse-down frame. An
 	// inspector field edit is not: while a field is still being edited the
 	// pending snapshot stays open, so typing "1250" is one commit at field

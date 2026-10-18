@@ -442,6 +442,17 @@ add_library(pf-imgui-cpu STATIC
 )
 target_include_directories(pf-imgui-cpu PUBLIC "${PF_INCLUDE_DIR}" "${PF_INCLUDE_DIR}/imgui")
 target_compile_features(pf-imgui-cpu PUBLIC cxx_std_20)
+# Reuse the vendored ImPlot with the editor's ImGui version, not the
+# Launcher's newer, independently built ImGui headers.
+set(PF_IMPLOT_INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/generated/implot")
+file(MAKE_DIRECTORY "${PF_IMPLOT_INCLUDE}")
+foreach(header implot.h implot_internal.h)
+    configure_file("src/Launcher/include/imgui/${header}" "${PF_IMPLOT_INCLUDE}/${header}" COPYONLY)
+endforeach()
+target_include_directories(pf-imgui-cpu PUBLIC "${PF_IMPLOT_INCLUDE}")
+target_sources(pf-imgui-cpu PRIVATE
+    src/Launcher/src/imgui/implot.cpp
+    src/Launcher/src/imgui/implot_items.cpp)
 
 # SPIKE(#test-engine): Dear ImGui Test Engine, vendored at v1.89.5 to match
 # the vendored ImGui. The hooks it needs are already present in imgui.cpp /

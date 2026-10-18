@@ -5929,6 +5929,10 @@ namespace core
 			for (auto const& transfer : snap.transfers)
 				appendBoundedTrendSampleImpl(trendSeries, "transfer", transfer.id, transfer.unit, base, retention,
 					tick, elapsed, transfer.lastRequested, transfer.lastCompleted);
+			// Generation is not supplied service: batteries can supply a deficit,
+			// and unused generation can exceed demand. Keep its own bounded history.
+			appendBoundedTrendSampleImpl(trendSeries, "power-generation", "", "kW", base, retention,
+				tick, elapsed, snap.power.availableGenerationKW, snap.power.availableGenerationKW);
 		}
 		// #419: the endurance observation windows. One window per Resource
 		// store and per battery, advanced only at the existing observation

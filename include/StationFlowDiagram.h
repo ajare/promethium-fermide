@@ -86,7 +86,8 @@ public:
 		std::function<void()> const& beforeNodeRemoval = {},
 		std::function<void()> const& beforeLayoutChange = {},
 		core::StationSystemsSnapshot const* live = nullptr,
-		bool draftMatchesLive = true, bool paused = false);
+		bool draftMatchesLive = true, bool paused = false,
+		std::function<void()> const& finishHeader = {});
 	// Last displayed readout, also used by headless UI checks.
 	std::optional<station_flow::NodeTelemetry> nodeTelemetry(std::string const& type,
 		std::string const& id) const;

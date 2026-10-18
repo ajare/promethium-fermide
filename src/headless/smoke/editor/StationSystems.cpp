@@ -3315,6 +3315,14 @@ namespace
 		core::ResourceTransferSettings transfer;
 		transfer.id = "move"; transfer.sourceId = "a"; transfer.destinationId = "b";
 		transfer.unit = "kg"; transfer.ratePerSecond = 2; seed.transfers = {transfer};
+		core::BatterySettings battery;
+		battery.id = "bank"; battery.nameplateKWh = 10; battery.usableKWh = 10;
+		battery.startingStoredKWh = 10; battery.maxDischargeKW = 5;
+		seed.batteries = {battery};
+		core::EquipmentLoadSettings load;
+		load.id = "load"; load.electricalDemandKW = 2; load.thermalClass = "low";
+		load.coolingDisposition = core::StationCoolingDisposition::Exported;
+		seed.equipmentLoads = {load};
 		std::string diagnostic;
 		require(world->configureStationSystems(seed, false, &diagnostic), diagnostic.c_str());
 		world->markSaved();
@@ -3327,14 +3335,29 @@ namespace
 		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
 		driver.run("station", "flowTelemetry", [&](ImGuiTestContext* ctx) {
 			ctx->SetRef("Configuration");
+			REQ(driver.contains("Power demand and generation (applied simulation)")
+				&& driver.contains("No samples yet"), "Flow power chart missing its initial state");
+			auto const initialDraft = window.draft();
+			ctx->ComboClick("##Station observation property/power/Power"); ctx->Yield(2);
+			REQ(window.draft() == initialDraft && window.draftHistory().undoCount() == 0
+				&& !world->isModified() && world->getSimulationTick() == 0,
+				"Property selection changed the World or Configuration draft");
 			auto initial = window.flowTelemetry("Store", "a");
 			REQ(initial && initial->status == "Ready - no completed tick", "Flow lacks initial live inventory");
 			world->resumeSimulation();
-			REQ(world->advanceTicks(30), "Live telemetry fixture failed to advance");
+			REQ(world->advanceTicks(60), "Live telemetry fixture failed to advance");
 			ctx->Yield(20);
 			auto moving = window.flowTelemetry("Transfer", "move");
 			REQ(moving && moving->ports.at("Source") == "2 kg/s", "Flow did not update actual transfer rates");
 			auto observed = world->getStationSystemsSnapshot();
+			auto chart = core::queryStationChart(core::stationCharts().front(), world->getStationSystemsMetricHistory());
+			REQ(chart.series.size() == 2 && chart.series[0].label == "Demand" && chart.series[1].label == "Generation"
+				&& chart.series[0].times.size() == 1 && std::abs(chart.series[0].times[0] - 1.0) < 1e-6
+				&& chart.series[0].values[0] == 2.0 && chart.series[1].values[0] == 0.0
+				&& observed.power.totalSuppliedKW > 0 && !chart.incomplete,
+				"Power chart substituted battery-assisted service for generation or lost simulation timestamps");
+			REQ(driver.contains("Demand") && driver.contains("Generation") && driver.contains("Power (kW)")
+				&& driver.contains("Simulation time (s)"), "Generic plot omitted power lines or axis units");
 			ctx->Sleep(0.3f);
 			REQ(world->getStationSystemsSnapshot() == observed && !world->isModified()
 				&& window.draftHistory().undoCount() == 0, "Live rendering advanced or mutated the World/draft");
@@ -3349,6 +3372,12 @@ namespace
 			REQ(window.flowTelemetry("Store", "a").has_value(), "Reverting the draft did not restore live telemetry");
 			world->pauseSimulation(); ctx->Yield(2);
 			REQ(driver.contains("Paused"), "Flow omitted paused simulation state");
+			auto const pausedHistory = world->getStationSystemsTrends();
+			auto const pausedDraft = window.draft();
+			ctx->ComboClick("##Station observation property/power/Power"); ctx->Yield(20);
+			REQ(world->getStationSystemsTrends() == pausedHistory && window.draft() == pausedDraft
+				&& !world->isModified() && window.draftHistory().undoCount() == 0,
+				"Paused property selection changed history or authored state");
 			world->resumeSimulation(); ctx->Yield(2);
 			auto cachedValues = window.flowTelemetry("Store", "a")->values;
 			REQ(world->advanceTicks(30), "Second telemetry fixture advance failed");
@@ -3362,6 +3391,7 @@ namespace
 				"Throttled telemetry never refreshed");
 			world->pauseSimulation(); ctx->Yield(2);
 			world->resetSimulation(); ctx->Yield(2);
+			REQ(driver.contains("No samples yet"), "Reset left stale power history in the chart");
 			REQ(window.flowTelemetry("Transfer", "move")->ports.empty()
 				&& window.flowTelemetry("Store", "a")->values == initial->values, "Reset left stale live values");
 			auto replacement = std::make_shared<core::World>("Replacement live flow", 2, 2);
@@ -3371,6 +3401,14 @@ namespace
 			world = replacement; ctx->Yield(2);
 			REQ(!window.flowTelemetry("Store", "a") && window.flowTelemetry("Store", "new"),
 				"World switch reused the previous World's telemetry");
+			seed.enabled = false;
+			REQ(world->configureStationSystems(seed, false), "Disabling station failed");
+			world->markSaved(); ctx->Yield(2);
+			auto const disabledDraft = window.draft();
+			ctx->ComboClick("##Station observation property/power/Power"); ctx->Yield(2);
+			REQ(driver.contains("Simulation disabled; no live history.") && !world->isModified()
+				&& window.draft() == disabledDraft && window.draftHistory().undoCount() == 0
+				&& world->getStationSystemsTrends().empty(), "Disabled chart mutated state or retained live history");
 		});
 		#undef REQ
 		require(driver.passed(), "Live Flow telemetry workflow failed");
@@ -6264,7 +6302,7 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 			require(world->advanceTicks(120), "trends run during hidden window failed");
 			window.visible = true;
 			ctx->Sleep(2);
-			REQ(world->getStationSystemsTrends().size() == 3
+			REQ(world->getStationSystemsTrends().size() == 4
 				&& world->getStationSystemsTrends()[0].samples.size() == 7,
 				"trends did not advance with the World ticks while the window was hidden");
 			REQ(driver.contains("power (station-wide) (kW)"),

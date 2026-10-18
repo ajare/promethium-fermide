@@ -4,10 +4,12 @@
 #include <optional>
 #include <string>
 #include "core/StationSystems.h"
+#include "core/StationMetrics.h"
 #include "StationFlowDiagram.h"
 #include "DocumentHistory.h"
 #include "RecentFiles.h"
 namespace core { class World; }
+struct ImPlotContext;
 
 // One editor session owns its visibility/draft. Observation never ticks Lua.
 class StationSystemsWindow
@@ -75,6 +77,11 @@ private:
 	void openDraft(std::string const& path);
 	void newDraft();
 	void renderFileToolbar();
+	void renderObservationPlot(float height);
+	std::shared_ptr<ImPlotContext> mPowerPlotContext;
+	std::string mSelectedChart{"power"};
+	std::vector<core::StationMetricHistory> mFlowMetrics;
+	core::StationChartData mFlowChart;
 	std::optional<DocumentSnapshot> mPendingDraftEdit;
 	bool mPendingLayoutEdit{false};
 	StationFlowDiagram mFlow;
