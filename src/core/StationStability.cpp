@@ -292,6 +292,7 @@ namespace core
 			fin(transfer.lastRequested, tag("lastRequested", transfer.id));
 			fin(transfer.lastCompleted, tag("lastCompleted", transfer.id));
 			fin(transfer.lastUnmet, tag("lastUnmet", transfer.id));
+			fin(transfer.nextOccurrenceSeconds, tag("nextOccurrenceSeconds", transfer.id));
 		}
 		// StationConversionSnapshot
 		for (auto const& conversion : snapshot.conversions)

@@ -1692,7 +1692,9 @@ namespace core
 		if (transfer.mode != ResourceTransferMode::Scheduled) return refuse("mode is invalid");
 		if (transfer.quantity <= 0.0) return refuse("quantity must be positive");
 		if (transfer.firstOccurrenceSeconds < 0.0) return refuse("first occurrence must be non-negative");
-		if (transfer.recurrenceSeconds != 0.0) return refuse("recurrence must be zero (one-off only)");
+		if (transfer.recurrenceSeconds < 0.0 || (transfer.recurrenceSeconds > 0.0
+			&& transfer.recurrenceSeconds + StationScheduleTolerance < static_cast<double>(World::getFixedTimestep())))
+			return refuse("recurrence must be zero or at least one fixed tick");
 		return true;
 	}
 
@@ -7979,9 +7981,15 @@ namespace core
 			for (size_t index = 0; index < transfers.size(); ++index)
 			{
 				auto const& transfer = transfers[index];
-				if (transfer.authored.mode != ResourceTransferMode::Scheduled || transfer.occurrencesFired) continue;
-				if (stationScheduleOccurrencesDue(transfer.authored.firstOccurrenceSeconds, 0.0, elapsed))
-					arrivals.push_back({{transfer.authored.firstOccurrenceSeconds, transfer.authored.priority, index}, 0, false, true});
+				if (transfer.authored.mode != ResourceTransferMode::Scheduled) continue;
+				auto const due = stationScheduleOccurrencesDue(transfer.authored.firstOccurrenceSeconds,
+					transfer.authored.recurrenceSeconds, elapsed);
+				for (uint64_t occurrence = transfer.occurrencesFired; occurrence < due; ++occurrence)
+				{
+					auto const when = transfer.authored.firstOccurrenceSeconds
+						+ static_cast<double>(occurrence) * transfer.authored.recurrenceSeconds;
+					arrivals.push_back({{when, transfer.authored.priority, index}, occurrence, false, true});
+				}
 			}
 			std::sort(arrivals.begin(), arrivals.end(),
 				[](DueArrival const& left, DueArrival const& right)
@@ -8024,7 +8032,7 @@ namespace core
 					qualified[source] -= moved; qualified[destination] += moved;
 					flowOut[source] += moved; flowIn[destination] += moved;
 					transfer.lastRequested = requested; transfer.lastCompleted = moved;
-					transfer.lastUnmet = requested - moved; transfer.occurrencesFired = 1; transfer.lastFiredTick = tick;
+					transfer.lastUnmet = requested - moved; transfer.occurrencesFired = arrival.occurrence + 1; transfer.lastFiredTick = tick;
 					transfer.status = moved <= 0.0 ? StationTransferStatus::Rejected
 						: moved < requested ? StationTransferStatus::Partial : StationTransferStatus::Full;
 					transfer.limitingReason = moved >= requested ? "" : headroom < requested && headroom <= drawable
@@ -17729,6 +17737,12 @@ namespace core
 				transfer.authored.ratePerSecond, transfer.authored.priority,
 				transfer.lastRequested, transfer.lastCompleted, transfer.lastUnmet, transfer.status,
 				transfer.authored.mode, transfer.authored.firstOccurrenceSeconds, transfer.occurrencesFired, transfer.lastFiredTick, transfer.limitingReason});
+			auto& snapshot = result.transfers.back();
+			snapshot.hasNextOccurrence = transfer.authored.mode == ResourceTransferMode::Scheduled
+				&& (transfer.authored.recurrenceSeconds > 0.0 || transfer.occurrencesFired == 0);
+			if (snapshot.hasNextOccurrence)
+				snapshot.nextOccurrenceSeconds = transfer.authored.firstOccurrenceSeconds
+					+ static_cast<double>(transfer.occurrencesFired) * transfer.authored.recurrenceSeconds;
 		}
 		for (auto const index : mImpl->conversionOrder)
 		{

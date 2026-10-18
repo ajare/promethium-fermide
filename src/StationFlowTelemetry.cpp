@@ -134,7 +134,11 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 		auto p = find(s.transfers, id); if (!p) return {}; state(out, *p);
 		if (p->mode == core::ResourceTransferMode::Scheduled)
 		{
-			out.status = !p->occurrencesFired ? "Scheduled: waiting" : p->lastUnmet > 0 ? "Scheduled: completed (blocked/partial)" : "Scheduled: completed";
+			out.status = p->hasNextOccurrence ? "Scheduled: waiting for next occurrence"
+				: p->lastUnmet > 0 ? "Scheduled: completed one-off (blocked/partial)" : "Scheduled: completed one-off";
+			out.details = {"Occurrence count " + std::to_string(p->occurrencesFired)};
+			if (p->hasNextOccurrence)
+				out.details.push_back("Next occurrence " + quantity(p->nextOccurrenceSeconds, "s"));
 			out.values = {"Moved " + quantity(p->lastCompleted, p->unit),
 				"Requested " + quantity(p->lastRequested, p->unit), "Unmet " + quantity(p->lastUnmet, p->unit)};
 			if (p->lastUnmet > 0)

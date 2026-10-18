@@ -421,13 +421,15 @@ Reset reconstruct the ledger from the authored starting conditions, and
 replaying the same World tick sequence reproduces the outcomes exactly,
 including which competing request won the last kilogram.
 
-### One-off Scheduled Resource transfers (#690)
+### Scheduled Resource transfers (#690, #692)
 
 In both Station Systems and the Station Flow Transfer inspector, choose
 **Continuous** (the rate-based behavior above) or **Scheduled**. Scheduled
 fields are `quantity` (positive, in store units), `firstOccurrenceSeconds`
-(non-negative scenario time), and `recurrenceSeconds` (must be **zero**;
-recurring batches are not supported yet). Source, destination, unit, priority,
+(non-negative scenario time), and `recurrenceSeconds` (**zero** for one-off,
+otherwise at least one World fixed tick, using the shared schedule tolerance).
+Both editors expose recurrence with independent draft undo/redo.
+Source, destination, unit, priority,
 compatibility rules and the combined 32-transfer limit are shared. Incomplete
 wiring stays visible in drafts; Apply requires valid complete wiring. Placement,
 wiring and field changes use Configuration draft undo/redo and do not change
@@ -438,7 +440,10 @@ not an Agent hauling task or a physical carrier. It attempts its quantity once,
 moving only qualified source stock above protected reserves and existing
 maintenance reservations, within destination capacity after held material and
 maintenance waste claims. Partial or zero movement **completes the occurrence**:
-unmet stock stays at source, with no retry or carry-over. Reservations for jobs
+unmet stock stays at source, with no retry or carry-over. Every recurrence
+requests the original quantity independently, including after blocked occurrences.
+Schedules derive each occurrence from first time plus occurrence index times
+interval, never a floating-point countdown. Reservations for jobs
 starting later in the tick use the inventory left by the scenario-event pass.
 
 Before continuous processing, due events sort by occurrence time, priority
@@ -456,20 +461,28 @@ retained connection design properties, including efficiency, are informational
 and do not cap or lose batch material. The Scheduled connection inspector shows
 saved efficiency read-only; switch to Continuous to edit the saved design
 properties. Explicit property reset remains available and undoable.
-Readouts show Scheduled waiting/completed/blocked outcomes, occurrence count,
-and last requested/moved/unmet **amounts**, not instantaneous rates. The bounded
+Both views show next occurrence and occurrence count, distinguish completed
+one-offs from recurring transfers waiting between occurrences, and retain last
+requested/moved/unmet **amounts** and limiting reasons, not instantaneous rates. The bounded
 event log reports each occurrence. Scheduled batches do not appear in the
 continuous exchange-rate charts; inventory charts still show their inventory
-changes. With one occurrence, last amounts are also the cumulative totals.
-Runtime state is never saved.
+changes. Full cumulative transfer telemetry is deferred; runtime accounting
+and next-occurrence state are never saved.
 
 World and standalone Station configuration schema **99** preserve mode and
-one-off fields; missing mode defaults to Continuous. Older declared schemas
+schedule fields (including recurrence); missing mode defaults to Continuous. Older declared schemas
 carrying the new fields are refused rather than silently discarding semantics.
 Non-finite supplied numbers are refused even for inactive mode fields. Affected
 material-connected Resource forecasts explicitly report Scheduled-transfer
 unavailability; independent projections remain available. Exact Scheduled
 forecasting is not implemented.
+
+The automated pantry/Crew integration scenario replenishes an empty pantry from
+bulk food, consumes continuously between events, depletes before the next event,
+and recovers on the next replenishment. Shortages remain ordinary Unmet demand,
+not software failures. Focused checks cover minimum and non-tick-aligned
+recurrence, time-zero/boundary tolerance, repeated competition, pause, batching,
+time scaling, atomic invalid interval refusal, and deterministic Reset/load replay.
 
 #### Switching existing transfers (#691)
 

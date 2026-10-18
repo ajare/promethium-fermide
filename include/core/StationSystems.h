@@ -116,7 +116,7 @@ namespace core
 		ResourceTransferMode mode{ResourceTransferMode::Continuous};
 		double quantity{1.0};
 		double firstOccurrenceSeconds{0.0};
-		double recurrenceSeconds{0.0}; // one-off only; positive recurrence is refused
+		double recurrenceSeconds{0.0}; // 0 = one-off, else >= one fixed tick
 		bool operator==(ResourceTransferSettings const&) const = default;
 	};
 
@@ -2111,6 +2111,8 @@ namespace core
 		uint64_t occurrencesFired{0};
 		uint64_t lastFiredTick{0};
 		std::string limitingReason;
+		bool hasNextOccurrence{false};
+		double nextOccurrenceSeconds{0.0};
 		bool operator==(StationTransferSnapshot const&) const = default;
 	};
 

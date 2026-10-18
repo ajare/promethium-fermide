@@ -230,7 +230,7 @@ void scheduledTransfers(smoke::Context const&)
         if (test == 1) transfer.quantity = std::numeric_limits<double>::quiet_NaN();
         if (test == 2) transfer.firstOccurrenceSeconds = -1;
         if (test == 3) transfer.firstOccurrenceSeconds = std::numeric_limits<double>::infinity();
-        if (test == 4) transfer.recurrenceSeconds = dt;
+        if (test == 4) transfer.recurrenceSeconds = dt * 0.5;
         if (test == 5) transfer.sourceId = transfer.destinationId;
         if (test == 6) bad.stores[1].hazardClass = "hazardous";
         if (test == 7) transfer.ratePerSecond = std::numeric_limits<double>::infinity();
@@ -264,6 +264,7 @@ void scheduledTransferDocuments(smoke::Context const&)
 {
     auto s = fixture();
     s.transfers[0].ratePerSecond = 37; // retain the inactive Continuous setting
+    s.transfers[0].recurrenceSeconds = core::World::getFixedTimestep();
     for (auto const& edge : core::station_connections::build(s).links)
         s.connections[edge.designKey] = {core::StationPhysicalConnection::GasPipe, 2.5, 0.4};
     // Preserve keys through rename as well as mode switching before saving.
@@ -309,8 +310,10 @@ void scheduledTransferDocuments(smoke::Context const&)
     document.settings.transfers[0].sourceId.clear();
     require(core::parseStationConfiguration(core::serializeStationConfiguration(document), loaded, &why)
         && loaded.settings == document.settings, "Incomplete Scheduled draft was not inspectable");
-    document.settings.transfers[0].recurrenceSeconds = 1;
-    require(!core::parseStationConfiguration(core::serializeStationConfiguration(document), loaded, &why), "Incomplete draft accepted unsupported recurrence");
+    document.settings.transfers[0].recurrenceSeconds = core::World::getFixedTimestep() * 0.5;
+    auto previous = loaded;
+    require(!core::parseStationConfiguration(core::serializeStationConfiguration(document), loaded, &why)
+        && loaded.settings == previous.settings, "Incomplete draft accepted sub-tick recurrence or mutated on refusal");
     document.settings = fixture(); document.settings.transfers[0].mode = Mode::Continuous;
     document.settings.transfers[0].ratePerSecond = 1;
     document.settings.transfers[0].quantity = 1;
@@ -318,6 +321,66 @@ void scheduledTransferDocuments(smoke::Context const&)
     legacy.replace(at, 17, "schemaVersion: 98");
     require(core::parseStationConfiguration(legacy, loaded, &why) && loaded.settings == document.settings,
         "Legacy transfer did not default to Continuous");
+}
+void recurringTransfers(smoke::Context const&)
+{
+    double const dt = core::World::getFixedTimestep();
+    auto s = fixture();
+    s.transfers[0].recurrenceSeconds = dt;
+    core::World minimum("Minimum recurrence", 2, 2); configure(minimum, s);
+    run(minimum, 1);
+    auto snap = minimum.getStationSystemsSnapshot();
+    require(snap.transfers[0].occurrencesFired == 2 && stock(minimum, "b").currentQualified == 8
+        && snap.transfers[0].hasNextOccurrence && snap.transfers[0].nextOccurrenceSeconds == 2 * dt,
+        "Time-zero and first boundary occurrences were not counted independently");
+    run(minimum, 1);
+    require(minimum.getStationSystemsSnapshot().transfers[0].lastCompleted == 2, "Partial occurrence incorrect");
+    run(minimum, 1);
+    require(minimum.getStationSystemsSnapshot().transfers[0].lastRequested == 4
+        && minimum.getStationSystemsSnapshot().transfers[0].lastCompleted == 0, "Shortage was retried or accumulated");
+
+    // A delivery replenishes a depleted source at a later coincident occurrence.
+    s = fixture(); s.stores[0].startingQualified = 3;
+    s.transfers = {batch("first", "a", "b", 4, 2 * dt), batch("second", "a", "c", 4, 2 * dt)};
+    for (auto& t : s.transfers) t.recurrenceSeconds = 3 * dt;
+    s.deliveries = {{"refill", "a", "kg", 10, 5 * dt}};
+    core::World repeated("Repeated competition", 2, 2); configure(repeated, s);
+    run(repeated, 2);
+    require(stock(repeated, "b").currentQualified == 3 && stock(repeated, "c").currentQualified == 0,
+        "First competition ignored declaration order");
+    run(repeated, 3); snap = repeated.getStationSystemsSnapshot();
+    require(stock(repeated, "b").currentQualified == 7 && stock(repeated, "c").currentQualified == 4,
+        "Later requests accumulated unmet stock or delivery tie ordering changed");
+    for (auto const& t : snap.transfers)
+        require(t.lastRequested == 4 && t.lastCompleted == 4 && t.occurrencesFired == 2
+            && t.hasNextOccurrence && t.nextOccurrenceSeconds == 8 * dt, "Recurring accounting incorrect");
+    repeated.pauseSimulation(); repeated.resetSimulation(); run(repeated, 5);
+    require(repeated.getStationSystemsSnapshot() == snap, "Recurring Reset replay changed outcomes");
+
+    // Non-tick-aligned intervals use absolute occurrence arithmetic, never countdowns.
+    s = fixture(); s.transfers[0].firstOccurrenceSeconds = 3 * dt + 1e-10;
+    s.transfers[0].recurrenceSeconds = 2.5 * dt;
+    core::World a("Ticks", 2, 2), b("Batched", 2, 2); configure(a, s); configure(b, s);
+    run(a, 2); require(stock(a, "b").currentQualified == 0, "Recurring event fired early");
+    run(a, 1); require(a.getStationSystemsSnapshot().transfers[0].occurrencesFired == 1, "Boundary tolerance missed occurrence");
+    a.pauseSimulation(); auto paused = a.getStationSystemsSnapshot(); a.update(10);
+    require(a.getStationSystemsSnapshot() == paused, "Pause advanced recurring time");
+    run(a, 57); b.resumeSimulation(); b.setSimulationTimeScale(2); b.update(0.5f);
+    require(a.getStationSystemsSnapshot() == b.getStationSystemsSnapshot(), "Recurring batching/time-scale mismatch");
+    require(a.getStationSystemsSnapshot().transfers[0].occurrencesFired == 23, "Recurring interval drifted");
+
+    // Both Apply and standalone parsing refuse invalid intervals atomically.
+    a.pauseSimulation(); auto settings = a.getStationSystemsSettings(); auto live = a.getStationSystemsSnapshot();
+    core::StationConfigurationDocument doc, parsed; doc.settings = settings; parsed = doc;
+    for (double interval : {-1.0, dt * 0.5, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
+    {
+        auto bad = settings; bad.transfers[0].recurrenceSeconds = interval; std::string why;
+        require(!a.configureStationSystems(bad, true, &why) && a.getStationSystemsSettings() == settings
+            && a.getStationSystemsSnapshot() == live, "Invalid recurrence Apply was not atomic");
+        doc.settings = bad;
+        require(!core::parseStationConfiguration(core::serializeStationConfiguration(doc), parsed, &why)
+            && parsed.settings == settings, "Invalid recurrence load was not atomic");
+    }
 }
 void scheduledPantry(smoke::Context const&)
 {
@@ -329,6 +392,7 @@ void scheduledPantry(smoke::Context const&)
     pantry->startingQualified = 0; pantry->protectedReserve = 0;
     auto const pantryId = pantry->id; s.stores.push_back(bulk);
     auto t = batch("replenish", bulk.id, pantryId, 0.0001, 3.0 * static_cast<double>(core::World::getFixedTimestep())); t.unit = bulk.unit;
+    t.recurrenceSeconds = 400 * static_cast<double>(core::World::getFixedTimestep());
     s.transfers = {t};
     core::World w("Pantry", 2, 2); configure(w, s); run(w, 2);
     require(stock(w, pantryId).currentQualified == 0, "Pantry replenished before due time");
@@ -340,11 +404,17 @@ void scheduledPantry(smoke::Context const&)
     run(w, 300); require(stock(w, pantryId).currentQualified < 1e-10 && stock(w, bulk.id).currentQualified == 10 - t.quantity,
         "Depleted pantry retried batch or created food");
     require(w.getStationSystemsSnapshot().crews.front().metabolicScale == 0, "Empty pantry did not remain ordinary Crew shortage");
+    run(w, 100);
+    snap = w.getStationSystemsSnapshot();
+    require(snap.transfers[0].occurrencesFired == 2 && snap.transfers[0].lastRequested == t.quantity
+        && snap.crews.front().metabolicScale > 0 && stock(w, pantryId).currentQualified > 0,
+        "Later recurrence did not recover the depleted pantry and Crew");
 }
 }
 void registerScheduledTransferChecks(std::vector<smoke::Check>& checks)
 {
     checks.push_back({"scheduledTransfers", scheduledTransfers});
+    checks.push_back({"recurringTransfers", recurringTransfers});
     checks.push_back({"scheduledTransferDocuments", scheduledTransferDocuments});
     checks.push_back({"scheduledPantry", scheduledPantry});
 }

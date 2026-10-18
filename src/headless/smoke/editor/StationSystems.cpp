@@ -1738,6 +1738,21 @@ namespace
 			flow = false; ctx->Yield(3);
 			REQ(driver.contains("Transfer 0 quantity") && driver.contains("Transfer 0 first occurrence seconds"),
 				"Form did not expose the same scheduled draft fields");
+			// #692: recurrence is a shared, independently undoable field.
+			driver.typeValue(ctx, "**/Transfer 0 recurrence seconds (0 = one-off)", "5");
+			REQ(window.draft().transfers[0].recurrenceSeconds == 5, "Form recurrence edit lost");
+			ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+			REQ(window.draft().transfers[0].recurrenceSeconds == 0, "Recurrence undo failed");
+			ctx->ItemClick("Redo configuration"); ctx->Yield(3);
+			flow = true; ctx->Yield(3);
+			REQ(driver.contains("Transfer 0 recurrence seconds (0 = one-off)")
+				&& window.draft().transfers[0].recurrenceSeconds == 5, "Flow recurrence parity failed");
+			driver.typeValue(ctx, "**/Transfer 0 recurrence seconds (0 = one-off)", "0.001");
+			REQ(driver.contains("recurrence must be zero or at least one fixed tick"), "Flow accepted sub-tick recurrence");
+			ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+			ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+			REQ(window.draft().transfers[0].recurrenceSeconds == 0, "Recurrence edits did not undo independently");
+			flow = false; ctx->Yield(3);
 			// #691: switching back through the other editor keeps the inactive
 			// schedule. Undo/redo restores visibility as well as the mode.
 			auto* quantityInfo = ctx->ItemInfo("**/Transfer 0 quantity");
@@ -3311,6 +3326,18 @@ namespace
 			"Transfer telemetry confuses actual rates, units or unmet demand");
 		require(station_flow::telemetry({"Transfer", "node"}, s, 0)->ports.at("Source") == "--",
 			"Unknown tick duration fabricated a rate");
+		auto scheduled = s;
+		auto& recurring = scheduled.transfers[0];
+		recurring.mode = core::ResourceTransferMode::Scheduled;
+		recurring.occurrencesFired = 3; recurring.hasNextOccurrence = true; recurring.nextOccurrenceSeconds = 8;
+		auto recurringReadout = station_flow::telemetry({"Transfer", "node"}, scheduled, 0.5);
+		require(recurringReadout->status == "Scheduled: waiting for next occurrence"
+			&& recurringReadout->details == std::vector<std::string>{"Occurrence count 3", "Next occurrence 8 s"}
+			&& recurringReadout->values[0] == "Moved 2 L" && recurringReadout->ports.empty(),
+			"Recurring Flow readout lost next/count or presented an event as a rate");
+		recurring.hasNextOccurrence = false;
+		require(station_flow::telemetry({"Transfer", "node"}, scheduled, 0.5)->status
+			== "Scheduled: completed one-off (blocked/partial)", "Flow confused completed one-off with recurring wait");
 		s.stores[0].unit = "kg"; s.stores[0].lastTickIn = 3; s.stores[0].lastTickOut = 1;
 		s.stores[0].currentQualified = 10; s.stores[0].protectedReserve = 10;
 		auto inventory = station_flow::telemetry({"Store", "node"}, s, 0.5);
@@ -5159,8 +5186,18 @@ namespace
 			world->resumeSimulation(); REQ(world->advanceTicks(1), "Scheduled editor tick failed");
 			world->pauseSimulation(); ctx->Yield(2);
 			REQ(world->getStationSystemsSnapshot().transfers[1].lastCompleted == 3
-				&& driver.contains("Scheduled src -> dst") && driver.contains("completed"),
+				&& driver.contains("Scheduled src -> dst") && driver.contains("completed one-off")
+				&& driver.contains("occurrence count 1"),
 				"Scheduled form outcome was not shown as a batch quantity");
+			driver.typeValue(ctx, "Transfer 1 recurrence seconds (0 = one-off)", "1");
+			driver.click(ctx, "Apply settings"); ctx->Yield(2);
+			ctx->ScrollToItemY("Confirm World reset"); ctx->Sleep(1);
+			driver.click(ctx, "Confirm World reset"); ctx->Yield(2);
+			world->resumeSimulation(); REQ(world->advanceTicks(1), "Recurring editor tick failed");
+			world->pauseSimulation(); ctx->Yield(2);
+			REQ(world->getStationSystemsSnapshot().transfers[1].hasNextOccurrence
+				&& driver.contains("waiting for next occurrence") && driver.contains("next occurrence at 1.000000 s")
+				&& driver.contains("occurrence count 1"), "Recurring form next/count readouts missing");
 				});
 		#undef REQ
 		require(driver.passed(), "transferWorkflow failed on the Test Engine");

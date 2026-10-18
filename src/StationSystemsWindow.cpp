@@ -1520,10 +1520,11 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 		{
 			ImGui::Text("%s: Scheduled %s -> %s | %s | requested %.3f, moved %.3f, unmet %.3f %s (priority %d)",
 				transfer.id.c_str(), transfer.sourceId.c_str(), transfer.destinationId.c_str(),
-				!transfer.occurrencesFired ? "waiting" : transfer.lastUnmet > 0 ? "completed (blocked/partial)" : "completed",
+				transfer.hasNextOccurrence ? "waiting for next occurrence" : transfer.lastUnmet > 0 ? "completed one-off (blocked/partial)" : "completed one-off",
 				transfer.lastRequested, transfer.lastCompleted, transfer.lastUnmet, transfer.unit.c_str(), transfer.priority);
-			ImGui::Text("  occurrence at %.3f s | count %llu | %s", transfer.firstOccurrenceSeconds,
+			ImGui::Text("  occurrence count %llu | last outcome: %s",
 				static_cast<unsigned long long>(transfer.occurrencesFired), transfer.limitingReason.c_str());
+			if (transfer.hasNextOccurrence) ImGui::Text("  next occurrence at %.6f s", transfer.nextOccurrenceSeconds);
 			continue;
 		}
 		ImGui::Text("%s: %s -> %s (%s) %s | requested %.3f, completed %.3f, unmet %.3f (rate %.3f/s, priority %d)",
