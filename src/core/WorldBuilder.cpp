@@ -1246,7 +1246,7 @@ namespace core
 					if (sectors[1]->getType() != SectorType::Lift)
 						return reject("The complete lift width must overlap one corridor");
 				}
-				else if (!back) return reject("A Room, Corridor, Facade on the Layer behind is required here");
+				else if (!back) return reject("A Room, Corridor or Facade on the Layer behind is required here");
 				// Only the authored Layer owns the Door's cell occupancy. Objects and
 				// Markers on the destination Layer remain independent.
 				if (foreCell.hasObject() || !foreCell.markers.empty())
