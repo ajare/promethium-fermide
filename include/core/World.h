@@ -51,6 +51,7 @@ namespace core
 	class AgentBehaviourRegistry;
 	class PlacementValidator;
 	class AgentGroupRegistry;
+	class PermissionRequirementStore;
 
 	class World : public Serializable
 	{
@@ -69,6 +70,10 @@ namespace core
 		// The Agent group registry owns no state; it reads and edits the
 		// registries below on the World's behalf (ADR 0022).
 		friend class AgentGroupRegistry;
+		// The permission requirement store owns no state; it reads and edits
+		// the registries and authored requirement maps below on the World's
+		// behalf (ADR 0022).
+		friend class PermissionRequirementStore;
 		friend struct WorldAgentRestorationTestAccess;
 		friend struct PhysicalControlLookupTestAccess;
 		friend struct QueuedPressLookupTestAccess;
@@ -600,6 +605,15 @@ namespace core
 		// caller reaches these operations; the registry owns no state and
 		// reaches the registries below through this World.
 		std::unique_ptr<AgentGroupRegistry> mAgentGroupRegistry;
+
+		// The authored `*PermissionRequirement` get/set behaviour lives in the
+		// permission requirement store (ADR 0022). World keeps ownership of
+		// the state it edits - the registries, the pending requirement map,
+		// and the authored control-requirement index (ADR 0001) - and stays
+		// the facade (design pattern) through which every caller reaches
+		// these operations; the store owns no state and reaches them through
+		// this World.
+		std::unique_ptr<PermissionRequirementStore> mPermissionRequirementStore;
 
 		// Every World owns one sandboxed Lua runtime for its Agent types. It is
 		// declared before mAgents so Agent destruction (which releases live Lua
@@ -1280,7 +1294,6 @@ namespace core
 		void restoreFurniture(ConstructionRecord const& record);
 		bool markerHasNoBehaviourReferences(MarkerId id, std::string* diagnostic) const;
 		std::string furnitureSupportDiagnostic(uint32_t sector, uint32_t x, uint32_t y) const;
-		ConstructionRecord const* findLocationPermissionRecord(uint32_t sectorIndex) const;
 		ConstructionRecord const* findLiftDestinationRecord(uint32_t sectorIndex, uint32_t objectIndex = ~0u) const;
 		ConstructionRecord const* findLiftDestinationRecord(TraversalResource const& resource) const;
 		std::vector<ConstructionRecord> mConstructionRecords;

@@ -141,6 +141,7 @@ namespace core
 		friend class World;
 		friend class SimulationCoordinator;
 		friend class PlacementValidator;
+		friend class PermissionRequirementStore; // ADR 0022 requirement edits
 
 		std::string mName;
 		BoothWindowId mBoothWindowOwner;
@@ -339,6 +340,7 @@ namespace core
 		friend class World;
 		friend class SimulationCoordinator;
 		friend class PlacementValidator;
+		friend class PermissionRequirementStore; // ADR 0022 requirement edits
 		std::string mName;
 		std::shared_ptr<Door> mDoor;
 		std::shared_ptr<Window> mWindow;

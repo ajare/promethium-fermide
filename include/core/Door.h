@@ -20,6 +20,7 @@ namespace core
 	{
 		friend class World;
 		friend class SimulationCoordinator;
+		friend class PermissionRequirementStore; // ADR 0022 requirement edits
 	public:
 		// The authored visual manner in which the Door's leaf or leaves reveal its
 		// threshold. OpenApart's two leaves remain one logical Door. A tall OpenUp

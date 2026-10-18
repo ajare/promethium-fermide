@@ -45,6 +45,7 @@ for source in sorted(cmake_owners.keys() - actual_module_sources):
 standalone_owners = {
     "AgentGroupRegistryChecks.cpp": "pf-agent-group-registry-checks",
     "OccupantPackingChecks.cpp": "pf-occupant-packing-checks",
+    "PermissionRequirementStoreChecks.cpp": "pf-permission-requirement-store-checks",
     "PlacementValidatorChecks.cpp": "pf-placement-validator-checks",
     "SectorTilesetChecks.cpp": "pf-sector-tileset-checks",
     "SimulationStepTimingChecks.cpp": "pf-simulation-step-timing-checks",
