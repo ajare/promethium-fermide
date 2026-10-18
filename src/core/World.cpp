@@ -43,26 +43,12 @@
 #include "core/BulkheadDoor.h"
 #include "core/DoorEdge.h"
 #include "core/Exceptions.h"
+#include "core/RegistryBinding.h"
 #include "core/SerializationException.h"
 
 
 namespace core
 {
-	namespace
-	{
-		// An external registry/catalogue reference is an application Resource name
-		// (ADR 0010), not a file path: a non-empty name with no directory part.
-		void requireCatalogResourceName(std::string const& resourceName, char const* kind)
-		{
-			std::filesystem::path const path(resourceName);
-			if (resourceName.empty() || path.is_absolute() || path.has_parent_path()
-				|| path.filename().string() != resourceName)
-				throw std::invalid_argument(std::string("A ") + kind
-					+ " reference must be a Resource name");
-		}
-	}
-
-
 	using namespace std;
 
 	// The shuttle door-offset helper - expanding a carriage's door mask into the cells
@@ -143,6 +129,11 @@ namespace core
 		, mAgentBehaviourRuntime(std::make_unique<AgentBehaviourRuntimeAdapter>(
 			behaviourRuntimeLimits))
 	{
+		// The registry bindings are configured before anything can reach
+		// them; they hold references to the World-owned state, not the
+		// state itself (#676, ADR 0022).
+		configureAgentTagRegistryBinding();
+		configureAgentBehaviourRegistryBinding();
 		// Refuse an unsupported size before any Layer is allocated or any cell
 		// buffer is sized, so a wrapped product can never become an empty Layer
 		// that still validates in-bounds reads (#184).
@@ -223,33 +214,456 @@ namespace core
 		return true;
 	}
 
+	// The tag family policy: every tag-specific guard and clearing step the
+	// shared binding runs at the point where the previous duplicated method
+	// performed it. The binding keeps the ordering contract; the policy keeps
+	// the tag semantics exactly as they were (#676).
+	void World::configureAgentTagRegistryBinding()
+	{
+		RegistryBinding<AgentTagRegistry>::Policy policy;
+		policy.label = "Agent tag registry";
+		policy.preflightAttach = [this](AgentTagRegistry& registry, bool)
+			-> CommitHook
+		{
+			if (getAgentTagAssignmentCount() != 0)
+			{
+				throw invalid_argument(
+					"Cannot switch Agent tag registries while Agent tag assignments exist; use the confirmed destructive action to clear assignments and samples first");
+			}
+			string diagnostic;
+			if (!agentTagAssignmentsAreValid(registry, &diagnostic))
+				throw invalid_argument(diagnostic);
+			return {};
+		};
+		policy.preflightAttachAndClear = [this](AgentTagRegistry&)
+			-> CommitHook
+		{
+			string diagnostic;
+			if (!allAgentTagAssignmentsCanBeCleared(&diagnostic))
+				throw invalid_argument(diagnostic);
+			// Construct and register the replacement before changing any
+			// authored state. Everything after registration is non-refusing,
+			// so clearing assignments, clearing samples, and changing the
+			// namespace commit as one operation.
+			return [this] { clearAllAgentTagAssignmentsAndSamples(); };
+		};
+		policy.guardDetach = [this]
+		{
+			if (getAgentTagAssignmentCount() != 0 || getAgentTagSampleCount() != 0)
+			{
+				throw invalid_argument(
+					"Cannot detach the Agent tag registry while assignments or samples exist; use the confirmed destructive action to clear them first");
+			}
+		};
+		policy.clearAssignmentsBeforeDetach = [this]
+		{
+			clearAllAgentTagAssignmentsAndSamples();
+			return CommitHook{};
+		};
+		policy.resolveBody = [this](shared_ptr<AgentTagRegistry> registry,
+			shared_ptr<AgentTagRegistry>& registrySlot)
+		{
+			// Reconciliation is completed before registration, so a refusal
+			// neither exposes this World through the shared registry nor
+			// changes any Agent.
+			reconcileAgentTagAssignments(*registry);
+			if (registrySlot) registrySlot->unregisterWorld(*this);
+			registrySlot = std::move(registry);
+			registrySlot->registerWorld(*this);
+
+			// Saved route intent stays unevaluated until reconciliation has
+			// made every tag-supplied routing property and persisted sample
+			// effective (#194, #221).
+			rebuildRestoredAgentPaths();
+		};
+		policy.preflightReplaceCopy = [this](string const&,
+			shared_ptr<AgentTagRegistry> const& replacement)
+			-> CommitHook
+		{
+			if (!mAgentTagRegistry || !mAgentTagRegistryReference)
+				throw invalid_argument(
+					"The World has no attached Agent tag registry to copy");
+			if (!replacement
+				|| !AgentTagRegistry::uuidIsValid(replacement->getUuid()))
+				throw invalid_argument(
+					"Cannot attach an invalid Agent tag registry copy");
+			if (replacement == mAgentTagRegistry
+				|| replacement->getUuid() == mAgentTagRegistry->getUuid())
+				throw invalid_argument(
+					"An Agent tag registry copy must have a new UUID");
+			if (!mAgentTagRegistry->hasEquivalentDefinitions(*replacement))
+				throw invalid_argument(
+					"An Agent tag registry copy must preserve every definition and allocator");
+
+			string diagnostic;
+			if (!agentTagAssignmentsAreValid(*replacement, &diagnostic))
+				throw invalid_argument(diagnostic);
+			return {};
+		};
+		mAgentTagRegistryBinding = std::make_unique<RegistryBinding<AgentTagRegistry>>(
+			*this, std::move(policy), mAgentTagRegistryReference,
+			mAgentTagRegistry);
+	}
+
+	// The behaviour family policy: pause gates, namespace-use guards, schema
+	// inspection, candidate-runtime preflight, and the live runtime swap the
+	// shared binding runs at exactly the points where the previous
+	// duplicated methods performed them (#676).
+	void World::configureAgentBehaviourRegistryBinding()
+	{
+		RegistryBinding<AgentBehaviourRegistry>::Policy policy;
+		policy.label = "Agent behaviour registry";
+		policy.requirePausedForAttach = [this]
+		{
+			if (!isSimulationPaused())
+				throw invalid_argument(
+					"Pause the World before changing its Agent behaviour registry");
+		};
+		policy.requirePausedForAttachAndClear = [this]
+		{
+			if (!isSimulationPaused())
+				throw invalid_argument(
+					"Pause the World before replacing its Agent behaviour registry");
+		};
+		policy.requirePausedForDetach = [this]
+		{
+			if (!isSimulationPaused())
+				throw invalid_argument(
+					"Pause the World before detaching its Agent behaviour registry");
+		};
+		policy.requirePausedForReplaceCopy = [this]
+		{
+			if (!isSimulationPaused())
+				throw invalid_argument(
+					"Pause the World before replacing its Agent behaviour registry with a Save As copy");
+		};
+		// A behaviour switch that keeps the same persisted reference is not a
+		// World change; only a changed reference dirties the document.
+		policy.modifyOnlyIfReferenceChanged = true;
+		// The destructive switch must never skip its clearing because the
+		// caller passed the already-attached registry.
+		policy.attachAndClearIdenticalIsNoOp = false;
+		policy.preflightAttach = [this](AgentBehaviourRegistry& registry,
+			bool sameNamespace) -> CommitHook
+		{
+			if (countAgentBehaviourAssignments() != 0 && !sameNamespace)
+			{
+				throw invalid_argument(
+					"Cannot replace a used Agent behaviour registry; use the confirmed destructive action to clear every assignment and configuration first");
+			}
+			string assignmentDiagnostic;
+			if (!inspectAgentBehaviourAssignments(registry,
+				&assignmentDiagnostic))
+				throw invalid_argument(assignmentDiagnostic);
+
+			// Build every assigned factory in a private candidate runtime
+			// before the shared dependency list, persisted reference,
+			// assignments, or live runtime changes. A repaired expected
+			// package therefore becomes usable as one operation and a bad
+			// factory leaves the unresolved World untouched.
+			unique_ptr<AgentBehaviourRuntimeAdapter> candidateRuntime;
+			vector<AgentBehaviourRuntimeDiagnostic> runtimeDiagnostics;
+			if (!AgentBehaviourRuntimeAdapter::prepareReload(*this, registry,
+				candidateRuntime, runtimeDiagnostics))
+			{
+				string details;
+				for (auto const& item : runtimeDiagnostics)
+					details += (details.empty() ? "" : "\n") + format(
+						"Agent '{}' ({}), module '{}': {}", item.agentName,
+						item.agent.value, item.moduleName, item.diagnostic);
+				throw invalid_argument("Agent behaviour runtime preflight failed"
+					+ (details.empty() ? string{} : ":\n" + details));
+			}
+			return [this, candidate = std::move(candidateRuntime)]() mutable
+			{
+				mAgentBehaviourRuntime->teardownAll(*this,
+					AgentBehaviourTeardownReason::Reload);
+				candidate->appendDiagnostics(
+					mAgentBehaviourRuntime->consumeDiagnostics());
+				mAgentBehaviourRuntime = std::move(candidate);
+			};
+		};
+		policy.afterAttach = [this]
+		{
+			mAgentBehaviourDependencyDiagnostic.clear();
+			for (auto const& [agentId, agent] : mAgents.entries())
+				if (agent && agent->getBehaviourAssignment()
+					&& !agent->isPlayerControlled())
+					mSimulationCoordinator.clearAgentMovementForBehaviourEdit(
+						agentId);
+		};
+		policy.preflightAttachAndClear = [this](AgentBehaviourRegistry&)
+			-> CommitHook
+		{
+			// Allocation and shared registration are the only potentially
+			// refusing in-memory steps. Complete them before any authored
+			// configuration is lost.
+			auto candidateRuntime = make_unique<AgentBehaviourRuntimeAdapter>(
+				mAgentBehaviourRuntime->getLimits());
+			return [this, candidate = std::move(candidateRuntime)]() mutable
+			{
+				mAgentBehaviourRuntime->teardownAll(*this,
+					AgentBehaviourTeardownReason::Unassignment);
+				candidate->appendDiagnostics(
+					mAgentBehaviourRuntime->consumeDiagnostics());
+				for (auto const& [agentId, agent] : mAgents.entries())
+				{
+					if (!agent || !agent->getBehaviourAssignment()
+						|| agent->isPlayerControlled()) continue;
+					mSimulationCoordinator.clearAgentMovementForBehaviourEdit(
+						agentId);
+					agent->clearBehaviourAssignment();
+				}
+				mAgentBehaviourRuntime = std::move(candidate);
+			};
+		};
+		policy.afterAttachAndClear = [this]
+		{
+			mAgentBehaviourDependencyDiagnostic.clear();
+		};
+		policy.afterReplaceCopy = [this]
+		{
+			// The Save As swap resolves the dependency: the copied package
+			// is attached, so any stale unavailable diagnostic is cleared.
+			mAgentBehaviourDependencyDiagnostic.clear();
+		};
+		policy.guardDetach = [this]
+		{
+			if (countAgentBehaviourAssignments() != 0)
+				throw invalid_argument(
+					"Cannot detach a used Agent behaviour registry; use the confirmed destructive action to clear every assignment and configuration first");
+		};
+		policy.clearAssignmentsBeforeDetach = [this]
+		{
+			auto candidateRuntime = make_unique<AgentBehaviourRuntimeAdapter>(
+				mAgentBehaviourRuntime->getLimits());
+			mAgentBehaviourRuntime->teardownAll(*this,
+				AgentBehaviourTeardownReason::Unassignment);
+			candidateRuntime->appendDiagnostics(
+				mAgentBehaviourRuntime->consumeDiagnostics());
+			for (auto const& [agentId, agent] : mAgents.entries())
+			{
+				if (!agent || !agent->getBehaviourAssignment()
+					|| agent->isPlayerControlled()) continue;
+				mSimulationCoordinator.clearAgentMovementForBehaviourEdit(
+					agentId);
+				agent->clearBehaviourAssignment();
+			}
+			return [this, candidate = std::move(candidateRuntime)]() mutable
+			{
+				mAgentBehaviourRuntime = std::move(candidate);
+			};
+		};
+		policy.afterDetach = [this]
+		{
+			mAgentBehaviourDependencyDiagnostic.clear();
+		};
+		policy.resolveBody = [this](shared_ptr<AgentBehaviourRegistry> registry,
+			shared_ptr<AgentBehaviourRegistry>& registrySlot)
+		{
+			auto previousRegistry = registrySlot;
+			auto const registryChanges = previousRegistry != registry;
+			if (registryChanges) registry->registerWorld(*this);
+			auto rollbackRegistry = [&]
+			{
+				if (registryChanges) registry->unregisterWorld(*this);
+			};
+
+			AgentBehaviourSchemaMigrationPreview preview;
+			string previewDiagnostic;
+			if (!registry->previewDefinitionsFrom(*registry, preview,
+				&previewDiagnostic))
+			{
+				rollbackRegistry();
+				throw invalid_argument(previewDiagnostic);
+			}
+			map<AgentId, AgentBehaviourAssignment> reconciled;
+			vector<string> mismatches;
+			for (auto const& item : preview.configurations)
+			{
+				if (item.world != this) continue;
+				if (item.fromRevision == item.toRevision)
+				{
+					string details;
+					for (auto const& field : item.fields)
+						details += (details.empty() ? "" : "; ") + field.diagnostic;
+					mismatches.push_back(format(
+						"World '{}' / Agent '{}' ({}): {}", getName(),
+						item.agentName, item.agent.value, details));
+					continue;
+				}
+				if (item.compatibility
+					== AgentBehaviourSchemaCompatibility::Incompatible)
+				{
+					string fields;
+					for (auto const& field : item.fields)
+						fields += (fields.empty() ? "" : ", ") + field.path
+							+ " (" + field.diagnostic + ")";
+					mismatches.push_back(format(
+						"World '{}' / Agent '{}' ({}) / {}: {}",
+						getName(), item.agentName, item.agent.value,
+						item.behaviourName, fields));
+					continue;
+				}
+				auto const* agent = mAgents.find(item.agent);
+				auto const* definition =
+					registry->lookupAgentBehaviour(item.behaviour);
+				if (!agent || !agent->getBehaviourAssignment() || !definition)
+				{
+					rollbackRegistry();
+					throw invalid_argument(
+						"An Agent behaviour reconciliation target disappeared");
+				}
+				AgentBehaviourConfiguration normalized;
+				string validation;
+				if (!validateAgentBehaviourAssignmentAgainst(*registry,
+					item.behaviour, definition->getRevision(),
+					agent->getBehaviourAssignment()->configuration,
+					&normalized, &validation))
+				{
+					rollbackRegistry();
+					throw invalid_argument(validation);
+				}
+				reconciled[item.agent] = AgentBehaviourAssignment{
+					item.behaviour, definition->getRevision(),
+					std::move(normalized) };
+			}
+			if (!mismatches.empty())
+			{
+				registrySlot = registry;
+				mAgentBehaviourDependencyDiagnostic.clear();
+				for (auto const& mismatch : mismatches)
+					mAgentBehaviourDependencyDiagnostic +=
+						(mAgentBehaviourDependencyDiagnostic.empty() ? ""
+							: "\n") + mismatch;
+				mSimulationPaused = true;
+				if (registryChanges && previousRegistry)
+					previousRegistry->unregisterWorld(*this);
+				return;
+			}
+
+			unique_ptr<AgentBehaviourRuntimeAdapter> candidateRuntime;
+			vector<AgentBehaviourRuntimeDiagnostic> runtimeDiagnostics;
+			if (!AgentBehaviourRuntimeAdapter::prepareReload(*this, *registry,
+				candidateRuntime, runtimeDiagnostics,
+				reconciled.empty() ? nullptr : &reconciled))
+			{
+				rollbackRegistry();
+				string details;
+				for (auto const& item : runtimeDiagnostics)
+					details += (details.empty() ? "" : "\n") + format(
+						"Agent '{}' ({}), module '{}': {}", item.agentName,
+						item.agent.value, item.moduleName, item.diagnostic);
+				throw invalid_argument("Agent behaviour runtime preflight failed"
+					+ (details.empty() ? string{} : ":\n" + details));
+			}
+
+			mAgentBehaviourRuntime->teardownAll(*this,
+				AgentBehaviourTeardownReason::Reload);
+			candidateRuntime->appendDiagnostics(
+				mAgentBehaviourRuntime->consumeDiagnostics());
+			mAgentBehaviourRuntime = std::move(candidateRuntime);
+			registrySlot = registry;
+			for (auto& [agentId, assignment] : reconciled)
+			{
+				auto* agent = mAgents.find(agentId);
+				if (agent) agent->setBehaviourAssignment(std::move(assignment));
+			}
+			if (!reconciled.empty()) modify();
+			mAgentBehaviourDependencyDiagnostic.clear();
+			if (registryChanges && previousRegistry)
+				previousRegistry->unregisterWorld(*this);
+			for (auto const& [agentId, agent] : mAgents.entries())
+				if (agent && agent->getBehaviourAssignment()
+					&& !agent->isPlayerControlled())
+					mSimulationCoordinator.clearAgentMovementForBehaviourEdit(
+						agentId);
+		};
+		policy.preflightReplaceCopy = [this](string const&,
+			shared_ptr<AgentBehaviourRegistry> const& replacement)
+			-> CommitHook
+		{
+			if (!mAgentBehaviourRegistry || !replacement)
+				throw invalid_argument(
+					"Save As requires attached source and copied Agent behaviour registries");
+			if (replacement == mAgentBehaviourRegistry
+				|| replacement->getUuid()
+					== mAgentBehaviourRegistry->getUuid())
+				throw invalid_argument(
+					"An Agent behaviour registry copy must have a new UUID");
+			if (!mAgentBehaviourRegistry->hasEquivalentDefinitions(
+					*replacement))
+				throw invalid_argument(
+					"An Agent behaviour registry copy must preserve every definition, revision, and allocator");
+			string assignmentDiagnostic;
+			if (!inspectAgentBehaviourAssignments(*replacement,
+				&assignmentDiagnostic))
+				throw invalid_argument(assignmentDiagnostic);
+
+			unique_ptr<AgentBehaviourRuntimeAdapter> candidateRuntime;
+			vector<AgentBehaviourRuntimeDiagnostic> runtimeDiagnostics;
+			if (!AgentBehaviourRuntimeAdapter::prepareReload(*this,
+				*replacement, candidateRuntime, runtimeDiagnostics))
+				throw invalid_argument(
+					"Copied Agent behaviour package runtime preflight failed");
+			return [this, candidate = std::move(candidateRuntime)]() mutable
+			{
+				mAgentBehaviourRuntime->teardownAll(*this,
+					AgentBehaviourTeardownReason::Reload);
+				candidate->appendDiagnostics(
+					mAgentBehaviourRuntime->consumeDiagnostics());
+				mAgentBehaviourRuntime = std::move(candidate);
+			};
+		};
+		policy.markUnavailable = [this](
+			AgentBehaviourRegistryReference const& reference,
+			string diagnostic)
+		{
+			// An admitted in-memory registry/runtime is not discarded merely
+			// because a later disk resolution attempt failed. Freshly
+			// deserialized Worlds have no attachment here; explicit
+			// replacement failures therefore preserve the old dependency and
+			// runtime as well.
+			mAgentBehaviourDependencyDiagnostic = format(
+				"Agent behaviour registry dependency '{}' is unavailable. {} authored assignment{} remain{} unresolved.\n{}",
+				reference.resourceName,
+				countAgentBehaviourAssignments(),
+				countAgentBehaviourAssignments() == 1 ? "" : "s",
+				countAgentBehaviourAssignments() == 1 ? "s" : "",
+				std::move(diagnostic));
+			mSimulationPaused = true;
+		};
+		mAgentBehaviourRegistryBinding =
+			std::make_unique<RegistryBinding<AgentBehaviourRegistry>>(
+				*this, std::move(policy),
+				mAgentBehaviourRegistryReference, mAgentBehaviourRegistry);
+	}
+
+	// The tag/behaviour registry reference and attachment queries forward to
+	// the shared RegistryBinding state machine (#676, ADR 0022).
 	bool World::hasAgentTagRegistryReference() const
 	{
-		return mAgentTagRegistryReference.has_value();
+		return mAgentTagRegistryBinding->hasReference();
 	}
 
 	bool World::hasAttachedAgentTagRegistry() const
 	{
-		return mAgentTagRegistry != nullptr;
+		return mAgentTagRegistryBinding->hasAttachedRegistry();
 	}
 
 	string const& World::getAgentTagRegistryResourceName() const
 	{
-		if (!mAgentTagRegistryReference)
-			throw runtime_error("The World has no Agent tag registry reference");
-		return mAgentTagRegistryReference->resourceName;
+		return mAgentTagRegistryBinding->resourceName();
 	}
 
 	string const& World::getExpectedAgentTagRegistryUuid() const
 	{
-		if (!mAgentTagRegistryReference)
-			throw runtime_error("The World has no Agent tag registry reference");
-		return mAgentTagRegistryReference->expectedUuid;
+		return mAgentTagRegistryBinding->expectedUuid();
 	}
 
 	shared_ptr<AgentTagRegistry> const& World::getAgentTagRegistry() const
 	{
-		return mAgentTagRegistry;
+		return mAgentTagRegistryBinding->registry();
 	}
 
 	uint64_t World::getAgentTagAssignmentCount() const
@@ -301,168 +715,62 @@ namespace core
 	void World::attachAgentTagRegistry(string resourceName,
 		shared_ptr<AgentTagRegistry> registry)
 	{
-		invalidateSimulationSnapshot();
-		requireCatalogResourceName(resourceName, "Agent tag registry");
-		if (!registry || !AgentTagRegistry::uuidIsValid(registry->getUuid()))
-			throw invalid_argument("Cannot attach an invalid Agent tag registry");
-		if (mAgentTagRegistryReference
-			&& mAgentTagRegistryReference->resourceName == resourceName
-			&& mAgentTagRegistryReference->expectedUuid == registry->getUuid()
-			&& mAgentTagRegistry == registry) return;
-		if (getAgentTagAssignmentCount() != 0)
-		{
-			throw invalid_argument(
-				"Cannot switch Agent tag registries while Agent tag assignments exist; use the confirmed destructive action to clear assignments and samples first");
-		}
-		string diagnostic;
-		if (!agentTagAssignmentsAreValid(*registry, &diagnostic))
-			throw invalid_argument(diagnostic);
-
-		AgentTagRegistryReference replacement{ std::move(resourceName), registry->getUuid() };
-		auto const registryChanges = mAgentTagRegistry != registry;
-		if (registryChanges) registry->registerWorld(*this);
-		if (registryChanges && mAgentTagRegistry)
-			mAgentTagRegistry->unregisterWorld(*this);
-		mAgentTagRegistryReference = std::move(replacement);
-		mAgentTagRegistry = std::move(registry);
-		modify();
+		mAgentTagRegistryBinding->attach(std::move(resourceName),
+			std::move(registry));
 	}
 
 	void World::attachAgentTagRegistryAndClearAssignments(string resourceName,
 		shared_ptr<AgentTagRegistry> registry)
 	{
-		invalidateSimulationSnapshot();
-		requireCatalogResourceName(resourceName, "Agent tag registry");
-		if (!registry || !AgentTagRegistry::uuidIsValid(registry->getUuid()))
-			throw invalid_argument("Cannot attach an invalid Agent tag registry");
-		if (mAgentTagRegistryReference
-			&& mAgentTagRegistryReference->resourceName == resourceName
-			&& mAgentTagRegistryReference->expectedUuid == registry->getUuid()
-			&& mAgentTagRegistry == registry) return;
-
-		string diagnostic;
-		if (!allAgentTagAssignmentsCanBeCleared(&diagnostic)) throw invalid_argument(diagnostic);
-		// Construct and register the replacement before changing any authored state.
-		// Everything after registration is non-refusing, so clearing assignments,
-		// clearing samples, and changing namespace commit as one operation.
-		AgentTagRegistryReference replacement{ std::move(resourceName), registry->getUuid() };
-		auto const registryChanges = mAgentTagRegistry != registry;
-		if (registryChanges) registry->registerWorld(*this);
-		clearAllAgentTagAssignmentsAndSamples();
-		if (registryChanges && mAgentTagRegistry)
-			mAgentTagRegistry->unregisterWorld(*this);
-		mAgentTagRegistryReference = std::move(replacement);
-		mAgentTagRegistry = std::move(registry);
-		modify();
+		mAgentTagRegistryBinding->attachAndClearAssignments(
+			std::move(resourceName), std::move(registry));
 	}
 
 	void World::detachAgentTagRegistry()
 	{
-		invalidateSimulationSnapshot();
-		if (!mAgentTagRegistryReference) return;
-		if (getAgentTagAssignmentCount() != 0 || getAgentTagSampleCount() != 0)
-		{
-			throw invalid_argument(
-				"Cannot detach the Agent tag registry while assignments or samples exist; use the confirmed destructive action to clear them first");
-		}
-		if (mAgentTagRegistry) mAgentTagRegistry->unregisterWorld(*this);
-		mAgentTagRegistry.reset();
-		mAgentTagRegistryReference.reset();
-		modify();
+		mAgentTagRegistryBinding->detach();
 	}
 
 	void World::detachAgentTagRegistryAndClearAssignments()
 	{
-		invalidateSimulationSnapshot();
-		if (!mAgentTagRegistryReference) return;
-		clearAllAgentTagAssignmentsAndSamples();
-		if (mAgentTagRegistry) mAgentTagRegistry->unregisterWorld(*this);
-		mAgentTagRegistry.reset();
-		mAgentTagRegistryReference.reset();
-		modify();
+		mAgentTagRegistryBinding->detachAndClearAssignments();
 	}
 
 	void World::resolveAgentTagRegistry(shared_ptr<AgentTagRegistry> registry)
 	{
-		invalidateSimulationSnapshot();
-		if (!mAgentTagRegistryReference)
-			throw invalid_argument("The World has no Agent tag registry reference to resolve");
-		if (!registry)
-			throw invalid_argument("Cannot resolve a null Agent tag registry");
-		if (registry->getUuid() != mAgentTagRegistryReference->expectedUuid)
-		{
-			throw runtime_error(format(
-				"Agent tag registry UUID mismatch: World expects {}, file contains {}",
-				mAgentTagRegistryReference->expectedUuid, registry->getUuid()));
-		}
-
-		// Reconciliation is completed before registration, so a refusal neither
-		// exposes this World through the shared registry nor changes any Agent.
-		reconcileAgentTagAssignments(*registry);
-		if (mAgentTagRegistry) mAgentTagRegistry->unregisterWorld(*this);
-		mAgentTagRegistry = std::move(registry);
-		mAgentTagRegistry->registerWorld(*this);
-
-		// Saved route intent stays unevaluated until reconciliation has made every
-		// tag-supplied routing property and persisted sample effective (#194, #221).
-		rebuildRestoredAgentPaths();
+		mAgentTagRegistryBinding->resolve(std::move(registry));
 	}
 
 	void World::replaceAgentTagRegistryWithIndependentCopy(string resourceName,
 		shared_ptr<AgentTagRegistry> registry)
 	{
-		invalidateSimulationSnapshot();
-		requireCatalogResourceName(resourceName, "Agent tag registry");
-		if (!mAgentTagRegistry || !mAgentTagRegistryReference)
-			throw invalid_argument("The World has no attached Agent tag registry to copy");
-		if (!registry || !AgentTagRegistry::uuidIsValid(registry->getUuid()))
-			throw invalid_argument("Cannot attach an invalid Agent tag registry copy");
-		if (registry == mAgentTagRegistry
-			|| registry->getUuid() == mAgentTagRegistry->getUuid())
-			throw invalid_argument("An Agent tag registry copy must have a new UUID");
-		if (!mAgentTagRegistry->hasEquivalentDefinitions(*registry))
-			throw invalid_argument(
-				"An Agent tag registry copy must preserve every definition and allocator");
-
-		string diagnostic;
-		if (!agentTagAssignmentsAreValid(*registry, &diagnostic))
-			throw invalid_argument(diagnostic);
-
-		AgentTagRegistryReference replacement{ std::move(resourceName), registry->getUuid() };
-		registry->registerWorld(*this);
-		mAgentTagRegistry->unregisterWorld(*this);
-		mAgentTagRegistryReference = std::move(replacement);
-		mAgentTagRegistry = std::move(registry);
-		modify();
+		mAgentTagRegistryBinding->replaceWithIndependentCopy(
+			std::move(resourceName), std::move(registry));
 	}
 
 	bool World::hasAgentBehaviourRegistryReference() const
 	{
-		return mAgentBehaviourRegistryReference.has_value();
+		return mAgentBehaviourRegistryBinding->hasReference();
 	}
 
 	bool World::hasAttachedAgentBehaviourRegistry() const
 	{
-		return mAgentBehaviourRegistry != nullptr;
+		return mAgentBehaviourRegistryBinding->hasAttachedRegistry();
 	}
 
 	string const& World::getAgentBehaviourRegistryResourceName() const
 	{
-		if (!mAgentBehaviourRegistryReference)
-			throw runtime_error("The World has no Agent behaviour registry reference");
-		return mAgentBehaviourRegistryReference->resourceName;
+		return mAgentBehaviourRegistryBinding->resourceName();
 	}
 
 	string const& World::getExpectedAgentBehaviourRegistryUuid() const
 	{
-		if (!mAgentBehaviourRegistryReference)
-			throw runtime_error("The World has no Agent behaviour registry reference");
-		return mAgentBehaviourRegistryReference->expectedUuid;
+		return mAgentBehaviourRegistryBinding->expectedUuid();
 	}
 
 	shared_ptr<AgentBehaviourRegistry> const& World::getAgentBehaviourRegistry() const
 	{
-		return mAgentBehaviourRegistry;
+		return mAgentBehaviourRegistryBinding->registry();
 	}
 
 	namespace
@@ -599,326 +907,43 @@ namespace core
 	void World::attachAgentBehaviourRegistry(string resourceName,
 		shared_ptr<AgentBehaviourRegistry> registry)
 	{
-		invalidateSimulationSnapshot();
-		if (!isSimulationPaused())
-			throw invalid_argument("Pause the World before changing its Agent behaviour registry");
-		requireCatalogResourceName(resourceName, "Agent behaviour registry");
-		if (!registry || !AgentBehaviourRegistry::uuidIsValid(registry->getUuid()))
-			throw invalid_argument("Cannot attach an invalid Agent behaviour registry");
-		if (mAgentBehaviourRegistryReference
-			&& mAgentBehaviourRegistryReference->resourceName == resourceName
-			&& mAgentBehaviourRegistryReference->expectedUuid == registry->getUuid()
-			&& mAgentBehaviourRegistry == registry) return;
-
-		auto const sameNamespace = mAgentBehaviourRegistryReference
-			&& mAgentBehaviourRegistryReference->expectedUuid == registry->getUuid();
-		if (countAgentBehaviourAssignments() != 0 && !sameNamespace)
-		{
-			throw invalid_argument(
-				"Cannot replace a used Agent behaviour registry; use the confirmed destructive action to clear every assignment and configuration first");
-		}
-		string assignmentDiagnostic;
-		if (!inspectAgentBehaviourAssignments(*registry, &assignmentDiagnostic))
-			throw invalid_argument(assignmentDiagnostic);
-
-		// Build every assigned factory in a private candidate runtime before the
-		// shared dependency list, persisted reference, assignments, or live runtime
-		// changes. A repaired expected package therefore becomes usable as one
-		// operation and a bad factory leaves the unresolved World untouched.
-		unique_ptr<AgentBehaviourRuntimeAdapter> candidateRuntime;
-		vector<AgentBehaviourRuntimeDiagnostic> runtimeDiagnostics;
-		if (!AgentBehaviourRuntimeAdapter::prepareReload(*this, *registry,
-			candidateRuntime, runtimeDiagnostics))
-		{
-			string details;
-			for (auto const& item : runtimeDiagnostics)
-				details += (details.empty() ? "" : "\n") + format(
-					"Agent '{}' ({}), module '{}': {}", item.agentName,
-					item.agent.value, item.moduleName, item.diagnostic);
-			throw invalid_argument("Agent behaviour runtime preflight failed"
-				+ (details.empty() ? string{} : ":\n" + details));
-		}
-
-		AgentBehaviourRegistryReference replacement{ resourceName, registry->getUuid() };
-		auto const referenceChanges = !mAgentBehaviourRegistryReference
-			|| mAgentBehaviourRegistryReference->resourceName != replacement.resourceName
-			|| mAgentBehaviourRegistryReference->expectedUuid != replacement.expectedUuid;
-		auto previousRegistry = mAgentBehaviourRegistry;
-		auto const registryChanges = previousRegistry != registry;
-		if (registryChanges) registry->registerWorld(*this);
-		mAgentBehaviourRuntime->teardownAll(*this,
-			AgentBehaviourTeardownReason::Reload);
-		candidateRuntime->appendDiagnostics(
-			mAgentBehaviourRuntime->consumeDiagnostics());
-		mAgentBehaviourRuntime = std::move(candidateRuntime);
-		if (registryChanges && previousRegistry)
-			previousRegistry->unregisterWorld(*this);
-		mAgentBehaviourRegistryReference = std::move(replacement);
-		mAgentBehaviourRegistry = std::move(registry);
-		mAgentBehaviourDependencyDiagnostic.clear();
-		for (auto const& [agentId, agent] : mAgents.entries())
-			if (agent && agent->getBehaviourAssignment() && !agent->isPlayerControlled())
-				mSimulationCoordinator.clearAgentMovementForBehaviourEdit(agentId);
-		if (referenceChanges) modify();
+		mAgentBehaviourRegistryBinding->attach(std::move(resourceName),
+			std::move(registry));
 	}
 
-	void World::attachAgentBehaviourRegistryAndClearAssignments(string resourceName,
-		shared_ptr<AgentBehaviourRegistry> registry)
+	void World::attachAgentBehaviourRegistryAndClearAssignments(
+		string resourceName, shared_ptr<AgentBehaviourRegistry> registry)
 	{
-		invalidateSimulationSnapshot();
-		if (!isSimulationPaused())
-			throw invalid_argument("Pause the World before replacing its Agent behaviour registry");
-		requireCatalogResourceName(resourceName, "Agent behaviour registry");
-		if (!registry || !AgentBehaviourRegistry::uuidIsValid(registry->getUuid()))
-			throw invalid_argument("Cannot attach an invalid Agent behaviour registry");
-
-		// Allocation and shared registration are the only potentially refusing
-		// in-memory steps. Complete them before any authored configuration is lost.
-		auto candidateRuntime = make_unique<AgentBehaviourRuntimeAdapter>(
-			mAgentBehaviourRuntime->getLimits());
-		auto previousRegistry = mAgentBehaviourRegistry;
-		auto const registryChanges = previousRegistry != registry;
-		if (registryChanges) registry->registerWorld(*this);
-		mAgentBehaviourRuntime->teardownAll(*this,
-			AgentBehaviourTeardownReason::Unassignment);
-		candidateRuntime->appendDiagnostics(
-			mAgentBehaviourRuntime->consumeDiagnostics());
-		for (auto const& [agentId, agent] : mAgents.entries())
-		{
-			if (!agent || !agent->getBehaviourAssignment() || agent->isPlayerControlled()) continue;
-			mSimulationCoordinator.clearAgentMovementForBehaviourEdit(agentId);
-			agent->clearBehaviourAssignment();
-		}
-		if (registryChanges && previousRegistry)
-			previousRegistry->unregisterWorld(*this);
-		mAgentBehaviourRuntime = std::move(candidateRuntime);
-		mAgentBehaviourRegistryReference = AgentBehaviourRegistryReference{
-			std::move(resourceName), registry->getUuid() };
-		mAgentBehaviourRegistry = std::move(registry);
-		mAgentBehaviourDependencyDiagnostic.clear();
-		modify();
+		mAgentBehaviourRegistryBinding->attachAndClearAssignments(
+			std::move(resourceName), std::move(registry));
 	}
 
 	void World::detachAgentBehaviourRegistry()
 	{
-		invalidateSimulationSnapshot();
-		if (!mAgentBehaviourRegistryReference) return;
-		if (!isSimulationPaused())
-			throw invalid_argument("Pause the World before detaching its Agent behaviour registry");
-		if (countAgentBehaviourAssignments() != 0)
-			throw invalid_argument(
-				"Cannot detach a used Agent behaviour registry; use the confirmed destructive action to clear every assignment and configuration first");
-		if (mAgentBehaviourRegistry) mAgentBehaviourRegistry->unregisterWorld(*this);
-		mAgentBehaviourRegistry.reset();
-		mAgentBehaviourRegistryReference.reset();
-		mAgentBehaviourDependencyDiagnostic.clear();
-		modify();
+		mAgentBehaviourRegistryBinding->detach();
 	}
 
 	void World::detachAgentBehaviourRegistryAndClearAssignments()
 	{
-		invalidateSimulationSnapshot();
-		if (!mAgentBehaviourRegistryReference) return;
-		if (!isSimulationPaused())
-			throw invalid_argument("Pause the World before detaching its Agent behaviour registry");
-		auto candidateRuntime = make_unique<AgentBehaviourRuntimeAdapter>(
-			mAgentBehaviourRuntime->getLimits());
-		mAgentBehaviourRuntime->teardownAll(*this,
-			AgentBehaviourTeardownReason::Unassignment);
-		candidateRuntime->appendDiagnostics(
-			mAgentBehaviourRuntime->consumeDiagnostics());
-		for (auto const& [agentId, agent] : mAgents.entries())
-		{
-			if (!agent || !agent->getBehaviourAssignment() || agent->isPlayerControlled()) continue;
-			mSimulationCoordinator.clearAgentMovementForBehaviourEdit(agentId);
-			agent->clearBehaviourAssignment();
-		}
-		if (mAgentBehaviourRegistry) mAgentBehaviourRegistry->unregisterWorld(*this);
-		mAgentBehaviourRuntime = std::move(candidateRuntime);
-		mAgentBehaviourRegistry.reset();
-		mAgentBehaviourRegistryReference.reset();
-		mAgentBehaviourDependencyDiagnostic.clear();
-		modify();
+		mAgentBehaviourRegistryBinding->detachAndClearAssignments();
 	}
 
-	void World::resolveAgentBehaviourRegistry(shared_ptr<AgentBehaviourRegistry> registry)
+	void World::resolveAgentBehaviourRegistry(
+		shared_ptr<AgentBehaviourRegistry> registry)
 	{
-		invalidateSimulationSnapshot();
-		if (!mAgentBehaviourRegistryReference)
-			throw invalid_argument("The World has no Agent behaviour registry reference to resolve");
-		if (!registry)
-			throw invalid_argument("Cannot resolve a null Agent behaviour registry");
-		if (registry->getUuid() != mAgentBehaviourRegistryReference->expectedUuid)
-		{
-			throw runtime_error(format(
-				"Agent behaviour registry UUID mismatch: World expects {}, file contains {}",
-				mAgentBehaviourRegistryReference->expectedUuid, registry->getUuid()));
-		}
-		auto previousRegistry = mAgentBehaviourRegistry;
-		auto const registryChanges = previousRegistry != registry;
-		if (registryChanges) registry->registerWorld(*this);
-		auto rollbackRegistry = [&]
-		{
-			if (registryChanges) registry->unregisterWorld(*this);
-		};
-
-		AgentBehaviourSchemaMigrationPreview preview;
-		string previewDiagnostic;
-		if (!registry->previewDefinitionsFrom(*registry, preview, &previewDiagnostic))
-		{
-			rollbackRegistry();
-			throw invalid_argument(previewDiagnostic);
-		}
-		map<AgentId, AgentBehaviourAssignment> reconciled;
-		vector<string> mismatches;
-		for (auto const& item : preview.configurations)
-		{
-			if (item.world != this) continue;
-			if (item.fromRevision == item.toRevision)
-			{
-				string details;
-				for (auto const& field : item.fields)
-					details += (details.empty() ? "" : "; ") + field.diagnostic;
-				mismatches.push_back(format(
-					"World '{}' / Agent '{}' ({}): {}", getName(),
-					item.agentName, item.agent.value, details));
-				continue;
-			}
-			if (item.compatibility == AgentBehaviourSchemaCompatibility::Incompatible)
-			{
-				string fields;
-				for (auto const& field : item.fields)
-					fields += (fields.empty() ? "" : ", ") + field.path
-						+ " (" + field.diagnostic + ")";
-				mismatches.push_back(format("World '{}' / Agent '{}' ({}) / {}: {}",
-					getName(), item.agentName, item.agent.value,
-					item.behaviourName, fields));
-				continue;
-			}
-			auto const* agent = mAgents.find(item.agent);
-			auto const* definition = registry->lookupAgentBehaviour(item.behaviour);
-			if (!agent || !agent->getBehaviourAssignment() || !definition)
-			{
-				rollbackRegistry();
-				throw invalid_argument("An Agent behaviour reconciliation target disappeared");
-			}
-			AgentBehaviourConfiguration normalized;
-			string validation;
-			if (!validateAgentBehaviourAssignmentAgainst(*registry,
-				item.behaviour, definition->getRevision(),
-				agent->getBehaviourAssignment()->configuration, &normalized, &validation))
-			{
-				rollbackRegistry();
-				throw invalid_argument(validation);
-			}
-			reconciled[item.agent] = AgentBehaviourAssignment{
-				item.behaviour, definition->getRevision(), std::move(normalized) };
-		}
-		if (!mismatches.empty())
-		{
-			mAgentBehaviourRegistry = registry;
-			mAgentBehaviourDependencyDiagnostic.clear();
-			for (auto const& mismatch : mismatches)
-				mAgentBehaviourDependencyDiagnostic +=
-					(mAgentBehaviourDependencyDiagnostic.empty() ? "" : "\n") + mismatch;
-			mSimulationPaused = true;
-			if (registryChanges && previousRegistry)
-				previousRegistry->unregisterWorld(*this);
-			return;
-		}
-
-		unique_ptr<AgentBehaviourRuntimeAdapter> candidateRuntime;
-		vector<AgentBehaviourRuntimeDiagnostic> runtimeDiagnostics;
-		if (!AgentBehaviourRuntimeAdapter::prepareReload(*this, *registry,
-			candidateRuntime, runtimeDiagnostics,
-			reconciled.empty() ? nullptr : &reconciled))
-		{
-			rollbackRegistry();
-			string details;
-			for (auto const& item : runtimeDiagnostics)
-				details += (details.empty() ? "" : "\n") + format(
-					"Agent '{}' ({}), module '{}': {}", item.agentName,
-					item.agent.value, item.moduleName, item.diagnostic);
-			throw invalid_argument("Agent behaviour runtime preflight failed"
-				+ (details.empty() ? string{} : ":\n" + details));
-		}
-
-		mAgentBehaviourRuntime->teardownAll(*this,
-			AgentBehaviourTeardownReason::Reload);
-		candidateRuntime->appendDiagnostics(
-			mAgentBehaviourRuntime->consumeDiagnostics());
-		mAgentBehaviourRuntime = std::move(candidateRuntime);
-		mAgentBehaviourRegistry = registry;
-		for (auto& [agentId, assignment] : reconciled)
-		{
-			auto* agent = mAgents.find(agentId);
-			if (agent) agent->setBehaviourAssignment(std::move(assignment));
-		}
-		if (!reconciled.empty()) modify();
-		mAgentBehaviourDependencyDiagnostic.clear();
-		if (registryChanges && previousRegistry)
-			previousRegistry->unregisterWorld(*this);
-		for (auto const& [agentId, agent] : mAgents.entries())
-			if (agent && agent->getBehaviourAssignment() && !agent->isPlayerControlled())
-				mSimulationCoordinator.clearAgentMovementForBehaviourEdit(agentId);
+		mAgentBehaviourRegistryBinding->resolve(std::move(registry));
 	}
 
 	void World::markAgentBehaviourRegistryUnavailable(string diagnostic)
 	{
-		invalidateSimulationSnapshot();
-		if (!mAgentBehaviourRegistryReference) return;
-		// An admitted in-memory registry/runtime is not discarded merely because a
-		// later disk resolution attempt failed. Freshly deserialized Worlds have
-		// no attachment here; explicit replacement failures therefore preserve the
-		// old dependency and runtime as well.
-		mAgentBehaviourDependencyDiagnostic = format(
-			"Agent behaviour registry dependency '{}' is unavailable. {} authored assignment{} remain{} unresolved.\n{}",
-			mAgentBehaviourRegistryReference->resourceName,
-			countAgentBehaviourAssignments(),
-			countAgentBehaviourAssignments() == 1 ? "" : "s",
-			countAgentBehaviourAssignments() == 1 ? "s" : "",
-			std::move(diagnostic));
-		mSimulationPaused = true;
+		mAgentBehaviourRegistryBinding->markUnavailable(std::move(diagnostic));
 	}
 
 	void World::replaceAgentBehaviourRegistryWithIndependentCopy(
 		string resourceName, shared_ptr<AgentBehaviourRegistry> registry)
 	{
-		invalidateSimulationSnapshot();
-		if (!isSimulationPaused())
-			throw invalid_argument("Pause the World before replacing its Agent behaviour registry with a Save As copy");
-		requireCatalogResourceName(resourceName, "Agent behaviour registry");
-		if (!mAgentBehaviourRegistry || !registry)
-			throw invalid_argument("Save As requires attached source and copied Agent behaviour registries");
-		if (registry == mAgentBehaviourRegistry
-			|| registry->getUuid() == mAgentBehaviourRegistry->getUuid())
-			throw invalid_argument("An Agent behaviour registry copy must have a new UUID");
-		if (!mAgentBehaviourRegistry->hasEquivalentDefinitions(*registry))
-			throw invalid_argument(
-				"An Agent behaviour registry copy must preserve every definition, revision, and allocator");
-		string assignmentDiagnostic;
-		if (!inspectAgentBehaviourAssignments(*registry, &assignmentDiagnostic))
-			throw invalid_argument(assignmentDiagnostic);
-
-		unique_ptr<AgentBehaviourRuntimeAdapter> candidateRuntime;
-		vector<AgentBehaviourRuntimeDiagnostic> runtimeDiagnostics;
-		if (!AgentBehaviourRuntimeAdapter::prepareReload(*this, *registry,
-			candidateRuntime, runtimeDiagnostics))
-			throw invalid_argument("Copied Agent behaviour package runtime preflight failed");
-
-		registry->registerWorld(*this);
-		auto previous = mAgentBehaviourRegistry;
-		mAgentBehaviourRuntime->teardownAll(*this,
-			AgentBehaviourTeardownReason::Reload);
-		candidateRuntime->appendDiagnostics(
-			mAgentBehaviourRuntime->consumeDiagnostics());
-		mAgentBehaviourRuntime = std::move(candidateRuntime);
-		previous->unregisterWorld(*this);
-		mAgentBehaviourRegistryReference = AgentBehaviourRegistryReference{
-			std::move(resourceName), registry->getUuid() };
-		mAgentBehaviourRegistry = std::move(registry);
-		mAgentBehaviourDependencyDiagnostic.clear();
-		modify();
+		mAgentBehaviourRegistryBinding->replaceWithIndependentCopy(
+			std::move(resourceName), std::move(registry));
 	}
 
 	bool World::validateAgentBehaviourAssignment(AgentBehaviourId behaviour,

@@ -149,6 +149,10 @@ namespace core
 
 		friend class World;
 		friend class AgentBehaviourRuntimeAdapter;
+		// The shared registry binding performs the attach/detach
+		// registration on the World's behalf (#676, ADR 0022).
+		template <typename Registry>
+		friend class RegistryBinding;
 
 	public:
 		static std::shared_ptr<AgentBehaviourRegistry> create();

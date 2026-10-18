@@ -41,6 +41,7 @@
 #include "core/Coordination.h"
 #include "core/SimulationCoordinator.h"
 #include "core/EntityRegistry.h"
+#include "core/RegistryReference.h"
 #include "core/Serializable.h"
 
 
@@ -49,6 +50,8 @@ namespace core
 
 	class AgentTagRegistry;
 	class AgentBehaviourRegistry;
+	template <typename Registry>
+	class RegistryBinding;
 	class PlacementValidator;
 	class AgentGroupRegistry;
 	class PermissionRequirementStore;
@@ -79,6 +82,12 @@ namespace core
 		// Agent-type registry and preview-baseline cache below on the World's
 		// behalf (ADR 0022).
 		friend class AgentTypeCatalog;
+		// The registry binding template owns no state; it edits the
+		// World-owned registry reference pairs and registry pointers below on
+		// the World's behalf through friend access to modify() (#676,
+		// ADR 0022).
+		template <typename Registry>
+		friend class RegistryBinding;
 		friend struct WorldAgentRestorationTestAccess;
 		friend struct PhysicalControlLookupTestAccess;
 		friend struct QueuedPressLookupTestAccess;
@@ -811,15 +820,12 @@ namespace core
 		void restoreFurnitureFinishPose(Agent& agent, Pose finishPose);
 		std::vector<SimulationEvent> mPendingMovementOutcomes;
 
-		struct AgentTagRegistryReference
-		{
-			std::string resourceName;
-			std::string expectedUuid;
-		};
-
 		// Agent tag definitions are an independent external document (ADR 0007).
 		// The World persists only this Resource name/UUID reference. The loaded
-		// registry is deliberately not a child for dirty-state purposes.
+		// registry is deliberately not a child for dirty-state purposes. The
+		// reference shape is the shared RegistryBinding state (#676); the name
+		// stays as it was for serialization and replay.
+		using AgentTagRegistryReference = RegistryReference<AgentTagRegistry>;
 		std::optional<AgentTagRegistryReference> mAgentTagRegistryReference;
 		std::shared_ptr<AgentTagRegistry> mAgentTagRegistry;
 
@@ -827,11 +833,10 @@ namespace core
 		// document. The World persists only this Resource name and expected UUID
 		// reference. The loaded registry is deliberately not a child for
 		// dirty-state purposes.
-		struct AgentBehaviourRegistryReference
-		{
-			std::string resourceName;
-			std::string expectedUuid;
-		};
+		// The reference shape is the shared RegistryBinding state (#676); the
+		// name stays as it was for serialization and replay.
+		using AgentBehaviourRegistryReference =
+			RegistryReference<AgentBehaviourRegistry>;
 		std::optional<AgentBehaviourRegistryReference> mAgentBehaviourRegistryReference;
 		std::shared_ptr<AgentBehaviourRegistry> mAgentBehaviourRegistry;
 		// An incompatible newer schema is a recoverable dependency state: authored
@@ -842,6 +847,26 @@ namespace core
 		// Lua/sol2 types out of this domain header and its per-Agent environments
 		// prevent mutable module or instance state crossing assignments.
 		std::unique_ptr<AgentBehaviourRuntimeAdapter> mAgentBehaviourRuntime;
+		// The shared attach/detach/resolve/replace/has/get state machine,
+		// instantiated once per registry family (#676, ADR 0022). The
+		// bindings own no state: they operate on the World-owned reference
+		// pairs and registry pointers above through references, and reach
+		// the family-specific validation, clearing, and runtime handling
+		// through the policies configured at construction. World keeps
+		// ownership of every entity registry (ADR 0001) and remains the
+		// facade (design pattern) whose methods forward here.
+		std::unique_ptr<RegistryBinding<AgentTagRegistry>>
+			mAgentTagRegistryBinding;
+		std::unique_ptr<RegistryBinding<AgentBehaviourRegistry>>
+			mAgentBehaviourRegistryBinding;
+
+		// Family policies configured into the bindings at construction. Each
+		// lambda reaches the World's private validation, clearing, and
+		// runtime seams directly; the binding supplies only the shared
+		// ordering. Defined in World.cpp where the binding template is
+		// complete.
+		void configureAgentTagRegistryBinding();
+		void configureAgentBehaviourRegistryBinding();
 		// App-only transient input. Editor simulation never supplies this intent.
 		int mPlayerMovementDirection{ 0 };
 		bool mPlayerStairUp{ false }, mPlayerStairDown{ false }, mPlayerCrouch{ false };

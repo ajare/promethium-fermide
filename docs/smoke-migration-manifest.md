@@ -34,6 +34,7 @@ contract/probe invocations are not new scenario owners. See
 | `AgentTypeCatalogChecks.cpp` | retained standalone | `pf-agent-type-catalog-checks` |
 | `PermissionRequirementStoreChecks.cpp` | retained standalone | `pf-permission-requirement-store-checks` |
 | `PlacementValidatorChecks.cpp` | retained standalone | `pf-placement-validator-checks` |
+| `RegistryBindingChecks.cpp` | retained standalone | `pf-registry-binding-checks` |
 | `SectorTilesetChecks.cpp` | retained standalone | `pf-sector-tileset-checks` |
 | `SimulationStepTimingChecks.cpp` | retained standalone | `pf-simulation-step-timing-checks` |
 | `WorldRenderSlotChecks.cpp` | retained standalone | `pf-world-render-slot-checks` |
