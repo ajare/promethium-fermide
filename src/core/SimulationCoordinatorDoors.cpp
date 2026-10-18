@@ -33,54 +33,11 @@ namespace core
 	// through friendship and calls its own queue refresh, ladder admission,
 	// grant and denial machinery directly - that queue and admission core joined
 	// the coordinator in stage 4, so no facade callback is left in this seam.
-
-	bool SimulationCoordinator::setDoorBroken(TraversalResourceId id, bool broken)
-	{
-		auto resource = mWorld.mTraversalResources.find(id);
-		if (!resource || !resource->mDoor || !resource->mDoor->isBreakable()) return false;
-		auto& door = *resource->mDoor;
-		if (door.mBroken == broken) return true;
-		mWorld.invalidateSimulationSnapshot();
-		door.mBroken = broken;
-		if (broken)
-			for (auto const& [operationId, operation] : mWorld.mDeviceOperations.entries())
-				if (operation->mHasCommand && operation->mCommand.type == DeviceCommandType::OpenDoor
-					&& operation->mCommand.traversalResource == id
-					&& (operation->mState == DeviceOperationState::Pending
-						|| operation->mState == DeviceOperationState::Running))
-				{
-					touchDeviceOperation(operationId, *operation);
-					operation->mState = DeviceOperationState::Failed;
-				}
-		// Observation, not this live edit, triggers per-Agent replanning.
-		return true;
-	}
-
-	bool SimulationCoordinator::setExtensibleBroken(TraversalResourceId id, bool broken)
-	{
-		auto resource = mWorld.mTraversalResources.find(id);
-		if (!resource || !resource->mExtensible || !resource->mExtensible->isExtensible()) return false;
-		auto& device = *resource->mExtensible;
-		if (device.mBroken == broken) return true;
-		mWorld.invalidateSimulationSnapshot();
-		device.mBroken = broken;
-		// A pending safe retract is retained, but Broken fully extended equipment
-		// is usable floor/climbing space until restoration resumes that operation.
-		if (resource->mRetractionPending) resource->mEnabled = broken;
-		if (broken)
-			for (auto const& [operationId, operation] : mWorld.mDeviceOperations.entries())
-				if (operation->mHasCommand && (operation->mCommand.type == DeviceCommandType::SetExtendedState
-					|| operation->mCommand.type == DeviceCommandType::ToggleExtendedState)
-					&& operation->mCommand.traversalResource == id
-					&& (operation->mState == DeviceOperationState::Pending
-						|| operation->mState == DeviceOperationState::Running))
-				{
-					touchDeviceOperation(operationId, *operation);
-					operation->mState = DeviceOperationState::Failed;
-				}
-		// Local observation owns planning and releases obsolete waiting work.
-		return true;
-	}
+	//
+	// The setDoorBroken / setExtensibleBroken condition setters moved out to
+	// DeviceConditionStore (#681, ADR 0022); they ask the coordinator's
+	// failPendingOperationsFor seam below to retire the live operations a
+	// broken device invalidates.
 
 	void SimulationCoordinator::observeLocalDeviceConditions(Agent& agent)
 	{

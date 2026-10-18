@@ -58,6 +58,7 @@ namespace core
 	class AgentTypeCatalog;
 	class MarkerStore;
 	class TraversalResourceRegistry;
+	class DeviceConditionStore;
 
 	class World : public Serializable
 	{
@@ -93,6 +94,10 @@ namespace core
 		// the traversal-resource registry and the waiting/geometry policies
 		// below on the World's behalf (ADR 0022).
 		friend class TraversalResourceRegistry;
+		// The device condition store owns no state; it reads and edits the
+		// traversal-resource registry, the construction records, and the
+		// interaction-point registry below on the World's behalf (ADR 0022).
+		friend class DeviceConditionStore;
 		// The registry binding template owns no state; it edits the
 		// World-owned registry reference pairs and registry pointers below on
 		// the World's behalf through friend access to modify() (#676,
@@ -665,6 +670,17 @@ namespace core
 		// the registry owns no state and reaches them, and the coordinator
 		// whose scheduling the ownership paths ride on, through this World.
 		std::unique_ptr<TraversalResourceRegistry> mTraversalRegistry;
+
+		// The authored-vs-runtime Broken behaviour family lives in the device
+		// condition store (ADR 0022). World keeps ownership of the state it
+		// edits - the traversal-resource registry, the device entities' live
+		// and authored condition flags, the construction records, and the
+		// sensor-observation maps (ADR 0001) - and stays the facade (design
+		// pattern) through which every caller reaches these operations; the
+		// store owns no state and reaches them, and the coordinator whose
+		// operation-failure seam a breaking device rides on, through this
+		// World.
+		std::unique_ptr<DeviceConditionStore> mDeviceConditionStore;
 
 		// Every World owns one sandboxed Lua runtime for its Agent types. It is
 		// declared before mAgents so Agent destruction (which releases live Lua

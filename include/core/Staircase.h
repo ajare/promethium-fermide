@@ -18,6 +18,7 @@ namespace core
 		bool mBroken{ false };
 		uint32_t mSectorIndex{ ~0u };
 		friend class World;
+		friend class DeviceConditionStore; // ADR 0022 device condition family
 
 	public:
 		Staircase(uint32_t cellX, uint32_t cellY, uint32_t cellsWide, int riseSide,

@@ -14,6 +14,7 @@ namespace core
 	{
 		friend class World;
 		friend class SimulationCoordinator;
+		friend class DeviceConditionStore; // ADR 0022 device condition family
 		bool mInitiallyBroken{ false };
 		bool mBroken{ false };
 		TraversalResourceId mTraversalResource;

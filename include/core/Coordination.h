@@ -142,6 +142,7 @@ namespace core
 		friend class SimulationCoordinator;
 		friend class PlacementValidator;
 		friend class PermissionRequirementStore; // ADR 0022 requirement edits
+		friend class DeviceConditionStore; // ADR 0022 control-target condition query
 
 		std::string mName;
 		BoothWindowId mBoothWindowOwner;
@@ -342,6 +343,7 @@ namespace core
 		friend class PlacementValidator;
 		friend class PermissionRequirementStore; // ADR 0022 requirement edits
 		friend class TraversalResourceRegistry; // ADR 0022 resource record family
+		friend class DeviceConditionStore; // ADR 0022 authored-vs-runtime Broken family
 		std::string mName;
 		std::shared_ptr<Door> mDoor;
 		std::shared_ptr<Window> mWindow;

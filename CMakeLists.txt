@@ -754,6 +754,14 @@ if(BUILD_TESTING)
     set_tests_properties(permission-requirement-store PROPERTIES
         LABELS "smoke;standalone;core" TIMEOUT 30)
 
+    add_executable(pf-device-condition-store-checks src/headless/DeviceConditionStoreChecks.cpp)
+    target_include_directories(pf-device-condition-store-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-device-condition-store-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-device-condition-store-checks)
+    add_test(NAME device-condition-store COMMAND pf-device-condition-store-checks)
+    set_tests_properties(device-condition-store PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
     add_executable(pf-occupant-packing-checks src/headless/OccupantPackingChecks.cpp)
     target_include_directories(pf-occupant-packing-checks PRIVATE "${PF_INCLUDE_DIR}")
     pf_apply_headless_verification_policy(pf-occupant-packing-checks)

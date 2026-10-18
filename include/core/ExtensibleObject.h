@@ -16,6 +16,7 @@ namespace core
 	{
 		friend class World;
 		friend class SimulationCoordinator;
+		friend class DeviceConditionStore; // ADR 0022 device condition family
 	public:
 		enum struct State { Extended, Extending, Retracted, Retracting };
 

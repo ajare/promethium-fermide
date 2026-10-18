@@ -43,70 +43,13 @@ namespace core
 	// allocateLiftRiding and allocateLiftDisembarking are reached only from
 	// inside the coordinator - the dispatcher from the coordinator's own
 	// traversal-request allocation, the branches from the dispatcher.
-
-	bool SimulationCoordinator::setLiftBroken(TraversalResourceId id, bool broken)
-	{
-		auto resource = mWorld.mTraversalResources.find(id);
-		if (!resource || !resource->mLift) return false;
-		return setTransportBroken(id, broken);
-	}
-
-	bool SimulationCoordinator::setShuttleBroken(TraversalResourceId id, bool broken)
-	{
-		auto resource = mWorld.mTraversalResources.find(id);
-		if (!resource || !resource->mShuttle) return false;
-		return setTransportBroken(id, broken);
-	}
-
-	bool SimulationCoordinator::setTransportBroken(TraversalResourceId id, bool broken)
-	{
-		auto resource = mWorld.mTraversalResources.find(id);
-		if (!resource || (!resource->mLift && !resource->mShuttle)) return false;
-		auto& condition = resource->mShuttle ? resource->mShuttle->mBroken : resource->mLift->mBroken;
-		if (condition == broken) return true;
-		mWorld.invalidateSimulationSnapshot();
-		condition = broken;
-		// Include every supported Shuttle landing, not only the representative
-		// Door stored on each Stop. Owned Doors cannot fail independently.
-		for (auto const& [landingId, landing] : mWorld.mTraversalResources.entries())
-		{
-			(void)landingId;
-			if (landing->mLiftCoordinator == id && landing->mDoor) landing->mDoor->mBroken = broken;
-		}
-		if (broken)
-		{
-			// A moving Shuttle's last spacing goal includes its last translation.
-			// Do not let locomotion finish that stale translation after service freezes.
-			if (resource->mShuttle && resource->mLiftMoving)
-				for (auto occupant : resource->mOccupants)
-					if (auto passenger = mWorld.mAgents.find(occupant)) passenger->mTraversalLocalGoal.reset();
-			for (auto const& [operationId, operation] : mWorld.mDeviceOperations.entries())
-			{
-				auto target = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
-				if (!operation->mHasCommand || !target
-					|| (target != resource && target->mLiftCoordinator != id)
-					|| (operation->mState != DeviceOperationState::Pending
-						&& operation->mState != DeviceOperationState::Running)) continue;
-				touchDeviceOperation(operationId, *operation);
-				operation->mState = DeviceOperationState::Failed;
-			}
-			// Retain onboard intent and occupancy, but not a failed selector request.
-			// Restoration must make a fresh request rather than exhaust retries.
-			for (auto const& [requestId, request] : mWorld.mTraversalRequests.entries())
-			{
-				(void)requestId;
-				if (request->mResource != id || request->mState != TraversalRequestState::Pending) continue;
-				for (auto const& [interactionId, interaction] : mWorld.mInteractionRequests.entries())
-					if (interaction->mActor == request->mOwner && interaction->mResult == InteractionResult::Pending)
-						cancelInteraction(interactionId);
-				request->mPreparationRequested = false;
-				request->mPreparationOperation = {};
-				request->mPreparationAttempts = 0;
-			}
-		}
-		// Do not notify Agents; only local observation changes their knowledge.
-		return true;
-	}
+	//
+	// The setLiftBroken / setShuttleBroken / setTransportBroken condition
+	// setters that used to open this file moved to DeviceConditionStore
+	// (#681, ADR 0022); the vehicle-freeze fallout that is operation state
+	// - stale locomotion goals, pending operations, selector requests -
+	// is retired through the coordinator's failPendingTransportOperations
+	// seam in SimulationCoordinatorInteractions.cpp.
 
 	uint32_t SimulationCoordinator::findLiftStop(TraversalResource const& resource, Vector2 const& endpoint) const
 	{

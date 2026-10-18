@@ -1,5 +1,6 @@
 #pragma once
 
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <vector>
@@ -191,6 +192,15 @@ namespace core
 		// Device-operation lifecycle. Commands coalesce: one accepted command is
 		// shared by every requester, and the operation outlives no requester.
 		DeviceOperationId submitDeviceCommand(DeviceCommand const& command);
+
+		// Operation-failure seam for DeviceConditionStore (#681): when a
+		// device breaks, the pending or running operations that target it
+		// can never complete, and the coordinator - not the store - owns
+		// failing them so every state change still goes through
+		// touchDeviceOperation and the tick event contract holds.
+		void failPendingOperationsFor(TraversalResourceId device,
+			std::initializer_list<DeviceCommandType> types);
+		void failPendingTransportOperations(TraversalResourceId transport);
 		void advanceDumbwaiters();
 		void resetDumbwaiter(Dumbwaiter& unit);
 		void admitDumbwaiterPress(DeviceOperationId id, DeviceOperation& operation);
@@ -266,13 +276,14 @@ namespace core
 		// and pressed a control applicable from the requester's sector. One
 		// preparation is shared by every pending request for the door, and a
 		// failed preparation retries on a fixed tick delay before it is refused.
-		bool setLiftBroken(TraversalResourceId lift, bool broken);
-		bool setShuttleBroken(TraversalResourceId shuttle, bool broken);
-		bool setDoorBroken(TraversalResourceId door, bool broken);
-		bool setExtensibleBroken(TraversalResourceId resource, bool broken);
+		//
+		// The Broken condition setters that used to live here moved to
+		// DeviceConditionStore (#681, ADR 0022): condition is no longer
+		// coordinator behaviour. What stays is the operation-failure seam
+		// below - the coordinator owns the device-operation registry, so the
+		// store asks it to retire the live work a broken device invalidates.
 		void observeLocalDeviceConditions(Agent& agent);
 		void validateDoorClearancePath(Agent& agent);
-		bool setTransportBroken(TraversalResourceId transport, bool broken);
 		void allocateRemoteDoorPreparation(TraversalRequestId requestId, TraversalResource& resource);
 
 		// A force bridge or extensible ladder must be extended before its
