@@ -901,6 +901,15 @@ namespace core
 				* processor.authored.mineralsRecovery);
 			auto const recoveredWaterPerKgFeed = composition.moisture
 				* processor.authored.waterRecovery;
+			// Water-only recovery is pass-through, not bioconversion. With
+			// no recoverable water either, leave all inventories untouched.
+			// Classify the actual blend, not the store declaration.
+			auto const noConversion = derived && nutrientPerKgFeed == 0.0
+				&& rates.oxygen == 0.0 && rates.co2 == 0.0
+				&& rates.heat == 0.0 && rates.consumable == 0.0
+				&& rates.nitrifiedNitrogen == 0.0;
+			auto const noConversionReason = "feed '" + feed.authored.id
+				+ "' carries no convertible content: the stage has nothing to oxidize or recover";
 			// The residue is the mass-balance remainder of the declared
 			// inputs and outputs per kilogram of feed: validation
 			// guaranteed it is non-negative, so the digestion can never
@@ -994,6 +1003,15 @@ namespace core
 				kgToMass(residue.authored.unit, fullKg * residuePerKgFeed),
 				"residue store '" + residue.authored.id
 				+ "' is full: the unrecoverable residue has nowhere to go");
+			if (noConversion)
+			{
+				if (limiter.empty()) limiter = noConversionReason;
+				if (recoveredWaterPerKgFeed == 0.0)
+				{
+					scale = 0.0;
+					limiter = noConversionReason;
+				}
+			}
 			// Condition throttles the whole stage the same uniform way:
 			// a degraded culture simply cannot drive the full rated feed
 			// (#408). It never adds or removes material on its own.

@@ -1,0 +1,139 @@
+# #736: zero bioconversion; water-only pass-through with an inert dry balance.
+# Load in Station systems and Apply. Per kg feed: water 0.999 kg,
+# inert residue 0.001 kg; O2, CO2, heat, medium and nutrients all zero.
+# Atmospheric nitrogen is inert, not recoverable nutrient nitrogen.
+# All-zero dry fractions would mean organic dry mass, NOT inert solids.
+# Set waterRecovery to 0 to demonstrate a zero-throughput no-op instead.
+schemaVersion: 99
+stationSystems:
+  enabled: true
+  observationIntervalSeconds: 1.0
+  trendRetentionSeconds: 3600.0
+  dispatchMode: manual
+  stores:
+  - id: nearlyWater
+    unit: kg
+    capacity: 100.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+    composition:
+      moisture: 0.999
+      nutrientNitrogen: 0.0
+      atmosphericNitrogen: 1.0
+      phosphorus: 0.0
+      potassium: 0.0
+      otherMinerals: 0.0
+      energyKJPerKgDry: 0.0
+  - id: processOxygen
+    unit: kg
+    capacity: 100.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: fresh
+    unit: kg
+    capacity: 100.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: digesterMedia
+    unit: kg
+    capacity: 100.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: nutrients
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: rawWater
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: co2
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: residue
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: bioStock
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  microbialProcessors:
+  - id: passThrough
+    hazardClass: normal
+    feedStoreId: nearlyWater
+    oxygenStoreId: processOxygen
+    waterStoreId: fresh
+    consumableStoreId: digesterMedia
+    nutrientStoreId: nutrients
+    recoveredWaterStoreId: rawWater
+    co2StoreId: co2
+    residueStoreId: residue
+    thermalClass: low
+    heatSinkId: processSink
+    rateKgPerS: 4.6296296296296294e-05
+    specificEnergyKWhPerKgFeed: 0.0
+    nitrogenRecovery: 0.8
+    phosphorusRecovery: 0.8
+    potassiumRecovery: 0.8
+    mineralsRecovery: 0.7
+    waterRecovery: 1.0
+    minOperatingTemperatureC: 15.0
+    maxSinkTemperatureC: 45.0
+    initialCondition: 1.0
+    starvationDegradePerHour: 0.05
+    consumableExhaustionDegradePerHour: 0.05
+    coldStressDegradePerHour: 0.02
+    heatStressDegradePerHour: 0.1
+    recoveryPerHour: 0.02
+    stockStoreId: bioStock
+    stockUnitsPerConditionPoint: 1.0
+    priority: 1
+    rateBasis: CompositionDerived
+    nitrificationFraction: 1.0
+    organicOxidationFraction: 0.9
+    o2PerKgOrganicOxidized: 1.4
+    o2PerKgNitrifiedN: 4.57
+    co2PerKgOrganicOxidized: 1.8
+    processWaterTargetMoisture: 0.0
+    heatReleaseFraction: 0.7
+    consumablePerKgOrganicOxidized: 0.05
+  solarArrays:
+  - id: solar
+    capacityKW: 10.0
+    illumination:
+      constantLevel: 1.0
+      periodSeconds: 0.0
+      segments: []
+  thermalReservoirs:
+  - id: processSink
+    thermalClass: low
+    heatCapacityKJPerK: 1000000.0
+    startingTemperatureC: 20.0
+    minTemperatureC: -10.0
+    maxTemperatureC: 100.0
+    absorbedHeatKW: 0.0

@@ -1,7 +1,8 @@
 # Generalized Bioconversion Stage — Microbial Processor Generalization
 
-Status: core slice (#735) implemented. Degenerate pass-through (#736), hot-digestion
-scenario/hardening (#737), and editor derived-rate preview (#738) remain follow-ups.
+Status: core slice (#735) and degenerate pass-through (#736) implemented.
+Hot-digestion scenario/hardening (#737) and editor derived-rate preview (#738)
+remain follow-ups.
 Origin: audit finding G1 in ticket #724 (Station systems gap analysis).
 Component: `MicrobialProcessorSettings` (`include/core/StationSystems.h`), validator
 and runtime in `src/core/StationSystems.cpp`.
@@ -146,9 +147,18 @@ rejected:
 | Zero N (or zero recovered N) | nitrification term = 0 regardless of `nitrificationFraction` |
 | Fully dry feed (moisture 0) | water recovery = 0; process-water draw = `feedKg × target / (1 − target)` when target > 0 |
 | Feed at or above target moisture | process-water draw = 0 |
-| Feed with zero recoverable anything (e.g. pure water) | every rate is zero; the stage runs as a no-op pass-through, consuming nothing, producing nothing, reporting zero rates. It must not divide by zero, must not stall the tick, and must not be a configuration error |
+| No oxidation/nutrient recovery, but recoverable water | water passes at `waterRecovery`; no O2/CO2/reaction heat/medium/nutrients; residue is inert dry mass **plus unrecovered water**; ordinary throughput/input/destination/power limits still apply |
+| No oxidation/nutrient recovery and no recoverable water | every actual is zero; the stage consumes nothing and produces nothing. It must not divide by zero, stall the tick, or be a configuration error |
 
-A degenerate stage is visible as such: the snapshot shows zero throughput with
+Water pass-through and the full no-op are distinct: a positive recovered-water
+stream necessarily consumes feed and cannot also report zero feed throughput.
+The latter row applies when `waterRecovery` is zero (or the feed has no water).
+The existing compound-store moisture range remains [0, 1); near-pure water is
+representable, while exactly 1 remains invalid. All-zero dry constituent fractions
+mean **organic** dry mass, not inert material; use an explicitly inert balance
+(such as atmospheric nitrogen, which this stage cannot recover).
+
+A fully no-op stage is visible as such: the snapshot shows zero throughput with
 the limiter reporting the feed carries nothing convertible. Authors are free to
 wire one (useful for placeholder configs and editor demos); the model neither
 punishes nor hides it.
@@ -307,15 +317,18 @@ to the pre-change component for the same scenario (regression anchor).
 
 ### 10.4 Degenerate pass-through (`bioconversion-degenerate.yaml`)
 
-A stage fed a compound store with nothing convertible (e.g. a water store with
-moisture 0.999, all constituent fractions 0, energy 0).
+A stage fed a compound store with no bioconvertible dry content: moisture
+0.999, atmospheric nitrogen dry fraction 1, other dry fractions 0, energy 0.
+The shipped scenario uses `waterRecovery: 1` to separate all water from the
+inert dry balance. Lower recovery leaves unrecovered water in residue; setting
+recovery to zero demonstrates the zero-throughput no-op.
 
 ```yaml
 microbialProcessors:
   - id: passThrough
     hazardClass: normal
     rateBasis: CompositionDerived
-    feedStoreId: nearlyWater      # compound, but zero organics/N/P/K/energy
+    feedStoreId: nearlyWater      # compound; inert atmospheric N, not nutrient N
     # ... wiring as above ...
     rateKgPerS: 1.0e-5
     nitrificationFraction: 1.0  # meaningless: no N to nitrify
@@ -323,7 +336,7 @@ microbialProcessors:
 
 Acceptance: validates; runs every tick; O2 = CO2 = heat = consumable =
 nutrient recovery = 0; water passes at `waterRecovery`; residue = inert dry
-mass; no division by zero; limiter reports the no-convertible-content reason
+mass plus unrecovered water; no division by zero; limiter reports the no-convertible-content reason
 when destinations and inputs are otherwise healthy and throughput is zero.
 
 ## 11. Migration and compatibility

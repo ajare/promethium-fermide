@@ -188,6 +188,103 @@ void blend(smoke::Context const& context)
 	close(dry.waterConsumedKg, dry.feedConsumedKg * 1.5);
 	close(dry.recoveredWaterKg, 0); close(dry.residualKg, 0);
 }
+void degenerate(smoke::Context const& context)
+{
+	core::StationConfigurationDocument doc;
+	std::string error;
+	require(core::loadStationConfiguration(context.fixture("resources/station-systems/scenarios/bioconversion-degenerate.yaml").string(), doc, &error), error.c_str());
+	auto settings = doc.settings;
+	// No zero-demand stream may require inventory or destination headroom.
+	for (auto index : {1, 2, 3}) settings.stores[index].startingQualified = 0;
+	for (auto index : {4, 6}) settings.stores[index].startingQualified = settings.stores[index].capacity;
+	SourceScope restoreSource;
+	core::setStationSystemsSourceLoader([] {
+		auto source = core::bundledStationSystemsSource();
+		auto const at = source.find("        self.ticks = self.ticks + 1");
+		require(at != std::string::npos, "Lua assertion insertion point missing");
+		source.insert(at, R"lua(
+        local p = self.microbial_processors[1]
+        assert(p.lastOxygenConsumed == 0 and p.lastCo2Produced == 0)
+        assert(p.lastReactionHeatKW == 0 and p.lastConsumableUsed == 0)
+        assert(p.lastNutrientProduced == 0 and p.lastNitrifiedNitrogenKg == 0)
+        if p.waterRecovery == 0 then
+            assert(p.lastFeedConsumed == 0 and p.lastRecoveredWaterProduced == 0)
+            assert(p.lastPowerSupplied == 0 and p.lastResidueProduced == 0)
+        else
+            assert(p.lastFeedConsumed > 0 and p.lastRecoveredWaterProduced > 0)
+        end
+        assert(string.find(p.lastLimiter, 'carries no convertible content', 1, true))
+)lua");
+		return source;
+	});
+	auto const pass = run(settings).microbialProcessors[0];
+	require(pass.feedConsumedKg > 0, "water pass-through stalled");
+	close(pass.recoveredWaterKg, pass.feedConsumedKg * 0.999);
+	close(pass.residueProducedKg, pass.feedConsumedKg * 0.001);
+	close(pass.oxygenConsumedKg, 0); close(pass.co2ProducedKg, 0);
+	close(pass.reactionHeatKJ, 0); close(pass.consumablesUsed, 0);
+	close(pass.nutrientProducedKg, 0); close(pass.waterConsumedKg, 0);
+	close(pass.nitrogenRecoveredKg, 0); close(pass.nitrifiedNitrogenKg, 0);
+	close(pass.phosphorusRecoveredKg, 0); close(pass.potassiumRecoveredKg, 0);
+	close(pass.mineralsRecoveredKg, 0);
+	require(pass.lastStressors.empty(), "zero-demand stream caused stress");
+	close(pass.residualKg, 0); close(pass.residualKJ, 0);
+	// At a partial recovery fraction, unrecovered water remains in residue.
+	settings.microbialProcessors[0].waterRecovery = 0.7;
+	auto const partial = run(settings).microbialProcessors[0];
+	close(partial.recoveredWaterKg, partial.feedConsumedKg * 0.999 * 0.7);
+	close(partial.residueProducedKg, partial.feedConsumedKg - partial.recoveredWaterKg);
+	close(partial.residualKg, 0);
+	settings.microbialProcessors[0].waterRecovery = 0;
+	settings.microbialProcessors[0].specificEnergyKWhPerKgFeed = 2;
+	settings.solarArrays.clear();
+	auto const idle = run(settings).microbialProcessors[0];
+	close(idle.feedConsumedKg, 0); close(idle.recoveredWaterKg, 0);
+	close(idle.residueProducedKg, 0); close(idle.energySuppliedKJ, 0);
+	close(idle.residualKg, 0);
+	require(idle.limiter == "feed 'nearlyWater' carries no convertible content: the stage has nothing to oxidize or recover",
+		"zero-throughput no-conversion reason missing");
+	settings.stores[0].composition->moisture = 0.999999;
+	close(run(settings).microbialProcessors[0].feedConsumedKg, 0);
+	settings.stores[0].composition.reset();
+	require(!core::validateStationSystemsSettings(settings, error), "undeclared degenerate feed accepted");
+	core::setStationSystemsSourceLoader({});
+	// Physical scarcity still takes precedence over the explanatory reason
+	// on a water pass-through; zero-demand destinations never bind it.
+	auto blocked = doc.settings;
+	blocked.stores[5].startingQualified = blocked.stores[5].capacity;
+	auto const full = run(blocked).microbialProcessors[0];
+	close(full.feedConsumedKg, 0);
+	require(full.limiter.find("recovered water store") != std::string::npos,
+		"no-conversion reason hid a full water destination");
+	// Remaining truth-table rows: zero organics but recovered N; zero N;
+	// energy-free organics; and moisture below, at and above the target.
+	settings = urine(context);
+	auto& c = *settings.stores[0].composition;
+	c.nutrientNitrogen = 1; c.phosphorus = c.potassium = c.otherMinerals = 0;
+	c.energyKJPerKgDry = 0;
+	auto const mineral = run(settings).microbialProcessors[0];
+	close(mineral.oxygenConsumedKg, mineral.nitrifiedNitrogenKg * 4.57);
+	close(mineral.co2ProducedKg, 0); close(mineral.reactionHeatKJ, 0);
+	close(mineral.consumablesUsed, 0); close(mineral.residualKg, 0);
+	settings.microbialProcessors[0].nitrogenRecovery = 0;
+	auto const unrecovered = run(settings).microbialProcessors[0];
+	close(unrecovered.nitrifiedNitrogenKg, 0); close(unrecovered.oxygenConsumedKg, 0);
+	c.nutrientNitrogen = 0;
+	for (double moisture : {0.0, 0.6, 0.9})
+	{
+		c.moisture = moisture;
+		settings.microbialProcessors[0].processWaterTargetMoisture = 0.6;
+		auto const p = run(settings).microbialProcessors[0];
+		require(p.feedConsumedKg > 0, "truth-table feed stalled");
+		close(p.nitrifiedNitrogenKg, 0); close(p.reactionHeatKJ, 0);
+		close(p.oxygenConsumedKg, p.feedConsumedKg * (1 - moisture) * 0.9 * 1.4);
+		close(p.co2ProducedKg, p.feedConsumedKg * (1 - moisture) * 0.9 * 1.8);
+		close(p.waterConsumedKg, p.feedConsumedKg * (moisture == 0 ? 1.5 : 0));
+		close(p.recoveredWaterKg, p.feedConsumedKg * moisture * 0.7);
+		close(p.residualKg, 0);
+	}
+}
 void documents(smoke::Context const& context)
 {
 	core::StationConfigurationDocument doc; doc.settings = urine(context);
@@ -244,5 +341,5 @@ void documents(smoke::Context const& context)
 void registerBioconversionChecks(std::vector<smoke::Check>& checks)
 {
 	checks.insert(checks.end(), {{"bioconversionTracer", tracer}, {"bioconversionValidation", validation},
-		{"bioconversionBlend", blend}, {"bioconversionDocuments", documents}});
+		{"bioconversionBlend", blend}, {"bioconversionDocuments", documents}, {"bioconversionDegenerate", degenerate}});
 }

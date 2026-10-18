@@ -7212,6 +7212,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         + composition.potassium * proc.potassiumRecovery
                         + composition.otherMinerals * proc.mineralsRecovery)
                     local recoveredWaterPerKgFeed = composition.moisture * proc.waterRecovery
+                    local noConversion = derived and nutrientPerKgFeed == 0
+                        and rates.oxygen == 0 and rates.co2 == 0 and rates.heat == 0
+                        and rates.consumable == 0 and rates.nitrifiedNitrogen == 0
+                    local noConversionReason = "feed '" .. feed.id
+                        .. "' carries no convertible content: the stage has nothing to oxidize or recover"
                     -- The residue is the mass-balance remainder of the
                     -- declared inputs and outputs per kilogram of feed.
                     local residuePerKgFeed = 1 + rates.oxygen + rates.water
@@ -7289,6 +7294,13 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         fromKg(proc.residue.unit, fullKg * residuePerKgFeed),
                         "residue store '" .. proc.residue.id
                             .. "' is full: the unrecoverable residue has nowhere to go")
+                    if noConversion then
+                        if limiter == '' then limiter = noConversionReason end
+                        if recoveredWaterPerKgFeed == 0 then
+                            scale = 0
+                            limiter = noConversionReason
+                        end
+                    end
                     -- Condition throttles the whole stage the same
                     -- uniform way: a degraded culture simply cannot
                     -- drive the full rated feed (#408). It never adds

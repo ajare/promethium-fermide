@@ -6812,6 +6812,53 @@ void bufferWorkflow(smoke::Context const&)
 		require(driver.passed(), "Bioconversion editor workflow failed");
 	}
 
+	void bioconversionDegenerateWorkflow(smoke::Context const& test)
+	{
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 2400};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history; StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Degenerate editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		window.setFilePicker([&](bool) -> std::optional<std::string> {
+			return test.fixture("resources/station-systems/scenarios/bioconversion-degenerate.yaml").string();
+		});
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({970, 10}); ImGui::SetNextWindowSize({220, 2350});
+			ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 2350});
+			window.render(world, history);
+		});
+		window.visible = true; driver.frame(); driver.frame();
+		driver.run("station", "bioconversionDegenerateWorkflow", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			driver.click(ctx, "Open configuration"); ctx->Yield(3);
+			ctx->SetRef("Station Systems");
+			if (!driver.require(window.draft().microbialProcessors.size() == 1, "Degenerate configuration did not open")) return;
+			driver.click(ctx, "Apply settings"); ctx->Yield(3);
+			world->resumeSimulation();
+			if (!driver.require(world->advanceTicks(3), "Applied degenerate scenario failed")) return;
+			world->pauseSimulation();
+			auto const p = world->getStationSystemsSnapshot().microbialProcessors.at(0);
+			if (!driver.require(p.lastRecoveredWaterKg > 0 && p.lastOxygenConsumedKg == 0
+				&& p.lastReactionHeatKW == 0, "Degenerate water pass-through incorrect")) return;
+			if (!driver.require(p.limiter.find("carries no convertible content") != std::string::npos,
+				"Degenerate limiter absent")) return;
+			// Use the real form and Apply/reset to select the full no-op.
+			driver.typeValue(ctx, "Microbial processor 0 water recovery", "0");
+			driver.click(ctx, "Apply settings"); ctx->Yield(3);
+			driver.click(ctx, "Confirm World reset"); ctx->Yield(3);
+			world->resumeSimulation();
+			if (!driver.require(world->advanceTicks(3), "No-op failed to tick")) return;
+			world->pauseSimulation();
+			auto const idle = world->getStationSystemsSnapshot().microbialProcessors.at(0);
+			driver.require(idle.feedConsumedKg == 0 && idle.recoveredWaterKg == 0
+				&& idle.limiter.find("carries no convertible content") != std::string::npos,
+				"Editor no-op configuration did not apply");
+		});
+		smoke::require(driver.passed(), "Degenerate bioconversion editor workflow failed");
+	}
+
 	void microbialConditionWorkflow(smoke::Context const&)
 	{
 		using smoke::require;
@@ -8556,6 +8603,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/bufferWorkflow", bufferWorkflow});
 	checks.push_back({"station/microbialConditionWorkflow", microbialConditionWorkflow});
 	checks.push_back({"station/bioconversionWorkflow", bioconversionWorkflow});
+	checks.push_back({"station/bioconversionDegenerateWorkflow", bioconversionDegenerateWorkflow});
 	checks.push_back({"station/cropWorkflow", cropWorkflow});
 	checks.push_back({"station/algaeWorkflow", algaeWorkflow});
 	checks.push_back({"station/maintenanceWorkflow", maintenanceWorkflow});
