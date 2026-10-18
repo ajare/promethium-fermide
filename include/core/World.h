@@ -1813,7 +1813,9 @@ namespace core
 
 		std::shared_ptr<Layer> getLayer(uint32_t layerIndex);
 
-		uint32_t createLocation(std::string const& name, SectorType type, uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight, bool isCorridor);
+		// The Location creation and add seams (createLocation/addLocation) live in
+		// WorldBuilder (#685, ADR 0022); the public Room/Corridor/Facade adds on
+		// the facade forward there.
 
 		// A Transit is created on layerIndex and lands on the Layer directly in front of
 		// it, so every landing cell is read from layerInFront(layerIndex).
@@ -1904,8 +1906,6 @@ namespace core
 		CreateObjectResult _createDoorButton(std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index = nullptr, uint32_t approachSide = 0);
 
 		CreateObjectResult _createBulkheadDoorButton(std::shared_ptr<const Sector> sector, uint32_t y, int side, uint32_t* index = nullptr);
-
-		uint32_t addLocation(std::string const& name, SectorType type, uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight, bool isCorridor);
 
 		void buildGraph();
 

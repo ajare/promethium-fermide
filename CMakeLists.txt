@@ -778,6 +778,14 @@ if(BUILD_TESTING)
     set_tests_properties(world-builder-sector-objects PROPERTIES
         LABELS "smoke;standalone;core" TIMEOUT 30)
 
+    add_executable(pf-world-builder-sectors-checks src/headless/WorldBuilderSectorsChecks.cpp)
+    target_include_directories(pf-world-builder-sectors-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-world-builder-sectors-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-world-builder-sectors-checks)
+    add_test(NAME world-builder-sectors COMMAND pf-world-builder-sectors-checks)
+    set_tests_properties(world-builder-sectors PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
     add_executable(pf-permission-requirement-store-checks src/headless/PermissionRequirementStoreChecks.cpp)
     target_include_directories(pf-permission-requirement-store-checks PRIVATE "${PF_INCLUDE_DIR}")
     target_link_libraries(pf-permission-requirement-store-checks PRIVATE promethium-fermide-core)

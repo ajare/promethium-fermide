@@ -9,11 +9,12 @@
 
 namespace core
 {
-	// Owns the SectorObject authoring behaviour on behalf of the World
-	// that owns it (ADR 0022).
+	// Owns the Sector and SectorObject authoring behaviour on behalf of
+	// the World that owns it (ADR 0022).
 	//
-	// This is the first leaf of the WorldBuilder seam: the SectorObject
-	// family - Walkway, ForceBridge, Window, BoothWindow, and LightSwitch
+	// This is the WorldBuilder seam: the Sector family - Room, Corridor,
+	// Facade, and Background authoring, plus the SectorObject family -
+	// Walkway, ForceBridge, Window, BoothWindow, and LightSwitch
 	// authoring. Each add is judged before anything is written, so a
 	// refusal leaves the World exactly as it was found; each accepted add
 	// records its construction record so replay reproduces it verbatim.
@@ -55,6 +56,58 @@ namespace core
 		WorldBuilder& operator=(WorldBuilder const&) = delete;
 
 		virtual ~WorldBuilder() = default;
+
+		// ------------------------------------------------------------------
+		// Sectors: Room / Corridor / Facade / Background
+		// ------------------------------------------------------------------
+
+		// The raw Location creation seam: appends the Sector to the World's
+		// registry. The cells are stamped by addLocation(); nothing here
+		// validates - callers come through the judged add family.
+		uint32_t createLocation(std::string const& name, SectorType type,
+			uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide,
+			uint32_t levelsHigh, float topLevelHeight, bool isCorridor);
+
+		// The validated Location add: bounds and layer-space are judged
+		// before anything is written; on acceptance the Location is created
+		// and its cells stamped (ground floor on the bottom level).
+		uint32_t addLocation(std::string const& name, SectorType type,
+			uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide,
+			uint32_t levelsHigh, float topLevelHeight, bool isCorridor);
+
+		// A Corridor is a Location, so it may sit on any Layer. The
+		// Layer-less form keeps the front-most Layer as its default.
+		uint32_t addCorridor(uint32_t y, uint32_t x, uint32_t cellsWide,
+			uint32_t levelsHigh);
+		uint32_t addCorridor(uint32_t layerIndex, uint32_t y, uint32_t x,
+			uint32_t cellsWide, uint32_t levelsHigh);
+
+		uint32_t addRoom(std::string const& name, uint32_t layerIndex,
+			uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh,
+			float topLevelHeight);
+
+		// A Background is a non-occupiable Sector: it takes space on its
+		// own Layer and nothing else. It may sit on any Layer, front-most
+		// and back-most included (ADR 0002).
+		bool canAddBackground(uint32_t layerIndex, uint32_t y, uint32_t x,
+			uint32_t cellsWide, uint32_t levelsHigh,
+			std::string* diagnostic = nullptr) const;
+		uint32_t addBackground(uint32_t layerIndex, uint32_t y, uint32_t x,
+			uint32_t cellsWide, uint32_t levelsHigh,
+			BackgroundColour const& colour);
+
+		// A Facade is an occupiable Location with its perimeter walls all
+		// open by construction; placement follows the Room rule (ADR 0003).
+		// The named form is the persistence form.
+		bool canAddFacade(uint32_t layerIndex, uint32_t y, uint32_t x,
+			uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight,
+			std::string* diagnostic = nullptr) const;
+		uint32_t addFacade(uint32_t layerIndex, uint32_t y, uint32_t x,
+			uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight,
+			BackgroundColour const& colour);
+		uint32_t addFacade(std::string const& name, uint32_t layerIndex,
+			uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh,
+			float topLevelHeight, BackgroundColour const& colour);
 
 		// ------------------------------------------------------------------
 		// Low-level creation seams

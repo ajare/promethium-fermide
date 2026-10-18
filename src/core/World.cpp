@@ -1662,17 +1662,6 @@ namespace core
 		return mLayers[layerIndex];
 	}
 
-	uint32_t World::createLocation(string const& name, SectorType type, uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight, bool isCorridor)
-	{
-		invalidateSimulationSnapshot();
-		auto sectorIndex = (uint32_t)mSectors.size();
-
-		auto location = make_shared<Location>(name, type, layerIndex, sectorIndex, x, y, cellsWide, levelsHigh, topLevelHeight, ~0u, isCorridor);
-		
-		mSectors.push_back(location);
-		return sectorIndex;
-	}
-
 	uint32_t World::createLadder(uint32_t layerIndex, uint32_t x, uint32_t y, CreateLadderOptions const& options)
 	{
 		invalidateSimulationSnapshot();
@@ -1832,34 +1821,6 @@ namespace core
 			SectorObjectType::Shuttle,
 			shuttle
 		};
-	}
-
-	uint32_t World::addLocation(string const& name, SectorType type, uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight, bool isCorridor)
-	{
-		invalidateSimulationSnapshot();
-		string caller = format("World::addLocation({}, {}, {}, {}, {}, {}, {} {})", name, getSectorTypeString(type), layerIndex, x, y, cellsWide, levelsHigh, topLevelHeight);
-		
-		validateBounds(caller, x, y, cellsWide, levelsHigh);
-		validateLayerSpace(caller, layerIndex, x, y, cellsWide, levelsHigh);
-
-		// Create sector
-		auto sectorIndex = createLocation(name, type, layerIndex, x, y, cellsWide, levelsHigh, topLevelHeight, isCorridor);
-
-		// Set layers
-		auto layer = getLayer(layerIndex);
-
-		for (uint32_t iy = y; iy < y + levelsHigh; ++iy)
-		{
-			for (uint32_t ix = x; ix < x + cellsWide; ++ix)
-			{
-				auto& cellDef = layer->getCellDefinition(ix, iy);
-
-				cellDef.sectorIndex = sectorIndex;
-				cellDef.floorType = iy == y ? CellFloorType::Ground : CellFloorType::None;
-			}
-		}
-
-		return sectorIndex;
 	}
 
 	World::CreateObjectResult World::createDoor(uint32_t layerIndex, uint32_t x, uint32_t y,
@@ -2067,243 +2028,48 @@ namespace core
 
 	uint32_t World::addCorridor(uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh)
 	{
-		invalidateSimulationSnapshot();
-		return addCorridor(0, y, x, cellsWide, levelsHigh);
+		return mWorldBuilder->addCorridor(y, x, cellsWide, levelsHigh);
 	}
 
 	uint32_t World::addCorridor(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide,
 		uint32_t levelsHigh)
 	{
-		invalidateSimulationSnapshot();
-		string const caller = format("World::addCorridor({}, {}, {}, {}, {})", layerIndex, y, x, cellsWide, levelsHigh);
-		// Every rejecting check runs before beginStructuralEdit() so a refused
-		// call stays a true no-op: no modified flag, no topology invalidation
-		// (ticket #93).
-		validateLayer(caller, layerIndex);
-		// Minimum (1,1). A zero-sized Location would pass the bounds checks by covering
-		// nothing, leaving a Sector no cell references: invisible, unselectable, and
-		// unreachable forever (ticket #64).
-		if (cellsWide == 0)
-			throw WorldException(this, format("{} - a Corridor must be at least one cell wide", caller));
-		if (levelsHigh == 0)
-			throw WorldException(this, format("{} - a Corridor must be at least one level high", caller));
-		validateBounds(caller, x, y, cellsWide, levelsHigh);
-		validatePhysicalControlSectorCreation(layerIndex, x, y, cellsWide, levelsHigh, true);
-		beginStructuralEdit("addCorridor");
-		auto const result = addLocation("Corridor", SectorType::Location, layerIndex, x, y, cellsWide, levelsHigh, CORE_CORRIDOR_HEIGHT, true);
-		reflowAllPhysicalControls();
-		ConstructionRecord record{ ConstructionType::Corridor };
-		record.layer = layerIndex;
-		record.a = y; record.b = x; record.c = cellsWide; record.d = levelsHigh;
-		recordConstruction(std::move(record));
-		return result;
+		return mWorldBuilder->addCorridor(layerIndex, y, x, cellsWide, levelsHigh);
 	}
 
 	uint32_t World::addRoom(string const& name, uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight)
 	{
-		invalidateSimulationSnapshot();
-		string const caller = format("World::addRoom({}, {}, {}, {}, {}, {}, {})", name, layerIndex, y, x, cellsWide, levelsHigh, topLevelHeight);
-		// Every rejecting check runs before beginStructuralEdit() so a refused
-		// call stays a true no-op: no modified flag, no topology invalidation
-		// (ticket #93).
-		// Written as a negated in-range test so a NaN topLevelHeight is rejected
-		// too: NaN fails both comparisons, so the plain < / > pair would let it
-		// through (ticket #55).
-		if (!(topLevelHeight >= CORE_ROOM_MIN_HEIGHT && topLevelHeight <= CORE_ROOM_MAX_HEIGHT))
-		{
-			throw WorldException(this, format("{} - topLevelHeight={} is out of range", caller, topLevelHeight));
-		}
-		// Minimum (1,1), the same invariant Background and Facade enforce: a
-		// zero-sized Room would pass the bounds checks by covering nothing,
-		// leaving a Sector no cell references (ticket #64).
-		if (cellsWide == 0)
-			throw WorldException(this, format("{} - a Room must be at least one cell wide", caller));
-		if (levelsHigh == 0)
-			throw WorldException(this, format("{} - a Room must be at least one level high", caller));
-
-		validateLayer(caller, layerIndex);
-		validateBounds(caller, x, y, cellsWide, levelsHigh);
-		validatePhysicalControlSectorCreation(layerIndex, x, y, cellsWide, levelsHigh, true);
-		beginStructuralEdit("addRoom");
-
-		auto const result = addLocation(name, SectorType::Location, layerIndex, x, y, cellsWide, levelsHigh, topLevelHeight, false);
-		reflowAllPhysicalControls();
-		ConstructionRecord record{ ConstructionType::Room };
-		record.name = name;
-		record.a = layerIndex; record.b = y; record.c = x; record.d = cellsWide; record.e = levelsHigh;
-		record.x = topLevelHeight;
-		recordConstruction(std::move(record));
-		return result;
+		return mWorldBuilder->addRoom(name, layerIndex, y, x, cellsWide, levelsHigh, topLevelHeight);
 	}
 
 	bool World::canAddBackground(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide,
 		uint32_t levelsHigh, string* diagnostic) const
 	{
-		if (diagnostic) diagnostic->clear();
-
-		string caller = format("World::addBackground({}, {}, {}, {}, {})",
-			layerIndex, y, x, cellsWide, levelsHigh);
-
-		try
-		{
-			validateLayer(caller, layerIndex);
-
-			// Minimum (1,1). A zero-sized block would pass the bounds checks by covering
-			// nothing, which is not a Background worth authoring.
-			if (cellsWide == 0)
-				throw WorldException(this, format("{} - a Background must be at least one cell wide", caller));
-			if (levelsHigh == 0)
-				throw WorldException(this, format("{} - a Background must be at least one level high", caller));
-
-			validateBounds(caller, x, y, cellsWide, levelsHigh);
-
-			// Every cell must be unoccupied on the Background's own Layer, which is the
-			// same rule a Location plays by. Any Layer is legal, front-most and back-most
-			// included: a "back layers only" rule would re-introduce exactly the
-			// Fore/Back special-casing that ADR 0002 removed.
-			validateLayerSpace(caller, layerIndex, x, y, cellsWide, levelsHigh);
-		}
-		catch (Exception const& error)
-		{
-			if (diagnostic) *diagnostic = error.getMessage();
-			return false;
-		}
-		catch (exception const& error)
-		{
-			if (diagnostic) *diagnostic = error.what();
-			return false;
-		}
-		return true;
+		return mWorldBuilder->canAddBackground(layerIndex, y, x, cellsWide, levelsHigh, diagnostic);
 	}
 
 	uint32_t World::addBackground(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide,
 		uint32_t levelsHigh, BackgroundColour const& colour)
 	{
-		invalidateSimulationSnapshot();
-		string diagnostic;
-		if (!canAddBackground(layerIndex, y, x, cellsWide, levelsHigh, &diagnostic))
-			throw WorldException(this, diagnostic);
-
-		validatePhysicalControlSectorCreation(layerIndex, x, y, cellsWide, levelsHigh, false);
-		beginStructuralEdit("addBackground");
-
-		auto sectorIndex = (uint32_t)mSectors.size();
-		mSectors.push_back(make_shared<Background>("Background", layerIndex, sectorIndex,
-			x, y, cellsWide, levelsHigh, colour));
-
-		auto layer = getLayer(layerIndex);
-		for (uint32_t iy = y; iy < y + levelsHigh; ++iy)
-		{
-			for (uint32_t ix = x; ix < x + cellsWide; ++ix)
-			{
-				auto& cellDef = layer->getCellDefinition(ix, iy);
-				cellDef.sectorIndex = sectorIndex;
-				// A Background owns no walkable floor and hosts no object, so its cells
-				// carry no floor and no SectorObject.
-				cellDef.floorType = Background::cellFloorType();
-				cellDef.sectorObjectType = SectorObjectType::None;
-			}
-		}
-
-		reflowAllPhysicalControls();
-		ConstructionRecord record{ ConstructionType::Background };
-		record.layer = layerIndex;
-		record.a = y; record.b = x; record.c = cellsWide; record.d = levelsHigh;
-		// The whole Background appearance fits one integer, so no new record field is
-		// needed to persist its colour.
-		record.f = packBackgroundColour(colour);
-		recordConstruction(std::move(record));
-
-		return sectorIndex;
+		return mWorldBuilder->addBackground(layerIndex, y, x, cellsWide, levelsHigh, colour);
 	}
 
 	bool World::canAddFacade(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide,
 		uint32_t levelsHigh, float topLevelHeight, string* diagnostic) const
 	{
-		if (diagnostic) diagnostic->clear();
-
-		string caller = format("World::addFacade({}, {}, {}, {}, {})",
-			layerIndex, y, x, cellsWide, levelsHigh);
-
-		try
-		{
-			validateLayer(caller, layerIndex);
-
-			// A Facade is placed exactly as a Room is: minimum (1,1), inside the
-			// World bounds, and on cells unoccupied on its own Layer.
-			if (cellsWide == 0)
-				throw WorldException(this, format("{} - a Facade must be at least one cell wide", caller));
-			if (levelsHigh == 0)
-				throw WorldException(this, format("{} - a Facade must be at least one level high", caller));
-			// Same negated in-range test as addRoom: a NaN topLevelHeight must
-			// not sail through the < / > pair (ticket #55).
-			if (!(topLevelHeight >= CORE_ROOM_MIN_HEIGHT && topLevelHeight <= CORE_ROOM_MAX_HEIGHT))
-				throw WorldException(this, format("{} - topLevelHeight={} is out of range", caller, topLevelHeight));
-
-			validateBounds(caller, x, y, cellsWide, levelsHigh);
-			validateLayerSpace(caller, layerIndex, x, y, cellsWide, levelsHigh);
-		}
-		catch (Exception const& error)
-		{
-			if (diagnostic) *diagnostic = error.getMessage();
-			return false;
-		}
-		catch (exception const& error)
-		{
-			if (diagnostic) *diagnostic = error.what();
-			return false;
-		}
-		return true;
+		return mWorldBuilder->canAddFacade(layerIndex, y, x, cellsWide, levelsHigh, topLevelHeight, diagnostic);
 	}
 
 	uint32_t World::addFacade(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide,
 		uint32_t levelsHigh, float topLevelHeight, BackgroundColour const& colour)
 	{
-		invalidateSimulationSnapshot();
-		return addFacade(Facade::defaultName(), layerIndex, y, x, cellsWide, levelsHigh,
-			topLevelHeight, colour);
+		return mWorldBuilder->addFacade(layerIndex, y, x, cellsWide, levelsHigh, topLevelHeight, colour);
 	}
 
 	uint32_t World::addFacade(std::string const& name, uint32_t layerIndex, uint32_t y, uint32_t x,
 		uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight, BackgroundColour const& colour)
 	{
-		invalidateSimulationSnapshot();
-		string diagnostic;
-		if (!canAddFacade(layerIndex, y, x, cellsWide, levelsHigh, topLevelHeight, &diagnostic))
-			throw WorldException(this, diagnostic);
-
-		validatePhysicalControlSectorCreation(layerIndex, x, y, cellsWide, levelsHigh, false);
-		beginStructuralEdit("addFacade");
-
-		auto sectorIndex = (uint32_t)mSectors.size();
-		mSectors.push_back(make_shared<Facade>(name, layerIndex, sectorIndex,
-			x, y, cellsWide, levelsHigh, topLevelHeight, colour));
-
-		auto layer = getLayer(layerIndex);
-		for (uint32_t iy = y; iy < y + levelsHigh; ++iy)
-		{
-			for (uint32_t ix = x; ix < x + cellsWide; ++ix)
-			{
-				auto& cellDef = layer->getCellDefinition(ix, iy);
-				cellDef.sectorIndex = sectorIndex;
-				// A Facade owns walkable floor exactly as a Location does: ground
-				// on the bottom level, upper levels reached by Walkways.
-				cellDef.floorType = iy == y ? CellFloorType::Ground : CellFloorType::None;
-			}
-		}
-
-		reflowAllPhysicalControls();
-		ConstructionRecord record{ ConstructionType::Facade };
-		record.name = name;
-		record.layer = layerIndex;
-		record.a = y; record.b = x; record.c = cellsWide; record.d = levelsHigh;
-		record.x = topLevelHeight;
-		// The Facade reuses Background's colour packing, so the editor and the
-		// headless checks round-trip the same arithmetic (ADR 0003).
-		record.f = packBackgroundColour(colour);
-		recordConstruction(std::move(record));
-
-		return sectorIndex;
+		return mWorldBuilder->addFacade(name, layerIndex, y, x, cellsWide, levelsHigh, topLevelHeight, colour);
 	}
 
 	bool World::canAddLadder(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t levelsHigh,
