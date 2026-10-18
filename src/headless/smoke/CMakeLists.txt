@@ -83,6 +83,8 @@ pf_add_smoke_module(pf-smoke-station
         station/StationCompoundPowerChecks.cpp
         station/StationBatteryChecks.cpp
         station/StationLogisticsChecks.cpp
+        station/StationOperationsChecks.cpp
+        station/StationResilienceChecks.cpp
         station/StationThermalChecks.cpp
         station/StationGenerationChecks.cpp
         station/StationAtmosphereChecks.cpp
