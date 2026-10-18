@@ -37,6 +37,10 @@ namespace core
 		// owning World's behalf and shares World's friendship here rather
 		// than widening Sector's public surface (ADR 0022).
 		friend class MarkerStore;
+		// The world builder creates SectorObjects on the owning World's
+		// behalf and shares World's friendship here rather than widening
+		// Sector's public surface (#688, ADR 0022).
+		friend class WorldBuilder;
 
 	private:
 

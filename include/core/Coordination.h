@@ -143,6 +143,7 @@ namespace core
 		friend class PlacementValidator;
 		friend class PermissionRequirementStore; // ADR 0022 requirement edits
 		friend class DeviceConditionStore; // ADR 0022 control-target condition query
+		friend class WorldBuilder; // ADR 0022 authored control wiring (#688)
 
 		std::string mName;
 		BoothWindowId mBoothWindowOwner;

@@ -64,6 +64,7 @@ namespace core
 	class FurnitureStore;
 	class AgentTagService;
 	class AgentProfileEditor;
+	class WorldBuilder;
 
 	class World : public Serializable
 	{
@@ -125,6 +126,11 @@ namespace core
 		// snapshot invalidation, and the coordinator's usage-change seam on
 		// the World's behalf (#683, ADR 0022).
 		friend class AgentProfileEditor;
+		// The world builder owns no state; it reads and edits the Sectors,
+		// Layers, cells, BoothWindow registry, interaction points, and
+		// construction records below on the World's behalf while authoring
+		// SectorObjects (#688, ADR 0022).
+		friend class WorldBuilder;
 		friend struct WorldAgentRestorationTestAccess;
 		friend struct PhysicalControlLookupTestAccess;
 		friend struct QueuedPressLookupTestAccess;
@@ -731,6 +737,16 @@ namespace core
 		// pause gate, snapshot invalidation, and replanning seams through
 		// this World.
 		std::unique_ptr<AgentProfileEditor> mAgentProfileEditor;
+
+		// The SectorObject authoring family lives in this owned builder
+		// (ADR 0022, #688). World keeps ownership of the state it edits -
+		// the Sectors, Layers, cells, BoothWindow registry, interaction
+		// points, and construction records (ADR 0001) - and stays the
+		// facade (design pattern) through which every caller reaches these
+		// operations; the builder owns no state and reaches them, and the
+		// placement validator and traversal resource registry they ride
+		// on, through this World.
+		std::unique_ptr<WorldBuilder> mWorldBuilder;
 
 		// Every World owns one sandboxed Lua runtime for its Agent types. It is
 		// declared before mAgents so Agent destruction (which releases live Lua
@@ -1844,15 +1860,11 @@ namespace core
 			CreateObjectResult& control, float standingY, float reach,
 			float durationSeconds, std::vector<InteractionBinding> bindings);
 
-		CreateObjectResult createWalkway(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t* vertexIdentifier = nullptr);
-
 		bool canAddSectorMarkerImpl(uint32_t sectorIndex, uint32_t levelIndex, float xOffset,
 			std::string* diagnostic, bool allowCoincident) const;
 		CreateObjectResult addSectorMarkerRestored(uint32_t sectorIndex,
 			uint32_t levelIndex, float xOffset, MarkerId id, std::string name,
 			MarkerProperties properties = 0, uint32_t* vertexIdentifier = nullptr, bool allowCoincident = false);
-
-		CreateObjectResult createForceBridge(uint32_t layerIndex, uint32_t x, uint32_t y, CreateForceBridgeOptions const& options);
 
 		CreateObjectResult createLadderSectorObject(uint32_t layerIndex, uint32_t x, uint32_t y, CreateLadderOptions const& options, uint32_t* vertexIdentifier = nullptr);
 
@@ -1874,8 +1886,6 @@ namespace core
 		CreateObjectResult _createDoorButton(std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index = nullptr, uint32_t approachSide = 0);
 
 		CreateObjectResult _createBulkheadDoorButton(std::shared_ptr<const Sector> sector, uint32_t y, int side, uint32_t* index = nullptr);
-
-		CreateObjectResult _createForceBridgeButton(std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, int side, uint32_t flags, uint32_t* index = nullptr);
 
 		uint32_t addLocation(std::string const& name, SectorType type, uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight, bool isCorridor);
 

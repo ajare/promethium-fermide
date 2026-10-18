@@ -8,6 +8,7 @@
 
 #include "core/MarkerStore.h"
 
+#include "core/CellDefinition.h"
 #include "core/Exceptions.h"
 #include "core/Layer.h"
 #include "core/Marker.h"
@@ -95,6 +96,55 @@ namespace core
 	}
 
 	// ----------------------------------------------------------------------
+	// Placement validation
+	// ----------------------------------------------------------------------
+
+	bool MarkerStore::canAddSectorMarker(uint32_t sectorIndex, uint32_t levelIndex,
+		float xOffset, string* diagnostic) const
+	{
+		return canAddSectorMarkerImpl(sectorIndex, levelIndex, xOffset, diagnostic, false);
+	}
+
+	bool MarkerStore::canAddSectorMarkerImpl(uint32_t sectorIndex, uint32_t levelIndex,
+		float xOffset, string* diagnostic, bool allowCoincident) const
+	{
+		auto reject = [diagnostic](string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+
+		if (sectorIndex >= mWorld.mSectors.size()) return reject("Marker sector does not exist");
+		auto const& sector = mWorld.mSectors[sectorIndex];
+		if (!sector || !sector->sectorSupportsObjectType(SectorObjectType::Marker))
+			return reject("This sector does not support Markers");
+		if (levelIndex >= sector->getLevelsHigh()) return reject("Marker level is outside the sector");
+		if (!isfinite(xOffset) || xOffset < 0.0f || xOffset >= sector->getSize().x)
+			return reject("Marker position is outside the sector");
+
+		auto const cellX = sector->getCellX() + (uint32_t)floor(xOffset);
+		auto const cellY = sector->getCellY() + levelIndex;
+		auto const& cellDef = mWorld.mLayers[sector->getLayerIndex()]->getCellDefinition(cellX, cellY);
+		if (cellDef.floorType != CellFloorType::Ground
+			&& cellDef.floorType != CellFloorType::Walkway)
+			return reject("Markers require ground or a Walkway");
+
+		auto const globalX = sector->getCellX() + xOffset;
+		for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
+		{
+			auto markerObject = dynamic_pointer_cast<MarkerSectorObject>(sector->getObject(i));
+			if (!markerObject) continue;
+			auto marker = markerObject->getMarker();
+			if (!allowCoincident && marker->getCellY() == cellY
+				&& fabs(marker->getCellX() + marker->getOffset() - globalX) <= 0.05f)
+				return reject("A Marker already exists at this position");
+		}
+
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	// ----------------------------------------------------------------------
 	// Creation
 	// ----------------------------------------------------------------------
 
@@ -136,7 +186,7 @@ namespace core
 	{
 		mWorld.invalidateSimulationSnapshot();
 		string diagnostic;
-		if (!mWorld.canAddSectorMarker(sectorIndex, levelIndex, xOffset, &diagnostic))
+		if (!canAddSectorMarker(sectorIndex, levelIndex, xOffset, &diagnostic))
 			throw WorldException(&mWorld, "World::addSectorMarker - " + diagnostic);
 		auto const trimmed = Marker::trimName(name);
 		if (!Marker::nameIsValid(trimmed, &diagnostic))
@@ -162,7 +212,7 @@ namespace core
 		if (properties & ~markerPropertyBit(MarkerProperty::BlocksPathing))
 			throw WorldException(&mWorld, "Marker properties contain unknown bits");
 		if (lookupMarker(id)) throw WorldException(&mWorld, "Marker ID is already in use");
-		if (!mWorld.canAddSectorMarkerImpl(sectorIndex, levelIndex, xOffset, &diagnostic, allowCoincident))
+		if (!canAddSectorMarkerImpl(sectorIndex, levelIndex, xOffset, &diagnostic, allowCoincident))
 			throw WorldException(&mWorld, "World::addSectorMarker - " + diagnostic);
 		name = Marker::trimName(name);
 		if (!Marker::nameIsValid(name, &diagnostic))

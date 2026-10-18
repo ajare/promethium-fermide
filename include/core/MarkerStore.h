@@ -25,12 +25,13 @@ namespace core
 	// pattern.
 	//
 	// This is the Marker behaviour moved out of World: ID allocation,
-	// creation and validated restoration, name-uniqueness judging and
-	// deterministic generated names, lookup and mutable access, rename
-	// with its authored-record and Furniture-destination upkeep, pathing-
-	// property edits behind the pause gate, and removal with its cell
-	// deregistration. Every operation is judged before anything is
-	// written, so a refusal leaves the World exactly as it was found.
+	// creation and validated restoration, placement judging, name-
+	// uniqueness judging and deterministic generated names, lookup and
+	// mutable access, rename with its authored-record and Furniture-
+	// destination upkeep, pathing-property edits behind the pause gate,
+	// and removal with its cell deregistration. Every operation is judged
+	// before anything is written, so a refusal leaves the World exactly
+	// as it was found.
 	//
 	// `markerHasNoBehaviourReferences` stays on World: it couples to the
 	// behaviour runtime's assignment configuration and is not part of the
@@ -73,6 +74,20 @@ namespace core
 
 		// All Marker IDs the World currently holds, in ascending order.
 		std::vector<MarkerId> getMarkerIds() const;
+
+		// ------------------------------------------------------------------
+		// Placement validation
+		// ------------------------------------------------------------------
+
+		// Read-only placement check for a Marker at (levelIndex, xOffset)
+		// within a Sector: the Sector must admit Markers, the position must
+		// be inside it and finite, the cell must carry a Ground or Walkway
+		// floor, and no existing Marker may sit at the same spot unless
+		// `allowCoincident` (used by Furniture-owned placement).
+		bool canAddSectorMarker(uint32_t sectorIndex, uint32_t levelIndex, float xOffset,
+			std::string* diagnostic = nullptr) const;
+		bool canAddSectorMarkerImpl(uint32_t sectorIndex, uint32_t levelIndex, float xOffset,
+			std::string* diagnostic, bool allowCoincident) const;
 
 		// ------------------------------------------------------------------
 		// Creation
