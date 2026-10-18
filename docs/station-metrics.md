@@ -1,5 +1,9 @@
 # Station Flow observations
 
+Carbon recovery and fuel-cell exchange catalogue (#710): see
+[Carbon recovery and fuel-cell exchange observations](station-carbon-exchange-observations.md)
+for distinct reactants/products, electrical/thermal accounts and connection losses.
+
 Water and gas processing exchange catalogue (#709): see
 [Water and gas processing exchange observations](station-water-gas-exchange-observations.md)
 for condensate, treatment, electrolysis, CO2 capture and separate loss boundaries.

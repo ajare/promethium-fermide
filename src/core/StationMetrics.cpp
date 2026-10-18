@@ -13,6 +13,7 @@ namespace core
 	void appendStationThermalObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
 	void appendStationCrewAtmosphereObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
 	void appendStationWaterGasObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
+	void appendStationCarbonObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
 	std::vector<StationStoreObservation> stationStoreObservations(StationSystemsSettings const& settings)
 	{
 		// Identity evidence belongs to ownership boundaries, never labels or units.
@@ -271,9 +272,13 @@ namespace core
 			add("Fuel cell", c.id, "Oxygen", c.oxygenStoreId, true, 0, false);
 			add("Fuel cell", c.id, "Product water", c.waterStoreId, false, 0, false);
 			scalar("Fuel cell", c.id, "Generation", StationMetricRole::Generation, cells,
-				CellRead{[](auto const& a) { return a.lastOutputKW; }}, CellRead{});
+				CellRead{[](auto const& a) { return a.lastOutputKW; }},
+				CellRead{[](auto const& a) { return a.commandedOutputKW; }});
+			result.back().metric.hazardClass = c.hazardClass;
 			scalar("Fuel cell", c.id, "Production waste heat", StationMetricRole::Output, cells,
 				CellRead{[](auto const& a) { return a.lastWasteHeatKW; }}, CellRead{});
+			result.back().metric.hazardClass = c.hazardClass;
+			result.back().metric.thermalClass = c.thermalClass;
 			connection("Fuel cell", c.id, "Backup generation", "Pool delivery", StationMetricRole::Output, 1);
 			connection("Fuel cell", c.id, "Backup generation", "Generation cable loss", StationMetricRole::Loss, 2);
 			connection("Fuel cell", c.id, "Heat", "Delivered heat", StationMetricRole::Output, 1);
@@ -282,6 +287,7 @@ namespace core
 		appendStationThermalObservations(settings, result);
 		appendStationCrewAtmosphereObservations(settings, result);
 		appendStationWaterGasObservations(settings, result);
+		appendStationCarbonObservations(settings, result);
 		return result;
 	}
 

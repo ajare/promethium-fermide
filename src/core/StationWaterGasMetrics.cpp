@@ -94,7 +94,8 @@ void appendStationWaterGasObservations(StationSystemsSettings const& settings,
 	// from process yields (which would conceal connection constraints).
 	for (auto const& link : graph.links) {
 		auto const& k = link.designKey;
-		if (k.ownerType != "Water collector" && k.ownerType != "Water treatment" && k.ownerType != "Electrolyzer" && k.ownerType != "CO2 capture") continue;
+		if (k.ownerType != "Water collector" && k.ownerType != "Water treatment" && k.ownerType != "Electrolyzer" && k.ownerType != "CO2 capture"
+			&& k.ownerType != "Sabatier" && k.ownerType != "Methane processor" && k.ownerType != "Fuel cell") continue;
 		bool const material = link.kind == station_connections::LinkKind::Material;
 		if (!material && link.kind != station_connections::LinkKind::Power && link.kind != station_connections::LinkKind::Heat) continue;
 		bool const incoming = graph.nodes[link.to].type == k.ownerType && graph.nodes[link.to].id == k.ownerId;
@@ -112,6 +113,18 @@ void appendStationWaterGasObservations(StationSystemsSettings const& settings,
 				if (k.peerType == "Store") storeIdentity(o, k.peerId);
 				else { auto a = std::ranges::find(settings.atmospheres, k.peerId, &AtmosphereSettings::id); if (a != settings.atmospheres.end()) d.hazardClass = a->hazardClass; }
 			}
+			// Carbon equipment carries one validated hazard class throughout its
+			// process. Retain it on electrical/thermal endpoint accounts as well.
+			auto carbonIdentity = [&](auto const& entries) {
+				auto owner = std::ranges::find(entries, k.ownerId, [](auto const& e) { return e.id; });
+				if (owner != entries.end()) {
+					d.hazardClass = owner->hazardClass;
+					if (link.kind == station_connections::LinkKind::Heat) d.thermalClass = owner->thermalClass;
+				}
+			};
+			if (k.ownerType == "Sabatier") carbonIdentity(settings.sabatierReactors);
+			else if (k.ownerType == "Methane processor") carbonIdentity(settings.methaneProcessors);
+			else if (k.ownerType == "Fuel cell") carbonIdentity(settings.fuelCells);
 			if (link.kind == station_connections::LinkKind::Heat) {
 				if (k.ownerType == "Water collector") d.thermalClass = std::ranges::find(settings.waterCollectors, k.ownerId, &WaterCollectorSettings::id)->thermalClass;
 				else if (k.ownerType == "Electrolyzer") d.thermalClass = std::ranges::find(settings.electrolyzers, k.ownerId, &ElectrolyzerSettings::id)->thermalClass;

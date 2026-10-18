@@ -1,5 +1,6 @@
 #include "MaterialObservations.h"
 #include "WaterGasObservationFixture.h"
+#include "CarbonObservationFixture.h"
 #include "core/World.h"
 #include <algorithm>
 #include <cmath>
@@ -150,6 +151,106 @@ namespace
 			require(observations.size() == 4 && observations[0].metric.unit == canonical, "canonical rate unit missing");
 			close(observations[0].sourceToCanonicalScale, scale);
 		}
+	}
+
+	void carbonExchangeObservations(smoke::Context const&)
+	{
+		auto s = smoke::station::carbonObservationFixture();
+		core::World world("Carbon exchanges", 2, 2); world.pauseSimulation(); world.finishBuild();
+		auto apply = [&] { std::string why; if (!world.configureStationSystems(s, true, &why)) throw std::runtime_error(why); };
+		auto family = [](std::string const& t) { return t == "Sabatier" || t == "Methane processor" || t == "Fuel cell"; };
+		auto check = [&](std::string const& type, std::string const& role, double expected) {
+			for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.breakdown == "Aggregate"
+				&& def.id.starts_with("exchange/" + type + "/") && def.id.find("/" + role + "/") != std::string::npos) {
+				auto const data = world.queryStationSystemsChart(def.id);
+				require(!data.incomplete && !data.series[0].values.empty(), "carbon chart missing history");
+				close(data.series[0].values.back(), expected);
+				auto const stack = world.queryStationSystemsChart(def.id + "/instances");
+				auto last = std::find_if(stack.series.rbegin(), stack.series.rend(), [](auto const& l) { return l.stacked; });
+				require(last != stack.series.rend(), "carbon instance stack missing"); close(last->upper.back(), expected);
+				return;
+			}
+			throw std::runtime_error("missing carbon role " + type + "/" + role);
+		};
+		auto verify = [&] {
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const history = world.getStationSystemsMetricHistory();
+			auto missing = snap; missing.sabatierReactors.clear(); missing.methaneProcessors.clear(); missing.fuelCells.clear(); missing.connections.clear();
+			for (auto const& o : core::stationExchangeObservations(s)) if (family(o.metric.equipmentType) && o.read) {
+				auto h = std::ranges::find(history, o.metric.id, [](auto const& h) { return h.descriptor.id; });
+				require(h != history.end() && !h->samples.empty(), "carbon metric missing");
+				auto const v = o.read(snap);
+				require(v.actual.has_value() && h->samples.back().actual.has_value(), "committed carbon exchange unavailable");
+				close(*h->samples.back().actual, *v.actual * o.sourceToCanonicalScale / (o.perTick ? core::World::getFixedTimestep() : 1));
+				if (v.requested) close(*h->samples.back().requested, *v.requested * o.sourceToCanonicalScale / (o.perTick ? core::World::getFixedTimestep() : 1));
+				require(!o.read(missing).actual, "missing carbon authority became zero");
+			}
+			for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.breakdown == "Aggregate" && def.id.starts_with("exchange/")
+				&& std::any_of(history.begin(), history.end(), [&](auto const& h) { return family(h.descriptor.equipmentType) && std::ranges::find(def.series[0].contributors, h.descriptor.id) != def.series[0].contributors.end(); })) {
+				auto const data = world.queryStationSystemsChart(def.id);
+				require(!data.incomplete, "carbon aggregate incomplete");
+				auto unavailable = history;
+				for (auto& h : unavailable) if (h.descriptor.id == def.series[0].contributors[0]) h.samples.back().actual.reset();
+				auto const gap = core::queryStationChart(def, unavailable);
+				require(gap.incomplete && std::isnan(gap.series[0].values.back()), "missing carbon contributor concealed");
+			}
+		};
+		apply(); run(world, 12); verify();
+		auto snap = world.getStationSystemsSnapshot(); auto dt = core::World::getFixedTimestep();
+		require(snap.sabatierReactors[0].lastCo2ConsumedKg > 0 && snap.methaneProcessors[0].lastMethaneConsumedKg > 0 && snap.fuelCells[0].lastOutputKW > 0, "carbon fixture inactive");
+		check("Sabatier", "CO2 feed", snap.sabatierReactors[0].lastCo2ConsumedKg / dt);
+		check("Sabatier", "Methane", snap.sabatierReactors[0].lastMethaneProducedKg / dt);
+		check("Sabatier", "Water", snap.sabatierReactors[0].lastWaterProducedKg / dt);
+		check("Sabatier", "Produced heat", snap.sabatierReactors[0].lastPowerSuppliedKW + snap.sabatierReactors[0].lastReactionHeatKW);
+		check("Methane processor", "Solid carbon", snap.methaneProcessors[0].lastCarbonProducedKg / dt);
+		check("Methane processor", "Recovered hydrogen", snap.methaneProcessors[0].lastHydrogenReturnedKg / dt);
+		check("Methane processor", "Produced heat", snap.methaneProcessors[0].lastPowerSuppliedKW - snap.methaneProcessors[0].lastReactionHeatKW);
+		check("Fuel cell", "Generation", snap.fuelCells[0].lastOutputKW);
+		check("Fuel cell", "Production waste heat", snap.fuelCells[0].lastWasteHeatKW);
+		// Physical connection input caps and losses remain authoritative.
+		for (auto const& c : snap.connections) if (family(c.key.ownerType)) s.connections[c.key] = {core::StationPhysicalConnection::Automatic, 0.0005, 0.5};
+		apply(); run(world, 12); verify(); snap = world.getStationSystemsSnapshot(); bool loss = false;
+		for (auto const& c : snap.connections) if (family(c.key.ownerType) && c.lastInputRate > 0) {
+			close(c.lastInputRate, c.lastDeliveredRate + c.lastLossRate); loss |= c.lastLossRate > 0;
+		}
+		require(loss && snap.sabatierReactors[0].lastCo2ConsumedKg / dt < s.sabatierReactors[0].rateKgPerS, "carbon reactant constraints not exercised");
+		// Dedicated oxygen exhaustion cannot borrow breathing oxygen.
+		s.connections.clear(); s.stores[6].startingQualified = 0;
+		apply(); run(world, 12); verify(); check("Fuel cell", "Dedicated oxygen", 0); check("Fuel cell", "Generation", 0);
+		close(world.getStationSystemsSnapshot().stores[8].currentQualified, 10);
+		s.sabatierReactors[0].rateKgPerS = 0; s.methaneProcessors[0].rateKgPerS = 0; s.fuelCells[0].ratedOutputKW = s.fuelCells[0].commandedOutputKW = 0;
+		apply(); run(world, 12); verify(); check("Sabatier", "Methane", 0); check("Methane processor", "Solid carbon", 0);
+		// Real run through coordinated history coarsening; constant rates must survive.
+		s = smoke::station::carbonObservationFixture(); auto second = s.sabatierReactors[0]; second.id = "second"; s.sabatierReactors.push_back(second);
+		apply(); run(world, 1800);
+		auto const status = world.getStationSystemsRecordingStatus(); require(status.coarseningLevel > 0, "carbon history did not coarsen");
+		auto const before = world.getStationSystemsSnapshot(); auto const revision = world.getStationSystemsObservationRevision();
+		for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.breakdown == "Aggregate" && def.id.starts_with("exchange/Sabatier/Output/Methane/")) {
+			auto const data = world.queryStationSystemsChart(def.id); auto const stack = world.queryStationSystemsChart(def.id + "/instances");
+			for (size_t row = 0; row < data.series[0].values.size(); ++row) {
+				close(data.series[0].values[row], 2 * 0.001 * core::StationSabatierMethaneMassPerCarbonDioxideKg);
+				close(stack.series.back().upper[row], data.series[0].values[row]);
+				close(stack.series.back().times[row], data.series[0].times[row]);
+			}
+		}
+		require(world.getStationSystemsSnapshot() == before && world.getStationSystemsObservationRevision() == revision, "carbon query mutated World");
+		auto invalid = s; invalid.stores[0].hazardClass = "hazardous";
+		require(!world.configureStationSystems(invalid, true), "carbon observation bypassed hazard compatibility");
+		s = smoke::station::carbonObservationFixture();
+		for (auto& stock : s.stores) stock.hazardClass = "hazardous";
+		s.sabatierReactors[0].hazardClass = s.methaneProcessors[0].hazardClass = s.fuelCells[0].hazardClass = "hazardous";
+		apply(); run(world, 12); verify();
+		for (auto const& h : world.getStationSystemsMetricHistory()) {
+			auto const& d = h.descriptor;
+			if (d.equipmentType == "Sabatier" || d.equipmentType == "Methane processor") {
+				require(d.hazardClass == "hazardous", "carbon hazard identity lost");
+				if (d.exchangeRole == "Produced heat") require(d.thermalClass == "moderate", "carbon thermal class lost");
+				if (d.exchangeRole == "Methane") require(d.materialId == "methane" && !d.requestedSemantics, "methane identity or invented product request");
+				if (d.exchangeRole == "Solid carbon") require(d.materialId == "carbon" && !d.requestedSemantics, "carbon identity or invented product request");
+			}
+		}
+		s.enabled = false; apply(); run(world, 12);
+		for (auto const& h : world.getStationSystemsMetricHistory()) if (family(h.descriptor.equipmentType)) require(h.samples.empty(), "disabled carbon history fabricated");
 	}
 
 	void waterGasExchangeObservations(smoke::Context const&)
@@ -1000,6 +1101,7 @@ void registerMaterialObservationChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"exchangeObservations", exchangeObservations});
 	checks.push_back({"crewAtmosphereExchangeObservations", crewAtmosphereExchangeObservations});
 	checks.push_back({"waterGasExchangeObservations", waterGasExchangeObservations});
+	checks.push_back({"carbonExchangeObservations", carbonExchangeObservations});
 	checks.push_back({"thermalExchangeObservations", thermalExchangeObservations});
 	checks.push_back({"electricalExchangeObservations", electricalExchangeObservations});
 	checks.push_back({"materialObservations", materialObservations});

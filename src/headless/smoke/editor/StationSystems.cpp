@@ -6,6 +6,7 @@
 #include "DocumentEdit.h"
 #include "../CoupledRig.h"
 #include "../station/WaterGasObservationFixture.h"
+#include "../station/CarbonObservationFixture.h"
 #include "core/StationReference.h"
 #include "StationFlowDiagram.h"
 #include "core/StationConfigurationDocument.h"
@@ -3533,6 +3534,77 @@ namespace
 		});
 		#undef REQ
 		require(driver.passed(), "Battery observation editor workflow failed");
+	}
+
+	void carbonObservationWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1200};
+		io.Fonts->AddFontDefault(); io.Fonts->Build(); io.DeltaTime = 1.0f / 60.0f;
+		auto world = std::make_shared<core::World>("Carbon charts", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		auto settings = smoke::station::carbonObservationFixture();
+		StationSystemsWindow window;
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 1080});
+			ImGui::Begin("Carbon configuration"); window.renderFlowContents(world); ImGui::End();
+		});
+		auto apply = [&] {
+			std::string why; if (!world->configureStationSystems(settings, true, &why)) throw std::runtime_error(why);
+			world->markSaved(); world->resumeSimulation(); require(world->advanceTicks(12), "carbon hidden run failed"); world->pauseSimulation();
+		};
+		apply(); driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "carbonObservations", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Carbon configuration");
+			for (int mode = 0; mode < 4; ++mode) {
+				if (mode == 1) {
+					for (auto const& c : world->getStationSystemsSnapshot().connections)
+						if (c.key.ownerType == "Sabatier" || c.key.ownerType == "Methane processor" || c.key.ownerType == "Fuel cell")
+							settings.connections[c.key] = {core::StationPhysicalConnection::Automatic, 0.0005, 0.5};
+					apply(); ctx->Yield(2);
+				}
+				if (mode == 2) {
+					settings.connections.clear(); settings.sabatierReactors[0].rateKgPerS = 0; settings.methaneProcessors[0].rateKgPerS = 0;
+					settings.fuelCells[0].ratedOutputKW = settings.fuelCells[0].commandedOutputKW = 0; apply(); ctx->Yield(2);
+				}
+				if (mode == 3) {
+					settings.enabled = false; apply(); ctx->Yield(2);
+					REQ(driver.contains("Simulation disabled; no live history."), "disabled carbon observation not explained"); break;
+				}
+				auto const observed = world->getStationSystemsSnapshot(); auto const revision = world->getStationSystemsObservationRevision();
+				auto const dt = core::World::getFixedTimestep();
+				for (auto const& [type, role, expected] : std::vector<std::tuple<std::string, std::string, double>>{
+					{"Sabatier", "CO2 feed", observed.sabatierReactors[0].lastCo2ConsumedKg / dt},
+					{"Sabatier", "Methane", observed.sabatierReactors[0].lastMethaneProducedKg / dt},
+					{"Sabatier", "Water", observed.sabatierReactors[0].lastWaterProducedKg / dt},
+					{"Methane processor", "Solid carbon", observed.methaneProcessors[0].lastCarbonProducedKg / dt},
+					{"Methane processor", "Recovered hydrogen", observed.methaneProcessors[0].lastHydrogenReturnedKg / dt},
+					{"Fuel cell", "Dedicated oxygen", observed.fuelCells[0].lastOxygenKg / dt},
+					{"Fuel cell", "Generation", observed.fuelCells[0].lastOutputKW},
+					{"Fuel cell", "Production waste heat", observed.fuelCells[0].lastWasteHeatKW}}) {
+					auto const catalogue = world->getStationSystemsObservationCatalogue();
+					auto const selected = std::find_if(catalogue.begin(), catalogue.end(), [&](auto const& c) {
+						return c.breakdown == "Aggregate" && c.id.starts_with("exchange/" + type + "/") && c.id.find("/" + role + "/") != std::string::npos;
+					});
+					REQ(selected != catalogue.end(), "carbon selector role absent");
+					ctx->ItemClick("##Station observation property"); ctx->Yield(2);
+					auto const* popup = ctx->GetWindowByRef("//$FOCUSED"); REQ(popup != nullptr, "carbon selector absent");
+					auto item = ImHashStr(selected->label.c_str(), 0, ImHashStr(selected->id.c_str(), 0, popup->ID));
+					ctx->ScrollToItemY(item); ctx->ItemClick(item); ctx->Yield(2);
+					REQ(window.selectedObservation() == selected->id && driver.contains("Actual rate"), "generic carbon chart not rendered");
+					auto const data = world->queryStationSystemsChart(selected->id);
+					REQ(!data.incomplete && !data.series[0].values.empty() && std::abs(data.series[0].values.back() - expected) < 1e-8, "carbon chart wrong rate or lost hidden history");
+					ctx->ComboClick("Breakdown/Instance"); ctx->Yield(2);
+					REQ(window.selectedObservation() == selected->id + "/instances", "carbon instance breakdown unavailable");
+					REQ(world->getStationSystemsSnapshot() == observed && world->getStationSystemsObservationRevision() == revision
+						&& window.draftHistory().undoCount() == 0 && !world->isModified(), "carbon viewing mutated World or document");
+				}
+			}
+		});
+		#undef REQ
+		require(driver.passed(), "Carbon observation editor workflow failed");
 	}
 
 	void waterGasObservationWorkflow(smoke::Context const&)
@@ -8047,6 +8119,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/batteryObservationWorkflow", batteryObservationWorkflow});
 	checks.push_back({"station/materialObservationWorkflow", materialObservationWorkflow});
 	checks.push_back({"station/waterGasObservationWorkflow", waterGasObservationWorkflow});
+	checks.push_back({"station/carbonObservationWorkflow", carbonObservationWorkflow});
 	checks.push_back({"station/flowThermalReservoirWorkflow", flowThermalReservoirWorkflow});
 	checks.push_back({"station/flowRadiatorWorkflow", flowRadiatorWorkflow});
 	checks.push_back({"station/flowCoolantLoopWorkflow", flowCoolantLoopWorkflow});
