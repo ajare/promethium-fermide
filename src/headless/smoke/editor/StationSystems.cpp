@@ -3548,6 +3548,8 @@ namespace
 		seed.stores[2].materialId = "oxygen";
 		seed.stores[1].hazardClass = "hazardous";
 		seed.stores[0].protectedReserve = 4;
+		// Composition is authoritative even when material identity is unknown.
+		seed.stores[3].composition = core::ResourceCompositionSettings{0.25, 0.1, 0.2};
 		core::AtmosphereSettings air;
 		air.id = "cabin"; air.hazardClass = "normal"; air.volumeM3 = 100;
 		air.startingOxygenKg = 20; air.startingNitrogenKg = 80; air.startingWaterVapourKg = 2;
@@ -3610,6 +3612,22 @@ namespace
 			REQ(window.selectedObservation() == "accounted-material/water/kg/by-equipment"
 				&& driver.contains("Atmosphere compartment") && driver.contains("Resource store"),
 				"Generic owner-type breakdown missing");
+			ctx->ComboClick("##Station observation property/Stored constituent inventory: water (kg)"); ctx->Yield(2);
+			REQ(window.selectedObservation() == "stored-constituent/water/kg"
+				&& driver.contains("wet-mass moisture") && driver.contains("not a system total")
+				&& driver.contains("retained waste"), "Constituent selector omitted compound accounting boundary");
+			REQ(world->queryStationSystemsChart(window.selectedObservation()).series[0].values[0] == 2.25,
+				"Constituent selector added material owner mass or atmospheric water twice");
+			ctx->ComboClick("##Station observation property/Usable stored constituent: water (kg; normal)"); ctx->Yield(2);
+			REQ(driver.contains("NOT discretionary drawability")
+				&& world->queryStationSystemsChart(window.selectedObservation()).series[0].values[0] == 1.75,
+				"Usable constituent included unqualified moisture");
+			ctx->ComboClick("##Station observation property/Stored constituent inventory: nutrientNitrogen (kg)"); ctx->Yield(2);
+			auto const bound = world->queryStationSystemsChart(window.selectedObservation()).series[0].values[0];
+			ctx->ComboClick("##Station observation property/Stored constituent inventory: atmosphericNitrogen (kg)"); ctx->Yield(2);
+			REQ(std::abs(bound - 0.675) < 1e-8
+				&& std::abs(world->queryStationSystemsChart(window.selectedObservation()).series[0].values[0] - 1.35) < 1e-8,
+				"Constituent selector conflated nitrogen chemical forms");
 			ctx->ComboClick("##Station observation property/Unclassified inventory: unknown"); ctx->Yield(2);
 			REQ(window.selectedObservation() == "unclassified/unknown" && driver.contains("no material inferred")
 				&& world->queryStationSystemsChart("unclassified/unknown").series[0].values[0] == 9,

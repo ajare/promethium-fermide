@@ -43,8 +43,9 @@ Thermal reservoirs and buffers retain energy, not separately identified fluids.
   and renderer; grouping does not change the population.
 
 Broader views deliberately say **Accounted**, not complete system total. Their
-partial accounting diagnostic remains visible while compound constituent and
-biological adapters are pending. Unclassified/non-canonical stores are counted
+partial accounting diagnostic remains visible while biological adapters are
+pending. Compound store constituents now have a separate accounting boundary;
+see [compound inventory observations](station-compound-inventory-observations.md). Unclassified/non-canonical stores are counted
 in that diagnostic, never assigned to a guessed material. Incompatible physical
 quantities remain separate: no density or molar conversion is inferred. Bound
 constituents are not silently treated as free gases or liquids.

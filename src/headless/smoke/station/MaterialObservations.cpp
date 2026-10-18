@@ -106,7 +106,7 @@ namespace
 		// Missing expected ownership produces gaps, not a plausible smaller sum.
 		auto history = world.getStationSystemsMetricHistory();
 		require(std::count_if(history.begin(), history.end(), [](auto const& h) {
-			return h.descriptor.equipmentType == "Resource store";
+			return h.descriptor.equipmentType == "Resource store" && !h.descriptor.constituentId;
 		}) == static_cast<int>(2 * settings.stores.size()), "total and qualified observations not registered once per store");
 		for (auto const& h : history) if (h.descriptor.equipmentType == "Resource store")
 			require(!h.descriptor.requestedSemantics && !h.samples[0].requested, "inventory manufactured a requested value");
@@ -239,6 +239,75 @@ namespace
 		require(world.getStationSystemsSnapshot() == snap, "fluid observation changed deterministic replay");
 	}
 
+	void compoundInventoryObservations(smoke::Context const&)
+	{
+		core::StationSystemsSettings s; s.enabled = true; s.observationIntervalSeconds = 0.1f;
+		s.stores = {store("food", "kg", 100, 8, 2, "food"), store("buffer", "kg", 100, 0, 0),
+			store("waste", "g", 10000, 2000, 2000, "organic-waste"),
+			store("hazard", "kg", 100, 1, 1, "organic-waste"), store("unknown", "kg", 100, 3, 0)};
+		core::ResourceCompositionSettings composition{0.25, 0.1, 0.2, 0.1, 0.1, 0.1, 3600};
+		for (size_t i = 0; i < 4; ++i) s.stores[i].composition = composition;
+		s.stores[3].hazardClass = "hazardous"; s.stores[0].protectedReserve = 2;
+		s.transfers = {{"transfer", "food", "buffer", "kg", 1}};
+		// Unqualified waste is retained but not ejectable, so ejection can
+		// remove only the qualified half. The loss ledger is not extra stock.
+		s.wasteEjections = {{"eject", "waste", "g", 3000, 0.5}};
+		core::World world("Compound owners", 2, 2); world.pauseSimulation(); world.finishBuild();
+		std::string diagnostic;
+		require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
+		run(world, 60);
+		auto const snap = world.getStationSystemsSnapshot();
+		require(snap.stores[1].currentQualified > 0 && snap.wasteEjections[0].ejectedTotal == 2000,
+			"compound fixture did not transfer/eject material");
+		double partition = 0;
+		for (auto key : core::StationMassConstituents)
+		{
+			auto const id = std::string("stored-constituent/") + key + "/kg";
+			auto const view = world.queryStationSystemsChart(id);
+			require(!view.series.empty() && view.incomplete, "constituent coverage claimed complete system accounting");
+			double actual = 0, usable = 0;
+			for (size_t i = 0; i < 4; ++i)
+			{
+				auto const& owner = snap.stores[i];
+				actual += owner.actualConstituents.at(key);
+				if (owner.hazardClass == "normal")
+					usable += owner.actualConstituents.at(key) * owner.currentQualified
+						/ (owner.currentQualified + owner.currentUnqualified);
+			}
+			close(view.series[0].values.back(), actual);
+			close(view.series.back().upper.back(), actual);
+			partition += actual;
+			auto const qualified = world.queryStationSystemsChart(std::string("stored-usable-constituent/") + key + "/kg/normal");
+			close(qualified.series[0].values.back(), usable);
+			close(qualified.series.back().upper.back(), usable);
+			auto const hazard = world.queryStationSystemsChart(id + "/by-hazard");
+			close(hazard.series.back().upper.back(), actual);
+		}
+		close(partition, 14); // 10 food + 2 remaining unqualified waste + 2 hazardous waste
+		close(world.queryStationSystemsChart("stored-constituent/water/kg").series[0].values.back(), 3.5);
+		close(world.queryStationSystemsChart("stored-constituent/nutrientNitrogen/kg").series[0].values.back(), 1.05);
+		close(world.queryStationSystemsChart("stored-constituent/atmosphericNitrogen/kg").series[0].values.back(), 2.1);
+		close(world.queryStationSystemsChart("stored-constituent/energy/kWh").series[0].values.back(), 10.5);
+		close(world.queryStationSystemsChart("stored-material/food/kg").series[0].values.back(), 10);
+		close(world.queryStationSystemsChart("accounted-material/organic-waste/kg").series[0].values.back(), 4);
+		require(world.queryStationSystemsChart("accounted-material/water/kg").series.empty(),
+			"bound moisture was silently added to free-water material");
+		auto const definition = chart(world, "stored-constituent/water/kg");
+		require(definition.accountingNote.find("retained waste") != std::string::npos
+			&& definition.accountingNote.find("not a system total") != std::string::npos,
+			"compound boundary labels missing");
+		auto history = world.getStationSystemsMetricHistory();
+		for (auto const& h : history) if (h.descriptor.constituentId)
+			require(!h.descriptor.materialId && !h.descriptor.requestedSemantics && !h.samples[0].requested,
+				"constituent manufactured material ownership or demand");
+		std::erase_if(history, [](auto const& h) { return h.descriptor.instanceId == "waste"; });
+		auto const missing = core::queryStationChart(definition, history);
+		require(std::isnan(missing.series[0].values[0]) && std::isnan(missing.series.back().upper[0]),
+			"missing compound owner shrank aggregate membership");
+		world.resetSimulation(); run(world, 60);
+		require(world.getStationSystemsSnapshot() == snap, "compound recording altered deterministic replay");
+	}
+
 	void materialCanonicalUnits(smoke::Context const&)
 	{
 		core::StationSystemsSettings s; s.enabled = true; s.observationIntervalSeconds = 0.1f;
@@ -299,6 +368,7 @@ void registerMaterialObservationChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"materialObservations", materialObservations});
 	checks.push_back({"fluidInventoryObservations", fluidInventoryObservations});
+	checks.push_back({"compoundInventoryObservations", compoundInventoryObservations});
 	checks.push_back({"materialCanonicalUnits", materialCanonicalUnits});
 	checks.push_back({"materialRelationshipObservations", materialRelationshipObservations});
 }

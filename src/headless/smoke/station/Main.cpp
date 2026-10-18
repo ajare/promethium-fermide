@@ -16675,6 +16675,25 @@ void buffers(smoke::Context const&)
 					c.harvestedToWasteConstituents, c.deadResidueToWasteConstituents,
 					c.deadResidueLostConstituents}),
 				"the starved crop nutrient ledger");
+			// #703: retained residue has a different blend from the store's
+			// declaration after organics respire. Graph the committed blend,
+			// not the nominal fractions multiplied by remaining wet mass.
+			auto const histories = world.getStationSystemsMetricHistory();
+			for (auto key : core::StationMassConstituents)
+			{
+				auto const id = std::string("store/waste/constituent/") + key;
+				auto const h = std::find_if(histories.begin(), histories.end(), [&](auto const& entry) {
+					return entry.descriptor.id == id;
+				});
+				require(h != histories.end() && !h->samples.empty() && h->samples.back().actual,
+					"retained residue constituent observation missing");
+				auto const snap = world.getStationSystemsSnapshot();
+				auto const owner = std::find_if(snap.stores.begin(), snap.stores.end(), [](auto const& entry) {
+					return entry.id == "waste";
+				});
+				require(closeTo(*h->samples.back().actual, owner->actualConstituents.at(key), 1e-8),
+					"constituent history relabelled deposited residue as nominal composition");
+			}
 		}
 		// The same starvation with a full waste path: the residue cannot
 		// all be routed, and the remainder must be booked as explicit

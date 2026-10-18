@@ -5989,6 +5989,34 @@ namespace core
 			auto const coolantStart = atmosphereStart + 4 * settings.atmospheres.size();
 			for (size_t i = 0; i < snap.coolantLoops.size() && i < settings.coolantLoops.size(); ++i)
 				put(coolantStart + i, snap.coolantLoops[i].coolantKg, snap.coolantLoops[i].coolantKg);
+			// Compound constituents are an alternative decomposition, not more
+			// material ownership. Read the committed blend (including deposit drift).
+			size_t constituentSlot = coolantStart + settings.coolantLoops.size();
+			for (size_t i = 0; i < settings.stores.size(); ++i) if (settings.stores[i].composition)
+			{
+				for (auto const* key : {StationMassConstituents[0], StationMassConstituents[1],
+					StationMassConstituents[2], StationMassConstituents[3], StationMassConstituents[4],
+					StationMassConstituents[5], StationMassConstituents[6], StationEnergyConstituent})
+				{
+					if (i < snap.stores.size())
+					{
+						auto const& store = snap.stores[i];
+						auto const found = store.actualConstituents.find(key);
+						if (found != store.actualConstituents.end())
+						{
+							// The allocator draws a proportional share of the same
+							// blend from qualified contents; no separate chemistry.
+							double const scale = key == StationEnergyConstituent ? 1.0 / 3600 : 1;
+							double const total = found->second * scale;
+							double const mass = store.currentQualified + store.currentUnqualified;
+							double const usable = mass > 0 ? total * store.currentQualified / mass : 0;
+							put(constituentSlot, total, total);
+							put(constituentSlot + 1, usable, usable);
+						}
+					}
+					constituentSlot += 2;
+				}
+			}
 			history.observe(static_cast<double>(tick) * World::getFixedTimestep(), recordingValues);
 		}
 		// #419: the endurance observation windows. One window per Resource
@@ -16595,6 +16623,24 @@ namespace core
 				retained("atmosphere", "Atmosphere compartment", a.id, material, a.hazardClass);
 		for (auto const& loop : settings.coolantLoops)
 			retained("coolant-loop", "Coolant loop", loop.id, "coolant", loop.hazardClass);
+		for (auto const& store : settings.stores) if (store.composition)
+			for (auto const* key : {StationMassConstituents[0], StationMassConstituents[1],
+				StationMassConstituents[2], StationMassConstituents[3], StationMassConstituents[4],
+				StationMassConstituents[5], StationMassConstituents[6], StationEnergyConstituent})
+			{
+				StationRecordingSlot slot;
+				auto& d = slot.metric;
+				d.id = "store/" + store.id + "/constituent/" + key;
+				d.equipmentType = "Resource store"; d.instanceId = store.id;
+				d.constituentId = key; d.hazardClass = store.hazardClass;
+				d.exchangeRole = "stored-constituent"; d.role = StationMetricRole::Inventory;
+				bool const energy = key == StationEnergyConstituent;
+				d.quantity = energy ? StationPhysicalQuantity::Energy : StationPhysicalQuantity::Mass;
+				d.unit = energy ? StationCanonicalUnit::KilowattHour : StationCanonicalUnit::Kilogram;
+				slots.push_back(slot);
+				d.id += "/usable"; d.exchangeRole = "usable-constituent";
+				slots.push_back(std::move(slot));
+			}
 		auto const slotCount = slots.size();
 		auto const cadenceTicks = std::max(1.0f, std::ceil(settings.observationIntervalSeconds / World::getFixedTimestep()));
 		mImpl->history = StationHistory(std::move(slots), cadenceTicks * World::getFixedTimestep(), settings.trendRetentionSeconds);
