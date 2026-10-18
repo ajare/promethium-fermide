@@ -83,6 +83,10 @@ pf_add_smoke_module(pf-smoke-station
         station/StationCompoundPowerChecks.cpp
         station/StationBatteryChecks.cpp
         station/StationLogisticsChecks.cpp
+        station/StationThermalChecks.cpp
+        station/StationGenerationChecks.cpp
+        station/StationAtmosphereChecks.cpp
+        station/StationWaterChecks.cpp
         station/ScheduledTransfers.cpp station/ObservationIntegration.cpp station/Documents.cpp station/BatteryObservations.cpp station/MaterialObservations.cpp station/Connections.cpp station/Coupled.cpp station/Reference.cpp station/Scenarios.cpp station/Stability.cpp
     LIBRARIES promethium-fermide-core
     LABELS "core;station"
