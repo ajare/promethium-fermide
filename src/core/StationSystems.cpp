@@ -5977,6 +5977,18 @@ namespace core
 				auto const usable = snap.stores[i].currentQualified * storeObservationScales[i];
 				put(storeStart + 2 * i + 1, usable, usable);
 			}
+			auto const atmosphereStart = storeStart + 2 * settings.stores.size();
+			for (size_t i = 0; i < snap.atmospheres.size() && i < settings.atmospheres.size(); ++i)
+			{
+				auto const& a = snap.atmospheres[i];
+				put(atmosphereStart + 4 * i, a.oxygenKg, a.oxygenKg);
+				put(atmosphereStart + 4 * i + 1, a.nitrogenKg, a.nitrogenKg);
+				put(atmosphereStart + 4 * i + 2, a.carbonDioxideKg, a.carbonDioxideKg);
+				put(atmosphereStart + 4 * i + 3, a.waterVapourKg, a.waterVapourKg);
+			}
+			auto const coolantStart = atmosphereStart + 4 * settings.atmospheres.size();
+			for (size_t i = 0; i < snap.coolantLoops.size() && i < settings.coolantLoops.size(); ++i)
+				put(coolantStart + i, snap.coolantLoops[i].coolantKg, snap.coolantLoops[i].coolantKg);
 			history.observe(static_cast<double>(tick) * World::getFixedTimestep(), recordingValues);
 		}
 		// #419: the endurance observation windows. One window per Resource
@@ -16565,6 +16577,24 @@ namespace core
 			slot.metric.exchangeRole = "usable-inventory";
 			slots.push_back(std::move(slot));
 		}
+		// Retained ownership only: neither circulation nor processing throughput
+		// is additional stock. Water vapour is water mass, not a second material.
+		auto retained = [&](std::string owner, std::string type, std::string id,
+			std::string material, std::string hazard) {
+			StationRecordingSlot slot;
+			auto& d = slot.metric;
+			d.id = owner + "/" + id + "/" + material + "/inventory";
+			d.equipmentType = std::move(type); d.instanceId = std::move(id);
+			d.materialId = std::move(material); d.hazardClass = std::move(hazard);
+			d.exchangeRole = "retained-inventory"; d.role = StationMetricRole::Inventory;
+			d.quantity = StationPhysicalQuantity::Mass; d.unit = StationCanonicalUnit::Kilogram;
+			slots.push_back(std::move(slot));
+		};
+		for (auto const& a : settings.atmospheres)
+			for (auto material : {"oxygen", "nitrogen", "carbon-dioxide", "water"})
+				retained("atmosphere", "Atmosphere compartment", a.id, material, a.hazardClass);
+		for (auto const& loop : settings.coolantLoops)
+			retained("coolant-loop", "Coolant loop", loop.id, "coolant", loop.hazardClass);
 		auto const slotCount = slots.size();
 		auto const cadenceTicks = std::max(1.0f, std::ceil(settings.observationIntervalSeconds / World::getFixedTimestep()));
 		mImpl->history = StationHistory(std::move(slots), cadenceTicks * World::getFixedTimestep(), settings.trendRetentionSeconds);

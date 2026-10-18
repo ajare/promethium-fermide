@@ -157,6 +157,88 @@ namespace
 		run(world, 6); close(world.queryStationSystemsChart("stored-material/water/kg").series[0].values[0], 5);
 	}
 
+	void fluidInventoryObservations(smoke::Context const&)
+	{
+		core::StationSystemsSettings s; s.enabled = true; s.observationIntervalSeconds = 0.1f;
+		s.stores = {store("raw", "kg", 100, 5, 1, "water")};
+		core::AtmosphereSettings air;
+		air.id = "shared-name"; air.hazardClass = "normal"; air.volumeM3 = 100;
+		air.startingOxygenKg = 20; air.startingNitrogenKg = 80;
+		air.startingCarbonDioxideKg = 0.5; air.startingWaterVapourKg = 2;
+		air.startingTemperatureC = 25; air.thermalCapacityKJPerK = 10000;
+		air.minPressureKPa = 1; air.maxPressureKPa = 200;
+		s.atmospheres = {air};
+		air.id = "hazard"; air.hazardClass = "hazardous"; air.startingWaterVapourKg = 1;
+		s.atmospheres.push_back(air);
+		core::ThermalReservoirSettings sink;
+		sink.id = "sink"; sink.thermalClass = "moderate"; sink.heatCapacityKJPerK = 10000;
+		sink.startingTemperatureC = 10; sink.minTemperatureC = -50; sink.maxTemperatureC = 200;
+		s.thermalReservoirs = {sink};
+		core::CoolantLoopSettings loop;
+		loop.id = "shared-name"; loop.hazardClass = "normal"; loop.reservoirId = "sink";
+		loop.coolantCapacityKg = 100; loop.startingCoolantKg = 100; loop.specificHeatKJPerKgK = 4;
+		loop.startingTemperatureC = 5; loop.freezeProtectionSetpointC = 0;
+		loop.pumpPowerKW = 0.1; loop.ratedFlowKgPerS = 10;
+		s.coolantLoops = {loop};
+		loop.id = "dry"; loop.startingCoolantKg = 0; s.coolantLoops.push_back(loop);
+		core::SolarArraySettings solar; solar.id = "solar"; solar.capacityKW = 10; s.solarArrays = {solar};
+		core::WaterCollectorSettings collector;
+		collector.id = "collector"; collector.hazardClass = "normal"; collector.atmosphereId = "shared-name";
+		collector.coolingLoopId = "shared-name"; collector.thermalClass = "moderate";
+		collector.destStoreId = "raw"; collector.maxRateKgPerS = 0.01; collector.targetRelativeHumidity = 0.5;
+		s.waterCollectors = {collector};
+		core::World world("Fluid owners", 2, 2); world.pauseSimulation(); world.finishBuild();
+		std::string diagnostic;
+		require(world.configureStationSystems(s, false, &diagnostic), diagnostic.c_str());
+		run(world, 600);
+		auto const snap = world.getStationSystemsSnapshot();
+		require(snap.waterCollectors[0].collectedKg > 0, "fixture did not exchange store/atmosphere water");
+		auto const water = world.queryStationSystemsChart("accounted-material/water/kg");
+		auto const stored = world.queryStationSystemsChart("stored-material/water/kg");
+		require(water.incomplete && chart(world, "accounted-material/water/kg").partialAccounting,
+			"pending adapters claimed complete system accounting");
+		for (size_t row = 0; row < water.series[0].values.size(); ++row)
+		{
+			close(water.series[0].values[row], 9);
+			close(water.series.back().upper[row], 9);
+		}
+		require(stored.series[0].values.back() > 6, "stored-only boundary did not track condensation");
+		close(water.series[0].values.back(), snap.stores[0].currentQualified + snap.stores[0].currentUnqualified
+			+ snap.atmospheres[0].waterVapourKg + snap.atmospheres[1].waterVapourKg);
+		close(world.queryStationSystemsChart("accounted-material/oxygen/kg").series[0].values.back(), 40);
+		close(world.queryStationSystemsChart("accounted-material/nitrogen/kg").series[0].values.back(), 160);
+		close(world.queryStationSystemsChart("accounted-material/carbon-dioxide/kg").series[0].values.back(), 1);
+		close(world.queryStationSystemsChart("accounted-material/coolant/kg").series[0].values.back(), 100);
+		auto const hazard = world.queryStationSystemsChart("accounted-material/water/kg/by-hazard");
+		close(hazard.series[1].values.back(), 1); close(hazard.series[2].values.back(), 8);
+		auto const equipment = world.queryStationSystemsChart("accounted-material/water/kg/by-equipment");
+		close(equipment.series.back().upper.back(), 9);
+		// Compartment stock is not qualified store supply, nor circulating flow.
+		close(world.queryStationSystemsChart("stored-usable/water/kg/normal").series[0].values.back(),
+			snap.stores[0].currentQualified);
+		auto histories = world.getStationSystemsMetricHistory();
+		require(std::count_if(histories.begin(), histories.end(), [](auto const& h) {
+			return h.descriptor.exchangeRole == "retained-inventory";
+		}) == 10, "non-store stock registered twice or omitted");
+		for (auto const& h : histories) if (h.descriptor.exchangeRole == "retained-inventory")
+			require(!h.descriptor.requestedSemantics && !h.samples[0].requested, "stock invented requested semantics");
+		std::erase_if(histories, [](auto const& h) { return h.descriptor.id == "atmosphere/shared-name/water/inventory"; });
+		for (auto id : {"accounted-material/water/kg", "accounted-material/water/kg/by-equipment",
+			"accounted-material/water/kg/by-hazard"})
+		{
+			auto const missing = core::queryStationChart(chart(world, id), histories);
+			require(missing.incomplete && std::isnan(missing.series[0].values[0])
+				&& std::isnan(missing.series.back().upper[0]), "missing fluid inventory became a zero or valid stack");
+		}
+		auto const revision = world.getStationSystemsObservationRevision();
+		world.resetSimulation();
+		require(world.getStationSystemsObservationRevision().run != revision.run
+			&& world.queryStationSystemsChart("accounted-material/water/kg").series[0].times.empty(),
+			"Reset joined fluid inventory runs");
+		run(world, 600);
+		require(world.getStationSystemsSnapshot() == snap, "fluid observation changed deterministic replay");
+	}
+
 	void materialCanonicalUnits(smoke::Context const&)
 	{
 		core::StationSystemsSettings s; s.enabled = true; s.observationIntervalSeconds = 0.1f;
@@ -216,6 +298,7 @@ namespace
 void registerMaterialObservationChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"materialObservations", materialObservations});
+	checks.push_back({"fluidInventoryObservations", fluidInventoryObservations});
 	checks.push_back({"materialCanonicalUnits", materialCanonicalUnits});
 	checks.push_back({"materialRelationshipObservations", materialRelationshipObservations});
 }

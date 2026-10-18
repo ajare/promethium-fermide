@@ -3548,6 +3548,12 @@ namespace
 		seed.stores[2].materialId = "oxygen";
 		seed.stores[1].hazardClass = "hazardous";
 		seed.stores[0].protectedReserve = 4;
+		core::AtmosphereSettings air;
+		air.id = "cabin"; air.hazardClass = "normal"; air.volumeM3 = 100;
+		air.startingOxygenKg = 20; air.startingNitrogenKg = 80; air.startingWaterVapourKg = 2;
+		air.startingTemperatureC = 25; air.thermalCapacityKJPerK = 10000;
+		air.minPressureKPa = 1; air.maxPressureKPa = 200;
+		seed.atmospheres = {air};
 		require(world->configureStationSystems(seed, false), "material graph fixture refused");
 		world->markSaved(); world->resumeSimulation(); require(world->advanceTicks(60), "hidden material recording failed");
 		world->pauseSimulation();
@@ -3594,6 +3600,16 @@ namespace
 			ctx->ComboClick("##Station observation property/Stored material inventory: oxygen (kg)"); ctx->Yield(2);
 			REQ(world->queryStationSystemsChart("stored-material/oxygen/kg").series[0].values[0] == 4,
 				"Same-unit different materials merged through selector");
+			ctx->ComboClick("##Station observation property/Accounted material inventory: water (kg)"); ctx->Yield(2);
+			REQ(window.selectedObservation() == "accounted-material/water/kg"
+				&& driver.contains("Partial system accounting") && driver.contains("water vapour"),
+				"Broader fluid accounting boundary was not visible");
+			REQ(world->queryStationSystemsChart(window.selectedObservation()).series[0].values[0] == 20,
+				"Accounted graph did not include compartment vapour");
+			ctx->ComboClick("Breakdown/Equipment type"); ctx->Yield(2);
+			REQ(window.selectedObservation() == "accounted-material/water/kg/by-equipment"
+				&& driver.contains("Atmosphere compartment") && driver.contains("Resource store"),
+				"Generic owner-type breakdown missing");
 			ctx->ComboClick("##Station observation property/Unclassified inventory: unknown"); ctx->Yield(2);
 			REQ(window.selectedObservation() == "unclassified/unknown" && driver.contains("no material inferred")
 				&& world->queryStationSystemsChart("unclassified/unknown").series[0].values[0] == 9,

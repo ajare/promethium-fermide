@@ -82,7 +82,7 @@ pf_add_smoke_module(pf-smoke-station
     DEFAULT_CHECK lifecycle
 )
 foreach(check connectionTransfers connectionConversions connectionPower connectionThermal connectionProcesses connectionLifecycle connectionForecast connectionMaterialDiagnostics connectionBlockedZeroEfficiency connectionBatteryTelemetry lifecycle batching eventBound persistence stores transfers linkSeam growablePorts completeThermalChain schedulesSeam biologySeam waterGasSeam powerChainSeam thermalReservoirSeam radiatorSeam coolantLoopSeam chillerSeam compounds power
-        materialObservations materialRelationshipObservations materialCanonicalUnits batteryObservations batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
+        materialObservations fluidInventoryObservations materialRelationshipObservations materialCanonicalUnits batteryObservations batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
         deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres crews water containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay

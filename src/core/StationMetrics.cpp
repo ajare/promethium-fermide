@@ -192,6 +192,38 @@ namespace core
 			chart.accountingNote = note + " Missing, contradictory material evidence or unsupported canonical unit; no material inferred.";
 			chart.partialAccounting = true; charts.push_back(std::move(chart));
 		}
+		// A broader boundary is deliberately separate from stored-only and usable
+		// queries. Gas in a compartment is not qualified store supply. Only
+		// ownership descriptors participate, never transfer/flow observations.
+		std::map<Key, std::vector<StationMetricDescriptor const*>> accounted;
+		for (auto const& d : descriptors)
+			if (d.role == StationMetricRole::Inventory
+				&& (d.exchangeRole == "stored-inventory" || d.exchangeRole == "retained-inventory")
+				&& d.materialId && d.unit != StationCanonicalUnit::Unspecified)
+				accounted[{*d.materialId, d.quantity, d.unit}].push_back(&d);
+		for (auto& [key, members] : accounted)
+		{
+			auto const& [material, quantity, unit] = key;
+			std::sort(members.begin(), members.end(), [](auto a, auto b) { return a->id < b->id; });
+			StationChartDefinition chart{"accounted-material/" + material + "/" + stationUnitLabel(unit), "Material inventories",
+				"Accounted material inventory: " + material + " (" + stationUnitLabel(unit) + ")",
+				"Accounted material inventory: " + material + " (applied simulation)", quantity, unit, {}};
+			// This stage covers fluids, not compound constituent or biological
+			// adapters. Never promote this subtotal to an unqualified system total.
+			chart.partialAccounting = true;
+			chart.accountingNote = "Accounted owners: Resource stores (qualified + unqualified), atmosphere gases and water vapour, closed-loop coolant. "
+				"Partial system accounting: compound constituent and biological inventory adapters pending; no inferred bound materials, culture liquid, or equipment holdup. "
+				+ std::to_string(unclassified) + " unclassified or non-canonical stores excluded. Different canonical quantities are separate; no inferred density or molar conversion. Not usable supply or discretionary drawability.";
+			StationChartSeriesDefinition total;
+			total.metricId = chart.id + "/subtotal"; total.label = "Accounted owners subtotal";
+			total.operation = StationChartOperation::Sum;
+			for (auto d : members) total.contributors.push_back(d->id);
+			chart.series.push_back(std::move(total));
+			for (auto d : members) chart.series.push_back({d->id, d->equipmentType + ": " + d->instanceId,
+				StationMetricValue::Actual, StationChartOperation::Value, {}, {}, true,
+				d->hazardClass.value_or("unclassified"), d->equipmentType});
+			charts.push_back(std::move(chart));
+		}
 		appendStationChartBreakdowns(charts);
 		return charts;
 	}
@@ -219,8 +251,17 @@ namespace core
 			for (auto const& [key, ids] : groups)
 				hazard.series.push_back({chart.propertyId + "/hazard/" + key, key, StationMetricValue::Actual,
 					StationChartOperation::Sum, ids, {}, true, key});
+			auto equipment = aggregate;
+			equipment.id = chart.id + "/by-equipment"; equipment.breakdown = "Equipment type";
+			std::map<std::string, std::vector<std::string>> equipmentGroups;
+			for (auto const& s : chart.series) if (s.stacked && !s.equipmentType.empty())
+				equipmentGroups[s.equipmentType].push_back(s.metricId);
+			for (auto const& [key, ids] : equipmentGroups)
+				equipment.series.push_back({chart.propertyId + "/equipment/" + key, key, StationMetricValue::Actual,
+					StationChartOperation::Sum, ids, {}, true});
 			charts.push_back(std::move(aggregate));
 			if (groups.size() > 1) charts.push_back(std::move(hazard));
+			if (equipmentGroups.size() > 1) charts.push_back(std::move(equipment));
 		}
 	}
 

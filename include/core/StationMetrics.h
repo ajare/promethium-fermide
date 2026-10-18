@@ -52,6 +52,7 @@ namespace core
 		std::vector<std::string> contributors, denominator;
 		bool stacked{false};
 		std::string hazardClass; // Optional grouping key of this contribution.
+		std::string equipmentType; // Optional owner-type breakdown, independent of instance names.
 	};
 	struct StationChartDefinition
 	{
