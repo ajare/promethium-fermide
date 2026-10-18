@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <tuple>
 
 namespace
 {
@@ -46,6 +47,110 @@ namespace
 	{
 		world.resumeSimulation(); require(world.advanceTicks(ticks), "material observation run failed"); world.pauseSimulation();
 	}
+	void exchangeObservations(smoke::Context const&)
+	{
+		core::StationSystemsSettings s; s.enabled = true; s.observationIntervalSeconds = 0.1f;
+		core::ResourceConversionSettings conversion; conversion.id = "split";
+		for (size_t i = 0; i < 5; ++i)
+		{
+			auto feed = store("feed" + std::to_string(i), "kg", 100, 50, 0, "feedstock");
+			auto product = store("product" + std::to_string(i), "g", 100000, 0, 0, i == 4 ? "other-product" : "product");
+			feed.composition = core::ResourceCompositionSettings{}; product.composition = feed.composition;
+			s.stores.push_back(feed); s.stores.push_back(product);
+			conversion.inputs.push_back({feed.id, 2}); conversion.outputs.push_back({product.id, 1000});
+		}
+		s.conversions = {conversion};
+		s.stores.push_back(store("source", "kg", 100, 20, 0, "water"));
+		s.stores.push_back(store("destination", "kg", 100, 0, 0, "water"));
+		s.stores.push_back(store("dry", "kg", 100, 0, 0, "water"));
+		s.stores.push_back(store("empty", "kg", 100, 0, 0, "water"));
+		// Deliberately reverse priority order relative to authored order.
+		s.transfers = {{"idle", "dry", "empty", "kg", 2, 10}, {"move", "source", "destination", "kg", 2, 0}};
+		s.connections[{"Transfer", "move", "Source", "Source", "Store", "source"}] = {core::StationPhysicalConnection::Automatic, 1, 0.5};
+		s.connections[{"Conversion", "split", "Input 1", "Input 1", "Store", "feed0"}] = {core::StationPhysicalConnection::Automatic, 1, 0.5};
+		core::World world("Exchanges", 2, 2); world.pauseSimulation(); world.finishBuild();
+		std::string diagnostic;
+		if (!world.configureStationSystems(s, false, &diagnostic)) throw std::runtime_error(diagnostic);
+		auto const definitions = world.getStationSystemsObservationCatalogue();
+		size_t outputs = 0;
+		for (auto const& c : definitions) if (c.group == "Resource exchanges" && c.breakdown == "Aggregate"
+			&& c.id.find("Resource conversion/Output/") != std::string::npos) ++outputs;
+		require(outputs == 5, "five outputs did not yield independent selectable properties");
+		run(world);
+		require(world.getStationSystemsQueryWork().queries == 0, "hidden exchanges performed chart queries");
+		auto const snap = world.getStationSystemsSnapshot();
+		auto const revision = world.getStationSystemsObservationRevision();
+		std::string const transferId = "exchange/Resource transfer/Output/Destination/water/kg/s/normal";
+		auto const transfer = world.queryStationSystemsChart(transferId);
+		require(transfer.series.size() == 2 && transfer.series[0].values.size() == 10,
+			"exchange default is not aggregate actual with requested overlay and retained history");
+		for (size_t row = 0; row < transfer.series[0].values.size(); ++row)
+		{ close(transfer.series[0].values[row], 0.5); close(transfer.series[1].values[row], 4); }
+		auto const instances = world.queryStationSystemsChart(transferId + "/instances");
+		require(instances.series.size() == 4 && !instances.series.back().stacked, "requests stacked into actual contributions");
+		for (size_t row = 0; row < instances.series[0].values.size(); ++row)
+		{ close(instances.series[1].values[row], 0); close(instances.series[2].values[row], 0.5); }
+		auto const loss = world.queryStationSystemsChart("exchange/Resource transfer/Transport loss/Source/water/kg/s/normal");
+		require(loss.series.size() == 1, "transport loss manufactured a request");
+		close(loss.series[0].values[0], 0.5);
+		auto const input = world.queryStationSystemsChart("exchange/Resource transfer/Input/Source/water/kg/s/normal");
+		require(input.series.size() == 1, "transfer input manufactured authoritative request");
+		close(input.series[0].values[0], 0.5);
+		for (size_t i = 0; i < 5; ++i)
+		{
+			auto const id = "exchange/Resource conversion/Output/Output " + std::to_string(i + 1)
+				+ "/" + (i == 4 ? "other-product" : "product") + "/kg/s/normal";
+			auto const data = world.queryStationSystemsChart(id);
+			require(data.series.size() == 2, "growable output lost request or canonical material grouping");
+			close(data.series[0].values[0], 0.25); close(data.series[1].values[0], 1);
+		}
+		auto const histories = world.getStationSystemsMetricHistory();
+		auto missing = histories;
+		std::erase_if(missing, [](auto const& h) { return h.descriptor.instanceId == "idle"; });
+		auto const gap = core::queryStationChart(chart(world, transferId), missing);
+		require(gap.incomplete && std::isnan(gap.series[0].values[0]), "missing exchange became zero");
+		require(world.getStationSystemsSnapshot() == snap && world.getStationSystemsObservationRevision() == revision,
+			"exchange query changed simulation");
+		// Missing requested authority is a gap in the overlay, not actual material.
+		auto missingRequest = histories;
+		for (auto& h : missingRequest) if (h.descriptor.equipmentType == "Resource transfer"
+			&& h.descriptor.instanceId == "move" && h.descriptor.role == core::StationMetricRole::Output)
+			h.samples[0].requested.reset();
+		auto const requestGap = core::queryStationChart(chart(world, transferId), missingRequest);
+		require(std::isfinite(requestGap.series[0].values[0]) && std::isnan(requestGap.series[1].values[0]),
+			"missing request contaminated actual or became zero");
+		// Hazard/material constraints remain authoritative even with observations installed.
+		auto invalid = s; invalid.stores[0].hazardClass = "hazardous";
+		require(!world.configureStationSystems(invalid, true), "exchange views bypassed hazard enforcement");
+		// Catalogue grouping must not conflate equal role labels and units of different materials.
+		auto descriptors = std::vector<core::StationMetricDescriptor>{};
+		for (auto const& h : histories) if (h.descriptor.equipmentType == "Resource conversion") descriptors.push_back(h.descriptor);
+		auto other = descriptors.front(); other.id += "/other"; other.materialId = "different"; descriptors.push_back(other);
+		auto const grouped = core::stationCharts(descriptors);
+		require(std::any_of(grouped.begin(), grouped.end(), [](auto const& c) { return c.id.find("/different/") != std::string::npos; }),
+			"mixed materials sharing labels and units were conflated");
+		// An inactive conversion has measured zero, not unavailable output.
+		for (size_t i = 0; i < 5; ++i) s.stores[2 * i].startingQualified = 0;
+		require(world.configureStationSystems(s, true), "inactive conversion configuration failed");
+		run(world, 6);
+		auto const inactive = world.queryStationSystemsChart("exchange/Resource conversion/Output/Output 5/other-product/kg/s/normal");
+		close(inactive.series[0].values[0], 0); close(inactive.series[1].values[0], 1);
+		// Canonical rate scales are independent of names and observation cadence.
+		for (auto const& [unit, scale, canonical] : std::vector<std::tuple<std::string, double, core::StationCanonicalUnit>>{
+			{"g", 0.001, core::StationCanonicalUnit::KilogramPerSecond},
+			{"L", 0.001, core::StationCanonicalUnit::CubicMetrePerSecond},
+			{"Wh", 3.6, core::StationCanonicalUnit::Kilowatt},
+			{"mol", 1, core::StationCanonicalUnit::MolePerSecond}})
+		{
+			core::StationSystemsSettings metadata;
+			metadata.stores = {store("a", unit, 100, 10, 0, "material"), store("b", unit, 100, 0, 0, "material")};
+			metadata.transfers = {{"t", "a", "b", unit, 1}};
+			auto const observations = core::stationExchangeObservations(metadata);
+			require(observations.size() == 4 && observations[0].metric.unit == canonical, "canonical rate unit missing");
+			close(observations[0].sourceToCanonicalScale, scale);
+		}
+	}
+
 	void materialObservations(smoke::Context const&)
 	{
 		core::World world("Materials", 2, 2); world.pauseSimulation(); world.finishBuild();
@@ -478,6 +583,7 @@ namespace
 
 void registerMaterialObservationChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"exchangeObservations", exchangeObservations});
 	checks.push_back({"materialObservations", materialObservations});
 	checks.push_back({"fluidInventoryObservations", fluidInventoryObservations});
 	checks.push_back({"compoundInventoryObservations", compoundInventoryObservations});

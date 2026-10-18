@@ -712,9 +712,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         assert(type(conversion) == "table", "resource conversion descriptor must be a table")
         assert(type(conversion.id) == "string" and #conversion.id > 0, "resource conversion needs an id")
         assert(type(conversion.inputs) == "table" and #conversion.inputs >= 1
-            and #conversion.inputs <= 4, "resource conversion needs 1 to 4 inputs")
+            and #conversion.inputs <= 5, "resource conversion needs 1 to 5 inputs")
         assert(type(conversion.outputs) == "table" and #conversion.outputs >= 1
-            and #conversion.outputs <= 4, "resource conversion needs 1 to 4 outputs")
+            and #conversion.outputs <= 5, "resource conversion needs 1 to 5 outputs")
         local seen = {}
         local inflow, outflow = {}, {}
         -- One conversion stays inside one hazard class (#412).

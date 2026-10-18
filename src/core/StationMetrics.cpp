@@ -1,4 +1,5 @@
 #include "core/StationMetrics.h"
+#include "core/StationConnections.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -77,6 +78,57 @@ namespace core
 			// Conflicting explicit identities are retained in authored settings,
 			// but excluded from classified accounting, not silently reinterpreted.
 			result.push_back(std::move(observation));
+		}
+		return result;
+	}
+
+	std::vector<StationExchangeObservation> stationExchangeObservations(StationSystemsSettings const& settings)
+	{
+		auto const stores = stationStoreObservations(settings);
+		auto const graph = station_connections::build(settings);
+		std::vector<StationExchangeObservation> result;
+		auto add = [&](std::string type, std::string id, std::string relation,
+			std::string const& storeId, bool input, size_t index, bool requested) {
+			auto const found = std::ranges::find(settings.stores, storeId, &ResourceStoreSettings::id);
+			auto const& store = stores[found - settings.stores.begin()];
+			for (bool loss : {false, true})
+			{
+				StationExchangeObservation o;
+				auto const link = std::find_if(graph.links.begin(), graph.links.end(), [&](auto const& l) {
+					return l.designKey.ownerType == type && l.designKey.ownerId == id && l.designKey.relation == relation;
+				});
+				if (link == graph.links.end()) continue;
+				o.connection = link->designKey; o.flowIndex = index;
+				o.sourceToCanonicalScale = store.sourceToCanonicalScale;
+				auto& d = o.metric;
+				d = store.metric;
+				d.id = "exchange/" + type + "/" + id + "/" + relation + (loss ? "/transport-loss" : "/actual");
+				d.equipmentType = type == "Transfer" ? "Resource transfer" : "Resource conversion";
+				d.instanceId = id; d.exchangeRole = relation;
+				d.role = loss ? StationMetricRole::Loss : input ? StationMetricRole::Input : StationMetricRole::Output;
+				if (d.quantity == StationPhysicalQuantity::Mass)
+				{ d.quantity = StationPhysicalQuantity::MassRate; d.unit = StationCanonicalUnit::KilogramPerSecond; }
+				else if (d.quantity == StationPhysicalQuantity::Volume)
+				{ d.quantity = StationPhysicalQuantity::VolumeRate; d.unit = StationCanonicalUnit::CubicMetrePerSecond; }
+				else if (d.quantity == StationPhysicalQuantity::Energy)
+				{ d.quantity = StationPhysicalQuantity::Power; d.unit = StationCanonicalUnit::Kilowatt; o.sourceToCanonicalScale *= 3600; }
+				else if (d.quantity == StationPhysicalQuantity::AmountOfSubstance)
+				{ d.quantity = StationPhysicalQuantity::AmountOfSubstanceRate; d.unit = StationCanonicalUnit::MolePerSecond; }
+				if (!loss && requested) d.requestedSemantics = StationRequestedSemantics::Demand;
+				result.push_back(std::move(o));
+			}
+		};
+		for (auto const& t : settings.transfers)
+		{
+			add("Transfer", t.id, "Source", t.sourceId, true, 0, false);
+			add("Transfer", t.id, "Destination", t.destinationId, false, 0, true);
+		}
+		for (auto const& c : settings.conversions)
+		{
+			for (size_t i = 0; i < c.inputs.size(); ++i)
+				add("Conversion", c.id, "Input " + std::to_string(i + 1), c.inputs[i].storeId, true, i, true);
+			for (size_t i = 0; i < c.outputs.size(); ++i)
+				add("Conversion", c.id, "Output " + std::to_string(i + 1), c.outputs[i].storeId, false, i, true);
 		}
 		return result;
 	}
@@ -281,6 +333,37 @@ namespace core
 			for (auto d : stores) hazards[d->hazardClass.value_or("unclassified")].push_back(d);
 			for (auto const& [hazard, population] : hazards) make(population, hazard);
 		}
+		using ExchangeKey = std::tuple<std::string, StationMetricRole, std::string, std::string,
+			StationPhysicalQuantity, StationCanonicalUnit, std::string>;
+		std::map<ExchangeKey, std::vector<StationMetricDescriptor const*>> exchanges;
+		for (auto const& d : descriptors)
+			if ((d.equipmentType == "Resource transfer" || d.equipmentType == "Resource conversion")
+				&& d.materialId && d.unit != StationCanonicalUnit::Unspecified)
+				exchanges[{d.equipmentType, d.role, d.exchangeRole, *d.materialId, d.quantity, d.unit,
+					d.hazardClass.value_or("unclassified")}].push_back(&d);
+		for (auto const& [key, members] : exchanges)
+		{
+			auto const& [type, role, exchange, material, quantity, unit, hazard] = key;
+			std::string const direction = role == StationMetricRole::Loss ? "Transport loss"
+				: role == StationMetricRole::Input ? "Input" : "Output";
+			std::string const id = "exchange/" + type + "/" + direction + "/" + exchange + "/" + material
+				+ "/" + stationUnitLabel(unit) + "/" + hazard;
+			std::string const label = type + ": " + exchange + " " + direction + " — " + material
+				+ " (" + stationUnitLabel(unit) + "; " + hazard + ")";
+			StationChartDefinition chart{id, "Resource exchanges", label, label + " (applied simulation)", quantity, unit, {}};
+			chart.accountingNote = "Actual delivered exchange rate per simulation second; transport losses are separate views, not useful input/output or inventory change. Material identity, quantity and hazard class remain separate. Requests are optional overlays, never actual contributions.";
+			StationChartSeriesDefinition total;
+			total.metricId = id + "/total"; total.label = "Actual rate"; total.operation = StationChartOperation::Sum;
+			for (auto d : members) total.contributors.push_back(d->id);
+			chart.series.push_back(total);
+			for (auto d : members) chart.series.push_back({d->id, d->instanceId, StationMetricValue::Actual,
+				StationChartOperation::Value, {}, {}, true});
+			std::vector<std::string> requests;
+			for (auto d : members) if (d->requestedSemantics) requests.push_back(d->id);
+			if (!requests.empty()) chart.series.push_back({id + "/requested", "Requested rate", StationMetricValue::Requested,
+				StationChartOperation::Sum, requests});
+			charts.push_back(std::move(chart));
+		}
 		appendStationChartBreakdowns(charts);
 		return charts;
 	}
@@ -316,6 +399,12 @@ namespace core
 			for (auto const& [key, ids] : equipmentGroups)
 				equipment.series.push_back({chart.propertyId + "/equipment/" + key, key, StationMetricValue::Actual,
 					StationChartOperation::Sum, ids, {}, true});
+			// Exchange selectors default to aggregate; keep legacy inventory defaults.
+			if (chart.group == "Resource exchanges")
+			{
+				chart.id = chart.propertyId + "/instances";
+				aggregate.id = chart.propertyId;
+			}
 			charts.push_back(std::move(aggregate));
 			if (groups.size() > 1) charts.push_back(std::move(hazard));
 			if (equipmentGroups.size() > 1) charts.push_back(std::move(equipment));
@@ -352,6 +441,7 @@ namespace core
 		case StationCanonicalUnit::Percent: return "%";
 		case StationCanonicalUnit::Unspecified: return "unspecified";
 		case StationCanonicalUnit::Mole: return "mol";
+		case StationCanonicalUnit::MolePerSecond: return "mol/s";
 		}
 		return "";
 	}

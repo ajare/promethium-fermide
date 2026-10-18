@@ -145,7 +145,7 @@ namespace core
 		bool operator==(ResourceConversionSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationResourceConversions{16};
-	inline constexpr size_t MaxStationConversionFlows{4};
+	inline constexpr size_t MaxStationConversionFlows{5};
 	// A scheduled external addition of a declared quantity to one Resource
 	// store (#392). A delivery is a scenario event, not a station process:
 	// it brings material in from outside the station boundary at declared

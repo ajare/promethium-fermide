@@ -1075,7 +1075,7 @@ namespace
 	}
 
 	// #645: growable port sets and the derived-node refusal rule at the
-	// pure seam. A conversion's input and output sets grow to four real
+	// pure seam. A conversion's input and output sets grow to five real
 	// connectors each and shrink to the floor of one; every grown connector
 	// writes its own flow through the same mapping the editor uses; a
 	// derived service node is refused by name, never as "unknown".
@@ -1259,7 +1259,7 @@ namespace
 			requireAllowed(grown, link(pin("Store", "grain", "Inventory out"),
 				pin("Conversion", "c1", "Conversion input 4")),
 				"a store into the fourth grown input");
-			// The ceiling: growth past four is refused with a reason.
+			// The ceiling: growth past the declared limit is refused with a reason.
 			require(!core::growStationPortSet(grown, "Conversion", "c1",
 					core::StationPortSet::ConversionInputs, reason)
 				&& reason.find("at most") != std::string::npos,
@@ -24098,7 +24098,8 @@ void recovery(smoke::Context const& context)
 				&& chart.series[0].values.size() == 1 && approx(chart.series[0].values[0], 6.0)
 				&& chart.series[1].values.size() == 1 && approx(chart.series[1].values[0], 10.0),
 				"declarative Power query lost surplus generation, demand or simulation time");
-			require(metrics.size() == 4 + 2 * settings.stores.size() && metrics[0].descriptor.requestedSemantics
+			require(metrics.size() == 4 + 2 * settings.stores.size() + core::stationExchangeObservations(settings).size()
+				&& metrics[0].descriptor.requestedSemantics
 				&& !metrics[1].descriptor.requestedSemantics && !metrics[1].samples[0].requested,
 				"catalogue manufactured requested generation semantics");
 			auto const* transfer = findSeries(trends, "transfer", "pump");

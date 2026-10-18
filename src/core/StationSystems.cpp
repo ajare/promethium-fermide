@@ -5944,6 +5944,7 @@ namespace core
 		StationHistory history;
 		std::vector<StationMetricSample> recordingValues;
 		std::vector<double> storeObservationScales;
+		std::vector<StationExchangeObservation> exchangeObservations;
 		void recordTrends(uint64_t tick, StationSystemsSnapshot const& snap)
 		{
 			if (history.status().limited) return;
@@ -6035,6 +6036,35 @@ namespace core
 			};
 			recordLiving(settings.cropPopulations, snap.cropPopulations);
 			recordLiving(settings.algaeCultures, snap.algaeCultures);
+			for (size_t i = 0; i < exchangeObservations.size(); ++i)
+			{
+				auto const& o = exchangeObservations[i];
+				auto const connection = std::ranges::find(snap.connections, o.connection, &StationConnectionSnapshot::key);
+				if (connection == snap.connections.end()) continue; // Missing authority is a gap, not zero.
+				double actual = o.metric.role == StationMetricRole::Loss ? connection->lastLossRate : connection->lastDeliveredRate;
+				double requested = 0;
+				if (o.metric.requestedSemantics)
+				{
+					// Public snapshots are priority ordered: resolve identity, not vector position.
+					if (o.connection.ownerType == "Transfer")
+					{
+						auto t = std::ranges::find(snap.transfers, o.connection.ownerId, &StationTransferSnapshot::id);
+						if (t == snap.transfers.end()) continue;
+						actual = t->lastCompleted / World::getFixedTimestep();
+						requested = t->lastRequested / World::getFixedTimestep();
+					}
+					else
+					{
+						auto c = std::ranges::find(snap.conversions, o.connection.ownerId, &StationConversionSnapshot::id);
+						if (c == snap.conversions.end()) continue;
+						auto const& flows = o.metric.role == StationMetricRole::Input ? c->inputs : c->outputs;
+						if (o.flowIndex >= flows.size()) continue;
+						actual = flows[o.flowIndex].completed / World::getFixedTimestep();
+						requested = flows[o.flowIndex].requested / World::getFixedTimestep();
+					}
+				}
+				put(constituentSlot + i, actual * o.sourceToCanonicalScale, requested * o.sourceToCanonicalScale);
+			}
 			history.observe(static_cast<double>(tick) * World::getFixedTimestep(), recordingValues);
 		}
 		// #419: the endurance observation windows. One window per Resource
@@ -16684,6 +16714,12 @@ namespace core
 		};
 		living(settings.cropPopulations, "crop-population", "Crop population");
 		living(settings.algaeCultures, "algae-culture", "Algae culture");
+		mImpl->exchangeObservations = stationExchangeObservations(settings);
+		for (auto const& o : mImpl->exchangeObservations)
+		{
+			StationRecordingSlot slot; slot.metric = o.metric;
+			slots.push_back(std::move(slot));
+		}
 		auto const slotCount = slots.size();
 		auto const cadenceTicks = std::max(1.0f, std::ceil(settings.observationIntervalSeconds / World::getFixedTimestep()));
 		mImpl->history = StationHistory(std::move(slots), cadenceTicks * World::getFixedTimestep(), settings.trendRetentionSeconds);

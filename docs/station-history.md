@@ -159,3 +159,38 @@ Coverage: `station-materialObservations`,
 `station-materialRelationshipObservations`, `station-materialCanonicalUnits`, and
 `station-editor-material-observations`, alongside existing identity persistence
 and editor-history checks from #699.
+
+## Transfer and conversion exchange rates (#705)
+
+Resource transfers and conversions register each applied input/output role and
+its connection transport loss separately. Conversions support up to five inputs
+and five outputs; all declared roles receive independent selectable properties.
+Views group only equal equipment types, directions, exchange roles, resolved
+material identities, canonical quantities/units and hazard classes. Unclassified
+materials and unsupported units are not silently assigned to a material rate.
+
+Actual conversion exchanges and transfer deliveries are committed last-tick
+quantities divided by the fixed simulation timestep, then canonically scaled.
+Transfer inputs and connection losses use the authoritative connection ledger's
+already-per-second rates. Mass, volume, energy and molar exchanges use kg/s,
+m3/s, kW and mol/s respectively. No accumulated quantity is relabelled as a rate;
+legacy native per-tick transfer trends remain unchanged.
+
+Each selector property defaults to aggregate actual rate, with a generic Instance
+breakdown. Requested conversion rates and transfer destination requests are
+separate, unstacked overlays. Transfer source requests and loss requests are not
+invented. Inputs describe material delivered to equipment; outputs describe
+material delivered to receiving stores. Source inventory draw can additionally
+include transport loss; it is not the useful input. Connection transport losses
+are neither useful output nor inventory change. These views do not infer
+per-material conversion reaction losses from different input/output materials.
+
+All exchanges record in the shared bounded history before selection. Missing
+connections or expected measurements produce gaps, while known inactive exchanges
+produce valid zero. Priority-ordered snapshots resolve by equipment identity,
+not authored vector position. No query changes allocation or compatibility rules.
+`station-exchangeObservations` covers five-way ports, constrained operation,
+canonical rates, optional requests, inactive zero, missing values and preselection
+history. `station-editor-material-observations` exercises the real selector and
+aggregate/instance switching; existing connection and growable-port checks cover
+enforcement and authoring.

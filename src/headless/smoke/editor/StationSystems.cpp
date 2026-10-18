@@ -861,12 +861,12 @@ namespace
 				(conversionRect.y + conversionRect.w) * 0.5f});
 			REQ(driver.contains("Selected: Conversion 'conversion1'"),
 				"clicking the conversion did not select it");
-			// The input set grows via + up to four real connectors, and +
+			// The input set grows via + up to the declared limit, and +
 			// is not offered past the ceiling.
-			for (int extra = 0; extra < 3; ++extra)
+			for (size_t extra = 1; extra < core::MaxStationConversionFlows; ++extra)
 				REQ(clickButton(grow, true), "the grow affordance vanished before the ceiling");
-			REQ(window.draft().conversions[0].inputs.size() == 4
-				&& window.draftHistory().undoCount() == 4,
+			REQ(window.draft().conversions[0].inputs.size() == core::MaxStationConversionFlows
+				&& window.draftHistory().undoCount() == core::MaxStationConversionFlows,
 				"growing the input set did not add the connectors as separate entries");
 			REQ(!window.flowPortButtonRect("Conversion", "conversion1", grow, true, nullptr),
 				"growing past the ceiling was still offered");
@@ -877,17 +877,17 @@ namespace
 				"the required floor slot read as optional");
 			// Undo and redo rewind and restore the growth one entry at a time.
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
-			REQ(window.draft().conversions[0].inputs.size() == 3
+			REQ(window.draft().conversions[0].inputs.size() == core::MaxStationConversionFlows - 1
 				&& window.draftHistory().redoCount() == 1,
 				"undo did not rewind exactly one grown connector");
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y); ctx->Yield(3);
-			REQ(window.draft().conversions[0].inputs.size() == 4,
+			REQ(window.draft().conversions[0].inputs.size() == core::MaxStationConversionFlows,
 				"redo did not restore the grown connector");
 			// Shrink back toward the floor; - is not offered below one.
-			for (int shrink = 0; shrink < 3; ++shrink)
+			for (size_t shrink = 1; shrink < core::MaxStationConversionFlows; ++shrink)
 				REQ(clickButton(grow, false), "the shrink affordance vanished above the floor");
 			REQ(window.draft().conversions[0].inputs.size() == 1
-				&& window.draftHistory().undoCount() == 7,
+				&& window.draftHistory().undoCount() == 2 * core::MaxStationConversionFlows - 1,
 				"shrinking did not remove the connectors as entries");
 			REQ(!window.flowPortButtonRect("Conversion", "conversion1", grow, false, nullptr),
 				"shrinking below the floor was still offered");
@@ -900,7 +900,7 @@ namespace
 			// The output set grows too.
 			REQ(clickButton(growOut, true), "the output grow affordance is missing");
 			REQ(window.draft().conversions[0].outputs.size() == 2
-				&& window.draftHistory().undoCount() == 8,
+				&& window.draftHistory().undoCount() == 2 * core::MaxStationConversionFlows,
 				"output growth did not land as one entry");
 			// Each added connector is real: a store drags onto input 2 and
 			// the reference lands as one history entry, readable in the
@@ -910,7 +910,7 @@ namespace
 				"the grown input connector was not drawn for dragging");
 			REQ(window.draft().conversions[0].inputs.size() == 2
 				&& window.draft().conversions[0].inputs[1].storeId == "silage"
-				&& window.draftHistory().undoCount() == 10,
+				&& window.draftHistory().undoCount() == 2 * core::MaxStationConversionFlows + 2,
 				"a grown connector did not take the link as one entry");
 			ctx->MouseTeleportToPos(canvasPoint(60, 60)); ctx->Yield(3);
 			REQ(driver.contains("Conversion input 2 (input) - connected"),
@@ -921,7 +921,7 @@ namespace
 				"the floor input connector was not drawn for dragging");
 			REQ(window.flowLinkRejection().find("hazard-class boundary") != std::string::npos
 				&& window.draft().conversions[0].inputs[0].storeId.empty()
-				&& window.draftHistory().undoCount() == 10,
+				&& window.draftHistory().undoCount() == 2 * core::MaxStationConversionFlows + 2,
 				"a hazard-crossing conversion link was not refused without writing");
 			// Undo rewinds the wiring, redo restores it.
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
@@ -939,7 +939,7 @@ namespace
 			clickAt(canvasPoint(600, 420));
 			REQ(window.draft().solarArrays.size() == 1
 				&& window.draft().solarArrays[0].id == "solar1"
-				&& window.draftHistory().undoCount() == 11,
+				&& window.draftHistory().undoCount() == 2 * core::MaxStationConversionFlows + 3,
 				"placing the solar array did not commit one entry");
 			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
 			ImVec4 poolRect{};
@@ -963,7 +963,7 @@ namespace
 				"Store", "grain", "Inventory in"), "grown output connector missing");
 			REQ(window.draft().conversions[0].outputs[1].storeId == "grain"
 				&& window.flowLinkRejection().empty()
-				&& window.draftHistory().undoCount() == 12,
+				&& window.draftHistory().undoCount() == 2 * core::MaxStationConversionFlows + 4,
 				("grown output wiring failed: " + window.flowLinkRejection()
 					+ " history=" + std::to_string(window.draftHistory().undoCount())).c_str());
 			// A link drag dropped on the pool body is refused as derived and
@@ -980,7 +980,7 @@ namespace
 				&& window.flowLinkRejection().find("Shared electrical pool") != std::string::npos,
 				("a link dropped on the derived pool was not refused by name: "
 					+ window.flowLinkRejection()).c_str());
-			REQ(window.draftHistory().undoCount() == 12,
+			REQ(window.draftHistory().undoCount() == 2 * core::MaxStationConversionFlows + 4,
 				"a dropped derived link changed the history");
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
 			REQ(window.draft().conversions[0].outputs[1].storeId.empty(),
@@ -3548,6 +3548,10 @@ namespace
 		seed.stores[2].materialId = "oxygen";
 		seed.stores[1].hazardClass = "hazardous";
 		seed.stores[0].protectedReserve = 4;
+		core::ResourceStoreSettings flowFeed{"flow-feed", "kg", 100, 20, 0}; flowFeed.materialId = "exchange-test";
+		core::ResourceStoreSettings flowProduct{"flow-product", "kg", 100, 0, 0}; flowProduct.materialId = "exchange-test";
+		seed.stores.push_back(flowFeed); seed.stores.push_back(flowProduct);
+		seed.transfers = {{"flow", "flow-feed", "flow-product", "kg", 2}};
 		// Composition is authoritative even when material identity is unknown.
 		seed.stores[3].composition = core::ResourceCompositionSettings{0.25, 0.1, 0.2};
 		core::AtmosphereSettings air;
@@ -3589,6 +3593,26 @@ namespace
 			ctx->SetRef("Material configuration");
 			auto const observed = world->getStationSystemsSnapshot();
 			auto const revision = world->getStationSystemsObservationRevision();
+			std::string const exchangeId = "exchange/Resource transfer/Output/Destination/exchange-test/kg/s/normal";
+			ctx->ItemClick("##Station observation property"); ctx->Yield(2);
+			auto const catalogue = world->getStationSystemsObservationCatalogue();
+			auto const selected = std::find_if(catalogue.begin(), catalogue.end(), [&](auto const& c) { return c.id == exchangeId; });
+			REQ(selected != catalogue.end(), "exchange property missing from selector catalogue");
+			auto const* popup = ctx->GetWindowByRef("//$FOCUSED");
+			REQ(popup != nullptr, "property selector did not open");
+			// Resolve the real selectable ID: canonical rate labels contain '/'.
+			auto const itemId = ImHashStr(selected->label.c_str(), 0, ImHashStr(exchangeId.c_str(), 0, popup->ID));
+			ctx->ScrollToItemY(itemId); ctx->ItemClick(itemId); ctx->Yield(2);
+			REQ(window.selectedObservation() == exchangeId && driver.contains("Requested rate"),
+				("exchange selector did not default to aggregate actual/request overlay: selected=" + window.selectedObservation()
+					+ " requestLegend=" + std::to_string(driver.contains("Requested rate"))).c_str());
+			auto const exchange = world->queryStationSystemsChart(exchangeId);
+			REQ(exchange.series.size() == 2 && exchange.series[0].values.size() == 1
+				&& std::abs(exchange.series[0].values[0] - 2) < 1e-8, "selector lost preselection exchange history or mislabeled amounts as rates");
+			ctx->ComboClick("Breakdown/Instance"); ctx->Yield(2);
+			REQ(window.selectedObservation() == exchangeId + "/instances", "exchange instance breakdown unavailable");
+			ctx->ComboClick("Breakdown/Aggregate"); ctx->Yield(2);
+			REQ(window.selectedObservation() == exchangeId, "exchange aggregate identity did not survive breakdown switching");
 			ctx->ComboClick("##Station observation property/Stored material inventory: water (kg)"); ctx->Yield(2);
 			REQ(window.selectedObservation() == "stored-material/water/kg", "Material selector did not select the material identity");
 			REQ(driver.contains("Resource stores only"), "Material view omitted its stored-only accounting boundary");

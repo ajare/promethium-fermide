@@ -55,10 +55,12 @@ namespace core
 			PortDescriptor{"Conversion", "Conversion input 2", StationPortDirection::Input, "material", "inventory", 1, {}, true},
 			PortDescriptor{"Conversion", "Conversion input 3", StationPortDirection::Input, "material", "inventory", 1, {}, true},
 			PortDescriptor{"Conversion", "Conversion input 4", StationPortDirection::Input, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Conversion", "Conversion input 5", StationPortDirection::Input, "material", "inventory", 1, {}, true},
 			PortDescriptor{"Conversion", "Conversion output 1", StationPortDirection::Output, "material", "inventory", 1, {}, false},
 			PortDescriptor{"Conversion", "Conversion output 2", StationPortDirection::Output, "material", "inventory", 1, {}, true},
 			PortDescriptor{"Conversion", "Conversion output 3", StationPortDirection::Output, "material", "inventory", 1, {}, true},
 			PortDescriptor{"Conversion", "Conversion output 4", StationPortDirection::Output, "material", "inventory", 1, {}, true},
+			PortDescriptor{"Conversion", "Conversion output 5", StationPortDirection::Output, "material", "inventory", 1, {}, true},
 			// The power and conversion chain (#647). Each machine's material
 			// connectors name the reference field they write on the draft
 			// entry; the heat connector names its declared sink. The table
