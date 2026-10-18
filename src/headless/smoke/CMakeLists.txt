@@ -75,7 +75,12 @@ endfunction()
 
 pf_add_smoke_module(pf-smoke-station
     NAME station
-    SOURCES station/Main.cpp station/ScheduledTransfers.cpp station/ObservationIntegration.cpp station/Documents.cpp station/BatteryObservations.cpp station/MaterialObservations.cpp station/Connections.cpp station/Coupled.cpp station/Reference.cpp station/Scenarios.cpp station/Stability.cpp
+    SOURCES station/Main.cpp
+        station/StationCoreChecks.cpp
+        station/StationPortChecks.cpp
+        station/StationSeamChecks.cpp
+        station/StationPowerChecks.cpp
+        station/ScheduledTransfers.cpp station/ObservationIntegration.cpp station/Documents.cpp station/BatteryObservations.cpp station/MaterialObservations.cpp station/Connections.cpp station/Coupled.cpp station/Reference.cpp station/Scenarios.cpp station/Stability.cpp
     LIBRARIES promethium-fermide-core
     LABELS "core;station"
     TIMEOUT 600
