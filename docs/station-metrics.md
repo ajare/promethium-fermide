@@ -1,5 +1,8 @@
 # Station Flow observations
 
+Complete family/ownership/external-role audit and mixed-reference acceptance
+(#715): [Coverage and bounded-operation verification](station-observation-coverage.md).
+
 Scheduled external and maintenance exchange catalogue (#714): see
 [Scheduled exchange observations](station-scheduled-exchange-observations.md)
 for event-window rates, resupply boundary accounts, ejection losses and committed
@@ -49,19 +52,21 @@ battery discharge and must never be plotted as generation. The generation metric
 has no requested value; the legacy paired trend representation is not an assertion
 that requested generation exists.
 
-## Temporary history adapter
+## Shared applied-run history
 
-`adaptStationTrends()` translates the existing bounded World-owned trends. It
-neither samples nor retains an independent recording. Existing Station Systems
-trend consumers remain unchanged. Histories still use the existing observation
-cadence, retention, coarsening and Reset/configuration lifecycle; resolution and
-truncation are shown by the viewer. Metadata is available before the first sample.
+`StationHistory` is the single World-owned recorder; the temporary trend adapter
+from slice 1a has been retired. Legacy trend consumers export the same history.
+Histories use the observation cadence, retention, coordinated coarsening and
+Reset/configuration lifecycle; resolution and truncation are shown by the viewer.
+Metadata and applicable membership are compiled before the first sample.
 
 Prepared plotting buffers are reused on unchanged frames; live snapshot polling
 is throttled to 4 Hz, with run/configuration and pause transitions bypassing the
-throttle. Selection prepares only the chosen chart. Slice 1b replaces the adapter
-with a shared bounded recorder, not another editor sampler. Inventory/equipment
-views and aggregation are later slices, not implied by the metadata declarations.
+throttle. Selection prepares only the chosen chart. Snapshot collection indices
+are built once per run and shared by all role readers, rather than searching a
+whole collection for each measurement. Public query-work counters expose this
+work. See [station-history.md](station-history.md) for the total budget, limits,
+cached queries and optional authoritative requested overlays.
 
 Acceptance uses `station-editor-flow-telemetry` (real selector, labels/axes,
 initial, paused, disabled and Reset states, read-only viewing, battery-assisted

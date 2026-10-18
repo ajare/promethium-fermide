@@ -22,9 +22,9 @@ void appendStationMicrobialObservations(StationSystemsSettings const& settings,
 			if (request) d.requestedSemantics = StationRequestedSemantics::Demand;
 			o.perTick = !power;
 			d.observationNote = "Committed microbial process exchanges: tick quantities converted to rates. Compound feed and recovered nutrients are material accounts, not atmospheric nitrogen or living biomass. Residue is unrecoverable product, not transport loss. No separate ambient exchange or instantaneous constituent recovery measurement is exposed by this process. Cumulative constituent recovery and culture condition are not rates. Process and connection accounts are separate boundaries, not additive production. Inactive is zero; unavailable is a gap.";
-			o.read = [id = e.id, member, request](StationSystemsSnapshot const& s) {
+			o.read = [id = e.id, member, request](StationSystemsSnapshot const& s, StationObservationIndex& index) {
 				StationMetricSample v;
-				auto f = std::ranges::find(s.microbialProcessors, id, &S::id);
+				auto f = index.find(s.microbialProcessors, id, &S::id);
 				if (f != s.microbialProcessors.end()) {
 					v.actual = (*f).*member;
 					if (request) v.requested = (*f).*request;
@@ -66,8 +66,8 @@ void appendStationMicrobialObservations(StationSystemsSettings const& settings,
 		add("Electrical service", R::Input, &S::lastPowerSuppliedKW, &S::lastPowerDemandKW, true).metric.thermalClass.reset();
 		add("Reaction heat released", R::Output, &S::lastReactionHeatKW, nullptr, true);
 		auto& heat = add("Produced heat", R::Output, &S::lastReactionHeatKW, nullptr, true);
-		heat.read = [id = e.id](StationSystemsSnapshot const& s) {
-			StationMetricSample v; auto f = std::ranges::find(s.microbialProcessors, id, &S::id);
+		heat.read = [id = e.id](StationSystemsSnapshot const& s, StationObservationIndex& index) {
+			StationMetricSample v; auto f = index.find(s.microbialProcessors, id, &S::id);
 			if (f != s.microbialProcessors.end()) v.actual = f->lastPowerSuppliedKW + f->lastReactionHeatKW;
 			return v;
 		};

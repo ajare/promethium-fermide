@@ -24,7 +24,10 @@ or second simulation is involved.
 ## Discrete Airlock events
 
 Each Airlock schedule has separate removed-gas input, recovered-gas output and
-vented-gas loss properties. The committed snapshot still supplies per-occurrence
+vented-gas loss properties. A separate **Retained recovered mixture** inventory
+property reads cumulative recovered kg: no receiver withdrawal is modeled. This
+is stored mixture, not an event rate, qualified supply or species-resolved gas
+inventory. The committed snapshot still supplies per-occurrence
 `lastRemovedKg`, `lastRecoveredKg`, `lastLostKg`, `lastOccurrenceSeconds` and
 `occurrencesCompleted`; these are event quantities/times, not sustained rates.
 

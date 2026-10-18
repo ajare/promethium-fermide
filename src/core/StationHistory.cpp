@@ -15,15 +15,45 @@ namespace core
 		{
 			auto const& d = s.metric;
 			metadata += sizeof(s) + s.subsystem.capacity() + s.id.capacity() + s.unit.capacity()
-				+ d.id.capacity() + d.equipmentType.capacity() + d.instanceId.capacity() + d.exchangeRole.capacity();
+				+ d.id.capacity() + d.equipmentType.capacity() + d.instanceId.capacity() + d.exchangeRole.capacity()
+				+ d.observationNote.capacity();
 			for (auto const* text : {&d.materialId, &d.constituentId, &d.hazardClass, &d.thermalClass})
 				if (*text) metadata += (*text)->capacity();
 		}
 		if (slots.size() > limits.metrics || metadata > limits.metadataBytes || metadata > limits.memoryBytes
 			|| !std::isfinite(cadence) || cadence <= 0 || !std::isfinite(retention) || retention <= 0)
 		{ mStatus.limited = true; return; }
-		auto const rowBytes = sizeof(double) + slots.size() * sizeof(Cell);
-		auto const overhead = sizeof(*this) + metadata + slots.size() * (sizeof(Cell) + sizeof(StationMetricSample));
+		std::vector<StationMetricDescriptor> descriptors;
+		for (auto const& slot : slots) descriptors.push_back(slot.metric);
+		auto catalogue = stationCharts(descriptors);
+		// Include compiled queries and membership, not only sampled cells. Long
+		// accounting notes and high-cardinality instance variants are real storage.
+		size_t catalogueBytes = catalogue.capacity() * sizeof(StationChartDefinition);
+		for (auto const& chart : catalogue)
+		{
+			for (auto const* s : {&chart.id, &chart.group, &chart.label, &chart.title,
+				&chart.accountingNote, &chart.propertyId, &chart.breakdown}) catalogueBytes += s->capacity();
+			catalogueBytes += chart.series.capacity() * sizeof(StationChartSeriesDefinition);
+			for (auto const& series : chart.series)
+			{
+				for (auto const* s : {&series.metricId, &series.label, &series.hazardClass, &series.equipmentType}) catalogueBytes += s->capacity();
+				for (auto const* ids : {&series.contributors, &series.denominator})
+				{
+					catalogueBytes += ids->capacity() * sizeof(std::string);
+					for (auto const& id : *ids) catalogueBytes += id.capacity();
+				}
+			}
+			catalogueBytes += sizeof(std::vector<size_t>) + stationChartMetricIds(chart).size() * sizeof(size_t);
+		}
+		// Reserve selected-query export/preparation and the editor's single plot
+		// copy under the same total budget, even when that view uses every slot.
+		auto const rowBytes = sizeof(double) + slots.size() * (sizeof(Cell)
+			+ sizeof(StationMetricSample) + 4 * 6 * sizeof(double));
+		// Conservative per-slot allowance for domain reader closures, cumulative
+		// baselines, indexed snapshot keys and selected-series metadata during
+		// cache replacement (bounded authored IDs/role counts).
+		auto const overhead = sizeof(*this) + 2 * metadata + 2 * catalogueBytes
+			+ slots.size() * (8192 + sizeof(Cell) + sizeof(StationMetricSample));
 		auto const available = limits.memoryBytes > overhead ? (limits.memoryBytes - overhead) / rowBytes : 0;
 		mStatus.sampleLimit = std::min({limits.samples, available, size_t{256}});
 		if (mStatus.sampleLimit < 2) { mStatus.limited = true; return; }
@@ -35,13 +65,14 @@ namespace core
 		mPending.resize(mSlots.size());
 		mStatus.recordingBytes = overhead + mStatus.sampleLimit * rowBytes;
 		mStatus.resolutionSeconds = cadence;
-		std::vector<StationMetricDescriptor> descriptors;
-		for (auto const& slot : mSlots) descriptors.push_back(slot.metric);
-		mCatalogue = stationCharts(descriptors);
+		mCatalogue = std::move(catalogue);
+		mChartSlots.reserve(mCatalogue.size());
 		for (auto const& chart : mCatalogue)
 		{
 			auto& indices = mChartSlots.emplace_back();
-			for (auto const& id : stationChartMetricIds(chart))
+			auto const ids = stationChartMetricIds(chart);
+			indices.reserve(ids.size());
+			for (auto const& id : ids)
 			{
 				auto slot = std::find_if(mSlots.begin(), mSlots.end(), [&](auto const& s) { return s.metric.id == id; });
 				if (slot != mSlots.end()) indices.push_back(static_cast<size_t>(slot - mSlots.begin()));

@@ -2,6 +2,7 @@
 #include "Documents.h"
 #include "Connections.h"
 #include "BatteryObservations.h"
+void registerObservationIntegrationChecks(std::vector<smoke::Check>& checks);
 #include "MaterialObservations.h"
 #include "Coupled.h"
 #include "Reference.h"
@@ -26846,6 +26847,7 @@ int main(int argc, char** argv)
 	registerStationDocumentChecks(checks);
 	registerStationConnectionChecks(checks);
 	registerBatteryObservationChecks(checks);
+	registerObservationIntegrationChecks(checks);
 	registerMaterialObservationChecks(checks);
 	registerCoupledStationChecks(checks);
 	registerReferenceStationChecks(checks);

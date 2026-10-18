@@ -10,9 +10,19 @@ pause and refused configuration changes preserve it.
 `World::getStationSystemsRecordingStatus()` reports limits and the retained
 interval. Default recording bounds are 256 timeline rows, 1024 slots, 1 MiB of
 metadata and 32 MiB of recording storage. Metadata accounting includes slot vector
-capacity and owned string capacities. Storage accounting includes recorder state,
-metadata, the shared timestamp array, all metric cells, pending cells and runtime
-observation staging. Smaller memory budgets reduce the common even row capacity.
+capacity and every owned string capacity, including accounting notes. The 32 MiB
+total observation budget reserves recorder state, slot and compiled catalogue
+metadata (including membership), the editor's catalogue copy, shared timestamps,
+metric/pending/staging cells, indexed extraction keys/reader closures and cumulative
+baselines, a selected-query export/preparation workspace and one editor plot copy.
+Each row conservatively reserves, per slot, a recording cell, an exported sample
+and four sets of six double buffers (including old/new selected results during
+cache replacement). Per-slot fixed extraction/selected-series-metadata allowance is 8192
+bytes (including cache replacement); compiled metadata is capacity-accounted. This is a conservative observation
+working-set reservation, not just allocated recorder-cell bytes. Caller-retained
+full-history exports and simulation/document state are outside this budget.
+Temporary applied-run compilation input is not a retained recording. Smaller
+memory budgets or larger catalogues reduce the common even row capacity.
 If two rows and metadata cannot fit, or cardinality/metadata limits are exceeded,
 the entire recording is refused with `limited=true`; no metric subset is silently
 selected. Read-only exported snapshots are bounded by the same cardinality and row
@@ -59,9 +69,9 @@ membership. Power remains the fallback, including empty/disabled runs.
 property identity and history revision. Only metrics referenced by that property
 are exported; selecting another property replaces the cache. Unknown identities
 return an empty result. Borrowed query results must not be retained across another
-query or run replacement without copying. Query storage is additional to recorder
-storage, bounded by one catalogue property's series and the recorder's row limit;
-it is not a second recording system. Legacy full-history exports remain available
+query or run replacement without copying. Query storage is bounded by one catalogue property's series and the recorder's
+row limit, with workspace reserved in the total observation budget above; it is
+not a second recording system. Legacy full-history exports remain available
 for existing consumers, but Flow never calls them.
 
 Flow copies and prepares only the selected result when the run/history/selection
@@ -168,6 +178,11 @@ and five outputs; all declared roles receive independent selectable properties.
 Views group only equal equipment types, directions, exchange roles, resolved
 material identities, canonical quantities/units and hazard classes. Unclassified
 materials and unsupported units are not silently assigned to a material rate.
+
+The generic **Show requested** checkbox appears only for properties with
+an authoritative optional request series. Actual rates are the default; requests
+are unstacked overlays, never actual contributions. Power retains its always
+visible Demand/Generation compatibility presentation.
 
 Actual conversion exchanges and transfer deliveries are committed last-tick
 quantities divided by the fixed simulation timestep, then canonically scaled.

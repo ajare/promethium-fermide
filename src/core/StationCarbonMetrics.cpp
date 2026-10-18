@@ -21,9 +21,9 @@ void appendStationCarbonObservations(StationSystemsSettings const& settings,
 			if (request) d.requestedSemantics = StationRequestedSemantics::Demand;
 			o.perTick = !power;
 			d.observationNote = "Committed process exchanges: material kg per tick converted to kg/s; electrical and thermal power are separate kW accounts. Dedicated fuel-cell reactants are not life-support supply. Process and connection endpoint accounts are separate boundaries, not additive production. Inactive is zero; unavailable is a gap.";
-			o.read = [id = entry.id, collection, member, request, extra, extraScale](StationSystemsSnapshot const& s) {
+			o.read = [id = entry.id, collection, member, request, extra, extraScale](StationSystemsSnapshot const& s, StationObservationIndex& index) {
 				StationMetricSample v; auto const& items = collection(s);
-				auto f = std::ranges::find(items, id, [](auto const& i) { return i.id; });
+				auto f = index.find(items, id, [](auto const& i) { return i.id; });
 				if (f != items.end()) {
 					v.actual = (*f).*member + (extra ? extraScale * ((*f).*extra) : 0);
 					if (request) v.requested = (*f).*request;

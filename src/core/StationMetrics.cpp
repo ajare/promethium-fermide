@@ -155,11 +155,24 @@ namespace core
 			d.id = "exchange/" + type + "/" + id + "/" + role;
 			d.equipmentType = type == "Solar" ? "Solar array" : type == "Equipment" ? "External equipment load group" : type;
 			d.instanceId = id; d.exchangeRole = std::move(role); d.role = direction;
-			o.read = [key = o.connection, field](StationSystemsSnapshot const& snap) {
+			if (relation == "Heat")
+			{
+				if (type == "Generator") d.thermalClass = std::ranges::find(settings.generators, id, &GeneratorSettings::id)->thermalClass;
+				else if (type == "Equipment") d.thermalClass = std::ranges::find(settings.equipmentLoads, id, &EquipmentLoadSettings::id)->thermalClass;
+				else if (type == "Fuel cell") d.thermalClass = std::ranges::find(settings.fuelCells, id, &FuelCellSettings::id)->thermalClass;
+			}
+			if (field == 3)
+			{
+				d.quantity = StationPhysicalQuantity::Energy; d.unit = StationCanonicalUnit::KilowattHour;
+				o.sourceToCanonicalScale = 1.0 / 3600;
+				d.observationNote = "Retained source heat is stored energy, not useful output or connection transport loss.";
+			}
+			o.read = [key = o.connection, field](StationSystemsSnapshot const& snap, StationObservationIndex& index) {
 				StationMetricSample v;
-				auto const found = std::ranges::find(snap.connections, key, &StationConnectionSnapshot::key);
+				auto const found = index.find(snap.connections, key, &StationConnectionSnapshot::key);
 				if (found != snap.connections.end())
-					v.actual = field == 0 ? found->lastInputRate : field == 1 ? found->lastDeliveredRate : found->lastLossRate;
+					v.actual = field == 0 ? found->lastInputRate : field == 1 ? found->lastDeliveredRate
+						: field == 2 ? found->lastLossRate : found->retainedHeatKJ;
 				return v;
 			};
 			result.push_back(std::move(o));
@@ -174,10 +187,10 @@ namespace core
 			d.id = "exchange/" + type + "/" + id + "/" + role;
 			d.equipmentType = std::move(type); d.instanceId = id; d.exchangeRole = std::move(role); d.role = direction;
 			if (request) d.requestedSemantics = StationRequestedSemantics::Demand;
-			o.read = [id, collection, actual, request](StationSystemsSnapshot const& snap) {
+			o.read = [id, collection, actual, request](StationSystemsSnapshot const& snap, StationObservationIndex& index) {
 				StationMetricSample v;
 				auto const& items = collection(snap);
-				auto const found = std::find_if(items.begin(), items.end(), [&](auto const& item) { return item.id == id; });
+				auto const found = index.find(items, id, [](auto const& item) { return item.id; });
 				if (found != items.end()) { v.actual = actual(*found); if (request) v.requested = request(*found); }
 				return v;
 			};
@@ -205,9 +218,9 @@ namespace core
 			add("Generator", g.id, "Fuel", g.fuelStoreId, true, 0, false);
 			auto& fuel = result[result.size() - 2];
 			fuel.sourceToCanonicalScale = 3600; fuel.perTick = true;
-			fuel.read = [id = g.id](StationSystemsSnapshot const& snap) {
+			fuel.read = [id = g.id](StationSystemsSnapshot const& snap, StationObservationIndex& index) {
 				StationMetricSample v;
-				auto const found = std::ranges::find(snap.power.generators, id, &StationGeneratorSnapshot::id);
+				auto const found = index.find(snap.power.generators, id, &StationGeneratorSnapshot::id);
 				if (found != snap.power.generators.end()) v.actual = found->fuelDrawKWh;
 				return v;
 			};
@@ -218,15 +231,19 @@ namespace core
 				GeneratorRead{[](auto const& a) { return a.startupDrawKW + a.startupUnmetKW; }});
 			scalar("Generator", g.id, "Startup heat", StationMetricRole::Output, generators,
 				GeneratorRead{[](auto const& a) { return a.startupDrawKW; }}, GeneratorRead{});
+			result.back().metric.thermalClass = g.thermalClass;
 			scalar("Generator", g.id, "Production waste heat", StationMetricRole::Output, generators,
 				GeneratorRead{[](auto const& a) { return a.wasteHeatKW; }}, GeneratorRead{});
+			result.back().metric.thermalClass = g.thermalClass;
 			scalar("Generator", g.id, "Decay heat", StationMetricRole::Output, generators,
 				GeneratorRead{[](auto const& a) { return a.decayHeatKW; }}, GeneratorRead{});
+			result.back().metric.thermalClass = g.thermalClass;
 			connection("Generator", g.id, "Generation", "Pool delivery", StationMetricRole::Output, 1);
 			connection("Generator", g.id, "Generation", "Generation cable loss", StationMetricRole::Loss, 2);
 			connection("Generator", g.id, "Startup", "Startup cable loss", StationMetricRole::Loss, 2);
 			connection("Generator", g.id, "Heat", "Delivered heat", StationMetricRole::Output, 1);
 			connection("Generator", g.id, "Heat", "Heat transport loss", StationMetricRole::Loss, 2);
+			connection("Generator", g.id, "Heat", "Retained source heat", StationMetricRole::Inventory, 3);
 		}
 		for (auto const& b : settings.batteries)
 		{
@@ -249,9 +266,11 @@ namespace core
 				LoadRead{[](auto const& a) { return a.recoverySurgeKW; }}, LoadRead{});
 			scalar("External equipment load group", l.id, "Exported heat", StationMetricRole::Output, loads,
 				LoadRead{[](auto const& a) { return a.heatExportedKW; }}, LoadRead{});
+			result.back().metric.thermalClass = l.thermalClass;
 			connection("Equipment", l.id, "Electrical supply", "Supply cable loss", StationMetricRole::Loss, 2);
 			connection("Equipment", l.id, "Heat", "Delivered heat", StationMetricRole::Output, 1);
 			connection("Equipment", l.id, "Heat", "Heat transport loss", StationMetricRole::Loss, 2);
+			connection("Equipment", l.id, "Heat", "Retained source heat", StationMetricRole::Inventory, 3);
 			size_t in = 0, out = 0;
 			for (size_t i = 0; i < l.materialExchanges.size(); ++i)
 			{
@@ -260,9 +279,9 @@ namespace core
 				if (f.storeId.empty()) continue;
 				add("Equipment", l.id, relation, f.storeId, f.consumes, i, true);
 				auto& o = result[result.size() - 2]; o.perTick = true;
-				o.read = [id = l.id, i](StationSystemsSnapshot const& snap) {
+				o.read = [id = l.id, i](StationSystemsSnapshot const& snap, StationObservationIndex& index) {
 					StationMetricSample v;
-					auto const found = std::ranges::find(snap.power.loads, id, &StationEquipmentLoadSnapshot::id);
+					auto const found = index.find(snap.power.loads, id, &StationEquipmentLoadSnapshot::id);
 					if (found != snap.power.loads.end() && i < found->materialExchanges.size())
 					{ v.actual = found->materialExchanges[i].completed; v.requested = found->materialExchanges[i].requested; }
 					return v;
@@ -286,7 +305,8 @@ namespace core
 			connection("Fuel cell", c.id, "Backup generation", "Pool delivery", StationMetricRole::Output, 1);
 			connection("Fuel cell", c.id, "Backup generation", "Generation cable loss", StationMetricRole::Loss, 2);
 			connection("Fuel cell", c.id, "Heat", "Delivered heat", StationMetricRole::Output, 1);
-			connection("Fuel cell", c.id, "Heat", "Heat transport loss", StationMetricRole::Loss, 2);
+			// The shared process connection adapter owns Heat transport loss
+			// (and retained source heat); registering it here duplicates its ID.
 		}
 		appendStationThermalObservations(settings, result);
 		appendStationCrewAtmosphereObservations(settings, result);
@@ -430,7 +450,7 @@ namespace core
 			// populations. Never add compound constituents to this material sum.
 			chart.partialAccounting = true;
 			chart.accountingNote = "Accounted owners: Resource stores (qualified + unqualified), atmosphere gases and water vapour, closed-loop coolant, crop and algae dry Living biomass. "
-				"Partial system accounting: compound constituents are separate views, not additional material ownership. No inferred bound materials, biological water, culture liquid, crew body mass, microbial biomass or equipment holdup. "
+				"Partial system accounting: compound constituents are separate views, not additional material ownership. No inferred bound materials, biological water, culture liquid, crew body mass, species-resolved Airlock recovery, microbial biomass or equipment holdup. "
 				+ std::to_string(unclassified) + " unclassified or non-canonical stores excluded. Different canonical quantities are separate; no inferred density or molar conversion. Not usable supply or discretionary drawability.";
 			StationChartSeriesDefinition total;
 			total.metricId = chart.id + "/subtotal"; total.label = "Accounted owners subtotal";
@@ -539,8 +559,12 @@ namespace core
 				StationChartOperation::Value, {}, {}, true});
 			std::vector<std::string> requests;
 			for (auto d : members) if (d->requestedSemantics) requests.push_back(d->id);
-			if (!requests.empty()) chart.series.push_back({id + "/requested", "Requested rate", StationMetricValue::Requested,
-				StationChartOperation::Sum, requests});
+			if (!requests.empty())
+			{
+				chart.series.push_back({id + "/requested", "Requested rate", StationMetricValue::Requested,
+					StationChartOperation::Sum, requests});
+				chart.series.back().optionalRequested = true;
+			}
 			charts.push_back(std::move(chart));
 		}
 		appendStationChartBreakdowns(charts);
@@ -588,6 +612,13 @@ namespace core
 			if (groups.size() > 1) charts.push_back(std::move(hazard));
 			if (equipmentGroups.size() > 1) charts.push_back(std::move(equipment));
 		}
+	}
+
+	uint32_t stationSeriesColourKey(std::string const& id)
+	{
+		uint32_t colour = 2166136261u;
+		for (unsigned char c : id) colour = (colour ^ c) * 16777619u;
+		return colour;
 	}
 
 	std::vector<std::string> stationChartMetricIds(StationChartDefinition const& chart)
@@ -648,6 +679,7 @@ namespace core
 		{
 			StationChartSeries line;
 			line.id = definition.metricId; line.label = definition.label; line.stacked = definition.stacked;
+			line.optionalRequested = definition.optionalRequested;
 			line.times = times;
 			auto const numerator = definition.operation == StationChartOperation::Value
 				? std::vector<std::string>{definition.metricId} : definition.contributors;

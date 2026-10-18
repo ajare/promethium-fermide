@@ -11,7 +11,7 @@ void appendStationScheduledObservations(StationSystemsSettings const& settings,
 	// committed totals at the shared observation cadence so no event is missed
 	// between samples, and a sticky last-occurrence value cannot repeat forever.
 	auto add = [&](std::string type, std::string id, std::string role, StationMetricRole direction,
-		std::string const& storeId, std::function<StationMetricSample(StationSystemsSnapshot const&)> read) {
+		std::string const& storeId, std::function<StationMetricSample(StationSystemsSnapshot const&, StationObservationIndex&)> read) {
 		auto f = std::ranges::find(settings.stores, storeId, &ResourceStoreSettings::id);
 		if (f == settings.stores.end()) return;
 		auto const& stock = stores[f - settings.stores.begin()];
@@ -46,8 +46,8 @@ void appendStationScheduledObservations(StationSystemsSettings const& settings,
 		for (int field = 0; field < 3; ++field)
 			add("Resupply", e.id, field == 0 ? "Delivered" : field == 1 ? "Accepted" : "Rejected",
 				field == 2 ? StationMetricRole::Output : StationMetricRole::Input, e.storeId,
-				[id = e.id, field](StationSystemsSnapshot const& s) {
-					StationMetricSample v; auto f = std::ranges::find(s.deliveries, id, &StationDeliverySnapshot::id);
+				[id = e.id, field](StationSystemsSnapshot const& s, StationObservationIndex& index) {
+					StationMetricSample v; auto f = index.find(s.deliveries, id, &StationDeliverySnapshot::id);
 					if (f != s.deliveries.end()) v.actual = field == 0 ? f->acceptedTotal + f->rejectedTotal
 						: field == 1 ? f->acceptedTotal : f->rejectedTotal;
 					return v;
@@ -55,16 +55,16 @@ void appendStationScheduledObservations(StationSystemsSettings const& settings,
 	}
 	for (auto const& e : settings.wasteEjections)
 		add("Waste ejection", e.id, "Ejected material", StationMetricRole::Loss, e.storeId,
-			[id = e.id](StationSystemsSnapshot const& s) {
-				StationMetricSample v; auto f = std::ranges::find(s.wasteEjections, id, &StationWasteEjectionSnapshot::id);
+			[id = e.id](StationSystemsSnapshot const& s, StationObservationIndex& index) {
+				StationMetricSample v; auto f = index.find(s.wasteEjections, id, &StationWasteEjectionSnapshot::id);
 				if (f != s.wasteEjections.end()) v.actual = f->ejectedTotal;
 				return v;
 			});
 	for (auto const& e : settings.maintenanceJobs)
 		for (size_t i = 0; i < e.requirements.size(); ++i) if (e.requirements[i].consumed)
 			add("Maintenance", e.id, "Consumed requirement " + std::to_string(i + 1), StationMetricRole::Input,
-				e.requirements[i].storeId, [id = e.id, i](StationSystemsSnapshot const& s) {
-					StationMetricSample v; auto f = std::ranges::find(s.maintenanceJobs, id, &StationMaintenanceSnapshot::id);
+				e.requirements[i].storeId, [id = e.id, i](StationSystemsSnapshot const& s, StationObservationIndex& index) {
+					StationMetricSample v; auto f = index.find(s.maintenanceJobs, id, &StationMaintenanceSnapshot::id);
 					if (f != s.maintenanceJobs.end() && i < f->requirements.size()) v.actual = f->requirements[i].consumedTotal;
 					return v;
 				});

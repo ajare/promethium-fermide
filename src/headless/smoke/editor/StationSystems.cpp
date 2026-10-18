@@ -1,4 +1,5 @@
 #include "Checks.h"
+void registerMixedObservationEditorChecks(std::vector<smoke::Check>& checks);
 #include "TestEngine.h"
 #include "State.h"
 #include "StationSystemsWindow.h"
@@ -2005,7 +2006,9 @@ namespace
 				ImVec4 rect{};
 				REQ(window.flowNodeRect(probe.type, probe.id, &rect),
 					(std::string(probe.type) + " node is not on screen").c_str());
-				ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+				// Select the title, not the body midpoint: at fit-to-station
+				// zoom the midpoint can fall within a Port's hit radius.
+				ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, rect.y + std::min(3.0f, (rect.w - rect.y) * 0.1f)});
 				ctx->Yield(2);
 				ctx->MouseClick(); ctx->Yield(4);
 				// Clear the filter again for the next probe.
@@ -4065,6 +4068,8 @@ namespace
 			// Resolve the real selectable ID: canonical rate labels contain '/'.
 			auto const itemId = ImHashStr(selected->label.c_str(), 0, ImHashStr(exchangeId.c_str(), 0, popup->ID));
 			ctx->ScrollToItemY(itemId); ctx->ItemClick(itemId); ctx->Yield(2);
+			REQ(driver.contains("Show requested"), "authoritative request control absent");
+			ctx->ItemClick("Show requested"); ctx->Yield(2);
 			REQ(window.selectedObservation() == exchangeId && driver.contains("Requested rate"),
 				("exchange selector did not default to aggregate actual/request overlay: selected=" + window.selectedObservation()
 					+ " requestLegend=" + std::to_string(driver.contains("Requested rate"))).c_str());
@@ -8330,6 +8335,7 @@ void cropWorkflow(smoke::Context const&)
 	void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	editor_smoke::registerStationConnections(checks);
+	registerMixedObservationEditorChecks(checks);
 	checks.push_back({"station/windowWorkflow", workflow});
 	checks.push_back({"station/materialIdentityWorkflow", materialIdentityWorkflow});
 	checks.push_back({"station/configurationDocument", configurationDocumentWorkflow});

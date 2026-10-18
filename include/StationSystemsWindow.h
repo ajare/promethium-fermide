@@ -92,7 +92,7 @@ private:
 	core::StationObservationRevision mObservationRevision{~uint64_t{0}, 0};
 	std::string mPreparedChart, mObservationAxis;
 	std::vector<std::string> mObservationLabels;
-	bool mObservationFallback{false};
+	bool mObservationFallback{false}, mShowRequested{false};
 	uint64_t mObservationPreparations{0};
 	core::StationRecordingStatus mFlowRecording;
 	core::StationChartData mFlowChart;

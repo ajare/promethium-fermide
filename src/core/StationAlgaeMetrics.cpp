@@ -27,8 +27,8 @@ void appendStationAlgaeObservations(StationSystemsSettings const& settings,
 				? "Interval-average event rate: cumulative quantity difference / elapsed simulation seconds between observations (first window starts at run time zero). Includes harvest and mortality between samples; not an instantaneous or sustained rate."
 				: "Last committed algae tick: kg per fixed simulation tick converted to kg/s; energy exchange is kW. Ambient exchanges are authoritative, including those without diagram Ports.";
 			d.observationNote += " Living biomass inventory, Growing capacity, organic respiration, bound nutrients, harvested products and uncontained loss are distinct accounts. Diagnostic biomass changes and respiration heat release are not additional external production. Known inactive is zero; unavailable is a gap.";
-			o.read = [id = e.id, member, request](StationSystemsSnapshot const& s) {
-				StationMetricSample v; auto f = std::ranges::find(s.algaeCultures, id, &S::id);
+			o.read = [id = e.id, member, request](StationSystemsSnapshot const& s, StationObservationIndex& index) {
+				StationMetricSample v; auto f = index.find(s.algaeCultures, id, &S::id);
 				if (f != s.algaeCultures.end()) { v.actual = (*f).*member; if (request) v.requested = (*f).*request; }
 				return v;
 			};
@@ -43,8 +43,8 @@ void appendStationAlgaeObservations(StationSystemsSettings const& settings,
 		add("Growth CO2 uptake", R::Input, "carbon-dioxide", &S::lastCo2DrawnKg);
 		auto& water = add("Culture water", R::Input, "", &S::lastAssimilationWaterKg);
 		stock(water, e.waterStoreId);
-		water.read = [id = e.id](StationSystemsSnapshot const& s) {
-			StationMetricSample v; auto f = std::ranges::find(s.algaeCultures, id, &S::id);
+		water.read = [id = e.id](StationSystemsSnapshot const& s, StationObservationIndex& index) {
+			StationMetricSample v; auto f = index.find(s.algaeCultures, id, &S::id);
 			if (f != s.algaeCultures.end()) v.actual = f->lastAssimilationWaterKg + f->lastEvaporatedKg;
 			return v;
 		};
@@ -80,8 +80,8 @@ void appendStationAlgaeObservations(StationSystemsSettings const& settings,
 			std::tuple{"Uncontained dead residue", &S::deadResidueLostConstituents, R::Loss, std::string{"external"}}}) {
 			if (destination.empty()) continue;
 			auto& energy = add(std::string(role) + " chemical energy", direction, "", &S::foodProducedKg, nullptr, true, true);
-			energy.read = [id = e.id, ledger](StationSystemsSnapshot const& s) {
-				StationMetricSample v; auto f = std::ranges::find(s.algaeCultures, id, &S::id);
+			energy.read = [id = e.id, ledger](StationSystemsSnapshot const& s, StationObservationIndex& index) {
+				StationMetricSample v; auto f = index.find(s.algaeCultures, id, &S::id);
 				if (f != s.algaeCultures.end()) v.actual = ((*f).*ledger).organicKg * f->energyKJPerKgOrganic;
 				return v;
 			};
@@ -93,8 +93,8 @@ void appendStationAlgaeObservations(StationSystemsSettings const& settings,
 				std::pair{"otherMinerals", &StationBiologicalConstituents::mineralsKg}}) {
 				auto& o = add(std::string(role) + " constituent " + name, direction, "", &S::foodProducedKg, nullptr, false, true);
 				o.metric.constituentId = name;
-				o.read = [id = e.id, ledger, member](StationSystemsSnapshot const& s) {
-					StationMetricSample v; auto f = std::ranges::find(s.algaeCultures, id, &S::id);
+				o.read = [id = e.id, ledger, member](StationSystemsSnapshot const& s, StationObservationIndex& index) {
+					StationMetricSample v; auto f = index.find(s.algaeCultures, id, &S::id);
 					if (f != s.algaeCultures.end()) v.actual = ((*f).*ledger).*member;
 					return v;
 				};

@@ -23,6 +23,7 @@ namespace core
 	struct StationQueryWork
 	{
 		uint64_t queries{0}, metricsExported{0};
+		uint64_t observationLookups{0}, observationIndexEntries{0};
 	};
 	struct StationRecordingSlot
 	{

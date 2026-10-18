@@ -1,5 +1,6 @@
 #pragma once
 #include "StationSystems.h"
+#include "StationObservationIndex.h"
 #include <optional>
 #include <functional>
 #include <string>
@@ -56,6 +57,7 @@ namespace core
 		bool stacked{false};
 		std::string hazardClass; // Optional grouping key of this contribution.
 		std::string equipmentType; // Optional owner-type breakdown, independent of instance names.
+		bool optionalRequested{false};
 	};
 	struct StationChartDefinition
 	{
@@ -73,7 +75,7 @@ namespace core
 		std::string id, label;
 		std::vector<double> coverage;
 		std::vector<double> times, values; // Missing/invalid measurements are NaN gaps, never zero.
-		bool stacked{false};
+		bool stacked{false}, optionalRequested{false};
 		std::vector<double> lower, upper; // Prepared cumulative stack bounds; values remain individual contributions.
 	};
 	struct StationChartData
@@ -87,6 +89,15 @@ namespace core
 		StationMetricDescriptor metric;
 		double sourceToCanonicalScale{1};
 	};
+	struct StationExchangeReader
+	{
+		std::function<StationMetricSample(StationSystemsSnapshot const&, StationObservationIndex&)> read;
+		template<class F> StationExchangeReader& operator=(F&& f) { read = std::forward<F>(f); return *this; }
+		explicit operator bool() const { return bool(read); }
+		StationMetricSample operator()(StationSystemsSnapshot const& s, StationObservationIndex& index) const { return read(s, index); }
+		// Standalone exported-snapshot queries have their own short-lived index.
+		StationMetricSample operator()(StationSystemsSnapshot const& s) const { StationObservationIndex index; return read(s, index); }
+	};
 	struct StationExchangeObservation
 	{
 		StationMetricDescriptor metric;
@@ -95,7 +106,7 @@ namespace core
 		size_t flowIndex{0};
 		// Compiled domain extraction for non-transfer exchanges. Empty values
 		// preserve missing authority as a gap; callbacks never run simulation.
-		std::function<StationMetricSample(StationSystemsSnapshot const&)> read;
+		StationExchangeReader read;
 		bool perTick{false};
 		bool cumulativeRate{false}; // Difference committed cumulative quantity over the observation window.
 	};
@@ -107,6 +118,7 @@ namespace core
 	void appendStationChartBreakdowns(std::vector<StationChartDefinition>& charts);
 	std::vector<std::string> stationChartMetricIds(StationChartDefinition const& chart);
 	char const* stationUnitLabel(StationCanonicalUnit unit);
+	uint32_t stationSeriesColourKey(std::string const& id);
 	StationChartData queryStationChart(StationChartDefinition const& chart,
 		std::vector<StationMetricHistory> const& history);
 }

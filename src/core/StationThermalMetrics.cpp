@@ -24,10 +24,10 @@ void appendStationThermalObservations(StationSystemsSettings const& settings,
 		d.role = direction; d.thermalClass = cls;
 		if (energy) { d.quantity = StationPhysicalQuantity::Energy; d.unit = StationCanonicalUnit::KilowattHour; o.sourceToCanonicalScale = 1.0 / 3600; }
 		if (request) d.requestedSemantics = StationRequestedSemantics::Demand;
-		o.read = [id, collection, member, request](StationSystemsSnapshot const& snap) {
+		o.read = [id, collection, member, request](StationSystemsSnapshot const& snap, StationObservationIndex& index) {
 			StationMetricSample v;
 			auto const& items = collection(snap);
-			auto found = std::ranges::find(items, id, [](auto const& a) { return a.id; });
+			auto found = index.find(items, id, [](auto const& a) { return a.id; });
 			if (found != items.end()) { v.actual = (*found).*member; if (request) v.requested = (*found).*request; }
 			return v;
 		};
@@ -77,9 +77,9 @@ void appendStationThermalObservations(StationSystemsSettings const& settings,
 		add("Net inventory change", R::InventoryChange, &S::exchangeIntoLoopKW);
 		// Net change is the signed balance of already-booked external
 		// exchanges, not a new integration or a useful-output estimate.
-		result.back().read = [id = l.id](StationSystemsSnapshot const& snap) {
+		result.back().read = [id = l.id](StationSystemsSnapshot const& snap, StationObservationIndex& index) {
 			StationMetricSample v;
-			auto found = std::ranges::find(snap.coolantLoops, id, &StationCoolantLoopSnapshot::id);
+			auto found = index.find(snap.coolantLoops, id, &StationCoolantLoopSnapshot::id);
 			if (found != snap.coolantLoops.end()) v.actual = found->pumpSuppliedKW + found->heaterSuppliedKW
 				+ found->exchangeIntoLoopKW + found->collectorHeatKW - found->chillerExtractionKW;
 			return v;
@@ -101,9 +101,9 @@ void appendStationThermalObservations(StationSystemsSettings const& settings,
 		scalar("Thermal buffer", b.id, service(b.reservoirId), "Discharge heat", R::Output, buffers, &S::lastDischargeKW, static_cast<double S::*>(nullptr));
 		scalar("Thermal buffer", b.id, service(b.reservoirId), "Stored thermal energy", R::Inventory, buffers, &S::storedEnergyKJ, static_cast<double S::*>(nullptr), true);
 		scalar("Thermal buffer", b.id, service(b.reservoirId), "Net inventory change", R::InventoryChange, buffers, &S::lastChargeKW, static_cast<double S::*>(nullptr));
-		result.back().read = [id = b.id](StationSystemsSnapshot const& snap) {
+		result.back().read = [id = b.id](StationSystemsSnapshot const& snap, StationObservationIndex& index) {
 			StationMetricSample v;
-			auto found = std::ranges::find(snap.thermalBuffers, id, &StationThermalBufferSnapshot::id);
+			auto found = index.find(snap.thermalBuffers, id, &StationThermalBufferSnapshot::id);
 			if (found != snap.thermalBuffers.end()) v.actual = found->lastChargeKW - found->lastDischargeKW;
 			return v;
 		};
@@ -135,9 +135,9 @@ void appendStationThermalObservations(StationSystemsSettings const& settings,
 			bool const incoming = graph.nodes[link.to].type == k.ownerType && graph.nodes[link.to].id == k.ownerId;
 			d.role = field == 3 ? R::Inventory : field == 2 ? R::Loss : incoming ? R::Input : R::Output;
 			if (field == 3) { d.quantity = StationPhysicalQuantity::Energy; d.unit = StationCanonicalUnit::KilowattHour; o.sourceToCanonicalScale = 1.0 / 3600; }
-			o.read = [k, field](StationSystemsSnapshot const& snap) {
+			o.read = [k, field](StationSystemsSnapshot const& snap, StationObservationIndex& index) {
 				StationMetricSample v;
-				auto c = std::ranges::find(snap.connections, k, &StationConnectionSnapshot::key);
+				auto c = index.find(snap.connections, k, &StationConnectionSnapshot::key);
 				if (c != snap.connections.end()) v.actual = field == 0 ? c->lastInputRate : field == 1 ? c->lastDeliveredRate : field == 2 ? c->lastLossRate : c->retainedHeatKJ;
 				return v;
 			};

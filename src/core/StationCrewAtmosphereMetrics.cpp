@@ -30,10 +30,10 @@ void appendStationCrewAtmosphereObservations(StationSystemsSettings const& setti
 		d.observationNote = cumulative
 			? "Interval-average event rate: cumulative kg difference / elapsed simulation seconds between consecutive observations (first window starts at run time zero). Includes every occurrence in that window, not an instantaneous or sustained cycle rate. Per-occurrence kg and occurrence times remain in the Airlock observation."
 			: "Last committed tick exchange: material kg per fixed simulation tick converted to kg/s; heat is kW. Known inactive pathways are zero; unavailable observations are gaps.";
-		o.read = [id, collection, member, request](StationSystemsSnapshot const& snap) {
+		o.read = [id, collection, member, request](StationSystemsSnapshot const& snap, StationObservationIndex& index) {
 			StationMetricSample v;
 			auto const& items = collection(snap);
-			auto found = std::ranges::find(items, id, [](auto const& a) { return a.id; });
+			auto found = index.find(items, id, [](auto const& a) { return a.id; });
 			if (found != items.end()) { v.actual = (*found).*member; if (request) v.requested = (*found).*request; }
 			return v;
 		};
@@ -105,6 +105,13 @@ void appendStationCrewAtmosphereObservations(StationSystemsSettings const& setti
 				member, static_cast<double S::*>(nullptr), false, true);
 			o.metric.observationNote += " Removed gas = recovered + vented; recovery is retained, not usable production. Mixture kg is not a pure-species quantity and is never combined with oxygen/nitrogen/carbon-dioxide/water inventories.";
 		}
+		auto& retained = scalar("Airlock cycle", c.id, "Retained recovered mixture", R::Inventory,
+			"atmosphere-mixture", hazard(c.atmosphereId), cycles, &S::recoveredTotal,
+			static_cast<double S::*>(nullptr));
+		retained.perTick = false;
+		retained.metric.quantity = StationPhysicalQuantity::Mass;
+		retained.metric.unit = StationCanonicalUnit::Kilogram;
+		retained.metric.observationNote = "Retained recovered mixture in kg; no receiver withdrawal is modeled. This is not an output rate or usable supply. No retained species decomposition is measured, so do not add this mixture account to free gas inventories.";
 	}
 }
 }

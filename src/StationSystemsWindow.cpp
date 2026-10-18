@@ -317,6 +317,8 @@ void StationSystemsWindow::renderObservationPlot(float height, core::World const
 			ImGui::EndCombo();
 		}
 	}
+	if (std::any_of(mFlowChart.series.begin(), mFlowChart.series.end(), [](auto const& s) { return s.optionalRequested; }))
+		ImGui::Checkbox("Show requested", &mShowRequested);
 	ImGui::TextUnformatted(selected->title.c_str());
 	if (!selected->accountingNote.empty()) ImGui::TextWrapped("Accounting coverage: %s", selected->accountingNote.c_str());
 	bool const empty = std::all_of(mFlowChart.series.begin(), mFlowChart.series.end(),
@@ -360,13 +362,13 @@ void StationSystemsWindow::renderObservationPlot(float height, core::World const
 		size_t lineIndex = 0;
 		for (auto const& line : mFlowChart.series)
 		{
+			auto const* label = mObservationLabels[lineIndex++].c_str();
+			if (line.optionalRequested && !mShowRequested) continue;
 			// Colour and legend identity derive from the metric, not its vector position.
-			unsigned colour = 2166136261u;
-			for (unsigned char c : line.id) colour = (colour ^ c) * 16777619u;
+			auto const colour = core::stationSeriesColourKey(line.id);
 			ImPlot::SetNextLineStyle(ImPlot::GetColormapColor(static_cast<int>(colour % ImPlot::GetColormapSize())), 2);
 			ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 2);
 			ImGui::LogText("%s\n", line.label.c_str());
-			auto const* label = mObservationLabels[lineIndex++].c_str();
 			if (line.stacked)
 			{
 				ImPlot::SetNextFillStyle(ImPlot::GetColormapColor(static_cast<int>(colour % ImPlot::GetColormapSize())), 0.55f);

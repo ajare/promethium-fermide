@@ -757,6 +757,7 @@ namespace
 		close(value("exchange/Atmosphere/habitat/Leakage"), 0.01);
 		close(value("exchange/Crew/crew/Metabolic heat"), 0.2);
 		close(value("exchange/Crew/crew/Retained body mass"), snap.crews[0].retainedKg);
+		close(value("exchange/Airlock cycle/cycle/Retained recovered mixture"), snap.airlockCycles[0].recoveredTotal);
 		require(snap.airlockCycles[0].occurrencesCompleted > 2, "multiple off-cadence events not exercised");
 		close(value("exchange/Crew/crew/Food") + value("exchange/Crew/crew/Water") + value("exchange/Crew/crew/Oxygen"),
 			value("exchange/Crew/crew/Carbon dioxide") + value("exchange/Crew/crew/Moisture")
@@ -790,7 +791,8 @@ namespace
 				auto gap = core::queryStationChart(def, missing);
 				require(gap.incomplete && std::isnan(gap.series[0].values.back()), "unavailable crew amount became zero");
 			}
-			if (def.id.starts_with("exchange/Airlock cycle/")) { eventChart = true; require(def.accountingNote.find("Interval-average event rate") != std::string::npos, "event window not documented"); }
+			if (def.id.starts_with("exchange/Airlock cycle/") && def.quantity == core::StationPhysicalQuantity::MassRate)
+			{ eventChart = true; require(def.accountingNote.find("Interval-average event rate") != std::string::npos, "event window not documented"); }
 		}
 		require(eventChart && world.getStationSystemsSnapshot() == before && world.getStationSystemsObservationRevision() == revision, "query changed World");
 		// Reapplication starts fresh baselines and repeats exactly, rather than differencing across runs.

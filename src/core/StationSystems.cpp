@@ -5944,6 +5944,7 @@ namespace core
 		// nothing here feeds back into the ledger or the sandbox.
 		StationHistory history;
 		std::vector<StationMetricSample> recordingValues;
+		StationObservationIndex observationIndex;
 		std::vector<double> storeObservationScales;
 		std::vector<StationExchangeObservation> exchangeObservations;
 		std::vector<std::optional<double>> previousExchangeTotals;
@@ -6044,7 +6045,7 @@ namespace core
 				auto const& o = exchangeObservations[i];
 				if (o.read)
 				{
-					auto v = o.read(snap);
+					auto v = o.read(snap, observationIndex);
 					if (o.cumulativeRate)
 					{
 						double const seconds = static_cast<double>(tick) * World::getFixedTimestep() - previousExchangeSeconds;
@@ -6063,7 +6064,7 @@ namespace core
 					recordingValues[constituentSlot + i] = std::move(v);
 					continue;
 				}
-				auto const connection = std::ranges::find(snap.connections, o.connection, &StationConnectionSnapshot::key);
+				auto const connection = observationIndex.find(snap.connections, o.connection, &StationConnectionSnapshot::key);
 				if (connection == snap.connections.end()) continue; // Missing authority is a gap, not zero.
 				double actual = o.metric.role == StationMetricRole::Loss ? connection->lastLossRate : connection->lastDeliveredRate;
 				double requested = 0;
@@ -6072,14 +6073,14 @@ namespace core
 					// Public snapshots are priority ordered: resolve identity, not vector position.
 					if (o.connection.ownerType == "Transfer")
 					{
-						auto t = std::ranges::find(snap.transfers, o.connection.ownerId, &StationTransferSnapshot::id);
+						auto t = observationIndex.find(snap.transfers, o.connection.ownerId, &StationTransferSnapshot::id);
 						if (t == snap.transfers.end()) continue;
 						actual = t->lastCompleted / World::getFixedTimestep();
 						requested = t->lastRequested / World::getFixedTimestep();
 					}
 					else
 					{
-						auto c = std::ranges::find(snap.conversions, o.connection.ownerId, &StationConversionSnapshot::id);
+						auto c = observationIndex.find(snap.conversions, o.connection.ownerId, &StationConversionSnapshot::id);
 						if (c == snap.conversions.end()) continue;
 						auto const& flows = o.metric.role == StationMetricRole::Input ? c->inputs : c->outputs;
 						if (o.flowIndex >= flows.size()) continue;
@@ -16759,6 +16760,13 @@ namespace core
 		auto const cadenceTicks = std::max(1.0f, std::ceil(settings.observationIntervalSeconds / World::getFixedTimestep()));
 		mImpl->history = StationHistory(std::move(slots), cadenceTicks * World::getFixedTimestep(), settings.trendRetentionSeconds);
 		if (!mImpl->history.status().limited) mImpl->recordingValues.resize(slotCount);
+		else
+		{
+			// Refusal must not retain a second, over-budget adapter catalogue.
+			std::vector<StationExchangeObservation>{}.swap(mImpl->exchangeObservations);
+			std::vector<std::optional<double>>{}.swap(mImpl->previousExchangeTotals);
+			std::vector<double>{}.swap(mImpl->storeObservationScales);
+		}
 		mImpl->connectionGraph = station_connections::build(settings);
 		for (auto const& store : settings.stores)
 		{
@@ -19306,6 +19314,12 @@ namespace core
 	StationObservationRevision StationSystemsRuntime::observationRevision() const { return {mRun, mImpl->history.revision()}; }
 	std::vector<StationChartDefinition> const& StationSystemsRuntime::catalogue() const { return mImpl->history.catalogue(); }
 	StationChartData const& StationSystemsRuntime::query(std::string const& id) const { return mImpl->history.query(id); }
-	StationQueryWork StationSystemsRuntime::queryWork() const { return mImpl->history.queryWork(); }
+	StationQueryWork StationSystemsRuntime::queryWork() const
+	{
+		auto work = mImpl->history.queryWork();
+		work.observationLookups = mImpl->observationIndex.lookups;
+		work.observationIndexEntries = mImpl->observationIndex.entriesIndexed;
+		return work;
+	}
 	std::vector<StationSystemsDiagnostic> const& StationSystemsRuntime::diagnostics() const { return mImpl->diagnostics; }
 }

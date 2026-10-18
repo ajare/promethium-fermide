@@ -21,10 +21,10 @@ void appendStationWaterGasObservations(StationSystemsSettings const& settings,
 		if (request) d.requestedSemantics = StationRequestedSemantics::Demand;
 		o.perTick = !power;
 		d.observationNote = "Last committed process exchange: tick material quantities converted to canonical rates; electrical service is kW. Inactive exchanges are zero; unavailable observations are gaps. Process accounts and connection endpoint accounts are separate boundaries, not additive production.";
-		o.read = [id = entry.id, collection, member, request](StationSystemsSnapshot const& s) {
+		o.read = [id = entry.id, collection, member, request](StationSystemsSnapshot const& s, StationObservationIndex& index) {
 			StationMetricSample v;
 			auto const& items = collection(s);
-			auto f = std::ranges::find(items, id, [](auto const& i) { return i.id; });
+			auto f = index.find(items, id, [](auto const& i) { return i.id; });
 			if (f != items.end()) { v.actual = (*f).*member; if (request) v.requested = (*f).*request; }
 			return v;
 		};
@@ -133,8 +133,8 @@ void appendStationWaterGasObservations(StationSystemsSettings const& settings,
 			}
 			if (field == 3) { d.quantity = StationPhysicalQuantity::Energy; d.unit = StationCanonicalUnit::KilowattHour; o.sourceToCanonicalScale = 1.0 / 3600; }
 			d.observationNote = "Committed connection endpoint rates; accepted input = delivered output + external transport loss. Retained source heat is inventory, not useful output. Not additive with process accounts.";
-			o.read = [k, field](StationSystemsSnapshot const& s) {
-				StationMetricSample v; auto c = std::ranges::find(s.connections, k, &StationConnectionSnapshot::key);
+			o.read = [k, field](StationSystemsSnapshot const& s, StationObservationIndex& index) {
+				StationMetricSample v; auto c = index.find(s.connections, k, &StationConnectionSnapshot::key);
 				if (c != s.connections.end()) v.actual = field == 0 ? c->lastInputRate : field == 1 ? c->lastDeliveredRate : field == 2 ? c->lastLossRate : c->retainedHeatKJ;
 				return v;
 			};
