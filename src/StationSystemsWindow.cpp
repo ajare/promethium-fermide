@@ -212,6 +212,8 @@ void StationSystemsWindow::renderFileToolbar()
 	if (ImGui::Button("Save configuration as...")) { commitDraftChanges(true); saveDraft(true); }
 	ImGui::SameLine(); ImGui::TextDisabled("%s%s", mFilepath.empty() ? "Untitled" : mFilepath.c_str(),
 		draftDirty() ? " *" : "");
+
+	ImGui::SetNextItemWidth(256);
 	if (ImGui::BeginCombo("Recent configurations", "Open recent..."))
 	{
 		for (auto const& path : mRecent.entries())

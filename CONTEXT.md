@@ -569,6 +569,21 @@ Dedicated hydrogen and oxygen inventories available to fuel-cell generation, dis
 **Resource store**:
 A capacity-limited inventory of a specified material held by the Station systems. Its usable contents change through deliveries, production, consumption, transfers, and losses; material awaiting treatment or quality clearance is not automatically usable.
 
+**Material identity**:
+The explicit identity of a material held or exchanged by Station systems, independent of an inventory's name, unit, or hazard class. Material identity is distinct from the constituent composition of a compound material.
+_Avoid_: Store ID, unit, inferred material name
+
+**Total material inventory**:
+The quantity of one identified material across all explicitly accounted Station systems inventories, including qualified and unqualified contents and material outside Resource stores, counted exactly once. A total covering only Resource stores is a Stored material inventory, not a system-wide total.
+_Avoid_: Usable inventory, constituent inventory
+
+**Stored material inventory**:
+The quantity of one identified material held in Resource stores, including qualified and unqualified contents. It excludes material held elsewhere in Station systems.
+
+**Usable material inventory**:
+The portion of a material inventory currently qualified for use; unqualified contents are excluded. Usability does not imply that a Protected resource reserve is available for discretionary use.
+_Avoid_: Total material inventory, drawable surplus
+
 **Resupply delivery**:
 An external addition of declared resource quantities at a scheduled simulation time, optionally recurring. A delivery cannot silently overfill a Resource store; quantities that cannot be accepted remain explicitly accounted for.
 

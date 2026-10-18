@@ -766,6 +766,12 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 		}
 		ImGui::EndCombo();
 	}
+	if (ImGui::Button("Auto-arrange"))
+	{
+		if (beforeLayoutChange) beforeLayoutChange();
+		mPositions = station_flow::forceLayout(mGraph);
+		updateBounds(); mFitRequested = true;
+	}
 	if (!mPlacingType.empty())
 		ImGui::TextDisabled("%s placement armed - Esc or right-click to cancel.", mPlacingType.c_str());
 	// The status line keeps its height whether or not a refusal is showing:
@@ -780,13 +786,6 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
 		&& (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsMouseClicked(ImGuiMouseButton_Right)))
 		mPlacingType.clear();
-	ImGui::SameLine();
-	if (ImGui::Button("Auto-arrange"))
-	{
-		if (beforeLayoutChange) beforeLayoutChange();
-		mPositions = station_flow::forceLayout(mGraph);
-		updateBounds(); mFitRequested = true;
-	}
 	ImGui::Text("Draft activation: %s | %zu nodes, %zu connections", draft.enabled ? "on" : "off",
 		mGraph.nodes.size(), mGraph.links.size());
 	ImGui::SetNextItemWidth(220);
