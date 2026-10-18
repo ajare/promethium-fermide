@@ -8,6 +8,7 @@
 #include "../station/WaterGasObservationFixture.h"
 #include "../station/CarbonObservationFixture.h"
 #include "../station/MicrobialObservationFixture.h"
+#include "../station/CropObservationFixture.h"
 #include "core/StationReference.h"
 #include "StationFlowDiagram.h"
 #include "core/StationConfigurationDocument.h"
@@ -3535,6 +3536,62 @@ namespace
 		});
 		#undef REQ
 		require(driver.passed(), "Battery observation editor workflow failed");
+	}
+
+	void cropObservationWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1200};
+		io.Fonts->AddFontDefault(); io.Fonts->Build(); io.DeltaTime = 1.0f / 60.0f;
+		auto world = std::make_shared<core::World>("Crop charts", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		StationSystemsWindow window;
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 1080});
+			ImGui::Begin("Crop configuration"); window.renderFlowContents(world); ImGui::End();
+		});
+		auto apply = [&](int scenario) {
+			auto settings = smoke::station::cropObservationFixture(scenario);
+			std::string why; if (!world->configureStationSystems(settings, true, &why)) throw std::runtime_error(why);
+			world->markSaved(); world->resumeSimulation(); require(world->advanceTicks(300), "crop hidden run failed"); world->pauseSimulation();
+		};
+		apply(0); driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "cropObservations", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Crop configuration");
+			for (int mode = 0; mode < 4; ++mode) {
+				if (mode) { apply(mode); ctx->Yield(2); }
+				auto const observed = world->getStationSystemsSnapshot(); auto const revision = world->getStationSystemsObservationRevision();
+				for (auto const& role : {"Growth CO2 uptake", "Irrigation water", "Nutrient nitrogen uptake", "Respiration oxygen",
+					"Respiration vapour", "Lamp electrical service", "Heat into compartment", "Harvest to food", "Harvest to waste",
+					"Harvest to food constituent nutrientNitrogen", "Dead residue to waste", "Uncontained dead residue"}) {
+					if (mode == 3 && (std::string(role) == "Harvest to waste" || std::string(role) == "Dead residue to waste")) continue;
+					auto const catalogue = world->getStationSystemsObservationCatalogue();
+					auto selected = std::find_if(catalogue.begin(), catalogue.end(), [&](auto const& c) {
+						return c.breakdown == "Aggregate" && c.id.starts_with("exchange/Crops/") && c.id.find("/" + std::string(role) + "/") != std::string::npos;
+					});
+					REQ(selected != catalogue.end(), "crop selector role absent");
+					auto const retained = world->queryStationSystemsChart(selected->id);
+					ctx->ItemClick("##Station observation property"); ctx->Yield(2);
+					auto const* popup = ctx->GetWindowByRef("//$FOCUSED"); REQ(popup != nullptr, "crop selector absent");
+					auto item = ImHashStr(selected->label.c_str(), 0, ImHashStr(selected->id.c_str(), 0, popup->ID));
+					ctx->ScrollToItemY(item); ctx->ItemClick(item); ctx->Yield(2);
+					REQ(window.selectedObservation() == selected->id && driver.contains("Actual rate"), "generic crop chart not rendered");
+					auto const data = world->queryStationSystemsChart(selected->id);
+					REQ(!data.incomplete && data.series[0].times == retained.series[0].times && data.series[0].values == retained.series[0].values,
+						"crop selection lost hidden history");
+					if (std::string(role).starts_with("Harvest") || std::string(role).find("residue") != std::string::npos)
+						REQ(driver.contains("Interval-average event rate"), "crop event window semantics not visible");
+					ctx->ComboClick("Breakdown/Instance"); ctx->Yield(2);
+					REQ(window.selectedObservation() == selected->id + "/instances", "crop instance breakdown unavailable");
+					REQ(world->getStationSystemsSnapshot() == observed && world->getStationSystemsObservationRevision() == revision
+						&& window.draftHistory().undoCount() == 0 && !world->isModified(), "crop viewing mutated World or document");
+				}
+			}
+		});
+		#undef REQ
+		require(driver.passed(), "Crop observation editor workflow failed");
 	}
 
 	void microbialObservationWorkflow(smoke::Context const&)
@@ -8183,6 +8240,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/materialObservationWorkflow", materialObservationWorkflow});
 	checks.push_back({"station/waterGasObservationWorkflow", waterGasObservationWorkflow});
 	checks.push_back({"station/carbonObservationWorkflow", carbonObservationWorkflow});
+	checks.push_back({"station/cropObservationWorkflow", cropObservationWorkflow});
 	checks.push_back({"station/microbialObservationWorkflow", microbialObservationWorkflow});
 	checks.push_back({"station/flowThermalReservoirWorkflow", flowThermalReservoirWorkflow});
 	checks.push_back({"station/flowRadiatorWorkflow", flowRadiatorWorkflow});

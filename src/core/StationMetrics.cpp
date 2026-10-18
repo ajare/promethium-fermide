@@ -15,6 +15,7 @@ namespace core
 	void appendStationWaterGasObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
 	void appendStationCarbonObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
 	void appendStationMicrobialObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
+	void appendStationCropObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
 	std::vector<StationStoreObservation> stationStoreObservations(StationSystemsSettings const& settings)
 	{
 		// Identity evidence belongs to ownership boundaries, never labels or units.
@@ -290,6 +291,7 @@ namespace core
 		appendStationWaterGasObservations(settings, result);
 		appendStationCarbonObservations(settings, result);
 		appendStationMicrobialObservations(settings, result);
+		appendStationCropObservations(settings, result);
 		return result;
 	}
 
@@ -501,7 +503,7 @@ namespace core
 				&& (d.role == StationMetricRole::Input || d.role == StationMetricRole::Output
 					|| d.role == StationMetricRole::Generation || d.role == StationMetricRole::Loss
 					|| (d.id.starts_with("exchange/") && (d.role == StationMetricRole::Inventory || d.role == StationMetricRole::InventoryChange))))
-				exchanges[{d.equipmentType, d.role, d.exchangeRole, d.materialId.value_or(d.coverage == StationMetricCoverage::Unclassified ? "unclassified/" + d.instanceId : "energy"), d.quantity, d.unit,
+				exchanges[{d.equipmentType, d.role, d.exchangeRole, d.materialId.value_or(d.constituentId ? "constituent/" + *d.constituentId : d.coverage == StationMetricCoverage::Unclassified ? "unclassified/" + d.instanceId : "energy"), d.quantity, d.unit,
 					d.hazardClass.value_or("unclassified"), d.thermalClass.value_or("")}].push_back(&d);
 		for (auto const& [key, members] : exchanges)
 		{

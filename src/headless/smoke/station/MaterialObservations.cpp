@@ -2,6 +2,7 @@
 #include "WaterGasObservationFixture.h"
 #include "CarbonObservationFixture.h"
 #include "MicrobialObservationFixture.h"
+#include "CropObservationFixture.h"
 #include "core/World.h"
 #include <algorithm>
 #include <cmath>
@@ -151,6 +152,62 @@ namespace
 			auto const observations = core::stationExchangeObservations(metadata);
 			require(observations.size() == 4 && observations[0].metric.unit == canonical, "canonical rate unit missing");
 			close(observations[0].sourceToCanonicalScale, scale);
+		}
+	}
+
+	void cropExchangeObservations(smoke::Context const&)
+	{
+		for (int scenario = 0; scenario < 8; ++scenario) {
+			auto s = smoke::station::cropObservationFixture(scenario < 4 ? scenario : 0);
+			if (scenario == 4) s.stores[0].startingQualified = 0;
+			if (scenario == 5) s.cropPopulations[0].illuminationProfile.constantLevel = 0;
+			if (scenario == 6) s.cropPopulations[0].growingAreaM2 = 0, s.cropPopulations[0].initialBiomassKg = 0;
+			if (scenario == 7) s.solarArrays[0].capacityKW = 0;
+			core::World world("Crop exchanges", 2, 2); world.pauseSimulation(); world.finishBuild();
+			std::string why; if (!world.configureStationSystems(s, true, &why)) throw std::runtime_error(why);
+			run(world, 300);
+			auto const snap = world.getStationSystemsSnapshot(); auto const& p = snap.cropPopulations[0];
+			auto const history = world.getStationSystemsMetricHistory(); auto const catalogue = world.getStationSystemsObservationCatalogue();
+			auto const dt = core::World::getFixedTimestep();
+			for (auto const& o : core::stationExchangeObservations(s)) if (o.metric.equipmentType == "Crops") {
+				auto h = std::ranges::find(history, o.metric.id, [](auto const& h) { return h.descriptor.id; });
+				require(h != history.end() && !h->samples.empty(), "crop metric not recorded while hidden");
+				auto v = o.read(snap); require(v.actual.has_value(), "crop authority missing");
+				auto missing = snap; missing.cropPopulations.clear(); require(!o.read(missing).actual, "missing crop became zero");
+				if (o.cumulativeRate) {
+					double total = 0, previous = 0;
+					for (auto const& sample : h->samples) {
+						require(sample.actual.has_value(), "crop event window unavailable");
+						total += *sample.actual * (sample.elapsedSeconds - previous); previous = sample.elapsedSeconds;
+					}
+					close(total, *v.actual); // Includes events on non-observation ticks.
+				} else close(*h->samples.back().actual, *v.actual / (o.perTick ? dt : 1));
+				if (v.requested) close(*h->samples.back().requested, *v.requested / (o.perTick ? dt : 1));
+			}
+			for (auto const& def : catalogue) if (def.breakdown == "Aggregate" && def.id.starts_with("exchange/Crops/")) {
+				auto data = world.queryStationSystemsChart(def.id); require(!data.incomplete && !data.series[0].values.empty(), "crop chart incomplete");
+				auto stack = world.queryStationSystemsChart(def.id + "/instances");
+				auto last = std::find_if(stack.series.rbegin(), stack.series.rend(), [](auto const& l) { return l.stacked; });
+				require(last != stack.series.rend(), "crop stack missing"); close(last->upper.back(), data.series[0].values.back());
+				auto unavailable = history;
+				for (auto& h : unavailable) if (h.descriptor.id == def.series[0].contributors[0]) h.samples.back().actual.reset();
+				auto gap = core::queryStationChart(def, unavailable);
+				require(gap.incomplete && std::isnan(gap.series[0].values.back()), "missing crop hidden by aggregate");
+			}
+			close(s.cropPopulations[0].initialBiomassKg + p.growthKg - p.respirationKg - p.harvestedKg
+				- p.deadResidueToWasteKg - p.deadResidueLostKg, p.livingBiomassKg);
+			close(s.stores[0].startingQualified - snap.stores[0].currentQualified, p.waterDrawnKg);
+			close(snap.stores[5].currentQualified, p.foodProducedKg);
+			close(snap.stores[6].currentQualified, p.wasteProducedKg + p.deadResidueToWasteKg);
+			close(p.co2DrawnKg + p.waterDrawnKg + p.nitrogenDrawnKg + p.phosphorusDrawnKg + p.potassiumDrawnKg + p.mineralsDrawnKg
+				+ p.respirationO2DrawnKg - p.oxygenReleasedKg - p.respirationCo2ReturnedKg - p.respirationWaterKg - p.transpiredKg,
+				p.livingBiomassKg - s.cropPopulations[0].initialBiomassKg + p.harvestedKg + p.deadResidueToWasteKg + p.deadResidueLostKg);
+			if (scenario == 0) require(p.growthKg > 0, "growth not exercised");
+			if (scenario == 1) require(p.harvestedKg > 0 && p.harvestedToFoodConstituents.nutrientNitrogenKg > 0, "harvest not exercised");
+			if (scenario == 2 || scenario == 3) require(p.dead && p.respirationKg > 0 && (scenario == 2 ? p.deadResidueToWasteKg : p.deadResidueLostKg) > 0, "mortality not exercised");
+			if (scenario >= 4) close(p.growthKg, 0);
+			require(world.getStationSystemsSnapshot() == snap, "crop viewing changed World");
+			world.resetSimulation(); run(world, 300); require(world.getStationSystemsSnapshot() == snap, "crop observation replay drift");
 		}
 	}
 
@@ -1219,6 +1276,7 @@ void registerMaterialObservationChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"crewAtmosphereExchangeObservations", crewAtmosphereExchangeObservations});
 	checks.push_back({"waterGasExchangeObservations", waterGasExchangeObservations});
 	checks.push_back({"carbonExchangeObservations", carbonExchangeObservations});
+	checks.push_back({"cropExchangeObservations", cropExchangeObservations});
 	checks.push_back({"microbialExchangeObservations", microbialExchangeObservations});
 	checks.push_back({"thermalExchangeObservations", thermalExchangeObservations});
 	checks.push_back({"electricalExchangeObservations", electricalExchangeObservations});
