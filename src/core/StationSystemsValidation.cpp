@@ -1,0 +1,2901 @@
+#include "StationSystemsDetail.h"
+namespace core
+{
+using namespace station_detail;
+	bool isValidStationMaterialId(std::string const& id)
+	{
+		if (id.empty()) return true;
+		if (id.size() > MaxStationMaterialIdLength || id.front() < 'a' || id.front() > 'z'
+			|| id.back() == '-') return false;
+		bool hyphen = false;
+		for (auto const c : id)
+		{
+			if (c == '-')
+			{
+				if (hyphen) return false;
+				hyphen = true;
+			}
+			else
+			{
+				if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) return false;
+				hyphen = false;
+			}
+		}
+		return true;
+	}
+
+	bool validateStationProfile(ProfileSettings const& profile, std::string const& where,
+		std::string& diagnostic)
+	{
+		auto refuse = [&](std::string text) { diagnostic = where + ": " + std::move(text); return false; };
+		if (!std::isfinite(profile.periodSeconds) || profile.periodSeconds < 0.0)
+			return refuse("period must be finite and non-negative");
+		if (profile.periodSeconds == 0.0)
+		{
+			if (!profile.segments.empty())
+				return refuse("a constant profile must not declare segments");
+			if (!std::isfinite(profile.constantLevel)
+				|| profile.constantLevel < 0.0 || profile.constantLevel > 1.0)
+				return refuse("constant level must be finite and from 0 to 1");
+			return true;
+		}
+		if (profile.segments.empty() || profile.segments.size() > MaxStationProfileSegments)
+			return refuse("a periodic profile needs between 1 and "
+				+ std::to_string(MaxStationProfileSegments) + " segments");
+		if (profile.segments.front().startSeconds != 0.0)
+			return refuse("the first segment must start at 0");
+		for (size_t index = 0; index < profile.segments.size(); ++index)
+		{
+			auto const& segment = profile.segments[index];
+			if (!std::isfinite(segment.startSeconds) || segment.startSeconds < 0.0
+				|| segment.startSeconds >= profile.periodSeconds)
+				return refuse("segment start must be finite and inside the period");
+			if (!std::isfinite(segment.level) || segment.level < 0.0 || segment.level > 1.0)
+				return refuse("segment level must be finite and from 0 to 1");
+			if (index > 0 && segment.startSeconds <= profile.segments[index - 1].startSeconds)
+				return refuse("segments must start in strictly increasing order");
+		}
+		return true;
+	}
+	bool validateStationTransferSettings(ResourceTransferSettings const& transfer, std::string& diagnostic)
+	{
+		auto refuse = [&](char const* reason) { diagnostic = "Station resource transfer '" + transfer.id + "' " + reason; return false; };
+		if (!std::isfinite(transfer.ratePerSecond) || !std::isfinite(transfer.quantity)
+			|| !std::isfinite(transfer.firstOccurrenceSeconds) || !std::isfinite(transfer.recurrenceSeconds))
+			return refuse("numbers must be finite");
+		if (transfer.mode == ResourceTransferMode::Continuous)
+			return transfer.ratePerSecond > 0.0 || refuse("rate must be positive");
+		if (transfer.mode != ResourceTransferMode::Scheduled) return refuse("mode is invalid");
+		if (transfer.quantity <= 0.0) return refuse("quantity must be positive");
+		if (transfer.firstOccurrenceSeconds < 0.0) return refuse("first occurrence must be non-negative");
+		if (transfer.recurrenceSeconds < 0.0 || (transfer.recurrenceSeconds > 0.0
+			&& transfer.recurrenceSeconds + StationScheduleTolerance < static_cast<double>(World::getFixedTimestep())))
+			return refuse("recurrence must be zero or at least one fixed tick");
+		return true;
+	}
+
+	bool validateStationTransferWiring(StationSystemsSettings const& settings,
+		ResourceTransferSettings const& transfer, std::string& diagnostic,
+		bool ignoreUnconnected)
+	{
+		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
+		auto const where = "Station resource transfer '" + transfer.id + "'";
+		auto const openSource = ignoreUnconnected && transfer.sourceId.empty();
+		auto const openDestination = ignoreUnconnected && transfer.destinationId.empty();
+		if (openSource && openDestination) return true;
+		if (!openSource && !openDestination && transfer.sourceId == transfer.destinationId)
+			return refuse(where + " source and destination must differ");
+		auto const findStore = [&](std::string const& id) -> ResourceStoreSettings const*
+		{
+			auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == id; });
+			return it == settings.stores.end() ? nullptr : &*it;
+		};
+		auto const* source = openSource ? nullptr : findStore(transfer.sourceId);
+		auto const* destination = openDestination ? nullptr : findStore(transfer.destinationId);
+		if (!openSource && !source)
+			return refuse(where + " references unknown source store '" + transfer.sourceId + "'");
+		if (!openDestination && !destination)
+			return refuse(where + " references unknown destination store '" + transfer.destinationId + "'");
+		// Same-unit endpoints only: cross-unit movement is conversion, which
+		// later slices introduce with explicit composition accounting. With
+		// one end still open only the connected end can be judged.
+		if (source && destination)
+		{
+			if (transfer.unit != source->unit || transfer.unit != destination->unit)
+				return refuse(where + " unit '" + transfer.unit
+					+ "' does not match both stores ('" + source->unit + "' -> '" + destination->unit + "')");
+		}
+		else if (source && transfer.unit != source->unit)
+			return refuse(where + " unit '" + transfer.unit + "' does not match store '"
+				+ source->id + "' ('" + source->unit + "')");
+		else if (destination && transfer.unit != destination->unit)
+			return refuse(where + " unit '" + transfer.unit + "' does not match store '"
+				+ destination->id + "' ('" + destination->unit + "')");
+		if (!source || !destination) return true;
+		// Compound material only moves between identical declared
+		// compositions. Crossing a composition boundary — including bound
+		// nutrient nitrogen versus atmospheric nitrogen, which are never
+		// freely interchangeable — is conversion and requires an
+		// explicitly declared, constituent-balanced conversion process.
+		if (source->composition || destination->composition)
+		{
+			if (!source->composition || !destination->composition
+				|| !compositionsClose(*source->composition, *destination->composition))
+				return refuse(where + " crosses a compound-material boundary; transfers between stores with different declared compositions require an explicit conversion");
+		}
+		// A generic transfer never crosses the hazard-class boundary
+		// (#412): a hazardous store's contents are a protected reserve
+		// of their own class, and an accidentally-wired transfer cannot
+		// siphon hazardous material into the normal inventory or dilute
+		// hazardous containment with normal material. Recovery of
+		// hazardous material runs inside the hazardous class, between
+		// stores of that class only.
+		if (source->hazardClass != destination->hazardClass)
+			return refuse(where + " crosses the hazard-class boundary ('"
+				+ source->hazardClass + "' -> '" + destination->hazardClass
+				+ "'); hazardous and normal material may not share a generic transfer");
+		return true;
+	}
+	namespace
+	{
+		// Unwind signal for draft-tolerant validation (#642): an entry whose
+		// reference cannot be resolved raises this so the enclosing per-entry
+		// loop can record the entry as broken and carry on. It never escapes
+		// the validator.
+		struct BrokenDraftEntry
+		{
+		};
+	}
+	bool validateStationWaterGasWiring(StationSystemsSettings const& settings,
+		AtmosphereSettings const& atmosphere, std::string& diagnostic, [[maybe_unused]] bool allowIncomplete, std::vector<std::string>* brokenReferences)
+	{
+		diagnostic.clear();
+		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
+		auto missing = [&](std::string text) -> bool {
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			throw BrokenDraftEntry{};
+		};
+		auto const where = "Station atmosphere '" + atmosphere.id + "'";
+		if (atmosphere.id.empty()) return refuse("Station atmosphere id must not be empty");
+		if (atmosphere.id.size() > MaxStationStoreIdLength)
+			return refuse("Station atmosphere id exceeds "
+				+ std::to_string(MaxStationStoreIdLength) + " characters");
+		if (std::find(StationAtmosphereHazardClasses.begin(),
+			StationAtmosphereHazardClasses.end(),
+			atmosphere.hazardClass) == StationAtmosphereHazardClasses.end())
+			return refuse(where + " has unknown atmosphere hazard class '" + atmosphere.hazardClass
+				+ "'; declared classes are: normal, hazardous");
+		if (!std::isfinite(atmosphere.volumeM3) || atmosphere.volumeM3 <= 0.0)
+			return refuse(where + " volume must be finite and positive");
+		auto const masses = {atmosphere.startingOxygenKg, atmosphere.startingNitrogenKg,
+			atmosphere.startingCarbonDioxideKg, atmosphere.startingWaterVapourKg};
+		for (auto const mass : masses)
+			if (!std::isfinite(mass) || mass < 0.0)
+				return refuse(where + " starting gas masses must all be finite and non-negative");
+		if (!std::isfinite(atmosphere.startingTemperatureC)
+			|| atmosphere.startingTemperatureC <= -StationCelsiusOffset)
+			return refuse(where + " starting temperature must be finite and above absolute zero (-273.15 C)");
+		if (!std::isfinite(atmosphere.thermalCapacityKJPerK) || atmosphere.thermalCapacityKJPerK <= 0.0)
+			return refuse(where + " effective thermal capacity must be finite and positive");
+		if (!atmosphere.reservoirId.empty())
+		{
+			auto const host = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(),
+				[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == atmosphere.reservoirId; });
+			if (host == settings.thermalReservoirs.end())
+				return missing(where + " is coupled to unknown thermal reservoir '" + atmosphere.reservoirId + "'");
+		}
+		if (!std::isfinite(atmosphere.exchangerConductanceKWPerK) || atmosphere.exchangerConductanceKWPerK < 0.0)
+			return refuse(where + " exchanger conductance must be finite and non-negative");
+		if (atmosphere.occupants < 0)
+			return refuse(where + " occupant count must not be negative");
+		auto const rates = {atmosphere.oxygenUsePerOccupantKgPerS,
+			atmosphere.co2ProductionPerOccupantKgPerS, atmosphere.sensibleHeatPerOccupantKW,
+			atmosphere.moistureAdditionPerOccupantKgPerS};
+		for (auto const rate : rates)
+			if (!std::isfinite(rate) || rate < 0.0)
+				return refuse(where + " per-occupant load rates must all be finite and non-negative");
+		if (!std::isfinite(atmosphere.leakRateKgPerS) || atmosphere.leakRateKgPerS < 0.0)
+			return refuse(where + " leak rate must be finite and non-negative");
+		if (!std::isfinite(atmosphere.minPressureKPa) || !std::isfinite(atmosphere.maxPressureKPa)
+			|| atmosphere.minPressureKPa <= 0.0 || atmosphere.minPressureKPa >= atmosphere.maxPressureKPa)
+			return refuse(where + " pressure limits must be finite and positive with min below max");
+		if (!std::isfinite(atmosphere.minOxygenPartialPressureKPa) || atmosphere.minOxygenPartialPressureKPa < 0.0)
+			return refuse(where + " minimum oxygen partial pressure must be finite and non-negative");
+		if (!std::isfinite(atmosphere.maxCarbonDioxidePartialPressureKPa)
+			|| atmosphere.maxCarbonDioxidePartialPressureKPa < 0.0)
+			return refuse(where + " maximum carbon dioxide partial pressure must be finite and non-negative");
+		// #565: every authored field being finite does not make the
+		// starting state publishable. The ideal-gas division by a tiny
+		// volume can overflow, and a compartment whose starting
+		// inventory already derives a non-finite pressure is an
+		// inconsistent authored input: it is refused here, before any
+		// runtime exists, so no initial or reset snapshot can ever
+		// publish a non-finite derived pressure as a healthy state.
+		{
+			auto const startingOxygenKPa = stationAtmospherePartialPressureKPa(
+				atmosphere.startingOxygenKg, StationMolarMassOxygenKgPerMol,
+				atmosphere.volumeM3, atmosphere.startingTemperatureC);
+			auto const startingNitrogenKPa = stationAtmospherePartialPressureKPa(
+				atmosphere.startingNitrogenKg, StationMolarMassNitrogenKgPerMol,
+				atmosphere.volumeM3, atmosphere.startingTemperatureC);
+			auto const startingCarbonDioxideKPa = stationAtmospherePartialPressureKPa(
+				atmosphere.startingCarbonDioxideKg, StationMolarMassCarbonDioxideKgPerMol,
+				atmosphere.volumeM3, atmosphere.startingTemperatureC);
+			auto const startingVapourKPa = stationAtmospherePartialPressureKPa(
+				atmosphere.startingWaterVapourKg, StationMolarMassWaterKgPerMol,
+				atmosphere.volumeM3, atmosphere.startingTemperatureC);
+			if (!std::isfinite(startingOxygenKPa) || !std::isfinite(startingNitrogenKPa)
+				|| !std::isfinite(startingCarbonDioxideKPa) || !std::isfinite(startingVapourKPa)
+				|| !std::isfinite(startingOxygenKPa + startingNitrogenKPa
+					+ startingCarbonDioxideKPa + startingVapourKPa))
+				return refuse(where + " starting inventory in this volume and temperature derives a non-finite pressure");
+		}
+		return true;
+	}
+
+	bool validateStationWaterGasWiring(StationSystemsSettings const& settings,
+		AirlockCycleSettings const& cycle, std::string& diagnostic, [[maybe_unused]] bool allowIncomplete, std::vector<std::string>* brokenReferences)
+	{
+		diagnostic.clear();
+		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
+		auto missing = [&](std::string text) -> bool {
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			throw BrokenDraftEntry{};
+		};
+		auto const where = "Station airlock cycle '" + cycle.id + "'";
+		if (cycle.id.empty()) return refuse("Station airlock cycle id must not be empty");
+		if (cycle.id.size() > MaxStationStoreIdLength)
+			return refuse("Station airlock cycle id exceeds "
+				+ std::to_string(MaxStationStoreIdLength) + " characters");
+		if (!allowIncomplete || !cycle.atmosphereId.empty())
+		{
+			auto const it = std::find_if(settings.atmospheres.begin(), settings.atmospheres.end(),
+				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == cycle.atmosphereId; });
+			if (it == settings.atmospheres.end())
+				return missing(where + " draws from unknown atmosphere compartment '" + cycle.atmosphereId + "'");
+		}
+
+		if (!std::isfinite(cycle.gasMassKg) || cycle.gasMassKg <= 0.0)
+			return refuse(where + " cycled gas mass must be finite and positive");
+		if (!std::isfinite(cycle.firstOccurrenceSeconds) || cycle.firstOccurrenceSeconds < 0.0)
+			return refuse(where + " first occurrence must be finite and non-negative");
+		if (!std::isfinite(cycle.recurrenceSeconds) || cycle.recurrenceSeconds < 0.0)
+			return refuse(where + " recurrence must be finite and non-negative (0 is a one-off)");
+		if (cycle.recurrenceSeconds > 0.0
+			&& cycle.recurrenceSeconds + StationScheduleTolerance
+				< static_cast<double>(World::getFixedTimestep()))
+			return refuse(where + " recurrence must be zero or at least one World fixed tick ("
+				+ std::to_string(World::getFixedTimestep()) + " seconds)");
+		if (!std::isfinite(cycle.recoveredFraction) || cycle.recoveredFraction < 0.0
+			|| cycle.recoveredFraction > 1.0)
+			return refuse(where + " recovered fraction must be finite and from 0 to 1");
+		return true;
+	}
+
+	bool validateStationWaterGasWiring(StationSystemsSettings const& settings,
+		WaterCollectorSettings const& collector, std::string& diagnostic, [[maybe_unused]] bool allowIncomplete, std::vector<std::string>* brokenReferences)
+	{
+		diagnostic.clear();
+		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
+		auto missing = [&](std::string text) -> bool {
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			throw BrokenDraftEntry{};
+		};
+		std::map<std::string, std::string> waterStoreClass;
+		auto declareWaterStore = [&](std::string const& storeId, char const* role,
+			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+		{
+			if (allowIncomplete && storeId.empty()) return true;
+			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
+			if (found == settings.stores.end())
+				return missing(where + " " + role + " store '" + storeId + "' does not exist");
+			if (!isMassUnit(found->unit))
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' must be a mass unit; water recovery is mass-denominated (g or kg)");
+			if (found->composition && !allowCompound)
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' declares a composition; recovered water streams are plain mass stores, so no dry constituent can be created from pure condensate");
+			if (found->hazardClass != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is authored "
+					+ found->hazardClass + "-class but this is a " + hazardClass
+					+ "-class water process; a process may only touch stores of its own hazard class");
+			auto const existing = waterStoreClass.find(storeId);
+			if (existing == waterStoreClass.end())
+				waterStoreClass.emplace(storeId, hazardClass);
+			else if (existing->second != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
+					+ existing->second + "-class water process; hazardous and normal water streams may not share a store");
+			return true;
+		};
+		auto const where = "Station water collector '" + collector.id + "'";
+		if (collector.id.empty()) return refuse("Station water collector id must not be empty");
+		if (collector.id.size() > MaxStationStoreIdLength)
+			return refuse("Station water collector id exceeds "
+				+ std::to_string(MaxStationStoreIdLength) + " characters");
+		if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
+			collector.hazardClass) == StationWaterHazardClasses.end())
+			return refuse(where + " has unknown water hazard class '" + collector.hazardClass
+				+ "'; declared classes are: normal, hazardous");
+		if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+			collector.thermalClass) == StationThermalServiceClasses.end())
+			return refuse(where + " has unknown thermal service class '" + collector.thermalClass
+				+ "'; declared classes are: " + declaredThermalClasses());
+		if (!std::isfinite(collector.maxRateKgPerS) || collector.maxRateKgPerS < 0.0)
+			return refuse(where + " maximum collection rate must be finite and non-negative");
+		if (!std::isfinite(collector.targetRelativeHumidity)
+			|| collector.targetRelativeHumidity < 0.0 || collector.targetRelativeHumidity > 1.0)
+			return refuse(where + " target relative humidity must be finite and from 0 to 1");
+		if (!allowIncomplete || !collector.atmosphereId.empty())
+		{
+			auto const compartment = std::find_if(settings.atmospheres.begin(),
+				settings.atmospheres.end(), [&](AtmosphereSettings const& atmosphere)
+				{ return atmosphere.id == collector.atmosphereId; });
+			if (compartment == settings.atmospheres.end())
+				return missing(where + " condenses from unknown atmosphere compartment '" + collector.atmosphereId + "'");
+			if (compartment->hazardClass != collector.hazardClass)
+				return refuse(where + " hazard class '" + collector.hazardClass + "' does not match compartment '"
+					+ compartment->id + "' hazard class '" + compartment->hazardClass
+					+ "'; condensate inherits the hazard of the air it is condensed from");
+		}
+
+		if (!allowIncomplete || !collector.coolingLoopId.empty())
+		{
+			auto const loop = std::find_if(settings.coolantLoops.begin(), settings.coolantLoops.end(),
+				[&](CoolantLoopSettings const& candidate) { return candidate.id == collector.coolingLoopId; });
+			if (loop == settings.coolantLoops.end())
+				return missing(where + " cold surface is served by unknown coolant loop '" + collector.coolingLoopId + "'");
+			if (!allowIncomplete || !loop->reservoirId.empty())
+			{
+				auto const host = std::find_if(settings.thermalReservoirs.begin(),
+					settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
+					{ return reservoir.id == loop->reservoirId; });
+				if (host == settings.thermalReservoirs.end())
+					return missing(where + " coolant loop '" + loop->id + "' has no known host reservoir");
+				if (host->thermalClass != collector.thermalClass)
+					return refuse(where + " thermal class '" + collector.thermalClass + "' does not match coolant loop '"
+						+ loop->id + "' host reservoir class '" + host->thermalClass
+						+ "'; the cold surface serves only its own service class");
+			}
+		}
+
+		if (!declareWaterStore(collector.destStoreId, "raw water destination", where,
+			collector.hazardClass, false))
+			return false;
+		return true;
+	}
+
+	bool validateStationWaterGasWiring(StationSystemsSettings const& settings,
+		WaterTreatmentSettings const& treatment, std::string& diagnostic, [[maybe_unused]] bool allowIncomplete, std::vector<std::string>* brokenReferences)
+	{
+		diagnostic.clear();
+		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
+		auto missing = [&](std::string text) -> bool {
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			return true;
+		};
+		std::map<std::string, std::string> waterStoreClass;
+		auto declareWaterStore = [&](std::string const& storeId, char const* role,
+			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+		{
+			if (allowIncomplete && storeId.empty()) return true;
+			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
+			if (found == settings.stores.end())
+				return missing(where + " " + role + " store '" + storeId + "' does not exist");
+			if (!isMassUnit(found->unit))
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' must be a mass unit; water recovery is mass-denominated (g or kg)");
+			if (found->composition && !allowCompound)
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' declares a composition; recovered water streams are plain mass stores, so no dry constituent can be created from pure condensate");
+			if (found->hazardClass != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is authored "
+					+ found->hazardClass + "-class but this is a " + hazardClass
+					+ "-class water process; a process may only touch stores of its own hazard class");
+			auto const existing = waterStoreClass.find(storeId);
+			if (existing == waterStoreClass.end())
+				waterStoreClass.emplace(storeId, hazardClass);
+			else if (existing->second != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
+					+ existing->second + "-class water process; hazardous and normal water streams may not share a store");
+			return true;
+		};
+		auto const where = "Station water treatment '" + treatment.id + "'";
+		if (treatment.id.empty()) return refuse("Station water treatment id must not be empty");
+		if (treatment.id.size() > MaxStationStoreIdLength)
+			return refuse("Station water treatment id exceeds "
+				+ std::to_string(MaxStationStoreIdLength) + " characters");
+		if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
+			treatment.hazardClass) == StationWaterHazardClasses.end())
+			return refuse(where + " has unknown water hazard class '" + treatment.hazardClass
+				+ "'; declared classes are: normal, hazardous");
+		if (!std::isfinite(treatment.throughputKgPerS) || treatment.throughputKgPerS < 0.0)
+			return refuse(where + " throughput must be finite and non-negative");
+		if (!std::isfinite(treatment.recoveryRatio) || treatment.recoveryRatio <= 0.0
+			|| treatment.recoveryRatio > 1.0)
+			return refuse(where + " recovery ratio must be finite and above zero up to 1: a process that recovers nothing is not a recovery process");
+		if (!std::isfinite(treatment.specificEnergyKWhPerKg) || treatment.specificEnergyKWhPerKg < 0.0)
+			return refuse(where + " specific energy must be finite and non-negative");
+		if (!std::isfinite(treatment.consumablePerKg) || treatment.consumablePerKg < 0.0)
+			return refuse(where + " consumable per kg must be finite and non-negative");
+		char const* streamRoles[3]{"source", "treated", "concentrate"};
+		std::string const streamIds[3]{treatment.sourceStoreId, treatment.treatedStoreId,
+			treatment.concentrateStoreId};
+		for (size_t stream = 0; stream < 3; ++stream)
+		{
+			for (size_t other = stream + 1; other < 3; ++other)
+				if (!streamIds[stream].empty() && streamIds[stream] == streamIds[other])
+					return refuse(where + " " + streamRoles[stream] + " store and " + streamRoles[other]
+						+ " store are the same store '" + streamIds[stream]
+						+ "'; the recovery split needs distinct source, treated and concentrate stores");
+			if (!declareWaterStore(streamIds[stream], streamRoles[stream], where,
+				treatment.hazardClass, false))
+				return false;
+		}
+		if (!declareWaterStore(treatment.consumableStoreId, "consumable", where,
+			treatment.hazardClass, true))
+			return false;
+		// Release clearance (#412): a hazardous-class treatment must
+		// declare the clearance contract - treated hazardous material is
+		// released only on a passed clearance test, so a treatment with
+		// no clearance authority cannot release anything. A normal-class
+		// treatment cannot configure clearance testing: release
+		// clearance is the hazardous containment boundary, not a
+		// normal-water filter, and a normal store is not a containment
+		// boundary that anything needs clearing into.
+		if (treatment.hazardClass == "hazardous")
+		{
+			if (!allowIncomplete && !brokenReferences && treatment.clearanceStoreId.empty())
+				return refuse(where + " is hazardous-class but declares no release-clearance consumable store: hazardous treated material is released only on a passed clearance test");
+			if ((!allowIncomplete || !treatment.clearanceStoreId.empty())
+				&& (!std::isfinite(treatment.clearancePerKg) || treatment.clearancePerKg <= 0.0))
+				return refuse(where + " release clearance per kg must be finite and positive for a hazardous-class treatment");
+			for (auto const& streamId : streamIds)
+				if (!streamId.empty() && streamId == treatment.clearanceStoreId)
+					return refuse(where + " release-clearance store is the same store '" + streamId
+						+ "' as a recovery stream; the clearance test consumable is a supplied consumable, not part of the water stream it tests");
+			if (!declareWaterStore(treatment.clearanceStoreId, "release-clearance consumable", where,
+				treatment.hazardClass, true))
+				return false;
+			// The clearance kit may be the same store as the treatment
+			// consumable (#574): one stocked kit that both runs and
+			// clears the process is a legitimate authoring. The runtime
+			// never spends one kilogram twice - the tick reserves the
+			// combined treatment-plus-clearance draw against the kit's
+			// drawable stock and tests clearance against what remains
+			// after treatment - so the alias needs no refusal here.
+		}
+		else if (!treatment.clearanceStoreId.empty() || treatment.clearancePerKg != 0.0)
+			return refuse(where + " is normal-class but configures release-clearance testing; release clearance is the hazardous-class containment boundary and does not apply to normal water treatment");
+		return true;
+	}
+
+	bool validateStationWaterGasWiring(StationSystemsSettings const& settings,
+		ElectrolyzerSettings const& electrolyzer, std::string& diagnostic, [[maybe_unused]] bool allowIncomplete, std::vector<std::string>* brokenReferences)
+	{
+		diagnostic.clear();
+		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
+		auto missing = [&](std::string text) -> bool {
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			return true;
+		};
+		std::map<std::string, std::string> waterStoreClass;
+		auto declareWaterStore = [&](std::string const& storeId, char const* role,
+			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+		{
+			if (allowIncomplete && storeId.empty()) return true;
+			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
+			if (found == settings.stores.end())
+				return missing(where + " " + role + " store '" + storeId + "' does not exist");
+			if (!isMassUnit(found->unit))
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' must be a mass unit; water recovery is mass-denominated (g or kg)");
+			if (found->composition && !allowCompound)
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' declares a composition; recovered water streams are plain mass stores, so no dry constituent can be created from pure condensate");
+			if (found->hazardClass != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is authored "
+					+ found->hazardClass + "-class but this is a " + hazardClass
+					+ "-class water process; a process may only touch stores of its own hazard class");
+			auto const existing = waterStoreClass.find(storeId);
+			if (existing == waterStoreClass.end())
+				waterStoreClass.emplace(storeId, hazardClass);
+			else if (existing->second != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
+					+ existing->second + "-class water process; hazardous and normal water streams may not share a store");
+			return true;
+		};
+		std::map<std::string, std::string> gasStoreClass;
+		auto declareGasStore = [&](std::string const& storeId, char const* role,
+			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+		{
+			if (allowIncomplete && storeId.empty()) return true;
+			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
+			if (found == settings.stores.end())
+				return missing(where + " " + role + " store '" + storeId + "' does not exist");
+			if (!isMassUnit(found->unit))
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' must be a mass unit; gas handling is mass-denominated (g or kg)");
+			if (found->composition && !allowCompound)
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' declares a composition; handled gas streams are plain mass stores, so no dry constituent can be created from pure gas");
+			if (found->hazardClass != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is authored "
+					+ found->hazardClass + "-class but this is a " + hazardClass
+					+ "-class gas process; a process may only touch stores of its own hazard class");
+			auto const existing = gasStoreClass.find(storeId);
+			if (existing == gasStoreClass.end())
+				gasStoreClass.emplace(storeId, hazardClass);
+			else if (existing->second != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
+					+ existing->second + "-class gas process; hazardous and normal gas streams may not share a store");
+			return true;
+		};
+		auto const where = "Station electrolyzer '" + electrolyzer.id + "'";
+		if (electrolyzer.id.empty()) return refuse("Station electrolyzer id must not be empty");
+		if (electrolyzer.id.size() > MaxStationStoreIdLength)
+			return refuse("Station electrolyzer id exceeds "
+				+ std::to_string(MaxStationStoreIdLength) + " characters");
+		if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
+			electrolyzer.hazardClass) == StationWaterHazardClasses.end())
+			return refuse(where + " has unknown hazard class '" + electrolyzer.hazardClass
+				+ "'; declared classes are: normal, hazardous");
+		if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+			electrolyzer.thermalClass) == StationThermalServiceClasses.end())
+			return refuse(where + " has unknown thermal service class '" + electrolyzer.thermalClass
+				+ "'; declared classes are: " + declaredThermalClasses());
+		if (!std::isfinite(electrolyzer.rateKgPerS) || electrolyzer.rateKgPerS < 0.0)
+			return refuse(where + " rated water split must be finite and non-negative");
+		if (!std::isfinite(electrolyzer.specificEnergyKWhPerKgWater)
+			|| electrolyzer.specificEnergyKWhPerKgWater * 3600.0
+				< StationElectrolysisChemicalEnergyKJPerKgWater
+				- StationBalanceTolerance * std::max(1.0,
+					StationElectrolysisChemicalEnergyKJPerKgWater))
+			return refuse(where + " specific energy is below the chemical energy the produced hydrogen retains: the electrical dose may not fund less than the products carry");
+		if (!std::isfinite(electrolyzer.maxSinkTemperatureC)
+			|| electrolyzer.maxSinkTemperatureC <= -StationCelsiusOffset)
+			return refuse(where + " maximum sink temperature must be finite and above absolute zero");
+		auto const oxygenDestinationError = where
+			+ " must configure exactly one oxygen destination: a qualified gas store or one compartment atmosphere";
+		if (!electrolyzer.oxygenStoreId.empty() && !electrolyzer.atmosphereId.empty())
+			return refuse(oxygenDestinationError);
+		if (!allowIncomplete && electrolyzer.oxygenStoreId.empty() && electrolyzer.atmosphereId.empty()
+			&& !missing(oxygenDestinationError)) return false;
+		// The compartment boundary is checked before the stores so a
+		// hazardous cell pointed at a normal compartment names the
+		// compartment as the refusal reason (#412): the atmosphere it
+		// delivers into is the containment boundary, not the feed store.
+		if (!electrolyzer.atmosphereId.empty())
+		{
+			auto const compartment = std::find_if(settings.atmospheres.begin(),
+				settings.atmospheres.end(), [&](AtmosphereSettings const& atmosphere)
+				{ return atmosphere.id == electrolyzer.atmosphereId; });
+			if (compartment == settings.atmospheres.end())
+			{
+				if (!missing(where + " delivers oxygen to unknown atmosphere compartment '" + electrolyzer.atmosphereId + "'")) return false;
+			}
+			else if (compartment->hazardClass != electrolyzer.hazardClass)
+				return refuse(where + " hazard class '" + electrolyzer.hazardClass
+					+ "' does not match compartment '" + compartment->id
+					+ "' hazard class '" + compartment->hazardClass
+					+ "'; oxygen may only be delivered to a compartment of the cell's own class");
+		}
+		// Aliased stream roles are refused (#585): the two products are
+		// chemically distinct, and the tick sizes each product against
+		// its own store's headroom before either is added. Pointing both
+		// at one store spends the same headroom twice and overfills it -
+		// authored configuration turning a finite physical limit into a
+		// terminal runtime failure - so the alias never reaches the tick.
+		if (!electrolyzer.oxygenStoreId.empty()
+			&& electrolyzer.oxygenStoreId == electrolyzer.hydrogenStoreId)
+			return refuse(where + " names the same store '" + electrolyzer.oxygenStoreId
+				+ "' for both the oxygen and the hydrogen product: the two products are chemically distinct streams and may not share one store, whose headroom the split would spend twice");
+		if (!electrolyzer.waterStoreId.empty()
+			&& (electrolyzer.waterStoreId == electrolyzer.hydrogenStoreId
+			|| (!electrolyzer.oxygenStoreId.empty()
+				&& electrolyzer.waterStoreId == electrolyzer.oxygenStoreId)))
+			return refuse(where + " names the same store for the feed water and a gas product: the machine cannot treat one store as both the water it draws and the gas it produces");
+		if (!declareWaterStore(electrolyzer.waterStoreId, "feed water", where,
+			electrolyzer.hazardClass, false))
+			return false;
+		if (!electrolyzer.oxygenStoreId.empty()
+			&& !declareGasStore(electrolyzer.oxygenStoreId, "oxygen", where,
+				electrolyzer.hazardClass, false))
+			return false;
+		if (!declareGasStore(electrolyzer.hydrogenStoreId, "hydrogen", where,
+			electrolyzer.hazardClass, false))
+			return false;
+		if (!allowIncomplete || !electrolyzer.heatSinkId.empty())
+		{
+			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
+				{ return reservoir.id == electrolyzer.heatSinkId; });
+			if (sink == settings.thermalReservoirs.end())
+				return missing(where + " heat sink is unknown thermal reservoir '" + electrolyzer.heatSinkId + "'");
+			if (sink->thermalClass != electrolyzer.thermalClass)
+				return refuse(where + " thermal class '" + electrolyzer.thermalClass
+					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
+					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
+		}
+
+		return true;
+	}
+
+	bool validateStationWaterGasWiring(StationSystemsSettings const& settings,
+		Co2CaptureSettings const& capture, std::string& diagnostic, [[maybe_unused]] bool allowIncomplete, std::vector<std::string>* brokenReferences)
+	{
+		diagnostic.clear();
+		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
+		auto missing = [&](std::string text) -> bool {
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			throw BrokenDraftEntry{};
+		};
+		std::map<std::string, std::string> gasStoreClass;
+		auto declareGasStore = [&](std::string const& storeId, char const* role,
+			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+		{
+			if (allowIncomplete && storeId.empty()) return true;
+			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
+			if (found == settings.stores.end())
+				return missing(where + " " + role + " store '" + storeId + "' does not exist");
+			if (!isMassUnit(found->unit))
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' must be a mass unit; gas handling is mass-denominated (g or kg)");
+			if (found->composition && !allowCompound)
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' declares a composition; handled gas streams are plain mass stores, so no dry constituent can be created from pure gas");
+			if (found->hazardClass != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is authored "
+					+ found->hazardClass + "-class but this is a " + hazardClass
+					+ "-class gas process; a process may only touch stores of its own hazard class");
+			auto const existing = gasStoreClass.find(storeId);
+			if (existing == gasStoreClass.end())
+				gasStoreClass.emplace(storeId, hazardClass);
+			else if (existing->second != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
+					+ existing->second + "-class gas process; hazardous and normal gas streams may not share a store");
+			return true;
+		};
+		auto const where = "Station CO2 capture machine '" + capture.id + "'";
+		if (capture.id.empty()) return refuse("Station CO2 capture machine id must not be empty");
+		if (capture.id.size() > MaxStationStoreIdLength)
+			return refuse("Station CO2 capture machine id exceeds "
+				+ std::to_string(MaxStationStoreIdLength) + " characters");
+		if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
+			capture.hazardClass) == StationWaterHazardClasses.end())
+			return refuse(where + " has unknown hazard class '" + capture.hazardClass
+				+ "'; declared classes are: normal, hazardous");
+		if (!std::isfinite(capture.maxRateKgPerS) || capture.maxRateKgPerS < 0.0)
+			return refuse(where + " capture capacity must be finite and non-negative");
+		if (!std::isfinite(capture.specificEnergyKWhPerKg) || capture.specificEnergyKWhPerKg < 0.0)
+			return refuse(where + " specific energy must be finite and non-negative");
+		if (!std::isfinite(capture.consumablePerKg) || capture.consumablePerKg < 0.0)
+			return refuse(where + " consumable per kg must be finite and non-negative");
+		if (!allowIncomplete && capture.consumablePerKg > 0.0 && capture.consumableStoreId.empty())
+			return refuse(where + " declares a consumable demand but names no consumable store: a process cannot spend media it has no way to hold");
+		if (!allowIncomplete || !capture.atmosphereId.empty())
+		{
+			auto const compartment = std::find_if(settings.atmospheres.begin(),
+				settings.atmospheres.end(), [&](AtmosphereSettings const& atmosphere)
+				{ return atmosphere.id == capture.atmosphereId; });
+			if (compartment == settings.atmospheres.end())
+				return missing(where + " scrubs unknown atmosphere compartment '" + capture.atmosphereId + "'");
+			if (compartment->hazardClass != capture.hazardClass)
+				return refuse(where + " hazard class '" + capture.hazardClass
+					+ "' does not match compartment '" + compartment->id
+					+ "' hazard class '" + compartment->hazardClass
+					+ "'; a hazardous atmosphere's carbon stays on the hazardous side of the capture chain");
+		}
+
+		if (!declareGasStore(capture.captureStoreId, "capture", where,
+			capture.hazardClass, false))
+			return false;
+		if (!capture.consumableStoreId.empty()
+			&& !declareGasStore(capture.consumableStoreId, "consumable", where,
+				capture.hazardClass, true))
+			return false;
+		return true;
+	}
+
+	bool validateStationScheduleWiring(StationSystemsSettings const& settings,
+		ResourceDeliverySettings const& delivery, std::string& diagnostic, bool allowIncomplete, std::vector<std::string>* brokenReferences)
+	{
+		diagnostic.clear();
+		auto refuse = [&](std::string reason) { diagnostic = std::move(reason); return false; };
+		auto missing = [&](std::string text) -> bool {
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			throw BrokenDraftEntry{};
+		};
+		auto const where = "Station resupply delivery '" + delivery.id + "'";
+		if (allowIncomplete && delivery.storeId.empty()) return true;
+		auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
+			[&](ResourceStoreSettings const& store) { return store.id == delivery.storeId; });
+		if (it == settings.stores.end())
+			return missing(where + " targets unknown Resource store '" + delivery.storeId + "'");
+		// A delivery brings a store's own material in; it never converts
+		// units on the way through the boundary.
+		if (delivery.unit != it->unit)
+			return refuse(where + " unit '" + delivery.unit
+				+ "' does not match destination store unit '" + it->unit + "'");
+		return true;
+	}
+	bool validateStationScheduleWiring(StationSystemsSettings const& settings,
+		WasteEjectionSettings const& ejection, std::string& diagnostic, bool allowIncomplete, std::vector<std::string>* brokenReferences)
+	{
+		diagnostic.clear();
+		auto refuse = [&](std::string reason) { diagnostic = std::move(reason); return false; };
+		auto missing = [&](std::string text) -> bool {
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			throw BrokenDraftEntry{};
+		};
+		auto const where = "Station waste ejection '" + ejection.id + "'";
+		if (allowIncomplete && ejection.storeId.empty()) return true;
+		auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
+			[&](ResourceStoreSettings const& store) { return store.id == ejection.storeId; });
+		if (it == settings.stores.end())
+			return missing(where + " targets unknown Resource store '" + ejection.storeId + "'");
+		// Ejection carries a store's own material out; it never
+		// converts units on the way through the boundary.
+		if (ejection.unit != it->unit)
+			return refuse(where + " unit '" + ejection.unit
+				+ "' does not match target store unit '" + it->unit + "'");
+		return true;
+	}
+	bool validateStationScheduleWiring(StationSystemsSettings const& settings,
+		InstallationOutageSettings const& outage, std::string& diagnostic, bool allowIncomplete, std::vector<std::string>* brokenReferences)
+	{
+		diagnostic.clear();
+		auto refuse = [&](std::string reason) { diagnostic = std::move(reason); return false; };
+		auto missing = [&](std::string text) -> bool {
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			return true;
+		};
+		auto const where = "Station installation outage '" + outage.id + "'";
+		auto const registeredInstallations = stationInstallationIdentities(settings);
+		if (!(outage.installationId.empty() && allowIncomplete) && std::none_of(registeredInstallations.begin(), registeredInstallations.end(),
+			[&](StationInstallationIdentity const& installation) {
+				return installation.id == outage.installationId;
+			}))
+			return missing(where + " targets unknown installation '" + outage.installationId
+				+ "'; only installations registered with the availability contract can be outaged");
+
+		return true;
+	}
+	bool validateStationScheduleWiring(StationSystemsSettings const& settings,
+		MaintenanceJobSettings const& job, std::string& diagnostic, bool allowIncomplete, std::vector<std::string>* brokenReferences)
+	{
+		diagnostic.clear();
+		auto refuse = [&](std::string reason) { diagnostic = std::move(reason); return false; };
+		auto missing = [&](std::string text) -> bool {
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			return true;
+		};
+		auto const where = "Station maintenance job '" + job.id + "'";
+		auto const registeredInstallations = stationInstallationIdentities(settings);
+		if (!(job.installationId.empty() && allowIncomplete) && std::none_of(registeredInstallations.begin(), registeredInstallations.end(),
+			[&](StationInstallationIdentity const& installation) {
+				return installation.id == job.installationId;
+			}))
+			if (!missing(where + " targets unknown installation '" + job.installationId
+				+ "'; only installations registered with the availability contract can be maintained")) return false;
+		auto const findStore = [&](std::string const& id) -> ResourceStoreSettings const*
+		{
+			auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
+					[&](ResourceStoreSettings const& store) { return store.id == id; });
+			return it == settings.stores.end() ? nullptr : &*it;
+		};
+		ResourceStoreSettings const* waste = nullptr;
+		if (!job.wasteStoreId.empty())
+		{
+			waste = findStore(job.wasteStoreId);
+			if (!waste)
+				if (!missing(where + " references unknown waste store '" + job.wasteStoreId + "'")) return false;
+		}
+		bool anyConsumed = false;
+		std::set<std::string> requirementStores;
+		for (auto const& requirement : job.requirements)
+		{
+			auto const item = where + " requirement '" + requirement.storeId + "'";
+			if (!allowIncomplete && (!std::isfinite(requirement.quantity) || requirement.quantity <= 0.0))
+				return refuse(item + " quantity must be finite and positive");
+			if (allowIncomplete && requirement.storeId.empty()) continue;
+			if (requirement.storeId.empty() && !brokenReferences)
+				return refuse(where + " requirement store id must not be empty");
+			if (!requirement.storeId.empty() && !requirementStores.insert(requirement.storeId).second)
+				return refuse(item + " is duplicated within the job");
+			auto const* source = findStore(requirement.storeId);
+			if (!source && !missing(item + " references unknown store")) return false;
+			if (!requirement.consumed) continue;
+			anyConsumed = true;
+			if (!requirement.storeId.empty() && requirement.storeId == job.wasteStoreId)
+				return refuse(item + " is consumed into itself; the waste store may not also be its own source");
+			if (!waste && (allowIncomplete || brokenReferences)) continue;
+			if (!waste)
+				return refuse(where + " consumes from " + item
+					+ " but declares no waste store; removed parts and used material must be booked into appropriate waste");
+			if (!source) continue;
+			if (source->unit != waste->unit)
+				return refuse(item + " unit '" + source->unit
+					+ "' does not match the waste store unit '" + waste->unit + "'");
+			if (source->composition || waste->composition)
+			{
+				if (!source->composition || !waste->composition
+					|| !compositionsClose(*source->composition, *waste->composition))
+					return refuse(item
+						+ " crosses a compound-material boundary into the waste store; consumed material may only land in a store with the same declared composition");
+			}
+			if (source->hazardClass != waste->hazardClass)
+				return refuse(item + " crosses the hazard-class boundary ('"
+					+ source->hazardClass + "' -> '" + waste->hazardClass
+					+ "'); consumed material may not cross the containment boundary");
+		}
+		if (!allowIncomplete && !anyConsumed && !job.wasteStoreId.empty())
+			return refuse(where + " declares a waste store but consumes nothing; the waste store would never receive material");
+		return true;
+	}
+
+
+	bool validateStationSystemsSettings(StationSystemsSettings const& settings, std::string& diagnostic,
+		std::vector<std::string>* brokenReferences)
+	{
+		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
+		// Draft-tolerant mode (#642): with a brokenReferences list supplied,
+		// an unresolvable reference is recorded and the entry carrying it
+		// stops being validated, so the draft opens with the reference shown
+		// as broken instead of the whole configuration being refused. Every
+		// other rule keeps its full strictness; without the list (the World
+		// path) this behaves exactly as refuse.
+		auto missing = [&](std::string text) -> bool
+		{
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			throw BrokenDraftEntry{};
+		};
+		for (auto const& [key, properties] : settings.connections)
+		{
+			if (key.ownerType.empty() || key.ownerId.empty() || key.reference.empty() || key.relation.empty()
+				|| key.peerType.empty() || key.peerId.empty()
+				|| static_cast<size_t>(properties.physicalType) >= StationPhysicalConnectionNames.size()
+				|| !std::isfinite(properties.maximumThroughput) || properties.maximumThroughput <= 0)
+				return refuse("Station connection properties require a valid type and positive finite maximum throughput");
+			if (!std::isfinite(properties.efficiency) || properties.efficiency < 0 || properties.efficiency > 1)
+				return refuse("Station connection efficiency must be finite, from 0 to 1 inclusive");
+		}
+		if (!std::isfinite(settings.observationIntervalSeconds)
+			|| settings.observationIntervalSeconds < 0.1f || settings.observationIntervalSeconds > 60.0f)
+			return refuse("Station observation interval must be finite, from 0.1 to 60 seconds");
+		if (!std::isfinite(settings.trendRetentionSeconds)
+			|| settings.trendRetentionSeconds < 1.0f || settings.trendRetentionSeconds > 86400.0f)
+			return refuse("Station trend retention must be finite, from 1 to 86400 seconds");
+		if (settings.stores.size() > MaxStationResourceStores)
+			return refuse("Station resource stores are limited to "
+				+ std::to_string(MaxStationResourceStores) + " entries");
+		std::set<std::string> ids;
+		for (auto const& store : settings.stores)
+		{
+			auto const where = "Station resource store '" + store.id + "'";
+			if (store.id.empty()) return refuse("Station resource store id must not be empty");
+			if (store.id.size() > MaxStationStoreIdLength)
+				return refuse("Station resource store id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!ids.insert(store.id).second) return refuse(where + " id is duplicated");
+			if (!isValidStationMaterialId(store.materialId))
+				return refuse(where + " material identity must be empty (unclassified) or at most 64 characters: "
+					"lowercase ASCII words/digits starting with a letter, separated by single hyphens");
+			if (std::find(StationStoreUnits.begin(), StationStoreUnits.end(), store.unit)
+				== StationStoreUnits.end())
+				return refuse(where + " has unknown unit '" + store.unit
+					+ "'; declared units are: " + declaredUnitsList());
+			if (!std::isfinite(store.capacity) || store.capacity <= 0.0)
+				return refuse(where + " capacity must be finite and positive");
+			if (!std::isfinite(store.startingQualified) || !std::isfinite(store.startingUnqualified))
+				return refuse(where + " starting inventory must be finite");
+			if (store.startingQualified < 0.0 || store.startingUnqualified < 0.0)
+				return refuse(where + " starting inventory must not be negative");
+			if (store.startingQualified + store.startingUnqualified > store.capacity)
+				return refuse(where + " starting inventory exceeds capacity");
+			if (!std::isfinite(store.protectedReserve) || store.protectedReserve < 0.0)
+				return refuse(where + " protected reserve must be finite and non-negative");
+			if (store.protectedReserve > store.startingQualified)
+				return refuse(where + " protected reserve exceeds starting usable inventory");
+			if (std::find(StationResourceHazardClasses.begin(),
+				StationResourceHazardClasses.end(),
+				store.hazardClass) == StationResourceHazardClasses.end())
+				return refuse(where + " has unknown hazard class '" + store.hazardClass
+					+ "'; declared classes are: normal, hazardous");
+			if (store.composition)
+			{
+				auto const& composition = *store.composition;
+				if (!isMassUnit(store.unit))
+					return refuse(where + " declares a composition but unit '" + store.unit
+						+ "' is not a mass unit; compound materials are mass-denominated (g or kg)");
+				if (!std::isfinite(composition.moisture)
+					|| composition.moisture < 0.0 || composition.moisture >= 1.0)
+					return refuse(where + " moisture fraction must be finite and from 0 up to but below 1");
+				auto const dryFractions = {composition.nutrientNitrogen,
+					composition.atmosphericNitrogen, composition.phosphorus,
+					composition.potassium, composition.otherMinerals};
+				for (auto const fraction : dryFractions)
+					if (!std::isfinite(fraction) || fraction < 0.0)
+						return refuse(where + " dry-mass fractions must all be finite and non-negative");
+				auto const drySum = composition.nutrientNitrogen + composition.atmosphericNitrogen
+					+ composition.phosphorus + composition.potassium + composition.otherMinerals;
+				if (drySum > 1.0)
+					return refuse(where + " dry-mass fractions sum to " + std::to_string(drySum)
+						+ ", exceeding the available dry mass");
+				if (!std::isfinite(composition.energyKJPerKgDry) || composition.energyKJPerKgDry < 0.0)
+					return refuse(where + " energy term must be finite and non-negative");
+			}
+		}
+		if (settings.transfers.size() > MaxStationResourceTransfers)
+			return refuse("Station resource transfers are limited to "
+				+ std::to_string(MaxStationResourceTransfers) + " entries");
+		std::set<std::string> transferIds;
+		for (auto const& transfer : settings.transfers)
+		{
+			auto const where = "Station resource transfer '" + transfer.id + "'";
+			if (transfer.id.empty()) return refuse("Station resource transfer id must not be empty");
+			if (transfer.id.size() > MaxStationStoreIdLength)
+				return refuse("Station resource transfer id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!transferIds.insert(transfer.id).second) return refuse(where + " id is duplicated");
+			if (!validateStationTransferWiring(settings, transfer, diagnostic)) return false;
+			if (!validateStationTransferSettings(transfer, diagnostic)) return false;
+		}
+		if (settings.conversions.size() > MaxStationResourceConversions)
+			return refuse("Station resource conversions are limited to "
+				+ std::to_string(MaxStationResourceConversions) + " entries");
+		std::set<std::string> conversionIds;
+		for (auto const& conversion : settings.conversions) try
+		{
+			auto const where = "Station resource conversion '" + conversion.id + "'";
+			if (conversion.id.empty()) return refuse("Station resource conversion id must not be empty");
+			if (conversion.id.size() > MaxStationStoreIdLength)
+				return refuse("Station resource conversion id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!conversionIds.insert(conversion.id).second) return refuse(where + " id is duplicated");
+			if (conversion.inputs.empty() || conversion.inputs.size() > MaxStationConversionFlows)
+				return refuse(where + " needs between 1 and "
+					+ std::to_string(MaxStationConversionFlows) + " inputs");
+			if (conversion.outputs.empty() || conversion.outputs.size() > MaxStationConversionFlows)
+				return refuse(where + " needs between 1 and "
+					+ std::to_string(MaxStationConversionFlows) + " outputs");
+			std::set<std::string> endpoints;
+			ConstituentLedger inflow, outflow;
+			// A conversion never crosses the hazard-class boundary either
+			// (#412): every endpoint of one conversion carries the same
+			// class, so a declared process can never transmute hazardous
+			// material into normal inventory or feed normal material into a
+			// hazardous chain.
+			std::string endpointClass;
+			auto const addFlow = [&](std::string const& storeId, double rate, bool input)
+			{
+				auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
+						[&](ResourceStoreSettings const& store) { return store.id == storeId; });
+				if (it == settings.stores.end())
+					return missing(where + " references unknown " + (input ? "input" : "output")
+						+ " store '" + storeId + "'");
+				if (!endpoints.insert(storeId).second)
+					return refuse(where + " uses store '" + storeId + "' more than once");
+				if (!it->composition)
+					return refuse(where + " " + (input ? "input" : "output") + " store '" + storeId
+						+ "' has no declared composition; conversions require compound stores");
+				if (!std::isfinite(rate) || rate <= 0.0)
+					return refuse(where + " " + (input ? "input rate" : "output yield")
+						+ " for store '" + storeId + "' must be finite and positive");
+				if (endpointClass.empty())
+					endpointClass = it->hazardClass;
+				else if (it->hazardClass != endpointClass)
+					return refuse(where + " crosses the hazard-class boundary at store '" + storeId
+						+ "' ('" + it->hazardClass + "' vs '" + endpointClass
+						+ "'); one conversion may only transform material within a single hazard class");
+				addComposition(input ? inflow : outflow, *it->composition,
+					massToKg(it->unit, rate), 1.0);
+				return true;
+			};
+			for (auto const& flow : conversion.inputs)
+				if (!addFlow(flow.storeId, flow.ratePerSecond, true)) return false;
+			for (auto const& flow : conversion.outputs)
+				if (!addFlow(flow.storeId, flow.yieldPerSecond, false)) return false;
+			// Constituent and energy balance at declared full throughput:
+			// an impossible configured yield that would create a tracked
+			// constituent is rejected here rather than allowed to create
+			// material at runtime. Losses below the input are legal and are
+			// reported as explicit losses by the runtime ledger.
+			for (auto const& [constituent, produced] : outflow)
+			{
+				auto const supplied = inflow.count(constituent) ? inflow.at(constituent) : 0.0;
+				if (produced > supplied + StationBalanceTolerance * std::max(1.0, std::abs(supplied)))
+					return refuse(where + " would create constituent '" + constituent
+						+ "': declared output " + std::to_string(produced)
+						+ " exceeds declared input " + std::to_string(supplied));
+			}
+		} catch (BrokenDraftEntry const&) {}
+		if (settings.solarArrays.size() > MaxStationSolarArrays)
+			return refuse("Station solar arrays are limited to "
+				+ std::to_string(MaxStationSolarArrays) + " entries");
+		std::set<std::string> solarIds;
+		for (auto const& array : settings.solarArrays)
+		{
+			auto const where = "Station solar array '" + array.id + "'";
+			if (array.id.empty()) return refuse("Station solar array id must not be empty");
+			if (array.id.size() > MaxStationStoreIdLength)
+				return refuse("Station solar array id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!solarIds.insert(array.id).second) return refuse(where + " id is duplicated");
+			// Zero installed capacity is legal and disables the array; it is
+			// never mistaken for a source that can carry a load.
+			if (!std::isfinite(array.capacityKW) || array.capacityKW < 0.0)
+				return refuse(where + " installed capacity must be finite and non-negative (0 disables the array)");
+			if (!validateStationProfile(array.illumination, where + " illumination profile", diagnostic))
+				return false;
+		}
+		if (settings.equipmentLoads.size() > MaxStationEquipmentLoads)
+			return refuse("Station external equipment loads are limited to "
+				+ std::to_string(MaxStationEquipmentLoads) + " entries");
+		std::set<std::string> loadIds;
+		for (auto const& load : settings.equipmentLoads) try
+		{
+			auto const where = "Station equipment load '" + load.id + "'";
+			if (load.id.empty()) return refuse("Station equipment load id must not be empty");
+			if (load.id.size() > MaxStationStoreIdLength)
+				return refuse("Station equipment load id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!loadIds.insert(load.id).second) return refuse(where + " id is duplicated");
+			if (!std::isfinite(load.electricalDemandKW) || load.electricalDemandKW < 0.0)
+				return refuse(where + " electrical demand must be finite and non-negative");
+			if (!std::isfinite(load.heatOutputKW) || load.heatOutputKW < 0.0)
+				return refuse(where + " heat output must be finite and non-negative");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				load.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + load.thermalClass
+					+ "'; declared classes are: low, moderate, warm, generation");
+			if (load.coolingDisposition != StationCoolingDisposition::Exported
+				&& load.coolingDisposition != StationCoolingDisposition::CoolingService)
+				return refuse(where + " has an unknown cooling disposition");
+			if (!std::isfinite(load.criticalFloorKW) || load.criticalFloorKW < 0.0)
+				return refuse(where + " critical floor must be finite and non-negative");
+			if (load.criticalFloorKW > load.electricalDemandKW)
+				return refuse(where + " critical floor exceeds the declared electrical demand");
+			if (!std::isfinite(load.maxCurtailment) || load.maxCurtailment < 0.0 || load.maxCurtailment > 1.0)
+				return refuse(where + " allowed curtailment must be finite and from 0 to 1");
+			// #417 recovery settings. All four default to zero (no recovery
+			// protection, clean restart). When declared they must be finite
+			// and within range; the hysteresis fraction is capped at 1 so a
+			// restart never demands more than double the load's own demand as
+			// spare headroom.
+			if (!std::isfinite(load.recoveryDwellSeconds) || load.recoveryDwellSeconds < 0.0)
+				return refuse(where + " recovery dwell must be finite and non-negative");
+			if (!std::isfinite(load.recoveryHysteresisFraction) || load.recoveryHysteresisFraction < 0.0
+				|| load.recoveryHysteresisFraction > 1.0)
+				return refuse(where + " recovery hysteresis fraction must be finite and from 0 to 1");
+			if (!std::isfinite(load.restartSurgePowerKW) || load.restartSurgePowerKW < 0.0)
+				return refuse(where + " restart surge power must be finite and non-negative");
+			if (!std::isfinite(load.restartSurgeSeconds) || load.restartSurgeSeconds < 0.0)
+				return refuse(where + " restart surge seconds must be finite and non-negative");
+			if (load.restartSurgeSeconds > 0.0 && load.restartSurgePowerKW <= 0.0)
+				return refuse(where + " restart surge seconds are declared with no surge power");
+			if (!validateStationProfile(load.operatingProfile, where + " operating profile", diagnostic))
+				return false;
+			if (load.materialExchanges.size() > MaxStationLoadMaterialExchanges)
+				return refuse(where + " material exchanges are limited to "
+					+ std::to_string(MaxStationLoadMaterialExchanges) + " entries");
+			std::set<std::string> exchangeStores;
+			for (auto const& exchange : load.materialExchanges)
+			{
+				auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
+						[&](ResourceStoreSettings const& store) { return store.id == exchange.storeId; });
+				if (it == settings.stores.end())
+					return missing(where + " material exchange references unknown store '" + exchange.storeId + "'");
+				if (!exchangeStores.insert(exchange.storeId).second)
+					return refuse(where + " exchanges with store '" + exchange.storeId + "' more than once");
+				if (!std::isfinite(exchange.ratePerSecond) || exchange.ratePerSecond <= 0.0)
+					return refuse(where + " material exchange rate for store '" + exchange.storeId
+						+ "' must be finite and positive");
+			}
+			// Heat sink routing (#395): emitted heat goes to exactly one
+			// declared reservoir, of the same thermal service class. Spare
+			// capacity in another class is never usable, and a
+			// cooling-service load needs a cooling service rather than a
+			// passive sink.
+			if (!load.heatSinkId.empty())
+			{
+				if (load.coolingDisposition != StationCoolingDisposition::Exported)
+					return refuse(where + " declares a heat sink but requires a cooling service; a cooling-service load needs a cooling service of its class, not a heat sink");
+				auto const sink = std::find_if(settings.thermalReservoirs.begin(),
+					settings.thermalReservoirs.end(),
+					[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == load.heatSinkId; });
+				if (sink == settings.thermalReservoirs.end())
+					return missing(where + " heat sink references unknown thermal reservoir '" + load.heatSinkId + "'");
+				if (sink->thermalClass != load.thermalClass)
+					return refuse(where + " thermal class '" + load.thermalClass
+						+ "' is incompatible with heat sink reservoir '" + sink->id + "' of class '"
+						+ sink->thermalClass + "'; heat routes only to the same service class");
+			}
+		} catch (BrokenDraftEntry const&) {}
+		if (settings.batteries.size() > MaxStationBatteries)
+			return refuse("Station batteries are limited to "
+				+ std::to_string(MaxStationBatteries) + " entries");
+		std::set<std::string> batteryIds;
+		for (auto const& battery : settings.batteries)
+		{
+			auto const where = "Station battery '" + battery.id + "'";
+			if (battery.id.empty()) return refuse("Station battery id must not be empty");
+			if (battery.id.size() > MaxStationStoreIdLength)
+				return refuse("Station battery id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!batteryIds.insert(battery.id).second) return refuse(where + " id is duplicated");
+			if (!std::isfinite(battery.nameplateKWh) || battery.nameplateKWh < 0.0)
+				return refuse(where + " nameplate energy must be finite and non-negative");
+			// Usable energy is the cyclable slice above the reserve floor; it
+			// can never exceed the installed nameplate, so no policy can
+			// invent storage the battery does not have.
+			if (!std::isfinite(battery.usableKWh) || battery.usableKWh < 0.0)
+				return refuse(where + " usable energy must be finite and non-negative");
+			if (battery.usableKWh > battery.nameplateKWh)
+				return refuse(where + " usable energy exceeds the nameplate energy");
+			if (!std::isfinite(battery.startingStoredKWh) || battery.startingStoredKWh < 0.0)
+				return refuse(where + " starting stored energy must be finite and non-negative");
+			if (battery.startingStoredKWh > battery.nameplateKWh)
+				return refuse(where + " starting stored energy exceeds the nameplate energy");
+			if (!std::isfinite(battery.maxChargeKW) || battery.maxChargeKW < 0.0)
+				return refuse(where + " maximum charge power must be finite and non-negative");
+			if (!std::isfinite(battery.maxDischargeKW) || battery.maxDischargeKW < 0.0)
+				return refuse(where + " maximum discharge power must be finite and non-negative");
+			if (!std::isfinite(battery.chargeEfficiency)
+				|| battery.chargeEfficiency <= 0.0 || battery.chargeEfficiency > 1.0)
+				return refuse(where + " charge efficiency must be finite and greater than 0 up to 1");
+			if (!std::isfinite(battery.dischargeEfficiency)
+				|| battery.dischargeEfficiency <= 0.0 || battery.dischargeEfficiency > 1.0)
+				return refuse(where + " discharge efficiency must be finite and greater than 0 up to 1");
+		}
+		if (settings.thermalReservoirs.size() > MaxStationThermalReservoirs)
+			return refuse("Station thermal reservoirs are limited to "
+				+ std::to_string(MaxStationThermalReservoirs) + " entries");
+		std::set<std::string> reservoirIds;
+		for (auto const& reservoir : settings.thermalReservoirs)
+		{
+			auto const where = "Station thermal reservoir '" + reservoir.id + "'";
+			if (reservoir.id.empty()) return refuse("Station thermal reservoir id must not be empty");
+			if (reservoir.id.size() > MaxStationStoreIdLength)
+				return refuse("Station thermal reservoir id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!reservoirIds.insert(reservoir.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				reservoir.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + reservoir.thermalClass
+					+ "'; declared classes are: low, moderate, warm, generation");
+			if (!std::isfinite(reservoir.heatCapacityKJPerK) || reservoir.heatCapacityKJPerK <= 0.0)
+				return refuse(where + " effective thermal capacity must be finite and positive");
+			if (!std::isfinite(reservoir.minTemperatureC) || !std::isfinite(reservoir.maxTemperatureC)
+				|| reservoir.minTemperatureC >= reservoir.maxTemperatureC)
+				return refuse(where + " temperature limits must be finite with min below max");
+			if (!std::isfinite(reservoir.startingTemperatureC))
+				return refuse(where + " starting temperature must be finite");
+			// Temperatures below absolute zero describe no material; refuse
+			// them rather than let the integration wander into nonsense.
+			if (reservoir.minTemperatureC <= -StationCelsiusOffset
+				|| reservoir.maxTemperatureC <= -StationCelsiusOffset
+				|| reservoir.startingTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " temperatures must be above absolute zero (-273.15 C)");
+			if (reservoir.startingTemperatureC < reservoir.minTemperatureC
+				|| reservoir.startingTemperatureC > reservoir.maxTemperatureC)
+				return refuse(where + " starting temperature is outside its declared limits");
+			if (!std::isfinite(reservoir.absorbedHeatKW) || reservoir.absorbedHeatKW < 0.0)
+				return refuse(where + " absorbed heat must be finite and non-negative");
+		}
+		if (settings.radiators.size() > MaxStationRadiators)
+			return refuse("Station radiators are limited to "
+				+ std::to_string(MaxStationRadiators) + " entries");
+		std::set<std::string> radiatorIds;
+		for (auto const& radiator : settings.radiators) try
+		{
+			auto const where = "Station radiator '" + radiator.id + "'";
+			if (radiator.id.empty()) return refuse("Station radiator id must not be empty");
+			if (radiator.id.size() > MaxStationStoreIdLength)
+				return refuse("Station radiator id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!radiatorIds.insert(radiator.id).second) return refuse(where + " id is duplicated");
+			auto const host = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(),
+				[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == radiator.reservoirId; });
+			if (host == settings.thermalReservoirs.end())
+				return missing(where + " is attached to unknown thermal reservoir '" + radiator.reservoirId + "'");
+			if (!std::isfinite(radiator.areaM2) || radiator.areaM2 <= 0.0)
+				return refuse(where + " area must be finite and positive");
+			if (!std::isfinite(radiator.emissivity) || radiator.emissivity <= 0.0 || radiator.emissivity > 1.0)
+				return refuse(where + " emissivity must be finite and greater than 0 up to 1");
+			if (!std::isfinite(radiator.viewFactor) || radiator.viewFactor <= 0.0 || radiator.viewFactor > 1.0)
+				return refuse(where + " view factor must be finite and greater than 0 up to 1");
+			if (!std::isfinite(radiator.sinkTemperatureC)
+				|| radiator.sinkTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " sink temperature must be finite and above absolute zero (-273.15 C)");
+		} catch (BrokenDraftEntry const&) {}
+		if (settings.coolantLoops.size() > MaxStationCoolantLoops)
+			return refuse("Station coolant loops are limited to "
+				+ std::to_string(MaxStationCoolantLoops) + " entries");
+		std::set<std::string> loopIds;
+		for (auto const& loop : settings.coolantLoops) try
+		{
+			auto const where = "Station coolant loop '" + loop.id + "'";
+			if (loop.id.empty()) return refuse("Station coolant loop id must not be empty");
+			if (loop.id.size() > MaxStationStoreIdLength)
+				return refuse("Station coolant loop id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!loopIds.insert(loop.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationCoolantHazardClasses.begin(), StationCoolantHazardClasses.end(),
+				loop.hazardClass) == StationCoolantHazardClasses.end())
+				return refuse(where + " has unknown coolant hazard class '" + loop.hazardClass
+					+ "'; declared classes are: normal, hazardous");
+			// A loop couples heat-only to one declared thermal reservoir.
+			// Coolant never touches a Resource store: it is not potable or
+			// nutrient water, and the loop's inventory is its own.
+			auto const host = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(),
+				[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == loop.reservoirId; });
+			if (host == settings.thermalReservoirs.end())
+				return missing(where + " is coupled to unknown thermal reservoir '" + loop.reservoirId + "'");
+			if (!std::isfinite(loop.coolantCapacityKg) || loop.coolantCapacityKg <= 0.0)
+				return refuse(where + " coolant capacity must be finite and positive");
+			if (!std::isfinite(loop.startingCoolantKg) || loop.startingCoolantKg < 0.0)
+				return refuse(where + " starting coolant must be finite and non-negative");
+			if (loop.startingCoolantKg > loop.coolantCapacityKg)
+				return refuse(where + " starting coolant exceeds the loop capacity");
+			if (!std::isfinite(loop.specificHeatKJPerKgK) || loop.specificHeatKJPerKgK <= 0.0)
+				return refuse(where + " specific heat must be finite and positive");
+			if (!std::isfinite(loop.startingTemperatureC)
+				|| loop.startingTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " starting temperature must be finite and above absolute zero (-273.15 C)");
+			if (!std::isfinite(loop.freezeProtectionSetpointC)
+				|| loop.freezeProtectionSetpointC <= -StationCelsiusOffset)
+				return refuse(where + " freeze-protection setpoint must be finite and above absolute zero (-273.15 C)");
+			if (!std::isfinite(loop.pumpPowerKW) || loop.pumpPowerKW < 0.0)
+				return refuse(where + " pump power must be finite and non-negative");
+			if (!std::isfinite(loop.ratedFlowKgPerS) || loop.ratedFlowKgPerS < 0.0)
+				return refuse(where + " rated flow must be finite and non-negative");
+			if (!std::isfinite(loop.exchangerConductanceKWPerK) || loop.exchangerConductanceKWPerK < 0.0)
+				return refuse(where + " exchanger conductance must be finite and non-negative");
+			if (!std::isfinite(loop.heaterCapacityKW) || loop.heaterCapacityKW < 0.0)
+				return refuse(where + " heater capacity must be finite and non-negative");
+		} catch (BrokenDraftEntry const&) {}
+		// Chiller contracts (#397): the cold-side interface is a declared
+		// coolant loop and the hot-side sink a declared thermal reservoir,
+		// both of the chiller's own service class — spare capacity in
+		// another class is never usable, and a chiller that rejects its
+		// condenser heat into the very reservoir its cold side cools is a
+		// heater, not a cooling service, so it is refused rather than
+		// silently circulating heat in a circle.
+		if (settings.chillers.size() > MaxStationChillers)
+			return refuse("Station chillers are limited to "
+				+ std::to_string(MaxStationChillers) + " entries");
+		std::set<std::string> chillerIds;
+		std::set<std::string> chilledLoops;
+		for (auto const& chiller : settings.chillers) try
+		{
+			auto const where = "Station chiller '" + chiller.id + "'";
+			if (chiller.id.empty()) return refuse("Station chiller id must not be empty");
+			if (chiller.id.size() > MaxStationStoreIdLength)
+				return refuse("Station chiller id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!chillerIds.insert(chiller.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				chiller.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + chiller.thermalClass
+					+ "'; declared classes are: low, moderate, warm, generation");
+			auto const loop = std::find_if(settings.coolantLoops.begin(),
+				settings.coolantLoops.end(),
+				[&](CoolantLoopSettings const& candidate) { return candidate.id == chiller.coldLoopId; });
+			if (loop == settings.coolantLoops.end())
+				return missing(where + " cold-side interface references unknown coolant loop '"
+					+ chiller.coldLoopId + "'");
+			if (!chilledLoops.insert(chiller.coldLoopId).second)
+				return refuse(where + " shares cold loop '" + chiller.coldLoopId
+					+ "' with another chiller; one evaporator serves one chiller");
+			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(),
+				[&](ThermalReservoirSettings const& candidate) { return candidate.id == chiller.condenserReservoirId; });
+			if (sink == settings.thermalReservoirs.end())
+				return missing(where + " condenser sink references unknown thermal reservoir '"
+					+ chiller.condenserReservoirId + "'");
+			// Class compatibility on both interfaces: the cold loop's host
+			// reservoir and the condenser sink must each declare the
+			// service class the chiller supplies.
+			auto const host = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(),
+				[&](ThermalReservoirSettings const& candidate) { return candidate.id == loop->reservoirId; });
+			if (host->thermalClass != chiller.thermalClass)
+				return refuse(where + " thermal class '" + chiller.thermalClass
+					+ "' is incompatible with cold loop '" + loop->id + "' serving reservoir '"
+					+ host->id + "' of class '" + host->thermalClass
+					+ "'; cold services are class-matched");
+			if (sink->thermalClass != chiller.thermalClass)
+				return refuse(where + " thermal class '" + chiller.thermalClass
+					+ "' is incompatible with condenser sink reservoir '" + sink->id
+					+ "' of class '" + sink->thermalClass + "'; heat routes only to the same service class");
+			if (sink->id == host->id)
+				return refuse(where + " rejects its condenser heat into reservoir '" + sink->id
+					+ "', the same reservoir its cold side cools; that is a heater, not a cooling service");
+			if (!std::isfinite(chiller.ratedCoolingCapacityKW) || chiller.ratedCoolingCapacityKW < 0.0)
+				return refuse(where + " rated cooling capacity must be finite and non-negative");
+			if (!std::isfinite(chiller.cop) || chiller.cop <= 0.0)
+				return refuse(where + " COP must be finite and positive");
+			if (!std::isfinite(chiller.auxiliaryPowerKW) || chiller.auxiliaryPowerKW < 0.0)
+				return refuse(where + " auxiliary power must be finite and non-negative");
+			if (!std::isfinite(chiller.chilledSetpointC)
+				|| chiller.chilledSetpointC <= -StationCelsiusOffset)
+				return refuse(where + " chilled setpoint must be finite and above absolute zero (-273.15 C)");
+			if (!std::isfinite(chiller.maxCondensingTemperatureC)
+				|| chiller.maxCondensingTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum condensing temperature must be finite and above absolute zero (-273.15 C)");
+			if (chiller.chilledSetpointC >= chiller.maxCondensingTemperatureC)
+				return refuse(where + " chilled setpoint must be below the maximum condensing temperature");
+		} catch (BrokenDraftEntry const&) {}
+		// Thermal buffer contracts (#398): the buffer couples to a declared
+		// host reservoir; a circulation-access buffer additionally names a
+		// coolant loop coupled to that same host, because the buffer's
+		// transfer path runs through the loop's circulation and a gate on
+		// a different reservoir would let a blackout on one side absorb
+		// through the other. The store is finite and its starting energy
+		// sits inside its capacity; the usable temperature band is finite,
+		// above absolute zero and properly ordered; the rate limits are
+		// finite and non-negative with at least one direction alive; a
+		// passive buffer must declare a positive transfer conductance.
+		if (settings.thermalBuffers.size() > MaxStationThermalBuffers)
+			return refuse("Station thermal buffers are limited to "
+				+ std::to_string(MaxStationThermalBuffers) + " entries");
+		std::set<std::string> thermalBufferIds;
+		for (auto const& buffer : settings.thermalBuffers) try
+		{
+			auto const where = "Station thermal buffer '" + buffer.id + "'";
+			if (buffer.id.empty()) return refuse("Station thermal buffer id must not be empty");
+			if (buffer.id.size() > MaxStationStoreIdLength)
+				return refuse("Station thermal buffer id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!thermalBufferIds.insert(buffer.id).second) return refuse(where + " id is duplicated");
+			auto const host = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(),
+				[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == buffer.reservoirId; });
+			if (host == settings.thermalReservoirs.end())
+				return missing(where + " references unknown host thermal reservoir '" + buffer.reservoirId + "'");
+			if (std::find(StationThermalBufferAccessModes.begin(),
+				StationThermalBufferAccessModes.end(), buffer.accessMode)
+				== StationThermalBufferAccessModes.end())
+				return refuse(where + " has unknown access mode '" + buffer.accessMode
+					+ "'; declared modes are: circulation, passive");
+			if (buffer.accessMode == "circulation")
+			{
+				auto const gate = std::find_if(settings.coolantLoops.begin(),
+					settings.coolantLoops.end(),
+					[&](CoolantLoopSettings const& loop) { return loop.id == buffer.circulationLoopId; });
+				if (gate == settings.coolantLoops.end())
+					return missing(where + " circulation access references unknown coolant loop '"
+						+ buffer.circulationLoopId + "'");
+				if (gate->reservoirId != buffer.reservoirId)
+					return refuse(where + " circulation loop '" + gate->id
+						+ "' is coupled to reservoir '" + gate->reservoirId
+						+ "', not the buffer's host reservoir '" + buffer.reservoirId + "'");
+			}
+			else
+			{
+				if (!std::isfinite(buffer.transferConductanceKWPerK)
+					|| buffer.transferConductanceKWPerK <= 0.0)
+					return refuse(where + " passive transfer conductance must be finite and positive");
+			}
+			if (!std::isfinite(buffer.capacityKJ) || buffer.capacityKJ <= 0.0)
+				return refuse(where + " capacity must be finite and positive");
+			if (!std::isfinite(buffer.startingEnergyKJ) || buffer.startingEnergyKJ < 0.0
+				|| buffer.startingEnergyKJ > buffer.capacityKJ)
+				return refuse(where + " starting energy must be finite and within capacity");
+			if (!std::isfinite(buffer.minUsableTemperatureC)
+				|| buffer.minUsableTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " minimum usable temperature must be finite and above absolute zero (-273.15 C)");
+			if (!std::isfinite(buffer.maxUsableTemperatureC)
+				|| buffer.maxUsableTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum usable temperature must be finite and above absolute zero (-273.15 C)");
+			if (buffer.minUsableTemperatureC >= buffer.maxUsableTemperatureC)
+				return refuse(where + " usable temperature band needs the minimum below the maximum");
+			if (!std::isfinite(buffer.maxChargeKW) || buffer.maxChargeKW < 0.0)
+				return refuse(where + " charge rate must be finite and non-negative");
+			if (!std::isfinite(buffer.maxDischargeKW) || buffer.maxDischargeKW < 0.0)
+				return refuse(where + " discharge rate must be finite and non-negative");
+			if (buffer.maxChargeKW <= 0.0 && buffer.maxDischargeKW <= 0.0)
+				return refuse(where + " that can neither charge nor discharge is not a buffer");
+		} catch (BrokenDraftEntry const&) {}
+		// Generator contracts (#399): the fuel inventory is an energy-unit
+		// Resource store, the waste-heat sink a declared thermal reservoir
+		// of the generator's own service class - spare capacity in another
+		// class is never usable - and the conversion, ramp, startup and
+		// shutdown-heat terms are all finite and physically ordered.
+		if (settings.generators.size() > MaxStationGenerators)
+			return refuse("Station generators are limited to "
+				+ std::to_string(MaxStationGenerators) + " entries");
+		std::set<std::string> generatorIds;
+		for (auto const& generator : settings.generators) try
+		{
+			auto const where = "Station generator '" + generator.id + "'";
+			if (generator.id.empty()) return refuse("Station generator id must not be empty");
+			if (generator.id.size() > MaxStationStoreIdLength)
+				return refuse("Station generator id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!generatorIds.insert(generator.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				generator.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + generator.thermalClass
+					+ "'; declared classes are: low, moderate, warm, generation");
+			// Fuel is energy the generator can burn: the store must be
+			// denominated in an energy unit so the fuel ledger closes in
+			// the same energy terms as the electrical output.
+			auto const fuel = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == generator.fuelStoreId; });
+			if (fuel == settings.stores.end())
+				return missing(where + " fuel inventory references unknown Resource store '"
+					+ generator.fuelStoreId + "'");
+			if (fuel->unit != "kJ" && fuel->unit != "MJ" && fuel->unit != "Wh" && fuel->unit != "kWh")
+				return refuse(where + " fuel store unit '" + fuel->unit
+					+ "' is not an energy unit; fuelled generators burn kJ, MJ, Wh or kWh");
+			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(),
+				[&](ThermalReservoirSettings const& reservoir) { return reservoir.id == generator.heatSinkId; });
+			if (sink == settings.thermalReservoirs.end())
+				return missing(where + " heat sink references unknown thermal reservoir '"
+					+ generator.heatSinkId + "'");
+			if (sink->thermalClass != generator.thermalClass)
+				return refuse(where + " thermal class '" + generator.thermalClass
+					+ "' is incompatible with heat sink reservoir '" + sink->id
+					+ "' of class '" + sink->thermalClass + "'; heat routes only to the same service class");
+			// Zero installed capacity is legal and disables the generator;
+			// it is never mistaken for a source that can carry a load.
+			if (!std::isfinite(generator.ratedOutputKW) || generator.ratedOutputKW < 0.0)
+				return refuse(where + " installed capacity must be finite and non-negative (0 disables the generator)");
+			if (!std::isfinite(generator.efficiency)
+				|| generator.efficiency <= 0.0 || generator.efficiency > 1.0)
+				return refuse(where + " conversion efficiency must be finite and greater than 0 up to 1");
+			// A generator that cannot change its output at all could never
+			// reach any commanded level, so the ramp limit must be positive.
+			if (!std::isfinite(generator.maxRampKWPerSecond) || generator.maxRampKWPerSecond <= 0.0)
+				return refuse(where + " ramp limit must be finite and positive");
+			if (!std::isfinite(generator.commandedOutputKW) || generator.commandedOutputKW < 0.0)
+				return refuse(where + " commanded output must be finite and non-negative");
+			if (generator.commandedOutputKW > generator.ratedOutputKW)
+				return refuse(where + " commanded output exceeds the installed capacity");
+			if (!std::isfinite(generator.startupPowerKW) || generator.startupPowerKW < 0.0)
+				return refuse(where + " startup power must be finite and non-negative");
+			if (!std::isfinite(generator.startupSeconds) || generator.startupSeconds < 0.0)
+				return refuse(where + " startup duration must be finite and non-negative");
+			if (!std::isfinite(generator.shutdownHeatKW) || generator.shutdownHeatKW < 0.0)
+				return refuse(where + " shutdown heat must be finite and non-negative");
+			if (!std::isfinite(generator.shutdownSeconds) || generator.shutdownSeconds < 0.0)
+				return refuse(where + " shutdown heat duration must be finite and non-negative");
+			if (!std::isfinite(generator.maxSinkTemperatureC)
+				|| generator.maxSinkTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum sink temperature must be finite and above absolute zero (-273.15 C)");
+		} catch (BrokenDraftEntry const&) {}
+		if (settings.deliveries.size() > MaxStationResourceDeliveries)
+			return refuse("Station resupply deliveries are limited to "
+				+ std::to_string(MaxStationResourceDeliveries) + " entries");
+		std::set<std::string> deliveryIds;
+		for (auto const& delivery : settings.deliveries) try
+		{
+			auto const where = "Station resupply delivery '" + delivery.id + "'";
+			if (delivery.id.empty()) return refuse("Station resupply delivery id must not be empty");
+			if (delivery.id.size() > MaxStationStoreIdLength)
+				return refuse("Station resupply delivery id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!deliveryIds.insert(delivery.id).second) return refuse(where + " id is duplicated");
+			std::string wiringReason;
+			if (!validateStationScheduleWiring(settings, delivery, wiringReason, false, brokenReferences))
+				return refuse(wiringReason);
+			// A delivery that brings nothing specifies nothing; refusing it
+			// keeps every fired occurrence a real inflow.
+			if (!std::isfinite(delivery.quantity) || delivery.quantity <= 0.0)
+				return refuse(where + " quantity must be finite and positive");
+			if (!std::isfinite(delivery.firstOccurrenceSeconds)
+				|| delivery.firstOccurrenceSeconds < 0.0)
+				return refuse(where + " first occurrence must be finite and non-negative");
+			// Zero is a one-off; a recurring schedule must not repeat faster
+			// than one World fixed tick, so no tick is ever asked to absorb an
+			// unbounded burst of catch-up arrivals.
+			if (!std::isfinite(delivery.recurrenceSeconds) || delivery.recurrenceSeconds < 0.0)
+				return refuse(where + " recurrence must be finite and non-negative (0 is a one-off)");
+			if (delivery.recurrenceSeconds > 0.0
+				&& delivery.recurrenceSeconds + StationScheduleTolerance
+					< static_cast<double>(World::getFixedTimestep()))
+				return refuse(where + " recurrence must be zero or at least one World fixed tick ("
+					+ std::to_string(World::getFixedTimestep()) + " seconds)");
+		} catch (BrokenDraftEntry const&) {}
+		// Terminal-waste ejection schedules (#403): a scenario removal of
+		// disposal-ready (qualified) material from one waste store at
+		// authored times. The same schedule discipline as resupply
+		// deliveries governs them; what makes them different is direction:
+		// ejection can only remove what the store actually holds as
+		// eligible, so it never needs a capacity-shaped rule, but it must
+		// still name a real store in that store's own unit.
+		if (settings.wasteEjections.size() > MaxStationWasteEjections)
+			return refuse("Station waste ejections are limited to "
+				+ std::to_string(MaxStationWasteEjections) + " entries");
+		std::set<std::string> ejectionIds;
+		for (auto const& ejection : settings.wasteEjections) try
+		{
+			auto const where = "Station waste ejection '" + ejection.id + "'";
+			if (ejection.id.empty()) return refuse("Station waste ejection id must not be empty");
+			if (ejection.id.size() > MaxStationStoreIdLength)
+				return refuse("Station waste ejection id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!ejectionIds.insert(ejection.id).second) return refuse(where + " id is duplicated");
+			std::string wiringReason;
+			if (!validateStationScheduleWiring(settings, ejection, wiringReason, false, brokenReferences))
+				return refuse(wiringReason);
+			// An ejection that removes nothing specifies nothing; refusing
+			// it keeps every fired occurrence a real outflow.
+			if (!std::isfinite(ejection.quantity) || ejection.quantity <= 0.0)
+				return refuse(where + " quantity must be finite and positive");
+			if (!std::isfinite(ejection.firstOccurrenceSeconds)
+				|| ejection.firstOccurrenceSeconds < 0.0)
+				return refuse(where + " first occurrence must be finite and non-negative");
+			// Zero is a one-off; a recurring schedule must not repeat faster
+			// than one World fixed tick, so no tick is ever asked to absorb
+			// an unbounded burst of catch-up ejections.
+			if (!std::isfinite(ejection.recurrenceSeconds) || ejection.recurrenceSeconds < 0.0)
+				return refuse(where + " recurrence must be finite and non-negative (0 is a one-off)");
+			if (ejection.recurrenceSeconds > 0.0
+				&& ejection.recurrenceSeconds + StationScheduleTolerance
+					< static_cast<double>(World::getFixedTimestep()))
+				return refuse(where + " recurrence must be zero or at least one World fixed tick ("
+					+ std::to_string(World::getFixedTimestep()) + " seconds)");
+		} catch (BrokenDraftEntry const&) {}
+		// Installation outage and capacity-reduction schedules (#413): a
+		// scenario change to one registered installation's available rated
+		// capacity at authored times. The outage must name an installation
+		// that has registered with the shared availability contract, so a
+		// typo or an unwired target is refused rather than silently doing
+		// nothing. The capacity fraction is the share of the rating that
+		// stays available during the window: 0 is a full outage, a value
+		// below 1 is a reduction; a fraction of 1 changes nothing and is
+		// refused so every fired occurrence is a real reduction. The
+		// window must be positive and, when recurring, no shorter than the
+		// window itself, so a schedule's own windows never overlap.
+		if (settings.outages.size() > MaxStationInstallationOutages)
+			return refuse("Station installation outages are limited to "
+				+ std::to_string(MaxStationInstallationOutages) + " entries");
+		auto const registeredInstallations = stationInstallationIdentities(settings);
+		// The shared installation namespace must be unambiguous (#576):
+		// an outage names its target by installationId alone, so two
+		// installations of different kinds sharing an id would leave the
+		// contract unable to say which machine it caps - and resolution
+		// would silently pick whichever kind it consults first. Refuse
+		// the collision at the crossing, transactionally, so no file or
+		// editor draft carrying it can ever be applied.
+		std::map<std::string, std::string> installedKindById;
+		for (auto const& installation : registeredInstallations)
+		{
+			auto const [existing, inserted] = installedKindById.emplace(
+				installation.id, installation.kind);
+			if (!inserted)
+				return refuse("Station installation id '" + installation.id
+					+ "' is ambiguous: registered as both a " + existing->second
+					+ " and a " + installation.kind
+					+ "; installation ids must be unique across generators, coolant loops and chillers");
+		}
+		std::set<std::string> outageIds;
+		for (auto const& outage : settings.outages) try
+		{
+			auto const where = "Station installation outage '" + outage.id + "'";
+			if (outage.id.empty()) return refuse("Station installation outage id must not be empty");
+			if (outage.id.size() > MaxStationStoreIdLength)
+				return refuse("Station installation outage id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!outageIds.insert(outage.id).second) return refuse(where + " id is duplicated");
+			if (outage.installationId.empty() && !brokenReferences)
+				return refuse(where + " installation id must not be empty");
+			if (outage.installationId.size() > MaxStationStoreIdLength)
+				return refuse(where + " installation id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			std::string wiringReason;
+			if (!validateStationScheduleWiring(settings, outage, wiringReason, false, brokenReferences))
+				return refuse(wiringReason);
+			if (!std::isfinite(outage.capacityFraction) || outage.capacityFraction < 0.0
+				|| outage.capacityFraction >= 1.0)
+				return refuse(where + " capacity fraction must be finite and from 0 up to but not including 1"
+					+ " (0 is a full outage; 1 would change nothing)");
+			if (!std::isfinite(outage.firstOccurrenceSeconds)
+				|| outage.firstOccurrenceSeconds < 0.0)
+				return refuse(where + " first occurrence must be finite and non-negative");
+			if (!std::isfinite(outage.durationSeconds) || outage.durationSeconds <= 0.0)
+				return refuse(where + " duration must be finite and positive");
+			if (!std::isfinite(outage.recurrenceSeconds) || outage.recurrenceSeconds < 0.0)
+				return refuse(where + " recurrence must be finite and non-negative (0 is a one-off)");
+			if (outage.recurrenceSeconds > 0.0
+				&& outage.recurrenceSeconds + StationScheduleTolerance
+					< static_cast<double>(World::getFixedTimestep()))
+				return refuse(where + " recurrence must be zero or at least one World fixed tick ("
+					+ std::to_string(World::getFixedTimestep()) + " seconds)");
+			if (outage.recurrenceSeconds > 0.0
+				&& outage.recurrenceSeconds + StationScheduleTolerance < outage.durationSeconds)
+				return refuse(where + " recurrence must be at least the outage duration so its windows never overlap");
+		} catch (BrokenDraftEntry const&) {}
+		// Authored scheduled maintenance jobs (#414): timed work whose
+		// completion must be paid for with declared tools, spare parts and
+		// consumables. The target must be a registered installation, every
+		// requirement must name an existing store with a positive finite
+		// quantity, and the consumed stream must land in a declared waste
+		// store that can actually hold it: same unit (cross-unit movement
+		// is conversion, not maintenance), same declared composition (a
+		// compound boundary is never crossed silently) and the same hazard
+		// class (containment is enforced at configuration, never policed
+		// at runtime). A reusable tool may come from anywhere - it is
+		// returned, not moved - but a consumed requirement may not draw
+		// from the waste store itself, and a waste store with nothing to
+		// fill it is refused rather than carried as dead configuration.
+		if (settings.maintenanceJobs.size() > MaxStationMaintenanceJobs)
+			return refuse("Station maintenance jobs are limited to "
+				+ std::to_string(MaxStationMaintenanceJobs) + " entries");
+		std::set<std::string> maintenanceIds;
+		for (auto const& job : settings.maintenanceJobs) try
+		{
+			auto const where = "Station maintenance job '" + job.id + "'";
+			if (job.id.empty()) return refuse("Station maintenance job id must not be empty");
+			if (job.id.size() > MaxStationStoreIdLength)
+				return refuse("Station maintenance job id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!maintenanceIds.insert(job.id).second) return refuse(where + " id is duplicated");
+			if (job.installationId.empty() && !brokenReferences)
+				return refuse(where + " installation id must not be empty");
+			if (job.installationId.size() > MaxStationStoreIdLength)
+				return refuse(where + " installation id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			std::string wiringReason;
+			if (!validateStationScheduleWiring(settings, job, wiringReason, false, brokenReferences))
+				return refuse(wiringReason);
+			if (!std::isfinite(job.firstOccurrenceSeconds)
+				|| job.firstOccurrenceSeconds < 0.0)
+				return refuse(where + " first occurrence must be finite and non-negative");
+			if (!std::isfinite(job.durationSeconds) || job.durationSeconds <= 0.0)
+				return refuse(where + " duration must be finite and positive");
+			if (!std::isfinite(job.recurrenceSeconds) || job.recurrenceSeconds < 0.0)
+				return refuse(where + " recurrence must be finite and non-negative (0 is a one-off)");
+			if (job.recurrenceSeconds > 0.0
+				&& job.recurrenceSeconds + StationScheduleTolerance
+					< static_cast<double>(World::getFixedTimestep()))
+				return refuse(where + " recurrence must be zero or at least one World fixed tick ("
+					+ std::to_string(World::getFixedTimestep()) + " seconds)");
+			if (job.recurrenceSeconds > 0.0
+				&& job.recurrenceSeconds + StationScheduleTolerance < job.durationSeconds)
+				return refuse(where + " recurrence must be at least the maintenance duration so its windows never overlap");
+			if (job.requirements.empty())
+				return refuse(where + " needs at least one declared tool/part/consumable requirement; maintenance without prerequisites would complete for free");
+			if (job.requirements.size() > MaxStationMaintenanceRequirements)
+				return refuse(where + " requirements are limited to "
+					+ std::to_string(MaxStationMaintenanceRequirements) + " entries");
+
+		} catch (BrokenDraftEntry const&) {}
+		// Compartment atmosphere contracts (#400): a fixed volume with a
+		// finite owned gas inventory, an authored effective thermal
+		// capacity, an optional heat-only reservoir coupling and an
+		// authored occupancy/load assignment. Compartments are isolated
+		// by construction - no process moves gas between them - so the
+		// hazard class is a segregation label and every pathway that can
+		// remove gas (leak, airlock cycle) must book its mass.
+		if (settings.atmospheres.size() > MaxStationAtmospheres)
+			return refuse("Station atmospheres are limited to "
+				+ std::to_string(MaxStationAtmospheres) + " entries");
+		std::set<std::string> atmosphereIds;
+		for (auto const& atmosphere : settings.atmospheres) try
+		{
+			if (!atmosphereIds.insert(atmosphere.id).second) return refuse("Station atmosphere '" + atmosphere.id + "' id is duplicated");
+			std::string reason;
+			if (!validateStationWaterGasWiring(settings, atmosphere, reason, false, brokenReferences))
+				return refuse(reason);
+		} catch (BrokenDraftEntry const&) {}
+		// Scheduled airlock cycle contracts (#400): each cycle draws from
+		// one declared compartment on the shared scenario schedule rule
+		// and splits its removal into recovered and lost by the authored
+		// recovery fraction.
+		if (settings.airlockCycles.size() > MaxStationAirlockCycles)
+			return refuse("Station airlock cycles are limited to "
+				+ std::to_string(MaxStationAirlockCycles) + " entries");
+		std::set<std::string> airlockCycleIds;
+		for (auto const& cycle : settings.airlockCycles) try
+		{
+			if (!airlockCycleIds.insert(cycle.id).second) return refuse("Station airlock cycle '" + cycle.id + "' id is duplicated");
+			std::string reason;
+			if (!validateStationWaterGasWiring(settings, cycle, reason, false, brokenReferences))
+				return refuse(reason);
+		} catch (BrokenDraftEntry const&) {}
+		// Water recovery contracts (#402). A collector condenses vapour out
+		// of one compartment onto a coolant-loop cold surface; a treatment
+		// turns raw water into treated water plus retained concentrate. Both
+		// carry a hazard class, and the class is what keeps a potable stream
+		// from sharing equipment with a contaminated one: a collector may
+		// only serve a compartment of its own class, since condensate
+		// inherits the hazard of the air it came from, and no store may be
+		// touched by both a normal-class and a hazardous-class water
+		// process. Every water store must be a plain mass store: condensate
+		// is pure water and the recovery split is mass-denominated, so a
+		// compound store would create dry constituents out of nothing. The
+		// treatment consumable store is the one exception - it is a supplied
+		// consumable, not a water stream, and may be compound.
+		if (settings.waterCollectors.size() > MaxStationWaterCollectors)
+			return refuse("Station water collectors are limited to "
+				+ std::to_string(MaxStationWaterCollectors) + " entries");
+		if (settings.waterTreatments.size() > MaxStationWaterTreatments)
+			return refuse("Station water treatments are limited to "
+				+ std::to_string(MaxStationWaterTreatments) + " entries");
+		// Unlike an entry-level unwind, an unresolved store ends only that
+		// endpoint's check, so other resolved endpoints still undergo validation.
+		auto missingStore = [&](std::string text) -> bool {
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			return true;
+		};
+		std::map<std::string, std::string> waterStoreClass;
+		auto declareWaterStore = [&](std::string const& storeId, char const* role,
+			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+		{
+			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
+			if (found == settings.stores.end())
+				return missingStore(where + " " + role + " store '" + storeId + "' does not exist");
+			if (!isMassUnit(found->unit))
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' must be a mass unit; water recovery is mass-denominated (g or kg)");
+			if (found->composition && !allowCompound)
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' declares a composition; recovered water streams are plain mass stores, so no dry constituent can be created from pure condensate");
+			if (found->hazardClass != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is authored "
+					+ found->hazardClass + "-class but this is a " + hazardClass
+					+ "-class water process; a process may only touch stores of its own hazard class");
+			auto const existing = waterStoreClass.find(storeId);
+			if (existing == waterStoreClass.end())
+				waterStoreClass.emplace(storeId, hazardClass);
+			else if (existing->second != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
+					+ existing->second + "-class water process; hazardous and normal water streams may not share a store");
+			return true;
+		};
+		std::set<std::string> waterIds;
+		for (auto const& collector : settings.waterCollectors) try
+		{
+			if (!waterIds.insert(collector.id).second) return refuse("Station water collector '" + collector.id + "' id is duplicated");
+			std::string reason;
+			if (!validateStationWaterGasWiring(settings, collector, reason, false, brokenReferences))
+				return refuse(reason);
+		} catch (BrokenDraftEntry const&) {}
+		for (auto const& treatment : settings.waterTreatments) try
+		{
+			if (!waterIds.insert(treatment.id).second) return refuse("Station water treatment '" + treatment.id + "' id is duplicated");
+			std::string reason;
+			if (!validateStationWaterGasWiring(settings, treatment, reason, false, brokenReferences))
+				return refuse(reason);
+		} catch (BrokenDraftEntry const&) {}
+		// Oxygen production and CO2 capture contracts (#404). An
+		// electrolyzer splits qualified water into oxygen and hydrogen: the
+		// split is stoichiometric, so the authored electrical dose must at
+		// least cover the chemical energy the produced hydrogen retains -
+		// a dose below it would create energy-rich products out of less
+		// energy than they carry, which no machine can do. Exactly one
+		// oxygen destination must be configured: a qualified gas store or
+		// one compartment atmosphere, never both and never neither. All gas
+		// and water stores in the chain are plain mass stores: a compound
+		// store would create dry constituents out of pure water or pure
+		// gas. Hazard class segregates the whole chain - the feed store,
+		// both product stores and the delivery compartment must carry the
+		// cell's own class - and the heat sink must share the cell's
+		// thermal service class, because spare capacity in one class is
+		// never usable by another. A CO2 capture machine scrubs one
+		// compartment of its own hazard class into a finite capture store;
+		// if it declares a consumable demand it must name a consumable
+		// store, because a process cannot spend media it has no way to
+		// hold.
+		if (settings.electrolyzers.size() > MaxStationElectrolyzers)
+			return refuse("Station electrolyzers are limited to "
+				+ std::to_string(MaxStationElectrolyzers) + " entries");
+		if (settings.co2Captures.size() > MaxStationCo2Captures)
+			return refuse("Station CO2 capture machines are limited to "
+				+ std::to_string(MaxStationCo2Captures) + " entries");
+		if (settings.fuelCells.size() > MaxStationFuelCells)
+			return refuse("Station fuel cells are limited to "
+				+ std::to_string(MaxStationFuelCells) + " entries");
+		std::map<std::string, std::string> gasStoreClass;
+		auto declareGasStore = [&](std::string const& storeId, char const* role,
+			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+		{
+			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
+			if (found == settings.stores.end())
+				return missingStore(where + " " + role + " store '" + storeId + "' does not exist");
+			if (!isMassUnit(found->unit))
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' must be a mass unit; gas handling is mass-denominated (g or kg)");
+			if (found->composition && !allowCompound)
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' declares a composition; handled gas streams are plain mass stores, so no dry constituent can be created from pure gas");
+			if (found->hazardClass != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is authored "
+					+ found->hazardClass + "-class but this is a " + hazardClass
+					+ "-class gas process; a process may only touch stores of its own hazard class");
+			auto const existing = gasStoreClass.find(storeId);
+			if (existing == gasStoreClass.end())
+				gasStoreClass.emplace(storeId, hazardClass);
+			else if (existing->second != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
+					+ existing->second + "-class gas process; hazardous and normal gas streams may not share a store");
+			return true;
+		};
+		std::set<std::string> gasIds;
+		for (auto const& electrolyzer : settings.electrolyzers) try
+		{
+			if (!gasIds.insert(electrolyzer.id).second) return refuse("Station electrolyzer '" + electrolyzer.id + "' id is duplicated");
+			std::string reason;
+			if (!validateStationWaterGasWiring(settings, electrolyzer, reason, false, brokenReferences))
+				return refuse(reason);
+		} catch (BrokenDraftEntry const&) {}
+		for (auto const& capture : settings.co2Captures) try
+		{
+			if (!gasIds.insert(capture.id).second) return refuse("Station CO2 capture machine '" + capture.id + "' id is duplicated");
+			std::string reason;
+			if (!validateStationWaterGasWiring(settings, capture, reason, false, brokenReferences))
+				return refuse(reason);
+		} catch (BrokenDraftEntry const&) {}
+		// Fuel-cell backup contracts (#406). A cell generates electrical
+		// power from two dedicated reactant stores and can only ever see
+		// its own stores, so protected breathing oxygen is never drawn
+		// implicitly: refilling the oxygen store is a controlled surplus
+		// transfer that itself preserves the supplying service's protected
+		// reserve. Efficiency is electrical out per chemical energy in and
+		// must sit above zero and at most one - a cell delivering more
+		// electrical energy than the reactants' chemical energy is a
+		// perpetual-motion claim, not a machine. The dispatch setpoint may
+		// not exceed the installed rating. All three stores in the chain
+		// are plain mass stores carrying the cell's own hazard class, and
+		// the heat sink must share the cell's thermal service class.
+		for (auto const& cell : settings.fuelCells) try
+		{
+			auto const where = "Station fuel cell '" + cell.id + "'";
+			if (cell.id.empty()) return refuse("Station fuel cell id must not be empty");
+			if (cell.id.size() > MaxStationStoreIdLength)
+				return refuse("Station fuel cell id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!gasIds.insert(cell.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
+				cell.hazardClass) == StationWaterHazardClasses.end())
+				return refuse(where + " has unknown hazard class '" + cell.hazardClass
+					+ "'; declared classes are: normal, hazardous");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				cell.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + cell.thermalClass
+					+ "'; declared classes are: " + declaredThermalClasses());
+			if (!std::isfinite(cell.ratedOutputKW) || cell.ratedOutputKW < 0.0)
+				return refuse(where + " rated electrical output must be finite and non-negative");
+			if (!std::isfinite(cell.efficiency) || cell.efficiency <= 0.0 || cell.efficiency > 1.0)
+				return refuse(where + " efficiency must be greater than 0 and at most 1: a cell cannot deliver more electrical energy than the reactants' chemical energy");
+			if (!std::isfinite(cell.commandedOutputKW) || cell.commandedOutputKW < 0.0
+				|| cell.commandedOutputKW > cell.ratedOutputKW)
+				return refuse(where + " commanded output must be finite and within the installed rating");
+			if (!std::isfinite(cell.maxSinkTemperatureC)
+				|| cell.maxSinkTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum sink temperature must be finite and above absolute zero");
+			// The same aliased-role rule the electrolyzer carries (#585):
+			// the cell draws each reactant from its own store's drawable
+			// stock, so one store named for both reactants spends the same
+			// stock twice against a stoichiometry that expects two.
+			if (!cell.hydrogenStoreId.empty() && cell.hydrogenStoreId == cell.oxygenStoreId)
+				return refuse(where + " names the same store '" + cell.hydrogenStoreId
+					+ "' for both the hydrogen and the oxygen reactant: the cell draws both reactants independently and may not spend one store's stock as both");
+			if (!declareGasStore(cell.hydrogenStoreId, "hydrogen reactant", where,
+				cell.hazardClass, false))
+				return false;
+			if (!declareGasStore(cell.oxygenStoreId, "oxygen reactant", where,
+				cell.hazardClass, false))
+				return false;
+			if (!declareWaterStore(cell.waterStoreId, "product water", where,
+				cell.hazardClass, false))
+				return false;
+			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
+				{ return reservoir.id == cell.heatSinkId; });
+			if (sink == settings.thermalReservoirs.end())
+				return missing(where + " heat sink is unknown thermal reservoir '" + cell.heatSinkId + "'");
+			if (sink->thermalClass != cell.thermalClass)
+				return refuse(where + " thermal class '" + cell.thermalClass
+					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
+					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
+		} catch (BrokenDraftEntry const&) {}
+		// Carbon recovery contracts (#405). A Sabatier reactor converts
+		// captured CO2 and hydrogen into methane and water; the conversion
+		// is stoichiometric under the declared molar masses, so the mass
+		// ledger closes by construction. All four stores in the chain are
+		// plain mass stores carrying the reactor's own hazard class, and
+		// the heat sink must share the reactor's thermal service class.
+		// A methane processor splits methane into recovered hydrogen and
+		// solid carbon; the split is stoichiometric, and because the
+		// reaction is endothermic the authored electrical dose must at
+		// least cover the declared reaction heat demand - a dose below it
+		// would drive a reaction the machine cannot heat. The recovered
+		// hydrogen returns to the hydrogen store as recycled feed: the
+		// Sabatier stage consumes twice as much hydrogen per methane as
+		// the processor returns, so the combined loop retains a net
+		// hydrogen demand and the return is never free continuing supply.
+		if (settings.sabatierReactors.size() > MaxStationSabatierReactors)
+			return refuse("Station Sabatier reactors are limited to "
+				+ std::to_string(MaxStationSabatierReactors) + " entries");
+		if (settings.methaneProcessors.size() > MaxStationMethaneProcessors)
+			return refuse("Station methane processors are limited to "
+				+ std::to_string(MaxStationMethaneProcessors) + " entries");
+		for (auto const& reactor : settings.sabatierReactors) try
+		{
+			auto const where = "Station Sabatier reactor '" + reactor.id + "'";
+			if (reactor.id.empty()) return refuse("Station Sabatier reactor id must not be empty");
+			if (reactor.id.size() > MaxStationStoreIdLength)
+				return refuse("Station Sabatier reactor id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!gasIds.insert(reactor.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
+				reactor.hazardClass) == StationWaterHazardClasses.end())
+				return refuse(where + " has unknown hazard class '" + reactor.hazardClass
+					+ "'; declared classes are: normal, hazardous");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				reactor.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + reactor.thermalClass
+					+ "'; declared classes are: " + declaredThermalClasses());
+			if (!std::isfinite(reactor.rateKgPerS) || reactor.rateKgPerS < 0.0)
+				return refuse(where + " rated CO2 conversion must be finite and non-negative");
+			if (!std::isfinite(reactor.specificEnergyKWhPerKgCO2)
+				|| reactor.specificEnergyKWhPerKgCO2 < 0.0)
+				return refuse(where + " specific energy must be finite and non-negative");
+			if (!std::isfinite(reactor.maxSinkTemperatureC)
+				|| reactor.maxSinkTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum sink temperature must be finite and above absolute zero");
+			// Aliased stream roles are refused (#599), the same rule the
+			// electrolyzer and the fuel cell carry (#585): the four streams
+			// are chemically distinct, and the tick sizes each product
+			// against its own store's headroom before either is added, so
+			// one store named for two product roles has the same headroom
+			// spent twice and breaks the finite-capacity audit on the very
+			// first tick. Feed/feed and feed/product aliases are refused on
+			// the same principle even where no capacity error is reached:
+			// one inventory may not stand for two different substances the
+			// ledger books separately. Every pair of the reactor's own
+			// stream roles must name a distinct store; sharing between
+			// different machines - one reactor's methane feeding a
+			// processor - is untouched.
+			std::pair<char const*, std::string const*> const reactorRoles[] = {
+				{"CO2 feed", &reactor.co2StoreId},
+				{"hydrogen feed", &reactor.hydrogenStoreId},
+				{"methane product", &reactor.methaneStoreId},
+				{"product water", &reactor.waterStoreId},
+			};
+			for (size_t left = 0; left < 4; ++left)
+				for (size_t right = left + 1; right < 4; ++right)
+					if (!reactorRoles[left].second->empty()
+						&& *reactorRoles[left].second == *reactorRoles[right].second)
+						return refuse(where + " names the same store '"
+							+ *reactorRoles[left].second + "' for the "
+							+ reactorRoles[left].first + " and the "
+							+ reactorRoles[right].first
+							+ ": chemically distinct streams may not share one store");
+			if (!declareGasStore(reactor.co2StoreId, "CO2 feed", where,
+				reactor.hazardClass, false))
+				return false;
+			if (!declareGasStore(reactor.hydrogenStoreId, "hydrogen feed", where,
+				reactor.hazardClass, false))
+				return false;
+			if (!declareGasStore(reactor.methaneStoreId, "methane", where,
+				reactor.hazardClass, false))
+				return false;
+			if (!declareWaterStore(reactor.waterStoreId, "product water", where,
+				reactor.hazardClass, false))
+				return false;
+			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
+				{ return reservoir.id == reactor.heatSinkId; });
+			if (sink == settings.thermalReservoirs.end())
+				return missing(where + " heat sink is unknown thermal reservoir '" + reactor.heatSinkId + "'");
+			if (sink->thermalClass != reactor.thermalClass)
+				return refuse(where + " thermal class '" + reactor.thermalClass
+					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
+					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
+		} catch (BrokenDraftEntry const&) {}
+		for (auto const& processor : settings.methaneProcessors) try
+		{
+			auto const where = "Station methane processor '" + processor.id + "'";
+			if (processor.id.empty()) return refuse("Station methane processor id must not be empty");
+			if (processor.id.size() > MaxStationStoreIdLength)
+				return refuse("Station methane processor id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!gasIds.insert(processor.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
+				processor.hazardClass) == StationWaterHazardClasses.end())
+				return refuse(where + " has unknown hazard class '" + processor.hazardClass
+					+ "'; declared classes are: normal, hazardous");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				processor.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + processor.thermalClass
+					+ "'; declared classes are: " + declaredThermalClasses());
+			if (!std::isfinite(processor.rateKgPerS) || processor.rateKgPerS < 0.0)
+				return refuse(where + " rated methane processing must be finite and non-negative");
+			if (!std::isfinite(processor.specificEnergyKWhPerKgCH4)
+				|| processor.specificEnergyKWhPerKgCH4 * 3600.0
+					< StationMethaneProcessingReactionHeatKJPerKgMethane
+					- StationBalanceTolerance * std::max(1.0,
+						StationMethaneProcessingReactionHeatKJPerKgMethane))
+				return refuse(where + " specific energy is below the endothermic reaction heat the split must absorb: the electrical dose may not fund less than the reaction demands");
+			if (!std::isfinite(processor.maxSinkTemperatureC)
+				|| processor.maxSinkTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum sink temperature must be finite and above absolute zero");
+			// The same aliased-role rule as the Sabatier reactor (#599):
+			// the methane feed, the recovered hydrogen and the solid
+			// carbon are three chemically distinct streams, and the tick
+			// sizes each product against its own store's headroom before
+			// either is added, so one store named for two roles spends the
+			// same headroom twice. One inventory standing for two booked
+			// substances is refused whatever the fill levels.
+			std::pair<char const*, std::string const*> const processorRoles[] = {
+				{"methane feed", &processor.methaneStoreId},
+				{"recovered hydrogen", &processor.hydrogenStoreId},
+				{"solid carbon", &processor.carbonStoreId},
+			};
+			for (size_t left = 0; left < 3; ++left)
+				for (size_t right = left + 1; right < 3; ++right)
+					if (!processorRoles[left].second->empty()
+						&& *processorRoles[left].second == *processorRoles[right].second)
+						return refuse(where + " names the same store '"
+							+ *processorRoles[left].second + "' for the "
+							+ processorRoles[left].first + " and the "
+							+ processorRoles[right].first
+							+ ": chemically distinct streams may not share one store");
+			if (!declareGasStore(processor.methaneStoreId, "methane feed", where,
+				processor.hazardClass, false))
+				return false;
+			if (!declareGasStore(processor.hydrogenStoreId, "recovered hydrogen", where,
+				processor.hazardClass, false))
+				return false;
+			if (!declareGasStore(processor.carbonStoreId, "solid carbon", where,
+				processor.hazardClass, false))
+				return false;
+			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
+				{ return reservoir.id == processor.heatSinkId; });
+			if (sink == settings.thermalReservoirs.end())
+				return missing(where + " heat sink is unknown thermal reservoir '" + processor.heatSinkId + "'");
+			if (sink->thermalClass != processor.thermalClass)
+				return refuse(where + " thermal class '" + processor.thermalClass
+					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
+					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
+		} catch (BrokenDraftEntry const&) {}
+		// Nutrient recovery contracts (#407). A microbial processor digests
+		// a compound organic-waste feedstock and recovers its bound
+		// nutrients per constituent: the recovery yields are fractions of
+		// the feed's own bound nitrogen, phosphorus, potassium and grouped
+		// mineral content, so the recovered nutrients are funded by the
+		// feedstock alone. Atmospheric nitrogen in the feed is never a
+		// nutrient source - no configured process in this slice converts
+		// it, so it passes through to the residue and can never
+		// substitute for bound N. The feed must declare a composition:
+		// there is nothing to recover from an uncharacterised stream, and
+		// the product stores (nutrients, residue) must be plain mass
+		// stores, because a compound destination would create tracked
+		// constituents out of nothing. The residue rate is the
+		// mass-balance remainder of the declared inputs and outputs per
+		// kilogram of feed: a configuration whose declared outputs would
+	// exceed its inputs is refused rather than gifting mass. The
+		// exothermic reaction heat is capped by the feedstock's declared
+		// chemical energy per kilogram of feed - the released heat is
+		// paid for by the feed, never free - and the operating window
+		// must be a real window: minimum below maximum, both above
+		// absolute zero.
+		if (!validateStationBiologyWiring(settings, diagnostic, false, brokenReferences)) return false;
+		diagnostic.clear(); return true;
+	}
+	bool validateStationBiologyWiring(StationSystemsSettings const& settings, std::string& diagnostic,
+		bool allowUnwired, std::vector<std::string>* brokenReferences)
+	{
+		auto refuse = [&](std::string text) { diagnostic = std::move(text); return false; };
+		auto missing = [&](std::string text) -> bool {
+			if (!brokenReferences) return refuse(std::move(text));
+			brokenReferences->push_back(std::move(text));
+			throw BrokenDraftEntry{};
+		};
+		std::map<std::string, std::string> waterStoreClass;
+		auto declareWaterStore = [&](std::string const& storeId, char const* role,
+			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+		{
+			if (allowUnwired && storeId.empty()) return true;
+			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
+			if (found == settings.stores.end())
+				return missing(where + " " + role + " store '" + storeId + "' does not exist");
+			if (!isMassUnit(found->unit))
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' must be a mass unit; water recovery is mass-denominated (g or kg)");
+			if (found->composition && !allowCompound)
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' declares a composition; recovered water streams are plain mass stores, so no dry constituent can be created from pure condensate");
+			if (found->hazardClass != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is authored "
+					+ found->hazardClass + "-class but this is a " + hazardClass
+					+ "-class water process; a process may only touch stores of its own hazard class");
+			auto const existing = waterStoreClass.find(storeId);
+			if (existing == waterStoreClass.end())
+				waterStoreClass.emplace(storeId, hazardClass);
+			else if (existing->second != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
+					+ existing->second + "-class water process; hazardous and normal water streams may not share a store");
+			return true;
+		};
+		std::map<std::string, std::string> gasStoreClass;
+		auto declareGasStore = [&](std::string const& storeId, char const* role,
+			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+		{
+			if (allowUnwired && storeId.empty()) return true;
+			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
+			if (found == settings.stores.end())
+				return missing(where + " " + role + " store '" + storeId + "' does not exist");
+			if (!isMassUnit(found->unit))
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' must be a mass unit; gas handling is mass-denominated (g or kg)");
+			if (found->composition && !allowCompound)
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' declares a composition; handled gas streams are plain mass stores, so no dry constituent can be created from pure gas");
+			if (found->hazardClass != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is authored "
+					+ found->hazardClass + "-class but this is a " + hazardClass
+					+ "-class gas process; a process may only touch stores of its own hazard class");
+			auto const existing = gasStoreClass.find(storeId);
+			if (existing == gasStoreClass.end())
+				gasStoreClass.emplace(storeId, hazardClass);
+			else if (existing->second != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
+					+ existing->second + "-class gas process; hazardous and normal gas streams may not share a store");
+			return true;
+		};
+		// Crew contracts (#401): the crew is an authored population and
+		// activity assignment, never derived from World Agents. All four
+		// matter stores must be compound mass stores so the declared
+		// compositions can carry the nutrient/element closure: at full
+		// activity the emitted mass (CO2 + moisture + urine + organic
+		// waste) may not exceed the consumed mass (food + water +
+		// oxygen); every tracked constituent returned in the urine and
+		// organic-waste streams (plus respired moisture) must be funded
+		// by the consumed food and water; and the declared metabolic
+		// heat may not exceed the declared food energy minus the energy
+		// still bound in the waste streams. A crew that would create
+		// mass, constituents or energy out of nothing is refused before
+		// anything runs; a crew whose returns fall short of its
+		// consumption retains the difference as explicit body mass,
+		// reported in the ledger rather than discarded.
+		if (settings.crews.size() > MaxStationCrews)
+			return refuse("Station crews are limited to "
+				+ std::to_string(MaxStationCrews) + " entries");
+		std::set<std::string> crewIds;
+		for (auto const& crew : settings.crews) try
+		{
+			auto const where = "Station crew '" + crew.id + "'";
+			if (crew.id.empty()) return refuse("Station crew id must not be empty");
+			if (crew.id.size() > MaxStationStoreIdLength)
+				return refuse("Station crew id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!crewIds.insert(crew.id).second) return refuse(where + " id is duplicated");
+			auto const habitat = std::find_if(settings.atmospheres.begin(),
+				settings.atmospheres.end(),
+				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == crew.atmosphereId; });
+			if (habitat == settings.atmospheres.end() && !(allowUnwired && crew.atmosphereId.empty()))
+				return missing(where + " breathes in unknown atmosphere compartment '" + crew.atmosphereId + "'");
+			if (crew.crewCount < 0) return refuse(where + " crew count must not be negative");
+			if (!validateStationProfile(crew.activityProfile, where + " activity profile", diagnostic))
+				return false;
+			auto const rates = {crew.foodPerCrewPerS, crew.waterPerCrewPerS,
+				crew.oxygenPerCrewKgPerS, crew.co2PerCrewKgPerS, crew.moisturePerCrewKgPerS,
+				crew.urinePerCrewPerS, crew.organicWastePerCrewPerS, crew.metabolicHeatPerCrewKW};
+			for (auto const rate : rates)
+				if (!std::isfinite(rate) || rate < 0.0)
+					return refuse(where + " metabolic rates must be finite and non-negative");
+			ResourceStoreSettings const* streamStores[4]{nullptr, nullptr, nullptr, nullptr};
+			char const* streamRoles[4]{"food", "water", "urine", "organic waste"};
+			std::string const streamIds[4]{crew.foodStoreId, crew.waterStoreId,
+				crew.urineStoreId, crew.organicWasteStoreId};
+			for (size_t stream = 0; stream < 4; ++stream)
+			{
+				if (allowUnwired && streamIds[stream].empty()) continue;
+				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+					[&](ResourceStoreSettings const& store) { return store.id == streamIds[stream]; });
+				if (found == settings.stores.end())
+					return missing(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
+						+ "' does not exist");
+				if (!isMassUnit(found->unit))
+					return refuse(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
+						+ "' must be a mass unit; crew metabolism is mass-denominated (g or kg)");
+				if (!found->composition)
+					return refuse(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
+						+ "' has no declared composition; crew streams require compound stores to close the element balance");
+				// Hazard segregation (#573): the breathing compartment is the
+				// containment boundary, so every crew stream - food and water in,
+				// urine and organic waste out - is pinned to the compartment's
+				// own hazard class. A hazardous store can never feed or receive a
+				// normal population, and a normal store can never be claimed as
+				// the destination of a hazardous crew's returns: crossing that
+				// boundary is a release process with its own clearance contract,
+				// not metabolism.
+				if (habitat != settings.atmospheres.end() && found->hazardClass != habitat->hazardClass)
+					return refuse(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
+						+ "' is authored " + found->hazardClass + "-class but the crew breathes in '"
+						+ habitat->id + "', a " + habitat->hazardClass + "-class compartment: a crew may only consume and return material of its compartment's hazard class; crew returns never relabel material across the hazard boundary");
+				streamStores[stream] = &*found;
+			}
+			// Aliased stream roles are refused (#600), the same rule the
+			// electrolyzer and fuel cell carry (#585) and the carbon-recovery
+			// machines carry (#599): food, drinking water, urine and organic
+			// waste are four physically distinct streams the ledger books
+			// separately. The tick sizes every draw and return against the
+			// store's inventory or headroom measured from the same starting
+			// state, then books them sequentially, so one store named for two
+			// roles has the same inventory spent twice: with aliased inputs the
+			// second draw finds the store already drained while the returns
+			// still use the original scale, driving retained body mass
+			// negative and pausing the World at tick zero; with aliased outputs
+			// the second return is clipped after both inputs were consumed,
+			// silently changing the metabolic balance the author sized. Every
+			// pair of the crew's own stream roles must name a distinct store;
+			// sharing between different crews is untouched, because crews book
+			// sequentially against the live inventory.
+			for (size_t left = 0; left < 4; ++left)
+				for (size_t right = left + 1; right < 4; ++right)
+					if (!streamIds[left].empty() && streamIds[left] == streamIds[right])
+						return refuse(where + " names the same store '"
+							+ streamIds[left] + "' for the "
+							+ streamRoles[left] + " and the " + streamRoles[right]
+							+ ": chemically distinct streams may not share one store");
+			if (allowUnwired && std::any_of(std::begin(streamStores), std::end(streamStores),
+				[](auto store) { return store == nullptr; })) continue;
+			auto const* food = streamStores[0];
+			auto const* water = streamStores[1];
+			auto const* urine = streamStores[2];
+			auto const* waste = streamStores[3];
+			auto const foodKg = massToKg(food->unit, crew.foodPerCrewPerS);
+			auto const waterKg = massToKg(water->unit, crew.waterPerCrewPerS);
+			auto const urineKg = massToKg(urine->unit, crew.urinePerCrewPerS);
+			auto const wasteKg = massToKg(waste->unit, crew.organicWastePerCrewPerS);
+			auto const consumedKg = foodKg + waterKg + crew.oxygenPerCrewKgPerS;
+			auto const emittedKg = urineKg + wasteKg
+				+ crew.moisturePerCrewKgPerS + crew.co2PerCrewKgPerS;
+			if (emittedKg > consumedKg + StationBalanceTolerance * std::max(1.0, consumedKg))
+				return refuse(where + " declared returns exceed declared consumption: metabolism may not create mass");
+			ConstituentLedger funded;
+			addComposition(funded, *food->composition, foodKg, 1.0);
+			addComposition(funded, *water->composition, waterKg, 1.0);
+			ConstituentLedger returned;
+			addComposition(returned, *urine->composition, urineKg, 1.0);
+			addComposition(returned, *waste->composition, wasteKg, 1.0);
+			returned["water"] += crew.moisturePerCrewKgPerS;
+			for (auto const& entry : returned)
+			{
+				auto const available = funded.count(entry.first) ? funded.at(entry.first) : 0.0;
+				if (entry.second > available + StationBalanceTolerance
+					* std::max(1.0, std::abs(available)))
+					return refuse(where + " returns more '" + entry.first
+						+ "' than the consumed food and water carry: the element balance may not be created");
+			}
+			auto const streamEnergy = [](ResourceCompositionSettings const& composition, double wetKg)
+			{
+				return wetKg * (1.0 - composition.moisture) * composition.energyKJPerKgDry;
+			};
+			auto const releasedKJPerS = streamEnergy(*food->composition, foodKg)
+				- streamEnergy(*urine->composition, urineKg)
+				- streamEnergy(*waste->composition, wasteKg);
+			if (crew.metabolicHeatPerCrewKW > releasedKJPerS
+				+ StationBalanceTolerance * std::max(1.0, std::abs(releasedKJPerS)))
+				return refuse(where + " metabolic heat exceeds the consumed food energy minus the energy still bound in the waste streams: heat may not be created from nothing");
+		} catch (BrokenDraftEntry const&) {}
+		if (settings.microbialProcessors.size() > MaxStationMicrobialProcessors)
+			return refuse("Station microbial processors are limited to "
+				+ std::to_string(MaxStationMicrobialProcessors) + " entries");
+		std::map<std::string, std::string> microbialStoreClass;
+		auto declareMicrobialStore = [&](std::string const& storeId, char const* role,
+			std::string const& where, std::string const& hazardClass,
+			bool requireCompound) -> bool
+		{
+			if (allowUnwired && storeId.empty()) return true;
+			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
+			if (found == settings.stores.end())
+				return missing(where + " " + role + " store '" + storeId + "' does not exist");
+			if (!isMassUnit(found->unit))
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' must be a mass unit; nutrient recovery is mass-denominated (g or kg)");
+			if (requireCompound && !found->composition)
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' declares no composition; a microbial processor recovers bound nutrients from a declared compound feedstock, not from an uncharacterised stream");
+			if (!requireCompound && found->composition)
+				return refuse(where + " " + role + " store '" + storeId
+					+ "' declares a composition; recovered product streams land as plain mass, so a compound destination would create tracked constituents out of nothing");
+			if (found->hazardClass != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is authored "
+					+ found->hazardClass + "-class but this is a " + hazardClass
+					+ "-class nutrient process; a process may only touch stores of its own hazard class");
+			auto const existing = microbialStoreClass.find(storeId);
+			if (existing == microbialStoreClass.end())
+				microbialStoreClass.emplace(storeId, hazardClass);
+			else if (existing->second != hazardClass)
+				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
+					+ existing->second + "-class nutrient process; hazardous and normal nutrient streams may not share a store");
+			return true;
+		};
+		std::set<std::string> microbialIds;
+		for (auto const& processor : settings.microbialProcessors) try
+		{
+			auto const where = "Station microbial processor '" + processor.id + "'";
+			if (processor.id.empty()) return refuse("Station microbial processor id must not be empty");
+			if (processor.id.size() > MaxStationStoreIdLength)
+				return refuse("Station microbial processor id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!microbialIds.insert(processor.id).second) return refuse(where + " id is duplicated");
+			if (std::find(StationWaterHazardClasses.begin(), StationWaterHazardClasses.end(),
+				processor.hazardClass) == StationWaterHazardClasses.end())
+				return refuse(where + " has unknown hazard class '" + processor.hazardClass
+					+ "'; declared classes are: normal, hazardous");
+			if (std::find(StationThermalServiceClasses.begin(), StationThermalServiceClasses.end(),
+				processor.thermalClass) == StationThermalServiceClasses.end())
+				return refuse(where + " has unknown thermal service class '" + processor.thermalClass
+					+ "'; declared classes are: " + declaredThermalClasses());
+			if (!std::isfinite(processor.rateKgPerS) || processor.rateKgPerS < 0.0)
+				return refuse(where + " rated feed processing must be finite and non-negative");
+			double const rateFields[]{processor.specificEnergyKWhPerKgFeed,
+				processor.oxygenPerKgFeedKg, processor.processWaterPerKgFeedKg,
+				processor.consumablePerKgFeed, processor.co2PerKgFeedKg,
+				processor.reactionHeatKJPerKgFeed};
+			char const* rateNames[]{"specific energy", "oxygen per kg feed",
+				"process water per kg feed", "consumable per kg feed",
+				"CO2 per kg feed", "reaction heat per kg feed"};
+			for (size_t field = 0; field < 6; ++field)
+				if (!std::isfinite(rateFields[field]) || rateFields[field] < 0.0)
+					return refuse(where + " " + rateNames[field] + " must be finite and non-negative");
+			double const recoveryFields[]{processor.nitrogenRecovery,
+				processor.phosphorusRecovery, processor.potassiumRecovery,
+				processor.mineralsRecovery, processor.waterRecovery};
+			char const* recoveryNames[]{"nitrogen recovery", "phosphorus recovery",
+				"potassium recovery", "minerals recovery", "water recovery"};
+			for (size_t field = 0; field < 5; ++field)
+				if (!std::isfinite(recoveryFields[field]) || recoveryFields[field] < 0.0
+					|| recoveryFields[field] > 1.0)
+					return refuse(where + " " + recoveryNames[field]
+						+ " must be finite and from 0 to 1: a yield cannot recover more than the feed carries");
+			if (!std::isfinite(processor.minOperatingTemperatureC)
+				|| processor.minOperatingTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " minimum operating temperature must be finite and above absolute zero");
+			if (!std::isfinite(processor.maxSinkTemperatureC)
+				|| processor.maxSinkTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum sink temperature must be finite and above absolute zero");
+			if (processor.minOperatingTemperatureC >= processor.maxSinkTemperatureC)
+				return refuse(where + " minimum operating temperature must be below the maximum sink temperature: an empty operating window is never a service");
+			// #408 condition/recovery contract. The coefficients are
+			// provisional biological assumptions: the validation pins
+			// them finite and in range, not biologically correct.
+			if (!std::isfinite(processor.initialCondition)
+				|| processor.initialCondition < 0.0 || processor.initialCondition > 1.0)
+				return refuse(where + " initial culture condition must be finite and from 0 to 1");
+			double const biologyFields[]{processor.starvationDegradePerHour,
+				processor.consumableExhaustionDegradePerHour,
+				processor.coldStressDegradePerHour, processor.heatStressDegradePerHour,
+				processor.recoveryPerHour};
+			char const* biologyNames[]{"starvation degradation per hour",
+				"consumable exhaustion degradation per hour",
+				"cold stress degradation per hour", "heat stress degradation per hour",
+				"recovery per hour"};
+			for (size_t field = 0; field < 5; ++field)
+				if (!std::isfinite(biologyFields[field]) || biologyFields[field] < 0.0)
+					return refuse(where + " " + biologyNames[field]
+						+ " must be finite and non-negative (provisional biological assumption)");
+			if (!std::isfinite(processor.stockUnitsPerConditionPoint)
+				|| processor.stockUnitsPerConditionPoint < 0.0)
+				return refuse(where + " stock units per condition point must be finite and non-negative");
+			if (!processor.stockStoreId.empty() && processor.stockUnitsPerConditionPoint <= 0.0)
+				return refuse(where + " stock units per condition point must be positive when a replacement biological stock store is declared: recovery would otherwise restore capacity while consuming nothing per point");
+			std::string const chainIds[9]{processor.feedStoreId, processor.oxygenStoreId,
+				processor.waterStoreId, processor.consumableStoreId, processor.nutrientStoreId,
+				processor.recoveredWaterStoreId, processor.co2StoreId, processor.residueStoreId,
+				processor.stockStoreId};
+			char const* chainRoles[9]{"feed", "oxygen", "process water", "consumable",
+				"nutrient", "recovered water", "CO2", "residue", "replacement stock"};
+			for (size_t stream = 0; stream < 9; ++stream)
+				for (size_t other = stream + 1; other < 9; ++other)
+					if (!chainIds[stream].empty() && chainIds[stream] == chainIds[other])
+						return refuse(where + " " + chainRoles[stream] + " store and "
+							+ chainRoles[other] + " store are the same store '"
+							+ chainIds[stream] + "'; the recovery chain needs distinct stores for every stream");
+			if (!declareMicrobialStore(processor.feedStoreId, "feed", where,
+				processor.hazardClass, true))
+				return false;
+			if (!declareGasStore(processor.oxygenStoreId, "oxygen", where,
+				processor.hazardClass, false))
+				return false;
+			if (!declareWaterStore(processor.waterStoreId, "process water", where,
+				processor.hazardClass, false))
+				return false;
+			if (!allowUnwired || !processor.consumableStoreId.empty())
+			{
+				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+					[&](ResourceStoreSettings const& store) { return store.id == processor.consumableStoreId; });
+				if (found == settings.stores.end())
+					return missing(where + " consumable store '" + processor.consumableStoreId
+						+ "' does not exist");
+				// #592: the consumable is a consumed input like the feed: its
+				// authored hazard class must match the processor's own class,
+				// not merely stay consistent with other processors' claims on
+				// the same store id. A normal processor may not draw
+				// hazardous-class media, and a hazardous processor may not
+				// draw normal-class media.
+				if (found->hazardClass != processor.hazardClass)
+					return refuse(where + " consumable store '" + processor.consumableStoreId
+						+ "' is authored " + found->hazardClass
+						+ "-class but this is a " + processor.hazardClass
+						+ "-class nutrient process; a process may only touch stores of its own hazard class");
+				auto const existing = microbialStoreClass.find(processor.consumableStoreId);
+				if (existing == microbialStoreClass.end())
+					microbialStoreClass.emplace(processor.consumableStoreId, processor.hazardClass);
+				else if (existing->second != processor.hazardClass)
+					return refuse(where + " consumable store '" + processor.consumableStoreId
+						+ "' is already used by a " + existing->second
+						+ "-class nutrient process; hazardous and normal nutrient streams may not share a store");
+			}
+			if (!declareMicrobialStore(processor.nutrientStoreId, "nutrient", where,
+				processor.hazardClass, false))
+				return false;
+			if (!declareWaterStore(processor.recoveredWaterStoreId, "recovered water", where,
+				processor.hazardClass, false))
+				return false;
+			if (!declareGasStore(processor.co2StoreId, "CO2", where,
+				processor.hazardClass, false))
+				return false;
+			if (!declareMicrobialStore(processor.residueStoreId, "residue", where,
+				processor.hazardClass, false))
+				return false;
+			// The replacement biological stock store (#408) is an optional
+			// consumed input like the consumable: it must exist, carry the
+			// processor's own authored hazard class (#592), and stay
+			// hazard-class segregated from the rest of the nutrient chain.
+			if (!processor.stockStoreId.empty())
+			{
+				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+						[&](ResourceStoreSettings const& store) { return store.id == processor.stockStoreId; });
+				if (found == settings.stores.end())
+					return missing(where + " replacement biological stock store '"
+						+ processor.stockStoreId + "' does not exist");
+				if (found->hazardClass != processor.hazardClass)
+					return refuse(where + " replacement biological stock store '"
+						+ processor.stockStoreId + "' is authored " + found->hazardClass
+						+ "-class but this is a " + processor.hazardClass
+						+ "-class nutrient process; a process may only touch stores of its own hazard class");
+				auto const existing = microbialStoreClass.find(processor.stockStoreId);
+				if (existing == microbialStoreClass.end())
+					microbialStoreClass.emplace(processor.stockStoreId, processor.hazardClass);
+				else if (existing->second != processor.hazardClass)
+					return refuse(where + " replacement biological stock store '"
+						+ processor.stockStoreId + "' is already used by a "
+						+ existing->second + "-class nutrient process; hazardous and normal nutrient streams may not share a store");
+			}
+
+			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
+				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
+				{ return reservoir.id == processor.heatSinkId; });
+			if (sink == settings.thermalReservoirs.end() && !(allowUnwired && processor.heatSinkId.empty()))
+				return missing(where + " heat sink is unknown thermal reservoir '" + processor.heatSinkId + "'");
+			if (sink != settings.thermalReservoirs.end() && sink->thermalClass != processor.thermalClass)
+				return refuse(where + " thermal class '" + processor.thermalClass
+					+ "' does not match heat sink reservoir '" + sink->id + "' class '"
+					+ sink->thermalClass + "'; spare capacity in one class is never usable by another");
+			if (allowUnwired && processor.feedStoreId.empty()) continue;
+			auto const feed = std::find_if(settings.stores.begin(), settings.stores.end(),
+				[&](ResourceStoreSettings const& store) { return store.id == processor.feedStoreId; });
+			auto const& composition = *feed->composition;
+			auto const dryPerKgFeed = 1.0 - composition.moisture;
+			auto const nutrientPerKgFeed = dryPerKgFeed * (composition.nutrientNitrogen
+				* processor.nitrogenRecovery + composition.phosphorus * processor.phosphorusRecovery
+				+ composition.potassium * processor.potassiumRecovery
+				+ composition.otherMinerals * processor.mineralsRecovery);
+			auto const recoveredWaterPerKgFeed = composition.moisture * processor.waterRecovery;
+			auto const residuePerKgFeed = 1.0 + processor.oxygenPerKgFeedKg
+				+ processor.processWaterPerKgFeedKg - nutrientPerKgFeed
+				- recoveredWaterPerKgFeed - processor.co2PerKgFeedKg;
+			if (residuePerKgFeed < -StationBalanceTolerance)
+				return refuse(where + " declared yields would create mass: the outputs exceed the feed plus oxygen plus process water, and an unrecoverable residue cannot be negative");
+			auto const feedEnergyKJPerKgFeed = dryPerKgFeed * composition.energyKJPerKgDry;
+			if (processor.reactionHeatKJPerKgFeed > feedEnergyKJPerKgFeed
+				+ StationBalanceTolerance * std::max(1.0, std::abs(feedEnergyKJPerKgFeed)))
+				return refuse(where + " declared reaction heat exceeds the feedstock's declared chemical energy: the digestion may not release more heat than the feed carries");
+		} catch (BrokenDraftEntry const&) {}
+		// Crop production contracts (#409). A crop population grows a dry
+		// Living biomass inside one Atmosphere compartment under the
+		// resources actually delivered: lamp power through the declared
+		// illumination profile, CO2 from the compartment, irrigation water
+		// and each tracked nutrient from its own separate store, inside a
+		// declared growing temperature window and below the declared
+		// Growing capacity (growing area x maximum supported density).
+		// The declared composition fixes the dry-mass basis: the organic
+		// balance is what growth builds and respiration burns, and the
+		// bound nutrient fractions are funded by the matching stores
+		// alone, so one abundant nutrient can never substitute for an
+		// exhausted one. Atmospheric nitrogen is refused: crops take up
+		// bound nutrient nitrogen, not air, and no configured process here
+		// converts one form into the other. Moisture is refused too: Living
+		// biomass is tracked as dry mass, so a water fraction in this
+		// declaration would count water the population never carries.
+		// The growth yield may not fix more chemical energy per kWh of
+		// light than a kWh of light carries: photosynthesis is never a
+		// free source of chemical energy. All biological coefficients are
+		// provisional assumptions: the validation pins them finite and in
+		// range, not agronomically correct.
+		if (settings.cropPopulations.size() > MaxStationCropPopulations)
+			return refuse("Station crop populations are limited to "
+				+ std::to_string(MaxStationCropPopulations) + " entries");
+		std::set<std::string> cropIds;
+		for (auto const& crop : settings.cropPopulations) try
+		{
+			auto const where = "Station crop population '" + crop.id + "'";
+			if (crop.id.empty()) return refuse("Station crop population id must not be empty");
+			if (crop.id.size() > MaxStationStoreIdLength)
+				return refuse("Station crop population id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!cropIds.insert(crop.id).second) return refuse(where + " id is duplicated");
+			auto const compartment = std::find_if(settings.atmospheres.begin(),
+				settings.atmospheres.end(),
+				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == crop.atmosphereId; });
+			if (compartment == settings.atmospheres.end() && !(allowUnwired && crop.atmosphereId.empty()))
+				return missing(where + " grows in unknown atmosphere compartment '" + crop.atmosphereId + "'");
+			std::string const uptakeIds[5]{crop.waterStoreId, crop.nitrogenStoreId,
+				crop.phosphorusStoreId, crop.potassiumStoreId, crop.mineralsStoreId};
+			char const* uptakeRoles[5]{"irrigation water", "nitrogen", "phosphorus",
+				"potassium", "minerals"};
+			char const* uptakePurityNames[5]{"water", "bound nutrient nitrogen",
+				"phosphorus", "potassium", "other minerals"};
+			for (size_t stream = 0; stream < 5; ++stream)
+			{
+				if (allowUnwired && uptakeIds[stream].empty()) continue;
+				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+					[&](ResourceStoreSettings const& store) { return store.id == uptakeIds[stream]; });
+				if (found == settings.stores.end())
+					return missing(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
+						+ "' does not exist");
+				if (!isMassUnit(found->unit))
+					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
+						+ "' must be a mass unit; crop uptake is mass-denominated (g or kg)");
+				if (found->composition && !isPureUptakeComposition(*found->composition, stream))
+					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
+						+ "' declares a compound composition that is not pure "
+						+ uptakePurityNames[stream] + ": the uptake spends the drawn mass exactly as "
+						+ uptakePurityNames[stream]
+						+ " and owns no residual stream to account for any other constituent; only an explicit conversion may cross that boundary");
+				// Hazard segregation (#573): the growing compartment is the
+				// containment boundary, so every store the population touches -
+				// irrigation water and each tracked nutrient in, harvested food
+				// and waste out - must carry the compartment's own hazard class.
+				// Hazardous irrigation can never feed a normal canopy, and a
+				// normal store can never receive a hazardous population's
+				// harvest or death residue: relabelling across the boundary is
+				// a release process, not a harvest.
+				if (compartment != settings.atmospheres.end() && found->hazardClass != compartment->hazardClass)
+					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
+						+ "' is authored " + found->hazardClass + "-class but the population grows in '"
+						+ compartment->id + "', a " + compartment->hazardClass + "-class compartment: a crop may only take up and harvest material of its compartment's hazard class; harvest and death residue never relabel material across the hazard boundary");
+				for (size_t other = stream + 1; other < 5; ++other)
+					if (uptakeIds[stream] == uptakeIds[other])
+						return refuse(where + " " + uptakeRoles[stream] + " store and "
+							+ uptakeRoles[other] + " store are the same store '"
+							+ uptakeIds[stream] + "'; every tracked nutrient and the irrigation water need distinct stores so depletion stays visible per resource");
+			}
+			auto const& composition = crop.composition;
+			if (!std::isfinite(composition.moisture) || composition.moisture != 0.0)
+				return refuse(where + " declared composition carries moisture; Living biomass is tracked as dry mass, so the crop declaration must not carry a water fraction");
+			if (!std::isfinite(composition.atmosphericNitrogen) || composition.atmosphericNitrogen != 0.0)
+				return refuse(where + " declared composition carries atmospheric nitrogen; crops take up bound nutrient nitrogen, not air, and no configured process converts one into the other");
+			double const dryFractions[]{composition.nutrientNitrogen, composition.phosphorus,
+				composition.potassium, composition.otherMinerals};
+			char const* dryNames[]{"nutrient nitrogen", "phosphorus", "potassium", "other minerals"};
+			for (size_t field = 0; field < 4; ++field)
+				if (!std::isfinite(dryFractions[field]) || dryFractions[field] < 0.0)
+					return refuse(where + " declared " + dryNames[field]
+						+ " fraction must be finite and non-negative");
+			if (dryFractions[0] + dryFractions[1] + dryFractions[2] + dryFractions[3]
+				> 1.0 + StationBalanceTolerance)
+				return refuse(where + " declared dry nutrient fractions exceed 1: the organic dry-mass balance would be negative");
+			if (!std::isfinite(composition.energyKJPerKgDry) || composition.energyKJPerKgDry <= 0.0)
+				return refuse(where + " declared chemical energy per dry kg must be finite and positive: the respiration heat and fixed-energy ledger depend on it");
+			if (!std::isfinite(crop.growingAreaM2) || crop.growingAreaM2 < 0.0)
+				return refuse(where + " growing area must be finite and non-negative");
+			if (!std::isfinite(crop.maxBiomassDensityKgPerM2) || crop.maxBiomassDensityKgPerM2 <= 0.0)
+				return refuse(where + " maximum biomass density must be finite and positive");
+			auto const capacityKg = crop.growingAreaM2 * crop.maxBiomassDensityKgPerM2;
+			// #581: the two authored factors are each validated finite, but
+			// their product - the installation's Growing capacity - can still
+			// overflow to infinity. A non-finite capacity passes every upper-
+			// bound comparison downstream (inf > x is always true, inf > inf
+			// is false), so the finite installation bound the snapshot promises
+			// would silently vanish. The overflow is refused here, before any
+			// runtime construction or document mutation, rather than published
+			// as a healthy tick.
+			if (!std::isfinite(capacityKg))
+				return refuse(where + " derived Growing capacity overflows to a non-finite magnitude: growing area times maximum biomass density must stay finite so the installation bound stays a publishable, comparable number");
+			if (!std::isfinite(crop.initialBiomassKg) || crop.initialBiomassKg < 0.0)
+				return refuse(where + " initial living biomass must be finite and non-negative");
+			if (crop.initialBiomassKg > capacityKg + StationBalanceTolerance)
+				return refuse(where + " initial living biomass exceeds the declared Growing capacity: the population cannot start fuller than the installation can support");
+			if (!std::isfinite(crop.lampRatedKW) || crop.lampRatedKW < 0.0)
+				return refuse(where + " lamp rated power must be finite and non-negative");
+			if (!validateStationProfile(crop.illuminationProfile, where + " illumination profile", diagnostic))
+				return false;
+			if (!std::isfinite(crop.circulationPowerKW) || crop.circulationPowerKW < 0.0)
+				return refuse(where + " circulation power must be finite and non-negative");
+			if (!std::isfinite(crop.growthYieldKgPerKWh) || crop.growthYieldKgPerKWh < 0.0)
+				return refuse(where + " growth yield per kWh must be finite and non-negative (provisional biological assumption)");
+			if (crop.growthYieldKgPerKWh * composition.energyKJPerKgDry
+				> 3600.0 + StationBalanceTolerance * 3600.0)
+				return refuse(where + " declared growth yield would fix more chemical energy per kWh of light than the light carries: photosynthesis is never a free source of chemical energy");
+			if (!std::isfinite(crop.respirationPerHour) || crop.respirationPerHour < 0.0)
+				return refuse(where + " respiration per hour must be finite and non-negative (provisional biological assumption)");
+			if (!std::isfinite(crop.transpirationKgPerKgGrowth) || crop.transpirationKgPerKgGrowth < 0.0)
+				return refuse(where + " transpiration per kg growth must be finite and non-negative (provisional biological assumption)");
+			if (!std::isfinite(crop.minGrowingTemperatureC)
+				|| crop.minGrowingTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " minimum growing temperature must be finite and above absolute zero");
+			if (!std::isfinite(crop.maxGrowingTemperatureC)
+				|| crop.maxGrowingTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum growing temperature must be finite and above absolute zero");
+			if (crop.minGrowingTemperatureC >= crop.maxGrowingTemperatureC)
+				return refuse(where + " minimum growing temperature must be below the maximum growing temperature: an empty growing window is never a service");
+			// Harvest contract (#410). The edible and harvest fractions are
+			// declared shares of real material, so they must sit inside
+			// their physical ranges; a harvest trigger above the declared
+			// Growing capacity could never fire and is refused as a dead
+			// rule; and enabling a harvest without both destinations would
+			// remove living material with nowhere accounted to put it.
+			// Destination stores are validated whenever named, and required
+			// whenever the harvest is enabled: mass-denominated, distinct
+			// from each other, and composition-compatible with the crop's
+			// declared dry mass so the harvested constituents enter the
+			// stores exactly as declared rather than reinterpreted.
+			if (!std::isfinite(crop.edibleFraction) || crop.edibleFraction < 0.0
+				|| crop.edibleFraction > 1.0)
+				return refuse(where + " edible fraction must be finite and from 0 to 1: the edible share of the harvested dry mass cannot exceed the harvest");
+			if (!std::isfinite(crop.harvestFraction) || crop.harvestFraction <= 0.0
+				|| crop.harvestFraction > 1.0)
+				return refuse(where + " harvest fraction must be finite and from above 0 to 1: a harvest that removes nothing is not a harvest");
+			if (!std::isfinite(crop.harvestTriggerKg) || crop.harvestTriggerKg < 0.0)
+				return refuse(where + " harvest trigger must be finite and non-negative (0 disables the harvest)");
+			if (crop.harvestTriggerKg > capacityKg + StationBalanceTolerance)
+				return refuse(where + " harvest trigger exceeds the declared Growing capacity: the harvest could never fire, so the rule is dead as configured");
+			std::string const destinationIds[2]{crop.foodStoreId, crop.wasteStoreId};
+			char const* destinationRoles[2]{"food", "waste"};
+			for (size_t stream = 0; stream < 2; ++stream)
+			{
+				if (destinationIds[stream].empty())
+				{
+					if (!allowUnwired && crop.harvestTriggerKg > 0.0)
+						return refuse(where + " harvest is enabled but the " + destinationRoles[stream]
+							+ " destination store is not named: harvested living material must have a declared destination");
+					continue;
+				}
+				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+						[&](ResourceStoreSettings const& store) { return store.id == destinationIds[stream]; });
+				if (found == settings.stores.end())
+					return missing(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
+						+ "' does not exist");
+				if (!isMassUnit(found->unit))
+					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
+						+ "' must be a mass unit; harvested dry biomass is mass-denominated (g or kg)");
+				if (!destinationIds[0].empty() && destinationIds[0] == destinationIds[1])
+					return refuse(where + " food store and waste store are the same store '" + destinationIds[0]
+						+ "'; edible and inedible yield need distinct destinations so the split stays visible");
+				if (found->composition && !compositionsClose(*found->composition, composition))
+					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
+						+ "' declares a composition different from the crop's declared dry-mass composition: harvested material enters a store exactly as declared, and a different compound material is a boundary only an explicit conversion may cross");
+				if (compartment != settings.atmospheres.end() && found->hazardClass != compartment->hazardClass)
+					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
+						+ "' is authored " + found->hazardClass + "-class but the population grows in '"
+						+ compartment->id + "', a " + compartment->hazardClass + "-class compartment: a crop may only take up and harvest material of its compartment's hazard class; harvest and death residue never relabel material across the hazard boundary");
+			}
+		} catch (BrokenDraftEntry const&) {}
+		// Algae culture contracts (#411). A separate Biological population
+		// with its own installation limits: the Growing capacity here is the
+		// active culture volume times the supported dry-mass density per
+		// litre - never derived from, shared with, or substitutable by a
+		// crop's illuminated-area capacity. The lifecycle rules are the
+		// same as the crops' by design: dry-mass composition with no
+		// moisture and no atmospheric nitrogen, a growth yield that can
+		// never fix more chemical energy than the light delivers, a real
+		// growing window, and a start within the declared capacity. The
+		// harvest contract partitions the harvested dry mass into three
+		// declared destinations - food, recovery and waste - so enabling
+		// the harvest requires all three, pairwise distinct, mass-
+		// denominated and composition-compatible with the culture's
+		// declared dry mass; the food and recovery fractions together may
+		// not exceed the harvest, because the unrecoverable remainder is
+		// the waste share and a partition that spends more than 100% of
+		// the harvest is not conservative accounting.
+		if (settings.algaeCultures.size() > MaxStationAlgaeCultures)
+			return refuse("Station algae cultures are limited to "
+				+ std::to_string(MaxStationAlgaeCultures) + " entries");
+		std::set<std::string> algaeIds;
+		for (auto const& algae : settings.algaeCultures) try
+		{
+			auto const where = "Station algae culture '" + algae.id + "'";
+			if (algae.id.empty()) return refuse("Station algae culture id must not be empty");
+			if (algae.id.size() > MaxStationStoreIdLength)
+				return refuse("Station algae culture id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!algaeIds.insert(algae.id).second) return refuse(where + " id is duplicated");
+			auto const compartment = std::find_if(settings.atmospheres.begin(),
+				settings.atmospheres.end(),
+				[&](AtmosphereSettings const& atmosphere) { return atmosphere.id == algae.atmosphereId; });
+			if (compartment == settings.atmospheres.end() && !(allowUnwired && algae.atmosphereId.empty()))
+				return missing(where + " runs in unknown atmosphere compartment '" + algae.atmosphereId + "'");
+			std::string const uptakeIds[5]{algae.waterStoreId, algae.nitrogenStoreId,
+				algae.phosphorusStoreId, algae.potassiumStoreId, algae.mineralsStoreId};
+			char const* uptakeRoles[5]{"culture water", "nitrogen", "phosphorus",
+				"potassium", "minerals"};
+			char const* uptakePurityNames[5]{"water", "bound nutrient nitrogen",
+				"phosphorus", "potassium", "other minerals"};
+			for (size_t stream = 0; stream < 5; ++stream)
+			{
+				if (allowUnwired && uptakeIds[stream].empty()) continue;
+				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+					[&](ResourceStoreSettings const& store) { return store.id == uptakeIds[stream]; });
+				if (found == settings.stores.end())
+					return missing(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
+						+ "' does not exist");
+				if (!isMassUnit(found->unit))
+					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
+						+ "' must be a mass unit; culture uptake is mass-denominated (g or kg)");
+				if (found->composition && !isPureUptakeComposition(*found->composition, stream))
+					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
+						+ "' declares a compound composition that is not pure "
+						+ uptakePurityNames[stream] + ": the uptake spends the drawn mass exactly as "
+						+ uptakePurityNames[stream]
+						+ " and owns no residual stream to account for any other constituent; only an explicit conversion may cross that boundary");
+				// Hazard segregation (#573): as with the crops, the culture
+				// compartment is the containment boundary and every uptake and
+				// harvest destination must carry its hazard class.
+				if (compartment != settings.atmospheres.end() && found->hazardClass != compartment->hazardClass)
+					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
+						+ "' is authored " + found->hazardClass + "-class but the culture runs in '"
+						+ compartment->id + "', a " + compartment->hazardClass + "-class compartment: an algae culture may only take up and harvest material of its compartment's hazard class; the harvest partition and death residue never relabel material across the hazard boundary");
+				for (size_t other = stream + 1; other < 5; ++other)
+					if (uptakeIds[stream] == uptakeIds[other])
+						return refuse(where + " " + uptakeRoles[stream] + " store and "
+							+ uptakeRoles[other] + " store are the same store '"
+							+ uptakeIds[stream] + "'; every tracked nutrient and the culture water need distinct stores so depletion stays visible per resource");
+			}
+			auto const& composition = algae.composition;
+			if (!std::isfinite(composition.moisture) || composition.moisture != 0.0)
+				return refuse(where + " declared composition carries moisture; Living biomass is tracked as dry mass, so the culture declaration must not carry a water fraction");
+			if (!std::isfinite(composition.atmosphericNitrogen) || composition.atmosphericNitrogen != 0.0)
+				return refuse(where + " declared composition carries atmospheric nitrogen; the culture takes up bound nutrient nitrogen, not air, and no configured process converts one into the other");
+			double const dryFractions[]{composition.nutrientNitrogen, composition.phosphorus,
+				composition.potassium, composition.otherMinerals};
+			char const* dryNames[]{"nutrient nitrogen", "phosphorus", "potassium", "other minerals"};
+			for (size_t field = 0; field < 4; ++field)
+				if (!std::isfinite(dryFractions[field]) || dryFractions[field] < 0.0)
+					return refuse(where + " declared " + dryNames[field]
+						+ " fraction must be finite and non-negative");
+			if (dryFractions[0] + dryFractions[1] + dryFractions[2] + dryFractions[3]
+				> 1.0 + StationBalanceTolerance)
+				return refuse(where + " declared dry nutrient fractions exceed 1: the organic dry-mass balance would be negative");
+			if (!std::isfinite(composition.energyKJPerKgDry) || composition.energyKJPerKgDry <= 0.0)
+				return refuse(where + " declared chemical energy per dry kg must be finite and positive: the respiration heat and fixed-energy ledger depend on it");
+			if (!std::isfinite(algae.cultureVolumeL) || algae.cultureVolumeL < 0.0)
+				return refuse(where + " active culture volume must be finite and non-negative");
+			if (!std::isfinite(algae.maxBiomassDensityKgPerL) || algae.maxBiomassDensityKgPerL <= 0.0)
+				return refuse(where + " maximum biomass density per litre must be finite and positive");
+			auto const capacityKg = algae.cultureVolumeL * algae.maxBiomassDensityKgPerL;
+			// #581: the same product-overflow contract as the crops - the
+			// culture volume and the density per litre are each validated
+			// finite, but their product, the culture's installation bound,
+			// can still overflow to infinity and would then pass every
+			// upper-bound comparison downstream. Refused before any runtime
+			// construction or document mutation.
+			if (!std::isfinite(capacityKg))
+				return refuse(where + " derived culture capacity overflows to a non-finite magnitude: active culture volume times maximum biomass density per litre must stay finite so the installation bound stays a publishable, comparable number");
+			if (!std::isfinite(algae.initialBiomassKg) || algae.initialBiomassKg < 0.0)
+				return refuse(where + " initial living biomass must be finite and non-negative");
+			if (algae.initialBiomassKg > capacityKg + StationBalanceTolerance)
+				return refuse(where + " initial living biomass exceeds the declared culture capacity: the culture cannot start fuller than the installation can support");
+			if (!std::isfinite(algae.lampRatedKW) || algae.lampRatedKW < 0.0)
+				return refuse(where + " lamp rated power must be finite and non-negative");
+			if (!validateStationProfile(algae.illuminationProfile, where + " illumination profile", diagnostic))
+				return false;
+			if (!std::isfinite(algae.circulationPowerKW) || algae.circulationPowerKW < 0.0)
+				return refuse(where + " culture circulation power must be finite and non-negative");
+			if (!std::isfinite(algae.growthYieldKgPerKWh) || algae.growthYieldKgPerKWh < 0.0)
+				return refuse(where + " growth yield per kWh must be finite and non-negative (provisional biological assumption)");
+			if (algae.growthYieldKgPerKWh * composition.energyKJPerKgDry
+				> 3600.0 + StationBalanceTolerance * 3600.0)
+				return refuse(where + " declared growth yield would fix more chemical energy per kWh of light than the light carries: photosynthesis is never a free source of chemical energy");
+			if (!std::isfinite(algae.respirationPerHour) || algae.respirationPerHour < 0.0)
+				return refuse(where + " respiration per hour must be finite and non-negative (provisional biological assumption)");
+			if (!std::isfinite(algae.evaporationKgPerKgGrowth) || algae.evaporationKgPerKgGrowth < 0.0)
+				return refuse(where + " evaporation per kg growth must be finite and non-negative (provisional biological assumption)");
+			if (!std::isfinite(algae.minGrowingTemperatureC)
+				|| algae.minGrowingTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " minimum growing temperature must be finite and above absolute zero");
+			if (!std::isfinite(algae.maxGrowingTemperatureC)
+				|| algae.maxGrowingTemperatureC <= -StationCelsiusOffset)
+				return refuse(where + " maximum growing temperature must be finite and above absolute zero");
+			if (algae.minGrowingTemperatureC >= algae.maxGrowingTemperatureC)
+				return refuse(where + " minimum growing temperature must be below the maximum growing temperature: an empty growing window is never a service");
+			// Harvest partition contract (#411): the food and recovery
+			// fractions are declared shares of the harvested dry mass and
+			// together may not exceed it - the unrecoverable remainder is
+			// the waste share, so a partition spending more than 100% of
+			// the harvest is refused as non-conservative. A trigger above
+			// the declared culture capacity could never fire and is refused
+			// as a dead rule; enabling the harvest requires all three
+			// destinations, pairwise distinct, mass-denominated and
+			// composition-compatible with the culture's declared dry mass.
+			if (!std::isfinite(algae.foodFraction) || algae.foodFraction < 0.0
+				|| algae.foodFraction > 1.0)
+				return refuse(where + " food fraction must be finite and from 0 to 1: the edible share of the harvested dry mass cannot exceed the harvest");
+			if (!std::isfinite(algae.recoveryFraction) || algae.recoveryFraction < 0.0
+				|| algae.recoveryFraction > 1.0)
+				return refuse(where + " recovery fraction must be finite and from 0 to 1: the recoverable share of the harvested dry mass cannot exceed the harvest");
+			if (algae.foodFraction + algae.recoveryFraction > 1.0 + StationBalanceTolerance)
+				return refuse(where + " food and recovery fractions together exceed 1: the harvest partition must leave a non-negative unrecoverable remainder for the waste path, so the declared destinations can never claim more than the harvest");
+			if (!std::isfinite(algae.harvestFraction) || algae.harvestFraction <= 0.0
+				|| algae.harvestFraction > 1.0)
+				return refuse(where + " harvest fraction must be finite and from above 0 to 1: a harvest that removes nothing is not a harvest");
+			if (!std::isfinite(algae.harvestTriggerKg) || algae.harvestTriggerKg < 0.0)
+				return refuse(where + " harvest trigger must be finite and non-negative (0 disables the harvest)");
+			if (algae.harvestTriggerKg > capacityKg + StationBalanceTolerance)
+				return refuse(where + " harvest trigger exceeds the declared culture capacity: the harvest could never fire, so the rule is dead as configured");
+			std::string const destinationIds[3]{algae.foodStoreId, algae.recoveryStoreId,
+				algae.wasteStoreId};
+			char const* destinationRoles[3]{"food", "recovery", "waste"};
+			for (size_t stream = 0; stream < 3; ++stream)
+			{
+				if (destinationIds[stream].empty())
+				{
+					if (!allowUnwired && algae.harvestTriggerKg > 0.0)
+						return refuse(where + " harvest is enabled but the " + destinationRoles[stream]
+							+ " destination store is not named: harvested living material must have a declared destination");
+					continue;
+				}
+				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
+						[&](ResourceStoreSettings const& store) { return store.id == destinationIds[stream]; });
+				if (found == settings.stores.end())
+					return missing(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
+						+ "' does not exist");
+				if (!isMassUnit(found->unit))
+					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
+						+ "' must be a mass unit; harvested dry biomass is mass-denominated (g or kg)");
+				for (size_t other = stream + 1; other < 3; ++other)
+					if (!destinationIds[other].empty() && destinationIds[stream] == destinationIds[other])
+						return refuse(where + " " + destinationRoles[stream] + " store and "
+							+ destinationRoles[other] + " store are the same store '"
+							+ destinationIds[stream] + "'; the food, recovery and waste yield need distinct destinations so the partition stays visible");
+				if (found->composition && !compositionsClose(*found->composition, composition))
+					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
+						+ "' declares a composition different from the culture's declared dry-mass composition: harvested material enters a store exactly as declared, and a different compound material is a boundary only an explicit conversion may cross");
+				if (compartment != settings.atmospheres.end() && found->hazardClass != compartment->hazardClass)
+					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
+						+ "' is authored " + found->hazardClass + "-class but the culture runs in '"
+						+ compartment->id + "', a " + compartment->hazardClass + "-class compartment: an algae culture may only take up and harvest material of its compartment's hazard class; the harvest partition and death residue never relabel material across the hazard boundary");
+			}
+		} catch (BrokenDraftEntry const&) {}
+		diagnostic.clear(); return true;
+	}
+
+}
