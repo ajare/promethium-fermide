@@ -1,5 +1,5 @@
 #pragma once
-#include "core/StationSystems.h"
+#include "core/StationHistory.h"
 
 namespace core
 {
@@ -14,7 +14,9 @@ namespace core
 		bool advance(uint64_t worldTick, float fixedSeconds);
 		StationSystemsSnapshot snapshot() const;
 		std::vector<StationSystemsEvent> const& events() const;
-		std::vector<StationTrendSeries> const& trends() const;
+		std::vector<StationTrendSeries> trends() const;
+		std::vector<StationMetricHistory> metrics() const;
+		StationRecordingStatus recordingStatus() const;
 		std::vector<StationSystemsDiagnostic> const& diagnostics() const;
 	private:
 		struct Impl;

@@ -1,6 +1,6 @@
 #pragma once
 #include "core/StationSystems.h"
-#include "core/StationMetrics.h"
+#include "core/StationHistory.h"
 #include "core/ActionRegistry.h"
 
 #include <string>
@@ -3383,6 +3383,7 @@ namespace core
 		std::vector<StationTrendSeries> getStationSystemsTrends() const;
 		// Read-only typed observation seam; uses the existing histories in slice 1a.
 		std::vector<StationMetricHistory> getStationSystemsMetricHistory() const;
+		StationRecordingStatus getStationSystemsRecordingStatus() const;
 		std::vector<StationSystemsDiagnostic> getStationSystemsDiagnostics() const;
 
 		// Clear the modified state of the World and every Agent it owns, so

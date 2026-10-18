@@ -43,7 +43,11 @@ namespace core
 	}
 	std::vector<StationMetricHistory> World::getStationSystemsMetricHistory() const
 	{
-		return adaptStationTrends(getStationSystemsTrends());
+		return mStationSystemsRuntime ? mStationSystemsRuntime->metrics() : std::vector<StationMetricHistory>{};
+	}
+	StationRecordingStatus World::getStationSystemsRecordingStatus() const
+	{
+		return mStationSystemsRuntime ? mStationSystemsRuntime->recordingStatus() : StationRecordingStatus{};
 	}
 	std::vector<StationSystemsDiagnostic> World::getStationSystemsDiagnostics() const
 	{

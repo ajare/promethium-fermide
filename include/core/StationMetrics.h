@@ -7,8 +7,8 @@
 namespace core
 {
 	// Observation metadata is independent of diagram nodes and presentation.
-	enum class StationPhysicalQuantity { Power, Energy, Mass, Volume, Temperature, Fraction, MassRate, VolumeRate };
-	enum class StationCanonicalUnit { Kilowatt, KilowattHour, Kilogram, CubicMetre, Kelvin, Fraction, KilogramPerSecond, CubicMetrePerSecond };
+	enum class StationPhysicalQuantity { Power, Energy, Mass, Volume, Temperature, Fraction, MassRate, VolumeRate, Unspecified };
+	enum class StationCanonicalUnit { Kilowatt, KilowattHour, Kilogram, CubicMetre, Kelvin, Fraction, KilogramPerSecond, CubicMetrePerSecond, Unspecified };
 	enum class StationMetricRole { Demand, Generation, Inventory, Input, Output, Loss, InventoryChange, StateOfCharge };
 	enum class StationRequestedSemantics { Demand };
 	enum class StationMetricValidity { Valid, Unavailable, Invalid };
@@ -29,6 +29,7 @@ namespace core
 	struct StationMetricSample
 	{
 		double elapsedSeconds{0};
+		double coverage{1};
 		std::optional<double> actual, requested;
 		StationMetricValidity validity{StationMetricValidity::Unavailable};
 	};
@@ -55,6 +56,7 @@ namespace core
 	struct StationChartSeries
 	{
 		std::string id, label;
+		std::vector<double> coverage;
 		std::vector<double> times, values; // Missing/invalid measurements are NaN gaps, never zero.
 	};
 	struct StationChartData
@@ -65,9 +67,6 @@ namespace core
 	};
 	std::vector<StationChartDefinition> const& stationCharts();
 	char const* stationUnitLabel(StationCanonicalUnit unit);
-	// Temporary 1a adapter. The World-owned recorder replaces this in 1b;
-	// it does not sample, tick, or own a second history.
-	std::vector<StationMetricHistory> adaptStationTrends(std::vector<StationTrendSeries> const& trends);
 	StationChartData queryStationChart(StationChartDefinition const& chart,
 		std::vector<StationMetricHistory> const& history);
 }

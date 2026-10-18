@@ -275,12 +275,20 @@ void StationSystemsWindow::renderObservationPlot(float height)
 		[](auto const& line) { return line.times.empty(); });
 	if (!mFlowSnapshot || !mFlowSnapshot->enabled)
 		ImGui::TextDisabled("Simulation disabled; no live history.");
+	else if (mFlowRecording.limited)
+		ImGui::TextDisabled("RECORDING LIMIT: complete catalogue cannot fit; no metrics recorded.");
 	else if (empty)
 		ImGui::TextDisabled("No samples yet; run the simulation.");
 	else
 		ImGui::TextDisabled("%sSimulation time; stride %.2f s%s%s", mFlowWasPaused ? "Paused; " : "",
 			mFlowChart.sampleIntervalSeconds, mFlowChart.truncated ? " (interval summaries; history merged or dropped)" : "",
 			mFlowChart.incomplete ? " (incomplete coverage)" : "");
+
+	if (!empty)
+		ImGui::TextDisabled("Retained %.2f - %.2f s | %zu samples maximum | %zu bytes | coarsening %u%s",
+			mFlowRecording.retainedFromSeconds, mFlowRecording.retainedUntilSeconds,
+			mFlowRecording.sampleLimit, mFlowRecording.recordingBytes, mFlowRecording.coarseningLevel,
+			mFlowChart.incomplete ? " | gaps: incomplete observations" : " | no gaps");
 
 	// A private context also makes this production view usable by CPU-only
 	// editor workflows, without depending on the Launcher's global context.
@@ -343,6 +351,7 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 	{
 		mFlowSnapshot = world->getStationSystemsSnapshot();
 		mFlowMetrics = world->getStationSystemsMetricHistory();
+		mFlowRecording = world->getStationSystemsRecordingStatus();
 		auto const& charts = core::stationCharts();
 		auto selected = std::find_if(charts.begin(), charts.end(), [&](auto const& chart) { return chart.id == mSelectedChart; });
 		mFlowChart = core::queryStationChart(selected == charts.end() ? charts.front() : *selected, mFlowMetrics);

@@ -4,7 +4,7 @@
 #include <optional>
 #include <string>
 #include "core/StationSystems.h"
-#include "core/StationMetrics.h"
+#include "core/StationHistory.h"
 #include "StationFlowDiagram.h"
 #include "DocumentHistory.h"
 #include "RecentFiles.h"
@@ -81,6 +81,7 @@ private:
 	std::shared_ptr<ImPlotContext> mPowerPlotContext;
 	std::string mSelectedChart{"power"};
 	std::vector<core::StationMetricHistory> mFlowMetrics;
+	core::StationRecordingStatus mFlowRecording;
 	core::StationChartData mFlowChart;
 	std::optional<DocumentSnapshot> mPendingDraftEdit;
 	bool mPendingLayoutEdit{false};

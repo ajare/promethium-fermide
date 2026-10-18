@@ -23911,6 +23911,42 @@ void recovery(smoke::Context const& context)
 			return settings;
 		};
 		std::string diagnostic;
+		// Extreme limits and invalid spans exercise the public shared recorder.
+		{
+			core::StationRecordingSlot a, b;
+			a.metric.id = "a"; b.metric.id = "b";
+			core::StationRecordingLimits limits; limits.samples = 4;
+			core::StationHistory history({a, b}, 1, 100, limits);
+			std::vector<core::StationMetricSample> values(2);
+			for (auto& v : values) { v.actual = 0; v.validity = core::StationMetricValidity::Valid; }
+			for (int t = 1; t <= 8; ++t)
+			{
+				values[1].validity = t == 2 ? core::StationMetricValidity::Unavailable : core::StationMetricValidity::Valid;
+				history.observe(t, values);
+			}
+			auto const recorded = history.metrics();
+			require(history.status().coarseningLevel == 1 && history.status().truncated,
+				"shared history did not coarsen deterministically");
+			require(recorded[0].samples.size() == recorded[1].samples.size()
+				&& recorded[0].samples[0].actual == 0 && !recorded[1].samples[0].actual
+				&& recorded[1].samples[0].coverage == 0.5,
+				"coarsening confused a known zero with an invalid interval");
+			for (size_t i = 0; i < recorded[0].samples.size(); ++i)
+				require(recorded[0].samples[i].elapsedSeconds == recorded[1].samples[i].elapsedSeconds,
+					"shared history lost timeline alignment");
+			limits.memoryBytes = 1;
+			core::StationHistory limited({a, b}, 1, 100, limits);
+			require(limited.status().limited && limited.metrics().empty(), "memory limit silently omitted a metric");
+			limits = {}; limits.metrics = 1;
+			require(core::StationHistory({a, b}, 1, 100, limits).status().limited, "cardinality limit ignored");
+			limits = {}; limits.metadataBytes = 1;
+			require(core::StationHistory({a, b}, 1, 100, limits).status().limited, "metadata limit ignored");
+			limits = {}; limits.samples = 4;
+			core::StationHistory retained({a, b}, 1, 2, limits);
+			for (int t = 1; t <= 20; ++t) retained.observe(t, values);
+			require(retained.status().retainedUntilSeconds - retained.status().retainedFromSeconds <= 2
+				&& retained.status().recordingBytes <= limits.memoryBytes, "retention or recording bound exceeded");
+		}
 		// Scenario A: sampling cadence. With a 60 s observation interval
 		// and a 60 s run, each series holds exactly one sample at the
 		// observation boundary - never one per tick - carrying units,
@@ -23935,7 +23971,7 @@ void recovery(smoke::Context const& context)
 					"trend sample is not at the observation-boundary tick");
 				require(series.downsampleLevel == 0 && !series.truncated,
 					"a fresh series reports downsampling or truncation");
-				require(approx(series.sampleIntervalSeconds, 60.0),
+				require(approx(series.sampleIntervalSeconds, 60.0, 1e-4),
 					"series stride does not match the authored observation cadence");
 			}
 			auto const* power = findSeries(trends, "power", "");
@@ -23956,7 +23992,7 @@ void recovery(smoke::Context const& context)
 				&& chart.series[0].values.size() == 1 && approx(chart.series[0].values[0], 6.0)
 				&& chart.series[1].values.size() == 1 && approx(chart.series[1].values[0], 10.0),
 				"declarative Power query lost surplus generation, demand or simulation time");
-			require(metrics.size() == 2 && metrics[0].descriptor.requestedSemantics
+			require(metrics.size() == 4 && metrics[0].descriptor.requestedSemantics
 				&& !metrics[1].descriptor.requestedSemantics && !metrics[1].samples[0].requested,
 				"catalogue manufactured requested generation semantics");
 			auto const* transfer = findSeries(trends, "transfer", "pump");
@@ -24221,6 +24257,17 @@ void recovery(smoke::Context const& context)
 			runOrDiagnose(world, 270000, "trend stride truth run"); // t = 4500 s
 			auto const trends = world.getStationSystemsTrends();
 			require(trends.size() == 4, "the 4500 s run lost a trend series");
+			auto const recorded = world.getStationSystemsMetricHistory();
+			auto const recording = world.getStationSystemsRecordingStatus();
+			require(!recording.limited && recording.recordingBytes <= 32 * 1024 * 1024
+				&& recording.coarseningLevel > 0, "World did not expose its bounded shared recorder");
+			for (auto const& metric : recorded)
+			{
+				require(metric.samples.size() == recorded.front().samples.size(), "World metric timelines differ in length");
+				for (size_t i = 0; i < metric.samples.size(); ++i)
+					require(metric.samples[i].elapsedSeconds == recorded.front().samples[i].elapsedSeconds
+						&& metric.samples[i].coverage == 1, "World metric timelines or coverage lost alignment");
+			}
 			for (auto const& series : trends)
 			{
 				require(series.samples.size() <= 256,

@@ -5915,24 +5915,26 @@ namespace core
 		// (pairwise merge) rather than growing it; the authored retention
 		// caps the retained simulation-time window. Pure observability:
 		// nothing here feeds back into the ledger or the sandbox.
-		std::vector<StationTrendSeries> trendSeries;
+		StationHistory history;
+		std::vector<StationMetricSample> recordingValues;
 		void recordTrends(uint64_t tick, StationSystemsSnapshot const& snap)
 		{
-			auto const elapsed = static_cast<double>(tick) * World::getFixedTimestep();
-			auto const base = static_cast<double>(settings.observationIntervalSeconds);
-			auto const retention = static_cast<double>(settings.trendRetentionSeconds);
-			appendBoundedTrendSampleImpl(trendSeries, "power", "", "kW", base, retention,
-				tick, elapsed, snap.power.totalRequestedKW, snap.power.totalSuppliedKW);
-			for (auto const& load : snap.power.loads)
-				appendBoundedTrendSampleImpl(trendSeries, "equipment-load", load.id, "kW", base, retention,
-					tick, elapsed, load.requestedKW, load.suppliedKW);
-			for (auto const& transfer : snap.transfers)
-				appendBoundedTrendSampleImpl(trendSeries, "transfer", transfer.id, transfer.unit, base, retention,
-					tick, elapsed, transfer.lastRequested, transfer.lastCompleted);
-			// Generation is not supplied service: batteries can supply a deficit,
-			// and unused generation can exceed demand. Keep its own bounded history.
-			appendBoundedTrendSampleImpl(trendSeries, "power-generation", "", "kW", base, retention,
-				tick, elapsed, snap.power.availableGenerationKW, snap.power.availableGenerationKW);
+			if (history.status().limited) return;
+			std::fill(recordingValues.begin(), recordingValues.end(), StationMetricSample{});
+			auto put = [&](size_t slot, double actual, double requested) {
+				auto& v = recordingValues[slot];
+				v.actual = actual; v.requested = requested;
+				v.validity = std::isfinite(actual) && std::isfinite(requested)
+					? StationMetricValidity::Valid : StationMetricValidity::Invalid;
+			};
+			put(0, snap.power.totalSuppliedKW, snap.power.totalRequestedKW);
+			put(1, snap.power.availableGenerationKW, snap.power.availableGenerationKW);
+			// Snapshot vectors follow the compiled applied configuration order.
+			for (size_t i = 0; i < snap.power.loads.size() && i < settings.equipmentLoads.size(); ++i)
+				put(2 + i, snap.power.loads[i].suppliedKW, snap.power.loads[i].requestedKW);
+			for (size_t i = 0; i < snap.transfers.size() && i < settings.transfers.size(); ++i)
+				put(2 + settings.equipmentLoads.size() + i, snap.transfers[i].lastCompleted, snap.transfers[i].lastRequested);
+			history.observe(static_cast<double>(tick) * World::getFixedTimestep(), recordingValues);
 		}
 		// #419: the endurance observation windows. One window per Resource
 		// store and per battery, advanced only at the existing observation
@@ -16470,6 +16472,37 @@ namespace core
 		std::string diagnostic;
 		if (!validateStationSystemsSettings(settings, diagnostic)) throw SerializationException(diagnostic);
 		mImpl->settings = settings; mImpl->snapshot.enabled = settings.enabled;
+		std::vector<StationRecordingSlot> slots;
+		auto addSlot = [&](std::string subsystem, std::string id, std::string unit, std::string metricId) {
+			StationRecordingSlot slot;
+			slot.subsystem = std::move(subsystem); slot.id = std::move(id); slot.unit = std::move(unit);
+			slot.metric.id = std::move(metricId);
+			slot.metric.instanceId = slot.id;
+			slot.metric.requestedSemantics = StationRequestedSemantics::Demand;
+			slots.push_back(std::move(slot));
+		};
+		addSlot("power", "", "kW", "station.power.service");
+		slots.back().metric.role = StationMetricRole::Input;
+		addSlot("power-generation", "", "kW", "station.power.generation");
+		slots.back().metric.role = StationMetricRole::Generation;
+		slots.back().metric.requestedSemantics.reset();
+		for (auto const& load : settings.equipmentLoads)
+			addSlot("equipment-load", load.id, "kW", "equipment-load/" + load.id);
+		for (auto const& transfer : settings.transfers)
+		{
+			auto const source = std::ranges::find(settings.stores, transfer.sourceId, &ResourceStoreSettings::id);
+			addSlot("transfer", transfer.id, source->unit, "transfer/" + transfer.id);
+			// Legacy transfer observations are per-observation quantities, not power.
+			auto& d = slots.back().metric;
+			d.quantity = StationPhysicalQuantity::Unspecified; d.unit = StationCanonicalUnit::Unspecified;
+			if (source->unit == "kg") { d.quantity = StationPhysicalQuantity::Mass; d.unit = StationCanonicalUnit::Kilogram; }
+			if (source->unit == "m3") { d.quantity = StationPhysicalQuantity::Volume; d.unit = StationCanonicalUnit::CubicMetre; }
+			if (source->unit == "kWh") { d.quantity = StationPhysicalQuantity::Energy; d.unit = StationCanonicalUnit::KilowattHour; }
+		}
+		auto const slotCount = slots.size();
+		auto const cadenceTicks = std::max(1.0f, std::ceil(settings.observationIntervalSeconds / World::getFixedTimestep()));
+		mImpl->history = StationHistory(std::move(slots), cadenceTicks * World::getFixedTimestep(), settings.trendRetentionSeconds);
+		if (!mImpl->history.status().limited) mImpl->recordingValues.resize(slotCount);
 		mImpl->connectionGraph = station_connections::build(settings);
 		for (auto const& store : settings.stores)
 		{
@@ -19010,6 +19043,8 @@ namespace core
 		return result;
 	}
 	std::vector<StationSystemsEvent> const& StationSystemsRuntime::events() const { return mImpl->events; }
-	std::vector<StationTrendSeries> const& StationSystemsRuntime::trends() const { return mImpl->trendSeries; }
+	std::vector<StationTrendSeries> StationSystemsRuntime::trends() const { return mImpl->history.trends(); }
+	std::vector<StationMetricHistory> StationSystemsRuntime::metrics() const { return mImpl->history.metrics(); }
+	StationRecordingStatus StationSystemsRuntime::recordingStatus() const { return mImpl->history.status(); }
 	std::vector<StationSystemsDiagnostic> const& StationSystemsRuntime::diagnostics() const { return mImpl->diagnostics; }
 }
