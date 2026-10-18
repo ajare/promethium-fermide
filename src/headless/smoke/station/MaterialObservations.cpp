@@ -151,6 +151,97 @@ namespace
 		}
 	}
 
+	void crewAtmosphereExchangeObservations(smoke::Context const&)
+	{
+		core::StationSystemsSettings s; s.enabled = true; s.observationIntervalSeconds = 0.1f;
+		core::ResourceCompositionSettings food, water, urine, waste;
+		food.moisture = 0.8; food.nutrientNitrogen = 0.05; food.phosphorus = 0.01;
+		food.potassium = 0.02; food.otherMinerals = 0.02; food.energyKJPerKgDry = 17000;
+		water.moisture = 0.999; water.otherMinerals = 0.001;
+		urine.moisture = 0.95; urine.nutrientNitrogen = 0.1; urine.phosphorus = 0.02;
+		urine.potassium = 0.05; urine.otherMinerals = 0.05; urine.energyKJPerKgDry = 500;
+		waste.moisture = 0.5; waste.energyKJPerKgDry = 10000;
+		s.stores = {store("food", "g", 100000, 50000, 0, "food"), store("water", "kg", 100, 50, 0, "water"),
+			store("urine", "kg", 100, 0, 0, "urine"), store("waste", "kg", 100, 0, 0, "organic-waste")};
+		s.stores[0].composition = food; s.stores[1].composition = water;
+		s.stores[2].composition = urine; s.stores[3].composition = waste;
+		core::AtmosphereSettings a; a.id = "habitat"; a.hazardClass = "normal"; a.volumeM3 = 100;
+		a.startingOxygenKg = 20; a.startingNitrogenKg = 80; a.thermalCapacityKJPerK = 10000;
+		a.minPressureKPa = 1; a.maxPressureKPa = 200; a.leakRateKgPerS = 0.01;
+		a.occupants = 1; a.oxygenUsePerOccupantKgPerS = 0.001; a.co2ProductionPerOccupantKgPerS = 0.001;
+		s.atmospheres = {a};
+		auto hazardous = a; hazardous.id = "hazard"; hazardous.hazardClass = "hazardous"; s.atmospheres.push_back(hazardous);
+		core::CrewSettings c; c.id = "crew"; c.atmosphereId = a.id; c.crewCount = 2; c.activityProfile.constantLevel = 1;
+		c.foodStoreId = "food"; c.waterStoreId = "water"; c.urineStoreId = "urine"; c.organicWasteStoreId = "waste";
+		c.foodPerCrewPerS = 1; c.waterPerCrewPerS = 0.002; c.oxygenPerCrewKgPerS = 0.001;
+		c.co2PerCrewKgPerS = 0.0011; c.moisturePerCrewKgPerS = 0.0005;
+		c.urinePerCrewPerS = 0.0015; c.organicWastePerCrewPerS = 0.0002; c.metabolicHeatPerCrewKW = 0.1;
+		s.crews = {c};
+		// Off-cadence occurrence followed by several occurrences in one window.
+		s.airlockCycles = {{"cycle", a.id, 0.2, 0.025, 0.025, 0.25}};
+		core::World world("Crew exchanges", 2, 2); world.pauseSimulation(); world.finishBuild();
+		auto apply = [&] { std::string why; if (!world.configureStationSystems(s, true, &why)) throw std::runtime_error(why); };
+		apply(); run(world, 12);
+		auto const snap = world.getStationSystemsSnapshot();
+		auto const observations = core::stationExchangeObservations(s);
+		auto history = world.getStationSystemsMetricHistory();
+		auto value = [&](std::string const& id) {
+			auto h = std::ranges::find(history, id, [](auto const& h) { return h.descriptor.id; });
+			require(h != history.end() && !h->samples.empty() && h->samples.back().actual.has_value(), "crew/air observation missing");
+			return *h->samples.back().actual;
+		};
+		close(value("exchange/Crew/crew/Food"), 0.002);
+		close(value("exchange/Crew/crew/Oxygen"), 0.002);
+		close(value("exchange/Atmosphere/habitat/Leakage"), 0.01);
+		close(value("exchange/Crew/crew/Metabolic heat"), 0.2);
+		close(value("exchange/Crew/crew/Retained body mass"), snap.crews[0].retainedKg);
+		require(snap.airlockCycles[0].occurrencesCompleted > 2, "multiple off-cadence events not exercised");
+		close(value("exchange/Crew/crew/Food") + value("exchange/Crew/crew/Water") + value("exchange/Crew/crew/Oxygen"),
+			value("exchange/Crew/crew/Carbon dioxide") + value("exchange/Crew/crew/Moisture")
+			+ value("exchange/Crew/crew/Urine") + value("exchange/Crew/crew/Organic waste") + 0.0014);
+		for (auto const& o : observations) if (o.metric.equipmentType == "Crew" || o.metric.equipmentType == "Atmosphere" || o.metric.equipmentType == "Airlock cycle")
+		{
+			auto missing = snap; missing.crews.clear(); missing.atmospheres.clear(); missing.airlockCycles.clear();
+			require(!o.read(missing).actual, "missing exchange became zero");
+			if (!o.cumulativeRate) close(value(o.metric.id), *o.read(snap).actual * o.sourceToCanonicalScale / (o.perTick ? core::World::getFixedTimestep() : 1));
+			else {
+				auto h = std::ranges::find(history, o.metric.id, [](auto const& h) { return h.descriptor.id; });
+				double amount = 0, previous = 0;
+				for (auto const& sample : h->samples) { amount += *sample.actual * (sample.elapsedSeconds - previous); previous = sample.elapsedSeconds; }
+				close(amount, *o.read(snap).actual);
+			}
+		}
+		auto const before = world.getStationSystemsSnapshot(); auto const revision = world.getStationSystemsObservationRevision();
+		bool eventChart = false;
+		for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.breakdown == "Aggregate" && def.id.starts_with("exchange/Atmosphere/") && def.id.find("/Leakage/") != std::string::npos)
+		{
+			require(def.series[0].contributors.size() == 1 && def.id.find("atmosphere-mixture") != std::string::npos, "hazards or species pooled in leakage");
+		}
+		for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.id.starts_with("exchange/Crew/") || def.id.starts_with("exchange/Airlock cycle/"))
+		{
+			auto data = world.queryStationSystemsChart(def.id); require(!data.incomplete, "generic crew chart incomplete");
+			if (def.breakdown == "Aggregate" && def.id.find("/Food/") != std::string::npos)
+			{
+				require(data.series.size() == 2, "authoritative request overlay missing"); close(data.series[1].values.back(), 0.002);
+				auto missing = history;
+				for (auto& h : missing) if (h.descriptor.id == def.series[0].contributors[0]) h.samples.back().actual.reset();
+				auto gap = core::queryStationChart(def, missing);
+				require(gap.incomplete && std::isnan(gap.series[0].values.back()), "unavailable crew amount became zero");
+			}
+			if (def.id.starts_with("exchange/Airlock cycle/")) { eventChart = true; require(def.accountingNote.find("Interval-average event rate") != std::string::npos, "event window not documented"); }
+		}
+		require(eventChart && world.getStationSystemsSnapshot() == before && world.getStationSystemsObservationRevision() == revision, "query changed World");
+		// Reapplication starts fresh baselines and repeats exactly, rather than differencing across runs.
+		auto const firstRate = value("exchange/Airlock cycle/cycle/Removed gas");
+		apply(); run(world, 12); history = world.getStationSystemsMetricHistory();
+		close(value("exchange/Airlock cycle/cycle/Removed gas"), firstRate);
+		// No new occurrence after a one-off: cumulative ledger remains, rate returns to zero.
+		s.airlockCycles[0].recurrenceSeconds = 0; s.crews[0].crewCount = 0; apply(); run(world, 18);
+		history = world.getStationSystemsMetricHistory();
+		close(value("exchange/Airlock cycle/cycle/Removed gas"), 0);
+		close(value("exchange/Crew/crew/Food"), 0);
+	}
+
 	void thermalExchangeObservations(smoke::Context const&)
 	{
 		core::StationSystemsSettings s; s.enabled = true; s.observationIntervalSeconds = 0.1f;
@@ -802,6 +893,7 @@ namespace
 void registerMaterialObservationChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"exchangeObservations", exchangeObservations});
+	checks.push_back({"crewAtmosphereExchangeObservations", crewAtmosphereExchangeObservations});
 	checks.push_back({"thermalExchangeObservations", thermalExchangeObservations});
 	checks.push_back({"electricalExchangeObservations", electricalExchangeObservations});
 	checks.push_back({"materialObservations", materialObservations});

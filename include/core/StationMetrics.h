@@ -25,6 +25,7 @@ namespace core
 		std::optional<std::string> materialId, constituentId;
 		std::optional<std::string> hazardClass;
 		std::optional<std::string> thermalClass; // Cooling services never pool across classes.
+		std::string observationNote; // Domain window/accounting semantics, rendered generically.
 		StationMetricCoverage coverage{StationMetricCoverage::Complete};
 		StationMetricValidity validity{StationMetricValidity::Unavailable};
 	};
@@ -96,6 +97,7 @@ namespace core
 		// preserve missing authority as a gap; callbacks never run simulation.
 		std::function<StationMetricSample(StationSystemsSnapshot const&)> read;
 		bool perTick{false};
+		bool cumulativeRate{false}; // Difference committed cumulative quantity over the observation window.
 	};
 	std::vector<StationExchangeObservation> stationExchangeObservations(StationSystemsSettings const& settings);
 	// Applied configuration must already have passed domain validation.

@@ -1,5 +1,9 @@
 # Station Flow observations
 
+Crew, atmosphere and Airlock exchange catalogue (#708): see
+[Crew and atmosphere exchange observations](station-crew-atmosphere-exchange-observations.md)
+for ambient flows, metabolic accounting and explicit Airlock event-rate windows.
+
 Thermal equipment exchange catalogue (#707): see
 [Thermal equipment exchange observations](station-thermal-exchange-observations.md)
 for class-segregated heat, cooling, electrical demand, storage and loss boundaries.

@@ -11,6 +11,7 @@
 namespace core
 {
 	void appendStationThermalObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
+	void appendStationCrewAtmosphereObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
 	std::vector<StationStoreObservation> stationStoreObservations(StationSystemsSettings const& settings)
 	{
 		// Identity evidence belongs to ownership boundaries, never labels or units.
@@ -278,6 +279,7 @@ namespace core
 			connection("Fuel cell", c.id, "Heat", "Heat transport loss", StationMetricRole::Loss, 2);
 		}
 		appendStationThermalObservations(settings, result);
+		appendStationCrewAtmosphereObservations(settings, result);
 		return result;
 	}
 
@@ -505,7 +507,11 @@ namespace core
 			StationChartDefinition chart{id, resource ? "Resource exchanges" : direction == "Input" ? "Equipment inputs"
 				: direction == "Loss" ? "Equipment losses" : role == StationMetricRole::Inventory || role == StationMetricRole::InventoryChange ? "Equipment inventories" : "Equipment outputs", label, label + " (applied simulation)", quantity, unit, {}};
 			chart.accountingNote = "Authoritative exchange rate per simulation second. Generation/availability, pool delivery, supplied service, startup obligations, heat and losses are distinct properties, not additive outputs. Material identity, quantity and hazard class remain separate. Requests are optional overlays, never actual contributions.";
-			if (role == StationMetricRole::Inventory) chart.accountingNote = "Authoritative inventory state in canonical energy units, not an output rate. Thermal energy uses the solver's zero-degrees-C reference; retained source heat is not useful output. ";
+			if (role == StationMetricRole::Inventory) chart.accountingNote = "Authoritative retained inventory state in canonical units, not an output rate. ";
+			if (role == StationMetricRole::Inventory && unit == StationCanonicalUnit::KilowattHour)
+				chart.accountingNote += "Thermal energy uses the solver's zero-degrees-C reference; retained source heat is not useful output. ";
+			for (auto d : members) if (!d->observationNote.empty() && chart.accountingNote.find(d->observationNote) == std::string::npos)
+				chart.accountingNote += " " + d->observationNote;
 			if (!service.empty()) chart.accountingNote += " Thermal service classes remain segregated. Signed heat exchanges preserve direction; inventory state/change, retained heat and transport loss are separate, never additive useful outputs. No fluid stock is inferred from thermal power.";
 			chart.partialAccounting = std::any_of(members.begin(), members.end(), [](auto d) { return d->coverage != StationMetricCoverage::Complete; });
 			if (chart.partialAccounting) chart.accountingNote += " Unclassified material: no identity inferred from store names or units; not combined across instances.";

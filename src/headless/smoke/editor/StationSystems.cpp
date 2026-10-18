@@ -3592,6 +3592,22 @@ namespace
 		air.startingTemperatureC = 25; air.thermalCapacityKJPerK = 10000;
 		air.minPressureKPa = 1; air.maxPressureKPa = 200;
 		seed.atmospheres = {air};
+		seed.airlockCycles = {{"graph-cycle", "cabin", 0.1, 100, 0, 0.25}};
+		for (auto const* id : {"crew-food", "crew-water", "crew-urine", "crew-waste"})
+		{
+			core::ResourceStoreSettings stock{id, "kg", 100, 0}; stock.materialId = id;
+			stock.composition = core::ResourceCompositionSettings{};
+			seed.stores.push_back(stock);
+		}
+		seed.stores[seed.stores.size() - 4].composition->energyKJPerKgDry = 10000;
+		seed.stores[seed.stores.size() - 3].materialId = "water";
+		seed.stores[seed.stores.size() - 3].composition->moisture = 0.999;
+		core::CrewSettings graphCrew; graphCrew.id = "graph-crew"; graphCrew.atmosphereId = "cabin"; graphCrew.crewCount = 1;
+		graphCrew.foodStoreId = "crew-food"; graphCrew.waterStoreId = "crew-water";
+		graphCrew.urineStoreId = "crew-urine"; graphCrew.organicWasteStoreId = "crew-waste";
+		graphCrew.foodPerCrewPerS = 0.001; graphCrew.waterPerCrewPerS = 0.001;
+		graphCrew.co2PerCrewKgPerS = 0.0001; graphCrew.moisturePerCrewKgPerS = 0.0001;
+		graphCrew.metabolicHeatPerCrewKW = 0.1; seed.crews = {graphCrew};
 		for (auto const* id : {"bio-N", "bio-P", "bio-K", "bio-minerals"})
 		{
 			core::ResourceStoreSettings nutrient;
@@ -3636,7 +3652,10 @@ namespace
 				{"Thermal reservoir", "Absorbed heat"}, {"Radiator", "Rejected heat"},
 				{"Coolant loop", "Pump electricity"}, {"Coolant loop", "Heater electricity"},
 				{"Chiller", "Cooling provided"}, {"Chiller", "Electrical service"},
-				{"Thermal buffer", "Charge heat"}, {"Thermal buffer", "Discharge heat"}})
+				{"Thermal buffer", "Charge heat"}, {"Thermal buffer", "Discharge heat"},
+				{"Crew", "Food"}, {"Crew", "Carbon dioxide"}, {"Crew", "Metabolic heat"},
+				{"Atmosphere", "Leakage"}, {"Atmosphere", "Occupancy oxygen consumption"},
+				{"Airlock cycle", "Removed gas"}, {"Airlock cycle", "Recovered gas"}, {"Airlock cycle", "Vented gas"}})
 			{
 				auto const catalogue = world->getStationSystemsObservationCatalogue();
 				auto const selected = std::find_if(catalogue.begin(), catalogue.end(), [&](auto const& c) {
@@ -3684,7 +3703,7 @@ namespace
 			REQ(driver.contains("unclassified"), "Material view omitted unclassified inventory coverage");
 			REQ(driver.contains("Classified stores subtotal"), "Material view omitted subtotal semantics");
 			auto const water = world->queryStationSystemsChart("stored-material/water/kg");
-			REQ(water.series.size() == 3 && water.series[0].times.size() == 1
+			REQ(water.series.size() == 4 && water.series[0].times.size() == 1
 				&& water.series[0].values[0] == 18 && water.incomplete,
 				"Material selection lost hidden history or miscounted qualified/unqualified stores");
 			ctx->ComboClick("Breakdown/Aggregate"); ctx->Yield(2);
@@ -3788,7 +3807,8 @@ namespace
 				"Reset lost applicable material selection or retained previous samples");
 			// Observe real ownership transitions through the same selector and
 			// generic stack controls, with history collected before selection.
-			for (size_t i = 4; i < 8; ++i) seed.stores[i].startingQualified = 10;
+			for (auto& stock : seed.stores) if (stock.id == "bio-N" || stock.id == "bio-P"
+				|| stock.id == "bio-K" || stock.id == "bio-minerals") stock.startingQualified = 10;
 			for (auto id : {"bio-food", "bio-waste", "bio-recovery"})
 			{
 				core::ResourceStoreSettings output;

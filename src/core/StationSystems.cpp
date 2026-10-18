@@ -5945,6 +5945,8 @@ namespace core
 		std::vector<StationMetricSample> recordingValues;
 		std::vector<double> storeObservationScales;
 		std::vector<StationExchangeObservation> exchangeObservations;
+		std::vector<std::optional<double>> previousExchangeTotals;
+		double previousExchangeSeconds{0};
 		void recordTrends(uint64_t tick, StationSystemsSnapshot const& snap)
 		{
 			if (history.status().limited) return;
@@ -6042,6 +6044,15 @@ namespace core
 				if (o.read)
 				{
 					auto v = o.read(snap);
+					if (o.cumulativeRate)
+					{
+						double const seconds = static_cast<double>(tick) * World::getFixedTimestep() - previousExchangeSeconds;
+						auto total = v.actual;
+						if (total && previousExchangeTotals[i] && seconds > 0)
+							v.actual = (*total - *previousExchangeTotals[i]) / seconds;
+						else v.actual.reset();
+						previousExchangeTotals[i] = total;
+					}
 					double const scale = o.sourceToCanonicalScale / (o.perTick ? World::getFixedTimestep() : 1);
 					if (v.actual) *v.actual *= scale;
 					if (v.requested) *v.requested *= scale;
@@ -6077,7 +6088,8 @@ namespace core
 				}
 				put(constituentSlot + i, actual * o.sourceToCanonicalScale, requested * o.sourceToCanonicalScale);
 			}
-			history.observe(static_cast<double>(tick) * World::getFixedTimestep(), recordingValues);
+			previousExchangeSeconds = static_cast<double>(tick) * World::getFixedTimestep();
+			history.observe(previousExchangeSeconds, recordingValues);
 		}
 		// #419: the endurance observation windows. One window per Resource
 		// store and per battery, advanced only at the existing observation
@@ -16732,6 +16744,9 @@ namespace core
 		living(settings.cropPopulations, "crop-population", "Crop population");
 		living(settings.algaeCultures, "algae-culture", "Algae culture");
 		mImpl->exchangeObservations = stationExchangeObservations(settings);
+		// Committed cumulative event ledgers start at zero in each applied run.
+		mImpl->previousExchangeTotals.assign(mImpl->exchangeObservations.size(), 0.0);
+		mImpl->previousExchangeSeconds = 0;
 		for (auto const& o : mImpl->exchangeObservations)
 		{
 			StationRecordingSlot slot; slot.metric = o.metric;
