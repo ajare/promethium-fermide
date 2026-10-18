@@ -10,6 +10,7 @@
 
 namespace core
 {
+	void appendStationThermalObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
 	std::vector<StationStoreObservation> stationStoreObservations(StationSystemsSettings const& settings)
 	{
 		// Identity evidence belongs to ownership boundaries, never labels or units.
@@ -276,6 +277,7 @@ namespace core
 			connection("Fuel cell", c.id, "Heat", "Delivered heat", StationMetricRole::Output, 1);
 			connection("Fuel cell", c.id, "Heat", "Heat transport loss", StationMetricRole::Loss, 2);
 		}
+		appendStationThermalObservations(settings, result);
 		return result;
 	}
 
@@ -480,31 +482,35 @@ namespace core
 			for (auto const& [hazard, population] : hazards) make(population, hazard);
 		}
 		using ExchangeKey = std::tuple<std::string, StationMetricRole, std::string, std::string,
-			StationPhysicalQuantity, StationCanonicalUnit, std::string>;
+			StationPhysicalQuantity, StationCanonicalUnit, std::string, std::string>;
 		std::map<ExchangeKey, std::vector<StationMetricDescriptor const*>> exchanges;
 		for (auto const& d : descriptors)
 			if (!d.equipmentType.empty() && d.unit != StationCanonicalUnit::Unspecified
 				&& (d.role == StationMetricRole::Input || d.role == StationMetricRole::Output
-					|| d.role == StationMetricRole::Generation || d.role == StationMetricRole::Loss))
+					|| d.role == StationMetricRole::Generation || d.role == StationMetricRole::Loss
+					|| (d.id.starts_with("exchange/") && (d.role == StationMetricRole::Inventory || d.role == StationMetricRole::InventoryChange))))
 				exchanges[{d.equipmentType, d.role, d.exchangeRole, d.materialId.value_or(d.coverage == StationMetricCoverage::Unclassified ? "unclassified/" + d.instanceId : "energy"), d.quantity, d.unit,
-					d.hazardClass.value_or("unclassified")}].push_back(&d);
+					d.hazardClass.value_or("unclassified"), d.thermalClass.value_or("")}].push_back(&d);
 		for (auto const& [key, members] : exchanges)
 		{
-			auto const& [type, role, exchange, material, quantity, unit, hazard] = key;
+			auto const& [type, role, exchange, material, quantity, unit, hazard, service] = key;
 			bool const resource = type == "Resource transfer" || type == "Resource conversion";
 			std::string const direction = role == StationMetricRole::Loss ? (resource ? "Transport loss" : "Loss")
+				: role == StationMetricRole::Inventory ? "Inventory" : role == StationMetricRole::InventoryChange ? "Inventory change"
 				: role == StationMetricRole::Input ? "Input" : role == StationMetricRole::Generation ? "Generation" : "Output";
 			std::string const id = "exchange/" + type + "/" + direction + "/" + exchange + "/" + material
-				+ "/" + stationUnitLabel(unit) + "/" + hazard;
+				+ "/" + stationUnitLabel(unit) + "/" + hazard + (service.empty() ? "" : "/thermal-class/" + service);
 			std::string const label = type + ": " + exchange + " " + direction + " — " + material
-				+ " (" + stationUnitLabel(unit) + "; " + hazard + ")";
+				+ " (" + stationUnitLabel(unit) + "; " + hazard + (service.empty() ? "" : "; class " + service) + ")";
 			StationChartDefinition chart{id, resource ? "Resource exchanges" : direction == "Input" ? "Equipment inputs"
-				: direction == "Loss" ? "Equipment losses" : "Equipment outputs", label, label + " (applied simulation)", quantity, unit, {}};
+				: direction == "Loss" ? "Equipment losses" : role == StationMetricRole::Inventory || role == StationMetricRole::InventoryChange ? "Equipment inventories" : "Equipment outputs", label, label + " (applied simulation)", quantity, unit, {}};
 			chart.accountingNote = "Authoritative exchange rate per simulation second. Generation/availability, pool delivery, supplied service, startup obligations, heat and losses are distinct properties, not additive outputs. Material identity, quantity and hazard class remain separate. Requests are optional overlays, never actual contributions.";
+			if (role == StationMetricRole::Inventory) chart.accountingNote = "Authoritative inventory state in canonical energy units, not an output rate. Thermal energy uses the solver's zero-degrees-C reference; retained source heat is not useful output. ";
+			if (!service.empty()) chart.accountingNote += " Thermal service classes remain segregated. Signed heat exchanges preserve direction; inventory state/change, retained heat and transport loss are separate, never additive useful outputs. No fluid stock is inferred from thermal power.";
 			chart.partialAccounting = std::any_of(members.begin(), members.end(), [](auto d) { return d->coverage != StationMetricCoverage::Complete; });
 			if (chart.partialAccounting) chart.accountingNote += " Unclassified material: no identity inferred from store names or units; not combined across instances.";
 			StationChartSeriesDefinition total;
-			total.metricId = id + "/total"; total.label = "Actual rate"; total.operation = StationChartOperation::Sum;
+			total.metricId = id + "/total"; total.label = role == StationMetricRole::Inventory ? "Inventory state" : role == StationMetricRole::InventoryChange ? "Inventory change rate" : "Actual rate"; total.operation = StationChartOperation::Sum;
 			for (auto d : members) total.contributors.push_back(d->id);
 			chart.series.push_back(total);
 			for (auto d : members) chart.series.push_back({d->id, d->instanceId, StationMetricValue::Actual,

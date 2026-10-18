@@ -1,5 +1,9 @@
 # Station Flow observations
 
+Thermal equipment exchange catalogue (#707): see
+[Thermal equipment exchange observations](station-thermal-exchange-observations.md)
+for class-segregated heat, cooling, electrical demand, storage and loss boundaries.
+
 Electrical equipment exchange catalogue (#706): see
 [Electrical equipment exchange observations](station-electrical-exchange-observations.md)
 for generation/service boundaries, canonical fuel/material rates and focused checks.

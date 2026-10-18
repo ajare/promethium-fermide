@@ -151,6 +151,120 @@ namespace
 		}
 	}
 
+	void thermalExchangeObservations(smoke::Context const&)
+	{
+		core::StationSystemsSettings s; s.enabled = true; s.observationIntervalSeconds = 0.1f;
+		s.solarArrays = {{"sun", 100}};
+		for (auto const* cls : {"warm", "moderate"})
+		{
+			core::ThermalReservoirSettings r; r.id = cls; r.thermalClass = cls;
+			r.heatCapacityKJPerK = 10000; r.startingTemperatureC = 20; r.minTemperatureC = -50; r.maxTemperatureC = 100;
+			r.absorbedHeatKW = 5; s.thermalReservoirs.push_back(r);
+			auto sink = r; sink.id += "-sink"; s.thermalReservoirs.push_back(sink);
+			core::CoolantLoopSettings l; l.id = cls; l.reservoirId = cls; l.hazardClass = "normal";
+			l.coolantCapacityKg = 100; l.startingCoolantKg = 100; l.specificHeatKJPerKgK = 4;
+			l.startingTemperatureC = 20; l.freezeProtectionSetpointC = 30; l.heaterCapacityKW = 1;
+			l.pumpPowerKW = 1; l.ratedFlowKgPerS = 2; l.exchangerConductanceKWPerK = 1;
+			s.coolantLoops.push_back(l);
+			core::ChillerSettings c; c.id = std::string(cls) + "-chiller"; c.thermalClass = cls; c.coldLoopId = cls; c.condenserReservoirId = std::string(cls) + "-sink";
+			c.ratedCoolingCapacityKW = 6; c.cop = 3; c.auxiliaryPowerKW = 0.5; c.chilledSetpointC = 5; c.maxCondensingTemperatureC = 90;
+			s.chillers.push_back(c);
+		}
+		s.radiators = {{"radiator", "warm", 1}};
+		core::ThermalBufferSettings b; b.id = "buffer"; b.reservoirId = "warm"; b.accessMode = "passive";
+		b.capacityKJ = 1000; b.minUsableTemperatureC = 0; b.maxUsableTemperatureC = 40;
+		b.maxChargeKW = 2; b.maxDischargeKW = 2; b.transferConductanceKWPerK = 1;
+		s.thermalBuffers = {b};
+		core::World world("Thermal exchanges", 2, 2); world.pauseSimulation(); world.finishBuild();
+		auto apply = [&] { std::string why; if (!world.configureStationSystems(s, true, &why)) throw std::runtime_error(why); };
+		apply(); run(world, 6);
+		auto verify = [&] {
+			auto const snapshot = world.getStationSystemsSnapshot();
+			auto const observations = core::stationExchangeObservations(s);
+			auto const history = world.getStationSystemsMetricHistory();
+			size_t checked = 0;
+			for (auto const& o : observations) if (o.metric.thermalClass)
+			{
+				require(!o.metric.materialId, "thermal exchange depends on material identity");
+				auto h = std::ranges::find(history, o.metric.id, [](auto const& a) { return a.descriptor.id; });
+				require(h != history.end() && !h->samples.empty() && h->samples.back().actual.has_value()
+					&& h->samples.back().validity == core::StationMetricValidity::Valid, "thermal history missing or invalid");
+				auto expected = o.read(snapshot);
+				require(expected.actual.has_value(), "thermal endpoint missing");
+				close(*h->samples.back().actual, *expected.actual * o.sourceToCanonicalScale);
+				if (expected.requested) close(*h->samples.back().requested, *expected.requested);
+				auto missing = snapshot;
+				missing.thermal.reservoirs.clear(); missing.thermal.radiators.clear(); missing.coolantLoops.clear();
+				missing.chillers.clear(); missing.thermalBuffers.clear(); missing.connections.clear();
+				require(!o.read(missing).actual, "missing thermal owner became zero"); ++checked;
+			}
+			require(checked > 50, "thermal family catalogue incomplete");
+		};
+		verify();
+		auto definition = [&](std::string type, std::string role, std::string cls) {
+			auto catalogue = world.getStationSystemsObservationCatalogue();
+			auto c = std::find_if(catalogue.begin(), catalogue.end(), [&](auto const& c) {
+				return c.breakdown == "Aggregate" && c.id.starts_with("exchange/" + type + "/")
+					&& c.id.find("/" + role + "/") != std::string::npos && c.id.ends_with("/thermal-class/" + cls);
+			});
+			require(c != catalogue.end(), "class-segregated thermal chart missing"); return *c;
+		};
+		auto const warm = definition("Chiller", "Cooling provided", "warm");
+		auto const cold = definition("Chiller", "Cooling provided", "moderate");
+		require(warm.id != cold.id && warm.series[0].contributors.size() == 1, "cooling classes pooled");
+		auto snap = world.getStationSystemsSnapshot();
+		require(snap.chillers[0].coolingKW > 0 && snap.coolantLoops[0].heaterDemandKW > 0
+			&& snap.thermalBuffers[0].lastChargeKW > 0, "fixture missed active thermal operation");
+		close(world.queryStationSystemsChart(warm.id).series[0].values.back(), snap.chillers[0].coolingKW);
+		auto pump = world.queryStationSystemsChart(definition("Coolant loop", "Pump electricity", "warm").id);
+		close(pump.series[0].values.back(), snap.coolantLoops[0].pumpSuppliedKW);
+		close(pump.series[1].values.back(), snap.coolantLoops[0].pumpDemandKW);
+		auto heater = world.queryStationSystemsChart(definition("Coolant loop", "Heater electricity", "warm").id);
+		close(heater.series[0].values.back(), snap.coolantLoops[0].heaterSuppliedKW);
+		close(heater.series[1].values.back(), snap.coolantLoops[0].heaterDemandKW);
+		auto const stored = definition("Thermal buffer", "Stored thermal energy", "warm");
+		require(stored.unit == core::StationCanonicalUnit::KilowattHour
+			&& stored.group == "Equipment inventories" && stored.series[0].label == "Inventory state", "inventory mislabeled as useful output");
+		close(world.queryStationSystemsChart(stored.id).series[0].values.back(), snap.thermalBuffers[0].storedEnergyKJ / 3600);
+		auto histories = world.getStationSystemsMetricHistory();
+		for (auto& h : histories) if (h.descriptor.id == warm.series[0].contributors[0]) h.samples.back().actual.reset();
+		auto gap = core::queryStationChart(warm, histories);
+		require(gap.incomplete && !gap.series[0].values.empty() && std::isnan(gap.series[0].values.back()), "missing cooling became zero");
+		// Apply real physical throughput/efficiency limits; all chart endpoints
+		// must follow the allocator, not unconstrained equipment calculations.
+		for (auto const& c : snap.connections) if (c.key.ownerType == "Chiller" || c.key.ownerType == "Coolant loop"
+			|| c.key.ownerType == "Radiator" || c.key.ownerType == "Thermal buffer")
+			s.connections[c.key] = {core::StationPhysicalConnection::Automatic, 2, 0.5};
+		apply(); run(world, 6); verify();
+		snap = world.getStationSystemsSnapshot();
+		for (auto const& c : snap.connections) if (s.connections.contains(c.key) && c.lastInputRate > 0)
+		{ require(c.lastInputRate <= 2 + 1e-8, "thermal throughput exceeded"); close(c.lastDeliveredRate, c.lastInputRate * 0.5); }
+		// A second same-class instance participates in generic breakdowns.
+		s.connections.clear(); auto second = s.chillers[0]; second.id = "second"; second.coldLoopId = "second";
+		auto loop = s.coolantLoops[0]; loop.id = "second-loop"; second.coldLoopId = loop.id; s.coolantLoops.push_back(loop); s.chillers.push_back(second);
+		apply(); run(world, 6); verify();
+		auto aggregate = definition("Chiller", "Cooling provided", "warm");
+		auto instances = world.queryStationSystemsChart(aggregate.id + "/instances");
+		require(instances.series.size() == 4, "thermal instance breakdown missing");
+		close(instances.series[1].values.back() + instances.series[2].values.back(), world.queryStationSystemsChart(aggregate.id).series[0].values.back());
+		auto missingMember = world.getStationSystemsMetricHistory();
+		std::erase_if(missingMember, [&](auto const& h) { return h.descriptor.id == aggregate.series[0].contributors[0]; });
+		auto missingTotal = core::queryStationChart(aggregate, missingMember);
+		require(missingTotal.incomplete && !missingTotal.series[0].values.empty()
+			&& std::isnan(missingTotal.series[0].values.back()), "missing class member silently shrank total");
+		// Disabled equipment is valid measured zero. Buffer can return stored heat.
+		s.chillers[0].ratedCoolingCapacityKW = 0; s.coolantLoops[1].startingCoolantKg = 0;
+		s.thermalBuffers[0].startingEnergyKJ = 1000; s.radiators[0].areaM2 = 100000;
+		apply(); run(world, 6); verify(); snap = world.getStationSystemsSnapshot();
+		close(snap.chillers[0].coolingKW, 0); close(snap.coolantLoops[1].pumpSuppliedKW, 0);
+		if (!(snap.thermalBuffers[0].lastDischargeKW > 0)) throw std::runtime_error("buffer discharge not exercised: " + snap.thermalBuffers[0].lastLimiter
+			+ "; stored=" + std::to_string(snap.thermalBuffers[0].storedEnergyKJ)
+			+ "; rejected=" + std::to_string(snap.thermal.radiators[0].lastRejectedKW));
+		auto const before = snap; auto const revision = world.getStationSystemsObservationRevision();
+		world.queryStationSystemsChart(definition("Thermal buffer", "Stored thermal energy", "warm").id);
+		require(world.getStationSystemsSnapshot() == before && world.getStationSystemsObservationRevision() == revision, "thermal query mutated run");
+	}
+
 	void electricalExchangeObservations(smoke::Context const&)
 	{
 		core::StationSystemsSettings s; s.enabled = true; s.observationIntervalSeconds = 0.1f;
@@ -688,6 +802,7 @@ namespace
 void registerMaterialObservationChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"exchangeObservations", exchangeObservations});
+	checks.push_back({"thermalExchangeObservations", thermalExchangeObservations});
 	checks.push_back({"electricalExchangeObservations", electricalExchangeObservations});
 	checks.push_back({"materialObservations", materialObservations});
 	checks.push_back({"fluidInventoryObservations", fluidInventoryObservations});

@@ -3563,6 +3563,22 @@ namespace
 		core::ThermalReservoirSettings graphSink; graphSink.id = "graph-sink"; graphSink.thermalClass = "warm";
 		graphSink.heatCapacityKJPerK = 1e6; graphSink.startingTemperatureC = 20; graphSink.minTemperatureC = 0; graphSink.maxTemperatureC = 100;
 		seed.thermalReservoirs = {graphSink};
+		seed.radiators = {{"graph-radiator", "graph-sink", 1}};
+		core::CoolantLoopSettings graphLoop; graphLoop.id = "graph-loop"; graphLoop.reservoirId = "graph-sink";
+		graphLoop.hazardClass = "normal"; graphLoop.coolantCapacityKg = 100; graphLoop.startingCoolantKg = 100;
+		graphLoop.specificHeatKJPerKgK = 4; graphLoop.pumpPowerKW = 1; graphLoop.ratedFlowKgPerS = 2;
+		graphLoop.freezeProtectionSetpointC = 30; graphLoop.heaterCapacityKW = 1;
+		seed.coolantLoops = {graphLoop};
+		core::ChillerSettings graphChiller; graphChiller.id = "graph-chiller"; graphChiller.thermalClass = "warm";
+		graphChiller.coldLoopId = "graph-loop"; graphChiller.condenserReservoirId = "graph-sink";
+		graphChiller.ratedCoolingCapacityKW = 2; graphChiller.cop = 3;
+		auto graphColdReservoir = graphSink; graphColdReservoir.id = "graph-cold";
+		seed.thermalReservoirs.push_back(graphColdReservoir); seed.coolantLoops[0].reservoirId = "graph-cold";
+		seed.chillers = {graphChiller};
+		core::ThermalBufferSettings graphBuffer; graphBuffer.id = "graph-buffer"; graphBuffer.reservoirId = "graph-sink";
+		graphBuffer.accessMode = "passive"; graphBuffer.capacityKJ = 1000; graphBuffer.minUsableTemperatureC = 0;
+		graphBuffer.maxUsableTemperatureC = 40; graphBuffer.maxChargeKW = 1; graphBuffer.maxDischargeKW = 1;
+		graphBuffer.transferConductanceKWPerK = 1; seed.thermalBuffers = {graphBuffer};
 		core::GeneratorSettings graphGen; graphGen.id = "graph-gen"; graphGen.fuelStoreId = "graph-fuel";
 		graphGen.heatSinkId = "graph-sink"; graphGen.thermalClass = "warm"; graphGen.ratedOutputKW = 10;
 		graphGen.commandedOutputKW = 8; graphGen.efficiency = 0.5; graphGen.maxRampKWPerSecond = 2;
@@ -3616,7 +3632,11 @@ namespace
 				{"Generator", "Fuel"}, {"Generator", "Startup electricity"},
 				{"Battery", "Charging electricity"}, {"External equipment load group", "Electrical service"},
 				{"External equipment load group", "Material in 1"}, {"External equipment load group", "Material return 1"},
-				{"External equipment load group", "Exported heat"}})
+				{"External equipment load group", "Exported heat"},
+				{"Thermal reservoir", "Absorbed heat"}, {"Radiator", "Rejected heat"},
+				{"Coolant loop", "Pump electricity"}, {"Coolant loop", "Heater electricity"},
+				{"Chiller", "Cooling provided"}, {"Chiller", "Electrical service"},
+				{"Thermal buffer", "Charge heat"}, {"Thermal buffer", "Discharge heat"}})
 			{
 				auto const catalogue = world->getStationSystemsObservationCatalogue();
 				auto const selected = std::find_if(catalogue.begin(), catalogue.end(), [&](auto const& c) {

@@ -16,7 +16,7 @@ namespace core
 			auto const& d = s.metric;
 			metadata += sizeof(s) + s.subsystem.capacity() + s.id.capacity() + s.unit.capacity()
 				+ d.id.capacity() + d.equipmentType.capacity() + d.instanceId.capacity() + d.exchangeRole.capacity();
-			for (auto const* text : {&d.materialId, &d.constituentId, &d.hazardClass})
+			for (auto const* text : {&d.materialId, &d.constituentId, &d.hazardClass, &d.thermalClass})
 				if (*text) metadata += (*text)->capacity();
 		}
 		if (slots.size() > limits.metrics || metadata > limits.metadataBytes || metadata > limits.memoryBytes

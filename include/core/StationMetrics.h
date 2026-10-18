@@ -24,6 +24,7 @@ namespace core
 		std::string equipmentType, instanceId, exchangeRole;
 		std::optional<std::string> materialId, constituentId;
 		std::optional<std::string> hazardClass;
+		std::optional<std::string> thermalClass; // Cooling services never pool across classes.
 		StationMetricCoverage coverage{StationMetricCoverage::Complete};
 		StationMetricValidity validity{StationMetricValidity::Unavailable};
 	};
