@@ -1,6 +1,7 @@
 #pragma once
 #include "StationSystems.h"
 #include <optional>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -90,6 +91,10 @@ namespace core
 		StationConnectionKey connection;
 		double sourceToCanonicalScale{1};
 		size_t flowIndex{0};
+		// Compiled domain extraction for non-transfer exchanges. Empty values
+		// preserve missing authority as a gap; callbacks never run simulation.
+		std::function<StationMetricSample(StationSystemsSnapshot const&)> read;
+		bool perTick{false};
 	};
 	std::vector<StationExchangeObservation> stationExchangeObservations(StationSystemsSettings const& settings);
 	// Applied configuration must already have passed domain validation.

@@ -1,5 +1,9 @@
 # Station Flow observations
 
+Electrical equipment exchange catalogue (#706): see
+[Electrical equipment exchange observations](station-electrical-exchange-observations.md)
+for generation/service boundaries, canonical fuel/material rates and focused checks.
+
 Slice 1a (#695) presents Power through `core/StationMetrics.h`:
 
 - `World::getStationSystemsMetricHistory()` exposes typed, read-only observations.

@@ -45,7 +45,7 @@ namespace
 			require(world.configureStationSystems(rig(charging), false, &diagnostic), diagnostic.c_str());
 			world.markSaved();
 			auto const catalogue = world.getStationSystemsObservationCatalogue();
-			require(catalogue.size() == 4 && catalogue[1].id == "battery-energy" && catalogue[2].id == "battery-charge",
+			require(catalogue.size() >= 4 && catalogue[1].id == "battery-energy" && catalogue[2].id == "battery-charge",
 				"battery properties were not discovered before recording");
 			world.resumeSimulation(); require(world.advanceTicks(60), "battery observation run failed"); world.pauseSimulation();
 			require(world.getStationSystemsQueryWork().queries == 0, "recording built unselected views");
@@ -111,7 +111,8 @@ namespace
 			// Real property removal: the catalogue follows the newly applied run.
 			auto empty = rig(charging); empty.batteries.clear();
 			require(world.configureStationSystems(empty, true), "battery removal failed");
-			require(world.getStationSystemsObservationCatalogue().size() == 1
+			auto const remaining = world.getStationSystemsObservationCatalogue();
+			require(std::none_of(remaining.begin(), remaining.end(), [](auto const& c) { return c.group == "Batteries"; })
 				&& world.queryStationSystemsChart("battery-charge").series.empty(), "absent batteries manufactured a percentage view");
 		}
 		core::World zero("Zero capacity", 2, 2); zero.pauseSimulation(); zero.finishBuild();

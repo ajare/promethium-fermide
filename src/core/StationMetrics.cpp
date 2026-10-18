@@ -90,6 +90,7 @@ namespace core
 		auto add = [&](std::string type, std::string id, std::string relation,
 			std::string const& storeId, bool input, size_t index, bool requested) {
 			auto const found = std::ranges::find(settings.stores, storeId, &ResourceStoreSettings::id);
+			if (found == settings.stores.end()) return; // An unwired optional port has no exchange.
 			auto const& store = stores[found - settings.stores.begin()];
 			for (bool loss : {false, true})
 			{
@@ -103,8 +104,10 @@ namespace core
 				auto& d = o.metric;
 				d = store.metric;
 				d.id = "exchange/" + type + "/" + id + "/" + relation + (loss ? "/transport-loss" : "/actual");
-				d.equipmentType = type == "Transfer" ? "Resource transfer" : "Resource conversion";
+				d.equipmentType = type == "Transfer" ? "Resource transfer" : type == "Conversion" ? "Resource conversion"
+					: type == "Equipment" ? "External equipment load group" : type == "Fuel cell" ? "Fuel cell" : "Generator";
 				d.instanceId = id; d.exchangeRole = relation;
+				if (!d.materialId) d.coverage = StationMetricCoverage::Unclassified;
 				d.role = loss ? StationMetricRole::Loss : input ? StationMetricRole::Input : StationMetricRole::Output;
 				if (d.quantity == StationPhysicalQuantity::Mass)
 				{ d.quantity = StationPhysicalQuantity::MassRate; d.unit = StationCanonicalUnit::KilogramPerSecond; }
@@ -129,6 +132,149 @@ namespace core
 				add("Conversion", c.id, "Input " + std::to_string(i + 1), c.inputs[i].storeId, true, i, true);
 			for (size_t i = 0; i < c.outputs.size(); ++i)
 				add("Conversion", c.id, "Output " + std::to_string(i + 1), c.outputs[i].storeId, false, i, true);
+		}
+		// Electrical families expose their authoritative endpoint exchanges,
+		// not an estimate reconstructed from allocated station service.
+		auto connection = [&](std::string const& type, std::string const& id, std::string const& relation,
+			std::string role, StationMetricRole direction, int field) {
+			auto link = std::find_if(graph.links.begin(), graph.links.end(), [&](auto const& l) {
+				return l.designKey.ownerType == type && l.designKey.ownerId == id && l.designKey.relation == relation;
+			});
+			if (link == graph.links.end()) return;
+			StationExchangeObservation o;
+			o.connection = link->designKey;
+			auto& d = o.metric;
+			d.id = "exchange/" + type + "/" + id + "/" + role;
+			d.equipmentType = type == "Solar" ? "Solar array" : type == "Equipment" ? "External equipment load group" : type;
+			d.instanceId = id; d.exchangeRole = std::move(role); d.role = direction;
+			o.read = [key = o.connection, field](StationSystemsSnapshot const& snap) {
+				StationMetricSample v;
+				auto const found = std::ranges::find(snap.connections, key, &StationConnectionSnapshot::key);
+				if (found != snap.connections.end())
+					v.actual = field == 0 ? found->lastInputRate : field == 1 ? found->lastDeliveredRate : found->lastLossRate;
+				return v;
+			};
+			result.push_back(std::move(o));
+		};
+		// Typed scalar adapters compile the extraction once, retaining expected
+		// membership even when a committed snapshot is unavailable. Identity lookup
+		// is deliberate: public snapshots need not follow declaration/priority order.
+		auto scalar = [&](std::string type, std::string const& id, std::string role, StationMetricRole direction,
+			auto collection, auto actual, auto request) {
+			StationExchangeObservation o;
+			auto& d = o.metric;
+			d.id = "exchange/" + type + "/" + id + "/" + role;
+			d.equipmentType = std::move(type); d.instanceId = id; d.exchangeRole = std::move(role); d.role = direction;
+			if (request) d.requestedSemantics = StationRequestedSemantics::Demand;
+			o.read = [id, collection, actual, request](StationSystemsSnapshot const& snap) {
+				StationMetricSample v;
+				auto const& items = collection(snap);
+				auto const found = std::find_if(items.begin(), items.end(), [&](auto const& item) { return item.id == id; });
+				if (found != items.end()) { v.actual = actual(*found); if (request) v.requested = request(*found); }
+				return v;
+			};
+			result.push_back(std::move(o));
+		};
+		auto solar = [](StationSystemsSnapshot const& s) -> auto const& { return s.power.sources; };
+		auto generators = [](StationSystemsSnapshot const& s) -> auto const& { return s.power.generators; };
+		auto batteries = [](StationSystemsSnapshot const& s) -> auto const& { return s.power.batteries; };
+		auto loads = [](StationSystemsSnapshot const& s) -> auto const& { return s.power.loads; };
+		auto cells = [](StationSystemsSnapshot const& s) -> auto const& { return s.fuelCells; };
+		using SolarRead = double (*)(StationSolarSourceSnapshot const&);
+		using GeneratorRead = double (*)(StationGeneratorSnapshot const&);
+		using BatteryRead = double (*)(StationBatterySnapshot const&);
+		using LoadRead = double (*)(StationEquipmentLoadSnapshot const&);
+		using CellRead = double (*)(StationFuelCellSnapshot const&);
+		for (auto const& s : settings.solarArrays)
+		{
+			scalar("Solar array", s.id, "Available generation", StationMetricRole::Generation, solar,
+				SolarRead{[](auto const& a) { return a.availableKW; }}, SolarRead{});
+			connection("Solar", s.id, "Solar generation", "Pool delivery", StationMetricRole::Output, 1);
+			connection("Solar", s.id, "Solar generation", "Generation cable loss", StationMetricRole::Loss, 2);
+		}
+		for (auto const& g : settings.generators)
+		{
+			add("Generator", g.id, "Fuel", g.fuelStoreId, true, 0, false);
+			auto& fuel = result[result.size() - 2];
+			fuel.sourceToCanonicalScale = 3600; fuel.perTick = true;
+			fuel.read = [id = g.id](StationSystemsSnapshot const& snap) {
+				StationMetricSample v;
+				auto const found = std::ranges::find(snap.power.generators, id, &StationGeneratorSnapshot::id);
+				if (found != snap.power.generators.end()) v.actual = found->fuelDrawKWh;
+				return v;
+			};
+			scalar("Generator", g.id, "Generation", StationMetricRole::Generation, generators,
+				GeneratorRead{[](auto const& a) { return a.outputKW; }}, GeneratorRead{});
+			scalar("Generator", g.id, "Startup electricity", StationMetricRole::Input, generators,
+				GeneratorRead{[](auto const& a) { return a.startupDrawKW; }},
+				GeneratorRead{[](auto const& a) { return a.startupDrawKW + a.startupUnmetKW; }});
+			scalar("Generator", g.id, "Startup heat", StationMetricRole::Output, generators,
+				GeneratorRead{[](auto const& a) { return a.startupDrawKW; }}, GeneratorRead{});
+			scalar("Generator", g.id, "Production waste heat", StationMetricRole::Output, generators,
+				GeneratorRead{[](auto const& a) { return a.wasteHeatKW; }}, GeneratorRead{});
+			scalar("Generator", g.id, "Decay heat", StationMetricRole::Output, generators,
+				GeneratorRead{[](auto const& a) { return a.decayHeatKW; }}, GeneratorRead{});
+			connection("Generator", g.id, "Generation", "Pool delivery", StationMetricRole::Output, 1);
+			connection("Generator", g.id, "Generation", "Generation cable loss", StationMetricRole::Loss, 2);
+			connection("Generator", g.id, "Startup", "Startup cable loss", StationMetricRole::Loss, 2);
+			connection("Generator", g.id, "Heat", "Delivered heat", StationMetricRole::Output, 1);
+			connection("Generator", g.id, "Heat", "Heat transport loss", StationMetricRole::Loss, 2);
+		}
+		for (auto const& b : settings.batteries)
+		{
+			scalar("Battery", b.id, "Charging electricity", StationMetricRole::Input, batteries,
+				BatteryRead{[](auto const& a) { return a.lastChargeKW; }}, BatteryRead{});
+			scalar("Battery", b.id, "Discharging electricity", StationMetricRole::Output, batteries,
+				BatteryRead{[](auto const& a) { return a.lastDischargeKW; }},
+				BatteryRead{[](auto const& a) { return a.lastDischargeRequestedKW; }});
+			scalar("Battery", b.id, "Charge conversion loss", StationMetricRole::Loss, batteries,
+				BatteryRead{[](auto const& a) { return a.lastChargeKW * (1 - a.chargeEfficiency); }}, BatteryRead{});
+			scalar("Battery", b.id, "Discharge conversion loss", StationMetricRole::Loss, batteries,
+				BatteryRead{[](auto const& a) { return a.dischargeEfficiency > 0 ? a.lastDischargeKW * (1 / a.dischargeEfficiency - 1) : 0; }}, BatteryRead{});
+			connection("Battery", b.id, "Discharge", "Pool delivery", StationMetricRole::Output, 1);
+			connection("Battery", b.id, "Charge", "Charge cable loss", StationMetricRole::Loss, 2);
+			connection("Battery", b.id, "Discharge", "Discharge cable loss", StationMetricRole::Loss, 2);
+		}
+		for (auto const& l : settings.equipmentLoads)
+		{
+			scalar("External equipment load group", l.id, "Recovery startup electricity", StationMetricRole::Input, loads,
+				LoadRead{[](auto const& a) { return a.recoverySurgeKW; }}, LoadRead{});
+			scalar("External equipment load group", l.id, "Exported heat", StationMetricRole::Output, loads,
+				LoadRead{[](auto const& a) { return a.heatExportedKW; }}, LoadRead{});
+			connection("Equipment", l.id, "Electrical supply", "Supply cable loss", StationMetricRole::Loss, 2);
+			connection("Equipment", l.id, "Heat", "Delivered heat", StationMetricRole::Output, 1);
+			connection("Equipment", l.id, "Heat", "Heat transport loss", StationMetricRole::Loss, 2);
+			size_t in = 0, out = 0;
+			for (size_t i = 0; i < l.materialExchanges.size(); ++i)
+			{
+				auto const& f = l.materialExchanges[i];
+				auto const relation = std::string(f.consumes ? "Material in " : "Material return ") + std::to_string(f.consumes ? ++in : ++out);
+				if (f.storeId.empty()) continue;
+				add("Equipment", l.id, relation, f.storeId, f.consumes, i, true);
+				auto& o = result[result.size() - 2]; o.perTick = true;
+				o.read = [id = l.id, i](StationSystemsSnapshot const& snap) {
+					StationMetricSample v;
+					auto const found = std::ranges::find(snap.power.loads, id, &StationEquipmentLoadSnapshot::id);
+					if (found != snap.power.loads.end() && i < found->materialExchanges.size())
+					{ v.actual = found->materialExchanges[i].completed; v.requested = found->materialExchanges[i].requested; }
+					return v;
+				};
+				// Equipment flow snapshots are per tick, converted at the recorder seam.
+			}
+		}
+		for (auto const& c : settings.fuelCells)
+		{
+			add("Fuel cell", c.id, "Hydrogen", c.hydrogenStoreId, true, 0, false);
+			add("Fuel cell", c.id, "Oxygen", c.oxygenStoreId, true, 0, false);
+			add("Fuel cell", c.id, "Product water", c.waterStoreId, false, 0, false);
+			scalar("Fuel cell", c.id, "Generation", StationMetricRole::Generation, cells,
+				CellRead{[](auto const& a) { return a.lastOutputKW; }}, CellRead{});
+			scalar("Fuel cell", c.id, "Production waste heat", StationMetricRole::Output, cells,
+				CellRead{[](auto const& a) { return a.lastWasteHeatKW; }}, CellRead{});
+			connection("Fuel cell", c.id, "Backup generation", "Pool delivery", StationMetricRole::Output, 1);
+			connection("Fuel cell", c.id, "Backup generation", "Generation cable loss", StationMetricRole::Loss, 2);
+			connection("Fuel cell", c.id, "Heat", "Delivered heat", StationMetricRole::Output, 1);
+			connection("Fuel cell", c.id, "Heat", "Heat transport loss", StationMetricRole::Loss, 2);
 		}
 		return result;
 	}
@@ -337,21 +483,26 @@ namespace core
 			StationPhysicalQuantity, StationCanonicalUnit, std::string>;
 		std::map<ExchangeKey, std::vector<StationMetricDescriptor const*>> exchanges;
 		for (auto const& d : descriptors)
-			if ((d.equipmentType == "Resource transfer" || d.equipmentType == "Resource conversion")
-				&& d.materialId && d.unit != StationCanonicalUnit::Unspecified)
-				exchanges[{d.equipmentType, d.role, d.exchangeRole, *d.materialId, d.quantity, d.unit,
+			if (!d.equipmentType.empty() && d.unit != StationCanonicalUnit::Unspecified
+				&& (d.role == StationMetricRole::Input || d.role == StationMetricRole::Output
+					|| d.role == StationMetricRole::Generation || d.role == StationMetricRole::Loss))
+				exchanges[{d.equipmentType, d.role, d.exchangeRole, d.materialId.value_or(d.coverage == StationMetricCoverage::Unclassified ? "unclassified/" + d.instanceId : "energy"), d.quantity, d.unit,
 					d.hazardClass.value_or("unclassified")}].push_back(&d);
 		for (auto const& [key, members] : exchanges)
 		{
 			auto const& [type, role, exchange, material, quantity, unit, hazard] = key;
-			std::string const direction = role == StationMetricRole::Loss ? "Transport loss"
-				: role == StationMetricRole::Input ? "Input" : "Output";
+			bool const resource = type == "Resource transfer" || type == "Resource conversion";
+			std::string const direction = role == StationMetricRole::Loss ? (resource ? "Transport loss" : "Loss")
+				: role == StationMetricRole::Input ? "Input" : role == StationMetricRole::Generation ? "Generation" : "Output";
 			std::string const id = "exchange/" + type + "/" + direction + "/" + exchange + "/" + material
 				+ "/" + stationUnitLabel(unit) + "/" + hazard;
 			std::string const label = type + ": " + exchange + " " + direction + " — " + material
 				+ " (" + stationUnitLabel(unit) + "; " + hazard + ")";
-			StationChartDefinition chart{id, "Resource exchanges", label, label + " (applied simulation)", quantity, unit, {}};
-			chart.accountingNote = "Actual delivered exchange rate per simulation second; transport losses are separate views, not useful input/output or inventory change. Material identity, quantity and hazard class remain separate. Requests are optional overlays, never actual contributions.";
+			StationChartDefinition chart{id, resource ? "Resource exchanges" : direction == "Input" ? "Equipment inputs"
+				: direction == "Loss" ? "Equipment losses" : "Equipment outputs", label, label + " (applied simulation)", quantity, unit, {}};
+			chart.accountingNote = "Authoritative exchange rate per simulation second. Generation/availability, pool delivery, supplied service, startup obligations, heat and losses are distinct properties, not additive outputs. Material identity, quantity and hazard class remain separate. Requests are optional overlays, never actual contributions.";
+			chart.partialAccounting = std::any_of(members.begin(), members.end(), [](auto d) { return d->coverage != StationMetricCoverage::Complete; });
+			if (chart.partialAccounting) chart.accountingNote += " Unclassified material: no identity inferred from store names or units; not combined across instances.";
 			StationChartSeriesDefinition total;
 			total.metricId = id + "/total"; total.label = "Actual rate"; total.operation = StationChartOperation::Sum;
 			for (auto d : members) total.contributors.push_back(d->id);
@@ -400,7 +551,7 @@ namespace core
 				equipment.series.push_back({chart.propertyId + "/equipment/" + key, key, StationMetricValue::Actual,
 					StationChartOperation::Sum, ids, {}, true});
 			// Exchange selectors default to aggregate; keep legacy inventory defaults.
-			if (chart.group == "Resource exchanges")
+			if (chart.id.starts_with("exchange/"))
 			{
 				chart.id = chart.propertyId + "/instances";
 				aggregate.id = chart.propertyId;

@@ -6039,6 +6039,18 @@ namespace core
 			for (size_t i = 0; i < exchangeObservations.size(); ++i)
 			{
 				auto const& o = exchangeObservations[i];
+				if (o.read)
+				{
+					auto v = o.read(snap);
+					double const scale = o.sourceToCanonicalScale / (o.perTick ? World::getFixedTimestep() : 1);
+					if (v.actual) *v.actual *= scale;
+					if (v.requested) *v.requested *= scale;
+					v.validity = !v.actual ? StationMetricValidity::Unavailable
+						: !std::isfinite(*v.actual) || (v.requested && !std::isfinite(*v.requested))
+						? StationMetricValidity::Invalid : StationMetricValidity::Valid;
+					recordingValues[constituentSlot + i] = std::move(v);
+					continue;
+				}
 				auto const connection = std::ranges::find(snap.connections, o.connection, &StationConnectionSnapshot::key);
 				if (connection == snap.connections.end()) continue; // Missing authority is a gap, not zero.
 				double actual = o.metric.role == StationMetricRole::Loss ? connection->lastLossRate : connection->lastDeliveredRate;
@@ -16620,7 +16632,12 @@ namespace core
 		slots.back().metric.role = StationMetricRole::Generation;
 		slots.back().metric.requestedSemantics.reset();
 		for (auto const& load : settings.equipmentLoads)
+		{
 			addSlot("equipment-load", load.id, "kW", "equipment-load/" + load.id);
+			auto& d = slots.back().metric;
+			d.equipmentType = "External equipment load group"; d.exchangeRole = "Electrical service";
+			d.role = StationMetricRole::Input;
+		}
 		for (auto const& transfer : settings.transfers)
 		{
 			auto const source = std::ranges::find(settings.stores, transfer.sourceId, &ResourceStoreSettings::id);

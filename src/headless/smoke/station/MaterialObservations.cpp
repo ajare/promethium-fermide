@@ -151,6 +151,110 @@ namespace
 		}
 	}
 
+	void electricalExchangeObservations(smoke::Context const&)
+	{
+		core::StationSystemsSettings s; s.enabled = true; s.observationIntervalSeconds = 0.1f;
+		s.solarArrays = {{"sun", 20}};
+		s.batteries = {{"bank", 10, 10, 5, 5, 10, 0.8, 0.7}};
+		core::EquipmentLoadSettings load; load.id = "load"; load.electricalDemandKW = 4;
+		load.thermalClass = "warm"; load.coolingDisposition = core::StationCoolingDisposition::Exported;
+		load.heatOutputKW = 2; load.materialExchanges = {{"misleading-oxygen", 2, true}, {"return", 1, false}};
+		s.equipmentLoads = {load};
+		s.stores = {store("misleading-oxygen", "g", 100000, 50000, 0, "feed"), store("return", "g", 100000, 0, 0, "product"),
+			store("fuel", "Wh", 100000, 100000, 0, "primary-fuel")};
+		core::ThermalReservoirSettings sink; sink.id = "sink"; sink.thermalClass = "warm";
+		sink.heatCapacityKJPerK = 1e6; sink.startingTemperatureC = 20; sink.minTemperatureC = 0; sink.maxTemperatureC = 100;
+		s.thermalReservoirs = {sink};
+		core::GeneratorSettings g; g.id = "gen"; g.fuelStoreId = "fuel"; g.heatSinkId = "sink"; g.thermalClass = "warm";
+		g.ratedOutputKW = 10; g.commandedOutputKW = 8; g.efficiency = 0.5; g.maxRampKWPerSecond = 2;
+		g.startupPowerKW = 1; g.startupSeconds = 0.2; g.maxSinkTemperatureC = 90;
+		s.generators = {g};
+		core::World world("Electrical exchanges", 2, 2); world.pauseSimulation(); world.finishBuild();
+		auto apply = [&] { std::string why; if (!world.configureStationSystems(s, true, &why)) throw std::runtime_error(why); };
+		auto definition = [&](std::string const& type, std::string const& role, std::string const& material = "energy") {
+			auto const catalogue = world.getStationSystemsObservationCatalogue();
+			auto const found = std::find_if(catalogue.begin(), catalogue.end(), [&](auto const& c) {
+				return c.breakdown == "Aggregate" && c.id.starts_with("exchange/" + type + "/")
+					&& c.id.find("/" + role + "/" + material + "/") != std::string::npos;
+			});
+			require(found != catalogue.end(), "electrical exchange not discovered"); return *found;
+		};
+		auto value = [&](std::string const& type, std::string const& role, std::string const& material = "energy") {
+			auto data = world.queryStationSystemsChart(definition(type, role, material).id);
+			require(!data.incomplete && !data.series[0].values.empty(), "electrical exchange unavailable");
+			return data.series[0].values.back();
+		};
+		apply();
+		require(world.queryStationSystemsChart(definition("Generator", "Generation").id).series[0].values.empty(), "new run fabricated samples");
+		run(world, 6); // Starting: separate demand, received crank and heat; no generation.
+		auto snap = world.getStationSystemsSnapshot();
+		close(value("Generator", "Generation"), snap.power.generators[0].outputKW);
+		close(value("Generator", "Startup electricity"), snap.power.generators[0].startupDrawKW);
+		close(value("Generator", "Startup heat"), snap.power.generators[0].startupDrawKW);
+		require(snap.power.generators[0].startupDrawKW > 0, "fixture did not start generator");
+		run(world, 60); snap = world.getStationSystemsSnapshot();
+		close(value("Solar array", "Available generation"), snap.power.sources[0].availableKW);
+		close(value("Generator", "Generation"), snap.power.generators[0].outputKW);
+		require(snap.power.generators[0].outputKW > 0 && snap.power.generators[0].outputKW < 8, "fixture did not exercise ramp");
+		close(value("Generator", "Fuel", "primary-fuel"), snap.power.generators[0].fuelDrawKWh * 3600 / core::World::getFixedTimestep());
+		close(value("Generator", "Production waste heat"), snap.power.generators[0].wasteHeatKW);
+		close(value("Battery", "Charging electricity"), snap.power.batteries[0].lastChargeKW);
+		close(value("Battery", "Charge conversion loss"), snap.power.batteries[0].lastChargeKW * 0.2);
+		close(value("External equipment load group", "Electrical service"), snap.power.loads[0].suppliedKW);
+		close(value("External equipment load group", "Exported heat"), snap.power.loads[0].heatExportedKW);
+		close(value("External equipment load group", "Material in 1", "feed"), snap.power.loads[0].materialExchanges[0].completed * 0.001 / core::World::getFixedTimestep());
+		close(value("External equipment load group", "Material return 1", "product"), snap.power.loads[0].materialExchanges[1].completed * 0.001 / core::World::getFixedTimestep());
+		require(value("Solar array", "Available generation") > value("External equipment load group", "Electrical service"), "surplus generation confused with service");
+		auto histories = world.getStationSystemsMetricHistory();
+		auto generationDefinition = definition("Generator", "Generation");
+		auto const data = world.queryStationSystemsChart(generationDefinition.id);
+		require(data.series.size() == 1, "generation invented a requested output");
+		for (auto& h : histories) if (h.descriptor.equipmentType == "Generator" && h.descriptor.exchangeRole == "Generation") h.samples.back().actual.reset();
+		auto const missing = core::queryStationChart(generationDefinition, histories);
+		require(missing.incomplete && std::isnan(missing.series[0].values.back()), "missing generator became zero");
+		// Reapply with no generation: battery supports a constrained, lossy cable.
+		s.solarArrays.clear(); s.generators.clear();
+		auto const cable = std::find_if(snap.connections.begin(), snap.connections.end(), [](auto const& c) {
+			return c.key.ownerType == "Equipment" && c.key.ownerId == "load" && c.key.relation == "Electrical supply";
+		});
+		require(cable != snap.connections.end(), "equipment cable authority absent");
+		s.connections[cable->key] = {core::StationPhysicalConnection::Automatic, 4, 0.5};
+		apply(); run(world, 6); snap = world.getStationSystemsSnapshot();
+		close(value("Battery", "Discharging electricity"), snap.power.batteries[0].lastDischargeKW);
+		close(value("Battery", "Discharge conversion loss"), snap.power.batteries[0].lastDischargeKW * (1 / 0.7 - 1));
+		close(value("External equipment load group", "Electrical service"), 2);
+		close(value("External equipment load group", "Supply cable loss"), 2);
+		close(world.queryStationSystemsChart("power").series[1].values.back(), 0);
+		require(snap.power.totalSuppliedKW > 0, "battery fixture supplied no service");
+		// Fuel cells have distinct H2/O2 reactant properties, never one fuel sum.
+		s.connections.clear(); s.equipmentLoads.clear(); s.batteries.clear();
+		s.stores = {store("h", "kg", 100, 50, 0), store("o", "kg", 100, 50, 0), store("w", "kg", 100, 0, 0)};
+		core::FuelCellSettings cell; cell.id = "cell"; cell.hazardClass = "normal"; cell.hydrogenStoreId = "h"; cell.oxygenStoreId = "o"; cell.waterStoreId = "w";
+		cell.thermalClass = "warm"; cell.heatSinkId = "sink"; cell.ratedOutputKW = 10; cell.commandedOutputKW = 5;
+		s.fuelCells = {cell}; apply(); run(world, 6); snap = world.getStationSystemsSnapshot();
+		close(value("Fuel cell", "Hydrogen", "hydrogen"), snap.fuelCells[0].lastHydrogenKg / core::World::getFixedTimestep());
+		close(value("Fuel cell", "Oxygen", "oxygen"), snap.fuelCells[0].lastOxygenKg / core::World::getFixedTimestep());
+		close(value("Fuel cell", "Product water", "water"), snap.fuelCells[0].lastWaterKg / core::World::getFixedTimestep());
+		close(value("Fuel cell", "Generation"), snap.fuelCells[0].lastOutputKW);
+		// Stopped equipment is a measured zero, not missing authority.
+		s.fuelCells[0].commandedOutputKW = 0; apply(); run(world, 6);
+		close(value("Fuel cell", "Generation"), 0); close(value("Fuel cell", "Hydrogen", "hydrogen"), 0);
+		// Expected membership and generic breakdowns cover multiple instances.
+		s.fuelCells.clear(); s.stores.clear(); s.solarArrays = {{"sun", 20}};
+		load.materialExchanges.clear(); load.electricalDemandKW = 3; s.equipmentLoads = {load};
+		load.id = "second"; load.electricalDemandKW = 2; s.equipmentLoads.push_back(load);
+		apply(); run(world, 6);
+		auto const service = definition("External equipment load group", "Electrical service");
+		auto const aggregate = world.queryStationSystemsChart(service.id);
+		auto const instances = world.queryStationSystemsChart(service.id + "/instances");
+		close(aggregate.series[0].values.back(), 5); close(aggregate.series[1].values.back(), 5);
+		require(instances.series.size() == 4 && instances.series[1].stacked && instances.series[2].stacked
+			&& !instances.series[3].stacked, "electrical actual/request breakdown population differs");
+		close(instances.series[1].values.back() + instances.series[2].values.back(), aggregate.series[0].values.back());
+		world.resetSimulation(); run(world, 6);
+		close(world.queryStationSystemsChart(service.id).series[0].values.back(), 5);
+	}
+
 	void materialObservations(smoke::Context const&)
 	{
 		core::World world("Materials", 2, 2); world.pauseSimulation(); world.finishBuild();
@@ -584,6 +688,7 @@ namespace
 void registerMaterialObservationChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"exchangeObservations", exchangeObservations});
+	checks.push_back({"electricalExchangeObservations", electricalExchangeObservations});
 	checks.push_back({"materialObservations", materialObservations});
 	checks.push_back({"fluidInventoryObservations", fluidInventoryObservations});
 	checks.push_back({"compoundInventoryObservations", compoundInventoryObservations});

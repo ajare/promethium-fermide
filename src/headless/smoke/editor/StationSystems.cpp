@@ -3552,6 +3552,22 @@ namespace
 		core::ResourceStoreSettings flowProduct{"flow-product", "kg", 100, 0, 0}; flowProduct.materialId = "exchange-test";
 		seed.stores.push_back(flowFeed); seed.stores.push_back(flowProduct);
 		seed.transfers = {{"flow", "flow-feed", "flow-product", "kg", 2}};
+		seed.solarArrays = {{"graph-sun", 20}};
+		seed.batteries = {{"graph-bank", 10, 10, 5, 5, 10}};
+		core::EquipmentLoadSettings graphLoad; graphLoad.id = "graph-load"; graphLoad.electricalDemandKW = 4;
+		graphLoad.thermalClass = "warm"; graphLoad.heatOutputKW = 2;
+		graphLoad.materialExchanges = {{"flow-feed", 0.1, true}, {"flow-product", 0.1, false}};
+		seed.equipmentLoads = {graphLoad};
+		core::ResourceStoreSettings graphFuel{"graph-fuel", "Wh", 100000, 100000}; graphFuel.materialId = "primary-fuel";
+		seed.stores.push_back(graphFuel);
+		core::ThermalReservoirSettings graphSink; graphSink.id = "graph-sink"; graphSink.thermalClass = "warm";
+		graphSink.heatCapacityKJPerK = 1e6; graphSink.startingTemperatureC = 20; graphSink.minTemperatureC = 0; graphSink.maxTemperatureC = 100;
+		seed.thermalReservoirs = {graphSink};
+		core::GeneratorSettings graphGen; graphGen.id = "graph-gen"; graphGen.fuelStoreId = "graph-fuel";
+		graphGen.heatSinkId = "graph-sink"; graphGen.thermalClass = "warm"; graphGen.ratedOutputKW = 10;
+		graphGen.commandedOutputKW = 8; graphGen.efficiency = 0.5; graphGen.maxRampKWPerSecond = 2;
+		graphGen.startupPowerKW = 1; graphGen.startupSeconds = 0.2; graphGen.maxSinkTemperatureC = 90;
+		seed.generators = {graphGen};
 		// Composition is authoritative even when material identity is unknown.
 		seed.stores[3].composition = core::ResourceCompositionSettings{0.25, 0.1, 0.2};
 		core::AtmosphereSettings air;
@@ -3593,6 +3609,34 @@ namespace
 			ctx->SetRef("Material configuration");
 			auto const observed = world->getStationSystemsSnapshot();
 			auto const revision = world->getStationSystemsObservationRevision();
+			// Each electrical exchange uses the same real selector and generic
+			// renderer; rates recorded while hidden are immediately available.
+			for (auto const& [type, role] : std::vector<std::pair<std::string, std::string>>{
+				{"Solar array", "Available generation"}, {"Generator", "Generation"},
+				{"Generator", "Fuel"}, {"Generator", "Startup electricity"},
+				{"Battery", "Charging electricity"}, {"External equipment load group", "Electrical service"},
+				{"External equipment load group", "Material in 1"}, {"External equipment load group", "Material return 1"},
+				{"External equipment load group", "Exported heat"}})
+			{
+				auto const catalogue = world->getStationSystemsObservationCatalogue();
+				auto const selected = std::find_if(catalogue.begin(), catalogue.end(), [&](auto const& c) {
+					return c.breakdown == "Aggregate" && c.id.starts_with("exchange/" + type + "/")
+						&& c.id.find("/" + role + "/") != std::string::npos;
+				});
+				REQ(selected != catalogue.end(), "electrical selector property absent");
+				ctx->ItemClick("##Station observation property"); ctx->Yield(2);
+				auto const* popup = ctx->GetWindowByRef("//$FOCUSED");
+				REQ(popup != nullptr, "electrical property popup absent");
+				auto const item = ImHashStr(selected->label.c_str(), 0, ImHashStr(selected->id.c_str(), 0, popup->ID));
+				ctx->ScrollToItemY(item); ctx->ItemClick(item); ctx->Yield(2);
+				REQ(window.selectedObservation() == selected->id && driver.contains("Actual rate"), "electrical chart not rendered");
+				auto const data = world->queryStationSystemsChart(selected->id);
+				REQ(!data.incomplete && data.series[0].values.size() == 1, "electrical selection lost hidden samples");
+				ctx->ComboClick("Breakdown/Instance"); ctx->Yield(2);
+				REQ(window.selectedObservation() == selected->id + "/instances", "electrical instance presentation unavailable");
+				REQ(world->getStationSystemsSnapshot() == observed && world->getStationSystemsObservationRevision() == revision
+					&& window.draftHistory().undoCount() == 0 && !world->isModified(), "electrical graph mutated applied run or document");
+			}
 			std::string const exchangeId = "exchange/Resource transfer/Output/Destination/exchange-test/kg/s/normal";
 			ctx->ItemClick("##Station observation property"); ctx->Yield(2);
 			auto const catalogue = world->getStationSystemsObservationCatalogue();
