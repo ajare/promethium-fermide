@@ -33,6 +33,10 @@ namespace core
 		// shares World's friendship here rather than widening Sector's public
 		// surface (ADR 0004).
 		friend class SimulationCoordinator;
+		// The marker store creates and removes Marker sector objects on the
+		// owning World's behalf and shares World's friendship here rather
+		// than widening Sector's public surface (ADR 0022).
+		friend class MarkerStore;
 
 	private:
 

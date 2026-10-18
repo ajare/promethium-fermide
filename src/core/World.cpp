@@ -14,6 +14,7 @@
 #include "core/AgentGroupRegistry.h"
 #include "core/PermissionRequirementStore.h"
 #include "core/AgentTypeCatalog.h"
+#include "core/MarkerStore.h"
 #include "core/ChamberTransit.h"
 #include "core/AirlockTransit.h"
 #include "core/RestorationTiming.h"
@@ -124,6 +125,7 @@ namespace core
 	, mAgentGroupRegistry(std::make_unique<AgentGroupRegistry>(*this))
 	, mPermissionRequirementStore(std::make_unique<PermissionRequirementStore>(*this))
 	, mAgentTypeCatalog(std::make_unique<AgentTypeCatalog>(*this))
+	, mMarkerStore(std::make_unique<MarkerStore>(*this))
 		, mAgentTypeRuntime(std::make_unique<AgentTypeRuntimeAdapter>(
 			agentTypeRuntimeLimits))
 		, mAgentBehaviourRuntime(std::make_unique<AgentBehaviourRuntimeAdapter>(
@@ -2816,32 +2818,6 @@ namespace core
 		return {
 			sector->createWalkway(sector, x, y, vertexIdentifier),
 			SectorObjectType::Walkway,
-			sector
-		};
-	}
-
-	World::CreateObjectResult World::createMarker(uint32_t layerIndex, uint32_t x,
-		uint32_t y, float xOffset, MarkerId id, string name,
-		MarkerProperties properties, uint32_t* vertexIdentifier)
-	{
-		invalidateSimulationSnapshot();
-		string caller = format("World::createMarker({}, {}, {}, {})", layerIndex, x, y, xOffset);
-
-		float xPos = x + xOffset;
-		x = (uint32_t)xPos;
-		
-
-		validateCellOccupied(caller, layerIndex, x, y);
-
-		// Create Marker
-		auto layer = getLayer(layerIndex);
-		auto const& cellDef = layer->getCellDefinition(x, y);
-		auto sector = _getSector(cellDef.sectorIndex);
-
-		return {
-			sector->createMarker(sector, id, std::move(name), properties,
-				x, y, xPos - x, vertexIdentifier),
-			SectorObjectType::Marker,
 			sector
 		};
 	}
@@ -6630,238 +6606,59 @@ namespace core
 
 	bool World::markerNameTaken(string const& trimmed, MarkerId except) const
 	{
-		// Inspect objects directly: getMarkerIds() followed by lookupMarker()
-		// rescans all objects for every identity, making repeated insertion
-		// cubic (including both validated restoration replays).
-		for (auto const& sector : mSectors)
-		{
-			if (!sector) continue;
-			for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
-			{
-				auto object = dynamic_pointer_cast<MarkerSectorObject>(sector->getObject(i));
-				if (!object) continue;
-				auto marker = object->getMarker();
-				if (marker->getId() != except && marker->getName() == trimmed) return true;
-			}
-		}
-		return false;
-	}
-
-	string World::nextGeneratedMarkerName() const
-	{
-		for (uint64_t suffix = 1; suffix != 0; ++suffix)
-		{
-			auto candidate = format("Marker {}", suffix);
-			if (!markerNameTaken(candidate)) return candidate;
-		}
-		throw WorldException(this, "No unique generated Marker name is available");
-	}
-
-	shared_ptr<Marker> World::mutableMarker(MarkerId id) const
-	{
-		for (auto const& sector : mSectors)
-		{
-			if (!sector) continue;
-			for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
-			{
-				auto object = dynamic_pointer_cast<MarkerSectorObject>(sector->getObject(i));
-				if (!object) continue;
-				auto marker = const_pointer_cast<Marker>(object->getMarker());
-				if (marker->getId() == id) return marker;
-			}
-		}
-		return nullptr;
-	}
-
-	vector<MarkerId> World::getMarkerIds() const
-	{
-		vector<MarkerId> result;
-		for (auto const& sector : mSectors)
-		{
-			if (!sector) continue;
-			for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
-			{
-				auto object = dynamic_pointer_cast<MarkerSectorObject>(sector->getObject(i));
-				if (object) result.push_back(object->getMarker()->getId());
-			}
-		}
-		sort(result.begin(), result.end());
-		return result;
+		return mMarkerStore->markerNameTaken(trimmed, except);
 	}
 
 	shared_ptr<const Marker> World::lookupMarker(MarkerId id) const
 	{
-		return mutableMarker(id);
+		return mMarkerStore->lookupMarker(id);
+	}
+
+	vector<MarkerId> World::getMarkerIds() const
+	{
+		return mMarkerStore->getMarkerIds();
 	}
 
 	bool World::canRenameMarker(MarkerId id, string const& name, string* diagnostic) const
 	{
-		auto reject = [diagnostic](string reason)
-		{
-			if (diagnostic) *diagnostic = std::move(reason);
-			return false;
-		};
-		if (!id || !lookupMarker(id)) return reject("Marker does not exist");
-		auto const trimmed = Marker::trimName(name);
-		string reason;
-		if (!Marker::nameIsValid(trimmed, &reason)) return reject(std::move(reason));
-		if (markerNameTaken(trimmed, id)) return reject("A Marker with this name already exists");
-		if (diagnostic) diagnostic->clear();
-		return true;
+		return mMarkerStore->canRenameMarker(id, name, diagnostic);
 	}
 
 	bool World::renameMarker(MarkerId id, string const& name, string* diagnostic)
 	{
-		if (!canRenameMarker(id, name, diagnostic)) return false;
-		auto const trimmed = Marker::trimName(name);
-		auto marker = mutableMarker(id);
-		if (marker->getName() == trimmed) return true;
-		auto record = find_if(mConstructionRecords.begin(), mConstructionRecords.end(),
-			[id](ConstructionRecord const& candidate)
-			{
-				return (candidate.type == ConstructionType::Marker && candidate.markerId == id)
-					|| (candidate.type == ConstructionType::Furniture && std::any_of(candidate.furnitureDestinations.begin(),
-						candidate.furnitureDestinations.end(), [id](auto const& p) { return p.marker == id; }));
-			});
-		if (record == mConstructionRecords.end())
-			throw WorldException(this, "renameMarker - Marker has no authored record");
-		invalidateSimulationSnapshot();
-		marker->setName(trimmed);
-		if (record->type == ConstructionType::Furniture)
-		{
-			for (auto& point : record->furnitureDestinations) if (point.marker == id) point.name = trimmed;
-			for (auto& instance : mFurniture)
-				for (auto& point : instance.destinations) if (point.marker == id) point.name = trimmed;
-		}
-		else record->name = trimmed;
-		modify();
-		return true;
+		return mMarkerStore->renameMarker(id, name, diagnostic);
 	}
 
 	bool World::setMarkerProperties(MarkerId id, MarkerProperties properties,
 		string* diagnostic)
 	{
-		auto reject = [diagnostic](string reason)
-		{
-			if (diagnostic) *diagnostic = std::move(reason);
-			return false;
-		};
-		if (properties & ~markerPropertyBit(MarkerProperty::BlocksPathing))
-			return reject("Marker properties contain unknown bits");
-		auto marker = mutableMarker(id);
-		if (!marker) return reject("Marker does not exist");
-		if (mBuildFinished && !mSimulationPaused)
-			return reject("Marker pathing properties can only be changed while the simulation is paused");
-		if (marker->getProperties() == properties)
-		{
-			if (diagnostic) diagnostic->clear();
-			return true;
-		}
-		auto record = find_if(mConstructionRecords.begin(), mConstructionRecords.end(),
-			[id](ConstructionRecord const& candidate)
-			{
-				return (candidate.type == ConstructionType::Marker && candidate.markerId == id)
-					|| (candidate.type == ConstructionType::Furniture && std::any_of(candidate.furnitureDestinations.begin(),
-						candidate.furnitureDestinations.end(), [id](auto const& p) { return p.marker == id; }));
-			});
-		if (record == mConstructionRecords.end())
-			throw WorldException(this, "setMarkerProperties - Marker has no authored record");
-		invalidateSimulationSnapshot();
-		marker->setProperties(properties);
-		if (record->type == ConstructionType::Furniture)
-		{
-			for (auto& point : record->furnitureDestinations) if (point.marker == id) point.properties = properties;
-			for (auto& instance : mFurniture)
-				for (auto& point : instance.destinations) if (point.marker == id) point.properties = properties;
-		}
-		else record->c = properties;
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
+		return mMarkerStore->setMarkerProperties(id, properties, diagnostic);
 	}
 
 	World::CreateObjectResult World::addSectorMarker(uint32_t sectorIndex,
 		uint32_t levelIndex, float xOffset, uint32_t* vertexIdentifier)
 	{
-		invalidateSimulationSnapshot();
-		return addSectorMarker(sectorIndex, levelIndex, xOffset,
-			nextGeneratedMarkerName(), vertexIdentifier);
+		return mMarkerStore->addSectorMarker(sectorIndex, levelIndex, xOffset, vertexIdentifier);
 	}
 
 	World::CreateObjectResult World::addSectorMarker(uint32_t sectorIndex,
 		uint32_t levelIndex, float xOffset, string const& name, uint32_t* vertexIdentifier)
 	{
-		invalidateSimulationSnapshot();
-		string diagnostic;
-		if (!canAddSectorMarker(sectorIndex, levelIndex, xOffset, &diagnostic))
-			throw WorldException(this, "World::addSectorMarker - " + diagnostic);
-		auto const trimmed = Marker::trimName(name);
-		if (!Marker::nameIsValid(trimmed, &diagnostic))
-			throw WorldException(this, "World::addSectorMarker - " + diagnostic);
-		if (markerNameTaken(trimmed))
-			throw WorldException(this, "World::addSectorMarker - A Marker with this name already exists");
-		if (mNextMarkerId == 0)
-			throw WorldException(this, "World::addSectorMarker - Marker ID space is exhausted");
-		auto const id = MarkerId{ mNextMarkerId };
-		mNextMarkerId = mNextMarkerId == numeric_limits<uint64_t>::max() ? 0 : mNextMarkerId + 1;
-		return addSectorMarkerRestored(sectorIndex, levelIndex, xOffset, id, trimmed,
-			0, vertexIdentifier);
+		return mMarkerStore->addSectorMarker(sectorIndex, levelIndex, xOffset, name, vertexIdentifier);
 	}
 
 	World::CreateObjectResult World::addSectorMarkerRestored(uint32_t sectorIndex,
 		uint32_t levelIndex, float xOffset, MarkerId id, string name,
 		MarkerProperties properties, uint32_t* vertexIdentifier, bool allowCoincident)
 	{
-		invalidateSimulationSnapshot();
-		string diagnostic;
-		if (!id) throw WorldException(this, "Marker ID cannot be zero");
-		if (properties & ~markerPropertyBit(MarkerProperty::BlocksPathing))
-			throw WorldException(this, "Marker properties contain unknown bits");
-		if (lookupMarker(id)) throw WorldException(this, "Marker ID is already in use");
-		if (!canAddSectorMarkerImpl(sectorIndex, levelIndex, xOffset, &diagnostic, allowCoincident))
-			throw WorldException(this, "World::addSectorMarker - " + diagnostic);
-		name = Marker::trimName(name);
-		if (!Marker::nameIsValid(name, &diagnostic))
-			throw WorldException(this, "World::addSectorMarker - " + diagnostic);
-		if (markerNameTaken(name))
-			throw WorldException(this, "World::addSectorMarker - A Marker with this name already exists");
-		beginStructuralEdit("addSectorMarker");
-
-		auto sector = _getSector(sectorIndex);
-		auto layerIndex = sector->getLayerIndex();
-		auto layer = getLayer(layerIndex);
-		auto& cellDef = layer->getCellDefinition(sector->getCellX() + (uint32_t)xOffset,
-			sector->getCellY() + levelIndex);
-		auto createdMarker = createMarker(layerIndex, sector->getCellX(),
-			sector->getCellY() + levelIndex, xOffset, id, name, properties,
-			vertexIdentifier);
-		cellDef.markers.push_back(createdMarker.index);
-		ConstructionRecord record{ ConstructionType::Marker };
-		record.a = sectorIndex; record.b = levelIndex; record.c = properties;
-		record.x = xOffset;
-		record.markerId = id; record.name = std::move(name);
-		recordConstruction(std::move(record));
-		return createdMarker;
+		return mMarkerStore->addSectorMarkerRestored(sectorIndex, levelIndex, xOffset,
+			id, std::move(name), properties, vertexIdentifier, allowCoincident);
 	}
 
 	bool World::canRemoveSectorMarker(uint32_t sectorIndex, uint32_t objectIndex,
 		string* diagnostic) const
 	{
-		if (diagnostic) diagnostic->clear();
-		auto reject = [diagnostic](string message)
-		{
-			if (diagnostic) *diagnostic = std::move(message);
-			return false;
-		};
-		if (sectorIndex >= mSectors.size()) return reject("The Marker Sector does not exist");
-		auto const sector = mSectors[sectorIndex];
-		if (!sector || objectIndex >= sector->getNumObjects())
-			return reject("The Marker object does not exist");
-		auto markerObject = dynamic_pointer_cast<MarkerSectorObject>(sector->getObject(objectIndex));
-		if (!markerObject) return reject("The selected object is not a Marker");
-		auto const marker = markerObject->getMarker()->getId();
-		if (isFurnitureMarker(marker)) return reject("A Furniture-owned Marker cannot be deleted independently");
-		return markerHasNoBehaviourReferences(marker, diagnostic);
+		return mMarkerStore->canRemoveSectorMarker(sectorIndex, objectIndex, diagnostic);
 	}
 
 	bool World::markerHasNoBehaviourReferences(MarkerId marker, string* diagnostic) const
@@ -6916,26 +6713,7 @@ namespace core
 	bool World::removeSectorMarker(uint32_t sectorIndex, uint32_t objectIndex,
 		string* diagnostic)
 	{
-		if (!canRemoveSectorMarker(sectorIndex, objectIndex, diagnostic)) return false;
-		auto sector = _getSector(sectorIndex);
-		auto markerObject = dynamic_pointer_cast<MarkerSectorObject>(sector->getObject(objectIndex));
-
-		beginStructuralEdit("removeSectorMarker");
-		auto const marker = markerObject->getMarker();
-		auto& cellDef = mLayers[sector->getLayerIndex()]->getCellDefinition(
-			marker->getCellX(), marker->getCellY());
-		auto const found = find(cellDef.markers.begin(), cellDef.markers.end(), objectIndex);
-		if (found == cellDef.markers.end())
-			throw WorldException(this, "removeSectorMarker - Marker is not registered in its cell");
-		cellDef.markers.erase(found);
-		if (!sector->removeSectorObject(objectIndex)) return false;
-
-		ConstructionRecord record{ ConstructionType::RemoveMarker };
-		record.a = sectorIndex;
-		record.b = objectIndex;
-		record.markerId = marker->getId();
-		recordConstruction(std::move(record));
-		return true;
+		return mMarkerStore->removeSectorMarker(sectorIndex, objectIndex, diagnostic);
 	}
 
 	World::CreateForceBridgeResult World::addSectorForceBridge(uint32_t sectorIndex,

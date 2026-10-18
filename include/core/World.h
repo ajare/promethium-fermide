@@ -56,6 +56,7 @@ namespace core
 	class AgentGroupRegistry;
 	class PermissionRequirementStore;
 	class AgentTypeCatalog;
+	class MarkerStore;
 
 	class World : public Serializable
 	{
@@ -82,6 +83,11 @@ namespace core
 		// Agent-type registry and preview-baseline cache below on the World's
 		// behalf (ADR 0022).
 		friend class AgentTypeCatalog;
+		// The marker store owns no state; it reads and edits the Marker ID
+		// allocation, the Sector-held Marker objects, the construction
+		// records, and the Furniture destinations below on the World's
+		// behalf (ADR 0022).
+		friend class MarkerStore;
 		// The registry binding template owns no state; it edits the
 		// World-owned registry reference pairs and registry pointers below on
 		// the World's behalf through friend access to modify() (#676,
@@ -637,6 +643,15 @@ namespace core
 		// through this World.
 		std::unique_ptr<AgentTypeCatalog> mAgentTypeCatalog;
 
+		// The Marker record behaviour lives in the marker store (ADR 0022).
+		// World keeps ownership of the state it edits - the `mNextMarkerId`
+		// allocation, the Sector-held Marker objects, the construction
+		// records, and the Furniture destinations (ADR 0001) - and stays
+		// the facade (design pattern) through which every caller reaches
+		// these operations; the store owns no state and reaches them
+		// through this World.
+		std::unique_ptr<MarkerStore> mMarkerStore;
+
 		// Every World owns one sandboxed Lua runtime for its Agent types. It is
 		// declared before mAgents so Agent destruction (which releases live Lua
 		// instances through their opaque handles) happens while the runtime's Lua
@@ -1117,8 +1132,6 @@ namespace core
 
 		bool markerNameTaken(std::string const& trimmed,
 			MarkerId except = MarkerId{}) const;
-		std::string nextGeneratedMarkerName() const;
-		std::shared_ptr<Marker> mutableMarker(MarkerId id) const;
 
 		EntityRegistry<InteractionPointId, InteractionPoint> mInteractionPoints;
 
@@ -1786,9 +1799,6 @@ namespace core
 
 		CreateObjectResult createWalkway(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t* vertexIdentifier = nullptr);
 
-		CreateObjectResult createMarker(uint32_t layerIndex, uint32_t x, uint32_t y,
-			float xOffset, MarkerId id, std::string name, MarkerProperties properties,
-			uint32_t* vertexIdentifier = nullptr);
 		bool canAddSectorMarkerImpl(uint32_t sectorIndex, uint32_t levelIndex, float xOffset,
 			std::string* diagnostic, bool allowCoincident) const;
 		CreateObjectResult addSectorMarkerRestored(uint32_t sectorIndex,

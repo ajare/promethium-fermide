@@ -32,6 +32,7 @@ contract/probe invocations are not new scenario owners. See
 | `OccupantPackingChecks.cpp` | retained standalone | `pf-occupant-packing-checks` |
 | `AgentGroupRegistryChecks.cpp` | retained standalone | `pf-agent-group-registry-checks` |
 | `AgentTypeCatalogChecks.cpp` | retained standalone | `pf-agent-type-catalog-checks` |
+| `MarkerStoreChecks.cpp` | retained standalone | `pf-marker-store-checks` |
 | `PermissionRequirementStoreChecks.cpp` | retained standalone | `pf-permission-requirement-store-checks` |
 | `PlacementValidatorChecks.cpp` | retained standalone | `pf-placement-validator-checks` |
 | `RegistryBindingChecks.cpp` | retained standalone | `pf-registry-binding-checks` |

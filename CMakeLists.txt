@@ -722,6 +722,14 @@ if(BUILD_TESTING)
     set_tests_properties(agent-type-catalog PROPERTIES
         LABELS "smoke;standalone;core" TIMEOUT 30)
 
+    add_executable(pf-marker-store-checks src/headless/MarkerStoreChecks.cpp)
+    target_include_directories(pf-marker-store-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-marker-store-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-marker-store-checks)
+    add_test(NAME marker-store COMMAND pf-marker-store-checks)
+    set_tests_properties(marker-store PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
     add_executable(pf-registry-binding-checks src/headless/RegistryBindingChecks.cpp)
     target_include_directories(pf-registry-binding-checks PRIVATE "${PF_INCLUDE_DIR}")
     target_link_libraries(pf-registry-binding-checks PRIVATE promethium-fermide-core)
