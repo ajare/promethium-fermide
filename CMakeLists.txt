@@ -794,6 +794,14 @@ if(BUILD_TESTING)
     set_tests_properties(world-builder-doors PROPERTIES
         LABELS "smoke;standalone;core" TIMEOUT 30)
 
+    add_executable(pf-world-builder-vertical-transit-checks src/headless/WorldBuilderVerticalTransitChecks.cpp)
+    target_include_directories(pf-world-builder-vertical-transit-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-world-builder-vertical-transit-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-world-builder-vertical-transit-checks)
+    add_test(NAME world-builder-vertical-transit COMMAND pf-world-builder-vertical-transit-checks)
+    set_tests_properties(world-builder-vertical-transit PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
     add_executable(pf-permission-requirement-store-checks src/headless/PermissionRequirementStoreChecks.cpp)
     target_include_directories(pf-permission-requirement-store-checks PRIVATE "${PF_INCLUDE_DIR}")
     target_link_libraries(pf-permission-requirement-store-checks PRIVATE promethium-fermide-core)

@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -17,9 +18,16 @@
 #include "core/Exceptions.h"
 #include "core/Facade.h"
 #include "core/Layer.h"
+#include "core/LadderTransit.h"
 #include "core/LiftTransit.h"
 #include "core/Location.h"
+#include "core/OccupantPacking.h"
 #include "core/PhysicalControlPlacement.h"
+#include "core/SimulationCoordinator.h"
+#include "core/ShuttleTransit.h"
+#include "core/StaircaseTransit.h"
+#include "core/StairwellTransit.h"
+#include "core/Transit.h"
 #include "core/Sector.h"
 #include "core/SectorObjectType.h"
 #include "core/SectorType.h"
@@ -1919,5 +1927,1159 @@ namespace core
 					static_cast<uint32_t>(permission.value));
 		mWorld.recordConstruction(std::move(record));
 		return { doorObject, { createdControls[0], createdControls[1] }, traversalResource };
+	}
+
+	// ----------------------------------------------------------------------
+	// VerticalTransit: Ladder / Stairwell / Staircase / Lift / Shuttle
+	// ----------------------------------------------------------------------
+
+	uint32_t WorldBuilder::createLadder(uint32_t layerIndex, uint32_t x, uint32_t y, CreateLadderOptions const& options)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		auto y0 = y;
+		auto y1 = y + options.levelsHigh - 1;
+
+		// Get Locations this Ladder connects.  A Transit on layerIndex lands on the
+		// Layer directly in front of it, never on a Layer of its own choosing.
+		auto const& landing = mWorld.mLayers[layerInFront(layerIndex)];
+		auto const& cellDef0 = landing->getCellDefinition(x, y0);
+		auto const& cellDef1 = landing->getCellDefinition(x, y1);
+		
+		shared_ptr<const Sector> sectors[2] = {
+			mWorld.getSector(cellDef0.sectorIndex),
+			mWorld.getSector(cellDef1.sectorIndex)
+		};
+
+		// Transit stops
+		vector<TransitStop> stops = {
+			{ sectors[CORE_LADDER_ENDPOINT_LOW], (int)x - (int)sectors[0]->getCellX(), (int)y - (int)sectors[0]->getCellY() },
+			{ sectors[CORE_LADDER_ENDPOINT_HIGH], (int)x - (int)sectors[1]->getCellX(), (int)y - (int)sectors[1]->getCellY() }
+		};
+
+		auto sectorIndex = (uint32_t)mWorld.mSectors.size();
+		auto ladder = make_shared<LadderTransit>(sectorIndex, layerIndex, x, y, options.levelsHigh, stops, options.extensible, options.startExtended);
+
+		mWorld.mSectors.push_back(ladder);
+		return sectorIndex;
+	}
+
+	uint32_t WorldBuilder::createStairwell(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t levelsHigh, int mountSide)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		ASSERT_SIDE_OK(mountSide);
+
+		// Get Locations this Stairwell connects.  Because a Stairwell is two cells wide, we
+		// just check the first horizontal cell, ie xOffset==0.  Every landing sits on the
+		// Layer directly in front of the Transit.
+		vector<TransitStop> stops;
+		auto const& landing = mWorld.mLayers[layerInFront(layerIndex)];
+
+		for (uint32_t iy = y; iy < y + levelsHigh; ++iy)
+		{
+			auto const& cellDef = landing->getCellDefinition(x, iy);
+			auto sector = mWorld.getSector(cellDef.sectorIndex);
+
+			stops.push_back({ 
+				sector,
+				(int)x - (int)sector->getCellX(),
+				(int)iy - (int)sector->getCellY(),
+			});
+		}
+
+		auto sectorIndex = (uint32_t)mWorld.mSectors.size();
+		auto stairwell = make_shared<StairwellTransit>(sectorIndex, layerIndex, x, y, levelsHigh, mountSide, stops);
+
+		mWorld.mSectors.push_back(stairwell);
+		return sectorIndex;
+	}
+
+	uint32_t WorldBuilder::createStaircase(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide,
+		int riseSide, float speed)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		ASSERT_SIDE_OK(riseSide);
+		uint32_t const lowerX = riseSide == CORE_SIDE_RIGHT ? x : x + cellsWide - 1;
+		uint32_t const upperX = riseSide == CORE_SIDE_RIGHT ? x + cellsWide - 1 : x;
+		auto const& landing = mWorld.mLayers[layerInFront(layerIndex)];
+		auto const& lowerCell = landing->getCellDefinition(lowerX, y);
+		auto const& upperCell = landing->getCellDefinition(upperX, y + 1);
+		auto lower = mWorld.getSector(lowerCell.sectorIndex);
+		auto upper = mWorld.getSector(upperCell.sectorIndex);
+		vector<TransitStop> stops{
+			{ lower, (int)lowerX - (int)lower->getCellX(), (int)y - (int)lower->getCellY() },
+			{ upper, (int)upperX - (int)upper->getCellX(), (int)(y + 1) - (int)upper->getCellY() }
+		};
+		auto sectorIndex = (uint32_t)mWorld.mSectors.size();
+		mWorld.mSectors.push_back(make_shared<StaircaseTransit>(sectorIndex, layerIndex, x, y, cellsWide,
+			riseSide, speed, stops));
+		static_pointer_cast<StaircaseTransit>(mWorld.mSectors.back())->getStaircase()->mSectorIndex = sectorIndex;
+		return sectorIndex;
+	}
+
+	WorldBuilder::CreateObjectResult WorldBuilder::createLift(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide,
+		uint32_t levelsHigh, vector<uint32_t> const& stopOffsets)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		// Get Locations this Lift connects, all on the Layer directly in front.
+		vector<TransitStop> stops;
+		auto const& landing = mWorld.mLayers[layerInFront(layerIndex)];
+
+		for (auto stopOffset : stopOffsets)
+		{
+			uint32_t iy = y + stopOffset;
+
+			auto const& cellDef = landing->getCellDefinition(x, iy);
+			auto sector = mWorld.getSector(cellDef.sectorIndex);
+
+			stops.push_back({
+				sector,
+				(int)x - (int)sector->getCellX(),
+				(int)iy - (int)sector->getCellY(),
+			});
+		}
+
+		auto sectorIndex = (uint32_t)mWorld.mSectors.size();
+		auto lift = make_shared<LiftTransit>(sectorIndex, layerIndex, x, y, cellsWide, levelsHigh, stops);
+
+		mWorld.mSectors.push_back(lift);
+		
+		return {
+			~0u,
+			SectorObjectType::Lift,
+			lift
+		};
+	}
+
+	WorldBuilder::CreateObjectResult WorldBuilder::createShuttle(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t numCars, uint32_t carWidth, vector<uint32_t> const& stopOffsets)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		// Get Locations this Shuttle connects, all on the Layer directly in front.
+		vector<TransitStop> stops;
+		auto const& landing = mWorld.mLayers[layerInFront(layerIndex)];
+
+		for (auto stopOffset : stopOffsets)
+		{
+			uint32_t ix = x + stopOffset;
+			shared_ptr<const Sector> sector;
+			for (uint32_t car = 0; car < numCars && !sector; ++car)
+			{
+				uint32_t cx = ix + car * (carWidth + 1) + 1;
+				auto const& cellDef = landing->getCellDefinition(cx, y);
+				bool supported = cellDef.sectorIndex != ~0u;
+				if (supported && carWidth == 4)
+					supported = landing->getCellDefinition(cx + 1, y).sectorIndex
+						== cellDef.sectorIndex;
+				if (supported) sector = mWorld.getSector(cellDef.sectorIndex);
+			}
+			assert(sector);
+			stops.push_back({
+				sector,
+				(int)ix - (int)sector->getCellX(),
+				(int)y - (int)sector->getCellY(),
+			});
+		}
+
+		auto sectorIndex = (uint32_t)mWorld.mSectors.size();
+
+		// Need to account for proper track dimensions, width is not necessarily
+		// the last stop offset
+		auto shuttle = make_shared<ShuttleTransit>(sectorIndex, layerIndex, x, y, cellsWide, numCars, carWidth, stops);
+
+		mWorld.mSectors.push_back(shuttle);
+		
+		return {
+			~0u,
+			SectorObjectType::Shuttle,
+			shuttle
+		};
+	}
+
+	bool WorldBuilder::canAddLadder(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t levelsHigh,
+		string* diagnostic) const
+	{
+		auto reject = [&](string message)
+		{
+			if (diagnostic) *diagnostic = std::move(message);
+			return false;
+		};
+		if (diagnostic) diagnostic->clear();
+		if (layerIndex == 0 || layerIndex >= mWorld.getLayerCount())
+			return reject("A Ladder must sit on a Layer that has a Layer in front of it to land on");
+		if (levelsHigh < 2) return reject("A Ladder must span at least two levels");
+		if (x >= mWorld.mCellsWide || y >= mWorld.mLevelsHigh || y + levelsHigh > mWorld.mLevelsHigh)
+			return reject("The Ladder is outside the World bounds");
+		auto const& transitLayer = mWorld.mLayers[layerIndex];
+		auto const& landing = mWorld.mLayers[layerInFront(layerIndex)];
+		for (uint32_t iy = y; iy < y + levelsHigh; ++iy)
+			if (transitLayer->getCellDefinition(x, iy).occupied())
+				return reject(format("A Sector at {},{} blocks the Ladder", x, iy));
+
+		auto upperY = y + levelsHigh - 1;
+		auto const& lower = landing->getCellDefinition(x, y);
+		auto const& upper = landing->getCellDefinition(x, upperY);
+		if (lower.sectorIndex == ~0u)
+			return reject(format("A landing Location is required at {},{}", x, y));
+		if (upper.sectorIndex == ~0u)
+			return reject(format("A landing Location is required at {},{}", x, upperY));
+		if (lower.sectorIndex == upper.sectorIndex)
+			return reject("A Ladder must connect two different landing Locations");
+		auto lowerSector = mWorld.mSectors[lower.sectorIndex];
+		auto upperSector = mWorld.mSectors[upper.sectorIndex];
+		// A Ladder lands on any location-like Sector: a Room, a Corridor, or a
+		// Facade.  A Facade takes part in traversal exactly as a Room does
+		// (ADR 0003, ticket #52), so it is a valid Ladder landing.
+		if (!lowerSector || !isLocationLike(lowerSector->getType()))
+			return reject(format("A landing Location is required at {},{}", x, y));
+		if (!upperSector || !isLocationLike(upperSector->getType()))
+			return reject(format("A landing Location is required at {},{}", x, upperY));
+		if (!lower.isTraversableOnFoot())
+			return reject(format("The landing floor at {},{} is not traversable", x, y));
+		if (!upper.isTraversableOnFoot())
+			return reject(format("The landing floor at {},{} is not traversable", x, upperY));
+		return true;
+	}
+
+	WorldBuilder::CreateLadderResult WorldBuilder::addLadder(uint32_t layerIndex, uint32_t y, uint32_t x, CreateLadderOptions const& options)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		// A Ladder Transit sits on layerIndex and lands on the Layer directly in front.
+		auto const landingLayer = layerInFront(layerIndex);
+		auto transitLayer = mWorld.getLayer(layerIndex);
+
+		// Checks
+		string caller = format("World::addLadder({}, {}, {}, {}, {})", layerIndex, y, x, options.levelsHigh, options.startExtended);
+
+		mWorld.validateLayer(caller, layerIndex);
+		if (isFrontMostLayer(layerIndex))
+		{
+			throw WorldException(&mWorld, format("{} - a Ladder cannot be placed on the front-most Layer, because it has no Layer in front to land on", caller));
+		}
+
+		if (options.levelsHigh < 2)
+		{
+			throw WorldException(&mWorld, format("{} - Ladder at {},{} must be at least 2 levels high", caller, x, y));
+		}
+
+		mWorld.validateBounds(caller, x, y, 1, options.levelsHigh);
+		mWorld.validateLayerSpace(caller, layerIndex, x, y, 1, options.levelsHigh);
+
+		auto y0 = y;
+		auto y1 = y + options.levelsHigh - 1;
+
+		// Make sure the landing cells have a Sector
+		auto const& cellDef0 = mWorld.mLayers[landingLayer]->getCellDefinition(x, y0);
+		auto const& cellDef1 = mWorld.mLayers[landingLayer]->getCellDefinition(x, y1);
+		auto foreSectorIndex0 = cellDef0.sectorIndex;
+		auto foreSectorIndex1 = cellDef1.sectorIndex;
+
+		if (foreSectorIndex0 == ~0u)
+		{
+			throw WorldException(&mWorld, format("{} - landing cell at {},{} is not occupied, which blocks ladder being placed", caller, x, y0));
+		}
+		if (foreSectorIndex1 == ~0u)
+		{
+			throw WorldException(&mWorld, format("{} - landing cell at {},{} is not occupied, which blocks ladder being placed", caller, x, y1));
+		}
+		if (foreSectorIndex0 == foreSectorIndex1)
+		{
+			throw WorldException(&mWorld, format("{} - landing cells from {},{} to {},{} are the same sector, which blocks ladder being placed", caller, x, y0, x, y1));
+		}
+
+		// Ladders can only connect location-like Sectors: Rooms, Corridors, and
+		// Facades (ADR 0003, ticket #52).
+		auto const& foreSector0 = mWorld._getSector(foreSectorIndex0);
+		auto const& foreSector1 = mWorld._getSector(foreSectorIndex1);
+
+		if (!isLocationLike(foreSector0->getType()))
+		{
+			throw WorldException(&mWorld, format("{} - landing cell at {},{} is not a Location, which blocks ladder being placed", caller, x, y0));
+		}
+		if (!isLocationLike(foreSector1->getType()))
+		{
+			throw WorldException(&mWorld, format("{} - landing cell at {},{} is not a Location, which blocks ladder being placed", caller, x, y1));
+		}
+
+		// Ladders ends must not be in the air
+		mWorld.validateCellTraversableOnFoot(caller, "Ladder", landingLayer, x, y0);
+		mWorld.validateCellTraversableOnFoot(caller, "Ladder", landingLayer, x, y1);
+
+		mWorld.validateSectorLadderOptions(caller, options);
+
+		physicalControl::Geometry controlGeometry{ layerIndex, x, y, 1, options.levelsHigh };
+		if (options.extensible)
+			mWorld.validatePhysicalControlAdditions({
+				mWorld.transportControlDemand(foreSector0, physicalControl::OwnerType::Ladder, controlGeometry, x, y0, 1),
+				mWorld.transportControlDemand(foreSector1, physicalControl::OwnerType::Ladder, controlGeometry, x, y1, 1) });
+		mWorld.beginStructuralEdit("addLadder");
+
+		// Create ladder
+		auto sectorIndex = createLadder(layerIndex, x, y, options);
+
+		// Set layers
+		for (uint32_t iy = y; iy < y + options.levelsHigh; ++iy)
+		{
+			auto& cellDef = transitLayer->getCellDefinition(x, iy);
+
+			cellDef.sectorIndex = sectorIndex;
+		}
+
+		auto ladderSector = mWorld._getSector(sectorIndex);
+		auto ladderTransit = dynamic_pointer_cast<LadderTransit>(ladderSector);
+		auto ladder = ladderTransit->getLadder();
+		ladder->mInitiallyBroken = ladder->mBroken = options.extensible && options.initiallyBroken;
+		auto traversalResource = mWorld.createLadderTraversalResource("Ladder capacity", ladder,
+			SectorId{ (uint64_t)sectorIndex + 1 }, options.directionalBatchLimit);
+		mWorld.configureLadderQueueLanes(traversalResource,
+			{ SectorId{ (uint64_t)foreSector0->getIndex() + 1 },
+				SectorId{ (uint64_t)foreSector1->getIndex() + 1 } },
+			{ Vector2{ (float)x + 0.5f, (float)y0 },
+				Vector2{ (float)x + 0.5f, (float)y1 } });
+		ladder->configureTraversal(traversalResource);
+		auto registerExtensionControl = [&](CreateObjectResult& control, size_t endpoint)
+		{
+			auto object = control.sector->_getObject(control.index);
+			DeviceCommand command;
+			command.type = DeviceCommandType::ToggleExtendedState;
+			command.desiredState = true;
+			command.traversalResource = traversalResource;
+			auto point = mWorld.createPhysicalControlInteractionPoint("Ladder extension control",
+				control, (float)object->getCellY(), 0.15f, mWorld.getFixedTimestep(),
+				{ { command, InteractionBindingRequirement::Required } });
+			if (auto interaction = mWorld.mInteractionPoints.find(point))
+				for (auto permission : options.controlPermissionRequirements[endpoint])
+					interaction->mPermissionRequirement.set(permission.value - 1);
+			mWorld.addTraversalControl(traversalResource, point);
+		};
+
+		CreateObjectResult createdControls[2];
+		if (options.extensible)
+		{
+			createdControls[CORE_LADDER_ENDPOINT_LOW] = mWorld.createPhysicalControl("Ladder button", landingLayer, y0,
+				mWorld.transportControlDemand(foreSector0, physicalControl::OwnerType::Ladder, controlGeometry, x, y0, 1), CORE_BUTTON_F_AUTO_REENABLE);
+			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_LOW], CORE_LADDER_ENDPOINT_LOW);
+
+			createdControls[CORE_LADDER_ENDPOINT_HIGH] = mWorld.createPhysicalControl("Ladder button", landingLayer, y1,
+				mWorld.transportControlDemand(foreSector1, physicalControl::OwnerType::Ladder, controlGeometry, x, y1, 1), CORE_BUTTON_F_AUTO_REENABLE);
+			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_HIGH], CORE_LADDER_ENDPOINT_HIGH);
+		}
+
+		CreateLadderResult result{
+			{ ~0u, SectorObjectType::Ladder, ladderSector },
+			{ createdControls[0], createdControls[1] },
+			traversalResource
+		};
+		World::ConstructionRecord record{ World::ConstructionType::Ladder };
+		record.layer = layerIndex;
+		record.a = y; record.b = x; record.c = options.levelsHigh; record.d = options.directionalBatchLimit;
+		record.p = options.extensible; record.q = options.startExtended;
+		record.initiallyBroken = options.extensible && options.initiallyBroken;
+		for (size_t endpoint = 0; endpoint < 2; ++endpoint)
+			for (auto permission : options.controlPermissionRequirements[endpoint])
+				record.controlPermissionRequirements[endpoint].push_back(
+					static_cast<uint32_t>(permission.value));
+		mWorld.recordConstruction(std::move(record));
+		return result;
+	}
+
+	bool WorldBuilder::canAddStairwell(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t levelsHigh,
+		string* diagnostic) const
+	{
+		auto reject = [&](string message)
+		{
+			if (diagnostic) *diagnostic = std::move(message);
+			return false;
+		};
+		if (diagnostic) diagnostic->clear();
+		if (layerIndex == 0 || layerIndex >= mWorld.getLayerCount())
+			return reject("A Stairwell must sit on a Layer that has a Layer in front of it to land on");
+		if (levelsHigh < 2) return reject("A Stairwell must span at least two levels");
+		if (x >= mWorld.mCellsWide || y >= mWorld.mLevelsHigh || x + 2 > mWorld.mCellsWide
+			|| y + levelsHigh > mWorld.mLevelsHigh)
+			return reject("The Stairwell is outside the World bounds");
+		auto const& transitLayer = mWorld.mLayers[layerIndex];
+		auto const& landing = mWorld.mLayers[layerInFront(layerIndex)];
+		for (uint32_t iy = y; iy < y + levelsHigh; ++iy)
+		{
+			auto const& first = landing->getCellDefinition(x, iy);
+			if (first.sectorIndex == ~0u)
+				return reject(format("A landing Location is required at {},{}", x, iy));
+			auto sector = mWorld.mSectors[first.sectorIndex];
+			// A Stairwell lands on any location-like Sector, a Facade included
+			// (ADR 0003, ticket #52).
+			if (!sector || !isLocationLike(sector->getType()))
+				return reject(format("A landing Location is required at {},{}", x, iy));
+			for (uint32_t ix = x; ix < x + 2; ++ix)
+			{
+				auto const& fore = landing->getCellDefinition(ix, iy);
+				if (fore.sectorIndex != first.sectorIndex)
+					return reject(format("The Stairwell spans different landing Locations at level {}", iy));
+				if (!fore.isTraversableOnFoot())
+					return reject(format("The landing floor at {},{} is not traversable", ix, iy));
+				auto const occupant = transitLayer->getCellDefinition(ix, iy).sectorIndex;
+				if (occupant != ~0u)
+					return reject(format("A Sector at {},{} blocks the Stairwell", ix, iy));
+			}
+		}
+		return true;
+	}
+
+	uint32_t WorldBuilder::addStairwell(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t levelsHigh, int mountSide)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		mWorld.beginStructuralEdit("addStairwell");
+		return addStairwell(layerIndex, y, x, CreateStairwellOptions{ levelsHigh, mountSide }).sectorIndex;
+	}
+
+	WorldBuilder::CreateStairwellResult WorldBuilder::addStairwell(uint32_t layerIndex, uint32_t y, uint32_t x,
+		CreateStairwellOptions const& options)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		mWorld.beginStructuralEdit("addStairwell");
+		auto levelsHigh = options.levelsHigh;
+		auto mountSide = options.mountSide;
+		ASSERT_SIDE_OK(mountSide);
+
+		// A Stairwell Transit sits on layerIndex and lands on the Layer directly in front.
+		auto const landingLayer = layerInFront(layerIndex);
+		auto transitLayer = mWorld.getLayer(layerIndex);
+		const uint32_t cellsWide = 2;
+
+		// Checks
+		string caller = format("World::addStairwell({}, {}, {}, {}, {})", layerIndex, y, x, levelsHigh, mountSide);
+
+		mWorld.validateLayer(caller, layerIndex);
+		if (isFrontMostLayer(layerIndex))
+		{
+			throw WorldException(&mWorld, format("{} - a Stairwell cannot be placed on the front-most Layer, because it has no Layer in front to land on", caller));
+		}
+
+		if (levelsHigh < 2)
+		{
+			throw WorldException(&mWorld, format("{} - Stairwell at {},{} must be at least 2 levels high", caller, x, y));
+		}
+
+		mWorld.validateBounds(caller, x, y, cellsWide, levelsHigh);
+		mWorld.validateLayerSpace(caller, layerIndex, x, y, cellsWide, levelsHigh);
+
+		for (uint32_t iy = y; iy < y + levelsHigh; ++iy)
+		{
+			auto const& cellDef0 = mWorld.mLayers[landingLayer]->getCellDefinition(x, iy);
+			auto levelSectorIndex = cellDef0.sectorIndex;
+
+			for (uint32_t ix = x; ix < x + cellsWide; ++ix)
+			{
+				auto const& cellDef = mWorld.mLayers[landingLayer]->getCellDefinition(ix, iy);
+				auto foreSectorIndex = cellDef.sectorIndex;
+
+				// Make sure the landing cells have a Sector, and that the horizontal Sectors are not different:
+				// Stairwells cannot span different Sectors horizontally, due to placement of the door leading to them.
+				if (foreSectorIndex != levelSectorIndex)
+				{
+					throw WorldException(&mWorld, format("{} - the stairwell horizontally spans different landing Sectors between {},{} and {},{}, which is not allowed", caller, x, iy, x + 1, iy));
+				}
+
+				// Landing Sector can't be empty
+				if (foreSectorIndex == ~0u)
+				{
+					throw WorldException(&mWorld, format("{} - landing cell at {},{} is not occupied, which blocks stairwell being placed", caller, ix, iy));
+				}
+
+				// Stairwells can only connect location-like Sectors: Rooms,
+				// Corridors, and Facades (ADR 0003, ticket #52).
+				auto const& foreSector = mWorld.getSector(foreSectorIndex);
+
+				if (!isLocationLike(foreSector->getType()))
+				{
+					throw WorldException(&mWorld, format("{} - landing cell at {},{} is not a Location, which blocks stairwell being placed", caller, ix, iy));
+				}
+
+				// Stairwells must not be in the air
+				mWorld.validateCellTraversableOnFoot(caller, "Stairwell", landingLayer, ix, iy);
+			}
+		}
+
+		if (options.directionalCapacity > 0 && options.directionalBatchLimit == 0)
+		{
+			throw WorldException(&mWorld, format("{} - Narrow stairwell directional batch limit must be positive.", caller));
+		}
+
+		// Create stairwell
+		auto sectorIndex = createStairwell(layerIndex, x, y, levelsHigh, mountSide);
+
+		// Set layers
+		for (uint32_t iy = y; iy < y + levelsHigh; ++iy)
+		{
+			for (uint32_t ix = x; ix < x + cellsWide; ++ix)
+			{
+				auto& cellDef = transitLayer->getCellDefinition(ix, iy);
+
+				cellDef.sectorIndex = sectorIndex;
+			}
+		}
+
+		TraversalResourceId traversalResource;
+		if (options.directionalCapacity > 0)
+		{
+			auto stairwellTransit = dynamic_pointer_cast<StairwellTransit>(mWorld._getSector(sectorIndex));
+			auto stairwell = stairwellTransit->getStairwell();
+			traversalResource = mWorld.createStairwellTraversalResource("Narrow stairwell capacity",
+				stairwell, SectorId{ (uint64_t)sectorIndex + 1 }, options.directionalCapacity,
+				options.directionalBatchLimit);
+			stairwell->configureTraversal(traversalResource);
+		}
+
+		World::ConstructionRecord record{ World::ConstructionType::Stairwell };
+		record.layer = layerIndex;
+		record.a = y; record.b = x; record.c = options.levelsHigh;
+		record.i = options.mountSide; record.d = options.directionalCapacity; record.e = options.directionalBatchLimit;
+		mWorld.recordConstruction(std::move(record));
+		return { sectorIndex, traversalResource };
+	}
+
+	bool WorldBuilder::canAddStaircase(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide,
+		int riseSide, string* diagnostic) const
+	{
+		auto reject = [&](string message) { if (diagnostic) *diagnostic = std::move(message); return false; };
+		if (diagnostic) diagnostic->clear();
+		if (layerIndex == 0 || layerIndex >= mWorld.getLayerCount())
+			return reject("A Staircase must sit on a Layer that has a Layer in front of it to land on");
+		if (riseSide != CORE_SIDE_LEFT && riseSide != CORE_SIDE_RIGHT)
+			return reject("The Staircase rise direction is invalid");
+		if (cellsWide < 2) return reject("A Staircase must be at least two cells wide");
+		if (x >= mWorld.mCellsWide || y >= mWorld.mLevelsHigh || cellsWide > mWorld.mCellsWide - x || y + 1 >= mWorld.mLevelsHigh)
+			return reject("The Staircase is outside the World bounds");
+		for (uint32_t iy = y; iy <= y + 1; ++iy)
+			for (uint32_t ix = x; ix < x + cellsWide; ++ix)
+				if (mWorld.mLayers[layerIndex]->getCellDefinition(ix, iy).occupied())
+					return reject(format("A Sector at {},{} blocks the Staircase", ix, iy));
+
+		auto const landingLayer = layerInFront(layerIndex);
+		uint32_t const lowerX = riseSide == CORE_SIDE_RIGHT ? x : x + cellsWide - 1;
+		uint32_t const upperX = riseSide == CORE_SIDE_RIGHT ? x + cellsWide - 1 : x;
+		string endpointDiagnostic;
+		if (!mWorld.validateStaircaseEndpoint(landingLayer, lowerX, y, false, riseSide, endpointDiagnostic)
+			|| !mWorld.validateStaircaseEndpoint(landingLayer, upperX, y + 1, true, riseSide, endpointDiagnostic))
+			return reject(std::move(endpointDiagnostic));
+		return true;
+	}
+
+	uint32_t WorldBuilder::addStaircase(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide,
+		int riseSide, float speed)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		return addStaircase(layerIndex, y, x, CreateStaircaseOptions{ cellsWide, riseSide, speed });
+	}
+
+	uint32_t WorldBuilder::addStaircase(uint32_t layerIndex, uint32_t y, uint32_t x, CreateStaircaseOptions const& options)
+	{
+		if (options.initiallyBroken && options.speed == 0.0f)
+			throw WorldException(&mWorld, "Stationary Staircases cannot be Broken");
+		mWorld.invalidateSimulationSnapshot();
+		mWorld.beginStructuralEdit("addStaircase");
+		string diagnostic;
+		if (!isfinite(options.speed))
+			throw WorldException(&mWorld, "A Staircase speed must be finite");
+		if (!canAddStaircase(layerIndex, y, x, options.cellsWide, options.riseSide, &diagnostic))
+			throw WorldException(&mWorld, format("World::addStaircase({}, {}, {}, {}) - {}", layerIndex, y, x, options.cellsWide, diagnostic));
+		auto sectorIndex = createStaircase(layerIndex, x, y, options.cellsWide, options.riseSide, options.speed);
+		auto staircase = static_pointer_cast<StaircaseTransit>(mWorld.mSectors[sectorIndex])->getStaircase();
+		staircase->mInitiallyBroken = staircase->mBroken = options.initiallyBroken;
+		auto transitLayer = mWorld.getLayer(layerIndex);
+		for (uint32_t iy = y; iy <= y + 1; ++iy)
+			for (uint32_t ix = x; ix < x + options.cellsWide; ++ix)
+				transitLayer->getCellDefinition(ix, iy).sectorIndex = sectorIndex;
+		World::ConstructionRecord record{ World::ConstructionType::Staircase };
+		record.layer = layerIndex;
+		record.a = y; record.b = x; record.c = options.cellsWide; record.i = options.riseSide;
+		record.x = options.speed;
+		record.initiallyBroken = options.initiallyBroken;
+		mWorld.recordConstruction(std::move(record));
+		return sectorIndex;
+	}
+
+	std::vector<WorldBuilder::LiftLandingRow> WorldBuilder::getLiftLandingRows(uint32_t layerIndex,
+		uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh) const
+	{
+		vector<LiftLandingRow> rows;
+		if (layerIndex >= mWorld.mLayers.size() || cellsWide == 0 || levelsHigh == 0)
+			return rows;
+		// A Transit lands on the Layer directly in front of the Layer it occupies, so
+		// the front-most Layer - which has nothing in front of it - has no landings.
+		if (isFrontMostLayer(layerIndex)) return rows;
+		if (x >= mWorld.mCellsWide || y >= mWorld.mLevelsHigh || cellsWide > mWorld.mCellsWide - x
+			|| levelsHigh > mWorld.mLevelsHigh - y) return rows;
+
+		auto const& landing = mWorld.mLayers[layerInFront(layerIndex)];
+		for (uint32_t iy = y; iy < y + levelsHigh; ++iy)
+		{
+			LiftLandingRow row;
+			row.offset = iy - y;
+			auto const& firstCell = landing->getCellDefinition(x, iy);
+			if (firstCell.sectorIndex != ~0u)
+				row.location = dynamic_pointer_cast<const Location>(mWorld.mSectors[firstCell.sectorIndex]);
+			if (!row.location)
+			{
+				rows.push_back(row);
+				continue;
+			}
+			bool complete = true;
+			for (uint32_t ix = x; ix < x + cellsWide; ++ix)
+			{
+				auto const& cell = landing->getCellDefinition(ix, iy);
+				complete = complete && cell.sectorIndex == firstCell.sectorIndex
+					&& cell.isTraversableOnFoot();
+				row.obstructed = row.obstructed || cell.hasObject() || !cell.markers.empty();
+			}
+			row.fullyOverlapping = complete;
+			if (row.fullyOverlapping)
+				row.callButtonSpace = !(x == row.location->getCellX0()
+					&& x + cellsWide - 1 == row.location->getCellX1());
+			rows.push_back(row);
+		}
+		return rows;
+	}
+
+	WorldBuilder::CreateLiftResult WorldBuilder::addLift(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide,
+		uint32_t levelsHigh)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		CreateLiftOptions options;
+		options.cellsWide = cellsWide;
+		options.levelsHigh = levelsHigh;
+		if (cellsWide == 0 || cellsWide > 2 || levelsHigh == 0)
+			throw WorldException(&mWorld, "Editor lifts must be one or two cells wide and at least one level high");
+		mWorld.validateLayer(format("World::addLift({}, ...)", layerIndex), layerIndex);
+		if (isFrontMostLayer(layerIndex))
+			throw WorldException(&mWorld, "A Lift cannot be placed on the front-most Layer, because it has no Layer in front to land on");
+		for (auto const& row : getLiftLandingRows(layerIndex, y, x, cellsWide, levelsHigh))
+		{
+			if (!row.fullyOverlapping) continue;
+			if (row.obstructed)
+				throw WorldException(&mWorld, format("An object blocks the Lift landing at level {}", y + row.offset));
+			options.stopOffsets.push_back(row.offset);
+		}
+		return addLift(layerIndex, y, x, options);
+	}
+
+	WorldBuilder::CreateLiftResult WorldBuilder::addLift(uint32_t layerIndex, uint32_t y, uint32_t x, CreateLiftOptions const& options)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		// The Lift Transit occupies layerIndex; its landings are the fore Layer of the
+		// pair it forms, which is the Layer directly in front.
+		mWorld.validateLayer(format("World::addLift({}, ...)", layerIndex), layerIndex);
+		if (isFrontMostLayer(layerIndex))
+			throw WorldException(&mWorld, "A Lift cannot be placed on the front-most Layer, because it has no Layer in front to land on");
+		auto foreLayer = mWorld.getLayer(layerInFront(layerIndex));
+		auto backLayer = mWorld.getLayer(layerIndex);
+
+		// Checks
+		string caller = format("World::addLift({}, {}, {}, {}, <stopOffsts>)", layerIndex, y, x, options.cellsWide);
+
+		// Option and timing checks run before mWorld.beginStructuralEdit() so a refused
+		// add is a true no-op and no non-finite timing reaches the tick
+		// conversion (#198).
+		mWorld.validateLiftOptions(caller, options);
+		if (options.cellsWide > 2)
+			throw WorldException(&mWorld, format("{} - enclosed Lift width must be one or two cells.", caller));
+
+		auto levelsHigh = options.levelsHigh ? options.levelsHigh : options.stopOffsets.back() + 1;
+		if (options.stopOffsets.back() >= levelsHigh)
+			throw WorldException(&mWorld, format("{} - Lift stop is outside the shaft bounds.", caller));
+
+		mWorld.validateBounds(caller, x, y, options.cellsWide, levelsHigh);
+		mWorld.validateLayerSpace(caller, layerIndex, x, y, options.cellsWide, levelsHigh);
+
+		for (auto stopOffset : options.stopOffsets)
+		{
+			auto iy = y + stopOffset;
+		
+			auto const& cellDef = foreLayer->getCellDefinition(x, iy);
+			auto levelSectorIndex = cellDef.sectorIndex;
+
+			for (uint32_t ix = x; ix < x + options.cellsWide; ++ix)
+			{
+				auto const& cellDef = foreLayer->getCellDefinition(ix, iy);
+				auto foreSectorIndex = cellDef.sectorIndex;
+
+				// Make sure the foreground cells have a Sector, and that the horizontal Sectors are not different:
+				// Lifts cannot span different Sectors horizontally, due to placement of the door leading to them.
+				if (foreSectorIndex != levelSectorIndex)
+				{
+					throw WorldException(&mWorld, format("{} - the lift horizontally spans different foreground Sectors between {},{} and {},{}, which is not allowed", caller, x, iy, x + 1, iy));
+				}
+
+				// Fore Sector can't be empty
+				if (foreSectorIndex == ~0u)
+				{
+					throw WorldException(&mWorld, format("{} - foreground cell at {},{} is not occupied, which blocks lift being placed", caller, ix, iy));
+				}
+
+				// Enclosed lifts connect fully overlapping Fore-layer Locations.
+				auto const& foreSector = mWorld.getSector(foreSectorIndex);
+				auto location = dynamic_pointer_cast<const Location>(foreSector);
+
+				if (!location)
+				{
+					throw WorldException(&mWorld, format("{} - foreground cell at {},{} is not a Location, which blocks lift being placed", caller, ix, iy));
+				}
+
+				// Lifts must not be in the air and every intersecting landing must be clear.
+				mWorld.validateCellTraversableOnFoot(caller, "Lift", layerInFront(layerIndex), ix, iy);
+				if (cellDef.hasObject() || !cellDef.markers.empty())
+					throw WorldException(&mWorld, format("{} - an object blocks the Lift landing at {},{}", caller, ix, iy));
+			}
+		}
+		vector<physicalControl::Demand> landingDemands;
+		for (auto offset : options.stopOffsets)
+		{
+			auto level = y + offset;
+			auto location = mWorld.getSector(foreLayer->getCellDefinition(x, level).sectorIndex);
+			landingDemands.push_back(mWorld.transportControlDemand(location, physicalControl::OwnerType::Lift,
+				{layerIndex, x, y, options.cellsWide, levelsHigh}, x, level, options.cellsWide));
+		}
+		mWorld.validatePhysicalControlAdditions(landingDemands);
+		mWorld.beginStructuralEdit("addLift");
+
+		// Create lift
+		auto liftObject = createLift(layerIndex, x, y, options.cellsWide, levelsHigh, options.stopOffsets);
+
+		auto liftTransit = dynamic_pointer_cast<LiftTransit>(liftObject.sector);
+		auto lift = liftTransit->getLift();
+		lift->mInitiallyBroken = options.initiallyBroken;
+
+		// Set layers
+		for (uint32_t iy = y; iy < y + levelsHigh; ++iy)
+		{
+			for (uint32_t ix = x; ix < x + options.cellsWide; ++ix)
+			{
+				auto& cellDef = backLayer->getCellDefinition(ix, iy);
+
+				cellDef.sectorIndex = liftObject.sector->getIndex();
+			}
+		}
+
+		CreateLiftResult liftRes;
+
+		liftRes.lift = liftObject;
+
+		// Landing controls are physical InteractionPoints; the lift coordinator owns
+		// scheduling, door interlocks, and operation completion.
+		for (size_t stopIndex = 0; stopIndex < options.stopOffsets.size(); ++stopIndex)
+		{
+			// A Lift entrance reads as a centre-opening pair, so its generated Doors
+			// are authored OpenApart unless the Lift's record carries a per-stop
+			// override.  Shuttle-owned Doors keep OpenUp.
+			CreateDoorOptions stopDoorOptions;
+			stopDoorOptions.width = options.cellsWide;
+			stopDoorOptions.controls[0] = true;
+			stopDoorOptions.activationMode = DoorActivationMode::Unavailable;
+			stopDoorOptions.openStyle = Door::OpenStyle::OpenApart;
+			if (stopIndex < options.stopDoorOpenStyles.size()
+				&& options.stopDoorOpenStyles[stopIndex] != ~0u)
+				stopDoorOptions.openStyle =
+					static_cast<Door::OpenStyle>(options.stopDoorOpenStyles[stopIndex]);
+			if (stopIndex < options.doorSpeeds.size() && options.doorSpeeds[stopIndex] > 0.0f)
+				stopDoorOptions.speedOverride = options.doorSpeeds[stopIndex];
+			auto doorRes = _addSectorDoor(layerInFront(layerIndex), y + options.stopOffsets[stopIndex],
+				x, stopDoorOptions, true);
+			liftRes.doors.push_back(doorRes);
+		}
+
+		// The replacement lift coordinator owns the car manifest and schedule. Each
+		// landing remains a distinct threshold resource, linked to this coordinator.
+		vector<LiftStop> liftStops;
+		for (uint32_t i = 0; i < options.stopOffsets.size(); ++i)
+		{
+			auto location = mWorld.getSector(foreLayer->getCellDefinition(x, y + options.stopOffsets[i]).sectorIndex);
+			liftStops.push_back({ SectorId{ (uint64_t)location->getIndex() + 1 },
+				(float)(y + options.stopOffsets[i]), liftRes.doors[i].traversalResource, {} });
+		}
+		auto coordinator = mWorld.createLiftTraversalResource("Lift journey", lift,
+			SectorId{ (uint64_t)liftTransit->getIndex() + 1 }, liftStops, options.capacity,
+			options.minimumDwellSeconds, options.maximumBoardingSeconds);
+		lift->configureTraversal(coordinator, options.capacity, options.minimumDwellSeconds);
+		liftRes.traversalResource = coordinator;
+		auto liftResource = mWorld.mTraversalResources.find(coordinator);
+		liftResource->mLiftCurrentStop = options.initialStop;
+		liftResource->mLiftPosition = liftStops[options.initialStop].globalPosition;
+		lift->setCoordinatedPosition(liftResource->mLiftPosition);
+		// Pack every authored capacity slot inside the car. The World's desired
+		// clearance is used where it fits; compact packing reduces only the gap when
+		// the authored width is tighter, without reducing capacity or leaving the car.
+		auto const halfAgentWidth = CORE_RESOURCE_SLOT_WIDTH * 0.5f;
+		auto const occupantTargets = packOccupants(options.capacity, 0,
+			{ halfAgentWidth, lift->getSize().x - halfAgentWidth }, CORE_RESOURCE_SLOT_WIDTH,
+			mWorld.mTraversalGeometryPolicy.occupantClearance, OccupantPackingOrder::Forward,
+			OccupantPackingLayout::Compact);
+		for (uint32_t i = 0; i < options.capacity; ++i)
+			liftResource->mCapacityPositions[i] = { occupantTargets[i], 0.0f };
+		for (uint32_t i = 0; i < liftRes.doors.size(); ++i)
+		{
+			auto landing = mWorld.mTraversalResources.find(liftRes.doors[i].traversalResource);
+			landing->mLiftCoordinator = coordinator;
+			landing->mLiftStopIndex = i;
+			// Lift landing Doors use their physical opening for clearance, like
+			// Bulkhead and Chamber thresholds, without a height-authoring override.
+			landing->mDoor->mLiftOwned = true;
+			// The car-side lane represents standing capacity, not corridor waiting
+			// space. Give it exactly one spot per passenger position.
+			for (auto& lane : landing->mQueueLanes)
+			{
+				if (lane.sector != liftResource->mLiftSector) continue;
+				lane.positions.clear();
+				for (auto const& position : liftResource->mCapacityPositions)
+					lane.positions.push_back({ liftTransit->getPosition().x + position.x,
+						liftStops[i].globalPosition + position.y });
+				lane.positionOwners.assign(lane.positions.size(), {});
+				if (!lane.positions.empty())
+				{
+					lane.origin = lane.positions.front();
+					lane.direction = Vector2::UNIT_X;
+					lane.extent = lane.positions.back().x - lane.positions.front().x;
+				}
+			}
+
+			auto& control = liftRes.doors[i].controls[0];
+			DeviceCommand call;
+			call.type = DeviceCommandType::CallLift;
+			call.traversalResource = coordinator;
+			call.stopIndex = i;
+			auto point = mWorld.createPhysicalControlInteractionPoint("Lift landing call", control,
+				(float)(y + options.stopOffsets[i]), 0.15f, mWorld.getFixedTimestep(),
+				{ { call, InteractionBindingRequirement::Required } });
+			if (i < options.landingControlPermissionRequirements.size())
+				for (auto permission : options.landingControlPermissionRequirements[i])
+					mWorld.mInteractionPoints.find(point)->mPermissionRequirement.set(permission.value - 1);
+			mWorld.mAuthoredControlRequirements[point] = { mWorld.mDeserializingConstruction ? mWorld.mConstructionReplayIndex : mWorld.mConstructionRecords.size(), i };
+			landing->mControls.push_back(point);
+			liftResource->mLiftStops[i].callControl = point;
+
+			DeviceCommand select;
+			select.type = DeviceCommandType::SelectLiftDestination;
+			select.traversalResource = coordinator;
+			select.stopIndex = i;
+			auto selector = mWorld.createInteractionPoint("Lift destination selector",
+				liftResource->mLiftSector, { x + options.cellsWide * 0.5f, liftResource->mLiftPosition },
+				0.25f, mWorld.getFixedTimestep(), { { select, InteractionBindingRequirement::Required } });
+			liftResource->mControls.push_back(selector);
+			if (i == 0) liftRes.interiorSelector = selector;
+		}
+		liftResource->mLiftSelector = liftRes.interiorSelector;
+		mWorld.setLiftBroken(coordinator, options.initiallyBroken);
+
+		World::ConstructionRecord record{ World::ConstructionType::Lift };
+		record.initiallyBroken = options.initiallyBroken;
+		record.layer = layerIndex;
+		record.a = y; record.b = x; record.c = options.cellsWide; record.d = options.capacity;
+		record.e = levelsHigh; record.g = options.initialStop;
+		record.x = options.minimumDwellSeconds; record.y = options.maximumBoardingSeconds;
+		record.values = options.stopOffsets;
+		record.stopShortNames = options.stopShortNames;
+		// The per-stop Door styles are authored Lift data, not just initial Door
+		// state: record them so save/load and later rebuilds replay them, the
+		// way the Shuttle path records its doorOpenStyles.
+		record.overrides = options.stopDoorOpenStyles;
+		record.transportDoorSpeeds = options.doorSpeeds;
+		for (auto const& requirement : options.landingControlPermissionRequirements)
+		{
+			record.landingControlPermissionRequirements.emplace_back();
+			for (auto permission : requirement)
+				record.landingControlPermissionRequirements.back().push_back(
+					static_cast<uint32_t>(permission.value));
+		}
+		mWorld.recordConstruction(std::move(record));
+		return liftRes;
+	}
+
+	WorldBuilder::CreateShuttleResult WorldBuilder::addShuttle(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, CreateShuttleOptions const& options)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		// The Shuttle Transit occupies layerIndex; its landings are the fore Layer of
+		// the pair it forms, which is the Layer directly in front.
+		mWorld.validateLayer(format("World::addShuttle({}, ...)", layerIndex), layerIndex);
+		if (isFrontMostLayer(layerIndex))
+			throw WorldException(&mWorld, "A Shuttle cannot be placed on the front-most Layer, because it has no Layer in front to land on");
+		auto foreLayer = mWorld.getLayer(layerInFront(layerIndex));
+		auto backLayer = mWorld.getLayer(layerIndex);
+
+		// Checks
+		string caller = format("World::addShuttle({}, {}, {}, {}, <options>)", layerIndex, y, x, cellsWide);
+
+		// Bear in mind that we may have to allow extra space on the transit layer beyond the x/x+cellsWide
+		// extents.  Eg, for where a=x and b=x+cellsWide, and s=stop offsets:
+		//       a        b
+		//        s      s 
+		// BACK: XDX-------
+		// FORE: -D-....-D-
+
+		// Option and timing checks run before mWorld.beginStructuralEdit() so a refused
+		// add is a true no-op and no non-finite timing reaches the tick
+		// conversion (#198).
+		mWorld.validateShuttleOptions(caller, options);
+		mWorld.validateBounds(caller, x, y, cellsWide, 1);
+		mWorld.validateLayerSpace(caller, layerIndex, x, y, cellsWide, 1);
+
+		auto shuttleWidth = options.carWidth * options.numCars + (options.numCars - 1);
+
+		// Make sure the shuttle track is long enough
+		if (shuttleWidth > cellsWide)
+		{
+			throw WorldException(&mWorld, format("{} - shuttle track is not wide enough for shuttle", caller));
+		}
+
+		auto numStops = (uint32_t)options.stopOffsets.size();
+		for (uint32_t i = 0; i < numStops; ++i)
+		{
+			auto ix = x + options.stopOffsets[i];
+
+			// Each stop must be at least shuttleWidth cells apart
+			if (i < numStops - 1)
+			{
+				auto ix1 = x + options.stopOffsets[i + 1];
+
+				if (ix1 - ix < shuttleWidth)
+				{
+					throw WorldException(&mWorld, format("{} - shuttle is too wide to fit between stop offsets {} and {}", caller, i, i + 1));
+				}
+			}
+
+			// Must be able to fit whole shuttle into stop
+			if (ix + shuttleWidth > (x + cellsWide))
+			{
+				throw WorldException(&mWorld, format("{} - shuttle is too wide to fit at stop offset {}", caller, i));
+			}
+
+			// A stop remains usable when at least one configured carriage door has
+			// a Location landing. Partial mode omits unsupported individual doors.
+			bool hasLanding = false;
+			auto doorOffsets = SimulationCoordinator::shuttleDoorOffsets(options.carWidth, options.doorMask);
+			for (uint32_t car = 0; car < options.numCars; ++car)
+				for (uint32_t door = 0; door < doorOffsets.size(); ++door)
+				{
+					uint32_t cx = ix + car * (options.carWidth + 1) + doorOffsets[door];
+					auto const& cell = foreLayer->getCellDefinition(cx, y);
+					// A carriage door lands on any location-like Sector: a Room, a
+					// Corridor, or a Facade (ADR 0003, ticket #52).
+					bool supported = cell.sectorIndex != ~0u
+						&& isLocationLike(mWorld.getSector(cell.sectorIndex)->getType());
+					if (!supported && !options.allowPartialLandings)
+						throw WorldException(&mWorld, format("{} - door {} of carriage {} at stop offset {} has no supported landing",
+							caller, door, car, options.stopOffsets[i]));
+					if (supported)
+					{
+						mWorld.validateCellTraversableOnFoot(caller, "Shuttle", layerInFront(layerIndex), cx, y);
+						if (cell.hasObject() || !cell.markers.empty())
+							throw WorldException(&mWorld, format("{} - an object blocks the Shuttle landing at {},{}", caller, cx, y));
+					}
+					hasLanding = hasLanding || supported;
+				}
+			if (!hasLanding)
+				throw WorldException(&mWorld, format("{} - stop offset {} has no supported carriage landing", caller, options.stopOffsets[i]));
+		}
+
+		vector<physicalControl::Demand> landingDemands;
+		auto authoredDoorOffsets = SimulationCoordinator::shuttleDoorOffsets(options.carWidth, options.doorMask);
+		for (auto offset : options.stopOffsets)
+			for (uint32_t car = 0; car < options.numCars; ++car)
+				for (auto doorOffset : authoredDoorOffsets)
+				{
+					auto doorwayX = x + offset + car * (options.carWidth + 1) + doorOffset;
+					auto index = foreLayer->getCellDefinition(doorwayX, y).sectorIndex;
+					if (index == ~0u || !isLocationLike(mWorld.getSector(index)->getType())) continue;
+					landingDemands.push_back(mWorld.transportControlDemand(mWorld.getSector(index), physicalControl::OwnerType::Shuttle,
+						{layerIndex, x, y, cellsWide, 1}, doorwayX, y, 1));
+				}
+		mWorld.validatePhysicalControlAdditions(landingDemands);
+		mWorld.beginStructuralEdit("addShuttle");
+
+		// Create shuttle
+		auto shuttleObject = createShuttle(layerIndex, x, y, cellsWide, options.numCars, options.carWidth, options.stopOffsets);
+
+		auto shuttleTransit = dynamic_pointer_cast<ShuttleTransit>(shuttleObject.sector);
+		auto shuttle = shuttleTransit->getShuttle();
+
+		// Set layers
+		for (uint32_t ix = x; ix < x + cellsWide; ++ix)
+		{
+			auto& cellDef = backLayer->getCellDefinition(ix, y);
+
+			cellDef.sectorIndex = shuttleObject.sector->getIndex();
+		}
+
+		CreateShuttleResult shuttleRes;
+
+		shuttleRes.shuttle = shuttleObject;
+
+		// Create landing thresholds and physical InteractionPoints. Keep a fixed
+		// stop/carriage/door result grid so absent partial landings remain explicit.
+		auto doorOffsets = SimulationCoordinator::shuttleDoorOffsets(options.carWidth, options.doorMask);
+		auto doorResultIndex = [&](uint32_t stop, uint32_t car, uint32_t door)
+		{
+			return (stop * options.numCars + car) * doorOffsets.size() + door;
+		};
+		shuttleRes.doors.resize(options.stopOffsets.size() * options.numCars * doorOffsets.size());
+		for (uint32_t stop = 0; stop < options.stopOffsets.size(); ++stop)
+			for (uint32_t car = 0; car < options.numCars; ++car)
+				for (uint32_t door = 0; door < doorOffsets.size(); ++door)
+				{
+					auto globalX = x + options.stopOffsets[stop]
+						+ car * (options.carWidth + 1) + doorOffsets[door];
+					auto const& cell = foreLayer->getCellDefinition(globalX, y);
+					// Same rule as the validation pass above: only a location-like
+					// landing is supported, a Facade included. A Background behind a
+					// carriage door is omitted, never built into a threshold that
+					// touches it.
+					bool supported = cell.sectorIndex != ~0u
+						&& isLocationLike(mWorld.getSector(cell.sectorIndex)->getType());
+					if (supported)
+					{
+						// A Shuttle landing reads as a hatch, so its generated Doors
+						// are authored OpenUp unless the Shuttle's record carries a
+						// per-Door override on this grid slot.
+						CreateDoorOptions stopDoorOptions;
+						stopDoorOptions.width = 1;
+						stopDoorOptions.controls[0] = true;
+						stopDoorOptions.activationMode = DoorActivationMode::Unavailable;
+						auto const slot = doorResultIndex(stop, car, door);
+						if (slot < options.doorOpenStyles.size()
+							&& options.doorOpenStyles[slot] != ~0u)
+							stopDoorOptions.openStyle =
+								static_cast<Door::OpenStyle>(options.doorOpenStyles[slot]);
+						if (slot < options.doorSpeeds.size() && options.doorSpeeds[slot] > 0.0f)
+							stopDoorOptions.speedOverride = options.doorSpeeds[slot];
+						shuttleRes.doors[slot] = _addSectorDoor(layerInFront(layerIndex),
+							y, globalX, stopDoorOptions, true);
+					}
+				}
+
+		vector<LiftStop> stops;
+		for (uint32_t i = 0; i < options.stopOffsets.size(); ++i)
+		{
+			uint32_t doorIndex = i * options.numCars * (uint32_t)doorOffsets.size();
+			auto stopEnd = (i + 1) * options.numCars * (uint32_t)doorOffsets.size();
+			while (doorIndex < stopEnd && !shuttleRes.doors[doorIndex].traversalResource) ++doorIndex;
+			assert(doorIndex < stopEnd);
+			auto location = shuttleRes.doors[doorIndex].door.sector;
+			stops.push_back({ SectorId{ (uint64_t)location->getIndex() + 1 },
+				(float)(x + options.stopOffsets[i]), shuttleRes.doors[doorIndex].traversalResource, {} });
+		}
+		auto coordinator = mWorld.createShuttleTraversalResource("Shuttle journey", shuttle,
+			SectorId{ (uint64_t)shuttleTransit->getIndex() + 1 }, stops, options.capacity,
+			options.minimumDwellSeconds, options.maximumBoardingSeconds);
+		shuttle->configureTraversal(coordinator);
+		shuttleRes.traversalResource = coordinator;
+		auto shuttleResource = mWorld.mTraversalResources.find(coordinator);
+		shuttleResource->mLiftCurrentStop = options.initialStop;
+		shuttleResource->mLiftPosition = stops[options.initialStop].globalPosition;
+		shuttle->setCoordinatedPosition(shuttleResource->mLiftPosition);
+
+		// A Location sector is one connected platform access zone. Doors opening
+		// onto the same sector share a logical queue; different sectors do not.
+		for (uint32_t stop = 0; stop < stops.size(); ++stop)
+		{
+			map<SectorId, uint32_t> accessZones;
+			for (uint32_t carriage = 0; carriage < options.numCars; ++carriage)
+				for (uint32_t door = 0; door < doorOffsets.size(); ++door)
+			{
+				auto doorIndex = doorResultIndex(stop, carriage, door);
+				auto& doorResult = shuttleRes.doors[doorIndex];
+				if (!doorResult.traversalResource) continue;
+				auto landing = mWorld.mTraversalResources.find(doorResult.traversalResource);
+				auto doorX = x + options.stopOffsets[stop]
+					+ carriage * (options.carWidth + 1) + doorOffsets[door];
+				auto location = mWorld.getSector(foreLayer->getCellDefinition(doorX, y).sectorIndex);
+				auto locationId = SectorId{ (uint64_t)location->getIndex() + 1 };
+				auto [zone, inserted] = accessZones.emplace(locationId, (uint32_t)accessZones.size());
+				(void)inserted;
+				landing->mLiftCoordinator = coordinator;
+				landing->mLiftStopIndex = stop;
+				// Shuttle landing Doors use their physical opening for clearance, like
+				// Lift landing Doors, without a height-authoring override.
+				landing->mDoor->mShuttleOwned = true;
+				shuttleResource->mShuttleDoors.push_back({ stop, carriage, zone->second,
+					locationId, doorResult.traversalResource,
+					carriage * (options.carWidth + 1.0f) + doorOffsets[door] + 0.5f });
+				auto& carriageState = shuttleResource->mShuttleCarriages[carriage];
+				carriageState.stopDoors[stop].push_back(doorResult.traversalResource);
+				// Car-side Door spots mirror this carriage's declared capacity. They
+				// remain independent from the platform-side queue, even where the two
+				// layers' spots overlap visually.
+				for (auto& lane : landing->mQueueLanes)
+				{
+					if (lane.sector != shuttleResource->mLiftSector) continue;
+					lane.positions.clear();
+					for (uint32_t position = 0; position < carriageState.capacity; ++position)
+					{
+						auto capacityIndex = carriageState.firstCapacityPosition + position;
+						auto const& local = shuttleResource->mCapacityPositions[capacityIndex];
+						lane.positions.push_back({ stops[stop].globalPosition + local.x,
+							(float)y + local.y });
+					}
+					lane.positionOwners.assign(lane.positions.size(), {});
+					if (!lane.positions.empty())
+					{
+						lane.origin = lane.positions.front();
+						lane.direction = Vector2::UNIT_X;
+						lane.extent = lane.positions.back().x - lane.positions.front().x;
+					}
+				}
+
+				auto& control = doorResult.controls[0];
+				DeviceCommand call;
+				call.type = DeviceCommandType::CallShuttle;
+				call.traversalResource = coordinator;
+				call.stopIndex = stop;
+				auto point = mWorld.createPhysicalControlInteractionPoint("Shuttle landing call", control,
+					(float)y, 0.15f, mWorld.getFixedTimestep(),
+					{ { call, InteractionBindingRequirement::Required } });
+				if (doorIndex < options.landingControlPermissionRequirements.size())
+					for (auto permission : options.landingControlPermissionRequirements[doorIndex])
+						mWorld.mInteractionPoints.find(point)->mPermissionRequirement.set(permission.value - 1);
+				mWorld.mAuthoredControlRequirements[point] = { mWorld.mDeserializingConstruction ? mWorld.mConstructionReplayIndex : mWorld.mConstructionRecords.size(), doorIndex };
+				landing->mControls.push_back(point);
+				if (!shuttleResource->mLiftStops[stop].callControl)
+					shuttleResource->mLiftStops[stop].callControl = point;
+			}
+		}
+
+		// Destination selection is serialized vehicle-wide. The interaction point
+		// is moved to the acting passenger, so passengers retain carriage positions.
+		for (uint32_t i = 0; i < stops.size(); ++i)
+		{
+			DeviceCommand select;
+			select.type = DeviceCommandType::SelectShuttleDestination;
+			select.traversalResource = coordinator;
+			select.stopIndex = i;
+			auto selector = mWorld.createInteractionPoint("Shuttle destination selector",
+				shuttleResource->mLiftSector,
+				{ shuttleResource->mLiftPosition + options.carWidth * 0.5f, (float)y },
+				0.25f, mWorld.getFixedTimestep(), { { select, InteractionBindingRequirement::Required } });
+			shuttleResource->mControls.push_back(selector);
+			if (i == 0) shuttleRes.interiorSelector = selector;
+		}
+		shuttleResource->mLiftSelector = shuttleRes.interiorSelector;
+
+		shuttle->mInitiallyBroken = options.initiallyBroken;
+		mWorld.setShuttleBroken(coordinator, options.initiallyBroken);
+		World::ConstructionRecord record{ World::ConstructionType::Shuttle };
+		record.initiallyBroken = options.initiallyBroken;
+		record.layer = layerIndex;
+		record.a = y; record.b = x; record.c = cellsWide; record.d = options.numCars;
+		record.e = options.carWidth; record.f = options.initialStop; record.g = options.capacity;
+		record.h = options.doorMask; record.p = options.allowPartialLandings;
+		record.x = options.minimumDwellSeconds; record.y = options.maximumBoardingSeconds;
+		record.values = options.stopOffsets;
+		record.stopShortNames = options.stopShortNames;
+		record.overrides = options.doorOpenStyles;
+		record.transportDoorSpeeds = options.doorSpeeds;
+		for (auto const& requirement : options.landingControlPermissionRequirements)
+		{
+			record.landingControlPermissionRequirements.emplace_back();
+			for (auto permission : requirement)
+				record.landingControlPermissionRequirements.back().push_back(
+					static_cast<uint32_t>(permission.value));
+		}
+		mWorld.recordConstruction(std::move(record));
+		return shuttleRes;
 	}
 }

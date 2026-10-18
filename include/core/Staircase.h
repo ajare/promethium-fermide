@@ -18,6 +18,7 @@ namespace core
 		bool mBroken{ false };
 		uint32_t mSectorIndex{ ~0u };
 		friend class World;
+		friend class WorldBuilder; // ADR 0022 VerticalTransit authoring
 		friend class DeviceConditionStore; // ADR 0022 device condition family
 
 	public:

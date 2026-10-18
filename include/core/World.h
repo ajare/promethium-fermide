@@ -1817,19 +1817,10 @@ namespace core
 		// WorldBuilder (#685, ADR 0022); the public Room/Corridor/Facade adds on
 		// the facade forward there.
 
-		// A Transit is created on layerIndex and lands on the Layer directly in front of
-		// it, so every landing cell is read from layerInFront(layerIndex).
-		uint32_t createLadder(uint32_t layerIndex, uint32_t x, uint32_t y, CreateLadderOptions const& options);
-
-		uint32_t createStairwell(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t levelsHigh, int mountSide);
-
-		uint32_t createStaircase(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide,
-			int riseSide, float speed);
-
-		CreateObjectResult createLift(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide,
-			uint32_t levelsHigh, std::vector<uint32_t> const& stopOffsets);
-
-		CreateObjectResult createShuttle(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t numCars, uint32_t carWidth, std::vector<uint32_t> const& stopOffsets);
+		// The Transit creation seams (createLadder, createStairwell,
+		// createStaircase, createLift, createShuttle) live in WorldBuilder
+		// (#687, ADR 0022); the judged VerticalTransit add family on the
+		// facade forwards there.
 
 		CreateObjectResult createWindow(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, uint32_t* vertexIdentifier = nullptr, bool boothWindow = false);
 		CreateWindowResult addWindowAperture(uint32_t layer, uint32_t y, uint32_t x,

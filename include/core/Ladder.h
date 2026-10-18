@@ -13,6 +13,7 @@ namespace core
 	class Ladder : public ExtensibleObject
 	{
 		friend class World;
+		friend class WorldBuilder; // ADR 0022 VerticalTransit authoring
 
 	private:
 

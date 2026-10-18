@@ -16,9 +16,10 @@ namespace core
 	//
 	// This is the WorldBuilder seam: the Sector family - Room, Corridor,
 	// Facade, and Background authoring, the Door family - ordinary Door
-	// and Bulkhead Door authoring with their Buttons, plus the
-	// SectorObject family - Walkway, ForceBridge, Window, BoothWindow,
-	// and LightSwitch authoring. Each add is judged before anything is written, so a
+	// and Bulkhead Door authoring with their Buttons, the SectorObject
+	// family - Walkway, ForceBridge, Window, BoothWindow, and LightSwitch
+	// authoring, plus the VerticalTransit family - Ladder, Stairwell,
+	// Staircase, enclosed Lift, and Shuttle authoring. Each add is judged before anything is written, so a
 	// refusal leaves the World exactly as it was found; each accepted add
 	// records its construction record so replay reproduces it verbatim.
 	// The Walkway add carries its detached-replay path: once the document
@@ -56,6 +57,16 @@ namespace core
 		using CreateDoorResult = World::CreateDoorResult;
 		using CreateBulkheadDoorOptions = World::CreateBulkheadDoorOptions;
 		using CreateBulkheadDoorResult = World::CreateBulkheadDoorResult;
+		using CreateLadderOptions = World::CreateLadderOptions;
+		using CreateLadderResult = World::CreateLadderResult;
+		using CreateStairwellOptions = World::CreateStairwellOptions;
+		using CreateStairwellResult = World::CreateStairwellResult;
+		using CreateStaircaseOptions = World::CreateStaircaseOptions;
+		using CreateLiftOptions = World::CreateLiftOptions;
+		using CreateLiftResult = World::CreateLiftResult;
+		using CreateShuttleOptions = World::CreateShuttleOptions;
+		using CreateShuttleResult = World::CreateShuttleResult;
+		using LiftLandingRow = World::LiftLandingRow;
 
 		explicit WorldBuilder(World& world);
 
@@ -236,6 +247,60 @@ namespace core
 			uint32_t* index = nullptr, uint32_t approachSide = 0);
 		CreateObjectResult _createBulkheadDoorButton(std::shared_ptr<const Sector> sector,
 			uint32_t y, int side, uint32_t* index = nullptr);
+
+		// ------------------------------------------------------------------
+		// VerticalTransit: Ladder / Stairwell / Staircase / Lift / Shuttle
+		// ------------------------------------------------------------------
+
+		// A Transit is created on layerIndex and lands on the Layer directly
+		// in front of it, so every landing cell is read from
+		// layerInFront(layerIndex). These are the raw creation seams the
+		// judged add family below uses.
+		uint32_t createLadder(uint32_t layerIndex, uint32_t x, uint32_t y,
+			CreateLadderOptions const& options);
+		uint32_t createStairwell(uint32_t layerIndex, uint32_t x, uint32_t y,
+			uint32_t levelsHigh, int mountSide);
+		uint32_t createStaircase(uint32_t layerIndex, uint32_t x, uint32_t y,
+			uint32_t cellsWide, int riseSide, float speed);
+		CreateObjectResult createLift(uint32_t layerIndex, uint32_t x, uint32_t y,
+			uint32_t cellsWide, uint32_t levelsHigh,
+			std::vector<uint32_t> const& stopOffsets);
+		CreateObjectResult createShuttle(uint32_t layerIndex, uint32_t x, uint32_t y,
+			uint32_t cellsWide, uint32_t numCars, uint32_t carWidth,
+			std::vector<uint32_t> const& stopOffsets);
+
+		// A Ladder is authored on layerIndex and lands on the Layer directly
+		// in front of it; the front-most Layer can carry no Transit.
+		bool canAddLadder(uint32_t layerIndex, uint32_t y, uint32_t x,
+			uint32_t levelsHigh, std::string* diagnostic = nullptr) const;
+		CreateLadderResult addLadder(uint32_t layerIndex, uint32_t y, uint32_t x,
+			CreateLadderOptions const& options);
+
+		bool canAddStairwell(uint32_t layerIndex, uint32_t y, uint32_t x,
+			uint32_t levelsHigh, std::string* diagnostic = nullptr) const;
+		uint32_t addStairwell(uint32_t layerIndex, uint32_t y, uint32_t x,
+			uint32_t levelsHigh, int mountSide);
+		CreateStairwellResult addStairwell(uint32_t layerIndex, uint32_t y,
+			uint32_t x, CreateStairwellOptions const& options);
+
+		bool canAddStaircase(uint32_t layerIndex, uint32_t y, uint32_t x,
+			uint32_t cellsWide, int riseSide, std::string* diagnostic = nullptr) const;
+		uint32_t addStaircase(uint32_t layerIndex, uint32_t y, uint32_t x,
+			uint32_t cellsWide, int riseSide, float speed = 0.0f);
+		uint32_t addStaircase(uint32_t layerIndex, uint32_t y, uint32_t x,
+			CreateStaircaseOptions const& options);
+
+		// The landing rows of a cellsWide-by-levelsHigh shaft at (y, x) on
+		// layerIndex, read from the Layer directly in front.
+		std::vector<LiftLandingRow> getLiftLandingRows(uint32_t layerIndex,
+			uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh) const;
+		CreateLiftResult addLift(uint32_t layerIndex, uint32_t y, uint32_t x,
+			uint32_t cellsWide, uint32_t levelsHigh);
+		CreateLiftResult addLift(uint32_t layerIndex, uint32_t y, uint32_t x,
+			CreateLiftOptions const& options);
+
+		CreateShuttleResult addShuttle(uint32_t layerIndex, uint32_t y, uint32_t x,
+			uint32_t cellsWide, CreateShuttleOptions const& options);
 
 		// ------------------------------------------------------------------
 		// Light switch
