@@ -57,6 +57,7 @@ namespace core
 	class PlacementValidator;
 	class AgentGroupRegistry;
 	class PermissionRequirementStore;
+	class AuthorizationLedger;
 	class AgentTypeCatalog;
 	class MarkerStore;
 	class TraversalResourceRegistry;
@@ -87,6 +88,12 @@ namespace core
 		// the registries and authored requirement maps below on the World's
 		// behalf (ADR 0022).
 		friend class PermissionRequirementStore;
+		// The authorization ledger owns no state; it reads and edits the
+		// Access permission slots, the Permission set registry, the Agent
+		// entities' grant bitsets and set assignments, the interaction-point
+		// and traversal-resource requirements, the Sectors, and the
+		// construction records below on the World's behalf (#684, ADR 0022).
+		friend class AuthorizationLedger;
 		// The Agent type catalog owns no state; it reads and edits the
 		// Agent-type registry and preview-baseline cache below on the World's
 		// behalf (ADR 0022).
@@ -671,6 +678,17 @@ namespace core
 		// these operations; the store owns no state and reaches them through
 		// this World.
 		std::unique_ptr<PermissionRequirementStore> mPermissionRequirementStore;
+
+		// The AccessPermission/PermissionSet authoring and Agent grant/
+		// assignment behaviour lives in the authorization ledger (ADR 0022,
+		// #684). World keeps ownership of the state it edits - the fixed
+		// Access permission slots, the Permission set registry, and the
+		// Agent entities' grant records (ADR 0001) - and stays the facade
+		// (design pattern) through which every caller reaches these
+		// operations; the ledger owns no state and reaches them through
+		// this World. Live `canAgent…Now` eligibility stays out: the ledger
+		// holds authorization facts, not live traversal evaluation.
+		std::unique_ptr<AuthorizationLedger> mAuthorizationLedger;
 
 		// The registered Agent-type behaviour lives in the Agent type catalog
 		// (ADR 0022). World keeps ownership of the Agent-type registry itself

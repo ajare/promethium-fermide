@@ -786,6 +786,14 @@ if(BUILD_TESTING)
     set_tests_properties(permission-requirement-store PROPERTIES
         LABELS "smoke;standalone;core" TIMEOUT 30)
 
+    add_executable(pf-authorization-ledger-checks src/headless/AuthorizationLedgerChecks.cpp)
+    target_include_directories(pf-authorization-ledger-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-authorization-ledger-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-authorization-ledger-checks)
+    add_test(NAME authorization-ledger COMMAND pf-authorization-ledger-checks)
+    set_tests_properties(authorization-ledger PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
     add_executable(pf-device-condition-store-checks src/headless/DeviceConditionStoreChecks.cpp)
     target_include_directories(pf-device-condition-store-checks PRIVATE "${PF_INCLUDE_DIR}")
     target_link_libraries(pf-device-condition-store-checks PRIVATE promethium-fermide-core)

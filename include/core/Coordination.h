@@ -142,6 +142,7 @@ namespace core
 		friend class SimulationCoordinator;
 		friend class PlacementValidator;
 		friend class PermissionRequirementStore; // ADR 0022 requirement edits
+		friend class AuthorizationLedger; // ADR 0022 (#684) grant/deletion reference clearing
 		friend class DeviceConditionStore; // ADR 0022 control-target condition query
 		friend class WorldBuilder; // ADR 0022 authored control wiring (#688)
 
@@ -343,6 +344,7 @@ namespace core
 		friend class SimulationCoordinator;
 		friend class PlacementValidator;
 		friend class PermissionRequirementStore; // ADR 0022 requirement edits
+		friend class AuthorizationLedger; // ADR 0022 (#684) grant/deletion reference clearing
 		friend class TraversalResourceRegistry; // ADR 0022 resource record family
 		friend class DeviceConditionStore; // ADR 0022 authored-vs-runtime Broken family
 		std::string mName;
