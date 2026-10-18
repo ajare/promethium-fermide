@@ -7,6 +7,7 @@
 #include "../CoupledRig.h"
 #include "../station/WaterGasObservationFixture.h"
 #include "../station/CarbonObservationFixture.h"
+#include "../station/MicrobialObservationFixture.h"
 #include "core/StationReference.h"
 #include "StationFlowDiagram.h"
 #include "core/StationConfigurationDocument.h"
@@ -3534,6 +3535,68 @@ namespace
 		});
 		#undef REQ
 		require(driver.passed(), "Battery observation editor workflow failed");
+	}
+
+	void microbialObservationWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1200};
+		io.Fonts->AddFontDefault(); io.Fonts->Build(); io.DeltaTime = 1.0f / 60.0f;
+		auto world = std::make_shared<core::World>("Microbial charts", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		auto settings = smoke::station::microbialObservationFixture(); StationSystemsWindow window;
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 1080});
+			ImGui::Begin("Microbial configuration"); window.renderFlowContents(world); ImGui::End();
+		});
+		auto apply = [&] {
+			std::string why; if (!world->configureStationSystems(settings, true, &why)) throw std::runtime_error(why);
+			world->markSaved(); world->resumeSimulation(); require(world->advanceTicks(12), "microbial hidden run failed"); world->pauseSimulation();
+		};
+		apply(); driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "microbialObservations", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Microbial configuration");
+			for (int mode = 0; mode < 6; ++mode) {
+				if (mode == 1) { settings.stores[3].startingQualified = 0; apply(); ctx->Yield(2); }
+				if (mode == 2) { settings.thermalReservoirs[0].startingTemperatureC = 10; apply(); ctx->Yield(2); }
+				if (mode == 3) { settings = smoke::station::microbialObservationFixture(); apply(); ctx->Yield(2); }
+				if (mode == 4) { settings.microbialProcessors[0].rateKgPerS = 0; apply(); ctx->Yield(2); }
+				if (mode == 5) { settings = smoke::station::microbialObservationFixture(); settings.stores[0].materialId.clear(); apply(); ctx->Yield(2); }
+				auto const observed = world->getStationSystemsSnapshot(); auto const revision = world->getStationSystemsObservationRevision();
+				auto const& p = observed.microbialProcessors[0]; auto const dt = core::World::getFixedTimestep();
+				for (auto const& [role, expected] : std::vector<std::pair<std::string, double>>{
+					{"Organic feed", p.lastFeedConsumedKg / dt}, {"Culture medium", p.lastConsumableUsed / dt},
+					{"Replacement stock", p.lastStockConsumedUnits / dt}, {"Recovered nutrients", p.lastNutrientProducedKg / dt},
+					{"Recovered water", p.lastRecoveredWaterKg / dt}, {"CO2", p.lastCo2ProducedKg / dt},
+					{"Unrecoverable residue", p.lastResidueProducedKg / dt}, {"Produced heat", p.lastPowerSuppliedKW + p.lastReactionHeatKW}}) {
+					auto const catalogue = world->getStationSystemsObservationCatalogue();
+					auto selected = std::find_if(catalogue.begin(), catalogue.end(), [&](auto const& c) {
+						return c.breakdown == "Aggregate" && c.id.starts_with("exchange/Microbial processor/") && c.id.find("/" + role + "/") != std::string::npos;
+					});
+					REQ(selected != catalogue.end(), "microbial selector role absent");
+					ctx->ItemClick("##Station observation property"); ctx->Yield(2);
+					auto const* popup = ctx->GetWindowByRef("//$FOCUSED"); REQ(popup != nullptr, "microbial selector absent");
+					auto item = ImHashStr(selected->label.c_str(), 0, ImHashStr(selected->id.c_str(), 0, popup->ID));
+					ctx->ScrollToItemY(item); ctx->ItemClick(item); ctx->Yield(2);
+					REQ(window.selectedObservation() == selected->id && driver.contains("Actual rate"), "generic microbial chart not rendered");
+					auto const data = world->queryStationSystemsChart(selected->id);
+					if (mode == 5 && role == "Organic feed") {
+						REQ(data.incomplete && !data.series[0].values.empty() && std::isnan(data.series[0].values.back()), "unclassified microbial exchange not shown as gap");
+						REQ(driver.contains("Unclassified material"), "microbial coverage limitation not visible");
+					} else {
+						REQ(!data.incomplete && !data.series[0].values.empty() && std::abs(data.series[0].values.back() - expected) < 1e-8, "microbial rate wrong or hidden history lost");
+					}
+					ctx->ComboClick("Breakdown/Instance"); ctx->Yield(2);
+					REQ(window.selectedObservation() == selected->id + "/instances", "microbial instance breakdown unavailable");
+					REQ(world->getStationSystemsSnapshot() == observed && world->getStationSystemsObservationRevision() == revision
+						&& window.draftHistory().undoCount() == 0 && !world->isModified(), "microbial viewing mutated World or document");
+				}
+			}
+		});
+		#undef REQ
+		require(driver.passed(), "Microbial observation editor workflow failed");
 	}
 
 	void carbonObservationWorkflow(smoke::Context const&)
@@ -8120,6 +8183,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/materialObservationWorkflow", materialObservationWorkflow});
 	checks.push_back({"station/waterGasObservationWorkflow", waterGasObservationWorkflow});
 	checks.push_back({"station/carbonObservationWorkflow", carbonObservationWorkflow});
+	checks.push_back({"station/microbialObservationWorkflow", microbialObservationWorkflow});
 	checks.push_back({"station/flowThermalReservoirWorkflow", flowThermalReservoirWorkflow});
 	checks.push_back({"station/flowRadiatorWorkflow", flowRadiatorWorkflow});
 	checks.push_back({"station/flowCoolantLoopWorkflow", flowCoolantLoopWorkflow});

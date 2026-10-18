@@ -82,7 +82,7 @@ pf_add_smoke_module(pf-smoke-station
     DEFAULT_CHECK lifecycle
 )
 foreach(check connectionTransfers connectionConversions connectionPower connectionThermal connectionProcesses connectionLifecycle connectionForecast connectionMaterialDiagnostics connectionBlockedZeroEfficiency connectionBatteryTelemetry lifecycle batching eventBound persistence stores transfers linkSeam growablePorts completeThermalChain schedulesSeam biologySeam waterGasSeam powerChainSeam thermalReservoirSeam radiatorSeam coolantLoopSeam chillerSeam compounds power
-        carbonExchangeObservations waterGasExchangeObservations crewAtmosphereExchangeObservations thermalExchangeObservations electricalExchangeObservations exchangeObservations materialObservations fluidInventoryObservations compoundInventoryObservations livingInventoryObservations materialRelationshipObservations materialCanonicalUnits batteryObservations batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
+        microbialExchangeObservations carbonExchangeObservations waterGasExchangeObservations crewAtmosphereExchangeObservations thermalExchangeObservations electricalExchangeObservations exchangeObservations materialObservations fluidInventoryObservations compoundInventoryObservations livingInventoryObservations materialRelationshipObservations materialCanonicalUnits batteryObservations batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
         deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres crews water containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay
@@ -770,6 +770,9 @@ add_test(NAME station-editor-compounds COMMAND pf-smoke-editor --check station/c
 set_tests_properties(station-editor-compounds PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-power COMMAND pf-smoke-editor --check station/powerWorkflow)
 set_tests_properties(station-editor-power PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 180)
+add_test(NAME station-editor-microbial-observations COMMAND pf-smoke-editor --check station/microbialObservationWorkflow)
+set_tests_properties(station-editor-microbial-observations PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
+
 add_test(NAME station-editor-carbon-observations COMMAND pf-smoke-editor --check station/carbonObservationWorkflow)
 set_tests_properties(station-editor-carbon-observations PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 

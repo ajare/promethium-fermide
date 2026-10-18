@@ -1,5 +1,9 @@
 # Station Flow observations
 
+Microbial processor exchange catalogue (#711): see
+[Microbial processor exchange observations](station-microbial-exchange-observations.md)
+for compound feed, consumables, recovered products, heat and loss boundaries.
+
 Carbon recovery and fuel-cell exchange catalogue (#710): see
 [Carbon recovery and fuel-cell exchange observations](station-carbon-exchange-observations.md)
 for distinct reactants/products, electrical/thermal accounts and connection losses.

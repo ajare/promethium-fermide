@@ -1,6 +1,7 @@
 #include "MaterialObservations.h"
 #include "WaterGasObservationFixture.h"
 #include "CarbonObservationFixture.h"
+#include "MicrobialObservationFixture.h"
 #include "core/World.h"
 #include <algorithm>
 #include <cmath>
@@ -151,6 +152,122 @@ namespace
 			require(observations.size() == 4 && observations[0].metric.unit == canonical, "canonical rate unit missing");
 			close(observations[0].sourceToCanonicalScale, scale);
 		}
+	}
+
+	void microbialExchangeObservations(smoke::Context const&)
+	{
+		auto s = smoke::station::microbialObservationFixture();
+		core::World world("Microbial exchanges", 2, 2); world.pauseSimulation(); world.finishBuild();
+		auto apply = [&] { std::string why; if (!world.configureStationSystems(s, true, &why)) throw std::runtime_error(why); };
+		auto check = [&](std::string const& role, double expected) {
+			for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.breakdown == "Aggregate"
+				&& def.id.starts_with("exchange/Microbial processor/") && def.id.find("/" + role + "/") != std::string::npos) {
+				auto const data = world.queryStationSystemsChart(def.id);
+				require(!data.incomplete && !data.series[0].values.empty(), "microbial chart missing history");
+				close(data.series[0].values.back(), expected); return;
+			}
+			throw std::runtime_error("missing microbial role " + role);
+		};
+		auto verify = [&] {
+			auto const snap = world.getStationSystemsSnapshot(); auto const history = world.getStationSystemsMetricHistory();
+			auto missing = snap; missing.microbialProcessors.clear(); missing.connections.clear();
+			for (auto const& o : core::stationExchangeObservations(s)) if (o.metric.equipmentType == "Microbial processor") {
+				auto h = std::ranges::find(history, o.metric.id, [](auto const& h) { return h.descriptor.id; });
+				require(h != history.end() && !h->samples.empty(), "microbial metric absent");
+				auto v = o.read(snap); require(v.actual && h->samples.back().actual, "microbial exchange unavailable");
+				close(*h->samples.back().actual, *v.actual * o.sourceToCanonicalScale / (o.perTick ? core::World::getFixedTimestep() : 1));
+				if (v.requested) close(*h->samples.back().requested, *v.requested * o.sourceToCanonicalScale / (o.perTick ? core::World::getFixedTimestep() : 1));
+				require(!o.read(missing).actual, "missing microbial authority became zero");
+				if (o.metric.exchangeRole == "Recovered nutrients") require(o.metric.materialId != "nitrogen" && !o.metric.requestedSemantics, "nutrient product confused with atmospheric nitrogen or requested output");
+			}
+			for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.breakdown == "Aggregate" && def.id.starts_with("exchange/Microbial processor/")) {
+				auto const data = world.queryStationSystemsChart(def.id);
+				require(!data.incomplete && !data.series[0].values.empty(), "microbial aggregate unavailable");
+				auto const stack = world.queryStationSystemsChart(def.id + "/instances");
+				auto last = std::find_if(stack.series.rbegin(), stack.series.rend(), [](auto const& l) { return l.stacked; });
+				require(last != stack.series.rend(), "microbial instance stack missing"); close(last->upper.back(), data.series[0].values.back());
+				auto unavailable = history;
+				for (auto& h : unavailable) if (h.descriptor.id == def.series[0].contributors[0]) h.samples.back().actual.reset();
+				auto const gap = core::queryStationChart(def, unavailable);
+				require(gap.incomplete && std::isnan(gap.series[0].values.back()), "missing microbial contribution concealed");
+			}
+		};
+		apply(); run(world, 12); verify();
+		auto snap = world.getStationSystemsSnapshot(); auto const dt = core::World::getFixedTimestep(); auto p = snap.microbialProcessors[0];
+		require(p.lastFeedConsumedKg > 0 && p.lastStockConsumedUnits > 0 && p.condition > s.microbialProcessors[0].initialCondition, "microbial recovery fixture inactive");
+		check("Organic feed", p.lastFeedConsumedKg / dt); check("Recovered nutrients", p.lastNutrientProducedKg / dt);
+		check("Produced heat", p.lastPowerSuppliedKW + p.lastReactionHeatKW);
+		check("Replacement stock", p.lastStockConsumedUnits / dt);
+		check("Oxygen", p.lastOxygenConsumedKg / dt); check("Process water", p.lastWaterConsumedKg / dt);
+		check("Recovered water", p.lastRecoveredWaterKg / dt); check("CO2", p.lastCo2ProducedKg / dt);
+		check("Unrecoverable residue", p.lastResidueProducedKg / dt);
+		close(p.lastFeedConsumedKg + p.lastOxygenConsumedKg + p.lastWaterConsumedKg,
+			p.lastNutrientProducedKg + p.lastRecoveredWaterKg + p.lastCo2ProducedKg + p.lastResidueProducedKg);
+		close(p.nutrientProducedKg, p.nitrogenRecoveredKg + p.phosphorusRecoveredKg + p.potassiumRecoveredKg + p.mineralsRecoveredKg);
+		// A real oxygen shortage limits processing, without a graph-side simulation.
+		s.stores[1].startingQualified = 0; apply(); run(world, 12); verify(); check("Organic feed", 0);
+		// Exhausted medium degrades condition and reports known inactivity.
+		s = smoke::station::microbialObservationFixture(); s.stores[3].startingQualified = 0;
+		apply(); run(world, 12); verify(); check("Culture medium", 0); check("Recovered nutrients", 0);
+		require(world.getStationSystemsSnapshot().microbialProcessors[0].condition < s.microbialProcessors[0].initialCondition, "medium exhaustion did not degrade culture");
+		// Cold stress and benign recovery both preserve the committed exchange rates.
+		s = smoke::station::microbialObservationFixture(); s.thermalReservoirs[0].startingTemperatureC = 10;
+		apply(); run(world, 12); verify(); check("Organic feed", 0);
+		require(world.getStationSystemsSnapshot().microbialProcessors[0].condition < s.microbialProcessors[0].initialCondition, "cold stress not exercised");
+		s = smoke::station::microbialObservationFixture(); apply(); run(world, 12); verify(); snap = world.getStationSystemsSnapshot();
+		for (auto const& c : snap.connections) if (c.key.ownerType == "Microbial processor") {
+			if (c.key.relation == "Oxygen") s.connections[c.key] = {core::StationPhysicalConnection::Automatic, 0.0005, 0.5};
+			if (c.key.relation == "Heat") s.connections[c.key] = {core::StationPhysicalConnection::Automatic, 0.000001, 0.5};
+		}
+		apply(); run(world, 12); verify(); bool loss = false, retained = false;
+		for (auto const& c : world.getStationSystemsSnapshot().connections) if (c.key.ownerType == "Microbial processor") {
+			close(c.lastInputRate, c.lastDeliveredRate + c.lastLossRate);
+			loss |= c.lastLossRate > 0; retained |= c.retainedHeatKJ > 0;
+		}
+		require(loss && retained, "microbial transport loss and retained heat not exercised");
+		s = smoke::station::microbialObservationFixture(); s.microbialProcessors[0].rateKgPerS = 0;
+		apply(); run(world, 12); verify(); check("Organic feed", 0); check("Produced heat", 0);
+		// Consumables are in declared store units, unlike intrinsic kg process accounts.
+		s = smoke::station::microbialObservationFixture(); s.stores[3].unit = "g"; s.stores[8].unit = "g";
+		apply(); run(world, 12); verify(); p = world.getStationSystemsSnapshot().microbialProcessors[0];
+		check("Culture medium", p.lastConsumableUsed * 0.001 / dt); check("Replacement stock", p.lastStockConsumedUnits * 0.001 / dt);
+		// Multiple instances aggregate only compatible material identities.
+		s = smoke::station::microbialObservationFixture(); auto second = s.microbialProcessors[0]; second.id = "second"; s.microbialProcessors.push_back(second);
+		apply(); run(world, 12); verify(); snap = world.getStationSystemsSnapshot();
+		check("Organic feed", (snap.microbialProcessors[0].lastFeedConsumedKg + snap.microbialProcessors[1].lastFeedConsumedKg) / dt);
+		for (auto& stock : s.stores) stock.hazardClass = "hazardous";
+		for (auto& processor : s.microbialProcessors) processor.hazardClass = "hazardous";
+		apply(); run(world, 12); verify();
+		for (auto const& h : world.getStationSystemsMetricHistory()) if (h.descriptor.equipmentType == "Microbial processor")
+			require(h.descriptor.hazardClass == "hazardous", "microbial hazard metadata lost");
+		// Exchange queries preserve the generic hazard-segregated view boundary.
+		s = smoke::station::microbialObservationFixture(); auto hazardous = s.microbialProcessors[0];
+		hazardous.id = "hazardous"; hazardous.hazardClass = "hazardous";
+		for (auto member : {&core::MicrobialProcessorSettings::feedStoreId, &core::MicrobialProcessorSettings::oxygenStoreId,
+			&core::MicrobialProcessorSettings::waterStoreId, &core::MicrobialProcessorSettings::consumableStoreId,
+			&core::MicrobialProcessorSettings::stockStoreId, &core::MicrobialProcessorSettings::nutrientStoreId,
+			&core::MicrobialProcessorSettings::recoveredWaterStoreId, &core::MicrobialProcessorSettings::co2StoreId,
+			&core::MicrobialProcessorSettings::residueStoreId}) hazardous.*member += "-hazardous";
+		auto hazardousStores = s.stores;
+		for (auto& stock : hazardousStores) { stock.id += "-hazardous"; stock.hazardClass = "hazardous"; s.stores.push_back(stock); }
+		s.microbialProcessors.push_back(hazardous); apply(); run(world, 12); verify(); size_t hazards = 0;
+		for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.breakdown == "Aggregate"
+			&& def.id.starts_with("exchange/Microbial processor/") && def.id.find("/Organic feed/") != std::string::npos) {
+			// Each hazard has exactly its own processor, not the other chain.
+			require(def.series[0].contributors.size() == 1, "microbial hazards merged"); ++hazards;
+		}
+		require(hazards == 2, "microbial hazard-specific views missing");
+		// Unknown compound identity is an honest incomplete chart, not guessed
+		// from the feed's name, composition, or compatible kg unit.
+		s = smoke::station::microbialObservationFixture(); s.stores[0].materialId.clear();
+		apply(); run(world, 12);
+		bool unclassified = false;
+		for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.breakdown == "Aggregate"
+			&& def.id.starts_with("exchange/Microbial processor/") && def.id.find("/Organic feed/") != std::string::npos) {
+			auto const data = world.queryStationSystemsChart(def.id);
+			require(data.incomplete && std::isnan(data.series[0].values.back()), "unknown microbial feed silently classified"); unclassified = true;
+		}
+		require(unclassified, "unclassified microbial feed disappeared");
 	}
 
 	void carbonExchangeObservations(smoke::Context const&)
@@ -1102,6 +1219,7 @@ void registerMaterialObservationChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"crewAtmosphereExchangeObservations", crewAtmosphereExchangeObservations});
 	checks.push_back({"waterGasExchangeObservations", waterGasExchangeObservations});
 	checks.push_back({"carbonExchangeObservations", carbonExchangeObservations});
+	checks.push_back({"microbialExchangeObservations", microbialExchangeObservations});
 	checks.push_back({"thermalExchangeObservations", thermalExchangeObservations});
 	checks.push_back({"electricalExchangeObservations", electricalExchangeObservations});
 	checks.push_back({"materialObservations", materialObservations});
