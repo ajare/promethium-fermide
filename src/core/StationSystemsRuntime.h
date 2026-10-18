@@ -17,9 +17,14 @@ namespace core
 		std::vector<StationTrendSeries> trends() const;
 		std::vector<StationMetricHistory> metrics() const;
 		StationRecordingStatus recordingStatus() const;
+		StationObservationRevision observationRevision() const;
+		std::vector<StationChartDefinition> const& catalogue() const;
+		StationChartData const& query(std::string const& id) const;
+		StationQueryWork queryWork() const;
 		std::vector<StationSystemsDiagnostic> const& diagnostics() const;
 	private:
 		struct Impl;
 		std::unique_ptr<Impl> mImpl;
+		uint64_t mRun{0};
 	};
 }

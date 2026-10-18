@@ -92,6 +92,7 @@ bool StationSystemsWindow::syncWorld(std::shared_ptr<core::World> const& world)
 	{
 		mWorld.reset(); mConfirmReset = false; mPendingActivation.reset();
 		mFlowSnapshot.reset();
+		mObservationRevision = {~uint64_t{0}, 0};
 		mPendingLayoutEdit = false;
 		mFlow.reset(); mDraftHistory.clear(); mPendingDraftEdit.reset();
 		ImGui::TextDisabled("No World is open."); return false;
@@ -100,6 +101,7 @@ bool StationSystemsWindow::syncWorld(std::shared_ptr<core::World> const& world)
 	{
 		mWorld = world->getLifetimeToken(); mDraft = world->getStationSystemsSettings();
 		mFlowSnapshot.reset();
+		mObservationRevision = {~uint64_t{0}, 0};
 		mPendingLayoutEdit = false;
 		mDiagnostic.clear(); mConfirmReset = false; mPendingActivation.reset();
 		mFlow.reset(); mDraftHistory.clear(); mPendingDraftEdit.reset();
@@ -239,9 +241,33 @@ void StationSystemsWindow::renderFileToolbar()
 	if (!mDiagnostic.empty()) ImGui::TextWrapped("Configuration: %s", mDiagnostic.c_str());
 }
 
-void StationSystemsWindow::renderObservationPlot(float height)
+void StationSystemsWindow::prepareObservation(core::World const& world)
 {
-	auto const& charts = core::stationCharts();
+	auto const revision = world.getStationSystemsObservationRevision();
+	if (revision.run != mObservationRevision.run || mObservationCatalogue.empty())
+	{
+		mObservationCatalogue = world.getStationSystemsObservationCatalogue();
+	}
+	if ((revision.run != mObservationRevision.run || mPreparedChart != mSelectedChart)
+		&& std::none_of(mObservationCatalogue.begin(), mObservationCatalogue.end(),
+			[&](auto const& chart) { return chart.id == mSelectedChart; }))
+	{ mSelectedChart = "power"; mObservationFallback = true; }
+	if (revision == mObservationRevision && mPreparedChart == mSelectedChart) return;
+	mFlowChart = world.queryStationSystemsChart(mSelectedChart);
+	mFlowRecording = world.getStationSystemsRecordingStatus();
+	mObservationRevision = revision; mPreparedChart = mSelectedChart;
+	++mObservationPreparations;
+	auto const selected = std::find_if(mObservationCatalogue.begin(), mObservationCatalogue.end(),
+		[&](auto const& chart) { return chart.id == mSelectedChart; });
+	mObservationAxis = selected->label + " (" + core::stationUnitLabel(selected->unit) + ")";
+	mObservationLabels.clear();
+	for (auto const& line : mFlowChart.series) mObservationLabels.push_back(line.label + "###" + line.id);
+}
+
+void StationSystemsWindow::renderObservationPlot(float height, core::World const& world)
+{
+	prepareObservation(world);
+	auto const& charts = mObservationCatalogue;
 	auto const found = std::find_if(charts.begin(), charts.end(), [&](auto const& chart) {
 		return chart.id == mSelectedChart;
 	});
@@ -249,9 +275,11 @@ void StationSystemsWindow::renderObservationPlot(float height)
 	if (found == charts.end())
 	{
 		mSelectedChart = selected->id;
-		mFlowChart = core::queryStationChart(*selected, mFlowMetrics);
-		ImGui::TextDisabled("Selected property unavailable; showing Power.");
+		mObservationFallback = true;
+		prepareObservation(world);
 	}
+	if (mObservationFallback) ImGui::TextDisabled("Selected property unavailable; showing Power.");
+	ImGui::TextDisabled("Applied simulation: %s", world.getName().c_str());
 	ImGui::SetNextItemWidth(-1);
 	if (ImGui::BeginCombo("##Station observation property", selected->label.c_str()))
 	{
@@ -264,7 +292,8 @@ void StationSystemsWindow::renderObservationPlot(float height)
 			{
 				mSelectedChart = chart.id;
 				selected = &chart;
-				mFlowChart = core::queryStationChart(chart, mFlowMetrics);
+				mObservationFallback = false;
+				prepareObservation(world);
 			}
 			ImGui::PopID();
 		}
@@ -300,12 +329,12 @@ void StationSystemsWindow::renderObservationPlot(float height)
 	if (ImPlot::BeginPlot("##Station power history", { -1, std::max(130.0f,
 		height - 3 * ImGui::GetTextLineHeightWithSpacing() - ImGui::GetFrameHeightWithSpacing()) }, ImPlotFlags_NoMenus))
 	{
-		std::string const axis = selected->label + " (" + core::stationUnitLabel(selected->unit) + ")";
-		ImPlot::SetupAxes("Simulation time (s)", axis.c_str(),
+		ImPlot::SetupAxes("Simulation time (s)", mObservationAxis.c_str(),
 			ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
 		// ImPlot draws text directly, bypassing ImGui's normal text logging.
 		// Include chart labels in the same read-only UI log as other widgets.
-		ImGui::LogText("Simulation time (s) | %s\n", axis.c_str());
+		ImGui::LogText("Simulation time (s) | %s\n", mObservationAxis.c_str());
+		size_t lineIndex = 0;
 		for (auto const& line : mFlowChart.series)
 		{
 			// Colour and legend identity derive from the metric, not its vector position.
@@ -314,8 +343,7 @@ void StationSystemsWindow::renderObservationPlot(float height)
 			ImPlot::SetNextLineStyle(ImPlot::GetColormapColor(static_cast<int>(colour % ImPlot::GetColormapSize())), 2);
 			ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 2);
 			ImGui::LogText("%s\n", line.label.c_str());
-			std::string const label = line.label + "###" + line.id;
-			ImPlot::PlotLine(label.c_str(), line.times.data(), line.values.data(), static_cast<int>(line.times.size()));
+			ImPlot::PlotLine(mObservationLabels[lineIndex++].c_str(), line.times.data(), line.values.data(), static_cast<int>(line.times.size()));
 		}
 		ImPlot::EndPlot();
 	}
@@ -346,16 +374,10 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 	// and pausing bypass the throttle so old-run values cannot linger.
 	if (!mFlowSnapshot || now < mFlowRefreshTime
 		|| (now - mFlowRefreshTime >= 0.25 && world->getSimulationTick() != mFlowSnapshot->worldTick)
-		|| applied != mFlowApplied || paused != mFlowWasPaused
+		|| world->getStationSystemsObservationRevision().run != mObservationRevision.run || paused != mFlowWasPaused
 		|| world->getSimulationTick() < mFlowSnapshot->worldTick)
 	{
 		mFlowSnapshot = world->getStationSystemsSnapshot();
-		mFlowMetrics = world->getStationSystemsMetricHistory();
-		mFlowRecording = world->getStationSystemsRecordingStatus();
-		auto const& charts = core::stationCharts();
-		auto selected = std::find_if(charts.begin(), charts.end(), [&](auto const& chart) { return chart.id == mSelectedChart; });
-		mFlowChart = core::queryStationChart(selected == charts.end() ? charts.front() : *selected, mFlowMetrics);
-		mFlowApplied = applied;
 		mFlowRefreshTime = now;
 		mFlowWasPaused = paused;
 	}
@@ -378,7 +400,7 @@ void StationSystemsWindow::renderFlowContents(std::shared_ptr<core::World> const
 		ImGui::SetCursorScreenPos({headerOrigin.x + controlsWidth + ImGui::GetStyle().ItemSpacing.x,
 			headerOrigin.y});
 		ImGui::BeginGroup();
-		renderObservationPlot(height);
+		renderObservationPlot(height, *world);
 		ImGui::EndGroup();
 		ImGui::EndGroup();
 	});

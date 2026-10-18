@@ -45,6 +45,23 @@ namespace core
 	{
 		return mStationSystemsRuntime ? mStationSystemsRuntime->metrics() : std::vector<StationMetricHistory>{};
 	}
+	StationObservationRevision World::getStationSystemsObservationRevision() const
+	{
+		return mStationSystemsRuntime ? mStationSystemsRuntime->observationRevision() : StationObservationRevision{};
+	}
+	std::vector<StationChartDefinition> const& World::getStationSystemsObservationCatalogue() const
+	{
+		return mStationSystemsRuntime ? mStationSystemsRuntime->catalogue() : stationCharts();
+	}
+	StationChartData const& World::queryStationSystemsChart(std::string const& id) const
+	{
+		static StationChartData const empty;
+		return mStationSystemsRuntime ? mStationSystemsRuntime->query(id) : empty;
+	}
+	StationQueryWork World::getStationSystemsQueryWork() const
+	{
+		return mStationSystemsRuntime ? mStationSystemsRuntime->queryWork() : StationQueryWork{};
+	}
 	StationRecordingStatus World::getStationSystemsRecordingStatus() const
 	{
 		return mStationSystemsRuntime ? mStationSystemsRuntime->recordingStatus() : StationRecordingStatus{};

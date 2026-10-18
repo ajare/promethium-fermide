@@ -136,6 +136,8 @@ namespace
 		core::World world("Station", 2, 2); enable(world);
 		world.resumeSimulation(); world.advanceTicks(90); world.pauseSimulation();
 		auto initial = world.getStationSystemsSnapshot(); auto initialYaml = yaml(world);
+		auto const originalRevision = world.getStationSystemsObservationRevision();
+		(void)world.queryStationSystemsChart("power");
 		std::string diagnostic;
 		require(!world.configureStationSystems({false, 2}, false, &diagnostic) && !diagnostic.empty(), "Missing reset confirmation accepted");
 		require(initial == world.getStationSystemsSnapshot() && initialYaml == yaml(world), "Refusal changed state");
@@ -153,6 +155,9 @@ namespace
 			}
 			else input = core::YamlSerializer::fromString(yaml(world));
 			input->deserialize(); core::World loaded("Loaded", 2, 2); loaded.deserialize(*input, data);
+			require(loaded.getStationSystemsObservationRevision().run != originalRevision.run
+				&& loaded.queryStationSystemsChart("power").series[0].values.empty(),
+				"Persistence restored old-run query/cache state");
 			require(loaded.getStationSystemsSettings() == world.getStationSystemsSettings(), "Settings round trip failed");
 			require(loaded.getStationSystemsSnapshot().worldTick == 0 && loaded.getStationSystemsSnapshot().completedTicks[3] == 0,
 				"Persistence restored live Lua state");
@@ -23946,6 +23951,86 @@ void recovery(smoke::Context const& context)
 			for (int t = 1; t <= 20; ++t) retained.observe(t, values);
 			require(retained.status().retainedUntilSeconds - retained.status().retainedFromSeconds <= 2
 				&& retained.status().recordingBytes <= limits.memoryBytes, "retention or recording bound exceeded");
+		}
+		// #697: public revision/query seam is read-only and independent of
+		// population size. Counters measure work, not machine-dependent timing.
+		{
+			core::World world("Cached applied run", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto settings = rigSettings();
+			for (size_t i = 1; i < core::MaxStationEquipmentLoads; ++i)
+			{
+				auto load = settings.equipmentLoads.front(); load.id = "other-" + std::to_string(i);
+				settings.equipmentLoads.push_back(load);
+			}
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			world.markSaved();
+			auto revision = world.getStationSystemsObservationRevision();
+			auto const* catalogue = &world.getStationSystemsObservationCatalogue();
+			world.resumeSimulation(); runOrDiagnose(world, 60, "cache run"); world.pauseSimulation();
+			auto const recordedRevision = world.getStationSystemsObservationRevision();
+			require(recordedRevision.run == revision.run && recordedRevision.history > revision.history,
+				"observation did not advance only the history revision");
+			auto const beforeQueryDocument = yaml(world);
+			auto const beforeQuerySnapshot = world.getStationSystemsSnapshot();
+			auto const expected = world.queryStationSystemsChart("power");
+			auto const work = world.getStationSystemsQueryWork();
+			auto const* buffer = world.queryStationSystemsChart("power").series[0].values.data();
+			for (int i = 0; i < 100; ++i)
+			{
+				require(&world.getStationSystemsObservationCatalogue() == catalogue
+					&& world.queryStationSystemsChart("power").series[0].values.data() == buffer,
+					"unchanged query replaced catalogue or prepared buffer");
+			}
+			require(work.queries == 1 && work.metricsExported == 2
+				&& world.getStationSystemsQueryWork().queries == work.queries
+				&& world.getStationSystemsQueryWork().metricsExported == work.metricsExported
+				&& world.getStationSystemsObservationRevision() == recordedRevision && !world.isModified()
+				&& yaml(world) == beforeQueryDocument && world.getStationSystemsSnapshot() == beforeQuerySnapshot,
+				"cached query rebuilt unrelated metrics or mutated the paused document");
+			auto changed = settings; changed.equipmentLoads.clear();
+			require(!world.configureStationSystems(changed, false)
+				&& world.getStationSystemsObservationRevision() == recordedRevision,
+				"unconfirmed application replaced the run");
+			auto invalid = changed; invalid.observationIntervalSeconds = -1;
+			require(!world.configureStationSystems(invalid, true)
+				&& world.getStationSystemsObservationRevision() == recordedRevision,
+				"invalid application replaced the run");
+			require(world.configureStationSystems(settings, false)
+				&& world.getStationSystemsObservationRevision() == recordedRevision,
+				"unchanged application reset history");
+			(void)world.queryStationSystemsChart("unavailable");
+			auto const reselected = world.queryStationSystemsChart("power");
+			require(reselected.series[0].values == expected.series[0].values
+				&& reselected.series[0].times == expected.series[0].times
+				&& world.getSimulationTick() == 60 && world.getStationSystemsObservationRevision() == recordedRevision,
+				"property reselection did not reuse retained history without replay");
+			world.resetSimulation();
+			require(world.getStationSystemsObservationRevision().run != revision.run
+				&& world.queryStationSystemsChart("power").series[0].values.empty(),
+				"Reset reused an old-run query");
+			world.resumeSimulation(); runOrDiagnose(world, 60, "cached replay"); world.pauseSimulation();
+			auto const replay = world.queryStationSystemsChart("power");
+			require(replay.series[0].values == expected.series[0].values
+				&& replay.series[1].values == expected.series[1].values
+				&& replay.series[0].times == expected.series[0].times, "cached replay differs");
+			revision = world.getStationSystemsObservationRevision();
+			require(world.configureStationSystems(changed, true)
+				&& world.getStationSystemsObservationRevision().run != revision.run
+				&& world.queryStationSystemsChart("power").series[0].values.empty(),
+				"successful application retained old query history");
+			// Replace the sole cache entry repeatedly, including an unknown
+			// property; this cannot accumulate a per-selection history map.
+			auto const* cacheEntry = &world.queryStationSystemsChart("power");
+			for (int i = 0; i < 50; ++i)
+			{
+				auto const& missing = world.queryStationSystemsChart("unavailable-" + std::to_string(i));
+				require(missing.series.empty() && &missing == cacheEntry, "unknown property fabricated data or grew the cache");
+				auto const& power = world.queryStationSystemsChart("power");
+				require(power.series.size() == 2 && &power == cacheEntry, "Power selection did not reuse the bounded cache entry");
+			}
+			require(world.getStationSystemsQueryWork().metricsExported == 102,
+				"selection built unrelated metrics");
 		}
 		// Scenario A: sampling cadence. With a 60 s observation interval
 		// and a 60 s run, each series holds exactly one sample at the

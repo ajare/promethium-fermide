@@ -6,6 +6,7 @@
 #include "BundledStationSystemsSource.h"
 #include "ScriptSandbox.h"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <map>
 #include <numeric>
@@ -16469,6 +16470,8 @@ namespace core
 	};
 	StationSystemsRuntime::StationSystemsRuntime(StationSystemsSettings settings) : mImpl(std::make_unique<Impl>())
 	{
+		static std::atomic<uint64_t> nextRun{0};
+		mRun = ++nextRun;
 		std::string diagnostic;
 		if (!validateStationSystemsSettings(settings, diagnostic)) throw SerializationException(diagnostic);
 		mImpl->settings = settings; mImpl->snapshot.enabled = settings.enabled;
@@ -19046,5 +19049,9 @@ namespace core
 	std::vector<StationTrendSeries> StationSystemsRuntime::trends() const { return mImpl->history.trends(); }
 	std::vector<StationMetricHistory> StationSystemsRuntime::metrics() const { return mImpl->history.metrics(); }
 	StationRecordingStatus StationSystemsRuntime::recordingStatus() const { return mImpl->history.status(); }
+	StationObservationRevision StationSystemsRuntime::observationRevision() const { return {mRun, mImpl->history.revision()}; }
+	std::vector<StationChartDefinition> const& StationSystemsRuntime::catalogue() const { return mImpl->history.catalogue(); }
+	StationChartData const& StationSystemsRuntime::query(std::string const& id) const { return mImpl->history.query(id); }
+	StationQueryWork StationSystemsRuntime::queryWork() const { return mImpl->history.queryWork(); }
 	std::vector<StationSystemsDiagnostic> const& StationSystemsRuntime::diagnostics() const { return mImpl->diagnostics; }
 }

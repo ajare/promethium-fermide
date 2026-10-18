@@ -35,6 +35,23 @@ namespace core
 		mPending.resize(mSlots.size());
 		mStatus.recordingBytes = overhead + mStatus.sampleLimit * rowBytes;
 		mStatus.resolutionSeconds = cadence;
+		std::erase_if(mCatalogue, [&](auto const& chart) {
+			return chart.id != "power" && !std::all_of(chart.series.begin(), chart.series.end(), [&](auto const& line) {
+				return std::any_of(mSlots.begin(), mSlots.end(), [&](auto const& slot) {
+					return slot.metric.id == line.metricId && slot.metric.quantity == chart.quantity
+						&& slot.metric.unit == chart.unit;
+				});
+			});
+		});
+		for (auto const& chart : mCatalogue)
+		{
+			auto& indices = mChartSlots.emplace_back();
+			for (auto const& line : chart.series)
+			{
+				auto slot = std::find_if(mSlots.begin(), mSlots.end(), [&](auto const& s) { return s.metric.id == line.metricId; });
+				if (slot != mSlots.end()) indices.push_back(static_cast<size_t>(slot - mSlots.begin()));
+			}
+		}
 	}
 
 	void StationHistory::observe(double seconds, std::vector<StationMetricSample> const& values)
@@ -70,6 +87,7 @@ namespace core
 				--mCount;
 			}
 			mStatus.truncated = true;
+			++mRevision;
 		}
 		++mPendingCount;
 		for (size_t col = 0; col < n; ++col)
@@ -93,6 +111,7 @@ namespace core
 		std::fill(mPending.begin(), mPending.end(), Cell{});
 		mPendingCount = 0;
 		++mCount;
+		++mRevision;
 		while (mCount > 1 && seconds - mTimes[0] > mRetention)
 		{
 			std::move(mTimes.begin() + 1, mTimes.begin() + mCount, mTimes.begin());
@@ -102,30 +121,52 @@ namespace core
 		mStatus.retainedFromSeconds = mTimes[0]; mStatus.retainedUntilSeconds = seconds;
 	}
 
+	StationMetricHistory StationHistory::metric(size_t col) const
+	{
+		StationMetricHistory h;
+		h.descriptor = mSlots[col].metric;
+		h.descriptor.validity = mCount ? StationMetricValidity::Valid : StationMetricValidity::Unavailable;
+		h.sampleIntervalSeconds = mStatus.resolutionSeconds; h.truncated = mStatus.truncated;
+		h.samples.reserve(mCount);
+		for (size_t row = 0; row < mCount; ++row)
+		{
+			auto const& c = mCells[row * mSlots.size() + col];
+			StationMetricSample s;
+			s.elapsedSeconds = mTimes[row];
+			s.coverage = c.count ? double(c.valid) / double(c.count) : 0;
+			s.validity = c.valid == c.count && c.count && std::isfinite(c.actual) && std::isfinite(c.requested)
+				? StationMetricValidity::Valid : StationMetricValidity::Invalid;
+			if (s.validity == StationMetricValidity::Valid)
+			{ s.actual = c.actual; if (h.descriptor.requestedSemantics) s.requested = c.requested; }
+			h.samples.push_back(s);
+		}
+		return h;
+	}
+
 	std::vector<StationMetricHistory> StationHistory::metrics() const
 	{
 		std::vector<StationMetricHistory> result;
-		for (size_t col = 0; col < mSlots.size(); ++col)
-		{
-			StationMetricHistory h;
-			h.descriptor = mSlots[col].metric;
-			h.descriptor.validity = mCount ? StationMetricValidity::Valid : StationMetricValidity::Unavailable;
-			h.sampleIntervalSeconds = mStatus.resolutionSeconds; h.truncated = mStatus.truncated;
-			for (size_t row = 0; row < mCount; ++row)
-			{
-				auto const& c = mCells[row * mSlots.size() + col];
-				StationMetricSample s;
-				s.elapsedSeconds = mTimes[row];
-				s.coverage = c.count ? double(c.valid) / double(c.count) : 0;
-				s.validity = c.valid == c.count && c.count && std::isfinite(c.actual) && std::isfinite(c.requested)
-					? StationMetricValidity::Valid : StationMetricValidity::Invalid;
-				if (s.validity == StationMetricValidity::Valid)
-				{ s.actual = c.actual; if (h.descriptor.requestedSemantics) s.requested = c.requested; }
-				h.samples.push_back(s);
-			}
-			result.push_back(std::move(h));
-		}
+		for (size_t col = 0; col < mSlots.size(); ++col) result.push_back(metric(col));
 		return result;
+	}
+
+	StationChartData const& StationHistory::query(std::string const& id) const
+	{
+		if (mQueryId == id && mQueryRevision == mRevision) return mQuery;
+		auto chart = std::find_if(mCatalogue.begin(), mCatalogue.end(), [&](auto const& c) { return c.id == id; });
+		std::vector<StationMetricHistory> selected;
+		auto const index = static_cast<size_t>(chart - mCatalogue.begin());
+		if (index < mChartSlots.size())
+			for (auto col : mChartSlots[index])
+			{
+				selected.push_back(metric(col));
+				++mQueryWork.metricsExported;
+			}
+		mQuery = chart == mCatalogue.end() ? StationChartData{} : queryStationChart(*chart, selected);
+		// Unknown host/restored identities cannot retain arbitrarily large keys.
+		mQueryId = chart == mCatalogue.end() ? std::string{} : chart->id;
+		mQueryRevision = mRevision; ++mQueryWork.queries;
+		return mQuery;
 	}
 
 	std::vector<StationTrendSeries> StationHistory::trends() const

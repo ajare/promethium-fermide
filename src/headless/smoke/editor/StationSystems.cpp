@@ -3337,6 +3337,10 @@ namespace
 			ctx->SetRef("Configuration");
 			REQ(driver.contains("Power demand and generation (applied simulation)")
 				&& driver.contains("No samples yet"), "Flow power chart missing its initial state");
+			REQ(driver.contains("Applied simulation: Live flow"), "Graph did not name the applied simulation");
+			window.selectObservation("no-longer-applicable"); ctx->Yield(2);
+			REQ(window.selectedObservation() == "power" && driver.contains("Selected property unavailable; showing Power."),
+				"Inapplicable selection did not visibly fall back to Power");
 			auto const initialDraft = window.draft();
 			ctx->ComboClick("##Station observation property/power/Power"); ctx->Yield(2);
 			REQ(window.draft() == initialDraft && window.draftHistory().undoCount() == 0
@@ -3358,7 +3362,14 @@ namespace
 				"Power chart substituted battery-assisted service for generation or lost simulation timestamps");
 			REQ(driver.contains("Demand") && driver.contains("Generation") && driver.contains("Power (kW)")
 				&& driver.contains("Simulation time (s)"), "Generic plot omitted power lines or axis units");
-			ctx->Sleep(0.3f);
+			auto const prepared = window.observationPreparations();
+			auto const queryWork = world->getStationSystemsQueryWork();
+			auto const recordedRevision = world->getStationSystemsObservationRevision();
+			ctx->Yield(30);
+			REQ(window.observationPreparations() == prepared
+				&& world->getStationSystemsQueryWork().queries == queryWork.queries
+				&& world->getStationSystemsQueryWork().metricsExported == queryWork.metricsExported,
+				"Unchanged UI frames rebuilt plotting buffers or exported histories");
 			REQ(world->getStationSystemsSnapshot() == observed && !world->isModified()
 				&& window.draftHistory().undoCount() == 0, "Live rendering advanced or mutated the World/draft");
 			ctx->ComboClick("Place node/Store"); ctx->Yield(2);
@@ -3366,6 +3377,10 @@ namespace
 			ctx->MouseTeleportToPos({canvas->Pos.x + 50, canvas->Pos.y + 400});
 			ctx->Yield(2); ctx->MouseClick(); ctx->Yield(3);
 			ctx->KeyPress(ImGuiKey_Escape); ctx->Yield(2);
+			REQ(world->getStationSystemsObservationRevision() == recordedRevision
+				&& window.observationPreparations() == prepared && window.selectedObservation() == "power"
+				&& world->getStationSystemsSettings() == seed && driver.contains("Applied simulation: Live flow"),
+				"Unapplied draft changed the observed population/history or selection");
 			REQ(window.draft().stores.size() == 3 && !window.flowTelemetry("Store", "a")
 				&& driver.contains("live readouts hidden"), "Draft edits retained misleading live telemetry");
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
@@ -3391,7 +3406,13 @@ namespace
 				"Throttled telemetry never refreshed");
 			world->pauseSimulation(); ctx->Yield(2);
 			world->resetSimulation(); ctx->Yield(2);
-			REQ(driver.contains("No samples yet"), "Reset left stale power history in the chart");
+			REQ(driver.contains("No samples yet") && window.selectedObservation() == "power"
+				&& world->getStationSystemsObservationRevision().run != recordedRevision.run,
+				"Reset left stale power history/selection in the chart");
+			auto const afterReset = window.observationPreparations();
+			world->resetSimulation(); ctx->Yield(2);
+			REQ(window.observationPreparations() == afterReset + 1,
+				"Reset at the same tick failed to invalidate prepared buffers");
 			REQ(window.flowTelemetry("Transfer", "move")->ports.empty()
 				&& window.flowTelemetry("Store", "a")->values == initial->values, "Reset left stale live values");
 			auto replacement = std::make_shared<core::World>("Replacement live flow", 2, 2);
@@ -3399,6 +3420,8 @@ namespace
 			seed.stores[0].id = "new"; seed.transfers.clear();
 			REQ(replacement->configureStationSystems(seed, false), "Replacement station configuration failed");
 			world = replacement; ctx->Yield(2);
+			REQ(driver.contains("Applied simulation: Replacement live flow") && window.selectedObservation() == "power",
+				"World switch lost selection or applied-simulation identity");
 			REQ(!window.flowTelemetry("Store", "a") && window.flowTelemetry("Store", "new"),
 				"World switch reused the previous World's telemetry");
 			seed.enabled = false;
@@ -6313,6 +6336,8 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 			// reset-confirmation path and commits document history.
 			world->pauseSimulation();
 			ctx->Sleep(1);
+			auto const beforeRefusal = world->getStationSystemsObservationRevision();
+			auto const beforeRefusalValues = world->queryStationSystemsChart("power").series[0].values;
 			ctx->ItemInputValue("Trend retention (seconds)", "0");
 			ctx->ItemClick("Apply settings");
 			ctx->Sleep(1);
@@ -6320,8 +6345,10 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 			ctx->Sleep(1);
 			REQ(driver.contains("trend retention must be finite"),
 				"invalid trend retention was not refused visibly");
-			REQ(world->getStationSystemsSettings().trendRetentionSeconds == 300.0f,
-				"invalid trend retention mutated the authored settings");
+			REQ(world->getStationSystemsSettings().trendRetentionSeconds == 300.0f
+				&& world->getStationSystemsObservationRevision() == beforeRefusal
+				&& world->queryStationSystemsChart("power").series[0].values == beforeRefusalValues,
+				"invalid trend retention mutated the authored settings or observed run");
 			ctx->ItemClick("Cancel edits");
 			ctx->Sleep(1);
 			ctx->ItemInputValue("Trend retention (seconds)", "120");
@@ -6332,8 +6359,10 @@ void coupledLiveViewWorkflow(smoke::Context const&)
 			REQ(world->getStationSystemsSettings().trendRetentionSeconds == 120.0f
 				&& history.undoCount() >= 1,
 				"valid trend retention edit did not apply through the reset confirmation");
-			REQ(world->getSimulationTick() == 0,
-				"the confirmed retention change did not reset the World");
+			REQ(world->getSimulationTick() == 0
+				&& world->getStationSystemsObservationRevision().run != beforeRefusal.run
+				&& world->queryStationSystemsChart("power").series[0].values.empty(),
+				"the confirmed retention change did not reset the World and query history");
 			// Active-World switch: the window rebinds to the new World and
 			// shows only that World's series - nothing of the old one leaks.
 			world = std::make_shared<core::World>("Trends second", 2, 2);

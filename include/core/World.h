@@ -3383,6 +3383,12 @@ namespace core
 		std::vector<StationTrendSeries> getStationSystemsTrends() const;
 		// Read-only typed observation seam; uses the existing histories in slice 1a.
 		std::vector<StationMetricHistory> getStationSystemsMetricHistory() const;
+		// Read-only applied-run observations. Borrowed results last until the next
+		// query/run replacement; callers retaining them must copy on revision change.
+		StationObservationRevision getStationSystemsObservationRevision() const;
+		std::vector<StationChartDefinition> const& getStationSystemsObservationCatalogue() const;
+		StationChartData const& queryStationSystemsChart(std::string const& id) const;
+		StationQueryWork getStationSystemsQueryWork() const;
 		StationRecordingStatus getStationSystemsRecordingStatus() const;
 		std::vector<StationSystemsDiagnostic> getStationSystemsDiagnostics() const;
 

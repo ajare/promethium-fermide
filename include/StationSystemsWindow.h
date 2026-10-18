@@ -77,17 +77,29 @@ private:
 	void openDraft(std::string const& path);
 	void newDraft();
 	void renderFileToolbar();
-	void renderObservationPlot(float height);
+	void renderObservationPlot(float height, core::World const& world);
+	void prepareObservation(core::World const& world);
+public:
+	uint64_t observationPreparations() const { return mObservationPreparations; }
+	std::string const& selectedObservation() const { return mSelectedChart; }
+	// Identity-based selection requests are resolved against the applied catalogue
+	// on the next render, including requests restored by a host presentation.
+	void selectObservation(std::string id) { mSelectedChart = std::move(id); }
+private:
 	std::shared_ptr<ImPlotContext> mPowerPlotContext;
 	std::string mSelectedChart{"power"};
-	std::vector<core::StationMetricHistory> mFlowMetrics;
+	std::vector<core::StationChartDefinition> mObservationCatalogue;
+	core::StationObservationRevision mObservationRevision{~uint64_t{0}, 0};
+	std::string mPreparedChart, mObservationAxis;
+	std::vector<std::string> mObservationLabels;
+	bool mObservationFallback{false};
+	uint64_t mObservationPreparations{0};
 	core::StationRecordingStatus mFlowRecording;
 	core::StationChartData mFlowChart;
 	std::optional<DocumentSnapshot> mPendingDraftEdit;
 	bool mPendingLayoutEdit{false};
 	StationFlowDiagram mFlow;
 	std::optional<core::StationSystemsSnapshot> mFlowSnapshot;
-	core::StationSystemsSettings mFlowApplied;
 	double mFlowRefreshTime{-1.0};
 	bool mFlowWasPaused{true};
 	std::weak_ptr<void const> mWorld;

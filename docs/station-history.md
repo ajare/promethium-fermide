@@ -43,6 +43,36 @@ its original unit label.
 
 The Power header reports retained interval, resolution, coarsening/truncation,
 gaps, recording footprint, row limit and an explicit recording-limit condition.
+## Revisioned queries (#697)
+
+`World::getStationSystemsObservationRevision()` exposes an opaque applied-run
+identity and a history revision. Reconstruction (including Reset at tick zero),
+World load, and successful changed configuration application create a new run.
+An unchanged or refused application keeps the existing run. A history revision
+changes only when published rows change, including coarsening; partial pending
+observations do not invalidate an unchanged query. These identities are runtime
+observations, never saved or authored.
+
+`getStationSystemsObservationCatalogue()` borrows run-compiled applicable chart
+membership. Power remains the fallback, including empty/disabled runs.
+`queryStationSystemsChart(id)` borrows a single cached selected query, keyed by
+property identity and history revision. Only metrics referenced by that property
+are exported; selecting another property replaces the cache. Unknown identities
+return an empty result. Borrowed query results must not be retained across another
+query or run replacement without copying. Query storage is additional to recorder
+storage, bounded by one catalogue property's series and the recorder's row limit;
+it is not a second recording system. Legacy full-history exports remain available
+for existing consumers, but Flow never calls them.
+
+Flow copies and prepares only the selected result when the run/history/selection
+key changes, and caches axis and legend labels with those buffers. Pause,
+unapplied draft edits, and unchanged UI frames do not rebuild queries or plot
+buffers. Selection and contribution colour use stable identity; an inapplicable
+selection visibly falls back to Power. The graph names the applied simulation,
+not an unapplied Configuration draft. `getStationSystemsQueryWork()` and the
+editor's preparation counter expose deterministic work evidence without timing
+assertions or changing World/document state.
+
 The existing `station-trends` public World workflow checks hidden-window sampling,
 aligned bounded history, retention, pause/reset and deterministic replay, plus
 small recorder budgets and invalid intervals. `station-editor-trends` covers the
