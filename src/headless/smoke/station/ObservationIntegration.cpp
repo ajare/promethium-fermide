@@ -1,4 +1,4 @@
-#include "Smoke.h"
+#include "ObservationIntegration.h"
 #include "MixedObservationFixture.h"
 #include "core/StationHistory.h"
 #include "core/World.h"
