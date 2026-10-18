@@ -14,6 +14,7 @@
 
 #include "core/Defines.h"
 #include "core/AgentPropertyDescriptors.h"
+#include "core/AgentTagService.h"
 #include "core/PhysicalControlPlacement.h"
 #include "core/AgentGroup.h"
 #include "core/AccessPermission.h"
@@ -61,6 +62,7 @@ namespace core
 	class TraversalResourceRegistry;
 	class DeviceConditionStore;
 	class FurnitureStore;
+	class AgentTagService;
 
 	class World : public Serializable
 	{
@@ -112,6 +114,11 @@ namespace core
 		// ADR 0022).
 		template <typename Registry>
 		friend class RegistryBinding;
+		// The Agent tag service owns no state; it reads and edits the Agent
+		// entities' tag IDs and samples, the tag registry pointer and
+		// reference, and the tag-sample table below on the World's behalf
+		// (#682, ADR 0022).
+		friend class AgentTagService;
 		friend struct WorldAgentRestorationTestAccess;
 		friend struct PhysicalControlLookupTestAccess;
 		friend struct QueuedPressLookupTestAccess;
@@ -701,6 +708,15 @@ namespace core
 		// change rides on, through this World.
 		std::unique_ptr<FurnitureStore> mFurnitureStore;
 
+		// The Agent tag assignment behaviour family lives in the Agent tag
+		// service (ADR 0022, #682). World keeps ownership of the state it
+		// edits - the Agent entities' tag IDs and samples, the tag registry
+		// pointer and reference (ADR 0001) - and stays the facade (design
+		// pattern) through which every caller reaches these operations; the
+		// service owns no state and reaches them, and the coordinator whose
+		// usage-change notification a tag edit rides on, through this World.
+		std::unique_ptr<AgentTagService> mAgentTagService;
+
 		// Every World owns one sandboxed Lua runtime for its Agent types. It is
 		// declared before mAgents so Agent destruction (which releases live Lua
 		// instances through their opaque handles) happens while the runtime's Lua
@@ -1043,59 +1059,11 @@ namespace core
 		// or mistaking a later World allocated at the same address for it.
 		std::shared_ptr<void const> mLifetimeToken{ std::make_shared<uint8_t>(0) };
 
-		enum class AgentTagSampleRepairAction
-		{
-			None,
-			Clear,
-			Resample
-		};
-
-		struct AgentTagReconciliation
-		{
-			AgentId agent{};
-			ObjectUsage objectUsageBefore{ ObjectUsage::Arms };
-			float objectUsageDistanceBefore{ 0.f };
-			bool objectUsageChanged{ false };
-			AgentTagSampleRepairAction walkSpeedAction{ AgentTagSampleRepairAction::None };
-			AgentTagId walkSpeedSource{};
-			AgentWalkSpeedModifierProperty walkSpeedProperty{};
-			AgentTagSampleRepairAction heightAction{ AgentTagSampleRepairAction::None };
-			AgentTagId heightSource{};
-			AgentHeightModifierProperty heightProperty{};
-			AgentTagSampleRepairAction stairSpeedAction{ AgentTagSampleRepairAction::None };
-			AgentTagId stairSpeedSource{};
-			AgentStairSpeedModifierProperty stairSpeedProperty{};
-			AgentTagSampleRepairAction ladderSpeedAction{ AgentTagSampleRepairAction::None };
-			AgentTagId ladderSpeedSource{};
-			AgentLadderSpeedModifierProperty ladderSpeedProperty{};
-			AgentTagSampleRepairAction interactionAversionAction{ AgentTagSampleRepairAction::None };
-			AgentTagId interactionAversionSource{};
-			AgentInteractionAversionProperty interactionAversionProperty{};
-			AgentTagSampleRepairAction effortAversionAction{ AgentTagSampleRepairAction::None };
-			AgentTagId effortAversionSource{};
-			AgentEffortAversionProperty effortAversionProperty{};
-			AgentTagSampleRepairAction waitingAversionAction{ AgentTagSampleRepairAction::None };
-			AgentTagId waitingAversionSource{};
-			AgentWaitingAversionProperty waitingAversionProperty{};
-			AgentTagSampleRepairAction crowdAversionAction{ AgentTagSampleRepairAction::None };
-			AgentTagId crowdAversionSource{};
-			AgentCrowdAversionProperty crowdAversionProperty{};
-			AgentTagSampleRepairAction riskAversionAction{ AgentTagSampleRepairAction::None };
-			AgentTagId riskAversionSource{};
-			AgentRiskAversionProperty riskAversionProperty{};
-			AgentTagSampleRepairAction routeFamiliarityAction{ AgentTagSampleRepairAction::None };
-			AgentTagId routeFamiliaritySource{};
-			AgentRouteFamiliarityProperty routeFamiliarityProperty{};
-			AgentTagSampleRepairAction routePersistenceAction{ AgentTagSampleRepairAction::None };
-			AgentTagId routePersistenceSource{};
-			AgentRoutePersistenceProperty routePersistenceProperty{};
-			AgentTagSampleRepairAction minimumRoutePlanningTimeAction{ AgentTagSampleRepairAction::None };
-			AgentTagId minimumRoutePlanningTimeSource{};
-			AgentMinimumRoutePlanningTimeProperty minimumRoutePlanningTimeProperty{};
-			AgentTagSampleRepairAction maximumRoutePlanningTimeAction{ AgentTagSampleRepairAction::None };
-			AgentTagId maximumRoutePlanningTimeSource{};
-			AgentMaximumRoutePlanningTimeProperty maximumRoutePlanningTimeProperty{};
-		};
+		// The tag reconciliation transaction types live with the Agent tag
+		// service (#682, ADR 0022); the aliases keep the historical
+		// World-qualified names resolving for existing callers.
+		using AgentTagSampleRepairAction = core::AgentTagSampleRepairAction;
+		using AgentTagReconciliation = core::AgentTagReconciliation;
 
 		// Checks every assigned stable ID and inherited property against a
 		// prospective registry. Opening may additionally plan repairs for samples
