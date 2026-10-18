@@ -17,6 +17,7 @@ namespace core
 	class AgentGroup
 	{
 		friend class World;
+		friend class AgentGroupRegistry;
 
 		std::string mName;
 

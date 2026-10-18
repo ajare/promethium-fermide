@@ -11,6 +11,7 @@ namespace core
 	class AccessPermission
 	{
 		friend class World;
+		friend class AuthorizationLedger; // ADR 0022 (#684) rename edits
 		std::string mName;
 		explicit AccessPermission(std::string name) : mName(std::move(name)) {}
 		void setName(std::string name) { mName = std::move(name); }

@@ -718,6 +718,61 @@ namespace core
 		return { true, {} };
 	}
 
+	// Operation-failure seam for DeviceConditionStore (#681, ADR 0022).
+	// Condition lives in the store; the device-operation registry lives
+	// here, so when a device breaks the store calls in to retire the live
+	// work that can never complete. Every state change still goes through
+	// touchDeviceOperation so the tick event contract holds.
+
+	void SimulationCoordinator::failPendingOperationsFor(TraversalResourceId device,
+		std::initializer_list<DeviceCommandType> types)
+	{
+		for (auto const& [operationId, operation] : mWorld.mDeviceOperations.entries())
+			if (operation->mHasCommand
+				&& std::find(types.begin(), types.end(), operation->mCommand.type) != types.end()
+				&& operation->mCommand.traversalResource == device
+				&& (operation->mState == DeviceOperationState::Pending
+					|| operation->mState == DeviceOperationState::Running))
+			{
+				touchDeviceOperation(operationId, *operation);
+				operation->mState = DeviceOperationState::Failed;
+			}
+	}
+
+	void SimulationCoordinator::failPendingTransportOperations(TraversalResourceId id)
+	{
+		auto resource = mWorld.mTraversalResources.find(id);
+		if (!resource) return;
+		// A moving Shuttle's last spacing goal includes its last translation.
+		// Do not let locomotion finish that stale translation after service freezes.
+		if (resource->mShuttle && resource->mLiftMoving)
+			for (auto occupant : resource->mOccupants)
+				if (auto passenger = mWorld.mAgents.find(occupant)) passenger->mTraversalLocalGoal.reset();
+		for (auto const& [operationId, operation] : mWorld.mDeviceOperations.entries())
+		{
+			auto target = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
+			if (!operation->mHasCommand || !target
+				|| (target != resource && target->mLiftCoordinator != id)
+				|| (operation->mState != DeviceOperationState::Pending
+					&& operation->mState != DeviceOperationState::Running)) continue;
+			touchDeviceOperation(operationId, *operation);
+			operation->mState = DeviceOperationState::Failed;
+		}
+		// Retain onboard intent and occupancy, but not a failed selector request.
+		// Restoration must make a fresh request rather than exhaust retries.
+		for (auto const& [requestId, request] : mWorld.mTraversalRequests.entries())
+		{
+			(void)requestId;
+			if (request->mResource != id || request->mState != TraversalRequestState::Pending) continue;
+			for (auto const& [interactionId, interaction] : mWorld.mInteractionRequests.entries())
+				if (interaction->mActor == request->mOwner && interaction->mResult == InteractionResult::Pending)
+					cancelInteraction(interactionId);
+			request->mPreparationRequested = false;
+			request->mPreparationOperation = {};
+			request->mPreparationAttempts = 0;
+		}
+	}
+
 	DeviceOperationId SimulationCoordinator::submitDeviceCommand(DeviceCommand const& command)
 	{
 		if (command.type == DeviceCommandType::PressDumbwaiterLanding)

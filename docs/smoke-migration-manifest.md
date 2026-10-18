@@ -30,6 +30,14 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/agent/DoorClearance.cpp` | module-owned | `pf-smoke-agent` |
 | `smoke/agent/BulkheadCrawling.cpp` | module-owned | `pf-smoke-agent` |
 | `OccupantPackingChecks.cpp` | retained standalone | `pf-occupant-packing-checks` |
+| `AgentGroupRegistryChecks.cpp` | retained standalone | `pf-agent-group-registry-checks` |
+| `AgentTypeCatalogChecks.cpp` | retained standalone | `pf-agent-type-catalog-checks` |
+| `MarkerStoreChecks.cpp` | retained standalone | `pf-marker-store-checks` |
+| `TraversalResourceRegistryChecks.cpp` | retained standalone | `pf-traversal-resource-registry-checks` |
+| `PermissionRequirementStoreChecks.cpp` | retained standalone | `pf-permission-requirement-store-checks` |
+| `PlacementValidatorChecks.cpp` | retained standalone | `pf-placement-validator-checks` |
+| `RegistryBindingChecks.cpp` | retained standalone | `pf-registry-binding-checks` |
+| `AgentPropertyDescriptorChecks.cpp` | retained standalone | `pf-agent-property-descriptor-checks` |
 | `SectorTilesetChecks.cpp` | retained standalone | `pf-sector-tileset-checks` |
 | `SimulationStepTimingChecks.cpp` | retained standalone | `pf-simulation-step-timing-checks` |
 | `WorldRenderSlotChecks.cpp` | retained standalone | `pf-world-render-slot-checks` |

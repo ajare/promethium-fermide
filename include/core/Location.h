@@ -14,6 +14,8 @@ namespace core
 	class Location : public Sector
 	{
 		friend class World;
+		friend class PermissionRequirementStore; // ADR 0022 requirement edits
+		friend class AuthorizationLedger; // ADR 0022 (#684) grant/deletion reference clearing
 		bool mIsCorridor;
 		std::bitset<256> mPermissionRequirement;
 		// A one-cell-high Room's optional height override: a scale in

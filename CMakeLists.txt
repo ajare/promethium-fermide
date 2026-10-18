@@ -823,11 +823,148 @@ if(BUILD_TESTING)
     set_tests_properties(simulation-step-timing PROPERTIES
         LABELS "smoke;standalone;core" TIMEOUT 30)
 
+    add_executable(pf-agent-group-registry-checks src/headless/AgentGroupRegistryChecks.cpp)
+    target_include_directories(pf-agent-group-registry-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-agent-group-registry-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-agent-group-registry-checks)
+    add_test(NAME agent-group-registry COMMAND pf-agent-group-registry-checks)
+    set_tests_properties(agent-group-registry PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
+    add_executable(pf-agent-type-catalog-checks src/headless/AgentTypeCatalogChecks.cpp)
+    target_include_directories(pf-agent-type-catalog-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-agent-type-catalog-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-agent-type-catalog-checks)
+    add_test(NAME agent-type-catalog COMMAND pf-agent-type-catalog-checks)
+    set_tests_properties(agent-type-catalog PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
+    add_executable(pf-marker-store-checks src/headless/MarkerStoreChecks.cpp)
+    target_include_directories(pf-marker-store-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-marker-store-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-marker-store-checks)
+    add_test(NAME marker-store COMMAND pf-marker-store-checks)
+    set_tests_properties(marker-store PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
+    add_executable(pf-traversal-resource-registry-checks src/headless/TraversalResourceRegistryChecks.cpp)
+    target_include_directories(pf-traversal-resource-registry-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-traversal-resource-registry-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-traversal-resource-registry-checks)
+    add_test(NAME traversal-resource-registry COMMAND pf-traversal-resource-registry-checks)
+    set_tests_properties(traversal-resource-registry PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
+    add_executable(pf-registry-binding-checks src/headless/RegistryBindingChecks.cpp)
+    target_include_directories(pf-registry-binding-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-registry-binding-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-registry-binding-checks)
+    add_test(NAME registry-binding COMMAND pf-registry-binding-checks)
+    set_tests_properties(registry-binding PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
+    add_executable(pf-agent-property-descriptor-checks src/headless/AgentPropertyDescriptorChecks.cpp)
+    target_include_directories(pf-agent-property-descriptor-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-agent-property-descriptor-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-agent-property-descriptor-checks)
+    add_test(NAME agent-property-descriptor COMMAND pf-agent-property-descriptor-checks)
+    set_tests_properties(agent-property-descriptor PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
+    add_executable(pf-agent-tag-service-checks src/headless/AgentTagServiceChecks.cpp)
+    target_include_directories(pf-agent-tag-service-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-agent-tag-service-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-agent-tag-service-checks)
+    add_test(NAME agent-tag-service COMMAND pf-agent-tag-service-checks)
+    set_tests_properties(agent-tag-service PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
+    add_executable(pf-agent-profile-editor-checks src/headless/AgentProfileEditorChecks.cpp)
+    target_include_directories(pf-agent-profile-editor-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-agent-profile-editor-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-agent-profile-editor-checks)
+    add_test(NAME agent-profile-editor COMMAND pf-agent-profile-editor-checks)
+    set_tests_properties(agent-profile-editor PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
+    add_executable(pf-world-builder-sector-objects-checks src/headless/WorldBuilderSectorObjectsChecks.cpp)
+    target_include_directories(pf-world-builder-sector-objects-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-world-builder-sector-objects-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-world-builder-sector-objects-checks)
+    add_test(NAME world-builder-sector-objects COMMAND pf-world-builder-sector-objects-checks)
+    set_tests_properties(world-builder-sector-objects PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
+    add_executable(pf-world-builder-sectors-checks src/headless/WorldBuilderSectorsChecks.cpp)
+    target_include_directories(pf-world-builder-sectors-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-world-builder-sectors-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-world-builder-sectors-checks)
+    add_test(NAME world-builder-sectors COMMAND pf-world-builder-sectors-checks)
+    set_tests_properties(world-builder-sectors PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
+    add_executable(pf-world-builder-doors-checks src/headless/WorldBuilderDoorsChecks.cpp)
+    target_include_directories(pf-world-builder-doors-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-world-builder-doors-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-world-builder-doors-checks)
+    add_test(NAME world-builder-doors COMMAND pf-world-builder-doors-checks)
+    set_tests_properties(world-builder-doors PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
+    add_executable(pf-world-builder-vertical-transit-checks src/headless/WorldBuilderVerticalTransitChecks.cpp)
+    target_include_directories(pf-world-builder-vertical-transit-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-world-builder-vertical-transit-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-world-builder-vertical-transit-checks)
+    add_test(NAME world-builder-vertical-transit COMMAND pf-world-builder-vertical-transit-checks)
+    set_tests_properties(world-builder-vertical-transit PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
+    add_executable(pf-permission-requirement-store-checks src/headless/PermissionRequirementStoreChecks.cpp)
+    target_include_directories(pf-permission-requirement-store-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-permission-requirement-store-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-permission-requirement-store-checks)
+    add_test(NAME permission-requirement-store COMMAND pf-permission-requirement-store-checks)
+    set_tests_properties(permission-requirement-store PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
+    add_executable(pf-authorization-ledger-checks src/headless/AuthorizationLedgerChecks.cpp)
+    target_include_directories(pf-authorization-ledger-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-authorization-ledger-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-authorization-ledger-checks)
+    add_test(NAME authorization-ledger COMMAND pf-authorization-ledger-checks)
+    set_tests_properties(authorization-ledger PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
+    add_executable(pf-device-condition-store-checks src/headless/DeviceConditionStoreChecks.cpp)
+    target_include_directories(pf-device-condition-store-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-device-condition-store-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-device-condition-store-checks)
+    add_test(NAME device-condition-store COMMAND pf-device-condition-store-checks)
+    set_tests_properties(device-condition-store PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
+    add_executable(pf-furniture-store-checks src/headless/FurnitureStoreChecks.cpp)
+    target_include_directories(pf-furniture-store-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-furniture-store-checks PRIVATE promethium-fermide-core)
+    target_compile_definitions(pf-furniture-store-checks PRIVATE PF_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    pf_apply_headless_verification_policy(pf-furniture-store-checks)
+    add_test(NAME furniture-store COMMAND pf-furniture-store-checks)
+    set_tests_properties(furniture-store PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
     add_executable(pf-occupant-packing-checks src/headless/OccupantPackingChecks.cpp)
     target_include_directories(pf-occupant-packing-checks PRIVATE "${PF_INCLUDE_DIR}")
     pf_apply_headless_verification_policy(pf-occupant-packing-checks)
     add_test(NAME occupant-packing COMMAND pf-occupant-packing-checks)
     set_tests_properties(occupant-packing PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
+    add_executable(pf-placement-validator-checks src/headless/PlacementValidatorChecks.cpp)
+    target_include_directories(pf-placement-validator-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-placement-validator-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-placement-validator-checks)
+    add_test(NAME placement-validator COMMAND pf-placement-validator-checks)
+    set_tests_properties(placement-validator PROPERTIES
         LABELS "smoke;standalone;core" TIMEOUT 30)
 
     add_executable(pf-world-render-slot-checks src/headless/WorldRenderSlotChecks.cpp)

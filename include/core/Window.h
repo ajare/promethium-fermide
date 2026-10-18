@@ -111,6 +111,7 @@ namespace core
 	{
 		friend class World;
 		friend class SimulationCoordinator;
+		friend class WorldBuilder; // ADR 0022 authored device identity and panel wiring (#688)
 		BoothWindowId mDeviceId;
 		DumbwaiterId mDumbwaiterOwner;
 		InteractionPointId mPanel;

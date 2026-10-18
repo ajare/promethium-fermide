@@ -8,12 +8,14 @@
 namespace core
 {
 	class World;
+	class AuthorizationLedger; // ADR 0022 (#684) membership edits
 
 	// A stable, World-owned bundle of Access permissions. Permission sets are
 	// deliberately independent of Agent tags and may contain only permissions.
 	class PermissionSet
 	{
 		friend class World;
+		friend class AuthorizationLedger; // ADR 0022 (#684) membership edits
 		std::string mName;
 		std::bitset<256> mPermissions;
 

@@ -28,6 +28,10 @@ namespace core
 	{
 		friend class World;
 		friend class MarkerSectorObject;
+		// The marker store renames and re-properties Markers on the owning
+		// World's behalf and shares World's friendship here rather than
+		// widening Marker's public surface (ADR 0022).
+		friend class MarkerStore;
 
 		MarkerId mId;
 		std::string mName;

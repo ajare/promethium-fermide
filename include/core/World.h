@@ -15,6 +15,8 @@
 
 
 #include "core/Defines.h"
+#include "core/AgentPropertyDescriptors.h"
+#include "core/AgentTagService.h"
 #include "core/PhysicalControlPlacement.h"
 #include "core/AgentGroup.h"
 #include "core/AccessPermission.h"
@@ -43,6 +45,7 @@
 #include "core/Coordination.h"
 #include "core/SimulationCoordinator.h"
 #include "core/EntityRegistry.h"
+#include "core/RegistryReference.h"
 #include "core/Serializable.h"
 
 
@@ -51,6 +54,20 @@ namespace core
 
 	class AgentTagRegistry;
 	class AgentBehaviourRegistry;
+	template <typename Registry>
+	class RegistryBinding;
+	class PlacementValidator;
+	class AgentGroupRegistry;
+	class PermissionRequirementStore;
+	class AuthorizationLedger;
+	class AgentTypeCatalog;
+	class MarkerStore;
+	class TraversalResourceRegistry;
+	class DeviceConditionStore;
+	class FurnitureStore;
+	class AgentTagService;
+	class AgentProfileEditor;
+	class WorldBuilder;
 
 	class World : public Serializable
 	{
@@ -62,6 +79,67 @@ namespace core
 		// The coordinator owns no entities; it drives the registries below and
 		// the private machinery beside them on the World's behalf (ADR 0004).
 		friend class SimulationCoordinator;
+		// The placement validator owns no state; it reads the registries below
+		// and the private helper seams beside them on the World's behalf
+		// (ADR 0022).
+		friend class PlacementValidator;
+		// The Agent group registry owns no state; it reads and edits the
+		// registries below on the World's behalf (ADR 0022).
+		friend class AgentGroupRegistry;
+		// The permission requirement store owns no state; it reads and edits
+		// the registries and authored requirement maps below on the World's
+		// behalf (ADR 0022).
+		friend class PermissionRequirementStore;
+		// The authorization ledger owns no state; it reads and edits the
+		// Access permission slots, the Permission set registry, the Agent
+		// entities' grant bitsets and set assignments, the interaction-point
+		// and traversal-resource requirements, the Sectors, and the
+		// construction records below on the World's behalf (#684, ADR 0022).
+		friend class AuthorizationLedger;
+		// The Agent type catalog owns no state; it reads and edits the
+		// Agent-type registry and preview-baseline cache below on the World's
+		// behalf (ADR 0022).
+		friend class AgentTypeCatalog;
+		// The marker store owns no state; it reads and edits the Marker ID
+		// allocation, the Sector-held Marker objects, the construction
+		// records, and the Furniture destinations below on the World's
+		// behalf (ADR 0022).
+		friend class MarkerStore;
+		// The traversal resource registry owns no state; it reads and edits
+		// the traversal-resource registry and the waiting/geometry policies
+		// below on the World's behalf (ADR 0022).
+		friend class TraversalResourceRegistry;
+		// The device condition store owns no state; it reads and edits the
+		// traversal-resource registry, the construction records, and the
+		// interaction-point registry below on the World's behalf (ADR 0022).
+		friend class DeviceConditionStore;
+		// The furniture store owns no state; it reads and edits the Furniture
+		// instances, the catalogue reference and its Resource name, the
+		// `mNextFurnitureId` allocation, the construction records, and the
+		// usable-point resolution evidence below on the World's behalf
+		// (ADR 0022).
+		friend class FurnitureStore;
+		// The registry binding template owns no state; it edits the
+		// World-owned registry reference pairs and registry pointers below on
+		// the World's behalf through friend access to modify() (#676,
+		// ADR 0022).
+		template <typename Registry>
+		friend class RegistryBinding;
+		// The Agent tag service owns no state; it reads and edits the Agent
+		// entities' tag IDs and samples, the tag registry pointer and
+		// reference, and the tag-sample table below on the World's behalf
+		// (#682, ADR 0022).
+		friend class AgentTagService;
+		// The Agent profile editor owns no state; it reads and edits the
+		// Agent entities' individual override records, the pause gate, the
+		// snapshot invalidation, and the coordinator's usage-change seam on
+		// the World's behalf (#683, ADR 0022).
+		friend class AgentProfileEditor;
+		// The world builder owns no state; it reads and edits the Sectors,
+		// Layers, cells, BoothWindow registry, interaction points, and
+		// construction records below on the World's behalf while authoring
+		// SectorObjects (#688, ADR 0022).
+		friend class WorldBuilder;
 		friend struct WorldAgentRestorationTestAccess;
 		friend struct PhysicalControlLookupTestAccess;
 		friend struct QueuedPressLookupTestAccess;
@@ -582,6 +660,116 @@ namespace core
 		StationSystemsSettings mStationSystemsSettings;
 		std::unique_ptr<StationSystemsRuntime> mStationSystemsRuntime;
 
+		// The read-only validation family lives in the placement validator
+		// (ADR 0022). World owns it and stays the facade (design pattern)
+		// through which every caller reaches these checks; the validator owns
+		// no state and reaches the registries below through this World. Held
+		// by pointer because its header needs World's nested option types.
+		std::unique_ptr<PlacementValidator> mPlacementValidator;
+
+		// The Agent group behaviour lives in the Agent group registry
+		// (ADR 0022). World keeps ownership of the AgentGroup registry itself
+		// (ADR 0001) and stays the facade (design pattern) through which every
+		// caller reaches these operations; the registry owns no state and
+		// reaches the registries below through this World.
+		std::unique_ptr<AgentGroupRegistry> mAgentGroupRegistry;
+
+		// The authored `*PermissionRequirement` get/set behaviour lives in the
+		// permission requirement store (ADR 0022). World keeps ownership of
+		// the state it edits - the registries, the pending requirement map,
+		// and the authored control-requirement index (ADR 0001) - and stays
+		// the facade (design pattern) through which every caller reaches
+		// these operations; the store owns no state and reaches them through
+		// this World.
+		std::unique_ptr<PermissionRequirementStore> mPermissionRequirementStore;
+
+		// The AccessPermission/PermissionSet authoring and Agent grant/
+		// assignment behaviour lives in the authorization ledger (ADR 0022,
+		// #684). World keeps ownership of the state it edits - the fixed
+		// Access permission slots, the Permission set registry, and the
+		// Agent entities' grant records (ADR 0001) - and stays the facade
+		// (design pattern) through which every caller reaches these
+		// operations; the ledger owns no state and reaches them through
+		// this World. Live `canAgent…Now` eligibility stays out: the ledger
+		// holds authorization facts, not live traversal evaluation.
+		std::unique_ptr<AuthorizationLedger> mAuthorizationLedger;
+
+		// The registered Agent-type behaviour lives in the Agent type catalog
+		// (ADR 0022). World keeps ownership of the Agent-type registry itself
+		// (ADR 0001) and stays the facade (design pattern) through which every
+		// caller reaches these operations; the catalog owns no state and reaches
+		// mAgentTypes, the preview-baseline cache, and the topology seam below
+		// through this World.
+		std::unique_ptr<AgentTypeCatalog> mAgentTypeCatalog;
+
+		// The Marker record behaviour lives in the marker store (ADR 0022).
+		// World keeps ownership of the state it edits - the `mNextMarkerId`
+		// allocation, the Sector-held Marker objects, the construction
+		// records, and the Furniture destinations (ADR 0001) - and stays
+		// the facade (design pattern) through which every caller reaches
+		// these operations; the store owns no state and reaches them
+		// through this World.
+		std::unique_ptr<MarkerStore> mMarkerStore;
+
+		// The traversal-resource record behaviour lives in the traversal
+		// resource registry (ADR 0022). World keeps ownership of the state
+		// it edits - the traversal-resource registry itself and the waiting
+		// and geometry policies (ADR 0001) - and stays the facade (design
+		// pattern) through which every caller reaches these operations;
+		// the registry owns no state and reaches them, and the coordinator
+		// whose scheduling the ownership paths ride on, through this World.
+		std::unique_ptr<TraversalResourceRegistry> mTraversalRegistry;
+
+		// The authored-vs-runtime Broken behaviour family lives in the device
+		// condition store (ADR 0022). World keeps ownership of the state it
+		// edits - the traversal-resource registry, the device entities' live
+		// and authored condition flags, the construction records, and the
+		// sensor-observation maps (ADR 0001) - and stays the facade (design
+		// pattern) through which every caller reaches these operations; the
+		// store owns no state and reaches them, and the coordinator whose
+		// operation-failure seam a breaking device rides on, through this
+		// World.
+		std::unique_ptr<DeviceConditionStore> mDeviceConditionStore;
+
+		// The Furniture instance, catalogue-reference, and usable-point
+		// resolution behaviour lives in the furniture store (ADR 0022).
+		// World keeps ownership of the state it edits - the Furniture
+		// instances, the catalogue reference and Resource name, the
+		// `mNextFurnitureId` allocation, and the construction records
+		// (ADR 0001) - and stays the facade (design pattern) through which
+		// every caller reaches these operations; the store owns no state and
+		// reaches them, and the coordinator whose route replanning a layout
+		// change rides on, through this World.
+		std::unique_ptr<FurnitureStore> mFurnitureStore;
+
+		// The Agent tag assignment behaviour family lives in the Agent tag
+		// service (ADR 0022, #682). World keeps ownership of the state it
+		// edits - the Agent entities' tag IDs and samples, the tag registry
+		// pointer and reference (ADR 0001) - and stays the facade (design
+		// pattern) through which every caller reaches these operations; the
+		// service owns no state and reaches them, and the coordinator whose
+		// usage-change notification a tag edit rides on, through this World.
+		std::unique_ptr<AgentTagService> mAgentTagService;
+
+		// The per-Agent individual-profile edit family lives in this owned
+		// service (ADR 0022, #683). World keeps ownership of the Agent
+		// registry whose override records it edits (ADR 0001) and stays the
+		// facade (design pattern) through which every caller reaches these
+		// operations; the editor owns no state and reaches the World's
+		// pause gate, snapshot invalidation, and replanning seams through
+		// this World.
+		std::unique_ptr<AgentProfileEditor> mAgentProfileEditor;
+
+		// The SectorObject authoring family lives in this owned builder
+		// (ADR 0022, #688). World keeps ownership of the state it edits -
+		// the Sectors, Layers, cells, BoothWindow registry, interaction
+		// points, and construction records (ADR 0001) - and stays the
+		// facade (design pattern) through which every caller reaches these
+		// operations; the builder owns no state and reaches them, and the
+		// placement validator and traversal resource registry they ride
+		// on, through this World.
+		std::unique_ptr<WorldBuilder> mWorldBuilder;
+
 		// Every World owns one sandboxed Lua runtime for its Agent types. It is
 		// declared before mAgents so Agent destruction (which releases live Lua
 		// instances through their opaque handles) happens while the runtime's Lua
@@ -765,15 +953,12 @@ namespace core
 		void restoreFurnitureFinishPose(Agent& agent, Pose finishPose);
 		std::vector<SimulationEvent> mPendingMovementOutcomes;
 
-		struct AgentTagRegistryReference
-		{
-			std::string resourceName;
-			std::string expectedUuid;
-		};
-
 		// Agent tag definitions are an independent external document (ADR 0007).
 		// The World persists only this Resource name/UUID reference. The loaded
-		// registry is deliberately not a child for dirty-state purposes.
+		// registry is deliberately not a child for dirty-state purposes. The
+		// reference shape is the shared RegistryBinding state (#676); the name
+		// stays as it was for serialization and replay.
+		using AgentTagRegistryReference = RegistryReference<AgentTagRegistry>;
 		std::optional<AgentTagRegistryReference> mAgentTagRegistryReference;
 		std::shared_ptr<AgentTagRegistry> mAgentTagRegistry;
 
@@ -781,11 +966,10 @@ namespace core
 		// document. The World persists only this Resource name and expected UUID
 		// reference. The loaded registry is deliberately not a child for
 		// dirty-state purposes.
-		struct AgentBehaviourRegistryReference
-		{
-			std::string resourceName;
-			std::string expectedUuid;
-		};
+		// The reference shape is the shared RegistryBinding state (#676); the
+		// name stays as it was for serialization and replay.
+		using AgentBehaviourRegistryReference =
+			RegistryReference<AgentBehaviourRegistry>;
 		std::optional<AgentBehaviourRegistryReference> mAgentBehaviourRegistryReference;
 		std::shared_ptr<AgentBehaviourRegistry> mAgentBehaviourRegistry;
 		// An incompatible newer schema is a recoverable dependency state: authored
@@ -796,6 +980,26 @@ namespace core
 		// Lua/sol2 types out of this domain header and its per-Agent environments
 		// prevent mutable module or instance state crossing assignments.
 		std::unique_ptr<AgentBehaviourRuntimeAdapter> mAgentBehaviourRuntime;
+		// The shared attach/detach/resolve/replace/has/get state machine,
+		// instantiated once per registry family (#676, ADR 0022). The
+		// bindings own no state: they operate on the World-owned reference
+		// pairs and registry pointers above through references, and reach
+		// the family-specific validation, clearing, and runtime handling
+		// through the policies configured at construction. World keeps
+		// ownership of every entity registry (ADR 0001) and remains the
+		// facade (design pattern) whose methods forward here.
+		std::unique_ptr<RegistryBinding<AgentTagRegistry>>
+			mAgentTagRegistryBinding;
+		std::unique_ptr<RegistryBinding<AgentBehaviourRegistry>>
+			mAgentBehaviourRegistryBinding;
+
+		// Family policies configured into the bindings at construction. Each
+		// lambda reaches the World's private validation, clearing, and
+		// runtime seams directly; the binding supplies only the shared
+		// ordering. Defined in World.cpp where the binding template is
+		// complete.
+		void configureAgentTagRegistryBinding();
+		void configureAgentBehaviourRegistryBinding();
 		// App-only transient input. Editor simulation never supplies this intent.
 		int mPlayerMovementDirection{ 0 };
 		bool mPlayerStairUp{ false }, mPlayerStairDown{ false }, mPlayerCrouch{ false };
@@ -908,59 +1112,11 @@ namespace core
 		// or mistaking a later World allocated at the same address for it.
 		std::shared_ptr<void const> mLifetimeToken{ std::make_shared<uint8_t>(0) };
 
-		enum class AgentTagSampleRepairAction
-		{
-			None,
-			Clear,
-			Resample
-		};
-
-		struct AgentTagReconciliation
-		{
-			AgentId agent{};
-			ObjectUsage objectUsageBefore{ ObjectUsage::Arms };
-			float objectUsageDistanceBefore{ 0.f };
-			bool objectUsageChanged{ false };
-			AgentTagSampleRepairAction walkSpeedAction{ AgentTagSampleRepairAction::None };
-			AgentTagId walkSpeedSource{};
-			AgentWalkSpeedModifierProperty walkSpeedProperty{};
-			AgentTagSampleRepairAction heightAction{ AgentTagSampleRepairAction::None };
-			AgentTagId heightSource{};
-			AgentHeightModifierProperty heightProperty{};
-			AgentTagSampleRepairAction stairSpeedAction{ AgentTagSampleRepairAction::None };
-			AgentTagId stairSpeedSource{};
-			AgentStairSpeedModifierProperty stairSpeedProperty{};
-			AgentTagSampleRepairAction ladderSpeedAction{ AgentTagSampleRepairAction::None };
-			AgentTagId ladderSpeedSource{};
-			AgentLadderSpeedModifierProperty ladderSpeedProperty{};
-			AgentTagSampleRepairAction interactionAversionAction{ AgentTagSampleRepairAction::None };
-			AgentTagId interactionAversionSource{};
-			AgentInteractionAversionProperty interactionAversionProperty{};
-			AgentTagSampleRepairAction effortAversionAction{ AgentTagSampleRepairAction::None };
-			AgentTagId effortAversionSource{};
-			AgentEffortAversionProperty effortAversionProperty{};
-			AgentTagSampleRepairAction waitingAversionAction{ AgentTagSampleRepairAction::None };
-			AgentTagId waitingAversionSource{};
-			AgentWaitingAversionProperty waitingAversionProperty{};
-			AgentTagSampleRepairAction crowdAversionAction{ AgentTagSampleRepairAction::None };
-			AgentTagId crowdAversionSource{};
-			AgentCrowdAversionProperty crowdAversionProperty{};
-			AgentTagSampleRepairAction riskAversionAction{ AgentTagSampleRepairAction::None };
-			AgentTagId riskAversionSource{};
-			AgentRiskAversionProperty riskAversionProperty{};
-			AgentTagSampleRepairAction routeFamiliarityAction{ AgentTagSampleRepairAction::None };
-			AgentTagId routeFamiliaritySource{};
-			AgentRouteFamiliarityProperty routeFamiliarityProperty{};
-			AgentTagSampleRepairAction routePersistenceAction{ AgentTagSampleRepairAction::None };
-			AgentTagId routePersistenceSource{};
-			AgentRoutePersistenceProperty routePersistenceProperty{};
-			AgentTagSampleRepairAction minimumRoutePlanningTimeAction{ AgentTagSampleRepairAction::None };
-			AgentTagId minimumRoutePlanningTimeSource{};
-			AgentMinimumRoutePlanningTimeProperty minimumRoutePlanningTimeProperty{};
-			AgentTagSampleRepairAction maximumRoutePlanningTimeAction{ AgentTagSampleRepairAction::None };
-			AgentTagId maximumRoutePlanningTimeSource{};
-			AgentMaximumRoutePlanningTimeProperty maximumRoutePlanningTimeProperty{};
-		};
+		// The tag reconciliation transaction types live with the Agent tag
+		// service (#682, ADR 0022); the aliases keep the historical
+		// World-qualified names resolving for existing callers.
+		using AgentTagSampleRepairAction = core::AgentTagSampleRepairAction;
+		using AgentTagReconciliation = core::AgentTagReconciliation;
 
 		// Checks every assigned stable ID and inherited property against a
 		// prospective registry. Opening may additionally plan repairs for samples
@@ -1021,6 +1177,21 @@ namespace core
 			AgentMaximumRoutePlanningTimeProperty const& property);
 		void clearAgentTagMaximumRoutePlanningTimeSamples(AgentTagId id);
 
+		// The single shared path behind the tag-sample descriptor table
+		// (ADR 0022, #677): every addAgentTag*Samples /
+		// clearAgentTag*Samples method above forwards here, so ADR 0012's
+		// "individual Agent properties override tag properties"
+		// precedence is one code path. The table is built once inside
+		// World's own member scope because its closures reach World-owned
+		// state through that scope's access (the ADR 0022 access seam).
+		// The individual-override table and its shared setter path moved
+		// out with the profile editor (#683).
+		static TagSampleTable const& tagSampleTable();
+		void applyAgentTagSamples(TagSampleDescriptor const& descriptor,
+			AgentTagId id, AgentModifierRange const& range, uint64_t revision);
+		void clearAgentTagSamples(TagSampleDescriptor const& descriptor,
+			AgentTagId id);
+
 		// Case-sensitive name lookup across the groups this World owns, with
 		// one group optionally excluded so a group renaming itself to the name
 		// it already carries is not its own collision.
@@ -1046,8 +1217,6 @@ namespace core
 
 		bool markerNameTaken(std::string const& trimmed,
 			MarkerId except = MarkerId{}) const;
-		std::string nextGeneratedMarkerName() const;
-		std::shared_ptr<Marker> mutableMarker(MarkerId id) const;
 
 		EntityRegistry<InteractionPointId, InteractionPoint> mInteractionPoints;
 
@@ -1261,7 +1430,6 @@ namespace core
 		void restoreFurniture(ConstructionRecord const& record);
 		bool markerHasNoBehaviourReferences(MarkerId id, std::string* diagnostic) const;
 		std::string furnitureSupportDiagnostic(uint32_t sector, uint32_t x, uint32_t y) const;
-		ConstructionRecord const* findLocationPermissionRecord(uint32_t sectorIndex) const;
 		ConstructionRecord const* findLiftDestinationRecord(uint32_t sectorIndex, uint32_t objectIndex = ~0u) const;
 		ConstructionRecord const* findLiftDestinationRecord(TraversalResource const& resource) const;
 		std::vector<ConstructionRecord> mConstructionRecords;
@@ -1649,32 +1817,18 @@ namespace core
 
 		std::shared_ptr<Layer> getLayer(uint32_t layerIndex);
 
-		uint32_t createLocation(std::string const& name, SectorType type, uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight, bool isCorridor);
+		// The Location creation and add seams (createLocation/addLocation) live in
+		// WorldBuilder (#685, ADR 0022); the public Room/Corridor/Facade adds on
+		// the facade forward there.
 
-		// A Transit is created on layerIndex and lands on the Layer directly in front of
-		// it, so every landing cell is read from layerInFront(layerIndex).
-		uint32_t createLadder(uint32_t layerIndex, uint32_t x, uint32_t y, CreateLadderOptions const& options);
-
-		uint32_t createStairwell(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t levelsHigh, int mountSide);
-
-		uint32_t createStaircase(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide,
-			int riseSide, float speed);
-
-		CreateObjectResult createLift(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide,
-			uint32_t levelsHigh, std::vector<uint32_t> const& stopOffsets);
-
-		CreateObjectResult createShuttle(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t numCars, uint32_t carWidth, std::vector<uint32_t> const& stopOffsets);
-
-		// A Door is authored on the front Layer of its pair and opens into the Layer
-		// directly behind it.
-		CreateObjectResult createDoor(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide,
-			Door::Height height = Door::Height::Regular, uint32_t* vertexIdentifier = nullptr);
+		// The Transit creation seams (createLadder, createStairwell,
+		// createStaircase, createLift, createShuttle) live in WorldBuilder
+		// (#687, ADR 0022); the judged VerticalTransit add family on the
+		// facade forwards there.
 
 		CreateObjectResult createWindow(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, uint32_t* vertexIdentifier = nullptr, bool boothWindow = false);
 		CreateWindowResult addWindowAperture(uint32_t layer, uint32_t y, uint32_t x,
 			uint32_t width, uint32_t height, CreateWindowOptions const& options, bool boothWindow);
-
-		CreateObjectResult createBulkheadDoor(uint32_t layerIndex, uint32_t x, uint32_t y, int side);
 
 		// All stationary physical owners use authored canonical demands.
 		CreateObjectResult createPhysicalControl(std::string const& name, uint32_t layerIndex,
@@ -1714,43 +1868,28 @@ namespace core
 			CreateObjectResult& control, float standingY, float reach,
 			float durationSeconds, std::vector<InteractionBinding> bindings);
 
-		CreateObjectResult createWalkway(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t* vertexIdentifier = nullptr);
-
-		CreateObjectResult createMarker(uint32_t layerIndex, uint32_t x, uint32_t y,
-			float xOffset, MarkerId id, std::string name, MarkerProperties properties,
-			uint32_t* vertexIdentifier = nullptr);
 		bool canAddSectorMarkerImpl(uint32_t sectorIndex, uint32_t levelIndex, float xOffset,
 			std::string* diagnostic, bool allowCoincident) const;
 		CreateObjectResult addSectorMarkerRestored(uint32_t sectorIndex,
 			uint32_t levelIndex, float xOffset, MarkerId id, std::string name,
 			MarkerProperties properties = 0, uint32_t* vertexIdentifier = nullptr, bool allowCoincident = false);
 
-		CreateObjectResult createForceBridge(uint32_t layerIndex, uint32_t x, uint32_t y, CreateForceBridgeOptions const& options);
-
 		CreateObjectResult createLadderSectorObject(uint32_t layerIndex, uint32_t x, uint32_t y, CreateLadderOptions const& options, uint32_t* vertexIdentifier = nullptr);
 
 		CreateObjectResult createPlatformLiftSectorObject(uint32_t layerIndex, uint32_t x, uint32_t y, CreateLiftOptions const& options, uint32_t* vertexIdentifier = nullptr);
 
-		CreateDoorResult _addSectorDoor(uint32_t layerIndex, uint32_t y, uint32_t x, CreateDoorOptions const& options,
-			bool controlsAreExternallyBound = false);
-
 		// The complete Door option and placement preflight. Every rejecting check a
-		// Door add can make lives here, so the public addSectorDoor() can run it
-		// before beginStructuralEdit() and a refused call stays a true no-op
-		// (ticket #196). _addSectorDoor() runs it again so the lift and shuttle
-		// builders stay self-validating.
+		// Door add can make lives in the PlacementValidator behind this seam, so
+		// the builder's addSectorDoor() can run it before beginStructuralEdit()
+		// and a refused call stays a true no-op (ticket #196). _addSectorDoor()
+		// runs it again so the lift and shuttle builders stay self-validating.
 		void validateSectorDoorPlacement(std::string const& caller, uint32_t layerIndex, uint32_t y,
 			uint32_t x, CreateDoorOptions const& options, bool controlsAreExternallyBound) const;
 
-		CreateObjectResult _createSectorButton(std::string const& name, std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t flags, uint32_t* index = nullptr);
-
-		CreateObjectResult _createDoorButton(std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index = nullptr, uint32_t approachSide = 0);
-
-		CreateObjectResult _createBulkheadDoorButton(std::shared_ptr<const Sector> sector, uint32_t y, int side, uint32_t* index = nullptr);
-
-		CreateObjectResult _createForceBridgeButton(std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, int side, uint32_t flags, uint32_t* index = nullptr);
-
-		uint32_t addLocation(std::string const& name, SectorType type, uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight, bool isCorridor);
+		// The Door build seams (_addSectorDoor) and the physical-control button
+		// seams (_createSectorButton, _createDoorButton, _createBulkheadDoorButton)
+		// live in WorldBuilder (#686, ADR 0022); the transport builders and the
+		// public add family on the facade forward there.
 
 		void buildGraph();
 

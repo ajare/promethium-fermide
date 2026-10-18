@@ -13,7 +13,9 @@ namespace core
 	class Shuttle : public RailedTransport
 	{
 		friend class World;
+		friend class WorldBuilder; // ADR 0022 VerticalTransit authoring
 		friend class SimulationCoordinator;
+		friend class DeviceConditionStore; // ADR 0022 device condition family
 		bool mInitiallyBroken{ false };
 		bool mBroken{ false };
 		TraversalResourceId mTraversalResource;
