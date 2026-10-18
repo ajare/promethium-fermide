@@ -297,6 +297,7 @@ namespace core
 		friend class AgentGroupRegistry;
 		friend class SimulationCoordinator;
 		friend class Sector;
+		friend class FurnitureStore; // ADR 0022 catalogue reload/edit preflight
 
 	public:
 

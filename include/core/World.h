@@ -60,6 +60,7 @@ namespace core
 	class MarkerStore;
 	class TraversalResourceRegistry;
 	class DeviceConditionStore;
+	class FurnitureStore;
 
 	class World : public Serializable
 	{
@@ -99,6 +100,12 @@ namespace core
 		// traversal-resource registry, the construction records, and the
 		// interaction-point registry below on the World's behalf (ADR 0022).
 		friend class DeviceConditionStore;
+		// The furniture store owns no state; it reads and edits the Furniture
+		// instances, the catalogue reference and its Resource name, the
+		// `mNextFurnitureId` allocation, the construction records, and the
+		// usable-point resolution evidence below on the World's behalf
+		// (ADR 0022).
+		friend class FurnitureStore;
 		// The registry binding template owns no state; it edits the
 		// World-owned registry reference pairs and registry pointers below on
 		// the World's behalf through friend access to modify() (#676,
@@ -682,6 +689,17 @@ namespace core
 		// operation-failure seam a breaking device rides on, through this
 		// World.
 		std::unique_ptr<DeviceConditionStore> mDeviceConditionStore;
+
+		// The Furniture instance, catalogue-reference, and usable-point
+		// resolution behaviour lives in the furniture store (ADR 0022).
+		// World keeps ownership of the state it edits - the Furniture
+		// instances, the catalogue reference and Resource name, the
+		// `mNextFurnitureId` allocation, and the construction records
+		// (ADR 0001) - and stays the facade (design pattern) through which
+		// every caller reaches these operations; the store owns no state and
+		// reaches them, and the coordinator whose route replanning a layout
+		// change rides on, through this World.
+		std::unique_ptr<FurnitureStore> mFurnitureStore;
 
 		// Every World owns one sandboxed Lua runtime for its Agent types. It is
 		// declared before mAgents so Agent destruction (which releases live Lua

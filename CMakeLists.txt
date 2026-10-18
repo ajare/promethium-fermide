@@ -770,6 +770,15 @@ if(BUILD_TESTING)
     set_tests_properties(device-condition-store PROPERTIES
         LABELS "smoke;standalone;core" TIMEOUT 30)
 
+    add_executable(pf-furniture-store-checks src/headless/FurnitureStoreChecks.cpp)
+    target_include_directories(pf-furniture-store-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-furniture-store-checks PRIVATE promethium-fermide-core)
+    target_compile_definitions(pf-furniture-store-checks PRIVATE PF_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    pf_apply_headless_verification_policy(pf-furniture-store-checks)
+    add_test(NAME furniture-store COMMAND pf-furniture-store-checks)
+    set_tests_properties(furniture-store PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
     add_executable(pf-occupant-packing-checks src/headless/OccupantPackingChecks.cpp)
     target_include_directories(pf-occupant-packing-checks PRIVATE "${PF_INCLUDE_DIR}")
     pf_apply_headless_verification_policy(pf-occupant-packing-checks)

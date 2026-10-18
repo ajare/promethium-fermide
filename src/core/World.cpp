@@ -17,6 +17,7 @@
 #include "core/MarkerStore.h"
 #include "core/TraversalResourceRegistry.h"
 #include "core/DeviceConditionStore.h"
+#include "core/FurnitureStore.h"
 #include "core/ChamberTransit.h"
 #include "core/AirlockTransit.h"
 #include "core/RestorationTiming.h"
@@ -130,6 +131,7 @@ namespace core
 	, mMarkerStore(std::make_unique<MarkerStore>(*this))
 	, mTraversalRegistry(std::make_unique<TraversalResourceRegistry>(*this))
 	, mDeviceConditionStore(std::make_unique<DeviceConditionStore>(*this))
+	, mFurnitureStore(std::make_unique<FurnitureStore>(*this))
 		, mAgentTypeRuntime(std::make_unique<AgentTypeRuntimeAdapter>(
 			agentTypeRuntimeLimits))
 		, mAgentBehaviourRuntime(std::make_unique<AgentBehaviourRuntimeAdapter>(
@@ -4922,6 +4924,83 @@ namespace core
 	bool World::setExtensibleInitiallyBroken(TraversalResourceId id, bool broken)
 	{
 		return mDeviceConditionStore->setExtensibleInitiallyBroken(id, broken);
+	}
+
+	// ----------------------------------------------------------------------
+	// Furniture facade (design pattern) -> FurnitureStore (ADR 0022).
+	// World keeps ownership of the instances, the catalogue reference, and
+	// the ID allocation (ADR 0001); the behaviour lives in the store.
+	// ----------------------------------------------------------------------
+
+	void World::attachFurnitureCatalogue(std::string resourceName,
+		std::shared_ptr<const FurnitureCatalogue> catalogue)
+	{
+		mFurnitureStore->attachFurnitureCatalogue(std::move(resourceName), std::move(catalogue));
+	}
+
+	bool World::reloadFurnitureCatalogue(std::filesystem::path const& path, std::string* diagnostic)
+	{
+		return mFurnitureStore->reloadFurnitureCatalogue(path, diagnostic);
+	}
+
+	bool World::isFurnitureMarker(MarkerId id) const
+	{
+		return mFurnitureStore->isFurnitureMarker(id);
+	}
+
+	bool World::canPlaceFurniture(uint32_t sector, std::string const& definition,
+		float x, float y, std::string const& name, std::string* diagnostic, int localDepth) const
+	{
+		return mFurnitureStore->canPlaceFurniture(sector, definition, x, y, name, diagnostic, localDepth);
+	}
+
+	uint64_t World::placeFurniture(uint32_t sector, std::string const& definition,
+		float x, float y, std::string const& name, int localDepth)
+	{
+		return mFurnitureStore->placeFurniture(sector, definition, x, y, name, localDepth);
+	}
+
+	bool World::canEditFurniture(uint64_t id, float x, float y,
+		std::string const& name, std::string* diagnostic, std::optional<int> localDepth) const
+	{
+		return mFurnitureStore->canEditFurniture(id, x, y, name, diagnostic, localDepth);
+	}
+
+	bool World::editFurniture(uint64_t id, float x, float y,
+		std::string const& name, std::string* diagnostic, std::optional<int> localDepth)
+	{
+		return mFurnitureStore->editFurniture(id, x, y, name, diagnostic, localDepth);
+	}
+
+	bool World::canRemoveFurniture(uint64_t id, std::string* diagnostic) const
+	{
+		return mFurnitureStore->canRemoveFurniture(id, diagnostic);
+	}
+
+	bool World::removeFurniture(uint64_t id, std::string* diagnostic)
+	{
+		return mFurnitureStore->removeFurniture(id, diagnostic);
+	}
+
+	std::string World::furnitureSupportDiagnostic(uint32_t sector, uint32_t x, uint32_t y) const
+	{
+		return mFurnitureStore->furnitureSupportDiagnostic(sector, x, y);
+	}
+
+	void World::restoreFurniture(ConstructionRecord const& record)
+	{
+		mFurnitureStore->restoreFurniture(record);
+	}
+
+	World::ResolvedUsablePoint World::resolveUsablePoint(MarkerId marker,
+		std::shared_ptr<const FurnitureCatalogue> const& catalogue) const
+	{
+		return mFurnitureStore->resolveUsablePoint(marker, catalogue);
+	}
+
+	FurnitureInstance const* World::furnitureForMarker(MarkerId marker) const
+	{
+		return mFurnitureStore->furnitureForMarker(marker);
 	}
 
 	bool World::setSectorDoorOpenStyle(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t width,

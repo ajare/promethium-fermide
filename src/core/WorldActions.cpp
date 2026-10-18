@@ -148,77 +148,6 @@ namespace core
 		catch (std::exception const& error) { return reject(error.what()); }
 	}
 
-	bool World::reloadFurnitureCatalogue(std::filesystem::path const& path, std::string* diagnostic)
-	{
-		auto reject = [&](std::string message) { if (diagnostic) *diagnostic = "Furniture reload: " + message; return false; };
-		if (!FurnitureCatalogue::filenameIsValid(path.filename().string()))
-			return reject("Furniture catalogue must end with .furniture.lua; YAML Furniture requires conversion to Lua");
-		if (!isSimulationPaused()) return reject("Pause the simulation before reloading");
-		if (!mFurnitureCatalogue) return reject("Select this catalogue before reloading it");
-		try
-		{
-			auto replacement = FurnitureCatalogue::load(path);
-			if (replacement->uuid() != mFurnitureCatalogue->uuid()) return reject("Catalogue UUID does not match the selected package");
-			auto candidate = makeCandidateWorld();
-			candidate->mFurnitureCatalogue = replacement;
-			candidate->mDeserializingConstruction = true;
-			for (auto const& record : mConstructionRecords) candidate->applyConstructionRecord(record);
-			candidate->finishBuild();
-			for (auto const& [marker, actions] : mMarkerActions)
-				for (auto const& action : actions)
-					if (!candidate->actionAvailable(marker, action))
-						return reject("Marker " + std::to_string(marker.value) + " references unavailable Action " + action);
-			// Every lifecycle in this catalogue is affected, even if geometry is unchanged.
-			// Finish all users in stable Agent order, retaining the old package on error.
-			for (auto const& [id, agent] : mAgents.entries())
-				if (agent->mFurnitureUse && agent->mFurnitureUse->catalogue == mFurnitureCatalogue)
-				{
-					std::string reason;
-					if (!furniturePoseFits(id, agent->mFurnitureUse->marker,
-						mFurnitureCatalogue->definition(agent->mFurnitureUse->definition)->finishUsePose, false, &reason))
-						return reject(reason);
-				}
-			bool finishingFailed = false;
-			for (auto const& [id, agent] : mAgents.entries())
-				if (agent->mFurnitureUse && agent->mFurnitureUse->catalogue == mFurnitureCatalogue)
-				{
-					auto outcomes = mPendingMovementOutcomes.size();
-					finishFurnitureUse(id);
-					finishingFailed |= mPendingMovementOutcomes.size() != outcomes;
-				}
-			if (finishingFailed) return reject("Old finish_use failed; users were safely cleaned up and the old catalogue remains installed (see Action diagnostics)");
-			bool layoutChanged = false;
-			for (auto const& instance : mFurniture)
-				layoutChanged |= *mFurnitureCatalogue->definition(instance.definitionKey) != *replacement->definition(instance.definitionKey);
-			auto old = mFurnitureCatalogue;
-			auto goals = mMovementGoals;
-			auto outcomes = mPendingMovementOutcomes;
-			mFurnitureCatalogue = std::move(replacement);
-			if (layoutChanged)
-			{
-				try { rebuildFromConstructionRecords(mConstructionRecords); }
-				catch (...) { mFurnitureCatalogue = std::move(old); throw; }
-				// Structural replay carries Agents, not Paths. Retain request identities
-				// and replan against the new graph, never replacing their Action with Idle.
-				mMovementGoals = std::move(goals);
-				mPendingMovementOutcomes = std::move(outcomes);
-				for (auto& [id, goal] : mMovementGoals)
-				{
-					goal.retainedPath.reset();
-					if (auto agent = mAgents.find(id)) mSimulationCoordinator.beginRoutePlanning(*agent);
-				}
-			}
-			invalidateSimulationSnapshot();
-			for (auto& [id, goal] : mMovementGoals)
-				if (goal.marker && !actionAvailable(goal.marker, goal.selectedAction))
-				{ goal.actionInvalidated = true; goal.cancelling = true; }
-			clearUnavailableResetRequests();
-			if (diagnostic) diagnostic->clear();
-			return true;
-		}
-		catch (std::exception const& error) { return reject(error.what()); }
-	}
-
 	bool World::clearActionRegistry(std::string* diagnostic)
 	{
 		if (!isSimulationPaused())
@@ -355,37 +284,6 @@ namespace core
 		for (auto const& choice : agent.getPhysicalBaseline().roomMovement)
 			if (fits(choice.pose, 0)) return true;
 		return false;
-	}
-
-	World::ResolvedUsablePoint World::resolveUsablePoint(MarkerId marker,
-		std::shared_ptr<const FurnitureCatalogue> const& catalogue) const
-	{
-		// One pass over the instances resolves the whole Marker -> instance,
-		// definition, destination, usable-point support and Sector chain.
-		// The result borrows from the current World and catalogue and is
-		// meant to live only inside the calling evaluation (#627).
-		ResolvedUsablePoint resolved;
-		auto const& activeCatalogue = catalogue ? catalogue : mFurnitureCatalogue;
-		if (!marker || !activeCatalogue) return resolved;
-		for (auto const& instance : mFurniture)
-		{
-			++mUsablePointResolveVisits;
-			auto const destination = std::find_if(instance.destinations.begin(), instance.destinations.end(),
-				[&](auto const& point) { return point.marker == marker; });
-			if (destination == instance.destinations.end()) continue;
-			auto const definition = activeCatalogue->definition(instance.definitionKey);
-			if (!definition) return resolved;
-			auto const point = std::find_if(definition->usablePoints.begin(), definition->usablePoints.end(),
-				[&](auto const& candidate) { return candidate.key == destination->key; });
-			resolved.marker = marker;
-			resolved.instance = &instance;
-			resolved.definition = definition;
-			resolved.destination = &*destination;
-			resolved.point = point != definition->usablePoints.end() ? &*point : nullptr;
-			resolved.sector = mSectors.at(instance.sector).get();
-			return resolved;
-		}
-		return resolved;
 	}
 
 	bool World::furniturePoseFits(AgentId id, MarkerId marker, Pose pose, bool usingSupport,
@@ -551,12 +449,17 @@ namespace core
 			agent->mFurnitureUse = Agent::FurnitureUse{markerId, target.instance->id, target.instance->definitionKey, mFurnitureCatalogue};
 	}
 
-	FurnitureInstance const* World::furnitureForMarker(MarkerId marker) const
+	AgentId World::usablePointOccupant(MarkerId marker) const
 	{
-		for (auto const& instance : mFurniture)
-			for (auto const& point : instance.destinations)
-				if (point.marker == marker) return &instance;
-		return nullptr;
+		if (marker)
+			for (auto const& [id, agent] : mAgents.entries())
+				if (agent->mOccupiedUsablePoint == marker) return id;
+		return {};
+	}
+
+	bool World::claimUsablePoint(AgentId agent, MarkerId marker)
+	{
+		return mSimulationCoordinator.claimUsablePoint(agent, marker);
 	}
 
 	ActionViews World::actionViews(AgentId agentId, MarkerId markerId) const
