@@ -6859,6 +6859,52 @@ void bufferWorkflow(smoke::Context const&)
 		smoke::require(driver.passed(), "Degenerate bioconversion editor workflow failed");
 	}
 
+	void bioconversionFoodwasteWorkflow(smoke::Context const& test)
+	{
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 2400};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history; StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Hot digestion editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		window.setFilePicker([&](bool) -> std::optional<std::string> {
+			return test.fixture("resources/station-systems/scenarios/bioconversion-foodwaste.yaml").string();
+		});
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({970, 10}); ImGui::SetNextWindowSize({220, 2350});
+			ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 2350});
+			window.render(world, history);
+		});
+		window.visible = true; driver.frame(); driver.frame();
+		driver.run("station", "bioconversionFoodwasteWorkflow", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Configuration");
+			driver.click(ctx, "Open configuration"); ctx->Yield(3);
+			if (!driver.require(window.draft().microbialProcessors.size() == 1
+				&& window.draft().microbialProcessors[0].id == "hotDigester",
+				"Food-waste configuration did not open")) return;
+			ctx->SetRef("Station Systems");
+			driver.click(ctx, "Apply settings"); ctx->Yield(3);
+			if (!driver.require(world->getStationSystemsSettings() == window.draft(), "Hot digestion draft did not apply")) return;
+			world->resumeSimulation();
+			if (!driver.require(world->advanceTicks(60), "Applied food-waste scenario failed")) return;
+			world->pauseSimulation();
+			auto const snap = world->getStationSystemsSnapshot();
+			auto const& p = snap.microbialProcessors.at(0);
+			auto const daily = 86400.0 / (60 * core::World::getFixedTimestep());
+			// Public timestep is float-valued; use the core smoke's relative tolerance.
+			driver.require(std::abs(p.reactionHeatKJ * daily - 4712.4) < 4712.4 * 2e-7
+				&& std::abs(p.waterConsumedKg * daily - 0.75) < 0.75 * 2e-7
+				&& std::abs(p.nitrogenRecoveredKg * daily - 0.020) < 1e-8,
+				std::format("Editor-applied daily hot-digestion actuals: heat {}, water {}, N {}, feed {}",
+					p.reactionHeatKJ * daily, p.waterConsumedKg * daily, p.nitrogenRecoveredKg * daily,
+					p.feedConsumedKg * daily).c_str());
+			driver.require(std::abs(snap.thermal.reservoirs.at(0).microbialEnergyKJ
+				- p.energySuppliedKJ - p.reactionHeatKJ) < 1e-8, "Editor digestion sink heat counted incorrectly");
+		});
+		smoke::require(driver.passed(), "Food-waste bioconversion editor workflow failed");
+	}
+
 	void microbialConditionWorkflow(smoke::Context const&)
 	{
 		using smoke::require;
@@ -8604,6 +8650,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/microbialConditionWorkflow", microbialConditionWorkflow});
 	checks.push_back({"station/bioconversionWorkflow", bioconversionWorkflow});
 	checks.push_back({"station/bioconversionDegenerateWorkflow", bioconversionDegenerateWorkflow});
+	checks.push_back({"station/bioconversionFoodwasteWorkflow", bioconversionFoodwasteWorkflow});
 	checks.push_back({"station/cropWorkflow", cropWorkflow});
 	checks.push_back({"station/algaeWorkflow", algaeWorkflow});
 	checks.push_back({"station/maintenanceWorkflow", maintenanceWorkflow});

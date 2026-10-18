@@ -1,8 +1,8 @@
 # Generalized Bioconversion Stage — Microbial Processor Generalization
 
-Status: core slice (#735) and degenerate pass-through (#736) implemented.
-Hot-digestion scenario/hardening (#737) and editor derived-rate preview (#738)
-remain follow-ups.
+Status: core slice (#735), degenerate pass-through (#736), and hot-digestion
+scenario/hardening (#737) implemented. Editor derived-rate preview (#738)
+remains a follow-up.
 Origin: audit finding G1 in ticket #724 (Station systems gap analysis).
 Component: `MicrobialProcessorSettings` (`include/core/StationSystems.h`), validator
 and runtime in `src/core/StationSystems.cpp`.
@@ -301,13 +301,31 @@ microbialProcessors:
     organicOxidationFraction: 0.9
     nitrificationFraction: 0.0  # heterotrophic hot composting profile
     processWaterTargetMoisture: 0.6   # dry feed needs dilution water
-    heatReleaseFraction: 0.8
+    heatReleaseFraction: 0.7   # default; ~55 W for this food composition
     # recovery fractions at defaults
 ```
 
-Expected daily actuals for 0.5 kg food: organics oxidized ≈ 0.40 kg;
-O2 ≈ 0.55 kg; CO2 ≈ 0.71 kg; process water 0.75 kg;
-heat ≈ 4.8 MJ/day (~55 W continuous into the sink); N recovered ≈ 18 g.
+The shipped food composition matches reference food: dry N/P/K/minerals
+fractions 0.05/0.02/0.03/0.02, leaving 0.88 organics, at 17 MJ/kg dry.
+Daily actuals for 0.5 kg food: organics oxidized 0.396 kg; O2 0.5544 kg;
+CO2 0.7128 kg; dilution water 0.75 kg; medium 0.0198 kg;
+nutrients 0.047 kg (N 0.020, P 0.008, K 0.012, minerals 0.007 kg);
+recovered water and nitrified N zero; residue 1.0644 kg.
+Reaction heat is 4712.4 kJ/day (54.54 W continuous). The 2 kWh/kg
+electrical dose contributes another 3600 kJ/day: exactly 8312.4 kJ/day
+reaches `processSink`. The default 0.7 heat release is intentional: the
+earlier illustrative 0.8 would give 5385.6 kJ/day (62.33 W), not ~55 W.
+Likewise, default 0.8 N recovery gives 20 g/day, not the earlier ~18 g.
+
+Open this standalone configuration in Station systems, then Apply settings.
+Stores, solar and thermal headroom support at least one day at rated throughput.
+`bioconversionHotDigestion` verifies daily-normalized actuals through public
+World ticks/snapshots and exactly-once routing to the wired sink (an unwired
+sink receives none). `bioconversionOxygenStarvation` checks uniform scaling
+of every nonzero material/energy stream, and `bioconversionBlend` checks
+actual nutrient-rich, energy-depleted crop-death feed rather than its unchanged
+organic declaration. `station/bioconversionFoodwasteWorkflow` opens and applies
+the shipped file through the real editor and checks the resulting actuals.
 
 ### 10.3 Legacy equivalence (`bioconversion-legacy.yaml`)
 

@@ -1,0 +1,144 @@
+# #737: spoiled-food aerobic hot digestion, 0.5 kg dry food/day.
+# Standalone Station configuration; Open configuration in the editor, then Apply.
+# Food uses the reference food composition: dry organics 88%, 17 MJ/kg dry.
+# Daily actuals: organics oxidized 0.396 kg; O2 0.5544 kg; CO2 0.7128 kg;
+# dilution water 0.75 kg; medium 0.0198 kg; nutrients 0.047 kg
+# (N 0.020, P 0.008, K 0.012, minerals 0.007 kg); recovered water 0;
+# residue 1.0644 kg; nitrified N 0; reaction heat 4712.4 kJ (54.54 W).
+# Electrical dose 3600 kJ/day also reaches processSink: total 8312.4 kJ/day.
+# Quasi-steady provisional biology, not inhibition/acclimation dynamics.
+# Default heat release 0.7 gives the ~55 W profile; solar, stores and sink
+# support a full day without depletion, backpressure or temperature stress.
+schemaVersion: 99
+stationSystems:
+  enabled: true
+  observationIntervalSeconds: 1.0
+  trendRetentionSeconds: 3600.0
+  dispatchMode: manual
+  stores:
+  - id: spoiledFood
+    unit: kg
+    capacity: 100.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+    composition:
+      moisture: 0.0
+      nutrientNitrogen: 0.05
+      atmosphericNitrogen: 0.0
+      phosphorus: 0.02
+      potassium: 0.03
+      otherMinerals: 0.02
+      energyKJPerKgDry: 17000.0
+  - id: processOxygen
+    unit: kg
+    capacity: 100.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: fresh
+    unit: kg
+    capacity: 100.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: digesterMedia
+    unit: kg
+    capacity: 100.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: nutrients
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: rawWater
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: co2
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: residue
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: bioStock
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  microbialProcessors:
+  - id: hotDigester
+    hazardClass: normal
+    feedStoreId: spoiledFood
+    oxygenStoreId: processOxygen
+    waterStoreId: fresh
+    consumableStoreId: digesterMedia
+    nutrientStoreId: nutrients
+    recoveredWaterStoreId: rawWater
+    co2StoreId: co2
+    residueStoreId: residue
+    thermalClass: low
+    heatSinkId: processSink
+    rateKgPerS: 5.787037037037037e-06
+    specificEnergyKWhPerKgFeed: 2.0
+    nitrogenRecovery: 0.8
+    phosphorusRecovery: 0.8
+    potassiumRecovery: 0.8
+    mineralsRecovery: 0.7
+    waterRecovery: 0.7
+    minOperatingTemperatureC: 15.0
+    maxSinkTemperatureC: 45.0
+    initialCondition: 1.0
+    starvationDegradePerHour: 0.05
+    consumableExhaustionDegradePerHour: 0.05
+    coldStressDegradePerHour: 0.02
+    heatStressDegradePerHour: 0.1
+    recoveryPerHour: 0.02
+    stockStoreId: bioStock
+    stockUnitsPerConditionPoint: 1.0
+    priority: 1
+    rateBasis: CompositionDerived
+    nitrificationFraction: 0.0
+    organicOxidationFraction: 0.9
+    o2PerKgOrganicOxidized: 1.4
+    o2PerKgNitrifiedN: 4.57
+    co2PerKgOrganicOxidized: 1.8
+    processWaterTargetMoisture: 0.6
+    heatReleaseFraction: 0.7
+    consumablePerKgOrganicOxidized: 0.05
+  solarArrays:
+  - id: solar
+    capacityKW: 10.0
+    illumination:
+      constantLevel: 1.0
+      periodSeconds: 0.0
+      segments: []
+  thermalReservoirs:
+  - id: processSink
+    thermalClass: low
+    heatCapacityKJPerK: 1000000.0
+    startingTemperatureC: 20.0
+    minTemperatureC: -10.0
+    maxTemperatureC: 100.0
+    absorbedHeatKW: 0.0

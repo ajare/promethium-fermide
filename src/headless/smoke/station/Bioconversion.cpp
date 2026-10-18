@@ -111,6 +111,93 @@ void tracer(smoke::Context const& context)
 	close(m.lastCo2ProducedKg, 0); close(m.reactionHeatKJ, 0);
 	require(m.lastStressors.empty(), "zero-demand medium caused exhaustion stress");
 }
+void hotDigestion(smoke::Context const& context)
+{
+	core::StationConfigurationDocument doc;
+	std::string error;
+	require(core::loadStationConfiguration(context.fixture("resources/station-systems/scenarios/bioconversion-foodwaste.yaml").string(), doc, &error), error.c_str());
+	auto const snap = run(doc.settings);
+	auto const& p = snap.microbialProcessors.at(0);
+	auto const daily = 86400.0 / (60 * core::World::getFixedTimestep());
+	close(p.feedConsumedKg * daily, 0.5);
+	close(p.oxygenConsumedKg * daily, 0.5544);
+	close(p.co2ProducedKg * daily, 0.7128);
+	close(p.waterConsumedKg * daily, 0.75);
+	close(p.consumablesUsed * daily, 0.0198);
+	close(p.nutrientProducedKg * daily, 0.047);
+	close(p.nitrogenRecoveredKg * daily, 0.020);
+	close(p.phosphorusRecoveredKg * daily, 0.008);
+	close(p.potassiumRecoveredKg * daily, 0.012);
+	close(p.mineralsRecoveredKg * daily, 0.007);
+	close(p.recoveredWaterKg, 0); close(p.nitrifiedNitrogenKg, 0);
+	close(p.residueProducedKg * daily, 1.0644);
+	close(p.reactionHeatKJ * daily, 4712.4);
+	close(p.lastReactionHeatKW, 0.05454166666666667);
+	close(p.energySuppliedKJ * daily, 3600);
+	close(p.heatRoutedKJ * daily, 8312.4);
+	close(p.scale, 1); close(p.residualKg, 0); close(p.residualKJ, 0);
+	require(p.lastStressors.empty(), "hot digestion suffered unexpected stress");
+	close(snap.thermal.reservoirs.at(0).microbialEnergyKJ, p.heatRoutedKJ);
+	// A second, unwired reservoir must not receive digestion heat.
+	auto settings = doc.settings;
+	// Smaller capacity makes a duplicate physical temperature booking visible
+	// without cancellation error from subtracting almost-equal temperatures.
+	settings.thermalReservoirs[0].heatCapacityKJPerK = 1000;
+	auto unwired = settings.thermalReservoirs[0]; unwired.id = "unwired";
+	settings.thermalReservoirs.push_back(unwired);
+	auto const twoSinks = run(settings);
+	close(twoSinks.thermal.reservoirs[0].microbialEnergyKJ, p.energySuppliedKJ + p.reactionHeatKJ);
+	close(twoSinks.thermal.reservoirs[1].microbialEnergyKJ, 0);
+	auto const& sink = twoSinks.thermal.reservoirs[0];
+	close((sink.temperatureC - sink.startingTemperatureC) * sink.heatCapacityKJPerK,
+		p.energySuppliedKJ + p.reactionHeatKJ);
+	close(twoSinks.thermal.reservoirs[1].temperatureC, unwired.startingTemperatureC);
+}
+void oxygenStarvation(smoke::Context const& context)
+{
+	// Include nonzero nitrification AND dry-feed dilution so no derived
+	// stream can escape uniform scaling behind a zero-valued assertion.
+	auto settings = urine(context);
+	settings.stores[0].composition->moisture = 0;
+	settings.microbialProcessors[0].processWaterTargetMoisture = 0.6;
+	auto const full = run(settings, 1).microbialProcessors.at(0);
+	settings.stores[1].startingQualified = full.oxygenConsumedKg / 4;
+	auto const snap = run(settings, 1);
+	auto const& limited = snap.microbialProcessors.at(0);
+	require(limited.limiter.find("oxygen") != std::string::npos
+		&& limited.limiter.find("processOxygen") != std::string::npos, "missing named oxygen limiter");
+	close(limited.scale, 0.25);
+	for (auto field : {&core::StationMicrobialProcessorSnapshot::feedConsumedKg,
+		&core::StationMicrobialProcessorSnapshot::oxygenConsumedKg,
+		&core::StationMicrobialProcessorSnapshot::waterConsumedKg,
+		&core::StationMicrobialProcessorSnapshot::consumablesUsed,
+		&core::StationMicrobialProcessorSnapshot::nutrientProducedKg,
+		&core::StationMicrobialProcessorSnapshot::co2ProducedKg,
+		&core::StationMicrobialProcessorSnapshot::residueProducedKg,
+		&core::StationMicrobialProcessorSnapshot::nitrogenRecoveredKg,
+		&core::StationMicrobialProcessorSnapshot::phosphorusRecoveredKg,
+		&core::StationMicrobialProcessorSnapshot::potassiumRecoveredKg,
+		&core::StationMicrobialProcessorSnapshot::mineralsRecoveredKg,
+		&core::StationMicrobialProcessorSnapshot::nitrifiedNitrogenKg,
+		&core::StationMicrobialProcessorSnapshot::energySuppliedKJ,
+		&core::StationMicrobialProcessorSnapshot::reactionHeatKJ,
+		&core::StationMicrobialProcessorSnapshot::heatRoutedKJ})
+	{
+		require(full.*field > 0, "starvation coverage contains a zero stream");
+		close(limited.*field, full.*field / 4);
+	}
+	close(limited.residualKg, 0); close(limited.residualKJ, 0);
+	close(snap.thermal.reservoirs[0].microbialEnergyKJ, limited.heatRoutedKJ);
+	// Wet feed exercises the remaining nonzero output: recovered water.
+	settings.stores[0].composition->moisture = 0.5;
+	auto wet = settings; wet.stores[1].startingQualified = 10;
+	auto const wetFull = run(wet, 1).microbialProcessors.at(0);
+	settings.stores[1].startingQualified = wetFull.oxygenConsumedKg / 4;
+	auto const wetLimited = run(settings, 1).microbialProcessors.at(0);
+	require(wetFull.recoveredWaterKg > 0, "wet starvation fixture is dry");
+	close(wetLimited.recoveredWaterKg, wetFull.recoveredWaterKg / 4);
+	close(wetLimited.scale, 0.25);
+}
 void validation(smoke::Context const& context)
 {
 	auto settings = urine(context);
@@ -169,6 +256,7 @@ void blend(smoke::Context const& context)
 	crops.cropPopulations[0].respirationPerHour = 1e6;
 	crops.microbialProcessors = settings.microbialProcessors;
 	crops.microbialProcessors[0].feedStoreId = "waste";
+	crops.microbialProcessors[0].processWaterTargetMoisture = 0.6;
 	for (size_t i = 1; i < settings.stores.size(); ++i) crops.stores.push_back(settings.stores[i]);
 	crops.thermalReservoirs = settings.thermalReservoirs;
 	auto const snap = run(crops);
@@ -179,7 +267,18 @@ void blend(smoke::Context const& context)
 	close(p.oxygenConsumedKg, p.feedConsumedKg * (0.5 / 0.8) * 0.8 * 4.57);
 	close(p.nitrifiedNitrogenKg, p.feedConsumedKg * (0.5 / 0.8) * 0.8);
 	close(p.reactionHeatKJ, 0); close(p.co2ProducedKg, 0);
-	close(p.residualKg, 0);
+	close(p.consumablesUsed, 0); close(p.recoveredWaterKg, 0);
+	close(p.waterConsumedKg, p.feedConsumedKg * 1.5);
+	close(p.nitrogenRecoveredKg, p.nitrifiedNitrogenKg);
+	close(p.phosphorusRecoveredKg, p.feedConsumedKg * (0.1 / 0.8) * 0.8);
+	close(p.potassiumRecoveredKg, p.feedConsumedKg * (0.1 / 0.8) * 0.8);
+	close(p.mineralsRecoveredKg, p.feedConsumedKg * (0.1 / 0.8) * 0.7);
+	close(p.nutrientProducedKg, p.nitrogenRecoveredKg + p.phosphorusRecoveredKg
+		+ p.potassiumRecoveredKg + p.mineralsRecoveredKg);
+	close(p.residueProducedKg, p.feedConsumedKg + p.oxygenConsumedKg
+		+ p.waterConsumedKg - p.nutrientProducedKg);
+	close(p.heatRoutedKJ, p.energySuppliedKJ);
+	close(p.residualKg, 0); close(p.residualKJ, 0);
 	// Dry feed dilution uses moisture deficit; no legacy constant water draw.
 	settings.stores[0].startingQualified = 10;
 	settings.stores[0].composition->moisture = 0;
@@ -341,5 +440,6 @@ void documents(smoke::Context const& context)
 void registerBioconversionChecks(std::vector<smoke::Check>& checks)
 {
 	checks.insert(checks.end(), {{"bioconversionTracer", tracer}, {"bioconversionValidation", validation},
-		{"bioconversionBlend", blend}, {"bioconversionDocuments", documents}, {"bioconversionDegenerate", degenerate}});
+		{"bioconversionBlend", blend}, {"bioconversionDocuments", documents}, {"bioconversionDegenerate", degenerate},
+		{"bioconversionHotDigestion", hotDigestion}, {"bioconversionOxygenStarvation", oxygenStarvation}});
 }
