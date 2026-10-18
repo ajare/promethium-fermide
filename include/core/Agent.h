@@ -299,6 +299,7 @@ namespace core
 		friend class Sector;
 		friend class FurnitureStore; // ADR 0022 catalogue reload/edit preflight
 		friend class AgentTagService; // ADR 0022 (#682) tag assignment family
+		friend class AgentProfileEditor; // ADR 0022 (#683) profile edit family
 
 	public:
 

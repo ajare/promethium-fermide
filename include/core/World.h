@@ -63,6 +63,7 @@ namespace core
 	class DeviceConditionStore;
 	class FurnitureStore;
 	class AgentTagService;
+	class AgentProfileEditor;
 
 	class World : public Serializable
 	{
@@ -119,6 +120,11 @@ namespace core
 		// reference, and the tag-sample table below on the World's behalf
 		// (#682, ADR 0022).
 		friend class AgentTagService;
+		// The Agent profile editor owns no state; it reads and edits the
+		// Agent entities' individual override records, the pause gate, the
+		// snapshot invalidation, and the coordinator's usage-change seam on
+		// the World's behalf (#683, ADR 0022).
+		friend class AgentProfileEditor;
 		friend struct WorldAgentRestorationTestAccess;
 		friend struct PhysicalControlLookupTestAccess;
 		friend struct QueuedPressLookupTestAccess;
@@ -717,6 +723,15 @@ namespace core
 		// usage-change notification a tag edit rides on, through this World.
 		std::unique_ptr<AgentTagService> mAgentTagService;
 
+		// The per-Agent individual-profile edit family lives in this owned
+		// service (ADR 0022, #683). World keeps ownership of the Agent
+		// registry whose override records it edits (ADR 0001) and stays the
+		// facade (design pattern) through which every caller reaches these
+		// operations; the editor owns no state and reaches the World's
+		// pause gate, snapshot invalidation, and replanning seams through
+		// this World.
+		std::unique_ptr<AgentProfileEditor> mAgentProfileEditor;
+
 		// Every World owns one sandboxed Lua runtime for its Agent types. It is
 		// declared before mAgents so Agent destruction (which releases live Lua
 		// instances through their opaque handles) happens while the runtime's Lua
@@ -1124,24 +1139,20 @@ namespace core
 			AgentMaximumRoutePlanningTimeProperty const& property);
 		void clearAgentTagMaximumRoutePlanningTimeSamples(AgentTagId id);
 
-		// The single shared paths behind the descriptor tables (ADR 0022,
-		// #677): every addAgentTag*Samples / clearAgentTag*Samples method
-		// above and every setAgentIndividual* method below forwards here, so
-		// ADR 0012's "individual Agent properties override tag properties"
-		// precedence is one code path. The tables are built once inside
-		// World's own member scope because their closures reach World-owned
-		// state through that scope's access (the ADR 0022 access seam); the
-		// World owns no table state beyond this.
+		// The single shared path behind the tag-sample descriptor table
+		// (ADR 0022, #677): every addAgentTag*Samples /
+		// clearAgentTag*Samples method above forwards here, so ADR 0012's
+		// "individual Agent properties override tag properties"
+		// precedence is one code path. The table is built once inside
+		// World's own member scope because its closures reach World-owned
+		// state through that scope's access (the ADR 0022 access seam).
+		// The individual-override table and its shared setter path moved
+		// out with the profile editor (#683).
 		static TagSampleTable const& tagSampleTable();
 		void applyAgentTagSamples(TagSampleDescriptor const& descriptor,
 			AgentTagId id, AgentModifierRange const& range, uint64_t revision);
 		void clearAgentTagSamples(TagSampleDescriptor const& descriptor,
 			AgentTagId id);
-		static IndividualOverrideTable const& individualOverrideTable();
-		template <typename T>
-		bool setIndividualOverride(
-			IndividualOverrideDescriptor<T> const& descriptor,
-			AgentId id, std::optional<T> value, std::string* diagnostic);
 
 		// Case-sensitive name lookup across the groups this World owns, with
 		// one group optionally excluded so a group renaming itself to the name

@@ -28,6 +28,7 @@
 #include "core/AgentTypeRuntime.h"
 #include "core/WorldDocument.h"
 #include "core/AgentTagRegistry.h"
+#include "core/AgentProfileEditor.h"
 #include "core/AgentTagService.h"
 #include "core/Background.h"
 #include "core/Location.h"
@@ -134,6 +135,7 @@ namespace core
 	, mDeviceConditionStore(std::make_unique<DeviceConditionStore>(*this))
 	, mFurnitureStore(std::make_unique<FurnitureStore>(*this))
 	, mAgentTagService(std::make_unique<AgentTagService>(*this))
+	, mAgentProfileEditor(std::make_unique<AgentProfileEditor>(*this))
 		, mAgentTypeRuntime(std::make_unique<AgentTypeRuntimeAdapter>(
 			agentTypeRuntimeLimits))
 		, mAgentBehaviourRuntime(std::make_unique<AgentBehaviourRuntimeAdapter>(
@@ -7289,459 +7291,143 @@ namespace core
 		return mSimulationCoordinator.setAgentActive(id, active, diagnostic);
 	}
 
-	namespace
-	{
-		// Builds one plain float override row: the value is validated as a
-		// degenerate range { v, v } exactly as the replaced facade methods
-		// did, and written straight through to the Agent's individual
-		// property with no further side effects.
-		IndividualOverrideDescriptor<float> plainFloatOverride(
-			std::string unchangedMessage,
-			bool (*validator)(AgentModifierRange const&, std::string*),
-			std::optional<float> const& (Agent::*read)() const,
-			void (Agent::*write)(std::optional<float>))
-		{
-			IndividualOverrideDescriptor<float> descriptor;
-			descriptor.unchangedMessage = std::move(unchangedMessage);
-			descriptor.validate = [validator](float const& value,
-				std::string* diagnostic)
-			{ return validator({ value, value }, diagnostic); };
-			descriptor.read = [read](Agent const& agent)
-				-> std::optional<float> const& { return (agent.*read)(); };
-			descriptor.apply = [write](World&, AgentId, Agent& agent,
-				std::optional<float> const& value) { (agent.*write)(value); };
-			return descriptor;
-		}
-	}
+	// The per-Agent individual-profile edit family (ADR 0022, #683): the
+	// behaviour lives in the profile editor, which drives every single-
+	// property override through the #677 descriptor table and keeps the
+	// coupled object-usage pair on its own composite path. World keeps
+	// ownership of the Agent registry being edited (ADR 0001) and stays
+	// the facade (design pattern), forwarding every entry point below.
 
-	// The one individual-override table (ADR 0022, #677). Built once,
-	// inside World's own member scope: the special rows' closures reach
-	// World-owned state - the height-fit preflight, the adherence
-	// replanning seam, and the simulation coordinator behind the remote
-	// object-control flags - through this scope's access (the ADR 0022
-	// access seam). Object usage and its distance stay on their own
-	// composite path below: they are a coupled pair with a shared
-	// validity rule and a joint replanning side effect, not two
-	// independent single-property rows.
-	IndividualOverrideTable const& World::individualOverrideTable()
-	{
-		static IndividualOverrideTable const table = []()
-		{
-			IndividualOverrideTable t;
-			t.colour = []()
-			{
-				IndividualOverrideDescriptor<AgentColour> d;
-				d.unchangedMessage = "The individual Agent Colour is unchanged";
-				d.read = [](Agent const& agent)
-					-> std::optional<AgentColour> const&
-					{ return agent.getIndividualColour(); };
-				d.apply = [](World&, AgentId, Agent& agent,
-					std::optional<AgentColour> const& value)
-					{ agent.setIndividualColour(value); };
-				return d;
-			}();
-			t.escalatorWalkingChance = []()
-			{
-				IndividualOverrideDescriptor<float> d;
-				d.unchangedMessage =
-					"The individual Escalator walking chance is unchanged";
-				d.validate = [](float const& value, std::string* diagnostic)
-				{ return agentEscalatorWalkingChanceIsValid(value, diagnostic); };
-				d.read = [](Agent const& agent) -> std::optional<float> const&
-				{ return agent.getIndividualEscalatorWalkingChance(); };
-				d.apply = [](World&, AgentId, Agent& agent,
-					std::optional<float> const& value)
-					{ agent.setIndividualEscalatorWalkingChance(value); };
-				return d;
-			}();
-			t.walkSpeedModifier = plainFloatOverride(
-				"The individual Walk speed modifier is unchanged",
-				agentWalkSpeedModifierRangeIsValid,
-				&Agent::getIndividualWalkSpeedModifier,
-				&Agent::setIndividualWalkSpeedModifier);
-			t.heightModifier = []()
-			{
-				IndividualOverrideDescriptor<float> d;
-				d.unchangedMessage =
-					"The individual Height modifier is unchanged";
-				d.validate = [](float const& value, std::string* diagnostic)
-				{
-					return agentHeightModifierRangeIsValid(
-						{ value, value }, diagnostic);
-				};
-				d.read = [](Agent const& agent) -> std::optional<float> const&
-				{ return agent.getIndividualHeightModifier(); };
-				// Clearing the override reveals the sampled (or default
-				// 1.0) inherited value: the Agent's live pose must fit the
-				// next effective height before the write, exactly as the
-				// replaced method checked.
-				d.preflight = [](World& world, Agent const& agent,
-					std::optional<float> const& value, std::string* diagnostic)
-				{
-					auto const next = value.value_or(agent.getHeightModifierSample()
-						? agent.getHeightModifierSample()->value : 1.0f);
-					return world.agentHeightStateFits(agent, next, diagnostic);
-				};
-				d.apply = [](World&, AgentId, Agent& agent,
-					std::optional<float> const& value)
-					{ agent.setIndividualHeightModifier(value); };
-				return d;
-			}();
-			t.stairSpeedModifier = plainFloatOverride(
-				"The individual Stair speed modifier is unchanged",
-				agentStairSpeedModifierRangeIsValid,
-				&Agent::getIndividualStairSpeedModifier,
-				&Agent::setIndividualStairSpeedModifier);
-			t.ladderSpeedModifier = plainFloatOverride(
-				"The individual Ladder speed modifier is unchanged",
-				agentLadderSpeedModifierRangeIsValid,
-				&Agent::getIndividualLadderSpeedModifier,
-				&Agent::setIndividualLadderSpeedModifier);
-			t.interactionAversion = plainFloatOverride(
-				"The individual Interaction aversion is unchanged",
-				agentInteractionAversionRangeIsValid,
-				&Agent::getIndividualInteractionAversion,
-				&Agent::setIndividualInteractionAversion);
-			t.effortAversion = plainFloatOverride(
-				"The individual Effort aversion is unchanged",
-				agentEffortAversionRangeIsValid,
-				&Agent::getIndividualEffortAversion,
-				&Agent::setIndividualEffortAversion);
-			t.waitingAversion = plainFloatOverride(
-				"The individual Waiting aversion is unchanged",
-				agentWaitingAversionRangeIsValid,
-				&Agent::getIndividualWaitingAversion,
-				&Agent::setIndividualWaitingAversion);
-			t.crowdAversion = plainFloatOverride(
-				"The individual Crowd aversion is unchanged",
-				agentCrowdAversionRangeIsValid,
-				&Agent::getIndividualCrowdAversion,
-				&Agent::setIndividualCrowdAversion);
-			t.riskAversion = plainFloatOverride(
-				"The individual Risk aversion is unchanged",
-				agentRiskAversionRangeIsValid,
-				&Agent::getIndividualRiskAversion,
-				&Agent::setIndividualRiskAversion);
-			t.routeFamiliarity = plainFloatOverride(
-				"The individual Route familiarity is unchanged",
-				agentRouteFamiliarityRangeIsValid,
-				&Agent::getIndividualRouteFamiliarity,
-				&Agent::setIndividualRouteFamiliarity);
-			t.routePersistence = plainFloatOverride(
-				"The individual Route persistence is unchanged",
-				agentRoutePersistenceRangeIsValid,
-				&Agent::getIndividualRoutePersistence,
-				&Agent::setIndividualRoutePersistence);
-			t.minimumRoutePlanningTime = plainFloatOverride(
-				"The individual Minimum route planning time is unchanged",
-				agentMinimumRoutePlanningTimeRangeIsValid,
-				&Agent::getIndividualMinimumRoutePlanningTime,
-				&Agent::setIndividualMinimumRoutePlanningTime);
-			t.maximumRoutePlanningTime = plainFloatOverride(
-				"The individual Maximum route planning time is unchanged",
-				agentMaximumRoutePlanningTimeRangeIsValid,
-				&Agent::getIndividualMaximumRoutePlanningTime,
-				&Agent::setIndividualMaximumRoutePlanningTime);
-			t.permissionAdherence = []()
-			{
-				IndividualOverrideDescriptor<bool> d;
-				d.unchangedMessage =
-					"The individual Permission adherence is unchanged";
-				d.read = [](Agent const& agent) -> std::optional<bool> const&
-				{ return agent.getIndividualPermissionAdherence(); };
-				// The effective adherence can flip even though only one
-				// source changed; the replanning seam wraps the write
-				// itself, as the replaced method did.
-				d.apply = [](World& world, AgentId id, Agent& agent,
-					std::optional<bool> const& value)
-				{
-					auto const before =
-						agent.getEffectivePermissionAdherence().value;
-					agent.setIndividualPermissionAdherence(value);
-					auto const after =
-						agent.getEffectivePermissionAdherence().value;
-					if (before != after)
-					{
-						if (after) world.replanAgentAfterAuthorizationRefusal(id);
-						else world.beginVoluntaryRoutePlanning(id);
-					}
-				};
-				return d;
-			}();
-			t.remoteAccessPanels = []()
-			{
-				IndividualOverrideDescriptor<bool> d;
-				d.unchangedMessage =
-					"The individual Remote Access panels is unchanged";
-				d.read = [](Agent const& agent) -> std::optional<bool> const&
-				{ return agent.getIndividualRemoteAccessPanels(); };
-				d.apply = [](World& world, AgentId id, Agent& agent,
-					std::optional<bool> const& value)
-				{
-					agent.setIndividualRemoteAccessPanels(value);
-					world.mSimulationCoordinator.agentObjectUsageChanged(id);
-				};
-				return d;
-			}();
-			t.remoteBoothWindowShutters = []()
-			{
-				IndividualOverrideDescriptor<bool> d;
-				d.unchangedMessage =
-					"The individual Remote BoothWindow shutters is unchanged";
-				d.read = [](Agent const& agent) -> std::optional<bool> const&
-				{ return agent.getIndividualRemoteBoothWindowShutters(); };
-				d.apply = [](World& world, AgentId id, Agent& agent,
-					std::optional<bool> const& value)
-				{
-					agent.setIndividualRemoteBoothWindowShutters(value);
-					world.mSimulationCoordinator.agentObjectUsageChanged(id);
-				};
-				return d;
-			}();
-			t.mobilityProfile = []()
-			{
-				IndividualOverrideDescriptor<MobilityProfile> d;
-				d.unchangedMessage =
-					"The individual Mobility profile is unchanged";
-				d.validate = [](MobilityProfile const& value,
-					std::string* diagnostic)
-				{
-					if (!mobilityProfileIsValid(value))
-					{
-						if (diagnostic)
-							*diagnostic = "The individual Mobility profile "
-								"contains an invalid Mobility use";
-						return false;
-					}
-					return true;
-				};
-				d.read = [](Agent const& agent)
-					-> std::optional<MobilityProfile> const&
-					{ return agent.getIndividualMobilityProfile(); };
-				d.apply = [](World&, AgentId, Agent& agent,
-					std::optional<MobilityProfile> const& value)
-					{ agent.setIndividualMobilityProfile(value); };
-				return d;
-			}();
-			return t;
-		}();
-		return table;
-	}
-
-	// The one individual-override setter path (ADR 0012 through ADR 0022):
-	// every setAgentIndividual* facade method forwards here with its table
-	// row. Every refusal happens before any authored state changes, in the
-	// order the replaced methods established: unknown Agent, invalid value,
-	// running simulation, unchanged value, then the property's own
-	// preflight; only then is the snapshot invalidated, the write and its
-	// side effects applied, and the World dirtied.
-	template <typename T>
-	bool World::setIndividualOverride(
-		IndividualOverrideDescriptor<T> const& descriptor,
-		AgentId id, optional<T> value, string* diagnostic)
-	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (value && descriptor.validate && !descriptor.validate(*value, diagnostic))
-			return false;
-		if (!mSimulationPaused)
-		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		auto* agent = lookup.entity;
-		if (descriptor.read(*agent) == value)
-		{
-			if (diagnostic) *diagnostic = descriptor.unchangedMessage;
-			return false;
-		}
-		if (descriptor.preflight
-			&& !descriptor.preflight(*this, *agent, value, diagnostic)) return false;
-		invalidateSimulationSnapshot();
-		descriptor.apply(*this, id, *agent, value);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
-	}
-
-	bool World::setAgentIndividualColour(AgentId id, optional<AgentColour> value,
+	bool World::setAgentIndividualColour(AgentId agent, optional<AgentColour> value,
 		string* diagnostic)
 	{
-		return setIndividualOverride(individualOverrideTable().colour, id,
-			value, diagnostic);
+		return mAgentProfileEditor->setColour(agent, value, diagnostic);
 	}
 
-	bool World::setAgentIndividualEscalatorWalkingChance(AgentId id, optional<float> value,
-		string* diagnostic)
+	bool World::setAgentIndividualEscalatorWalkingChance(AgentId agent,
+		optional<float> value, string* diagnostic)
 	{
-		return setIndividualOverride(individualOverrideTable().escalatorWalkingChance, id,
-			value, diagnostic);
+		return mAgentProfileEditor->setEscalatorWalkingChance(agent, value, diagnostic);
 	}
 
-	bool World::setAgentIndividualWalkSpeedModifier(AgentId id, optional<float> value,
-		string* diagnostic)
+	bool World::setAgentIndividualWalkSpeedModifier(AgentId agent,
+		optional<float> value, string* diagnostic)
 	{
-		return setIndividualOverride(individualOverrideTable().walkSpeedModifier, id,
-			value, diagnostic);
+		return mAgentProfileEditor->setWalkSpeedModifier(agent, value, diagnostic);
 	}
 
-	bool World::setAgentIndividualHeightModifier(AgentId id, optional<float> value,
-		string* diagnostic)
+	bool World::setAgentIndividualHeightModifier(AgentId agent,
+		optional<float> value, string* diagnostic)
 	{
-		return setIndividualOverride(individualOverrideTable().heightModifier, id,
-			value, diagnostic);
+		return mAgentProfileEditor->setHeightModifier(agent, value, diagnostic);
 	}
 
-	bool World::setAgentIndividualStairSpeedModifier(AgentId id, optional<float> value,
-		string* diagnostic)
+	bool World::setAgentIndividualStairSpeedModifier(AgentId agent,
+		optional<float> value, string* diagnostic)
 	{
-		return setIndividualOverride(individualOverrideTable().stairSpeedModifier, id,
-			value, diagnostic);
+		return mAgentProfileEditor->setStairSpeedModifier(agent, value, diagnostic);
 	}
 
-	bool World::setAgentIndividualLadderSpeedModifier(AgentId id, optional<float> value,
-		string* diagnostic)
+	bool World::setAgentIndividualLadderSpeedModifier(AgentId agent,
+		optional<float> value, string* diagnostic)
 	{
-		return setIndividualOverride(individualOverrideTable().ladderSpeedModifier, id,
-			value, diagnostic);
+		return mAgentProfileEditor->setLadderSpeedModifier(agent, value, diagnostic);
 	}
 
-	bool World::setAgentIndividualInteractionAversion(AgentId id, optional<float> value,
-		string* diagnostic)
+	bool World::setAgentIndividualInteractionAversion(AgentId agent,
+		optional<float> value, string* diagnostic)
 	{
-		return setIndividualOverride(individualOverrideTable().interactionAversion, id,
-			value, diagnostic);
+		return mAgentProfileEditor->setInteractionAversion(agent, value, diagnostic);
 	}
 
-	bool World::setAgentIndividualEffortAversion(AgentId id, optional<float> value,
-		string* diagnostic)
+	bool World::setAgentIndividualEffortAversion(AgentId agent,
+		optional<float> value, string* diagnostic)
 	{
-		return setIndividualOverride(individualOverrideTable().effortAversion, id,
-			value, diagnostic);
+		return mAgentProfileEditor->setEffortAversion(agent, value, diagnostic);
 	}
 
-	bool World::setAgentIndividualWaitingAversion(AgentId id, optional<float> value,
-		string* diagnostic)
+	bool World::setAgentIndividualWaitingAversion(AgentId agent,
+		optional<float> value, string* diagnostic)
 	{
-		return setIndividualOverride(individualOverrideTable().waitingAversion, id,
-			value, diagnostic);
+		return mAgentProfileEditor->setWaitingAversion(agent, value, diagnostic);
 	}
 
-	bool World::setAgentIndividualCrowdAversion(AgentId id, optional<float> value,
-		string* diagnostic)
+	bool World::setAgentIndividualCrowdAversion(AgentId agent,
+		optional<float> value, string* diagnostic)
 	{
-		return setIndividualOverride(individualOverrideTable().crowdAversion, id,
-			value, diagnostic);
+		return mAgentProfileEditor->setCrowdAversion(agent, value, diagnostic);
 	}
 
-	bool World::setAgentIndividualRiskAversion(AgentId id, optional<float> value,
-		string* diagnostic)
+	bool World::setAgentIndividualRiskAversion(AgentId agent,
+		optional<float> value, string* diagnostic)
 	{
-		return setIndividualOverride(individualOverrideTable().riskAversion, id,
-			value, diagnostic);
+		return mAgentProfileEditor->setRiskAversion(agent, value, diagnostic);
 	}
 
-	bool World::setAgentIndividualRouteFamiliarity(AgentId id, optional<float> value,
-		string* diagnostic)
+	bool World::setAgentIndividualRouteFamiliarity(AgentId agent,
+		optional<float> value, string* diagnostic)
 	{
-		return setIndividualOverride(individualOverrideTable().routeFamiliarity, id,
-			value, diagnostic);
+		return mAgentProfileEditor->setRouteFamiliarity(agent, value, diagnostic);
 	}
 
-	bool World::setAgentIndividualRoutePersistence(AgentId id, optional<float> value,
-		string* diagnostic)
+	bool World::setAgentIndividualRoutePersistence(AgentId agent,
+		optional<float> value, string* diagnostic)
 	{
-		return setIndividualOverride(individualOverrideTable().routePersistence, id,
-			value, diagnostic);
+		return mAgentProfileEditor->setRoutePersistence(agent, value, diagnostic);
 	}
 
-	bool World::setAgentIndividualMinimumRoutePlanningTime(AgentId id, optional<float> value,
-		string* diagnostic)
+	bool World::setAgentIndividualMinimumRoutePlanningTime(AgentId agent,
+		optional<float> value, string* diagnostic)
 	{
-		return setIndividualOverride(individualOverrideTable().minimumRoutePlanningTime, id,
-			value, diagnostic);
+		return mAgentProfileEditor->setMinimumRoutePlanningTime(agent, value, diagnostic);
 	}
 
-	bool World::setAgentIndividualMaximumRoutePlanningTime(AgentId id, optional<float> value,
-		string* diagnostic)
+	bool World::setAgentIndividualMaximumRoutePlanningTime(AgentId agent,
+		optional<float> value, string* diagnostic)
 	{
-		return setIndividualOverride(individualOverrideTable().maximumRoutePlanningTime, id,
-			value, diagnostic);
+		return mAgentProfileEditor->setMaximumRoutePlanningTime(agent, value, diagnostic);
 	}
 
-	bool World::setAgentIndividualPermissionAdherence(AgentId id, optional<bool> value,
-		string* diagnostic)
+	bool World::setAgentIndividualObjectUsage(AgentId agent, optional<ObjectUsage> value, string* diagnostic)
 	{
-		return setIndividualOverride(individualOverrideTable().permissionAdherence, id,
-			value, diagnostic);
+		return mAgentProfileEditor->setObjectUsage(agent, value, diagnostic);
 	}
 
-	bool World::setAgentIndividualRemoteAccessPanels(AgentId id, optional<bool> value,
-		string* diagnostic)
+	bool World::setAgentIndividualObjectUsageDistance(AgentId agent, optional<float> value, string* diagnostic)
 	{
-		return setIndividualOverride(individualOverrideTable().remoteAccessPanels, id,
-			value, diagnostic);
+		return mAgentProfileEditor->setObjectUsageDistance(agent, value, diagnostic);
 	}
 
-	bool World::setAgentIndividualRemoteBoothWindowShutters(AgentId id, optional<bool> value,
-		string* diagnostic)
-	{
-		return setIndividualOverride(individualOverrideTable().remoteBoothWindowShutters, id,
-			value, diagnostic);
-	}
-
-	bool World::setAgentIndividualMobilityProfile(AgentId id, optional<MobilityProfile> value,
-		string* diagnostic)
-	{
-		return setIndividualOverride(individualOverrideTable().mobilityProfile, id,
-			value, diagnostic);
-	}
-
-	bool World::setAgentIndividualObjectUsage(AgentId id, optional<ObjectUsage> value, string* diagnostic)
-	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		return setAgentObjectUsageOverrides(id, value, lookup.entity->getIndividualObjectUsageDistance(), diagnostic);
-	}
-
-	bool World::setAgentIndividualObjectUsageDistance(AgentId id, optional<float> value, string* diagnostic)
-	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		return setAgentObjectUsageOverrides(id, lookup.entity->getIndividualObjectUsage(), value, diagnostic);
-	}
-
-	bool World::setAgentObjectUsageOverrides(AgentId id, optional<ObjectUsage> mode,
+	bool World::setAgentObjectUsageOverrides(AgentId agent, optional<ObjectUsage> mode,
 		optional<float> distance, string* diagnostic)
 	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (!mSimulationPaused)
-		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		auto* agent = lookup.entity;
-		if (!agent->objectUsageOverridesAreValid(mode, distance))
-		{
-			if (diagnostic) *diagnostic = "Object usage must be Arms, None or Remote control; usable distance must be finite and positive";
-			return false;
-		}
-		if (agent->getIndividualObjectUsage() == mode && agent->getIndividualObjectUsageDistance() == distance)
-		{
-			if (diagnostic) *diagnostic = "The individual Object usage properties are unchanged";
-			return false;
-		}
-		auto const beforeMode = agent->getObjectUsage();
-		auto const beforeDistance = agent->getObjectUsageDistance();
-		agent->setIndividualObjectUsage(mode);
-		agent->setIndividualObjectUsageDistance(distance);
-		agentObjectUsageChanged(id, beforeMode, beforeDistance);
-		invalidateSimulationSnapshot();
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
+		return mAgentProfileEditor->setObjectUsageOverrides(agent, mode, distance, diagnostic);
 	}
+
+	bool World::setAgentIndividualPermissionAdherence(AgentId agent,
+		optional<bool> value, string* diagnostic)
+	{
+		return mAgentProfileEditor->setPermissionAdherence(agent, value, diagnostic);
+	}
+
+	bool World::setAgentIndividualRemoteAccessPanels(AgentId agent,
+		optional<bool> value, string* diagnostic)
+	{
+		return mAgentProfileEditor->setRemoteAccessPanels(agent, value, diagnostic);
+	}
+
+	bool World::setAgentIndividualRemoteBoothWindowShutters(AgentId agent,
+		optional<bool> value, string* diagnostic)
+	{
+		return mAgentProfileEditor->setRemoteBoothWindowShutters(agent, value, diagnostic);
+	}
+
+	bool World::setAgentIndividualMobilityProfile(AgentId agent,
+		optional<MobilityProfile> value, string* diagnostic)
+	{
+		return mAgentProfileEditor->setMobilityProfile(agent, value, diagnostic);
+	}
+
 
 	void World::agentObjectUsageChanged(AgentId id, ObjectUsage beforeMode, float beforeDistance)
 	{

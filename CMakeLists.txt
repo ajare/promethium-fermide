@@ -762,6 +762,14 @@ if(BUILD_TESTING)
     set_tests_properties(agent-tag-service PROPERTIES
         LABELS "smoke;standalone;core" TIMEOUT 30)
 
+    add_executable(pf-agent-profile-editor-checks src/headless/AgentProfileEditorChecks.cpp)
+    target_include_directories(pf-agent-profile-editor-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-agent-profile-editor-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-agent-profile-editor-checks)
+    add_test(NAME agent-profile-editor COMMAND pf-agent-profile-editor-checks)
+    set_tests_properties(agent-profile-editor PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
     add_executable(pf-permission-requirement-store-checks src/headless/PermissionRequirementStoreChecks.cpp)
     target_include_directories(pf-permission-requirement-store-checks PRIVATE "${PF_INCLUDE_DIR}")
     target_link_libraries(pf-permission-requirement-store-checks PRIVATE promethium-fermide-core)
