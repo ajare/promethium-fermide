@@ -23,6 +23,7 @@ namespace core
 		friend class PermissionRequirementStore; // ADR 0022 requirement edits
 		friend class AuthorizationLedger; // ADR 0022 (#684) grant/deletion reference clearing
 		friend class DeviceConditionStore; // ADR 0022 device condition family
+		friend class WorldBuilder; // ADR 0022 (#686) authored Door construction
 	public:
 		// The authored visual manner in which the Door's leaf or leaves reveal its
 		// threshold. OpenApart's two leaves remain one logical Door. A tall OpenUp

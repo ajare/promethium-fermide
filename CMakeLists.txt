@@ -786,6 +786,14 @@ if(BUILD_TESTING)
     set_tests_properties(world-builder-sectors PROPERTIES
         LABELS "smoke;standalone;core" TIMEOUT 30)
 
+    add_executable(pf-world-builder-doors-checks src/headless/WorldBuilderDoorsChecks.cpp)
+    target_include_directories(pf-world-builder-doors-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-world-builder-doors-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-world-builder-doors-checks)
+    add_test(NAME world-builder-doors COMMAND pf-world-builder-doors-checks)
+    set_tests_properties(world-builder-doors PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
     add_executable(pf-permission-requirement-store-checks src/headless/PermissionRequirementStoreChecks.cpp)
     target_include_directories(pf-permission-requirement-store-checks PRIVATE "${PF_INCLUDE_DIR}")
     target_link_libraries(pf-permission-requirement-store-checks PRIVATE promethium-fermide-core)

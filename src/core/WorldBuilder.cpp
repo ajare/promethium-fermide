@@ -9,11 +9,17 @@
 #include "core/WorldBuilder.h"
 
 #include "core/Background.h"
+#include "core/BulkheadDoorSectorObject.h"
+#include "core/Button.h"
 #include "core/Defines.h"
+#include "core/Door.h"
+#include "core/DoorSectorObject.h"
 #include "core/Exceptions.h"
 #include "core/Facade.h"
 #include "core/Layer.h"
+#include "core/LiftTransit.h"
 #include "core/Location.h"
+#include "core/PhysicalControlPlacement.h"
 #include "core/Sector.h"
 #include "core/SectorObjectType.h"
 #include "core/SectorType.h"
@@ -645,7 +651,7 @@ namespace core
 				sector->getCellsWide(), sector->getLevelsHigh() }, { 0, sector->getCellX() + xOffset, sector->getCellY() } };
 		(void)mWorld.planPhysicalControls(sector->getLayerIndex(), sectorIndex, sector->getCellY(), &demand);
 		mWorld.beginStructuralEdit("addSectorLightSwitch");
-		auto ctrl = mWorld._createSectorButton("Lightswitch", sector, xOffset, sector->getCellY(), CORE_BUTTON_F_AUTO_REENABLE);
+		auto ctrl = _createSectorButton("Lightswitch", sector, xOffset, sector->getCellY(), CORE_BUTTON_F_AUTO_REENABLE);
 
 		auto object = ctrl.sector->_getObject(ctrl.index);
 		DeviceCommand command;
@@ -922,5 +928,996 @@ namespace core
 					static_cast<uint32_t>(permission.value));
 		mWorld.recordConstruction(std::move(record));
 		return result;
+	}
+
+	// ----------------------------------------------------------------------
+	// Physical control button seams
+	// ----------------------------------------------------------------------
+
+	WorldBuilder::CreateObjectResult WorldBuilder::_createSectorButton(string const& name, shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t flags, uint32_t* index)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		uint32_t buttonX = sector->getCellX() + x;
+		physicalControl::Demand demand;
+		demand.owner = { physicalControl::OwnerType::LocationLightSwitch,
+			{ sector->getLayerIndex(), buttonX, y, 1, 1 },
+			{ sector->getLayerIndex(), sector->getCellX(), sector->getCellY(),
+				sector->getCellsWide(), sector->getLevelsHigh() }, { 0, buttonX, y } };
+		auto const& obj = mWorld.createPhysicalControl(name, sector->getLayerIndex(), y, demand, flags);
+
+		if (index)
+		{
+			*index = obj.index;
+		}
+
+		return obj;
+	}
+
+	WorldBuilder::CreateObjectResult WorldBuilder::_createDoorButton(shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index, uint32_t approachSide)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		auto demand = mWorld.doorControlDemand(sector, x, y, cellsWide, approachSide);
+		auto obj = mWorld.createPhysicalControl("Door button", sector->getLayerIndex(), y, demand, flags);
+		if (index) *index = obj.index;
+		return obj;
+	}
+
+	WorldBuilder::CreateObjectResult WorldBuilder::_createBulkheadDoorButton(shared_ptr<const Sector> sector, uint32_t y, int side, uint32_t* index)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		uint32_t thresholdX = side == CORE_SIDE_LEFT ? sector->getCellX1() + 1 : sector->getCellX0();
+		auto demand = mWorld.insetControlDemand(sector, physicalControl::OwnerType::BulkheadDoor,
+			{ sector->getLayerIndex(), thresholdX, y, 2, 1 }, y, side);
+		auto obj = mWorld.createPhysicalControl("BulkheadDoor button", sector->getLayerIndex(), y, demand, 0);
+
+		if (index)
+		{
+			*index = obj.index;
+		}
+
+		return obj;
+	}
+
+	// ----------------------------------------------------------------------
+	// Ordinary Doors
+	// ----------------------------------------------------------------------
+
+	WorldBuilder::CreateObjectResult WorldBuilder::createDoor(uint32_t layerIndex, uint32_t x, uint32_t y,
+		uint32_t cellsWide, Door::Height height, uint32_t* vertexIdentifier)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		string caller = format("World::createDoor({}, {}, {}, {})", layerIndex, x, y, cellsWide);
+
+		// A Door is authored on the front Layer of its pair and opens into the Layer
+		// directly behind it.
+		auto const backLayer = layerBehind(layerIndex);
+
+		mWorld.validateCellOccupied(caller, layerIndex, x, y);
+		mWorld.validateCellOccupied(caller, backLayer, x, y);
+		// A threshold is owned by the Layer where it is authored. Objects on the
+		// destination Layer coexist with it and do not block its placement.
+		mWorld.validateCellHasNoDoor(caller, layerIndex, x, y);
+
+		// Find Sectors that the Door is connecting.
+		auto foreSector = mWorld._getSector(mWorld.mLayers[layerIndex]->getCellDefinition(x, y).sectorIndex);
+		auto backSector = mWorld._getSector(mWorld.mLayers[backLayer]->getCellDefinition(x, y).sectorIndex);
+
+		// A Door's front Sector is a Location or a Facade: a Facade follows
+		// the Room hosting rule (ADR 0003, ticket #48).
+		assert(isLocationLike(foreSector->getType()));
+
+		// Create door in Fore Location and add to Back.
+		uint32_t doorIndex = foreSector->createDoor(foreSector, backSector, x, y, cellsWide, height, vertexIdentifier);
+		backSector->addDoor(dynamic_pointer_cast<DoorSectorObject>(foreSector->_getObject(doorIndex)));
+
+		return {
+			doorIndex,
+			SectorObjectType::Door,
+			foreSector
+		};
+	}
+
+	WorldBuilder::CreateDoorResult WorldBuilder::_addSectorDoor(uint32_t layerIndex, uint32_t y, uint32_t x,
+		CreateDoorOptions const& options, bool controlsAreExternallyBound)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		string caller = format("World::addSectorDoor({}, {}, {}, {})", layerIndex, y, x, options.width);
+
+		auto const cellsWide = options.width;
+		constexpr uint32_t levelsHigh = 1;
+
+		// The placement preflight is the sole home of the rejecting checks. It has
+		// proved every cell of the rectangle is occupied inside one Sector on each
+		// Layer of the pair, so the Door's two Sectors come straight from the
+		// authored cell.
+		mWorld.validateSectorDoorPlacement(caller, layerIndex, y, x, options, controlsAreExternallyBound);
+
+		auto const backLayer = layerBehind(layerIndex);
+		auto frontLayer = mWorld.getLayer(layerIndex);
+		auto behindLayer = mWorld.getLayer(backLayer);
+		shared_ptr<Sector> sectors[2] = {
+			mWorld._getSector(frontLayer->getCellDefinition(x, y).sectorIndex),
+			mWorld._getSector(behindLayer->getCellDefinition(x, y).sectorIndex)
+		};
+
+		// Create door, making sure we add it to the other Location as well
+		// If there is a button, then a stateful button will control a stateless door - the state
+		// can only be in one object.
+		auto doorObject = createDoor(layerIndex, x, y, cellsWide, options.height);
+		auto doorSectorObject = dynamic_pointer_cast<DoorSectorObject>(doorObject.sector->_getObject(doorObject.index));
+		auto door = doorSectorObject->getDoor();
+		door->setOpenStyle(options.openStyle);
+		door->setSpeedOverride(options.speedOverride);
+		door->setHeightScale(options.heightScale);
+		// Generated transport Doors use the same construction helper but are not
+		// independently breakable in the ordinary Door slice.
+		door->mBreakable = isLocationLike(sectors[0]->getType())
+			&& isLocationLike(sectors[1]->getType());
+		door->mInitiallyBroken = door->mBroken = door->mBreakable && options.initiallyBroken;
+		door->mBrokenOpenPercentage = options.brokenOpenPercentage;
+		if (door->mBroken) door->mOpenPct = options.brokenOpenPercentage;
+		auto traversalResource = mWorld.createDoorTraversalResource(
+			format("Door at {},{}", x, y), door, options.activationMode, options.holdOpenSeconds);
+		door->configureTraversal(options.activationMode, traversalResource, options.holdOpenSeconds);
+		if (options.crossingLanes != 0)
+		{
+			mWorld.configureDoorCrossingLanes(traversalResource, options.crossingLanes);
+		}
+
+		// Door approaches are explicit resource geometry. Seed each side at the
+		// threshold, which Door placement already proved has traversable floor.
+		// Queue positions are expanded below only across contiguous usable floor;
+		// an unrelated gap elsewhere in a multi-level Room must not invalidate the Door.
+		auto const threshold = Vector2{ x + cellsWide * 0.5f, (float)y };
+		for (auto const& sector : sectors)
+			mWorld.configureDoorQueueLane(traversalResource,
+				SectorId{ (uint64_t)sector->getIndex() + 1 }, threshold,
+				Vector2::UNIT_X, 0.0f);
+
+		// Each side owns an independent centre-first queue. Expand left and right
+		// until that direction reaches either the Sector boundary or a floor gap.
+		auto queueResource = mWorld.mTraversalResources.find(traversalResource);
+		auto const halfWidth = CORE_RESOURCE_SLOT_WIDTH * 0.5f;
+		for (auto& lane : queueResource->mQueueLanes)
+		{
+			auto sector = mWorld.mSectors[(size_t)lane.sector.value - 1];
+			auto positionFits = [&](float positionX)
+			{
+				if (positionX - halfWidth < sector->getCellX0() - 0.001f
+					|| positionX + halfWidth > sector->getCellX1() + 1.0f + 0.001f
+					|| threshold.y < sector->getCellY0() - 0.001f
+					|| threshold.y + CORE_RESOURCE_SLOT_STANDING_HEIGHT > sector->getCellY1() + 1.0f + 0.001f)
+					return false;
+				auto const cellX = min(sector->getCellX1(), (uint32_t)floor(positionX));
+				auto const cellY = min(sector->getCellY1(), (uint32_t)floor(threshold.y));
+				return mWorld.mLayers[sector->getLayerIndex()]
+					->getCellDefinition(cellX, cellY).isTraversableOnFoot();
+			};
+
+			vector<Vector2> positions{ threshold };
+			bool scanLeft = true, scanRight = true;
+			for (uint32_t step = 1; scanLeft || scanRight; ++step)
+			{
+				auto const distance = step * (float)CORE_RESOURCE_QUEUE_SLOT_PITCH;
+				auto const left = threshold.x - distance;
+				auto const right = threshold.x + distance;
+				if (scanLeft)
+				{
+					scanLeft = positionFits(left);
+					if (scanLeft) positions.push_back({ left, threshold.y });
+				}
+				if (scanRight)
+				{
+					scanRight = positionFits(right);
+					if (scanRight) positions.push_back({ right, threshold.y });
+				}
+			}
+			lane.origin = threshold;
+			lane.direction = Vector2::UNIT_X;
+			lane.extent = positions.empty() ? 0.0f : max(abs(positions.back().x - threshold.x),
+				abs(positions.front().x - threshold.x));
+			lane.positions = std::move(positions);
+			lane.positionOwners.assign(lane.positions.size(), {});
+		}
+
+		// Only the authored Layer carries the Door in its cell grid. The shared
+		// Door remains registered in the destination Sector for rendering and
+		// traversal, without replacing that Layer's own object occupancy.
+		for (uint32_t iy = y; iy < y + levelsHigh; ++iy)
+			for (uint32_t ix = x; ix < x + cellsWide; ++ix)
+		{
+			auto& cellDef0 = frontLayer->getCellDefinition(ix, iy);
+			cellDef0.sectorObjectIndex = doorObject.index;
+			cellDef0.sectorObjectType = doorObject.type;
+		}
+
+		// Bind physical controls to typed device commands
+		CreateObjectResult createdControls[2];
+
+		for (int i = 0; i < 2; ++i)
+		{
+			if (options.controls[i])
+			{
+				auto buttonObject = _createDoorButton(sectors[i], x, y, cellsWide, CORE_BUTTON_F_AUTO_REENABLE, &createdControls[i].index, (uint32_t)i);
+				createdControls[i].type = SectorObjectType::InteractionPoint;
+				createdControls[i].sector = sectors[i];
+				// A Door Button renders like its Door: solid on the authored Layer,
+				// an outline from every other Layer.
+				static_pointer_cast<Button>(
+					buttonObject.sector->getObject(buttonObject.index)->_getObject())
+					->_setThresholdLayer(layerIndex);
+
+				if (!controlsAreExternallyBound)
+				{
+					DeviceCommand command;
+					command.type = DeviceCommandType::OpenDoor;
+					command.desiredState = true;
+					command.traversalResource = traversalResource;
+					auto point = mWorld.createPhysicalControlInteractionPoint("Door button",
+						createdControls[i], (float)y, CORE_RESOURCE_SLOT_STANDING_HEIGHT * 0.4f,
+						mWorld.getFixedTimestep(), { { command, InteractionBindingRequirement::Required } });
+					auto interaction = mWorld.mInteractionPoints.find(point);
+					for (auto permission : options.controlPermissionRequirements[i])
+					{
+						interaction->mPermissionRequirement.set(permission.value - 1);
+					}
+					mWorld.addTraversalControl(traversalResource, point);
+				}
+			}
+		}
+
+
+		return { doorObject, { createdControls[0], createdControls[1] }, traversalResource };
+	}
+
+	bool WorldBuilder::canAddCorridorDoor(uint32_t layerIndex, uint32_t y, uint32_t x, string* diagnostic) const
+	{
+		uint32_t liftX, liftWidth;
+		if (mWorld.getLiftLandingGeometry(layerBehind(layerIndex), y, x, liftX, liftWidth))
+		{
+			CreateDoorOptions options;
+			options.width = liftWidth;
+			return canAddCorridorDoor(layerIndex, y, liftX, options, diagnostic);
+		}
+		return canAddCorridorDoor(layerIndex, y, x, CreateDoorOptions{}, diagnostic);
+	}
+
+	bool WorldBuilder::canAddCorridorDoor(uint32_t layerIndex, uint32_t y, uint32_t x,
+		CreateDoorOptions const& options, string* diagnostic) const
+	{
+		auto reject = [diagnostic](string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		// A Door is authored on the front Layer of the pair it crosses.
+		if (layerIndex + 1 >= mWorld.getLayerCount())
+			return reject("A Door needs a Layer directly behind the Layer it is authored on");
+		auto const backLayer = layerBehind(layerIndex);
+		constexpr uint32_t levelsHigh = 1;
+		// Door authoring reserves the final column as the world boundary.
+		if (options.width == 0 || x >= mWorld.mCellsWide || options.width > mWorld.mCellsWide - x
+			|| x + options.width >= mWorld.mCellsWide || y + levelsHigh > mWorld.mLevelsHigh)
+			return reject("Door position is outside the world");
+		try
+		{
+			string const caller = "World::canAddCorridorDoor";
+			mWorld.validateSectorDoorOptions(caller, options);
+			uint32_t liftX, liftWidth;
+			bool const liftLanding = mWorld.getLiftLandingGeometry(backLayer, y, x, liftX, liftWidth);
+			if (liftLanding && options.heightScale) return reject("Transport-owned Doors refuse Height scale");
+			if (liftLanding && (x != liftX || options.width != liftWidth))
+				return reject(format("Lift landing doors must start at {} and be {} cells wide", liftX, liftWidth));
+			if (options.activationMode != DoorActivationMode::RemoteControlled
+				&& (options.controls[0] || options.controls[1]))
+				return reject("Physical controls require a remote-controlled Door");
+			mWorld.validateBounds(caller, x, y, options.width, levelsHigh);
+			// The whole Door rectangle stays inside one Sector on each Layer of its pair:
+			// a tall opening that straddles a Sector boundary on the Layer behind would
+			// join two Sectors with one threshold.
+			mWorld.validateSpaceOnlyInOneSector(caller, layerIndex, x, y, options.width, levelsHigh);
+			mWorld.validateSpaceOnlyInOneSector(caller, backLayer, x, y, options.width, levelsHigh);
+			shared_ptr<const Sector> sectors[2];
+			for (uint32_t iy = y; iy < y + levelsHigh; ++iy)
+				for (uint32_t ix = x; ix < x + options.width; ++ix)
+			{
+				auto const& foreCell = mWorld.mLayers[layerIndex]->getCellDefinition(ix, iy);
+				auto const& backCell = mWorld.mLayers[backLayer]->getCellDefinition(ix, iy);
+				if (!foreCell.occupied()) return reject("A Door must be placed in a Room, Corridor or Facade on the Layer where it is authored");
+				if (!backCell.occupied()) return reject("A Room, Corridor, Facade or Lift on the Layer behind is required here");
+				sectors[0] = mWorld.mSectors[foreCell.sectorIndex];
+				sectors[1] = mWorld.mSectors[backCell.sectorIndex];
+				auto fore = dynamic_pointer_cast<const Location>(sectors[0]);
+				auto back = dynamic_pointer_cast<const Location>(sectors[1]);
+				if (!fore) return reject("A Door must be placed in a Room, Corridor or Facade on the Layer where it is authored");
+				if (options.height == Door::Height::Tall
+					&& (fore->getType() != SectorType::Location || fore->isCorridor()))
+					return reject("A tall Door is only available in a Room");
+				if (liftLanding)
+				{
+					if (sectors[1]->getType() != SectorType::Lift)
+						return reject("The complete lift width must overlap one corridor");
+				}
+				else if (!back) return reject("A Room, Corridor, Facade on the Layer behind is required here");
+				// Only the authored Layer owns the Door's cell occupancy. Objects and
+				// Markers on the destination Layer remain independent.
+				if (foreCell.hasObject() || !foreCell.markers.empty())
+					return reject("Another object blocks Door placement");
+				// Only the threshold level carries the walking floor.  The levels above it
+				// are the opening's headroom, so they need no floor of their own.
+				if (iy == y && (!foreCell.isTraversableOnFoot() || !backCell.isTraversableOnFoot()))
+					return reject("Door placement requires a traversable floor on both layers");
+				// A Walkway or other floor above the threshold level runs through the
+				// opening, so the Door cannot cover it.
+				if (iy != y && (foreCell.floorType != CellFloorType::None
+					|| backCell.floorType != CellFloorType::None))
+					return reject("A Door cannot open through a Walkway above its threshold");
+				mWorld.validateObjectAllowedInSector(caller, SectorObjectType::Door, foreCell.sectorIndex);
+				mWorld.validateObjectAllowedInSector(caller, SectorObjectType::Door, backCell.sectorIndex);
+			}
+			if (!liftLanding)
+				for (auto sector : sectors)
+					mWorld.validatePanelWallRectangle(sector->getIndex(), {float(x) + CORE_DOOR_X_INSET, float(y)},
+						{float(x + options.width) - CORE_DOOR_X_INSET, float(y) + Door::effectiveHeight(options.height, options.heightScale)});
+			if (liftLanding)
+			{
+				auto const lift = dynamic_pointer_cast<const LiftTransit>(sectors[1]);
+				for (uint32_t stop = 0; stop < lift->getNumStops(); ++stop)
+				{
+					auto const& existing = lift->getStop(stop);
+					if ((uint32_t)((int)existing.sector->getCellY() + existing.sectorOffsetY) == y)
+						return reject("This lift already has a stop on this level");
+				}
+				auto demand = mWorld.doorControlDemand(sectors[0], x, y, options.width, 0);
+				(void)mWorld.planPhysicalControls(layerIndex, sectors[0]->getIndex(), y, &demand);
+			}
+			else for (uint32_t side = 0; side < 2; ++side)
+			{
+				if (!options.controls[side]) continue;
+				auto demand = mWorld.doorControlDemand(sectors[side], x, y, options.width, side);
+				(void)mWorld.planPhysicalControls(sectors[side]->getLayerIndex(), sectors[side]->getIndex(), y, &demand);
+			}
+		}
+		catch (std::exception const& error)
+		{
+			return reject(error.what());
+		}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	WorldBuilder::CreateDoorResult WorldBuilder::addSectorDoor(uint32_t layerIndex, uint32_t y, uint32_t x)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		return addSectorDoor(layerIndex, y, x, CreateDoorOptions{});
+	}
+
+	WorldBuilder::CreateDoorResult WorldBuilder::addSectorDoor(uint32_t layerIndex, uint32_t y, uint32_t x,
+		CreateDoorOptions const& options)
+	{
+		string const caller = format("World::addSectorDoor({}, {}, {}, {})", layerIndex, y, x, options.width);
+		// Every rejecting check runs before beginStructuralEdit() so a refused call
+		// stays a true no-op: no SectorObjects, traversal resources, events, or
+		// construction records, no modified flag, and no dirty topology
+		// (ticket #196).
+		mWorld.validateSectorDoorOptions(caller, options);
+		uint32_t liftX, liftWidth;
+		if (mWorld.getLiftLandingGeometry(layerBehind(layerIndex), y, x, liftX, liftWidth))
+		{
+			if (options.heightScale) throw WorldException(&mWorld, "Transport-owned Doors refuse Height scale");
+			string diagnostic;
+			CreateDoorOptions normalized;
+			normalized.width = liftWidth;
+			if (!canAddCorridorDoor(layerIndex, y, liftX, normalized, &diagnostic))
+				throw WorldException(&mWorld, diagnostic);
+			auto const liftIndex = mWorld.mLayers[layerBehind(layerIndex)]->getCellDefinition(liftX, y).sectorIndex;
+			auto lift = dynamic_pointer_cast<LiftTransit>(mWorld._getSector(liftIndex));
+			auto idlePlan = mWorld.planResizeLift(liftIndex, lift->getCellX(), lift->getCellY(),
+				lift->getCellsWide(), lift->getLevelsHigh());
+			if (!idlePlan.valid) throw WorldException(&mWorld, idlePlan.diagnostic);
+			idlePlan.stopOffsets.clear();
+			for (uint32_t stop = 0; stop < lift->getNumStops(); ++stop)
+			{
+				auto const& value = lift->getStop(stop);
+				idlePlan.stopOffsets.push_back((uint32_t)((int)value.sector->getCellY()
+					+ value.sectorOffsetY - (int)lift->getCellY()));
+			}
+			idlePlan.stopOffsets.push_back(y - lift->getCellY());
+			sort(idlePlan.stopOffsets.begin(), idlePlan.stopOffsets.end());
+			vector<World::ConstructionRecord> records;
+			if (!mWorld.prepareLiftEdit(idlePlan, records, diagnostic)) throw WorldException(&mWorld, diagnostic);
+			// The plan is complete and every authored record is built, so the edit
+			// can commit without a later refusal stranding a dirty World.
+			mWorld.beginStructuralEdit("addSectorDoor");
+			mWorld.rebuildFromConstructionRecords(std::move(records));
+			auto const& cell = mWorld.mLayers[layerIndex]->getCellDefinition(liftX, y);
+			auto sector = mWorld._getSector(cell.sectorIndex);
+			CreateObjectResult doorResult{ cell.sectorObjectIndex, SectorObjectType::Door, sector };
+			auto doorObject = dynamic_pointer_cast<DoorSectorObject>(sector->_getObject(cell.sectorObjectIndex));
+			return { doorResult, {}, doorObject->getDoor()->getTraversalResourceId() };
+		}
+		// Complete option and placement preflight, still before any mutation.
+		mWorld.validateSectorDoorPlacement(caller, layerIndex, y, x, options, false);
+		mWorld.beginStructuralEdit("addSectorDoor");
+		auto result = _addSectorDoor(layerIndex, y, x, options);
+		World::ConstructionRecord record{ World::ConstructionType::Door };
+		record.layer = layerIndex;
+		record.a = y; record.b = x; record.c = options.width; record.d = options.crossingLanes;
+		record.e = static_cast<uint32_t>(options.height);
+		record.p = options.controls[0]; record.q = options.controls[1];
+		record.i = static_cast<int32_t>(options.activationMode); record.x = options.holdOpenSeconds;
+		record.j = static_cast<int32_t>(options.openStyle);
+		record.initiallyBroken = options.initiallyBroken;
+		record.brokenOpenPercentage = options.brokenOpenPercentage;
+		record.doorSpeed = options.speedOverride;
+		record.doorHeightScale = options.heightScale;
+		for (size_t side = 0; side < 2; ++side)
+			for (auto permission : options.controlPermissionRequirements[side])
+				record.controlPermissionRequirements[side].push_back(
+					static_cast<uint32_t>(permission.value));
+		mWorld.recordConstruction(std::move(record));
+		return result;
+	}
+
+	void WorldBuilder::addSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		if (sectorIndex >= mWorld.mSectors.size() || !mWorld.mSectors[sectorIndex]
+			|| objectIndex >= mWorld.mSectors[sectorIndex]->getNumObjects())
+		{
+			throw WorldException(&mWorld, "The selected Door no longer exists");
+		}
+
+		auto doorObject = dynamic_pointer_cast<DoorSectorObject>(
+			mWorld.mSectors[sectorIndex]->getObject(objectIndex));
+		if (doorObject && (mWorld.isLiftOwnedDoor(doorObject) || mWorld.isShuttleOwnedDoor(doorObject)))
+			throw WorldException(&mWorld, "Transport-owned Doors are read-only; their call button is managed by the transport");
+		if (!doorObject)
+		{
+			throw WorldException(&mWorld, "The selected object is not a Door");
+		}
+		auto door = doorObject->getDoor();
+		auto sector = mWorld.mSectors[sectorIndex];
+		// A Door owns one Sector in each Layer of the pair it crosses. The selected
+		// Sector may sit on either side of that pair; giving the Door a Button
+		// always gives it Buttons on both sides.
+		bool const isFrontSide = door->getFrontSector() == sector;
+		if (!isFrontSide && door->getBackSector() != sector)
+		{
+			throw WorldException(&mWorld, "The selected Door does not belong to this Sector");
+		}
+		auto const doorLayer = isFrontSide ? sector->getLayerIndex() : sector->getLayerIndex() - 1;
+
+		auto source = find_if(mWorld.mConstructionRecords.begin(), mWorld.mConstructionRecords.end(),
+			[&](World::ConstructionRecord const& record)
+			{
+				return record.type == World::ConstructionType::Door
+					&& record.layer == doorLayer
+					&& record.a == doorObject->getCellY()
+					&& record.b == doorObject->getCellX()
+					&& record.c == door->getCellsWide();
+			});
+		if (source == mWorld.mConstructionRecords.end())
+		{
+			throw WorldException(&mWorld, "This Door does not support an added Door Button");
+		}
+		if (source->p && source->q)
+		{
+			throw WorldException(&mWorld, "This Door already has Door Buttons on both sides");
+		}
+		// The edit is all-or-nothing: every side that still lacks a Button must
+		// have space for one before either side is created.
+		shared_ptr<const Sector> sides[2];
+		sides[0] = door->getFrontSector();
+		sides[1] = door->getBackSector();
+		bool const hasButton[2] = { source->p, source->q };
+		for (uint32_t side = 0; side < 2; ++side)
+		{
+			if (hasButton[side]) continue;
+			auto demand = mWorld.doorControlDemand(sides[side], doorObject->getCellX(),
+				doorObject->getCellY(), door->getCellsWide(), side);
+			(void)mWorld.planPhysicalControls(sides[side]->getLayerIndex(), sides[side]->getIndex(),
+				doorObject->getCellY(), &demand);
+		}
+
+		mWorld.beginStructuralEdit("addSectorDoorButton");
+
+		for (uint32_t side = 0; side < 2; ++side)
+		{
+			if (hasButton[side]) continue;
+			auto control = _createDoorButton(sides[side], doorObject->getCellX(),
+				doorObject->getCellY(), door->getCellsWide(), CORE_BUTTON_F_AUTO_REENABLE, nullptr, side);
+			// A Door Button renders like its Door: solid on the Layer the Door was
+			// authored on, an outline from every other Layer.
+			auto button = static_pointer_cast<Button>(
+				control.sector->getObject(control.index)->_getObject());
+			button->_setThresholdLayer(door->getFrontLayer());
+			DeviceCommand command;
+			command.type = DeviceCommandType::OpenDoor;
+			command.desiredState = true;
+			command.traversalResource = door->getTraversalResourceId();
+			auto point = mWorld.createPhysicalControlInteractionPoint("Door button", control,
+				(float)doorObject->getCellY(), CORE_RESOURCE_SLOT_STANDING_HEIGHT * 0.4f,
+				mWorld.getFixedTimestep(), { { command, InteractionBindingRequirement::Required } });
+			auto interaction = mWorld.mInteractionPoints.find(point);
+			for (auto permission : source->values)
+			{
+				interaction->mPermissionRequirement.set(permission - 1);
+				source->controlPermissionRequirements[side].push_back(permission);
+			}
+			if (!mWorld.addTraversalControl(door->getTraversalResourceId(), point))
+			{
+				throw WorldException(&mWorld, "Could not bind the Door Button to its Door");
+			}
+		}
+
+		// A Door with a physical open control uses remote-controlled preparation.
+		auto resource = mWorld.mTraversalResources.find(door->getTraversalResourceId());
+		resource->mDoorActivationMode = DoorActivationMode::RemoteControlled;
+		door->configureTraversal(DoorActivationMode::RemoteControlled,
+			door->getTraversalResourceId(), door->mHoldOpenTime);
+		// Record the mode the Door had before its first editor-added Button so
+		// removal can restore it. Doors loaded with existing Buttons have no such
+		// history; removing those Buttons falls back to manual activation.
+		if (!source->p && !source->q)
+		{
+			source->preButtonActivationMode = source->i;
+		}
+		source->i = static_cast<int32_t>(DoorActivationMode::RemoteControlled);
+		source->p = true;
+		source->q = true;
+		// The direct interaction no longer exists. Its access intent now belongs
+		// independently to each generated control.
+		source->values.clear();
+		door->mPermissionRequirement.reset();
+	}
+
+	bool WorldBuilder::canAddSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex) const
+	{
+		if (sectorIndex >= mWorld.mSectors.size() || !mWorld.mSectors[sectorIndex]
+			|| objectIndex >= mWorld.mSectors[sectorIndex]->getNumObjects()) return false;
+		auto doorObject = dynamic_pointer_cast<DoorSectorObject>(
+			mWorld.mSectors[sectorIndex]->getObject(objectIndex));
+		if (!doorObject || mWorld.isLiftOwnedDoor(doorObject) || mWorld.isShuttleOwnedDoor(doorObject)) return false;
+		auto door = doorObject->getDoor();
+		auto sector = mWorld.mSectors[sectorIndex];
+		bool const isFrontSide = door->getFrontSector() == sector;
+		if (!isFrontSide && door->getBackSector() != sector) return false;
+		auto const doorLayer = isFrontSide ? sector->getLayerIndex() : sector->getLayerIndex() - 1;
+		auto source = find_if(mWorld.mConstructionRecords.begin(), mWorld.mConstructionRecords.end(),
+			[&](World::ConstructionRecord const& record)
+			{
+				return record.type == World::ConstructionType::Door
+					&& record.layer == doorLayer
+					&& record.a == doorObject->getCellY()
+					&& record.b == doorObject->getCellX()
+					&& record.c == door->getCellsWide();
+			});
+		if (source == mWorld.mConstructionRecords.end() || (source->p && source->q)) return false;
+		try
+		{
+			shared_ptr<const Sector> sides[] = { door->getFrontSector(), door->getBackSector() };
+			for (uint32_t side = 0; side < 2; ++side)
+			{
+				if (side == 0 ? source->p : source->q) continue;
+				auto demand = mWorld.doorControlDemand(sides[side], doorObject->getCellX(),
+					doorObject->getCellY(), door->getCellsWide(), side);
+				(void)mWorld.planPhysicalControls(sides[side]->getLayerIndex(), sides[side]->getIndex(),
+					doorObject->getCellY(), &demand);
+			}
+		}
+		catch (exception const&) { return false; }
+		return true;
+	}
+
+	bool WorldBuilder::canRemoveSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex) const
+	{
+		if (sectorIndex >= mWorld.mSectors.size() || !mWorld.mSectors[sectorIndex]
+			|| objectIndex >= mWorld.mSectors[sectorIndex]->getNumObjects()) return false;
+		auto doorObject = dynamic_pointer_cast<DoorSectorObject>(
+			mWorld.mSectors[sectorIndex]->getObject(objectIndex));
+		if (!doorObject || mWorld.isLiftOwnedDoor(doorObject) || mWorld.isShuttleOwnedDoor(doorObject)) return false;
+		auto door = doorObject->getDoor();
+		auto sector = mWorld.mSectors[sectorIndex];
+		bool const isFrontSide = door->getFrontSector() == sector;
+		if (!isFrontSide && door->getBackSector() != sector) return false;
+		auto const doorLayer = isFrontSide ? sector->getLayerIndex() : sector->getLayerIndex() - 1;
+		auto source = find_if(mWorld.mConstructionRecords.cbegin(), mWorld.mConstructionRecords.cend(),
+			[&](World::ConstructionRecord const& record)
+			{
+				return record.type == World::ConstructionType::Door
+					&& record.layer == doorLayer
+					&& record.a == doorObject->getCellY()
+					&& record.b == doorObject->getCellX()
+					&& record.c == door->getCellsWide();
+			});
+		return source != mWorld.mConstructionRecords.cend() && (source->p || source->q);
+	}
+
+	shared_ptr<const DoorSectorObject> WorldBuilder::removeSectorDoorButton(uint32_t sectorIndex,
+		uint32_t objectIndex, optional<vector<AccessPermissionId>> resultingRequirement)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		if (!mWorld.mSimulationPaused)
+			throw WorldException(&mWorld, "Removing a Door Button requires the simulation to be paused");
+		if (sectorIndex >= mWorld.mSectors.size() || !mWorld.mSectors[sectorIndex]
+			|| objectIndex >= mWorld.mSectors[sectorIndex]->getNumObjects())
+		{
+			throw WorldException(&mWorld, "The selected Door no longer exists");
+		}
+		auto doorObject = dynamic_pointer_cast<DoorSectorObject>(
+			mWorld.mSectors[sectorIndex]->getObject(objectIndex));
+		if (doorObject && (mWorld.isLiftOwnedDoor(doorObject) || mWorld.isShuttleOwnedDoor(doorObject)))
+			throw WorldException(&mWorld, "Transport-owned Doors are read-only; their call button is managed by the transport");
+		if (!doorObject)
+		{
+			throw WorldException(&mWorld, "The selected object is not a Door");
+		}
+		auto door = doorObject->getDoor();
+		auto sector = mWorld.mSectors[sectorIndex];
+		bool const isFrontSide = door->getFrontSector() == sector;
+		if (!isFrontSide && door->getBackSector() != sector)
+		{
+			throw WorldException(&mWorld, "The selected Door does not belong to this Sector");
+		}
+		auto const doorLayer = isFrontSide ? sector->getLayerIndex() : sector->getLayerIndex() - 1;
+		auto const doorX = doorObject->getCellX();
+		auto const doorY = doorObject->getCellY();
+		auto const doorWidth = door->getCellsWide();
+		auto source = find_if(mWorld.mConstructionRecords.begin(), mWorld.mConstructionRecords.end(),
+			[&](World::ConstructionRecord const& record)
+			{
+				return record.type == World::ConstructionType::Door
+					&& record.layer == doorLayer
+					&& record.a == doorY
+					&& record.b == doorX
+					&& record.c == doorWidth;
+			});
+		if (source == mWorld.mConstructionRecords.end())
+		{
+			throw WorldException(&mWorld, "This Door does not support an added Door Button");
+		}
+		if (!source->p && !source->q)
+		{
+			throw WorldException(&mWorld, "This Door has no Door Buttons to remove");
+		}
+
+		// Collapse two independent operations only when their requirements agree.
+		// A caller resolving a conflict must supply the resulting all-of set;
+		// omitting it refuses before the rebuild, leaving the Door untouched.
+		array<vector<AccessPermissionId>, 2> sideRequirements;
+		auto resource = mWorld.mTraversalResources.find(door->getTraversalResourceId());
+		for (auto pointId : resource->mControls)
+		{
+			auto point = mWorld.mInteractionPoints.find(pointId);
+			if (!point) continue;
+			size_t side = point->mSector == SectorId{ static_cast<uint64_t>(door->getBackSector()->getIndex()) + 1 } ? 1 : 0;
+			for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+				if (point->mPermissionRequirement.test(bit))
+					sideRequirements[side].push_back(AccessPermissionId{ bit + 1 });
+		}
+		vector<AccessPermissionId> collapsed;
+		if (resultingRequirement) collapsed = *resultingRequirement;
+		else if (sideRequirements[0] == sideRequirements[1]) collapsed = sideRequirements[0];
+		else throw WorldException(&mWorld,
+			"Door controls have different permission requirements; choose the resulting manual Door requirement");
+		bitset<AccessPermission::Capacity> seenPermissions;
+		for (auto permission : collapsed)
+		{
+			if (!mWorld.lookupAccessPermission(permission))
+				throw WorldException(&mWorld, "The resulting Door requirement references an unknown Access permission");
+			if (seenPermissions.test(permission.value - 1))
+				throw WorldException(&mWorld, "The resulting Door requirement contains a duplicate Access permission");
+			seenPermissions.set(permission.value - 1);
+		}
+
+		// The record is the authored source of truth: clearing its control flags
+		// and restoring the pre-Button activation mode, then replaying, removes
+		// both Buttons, their InteractionPoints, and their traversal bindings.
+		vector<World::ConstructionRecord> records = mWorld.mConstructionRecords;
+		for (auto& record : records)
+		{
+			if (record.type == World::ConstructionType::Door && record.layer == doorLayer
+				&& record.a == doorY && record.b == doorX && record.c == doorWidth)
+			{
+				record.p = false;
+				record.q = false;
+				record.i = record.preButtonActivationMode >= 0
+					? record.preButtonActivationMode
+					: static_cast<int32_t>(DoorActivationMode::Manual);
+				record.preButtonActivationMode = -1;
+				record.values.clear();
+				if (record.i == static_cast<int32_t>(DoorActivationMode::Manual))
+					for (auto permission : collapsed)
+						record.values.push_back(static_cast<uint32_t>(permission.value));
+				record.controlPermissionRequirements = {};
+			}
+		}
+		mWorld.rebuildFromConstructionRecords(std::move(records));
+
+		// The rebuild replaced every object, so re-resolve the Door on its front
+		// Layer and hand the fresh object back for the caller's selection.
+		auto const& cell = mWorld.mLayers[doorLayer]->getCellDefinition(doorX, doorY);
+		if (cell.sectorObjectType == SectorObjectType::Door && cell.sectorObjectIndex != ~0u)
+		{
+			auto rebuilt = dynamic_pointer_cast<DoorSectorObject>(
+				mWorld._getSector(cell.sectorIndex)->_getObject(cell.sectorObjectIndex));
+			if (rebuilt) return rebuilt;
+		}
+		return nullptr;
+	}
+
+	// ----------------------------------------------------------------------
+	// Bulkhead Doors
+	// ----------------------------------------------------------------------
+
+	WorldBuilder::CreateObjectResult WorldBuilder::createBulkheadDoor(uint32_t layerIndex, uint32_t x, uint32_t y, int side)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		ASSERT_SIDE_OK(side);
+
+		string caller = format("World::createBulkheadDoor({}, {}, {}, {})", layerIndex, x, y, side);
+		uint32_t cx0, cx1;
+
+		if (side == CORE_SIDE_LEFT)
+		{
+			cx0 = x - 1;
+			cx1 = x;
+		}
+		else
+		{
+			cx0 = x;
+			cx1 = x + 1;
+		}
+
+		mWorld.validateCellOccupied(caller, layerIndex, cx0, y);
+		mWorld.validateCellOccupied(caller, layerIndex, cx1, y);
+
+		// Find locations that the Door is connecting.
+		shared_ptr<Sector> leftSector{ nullptr };
+		shared_ptr<Sector> rightSector{ nullptr };
+
+		auto layer = mWorld.getLayer(layerIndex);
+
+		auto& cellDef0 = layer->getCellDefinition(cx0, y);
+		auto& cellDef1 = layer->getCellDefinition(cx1, y);
+
+		leftSector = mWorld._getSector(cellDef0.sectorIndex);
+		rightSector = mWorld._getSector(cellDef1.sectorIndex);
+
+		// Create bulkhead door in one location and add to the other
+		auto doorIndex = leftSector->createBulkheadDoor(leftSector, rightSector, y - leftSector->getCellY(), CORE_SIDE_LEFT);
+
+		rightSector->addBulkheadDoor(dynamic_pointer_cast<BulkheadDoorSectorObject>(leftSector->_getObject(doorIndex)), y - rightSector->getCellY(), CORE_SIDE_RIGHT);
+		
+		return {
+			doorIndex,
+			SectorObjectType::BulkheadDoor,
+			leftSector
+		};
+	}
+
+	bool WorldBuilder::canAddSectorBulkheadDoor(uint32_t layerIndex, uint32_t y, uint32_t x,
+		int side, CreateBulkheadDoorOptions const& options, string* diagnostic) const
+	{
+		auto reject = [diagnostic](string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		if (layerIndex >= mWorld.mLayers.size() || y >= mWorld.mLevelsHigh
+			|| (side != CORE_SIDE_LEFT && side != CORE_SIDE_RIGHT))
+			return reject("Bulkhead Door position is outside the world");
+		uint32_t thresholdX;
+		if (side == CORE_SIDE_LEFT)
+		{
+			if (x == 0 || x >= mWorld.mCellsWide) return reject("Bulkhead Doors require a cell on each side");
+			thresholdX = x;
+		}
+		else
+		{
+			if (x >= mWorld.mCellsWide - 1) return reject("Bulkhead Doors require a cell on each side");
+			thresholdX = x + 1;
+		}
+		if (!isFiniteTiming(options.holdOpenSeconds))
+			return reject("Bulkhead Door hold-open time must be finite and non-negative");
+		if (!Door::speedIsValid(options.speedOverride))
+			return reject("Bulkhead Door speed must be finite and positive");
+		if (!Door::brokenOpenPercentageIsValid(options.brokenOpenPercentage))
+			return reject("Bulkhead Door broken open percentage must be a finite value from 0 to 1");
+		if (!isfinite(options.automaticSensorDistance)
+			|| options.automaticSensorDistance < 0.0f)
+			return reject("Bulkhead Door automatic sensor distance must be finite and non-negative");
+		if (options.crossingLanes != 1)
+			return reject("Bulkhead Doors support exactly one crossing lane");
+		if (options.activationMode != DoorActivationMode::RemoteControlled
+			&& (options.controls[0] || options.controls[1]))
+			return reject("Physical controls require a remote-controlled Bulkhead Door");
+		if (!mWorld.mDeserializingConstruction)
+			for (auto const& requirement : options.controlPermissionRequirements)
+				for (auto permission : requirement)
+					if (!mWorld.lookupAccessPermission(permission))
+						return reject("A Bulkhead Door control requirement references an unknown Access permission");
+		try
+		{
+			auto const& left = mWorld.mLayers[layerIndex]->getCellDefinition(thresholdX - 1, y);
+			auto const& right = mWorld.mLayers[layerIndex]->getCellDefinition(thresholdX, y);
+			if (!left.occupied() || !right.occupied())
+				return reject("Bulkhead Doors require a Location on each side");
+			if (left.sectorIndex == right.sectorIndex)
+				return reject("Bulkhead Doors must connect two distinct Locations");
+			if (!dynamic_pointer_cast<const Location>(mWorld.mSectors[left.sectorIndex])
+				|| !dynamic_pointer_cast<const Location>(mWorld.mSectors[right.sectorIndex]))
+				return reject("Bulkhead Doors can only connect Locations");
+			// A Bulkhead Door is set into a pair of wall ends. A Facade has no
+			// wall ends, so there is nowhere for one to go (ADR 0003).
+			if (mWorld.mSectors[left.sectorIndex]->getType() == SectorType::Facade
+				|| mWorld.mSectors[right.sectorIndex]->getType() == SectorType::Facade)
+				return reject("A Bulkhead Door cannot connect a Facade: a Facade has no wall ends");
+			if (!left.isTraversableOnFoot() || !right.isTraversableOnFoot())
+				return reject("Bulkhead Door placement requires a traversable floor on both sides");
+			if (left.bulkheadIndices[CORE_SIDE_RIGHT] != ~0u
+				|| right.bulkheadIndices[CORE_SIDE_LEFT] != ~0u)
+				return reject("A Bulkhead Door already occupies this boundary");
+			if (left.sectorObjectType == SectorObjectType::Door
+				|| isWindowAperture(left.sectorObjectType)
+				|| right.sectorObjectType == SectorObjectType::Door
+				|| isWindowAperture(right.sectorObjectType))
+				return reject("Another object blocks Bulkhead Door placement");
+			mWorld.validateObjectAllowedInSector("World::canAddSectorBulkheadDoor",
+				SectorObjectType::BulkheadDoor, left.sectorIndex);
+			mWorld.validateObjectAllowedInSector("World::canAddSectorBulkheadDoor",
+				SectorObjectType::BulkheadDoor, right.sectorIndex);
+			for (auto owner : {left.sectorIndex, right.sectorIndex})
+				mWorld.validatePanelWallRectangle(owner,
+					{float(thresholdX) - CORE_BULKHEAD_DOOR_WIDTH * 0.5f, float(y)},
+					{float(thresholdX) + CORE_BULKHEAD_DOOR_WIDTH * 0.5f, float(y) + CORE_DOOR_HEIGHT});
+			vector<physicalControl::Demand> demands;
+			for (int controlSide = 0; controlSide < CORE_NUM_SIDES; ++controlSide)
+				if (options.controls[controlSide])
+					demands.push_back(mWorld.insetControlDemand(mWorld.mSectors[controlSide == CORE_SIDE_LEFT ? left.sectorIndex : right.sectorIndex],
+						physicalControl::OwnerType::BulkheadDoor, { layerIndex, thresholdX, y, 2, 1 }, y, controlSide));
+			if (demands.empty()) mWorld.validatePhysicalControlBoundary(layerIndex, y, thresholdX);
+			else mWorld.validatePhysicalControlAdditions(demands, thresholdX);
+		}
+		catch (Exception const& error) { return reject(error.getMessage()); }
+		catch (exception const& error) { return reject(error.what()); }
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	WorldBuilder::CreateBulkheadDoorResult WorldBuilder::addSectorBulkheadDoor(uint32_t layerIndex, uint32_t y,
+		uint32_t x, int side)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		return addSectorBulkheadDoor(layerIndex, y, x, side, CreateBulkheadDoorOptions{});
+	}
+
+	WorldBuilder::CreateBulkheadDoorResult WorldBuilder::addSectorBulkheadDoor(uint32_t layerIndex, uint32_t y, uint32_t x,
+		int side, CreateBulkheadDoorOptions const& options)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		ASSERT_SIDE_OK(side);
+
+		string caller = format("World::addSectorBulkheadDoor({}, {}, {}, {})", layerIndex, y, x, side);
+		string diagnostic;
+		// The option and placement preflight runs before beginStructuralEdit() so a
+		// refused Bulkhead Door add is a true no-op and no non-finite timing
+		// reaches the tick conversion (#198).
+		if (!canAddSectorBulkheadDoor(layerIndex, y, x, side, options, &diagnostic))
+			throw WorldException(&mWorld, format("{} - {}", caller, diagnostic));
+
+		mWorld.beginStructuralEdit("addSectorBulkheadDoor");
+
+		// Get locations on either side.
+		auto layer = mWorld.getLayer(layerIndex);
+
+		uint32_t cx0, cx1;
+
+		if (side == CORE_SIDE_LEFT)
+		{
+			cx0 = x - 1;
+			cx1 = x;
+		}
+		else
+		{
+			cx0 = x;
+			cx1 = x + 1;
+		}
+
+		auto& cellDef0 = layer->getCellDefinition(cx0, y);
+		auto& cellDef1 = layer->getCellDefinition(cx1, y);
+
+		// Check that there are no Doors or Windows in cells X and X-1, as there won't
+		// be space for them.
+		if (cellDef0.sectorObjectType == SectorObjectType::Door || isWindowAperture(cellDef0.sectorObjectType))
+		{
+			throw WorldException(&mWorld, format("{} - cell at {}, {} has an object blocking the Bulkhead door", caller, cx0, y));
+		}
+		if (cellDef1.sectorObjectType == SectorObjectType::Door || isWindowAperture(cellDef1.sectorObjectType))
+		{
+			throw WorldException(&mWorld, format("{} - cell at {}, {} has an object blocking the Bulkhead door", caller, cx1, y));
+		}
+
+		mWorld.validateObjectAllowedInSector(caller, SectorObjectType::BulkheadDoor, cellDef0.sectorIndex);
+		mWorld.validateObjectAllowedInSector(caller, SectorObjectType::BulkheadDoor, cellDef1.sectorIndex);
+		
+		// Create Bulkhead door
+		auto doorObject = createBulkheadDoor(layerIndex, x, y, side);
+
+		// Update cells
+		cellDef0.bulkheadIndices[CORE_SIDE_RIGHT] = doorObject.index;
+		cellDef1.bulkheadIndices[CORE_SIDE_LEFT] = doorObject.index;
+		mWorld.reflowAllPhysicalControls();
+
+		// Add buttons: place two, one of each side.
+		auto sector0 = mWorld._getSector(cellDef0.sectorIndex);
+		auto sector1 = mWorld._getSector(cellDef1.sectorIndex);
+
+		auto dooSectorObject = doorObject.sector->_getObject(doorObject.index);
+		auto door = dynamic_pointer_cast<BulkheadDoorSectorObject>(dooSectorObject)->getDoor();
+
+		auto traversalResource = mWorld.createDoorTraversalResource(format("Bulkhead door at {},{}", x, y),
+			door, options.activationMode, options.holdOpenSeconds);
+		door->configureTraversal(options.activationMode, traversalResource, options.holdOpenSeconds);
+		door->setAutomaticSensorDistance(options.automaticSensorDistance);
+		door->setSpeedOverride(options.speedOverride);
+		door->mBreakable = true;
+		door->mInitiallyBroken = door->mBroken = options.initiallyBroken;
+		door->mBrokenOpenPercentage = options.brokenOpenPercentage;
+		if (door->mBroken) door->mOpenPct = options.brokenOpenPercentage;
+		mWorld.configureDoorCrossingLanes(traversalResource, options.crossingLanes);
+
+		// Same-layer geometry gets explicit approaches on opposite sides of the
+		// threshold; no Y/layer heuristic participates in authorization.
+		auto threshold = Vector2{ (float)cx1, (float)y };
+		auto leftOrigin = threshold - Vector2::UNIT_X * CORE_RESOURCE_QUEUE_SLOT_PITCH;
+		auto rightOrigin = threshold + Vector2::UNIT_X * CORE_RESOURCE_QUEUE_SLOT_PITCH;
+		mWorld.configureDoorQueueLane(traversalResource, SectorId{ (uint64_t)sector0->getIndex() + 1 },
+			leftOrigin, Vector2::NEGATIVE_UNIT_X,
+			max(0.0f, leftOrigin.x - (sector0->getCellX0() + CORE_RESOURCE_SLOT_WIDTH * 0.5f)));
+		mWorld.configureDoorQueueLane(traversalResource, SectorId{ (uint64_t)sector1->getIndex() + 1 },
+			rightOrigin, Vector2::UNIT_X,
+			max(0.0f, (sector1->getCellX1() + 1.0f - CORE_RESOURCE_SLOT_WIDTH * 0.5f) - rightOrigin.x));
+
+		CreateObjectResult createdControls[2];
+
+		for (int i = 0; i < CORE_NUM_SIDES; ++i)
+		{
+			if (!options.controls[i]) continue;
+			auto sector = i == CORE_SIDE_LEFT ? sector0 : sector1;
+			createdControls[i] = _createBulkheadDoorButton(sector, y, i);
+			if (options.activationMode == DoorActivationMode::RemoteControlled)
+			{
+				DeviceCommand command;
+				command.type = DeviceCommandType::OpenDoor;
+				command.desiredState = true;
+				command.traversalResource = traversalResource;
+				auto point = mWorld.createPhysicalControlInteractionPoint("Bulkhead door button",
+					createdControls[i], (float)y, 0.15f, mWorld.getFixedTimestep(),
+					{ { command, InteractionBindingRequirement::Required } });
+				auto interaction = mWorld.mInteractionPoints.find(point);
+				for (auto permission : options.controlPermissionRequirements[i])
+				{
+					interaction->mPermissionRequirement.set(permission.value - 1);
+				}
+				mWorld.addTraversalControl(traversalResource, point);
+			}
+		}
+		World::ConstructionRecord record{ World::ConstructionType::BulkheadDoor };
+		record.a = layerIndex; record.b = y; record.c = x; record.i = side;
+		record.p = options.controls[0]; record.q = options.controls[1];
+		record.j = static_cast<int32_t>(options.activationMode);
+		record.x = options.holdOpenSeconds; record.d = options.crossingLanes;
+		record.y = options.automaticSensorDistance;
+		record.initiallyBroken = options.initiallyBroken;
+		record.brokenOpenPercentage = options.brokenOpenPercentage;
+		record.doorSpeed = options.speedOverride;
+		for (size_t controlSide = 0; controlSide < 2; ++controlSide)
+			for (auto permission : options.controlPermissionRequirements[controlSide])
+				record.controlPermissionRequirements[controlSide].push_back(
+					static_cast<uint32_t>(permission.value));
+		mWorld.recordConstruction(std::move(record));
+		return { doorObject, { createdControls[0], createdControls[1] }, traversalResource };
 	}
 }

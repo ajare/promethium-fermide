@@ -2,7 +2,9 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include "core/Window.h"
 #include "core/World.h"
@@ -13,9 +15,10 @@ namespace core
 	// the World that owns it (ADR 0022).
 	//
 	// This is the WorldBuilder seam: the Sector family - Room, Corridor,
-	// Facade, and Background authoring, plus the SectorObject family -
-	// Walkway, ForceBridge, Window, BoothWindow, and LightSwitch
-	// authoring. Each add is judged before anything is written, so a
+	// Facade, and Background authoring, the Door family - ordinary Door
+	// and Bulkhead Door authoring with their Buttons, plus the
+	// SectorObject family - Walkway, ForceBridge, Window, BoothWindow,
+	// and LightSwitch authoring. Each add is judged before anything is written, so a
 	// refusal leaves the World exactly as it was found; each accepted add
 	// records its construction record so replay reproduces it verbatim.
 	// The Walkway add carries its detached-replay path: once the document
@@ -49,6 +52,10 @@ namespace core
 		using CreateWindowResult = World::CreateWindowResult;
 		using CreateForceBridgeOptions = World::CreateForceBridgeOptions;
 		using CreateForceBridgeResult = World::CreateForceBridgeResult;
+		using CreateDoorOptions = World::CreateDoorOptions;
+		using CreateDoorResult = World::CreateDoorResult;
+		using CreateBulkheadDoorOptions = World::CreateBulkheadDoorOptions;
+		using CreateBulkheadDoorResult = World::CreateBulkheadDoorResult;
 
 		explicit WorldBuilder(World& world);
 
@@ -153,6 +160,82 @@ namespace core
 
 		CreateWindowResult addBoothWindow(uint32_t layer, uint32_t y, uint32_t x,
 			Window::State state);
+
+		// ------------------------------------------------------------------
+		// Ordinary Doors
+		// ------------------------------------------------------------------
+
+		// A Door is authored on the front Layer of its pair and opens into
+		// the Layer directly behind it. This is the raw creation seam the
+		// judged add family and the World's transport builders use.
+		CreateObjectResult createDoor(uint32_t layerIndex, uint32_t x, uint32_t y,
+			uint32_t cellsWide, Door::Height height = Door::Height::Regular,
+			uint32_t* vertexIdentifier = nullptr);
+
+		// The complete Door build: placement preflight, threshold creation,
+		// traversal resource, queue lanes, and optional per-side Buttons.
+		// The lift and shuttle builders call it with
+		// controlsAreExternallyBound so their own binding path owns the
+		// Button InteractionPoints.
+		CreateDoorResult _addSectorDoor(uint32_t layerIndex, uint32_t y, uint32_t x,
+			CreateDoorOptions const& options, bool controlsAreExternallyBound = false);
+
+		// The judged ordinary Door add: every rejecting check runs before
+		// any mutation so a refusal leaves the World exactly as found.
+		bool canAddCorridorDoor(uint32_t layerIndex, uint32_t y, uint32_t x,
+			std::string* diagnostic = nullptr) const;
+		bool canAddCorridorDoor(uint32_t layerIndex, uint32_t y, uint32_t x,
+			CreateDoorOptions const& options, std::string* diagnostic = nullptr) const;
+
+		CreateDoorResult addSectorDoor(uint32_t layerIndex, uint32_t y, uint32_t x);
+		CreateDoorResult addSectorDoor(uint32_t layerIndex, uint32_t y, uint32_t x,
+			CreateDoorOptions const& options);
+
+		// Gives the selected Door physical open controls on both sides of
+		// the threshold; the missing side(s) gain one, a side that lacks a
+		// Button but has no space for one refuses before anything changes.
+		void addSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex);
+		bool canAddSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex) const;
+
+		// Removes every Door Button from the selected Door and returns the
+		// rebuilt Door object; the pre-Button activation mode recorded in
+		// the Door's construction record is restored.
+		bool canRemoveSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex) const;
+		std::shared_ptr<const DoorSectorObject> removeSectorDoorButton(
+			uint32_t sectorIndex, uint32_t objectIndex,
+			std::optional<std::vector<AccessPermissionId>> resultingRequirement = std::nullopt);
+
+		// ------------------------------------------------------------------
+		// Bulkhead Doors
+		// ------------------------------------------------------------------
+
+		// A Bulkhead Door sits in the boundary between two adjacent
+		// Locations on one Layer; this is the raw creation seam.
+		CreateObjectResult createBulkheadDoor(uint32_t layerIndex, uint32_t x,
+			uint32_t y, int side);
+
+		bool canAddSectorBulkheadDoor(uint32_t layerIndex, uint32_t y, uint32_t x,
+			int side, CreateBulkheadDoorOptions const& options,
+			std::string* diagnostic = nullptr) const;
+		CreateBulkheadDoorResult addSectorBulkheadDoor(uint32_t layerIndex,
+			uint32_t y, uint32_t x, int side);
+		CreateBulkheadDoorResult addSectorBulkheadDoor(uint32_t layerIndex,
+			uint32_t y, uint32_t x, int side, CreateBulkheadDoorOptions const& options);
+
+		// ------------------------------------------------------------------
+		// Physical control button seams
+		// ------------------------------------------------------------------
+
+		// The unjudged button creation seams shared by the add families
+		// above and the World's own builders (light switch, transports).
+		CreateObjectResult _createSectorButton(std::string const& name,
+			std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y,
+			uint32_t flags, uint32_t* index = nullptr);
+		CreateObjectResult _createDoorButton(std::shared_ptr<const Sector> sector,
+			uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags,
+			uint32_t* index = nullptr, uint32_t approachSide = 0);
+		CreateObjectResult _createBulkheadDoorButton(std::shared_ptr<const Sector> sector,
+			uint32_t y, int side, uint32_t* index = nullptr);
 
 		// ------------------------------------------------------------------
 		// Light switch

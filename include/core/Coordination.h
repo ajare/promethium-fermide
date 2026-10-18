@@ -347,6 +347,7 @@ namespace core
 		friend class AuthorizationLedger; // ADR 0022 (#684) grant/deletion reference clearing
 		friend class TraversalResourceRegistry; // ADR 0022 resource record family
 		friend class DeviceConditionStore; // ADR 0022 authored-vs-runtime Broken family
+		friend class WorldBuilder; // ADR 0022 (#686) authored Door traversal wiring
 		std::string mName;
 		std::shared_ptr<Door> mDoor;
 		std::shared_ptr<Window> mWindow;

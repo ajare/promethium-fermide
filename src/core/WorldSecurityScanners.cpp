@@ -1,4 +1,5 @@
 #include "core/World.h"
+#include "core/WorldBuilder.h"
 #include "core/ChamberTransit.h"
 #include "core/Exceptions.h"
 
@@ -61,7 +62,7 @@ namespace core
 		for (int side = 0; side < 2; ++side)
 		{
 			auto thresholdX = side == CORE_SIDE_LEFT ? x : x + width;
-			auto created = createBulkheadDoor(layer, thresholdX, y, CORE_SIDE_LEFT);
+			auto created = mWorldBuilder->createBulkheadDoor(layer, thresholdX, y, CORE_SIDE_LEFT);
 			grid->getCellDefinition(thresholdX - 1, y).bulkheadIndices[CORE_SIDE_RIGHT] = created.index;
 			grid->getCellDefinition(thresholdX, y).bulkheadIndices[CORE_SIDE_LEFT] = created.index;
 			auto object = std::dynamic_pointer_cast<BulkheadDoorSectorObject>(created.sector->getObject(created.index));

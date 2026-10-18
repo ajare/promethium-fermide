@@ -1831,16 +1831,9 @@ namespace core
 
 		CreateObjectResult createShuttle(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t numCars, uint32_t carWidth, std::vector<uint32_t> const& stopOffsets);
 
-		// A Door is authored on the front Layer of its pair and opens into the Layer
-		// directly behind it.
-		CreateObjectResult createDoor(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide,
-			Door::Height height = Door::Height::Regular, uint32_t* vertexIdentifier = nullptr);
-
 		CreateObjectResult createWindow(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, uint32_t* vertexIdentifier = nullptr, bool boothWindow = false);
 		CreateWindowResult addWindowAperture(uint32_t layer, uint32_t y, uint32_t x,
 			uint32_t width, uint32_t height, CreateWindowOptions const& options, bool boothWindow);
-
-		CreateObjectResult createBulkheadDoor(uint32_t layerIndex, uint32_t x, uint32_t y, int side);
 
 		// All stationary physical owners use authored canonical demands.
 		CreateObjectResult createPhysicalControl(std::string const& name, uint32_t layerIndex,
@@ -1890,22 +1883,18 @@ namespace core
 
 		CreateObjectResult createPlatformLiftSectorObject(uint32_t layerIndex, uint32_t x, uint32_t y, CreateLiftOptions const& options, uint32_t* vertexIdentifier = nullptr);
 
-		CreateDoorResult _addSectorDoor(uint32_t layerIndex, uint32_t y, uint32_t x, CreateDoorOptions const& options,
-			bool controlsAreExternallyBound = false);
-
 		// The complete Door option and placement preflight. Every rejecting check a
-		// Door add can make lives here, so the public addSectorDoor() can run it
-		// before beginStructuralEdit() and a refused call stays a true no-op
-		// (ticket #196). _addSectorDoor() runs it again so the lift and shuttle
-		// builders stay self-validating.
+		// Door add can make lives in the PlacementValidator behind this seam, so
+		// the builder's addSectorDoor() can run it before beginStructuralEdit()
+		// and a refused call stays a true no-op (ticket #196). _addSectorDoor()
+		// runs it again so the lift and shuttle builders stay self-validating.
 		void validateSectorDoorPlacement(std::string const& caller, uint32_t layerIndex, uint32_t y,
 			uint32_t x, CreateDoorOptions const& options, bool controlsAreExternallyBound) const;
 
-		CreateObjectResult _createSectorButton(std::string const& name, std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t flags, uint32_t* index = nullptr);
-
-		CreateObjectResult _createDoorButton(std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index = nullptr, uint32_t approachSide = 0);
-
-		CreateObjectResult _createBulkheadDoorButton(std::shared_ptr<const Sector> sector, uint32_t y, int side, uint32_t* index = nullptr);
+		// The Door build seams (_addSectorDoor) and the physical-control button
+		// seams (_createSectorButton, _createDoorButton, _createBulkheadDoorButton)
+		// live in WorldBuilder (#686, ADR 0022); the transport builders and the
+		// public add family on the facade forward there.
 
 		void buildGraph();
 
