@@ -812,6 +812,33 @@ bool renderWaterTreatmentEntry([[maybe_unused]] core::StationSystemsSettings& dr
 		&treatment.specificEnergyKWhPerKg, 0.0, 0.0, "%.4f");
 	ImGui::InputDouble((label + " consumable per kg").c_str(),
 		&treatment.consumablePerKg, 0.0, 0.0, "%.6f");
+	ImGui::TextUnformatted("Removal fractions (default: all removed)");
+	for (auto const* name : core::StationWaterDryConstituents)
+	{
+		auto found = treatment.removalFractions.find(name);
+		bool authored = found != treatment.removalFractions.end();
+		if (ImGui::Checkbox((label + " override " + name).c_str(), &authored))
+		{
+			if (authored) treatment.removalFractions[name] = 1.0;
+			else treatment.removalFractions.erase(name);
+		}
+		if (authored)
+			ImGui::InputDouble((label + " removal " + name).c_str(),
+				&treatment.removalFractions.at(name), 0, 0, "%.6f");
+	}
+	auto const source = std::find_if(draft.stores.begin(), draft.stores.end(),
+		[&](auto const& store) { return store.id == treatment.sourceStoreId; });
+	if (source == draft.stores.end()) ImGui::TextUnformatted("Effluent preview: connect a source store");
+	else if (!source->composition) ImGui::TextUnformatted("Effluent preview: pure water (declared source)");
+	else
+	{
+		auto const effluent = core::waterTreatmentEffluent(*source->composition, treatment);
+		double total = 0;
+		for (auto const& [name, mass] : effluent) if (name != "energy") total += mass;
+		ImGui::TextUnformatted("Effluent concentration preview (declared source; kg/kg stream)");
+		for (auto const* name : core::StationWaterDryConstituents)
+			ImGui::Text("  %s: %.8g", name, total > 0 ? effluent.at(name) / total : 0.0);
+	}
 	ImGui::InputInt((label + " priority").c_str(), &treatment.priority, 1, 0);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))

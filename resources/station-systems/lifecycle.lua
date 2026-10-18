@@ -2248,9 +2248,24 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             streams[stream] = declareWaterStore(streamIds[stream], streamRoles[stream],
                 treatment.hazardClass, true)
         end
+        local removals = treatment.removalFractions or {}
+        local species = {dryOrganics=true, nutrientNitrogen=true, atmosphericNitrogen=true,
+            phosphorus=true, potassium=true, otherMinerals=true}
+        for name, fraction in pairs(removals) do
+            assert(species[name], "unknown removal constituent '" .. name .. "'")
+            assert(type(fraction) == 'number' and fraction == fraction
+                and fraction >= 0 and fraction <= 1, 'invalid removal fraction: ' .. name)
+        end
         if streams[1].composition then
-            assert(streams[3].composition ~= nil,
-                'loaded treatment requires a compound concentrate store')
+            for name, mass in pairs(compositionLedgerOf(streams[1].composition, 1, 1)) do
+                if species[name] and mass > 0 then
+                    local removal = removals[name] == nil and 1 or removals[name]
+                    assert(removal == 1 or streams[2].composition,
+                        'loaded treatment requires a compound treated store: ' .. name)
+                    assert(removal == 0 or streams[3].composition,
+                        'loaded treatment requires a compound concentrate store: ' .. name)
+                end
+            end
         end
         local consumable = declareWaterStore(treatment.consumableStore, 'consumable',
             treatment.hazardClass, true)
@@ -2288,6 +2303,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             clearancePerKg = treatment.clearancePerKg or 0,
             throughputKgPerS = treatment.throughputKgPerS,
             recoveryRatio = treatment.recoveryRatio,
+            removalFractions = removals,
+            lastRemovedConstituents = {}, lastPassedConstituents = {},
+            removedConstituents = {}, passedConstituents = {},
             specificEnergyKWhPerKg = treatment.specificEnergyKWhPerKg,
             consumablePerKg = treatment.consumablePerKg,
             priority = treatment.priority,
@@ -6132,6 +6150,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local consumable = treatment.consumable
             treatment.lastScale = 0
             treatment.lastLimiter = ''
+            treatment.lastRemovedConstituents = {}
+            treatment.lastPassedConstituents = {}
             treatment.lastProcessed = 0
             treatment.lastTreated = 0
             treatment.lastConcentrate = 0
@@ -6151,6 +6171,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 local fullKg = treatment.throughputKgPerS * fixed_seconds
                 local waterFraction = source.composition and storeComposition(source).moisture or 1
                 local treatedFraction = waterFraction * treatment.recoveryRatio
+                if source.composition then
+                    for name, mass in pairs(compositionLedgerOf(storeComposition(source), 1, 1)) do
+                        if name ~= 'water' and name ~= 'energy' then
+                            local removal = treatment.removalFractions[name]
+                            if removal == nil then removal = 1 end
+                            treatedFraction = treatedFraction + mass - mass * removal
+                        end
+                    end
+                end
                 local drawableSource = math.max(0,
                     source.qualified - source.protected_reserve)
                 local treatedHeadroom = math.max(0,
@@ -6246,8 +6275,21 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             toKg(source.unit, source.qualified + source.unqualified), processedKg)
                         addLedger(self.constituent_loss, drawn, 1)
                         if not source.composition then drawn.water = processedKg end
-                        local pure = {water = treatedKg}
-                        drawn.water = (drawn.water or 0) - treatedKg
+                        local pure = {}
+                        for name, mass in pairs(drawn) do
+                            local key = name == 'energy' and 'dryOrganics' or name
+                            local removal = treatment.removalFractions[key]
+                            if removal == nil then removal = 1 end
+                            local passed = name == 'water'
+                                and processedKg * waterFraction * treatment.recoveryRatio
+                                or mass - mass * removal
+                            pure[name] = passed
+                            drawn[name] = mass - passed
+                        end
+                        treatment.lastRemovedConstituents = drawn
+                        treatment.lastPassedConstituents = pure
+                        addLedger(treatment.removedConstituents, drawn, 1)
+                        addLedger(treatment.passedConstituents, pure, 1)
                         depositStoreDrift(treated, treatedKg, pure)
                         depositStoreDrift(concentrate, concentrateKg, drawn)
                         if treated.composition then addLedger(self.constituent_loss, pure, -1) end

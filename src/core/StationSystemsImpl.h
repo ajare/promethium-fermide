@@ -695,6 +695,8 @@ using namespace station_detail;
 		// disposal capability exists.
 		struct WaterTreatmentState
 		{
+			station_detail::ConstituentLedger lastRemovedConstituents, lastPassedConstituents;
+			station_detail::ConstituentLedger removedConstituents, passedConstituents;
 			WaterTreatmentSettings authored;
 			size_t sourceIndex{0};
 			size_t treatedIndex{0};

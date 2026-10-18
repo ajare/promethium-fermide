@@ -375,6 +375,22 @@ using namespace station_detail;
 		return true;
 	}
 
+	std::map<std::string, double> waterTreatmentEffluent(
+		ResourceCompositionSettings const& blend, WaterTreatmentSettings const& treatment)
+	{
+		auto result = compositionLedgerOf(blend, 1.0, 1.0);
+		for (auto& [name, mass] : result)
+		{
+			if (name == "water") mass *= treatment.recoveryRatio;
+			else
+			{
+				auto const found = treatment.removalFractions.find(name == "energy" ? "dryOrganics" : name);
+				mass = found == treatment.removalFractions.end() ? 0.0 : mass - mass * found->second;
+			}
+		}
+		return result;
+	}
+
 	bool validateStationWaterGasWiring(StationSystemsSettings const& settings,
 		WaterTreatmentSettings const& treatment, std::string& diagnostic, [[maybe_unused]] bool allowIncomplete, std::vector<std::string>* brokenReferences)
 	{
@@ -433,21 +449,35 @@ using namespace station_detail;
 		char const* streamRoles[3]{"source", "treated", "concentrate"};
 		std::string const streamIds[3]{treatment.sourceStoreId, treatment.treatedStoreId,
 			treatment.concentrateStoreId};
-		// Full removal requires a compound concentrate destination for each
-		// dry species. Incomplete drafts may leave that endpoint unconnected.
+		for (auto const& [name, fraction] : treatment.removalFractions)
+		{
+			if (std::find(StationWaterDryConstituents.begin(), StationWaterDryConstituents.end(), name)
+				== StationWaterDryConstituents.end())
+				return refuse(where + " unknown removal constituent '" + name + "'");
+			if (!std::isfinite(fraction) || fraction < 0.0 || fraction > 1.0)
+				return refuse(where + " removal fraction '" + name + "' must be finite and within [0, 1]");
+		}
 		auto source = std::find_if(settings.stores.begin(), settings.stores.end(),
 			[&](auto const& store) { return store.id == treatment.sourceStoreId; });
-		auto concentrate = std::find_if(settings.stores.begin(), settings.stores.end(),
-			[&](auto const& store) { return store.id == treatment.concentrateStoreId; });
 		if (source != settings.stores.end() && source->composition)
 		{
 			auto const load = compositionLedgerOf(*source->composition, 1.0, 1.0);
 			for (auto const& [name, mass] : load)
-				if (name != "water" && name != "energy" && mass > 0.0
-					&& ((treatment.concentrateStoreId.empty() && !allowIncomplete && !brokenReferences)
-						|| (concentrate != settings.stores.end() && !concentrate->composition)))
-					return refuse(where + " constituent '" + name
-						+ "' requires a compound concentrate store; dry load must go somewhere");
+			{
+				if (name == "water" || name == "energy" || mass <= 0.0) continue;
+				auto const f = treatment.removalFractions.find(name);
+				auto const removal = f == treatment.removalFractions.end() ? 1.0 : f->second;
+				for (size_t outlet : {size_t{1}, size_t{2}})
+				{
+					if ((outlet == 1 && removal == 1.0) || (outlet == 2 && removal == 0.0)) continue;
+					auto dest = std::find_if(settings.stores.begin(), settings.stores.end(),
+						[&](auto const& store) { return store.id == streamIds[outlet]; });
+					if ((streamIds[outlet].empty() && !allowIncomplete && !brokenReferences)
+						|| (dest != settings.stores.end() && !dest->composition))
+						return refuse(where + " constituent '" + name + "' requires a compound "
+							+ streamRoles[outlet] + " store; dry load must go somewhere");
+				}
+			}
 		}
 		for (size_t stream = 0; stream < 3; ++stream)
 		{

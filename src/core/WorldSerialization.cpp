@@ -949,7 +949,8 @@ namespace core
 		// Schema 97 adds authored Station connection carrier, throughput and efficiency properties.
 		// Schema 98 adds optional explicit Station Resource store material identity.
 		// Schema 99 adds Continuous / one-off Scheduled Resource transfers.
-		serializer.writeUint32("version", 99);
+		// Schema 100 adds per-constituent water-treatment removal fractions.
+		serializer.writeUint32("version", 100);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
 		serializer.writeString("furnitureImageSet", mFurnitureImageSetResourceName);
@@ -1851,7 +1852,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 99)
+		if (version < 1 || version > 100)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}

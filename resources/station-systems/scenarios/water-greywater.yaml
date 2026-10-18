@@ -1,10 +1,10 @@
-# #740 full-removal variant (no fractional removal or quality gates yet).
-# 100 kg/day at 0.2% organics, water recovery 85%:
-# treated 84.83 kg/day pure water; retained concentrate 15.17 kg/day,
-# containing all 0.2 kg/day organics and 14.97 kg/day rejected water.
+# #741 partial removal (quality gates are a later slice).
+# 100 kg/day at 0.2% organics, water recovery 85%, organics removal 95%:
+# treated 84.84 kg/day at 0.011787% organics; concentrate 15.16 kg/day
+# at 1.2533% organics. Every drawn constituent is retained exactly once.
 # Load in Station systems, then Apply. Concentrate starts empty; its
 # declaration is only a seed, not the actual deposited composition.
-schemaVersion: 99
+schemaVersion: 100
 stationSystems:
   enabled: true
   observationIntervalSeconds: 1.0
@@ -29,6 +29,14 @@ stationSystems:
     capacity: 1000
     startingQualified: 0
     startingUnqualified: 0
+    composition:
+      moisture: 0.998
+      nutrientNitrogen: 0
+      atmosphericNitrogen: 0
+      phosphorus: 0
+      potassium: 0
+      otherMinerals: 0
+      energyKJPerKgDry: 17000
   - id: concentrate
     materialId: water-concentrate
     unit: kg
@@ -64,6 +72,8 @@ stationSystems:
     consumableStoreId: media
     throughputKgPerS: 0.0011574074074074073
     recoveryRatio: 0.85
+    removalFractions:
+      dryOrganics: 0.95
     specificEnergyKWhPerKg: 0.5
     consumablePerKg: 0.01
     priority: 0

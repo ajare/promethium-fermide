@@ -104,6 +104,17 @@ namespace core
 		return node.IsMap() && node[name].IsDefined();
 	}
 
+	std::vector<std::string> YamlSerializer::mapKeys(std::string const& name) const
+	{
+		requireDeserializing("inspect map keys");
+		auto const parent = mNodeStack.empty() ? mLoadedData : mNodeStack.top();
+		auto const node = parent[name];
+		if (!node.IsMap()) throw SerializationException("Expected YAML map at " + getPath(name));
+		std::vector<std::string> keys;
+		for (auto const& item : node) keys.push_back(item.first.as<std::string>());
+		return keys;
+	}
+
 	bool YamlSerializer::fieldIsMap(std::string const& name) const
 	{
 		requireDeserializing("inspect fields");

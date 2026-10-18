@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace core
 {
@@ -20,6 +21,8 @@ namespace core
 		{
 			return true;
 		}
+
+		virtual std::vector<std::string> mapKeys(std::string const& name) const = 0;
 
 		virtual bool fieldIsMap(std::string const&) const
 		{

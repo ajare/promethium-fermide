@@ -6929,6 +6929,25 @@ void bufferWorkflow(smoke::Context const&)
 			WATER_REQ(window.draft().stores[0].composition->moisture == 0.998, "Water composition undo failed");
 			driver.click(ctx, "Redo configuration"); ctx->Yield(3);
 			driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+			WATER_REQ(window.draft().waterTreatments[0].removalFractions.at("dryOrganics") == 0.95,
+				"Authored removal fraction did not open");
+			driver.typeValue(ctx, "Treatment 0 removal dryOrganics", "0.5"); ctx->Yield(3);
+			WATER_REQ(window.draft().waterTreatments[0].removalFractions.at("dryOrganics") == 0.5,
+				"Removal form did not edit");
+			driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+			WATER_REQ(window.draft().waterTreatments[0].removalFractions.at("dryOrganics") == 0.95,
+				"Removal undo failed");
+			driver.click(ctx, "Redo configuration"); ctx->Yield(3);
+			WATER_REQ(window.draft().waterTreatments[0].removalFractions.at("dryOrganics") == 0.5,
+				"Removal redo failed");
+			driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+			driver.click(ctx, "Treatment 0 override dryOrganics"); ctx->Yield(3);
+			WATER_REQ(window.draft().waterTreatments[0].removalFractions.empty(), "Default removal reset failed");
+			driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+			auto const preview = core::waterTreatmentEffluent(*window.draft().stores[0].composition,
+				window.draft().waterTreatments[0]);
+			WATER_REQ(std::abs(preview.at("dryOrganics") / (preview.at("water") + preview.at("dryOrganics"))
+				- 0.01 / 84.84) < 1e-10, "Effluent preview disagrees with declared-source actuals");
 			core::StationConfigurationDocument saved, restored; std::string error;
 			saved.settings = window.draft();
 			auto const parsed = core::parseStationConfiguration(core::serializeStationConfiguration(saved), restored, &error);
@@ -6939,7 +6958,7 @@ void bufferWorkflow(smoke::Context const&)
 			world->pauseSimulation();
 			auto const snap = world->getStationSystemsSnapshot();
 			auto const daily = 86400.0 / (60.0 * core::World::getFixedTimestep());
-			WATER_REQ(std::abs(snap.waterTreatments[0].treatedKg * daily - 84.83) < 1e-7,
+			WATER_REQ(std::abs(snap.waterTreatments[0].treatedKg * daily - 84.84) < 1e-7,
 				"Editor-applied greywater actuals disagree");
 			// The store inspector's production telemetry reads the live ledger,
 			// not its deliberately different authored concentrate composition.

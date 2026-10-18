@@ -998,6 +998,8 @@ namespace core
 	// only a full dose with a passed test releases it. A normal-class
 	// treatment cannot configure clearance testing - release clearance is
 	// the hazardous containment boundary, not a normal-water filter.
+	inline constexpr std::array<char const*, 6> StationWaterDryConstituents{
+		"dryOrganics", "nutrientNitrogen", "atmosphericNitrogen", "phosphorus", "potassium", "otherMinerals"};
 	struct WaterTreatmentSettings
 	{
 		std::string id;
@@ -1007,7 +1009,8 @@ namespace core
 		std::string concentrateStoreId;      // retained concentrate, pending disposal
 		std::string consumableStoreId;       // treatment consumables
 		double throughputKgPerS{0.0};      // processing ceiling, 0 disables
-		double recoveryRatio{0.85};        // treated / processed, in (0, 1]
+		double recoveryRatio{0.85};        // recovered water / drawn water, in (0, 1]
+		std::map<std::string, double> removalFractions; // dry species to concentrate; omitted keys = 1
 		double specificEnergyKWhPerKg{0.5}; // electricity per kg processed
 		double consumablePerKg{0.01};      // consumable units per kg processed
 		// Release-clearance consumable (#412): required for a hazardous-class
@@ -1020,6 +1023,9 @@ namespace core
 		bool operator==(WaterTreatmentSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationWaterTreatments{8};
+	// Treated constituents per kg of the current source blend; energy follows organics.
+	std::map<std::string, double> waterTreatmentEffluent(
+		ResourceCompositionSettings const& blend, WaterTreatmentSettings const& treatment);
 
 	// Stoichiometric oxygen mass per kilogram of split water: M_O2 / (2 x
 	// M_H2O). Hydrogen is the declared mass-balance remainder (one minus
@@ -3281,6 +3287,10 @@ namespace core
 	// accounted as retained material pending a disposal capability.
 	struct StationWaterTreatmentSnapshot
 	{
+		std::map<std::string, double> removalFractions; // authored overrides; omitted dry species = 1
+		// kg per constituent (water included); the energy slot is kJ.
+		std::map<std::string, double> lastRemovedConstituents, lastPassedConstituents;
+		std::map<std::string, double> removedConstituents, passedConstituents;
 		std::string id;
 		std::string hazardClass;
 		std::string sourceStoreId;

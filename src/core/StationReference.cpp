@@ -485,6 +485,13 @@ namespace core
 				serializer.writeString("consumableStoreId", treatment.consumableStoreId);
 				serializer.writeDouble("throughputKgPerS", treatment.throughputKgPerS);
 				serializer.writeDouble("recoveryRatio", treatment.recoveryRatio);
+				if (!treatment.removalFractions.empty())
+				{
+					serializer.beginMap("removalFractions");
+					for (auto const& [name, fraction] : treatment.removalFractions)
+						serializer.writeDouble(name, fraction);
+					serializer.endMap();
+				}
 				serializer.writeDouble("specificEnergyKWhPerKg", treatment.specificEnergyKWhPerKg);
 				serializer.writeDouble("consumablePerKg", treatment.consumablePerKg);
 				serializer.writeString("clearanceStoreId", treatment.clearanceStoreId);
@@ -1498,6 +1505,15 @@ namespace core
 				treatment.consumableStoreId = serializer.readString("consumableStoreId");
 				treatment.throughputKgPerS = serializer.readDouble("throughputKgPerS");
 				treatment.recoveryRatio = serializer.readDouble("recoveryRatio");
+				if (serializer.hasField("removalFractions"))
+				{
+					if (version < 100) throw SerializationException("Water removal fractions require schema 100");
+					auto const keys = serializer.mapKeys("removalFractions");
+					serializer.beginMap("removalFractions");
+					for (auto const& name : keys)
+						treatment.removalFractions[name] = serializer.readDouble(name);
+					serializer.endMap();
+				}
 				treatment.specificEnergyKWhPerKg = serializer.readDouble("specificEnergyKWhPerKg");
 				treatment.consumablePerKg = serializer.readDouble("consumablePerKg");
 				if (serializer.hasField("clearanceStoreId"))
@@ -2056,8 +2072,8 @@ namespace core
 			// systems, the upper bound is the newest schema this reader
 			// knows. A reference outside that range is refused rather than
 			// read under assumptions the reader has not been checked for.
-			if (document.schemaVersion < 65 || document.schemaVersion > 99)
-				return refuse("Reference station schema version must be from 65 to 99");
+			if (document.schemaVersion < 65 || document.schemaVersion > 100)
+				return refuse("Reference station schema version must be from 65 to 100");
 			if (serializer->hasField("provenance"))
 			{
 				serializer->beginArray("provenance");

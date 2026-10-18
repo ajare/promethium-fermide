@@ -1560,11 +1560,13 @@ side of its store and stays accounted for there until a disposal
 capability exists. Nothing in this slice disposes of it, and its retained
 total is reported so the stream is never silently dropped.
 
-Every water-process store is a **plain mass store**. Condensate is pure
-water and the recovery split is mass-denominated, so a compound store
-would create dry constituents out of nothing; the treatment's consumable
-store is the one exception, being a supplied consumable rather than a
-water stream, and its draw books both the unit and constituent loss. Water
+Treatment source, treated and concentrate stores may be **compound water
+streams** (#740–#741). Moisture is the water fraction; the existing dry
+constituents are the dissolved load. Live concentration uses the actual
+constituent ledger, including dilution, never the destination's declaration.
+Plain inflow into a compound water store adds water only; compound-to-plain
+transfers remain refused. Condensate collectors still produce pure water.
+The treatment consumable's draw books both unit and constituent loss. Water
 stores shared between a normal-class and a hazardous-class process are
 refused at configuration — segregation is enforced up front rather than
 policed at runtime — and a collector may only serve a compartment of its
@@ -1594,7 +1596,7 @@ Water recovery acceptance coverage: refused configurations (unknown
 compartment, loop or store; a hazard class that does not match the
 compartment; an undeclared hazard class; a humidity target outside [0, 1];
 a negative rate; a service class that mismatches the loop's host
-reservoir; a compound water store; a store shared between normal and
+reservoir; an incompatible compound outlet; a store shared between normal and
 hazardous processes; a recovery ratio outside (0, 1]; a treatment sharing
 one store between two roles; over-budget contract counts) with no World
 mutation; nominal recovery where the collector runs at its configured
@@ -1614,6 +1616,37 @@ and an exhausted consumable store each capping the process and naming
 themselves as the limiter; deterministic Reset replay; and intact water
 descriptor crossings with contained construction refusal for both
 contracts.
+
+### Partial water-treatment removal (#741)
+
+Schema **100** adds an optional `removalFractions` map keyed by
+`dryOrganics`, `nutrientNitrogen`, `atmosphericNitrogen`, `phosphorus`,
+`potassium`, or `otherMinerals`. Each finite fraction in [0, 1] is the share
+of that drawn constituent routed to concentrate; omitted keys mean **all
+removed** (1). Unknown keys are refused with their name. Water recovery
+still applies only to the drawn water. Chemical energy follows the organic
+partition. Every drawn constituent ends in treated or concentrate exactly
+once; headroom and clearance demand use the complete resulting stream mass.
+Any outlet receiving dry load must be compound, including the treated outlet
+when all removals are zero. Absent fractions preserve full removal from a
+compound source and the original exact scalar split from a plain source.
+
+The shared form/Flow inspector supports per-species overrides, reset to the
+full-removal default, and an effluent-concentration preview using the wired
+source's **declared** composition (not a prediction of future mixing).
+Fields participate in draft undo/redo, configuration and World save/load,
+and Apply. Snapshots and Lua expose the authored overrides and per-tick and
+lifetime removed/passed constituent ledgers.
+
+`scenarios/water-greywater.yaml` draws 100 kg/day at 0.2% organics with 85%
+water recovery and 95% organics removal: **84.84 kg/day treated** containing
+0.01 kg organics (0.011787%), and **15.16 kg/day concentrate** containing
+0.19 kg organics (1.2533%). Lower removal or higher incoming load raises
+effluent concentration; downstream quality gates are a later ticket.
+`water-legacy-anchor.yaml` keeps the all-plain default regression.
+Focused checks: `station-compoundWaterPartial`,
+`station-compoundWaterPartialValidation`, `station-compoundWaterDocuments`,
+and `station-editor-compound-water`, alongside the full-removal checks.
 
 ### Oxygen production and CO2 capture (#404)
 

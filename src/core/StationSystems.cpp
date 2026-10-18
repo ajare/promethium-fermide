@@ -437,6 +437,10 @@ StationSystemsSourceLoader sourceLoader;
 					lua_pushstring(state, treatment.clearanceStoreId.c_str()); lua_setfield(state, -2, "clearanceStore");
 					lua_pushnumber(state, treatment.throughputKgPerS); lua_setfield(state, -2, "throughputKgPerS");
 					lua_pushnumber(state, treatment.recoveryRatio); lua_setfield(state, -2, "recoveryRatio");
+					lua_createtable(state, 0, static_cast<int>(treatment.removalFractions.size()));
+					for (auto const& [name, fraction] : treatment.removalFractions)
+					{ lua_pushnumber(state, fraction); lua_setfield(state, -2, name.c_str()); }
+					lua_setfield(state, -2, "removalFractions");
 					lua_pushnumber(state, treatment.specificEnergyKWhPerKg); lua_setfield(state, -2, "specificEnergyKWhPerKg");
 					lua_pushnumber(state, treatment.consumablePerKg); lua_setfield(state, -2, "consumablePerKg");
 					lua_pushnumber(state, treatment.clearancePerKg); lua_setfield(state, -2, "clearancePerKg");

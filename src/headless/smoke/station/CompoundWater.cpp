@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <format>
 #include <cmath>
+#include <limits>
 
 namespace
 {
@@ -17,13 +18,18 @@ void close(double actual, double expected)
 	require(std::abs(actual - expected) < 1e-8 * std::max(1.0, std::abs(expected)),
 		std::format("compound water numeric mismatch: {:.17g} expected {:.17g}", actual, expected).c_str());
 }
-core::StationSystemsSettings scenario(smoke::Context const& context, char const* name)
+core::StationSystemsSettings scenario(smoke::Context const& context, char const* name, bool partial = false)
 {
 	core::StationConfigurationDocument document;
 	std::string error;
 	auto const loaded = core::loadStationConfiguration(context.fixture(std::string("resources/station-systems/scenarios/")
 		+ name).string(), document, &error);
 	require(loaded, error.c_str());
+	if (!partial && std::string(name) == "water-greywater.yaml")
+	{
+		document.settings.waterTreatments[0].removalFractions.clear();
+		document.settings.stores[1].composition.reset();
+	}
 	return document.settings;
 }
 core::StationSystemsSnapshot run(core::StationSystemsSettings const& settings, int ticks = 60)
@@ -76,6 +82,121 @@ void tracer(smoke::Context const& context)
 	close(t.concentrateKg * daily, 15.17);
 	close(store(snapshot, "concentrate").actualConstituents.at("dryOrganics") * daily, 0.2);
 	close(store(snapshot, "concentrate").concentrations.at("dryOrganics"), 0.2 / 15.17);
+}
+void partialRemoval(smoke::Context const& context)
+{
+	auto settings = scenario(context, "water-greywater.yaml", true);
+	SourceScope restore;
+	core::setStationSystemsSourceLoader([] {
+		auto source = core::bundledStationSystemsSource();
+		auto at = source.find("        self.ticks = self.ticks + 1");
+		require(at != std::string::npos, "Lua partial assertion point missing");
+		source.insert(at, R"lua(
+        local t = self.water_treatments[1]
+        assert(t.removalFractions.dryOrganics == 0.95)
+        assert(math.abs(t.removedConstituents.dryOrganics - t.processedTotal * 0.0019) < 1e-10)
+        assert(math.abs(t.passedConstituents.dryOrganics - t.processedTotal * 0.0001) < 1e-10)
+)lua");
+		return source;
+	});
+	auto const snapshot = run(settings);
+	auto const daily = 86400.0 / (60.0 * core::World::getFixedTimestep());
+	auto const& t = snapshot.waterTreatments[0];
+	close(t.treatedKg * daily, 84.84); close(t.concentrateKg * daily, 15.16);
+	close(store(snapshot, "treated").concentrations.at("dryOrganics"), 0.01 / 84.84);
+	close(store(snapshot, "concentrate").concentrations.at("dryOrganics"), 0.19 / 15.16);
+	require(t.removalFractions == settings.waterTreatments[0].removalFractions, "snapshot lost removals");
+	core::setStationSystemsSourceLoader({});
+	// Lower removal or greater incoming load raises effluent concentration.
+	auto lighter = settings; lighter.waterTreatments[0].removalFractions["dryOrganics"] = 0.5;
+	require(store(run(lighter), "treated").concentrations.at("dryOrganics")
+		> store(snapshot, "treated").concentrations.at("dryOrganics"), "lighter removal did not overwhelm effluent");
+	auto heavier = settings; heavier.stores[0].composition->moisture = 0.99;
+	require(store(run(heavier), "treated").concentrations.at("dryOrganics")
+		> store(snapshot, "treated").concentrations.at("dryOrganics"), "heavier load did not overwhelm effluent");
+	// Plain inflow changes the actual blend: partial selectivity must follow it.
+	auto diluted = settings;
+	auto fresh = diluted.stores[1]; fresh.id = "fresh"; fresh.composition.reset();
+	fresh.startingQualified = 100; diluted.stores.push_back(fresh);
+	core::ResourceTransferSettings inflow;
+	inflow.id = "dilute"; inflow.sourceId = "fresh"; inflow.destinationId = "greywater";
+	inflow.unit = "kg"; inflow.ratePerSecond = 10; diluted.transfers = {inflow};
+	require(store(run(diluted), "treated").concentrations.at("dryOrganics")
+		< store(snapshot, "treated").concentrations.at("dryOrganics"), "partial removal ignored live dilution");
+	// Arbitrary species, gram units and chemical energy: every tick closes.
+	auto& c = *settings.stores[0].composition;
+	c.moisture = 0.8; c.nutrientNitrogen = 0.1; c.atmosphericNitrogen = 0.1;
+	c.phosphorus = 0.1; c.potassium = 0.1; c.otherMinerals = 0.1;
+	settings.stores[0].unit = "g"; settings.stores[0].capacity *= 1000;
+	settings.stores[0].startingQualified *= 1000;
+	for (double fraction : {0.0, 0.13, 0.5, 0.99, 1.0})
+	{
+		for (size_t i = 0; i < core::StationWaterDryConstituents.size(); ++i)
+			settings.waterTreatments[0].removalFractions[core::StationWaterDryConstituents[i]] =
+				fraction == 0 || fraction == 1 ? fraction : std::fmod(fraction + i * 0.17, 1.0);
+		core::World world("Partial conservation", 2, 2);
+		world.pauseSimulation(); world.finishBuild(); std::string error;
+		require(world.configureStationSystems(settings, false, &error), error.c_str());
+		world.resumeSimulation();
+		auto before = world.getStationSystemsSnapshot();
+		for (int tick = 0; tick < 60; ++tick)
+		{
+			require(world.advanceTicks(1), "partial treatment tick failed");
+			auto after = world.getStationSystemsSnapshot();
+			auto const& treatment = after.waterTreatments[0];
+			for (auto const& [name, initial] : store(before, "greywater").actualConstituents)
+			{
+				auto const drawn = initial - store(after, "greywater").actualConstituents.at(name);
+				auto const passed = treatment.lastPassedConstituents.at(name);
+				auto const removed = treatment.lastRemovedConstituents.at(name);
+				close(drawn, passed + removed);
+				close(store(after, "treated").actualConstituents.at(name)
+					- store(before, "treated").actualConstituents.at(name), passed);
+				close(store(after, "concentrate").actualConstituents.at(name)
+					- store(before, "concentrate").actualConstituents.at(name), removed);
+				if (fraction == 0 && name != "water") close(removed, 0);
+			}
+			for (auto const& balance : after.constituentBalances) close(balance.residual, 0);
+			before = std::move(after);
+		}
+	}
+}
+void partialValidation(smoke::Context const& context)
+{
+	auto const base = scenario(context, "water-greywater.yaml", true);
+	std::string reason;
+	for (double value : {-0.01, 1.01, std::numeric_limits<double>::infinity(),
+		std::numeric_limits<double>::quiet_NaN()})
+	{
+		auto settings = base; settings.waterTreatments[0].removalFractions["dryOrganics"] = value;
+		require(!core::validateStationSystemsSettings(settings, reason)
+			&& reason.find("dryOrganics") != std::string::npos, "invalid removal fraction accepted");
+	}
+	for (std::string const name : {"unobtainium", "water", "energy"})
+	{
+		auto settings = base; settings.waterTreatments[0].removalFractions[name] = 0.5;
+		require(!core::validateStationSystemsSettings(settings, reason)
+			&& reason.find(name) != std::string::npos, "unknown removal key accepted");
+		core::StationConfigurationDocument doc, restored; doc.settings = settings;
+		require(!core::parseStationConfiguration(core::serializeStationConfiguration(doc), restored, &reason)
+			&& reason.find(name) != std::string::npos, "YAML silently dropped unknown removal key");
+	}
+	auto plain = base; plain.stores[1].composition.reset();
+	require(!core::validateStationSystemsSettings(plain, reason)
+		&& reason.find("dryOrganics") != std::string::npos, "partial load entered plain treated store");
+	plain.waterTreatments[0].removalFractions["dryOrganics"] = 0;
+	require(!core::validateStationSystemsSettings(plain, reason), "all-zero removal bypassed treated boundary");
+	plain.stores[1].composition = base.stores[1].composition;
+	plain.stores[2].composition.reset();
+	require(core::validateStationSystemsSettings(plain, reason), reason.c_str());
+	auto const passed = run(plain);
+	close(store(passed, "treated").actualConstituents.at("dryOrganics"), passed.waterTreatments[0].processedKg * 0.002);
+	// Headroom must use loaded effluent mass rather than recovered water alone.
+	auto limited = base; limited.stores[1].capacity = 0.0001;
+	auto const result = run(limited);
+	close(store(result, "treated").currentQualified, limited.stores[1].capacity);
+	require(result.waterTreatments[0].limiter.find("treated water") != std::string::npos,
+		"loaded effluent headroom did not throttle");
 }
 void blend(smoke::Context const& context)
 {
@@ -216,7 +337,7 @@ void validation(smoke::Context const& context)
 }
 void documents(smoke::Context const& context)
 {
-	auto const settings = scenario(context, "water-greywater.yaml");
+	auto const settings = scenario(context, "water-greywater.yaml", true);
 	core::StationConfigurationDocument document; document.settings = settings;
 	core::StationConfigurationDocument restored; std::string error;
 	auto const parsed = core::parseStationConfiguration(core::serializeStationConfiguration(document), restored, &error);
@@ -257,6 +378,8 @@ void legacy(smoke::Context const& context)
 }
 void registerCompoundWaterChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"compoundWaterPartial", partialRemoval});
+	checks.push_back({"compoundWaterPartialValidation", partialValidation});
 	checks.push_back({"compoundWaterTracer", tracer});
 	checks.push_back({"compoundWaterBlend", blend});
 	checks.push_back({"compoundWaterValidation", validation});

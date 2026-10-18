@@ -443,6 +443,8 @@ namespace core
 			auto& treated = runtime.stores[treatment.treatedIndex];
 			auto& concentrate = runtime.stores[treatment.concentrateIndex];
 			auto& consumable = runtime.stores[treatment.consumableIndex];
+			treatment.lastRemovedConstituents.clear();
+			treatment.lastPassedConstituents.clear();
 			treatment.lastScale = 0.0;
 			treatment.lastLimiter.clear();
 			treatment.lastProcessedKg = 0.0;
@@ -470,7 +472,11 @@ namespace core
 			// Selectivity follows the current blend, including dilution/drift.
 			auto const waterFraction = source.authored.composition
 				? storeComposition(treatment.sourceIndex).moisture : 1.0;
-			auto const treatedFraction = waterFraction * treatment.authored.recoveryRatio;
+			auto effluent = source.authored.composition
+				? waterTreatmentEffluent(storeComposition(treatment.sourceIndex), treatment.authored)
+				: ConstituentLedger{{"water", treatment.authored.recoveryRatio}};
+			double treatedFraction = 0.0;
+			for (auto const& [name, mass] : effluent) if (name != "energy") treatedFraction += mass;
 			if (waterFraction <= 0.0)
 			{
 				treatment.lastLimiter = "stream carries no water";
@@ -590,8 +596,20 @@ namespace core
 			// a compound destination. A plain treated outlet exits that boundary.
 			addLedger(stagedLoss, drawnActual, 1.0);
 			if (!source.authored.composition) drawnActual["water"] = processedKg;
-			ConstituentLedger const treatedActual{{"water", treatedKg}};
-			drawnActual["water"] -= treatedKg;
+			ConstituentLedger treatedActual;
+			for (auto& [name, mass] : drawnActual)
+			{
+				auto const fraction = treatment.authored.removalFractions.find(name == "energy" ? "dryOrganics" : name);
+				auto const removal = fraction == treatment.authored.removalFractions.end() ? 1.0 : fraction->second;
+				auto const passed = name == "water" ? processedKg * waterFraction * treatment.authored.recoveryRatio
+					: mass - mass * removal;
+				treatedActual[name] = passed;
+				mass -= passed;
+			}
+			treatment.lastRemovedConstituents = drawnActual;
+			treatment.lastPassedConstituents = treatedActual;
+			addLedger(treatment.removedConstituents, drawnActual, 1.0);
+			addLedger(treatment.passedConstituents, treatedActual, 1.0);
 			depositStoreDrift(treatment.treatedIndex, treatedKg, treatedActual);
 			depositStoreDrift(treatment.concentrateIndex, concentrateKg, drawnActual);
 			if (treated.authored.composition) addLedger(stagedLoss, treatedActual, -1.0);

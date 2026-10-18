@@ -189,6 +189,16 @@ namespace core
 		return false;
 	}
 
+	std::vector<std::string> BinarySerializer::mapKeys(std::string const& name) const
+	{
+		requireDeserializing("inspect map keys");
+		auto const& node = requireValue(name);
+		if (node.type != Map) throw SerializationException("Expected binary map: " + name);
+		std::vector<std::string> keys;
+		for (auto const& field : node.fields) keys.push_back(field.first);
+		return keys;
+	}
+
 	bool BinarySerializer::fieldIsMap(std::string const& name) const
 	{
 		requireDeserializing("inspect fields");

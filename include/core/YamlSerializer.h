@@ -90,6 +90,7 @@ namespace core
 
 		std::string getSerializedString() const;
 		bool hasField(std::string const& name) const override;
+		std::vector<std::string> mapKeys(std::string const& name) const override;
 		bool fieldIsMap(std::string const& name) const override;
 
 		void writeBool(std::string const& name, bool value) override;

@@ -787,6 +787,11 @@ namespace core
 		for (auto const& treatment : mImpl->waterTreatments)
 		{
 			StationWaterTreatmentSnapshot treatmentResult;
+			treatmentResult.removalFractions = treatment.authored.removalFractions;
+			treatmentResult.lastRemovedConstituents = treatment.lastRemovedConstituents;
+			treatmentResult.lastPassedConstituents = treatment.lastPassedConstituents;
+			treatmentResult.removedConstituents = treatment.removedConstituents;
+			treatmentResult.passedConstituents = treatment.passedConstituents;
 			treatmentResult.id = treatment.authored.id;
 			treatmentResult.hazardClass = treatment.authored.hazardClass;
 			treatmentResult.sourceStoreId = treatment.authored.sourceStoreId;
