@@ -43,6 +43,7 @@ for source in sorted(cmake_owners.keys() - actual_module_sources):
     errors.append(f"{source}: CMake-owned smoke check source does not exist")
 
 standalone_owners = {
+    "AgentPropertyDescriptorChecks.cpp": "pf-agent-property-descriptor-checks",
     "AgentGroupRegistryChecks.cpp": "pf-agent-group-registry-checks",
     "AgentTypeCatalogChecks.cpp": "pf-agent-type-catalog-checks",
     "MarkerStoreChecks.cpp": "pf-marker-store-checks",

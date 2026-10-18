@@ -746,6 +746,14 @@ if(BUILD_TESTING)
     set_tests_properties(registry-binding PROPERTIES
         LABELS "smoke;standalone;core" TIMEOUT 30)
 
+    add_executable(pf-agent-property-descriptor-checks src/headless/AgentPropertyDescriptorChecks.cpp)
+    target_include_directories(pf-agent-property-descriptor-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-agent-property-descriptor-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-agent-property-descriptor-checks)
+    add_test(NAME agent-property-descriptor COMMAND pf-agent-property-descriptor-checks)
+    set_tests_properties(agent-property-descriptor PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
     add_executable(pf-permission-requirement-store-checks src/headless/PermissionRequirementStoreChecks.cpp)
     target_include_directories(pf-permission-requirement-store-checks PRIVATE "${PF_INCLUDE_DIR}")
     target_link_libraries(pf-permission-requirement-store-checks PRIVATE promethium-fermide-core)

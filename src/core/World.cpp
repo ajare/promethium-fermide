@@ -1878,8 +1878,114 @@ namespace core
 		}
 	}
 
-	void World::addAgentTagWalkSpeedModifierSamples(AgentTagId id,
-		AgentWalkSpeedModifierProperty const& property)
+	namespace
+	{
+		// Builds one plain tag-sample row: the shared add/clear paths drive
+		// the Agent's per-property sample accessors through these pointers,
+		// exactly as the replaced facade methods did by hand. There is no
+		// per-property extra today - the Height modifier's pose sync already
+		// lives inside the Agent's own sample accessors.
+		TagSampleDescriptor plainTagSample(
+			SampledAgentPropertyType type,
+			std::optional<AgentPropertySample> const& (Agent::*read)() const,
+			void (Agent::*write)(AgentPropertySample),
+			void (Agent::*clear)())
+		{
+			TagSampleDescriptor descriptor;
+			descriptor.type = type;
+			descriptor.readSample = [read](Agent const& agent)
+				-> std::optional<AgentPropertySample> const&
+				{ return (agent.*read)(); };
+			descriptor.writeSample = [write](Agent& agent,
+				AgentPropertySample const& sample) { (agent.*write)(sample); };
+			descriptor.clearSample = [clear](Agent& agent) { (agent.*clear)(); };
+			return descriptor;
+		}
+	}
+
+	// The one tag-sample table (ADR 0022, #677): every addAgentTag*Samples /
+	// clearAgentTag*Samples facade method names its row and the shared paths
+	// below apply it. Built once on first use.
+	TagSampleTable const& World::tagSampleTable()
+	{
+		static TagSampleTable const table = []()
+		{
+			TagSampleTable t;
+			t.walkSpeedModifier = plainTagSample(
+				SampledAgentPropertyType::WalkSpeedModifier,
+				&Agent::getWalkSpeedModifierSample,
+				&Agent::setWalkSpeedModifierSample,
+				&Agent::clearWalkSpeedModifierSample);
+			t.heightModifier = plainTagSample(
+				SampledAgentPropertyType::HeightModifier,
+				&Agent::getHeightModifierSample,
+				&Agent::setHeightModifierSample,
+				&Agent::clearHeightModifierSample);
+			t.stairSpeedModifier = plainTagSample(
+				SampledAgentPropertyType::StairSpeedModifier,
+				&Agent::getStairSpeedModifierSample,
+				&Agent::setStairSpeedModifierSample,
+				&Agent::clearStairSpeedModifierSample);
+			t.ladderSpeedModifier = plainTagSample(
+				SampledAgentPropertyType::LadderSpeedModifier,
+				&Agent::getLadderSpeedModifierSample,
+				&Agent::setLadderSpeedModifierSample,
+				&Agent::clearLadderSpeedModifierSample);
+			t.interactionAversion = plainTagSample(
+				SampledAgentPropertyType::InteractionAversion,
+				&Agent::getInteractionAversionSample,
+				&Agent::setInteractionAversionSample,
+				&Agent::clearInteractionAversionSample);
+			t.effortAversion = plainTagSample(
+				SampledAgentPropertyType::EffortAversion,
+				&Agent::getEffortAversionSample,
+				&Agent::setEffortAversionSample,
+				&Agent::clearEffortAversionSample);
+			t.waitingAversion = plainTagSample(
+				SampledAgentPropertyType::WaitingAversion,
+				&Agent::getWaitingAversionSample,
+				&Agent::setWaitingAversionSample,
+				&Agent::clearWaitingAversionSample);
+			t.crowdAversion = plainTagSample(
+				SampledAgentPropertyType::CrowdAversion,
+				&Agent::getCrowdAversionSample,
+				&Agent::setCrowdAversionSample,
+				&Agent::clearCrowdAversionSample);
+			t.riskAversion = plainTagSample(
+				SampledAgentPropertyType::RiskAversion,
+				&Agent::getRiskAversionSample,
+				&Agent::setRiskAversionSample,
+				&Agent::clearRiskAversionSample);
+			t.routeFamiliarity = plainTagSample(
+				SampledAgentPropertyType::RouteFamiliarity,
+				&Agent::getRouteFamiliaritySample,
+				&Agent::setRouteFamiliaritySample,
+				&Agent::clearRouteFamiliaritySample);
+			t.routePersistence = plainTagSample(
+				SampledAgentPropertyType::RoutePersistence,
+				&Agent::getRoutePersistenceSample,
+				&Agent::setRoutePersistenceSample,
+				&Agent::clearRoutePersistenceSample);
+			t.minimumRoutePlanningTime = plainTagSample(
+				SampledAgentPropertyType::MinimumRoutePlanningTime,
+				&Agent::getMinimumRoutePlanningTimeSample,
+				&Agent::setMinimumRoutePlanningTimeSample,
+				&Agent::clearMinimumRoutePlanningTimeSample);
+			t.maximumRoutePlanningTime = plainTagSample(
+				SampledAgentPropertyType::MaximumRoutePlanningTime,
+				&Agent::getMaximumRoutePlanningTimeSample,
+				&Agent::setMaximumRoutePlanningTimeSample,
+				&Agent::clearMaximumRoutePlanningTimeSample);
+			return t;
+		}();
+		return table;
+	}
+
+	// The one add path: every Agent assigned the tag gets a fresh sample of
+	// the definition's range, stamped with the descriptor's property type,
+	// the tag, and the definition revision (ADR 0012).
+	void World::applyAgentTagSamples(TagSampleDescriptor const& descriptor,
+		AgentTagId id, AgentModifierRange const& range, uint64_t revision)
 	{
 		invalidateSimulationSnapshot();
 		bool changed{ false };
@@ -1887,27 +1993,41 @@ namespace core
 		{
 			(void)agentId;
 			if (!agent || !agent->hasAgentTag(id)) continue;
-			agent->setWalkSpeedModifierSample({
-				SampledAgentPropertyType::WalkSpeedModifier, id, property.revision,
-				sampleAgentModifier(property.range) });
+			descriptor.writeSample(*agent, AgentPropertySample{
+				descriptor.type, id, revision, sampleAgentModifier(range) });
 			changed = true;
 		}
 		if (changed) modify();
 	}
 
-	void World::clearAgentTagWalkSpeedModifierSamples(AgentTagId id)
+	// The one clear path: only samples sourced from this tag are dropped;
+	// individual overrides and other tags' samples are untouched.
+	void World::clearAgentTagSamples(TagSampleDescriptor const& descriptor,
+		AgentTagId id)
 	{
 		invalidateSimulationSnapshot();
 		bool changed{ false };
 		for (auto& [agentId, agent] : mAgents.entries())
 		{
 			(void)agentId;
-			if (!agent || !agent->getWalkSpeedModifierSample()
-				|| agent->getWalkSpeedModifierSample()->sourceTag != id) continue;
-			agent->clearWalkSpeedModifierSample();
+			if (!agent || !descriptor.readSample(*agent)
+				|| descriptor.readSample(*agent)->sourceTag != id) continue;
+			descriptor.clearSample(*agent);
 			changed = true;
 		}
 		if (changed) modify();
+	}
+
+	void World::addAgentTagWalkSpeedModifierSamples(AgentTagId id,
+		AgentWalkSpeedModifierProperty const& property)
+	{
+		applyAgentTagSamples(tagSampleTable().walkSpeedModifier, id,
+			property.range, property.revision);
+	}
+
+	void World::clearAgentTagWalkSpeedModifierSamples(AgentTagId id)
+	{
+		clearAgentTagSamples(tagSampleTable().walkSpeedModifier, id);
 	}
 
 	bool World::canApplyAgentTagHeightModifier(AgentTagId id, std::optional<AgentModifierRange> range,
@@ -1927,387 +2047,145 @@ namespace core
 	void World::addAgentTagHeightModifierSamples(AgentTagId id,
 		AgentHeightModifierProperty const& property)
 	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->hasAgentTag(id)) continue;
-			agent->setHeightModifierSample({
-				SampledAgentPropertyType::HeightModifier, id, property.revision,
-				sampleAgentModifier(property.range) });
-			agent->syncPoseToSector();
-			changed = true;
-		}
-		if (changed) modify();
+		applyAgentTagSamples(tagSampleTable().heightModifier, id,
+			property.range, property.revision);
 	}
 
 	void World::clearAgentTagHeightModifierSamples(AgentTagId id)
 	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->getHeightModifierSample()
-				|| agent->getHeightModifierSample()->sourceTag != id) continue;
-			agent->clearHeightModifierSample();
-			agent->syncPoseToSector();
-			changed = true;
-		}
-		if (changed) modify();
+		clearAgentTagSamples(tagSampleTable().heightModifier, id);
 	}
 
 	void World::addAgentTagStairSpeedModifierSamples(AgentTagId id,
 		AgentStairSpeedModifierProperty const& property)
 	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->hasAgentTag(id)) continue;
-			agent->setStairSpeedModifierSample({
-				SampledAgentPropertyType::StairSpeedModifier, id, property.revision,
-				sampleAgentModifier(property.range) });
-			changed = true;
-		}
-		if (changed) modify();
+		applyAgentTagSamples(tagSampleTable().stairSpeedModifier, id,
+			property.range, property.revision);
 	}
 
 	void World::clearAgentTagStairSpeedModifierSamples(AgentTagId id)
 	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->getStairSpeedModifierSample()
-				|| agent->getStairSpeedModifierSample()->sourceTag != id) continue;
-			agent->clearStairSpeedModifierSample();
-			changed = true;
-		}
-		if (changed) modify();
+		clearAgentTagSamples(tagSampleTable().stairSpeedModifier, id);
 	}
 
 	void World::addAgentTagLadderSpeedModifierSamples(AgentTagId id,
 		AgentLadderSpeedModifierProperty const& property)
 	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->hasAgentTag(id)) continue;
-			agent->setLadderSpeedModifierSample({
-				SampledAgentPropertyType::LadderSpeedModifier, id, property.revision,
-				sampleAgentModifier(property.range) });
-			changed = true;
-		}
-		if (changed) modify();
+		applyAgentTagSamples(tagSampleTable().ladderSpeedModifier, id,
+			property.range, property.revision);
 	}
 
 	void World::clearAgentTagLadderSpeedModifierSamples(AgentTagId id)
 	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->getLadderSpeedModifierSample()
-				|| agent->getLadderSpeedModifierSample()->sourceTag != id) continue;
-			agent->clearLadderSpeedModifierSample();
-			changed = true;
-		}
-		if (changed) modify();
-	}
-
-	void World::addAgentTagEffortAversionSamples(AgentTagId id,
-		AgentEffortAversionProperty const& property)
-	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->hasAgentTag(id)) continue;
-			agent->setEffortAversionSample({
-				SampledAgentPropertyType::EffortAversion, id, property.revision,
-				sampleAgentModifier(property.range) });
-			changed = true;
-		}
-		if (changed) modify();
-	}
-
-	void World::clearAgentTagEffortAversionSamples(AgentTagId id)
-	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->getEffortAversionSample()
-				|| agent->getEffortAversionSample()->sourceTag != id) continue;
-			agent->clearEffortAversionSample();
-			changed = true;
-		}
-		if (changed) modify();
-	}
-
-	void World::addAgentTagWaitingAversionSamples(AgentTagId id,
-		AgentWaitingAversionProperty const& property)
-	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->hasAgentTag(id)) continue;
-			agent->setWaitingAversionSample({
-				SampledAgentPropertyType::WaitingAversion, id, property.revision,
-				sampleAgentModifier(property.range) });
-			changed = true;
-		}
-		if (changed) modify();
-	}
-
-	void World::clearAgentTagWaitingAversionSamples(AgentTagId id)
-	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->getWaitingAversionSample()
-				|| agent->getWaitingAversionSample()->sourceTag != id) continue;
-			agent->clearWaitingAversionSample();
-			changed = true;
-		}
-		if (changed) modify();
-	}
-
-	void World::addAgentTagCrowdAversionSamples(AgentTagId id,
-		AgentCrowdAversionProperty const& property)
-	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->hasAgentTag(id)) continue;
-			agent->setCrowdAversionSample({
-				SampledAgentPropertyType::CrowdAversion, id, property.revision,
-				sampleAgentModifier(property.range) });
-			changed = true;
-		}
-		if (changed) modify();
-	}
-
-	void World::clearAgentTagCrowdAversionSamples(AgentTagId id)
-	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->getCrowdAversionSample()
-				|| agent->getCrowdAversionSample()->sourceTag != id) continue;
-			agent->clearCrowdAversionSample();
-			changed = true;
-		}
-		if (changed) modify();
-	}
-
-	void World::addAgentTagRiskAversionSamples(AgentTagId id,
-		AgentRiskAversionProperty const& property)
-	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->hasAgentTag(id)) continue;
-			agent->setRiskAversionSample({
-				SampledAgentPropertyType::RiskAversion, id, property.revision,
-				sampleAgentModifier(property.range) });
-			changed = true;
-		}
-		if (changed) modify();
-	}
-
-	void World::clearAgentTagRiskAversionSamples(AgentTagId id)
-	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->getRiskAversionSample()
-				|| agent->getRiskAversionSample()->sourceTag != id) continue;
-			agent->clearRiskAversionSample();
-			changed = true;
-		}
-		if (changed) modify();
-	}
-
-	void World::addAgentTagRouteFamiliaritySamples(AgentTagId id,
-		AgentRouteFamiliarityProperty const& property)
-	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->hasAgentTag(id)) continue;
-			agent->setRouteFamiliaritySample({
-				SampledAgentPropertyType::RouteFamiliarity, id, property.revision,
-				sampleAgentModifier(property.range) });
-			changed = true;
-		}
-		if (changed) modify();
-	}
-
-	void World::clearAgentTagRouteFamiliaritySamples(AgentTagId id)
-	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->getRouteFamiliaritySample()
-				|| agent->getRouteFamiliaritySample()->sourceTag != id) continue;
-			agent->clearRouteFamiliaritySample();
-			changed = true;
-		}
-		if (changed) modify();
-	}
-
-	void World::addAgentTagRoutePersistenceSamples(AgentTagId id,
-		AgentRoutePersistenceProperty const& property)
-	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->hasAgentTag(id)) continue;
-			agent->setRoutePersistenceSample({
-				SampledAgentPropertyType::RoutePersistence, id, property.revision,
-				sampleAgentModifier(property.range) });
-			changed = true;
-		}
-		if (changed) modify();
-	}
-
-	void World::clearAgentTagRoutePersistenceSamples(AgentTagId id)
-	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->getRoutePersistenceSample()
-				|| agent->getRoutePersistenceSample()->sourceTag != id) continue;
-			agent->clearRoutePersistenceSample();
-			changed = true;
-		}
-		if (changed) modify();
-	}
-
-	void World::addAgentTagMinimumRoutePlanningTimeSamples(AgentTagId id,
-		AgentMinimumRoutePlanningTimeProperty const& property)
-	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->hasAgentTag(id)) continue;
-			agent->setMinimumRoutePlanningTimeSample({
-				SampledAgentPropertyType::MinimumRoutePlanningTime, id, property.revision,
-				sampleAgentModifier(property.range) });
-			changed = true;
-		}
-		if (changed) modify();
-	}
-
-	void World::clearAgentTagMinimumRoutePlanningTimeSamples(AgentTagId id)
-	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->getMinimumRoutePlanningTimeSample()
-				|| agent->getMinimumRoutePlanningTimeSample()->sourceTag != id) continue;
-			agent->clearMinimumRoutePlanningTimeSample();
-			changed = true;
-		}
-		if (changed) modify();
-	}
-
-	void World::addAgentTagMaximumRoutePlanningTimeSamples(AgentTagId id,
-		AgentMaximumRoutePlanningTimeProperty const& property)
-	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->hasAgentTag(id)) continue;
-			agent->setMaximumRoutePlanningTimeSample({
-				SampledAgentPropertyType::MaximumRoutePlanningTime, id, property.revision,
-				sampleAgentModifier(property.range) });
-			changed = true;
-		}
-		if (changed) modify();
-	}
-
-	void World::clearAgentTagMaximumRoutePlanningTimeSamples(AgentTagId id)
-	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->getMaximumRoutePlanningTimeSample()
-				|| agent->getMaximumRoutePlanningTimeSample()->sourceTag != id) continue;
-			agent->clearMaximumRoutePlanningTimeSample();
-			changed = true;
-		}
-		if (changed) modify();
+		clearAgentTagSamples(tagSampleTable().ladderSpeedModifier, id);
 	}
 
 	void World::addAgentTagInteractionAversionSamples(AgentTagId id,
 		AgentInteractionAversionProperty const& property)
 	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->hasAgentTag(id)) continue;
-			agent->setInteractionAversionSample({
-				SampledAgentPropertyType::InteractionAversion, id, property.revision,
-				sampleAgentModifier(property.range) });
-			changed = true;
-		}
-		if (changed) modify();
+		applyAgentTagSamples(tagSampleTable().interactionAversion, id,
+			property.range, property.revision);
 	}
 
 	void World::clearAgentTagInteractionAversionSamples(AgentTagId id)
 	{
-		invalidateSimulationSnapshot();
-		bool changed{ false };
-		for (auto& [agentId, agent] : mAgents.entries())
-		{
-			(void)agentId;
-			if (!agent || !agent->getInteractionAversionSample()
-				|| agent->getInteractionAversionSample()->sourceTag != id) continue;
-			agent->clearInteractionAversionSample();
-			changed = true;
-		}
-		if (changed) modify();
+		clearAgentTagSamples(tagSampleTable().interactionAversion, id);
+	}
+
+	void World::addAgentTagEffortAversionSamples(AgentTagId id,
+		AgentEffortAversionProperty const& property)
+	{
+		applyAgentTagSamples(tagSampleTable().effortAversion, id,
+			property.range, property.revision);
+	}
+
+	void World::clearAgentTagEffortAversionSamples(AgentTagId id)
+	{
+		clearAgentTagSamples(tagSampleTable().effortAversion, id);
+	}
+
+	void World::addAgentTagWaitingAversionSamples(AgentTagId id,
+		AgentWaitingAversionProperty const& property)
+	{
+		applyAgentTagSamples(tagSampleTable().waitingAversion, id,
+			property.range, property.revision);
+	}
+
+	void World::clearAgentTagWaitingAversionSamples(AgentTagId id)
+	{
+		clearAgentTagSamples(tagSampleTable().waitingAversion, id);
+	}
+
+	void World::addAgentTagCrowdAversionSamples(AgentTagId id,
+		AgentCrowdAversionProperty const& property)
+	{
+		applyAgentTagSamples(tagSampleTable().crowdAversion, id,
+			property.range, property.revision);
+	}
+
+	void World::clearAgentTagCrowdAversionSamples(AgentTagId id)
+	{
+		clearAgentTagSamples(tagSampleTable().crowdAversion, id);
+	}
+
+	void World::addAgentTagRiskAversionSamples(AgentTagId id,
+		AgentRiskAversionProperty const& property)
+	{
+		applyAgentTagSamples(tagSampleTable().riskAversion, id,
+			property.range, property.revision);
+	}
+
+	void World::clearAgentTagRiskAversionSamples(AgentTagId id)
+	{
+		clearAgentTagSamples(tagSampleTable().riskAversion, id);
+	}
+
+	void World::addAgentTagRouteFamiliaritySamples(AgentTagId id,
+		AgentRouteFamiliarityProperty const& property)
+	{
+		applyAgentTagSamples(tagSampleTable().routeFamiliarity, id,
+			property.range, property.revision);
+	}
+
+	void World::clearAgentTagRouteFamiliaritySamples(AgentTagId id)
+	{
+		clearAgentTagSamples(tagSampleTable().routeFamiliarity, id);
+	}
+
+	void World::addAgentTagRoutePersistenceSamples(AgentTagId id,
+		AgentRoutePersistenceProperty const& property)
+	{
+		applyAgentTagSamples(tagSampleTable().routePersistence, id,
+			property.range, property.revision);
+	}
+
+	void World::clearAgentTagRoutePersistenceSamples(AgentTagId id)
+	{
+		clearAgentTagSamples(tagSampleTable().routePersistence, id);
+	}
+
+	void World::addAgentTagMinimumRoutePlanningTimeSamples(AgentTagId id,
+		AgentMinimumRoutePlanningTimeProperty const& property)
+	{
+		applyAgentTagSamples(tagSampleTable().minimumRoutePlanningTime, id,
+			property.range, property.revision);
+	}
+
+	void World::clearAgentTagMinimumRoutePlanningTimeSamples(AgentTagId id)
+	{
+		clearAgentTagSamples(tagSampleTable().minimumRoutePlanningTime, id);
+	}
+
+	void World::addAgentTagMaximumRoutePlanningTimeSamples(AgentTagId id,
+		AgentMaximumRoutePlanningTimeProperty const& property)
+	{
+		applyAgentTagSamples(tagSampleTable().maximumRoutePlanningTime, id,
+			property.range, property.revision);
+	}
+
+	void World::clearAgentTagMaximumRoutePlanningTimeSamples(AgentTagId id)
+	{
+		clearAgentTagSamples(tagSampleTable().maximumRoutePlanningTime, id);
 	}
 
 	uint32_t World::getCellsWide() const
@@ -8036,353 +7914,412 @@ namespace core
 		return mSimulationCoordinator.setAgentActive(id, active, diagnostic);
 	}
 
-	bool World::setAgentIndividualColour(AgentId id, optional<AgentColour> value,
-		string* diagnostic)
+	namespace
 	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (!mSimulationPaused)
+		// Builds one plain float override row: the value is validated as a
+		// degenerate range { v, v } exactly as the replaced facade methods
+		// did, and written straight through to the Agent's individual
+		// property with no further side effects.
+		IndividualOverrideDescriptor<float> plainFloatOverride(
+			std::string unchangedMessage,
+			bool (*validator)(AgentModifierRange const&, std::string*),
+			std::optional<float> const& (Agent::*read)() const,
+			void (Agent::*write)(std::optional<float>))
 		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
+			IndividualOverrideDescriptor<float> descriptor;
+			descriptor.unchangedMessage = std::move(unchangedMessage);
+			descriptor.validate = [validator](float const& value,
+				std::string* diagnostic)
+			{ return validator({ value, value }, diagnostic); };
+			descriptor.read = [read](Agent const& agent)
+				-> std::optional<float> const& { return (agent.*read)(); };
+			descriptor.apply = [write](World&, AgentId, Agent& agent,
+				std::optional<float> const& value) { (agent.*write)(value); };
+			return descriptor;
 		}
-		if (lookup.entity->getIndividualColour() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Agent Colour is unchanged";
-			return false;
-		}
-		invalidateSimulationSnapshot();
-		lookup.entity->setIndividualColour(value);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
 	}
 
-	bool World::setAgentIndividualEscalatorWalkingChance(AgentId id,
-		optional<float> value, string* diagnostic)
+	// The one individual-override table (ADR 0022, #677). Built once,
+	// inside World's own member scope: the special rows' closures reach
+	// World-owned state - the height-fit preflight, the adherence
+	// replanning seam, and the simulation coordinator behind the remote
+	// object-control flags - through this scope's access (the ADR 0022
+	// access seam). Object usage and its distance stay on their own
+	// composite path below: they are a coupled pair with a shared
+	// validity rule and a joint replanning side effect, not two
+	// independent single-property rows.
+	IndividualOverrideTable const& World::individualOverrideTable()
 	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (value && !agentEscalatorWalkingChanceIsValid(*value, diagnostic)) return false;
-		if (!mSimulationPaused)
+		static IndividualOverrideTable const table = []()
 		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		if (lookup.entity->getIndividualEscalatorWalkingChance() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Escalator walking chance is unchanged";
-			return false;
-		}
-		invalidateSimulationSnapshot();
-		lookup.entity->setIndividualEscalatorWalkingChance(value);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
+			IndividualOverrideTable t;
+			t.colour = []()
+			{
+				IndividualOverrideDescriptor<AgentColour> d;
+				d.unchangedMessage = "The individual Agent Colour is unchanged";
+				d.read = [](Agent const& agent)
+					-> std::optional<AgentColour> const&
+					{ return agent.getIndividualColour(); };
+				d.apply = [](World&, AgentId, Agent& agent,
+					std::optional<AgentColour> const& value)
+					{ agent.setIndividualColour(value); };
+				return d;
+			}();
+			t.escalatorWalkingChance = []()
+			{
+				IndividualOverrideDescriptor<float> d;
+				d.unchangedMessage =
+					"The individual Escalator walking chance is unchanged";
+				d.validate = [](float const& value, std::string* diagnostic)
+				{ return agentEscalatorWalkingChanceIsValid(value, diagnostic); };
+				d.read = [](Agent const& agent) -> std::optional<float> const&
+				{ return agent.getIndividualEscalatorWalkingChance(); };
+				d.apply = [](World&, AgentId, Agent& agent,
+					std::optional<float> const& value)
+					{ agent.setIndividualEscalatorWalkingChance(value); };
+				return d;
+			}();
+			t.walkSpeedModifier = plainFloatOverride(
+				"The individual Walk speed modifier is unchanged",
+				agentWalkSpeedModifierRangeIsValid,
+				&Agent::getIndividualWalkSpeedModifier,
+				&Agent::setIndividualWalkSpeedModifier);
+			t.heightModifier = []()
+			{
+				IndividualOverrideDescriptor<float> d;
+				d.unchangedMessage =
+					"The individual Height modifier is unchanged";
+				d.validate = [](float const& value, std::string* diagnostic)
+				{
+					return agentHeightModifierRangeIsValid(
+						{ value, value }, diagnostic);
+				};
+				d.read = [](Agent const& agent) -> std::optional<float> const&
+				{ return agent.getIndividualHeightModifier(); };
+				// Clearing the override reveals the sampled (or default
+				// 1.0) inherited value: the Agent's live pose must fit the
+				// next effective height before the write, exactly as the
+				// replaced method checked.
+				d.preflight = [](World& world, Agent const& agent,
+					std::optional<float> const& value, std::string* diagnostic)
+				{
+					auto const next = value.value_or(agent.getHeightModifierSample()
+						? agent.getHeightModifierSample()->value : 1.0f);
+					return world.agentHeightStateFits(agent, next, diagnostic);
+				};
+				d.apply = [](World&, AgentId, Agent& agent,
+					std::optional<float> const& value)
+					{ agent.setIndividualHeightModifier(value); };
+				return d;
+			}();
+			t.stairSpeedModifier = plainFloatOverride(
+				"The individual Stair speed modifier is unchanged",
+				agentStairSpeedModifierRangeIsValid,
+				&Agent::getIndividualStairSpeedModifier,
+				&Agent::setIndividualStairSpeedModifier);
+			t.ladderSpeedModifier = plainFloatOverride(
+				"The individual Ladder speed modifier is unchanged",
+				agentLadderSpeedModifierRangeIsValid,
+				&Agent::getIndividualLadderSpeedModifier,
+				&Agent::setIndividualLadderSpeedModifier);
+			t.interactionAversion = plainFloatOverride(
+				"The individual Interaction aversion is unchanged",
+				agentInteractionAversionRangeIsValid,
+				&Agent::getIndividualInteractionAversion,
+				&Agent::setIndividualInteractionAversion);
+			t.effortAversion = plainFloatOverride(
+				"The individual Effort aversion is unchanged",
+				agentEffortAversionRangeIsValid,
+				&Agent::getIndividualEffortAversion,
+				&Agent::setIndividualEffortAversion);
+			t.waitingAversion = plainFloatOverride(
+				"The individual Waiting aversion is unchanged",
+				agentWaitingAversionRangeIsValid,
+				&Agent::getIndividualWaitingAversion,
+				&Agent::setIndividualWaitingAversion);
+			t.crowdAversion = plainFloatOverride(
+				"The individual Crowd aversion is unchanged",
+				agentCrowdAversionRangeIsValid,
+				&Agent::getIndividualCrowdAversion,
+				&Agent::setIndividualCrowdAversion);
+			t.riskAversion = plainFloatOverride(
+				"The individual Risk aversion is unchanged",
+				agentRiskAversionRangeIsValid,
+				&Agent::getIndividualRiskAversion,
+				&Agent::setIndividualRiskAversion);
+			t.routeFamiliarity = plainFloatOverride(
+				"The individual Route familiarity is unchanged",
+				agentRouteFamiliarityRangeIsValid,
+				&Agent::getIndividualRouteFamiliarity,
+				&Agent::setIndividualRouteFamiliarity);
+			t.routePersistence = plainFloatOverride(
+				"The individual Route persistence is unchanged",
+				agentRoutePersistenceRangeIsValid,
+				&Agent::getIndividualRoutePersistence,
+				&Agent::setIndividualRoutePersistence);
+			t.minimumRoutePlanningTime = plainFloatOverride(
+				"The individual Minimum route planning time is unchanged",
+				agentMinimumRoutePlanningTimeRangeIsValid,
+				&Agent::getIndividualMinimumRoutePlanningTime,
+				&Agent::setIndividualMinimumRoutePlanningTime);
+			t.maximumRoutePlanningTime = plainFloatOverride(
+				"The individual Maximum route planning time is unchanged",
+				agentMaximumRoutePlanningTimeRangeIsValid,
+				&Agent::getIndividualMaximumRoutePlanningTime,
+				&Agent::setIndividualMaximumRoutePlanningTime);
+			t.permissionAdherence = []()
+			{
+				IndividualOverrideDescriptor<bool> d;
+				d.unchangedMessage =
+					"The individual Permission adherence is unchanged";
+				d.read = [](Agent const& agent) -> std::optional<bool> const&
+				{ return agent.getIndividualPermissionAdherence(); };
+				// The effective adherence can flip even though only one
+				// source changed; the replanning seam wraps the write
+				// itself, as the replaced method did.
+				d.apply = [](World& world, AgentId id, Agent& agent,
+					std::optional<bool> const& value)
+				{
+					auto const before =
+						agent.getEffectivePermissionAdherence().value;
+					agent.setIndividualPermissionAdherence(value);
+					auto const after =
+						agent.getEffectivePermissionAdherence().value;
+					if (before != after)
+					{
+						if (after) world.replanAgentAfterAuthorizationRefusal(id);
+						else world.beginVoluntaryRoutePlanning(id);
+					}
+				};
+				return d;
+			}();
+			t.remoteAccessPanels = []()
+			{
+				IndividualOverrideDescriptor<bool> d;
+				d.unchangedMessage =
+					"The individual Remote Access panels is unchanged";
+				d.read = [](Agent const& agent) -> std::optional<bool> const&
+				{ return agent.getIndividualRemoteAccessPanels(); };
+				d.apply = [](World& world, AgentId id, Agent& agent,
+					std::optional<bool> const& value)
+				{
+					agent.setIndividualRemoteAccessPanels(value);
+					world.mSimulationCoordinator.agentObjectUsageChanged(id);
+				};
+				return d;
+			}();
+			t.remoteBoothWindowShutters = []()
+			{
+				IndividualOverrideDescriptor<bool> d;
+				d.unchangedMessage =
+					"The individual Remote BoothWindow shutters is unchanged";
+				d.read = [](Agent const& agent) -> std::optional<bool> const&
+				{ return agent.getIndividualRemoteBoothWindowShutters(); };
+				d.apply = [](World& world, AgentId id, Agent& agent,
+					std::optional<bool> const& value)
+				{
+					agent.setIndividualRemoteBoothWindowShutters(value);
+					world.mSimulationCoordinator.agentObjectUsageChanged(id);
+				};
+				return d;
+			}();
+			t.mobilityProfile = []()
+			{
+				IndividualOverrideDescriptor<MobilityProfile> d;
+				d.unchangedMessage =
+					"The individual Mobility profile is unchanged";
+				d.validate = [](MobilityProfile const& value,
+					std::string* diagnostic)
+				{
+					if (!mobilityProfileIsValid(value))
+					{
+						if (diagnostic)
+							*diagnostic = "The individual Mobility profile "
+								"contains an invalid Mobility use";
+						return false;
+					}
+					return true;
+				};
+				d.read = [](Agent const& agent)
+					-> std::optional<MobilityProfile> const&
+					{ return agent.getIndividualMobilityProfile(); };
+				d.apply = [](World&, AgentId, Agent& agent,
+					std::optional<MobilityProfile> const& value)
+					{ agent.setIndividualMobilityProfile(value); };
+				return d;
+			}();
+			return t;
+		}();
+		return table;
 	}
 
-	bool World::setAgentIndividualWalkSpeedModifier(AgentId id,
-		optional<float> value, string* diagnostic)
+	// The one individual-override setter path (ADR 0012 through ADR 0022):
+	// every setAgentIndividual* facade method forwards here with its table
+	// row. Every refusal happens before any authored state changes, in the
+	// order the replaced methods established: unknown Agent, invalid value,
+	// running simulation, unchanged value, then the property's own
+	// preflight; only then is the snapshot invalidated, the write and its
+	// side effects applied, and the World dirtied.
+	template <typename T>
+	bool World::setIndividualOverride(
+		IndividualOverrideDescriptor<T> const& descriptor,
+		AgentId id, optional<T> value, string* diagnostic)
 	{
 		auto lookup = lookupAgent(id);
 		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (value && !agentWalkSpeedModifierRangeIsValid({ *value, *value }, diagnostic)) return false;
+		if (value && descriptor.validate && !descriptor.validate(*value, diagnostic))
+			return false;
 		if (!mSimulationPaused)
 		{
 			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		if (lookup.entity->getIndividualWalkSpeedModifier() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Walk speed modifier is unchanged";
-			return false;
-		}
-		invalidateSimulationSnapshot();
-		lookup.entity->setIndividualWalkSpeedModifier(value);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
-	}
-
-	bool World::setAgentIndividualHeightModifier(AgentId id,
-		optional<float> value, string* diagnostic)
-	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (value && !agentHeightModifierRangeIsValid({ *value, *value }, diagnostic)) return false;
-		if (!mSimulationPaused)
-		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		if (lookup.entity->getIndividualHeightModifier() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Height modifier is unchanged";
 			return false;
 		}
 		auto* agent = lookup.entity;
-		auto const next = value.value_or(agent->getHeightModifierSample()
-			? agent->getHeightModifierSample()->value : 1.0f);
-		if (!agentHeightStateFits(*agent, next, diagnostic)) return false;
+		if (descriptor.read(*agent) == value)
+		{
+			if (diagnostic) *diagnostic = descriptor.unchangedMessage;
+			return false;
+		}
+		if (descriptor.preflight
+			&& !descriptor.preflight(*this, *agent, value, diagnostic)) return false;
 		invalidateSimulationSnapshot();
-		agent->setIndividualHeightModifier(value);
-		agent->syncPoseToSector();
+		descriptor.apply(*this, id, *agent, value);
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
 	}
 
-	bool World::setAgentIndividualStairSpeedModifier(AgentId id,
-		optional<float> value, string* diagnostic)
+	bool World::setAgentIndividualColour(AgentId id, optional<AgentColour> value,
+		string* diagnostic)
 	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (value && !agentStairSpeedModifierRangeIsValid({ *value, *value }, diagnostic)) return false;
-		if (!mSimulationPaused)
-		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		if (lookup.entity->getIndividualStairSpeedModifier() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Stair speed modifier is unchanged";
-			return false;
-		}
-		invalidateSimulationSnapshot();
-		lookup.entity->setIndividualStairSpeedModifier(value);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
+		return setIndividualOverride(individualOverrideTable().colour, id,
+			value, diagnostic);
 	}
 
-	bool World::setAgentIndividualLadderSpeedModifier(AgentId id,
-		optional<float> value, string* diagnostic)
+	bool World::setAgentIndividualEscalatorWalkingChance(AgentId id, optional<float> value,
+		string* diagnostic)
 	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (value && !agentLadderSpeedModifierRangeIsValid({ *value, *value }, diagnostic)) return false;
-		if (!mSimulationPaused)
-		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		if (lookup.entity->getIndividualLadderSpeedModifier() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Ladder speed modifier is unchanged";
-			return false;
-		}
-		invalidateSimulationSnapshot();
-		lookup.entity->setIndividualLadderSpeedModifier(value);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
+		return setIndividualOverride(individualOverrideTable().escalatorWalkingChance, id,
+			value, diagnostic);
 	}
 
-	bool World::setAgentIndividualInteractionAversion(AgentId id,
-		optional<float> value, string* diagnostic)
+	bool World::setAgentIndividualWalkSpeedModifier(AgentId id, optional<float> value,
+		string* diagnostic)
 	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (value && !agentInteractionAversionRangeIsValid({ *value, *value }, diagnostic)) return false;
-		if (!mSimulationPaused)
-		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		if (lookup.entity->getIndividualInteractionAversion() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Interaction aversion is unchanged";
-			return false;
-		}
-		invalidateSimulationSnapshot();
-		lookup.entity->setIndividualInteractionAversion(value);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
+		return setIndividualOverride(individualOverrideTable().walkSpeedModifier, id,
+			value, diagnostic);
 	}
 
-	bool World::setAgentIndividualEffortAversion(AgentId id,
-		optional<float> value, string* diagnostic)
+	bool World::setAgentIndividualHeightModifier(AgentId id, optional<float> value,
+		string* diagnostic)
 	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (value && !agentEffortAversionRangeIsValid({ *value, *value }, diagnostic)) return false;
-		if (!mSimulationPaused)
-		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		if (lookup.entity->getIndividualEffortAversion() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Effort aversion is unchanged";
-			return false;
-		}
-		invalidateSimulationSnapshot();
-		lookup.entity->setIndividualEffortAversion(value);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
+		return setIndividualOverride(individualOverrideTable().heightModifier, id,
+			value, diagnostic);
 	}
 
-	bool World::setAgentIndividualWaitingAversion(AgentId id,
-		optional<float> value, string* diagnostic)
+	bool World::setAgentIndividualStairSpeedModifier(AgentId id, optional<float> value,
+		string* diagnostic)
 	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (value && !agentWaitingAversionRangeIsValid({ *value, *value }, diagnostic)) return false;
-		if (!mSimulationPaused)
-		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		if (lookup.entity->getIndividualWaitingAversion() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Waiting aversion is unchanged";
-			return false;
-		}
-		invalidateSimulationSnapshot();
-		lookup.entity->setIndividualWaitingAversion(value);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
+		return setIndividualOverride(individualOverrideTable().stairSpeedModifier, id,
+			value, diagnostic);
 	}
 
-	bool World::setAgentIndividualCrowdAversion(AgentId id,
-		optional<float> value, string* diagnostic)
+	bool World::setAgentIndividualLadderSpeedModifier(AgentId id, optional<float> value,
+		string* diagnostic)
 	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (value && !agentCrowdAversionRangeIsValid({ *value, *value }, diagnostic)) return false;
-		if (!mSimulationPaused)
-		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		if (lookup.entity->getIndividualCrowdAversion() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Crowd aversion is unchanged";
-			return false;
-		}
-		invalidateSimulationSnapshot();
-		lookup.entity->setIndividualCrowdAversion(value);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
+		return setIndividualOverride(individualOverrideTable().ladderSpeedModifier, id,
+			value, diagnostic);
 	}
 
-	bool World::setAgentIndividualRiskAversion(AgentId id,
-		optional<float> value, string* diagnostic)
+	bool World::setAgentIndividualInteractionAversion(AgentId id, optional<float> value,
+		string* diagnostic)
 	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (value && !agentRiskAversionRangeIsValid({ *value, *value }, diagnostic)) return false;
-		if (!mSimulationPaused)
-		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		if (lookup.entity->getIndividualRiskAversion() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Risk aversion is unchanged";
-			return false;
-		}
-		invalidateSimulationSnapshot();
-		lookup.entity->setIndividualRiskAversion(value);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
+		return setIndividualOverride(individualOverrideTable().interactionAversion, id,
+			value, diagnostic);
 	}
 
-	bool World::setAgentIndividualRouteFamiliarity(AgentId id,
-		optional<float> value, string* diagnostic)
+	bool World::setAgentIndividualEffortAversion(AgentId id, optional<float> value,
+		string* diagnostic)
 	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (value && !agentRouteFamiliarityRangeIsValid({ *value, *value }, diagnostic)) return false;
-		if (!mSimulationPaused)
-		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		if (lookup.entity->getIndividualRouteFamiliarity() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Route familiarity is unchanged";
-			return false;
-		}
-		invalidateSimulationSnapshot();
-		lookup.entity->setIndividualRouteFamiliarity(value);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
+		return setIndividualOverride(individualOverrideTable().effortAversion, id,
+			value, diagnostic);
 	}
 
-	bool World::setAgentIndividualRoutePersistence(AgentId id,
-		optional<float> value, string* diagnostic)
+	bool World::setAgentIndividualWaitingAversion(AgentId id, optional<float> value,
+		string* diagnostic)
 	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (value && !agentRoutePersistenceRangeIsValid({ *value, *value }, diagnostic)) return false;
-		if (!mSimulationPaused)
-		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		if (lookup.entity->getIndividualRoutePersistence() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Route persistence is unchanged";
-			return false;
-		}
-		invalidateSimulationSnapshot();
-		lookup.entity->setIndividualRoutePersistence(value);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
+		return setIndividualOverride(individualOverrideTable().waitingAversion, id,
+			value, diagnostic);
 	}
 
-	bool World::setAgentIndividualMinimumRoutePlanningTime(AgentId id,
-		optional<float> value, string* diagnostic)
+	bool World::setAgentIndividualCrowdAversion(AgentId id, optional<float> value,
+		string* diagnostic)
 	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (value && !agentMinimumRoutePlanningTimeRangeIsValid({ *value, *value }, diagnostic)) return false;
-		if (!mSimulationPaused)
-		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		if (lookup.entity->getIndividualMinimumRoutePlanningTime() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Minimum route planning time is unchanged";
-			return false;
-		}
-		invalidateSimulationSnapshot();
-		lookup.entity->setIndividualMinimumRoutePlanningTime(value);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
+		return setIndividualOverride(individualOverrideTable().crowdAversion, id,
+			value, diagnostic);
 	}
 
-	bool World::setAgentIndividualMaximumRoutePlanningTime(AgentId id,
-		optional<float> value, string* diagnostic)
+	bool World::setAgentIndividualRiskAversion(AgentId id, optional<float> value,
+		string* diagnostic)
 	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (value && !agentMaximumRoutePlanningTimeRangeIsValid({ *value, *value }, diagnostic)) return false;
-		if (!mSimulationPaused)
-		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		if (lookup.entity->getIndividualMaximumRoutePlanningTime() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Maximum route planning time is unchanged";
-			return false;
-		}
-		invalidateSimulationSnapshot();
-		lookup.entity->setIndividualMaximumRoutePlanningTime(value);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
+		return setIndividualOverride(individualOverrideTable().riskAversion, id,
+			value, diagnostic);
+	}
+
+	bool World::setAgentIndividualRouteFamiliarity(AgentId id, optional<float> value,
+		string* diagnostic)
+	{
+		return setIndividualOverride(individualOverrideTable().routeFamiliarity, id,
+			value, diagnostic);
+	}
+
+	bool World::setAgentIndividualRoutePersistence(AgentId id, optional<float> value,
+		string* diagnostic)
+	{
+		return setIndividualOverride(individualOverrideTable().routePersistence, id,
+			value, diagnostic);
+	}
+
+	bool World::setAgentIndividualMinimumRoutePlanningTime(AgentId id, optional<float> value,
+		string* diagnostic)
+	{
+		return setIndividualOverride(individualOverrideTable().minimumRoutePlanningTime, id,
+			value, diagnostic);
+	}
+
+	bool World::setAgentIndividualMaximumRoutePlanningTime(AgentId id, optional<float> value,
+		string* diagnostic)
+	{
+		return setIndividualOverride(individualOverrideTable().maximumRoutePlanningTime, id,
+			value, diagnostic);
+	}
+
+	bool World::setAgentIndividualPermissionAdherence(AgentId id, optional<bool> value,
+		string* diagnostic)
+	{
+		return setIndividualOverride(individualOverrideTable().permissionAdherence, id,
+			value, diagnostic);
+	}
+
+	bool World::setAgentIndividualRemoteAccessPanels(AgentId id, optional<bool> value,
+		string* diagnostic)
+	{
+		return setIndividualOverride(individualOverrideTable().remoteAccessPanels, id,
+			value, diagnostic);
+	}
+
+	bool World::setAgentIndividualRemoteBoothWindowShutters(AgentId id, optional<bool> value,
+		string* diagnostic)
+	{
+		return setIndividualOverride(individualOverrideTable().remoteBoothWindowShutters, id,
+			value, diagnostic);
+	}
+
+	bool World::setAgentIndividualMobilityProfile(AgentId id, optional<MobilityProfile> value,
+		string* diagnostic)
+	{
+		return setIndividualOverride(individualOverrideTable().mobilityProfile, id,
+			value, diagnostic);
 	}
 
 	bool World::setAgentIndividualObjectUsage(AgentId id, optional<ObjectUsage> value, string* diagnostic)
@@ -8445,105 +8382,6 @@ namespace core
 		modify();
 	}
 
-	bool World::setAgentIndividualPermissionAdherence(AgentId id,
-		optional<bool> value, string* diagnostic)
-	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (!mSimulationPaused)
-		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		if (lookup.entity->getIndividualPermissionAdherence() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Permission adherence is unchanged";
-			return false;
-		}
-		invalidateSimulationSnapshot();
-		auto const before = lookup.entity->getEffectivePermissionAdherence().value;
-		lookup.entity->setIndividualPermissionAdherence(value);
-		auto const after = lookup.entity->getEffectivePermissionAdherence().value;
-		if (before != after)
-		{
-			if (after) replanAgentAfterAuthorizationRefusal(id);
-			else beginVoluntaryRoutePlanning(id);
-		}
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
-	}
-	bool World::setAgentIndividualRemoteAccessPanels(AgentId id,
-		optional<bool> value, string* diagnostic)
-	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (!mSimulationPaused)
-		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		if (lookup.entity->getIndividualRemoteAccessPanels() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Remote Access panels is unchanged";
-			return false;
-		}
-		invalidateSimulationSnapshot();
-		lookup.entity->setIndividualRemoteAccessPanels(value);
-		mSimulationCoordinator.agentObjectUsageChanged(id);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
-	}
-	bool World::setAgentIndividualRemoteBoothWindowShutters(AgentId id,
-		optional<bool> value, string* diagnostic)
-	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (!mSimulationPaused)
-		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		if (lookup.entity->getIndividualRemoteBoothWindowShutters() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Remote BoothWindow shutters is unchanged";
-			return false;
-		}
-		invalidateSimulationSnapshot();
-		lookup.entity->setIndividualRemoteBoothWindowShutters(value);
-		mSimulationCoordinator.agentObjectUsageChanged(id);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
-	}
-
-	bool World::setAgentIndividualMobilityProfile(AgentId id,
-		optional<MobilityProfile> value, string* diagnostic)
-	{
-		auto lookup = lookupAgent(id);
-		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (value && !mobilityProfileIsValid(*value))
-		{
-			if (diagnostic) *diagnostic = "The individual Mobility profile contains an invalid Mobility use";
-			return false;
-		}
-		if (!mSimulationPaused)
-		{
-			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
-			return false;
-		}
-		if (lookup.entity->getIndividualMobilityProfile() == value)
-		{
-			if (diagnostic) *diagnostic = "The individual Mobility profile is unchanged";
-			return false;
-		}
-		invalidateSimulationSnapshot();
-		lookup.entity->setIndividualMobilityProfile(value);
-		modify();
-		if (diagnostic) diagnostic->clear();
-		return true;
-	}
 
 	// Agent groups are authored World data, not simulation state (ADR 0006).
 	// The behaviour lives in the Agent group registry (ADR 0022); World keeps

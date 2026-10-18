@@ -13,6 +13,7 @@
 
 
 #include "core/Defines.h"
+#include "core/AgentPropertyDescriptors.h"
 #include "core/PhysicalControlPlacement.h"
 #include "core/AgentGroup.h"
 #include "core/AccessPermission.h"
@@ -1136,6 +1137,25 @@ namespace core
 		void addAgentTagMaximumRoutePlanningTimeSamples(AgentTagId id,
 			AgentMaximumRoutePlanningTimeProperty const& property);
 		void clearAgentTagMaximumRoutePlanningTimeSamples(AgentTagId id);
+
+		// The single shared paths behind the descriptor tables (ADR 0022,
+		// #677): every addAgentTag*Samples / clearAgentTag*Samples method
+		// above and every setAgentIndividual* method below forwards here, so
+		// ADR 0012's "individual Agent properties override tag properties"
+		// precedence is one code path. The tables are built once inside
+		// World's own member scope because their closures reach World-owned
+		// state through that scope's access (the ADR 0022 access seam); the
+		// World owns no table state beyond this.
+		static TagSampleTable const& tagSampleTable();
+		void applyAgentTagSamples(TagSampleDescriptor const& descriptor,
+			AgentTagId id, AgentModifierRange const& range, uint64_t revision);
+		void clearAgentTagSamples(TagSampleDescriptor const& descriptor,
+			AgentTagId id);
+		static IndividualOverrideTable const& individualOverrideTable();
+		template <typename T>
+		bool setIndividualOverride(
+			IndividualOverrideDescriptor<T> const& descriptor,
+			AgentId id, std::optional<T> value, std::string* diagnostic);
 
 		// Case-sensitive name lookup across the groups this World owns, with
 		// one group optionally excluded so a group renaming itself to the name
