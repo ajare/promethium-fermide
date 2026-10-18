@@ -2113,6 +2113,10 @@ namespace core
 		std::string limitingReason;
 		bool hasNextOccurrence{false};
 		double nextOccurrenceSeconds{0.0};
+		// Runtime-only occurrence totals, independent of bounded event history.
+		double cumulativeRequested{0.0};
+		double cumulativeMoved{0.0};
+		double cumulativeUnmet{0.0};
 		bool operator==(StationTransferSnapshot const&) const = default;
 	};
 

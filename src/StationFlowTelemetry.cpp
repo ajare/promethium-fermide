@@ -136,10 +136,15 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 		{
 			out.status = p->hasNextOccurrence ? "Scheduled: waiting for next occurrence"
 				: p->lastUnmet > 0 ? "Scheduled: completed one-off (blocked/partial)" : "Scheduled: completed one-off";
-			out.details = {"Occurrence count " + std::to_string(p->occurrencesFired)};
+			out.details = {"Occurrence count " + std::to_string(p->occurrencesFired),
+				"Cumulative requested " + quantity(p->cumulativeRequested, p->unit),
+				"Cumulative moved " + quantity(p->cumulativeMoved, p->unit),
+				"Cumulative unmet " + quantity(p->cumulativeUnmet, p->unit),
+				p->occurrencesFired == 0 ? "Last outcome: none" : p->lastUnmet == 0 ? "Last outcome: full"
+					: p->lastCompleted == 0 ? "Last outcome: blocked" : "Last outcome: partial"};
 			if (p->hasNextOccurrence)
 				out.details.push_back("Next occurrence " + quantity(p->nextOccurrenceSeconds, "s"));
-			out.values = {"Moved " + quantity(p->lastCompleted, p->unit),
+			out.values = {"Last moved " + quantity(p->lastCompleted, p->unit),
 				"Requested " + quantity(p->lastRequested, p->unit), "Unmet " + quantity(p->lastUnmet, p->unit)};
 			if (p->lastUnmet > 0)
 			{

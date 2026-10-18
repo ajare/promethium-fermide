@@ -466,8 +466,16 @@ one-offs from recurring transfers waiting between occurrences, and retain last
 requested/moved/unmet **amounts** and limiting reasons, not instantaneous rates. The bounded
 event log reports each occurrence. Scheduled batches do not appear in the
 continuous exchange-rate charts; inventory charts still show their inventory
-changes. Full cumulative transfer telemetry is deferred; runtime accounting
-and next-occurrence state are never saved.
+changes. Both views also expose cumulative requested/moved/unmet amounts (#693).
+These runtime totals survive event-log rollover and satisfy requested = moved +
+unmet, including zero-movement occurrences. Waiting is schedule state, not a
+rejection: the last full, partial or blocked outcome and its limiting reason remain
+visible between occurrences without counting idle ticks as new requests. Each
+occurrence emits one bounded event in store units; no idle-tick events are emitted.
+Failed ticks publish neither occurrence counters nor totals/history changes.
+Load/Reset reconstruct accounting from authored starting state; runtime accounting
+and next-occurrence state are never saved. Reading snapshots or rendering either
+view does not execute occurrences.
 
 World and standalone Station configuration schema **99** preserve mode and
 schedule fields (including recurrence); missing mode defaults to Continuous. Older declared schemas

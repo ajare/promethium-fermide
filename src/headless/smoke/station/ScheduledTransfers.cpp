@@ -48,12 +48,49 @@ auto stock(core::World const& w, std::string const& id)
 void scheduledTransfers(smoke::Context const&)
 {
     auto s = fixture(); double const dt = core::World::getFixedTimestep();
+    // Cumulative occurrence accounting is not reconstructed from the bounded log.
+    auto historySettings = s;
+    historySettings.transfers[0].recurrenceSeconds = dt;
+    historySettings.transfers[0].firstOccurrenceSeconds = dt;
+    core::World history("History", 2, 2); configure(history, historySettings);
+    auto checkTotals = [&](uint64_t count, double moved) {
+        auto const snapshot = history.getStationSystemsSnapshot();
+        auto const& t = snapshot.transfers[0];
+        require(t.occurrencesFired == count && t.cumulativeRequested == count * 4
+            && t.cumulativeMoved == moved && t.cumulativeUnmet == count * 4 - moved
+            && t.cumulativeRequested == t.cumulativeMoved + t.cumulativeUnmet,
+            "Occurrence totals lost requested=moved+unmet conservation");
+        require(history.getStationSystemsSnapshot() == snapshot, "Snapshot advanced history");
+    };
+    checkTotals(0, 0); run(history, 1); checkTotals(1, 4);
+    run(history, 1); checkTotals(2, 8);
+    run(history, 1); checkTotals(3, 10);
+    require(history.getStationSystemsSnapshot().transfers[0].status == core::StationTransferStatus::Partial,
+        "Partial occurrence lost its outcome");
+    run(history, 1); checkTotals(4, 10);
+    require(history.getStationSystemsSnapshot().transfers[0].status == core::StationTransferStatus::Rejected
+        && !history.getStationSystemsSnapshot().transfers[0].limitingReason.empty(), "Blocked occurrence lost its reason");
+    run(history, core::StationEventHistoryLimit + 8);
+    checkTotals(core::StationEventHistoryLimit + 12, 10);
+    auto const retained = history.getStationSystemsEvents();
+    require(retained.size() == core::StationEventHistoryLimit && retained.front().worldTick > 1,
+        "Occurrence event log did not roll over");
+    history.pauseSimulation(); history.resetSimulation(); checkTotals(0, 0);
+    run(history, 1); checkTotals(1, 4);
     core::World w("One off", 2, 2); configure(w, s);
     require(w.getStationSystemsSnapshot().transfers[0].occurrencesFired == 0, "Time-zero event ran during Apply");
     run(w, 1); auto fired = w.getStationSystemsSnapshot();
     require(stock(w, "a").currentQualified == 6 && stock(w, "b").currentQualified == 4
         && fired.transfers[0].occurrencesFired == 1, "Time-zero event did not execute exactly once");
+    auto transferEvents = [&]() {
+        auto events = w.getStationSystemsEvents();
+        std::erase_if(events, [](auto const& event) { return event.category != "transfer"; });
+        return events;
+    };
+    auto const occurrenceEvents = transferEvents();
     run(w, 60);
+    require(w.getStationSystemsSnapshot().transfers[0] == fired.transfers[0]
+        && transferEvents() == occurrenceEvents, "Idle ticks changed occurrence accounting or spammed history");
     require(stock(w, "b").currentQualified == 4 && w.getStationSystemsSnapshot().transfers[0].lastCompleted == 4,
         "Scheduled event repeated or lost its last outcome");
     for (auto const& balance : w.getStationSystemsSnapshot().balances)
@@ -257,7 +294,11 @@ void scheduledTransfers(smoke::Context const&)
     s.solarArrays = {sun}; s.solarArrays.push_back(sun); s.solarArrays.back().id = "sun2";
     core::World failed("Atomic", 2, 2); configure(failed, s); failed.resumeSimulation(); failed.advanceTick();
     auto failure = failed.getStationSystemsSnapshot();
-    require(!failure.healthy && failure.transfers[0].occurrencesFired == 0 && stock(failed, "a").currentQualified == 10,
+    require(!failure.healthy && failure.transfers[0].occurrencesFired == 0
+        && failure.transfers[0].cumulativeRequested == 0 && failure.transfers[0].cumulativeMoved == 0
+        && failure.transfers[0].cumulativeUnmet == 0 && failure.transfers[0].lastRequested == 0
+        && stock(failed, "a").currentQualified == 10
+        && std::ranges::none_of(failed.getStationSystemsEvents(), [](auto const& event) { return event.category == "transfer"; }),
         "Failed tick published a partial scheduled transfer");
 }
 void scheduledTransferDocuments(smoke::Context const&)
@@ -285,7 +326,10 @@ void scheduledTransferDocuments(smoke::Context const&)
         };
         auto owned = binary ? roundTrip.template operator()<core::BinarySerializer>() : roundTrip.template operator()<core::YamlSerializer>();
         auto& loaded = *owned;
-        require(loaded.getStationSystemsSettings() == s && loaded.getStationSystemsSnapshot().transfers[0].occurrencesFired == 0,
+        auto const freshTransfer = loaded.getStationSystemsSnapshot().transfers[0];
+        require(loaded.getStationSystemsSettings() == s && freshTransfer.occurrencesFired == 0
+            && freshTransfer.cumulativeRequested == 0 && freshTransfer.cumulativeMoved == 0
+            && freshTransfer.cumulativeUnmet == 0,
             "World round trip lost authored fields or serialized runtime counters");
         run(loaded, 2); require(loaded.getStationSystemsSnapshot() == w.getStationSystemsSnapshot(), "Loaded schedule did not replay");
       }

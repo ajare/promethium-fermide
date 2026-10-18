@@ -3330,10 +3330,12 @@ namespace
 		auto& recurring = scheduled.transfers[0];
 		recurring.mode = core::ResourceTransferMode::Scheduled;
 		recurring.occurrencesFired = 3; recurring.hasNextOccurrence = true; recurring.nextOccurrenceSeconds = 8;
+		recurring.cumulativeRequested = 12; recurring.cumulativeMoved = 8; recurring.cumulativeUnmet = 4;
 		auto recurringReadout = station_flow::telemetry({"Transfer", "node"}, scheduled, 0.5);
 		require(recurringReadout->status == "Scheduled: waiting for next occurrence"
-			&& recurringReadout->details == std::vector<std::string>{"Occurrence count 3", "Next occurrence 8 s"}
-			&& recurringReadout->values[0] == "Moved 2 L" && recurringReadout->ports.empty(),
+			&& recurringReadout->details == std::vector<std::string>{"Occurrence count 3", "Cumulative requested 12 L",
+				"Cumulative moved 8 L", "Cumulative unmet 4 L", "Last outcome: partial", "Next occurrence 8 s"}
+			&& recurringReadout->values[0] == "Last moved 2 L" && recurringReadout->ports.empty(),
 			"Recurring Flow readout lost next/count or presented an event as a rate");
 		recurring.hasNextOccurrence = false;
 		require(station_flow::telemetry({"Transfer", "node"}, scheduled, 0.5)->status

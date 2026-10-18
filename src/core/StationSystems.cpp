@@ -4582,6 +4582,9 @@ namespace core
 			uint64_t occurrencesFired{0};
 			uint64_t lastFiredTick{0};
 			std::string limitingReason;
+			double cumulativeRequested{0.0};
+			double cumulativeMoved{0.0};
+			double cumulativeUnmet{0.0};
 		};
 		// The authoritative ledger of one authored conversion. Inputs are
 		// consumed and outputs produced at a common completed scale: the
@@ -8031,6 +8034,12 @@ namespace core
 						qualified[source] + unqualified[source]), massToKg(stores[source].authored.unit, moved));
 					qualified[source] -= moved; qualified[destination] += moved;
 					flowOut[source] += moved; flowIn[destination] += moved;
+					transfer.cumulativeRequested += requested;
+					transfer.cumulativeMoved += moved;
+					transfer.cumulativeUnmet += requested - moved;
+					if (!std::isfinite(transfer.cumulativeRequested) || !std::isfinite(transfer.cumulativeMoved)
+						|| !std::isfinite(transfer.cumulativeUnmet))
+						return violation = "Scheduled transfer cumulative accounting overflow", false;
 					transfer.lastRequested = requested; transfer.lastCompleted = moved;
 					transfer.lastUnmet = requested - moved; transfer.occurrencesFired = arrival.occurrence + 1; transfer.lastFiredTick = tick;
 					transfer.status = moved <= 0.0 ? StationTransferStatus::Rejected
@@ -8040,7 +8049,7 @@ namespace core
 						: "eligible source inventory (qualified, above reserve and unreserved)";
 					stallReason[arrival.key.declarationIndex] = transfer.limitingReason;
 					appendBoundedEvent(events, tick, "transfer", "Scheduled transfer '" + transfer.authored.id
-						+ "' completed: requested " + std::to_string(requested) + ", moved " + std::to_string(moved)
+						+ "' occurrence: requested " + std::to_string(requested) + ", moved " + std::to_string(moved)
 						+ ", unmet " + std::to_string(requested - moved) + " " + transfer.authored.unit
 						+ (transfer.limitingReason.empty() ? "" : "; " + transfer.limitingReason));
 					continue;
@@ -17738,6 +17747,9 @@ namespace core
 				transfer.lastRequested, transfer.lastCompleted, transfer.lastUnmet, transfer.status,
 				transfer.authored.mode, transfer.authored.firstOccurrenceSeconds, transfer.occurrencesFired, transfer.lastFiredTick, transfer.limitingReason});
 			auto& snapshot = result.transfers.back();
+			snapshot.cumulativeRequested = transfer.cumulativeRequested;
+			snapshot.cumulativeMoved = transfer.cumulativeMoved;
+			snapshot.cumulativeUnmet = transfer.cumulativeUnmet;
 			snapshot.hasNextOccurrence = transfer.authored.mode == ResourceTransferMode::Scheduled
 				&& (transfer.authored.recurrenceSeconds > 0.0 || transfer.occurrencesFired == 0);
 			if (snapshot.hasNextOccurrence)

@@ -1522,8 +1522,12 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 				transfer.id.c_str(), transfer.sourceId.c_str(), transfer.destinationId.c_str(),
 				transfer.hasNextOccurrence ? "waiting for next occurrence" : transfer.lastUnmet > 0 ? "completed one-off (blocked/partial)" : "completed one-off",
 				transfer.lastRequested, transfer.lastCompleted, transfer.lastUnmet, transfer.unit.c_str(), transfer.priority);
-			ImGui::Text("  occurrence count %llu | last outcome: %s",
-				static_cast<unsigned long long>(transfer.occurrencesFired), transfer.limitingReason.c_str());
+			ImGui::Text("  occurrence count %llu | last outcome: %s | %s",
+				static_cast<unsigned long long>(transfer.occurrencesFired),
+				transfer.occurrencesFired == 0 ? "none" : transfer.lastUnmet == 0 ? "full"
+					: transfer.lastCompleted == 0 ? "blocked" : "partial", transfer.limitingReason.c_str());
+			ImGui::Text("  cumulative requested %.3f, moved %.3f, unmet %.3f %s",
+				transfer.cumulativeRequested, transfer.cumulativeMoved, transfer.cumulativeUnmet, transfer.unit.c_str());
 			if (transfer.hasNextOccurrence) ImGui::Text("  next occurrence at %.6f s", transfer.nextOccurrenceSeconds);
 			continue;
 		}
