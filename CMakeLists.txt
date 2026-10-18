@@ -730,6 +730,14 @@ if(BUILD_TESTING)
     set_tests_properties(marker-store PROPERTIES
         LABELS "smoke;standalone;core" TIMEOUT 30)
 
+    add_executable(pf-traversal-resource-registry-checks src/headless/TraversalResourceRegistryChecks.cpp)
+    target_include_directories(pf-traversal-resource-registry-checks PRIVATE "${PF_INCLUDE_DIR}")
+    target_link_libraries(pf-traversal-resource-registry-checks PRIVATE promethium-fermide-core)
+    pf_apply_headless_verification_policy(pf-traversal-resource-registry-checks)
+    add_test(NAME traversal-resource-registry COMMAND pf-traversal-resource-registry-checks)
+    set_tests_properties(traversal-resource-registry PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
+
     add_executable(pf-registry-binding-checks src/headless/RegistryBindingChecks.cpp)
     target_include_directories(pf-registry-binding-checks PRIVATE "${PF_INCLUDE_DIR}")
     target_link_libraries(pf-registry-binding-checks PRIVATE promethium-fermide-core)

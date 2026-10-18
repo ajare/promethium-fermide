@@ -46,6 +46,7 @@ standalone_owners = {
     "AgentGroupRegistryChecks.cpp": "pf-agent-group-registry-checks",
     "AgentTypeCatalogChecks.cpp": "pf-agent-type-catalog-checks",
     "MarkerStoreChecks.cpp": "pf-marker-store-checks",
+    "TraversalResourceRegistryChecks.cpp": "pf-traversal-resource-registry-checks",
     "OccupantPackingChecks.cpp": "pf-occupant-packing-checks",
     "PermissionRequirementStoreChecks.cpp": "pf-permission-requirement-store-checks",
     "PlacementValidatorChecks.cpp": "pf-placement-validator-checks",

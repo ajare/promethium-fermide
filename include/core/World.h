@@ -57,6 +57,7 @@ namespace core
 	class PermissionRequirementStore;
 	class AgentTypeCatalog;
 	class MarkerStore;
+	class TraversalResourceRegistry;
 
 	class World : public Serializable
 	{
@@ -88,6 +89,10 @@ namespace core
 		// records, and the Furniture destinations below on the World's
 		// behalf (ADR 0022).
 		friend class MarkerStore;
+		// The traversal resource registry owns no state; it reads and edits
+		// the traversal-resource registry and the waiting/geometry policies
+		// below on the World's behalf (ADR 0022).
+		friend class TraversalResourceRegistry;
 		// The registry binding template owns no state; it edits the
 		// World-owned registry reference pairs and registry pointers below on
 		// the World's behalf through friend access to modify() (#676,
@@ -651,6 +656,15 @@ namespace core
 		// these operations; the store owns no state and reaches them
 		// through this World.
 		std::unique_ptr<MarkerStore> mMarkerStore;
+
+		// The traversal-resource record behaviour lives in the traversal
+		// resource registry (ADR 0022). World keeps ownership of the state
+		// it edits - the traversal-resource registry itself and the waiting
+		// and geometry policies (ADR 0001) - and stays the facade (design
+		// pattern) through which every caller reaches these operations;
+		// the registry owns no state and reaches them, and the coordinator
+		// whose scheduling the ownership paths ride on, through this World.
+		std::unique_ptr<TraversalResourceRegistry> mTraversalRegistry;
 
 		// Every World owns one sandboxed Lua runtime for its Agent types. It is
 		// declared before mAgents so Agent destruction (which releases live Lua

@@ -341,6 +341,7 @@ namespace core
 		friend class SimulationCoordinator;
 		friend class PlacementValidator;
 		friend class PermissionRequirementStore; // ADR 0022 requirement edits
+		friend class TraversalResourceRegistry; // ADR 0022 resource record family
 		std::string mName;
 		std::shared_ptr<Door> mDoor;
 		std::shared_ptr<Window> mWindow;
