@@ -39,6 +39,13 @@ namespace core
 
 	void StationSystemsRuntime::Impl::Tick::moveStoreDrift(size_t sourceIndex, size_t destinationIndex, double sourceKgBefore, double movedKg)
 	{
+		if (!runtime.stores[sourceIndex].authored.composition
+			&& runtime.stores[destinationIndex].authored.composition)
+		{
+			depositStoreDrift(destinationIndex, movedKg, {{"water", movedKg}});
+			stagedLoss["water"] -= movedKg;
+			return;
+		}
 		auto& source = stagedDrift[sourceIndex];
 		if (source.empty() || sourceKgBefore <= 0.0 || movedKg <= 0.0) return;
 		auto const share = std::min(1.0, movedKg / sourceKgBefore);
@@ -52,7 +59,7 @@ namespace core
 
 	StationMaterialConnections StationSystemsRuntime::Impl::Tick::materialPorts(std::string const& type, std::string const& id)
 	{
-		auto const biological = type == "Crops" || type == "Algae";
+		auto const actualOutput = type == "Crops" || type == "Algae" || type == "Water treatment";
 		return StationMaterialConnections(connections, runtime.settings, type, id, seconds,
 			flowIn, flowOut, qualified, materialConnectionsValid, stagedDrift,
 			[&](size_t index, double lost)
@@ -64,7 +71,7 @@ namespace core
 				qualified[index] -= lost; flowOut[index] += lost;
 				stagedUnitLoss[store.unit] += lost;
 			},
-			[&, biological, type, id](size_t index, double produced, double lost, ConstituentLedger const& before)
+			[&, actualOutput, type, id](size_t index, double produced, double lost, ConstituentLedger const& before)
 			{
 				if (lost <= 0.0) return;
 				auto const& store = runtime.stores[index].authored;
@@ -72,14 +79,14 @@ namespace core
 				for (auto const& treatment : runtime.waterTreatments)
 				{
 					if (type != "Water treatment" || treatment.authored.id != id) continue;
-					if (treatment.concentrateIndex == index) isQualified = false;
+					if (treatment.concentrateIndex == index) isQualified = store.composition.has_value();
 					if (treatment.treatedIndex == index) isQualified = treatment.lastQualityAccepted;
 				}
 				(isQualified ? qualified[index] : unqualified[index]) -= lost;
 				flowIn[index] -= lost;
 				stagedUnitLoss[store.unit] += lost;
 				if (store.composition) addComposition(stagedLoss, *store.composition, massToKg(store.unit, lost), 1.0);
-				if (biological && produced > 0.0)
+				if (actualOutput && produced > 0.0)
 				{
 					auto delta = stagedDrift[index]; addLedger(delta, before, -1.0);
 					addLedger(stagedLoss, delta, lost / produced);

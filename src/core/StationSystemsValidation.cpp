@@ -118,7 +118,12 @@ using namespace station_detail;
 		// nutrient nitrogen versus atmospheric nitrogen, which are never
 		// freely interchangeable — is conversion and requires an
 		// explicitly declared, constituent-balanced conversion process.
-		if (source->composition || destination->composition)
+		auto const waterDestination = std::any_of(settings.waterTreatments.begin(), settings.waterTreatments.end(),
+				[&](auto const& t) { return destination->id == t.sourceStoreId
+					|| destination->id == t.treatedStoreId || destination->id == t.concentrateStoreId; });
+		auto const dilution = !source->composition && destination->composition
+			&& isMassUnit(source->unit) && waterDestination;
+		if (!dilution && (source->composition || destination->composition))
 		{
 			if (!source->composition || !destination->composition
 				|| !compositionsClose(*source->composition, *destination->composition))
@@ -428,6 +433,22 @@ using namespace station_detail;
 		char const* streamRoles[3]{"source", "treated", "concentrate"};
 		std::string const streamIds[3]{treatment.sourceStoreId, treatment.treatedStoreId,
 			treatment.concentrateStoreId};
+		// Full removal requires a compound concentrate destination for each
+		// dry species. Incomplete drafts may leave that endpoint unconnected.
+		auto source = std::find_if(settings.stores.begin(), settings.stores.end(),
+			[&](auto const& store) { return store.id == treatment.sourceStoreId; });
+		auto concentrate = std::find_if(settings.stores.begin(), settings.stores.end(),
+			[&](auto const& store) { return store.id == treatment.concentrateStoreId; });
+		if (source != settings.stores.end() && source->composition)
+		{
+			auto const load = compositionLedgerOf(*source->composition, 1.0, 1.0);
+			for (auto const& [name, mass] : load)
+				if (name != "water" && name != "energy" && mass > 0.0
+					&& ((treatment.concentrateStoreId.empty() && !allowIncomplete && !brokenReferences)
+						|| (concentrate != settings.stores.end() && !concentrate->composition)))
+					return refuse(where + " constituent '" + name
+						+ "' requires a compound concentrate store; dry load must go somewhere");
+		}
 		for (size_t stream = 0; stream < 3; ++stream)
 		{
 			for (size_t other = stream + 1; other < 3; ++other)
@@ -436,7 +457,7 @@ using namespace station_detail;
 						+ " store are the same store '" + streamIds[stream]
 						+ "'; the recovery split needs distinct source, treated and concentrate stores");
 			if (!declareWaterStore(streamIds[stream], streamRoles[stream], where,
-				treatment.hazardClass, false))
+				treatment.hazardClass, true))
 				return false;
 		}
 		if (!declareWaterStore(treatment.consumableStoreId, "consumable", where,
@@ -1725,11 +1746,9 @@ using namespace station_detail;
 		// only serve a compartment of its own class, since condensate
 		// inherits the hazard of the air it came from, and no store may be
 		// touched by both a normal-class and a hazardous-class water
-		// process. Every water store must be a plain mass store: condensate
-		// is pure water and the recovery split is mass-denominated, so a
-		// compound store would create dry constituents out of nothing. The
-		// treatment consumable store is the one exception - it is a supplied
-		// consumable, not a water stream, and may be compound.
+		// process. Treatment streams may be compound (#740): dry load is
+		// retained in concentrate, while treated output is pure water. Other
+		// water processes retain their existing plain-store contracts.
 		if (settings.waterCollectors.size() > MaxStationWaterCollectors)
 			return refuse("Station water collectors are limited to "
 				+ std::to_string(MaxStationWaterCollectors) + " entries");

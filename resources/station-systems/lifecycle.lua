@@ -709,7 +709,14 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             "transfer priority must be a finite integer")
         -- Compound material only moves between identical declared
         -- compositions; crossing a composition boundary is conversion.
-        if source.composition ~= nil or destination.composition ~= nil then
+        local waterDestination = false
+        for _, t in ipairs(waterTreatments) do
+            waterDestination = waterDestination or destination.id == t.sourceStore
+                or destination.id == t.treatedStore or destination.id == t.concentrateStore
+        end
+        local dilution = source.composition == nil and destination.composition ~= nil
+            and (source.unit == 'kg' or source.unit == 'g') and waterDestination
+        if not dilution and (source.composition ~= nil or destination.composition ~= nil) then
             assert(source.composition ~= nil and destination.composition ~= nil
                 and math.abs(source.composition.moisture - destination.composition.moisture) <= BALANCE_TOLERANCE
                 and math.abs(source.composition.nutrientNitrogen - destination.composition.nutrientNitrogen) <= BALANCE_TOLERANCE
@@ -2239,7 +2246,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         .. streamRoles[other] .. ' stores must be distinct')
             end
             streams[stream] = declareWaterStore(streamIds[stream], streamRoles[stream],
-                treatment.hazardClass, false)
+                treatment.hazardClass, true)
+        end
+        if streams[1].composition then
+            assert(streams[3].composition ~= nil,
+                'loaded treatment requires a compound concentrate store')
         end
         local consumable = declareWaterStore(treatment.consumableStore, 'consumable',
             treatment.hazardClass, true)
@@ -4023,7 +4034,13 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 local before = toKg(source.unit, source.qualified + source.unqualified)
                 source.qualified = source.qualified - moved
                 destination.qualified = destination.qualified + moved
-                moveStoreDrift(source, destination, before, toKg(source.unit, moved))
+                if not source.composition and destination.composition then
+                    local kg = toKg(source.unit, moved)
+                    depositStoreDrift(destination, kg, {water = kg})
+                    self.constituent_loss.water = (self.constituent_loss.water or 0) - kg
+                else
+                    moveStoreDrift(source, destination, before, toKg(source.unit, moved))
+                end
                 transfer.fired = true
             elseif arrival.ejection then
                 local ejection = self.waste_ejections[arrival.declaration]
@@ -4457,8 +4474,14 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             -- configuration refuses any other transfer), so the moved
             -- share of the source's actual-constituent drift rides
             -- with the material.
-            moveStoreDrift(transfer.source, transfer.destination,
-                transferSourceKgBefore, toKg(transfer.source.unit, completed))
+            if not transfer.source.composition and transfer.destination.composition then
+                local kg = toKg(transfer.source.unit, completed)
+                depositStoreDrift(transfer.destination, kg, {water = kg})
+                self.constituent_loss.water = (self.constituent_loss.water or 0) - kg
+            else
+                moveStoreDrift(transfer.source, transfer.destination,
+                    transferSourceKgBefore, toKg(transfer.source.unit, completed))
+            end
         end
     end
     -- Mirror of the host conversion ledger: one common completed scale per
@@ -6126,6 +6149,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             treatment.lastClearanceUnmet = 0
             if treatment.throughputKgPerS > 0 then
                 local fullKg = treatment.throughputKgPerS * fixed_seconds
+                local waterFraction = source.composition and storeComposition(source).moisture or 1
+                local treatedFraction = waterFraction * treatment.recoveryRatio
                 local drawableSource = math.max(0,
                     source.qualified - source.protected_reserve)
                 local treatedHeadroom = math.max(0,
@@ -6151,7 +6176,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 local kitDemand = treatment.consumablePerKg * fullKg
                 if sharedKit then
                     kitDemand = kitDemand
-                        + treatment.clearancePerKg * fullKg * treatment.recoveryRatio
+                        + treatment.clearancePerKg * fullKg * treatedFraction
                 end
                 local scale = 1.0
                 local limiter = ''
@@ -6167,10 +6192,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     "raw water store '" .. source.id
                         .. "' has nothing drawable above its protected reserve")
                 constrain(treatedHeadroom,
-                    fromKg(treated.unit, fullKg * treatment.recoveryRatio),
+                    fromKg(treated.unit, fullKg * treatedFraction),
                     "treated water store '" .. treated.id .. "' is full")
                 constrain(concentrateHeadroom,
-                    fromKg(concentrate.unit, fullKg * (1 - treatment.recoveryRatio)),
+                    fromKg(concentrate.unit, fullKg * (1 - treatedFraction)),
                     "concentrate store '" .. concentrate.id
                         .. "' is full: the retained stream has nowhere to go")
                 if sharedKit then
@@ -6182,6 +6207,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     constrain(drawableConsumable, kitDemand,
                         "treatment consumable store '" .. consumable.id .. "' is exhausted")
                 end
+                if waterFraction <= 0 then scale = 0; limiter = 'stream carries no water' end
                 if scale < 0 then scale = 0 end
                 if scale > 1 then scale = 1 end
                 treatment.lastScale = scale
@@ -6209,13 +6235,23 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             fromKg(source.unit, fullKg * scale), drawableSource)
                         local processedKg = toKg(source.unit, processedUnits)
                         local treatedUnits = math.min(
-                            fromKg(treated.unit, processedKg * treatment.recoveryRatio),
+                            fromKg(treated.unit, processedKg * treatedFraction),
                             treatedHeadroom)
                         local treatedKg = toKg(treated.unit, treatedUnits)
                         local concentrateUnits = math.min(
                             fromKg(concentrate.unit, math.max(0, processedKg - treatedKg)),
                             concentrateHeadroom)
                         local concentrateKg = toKg(concentrate.unit, concentrateUnits)
+                        local drawn = drawStoreActual(source,
+                            toKg(source.unit, source.qualified + source.unqualified), processedKg)
+                        addLedger(self.constituent_loss, drawn, 1)
+                        if not source.composition then drawn.water = processedKg end
+                        local pure = {water = treatedKg}
+                        drawn.water = (drawn.water or 0) - treatedKg
+                        depositStoreDrift(treated, treatedKg, pure)
+                        depositStoreDrift(concentrate, concentrateKg, drawn)
+                        if treated.composition then addLedger(self.constituent_loss, pure, -1) end
+                        if concentrate.composition then addLedger(self.constituent_loss, drawn, -1) end
                         source.qualified = source.qualified - processedUnits
                         -- The treatment consumable is drawn before the
                         -- clearance test is evaluated (#574): when the
@@ -6267,10 +6303,14 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         else
                             treated.qualified = treated.qualified + treatedUnits
                         end
-                        -- The concentrate is retained, not usable: it lands
-                        -- on the unqualified side of its store and stays
-                        -- accounted until a disposal capability exists.
-                        concentrate.unqualified = concentrate.unqualified + concentrateUnits
+                        -- An identified compound concentrate is routable and
+                        -- disposable within its own hazard class. Plain scalar
+                        -- concentrate retains its historical held behaviour.
+                        if concentrate.composition then
+                            concentrate.qualified = concentrate.qualified + concentrateUnits
+                        else
+                            concentrate.unqualified = concentrate.unqualified + concentrateUnits
+                        end
                         -- The clearance test is spent only when it runs
                         -- and passes; a held batch consumed nothing, so
                         -- the kit stays available for the next tick.
@@ -10032,6 +10072,30 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             checkBiologicalConstituents(culture, "algae culture '" .. culture.id .. "'")
         end
     end
+    local function publishConcentrations(self)
+        for _, store in ipairs(self.stores) do
+            local kg = toKg(store.unit, store.qualified + store.unqualified)
+            local actual = store.composition and compositionLedgerOf(store.composition, kg, 1) or {}
+            if store.composition then addLedger(actual, store.drift, 1) end
+            store.actualConstituents = actual
+            store.concentrations = {}
+            local waterPort = false
+            for _, t in ipairs(self.water_treatments) do
+                waterPort = waterPort or store == t.source or store == t.treated or store == t.concentrate
+            end
+            if not store.composition and waterPort then
+                for _, name in ipairs({'water', 'dryOrganics', 'nutrientNitrogen',
+                    'atmosphericNitrogen', 'phosphorus', 'potassium', 'otherMinerals'}) do
+                    store.concentrations[name] = name == 'water' and kg > 0 and 1 or 0
+                end
+            end
+            for name, mass in pairs(actual) do
+                if name ~= 'energy' then
+                    store.concentrations[name] = kg > 0 and math.max(0, mass) / kg or 0
+                end
+            end
+        end
+    end
     function object:advance(world_tick, fixed_seconds)
         assert(world_tick > 0 and fixed_seconds > 0)
         checkFiniteLimits(self)
@@ -10067,6 +10131,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         checkMicrobial(self)
         checkCrops(self)
         checkAlgae(self)
+        publishConcentrations(self)
         self.ticks = self.ticks + 1
         return self.ticks
     end
@@ -10081,5 +10146,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     checkMicrobial(object)
     checkCrops(object)
     checkAlgae(object)
+    publishConcentrations(object)
     return object
 end

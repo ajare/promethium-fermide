@@ -128,6 +128,8 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 		port("Inventory in", p->lastTickIn, p->unit); port("Inventory out", p->lastTickOut, p->unit);
 		out.details = {"Protected reserve " + quantity(p->protectedReserve, p->unit),
 			"Drawable " + quantity(std::max(0.0, p->currentQualified - p->protectedReserve), p->unit)};
+		for (auto const& [name, concentration] : p->concentrations)
+			out.details.push_back("Live " + name + " concentration " + quantity(concentration, "kg/kg"));
 	}
 	else if (node.type == "Transfer")
 	{

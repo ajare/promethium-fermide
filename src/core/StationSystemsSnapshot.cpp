@@ -32,7 +32,21 @@ namespace core
 				store.lastTickIn, store.lastTickOut, store.authored.composition,
 				store.authored.hazardClass,
 				store.authored.composition ? actualConstituents
-					: std::map<std::string, double>{}});
+					: std::map<std::string, double>{}, {}});
+			auto const totalKg = massToKg(store.authored.unit,
+				store.currentQualified + store.currentUnqualified);
+			auto const waterPort = std::any_of(mImpl->settings.waterTreatments.begin(),
+				mImpl->settings.waterTreatments.end(), [&](auto const& t) {
+					return store.authored.id == t.sourceStoreId || store.authored.id == t.treatedStoreId
+						|| store.authored.id == t.concentrateStoreId; });
+			if (store.authored.composition || waterPort)
+				for (auto const* name : StationMassConstituents)
+				{
+					auto const mass = store.authored.composition ? actualConstituents[name]
+						: std::string_view(name) == "water" ? totalKg : 0.0;
+					result.stores.back().concentrations[name]
+						= totalKg > 0.0 ? std::max(0.0, mass) / totalKg : 0.0;
+				}
 			currentTotals[store.authored.unit] += store.currentQualified + store.currentUnqualified;
 			addLedger(currentConstituents, actualConstituents, 1.0);
 		}

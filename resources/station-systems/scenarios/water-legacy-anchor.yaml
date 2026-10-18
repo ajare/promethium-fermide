@@ -1,0 +1,31 @@
+# #740 legacy anchor: all-plain scalar treatment, 100 kg/day.
+# 85 kg/day treated and 15 kg/day concentrate, 50 kWh/day electrical,
+# 1 kg/day media. No composition or migration fields required.
+schemaVersion: 96
+stationSystems:
+  enabled: true
+  observationIntervalSeconds: 1.0
+  stores:
+  - {id: greywater, unit: kg, capacity: 1000, startingQualified: 200, startingUnqualified: 0}
+  - {id: treated, unit: kg, capacity: 1000, startingQualified: 0, startingUnqualified: 0}
+  - {id: concentrate, unit: kg, capacity: 1000, startingQualified: 0, startingUnqualified: 0}
+  - {id: media, unit: kg, capacity: 100, startingQualified: 10, startingUnqualified: 0}
+  solarArrays:
+  - id: supply
+    capacityKW: 10
+    illumination:
+      constantLevel: 1
+      periodSeconds: 0
+      segments: []
+  waterTreatments:
+  - id: filter
+    hazardClass: normal
+    sourceStoreId: greywater
+    treatedStoreId: treated
+    concentrateStoreId: concentrate
+    consumableStoreId: media
+    throughputKgPerS: 0.0011574074074074073
+    recoveryRatio: 0.85
+    specificEnergyKWhPerKg: 0.5
+    consumablePerKg: 0.01
+    priority: 0

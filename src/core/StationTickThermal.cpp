@@ -467,6 +467,16 @@ namespace core
 			}
 			auto const tickSeconds = static_cast<double>(seconds);
 			auto const fullKg = treatment.authored.throughputKgPerS * tickSeconds;
+			// Selectivity follows the current blend, including dilution/drift.
+			auto const waterFraction = source.authored.composition
+				? storeComposition(treatment.sourceIndex).moisture : 1.0;
+			auto const treatedFraction = waterFraction * treatment.authored.recoveryRatio;
+			if (waterFraction <= 0.0)
+			{
+				treatment.lastLimiter = "stream carries no water";
+				treatment.status = StationTransferStatus::Rejected;
+				continue;
+			}
 			auto const drawableSourceUnits = std::max(0.0,
 				ports.input(treatment.sourceIndex, qualified[treatment.sourceIndex] - source.authored.protectedReserve));
 			auto const treatedHeadroomUnits = std::max(0.0, ports.output(treatment.treatedIndex, treated.authored.capacity
@@ -491,7 +501,7 @@ namespace core
 			auto const sharedKit = hazardous
 				&& treatment.clearanceIndex == treatment.consumableIndex;
 			auto const kitDemandUnits = treatment.authored.consumablePerKg * fullKg;
-			auto const clearanceFullUnits = treatment.authored.clearancePerKg * treatment.authored.recoveryRatio * fullKg;
+			auto const clearanceFullUnits = treatment.authored.clearancePerKg * treatedFraction * fullKg;
 			double scale = 1.0;
 			std::string limiter;
 			auto const constrain = [&](auto available, double required,
@@ -506,11 +516,11 @@ namespace core
 				"raw water store '" + source.authored.id
 				+ "' has nothing drawable above its protected reserve");
 			constrain(treatedHeadroomUnits,
-				kgToMass(treated.authored.unit, fullKg * treatment.authored.recoveryRatio),
+				kgToMass(treated.authored.unit, fullKg * treatedFraction),
 				"treated water store '" + treated.authored.id + "' is full");
 			constrain(concentrateHeadroomUnits,
 				kgToMass(concentrate.authored.unit,
-					fullKg * (1.0 - treatment.authored.recoveryRatio)),
+					fullKg * (1.0 - treatedFraction)),
 				"concentrate store '" + concentrate.authored.id
 				+ "' is full: the retained stream has nowhere to go");
 			constrain(ports.request("consumableStoreId", drawableConsumableUnits, kitDemandUnits), kitDemandUnits,
@@ -566,13 +576,26 @@ namespace core
 				kgToMass(source.authored.unit, fullKg * scale), drawableSourceUnits);
 			auto const processedKg = massToKg(source.authored.unit, processedUnits);
 			auto const treatedUnits = std::min(
-				kgToMass(treated.authored.unit, processedKg * treatment.authored.recoveryRatio),
+				kgToMass(treated.authored.unit, processedKg * treatedFraction),
 				treatedHeadroomUnits);
 			auto const treatedKg = massToKg(treated.authored.unit, treatedUnits);
 			auto const concentrateUnits = std::min(
 				kgToMass(concentrate.authored.unit, std::max(0.0, processedKg - treatedKg)),
 				concentrateHeadroomUnits);
 			auto const concentrateKg = massToKg(concentrate.authored.unit, concentrateUnits);
+			auto drawnActual = drawStoreActual(treatment.sourceIndex,
+				massToKg(source.authored.unit, qualified[treatment.sourceIndex]
+					+ unqualified[treatment.sourceIndex]), processedKg);
+			// Plain water enters the constituent boundary only on deposit into
+			// a compound destination. A plain treated outlet exits that boundary.
+			addLedger(stagedLoss, drawnActual, 1.0);
+			if (!source.authored.composition) drawnActual["water"] = processedKg;
+			ConstituentLedger const treatedActual{{"water", treatedKg}};
+			drawnActual["water"] -= treatedKg;
+			depositStoreDrift(treatment.treatedIndex, treatedKg, treatedActual);
+			depositStoreDrift(treatment.concentrateIndex, concentrateKg, drawnActual);
+			if (treated.authored.composition) addLedger(stagedLoss, treatedActual, -1.0);
+			if (concentrate.authored.composition) addLedger(stagedLoss, drawnActual, -1.0);
 			qualified[treatment.sourceIndex] -= processedUnits;
 			flowOut[treatment.sourceIndex] += processedUnits;
 			// The treatment consumable is drawn before the clearance
@@ -632,10 +655,11 @@ namespace core
 			}
 			else qualified[treatment.treatedIndex] += treatedUnits;
 			flowIn[treatment.treatedIndex] += treatedUnits;
-			// The concentrate is retained, not usable: it lands on the
-			// unqualified side of its store and stays accounted there
-			// until a disposal capability exists.
-			unqualified[treatment.concentrateIndex] += concentrateUnits;
+			// Compound concentrate is an identified, routable/disposable
+			// product of its own hazard class, not purified water. Preserve
+			// the historical held scalar concentrate for plain destinations.
+			if (concentrate.authored.composition) qualified[treatment.concentrateIndex] += concentrateUnits;
+			else unqualified[treatment.concentrateIndex] += concentrateUnits;
 			flowIn[treatment.concentrateIndex] += concentrateUnits;
 			// The clearance test is spent only when it actually runs and
 			// passes: a held batch consumed nothing, so the kit stays

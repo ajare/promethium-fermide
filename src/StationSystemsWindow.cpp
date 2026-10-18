@@ -1503,6 +1503,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 				store.composition->atmosphericNitrogen, store.composition->phosphorus,
 				store.composition->potassium, store.composition->otherMinerals,
 				store.composition->energyKJPerKgDry);
+		for (auto const& [name, concentration] : store.concentrations)
+			ImGui::Text("  live %s concentration: %.6g kg/kg", name.c_str(), concentration);
 	}
 	ImGui::SeparatorText("Transfers (live; competing requests allocate by priority, then declaration order)");
 	if (snapshot.transfers.empty()) ImGui::TextDisabled("No Resource transfers authored.");

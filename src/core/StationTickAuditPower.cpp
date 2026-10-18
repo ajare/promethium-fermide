@@ -108,6 +108,9 @@ namespace core
 			flowOut[transfer.sourceIndex] += drawn;
 			flowIn[transfer.destinationIndex] += completed;
 			auto deliveredActual = actual;
+			// A permitted plain-to-compound water inflow carries only water.
+			if (!source.authored.composition && destination.authored.composition)
+				deliveredActual["water"] = massToKg(source.authored.unit, drawn);
 			for (auto& [name, value] : deliveredActual) value *= drawn > 0.0 ? completed / drawn : 0.0;
 			depositStoreDrift(transfer.destinationIndex, massToKg(destination.authored.unit, completed), deliveredActual);
 			stagedUnitLoss[source.authored.unit] += drawn - completed;

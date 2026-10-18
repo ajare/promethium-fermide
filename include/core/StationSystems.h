@@ -1894,6 +1894,9 @@ namespace core
 		// plain, uncharacterised stores, which carry no constituent
 		// inventory.
 		std::map<std::string, double> actualConstituents;
+		// Live kg constituent per kg stream (energy excluded). Published for
+		// compound stores and treatment water ports; empty inventories read 0.
+		std::map<std::string, double> concentrations;
 		bool operator==(StationSystemsStoreSnapshot const&) const = default;
 	};
 

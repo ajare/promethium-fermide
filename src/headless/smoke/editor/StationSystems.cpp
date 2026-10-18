@@ -6897,6 +6897,62 @@ void bufferWorkflow(smoke::Context const&)
 		smoke::require(driver.passed(), "Degenerate bioconversion editor workflow failed");
 	}
 
+	void compoundWaterWorkflow(smoke::Context const& test)
+	{
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 2400};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history; StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Greywater editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		window.setFilePicker([&](bool) -> std::optional<std::string> {
+			return test.fixture("resources/station-systems/scenarios/water-greywater.yaml").string();
+		});
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({970, 10}); ImGui::SetNextWindowSize({220, 2350});
+			ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 2350});
+			window.render(world, history);
+		});
+		window.visible = true; driver.frame(); driver.frame();
+		driver.run("station", "compoundWaterWorkflow", [&](ImGuiTestContext* ctx) {
+			#define WATER_REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+			ctx->SetRef("Configuration");
+			driver.click(ctx, "Open configuration"); ctx->Yield(3);
+			WATER_REQ(window.draft().stores.size() == 4 && window.draft().stores[0].composition,
+				"Compound water configuration did not open");
+			ctx->SetRef("Station Systems");
+			driver.typeValue(ctx, "Store 0 moisture fraction", "0.99"); ctx->Yield(3);
+			WATER_REQ(window.draft().stores[0].composition->moisture == 0.99,
+				"Existing composition editor refused water");
+			driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+			WATER_REQ(window.draft().stores[0].composition->moisture == 0.998, "Water composition undo failed");
+			driver.click(ctx, "Redo configuration"); ctx->Yield(3);
+			driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+			core::StationConfigurationDocument saved, restored; std::string error;
+			saved.settings = window.draft();
+			auto const parsed = core::parseStationConfiguration(core::serializeStationConfiguration(saved), restored, &error);
+			WATER_REQ(parsed && restored.settings == saved.settings, "Water draft save/load changed composition");
+			driver.click(ctx, "Apply settings"); ctx->Yield(3);
+			WATER_REQ(world->getStationSystemsSettings() == window.draft(), "Water draft did not Apply");
+			world->resumeSimulation(); WATER_REQ(world->advanceTicks(60), "Editor greywater failed to tick");
+			world->pauseSimulation();
+			auto const snap = world->getStationSystemsSnapshot();
+			auto const daily = 86400.0 / (60.0 * core::World::getFixedTimestep());
+			WATER_REQ(std::abs(snap.waterTreatments[0].treatedKg * daily - 84.83) < 1e-7,
+				"Editor-applied greywater actuals disagree");
+			// The store inspector's production telemetry reads the live ledger,
+			// not its deliberately different authored concentrate composition.
+			core::station_connections::Node node; node.type = "Store"; node.id = "concentrate";
+			auto const telemetry = station_flow::telemetry(node, snap, core::World::getFixedTimestep());
+			WATER_REQ(telemetry && std::any_of(telemetry->details.begin(), telemetry->details.end(),
+				[](auto const& line) { return line.find("Live dryOrganics concentration") != std::string::npos; }),
+				"Live water concentration inspector readout absent");
+			#undef WATER_REQ
+		});
+		smoke::require(driver.passed(), "Compound water editor workflow failed");
+	}
+
 	void bioconversionFoodwasteWorkflow(smoke::Context const& test)
 	{
 		headless::ScopedImGuiContext context;
@@ -8689,6 +8745,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/bioconversionWorkflow", bioconversionWorkflow});
 	checks.push_back({"station/bioconversionDegenerateWorkflow", bioconversionDegenerateWorkflow});
 	checks.push_back({"station/bioconversionFoodwasteWorkflow", bioconversionFoodwasteWorkflow});
+	checks.push_back({"station/compoundWaterWorkflow", compoundWaterWorkflow});
 	checks.push_back({"station/cropWorkflow", cropWorkflow});
 	checks.push_back({"station/algaeWorkflow", algaeWorkflow});
 	checks.push_back({"station/maintenanceWorkflow", maintenanceWorkflow});

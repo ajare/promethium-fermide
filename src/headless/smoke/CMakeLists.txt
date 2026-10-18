@@ -90,7 +90,7 @@ pf_add_smoke_module(pf-smoke-station
         station/StationThermalChecks.cpp
         station/StationGenerationChecks.cpp
         station/StationAtmosphereChecks.cpp
-        station/StationWaterChecks.cpp
+        station/StationWaterChecks.cpp station/CompoundWater.cpp
         station/StationRecoveryChecks.cpp station/Bioconversion.cpp
         station/StationBiologyChecks.cpp
         station/ScheduledTransfers.cpp station/ObservationIntegration.cpp station/Documents.cpp station/BatteryObservations.cpp station/MaterialObservations.cpp station/Connections.cpp station/Coupled.cpp station/Reference.cpp station/Scenarios.cpp station/Stability.cpp
@@ -103,7 +103,7 @@ foreach(check scheduledTransfers recurringTransfers scheduledTransferDocuments s
         observationIntegration observationBounds scheduledExchangeObservations algaeExchangeObservations cropExchangeObservations microbialExchangeObservations carbonExchangeObservations waterGasExchangeObservations crewAtmosphereExchangeObservations thermalExchangeObservations electricalExchangeObservations exchangeObservations materialObservations fluidInventoryObservations compoundInventoryObservations livingInventoryObservations materialRelationshipObservations materialCanonicalUnits batteryObservations batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
-        deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres crews water containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay
+        deliveries wasteEjections thermal coolant chillers generators outages maintenance buffers atmospheres crews water compoundWaterTracer compoundWaterBlend compoundWaterValidation compoundWaterLegacy compoundWaterRouting compoundWaterConnections compoundWaterDocuments containment gas fuelCells crops failures dispatch protectedServices recovery trends endurance configurationFile brokenReferenceDocument fileRoundTrip writeFailure legacyFiles structuralReplay
         compoundFiles powerFiles powerChainFiles batteryFiles deliveryFiles wasteEjectionFiles thermalFiles bufferFiles coolantFiles chillerFiles generatorFiles outageFiles maintenanceFiles atmosphereFiles crewFiles waterFiles containmentFiles gasFiles
         # #571: harvest, algae and the nutrient-conservation closure were
         # reachable through the binary but never registered here, so they
@@ -760,6 +760,8 @@ set_tests_properties(station-editor-flow-growable-ports PROPERTIES LABELS "smoke
 add_test(NAME station-editor-flow-inspector COMMAND pf-smoke-editor --check station/flowInspectorWorkflow)
 set_tests_properties(station-editor-flow-inspector PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 90)
 # #649: water/gas placement, shared inspectors and optional consumable wiring.
+add_test(NAME station-editor-compound-water COMMAND pf-smoke-editor --check station/compoundWaterWorkflow)
+set_tests_properties(station-editor-compound-water PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-flow-water-gas COMMAND pf-smoke-editor --check station/flowWaterGasWorkflow)
 set_tests_properties(station-editor-flow-water-gas PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-connection-design COMMAND pf-smoke-editor --check station/connectionDesign)
