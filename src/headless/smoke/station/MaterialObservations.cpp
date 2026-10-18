@@ -1,4 +1,5 @@
 #include "MaterialObservations.h"
+#include "WaterGasObservationFixture.h"
 #include "core/World.h"
 #include <algorithm>
 #include <cmath>
@@ -149,6 +150,110 @@ namespace
 			require(observations.size() == 4 && observations[0].metric.unit == canonical, "canonical rate unit missing");
 			close(observations[0].sourceToCanonicalScale, scale);
 		}
+	}
+
+	void waterGasExchangeObservations(smoke::Context const&)
+	{
+		auto s = smoke::station::waterGasObservationFixture();
+		core::World world("Water gas exchanges", 2, 2); world.pauseSimulation(); world.finishBuild();
+		auto apply = [&] { std::string why; if (!world.configureStationSystems(s, true, &why)) throw std::runtime_error(why); };
+		auto family = [](std::string const& t) { return t == "Water collector" || t == "Water treatment" || t == "Electrolyzer" || t == "CO2 capture"; };
+		auto verify = [&] {
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const history = world.getStationSystemsMetricHistory();
+			auto missing = snap; missing.waterCollectors.clear(); missing.waterTreatments.clear(); missing.electrolyzers.clear(); missing.co2Captures.clear(); missing.connections.clear();
+			for (auto const& o : core::stationExchangeObservations(s)) if (family(o.metric.equipmentType)) {
+				auto h = std::ranges::find(history, o.metric.id, [](auto const& h) { return h.descriptor.id; });
+				require(h != history.end() && !h->samples.empty() && h->samples.back().actual.has_value(), "water/gas metric absent");
+				auto v = o.read(snap);
+				close(*h->samples.back().actual, *v.actual * o.sourceToCanonicalScale / (o.perTick ? core::World::getFixedTimestep() : 1));
+				if (v.requested) close(*h->samples.back().requested, *v.requested * o.sourceToCanonicalScale / (o.perTick ? core::World::getFixedTimestep() : 1));
+				require(!o.read(missing).actual, "missing water/gas authority became zero");
+			}
+			auto const before = world.getStationSystemsSnapshot();
+			auto const revision = world.getStationSystemsObservationRevision();
+			for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.breakdown == "Aggregate" && std::any_of(history.begin(), history.end(), [&](auto const& h) {
+				return family(h.descriptor.equipmentType) && std::ranges::find(def.series[0].contributors, h.descriptor.id) != def.series[0].contributors.end();
+			})) {
+				auto const data = world.queryStationSystemsChart(def.id);
+				require(!data.incomplete && !data.series[0].values.empty(), "water/gas chart unavailable");
+				double expected = 0;
+				for (auto const& id : def.series[0].contributors) {
+					auto h = std::ranges::find(history, id, [](auto const& h) { return h.descriptor.id; }); expected += *h->samples.back().actual;
+				}
+				close(data.series[0].values.back(), expected);
+				auto const stack = world.queryStationSystemsChart(def.id + "/instances");
+				auto lastStack = std::find_if(stack.series.rbegin(), stack.series.rend(), [](auto const& line) { return line.stacked; });
+				require(lastStack != stack.series.rend() && !lastStack->upper.empty(), "water/gas instance stack missing");
+				close(lastStack->upper.back(), expected);
+				auto unavailable = history;
+				for (auto& h : unavailable) if (h.descriptor.id == def.series[0].contributors[0]) h.samples.back().actual.reset();
+				auto gap = core::queryStationChart(def, unavailable);
+				require(gap.incomplete && std::isnan(gap.series[0].values.back()), "unavailable contributor concealed in total");
+			}
+			require(world.getStationSystemsSnapshot() == before && world.getStationSystemsObservationRevision() == revision, "viewing water/gas changed World");
+		};
+		apply(); run(world, 12); verify();
+		auto snap = world.getStationSystemsSnapshot();
+		require(snap.waterCollectors[0].lastCollectedKg > 0, ("collector inactive: " + snap.waterCollectors[0].blockReason + " request=" + std::to_string(snap.waterCollectors[0].lastRequestedKg) + " latent=" + std::to_string(snap.waterCollectors[0].lastLatentHeatKW) + " treatment=" + std::to_string(snap.waterTreatments[0].lastProcessedKg)).c_str());
+		require(snap.waterTreatments[0].lastProcessedKg > 0, ("treatment inactive: " + snap.waterTreatments[0].limiter).c_str());
+		require(snap.electrolyzers[0].lastSplitKg > 0, ("electrolyzer inactive: " + snap.electrolyzers[0].blockReason).c_str());
+		require(snap.co2Captures[0].lastCapturedKg > 0, ("capture inactive: " + snap.co2Captures[0].blockReason).c_str());
+		// Snapshot-to-query numerical checks independent of the adapter callbacks.
+		auto check = [&](std::string const& type, std::string const& role, double actual) {
+			for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.breakdown == "Aggregate"
+				&& def.id.starts_with("exchange/" + type + "/") && def.id.find("/" + role + "/") != std::string::npos) {
+				close(world.queryStationSystemsChart(def.id).series[0].values.back(), actual); return;
+			}
+			throw std::runtime_error("missing water/gas role " + type + "/" + role);
+		};
+		auto dt = core::World::getFixedTimestep();
+		check("Water collector", "Condensate", snap.waterCollectors[0].lastCollectedKg / dt);
+		check("Water treatment", "Concentrate", snap.waterTreatments[0].lastConcentrateKg / dt);
+		check("Electrolyzer", "Oxygen", snap.electrolyzers[0].lastOxygenKg / dt);
+		check("Electrolyzer", "Product chemical energy", snap.electrolyzers[0].lastHydrogenKg * core::StationElectrolysisChemicalEnergyHydrogenKJPerKg / dt);
+		check("CO2 capture", "Captured CO2", snap.co2Captures[0].lastCapturedKg / dt);
+		// Constrained physical inputs/outputs expose separately named external losses.
+		for (auto const& c : snap.connections) if (family(c.key.ownerType))
+			s.connections[c.key] = {core::StationPhysicalConnection::Automatic, 0.005, 0.5};
+		apply(); run(world, 12); verify(); snap = world.getStationSystemsSnapshot();
+		bool loss = false;
+		for (auto const& c : snap.connections) if (family(c.key.ownerType) && c.lastInputRate > 0) {
+			close(c.lastInputRate, c.lastDeliveredRate + c.lastLossRate); loss |= c.lastLossRate > 0;
+		}
+		require(loss, "connection loss not exercised");
+		// Same-class instances participate in the generic aggregate/stack.
+		s.connections.clear(); auto second = s.electrolyzers[0]; second.id = "second"; s.electrolyzers.push_back(second);
+		apply(); run(world, 12); verify();
+		s.waterCollectors[0].maxRateKgPerS = 0; s.waterTreatments[0].throughputKgPerS = 0;
+		for (auto& e : s.electrolyzers) e.rateKgPerS = 0;
+		s.co2Captures[0].maxRateKgPerS = 0; apply(); run(world, 12); verify();
+		check("Electrolyzer", "Oxygen", 0); check("Water collector", "Condensate", 0);
+		check("Water treatment", "Treated water", 0); check("CO2 capture", "Captured CO2", 0);
+		// Hazardous clearance and non-kg consumables retain explicit identity and
+		// canonical rates. Oxygen may also go directly to atmosphere, not a store.
+		s = smoke::station::waterGasObservationFixture();
+		for (auto& stock : s.stores) stock.hazardClass = "hazardous";
+		s.atmospheres[0].hazardClass = "hazardous"; s.coolantLoops[0].hazardClass = "hazardous";
+		s.waterCollectors[0].hazardClass = "hazardous"; s.waterTreatments[0].hazardClass = "hazardous";
+		s.electrolyzers[0].hazardClass = "hazardous"; s.co2Captures[0].hazardClass = "hazardous";
+		s.waterTreatments[0].clearanceStoreId = "kit"; s.waterTreatments[0].clearancePerKg = 0.01;
+		s.stores[3].unit = "g"; s.stores[3].capacity = 100000; s.stores[3].startingQualified = 10000;
+		s.electrolyzers[0].oxygenStoreId.clear(); s.electrolyzers[0].atmosphereId = "air";
+		auto otherKit = s.stores[3]; otherKit.id = "other-kit"; otherKit.materialId = "other-sorbent"; s.stores.push_back(otherKit);
+		auto otherCapture = s.co2Captures[0]; otherCapture.id = "other-capture"; otherCapture.consumableStoreId = "other-kit"; s.co2Captures.push_back(otherCapture);
+		apply(); run(world, 12); verify(); snap = world.getStationSystemsSnapshot();
+		check("Water treatment", "Clearance consumable", snap.waterTreatments[0].lastClearanceUsed * 0.001 / dt);
+		check("Electrolyzer", "Oxygen", snap.electrolyzers[0].lastOxygenKg / dt);
+		size_t consumableViews = 0;
+		for (auto const& def : world.getStationSystemsObservationCatalogue()) if (def.breakdown == "Aggregate" && def.id.starts_with("exchange/CO2 capture/Input/Consumable/")) {
+			++consumableViews;
+			require(def.series[0].contributors.size() == 1 && def.id.ends_with("/hazardous"), "material/hazard identity pooled");
+		}
+		require(consumableViews == 2, "same-unit different consumables merged");
+		s.enabled = false; apply(); run(world, 12);
+		for (auto const& h : world.getStationSystemsMetricHistory()) if (family(h.descriptor.equipmentType))
+			require(h.samples.empty(), "disabled simulation fabricated water/gas history");
 	}
 
 	void crewAtmosphereExchangeObservations(smoke::Context const&)
@@ -894,6 +999,7 @@ void registerMaterialObservationChecks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"exchangeObservations", exchangeObservations});
 	checks.push_back({"crewAtmosphereExchangeObservations", crewAtmosphereExchangeObservations});
+	checks.push_back({"waterGasExchangeObservations", waterGasExchangeObservations});
 	checks.push_back({"thermalExchangeObservations", thermalExchangeObservations});
 	checks.push_back({"electricalExchangeObservations", electricalExchangeObservations});
 	checks.push_back({"materialObservations", materialObservations});

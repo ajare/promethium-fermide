@@ -1,5 +1,9 @@
 # Station Flow observations
 
+Water and gas processing exchange catalogue (#709): see
+[Water and gas processing exchange observations](station-water-gas-exchange-observations.md)
+for condensate, treatment, electrolysis, CO2 capture and separate loss boundaries.
+
 Crew, atmosphere and Airlock exchange catalogue (#708): see
 [Crew and atmosphere exchange observations](station-crew-atmosphere-exchange-observations.md)
 for ambient flows, metabolic accounting and explicit Airlock event-rate windows.

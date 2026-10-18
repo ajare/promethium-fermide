@@ -5,6 +5,7 @@
 #include "ViewWindow.h"
 #include "DocumentEdit.h"
 #include "../CoupledRig.h"
+#include "../station/WaterGasObservationFixture.h"
 #include "core/StationReference.h"
 #include "StationFlowDiagram.h"
 #include "core/StationConfigurationDocument.h"
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <limits>
 #include <set>
+#include <tuple>
 
 namespace
 {
@@ -3531,6 +3533,81 @@ namespace
 		});
 		#undef REQ
 		require(driver.passed(), "Battery observation editor workflow failed");
+	}
+
+	void waterGasObservationWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1200};
+		io.Fonts->AddFontDefault(); io.Fonts->Build(); io.DeltaTime = 1.0f / 60.0f;
+		auto world = std::make_shared<core::World>("Water gas charts", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		auto settings = smoke::station::waterGasObservationFixture();
+		StationSystemsWindow window;
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 1080});
+			ImGui::Begin("Water gas configuration"); window.renderFlowContents(world); ImGui::End();
+		});
+		auto apply = [&] {
+			std::string why; if (!world->configureStationSystems(settings, true, &why)) throw std::runtime_error(why);
+			world->markSaved(); world->resumeSimulation(); require(world->advanceTicks(12), "water gas hidden run failed"); world->pauseSimulation();
+		};
+		apply(); driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "waterGasObservations", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Water gas configuration");
+			for (int mode = 0; mode < 4; ++mode) {
+				if (mode == 1) {
+					for (auto const& c : world->getStationSystemsSnapshot().connections)
+						if (c.key.ownerType == "Electrolyzer" || c.key.ownerType == "Water collector" || c.key.ownerType == "Water treatment" || c.key.ownerType == "CO2 capture")
+							settings.connections[c.key] = {core::StationPhysicalConnection::Automatic, 0.005, 0.5};
+					apply(); ctx->Yield(2);
+				}
+				if (mode == 2) {
+					settings.connections.clear(); settings.electrolyzers[0].rateKgPerS = 0; settings.waterCollectors[0].maxRateKgPerS = 0;
+					settings.waterTreatments[0].throughputKgPerS = 0; settings.co2Captures[0].maxRateKgPerS = 0;
+					apply(); ctx->Yield(2);
+				}
+				if (mode == 3) {
+					settings.enabled = false; apply(); ctx->Yield(2);
+					auto const data = world->queryStationSystemsChart(window.selectedObservation());
+					REQ(driver.contains("Simulation disabled; no live history.") && std::all_of(data.series.begin(), data.series.end(), [](auto const& line) { return line.values.empty(); }), "unavailable water/gas history presented as zero");
+					break;
+				}
+				auto const observed = world->getStationSystemsSnapshot();
+				auto const revision = world->getStationSystemsObservationRevision();
+				for (auto const& [type, role, expected] : std::vector<std::tuple<std::string, std::string, double>>{
+					{"Water collector", "Condensate", observed.waterCollectors[0].lastCollectedKg / core::World::getFixedTimestep()},
+					{"Water treatment", "Treated water", observed.waterTreatments[0].lastTreatedKg / core::World::getFixedTimestep()},
+					{"Water treatment", "Concentrate", observed.waterTreatments[0].lastConcentrateKg / core::World::getFixedTimestep()},
+					{"Water treatment", "Treatment consumable", observed.waterTreatments[0].lastConsumableUsed / core::World::getFixedTimestep()},
+					{"Electrolyzer", "Oxygen", observed.electrolyzers[0].lastOxygenKg / core::World::getFixedTimestep()},
+					{"Electrolyzer", "Hydrogen", observed.electrolyzers[0].lastHydrogenKg / core::World::getFixedTimestep()},
+					{"Electrolyzer", "Electrical service", observed.electrolyzers[0].lastPowerSuppliedKW},
+					{"CO2 capture", "Captured CO2", observed.co2Captures[0].lastCapturedKg / core::World::getFixedTimestep()},
+					{"CO2 capture", "Consumable", observed.co2Captures[0].lastConsumableUsed / core::World::getFixedTimestep()}}) {
+					auto const catalogue = world->getStationSystemsObservationCatalogue();
+					auto const selected = std::find_if(catalogue.begin(), catalogue.end(), [&](auto const& c) {
+						return c.breakdown == "Aggregate" && c.id.starts_with("exchange/" + type + "/") && c.id.find("/" + role + "/") != std::string::npos;
+					});
+					REQ(selected != catalogue.end(), "water/gas selector role absent");
+					ctx->ItemClick("##Station observation property"); ctx->Yield(2);
+					auto const* popup = ctx->GetWindowByRef("//$FOCUSED"); REQ(popup != nullptr, "water/gas selector absent");
+					auto item = ImHashStr(selected->label.c_str(), 0, ImHashStr(selected->id.c_str(), 0, popup->ID));
+					ctx->ScrollToItemY(item); ctx->ItemClick(item); ctx->Yield(2);
+					REQ(window.selectedObservation() == selected->id && driver.contains("Actual rate"), "water/gas generic chart not rendered");
+					auto const data = world->queryStationSystemsChart(selected->id);
+					REQ(!data.incomplete && !data.series[0].values.empty() && std::abs(data.series[0].values.back() - expected) < 1e-8, "water/gas selector lost hidden history or wrong rate");
+					ctx->ComboClick("Breakdown/Instance"); ctx->Yield(2);
+					REQ(window.selectedObservation() == selected->id + "/instances", "water/gas instance breakdown unavailable");
+					REQ(world->getStationSystemsSnapshot() == observed && world->getStationSystemsObservationRevision() == revision
+						&& window.draftHistory().undoCount() == 0 && !world->isModified(), "water/gas viewing mutated simulation or document");
+				}
+			}
+		});
+		#undef REQ
+		require(driver.passed(), "Water/gas observation editor workflow failed");
 	}
 
 	void materialObservationWorkflow(smoke::Context const&)
@@ -7969,6 +8046,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/flowTelemetryWorkflow", flowTelemetryWorkflow});
 	checks.push_back({"station/batteryObservationWorkflow", batteryObservationWorkflow});
 	checks.push_back({"station/materialObservationWorkflow", materialObservationWorkflow});
+	checks.push_back({"station/waterGasObservationWorkflow", waterGasObservationWorkflow});
 	checks.push_back({"station/flowThermalReservoirWorkflow", flowThermalReservoirWorkflow});
 	checks.push_back({"station/flowRadiatorWorkflow", flowRadiatorWorkflow});
 	checks.push_back({"station/flowCoolantLoopWorkflow", flowCoolantLoopWorkflow});

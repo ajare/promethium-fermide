@@ -10861,6 +10861,7 @@ namespace core
 				auto const deliveredHeatKW = connections.send(heatPort, latentHeatKW).delivered;
 				collectorHeatByLoop[collector.loopIndex] += deliveredHeatKW;
 				collector.lastLatentHeatKW = deliveredHeatKW;
+				collector.lastCollectedKg = collectedKg;
 				collector.latentHeatRoutedKJ += deliveredHeatKW * tickSeconds;
 				collector.collectedTotalKg += collectedKg;
 				if (collectedKg + 1e-12 >= requestedKg) collector.status = StationTransferStatus::Full;

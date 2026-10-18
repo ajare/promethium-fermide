@@ -12,6 +12,7 @@ namespace core
 {
 	void appendStationThermalObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
 	void appendStationCrewAtmosphereObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
+	void appendStationWaterGasObservations(StationSystemsSettings const&, std::vector<StationExchangeObservation>&);
 	std::vector<StationStoreObservation> stationStoreObservations(StationSystemsSettings const& settings)
 	{
 		// Identity evidence belongs to ownership boundaries, never labels or units.
@@ -280,6 +281,7 @@ namespace core
 		}
 		appendStationThermalObservations(settings, result);
 		appendStationCrewAtmosphereObservations(settings, result);
+		appendStationWaterGasObservations(settings, result);
 		return result;
 	}
 
