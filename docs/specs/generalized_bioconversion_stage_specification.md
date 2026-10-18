@@ -1,8 +1,7 @@
 # Generalized Bioconversion Stage — Microbial Processor Generalization
 
-Status: core slice (#735), degenerate pass-through (#736), and hot-digestion
-scenario/hardening (#737) implemented. Editor derived-rate preview (#738)
-remains a follow-up.
+Status: core slice (#735), degenerate pass-through (#736), hot-digestion
+scenario/hardening (#737), and editor derived-rate preview (#738) implemented.
 Origin: audit finding G1 in ticket #724 (Station systems gap analysis).
 Component: `MicrobialProcessorSettings` (`include/core/StationSystems.h`), validator
 and runtime in `src/core/StationSystems.cpp`.
@@ -230,7 +229,12 @@ features of the model's tick-level abstraction, not oversights:
   composition, the form shows a one-line preview computed from the declared
   composition at rated throughput, e.g. `≈ 0.06 kg O2 per kg feed at the
   declared feed composition`. Preview only — the runtime always uses the
-  actual drawn blend.
+  actual drawn blend. The shared settings form (including the Flow inspector)
+  displays O2, process water, CO2, medium and nitrified N in kg/s and reaction
+  heat in kW at rated feed throughput. It recomputes each frame from the draft,
+  is hidden for fixed mode or a missing/undeclared feed, and marks the estimate
+  as "at declared feed composition (not runtime)". Non-finite or negative draft
+  results show an unavailable-preview notice instead of numeric rates.
 - All edits use draft undo/redo; only Apply changes the World (unchanged).
 - Link refusals are unchanged plus the new derived-mode validation messages.
 

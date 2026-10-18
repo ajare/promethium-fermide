@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <cmath>
 
 namespace station_editor
 {
@@ -233,7 +234,7 @@ bool renderCrewEntry([[maybe_unused]] core::StationSystemsSettings& draft, core:
 	return removeCrew;
 }
 
-bool renderMicrobialProcessorEntry([[maybe_unused]] core::StationSystemsSettings& draft, core::MicrobialProcessorSettings& processor,
+bool renderMicrobialProcessorEntry(core::StationSystemsSettings& draft, core::MicrobialProcessorSettings& processor,
 	std::string const& label, std::string const& removeLabel)
 {
 	bool removeProcessor = false;
@@ -341,6 +342,28 @@ bool renderMicrobialProcessorEntry([[maybe_unused]] core::StationSystemsSettings
 	if (processor.rateBasis == core::StationRateBasis::FixedPerFeedMass)
 		ImGui::InputDouble((label + " reaction heat kJ/kg feed").c_str(),
 			&processor.reactionHeatKJPerKgFeed, 0.0, 0.0, "%.2f");
+	// Re-evaluate from the draft every frame, after all rate/recovery edits.
+	// This deliberately never observes the World's live feed blend.
+	if (processor.rateBasis == core::StationRateBasis::CompositionDerived && !processor.feedStoreId.empty())
+	{
+		auto const feed = std::find_if(draft.stores.begin(), draft.stores.end(), [&](auto const& store) {
+			return store.id == processor.feedStoreId;
+		});
+		if (feed != draft.stores.end() && feed->composition)
+		{
+			auto const rates = core::stationMicrobialRates(processor, *feed->composition);
+			std::array values{rates.oxygen * processor.rateKgPerS, rates.water * processor.rateKgPerS,
+				rates.co2 * processor.rateKgPerS, rates.consumable * processor.rateKgPerS,
+				rates.heat * processor.rateKgPerS, rates.nitrifiedNitrogen * processor.rateKgPerS};
+			if (std::all_of(values.begin(), values.end(), [](double v) { return std::isfinite(v) && v >= 0.0; }))
+				ImGui::TextWrapped("Preview at declared feed composition (not runtime): O2 %.4g kg/s; water %.4g kg/s; CO2 %.4g kg/s; medium %.4g kg/s; heat %.4g kW; nitrified N %.4g kg/s",
+					values[0], values[1], values[2], values[3], values[4], values[5]);
+			else
+				ImGui::TextUnformatted("Preview unavailable at declared feed composition: invalid draft rates.");
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Estimate at rated feed throughput, before condition or resource throttling. Runtime uses the actual drawn blend, not this declaration.");
+		}
+	}
 	ImGui::InputDouble((label + " min operating temperature C").c_str(),
 		&processor.minOperatingTemperatureC, 0.0, 0.0, "%.2f");
 	ImGui::InputDouble((label + " max sink temperature C").c_str(),

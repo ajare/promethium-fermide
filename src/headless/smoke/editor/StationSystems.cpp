@@ -6760,6 +6760,10 @@ void bufferWorkflow(smoke::Context const&)
 		world->pauseSimulation(); world->finishBuild();
 		core::StationConfigurationDocument doc; std::string error;
 		require(core::loadStationConfiguration(test.fixture("resources/station-systems/scenarios/bioconversion-urine.yaml").string(), doc, &error), error);
+		auto alternateFeed = doc.settings.stores.front();
+		alternateFeed.id = "alternateFeed";
+		alternateFeed.composition->moisture = 0.9; // Twice the dry mass per kg feed.
+		doc.settings.stores.push_back(alternateFeed);
 		// Begin fixed with the same feed; switch through the real form.
 		doc.settings.microbialProcessors[0].rateBasis = core::StationRateBasis::FixedPerFeedMass;
 		doc.settings.microbialProcessors[0].reactionHeatKJPerKgFeed = 1;
@@ -6773,6 +6777,7 @@ void bufferWorkflow(smoke::Context const&)
 		driver.run("station", "bioconversionWorkflow", [&](ImGuiTestContext* ctx) {
 			ctx->SetRef("Station Systems");
 			REQ(driver.contains("Microbial processor 0 oxygen per kg feed kg"), "Fixed rate fields absent");
+			REQ(!driver.contains("Preview at declared feed composition"), "Fixed mode showed derived preview");
 			ctx->ComboClick("Microbial processor 0 rate basis/Composition derived"); ctx->Yield(3);
 			REQ(window.draft().microbialProcessors[0].rateBasis == core::StationRateBasis::CompositionDerived,
 				"Rate selector did not edit the draft");
@@ -6784,7 +6789,40 @@ void bufferWorkflow(smoke::Context const&)
 			REQ(window.draft().microbialProcessors[0].rateBasis == core::StationRateBasis::FixedPerFeedMass, "Basis undo failed");
 			driver.click(ctx, "Redo configuration"); ctx->Yield(3);
 			REQ(window.draft().microbialProcessors[0].rateBasis == core::StationRateBasis::CompositionDerived, "Basis redo failed");
+			// Independent coefficients for the declared urine composition, not a
+			// second call to the production model. Check every displayed rate.
+			auto previewMatches = [&](double feedRate, double dryScale, double nitrification) {
+				// Input helpers scroll to the edited field; bring the preview's
+				// following field into view before inspecting captured text.
+				ctx->MouseMove("Microbial processor 0 min operating temperature C"); ctx->Yield(3);
+				char expected[512];
+				std::snprintf(expected, sizeof(expected),
+					"O2 %.4g kg/s; water %.4g kg/s; CO2 %.4g kg/s; medium %.4g kg/s; heat %.4g kW; nitrified N %.4g kg/s",
+					(0.0063 + 0.05484 * nitrification) * feedRate * dryScale, 0.0,
+					0.0081 * feedRate * dryScale, 0.000225 * feedRate * dryScale,
+					2.52 * feedRate * dryScale, 0.012 * nitrification * feedRate * dryScale);
+				if (!driver.contains(expected))
+					std::printf("Expected preview: %s\nCaptured: %s\n", expected, driver.text().c_str());
+				return driver.contains(expected);
+			};
+			auto const rated = doc.settings.microbialProcessors[0].rateKgPerS;
+			REQ(driver.contains("Preview at declared feed composition (not runtime)")
+				&& previewMatches(rated, 1, 1), "Declared-composition preview rates incorrect");
+			driver.typeValue(ctx, "Microbial processor 0 rated feed processing kg\\/s", "2"); ctx->Yield(3);
+			REQ(previewMatches(2, 1, 1), "Rated throughput did not refresh preview");
+			driver.typeValue(ctx, "Microbial processor 0 organic waste feed store", "alternateFeed"); ctx->Yield(3);
+			REQ(previewMatches(2, 2, 1), "Feed rewiring did not refresh preview from draft composition");
+			driver.typeValue(ctx, "Microbial processor 0 organic waste feed store", ""); ctx->Yield(3);
+			REQ(!driver.contains("Preview at declared feed composition"), "Unwired feed showed preview");
+			driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+			REQ(previewMatches(2, 2, 1), "Feed undo did not restore preview");
+			driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+			driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+			REQ(previewMatches(rated, 1, 1), "Rate/feed undo did not restore preview");
 			driver.typeValue(ctx, "Microbial processor 0 nitrification fraction", "0.5"); ctx->Yield(3);
+			REQ(previewMatches(rated, 1, 0.5), "Parameter edit did not refresh preview");
+			REQ(world->getStationSystemsSettings() == doc.settings,
+				"Preview or draft edits changed the World before Apply");
 			REQ(window.draft().microbialProcessors[0].nitrificationFraction == 0.5, "Derived parameter edit failed");
 			driver.click(ctx, "Undo configuration"); ctx->Yield(3);
 			REQ(window.draft().microbialProcessors[0].nitrificationFraction == 1.0, "Parameter undo failed");
