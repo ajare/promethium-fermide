@@ -5,6 +5,7 @@
 #include "core/StationConfigurationDocument.h"
 #include "core/StationConnections.h"
 #include "core/StationMetrics.h"
+#include "core/StationPorts.h"
 #include "core/YamlSerializer.h"
 #include "core/BinarySerializer.h"
 #include <algorithm>
@@ -120,6 +121,91 @@ void scheduledTransfers(smoke::Context const&)
     core::World continuous("Continuous", 2, 2); configure(continuous, s); run(continuous, 1);
     require(stock(continuous, "b").currentQualified == 0, "Continuous physical enforcement regressed");
 
+    // #691: a round trip restores BOTH connection caps and efficiencies,
+    // without changing identity or executing the inactive schedule/rate.
+    auto continuousSettings = fixture();
+    continuousSettings.transfers[0].mode = Mode::Continuous;
+    continuousSettings.transfers[0].ratePerSecond = 60;
+    for (auto const& edge : core::station_connections::build(continuousSettings).links)
+        continuousSettings.connections[edge.designKey] = {core::StationPhysicalConnection::LiquidPipe, 6, 0.5};
+    auto switched = continuousSettings;
+    switched.transfers[0].mode = Mode::Scheduled;
+    require(switched.connections == continuousSettings.connections, "Mode switch changed connection identity");
+    core::World roundTrip("Switch", 2, 2); configure(roundTrip, switched); run(roundTrip, 2);
+    require(stock(roundTrip, "b").currentQualified == 4
+        && roundTrip.getStationSystemsSnapshot().transfers[0].occurrencesFired == 1,
+        "Switched Scheduled mode enforced physical properties or also ran the rate");
+    switched.transfers[0].mode = Mode::Continuous;
+    require(switched == continuousSettings, "Round trip lost inactive mode settings or properties");
+    configure(roundTrip, switched); run(roundTrip, 2);
+    require(std::abs(stock(roundTrip, "a").currentQualified - (10 - 12 * dt)) < 1e-9
+        && std::abs(stock(roundTrip, "b").currentQualified - 3 * dt) < 1e-9
+        && roundTrip.getStationSystemsSnapshot().transfers[0].occurrencesFired == 0,
+        "Continuous mode did not restore each cap and efficiency, or also fired its schedule");
+
+    // Inactive finite ranges are irrelevant, but all supplied numbers must
+    // remain well formed, including during standalone draft loading.
+    for (auto mode : {Mode::Continuous, Mode::Scheduled})
+    {
+        auto inactive = continuousSettings; inactive.transfers[0].mode = mode;
+        if (mode == Mode::Continuous)
+        {
+            inactive.transfers[0].quantity = -3;
+            inactive.transfers[0].firstOccurrenceSeconds = -2;
+            inactive.transfers[0].recurrenceSeconds = -1;
+        }
+        else inactive.transfers[0].ratePerSecond = -60;
+        configure(roundTrip, inactive);
+        core::StationConfigurationDocument doc, parsed; doc.settings = inactive;
+        std::string why;
+        require(core::parseStationConfiguration(core::serializeStationConfiguration(doc), parsed, &why)
+            && parsed.settings == inactive, "Inactive finite settings did not survive loading: " + why);
+        auto invalidSwitch = inactive;
+        invalidSwitch.transfers[0].mode = mode == Mode::Continuous ? Mode::Scheduled : Mode::Continuous;
+        require(!roundTrip.configureStationSystems(invalidSwitch, true, &why)
+            && roundTrip.getStationSystemsSettings() == inactive, "Switch bypassed active-mode range validation");
+        for (auto field : {"ratePerSecond", "quantity", "firstOccurrenceSeconds", "recurrenceSeconds"})
+        {
+            auto malformed = core::serializeStationConfiguration(doc);
+            auto at = malformed.find(std::string(field) + ": ");
+            require(at != std::string::npos, "Inactive field missing from document");
+            at += std::string(field).size() + 2;
+            malformed.replace(at, malformed.find('\n', at) - at, "not-a-number");
+            require(!core::parseStationConfiguration(malformed, parsed, &why) && parsed.settings == inactive,
+                "Malformed inactive number was accepted or mutated the document");
+        }
+        for (int field = 0; field < 4; ++field)
+        {
+            auto bad = inactive; auto& t = bad.transfers[0];
+            double* fields[] = {&t.ratePerSecond, &t.quantity, &t.firstOccurrenceSeconds, &t.recurrenceSeconds};
+            *fields[field] = std::numeric_limits<double>::infinity();
+            require(!roundTrip.configureStationSystems(bad, true, &why)
+                && roundTrip.getStationSystemsSettings() == inactive, "Non-finite inactive field was accepted");
+            doc.settings = bad;
+            require(!core::parseStationConfiguration(core::serializeStationConfiguration(doc), parsed, &why)
+                && parsed.settings == inactive, "Invalid inactive document replaced valid settings");
+        }
+    }
+
+    // Rename remaps design keys; ordinary disconnection/deletion still erases
+    // them, even while informational. Restoring the authored snapshot restores
+    // exactly the original settings (the draft history uses this same state).
+    switched = continuousSettings; switched.transfers[0].mode = Mode::Scheduled;
+    core::StationNodeRename rename;
+    require(core::planStationNodeRename(switched, "Transfer", "move", "renamed", rename)
+        && core::renameStationNode(switched, rename), "Scheduled transfer rename refused");
+    for (auto const& edge : core::station_connections::build(switched).links)
+        require(edge.designKey.ownerId == "renamed" && switched.connections.contains(edge.designKey),
+            "Scheduled rename lost design properties");
+    auto saved = switched;
+    require(core::clearStationLink(switched, "Transfer:renamed:Source")
+        && switched.connections.size() == 1, "Scheduled disconnect did not remove exactly its properties");
+    switched = saved;
+    core::StationNodeRemoval removal;
+    require(core::planStationNodeRemoval(switched, "Transfer", "renamed", removal)
+        && core::removeStationNode(switched, removal) && switched.connections.empty(),
+        "Scheduled deletion retained stale design properties");
+
     // Constituent accounting follows the material with no external term.
     s = fixture(); core::ResourceCompositionSettings mix;
     mix.moisture = 0.2; mix.nutrientNitrogen = 0.1; mix.phosphorus = 0.02;
@@ -176,9 +262,20 @@ void scheduledTransfers(smoke::Context const&)
 }
 void scheduledTransferDocuments(smoke::Context const&)
 {
-    auto s = fixture(); core::World w("Persistence", 2, 2); configure(w, s); run(w, 2);
-    for (bool binary : {false, true})
+    auto s = fixture();
+    s.transfers[0].ratePerSecond = 37; // retain the inactive Continuous setting
+    for (auto const& edge : core::station_connections::build(s).links)
+        s.connections[edge.designKey] = {core::StationPhysicalConnection::GasPipe, 2.5, 0.4};
+    // Preserve keys through rename as well as mode switching before saving.
+    core::StationNodeRename rename;
+    require(core::planStationNodeRename(s, "Transfer", "move", "saved move", rename)
+        && core::renameStationNode(s, rename), "Persistence fixture rename failed");
+    for (auto mode : {Mode::Continuous, Mode::Scheduled})
     {
+      s.transfers[0].mode = mode;
+      core::World w("Persistence", 2, 2); configure(w, s); run(w, 2);
+      for (bool binary : {false, true})
+      {
         core::SerializationWorkData data;
         auto roundTrip = [&]<class Serializer>() {
             auto writer = Serializer::toString(); w.serialize(*writer, data); writer->serialize();
@@ -190,17 +287,23 @@ void scheduledTransferDocuments(smoke::Context const&)
         require(loaded.getStationSystemsSettings() == s && loaded.getStationSystemsSnapshot().transfers[0].occurrencesFired == 0,
             "World round trip lost authored fields or serialized runtime counters");
         run(loaded, 2); require(loaded.getStationSystemsSnapshot() == w.getStationSystemsSnapshot(), "Loaded schedule did not replay");
+      }
+      core::StationConfigurationDocument doc, parsed; doc.settings = s; std::string why;
+      require(core::parseStationConfiguration(core::serializeStationConfiguration(doc), parsed, &why)
+          && parsed.settings == s, "Mode round trip lost inactive settings or properties: " + why);
     }
     core::StationConfigurationDocument document, loaded; document.settings = s; std::string why;
     auto yaml = core::serializeStationConfiguration(document);
     require(core::parseStationConfiguration(yaml, loaded, &why) && loaded.settings == s, "Standalone schedule round trip failed: " + why);
     auto withoutRate = yaml;
-    auto rateAt = withoutRate.find("ratePerSecond: 0");
+    auto rateAt = withoutRate.find("ratePerSecond: 37");
     require(rateAt != std::string::npos, "Scheduled fixture rate field missing");
     auto lineStart = withoutRate.rfind('\n', rateAt) + 1;
     withoutRate.erase(lineStart, withoutRate.find('\n', rateAt) + 1 - lineStart);
-    require(core::parseStationConfiguration(withoutRate, loaded, &why) && loaded.settings == s,
+    auto defaultRate = s; defaultRate.transfers[0].ratePerSecond = 0;
+    require(core::parseStationConfiguration(withoutRate, loaded, &why) && loaded.settings == defaultRate,
         "Scheduled load required an inactive continuous rate");
+    loaded.settings = s;
     auto stale = yaml; auto at = stale.find("schemaVersion: 99"); stale.replace(at, 17, "schemaVersion: 98");
     require(!core::parseStationConfiguration(stale, loaded, &why) && loaded.settings == s, "Old schema discarded Scheduled semantics");
     document.settings.transfers[0].sourceId.clear();

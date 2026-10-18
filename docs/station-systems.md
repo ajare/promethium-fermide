@@ -453,7 +453,9 @@ count no external import or loss for this internal move.
 
 Scheduled links are **Non-physical**. Carrier and throughput are not editable;
 retained connection design properties, including efficiency, are informational
-and do not cap or lose batch material. Continuous enforcement is unchanged.
+and do not cap or lose batch material. The Scheduled connection inspector shows
+saved efficiency read-only; switch to Continuous to edit the saved design
+properties. Explicit property reset remains available and undoable.
 Readouts show Scheduled waiting/completed/blocked outcomes, occurrence count,
 and last requested/moved/unmet **amounts**, not instantaneous rates. The bounded
 event log reports each occurrence. Scheduled batches do not appear in the
@@ -468,6 +470,23 @@ Non-finite supplied numbers are refused even for inactive mode fields. Affected
 material-connected Resource forecasts explicitly report Scheduled-transfer
 unavailability; independent projections remain available. Exact Scheduled
 forecasting is not implemented.
+
+#### Switching existing transfers (#691)
+
+Change **mode** in either editor to switch an existing transfer. Only the active
+mode's fields are shown and only that mode executes after Apply. The hidden rate
+or schedule is retained, including finite values outside the inactive mode's
+valid range; switching back exposes those values for correction. Both editors
+show the same active-mode validation, and invalid Apply/load is refused. Supplied
+malformed or non-finite numbers are always rejected, even when inactive.
+
+Switching preserves connection identity, carrier overrides, throughput and
+efficiency. Returning to Continuous restores the saved physical input caps and
+losses, not default ratings. Rename, World save/load and standalone configuration
+save/load preserve those settings in either mode. Ordinary disconnect or deletion
+still removes the affected design properties; undo restores them. Mode changes,
+field edits and property visibility follow Configuration draft undo/redo, remain
+isolated from the running World, and use the normal paused Apply/reset confirmation.
 
 ### Compound resources and constituent accounting (#391)
 

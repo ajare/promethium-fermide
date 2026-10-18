@@ -1738,7 +1738,33 @@ namespace
 			flow = false; ctx->Yield(3);
 			REQ(driver.contains("Transfer 0 quantity") && driver.contains("Transfer 0 first occurrence seconds"),
 				"Form did not expose the same scheduled draft fields");
+			// #691: switching back through the other editor keeps the inactive
+			// schedule. Undo/redo restores visibility as well as the mode.
+			auto* quantityInfo = ctx->ItemInfo("**/Transfer 0 quantity");
+			ctx->ItemClick(ImHashStr("Transfer 0 mode", 0, quantityInfo->ParentID)); ctx->Yield(2);
+			popup = ctx->GetWindowByRef("//$FOCUSED");
+			REQ(popup != nullptr, "Form mode popup missing");
+			ctx->ItemClick(("//" + std::string(popup->Name) + "/**/Continuous").c_str()); ctx->Yield(3);
+			REQ(window.draft().transfers[0].mode == core::ResourceTransferMode::Continuous
+				&& window.draft().transfers[0].ratePerSecond == transfer.ratePerSecond
+				&& window.draft().transfers[0].quantity == 7
+				&& window.draft().transfers[0].firstOccurrenceSeconds == 12
+				&& driver.contains("Transfer 0 rate per second")
+				&& !driver.contains("Transfer 0 quantity") && world->getStationSystemsSettings() == seed,
+				"Form mode switch lost inactive settings, visibility or isolation");
+			ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+			REQ(driver.contains("Transfer 0 quantity") && !driver.contains("Transfer 0 rate per second"),
+				"Mode undo did not restore Scheduled fields");
+			ctx->ItemClick("Redo configuration"); ctx->Yield(3);
+			REQ(driver.contains("Transfer 0 rate per second"), "Mode redo did not restore Continuous fields");
+			ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+			driver.typeValue(ctx, "**/Transfer 0 quantity", "0");
+			REQ(driver.contains("quantity must be positive"), "Form did not show active-mode validation");
 			flow = true; ctx->Yield(3);
+			REQ(driver.contains("quantity must be positive"), "Flow and form disagreed on mode validation");
+			ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+			REQ(window.draft().transfers[0].quantity == 7 && !driver.contains("quantity must be positive"),
+				"Undo retained stale active-mode validation");
 			for (int step = 0; step < 3; ++step) { ctx->ItemClick("Undo configuration"); ctx->Yield(2); }
 			REQ(window.draft().transfers[0] == transfer && window.draftHistory().undoCount() == transferUndo,
 				"Scheduled field edits did not undo independently");

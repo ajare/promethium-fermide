@@ -589,6 +589,47 @@ void flowConnectionsWorkflow(smoke::Context const& context)
 		ctx->ItemClick("Save configuration"); ctx->Yield(3);
 		core::StationConfigurationDocument loaded;
 		REQ(core::loadStationConfiguration(path, loaded) && loaded.settings == window.draft(), "UI-authored connection properties did not save");
+		// #691: switch a rated transfer through the real inspector, not a
+		// second editor model. Its connection keys and properties must survive.
+		ImVec4 rect{};
+		REQ(window.flowNodeRect("Transfer", "move", &rect), "Transfer node missing");
+		ctx->MouseTeleportToPos({(rect.x + rect.z) * 0.5f, (rect.y + rect.w) * 0.5f});
+		ctx->MouseClick(); ctx->Yield(3); ctx->MouseTeleportToPos({40, 40}); ctx->Yield(2);
+		auto* rate = ctx->ItemInfo("**/Transfer 0 rate per second");
+		ctx->ItemClick(ImHashStr("Transfer 0 mode", 0, rate->ParentID)); ctx->Yield(2);
+		auto* popup = ctx->GetWindowByRef("//$FOCUSED");
+		REQ(popup, "Transfer mode popup missing");
+		ctx->ItemClick(("//" + std::string(popup->Name) + "/**/Scheduled").c_str()); ctx->Yield(3);
+		auto const scheduled = window.draft();
+		REQ(scheduled.transfers[0].mode == core::ResourceTransferMode::Scheduled
+			&& scheduled.connections == loaded.settings.connections, "Switch pruned design properties");
+		REQ(select(source.designKey) && driver.contains("Effective type: Non-physical")
+			&& driver.contains("Saved efficiency: 0.9 (informational)")
+			&& driver.contains("Continuous mode restores their enforcement.")
+			&& ctx->ItemInfo("**/Maximum throughput", ImGuiTestOpFlags_NoError)->ID == 0,
+			"Scheduled connection exposed physical controls or hid informational properties");
+		ctx->ItemClick("**/Disconnect selected connection"); ctx->Yield(3);
+		REQ(window.draft().transfers[0].sourceId.empty() && !window.draft().connections.contains(source.designKey),
+			"Scheduled disconnect retained design properties");
+		ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+		REQ(window.draft() == scheduled, "Scheduled disconnect undo lost inactive settings or properties");
+		ctx->ItemClick("Redo configuration"); ctx->Yield(3);
+		REQ(!window.draft().connections.contains(source.designKey), "Scheduled disconnect redo retained properties");
+		ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+		ctx->ItemClick("Save configuration"); ctx->Yield(3);
+		core::StationConfigurationDocument scheduledDocument;
+		REQ(core::loadStationConfiguration(path, scheduledDocument) && scheduledDocument.settings == scheduled,
+			"Switched Scheduled configuration lost saved properties");
+		ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+		REQ(window.draft() == loaded.settings && select(source.designKey)
+			&& driver.contains("Effective type: Liquid pipe") && driver.contains("Maximum throughput"),
+			"Undo of mode switch did not restore physical properties and controls");
+		ctx->ItemClick("Redo configuration"); ctx->Yield(3);
+		REQ(window.draft() == scheduled && select(source.designKey)
+			&& driver.contains("Effective type: Non-physical"), "Mode redo lost Scheduled properties");
+		ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+		REQ(select(charge.designKey), "Power selection missing after mode round trip");
+		ctx->ItemClick("Save configuration"); ctx->Yield(3);
 		ctx->ItemClick("**/Reset connection properties"); ctx->Yield(3);
 		REQ(!window.draft().connections.contains(charge.designKey), "Reset did not restore implicit connection defaults");
 		ctx->ItemClick("Undo configuration"); ctx->Yield(3);

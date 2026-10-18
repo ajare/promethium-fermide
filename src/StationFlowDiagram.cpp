@@ -1999,6 +1999,9 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 					}
 					ImGui::TextWrapped("%s - maximum input rate", unit.c_str());
 				}
+				if (edge.scheduledTransfer)
+					ImGui::TextWrapped("Saved efficiency: %.6g (informational). Saved carrier and throughput are retained. This lossless inventory event ignores design properties; Continuous mode restores their enforcement.", properties.efficiency);
+				ImGui::BeginDisabled(edge.scheduledTransfer);
 				ImGui::SetNextItemWidth(140);
 				if (ImGui::InputDouble("Efficiency", &properties.efficiency, 0, 0, "%.6g"))
 				{
@@ -2008,6 +2011,7 @@ void StationFlowDiagram::render(core::StationSystemsSettings& draft,
 				ImGui::TextWrapped(automatic == core::StationPhysicalConnection::NonPhysical
 					? "0 to 1 - informational only"
 					: "0 to 1 - delivered fraction");
+				ImGui::EndDisabled();
 				if (changed && std::isfinite(properties.maximumThroughput) && properties.maximumThroughput > 0
 					&& std::isfinite(properties.efficiency) && properties.efficiency >= 0 && properties.efficiency <= 1)
 					draft.connections[edge.designKey] = properties;

@@ -990,6 +990,12 @@ bool renderTransferEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 		ImGui::TextWrapped("One-off only (recurrence must be zero). Lossless Non-physical inventory event; connection ratings are informational.");
 	}
 	else ImGui::InputDouble((label + " rate per second").c_str(), &transfer.ratePerSecond, 0.0, 0.0, "%.3f");
+	ImGui::TextWrapped("Switching mode retains inactive settings and connection design properties. Only the active mode executes after Apply.");
+	// Keep invalid drafts editable (including hidden settings after a switch),
+	// but use the same active-mode validation as Apply and document loading.
+	std::string diagnostic;
+	if (!core::validateStationTransferSettings(transfer, diagnostic))
+		ImGui::TextWrapped("%s", diagnostic.c_str());
 	ImGui::InputInt((label + " priority").c_str(), &transfer.priority);
 	ImGui::SameLine();
 	if (!removeLabel.empty() && ImGui::Button(removeLabel.c_str()))
