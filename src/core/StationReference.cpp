@@ -62,6 +62,7 @@ namespace core
 				serializer.beginMap("");
 				serializer.writeString("id", store.id);
 				serializer.writeString("unit", store.unit);
+				if (!store.materialId.empty()) serializer.writeString("materialId", store.materialId);
 				serializer.writeDouble("capacity", store.capacity);
 				serializer.writeDouble("startingQualified", store.startingQualified);
 				serializer.writeDouble("startingUnqualified", store.startingUnqualified);
@@ -993,6 +994,11 @@ namespace core
 				ResourceStoreSettings store;
 				store.id = serializer.readString("id");
 				store.unit = serializer.readString("unit");
+				if (serializer.hasField("materialId"))
+				{
+					if (version < 98) throw SerializationException("Station material identity requires schema 98");
+					store.materialId = serializer.readString("materialId");
+				}
 				store.capacity = serializer.readDouble("capacity");
 				store.startingQualified = serializer.readDouble("startingQualified");
 				store.startingUnqualified = serializer.readDouble("startingUnqualified");
@@ -2002,8 +2008,8 @@ namespace core
 			// systems, the upper bound is the newest schema this reader
 			// knows. A reference outside that range is refused rather than
 			// read under assumptions the reader has not been checked for.
-			if (document.schemaVersion < 65 || document.schemaVersion > 97)
-				return refuse("Reference station schema version must be from 65 to 97");
+			if (document.schemaVersion < 65 || document.schemaVersion > 98)
+				return refuse("Reference station schema version must be from 65 to 98");
 			if (serializer->hasField("provenance"))
 			{
 				serializer->beginArray("provenance");

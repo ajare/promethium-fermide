@@ -15,7 +15,7 @@ namespace core
 	{
 		auto output = YamlSerializer::toString();
 		output->beginMap("stationConfiguration");
-		output->writeUint32("schemaVersion", 97);
+		output->writeUint32("schemaVersion", 98);
 		writeStationSystemsSettingsMap(*output, document.settings);
 		output->beginMap("layout");
 		output->writeFloat("panX", document.panX);
@@ -48,7 +48,7 @@ namespace core
 				throw SerializationException("Missing stationSystems map");
 			input->beginMap("stationConfiguration");
 			auto const version = input->readUint32("schemaVersion");
-			if (version != 96 && version != 97) throw SerializationException("Unsupported Station configuration schemaVersion");
+			if (version < 96 || version > 98) throw SerializationException("Unsupported Station configuration schemaVersion");
 			StationConfigurationDocument candidate;
 			readStationSystemsSettingsMap(*input, version, candidate.settings, false);
 			// Incomplete wiring is valid draft state, but all surviving entries

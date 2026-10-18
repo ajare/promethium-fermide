@@ -130,7 +130,7 @@ foreach(check connectionTransfers connectionConversions connectionPower connecti
         # reported, never audited clean.
         stabilityWorkloadBundled stabilityLongRun stabilityPathEquivalence
         stabilityResetIsolation stabilityMultiWorldIsolation
-        stabilityAuditFaultInjection)
+        stabilityAuditFaultInjection materialIdentity)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()
@@ -716,6 +716,8 @@ pf_add_smoke_module(pf-smoke-editor
     TIMEOUT 300
 )
 
+add_test(NAME station-editor-material-identity COMMAND pf-smoke-editor --check station/materialIdentityWorkflow)
+set_tests_properties(station-editor-material-identity PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
 add_test(NAME station-editor-document COMMAND pf-smoke-editor --check station/configurationDocument)
 set_tests_properties(station-editor-document PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
 add_test(NAME station-editor-window COMMAND pf-smoke-editor --check station/windowWorkflow)

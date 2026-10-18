@@ -21,6 +21,12 @@ namespace core
 	inline constexpr size_t MaxStationResourceStores{32};
 	inline constexpr size_t MaxStationStoreIdLength{64};
 
+	// Canonical authored material IDs are lowercase ASCII words separated by
+	// single hyphens, at most 64 characters. Empty means unclassified. IDs
+	// describe substances, never store names, units, hazards or composition.
+	inline constexpr size_t MaxStationMaterialIdLength{64};
+	bool isValidStationMaterialId(std::string const& id);
+
 	// Declared constituent vocabulary for compound Resource materials
 	// (#391). The seven mass constituents partition a compound store's wet
 	// mass exactly: water is the moisture term and the other six together
@@ -88,6 +94,9 @@ namespace core
 		// "hazardous". Every process, transfer and conversion endpoint that
 		// touches the store must carry the store's own class.
 		std::string hazardClass{"normal"};
+		// Observation metadata only: does not grant compatibility or alter
+		// allocation. Legacy omission stays unclassified, without inference.
+		std::string materialId{};
 		bool operator==(ResourceStoreSettings const&) const = default;
 	};
 

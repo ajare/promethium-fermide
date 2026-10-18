@@ -15,6 +15,28 @@
 
 namespace core
 {
+	bool isValidStationMaterialId(std::string const& id)
+	{
+		if (id.empty()) return true;
+		if (id.size() > MaxStationMaterialIdLength || id.front() < 'a' || id.front() > 'z'
+			|| id.back() == '-') return false;
+		bool hyphen = false;
+		for (auto const c : id)
+		{
+			if (c == '-')
+			{
+				if (hyphen) return false;
+				hyphen = true;
+			}
+			else
+			{
+				if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) return false;
+				hyphen = false;
+			}
+		}
+		return true;
+	}
+
 	namespace
 	{
 		StationSystemsSourceLoader sourceLoader;
@@ -2477,6 +2499,9 @@ namespace core
 				return refuse("Station resource store id exceeds "
 					+ std::to_string(MaxStationStoreIdLength) + " characters");
 			if (!ids.insert(store.id).second) return refuse(where + " id is duplicated");
+			if (!isValidStationMaterialId(store.materialId))
+				return refuse(where + " material identity must be empty (unclassified) or at most 64 characters: "
+					"lowercase ASCII words/digits starting with a letter, separated by single hyphens");
 			if (std::find(StationStoreUnits.begin(), StationStoreUnits.end(), store.unit)
 				== StationStoreUnits.end())
 				return refuse(where + " has unknown unit '" + store.unit

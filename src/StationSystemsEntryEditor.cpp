@@ -637,6 +637,15 @@ bool renderStoreEntry([[maybe_unused]] core::StationSystemsSettings& draft,
 	bool removeRequested = false;
 	ImGui::PushItemWidth(220);
 	renderIdentity(label, store.id);
+	char materialBuffer[core::MaxStationMaterialIdLength + 1]{};
+	std::strncpy(materialBuffer, store.materialId.c_str(), sizeof(materialBuffer) - 1);
+	if (ImGui::InputText((label + " material identity").c_str(), materialBuffer, sizeof(materialBuffer)))
+		store.materialId = materialBuffer;
+	if (store.materialId.empty()) ImGui::TextUnformatted("Material: Unclassified");
+	else if (!core::isValidStationMaterialId(store.materialId))
+		ImGui::TextUnformatted("Invalid material identity: use lowercase words/digits separated by single hyphens.");
+	else ImGui::Text("Material: %s (explicit)", store.materialId.c_str());
+	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Material identity is independent of store name, unit, hazard and composition. Empty is unclassified; it never changes allocation.");
 	char unitBuffer[8]{};
 	std::strncpy(unitBuffer, store.unit.c_str(), sizeof(unitBuffer) - 1);
 	if (ImGui::InputText((label + " unit").c_str(), unitBuffer, sizeof(unitBuffer)))

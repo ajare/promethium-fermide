@@ -1584,6 +1584,24 @@ namespace
 				&& selectedCanvas.GetWidth() == idleCanvas.GetWidth()
 				&& selectedCanvas.GetHeight() == idleCanvas.GetHeight(),
 				"selecting a node moved or resized the canvas");
+			// #699: the shared Store editor classifies only the draft; its
+			// history retains explicit identity and restores unclassified state.
+			REQ(driver.contains("Material: Unclassified"), "legacy Store status not visible");
+			auto const identityUndo = window.draftHistory().undoCount();
+			driver.click(ctx, "**/Store 2 material identity");
+			ctx->KeyChars("water"); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			ctx->MouseTeleportToPos(emptyCanvasPoint()); ctx->Yield(2);
+			REQ(window.draft().stores.at(2).materialId == "water"
+				&& driver.contains("Material: water (explicit)")
+				&& window.draftHistory().undoCount() == identityUndo + 1
+				&& world->getStationSystemsSettings() == seed && !world->isModified()
+				&& worldHistory.undoCount() == 0, "material assignment escaped the draft or lost history");
+			ctx->ItemClick("Undo configuration"); ctx->Yield(3);
+			REQ(window.draft().stores.at(2).materialId.empty()
+				&& driver.contains("Material: Unclassified"), "identity undo did not restore unclassified");
+			ctx->ItemClick("Redo configuration"); ctx->Yield(3);
+			REQ(window.draft().stores.at(2).materialId == "water", "identity redo lost assignment");
+			ctx->ItemClick("Undo configuration"); ctx->Yield(3);
 			// --- Field-granularity commit: typing "1250" is one entry, not four.
 			auto const undoBefore = window.draftHistory().undoCount();
 			driver.click(ctx, "**/Store 2 capacity"); ctx->Yield(2);
@@ -4050,6 +4068,58 @@ namespace
 		});
 		#undef REQ
 		require(driver.passed(), "Placed defaults document workflow failed");
+	}
+
+	void materialIdentityWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Materials", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationSystemsSettings initial;
+		initial.stores.push_back({"oxygen", "kg", 100, 10, 5});
+		require(world->configureStationSystems(initial, false), "Could not seed material workflow");
+		world->markSaved();
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1100, 980});
+			ImGui::Begin("Materials"); window.renderContents(world, history); ImGui::End();
+		});
+		driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "materialIdentity", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Materials");
+			auto assign = [&](char const* value) {
+				driver.click(ctx, "**/Store 0 material identity");
+				ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A); ctx->KeyPress(ImGuiKey_Backspace);
+				ctx->KeyChars(value); ctx->KeyPress(ImGuiKey_Enter); ctx->Yield(3);
+			};
+			assign("Water");
+			REQ(driver.contains("Invalid material identity:"), "Invalid identity not reported in editor");
+			driver.click(ctx, "Apply settings"); ctx->Yield(3);
+			REQ(world->getStationSystemsSettings() == initial && !world->isModified()
+				&& history.undoCount() == 0, "Invalid identity apply partially mutated World/history");
+			assign("water");
+			REQ(world->getStationSystemsSettings() == initial && !world->isModified(),
+				"Identity edit implicitly applied");
+			driver.click(ctx, "Apply settings"); ctx->Yield(3);
+			REQ(world->getStationSystemsSettings().stores[0].materialId == "water"
+				&& history.undoCount() == 1, "Normal Apply did not persist material identity");
+			auto restore = [&](DocumentSnapshot const& snapshot) {
+				world = deserializeDocumentSnapshot(snapshot, world, {});
+				world->pauseSimulation(); return true;
+			};
+			REQ(history.undo(captureDocumentSnapshot(world, history), restore)
+				&& world->getStationSystemsSettings() == initial, "World undo lost unclassified identity");
+			REQ(history.redo(captureDocumentSnapshot(world, history), restore)
+				&& world->getStationSystemsSettings().stores[0].materialId == "water",
+				"World redo lost explicit identity");
+		});
+		#undef REQ
+		require(driver.passed(), "Material identity authoring workflow failed");
 	}
 
 	void configurationDocumentWorkflow(smoke::Context const& smokeContext)
@@ -7561,6 +7631,7 @@ void cropWorkflow(smoke::Context const&)
 {
 	editor_smoke::registerStationConnections(checks);
 	checks.push_back({"station/windowWorkflow", workflow});
+	checks.push_back({"station/materialIdentityWorkflow", materialIdentityWorkflow});
 	checks.push_back({"station/configurationDocument", configurationDocumentWorkflow});
 	checks.push_back({"station/removalWorkflow", removalWorkflow});
 	checks.push_back({"station/storeWorkflow", storeWorkflow});
