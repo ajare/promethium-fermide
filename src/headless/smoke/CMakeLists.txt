@@ -91,7 +91,7 @@ pf_add_smoke_module(pf-smoke-station
         station/StationGenerationChecks.cpp
         station/StationAtmosphereChecks.cpp
         station/StationWaterChecks.cpp
-        station/StationRecoveryChecks.cpp
+        station/StationRecoveryChecks.cpp station/Bioconversion.cpp
         station/StationBiologyChecks.cpp
         station/ScheduledTransfers.cpp station/ObservationIntegration.cpp station/Documents.cpp station/BatteryObservations.cpp station/MaterialObservations.cpp station/Connections.cpp station/Coupled.cpp station/Reference.cpp station/Scenarios.cpp station/Stability.cpp
     LIBRARIES promethium-fermide-core
@@ -112,7 +112,7 @@ foreach(check scheduledTransfers recurringTransfers scheduledTransferDocuments s
         # #570 registers the microbial condition/recovery gate so its
         # zero-coefficient regression coverage runs in CI.
         harvest algae nutrientConservation bioContainment bioHazardFiles bioCapacityFiles
-        microbialConditionRecovery
+        microbialConditionRecovery bioconversionTracer bioconversionValidation bioconversionBlend bioconversionDocuments
         # #420: the bounded scenario forecast - projected inventory at
         # resupply, shortfall onset and limiting service, capped accepted
         # arrivals, uncertainty labels and the segment-cap bound.
@@ -797,6 +797,8 @@ set_tests_properties(station-editor-algae-observations PROPERTIES LABELS "smoke;
 add_test(NAME station-editor-crop-observations COMMAND pf-smoke-editor --check station/cropObservationWorkflow)
 set_tests_properties(station-editor-crop-observations PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 
+add_test(NAME station-editor-bioconversion COMMAND pf-smoke-editor --check station/bioconversionWorkflow)
+set_tests_properties(station-editor-bioconversion PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-microbial-observations COMMAND pf-smoke-editor --check station/microbialObservationWorkflow)
 set_tests_properties(station-editor-microbial-observations PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 

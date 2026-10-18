@@ -1085,6 +1085,17 @@ namespace core
 		for (auto const& processor : mImpl->microbialProcessors)
 		{
 			StationMicrobialProcessorSnapshot processorResult;
+			processorResult.rateBasis = processor.authored.rateBasis;
+			processorResult.organicOxidationFraction = processor.authored.organicOxidationFraction;
+			processorResult.o2PerKgOrganicOxidized = processor.authored.o2PerKgOrganicOxidized;
+			processorResult.nitrificationFraction = processor.authored.nitrificationFraction;
+			processorResult.o2PerKgNitrifiedN = processor.authored.o2PerKgNitrifiedN;
+			processorResult.co2PerKgOrganicOxidized = processor.authored.co2PerKgOrganicOxidized;
+			processorResult.processWaterTargetMoisture = processor.authored.processWaterTargetMoisture;
+			processorResult.heatReleaseFraction = processor.authored.heatReleaseFraction;
+			processorResult.consumablePerKgOrganicOxidized = processor.authored.consumablePerKgOrganicOxidized;
+			processorResult.lastNitrifiedNitrogenKg = processor.lastNitrifiedNitrogenKg;
+			processorResult.nitrifiedNitrogenKg = processor.nitrifiedNitrogenKg;
 			processorResult.id = processor.authored.id;
 			processorResult.hazardClass = processor.authored.hazardClass;
 			processorResult.feedStoreId = processor.authored.feedStoreId;
@@ -1165,7 +1176,10 @@ namespace core
 			processorResult.reactionHeatKJ = processor.reactionHeatKJ;
 			processorResult.heatRoutedKJ = processor.heatRoutedKJ;
 			processorResult.residualKg = processor.feedConsumedKg + processor.oxygenConsumedKg
-				+ processor.waterConsumedKg - processor.nutrientProducedKg
+				+ processor.waterConsumedKg
+				+ (processor.authored.rateBasis == StationRateBasis::CompositionDerived
+					? massToKg(mImpl->stores[processor.consumableStoreIndex].authored.unit, processor.consumablesUsed) : 0.0)
+				- processor.nutrientProducedKg
 				- processor.recoveredWaterKg - processor.co2ProducedKg
 				- processor.residueProducedKg;
 			processorResult.residualKJ = processor.energySuppliedKJ + processor.reactionHeatKJ

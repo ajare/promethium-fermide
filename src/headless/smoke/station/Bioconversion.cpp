@@ -1,0 +1,248 @@
+#include "StationRecoveryChecks.h"
+#include "core/World.h"
+#include "core/StationReference.h"
+#include "CropObservationFixture.h"
+#include "core/StationConfigurationDocument.h"
+#include "core/AgentTagRegistryDocument.h"
+#include <yaml-cpp/yaml.h>
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <format>
+
+namespace
+{
+using namespace smoke::station;
+using smoke::require;
+struct SourceScope { ~SourceScope() { core::setStationSystemsSourceLoader({}); } };
+using Basis = core::StationRateBasis;
+
+void close(double actual, double expected)
+{
+	require(std::abs(actual - expected) < 2e-7 * std::max(1e-6, std::abs(expected)),
+		std::format("bioconversion mismatch: {:.17g} expected {:.17g}", actual, expected).c_str());
+}
+core::StationSystemsSettings urine(smoke::Context const& context)
+{
+	core::StationConfigurationDocument doc;
+	std::string error;
+	require(core::loadStationConfiguration(context.fixture("resources/station-systems/scenarios/bioconversion-urine.yaml").string(), doc, &error), error.c_str());
+	return doc.settings;
+}
+core::StationSystemsSnapshot run(core::StationSystemsSettings settings, int ticks = 60)
+{
+	core::World world("Bioconversion", 2, 2);
+	world.pauseSimulation(); world.finishBuild();
+	std::string error;
+	auto const configured = world.configureStationSystems(settings, false, &error);
+	require(configured, error.c_str());
+	world.resumeSimulation();
+	if (!world.advanceTicks(ticks))
+	{
+		for (auto const& diagnostic : world.getStationSystemsDiagnostics()) error += diagnostic.message;
+		require(false, error.c_str());
+	}
+	auto result = world.getStationSystemsSnapshot();
+	require(result.healthy, "bioconversion became unhealthy");
+	return result;
+}
+void tracer(smoke::Context const& context)
+{
+	auto settings = urine(context);
+	// Assert the sandbox's own actuals as well as the host snapshot: merely
+	// accepting descriptors would miss a stale fixed-rate Lua mirror.
+	core::StationSystemsSnapshot snap;
+	{
+		SourceScope restoreSource;
+		core::setStationSystemsSourceLoader([] {
+			auto source = core::bundledStationSystemsSource();
+			auto const at = source.find("        self.ticks = self.ticks + 1");
+			require(at != std::string::npos, "Lua assertion insertion point missing");
+			source.insert(at, R"lua(
+        local p = self.microbial_processors[1]
+        assert(p.rateBasis == 'CompositionDerived' and p.nitrificationFraction == 1)
+        assert(math.abs(p.lastOxygenConsumed - p.lastFeedConsumed * 0.06114) < 1e-12)
+        assert(math.abs(p.lastNitrifiedNitrogenKg - p.lastFeedConsumed * 0.012) < 1e-12)
+        assert(math.abs(p.nitrifiedNitrogenKg - p.nitrogenRecoveredTotal) < 1e-12)
+)lua");
+			return source;
+		});
+		snap = run(settings);
+	}
+	auto const& p = snap.microbialProcessors.at(0);
+	auto const daily = 86400.0 / (60 * core::World::getFixedTimestep());
+	close(p.feedConsumedKg * daily, 4.0);
+	close(p.nitrogenRecoveredKg * daily, 0.048);
+	close(p.nitrifiedNitrogenKg * daily, 0.048);
+	close(p.oxygenConsumedKg * daily, 0.24456);
+	close(p.co2ProducedKg * daily, 0.0324);
+	close(p.reactionHeatKJ * daily, 10.08);
+	close(p.recoveredWaterKg * daily, 2.66);
+	close(p.residueProducedKg * daily, 1.41206);
+	close(p.consumablesUsed * daily, 0.0009);
+	close(p.waterConsumedKg, 0.0);
+	close(p.lastNitrifiedNitrogenKg * 60, p.nitrifiedNitrogenKg);
+	close(p.residualKg, 0.0); close(p.residualKJ, 0.0);
+	close(snap.thermal.reservoirs[0].microbialEnergyKJ, p.energySuppliedKJ + p.reactionHeatKJ);
+	require(p.rateBasis == Basis::CompositionDerived && p.nitrificationFraction == 1.0,
+		"derived contract absent from snapshot");
+	// The limiter scales every stream, including nitrification, together.
+	auto starved = settings;
+	starved.stores[1].startingQualified = p.lastOxygenConsumedKg / 2;
+	auto const limited = run(starved, 1).microbialProcessors.at(0);
+	require(limited.limiter.find("oxygen") != std::string::npos, "missing oxygen limiter");
+	close(limited.lastFeedConsumedKg, p.lastFeedConsumedKg / 2);
+	close(limited.lastNitrifiedNitrogenKg, p.lastNitrifiedNitrogenKg / 2);
+	close(limited.lastCo2ProducedKg, p.lastCo2ProducedKg / 2);
+	close(limited.lastRecoveredWaterKg, p.lastRecoveredWaterKg / 2);
+	close(limited.lastResidueProducedKg, p.lastResidueProducedKg / 2);
+	// A non-kg consumable uses mass conversion, not store units as kg.
+	auto grams = settings;
+	grams.stores[3].unit = "g";
+	auto const g = run(grams).microbialProcessors.at(0);
+	close(g.consumablesUsed / 1000, p.consumablesUsed);
+	close(g.residueProducedKg, p.residueProducedKg); close(g.residualKg, 0);
+	// Feed with no organic oxidation still pays nitrification on recovered N only.
+	auto mineral = settings;
+	mineral.microbialProcessors[0].organicOxidationFraction = 0;
+	mineral.stores[3].startingQualified = 0;
+	auto const m = run(mineral).microbialProcessors.at(0);
+	close(m.oxygenConsumedKg, m.nitrifiedNitrogenKg * 4.57);
+	close(m.lastCo2ProducedKg, 0); close(m.reactionHeatKJ, 0);
+	require(m.lastStressors.empty(), "zero-demand medium caused exhaustion stress");
+}
+void validation(smoke::Context const& context)
+{
+	auto settings = urine(context);
+	std::string error;
+	auto validate = [&](auto const& s) { return core::validateStationSystemsSettings(s, error); };
+	require(validate(settings), error.c_str());
+	for (auto member : {&core::MicrobialProcessorSettings::organicOxidationFraction,
+		&core::MicrobialProcessorSettings::nitrificationFraction,
+		&core::MicrobialProcessorSettings::heatReleaseFraction,
+		&core::MicrobialProcessorSettings::processWaterTargetMoisture})
+		for (double invalid : {-0.1, 1.1, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
+		{
+			auto bad = settings; bad.microbialProcessors[0].*member = invalid;
+			require(!validate(bad), "invalid derived fraction accepted");
+		}
+	for (auto member : {&core::MicrobialProcessorSettings::o2PerKgOrganicOxidized,
+		&core::MicrobialProcessorSettings::o2PerKgNitrifiedN,
+		&core::MicrobialProcessorSettings::co2PerKgOrganicOxidized,
+		&core::MicrobialProcessorSettings::consumablePerKgOrganicOxidized})
+		for (double invalid : {-0.1, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
+		{
+			auto bad = settings; bad.microbialProcessors[0].*member = invalid;
+			require(!validate(bad), "invalid derived rate accepted");
+		}
+	auto bad = settings; bad.microbialProcessors[0].rateBasis = static_cast<Basis>(42);
+	require(!validate(bad), "invalid rate basis accepted");
+	bad = settings; bad.microbialProcessors[0].processWaterTargetMoisture = 1;
+	require(!validate(bad), "unit target moisture accepted");
+	bad = settings; bad.stores[0].composition.reset();
+	require(!validate(bad), "plain derived feed accepted");
+	bad = settings; bad.stores[1].hazardClass = "hazardous";
+	require(!validate(bad), "derived mode bypassed hazard segregation");
+	bad = settings; bad.microbialProcessors[0].thermalClass = "warm";
+	require(!validate(bad), "derived mode bypassed thermal class agreement");
+	bad = settings; bad.microbialProcessors[0].waterStoreId = bad.microbialProcessors[0].oxygenStoreId;
+	require(!validate(bad), "derived mode accepted aliased streams");
+	bad = settings; bad.stores[3].unit = "mol";
+	require(!validate(bad), "derived medium used a non-mass unit");
+	bad = settings; bad.microbialProcessors[0].co2PerKgOrganicOxidized = 1000;
+	require(!validate(bad) && error.find("mass") != std::string::npos, "negative derived residue accepted");
+	// Hidden fixed coefficients cannot reject or influence derived processing.
+	auto ignored = settings;
+	ignored.microbialProcessors[0].reactionHeatKJPerKgFeed = 1e100;
+	ignored.microbialProcessors[0].oxygenPerKgFeedKg = -1;
+	require(validate(ignored), error.c_str());
+	close(run(ignored).microbialProcessors[0].oxygenConsumedKg,
+		run(settings).microbialProcessors[0].oxygenConsumedKg);
+}
+void blend(smoke::Context const& context)
+{
+	auto settings = urine(context);
+	// Real biological death deposits nutrient-rich, energy-depleted material
+	// into a store whose declaration still contains organics (#601). No
+	// illegal generic transfer across a composition boundary is used.
+	auto crops = cropObservationFixture(2);
+	crops.cropPopulations[0].respirationPerHour = 1e6;
+	crops.microbialProcessors = settings.microbialProcessors;
+	crops.microbialProcessors[0].feedStoreId = "waste";
+	for (size_t i = 1; i < settings.stores.size(); ++i) crops.stores.push_back(settings.stores[i]);
+	crops.thermalReservoirs = settings.thermalReservoirs;
+	auto const snap = run(crops);
+	auto const& p = snap.microbialProcessors[0];
+	require(p.feedConsumedKg > 0, "drifted feed did not run");
+	// All organic mass was respired before the non-respirable 0.8 kg
+	// residue entered waste. The remaining N share is 0.5 / 0.8.
+	close(p.oxygenConsumedKg, p.feedConsumedKg * (0.5 / 0.8) * 0.8 * 4.57);
+	close(p.nitrifiedNitrogenKg, p.feedConsumedKg * (0.5 / 0.8) * 0.8);
+	close(p.reactionHeatKJ, 0); close(p.co2ProducedKg, 0);
+	close(p.residualKg, 0);
+	// Dry feed dilution uses moisture deficit; no legacy constant water draw.
+	settings.stores[0].startingQualified = 10;
+	settings.stores[0].composition->moisture = 0;
+	settings.microbialProcessors[0].processWaterTargetMoisture = 0.6;
+	auto const dry = run(settings).microbialProcessors[0];
+	close(dry.waterConsumedKg, dry.feedConsumedKg * 1.5);
+	close(dry.recoveredWaterKg, 0); close(dry.residualKg, 0);
+}
+void documents(smoke::Context const& context)
+{
+	core::StationConfigurationDocument doc; doc.settings = urine(context);
+	auto& authored = doc.settings.microbialProcessors[0];
+	authored.organicOxidationFraction = 0.4; authored.o2PerKgOrganicOxidized = 2;
+	authored.nitrificationFraction = 0.4; authored.o2PerKgNitrifiedN = 3;
+	authored.co2PerKgOrganicOxidized = 1; authored.processWaterTargetMoisture = 0.97;
+	authored.heatReleaseFraction = 0.123; authored.consumablePerKgOrganicOxidized = 0.2;
+	auto const bytes = core::serializeStationConfiguration(doc);
+	core::StationConfigurationDocument restored; std::string error;
+	require(core::parseStationConfiguration(bytes, restored, &error), error.c_str());
+	require(restored.settings == doc.settings, "derived document round trip changed settings");
+	core::World original("Derived files", 2, 2);
+	original.pauseSimulation(); original.finishBuild();
+	require(original.configureStationSystems(doc.settings, false, &error), error.c_str());
+	original.resumeSimulation(); require(original.advanceTicks(60), "derived save rig failed");
+	for (auto extension : {"derived.world.yaml", "derived.world"})
+	{
+		auto const path = context.temporaryRoot() / extension;
+		original.saveTo(path.string());
+		auto reopened = core::loadWorldDocument(path);
+		reopened->pauseSimulation();
+		require(reopened->getStationSystemsSettings() == doc.settings, "World derived settings changed on reload");
+		close(reopened->getStationSystemsSnapshot().microbialProcessors[0].nitrifiedNitrogenKg, 0);
+		reopened->resumeSimulation(); require(reopened->advanceTicks(60), "reloaded derived World failed");
+		require(reopened->getStationSystemsSnapshot().microbialProcessors == original.getStationSystemsSnapshot().microbialProcessors,
+			"derived World reload did not reproduce tick actuals");
+	}
+	auto node = YAML::Load(bytes);
+	node["stationSystems"]["microbialProcessors"][0]["rateBasis"] = "invalid";
+	require(!core::parseStationConfiguration(YAML::Dump(node), restored, &error), "unknown persisted basis accepted");
+	// Explicit fixed mode is tick-identical to the same old document with
+	// the new fields absent. Also exercise real World serialization/reload.
+	require(core::loadStationConfiguration(context.fixture("resources/station-systems/scenarios/bioconversion-legacy.yaml").string(), doc, &error), error.c_str());
+	node = YAML::Load(core::serializeStationConfiguration(doc));
+	auto proc = node["stationSystems"]["microbialProcessors"][0];
+	for (auto field : {"rateBasis", "organicOxidationFraction", "o2PerKgOrganicOxidized", "nitrificationFraction", "o2PerKgNitrifiedN", "co2PerKgOrganicOxidized", "processWaterTargetMoisture", "heatReleaseFraction", "consumablePerKgOrganicOxidized"}) proc.remove(field);
+	require(core::parseStationConfiguration(YAML::Dump(node), restored, &error), error.c_str());
+	require(restored.settings == doc.settings, "legacy default did not preserve settings");
+	core::World a("LegacyA", 2, 2), b("LegacyB", 2, 2);
+	for (auto* w : {&a, &b}) { w->pauseSimulation(); w->finishBuild(); }
+	require(a.configureStationSystems(doc.settings, false, &error), error.c_str());
+	require(b.configureStationSystems(restored.settings, false, &error), error.c_str());
+	a.resumeSimulation(); b.resumeSimulation();
+	for (int tick = 0; tick < 60; ++tick)
+	{
+		require(a.advanceTicks(1) && b.advanceTicks(1), "legacy anchor tick failed");
+		require(a.getStationSystemsSnapshot().microbialProcessors == b.getStationSystemsSnapshot().microbialProcessors,
+			"legacy anchor changed tick actuals");
+	}
+}
+}
+
+void registerBioconversionChecks(std::vector<smoke::Check>& checks)
+{
+	checks.insert(checks.end(), {{"bioconversionTracer", tracer}, {"bioconversionValidation", validation},
+		{"bioconversionBlend", blend}, {"bioconversionDocuments", documents}});
+}

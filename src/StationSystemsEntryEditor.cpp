@@ -303,14 +303,31 @@ bool renderMicrobialProcessorEntry([[maybe_unused]] core::StationSystemsSettings
 		&processor.rateKgPerS, 0.0, 0.0, "%.6f");
 	ImGui::InputDouble((label + " specific energy kWh/kg feed").c_str(),
 		&processor.specificEnergyKWhPerKgFeed, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " oxygen per kg feed kg").c_str(),
-		&processor.oxygenPerKgFeedKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " process water per kg feed kg").c_str(),
-		&processor.processWaterPerKgFeedKg, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " medium units per kg feed").c_str(),
-		&processor.consumablePerKgFeed, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " CO2 per kg feed kg").c_str(),
-		&processor.co2PerKgFeedKg, 0.0, 0.0, "%.4f");
+	int basis = static_cast<int>(processor.rateBasis);
+	if (ImGui::Combo((label + " rate basis").c_str(), &basis, "Fixed per feed mass\0Composition derived\0"))
+		processor.rateBasis = static_cast<core::StationRateBasis>(basis);
+	if (processor.rateBasis == core::StationRateBasis::FixedPerFeedMass)
+	{
+		ImGui::InputDouble((label + " oxygen per kg feed kg").c_str(),
+			&processor.oxygenPerKgFeedKg, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble((label + " process water per kg feed kg").c_str(),
+			&processor.processWaterPerKgFeedKg, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble((label + " medium units per kg feed").c_str(),
+			&processor.consumablePerKgFeed, 0.0, 0.0, "%.4f");
+		ImGui::InputDouble((label + " CO2 per kg feed kg").c_str(),
+			&processor.co2PerKgFeedKg, 0.0, 0.0, "%.4f");
+	}
+	else
+	{
+		ImGui::InputDouble((label + " organic oxidation fraction").c_str(), &processor.organicOxidationFraction);
+		ImGui::InputDouble((label + " O2 per kg organic oxidized").c_str(), &processor.o2PerKgOrganicOxidized);
+		ImGui::InputDouble((label + " nitrification fraction").c_str(), &processor.nitrificationFraction);
+		ImGui::InputDouble((label + " O2 per kg nitrified N").c_str(), &processor.o2PerKgNitrifiedN);
+		ImGui::InputDouble((label + " CO2 per kg organic oxidized").c_str(), &processor.co2PerKgOrganicOxidized);
+		ImGui::InputDouble((label + " process water target moisture").c_str(), &processor.processWaterTargetMoisture);
+		ImGui::InputDouble((label + " heat release fraction").c_str(), &processor.heatReleaseFraction);
+		ImGui::InputDouble((label + " medium kg per kg organic oxidized").c_str(), &processor.consumablePerKgOrganicOxidized);
+	}
 	ImGui::InputDouble((label + " nitrogen recovery").c_str(),
 		&processor.nitrogenRecovery, 0.0, 0.0, "%.4f");
 	ImGui::InputDouble((label + " phosphorus recovery").c_str(),
@@ -321,8 +338,9 @@ bool renderMicrobialProcessorEntry([[maybe_unused]] core::StationSystemsSettings
 		&processor.mineralsRecovery, 0.0, 0.0, "%.4f");
 	ImGui::InputDouble((label + " water recovery").c_str(),
 		&processor.waterRecovery, 0.0, 0.0, "%.4f");
-	ImGui::InputDouble((label + " reaction heat kJ/kg feed").c_str(),
-		&processor.reactionHeatKJPerKgFeed, 0.0, 0.0, "%.2f");
+	if (processor.rateBasis == core::StationRateBasis::FixedPerFeedMass)
+		ImGui::InputDouble((label + " reaction heat kJ/kg feed").c_str(),
+			&processor.reactionHeatKJPerKgFeed, 0.0, 0.0, "%.2f");
 	ImGui::InputDouble((label + " min operating temperature C").c_str(),
 		&processor.minOperatingTemperatureC, 0.0, 0.0, "%.2f");
 	ImGui::InputDouble((label + " max sink temperature C").c_str(),

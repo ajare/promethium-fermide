@@ -737,6 +737,7 @@ namespace core
 			processor.lastFeedConsumedKg = 0.0;
 			processor.lastOxygenConsumedKg = 0.0;
 			processor.lastWaterConsumedKg = 0.0;
+			processor.lastNitrifiedNitrogenKg = 0.0;
 			processor.lastConsumableRequested = 0.0;
 			processor.lastConsumableUsed = 0.0;
 			processor.lastConsumableUnmet = 0.0;
@@ -780,7 +781,12 @@ namespace core
 			auto const& sink = runtime.reservoirs[processor.sinkIndex];
 			auto const starving = std::max(0.0, ports.input(processor.feedStoreIndex, qualified[processor.feedStoreIndex]
 				- feed.authored.protectedReserve)) <= 0.0;
-			auto const mediaExhausted = std::max(0.0,
+			auto const stressComposition = effectiveCompositionOf(*feed.authored.composition,
+				massToKg(feed.authored.unit, qualified[processor.feedStoreIndex] + unqualified[processor.feedStoreIndex]),
+				stagedDrift[processor.feedStoreIndex]);
+			auto const mediaRequired = processor.authored.rateBasis == StationRateBasis::FixedPerFeedMass
+				|| stationMicrobialRates(processor.authored, stressComposition).consumable > 0.0;
+			auto const mediaExhausted = mediaRequired && std::max(0.0,
 				ports.input(processor.consumableStoreIndex, qualified[processor.consumableStoreIndex]
 				- consumable.authored.protectedReserve)) <= 0.0;
 			auto const coldStressed = sink.temperatureC + 1e-9
@@ -877,6 +883,10 @@ namespace core
 					+ unqualified[processor.feedStoreIndex]);
 			auto const composition = effectiveCompositionOf(*feed.authored.composition,
 				feedStoreKgBefore, stagedDrift[processor.feedStoreIndex]);
+			auto const rates = stationMicrobialRates(processor.authored, composition);
+			auto const derived = processor.authored.rateBasis == StationRateBasis::CompositionDerived;
+			auto const consumablePerKg = derived
+				? kgToMass(consumable.authored.unit, rates.consumable) : rates.consumable;
 			auto const dryPerKgFeed = 1.0 - composition.moisture;
 			// The recovered nutrients are funded by the feed's bound
 			// constituents only: bound nitrogen, phosphorus, potassium
@@ -895,9 +905,9 @@ namespace core
 			// inputs and outputs per kilogram of feed: validation
 			// guaranteed it is non-negative, so the digestion can never
 			// create or destroy mass.
-			auto const residuePerKgFeedRaw = 1.0 + processor.authored.oxygenPerKgFeedKg
-				+ processor.authored.processWaterPerKgFeedKg - nutrientPerKgFeed
-				- recoveredWaterPerKgFeed - processor.authored.co2PerKgFeedKg;
+			auto const residuePerKgFeedRaw = 1.0 + rates.oxygen
+				+ rates.water + (derived ? rates.consumable : 0.0) - nutrientPerKgFeed
+				- recoveredWaterPerKgFeed - rates.co2;
 			// #601: drifted feed can be richer in recoverable nutrient
 			// than the authored material the declared balance was sized
 			// for. If the declared outputs would exceed the declared
@@ -914,7 +924,7 @@ namespace core
 			auto const residuePerKgFeed = std::max(0.0, residuePerKgFeedRaw);
 			// Hold energy-depleted material before spending power or feed.
 			auto const feedEnergyPerKg = dryPerKgFeed * composition.energyKJPerKgDry;
-			if (processor.authored.reactionHeatKJPerKgFeed > feedEnergyPerKg
+			if (rates.heat > feedEnergyPerKg
 				+ StationBalanceTolerance * std::max(1.0, std::abs(feedEnergyPerKg)))
 			{
 				processor.lastBlockReason = "feed store '" + feed.authored.id
@@ -953,19 +963,19 @@ namespace core
 				"organic waste feed store '" + feed.authored.id
 				+ "' has nothing drawable above its protected reserve");
 			constrain(ports.request(processor.oxygenStoreIndex, drawableOxygenUnits, kgToMass(oxygen.authored.unit,
-					fullKg * processor.authored.oxygenPerKgFeedKg)),
+					fullKg * rates.oxygen)),
 				kgToMass(oxygen.authored.unit,
-					fullKg * processor.authored.oxygenPerKgFeedKg),
+					fullKg * rates.oxygen),
 				"oxygen store '" + oxygen.authored.id
 				+ "' has nothing drawable above its protected reserve");
 			constrain(ports.request(processor.waterStoreIndex, drawableWaterUnits, kgToMass(water.authored.unit,
-					fullKg * processor.authored.processWaterPerKgFeedKg)),
+					fullKg * rates.water)),
 				kgToMass(water.authored.unit,
-					fullKg * processor.authored.processWaterPerKgFeedKg),
+					fullKg * rates.water),
 				"process water store '" + water.authored.id
 				+ "' has nothing drawable above its protected reserve");
-			constrain(ports.request(processor.consumableStoreIndex, drawableConsumableUnits, fullKg * processor.authored.consumablePerKgFeed),
-				fullKg * processor.authored.consumablePerKgFeed,
+			constrain(ports.request(processor.consumableStoreIndex, drawableConsumableUnits, fullKg * consumablePerKg),
+				fullKg * consumablePerKg,
 				"consumable store '" + consumable.authored.id
 				+ "' has nothing drawable above its protected reserve");
 			constrain(nutrientHeadroomUnits,
@@ -977,7 +987,7 @@ namespace core
 				"recovered water store '" + recoveredWater.authored.id
 				+ "' is full: the recovered water has nowhere to go");
 			constrain(co2HeadroomUnits,
-				kgToMass(co2.authored.unit, fullKg * processor.authored.co2PerKgFeedKg),
+				kgToMass(co2.authored.unit, fullKg * rates.co2),
 				"CO2 store '" + co2.authored.id
 				+ "' is full: the carbon dioxide has nowhere to go");
 			constrain(residueHeadroomUnits,
@@ -1030,30 +1040,30 @@ namespace core
 			// plans a digestion the feeds cannot sustain.
 			auto extentKg = std::min(energyFeasibleKg,
 				massToKg(feed.authored.unit, drawableFeedUnits));
-			if (processor.authored.oxygenPerKgFeedKg > 0.0)
+			if (rates.oxygen > 0.0)
 				extentKg = std::min(extentKg,
 					massToKg(oxygen.authored.unit, drawableOxygenUnits)
-						/ processor.authored.oxygenPerKgFeedKg);
-			if (processor.authored.processWaterPerKgFeedKg > 0.0)
+						/ rates.oxygen);
+			if (rates.water > 0.0)
 				extentKg = std::min(extentKg,
 					massToKg(water.authored.unit, drawableWaterUnits)
-						/ processor.authored.processWaterPerKgFeedKg);
-			if (processor.authored.consumablePerKgFeed > 0.0)
+						/ rates.water);
+			if (consumablePerKg > 0.0)
 				extentKg = std::min(extentKg,
-					drawableConsumableUnits / processor.authored.consumablePerKgFeed);
+					drawableConsumableUnits / consumablePerKg);
 			// Move the flows, clamped per flow so roundoff never
 			// overshoots (#556), and recompute the ledger from what
 			// actually moved.
 			auto const feedUnits = std::min(kgToMass(feed.authored.unit, extentKg), drawableFeedUnits);
 			auto const feedActualKg = massToKg(feed.authored.unit, feedUnits);
 			auto const oxygenUnits = std::min(kgToMass(oxygen.authored.unit,
-				feedActualKg * processor.authored.oxygenPerKgFeedKg), drawableOxygenUnits);
+				feedActualKg * rates.oxygen), drawableOxygenUnits);
 			auto const oxygenActualKg = massToKg(oxygen.authored.unit, oxygenUnits);
 			auto const waterUnits = std::min(kgToMass(water.authored.unit,
-				feedActualKg * processor.authored.processWaterPerKgFeedKg), drawableWaterUnits);
+				feedActualKg * rates.water), drawableWaterUnits);
 			auto const waterActualKg = massToKg(water.authored.unit, waterUnits);
 			auto const consumableUnits = std::min(
-				feedActualKg * processor.authored.consumablePerKgFeed, drawableConsumableUnits);
+				feedActualKg * consumablePerKg, drawableConsumableUnits);
 			auto const nutrientUnits = std::min(kgToMass(nutrient.authored.unit,
 				feedActualKg * nutrientPerKgFeed), nutrientHeadroomUnits);
 			auto const nutrientActualKg = massToKg(nutrient.authored.unit, nutrientUnits);
@@ -1062,7 +1072,7 @@ namespace core
 			auto const recoveredWaterActualKg = massToKg(recoveredWater.authored.unit,
 				recoveredWaterUnits);
 			auto const co2Units = std::min(kgToMass(co2.authored.unit,
-				feedActualKg * processor.authored.co2PerKgFeedKg), co2HeadroomUnits);
+				feedActualKg * rates.co2), co2HeadroomUnits);
 			auto const co2ActualKg = massToKg(co2.authored.unit, co2Units);
 			auto const residueUnits = std::min(kgToMass(residue.authored.unit,
 				feedActualKg * residuePerKgFeed), residueHeadroomUnits);
@@ -1124,7 +1134,7 @@ namespace core
 			// products do not retain leave through the sink, once and
 			// nowhere else.
 			auto const reactionHeatKJ = feedActualKg
-				* processor.authored.reactionHeatKJPerKgFeed;
+				* rates.heat;
 			auto const heatKJ = energySuppliedKJ + reactionHeatKJ;
 			microbialHeatByReservoir[processor.sinkIndex] += connections.routeHeat(connections.port("Microbial processor", processor.authored.id, "Heat"), heatKJ / tickSeconds);
 			processor.lastReactionHeatKW = reactionHeatKJ / tickSeconds;
@@ -1132,6 +1142,8 @@ namespace core
 			// feed's bound content times its recovery fraction, so the
 			// elemental balance is visible per element and the
 			// atmospheric nitrogen share never appears here.
+			processor.lastNitrifiedNitrogenKg = feedActualKg * rates.nitrifiedNitrogen;
+			processor.nitrifiedNitrogenKg += processor.lastNitrifiedNitrogenKg;
 			processor.nitrogenRecoveredKg += feedActualKg * dryPerKgFeed
 				* composition.nutrientNitrogen * processor.authored.nitrogenRecovery;
 			processor.phosphorusRecoveredKg += feedActualKg * dryPerKgFeed
@@ -1144,7 +1156,7 @@ namespace core
 			processor.lastOxygenConsumedKg = oxygenActualKg;
 			processor.lastWaterConsumedKg = waterActualKg;
 			processor.lastConsumableRequested = scale * fullKg
-				* processor.authored.consumablePerKgFeed;
+				* consumablePerKg;
 			processor.lastConsumableUsed = consumableUnits;
 			processor.lastConsumableUnmet = processor.lastConsumableRequested - consumableUnits;
 			processor.lastNutrientProducedKg = nutrientActualKg;

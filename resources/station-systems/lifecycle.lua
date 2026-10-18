@@ -486,6 +486,28 @@ local function fromKg(unit, kg)
     return kg
 end
 
+-- Composition-derived coefficients mirror stationMicrobialRates. Runtime
+-- callers supply the effective (drifted) feed blend, not its declaration.
+local function microbialRates(p, c)
+    if p.rateBasis ~= 'CompositionDerived' then
+        return { oxygen = p.oxygenPerKgFeedKg, water = p.processWaterPerKgFeedKg,
+            consumable = p.consumablePerKgFeed, co2 = p.co2PerKgFeedKg,
+            heat = p.reactionHeatKJPerKgFeed, nitrifiedNitrogen = 0 }
+    end
+    local oxidized = (1 - c.moisture) * math.max(0, 1 - c.nutrientNitrogen
+        - c.atmosphericNitrogen - c.phosphorus - c.potassium - c.otherMinerals)
+        * p.organicOxidationFraction
+    local nitrified = (1 - c.moisture) * c.nutrientNitrogen
+        * p.nitrogenRecovery * p.nitrificationFraction
+    return { oxygen = oxidized * p.o2PerKgOrganicOxidized + nitrified * p.o2PerKgNitrifiedN,
+        water = math.max(0, (p.processWaterTargetMoisture - c.moisture)
+            / (1 - p.processWaterTargetMoisture)),
+        consumable = oxidized * p.consumablePerKgOrganicOxidized,
+        co2 = oxidized * p.co2PerKgOrganicOxidized,
+        heat = oxidized * c.energyKJPerKgDry * p.heatReleaseFraction,
+        nitrifiedNitrogen = nitrified }
+end
+
 -- Fuel energy is authored in the store's energy unit; the generator's
 -- physics runs in kWh. One factor converts store units to kWh and its
 -- reciprocal converts the required fuel energy back, so host and sandbox
@@ -2697,6 +2719,18 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     for index = 1, #microbialProcessors do
         local processor = microbialProcessors[index]
         assert(type(processor) == 'table', 'microbial processor descriptor must be a table')
+        assert(processor.rateBasis == 'FixedPerFeedMass' or processor.rateBasis == 'CompositionDerived',
+            'unknown microbial rate basis')
+        if processor.rateBasis == 'CompositionDerived' then
+            for _, field in ipairs({'organicOxidationFraction', 'nitrificationFraction', 'heatReleaseFraction', 'processWaterTargetMoisture'}) do
+                assert(isFinite(processor[field]) and processor[field] >= 0 and processor[field] <= 1,
+                    'invalid microbial fraction ' .. field)
+            end
+            assert(processor.processWaterTargetMoisture < 1, 'target moisture must be below 1')
+            for _, field in ipairs({'o2PerKgOrganicOxidized', 'o2PerKgNitrifiedN', 'co2PerKgOrganicOxidized', 'consumablePerKgOrganicOxidized'}) do
+                assert(isFinite(processor[field]) and processor[field] >= 0, 'invalid microbial rate ' .. field)
+            end
+        end
         assert(type(processor.id) == 'string' and #processor.id > 0, 'microbial processor needs an id')
         assert(processor.hazardClass == 'normal' or processor.hazardClass == 'hazardous',
             'microbial processor needs a declared hazard class (normal or hazardous)')
@@ -2713,6 +2747,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             { processor.co2PerKgFeedKg, 'CO2 per kg feed' },
             { processor.reactionHeatKJPerKgFeed, 'reaction heat per kg feed' },
         }
+        if processor.rateBasis == 'CompositionDerived' then
+            for i = #rateFields, 3, -1 do table.remove(rateFields, i) end
+        end
         for _, entry in ipairs(rateFields) do
             assert(type(entry[1]) == 'number' and entry[1] == entry[1]
                 and entry[1] >= 0 and entry[1] < math.huge,
@@ -2851,14 +2888,18 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             + composition.potassium * processor.potassiumRecovery
             + composition.otherMinerals * processor.mineralsRecovery)
         local recoveredWaterPerKgFeed = composition.moisture * processor.waterRecovery
-        local residuePerKgFeed = 1 + processor.oxygenPerKgFeedKg
-            + processor.processWaterPerKgFeedKg - nutrientPerKgFeed
-            - recoveredWaterPerKgFeed - processor.co2PerKgFeedKg
+        local rates = microbialRates(processor, composition)
+        local derived = processor.rateBasis == 'CompositionDerived'
+        assert(not derived or consumable.unit == 'g' or consumable.unit == 'kg',
+            'composition-derived consumable must use a mass unit')
+        local residuePerKgFeed = 1 + rates.oxygen + rates.water
+            + (derived and rates.consumable or 0) - nutrientPerKgFeed
+            - recoveredWaterPerKgFeed - rates.co2
         assert(residuePerKgFeed >= -BALANCE_TOLERANCE,
             'microbial processor ' .. processor.id
                 .. ' declared yields would create mass: the outputs exceed the feed plus oxygen plus process water, and an unrecoverable residue cannot be negative')
         local feedEnergyKJPerKgFeed = dryPerKgFeed * composition.energyKJPerKgDry
-        assert(processor.reactionHeatKJPerKgFeed <= feedEnergyKJPerKgFeed
+        assert(rates.heat <= feedEnergyKJPerKgFeed
             + BALANCE_TOLERANCE * math.max(1, math.abs(feedEnergyKJPerKgFeed)),
             'microbial processor ' .. processor.id
                 .. ' declared reaction heat exceeds the feedstock declared chemical energy: the digestion may not release more heat than the feed carries')
@@ -2867,6 +2908,16 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         assert(sink.thermalClass == processor.thermalClass,
             'microbial processor thermal class must match its heat sink reservoir class')
         object.microbial_processors[index] = {
+            rateBasis = processor.rateBasis,
+            organicOxidationFraction = processor.organicOxidationFraction,
+            o2PerKgOrganicOxidized = processor.o2PerKgOrganicOxidized,
+            nitrificationFraction = processor.nitrificationFraction,
+            o2PerKgNitrifiedN = processor.o2PerKgNitrifiedN,
+            co2PerKgOrganicOxidized = processor.co2PerKgOrganicOxidized,
+            processWaterTargetMoisture = processor.processWaterTargetMoisture,
+            heatReleaseFraction = processor.heatReleaseFraction,
+            consumablePerKgOrganicOxidized = processor.consumablePerKgOrganicOxidized,
+            lastNitrifiedNitrogenKg = 0, nitrifiedNitrogenKg = 0,
             id = processor.id,
             hazardClass = processor.hazardClass,
             feed = feed, oxygen = oxygen, water = water, consumable = consumable,
@@ -7010,6 +7061,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local oxygen = proc.oxygen
             local water = proc.water
             local consumable = proc.consumable
+            proc.lastNitrifiedNitrogenKg = 0
             proc.lastScale = 0
             proc.lastLimiter = ''
             proc.lastRequested = 0
@@ -7056,7 +7108,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 -- unfed, unsupplied or out-of-window culture never
                 -- spends replacement stock to heal.
                 local starving = math.max(0, feed.qualified - feed.protected_reserve) <= 0
-                local mediaExhausted = math.max(0,
+                local stressComposition = effectiveCompositionOf(feed.composition,
+                    toKg(feed.unit, feed.qualified + feed.unqualified), feed.drift)
+                local mediaRequired = proc.rateBasis ~= 'CompositionDerived'
+                    or microbialRates(proc, stressComposition).consumable > 0
+                local mediaExhausted = mediaRequired and math.max(0,
                     consumable.qualified - consumable.protected_reserve) <= 0
                 local coldStressed = proc.sink.temperature + 1e-9
                     < proc.minOperatingTemperatureC
@@ -7142,6 +7198,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         consumable.qualified + consumable.unqualified)
                     local composition = effectiveCompositionOf(feed.composition,
                         feedStoreKgBefore, feed.drift)
+                    local rates = microbialRates(proc, composition)
+                    local derived = proc.rateBasis == 'CompositionDerived'
+                    local consumablePerKg = derived and fromKg(consumable.unit, rates.consumable) or rates.consumable
                     local dryPerKgFeed = 1 - composition.moisture
                     -- The recovered nutrients are funded by the feed's
                     -- bound constituents only: bound nitrogen,
@@ -7155,9 +7214,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     local recoveredWaterPerKgFeed = composition.moisture * proc.waterRecovery
                     -- The residue is the mass-balance remainder of the
                     -- declared inputs and outputs per kilogram of feed.
-                    local residuePerKgFeed = 1 + proc.oxygenPerKgFeedKg
-                        + proc.processWaterPerKgFeedKg - nutrientPerKgFeed
-                        - recoveredWaterPerKgFeed - proc.co2PerKgFeedKg
+                    local residuePerKgFeed = 1 + rates.oxygen + rates.water
+                        + (derived and rates.consumable or 0) - nutrientPerKgFeed
+                        - recoveredWaterPerKgFeed - rates.co2
                     -- #601: drifted feed can be richer in recoverable
                     -- nutrient than the authored material the declared
                     -- balance was sized for. If the declared outputs
@@ -7169,7 +7228,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     if residuePerKgFeed < -BALANCE_TOLERANCE then
                         proc.lastBlockReason = "feed store '" .. feed.id
                             .. "' material is too nutrient-rich for the declared digestion balance: the outputs would exceed the inputs"
-                    elseif proc.reactionHeatKJPerKgFeed > feedEnergyPerKg
+                    elseif rates.heat > feedEnergyPerKg
                         + BALANCE_TOLERANCE * math.max(1, math.abs(feedEnergyPerKg)) then
                         proc.lastBlockReason = "feed store '" .. feed.id
                             .. "' actual chemical energy cannot fund the declared reaction heat"
@@ -7203,15 +7262,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         "organic waste feed store '" .. feed.id
                             .. "' has nothing drawable above its protected reserve")
                     constrain(drawableOxygen,
-                        fromKg(oxygen.unit, fullKg * proc.oxygenPerKgFeedKg),
+                        fromKg(oxygen.unit, fullKg * rates.oxygen),
                         "oxygen store '" .. oxygen.id
                             .. "' has nothing drawable above its protected reserve")
                     constrain(drawableWater,
-                        fromKg(water.unit, fullKg * proc.processWaterPerKgFeedKg),
+                        fromKg(water.unit, fullKg * rates.water),
                         "process water store '" .. water.id
                             .. "' has nothing drawable above its protected reserve")
                     constrain(drawableConsumable,
-                        fullKg * proc.consumablePerKgFeed,
+                        fullKg * consumablePerKg,
                         "consumable store '" .. consumable.id
                             .. "' has nothing drawable above its protected reserve")
                     constrain(nutrientHeadroom,
@@ -7223,7 +7282,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         "recovered water store '" .. proc.recoveredWater.id
                             .. "' is full: the recovered water has nowhere to go")
                     constrain(co2Headroom,
-                        fromKg(proc.co2.unit, fullKg * proc.co2PerKgFeedKg),
+                        fromKg(proc.co2.unit, fullKg * rates.co2),
                         "CO2 store '" .. proc.co2.id
                             .. "' is full: the carbon dioxide has nowhere to go")
                     constrain(residueHeadroom,
@@ -7274,17 +7333,17 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             -- protected reserves.
                             local extentKg = math.min(energyFeasibleKg,
                                 toKg(feed.unit, drawableFeed))
-                            if proc.oxygenPerKgFeedKg > 0 then
+                            if rates.oxygen > 0 then
                                 extentKg = math.min(extentKg,
-                                    toKg(oxygen.unit, drawableOxygen) / proc.oxygenPerKgFeedKg)
+                                    toKg(oxygen.unit, drawableOxygen) / rates.oxygen)
                             end
-                            if proc.processWaterPerKgFeedKg > 0 then
+                            if rates.water > 0 then
                                 extentKg = math.min(extentKg,
-                                    toKg(water.unit, drawableWater) / proc.processWaterPerKgFeedKg)
+                                    toKg(water.unit, drawableWater) / rates.water)
                             end
-                            if proc.consumablePerKgFeed > 0 then
+                            if consumablePerKg > 0 then
                                 extentKg = math.min(extentKg,
-                                    drawableConsumable / proc.consumablePerKgFeed)
+                                    drawableConsumable / consumablePerKg)
                             end
                             -- Move the flows, clamped per flow so
                             -- roundoff never overshoots (#556).
@@ -7292,15 +7351,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                                 fromKg(feed.unit, extentKg), drawableFeed)
                             local feedActualKg = toKg(feed.unit, feedUnits)
                             local oxygenUnits = math.min(
-                                fromKg(oxygen.unit, feedActualKg * proc.oxygenPerKgFeedKg),
+                                fromKg(oxygen.unit, feedActualKg * rates.oxygen),
                                 drawableOxygen)
                             local oxygenActualKg = toKg(oxygen.unit, oxygenUnits)
                             local waterUnits = math.min(
-                                fromKg(water.unit, feedActualKg * proc.processWaterPerKgFeedKg),
+                                fromKg(water.unit, feedActualKg * rates.water),
                                 drawableWater)
                             local waterActualKg = toKg(water.unit, waterUnits)
                             local consumableUnits = math.min(
-                                feedActualKg * proc.consumablePerKgFeed, drawableConsumable)
+                                feedActualKg * consumablePerKg, drawableConsumable)
                             local nutrientUnits = math.min(
                                 fromKg(proc.nutrient.unit, feedActualKg * nutrientPerKgFeed),
                                 nutrientHeadroom)
@@ -7312,7 +7371,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             local recoveredWaterActualKg = toKg(proc.recoveredWater.unit,
                                 recoveredWaterUnits)
                             local co2Units = math.min(
-                                fromKg(proc.co2.unit, feedActualKg * proc.co2PerKgFeedKg),
+                                fromKg(proc.co2.unit, feedActualKg * rates.co2),
                                 co2Headroom)
                             local co2ActualKg = toKg(proc.co2.unit, co2Units)
                             local residueUnits = math.min(
@@ -7372,7 +7431,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             -- Energy: the dose plus the exothermic heat
                             -- the products do not retain leave through
                             -- the sink, once.
-                            local reactionHeatKJ = feedActualKg * proc.reactionHeatKJPerKgFeed
+                            local reactionHeatKJ = feedActualKg * rates.heat
                             local heatKJ = energySuppliedKJ + reactionHeatKJ
                             proc.sink.microbialHeat =
                                 (proc.sink.microbialHeat or 0) + heatKJ / fixed_seconds
@@ -7393,10 +7452,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             proc.mineralsRecoveredTotal = proc.mineralsRecoveredTotal
                                 + feedActualKg * dryPerKgFeed * composition.otherMinerals
                                 * proc.mineralsRecovery
+                            proc.lastNitrifiedNitrogenKg = feedActualKg * rates.nitrifiedNitrogen
+                            proc.nitrifiedNitrogenKg = proc.nitrifiedNitrogenKg + proc.lastNitrifiedNitrogenKg
                             proc.lastFeedConsumed = feedActualKg
                             proc.lastOxygenConsumed = oxygenActualKg
                             proc.lastWaterConsumed = waterActualKg
-                            proc.lastConsumableRequested = scale * fullKg * proc.consumablePerKgFeed
+                            proc.lastConsumableRequested = scale * fullKg * consumablePerKg
                             proc.lastConsumableUsed = consumableUnits
                             proc.lastConsumableUnmet = proc.lastConsumableRequested - consumableUnits
                             proc.lastNutrientProduced = nutrientActualKg
@@ -9758,7 +9819,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 proc.nutrientProducedTotal + proc.recoveredWaterTotal
                     + proc.co2ProducedTotal + proc.residueProducedTotal)
             local massResidual = proc.feedConsumedTotal + proc.oxygenConsumedTotal
-                + proc.waterConsumedTotal - proc.nutrientProducedTotal
+                + proc.waterConsumedTotal
+                + (proc.rateBasis == 'CompositionDerived' and toKg(proc.consumable.unit, proc.consumablesUsedTotal) or 0)
+                - proc.nutrientProducedTotal
                 - proc.recoveredWaterTotal - proc.co2ProducedTotal
                 - proc.residueProducedTotal
             assert(math.abs(massResidual) <= bound,
@@ -9781,6 +9844,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             assert(proc.reactionHeatKJ <= feedEnergyKJ + energyBound,
                 "microbial processor '" .. proc.id
                     .. "' released more reaction heat than the consumed feedstock's actual chemical energy")
+            assert(isFinite(proc.lastNitrifiedNitrogenKg) and isFinite(proc.nitrifiedNitrogenKg)
+                and proc.nitrifiedNitrogenKg >= 0
+                and proc.nitrifiedNitrogenKg <= proc.nitrogenRecoveredTotal + BALANCE_TOLERANCE,
+                'nitrification exceeds recovered nitrogen')
             local boundNitrogenKg = proc.feedBoundNitrogenConsumedKg
             local nitrogenBound = BALANCE_TOLERANCE * math.max(1, math.abs(boundNitrogenKg))
             assert(proc.nitrogenRecoveredTotal <= boundNitrogenKg + nitrogenBound,

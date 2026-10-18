@@ -1,6 +1,7 @@
 # Generalized Bioconversion Stage — Microbial Processor Generalization
 
-Status: DRAFT — specification only, not implemented.
+Status: core slice (#735) implemented. Degenerate pass-through (#736), hot-digestion
+scenario/hardening (#737), and editor derived-rate preview (#738) remain follow-ups.
 Origin: audit finding G1 in ticket #724 (Station systems gap analysis).
 Component: `MicrobialProcessorSettings` (`include/core/StationSystems.h`), validator
 and runtime in `src/core/StationSystems.cpp`.
@@ -267,7 +268,11 @@ microbialProcessors:
 
 Expected daily actuals: N recovered 48 g (nitrified); O2 ≈ 0.24 kg
 (219 g nitrification + 25 g organic); CO2 ≈ 32 g; process water 0;
-heat ≈ 10 kJ; recovered water 2.66 kg; residue ≈ 1.2 kg.
+heat 10.08 kJ; recovered water 2.66 kg; residue 1.41206 kg (including
+0.0009 kg of medium). The standalone scenario isolates the processor at the
+four-crew production rate; it does not add a crew or change the reference station.
+Derived-mode medium is mass-denominated (g or kg); fixed mode retains its legacy
+store-unit dose and accounting.
 Compare legacy fixed-rate equivalent: 3.2 kg O2/day — the point of the spec.
 
 ### 10.2 Food-waste hot digestion (`bioconversion-foodwaste.yaml`)

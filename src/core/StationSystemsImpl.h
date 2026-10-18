@@ -941,6 +941,8 @@ using namespace station_detail;
 		struct MicrobialProcessorState
 		{
 			MicrobialProcessorSettings authored;
+			double lastNitrifiedNitrogenKg{0.0};
+			double nitrifiedNitrogenKg{0.0};
 			size_t feedStoreIndex{0};
 			size_t oxygenStoreIndex{0};
 			size_t waterStoreIndex{0};

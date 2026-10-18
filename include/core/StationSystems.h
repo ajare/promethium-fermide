@@ -1346,6 +1346,16 @@ namespace core
 	// backpressures the whole stage: the processor runs at one uniform
 	// scale per tick, so a full destination throttles consumption and
 	// production together and no pathway ever runs ahead of the others.
+	enum class StationRateBasis { FixedPerFeedMass, CompositionDerived };
+	inline char const* stationRateBasisName(StationRateBasis basis)
+	{
+		switch (basis)
+		{
+		case StationRateBasis::FixedPerFeedMass: return "FixedPerFeedMass";
+		case StationRateBasis::CompositionDerived: return "CompositionDerived";
+		}
+		return "Unknown";
+	}
 	struct MicrobialProcessorSettings
 	{
 		std::string id;
@@ -1361,6 +1371,15 @@ namespace core
 		std::string thermalClass;           // service class of the processor's heat sink
 		std::string heatSinkId;             // reservoir receiving the reaction and process heat
 		double rateKgPerS{0.0};           // rated feed processing, 0 disables
+		StationRateBasis rateBasis{StationRateBasis::FixedPerFeedMass};
+		double organicOxidationFraction{0.9};
+		double o2PerKgOrganicOxidized{1.4};
+		double nitrificationFraction{0.0};
+		double o2PerKgNitrifiedN{4.57};
+		double co2PerKgOrganicOxidized{1.8};
+		double processWaterTargetMoisture{0.0};
+		double heatReleaseFraction{0.7};
+		double consumablePerKgOrganicOxidized{0.05};
 		double specificEnergyKWhPerKgFeed{2.0}; // electrical dose per kg of feed
 		double oxygenPerKgFeedKg{0.8};    // kg O2 consumed per kg of feed
 		double processWaterPerKgFeedKg{0.5}; // process water kg drawn per kg of feed
@@ -1389,6 +1408,33 @@ namespace core
 		bool operator==(MicrobialProcessorSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationMicrobialProcessors{8};
+
+	// Shared coefficient model for validation, editor preview and actual-blend
+	// runtime sizing. Values are per kg feed; medium is kg in derived mode,
+	// legacy store units otherwise. Call only with validated parameters.
+	struct StationMicrobialRates
+	{
+		double oxygen, water, consumable, co2, heat, nitrifiedNitrogen;
+	};
+	inline StationMicrobialRates stationMicrobialRates(MicrobialProcessorSettings const& p,
+		ResourceCompositionSettings const& c)
+	{
+		if (p.rateBasis == StationRateBasis::FixedPerFeedMass)
+			return {p.oxygenPerKgFeedKg, p.processWaterPerKgFeedKg,
+				p.consumablePerKgFeed, p.co2PerKgFeedKg, p.reactionHeatKJPerKgFeed, 0.0};
+		auto organics = (1.0 - c.moisture) * (1.0 - c.nutrientNitrogen
+			- c.atmosphericNitrogen - c.phosphorus - c.potassium - c.otherMinerals);
+		if (organics < 0.0) organics = 0.0;
+		auto const oxidized = organics * p.organicOxidationFraction;
+		auto const nitrified = (1.0 - c.moisture) * c.nutrientNitrogen
+			* p.nitrogenRecovery * p.nitrificationFraction;
+		auto const dilution = p.processWaterTargetMoisture > c.moisture
+			? (p.processWaterTargetMoisture - c.moisture) / (1.0 - p.processWaterTargetMoisture) : 0.0;
+		return {oxidized * p.o2PerKgOrganicOxidized + nitrified * p.o2PerKgNitrifiedN,
+			dilution, oxidized * p.consumablePerKgOrganicOxidized,
+			oxidized * p.co2PerKgOrganicOxidized,
+			oxidized * c.energyKJPerKgDry * p.heatReleaseFraction, nitrified};
+	}
 
 	// The living biological constituent inventory (#571): the actual dry-mass
 	// amounts of each tracked constituent a Biological population carries,
@@ -3544,6 +3590,17 @@ namespace core
 	// names what bound it.
 	struct StationMicrobialProcessorSnapshot
 	{
+		StationRateBasis rateBasis{StationRateBasis::FixedPerFeedMass};
+		double organicOxidationFraction{0.0};
+		double o2PerKgOrganicOxidized{0.0};
+		double nitrificationFraction{0.0};
+		double o2PerKgNitrifiedN{0.0};
+		double co2PerKgOrganicOxidized{0.0};
+		double processWaterTargetMoisture{0.0};
+		double heatReleaseFraction{0.0};
+		double consumablePerKgOrganicOxidized{0.0};
+		double lastNitrifiedNitrogenKg{0.0};
+		double nitrifiedNitrogenKg{0.0};
 		std::string id;
 		std::string hazardClass;
 		std::string feedStoreId;

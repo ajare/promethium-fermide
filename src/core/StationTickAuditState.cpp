@@ -315,6 +315,8 @@ namespace core
 			if (!requireFinite(processor.recoveredWaterKg, where + "cumulative recovered water")) return false;
 			if (!requireFinite(processor.co2ProducedKg, where + "cumulative CO2 produced")) return false;
 			if (!requireFinite(processor.residueProducedKg, where + "cumulative residue produced")) return false;
+			if (!requireFinite(processor.lastNitrifiedNitrogenKg, where + "last nitrified nitrogen")) return false;
+			if (!requireFinite(processor.nitrifiedNitrogenKg, where + "nitrified nitrogen")) return false;
 			if (!requireFinite(processor.nitrogenRecoveredKg, where + "cumulative nitrogen recovered")) return false;
 			if (!requireFinite(processor.phosphorusRecoveredKg, where + "cumulative phosphorus recovered")) return false;
 			if (!requireFinite(processor.potassiumRecoveredKg, where + "cumulative potassium recovered")) return false;
@@ -330,7 +332,10 @@ namespace core
 				processor.nutrientProducedKg + processor.recoveredWaterKg
 					+ processor.co2ProducedKg + processor.residueProducedKg);
 			auto const massResidual = processor.feedConsumedKg + processor.oxygenConsumedKg
-				+ processor.waterConsumedKg - processor.nutrientProducedKg
+				+ processor.waterConsumedKg
+				+ (processor.authored.rateBasis == StationRateBasis::CompositionDerived
+					? massToKg(runtime.stores[processor.consumableStoreIndex].authored.unit, processor.consumablesUsed) : 0.0)
+				- processor.nutrientProducedKg
 				- processor.recoveredWaterKg - processor.co2ProducedKg
 				- processor.residueProducedKg;
 			if (!std::isfinite(massResidual) || std::abs(massResidual) > massBound)
@@ -353,6 +358,9 @@ namespace core
 			if (processor.reactionHeatKJ > feedEnergyKJ + energyCapBound)
 				return violation = where
 					+ "released more reaction heat than the consumed feedstock's actual chemical energy", false;
+			if (processor.nitrifiedNitrogenKg < 0.0
+				|| processor.nitrifiedNitrogenKg > processor.nitrogenRecoveredKg + StationBalanceTolerance)
+				return violation = where + "nitrification exceeds recovered nitrogen", false;
 			auto const boundNutrientKJ = processor.feedBoundNitrogenConsumedKg;
 			auto const nutrientCapBound = StationBalanceTolerance * std::max(1.0, std::abs(boundNutrientKJ));
 			if (processor.nitrogenRecoveredKg > boundNutrientKJ + nutrientCapBound)

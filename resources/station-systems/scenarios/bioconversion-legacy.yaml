@@ -1,0 +1,131 @@
+# #735: isolated reference-station dig processor, fixed-rate regression anchor.
+schemaVersion: 99
+stationSystems:
+  enabled: true
+  observationIntervalSeconds: 1.0
+  trendRetentionSeconds: 3600.0
+  dispatchMode: manual
+  stores:
+  - id: organicWaste
+    unit: kg
+    capacity: 40.0
+    startingQualified: 5.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+    composition:
+      moisture: 0.7
+      nutrientNitrogen: 0.05
+      atmosphericNitrogen: 0.0
+      phosphorus: 0.05
+      potassium: 0.05
+      otherMinerals: 0.1
+      energyKJPerKgDry: 8000.0
+  - id: processOxygen
+    unit: kg
+    capacity: 40.0
+    startingQualified: 15.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: fresh
+    unit: kg
+    capacity: 200.0
+    startingQualified: 80.0
+    startingUnqualified: 0.0
+    protectedReserve: 30.0
+    hazardClass: normal
+  - id: digesterMedia
+    unit: kg
+    capacity: 30.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: nutrients
+    unit: kg
+    capacity: 15.0
+    startingQualified: 1.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: rawWater
+    unit: kg
+    capacity: 150.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: co2
+    unit: kg
+    capacity: 60.0
+    startingQualified: 5.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: residue
+    unit: kg
+    capacity: 80.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: bioStock
+    unit: kg
+    capacity: 10.0
+    startingQualified: 5.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  microbialProcessors:
+  - id: dig
+    hazardClass: normal
+    feedStoreId: organicWaste
+    oxygenStoreId: processOxygen
+    waterStoreId: fresh
+    consumableStoreId: digesterMedia
+    nutrientStoreId: nutrients
+    recoveredWaterStoreId: rawWater
+    co2StoreId: co2
+    residueStoreId: residue
+    thermalClass: low
+    heatSinkId: processSink
+    rateKgPerS: 1.0e-05
+    specificEnergyKWhPerKgFeed: 2.0
+    oxygenPerKgFeedKg: 0.8
+    processWaterPerKgFeedKg: 0.5
+    consumablePerKgFeed: 0.01
+    co2PerKgFeedKg: 0.3
+    nitrogenRecovery: 0.8
+    phosphorusRecovery: 0.8
+    potassiumRecovery: 0.8
+    mineralsRecovery: 0.7
+    waterRecovery: 0.7
+    reactionHeatKJPerKgFeed: 600.0
+    minOperatingTemperatureC: 15.0
+    maxSinkTemperatureC: 45.0
+    initialCondition: 1.0
+    starvationDegradePerHour: 0.05
+    consumableExhaustionDegradePerHour: 0.05
+    coldStressDegradePerHour: 0.02
+    heatStressDegradePerHour: 0.1
+    recoveryPerHour: 0.02
+    stockStoreId: bioStock
+    stockUnitsPerConditionPoint: 1.0
+    priority: 1
+    rateBasis: FixedPerFeedMass
+  solarArrays:
+  - id: solar
+    capacityKW: 10.0
+    illumination:
+      constantLevel: 1.0
+      periodSeconds: 0.0
+      segments: []
+  thermalReservoirs:
+  - id: processSink
+    thermalClass: low
+    heatCapacityKJPerK: 1000000.0
+    startingTemperatureC: 20.0
+    minTemperatureC: -10.0
+    maxTemperatureC: 100.0
+    absorbedHeatKW: 0.0

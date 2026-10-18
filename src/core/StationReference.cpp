@@ -632,6 +632,15 @@ namespace core
 				serializer.beginMap("");
 				serializer.writeString("id", processor.id);
 				serializer.writeString("hazardClass", processor.hazardClass);
+				serializer.writeString("rateBasis", stationRateBasisName(processor.rateBasis));
+				serializer.writeDouble("organicOxidationFraction", processor.organicOxidationFraction);
+				serializer.writeDouble("o2PerKgOrganicOxidized", processor.o2PerKgOrganicOxidized);
+				serializer.writeDouble("nitrificationFraction", processor.nitrificationFraction);
+				serializer.writeDouble("o2PerKgNitrifiedN", processor.o2PerKgNitrifiedN);
+				serializer.writeDouble("co2PerKgOrganicOxidized", processor.co2PerKgOrganicOxidized);
+				serializer.writeDouble("processWaterTargetMoisture", processor.processWaterTargetMoisture);
+				serializer.writeDouble("heatReleaseFraction", processor.heatReleaseFraction);
+				serializer.writeDouble("consumablePerKgOrganicOxidized", processor.consumablePerKgOrganicOxidized);
 				serializer.writeString("feedStoreId", processor.feedStoreId);
 				serializer.writeString("oxygenStoreId", processor.oxygenStoreId);
 				serializer.writeString("waterStoreId", processor.waterStoreId);
@@ -1673,6 +1682,20 @@ namespace core
 				MicrobialProcessorSettings processor;
 				processor.id = serializer.readString("id");
 				processor.hazardClass = serializer.readString("hazardClass");
+				if (serializer.hasField("rateBasis"))
+				{
+					auto const basis = serializer.readString("rateBasis");
+					if (basis == "CompositionDerived") processor.rateBasis = StationRateBasis::CompositionDerived;
+					else if (basis != "FixedPerFeedMass") throw SerializationException("Unknown microbial rateBasis: " + basis);
+				}
+				if (serializer.hasField("organicOxidationFraction")) processor.organicOxidationFraction = serializer.readDouble("organicOxidationFraction");
+				if (serializer.hasField("o2PerKgOrganicOxidized")) processor.o2PerKgOrganicOxidized = serializer.readDouble("o2PerKgOrganicOxidized");
+				if (serializer.hasField("nitrificationFraction")) processor.nitrificationFraction = serializer.readDouble("nitrificationFraction");
+				if (serializer.hasField("o2PerKgNitrifiedN")) processor.o2PerKgNitrifiedN = serializer.readDouble("o2PerKgNitrifiedN");
+				if (serializer.hasField("co2PerKgOrganicOxidized")) processor.co2PerKgOrganicOxidized = serializer.readDouble("co2PerKgOrganicOxidized");
+				if (serializer.hasField("processWaterTargetMoisture")) processor.processWaterTargetMoisture = serializer.readDouble("processWaterTargetMoisture");
+				if (serializer.hasField("heatReleaseFraction")) processor.heatReleaseFraction = serializer.readDouble("heatReleaseFraction");
+				if (serializer.hasField("consumablePerKgOrganicOxidized")) processor.consumablePerKgOrganicOxidized = serializer.readDouble("consumablePerKgOrganicOxidized");
 				processor.feedStoreId = serializer.readString("feedStoreId");
 				processor.oxygenStoreId = serializer.readString("oxygenStoreId");
 				processor.waterStoreId = serializer.readString("waterStoreId");
@@ -1686,17 +1709,22 @@ namespace core
 				processor.rateKgPerS = serializer.readDouble("rateKgPerS");
 				processor.specificEnergyKWhPerKgFeed =
 					serializer.readDouble("specificEnergyKWhPerKgFeed");
-				processor.oxygenPerKgFeedKg = serializer.readDouble("oxygenPerKgFeedKg");
-				processor.processWaterPerKgFeedKg =
+				if (processor.rateBasis == StationRateBasis::FixedPerFeedMass
+					|| serializer.hasField("oxygenPerKgFeedKg")) processor.oxygenPerKgFeedKg = serializer.readDouble("oxygenPerKgFeedKg");
+				if (processor.rateBasis == StationRateBasis::FixedPerFeedMass
+					|| serializer.hasField("processWaterPerKgFeedKg")) processor.processWaterPerKgFeedKg =
 					serializer.readDouble("processWaterPerKgFeedKg");
-				processor.consumablePerKgFeed = serializer.readDouble("consumablePerKgFeed");
-				processor.co2PerKgFeedKg = serializer.readDouble("co2PerKgFeedKg");
+				if (processor.rateBasis == StationRateBasis::FixedPerFeedMass
+					|| serializer.hasField("consumablePerKgFeed")) processor.consumablePerKgFeed = serializer.readDouble("consumablePerKgFeed");
+				if (processor.rateBasis == StationRateBasis::FixedPerFeedMass
+					|| serializer.hasField("co2PerKgFeedKg")) processor.co2PerKgFeedKg = serializer.readDouble("co2PerKgFeedKg");
 				processor.nitrogenRecovery = serializer.readDouble("nitrogenRecovery");
 				processor.phosphorusRecovery = serializer.readDouble("phosphorusRecovery");
 				processor.potassiumRecovery = serializer.readDouble("potassiumRecovery");
 				processor.mineralsRecovery = serializer.readDouble("mineralsRecovery");
 				processor.waterRecovery = serializer.readDouble("waterRecovery");
-				processor.reactionHeatKJPerKgFeed =
+				if (processor.rateBasis == StationRateBasis::FixedPerFeedMass
+					|| serializer.hasField("reactionHeatKJPerKgFeed")) processor.reactionHeatKJPerKgFeed =
 					serializer.readDouble("reactionHeatKJPerKgFeed");
 				processor.minOperatingTemperatureC =
 					serializer.readDouble("minOperatingTemperatureC");

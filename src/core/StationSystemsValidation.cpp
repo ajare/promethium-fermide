@@ -2356,6 +2356,24 @@ using namespace station_detail;
 					+ "'; declared classes are: " + declaredThermalClasses());
 			if (!std::isfinite(processor.rateKgPerS) || processor.rateKgPerS < 0.0)
 				return refuse(where + " rated feed processing must be finite and non-negative");
+			auto const derived = processor.rateBasis == StationRateBasis::CompositionDerived;
+			if (!derived && processor.rateBasis != StationRateBasis::FixedPerFeedMass)
+				return refuse(where + " has unknown rate basis");
+			if (derived)
+			{
+				double const fractions[]{processor.organicOxidationFraction, processor.nitrificationFraction,
+					processor.heatReleaseFraction, processor.processWaterTargetMoisture};
+				char const* names[]{"organicOxidationFraction", "nitrificationFraction", "heatReleaseFraction", "processWaterTargetMoisture"};
+				for (size_t i = 0; i < 4; ++i)
+					if (!std::isfinite(fractions[i]) || fractions[i] < 0.0 || fractions[i] > 1.0
+						|| (i == 3 && fractions[i] == 1.0))
+						return refuse(where + " " + names[i] + " must be finite and in [0, 1] (target moisture strictly below 1)");
+				double const rates[]{processor.o2PerKgOrganicOxidized, processor.o2PerKgNitrifiedN,
+					processor.co2PerKgOrganicOxidized, processor.consumablePerKgOrganicOxidized};
+				for (double rate : rates)
+					if (!std::isfinite(rate) || rate < 0.0)
+						return refuse(where + " composition-derived rates must be finite and non-negative");
+			}
 			double const rateFields[]{processor.specificEnergyKWhPerKgFeed,
 				processor.oxygenPerKgFeedKg, processor.processWaterPerKgFeedKg,
 				processor.consumablePerKgFeed, processor.co2PerKgFeedKg,
@@ -2363,7 +2381,7 @@ using namespace station_detail;
 			char const* rateNames[]{"specific energy", "oxygen per kg feed",
 				"process water per kg feed", "consumable per kg feed",
 				"CO2 per kg feed", "reaction heat per kg feed"};
-			for (size_t field = 0; field < 6; ++field)
+			for (size_t field = 0; field < (derived ? 1u : 6u); ++field)
 				if (!std::isfinite(rateFields[field]) || rateFields[field] < 0.0)
 					return refuse(where + " " + rateNames[field] + " must be finite and non-negative");
 			double const recoveryFields[]{processor.nitrogenRecovery,
@@ -2435,6 +2453,8 @@ using namespace station_detail;
 				if (found == settings.stores.end())
 					return missing(where + " consumable store '" + processor.consumableStoreId
 						+ "' does not exist");
+				if (derived && !isMassUnit(found->unit))
+					return refuse(where + " composition-derived consumable must use a mass unit (g or kg)");
 				// #592: the consumable is a consumed input like the feed: its
 				// authored hazard class must match the processor's own class,
 				// not merely stay consistent with other processors' claims on
@@ -2510,13 +2530,16 @@ using namespace station_detail;
 				+ composition.potassium * processor.potassiumRecovery
 				+ composition.otherMinerals * processor.mineralsRecovery);
 			auto const recoveredWaterPerKgFeed = composition.moisture * processor.waterRecovery;
-			auto const residuePerKgFeed = 1.0 + processor.oxygenPerKgFeedKg
-				+ processor.processWaterPerKgFeedKg - nutrientPerKgFeed
-				- recoveredWaterPerKgFeed - processor.co2PerKgFeedKg;
+			auto const rates = stationMicrobialRates(processor, composition);
+			auto const residuePerKgFeed = 1.0 + rates.oxygen
+				+ rates.water + (derived ? rates.consumable : 0.0) - nutrientPerKgFeed
+				- recoveredWaterPerKgFeed - rates.co2;
+			if (!std::isfinite(residuePerKgFeed) || !std::isfinite(rates.heat))
+				return refuse(where + " derived rates overflow at the declared composition");
 			if (residuePerKgFeed < -StationBalanceTolerance)
 				return refuse(where + " declared yields would create mass: the outputs exceed the feed plus oxygen plus process water, and an unrecoverable residue cannot be negative");
 			auto const feedEnergyKJPerKgFeed = dryPerKgFeed * composition.energyKJPerKgDry;
-			if (processor.reactionHeatKJPerKgFeed > feedEnergyKJPerKgFeed
+			if (rates.heat > feedEnergyKJPerKgFeed
 				+ StationBalanceTolerance * std::max(1.0, std::abs(feedEnergyKJPerKgFeed)))
 				return refuse(where + " declared reaction heat exceeds the feedstock's declared chemical energy: the digestion may not release more heat than the feed carries");
 		} catch (BrokenDraftEntry const&) {}

@@ -938,6 +938,16 @@ namespace core
 			fin(microbial.recoveredWaterKg, tag("recoveredWaterKg", microbial.id));
 			fin(microbial.co2ProducedKg, tag("co2ProducedKg", microbial.id));
 			fin(microbial.residueProducedKg, tag("residueProducedKg", microbial.id));
+			fin(microbial.lastNitrifiedNitrogenKg, tag("lastNitrifiedNitrogenKg", microbial.id));
+			fin(microbial.nitrifiedNitrogenKg, tag("nitrifiedNitrogenKg", microbial.id));
+			fin(microbial.organicOxidationFraction, tag("organicOxidationFraction", microbial.id));
+			fin(microbial.o2PerKgOrganicOxidized, tag("o2PerKgOrganicOxidized", microbial.id));
+			fin(microbial.nitrificationFraction, tag("nitrificationFraction", microbial.id));
+			fin(microbial.o2PerKgNitrifiedN, tag("o2PerKgNitrifiedN", microbial.id));
+			fin(microbial.co2PerKgOrganicOxidized, tag("co2PerKgOrganicOxidized", microbial.id));
+			fin(microbial.processWaterTargetMoisture, tag("processWaterTargetMoisture", microbial.id));
+			fin(microbial.heatReleaseFraction, tag("heatReleaseFraction", microbial.id));
+			fin(microbial.consumablePerKgOrganicOxidized, tag("consumablePerKgOrganicOxidized", microbial.id));
 			fin(microbial.nitrogenRecoveredKg, tag("nitrogenRecoveredKg", microbial.id));
 			fin(microbial.phosphorusRecoveredKg, tag("phosphorusRecoveredKg", microbial.id));
 			fin(microbial.potassiumRecoveredKg, tag("potassiumRecoveredKg", microbial.id));

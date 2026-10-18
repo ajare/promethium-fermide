@@ -8,6 +8,7 @@ int main(int argc, char** argv)
 	registerStationTrendChecks(checks);
 	registerStationForecastChecks(checks);
 	registerStationRecoveryChecks(checks);
+	registerBioconversionChecks(checks);
 	registerStationBiologyChecks(checks);
 	registerStationThermalChecks(checks);
 	registerStationGenerationChecks(checks);

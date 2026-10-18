@@ -6749,6 +6749,69 @@ void bufferWorkflow(smoke::Context const&)
 	#undef REQ
 	require(driver.passed(), "Buffer workflow failed on the Test Engine");
 }
+	void bioconversionWorkflow(smoke::Context const& test)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 2400};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history; StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Bioconversion editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		core::StationConfigurationDocument doc; std::string error;
+		require(core::loadStationConfiguration(test.fixture("resources/station-systems/scenarios/bioconversion-urine.yaml").string(), doc, &error), error);
+		// Begin fixed with the same feed; switch through the real form.
+		doc.settings.microbialProcessors[0].rateBasis = core::StationRateBasis::FixedPerFeedMass;
+		doc.settings.microbialProcessors[0].reactionHeatKJPerKgFeed = 1;
+		require(world->configureStationSystems(doc.settings, false, &error), error);
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 2350});
+			window.render(world, history);
+		});
+		window.visible = true; driver.frame(); driver.frame();
+		#define REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+		driver.run("station", "bioconversionWorkflow", [&](ImGuiTestContext* ctx) {
+			ctx->SetRef("Station Systems");
+			REQ(driver.contains("Microbial processor 0 oxygen per kg feed kg"), "Fixed rate fields absent");
+			ctx->ComboClick("Microbial processor 0 rate basis/Composition derived"); ctx->Yield(3);
+			REQ(window.draft().microbialProcessors[0].rateBasis == core::StationRateBasis::CompositionDerived,
+				"Rate selector did not edit the draft");
+			REQ(driver.contains("Microbial processor 0 nitrification fraction")
+				&& !driver.contains("Microbial processor 0 oxygen per kg feed kg"), "Per-mode field visibility incorrect");
+			REQ(world->getStationSystemsSettings().microbialProcessors[0].rateBasis == core::StationRateBasis::FixedPerFeedMass,
+				"Selector implicitly applied settings");
+			driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+			REQ(window.draft().microbialProcessors[0].rateBasis == core::StationRateBasis::FixedPerFeedMass, "Basis undo failed");
+			driver.click(ctx, "Redo configuration"); ctx->Yield(3);
+			REQ(window.draft().microbialProcessors[0].rateBasis == core::StationRateBasis::CompositionDerived, "Basis redo failed");
+			driver.typeValue(ctx, "Microbial processor 0 nitrification fraction", "0.5"); ctx->Yield(3);
+			REQ(window.draft().microbialProcessors[0].nitrificationFraction == 0.5, "Derived parameter edit failed");
+			driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+			REQ(window.draft().microbialProcessors[0].nitrificationFraction == 1.0, "Parameter undo failed");
+			driver.click(ctx, "Redo configuration"); ctx->Yield(3);
+			driver.click(ctx, "Apply settings"); ctx->Yield(3);
+			REQ(world->getStationSystemsSettings().microbialProcessors[0].nitrificationFraction == 0.5
+				&& world->getStationSystemsSettings().microbialProcessors[0].rateBasis == core::StationRateBasis::CompositionDerived,
+				"Derived draft did not Apply");
+			world->resumeSimulation(); REQ(world->advanceTicks(1), "Applied derived stage failed to tick");
+			world->pauseSimulation();
+			REQ(world->getStationSystemsSnapshot().microbialProcessors[0].lastNitrifiedNitrogenKg > 0,
+				"Applied stage did not nitrify");
+			core::StationConfigurationDocument saved; saved.settings = window.draft();
+			core::StationConfigurationDocument restored;
+			REQ(core::parseStationConfiguration(core::serializeStationConfiguration(saved), restored, &error), error.c_str());
+			REQ(saved.settings == restored.settings, "Editor draft did not round trip");
+			driver.typeValue(ctx, "Microbial processor 0 heat release fraction", "2");
+			driver.click(ctx, "Apply settings"); ctx->Yield(3);
+			driver.click(ctx, "Confirm World reset"); ctx->Yield(3);
+			REQ(driver.contains("heatReleaseFraction"), "Derived validation reason not displayed");
+			REQ(world->getStationSystemsSettings().microbialProcessors[0].heatReleaseFraction == 0.7,
+				"Invalid derived parameter reached the World");
+		});
+		#undef REQ
+		require(driver.passed(), "Bioconversion editor workflow failed");
+	}
+
 	void microbialConditionWorkflow(smoke::Context const&)
 	{
 		using smoke::require;
@@ -8492,6 +8555,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/generatorWorkflow", generatorWorkflow});
 	checks.push_back({"station/bufferWorkflow", bufferWorkflow});
 	checks.push_back({"station/microbialConditionWorkflow", microbialConditionWorkflow});
+	checks.push_back({"station/bioconversionWorkflow", bioconversionWorkflow});
 	checks.push_back({"station/cropWorkflow", cropWorkflow});
 	checks.push_back({"station/algaeWorkflow", algaeWorkflow});
 	checks.push_back({"station/maintenanceWorkflow", maintenanceWorkflow});

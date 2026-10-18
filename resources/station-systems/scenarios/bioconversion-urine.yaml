@@ -1,0 +1,140 @@
+# #735: urine-nitrification tracer at the four-crew production rate (4 kg/day).
+# Standalone Station configuration; load in Station systems, then Apply.
+# One day: N recovered/nitrified 0.048 kg; O2 0.24456 kg (legacy 3.2 kg);
+# CO2 0.0324 kg; water recovered 2.66 kg; dilution water 0;
+# medium 0.0009 kg; reaction heat 10.08 kJ; residue 1.41206 kg.
+# Quasi-steady, provisional biology. No inhibition or nitrifier growth yield.
+# Plain products, actual-blend feed. Solar and sink sized for a full day.
+schemaVersion: 99
+stationSystems:
+  enabled: true
+  observationIntervalSeconds: 1.0
+  trendRetentionSeconds: 3600.0
+  dispatchMode: manual
+  stores:
+  - id: urine
+    unit: kg
+    capacity: 100.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+    composition:
+      moisture: 0.95
+      nutrientNitrogen: 0.3
+      atmosphericNitrogen: 0.0
+      phosphorus: 0.1
+      potassium: 0.35
+      otherMinerals: 0.15
+      energyKJPerKgDry: 800.0
+  - id: processOxygen
+    unit: kg
+    capacity: 100.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: fresh
+    unit: kg
+    capacity: 100.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: digesterMedia
+    unit: kg
+    capacity: 100.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: nutrients
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: rawWater
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: co2
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: residue
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: bioStock
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  microbialProcessors:
+  - id: urineNitrifier
+    hazardClass: normal
+    feedStoreId: urine
+    oxygenStoreId: processOxygen
+    waterStoreId: fresh
+    consumableStoreId: digesterMedia
+    nutrientStoreId: nutrients
+    recoveredWaterStoreId: rawWater
+    co2StoreId: co2
+    residueStoreId: residue
+    thermalClass: low
+    heatSinkId: processSink
+    rateKgPerS: 4.6296296296296294e-05
+    specificEnergyKWhPerKgFeed: 2.0
+    nitrogenRecovery: 0.8
+    phosphorusRecovery: 0.8
+    potassiumRecovery: 0.8
+    mineralsRecovery: 0.7
+    waterRecovery: 0.7
+    minOperatingTemperatureC: 15.0
+    maxSinkTemperatureC: 45.0
+    initialCondition: 1.0
+    starvationDegradePerHour: 0.05
+    consumableExhaustionDegradePerHour: 0.05
+    coldStressDegradePerHour: 0.02
+    heatStressDegradePerHour: 0.1
+    recoveryPerHour: 0.02
+    stockStoreId: bioStock
+    stockUnitsPerConditionPoint: 1.0
+    priority: 1
+    rateBasis: CompositionDerived
+    nitrificationFraction: 1.0
+    organicOxidationFraction: 0.9
+    o2PerKgOrganicOxidized: 1.4
+    o2PerKgNitrifiedN: 4.57
+    co2PerKgOrganicOxidized: 1.8
+    processWaterTargetMoisture: 0.0
+    heatReleaseFraction: 0.7
+    consumablePerKgOrganicOxidized: 0.05
+  solarArrays:
+  - id: solar
+    capacityKW: 10.0
+    illumination:
+      constantLevel: 1.0
+      periodSeconds: 0.0
+      segments: []
+  thermalReservoirs:
+  - id: processSink
+    thermalClass: low
+    heatCapacityKJPerK: 1000000.0
+    startingTemperatureC: 20.0
+    minTemperatureC: -10.0
+    maxTemperatureC: 100.0
+    absorbedHeatKW: 0.0
