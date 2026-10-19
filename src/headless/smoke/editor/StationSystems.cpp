@@ -4788,6 +4788,11 @@ namespace
 		{
 			for (int error = 0; error < 3; ++error)
 			{
+				// A declared composition on a treated water store is legal
+				// (#744): the recovery streams carry the source's dissolved
+				// load through the removal fractions, so the compound-store
+				// mutation is no longer a rejection case for this chain.
+				if (type == "Water treatment" && error == 2) continue;
 				invalid = document;
 				// The last store is resolved even though the first connector is absent.
 				auto& target = type == "Water treatment" ? invalid.settings.stores[1] : invalid.settings.stores.back();

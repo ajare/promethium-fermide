@@ -69,10 +69,21 @@ namespace
 					if (std::string(type) == "Crew") expected = compound;
 					else if (std::string(type) == "Microbial processor")
 					{
+						// Process water and recovered water may each carry a
+						// declared composition (#742/#744): the quality gates
+						// read the source's dissolved load and the carry-over
+						// fractions land in the recovered destination, so both
+						// a plain and a compound store are feeds there.
 						if (std::string(field) == "feedStoreId") expected = compound;
-						else if (std::string(field) != "consumableStoreId" && std::string(field) != "stockStoreId") expected = !compound;
+						else if (std::string(field) != "consumableStoreId" && std::string(field) != "stockStoreId"
+							&& std::string(field) != "waterStoreId"
+							&& std::string(field) != "recoveredWaterStoreId") expected = !compound;
 					}
-					else if (input) expected = !compound;
+					// Irrigation water may carry a declared composition (#742):
+					// the same gate reads the crop/algae water source, so the
+					// water uptake stream is not pinned to a plain store while
+					// the pure-nutrient intakes still are.
+					else if (input) expected = !compound || std::string(field) == "waterStoreId";
 				}
 				for (bool reverse : {false,true})
 				{
