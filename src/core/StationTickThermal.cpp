@@ -59,8 +59,8 @@ namespace core
 				? 0.0
 				: loop.authored.pumpPowerKW * fillFraction * loop.availabilityFactor;
 			double pumpSuppliedKW = 0.0;
-			if (protectedLoopPumpKW[loopIndex] > 0.0 || loop.authored.criticalService
-				|| loop.authored.hazardClass == "hazardous" || chillerCirculationResolved[loopIndex])
+			if (protectedLoopPumpKW[loopIndex] > 0.0 || coolantServiceProtected(loop)
+				|| chillerCirculationResolved[loopIndex])
 			{
 				// #416: a protected loop's pump draw was already taken
 				// from the pool ahead of the discretionary external
@@ -76,8 +76,7 @@ namespace core
 			if (!disabled && loop.temperatureC < loop.authored.freezeProtectionSetpointC)
 				heaterDemandKW = loop.authored.heaterCapacityKW;
 			double heaterSuppliedKW = 0.0;
-			if (protectedLoopHeaterKW[loopIndex] > 0.0 || loop.authored.criticalService
-				|| loop.authored.hazardClass == "hazardous")
+			if (protectedLoopHeaterKW[loopIndex] > 0.0 || coolantServiceProtected(loop))
 			{
 				// #416: the protected freeze-heater draw was taken
 				// ahead of the discretionary loads; consume the credit.

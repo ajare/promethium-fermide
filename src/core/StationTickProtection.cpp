@@ -64,8 +64,7 @@ namespace core
 		for (size_t loopIndex = 0; loopIndex < runtime.coolantLoops.size(); ++loopIndex)
 		{
 			auto const& loop = runtime.coolantLoops[loopIndex];
-			auto const protectedLoop = loop.authored.criticalService
-				|| loop.authored.hazardClass == "hazardous";
+			auto const protectedLoop = coolantServiceProtected(loop);
 			if (!protectedLoop) continue;
 			auto const disabled = loop.coolantKg <= 0.0;
 			auto const effectiveFlowCapacityKgPerS = loop.authored.ratedFlowKgPerS
@@ -153,9 +152,7 @@ namespace core
 			// be authored critical.
 			if (!chillerCirculationResolved[chiller.loopIndex])
 			{
-				if (!loop.authored.criticalService
-					&& loop.authored.hazardClass != "hazardous"
-					&& loopPumpDemandKW > 0.0)
+				if (!coolantServiceProtected(loop) && loopPumpDemandKW > 0.0)
 				{
 					auto const pumpSuppliedKW = drawPower("Coolant loop", loop.authored.id, loopPumpDemandKW);
 					protectedLoopPumpKW[chiller.loopIndex] = pumpSuppliedKW;

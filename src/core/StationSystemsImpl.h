@@ -1689,6 +1689,7 @@ using namespace station_detail;
 		double materialFeasible(LoadState const& load, std::string& limiter, bool requesting = false);
 		void reserveMaterial(LoadState& load, double fraction);
 		void leakZeroMaterial(LoadState const& load);
+		bool coolantServiceProtected(LoopState const& loop);
 		void recordProtected(std::string id, std::string kind, double requestedKW, double suppliedKW, std::string reason);
 		void refundChillerCredit(size_t chillerIndex, double refundKW);
 		void reconcileChillerProtected(size_t chillerIndex);
