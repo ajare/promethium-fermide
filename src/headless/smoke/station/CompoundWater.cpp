@@ -501,6 +501,264 @@ void qualityConsumers(smoke::Context const&)
 	require(ungated.algaeCultures[0].lastGrowthKg > 0, "ungated loaded makeup was refused");
 	require(ungated.microbialProcessors[0].lastWaterConsumedKg > 0, "ungated loaded process water was refused");
 }
+double mass(core::StationSystemsStoreSnapshot const& s, char const* name)
+{
+	auto const found = s.actualConstituents.find(name);
+	return found == s.actualConstituents.end() ? 0 : found->second;
+}
+void selectiveIrrigation(smoke::Context const& context)
+{
+	auto settings = scenario(context, "water-hydroponics.yaml");
+	settings.transfers.clear(); // isolate one selective draw
+	auto const before = run(settings, 0);
+	SourceScope restore;
+	core::setStationSystemsSourceLoader([] {
+		auto source = core::bundledStationSystemsSource();
+		auto const at = source.find("        self.ticks = self.ticks + 1");
+		require(at != std::string::npos, "Lua irrigation assertion point absent");
+		source.insert(at, R"lua(
+        local crop = self.crop_populations[1]
+        local water = crop.lastAssimilationWaterKg + crop.lastTranspiredKg
+        assert(math.abs(crop.lastIrrigationUptake.nutrientNitrogen - water * 0.0002 / 0.999 * 0.1) < 1e-12)
+        assert(math.abs(crop.irrigationUptake.nutrientNitrogen - crop.lastIrrigationUptake.nutrientNitrogen) < 1e-12)
+)lua");
+		return source;
+	});
+	auto const after = run(settings, 1);
+	core::setStationSystemsSourceLoader({});
+	auto const& crop = after.cropPopulations[0];
+	auto const water = crop.lastAssimilationWaterKg + crop.lastTranspiredKg;
+	for (auto const* name : {"nutrientNitrogen", "phosphorus", "potassium"})
+	{
+		auto const expected = mass(store(before, "loop"), name) / mass(store(before, "loop"), "water") * water * 0.1;
+		close(crop.lastIrrigationUptake.at(name), expected);
+		close(mass(store(before, "loop"), name) - mass(store(after, "loop"), name), expected);
+	}
+	close(mass(store(before, "loop"), "water") - mass(store(after, "loop"), "water"), water);
+	close(mass(store(after, "loop"), "otherMinerals"), mass(store(before, "loop"), "otherMinerals"));
+	close(crop.livingConstituents.nutrientNitrogenKg - before.cropPopulations[0].livingConstituents.nutrientNitrogenKg,
+		mass(store(before, "N"), "nutrientNitrogen") - mass(store(after, "N"), "nutrientNitrogen")
+		+ crop.lastIrrigationUptake.at("nutrientNitrogen"));
+	// Pure vapour, not the irrigation blend, reaches the atmosphere.
+	close(after.atmospheres[0].waterVapourKg - before.atmospheres[0].waterVapourKg, crop.lastTranspiredKg);
+	// Grams use the same kg ledger, and plain water is still supported.
+	auto grams = settings; grams.stores[0].unit = "g";
+	grams.stores[0].capacity *= 1000; grams.stores[0].startingQualified *= 1000;
+	close(run(grams, 1).cropPopulations[0].lastIrrigationUptake.at("nutrientNitrogen"), crop.lastIrrigationUptake.at("nutrientNitrogen"));
+	auto plain = settings; plain.stores[0].composition.reset();
+	close(run(plain, 1).cropPopulations[0].lastIrrigationUptake.at("nutrientNitrogen"), 0);
+	auto dry = settings; dry.stores[0].composition->moisture = 0;
+	auto const stopped = run(dry, 1);
+	close(stopped.cropPopulations[0].lastGrowthKg, 0);
+	require(stopped.cropPopulations[0].lastGrowthLimiter.find("water") != std::string::npos, "dry selective inlet has no limiter");
+	for (double fraction : {0.0, 1.0})
+	{
+		auto s = settings;
+		for (auto& [name, value] : s.cropPopulations[0].irrigationUptakeFractions) { (void)name; value = fraction; }
+		auto const result = run(s, 3);
+		if (fraction == 0) close(mass(store(result, "loop"), "nutrientNitrogen"), mass(store(before, "loop"), "nutrientNitrogen"));
+	}
+	auto restricted = settings; bool inlet = false;
+	for (auto const& link : core::station_connections::build(restricted).links)
+		if (link.designKey.ownerType == "Crops" && link.designKey.peerId == "loop")
+		{
+			restricted.connections[link.designKey].efficiency = 0.5;
+			restricted.connections[link.designKey].maximumThroughput = 0.003;
+			inlet = true;
+		}
+	require(inlet, "selective irrigation inlet absent");
+	auto const limited = run(restricted, 3);
+	require(limited.cropPopulations[0].lastGrowthScale > 0 && limited.cropPopulations[0].lastGrowthScale < 1,
+		"selective uptake ignored physical connection constraints");
+	// Nutrient-rich irrigation funds the whole demand without overdrawing
+	// a zero-stock fertilizer port or building excess nutrients into biomass.
+	auto rich = settings; rich.stores[0].composition->moisture = 0.5;
+	rich.cropPopulations[0].waterQuality = {};
+	for (auto& [name, value] : rich.cropPopulations[0].irrigationUptakeFractions) { (void)name; value = 1; }
+	for (auto& entry : rich.stores) if (entry.id == "N" || entry.id == "P" || entry.id == "K") entry.startingQualified = 0;
+	auto const funded = run(rich, 3);
+	require(funded.cropPopulations[0].lastGrowthScale == 1, "irrigation did not replace fertilizer deficit");
+	close(funded.cropPopulations[0].lastIrrigationUptake.at("nutrientNitrogen"), funded.cropPopulations[0].lastGrowthKg * 0.1);
+	std::string error;
+	for (auto value : {-1.0, 1.01, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
+	{
+		auto s = settings; s.cropPopulations[0].irrigationUptakeFractions["nutrientNitrogen"] = value;
+		require(!core::validateStationSystemsSettings(s, error) && error.find("irrigationUptakeFractions") != std::string::npos,
+			"invalid selective fraction accepted");
+	}
+	auto invalid = settings; invalid.cropPopulations[0].irrigationUptakeFractions["water"] = 0;
+	require(!core::validateStationSystemsSettings(invalid, error), "unsupported irrigation constituent accepted");
+	// Public document and World replay carry the opt-in without changing actuals.
+	for (auto const* file : {"water-hydroponics.yaml", "water-contamination.yaml"})
+	{
+		auto const s = scenario(context, file);
+		core::StationConfigurationDocument doc, restored; doc.settings = s;
+		require(core::parseStationConfiguration(core::serializeStationConfiguration(doc), restored, &error), error.c_str());
+		require(restored.settings == s, "flagship settings did not round trip");
+		core::World world("Flagship replay", 2, 2); world.pauseSimulation(); world.finishBuild();
+		require(world.configureStationSystems(s, false, &error), error.c_str());
+		for (auto const* extension : {".world.yaml", ".world"})
+		{
+			auto const path = context.temporaryRoot() / (std::string(file) + extension);
+			world.saveTo(path.string()); auto reopened = core::loadWorldDocument(path);
+			require(reopened->getStationSystemsSettings() == s, "flagship World lost settings");
+			reopened->resumeSimulation(); require(reopened->advanceTicks(3), "flagship World replay failed");
+			auto const expected = run(s, 3), actual = reopened->getStationSystemsSnapshot();
+			require(actual.stores == expected.stores && actual.cropPopulations == expected.cropPopulations
+				&& actual.waterTreatments == expected.waterTreatments, "flagship replay actuals changed");
+		}
+	}
+}
+void hydroponics(smoke::Context const& context)
+{
+	auto const base = scenario(context, "water-hydroponics.yaml");
+	for (bool purge : {true, false})
+	{
+		auto s = base; if (!purge) s.transfers.erase(s.transfers.begin());
+		core::World world("Hydroponic salt accumulation", 2, 2);
+		world.pauseSimulation(); world.finishBuild(); std::string error;
+		auto const configured = world.configureStationSystems(s, false, &error);
+		require(configured, error.c_str());
+		auto const initial = world.getStationSystemsSnapshot();
+		auto const total = [](auto const& snap, char const* species) {
+			double value = 0; for (auto const& entry : snap.stores) value += mass(entry, species);
+			auto const& live = snap.cropPopulations[0].livingConstituents;
+			if (std::string(species) == "nutrientNitrogen") value += live.nutrientNitrogenKg;
+			if (std::string(species) == "phosphorus") value += live.phosphorusKg;
+			if (std::string(species) == "potassium") value += live.potassiumKg;
+			if (std::string(species) == "otherMinerals") value += live.mineralsKg;
+			return value;
+		};
+		world.resumeSimulation(); int firstThrottle = 0; double at240 = 0;
+		for (int second = 1; second <= 300; ++second)
+		{
+			if (!world.advanceTicks(60))
+			{
+				error = std::format("hydroponics purge={} second={}: ", purge, second);
+				for (auto const& d : world.getStationSystemsDiagnostics()) error += d.message;
+				require(false, error.c_str());
+			}
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.healthy, "hydroponics unhealthy");
+			for (auto const& balance : snap.constituentBalances) close(balance.residual, 0);
+			for (auto const* name : {"nutrientNitrogen", "phosphorus", "potassium", "otherMinerals"}) close(total(snap, name), total(initial, name));
+			auto const& crop = snap.cropPopulations[0];
+			close(total(snap, "water") + snap.atmospheres[0].waterVapourKg + crop.waterDrawnKg - crop.transpiredKg,
+				total(initial, "water") + initial.atmospheres[0].waterVapourKg);
+			if (crop.lastGrowthScale < 0.999999 && !firstThrottle) firstThrottle = second;
+			auto const concentration = store(snap, "loop").concentrations.at("otherMinerals");
+			if (second == 240) at240 = concentration;
+			if (purge)
+			{
+				require(concentration < 0.0012 && crop.lastGrowthScale == 1, "purged loop exceeded quality gate");
+				if (second == 300) require(std::abs(concentration - at240) < 3e-6, "purged loop did not reach steady state");
+			}
+			else if (second == 300)
+			{
+				require(firstThrottle > 0 && firstThrottle <= 150, "unpurged loop missed documented throttle horizon");
+				require(crop.lastGrowthLimiter == "water quality: otherMinerals above crop tolerance", "wrong hydroponic limiter");
+				require(crop.lastGrowthScale < 0.8, "salt accumulation did not throttle growth");
+				close(store(snap, "purge").currentQualified, 0);
+			}
+			if (second == 300) std::printf("hydroponics purge=%d: minerals=%.12g scale=%.12g firstThrottle=%ds growth=%.12g kg\n",
+				purge, concentration, crop.lastGrowthScale, firstThrottle, crop.growthKg);
+		}
+	}
+}
+void contamination(smoke::Context const& context)
+{
+	auto const base = scenario(context, "water-contamination.yaml");
+	for (bool clearance : {true, false})
+	{
+		auto s = base;
+		if (!clearance) for (auto& entry : s.stores) if (entry.id == "clearance") entry.startingQualified = 0;
+		// Assert every authored transfer is class-matched, then assert both
+		// directions of a forbidden crossing at the public World boundary.
+		for (auto const& transfer : s.transfers)
+		{
+			auto const source = std::find_if(s.stores.begin(), s.stores.end(), [&](auto const& x) { return x.id == transfer.sourceId; });
+			auto const dest = std::find_if(s.stores.begin(), s.stores.end(), [&](auto const& x) { return x.id == transfer.destinationId; });
+			require(source != s.stores.end() && dest != s.stores.end() && source->hazardClass == dest->hazardClass,
+				"scenario contains cross-hazard transfer");
+		}
+		auto const snap = run(s, 600);
+		close(snap.crews[1].lastWaterActual, 0); close(snap.cropPopulations[1].growthKg, 0);
+		require(snap.crews[1].limiter.find("water quality: total dissolved") != std::string::npos
+			&& snap.cropPopulations[1].lastGrowthLimiter.find("water quality: total dissolved") != std::string::npos,
+			"hazard-side loaded probes did not name quality refusal");
+		auto const& treatment = snap.waterTreatments[0];
+		close(mass(store(snap, "ingress"), "dryOrganics") + mass(store(snap, "loop"), "dryOrganics")
+			+ mass(store(snap, "concentrate"), "dryOrganics"), 0.1);
+		close(mass(store(snap, "cleared"), "dryOrganics"), 0);
+		close(store(snap, "cleared").currentUnqualified, 0);
+		if (clearance)
+		{
+			require(treatment.releaseCleared && treatment.clearanceUsedTotal > 0 && snap.crews[0].lastWaterActual > 0
+				&& snap.cropPopulations[0].lastGrowthKg > 0, "cleared water did not reach normal consumers");
+			close(treatment.processedKg, 0.05 * core::World::getFixedTimestep() * 599); // first tick fills the loop
+		}
+		else
+		{
+			close(treatment.processedKg, 0); close(store(snap, "cleared").currentQualified, 0);
+			close(snap.crews[0].lastWaterActual, 0); close(snap.cropPopulations[0].growthKg, 0);
+			require(treatment.limiter.find("release clearance unavailable") != std::string::npos, "missing clearance hold reason");
+		}
+	}
+	core::World world("Refuse hazard bypass", 2, 2); world.pauseSimulation(); world.finishBuild(); std::string error;
+	require(world.configureStationSystems(base, false, &error), error.c_str());
+	for (bool reverse : {false, true})
+	{
+		auto bad = base;
+		// Equal declarations isolate hazard segregation from the separate
+		// composition-boundary refusal (which is checked first).
+		bad.stores[2].composition = bad.stores[1].composition;
+		auto bypass = bad.transfers[0]; bypass.id = "bypass";
+		bypass.sourceId = reverse ? "cleared" : "loop"; bypass.destinationId = reverse ? "loop" : "cleared";
+		bad.transfers.push_back(bypass);
+		require(!world.configureStationSystems(bad, false, &error) && error.find("hazard") != std::string::npos,
+			"cross-hazard transfer bypass accepted");
+		require(world.getStationSystemsSettings() == base, "refused hazard bypass mutated World");
+	}
+	for (bool crew : {true, false})
+	{
+		auto bad = base;
+		if (crew) bad.crews[0].waterStoreId = "loop";
+		else bad.cropPopulations[0].waterStoreId = "loop";
+		auto const accepted = world.configureStationSystems(bad, false, &error);
+		require(!accepted && error.find("hazard") != std::string::npos, "normal consumer accepted hazardous water");
+		require(world.getStationSystemsSettings() == base, "refused consumer bypass mutated World");
+	}
+	auto bad = base; bad.waterTreatments[0].releaseToNormalClass = false;
+	require(!core::validateStationSystemsSettings(bad, error), "implicit normal release accepted");
+	bad = base; bad.waterTreatments[0].clearanceStoreId.clear();
+	require(!core::validateStationSystemsSettings(bad, error), "normal release without clearance accepted");
+	bad = base; bad.solarArrays[0].capacityKW = 0;
+	auto const dark = run(bad, 3); close(store(dark, "cleared").currentQualified, 0); close(dark.waterTreatments[0].processedKg, 0);
+	// Dose and clearance feasibility must also respect physical port caps,
+	// transport losses, protected kit reserves and a kit shared by both roles.
+	for (auto const eta : {0.0, 0.5})
+	{
+		auto s = base; bool found = false;
+		for (auto const& link : core::station_connections::build(s).links)
+			if (link.designKey.ownerType == "Water treatment" && link.designKey.reference == "clearanceStoreId")
+			{ s.connections[link.designKey].efficiency = eta; found = true; }
+		require(found, "clearance connection absent");
+		auto const snap = run(s, 60);
+		close(store(snap, "cleared").currentUnqualified, 0);
+		if (eta == 0) close(snap.waterTreatments[0].processedKg, 0);
+		else require(snap.waterTreatments[0].releaseCleared, "lossy but stocked clearance did not release");
+	}
+	auto shared = base; shared.waterTreatments[0].clearanceStoreId = "media";
+	for (auto& entry : shared.stores) if (entry.id == "media") { entry.startingQualified = 0.001; entry.protectedReserve = 0.0005; }
+	auto const kit = run(shared, 60);
+	require(store(kit, "media").currentQualified >= 0.0005 - 1e-12, "shared kit overdrawn");
+	close(store(kit, "cleared").currentUnqualified, 0);
+	auto reduced = base; reduced.solarArrays[0].capacityKW = 1;
+	auto const partial = run(reduced, 60);
+	require(partial.waterTreatments[0].processedKg > 0 && partial.waterTreatments[0].releaseCleared,
+		"duty-limited full-dose release failed");
+	close(store(partial, "cleared").currentUnqualified, 0);
+}
 void legacy(smoke::Context const& context)
 {
 	auto settings = scenario(context, "water-legacy-anchor.yaml");
@@ -518,6 +776,9 @@ void legacy(smoke::Context const& context)
 }
 void registerCompoundWaterChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"waterSelectiveIrrigation", selectiveIrrigation});
+	checks.push_back({"waterHydroponics", hydroponics});
+	checks.push_back({"waterContamination", contamination});
 	checks.push_back({"waterQualityGates", qualityGates});
 	checks.push_back({"waterQualityValidation", qualityValidation});
 	checks.push_back({"waterQualityConsumers", qualityConsumers});

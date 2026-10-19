@@ -1,0 +1,216 @@
+# #744: loaded hazardous ingress -> hazardous loop -> clearance-only normal release.
+# Load in Station systems, Apply, Run. 10-second public-World verification.
+# Hazard-side crew and crop are zero-tolerance acceptance probes (not exposure models).
+# They draw nothing and report water quality: total dissolved above ... tolerance.
+# Normal consumers use only the cleared outlet. The filter removes all dry load.
+# Set clearance.startingQualified to 0: feed remains hazardous; normal output stays empty.
+# Generic transfers across hazard classes are always refused, even after treatment.
+schemaVersion: 101
+stationSystems:
+  enabled: true
+  observationIntervalSeconds: 1
+  dispatchMode: manual
+  stores:
+  - id: ingress
+    materialId: water
+    unit: kg
+    capacity: 100
+    startingQualified: 10
+    startingUnqualified: 0
+    hazardClass: hazardous
+    composition: {moisture: 0.99, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}
+  - id: loop
+    materialId: water
+    unit: kg
+    capacity: 100
+    startingQualified: 0
+    startingUnqualified: 0
+    hazardClass: hazardous
+    composition: {moisture: 0.99, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}
+  - id: cleared
+    materialId: water
+    unit: kg
+    capacity: 100
+    startingQualified: 0
+    startingUnqualified: 0
+    hazardClass: normal
+    composition: {moisture: 0.999, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}
+  - id: concentrate
+    materialId: water-concentrate
+    unit: kg
+    capacity: 100
+    startingQualified: 0
+    startingUnqualified: 0
+    hazardClass: hazardous
+    composition: {moisture: 0.5, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}
+  - {id: media, unit: kg, capacity: 10, startingQualified: 10, startingUnqualified: 0, hazardClass: hazardous}
+  - {id: clearance, unit: kg, capacity: 10, startingQualified: 10, startingUnqualified: 0, hazardClass: hazardous}
+  - {id: N, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: normal}
+  - {id: P, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: normal}
+  - {id: K, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: normal}
+  - {id: minerals, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: normal}
+  - {id: food, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: normal, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}}
+  - {id: urine, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: normal, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}}
+  - {id: waste, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: normal, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}}
+  - {id: hazN, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: hazardous}
+  - {id: hazP, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: hazardous}
+  - {id: hazK, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: hazardous}
+  - {id: hazMinerals, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: hazardous}
+  - {id: hazFood, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: hazardous, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}}
+  - {id: hazUrine, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: hazardous, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}}
+  - {id: hazWaste, unit: kg, capacity: 1, startingQualified: 0, startingUnqualified: 0, hazardClass: hazardous, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}}
+  transfers:
+  - {id: ingress, sourceId: ingress, destinationId: loop, unit: kg, ratePerSecond: 0.1, priority: 1}
+  solarArrays:
+  - id: supply
+    capacityKW: 10
+    illumination: {constantLevel: 1, periodSeconds: 0, segments: []}
+  waterTreatments:
+  - id: barrier
+    hazardClass: hazardous
+    releaseToNormalClass: true
+    sourceStoreId: loop
+    treatedStoreId: cleared
+    concentrateStoreId: concentrate
+    consumableStoreId: media
+    clearanceStoreId: clearance
+    clearancePerKg: 0.01
+    throughputKgPerS: 0.05
+    recoveryRatio: 0.8
+    specificEnergyKWhPerKg: 0.01
+    consumablePerKg: 0.01
+    priority: 1
+  atmospheres:
+  -
+    id: normal
+    hazardClass: normal
+    volumeM3: 100
+    startingOxygenKg: 20
+    startingNitrogenKg: 80
+    startingCarbonDioxideKg: 1
+    startingWaterVapourKg: 0
+    startingTemperatureC: 22
+    thermalCapacityKJPerK: 1000000
+    minPressureKPa: 1
+    maxPressureKPa: 1000
+    minOxygenPartialPressureKPa: 0
+    maxCarbonDioxidePartialPressureKPa: 1000
+    reservoirId: ''
+    exchangerConductanceKWPerK: 0
+    occupants: 0
+    oxygenUsePerOccupantKgPerS: 0
+    co2ProductionPerOccupantKgPerS: 0
+    sensibleHeatPerOccupantKW: 0
+    moistureAdditionPerOccupantKgPerS: 0
+    leakRateKgPerS: 0
+  - id: hazardous
+    hazardClass: hazardous
+    volumeM3: 100
+    startingOxygenKg: 20
+    startingNitrogenKg: 80
+    startingCarbonDioxideKg: 1
+    startingWaterVapourKg: 0
+    startingTemperatureC: 22
+    thermalCapacityKJPerK: 1000000
+    minPressureKPa: 1
+    maxPressureKPa: 1000
+    minOxygenPartialPressureKPa: 0
+    maxCarbonDioxidePartialPressureKPa: 1000
+    reservoirId: ''
+    exchangerConductanceKWPerK: 0
+    occupants: 0
+    oxygenUsePerOccupantKgPerS: 0
+    co2ProductionPerOccupantKgPerS: 0
+    sensibleHeatPerOccupantKW: 0
+    moistureAdditionPerOccupantKgPerS: 0
+    leakRateKgPerS: 0
+  cropPopulations:
+  -
+    id: normal-crop
+    atmosphereId: normal
+    waterStoreId: cleared
+    waterQuality: {maxTotalDissolved: 0}
+    nitrogenStoreId: N
+    phosphorusStoreId: P
+    potassiumStoreId: K
+    mineralsStoreId: minerals
+    composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}
+    growingAreaM2: 10
+    maxBiomassDensityKgPerM2: 2
+    initialBiomassKg: 0.01
+    lampRatedKW: 0.1
+    illumination: {constantLevel: 1, periodSeconds: 0, segments: []}
+    circulationPowerKW: 0
+    growthYieldKgPerKWh: 0.5
+    respirationPerHour: 0
+    transpirationKgPerKgGrowth: 10
+    minGrowingTemperatureC: 10
+    maxGrowingTemperatureC: 35
+    foodStoreId: food
+    wasteStoreId: waste
+    edibleFraction: 0.6
+    harvestTriggerKg: 0
+    harvestFraction: 0.5
+    priority: 1
+  - id: hazardous-crop-probe
+    waterQuality: {maxTotalDissolved: 0}
+    composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 3600}
+    growingAreaM2: 10
+    maxBiomassDensityKgPerM2: 2
+    initialBiomassKg: 0.01
+    lampRatedKW: 0.1
+    illumination: {constantLevel: 1, periodSeconds: 0, segments: []}
+    circulationPowerKW: 0
+    growthYieldKgPerKWh: 0.5
+    respirationPerHour: 0
+    transpirationKgPerKgGrowth: 10
+    minGrowingTemperatureC: 10
+    maxGrowingTemperatureC: 35
+    edibleFraction: 0.6
+    harvestTriggerKg: 0
+    harvestFraction: 0.5
+    priority: 1
+    atmosphereId: hazardous
+    waterStoreId: loop
+    nitrogenStoreId: hazN
+    phosphorusStoreId: hazP
+    potassiumStoreId: hazK
+    mineralsStoreId: hazMinerals
+    foodStoreId: hazFood
+    wasteStoreId: hazWaste
+  crews:
+  -
+    id: normal-crew
+    atmosphereId: normal
+    crewCount: 1
+    foodStoreId: food
+    waterStoreId: cleared
+    urineStoreId: urine
+    organicWasteStoreId: waste
+    foodPerCrewPerS: 0
+    waterPerCrewPerS: 0.001
+    oxygenPerCrewKgPerS: 0
+    co2PerCrewKgPerS: 0
+    moisturePerCrewKgPerS: 0
+    urinePerCrewPerS: 0
+    organicWastePerCrewPerS: 0
+    metabolicHeatPerCrewKW: 0
+    activity: {constantLevel: 1, periodSeconds: 0, segments: []}
+    waterQuality: {maxTotalDissolved: 0}
+  - id: hazardous-crew-probe
+    crewCount: 1
+    foodPerCrewPerS: 0
+    waterPerCrewPerS: 0.001
+    oxygenPerCrewKgPerS: 0
+    co2PerCrewKgPerS: 0
+    moisturePerCrewKgPerS: 0
+    urinePerCrewPerS: 0
+    organicWastePerCrewPerS: 0
+    metabolicHeatPerCrewKW: 0
+    activity: {constantLevel: 1, periodSeconds: 0, segments: []}
+    waterQuality: {maxTotalDissolved: 0}
+    atmosphereId: hazardous
+    waterStoreId: loop
+    foodStoreId: hazFood
+    urineStoreId: hazUrine
+    organicWasteStoreId: hazWaste

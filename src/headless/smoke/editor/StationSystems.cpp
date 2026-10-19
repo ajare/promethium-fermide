@@ -6897,6 +6897,82 @@ void bufferWorkflow(smoke::Context const&)
 		smoke::require(driver.passed(), "Degenerate bioconversion editor workflow failed");
 	}
 
+	void waterFlagshipWorkflow(smoke::Context const& test)
+	{
+		for (bool hydroponics : {true, false})
+		{
+			headless::ScopedImGuiContext context;
+			auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 2400};
+			io.Fonts->AddFontDefault(); io.Fonts->Build();
+			DocumentHistory history; StationSystemsWindow window;
+			auto world = std::make_shared<core::World>("Flagship editor", 2, 2);
+			world->pauseSimulation(); world->finishBuild();
+			window.setFilePicker([&](bool) -> std::optional<std::string> {
+				return test.fixture(hydroponics ? "resources/station-systems/scenarios/water-hydroponics.yaml"
+					: "resources/station-systems/scenarios/water-contamination.yaml").string();
+			});
+			headless::TestEngineDriver driver([&] {
+				ImGui::SetNextWindowPos({970, 10}); ImGui::SetNextWindowSize({220, 2350});
+				ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
+				ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 2350});
+				window.render(world, history);
+			});
+			window.visible = true; driver.frame(); driver.frame();
+			driver.run("station", hydroponics ? "waterHydroponicsWorkflow" : "waterContaminationWorkflow", [&](ImGuiTestContext* ctx) {
+				#define FLAG_REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+				ctx->SetRef("Configuration"); driver.click(ctx, "Open configuration"); ctx->Yield(3);
+				FLAG_REQ(!window.draft().cropPopulations.empty(), "Flagship configuration did not open");
+				ctx->SetRef("Station Systems");
+				if (hydroponics)
+				{
+					driver.typeValue(ctx, "Crop 0 irrigation uptake nutrientNitrogen", "0.2"); ctx->Yield(3);
+					FLAG_REQ(window.draft().cropPopulations[0].irrigationUptakeFractions.at("nutrientNitrogen") == 0.2,
+						"Selective irrigation form did not edit");
+					driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+					FLAG_REQ(window.draft().cropPopulations[0].irrigationUptakeFractions.at("nutrientNitrogen") == 0.1,
+						"Selective irrigation undo failed");
+					driver.click(ctx, "Redo configuration"); ctx->Yield(3);
+					driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+				}
+				else
+				{
+					FLAG_REQ(window.draft().waterTreatments[0].releaseToNormalClass, "Explicit normal release did not open");
+					driver.click(ctx, "Treatment 0 release to normal class"); ctx->Yield(3);
+					FLAG_REQ(!window.draft().waterTreatments[0].releaseToNormalClass, "Normal release checkbox did not edit");
+					driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+					FLAG_REQ(window.draft().waterTreatments[0].releaseToNormalClass, "Normal release undo failed");
+				}
+				core::StationConfigurationDocument saved, restored; std::string error;
+				saved.settings = window.draft();
+				auto const parsed = core::parseStationConfiguration(core::serializeStationConfiguration(saved), restored, &error);
+				FLAG_REQ(parsed && restored.settings == saved.settings, "Flagship editor save/load failed");
+				driver.click(ctx, "Apply settings"); ctx->Yield(3);
+				FLAG_REQ(world->getStationSystemsSettings() == window.draft(), "Flagship Apply failed");
+				world->resumeSimulation(); FLAG_REQ(world->advanceTicks(60), "Editor flagship ticks failed"); world->pauseSimulation();
+				auto const snap = world->getStationSystemsSnapshot();
+				FLAG_REQ(snap.healthy, "Editor flagship unhealthy");
+				if (hydroponics)
+					FLAG_REQ(snap.cropPopulations[0].lastGrowthScale == 1 && snap.cropPopulations[0].irrigationUptake.at("nutrientNitrogen") > 0,
+						"Editor selective uptake did not run");
+				else
+				{
+					FLAG_REQ(snap.waterTreatments[0].releaseCleared && snap.crews[0].lastWaterActual > 0
+						&& snap.crews[1].limiter.find("water quality") != std::string::npos, "Editor contamination actuals disagree");
+					driver.typeValue(ctx, "Store 5 starting usable", "0");
+					driver.click(ctx, "Apply settings"); ctx->Yield(3);
+					driver.click(ctx, "Confirm World reset"); ctx->Yield(3);
+					world->resumeSimulation(); FLAG_REQ(world->advanceTicks(60), "Editor clearance hold ticks failed"); world->pauseSimulation();
+					auto const held = world->getStationSystemsSnapshot();
+					FLAG_REQ(held.waterTreatments[0].processedKg == 0 && held.crews[0].lastWaterActual == 0
+						&& held.waterTreatments[0].limiter.find("release clearance unavailable") != std::string::npos,
+						"Editor disabled clearance did not hold hazardous feed");
+				}
+				#undef FLAG_REQ
+			});
+			smoke::require(driver.passed(), "Flagship water editor workflow failed");
+		}
+	}
+
 	void waterCarryoverWorkflow(smoke::Context const& test)
 	{
 		headless::ScopedImGuiContext context;
@@ -8833,6 +8909,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/bioconversionWorkflow", bioconversionWorkflow});
 	checks.push_back({"station/bioconversionDegenerateWorkflow", bioconversionDegenerateWorkflow});
 	checks.push_back({"station/bioconversionFoodwasteWorkflow", bioconversionFoodwasteWorkflow});
+	checks.push_back({"station/waterFlagshipWorkflow", waterFlagshipWorkflow});
 	checks.push_back({"station/compoundWaterWorkflow", compoundWaterWorkflow});
 	checks.push_back({"station/cropWorkflow", cropWorkflow});
 	checks.push_back({"station/algaeWorkflow", algaeWorkflow});

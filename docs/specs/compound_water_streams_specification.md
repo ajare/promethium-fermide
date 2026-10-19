@@ -228,12 +228,26 @@ irrigation gate at a tolerance that *accepts* the dilute load turns the waste in
 
 ### 9.3 Hydroponic salt accumulation (`water-hydroponics.yaml`)
 
+Implemented by #744 with an approved prerequisite scope expansion:
+`cropPopulations[].irrigationUptakeFractions` opts into selective pure-water
+withdrawal and bounded dissolved N/P/K uptake; absent maps retain legacy draws.
+See [documented actuals and reproduction](../compound-water.md#hydroponic-salt-accumulation)
+for the accelerated 300-second horizon, steady-state band, 96-second no-purge
+throttle and conservation checks. These rates are a stress rig, not agronomy.
+
 Recirculating loop: crops draw loop water, transpire pure vapour to the atmosphere, absorb a
 declared fraction of dissolved N/P/K; non-absorbed salts accumulate daily. A purge transfer
 holds concentration under the crop gate. With the purge disabled, concentration climbs and
 growth throttles on the named quality limiter within the scenario's documented day count.
 
 ### 9.4 Contamination barrier (`water-contamination.yaml`)
+
+Implemented by #744 with explicit `releaseToNormalClass` treatment authoring.
+The normal-class outlet receives only full-dose, cleared product; unavailable
+clearance or power retains feed on the hazardous side. Default #412 same-class
+release behavior and all generic Transfer segregation are unchanged. The
+[10-second reproduction](../compound-water.md#clearance-only-hazard-conversion-744)
+includes hazardous-side quality probes and normal consumers of cleared water.
 
 A hazardous-class loaded stream enters the loop; only clearance-gated treatment (#412) can
 return it to normal class; gates refuse the loaded water for crew and crops until treated.

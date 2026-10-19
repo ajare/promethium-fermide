@@ -437,6 +437,8 @@ using namespace station_detail;
 			treatment.hazardClass) == StationWaterHazardClasses.end())
 			return refuse(where + " has unknown water hazard class '" + treatment.hazardClass
 				+ "'; declared classes are: normal, hazardous");
+		if (treatment.releaseToNormalClass && treatment.hazardClass != "hazardous")
+			return refuse(where + " releaseToNormalClass requires hazardous-class clearance-gated treatment");
 		if (!std::isfinite(treatment.throughputKgPerS) || treatment.throughputKgPerS < 0.0)
 			return refuse(where + " throughput must be finite and non-negative");
 		if (!std::isfinite(treatment.recoveryRatio) || treatment.recoveryRatio <= 0.0
@@ -487,7 +489,7 @@ using namespace station_detail;
 						+ " store are the same store '" + streamIds[stream]
 						+ "'; the recovery split needs distinct source, treated and concentrate stores");
 			if (!declareWaterStore(streamIds[stream], streamRoles[stream], where,
-				treatment.hazardClass, true))
+				stream == 1 && treatment.releaseToNormalClass ? "normal" : treatment.hazardClass, true))
 				return false;
 		}
 		if (!declareWaterStore(treatment.consumableStoreId, "consumable", where,
@@ -2680,6 +2682,13 @@ using namespace station_detail;
 		for (auto const& crop : settings.cropPopulations) try
 		{
 			auto const where = "Station crop population '" + crop.id + "'";
+			for (auto const& [name, fraction] : crop.irrigationUptakeFractions)
+			{
+				if (name != "nutrientNitrogen" && name != "phosphorus" && name != "potassium")
+					return refuse(where + " irrigationUptakeFractions has unsupported constituent '" + name + "'");
+				if (!std::isfinite(fraction) || fraction < 0 || fraction > 1)
+					return refuse(where + " irrigationUptakeFractions " + name + " must be finite and in [0, 1]");
+			}
 			if (crop.id.empty()) return refuse("Station crop population id must not be empty");
 			if (crop.id.size() > MaxStationStoreIdLength)
 				return refuse("Station crop population id exceeds "

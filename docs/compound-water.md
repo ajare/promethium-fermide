@@ -1,10 +1,12 @@
-# Compound water: full-removal treatment (#740)
+# Compound water
 
-Water treatment source, treated and concentrate ports accept plain or compound
-mass stores. Other process ports keep their existing contracts; fractional
-removal, consumer quality gates and producer carry-over belong to later #739
-slices. No new fields or schema migration are required. The reference station
-remains unchanged.
+Water ports accept plain or compound mass stores, with live quality gates,
+per-constituent treatment removal and producer carry-over (#739–#744).
+Schema 101 adds opt-in selective crop irrigation and clearance-only release to
+normal class. Older documents retain their existing behavior and defaults;
+the reference station remains unchanged.
+
+## Full-removal treatment (#740)
 
 The existing composition editor seeds a compound store's constituent ledger.
 Treatment draws the **actual blend**, including previous deposits and dilution:
@@ -41,11 +43,14 @@ inspector telemetry and the live Resource stores section.
 
 Load either standalone configuration in Station systems and Apply:
 
-- `resources/station-systems/scenarios/water-greywater.yaml`: full removal of
+- `resources/station-systems/scenarios/water-greywater.yaml`: clearing its
+  `removalFractions` map selects full removal of
   100 kg/day with 0.2% organics and 85% water recovery gives **84.83 kg/day pure
   treated water** and **15.17 kg/day concentrate**, containing all 0.2 kg/day
   organics plus 14.97 kg/day rejected water. These are the exact mass-based
   specification equations, rather than the rounded 85/15 ticket shorthand.
+  The shipped 95% organic-removal setting instead gives 84.84 kg/day treated
+  with 0.01 kg/day organics, and 15.16 kg/day concentrate with 0.19 kg/day organics.
 - `resources/station-systems/scenarios/water-legacy-anchor.yaml`: all-plain legacy
   split gives exactly 85 kg/day treated and 15 kg/day held concentrate, at the
   same energy and consumable dose. Pure water at recovery ratio 1 produces zero
@@ -57,3 +62,87 @@ Focused Release CTest coverage: `station-compoundWater*` and
 connection regressions. World YAML/binary reloads reproduce exact tick snapshots;
 the editor workflow covers open, composition edit, undo/redo, draft serialization,
 Apply and live inspector telemetry.
+
+## Selective crop irrigation (#744)
+
+A nonempty `cropPopulations[].irrigationUptakeFractions` map opts in. Keys are
+`nutrientNitrogen`, `phosphorus`, and `potassium`; finite fractions lie in [0, 1].
+For each kilogram of **pure water** required by photosynthesis and transpiration,
+the current dry-to-water ratio determines the accompanying dissolved load. The
+specified fraction is absorbed, capped at growth's demand for that nutrient;
+separate fertilizer ports supply the deficit. Omitted species, unabsorbed N/P/K,
+organics, atmospheric nitrogen and other minerals remain in the loop ledger.
+A nonempty all-zero map retains every salt. Empty/absent maps preserve the old
+homogeneous irrigation draw. Plain water remains supported; a zero-water stream
+cannot grow crops. All coefficients are provisional, not validated agronomy.
+
+Pure water reaches the atmosphere as transpiration; the photosynthetic water
+share participates in the existing biomass stoichiometry. Uptake from irrigation
+is counted in living nutrients, not in addition to fertilizer demand.
+Snapshots/Lua expose `lastIrrigationUptake` and `irrigationUptake` (kg N/P/K);
+existing nutrient-draw counters now include both sources in selective mode,
+while `waterDrawnKg` counts pure water. The Flow inspector displays the irrigation
+uptake separately and subtracts it from fertilizer-port actuals.
+
+### Hydroponic salt accumulation
+
+Open `resources/station-systems/scenarios/water-hydroponics.yaml` in Station
+systems, Apply, and Run for **300 simulation seconds (0.003473 days)**.
+This deliberately accelerated, finite-tank stress rig is not a day-scale crop
+calibration: constant growth potential is 0.001 kg/s and pure transpiration is
+0.01 kg/s. Circulation through the 1 kg hydroponic reservoir is idealized; the
+model accounts for loaded make-up, selective uptake, pure vapour and purge, not
+an explicit pipe transit time. Make-up tops up available tank headroom. The
+atmosphere retains the vapour; no unmodeled condensate return is claimed.
+
+| At 300 s | Purge enabled | Purge transfer removed |
+| --- | ---: | ---: |
+| Other-mineral concentration, kg/kg | 0.000911686390 | 0.002121767843 |
+| Growth scale | 1 | 0.565581828384 |
+| Cumulative dry growth, kg | 0.300000015646 | 0.243385121536 |
+| First observed quality throttle | none | 96 s (0.001112 days) |
+
+The crop tolerance is 0.0012 kg/kg other minerals. Purge holds concentration below
+that gate for the entire horizon, with less than 0.000003 kg/kg change over the
+last minute. To reproduce failure, **remove only the purge Transfer** from the
+draft, Apply and confirm Reset; continuous Transfer rates cannot be zero.
+Growth binds on `water quality: otherMinerals above crop tolerance` before
+150 s (0.001737 days). The test closes N/P/K/minerals across all stores, living
+biomass and purge, and water across stores, atmosphere and photosynthetic uptake
+at each one-second observation, in addition to the per-tick constituent audit.
+
+## Clearance-only hazard conversion (#744)
+
+`waterTreatments[].releaseToNormalClass: true` is an explicit opt-in. Only a
+hazardous treatment may select it: its treated outlet must be normal-class,
+while source, concentrate, treatment media and clearance kit remain hazardous.
+The process is constrained by available clearance and electrical supply before
+moving feed; only full-dose, cleared product crosses into the normal outlet.
+Uncleared feed stays in the hazardous source, **not** a normal-class unqualified
+inventory. The default false retains #412's same-class release/held-output
+behavior. This exception applies to treatment only: generic Transfers never
+cross hazard classes in either direction, even when their composition matches.
+
+Open `resources/station-systems/scenarios/water-contamination.yaml`, Apply and
+Run for **10 seconds**. Loaded hazardous ingress propagates into the hazardous
+loop. Its crew/crop acceptance probes have zero dissolved tolerance and name
+`water quality: total dissolved above crew/crop tolerance`; they consume no
+loaded water. Normal consumers cannot be wired directly to the hazardous loop
+(validation refuses the hazard mismatch), and use only the cleared normal
+outlet. Normal and hazardous atmospheres stay separate. These are acceptance
+probes, not a crew-exposure/health model.
+
+After one startup tick, treatment processes 0.499166692700 kg over 10 seconds,
+returning 0.395340020619 kg pure normal-class water and retaining
+0.103826672082 kg hazardous concentrate. Its organic load is retained wholly
+on the hazardous side; clearance is consumed and normal crew/crops receive
+water. Set the clearance Store's starting usable inventory to zero and
+Apply/Reset: processed and normal-output masses stay zero, with
+`release clearance unavailable: hazardous feed retained`. No-power operation
+also leaves normal output empty. No cross-hazard Transfer is present or allowed.
+
+Focused Release checks: `station-waterSelectiveIrrigation`,
+`station-waterHydroponics`, `station-waterContamination`, and
+`station-editor-water-flagships`. They use public World ticks/snapshots, C++/Lua
+accounting, YAML/binary World replay, and real editor Open/edit/undo/redo,
+configuration serialization and Apply/reset paths.

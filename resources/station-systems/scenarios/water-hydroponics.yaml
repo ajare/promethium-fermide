@@ -1,0 +1,105 @@
+# #744: accelerated hydroponic stress rig, not agronomic rate calibration.
+# Load in Station systems, Apply, Run. Real simulation seconds, no time rescaling.
+# Purge 0.02 kg/s; loaded make-up tops up the finite 1 kg loop tank.
+# Crop growth potential 0.001 kg/s, pure transpiration 0.01 kg/s.
+# N/P/K uptake fractions 0.1 of the dissolved load accompanying pure water;
+# uptake is capped by growth demand; fertilizer ports supply the deficit.
+# Other minerals are retained. Gate: otherMinerals <= 0.0012 kg/kg.
+# Purge enabled: concentration approaches ~0.000913 kg/kg through 300 s.
+# Remove only the purge transfer: gate binds before
+# 150 s (0.001737 days); growth throttles with a named quality limiter.
+# Horizon 300 s = 0.003473 days. See docs/compound-water.md for actuals.
+schemaVersion: 101
+stationSystems:
+  enabled: true
+  observationIntervalSeconds: 1
+  trendRetentionSeconds: 600
+  dispatchMode: manual
+  stores:
+  - id: loop
+    materialId: water
+    unit: kg
+    capacity: 1
+    startingQualified: 1
+    startingUnqualified: 0
+    hazardClass: normal
+    composition: {moisture: 0.999, nutrientNitrogen: 0.2, atmosphericNitrogen: 0, phosphorus: 0.1, potassium: 0.1, otherMinerals: 0.6, energyKJPerKgDry: 0}
+  - id: makeup
+    materialId: water
+    unit: kg
+    capacity: 100
+    startingQualified: 100
+    startingUnqualified: 0
+    hazardClass: normal
+    composition: {moisture: 0.999, nutrientNitrogen: 0.2, atmosphericNitrogen: 0, phosphorus: 0.1, potassium: 0.1, otherMinerals: 0.6, energyKJPerKgDry: 0}
+  - id: purge
+    materialId: water
+    unit: kg
+    capacity: 100
+    startingQualified: 0
+    startingUnqualified: 0
+    hazardClass: normal
+    composition: {moisture: 0.999, nutrientNitrogen: 0.2, atmosphericNitrogen: 0, phosphorus: 0.1, potassium: 0.1, otherMinerals: 0.6, energyKJPerKgDry: 0}
+  - {id: N, unit: kg, capacity: 10, startingQualified: 10, startingUnqualified: 0, hazardClass: normal, composition: {moisture: 0, nutrientNitrogen: 1, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 0}}
+  - {id: P, unit: kg, capacity: 10, startingQualified: 10, startingUnqualified: 0, hazardClass: normal, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 1, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 0}}
+  - {id: K, unit: kg, capacity: 10, startingQualified: 10, startingUnqualified: 0, hazardClass: normal, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 1, otherMinerals: 0, energyKJPerKgDry: 0}}
+  - {id: minerals, unit: kg, capacity: 10, startingQualified: 10, startingUnqualified: 0, hazardClass: normal, composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 1, energyKJPerKgDry: 0}}
+  - {id: food, unit: kg, capacity: 10, startingQualified: 0, startingUnqualified: 0, hazardClass: normal}
+  - {id: waste, unit: kg, capacity: 10, startingQualified: 0, startingUnqualified: 0, hazardClass: normal}
+  transfers:
+  - {id: purge, sourceId: loop, destinationId: purge, unit: kg, ratePerSecond: 0.02, priority: 1}
+  - {id: makeup, sourceId: makeup, destinationId: loop, unit: kg, ratePerSecond: 1, priority: 0}
+  solarArrays:
+  - id: supply
+    capacityKW: 10
+    illumination: {constantLevel: 1, periodSeconds: 0, segments: []}
+  atmospheres:
+  - id: greenhouse
+    hazardClass: normal
+    volumeM3: 1000000
+    startingOxygenKg: 200000
+    startingNitrogenKg: 800000
+    startingCarbonDioxideKg: 100
+    startingWaterVapourKg: 0
+    startingTemperatureC: 22
+    thermalCapacityKJPerK: 1000000000
+    minPressureKPa: 1
+    maxPressureKPa: 1000
+    minOxygenPartialPressureKPa: 0
+    maxCarbonDioxidePartialPressureKPa: 1000
+    reservoirId: ''
+    exchangerConductanceKWPerK: 0
+    occupants: 0
+    oxygenUsePerOccupantKgPerS: 0
+    co2ProductionPerOccupantKgPerS: 0
+    sensibleHeatPerOccupantKW: 0
+    moistureAdditionPerOccupantKgPerS: 0
+    leakRateKgPerS: 0
+  cropPopulations:
+  - id: canopy
+    atmosphereId: greenhouse
+    waterStoreId: loop
+    waterQuality: {maxConcentrations: {otherMinerals: 0.0012}}
+    irrigationUptakeFractions: {nutrientNitrogen: 0.1, phosphorus: 0.1, potassium: 0.1}
+    nitrogenStoreId: N
+    phosphorusStoreId: P
+    potassiumStoreId: K
+    mineralsStoreId: minerals
+    composition: {moisture: 0, nutrientNitrogen: 0.1, atmosphericNitrogen: 0, phosphorus: 0.05, potassium: 0.05, otherMinerals: 0.1, energyKJPerKgDry: 3600}
+    growingAreaM2: 10
+    maxBiomassDensityKgPerM2: 2
+    initialBiomassKg: 0.01
+    lampRatedKW: 7.2
+    illumination: {constantLevel: 1, periodSeconds: 0, segments: []}
+    circulationPowerKW: 0
+    growthYieldKgPerKWh: 0.5
+    respirationPerHour: 0
+    transpirationKgPerKgGrowth: 10
+    minGrowingTemperatureC: 10
+    maxGrowingTemperatureC: 35
+    foodStoreId: food
+    wasteStoreId: waste
+    edibleFraction: 0.6
+    harvestTriggerKg: 0
+    harvestFraction: 0.5
+    priority: 1

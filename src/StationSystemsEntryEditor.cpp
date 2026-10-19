@@ -442,6 +442,20 @@ bool renderCropPopulationEntry([[maybe_unused]] core::StationSystemsSettings& dr
 	ImGui::PushItemWidth(220);
 	renderIdentity(label, crop.id);
 	renderWaterQuality(crop.waterQuality, label);
+	bool selectiveIrrigation = !crop.irrigationUptakeFractions.empty();
+	if (ImGui::Checkbox((label + " selective irrigation").c_str(), &selectiveIrrigation))
+	{
+		if (selectiveIrrigation) crop.irrigationUptakeFractions = {{"nutrientNitrogen", 0}, {"phosphorus", 0}, {"potassium", 0}};
+		else crop.irrigationUptakeFractions.clear();
+	}
+	if (selectiveIrrigation)
+		for (auto const* name : {"nutrientNitrogen", "phosphorus", "potassium"})
+		{
+			auto const found = crop.irrigationUptakeFractions.find(name);
+			double fraction = found == crop.irrigationUptakeFractions.end() ? 0 : found->second;
+			if (ImGui::InputDouble((label + " irrigation uptake " + name).c_str(), &fraction, 0, 0, "%.6f"))
+				crop.irrigationUptakeFractions[name] = fraction;
+		}
 	char cropAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cropAtmosphereBuffer, crop.atmosphereId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " atmosphere").c_str(),
@@ -823,6 +837,7 @@ bool renderWaterTreatmentEntry([[maybe_unused]] core::StationSystemsSettings& dr
 	if (ImGui::InputText((label + " hazard class").c_str(),
 		treatmentHazardBuffer, sizeof(treatmentHazardBuffer)))
 		treatment.hazardClass = treatmentHazardBuffer;
+	ImGui::Checkbox((label + " release to normal class").c_str(), &treatment.releaseToNormalClass);
 	char treatmentSourceBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(treatmentSourceBuffer, treatment.sourceStoreId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " raw water store").c_str(),

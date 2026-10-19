@@ -416,10 +416,21 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 			warn(out, p.lastGrowthLimiter); warn(out, p.lastRespirationLimiter);
 			if (!p.disabled && !p.temperatureEligible) warn(out, "Temperature outside growing range");
 			if (p.dead) warn(out, "Population dead", true);
-			if constexpr (requires { p.lastTranspiredKg; }) port("Water in", p.lastAssimilationWaterKg + p.lastTranspiredKg);
+			double irrigationN = 0, irrigationP = 0, irrigationK = 0;
+			if constexpr (requires { p.lastIrrigationUptake; })
+			{
+				for (auto const& [name, mass] : p.lastIrrigationUptake)
+				{
+					if (name == "nutrientNitrogen") irrigationN = mass;
+					if (name == "phosphorus") irrigationP = mass;
+					if (name == "potassium") irrigationK = mass;
+					out.details.push_back("Irrigation uptake " + name + " " + rate(mass));
+				}
+			}
+			if constexpr (requires { p.lastTranspiredKg; }) port("Water in", p.lastAssimilationWaterKg + p.lastTranspiredKg + irrigationN + irrigationP + irrigationK);
 			else port("Water in", p.lastAssimilationWaterKg + p.lastEvaporatedKg);
-			port("Nitrogen in", p.lastNitrogenDrawnKg);
-			port("Phosphorus in", p.lastPhosphorusDrawnKg); port("Potassium in", p.lastPotassiumDrawnKg); port("Minerals in", p.lastMineralsDrawnKg);
+			port("Nitrogen in", p.lastNitrogenDrawnKg - irrigationN);
+			port("Phosphorus in", p.lastPhosphorusDrawnKg - irrigationP); port("Potassium in", p.lastPotassiumDrawnKg - irrigationK); port("Minerals in", p.lastMineralsDrawnKg);
 			port("Food out", p.lastFoodAddedKg); port("Waste out", p.lastWasteAddedKg + p.lastDeadResidueToWasteKg);
 			port("Oxygen uptake", p.lastRespirationO2DrawnKg); port("CO2 return", p.lastRespirationCo2ReturnedKg);
 			if constexpr (requires { p.lastTranspiredKg; }) port("Moisture return", p.lastTranspiredKg + p.lastRespirationWaterKg);

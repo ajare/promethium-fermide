@@ -2335,7 +2335,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         .. streamRoles[other] .. ' stores must be distinct')
             end
             streams[stream] = declareWaterStore(streamIds[stream], streamRoles[stream],
-                treatment.hazardClass, true)
+                stream == 2 and treatment.releaseToNormalClass and 'normal' or treatment.hazardClass, true)
         end
         local removals = treatment.removalFractions or {}
         local species = {dryOrganics=true, nutrientNitrogen=true, atmosphericNitrogen=true,
@@ -2356,6 +2356,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 end
             end
         end
+        assert(not treatment.releaseToNormalClass or treatment.hazardClass == 'hazardous',
+            'normal release requires hazardous clearance-gated treatment')
         local consumable = declareWaterStore(treatment.consumableStore, 'consumable',
             treatment.hazardClass, true)
         -- Release clearance (#412): a hazardous-class treatment must
@@ -2386,6 +2388,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         object.water_treatments[index] = {
             id = treatment.id,
             hazardClass = treatment.hazardClass,
+            releaseToNormalClass = treatment.releaseToNormalClass or false,
             source = streams[1], treated = streams[2], concentrate = streams[3],
             consumable = consumable,
             clearance = clearance,
@@ -3113,6 +3116,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         assert(type(crop.id) == 'string' and #crop.id > 0, 'crop population needs an id')
         assert(cropIds[crop.id] == nil, 'crop population id is duplicated')
         cropIds[crop.id] = true
+        for name, fraction in pairs(crop.irrigationUptakeFractions or {}) do
+            assert(name == 'nutrientNitrogen' or name == 'phosphorus' or name == 'potassium',
+                'unsupported irrigation uptake constituent: ' .. name)
+            assert(isFinite(fraction) and fraction >= 0 and fraction <= 1,
+                'irrigation uptake fraction must be finite and in [0, 1]')
+        end
         local compartment = atmosphere_by_id[crop.atmosphere]
         assert(compartment ~= nil, 'crop population atmosphere compartment is unknown')
         local uptakeRoles = { 'irrigation water', 'nitrogen', 'phosphorus',
@@ -3286,6 +3295,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             growthYieldKgPerKWh = crop.growthYieldKgPerKWh,
             respirationPerHour = crop.respirationPerHour,
             transpirationKgPerKgGrowth = crop.transpirationKgPerKgGrowth,
+            irrigationUptakeFractions = crop.irrigationUptakeFractions or {},
+            lastIrrigationUptake = {}, irrigationUptake = {},
             waterQualitySettings = crop.waterQuality,
             minGrowingTemperatureC = crop.minGrowingTemperatureC,
             maxGrowingTemperatureC = crop.maxGrowingTemperatureC,
@@ -6355,6 +6366,16 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     constrain(drawableConsumable, kitDemand,
                         "treatment consumable store '" .. consumable.id .. "' is exhausted")
                 end
+                if treatment.releaseToNormalClass then
+                    constrain(generation + batteryDeliverableKW(self, fixed_hours),
+                        treatment.throughputKgPerS * treatment.specificEnergyKWhPerKg * 3600,
+                        'treatment energy unavailable: hazardous feed retained')
+                    if not sharedKit then
+                        constrain(math.max(0, treatment.clearance.qualified - treatment.clearance.protected_reserve),
+                            treatment.clearancePerKg * fullKg * treatedFraction,
+                            'release clearance unavailable: hazardous feed retained')
+                    end
+                end
                 if waterFraction <= 0 then scale = 0; limiter = 'stream carries no water' end
                 if scale < 0 then scale = 0 end
                 if scale > 1 then scale = 1 end
@@ -7778,6 +7799,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             crop.lastGrowthPotential = 0
             crop.lastGrowthScale = 0
             crop.lastGrowthLimiter = ''
+            crop.lastIrrigationUptake = {}
             crop.lastGrowthKg = 0
             crop.lastCo2DrawnKg = 0
             crop.lastAssimilationWaterKg = 0
@@ -7854,6 +7876,22 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 local assimilationWaterPerKgGrowth = organicFraction
                     * PHOTOSYNTHESIS_WATER_KG_PER_ORGANIC_KG
                 local oxygenPerKgGrowth = organicFraction * PHOTOSYNTHESIS_O2_KG_PER_ORGANIC_KG
+                local selective = next(crop.irrigationUptakeFractions) ~= nil
+                local waterPerGrowth = assimilationWaterPerKgGrowth + crop.transpirationKgPerKgGrowth
+                local blend = crop.water.composition and storeComposition(crop.water) or {}
+                local waterFraction = crop.water.composition and blend.moisture or 1
+                local function uptake(name, required)
+                    if waterFraction <= 0 then return 0 end
+                    return math.min(required, waterPerGrowth * (1 - waterFraction) / waterFraction
+                        * (blend[name] or 0) * (crop.irrigationUptakeFractions[name] or 0))
+                end
+                local irrigationN = uptake('nutrientNitrogen', composition.nutrientNitrogen)
+                local irrigationP = uptake('phosphorus', composition.phosphorus)
+                local irrigationK = uptake('potassium', composition.potassium)
+                local irrigationPerGrowth = waterPerGrowth + irrigationN + irrigationP + irrigationK
+                local nitrogenPerGrowth = composition.nutrientNitrogen - irrigationN
+                local phosphorusPerGrowth = composition.phosphorus - irrigationP
+                local potassiumPerGrowth = composition.potassium - irrigationK
                 local drawableWater = math.max(0,
                     crop.water.qualified - crop.water.protected_reserve)
                 local drawableNitrogen = math.max(0,
@@ -7902,24 +7940,24 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     constrain(math.max(0, compartment.carbonDioxide),
                         crop.lastGrowthPotential * co2PerKgGrowth,
                         "compartment '" .. compartment.id .. "' holds no carbon dioxide to fix")
+                    if selective then
+                        constrain(toKg(crop.water.unit, drawableWater) * waterFraction,
+                            crop.lastGrowthPotential * waterPerGrowth, 'stream carries no drawable water')
+                    end
                     constrain(drawableWater,
-                        fromKg(crop.water.unit, crop.lastGrowthPotential
-                            * (assimilationWaterPerKgGrowth + crop.transpirationKgPerKgGrowth)),
+                        fromKg(crop.water.unit, crop.lastGrowthPotential * irrigationPerGrowth),
                         "irrigation water store '" .. crop.water.id
                             .. "' has nothing drawable above its protected reserve")
                     constrain(drawableNitrogen,
-                        fromKg(crop.nitrogen.unit, crop.lastGrowthPotential
-                            * composition.nutrientNitrogen),
+                        fromKg(crop.nitrogen.unit, crop.lastGrowthPotential * nitrogenPerGrowth),
                         "nitrogen store '" .. crop.nitrogen.id
                             .. "' has nothing drawable above its protected reserve")
                     constrain(drawablePhosphorus,
-                        fromKg(crop.phosphorus.unit, crop.lastGrowthPotential
-                            * composition.phosphorus),
+                        fromKg(crop.phosphorus.unit, crop.lastGrowthPotential * phosphorusPerGrowth),
                         "phosphorus store '" .. crop.phosphorus.id
                             .. "' has nothing drawable above its protected reserve")
                     constrain(drawablePotassium,
-                        fromKg(crop.potassium.unit, crop.lastGrowthPotential
-                            * composition.potassium),
+                        fromKg(crop.potassium.unit, crop.lastGrowthPotential * potassiumPerGrowth),
                         "potassium store '" .. crop.potassium.id
                             .. "' has nothing drawable above its protected reserve")
                     constrain(drawableMinerals,
@@ -7947,16 +7985,17 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 local assimilationWaterKg = growthKg * assimilationWaterPerKgGrowth
                 local transpiredKg = growthKg * crop.transpirationKgPerKgGrowth
                 local irrigationUnits = math.min(
-                    fromKg(crop.water.unit, assimilationWaterKg + transpiredKg), drawableWater)
+                    fromKg(crop.water.unit, selective and growthKg * irrigationPerGrowth
+                        or assimilationWaterKg + transpiredKg), drawableWater)
                 local irrigationActualKg = toKg(crop.water.unit, irrigationUnits)
                 local nitrogenUnits = math.min(
-                    fromKg(crop.nitrogen.unit, growthKg * composition.nutrientNitrogen),
+                    fromKg(crop.nitrogen.unit, growthKg * nitrogenPerGrowth),
                     drawableNitrogen)
                 local phosphorusUnits = math.min(
-                    fromKg(crop.phosphorus.unit, growthKg * composition.phosphorus),
+                    fromKg(crop.phosphorus.unit, growthKg * phosphorusPerGrowth),
                     drawablePhosphorus)
                 local potassiumUnits = math.min(
-                    fromKg(crop.potassium.unit, growthKg * composition.potassium),
+                    fromKg(crop.potassium.unit, growthKg * potassiumPerGrowth),
                     drawablePotassium)
                 local mineralsUnits = math.min(
                     fromKg(crop.minerals.unit, growthKg * composition.otherMinerals),
@@ -7990,10 +8029,25 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 -- #601: each uptake draw spends the material the store
                 -- actually holds, drift included, measured before the
                 -- draw; plain stores contribute nothing to the ledger.
+                local irrigationActual
+                if selective then
+                    irrigationActual = crop.water.composition and {water = assimilationWaterKg + transpiredKg,
+                        nutrientNitrogen = growthKg * irrigationN, phosphorus = growthKg * irrigationP,
+                        potassium = growthKg * irrigationK} or {}
+                    crop.lastIrrigationUptake = {nutrientNitrogen = growthKg * irrigationN,
+                        phosphorus = growthKg * irrigationP, potassium = growthKg * irrigationK}
+                    addLedger(crop.irrigationUptake, crop.lastIrrigationUptake, 1)
+                    if crop.water.composition then
+                        crop.water.drift = crop.water.drift or {}
+                        addConstituents(crop.water.drift, crop.water.composition, irrigationActualKg, 1)
+                        addLedger(crop.water.drift, irrigationActual, -1)
+                    end
+                else
+                    irrigationActual = drawStoreActual(crop.water,
+                        toKg(crop.water.unit, crop.water.qualified + crop.water.unqualified), irrigationActualKg)
+                end
                 local uptakeDrawn = {
-                    drawStoreActual(crop.water,
-                        toKg(crop.water.unit, crop.water.qualified + crop.water.unqualified),
-                        irrigationActualKg),
+                    irrigationActual,
                     drawStoreActual(crop.nitrogen,
                         toKg(crop.nitrogen.unit, crop.nitrogen.qualified
                             + crop.nitrogen.unqualified),
@@ -8023,11 +8077,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 -- total.
                 crop.livingConstituents.nutrientNitrogenKg =
                     crop.livingConstituents.nutrientNitrogenKg
-                    + toKg(crop.nitrogen.unit, nitrogenUnits)
+                    + toKg(crop.nitrogen.unit, nitrogenUnits) + growthKg * irrigationN
                 crop.livingConstituents.phosphorusKg = crop.livingConstituents.phosphorusKg
-                    + toKg(crop.phosphorus.unit, phosphorusUnits)
+                    + toKg(crop.phosphorus.unit, phosphorusUnits) + growthKg * irrigationP
                 crop.livingConstituents.potassiumKg = crop.livingConstituents.potassiumKg
-                    + toKg(crop.potassium.unit, potassiumUnits)
+                    + toKg(crop.potassium.unit, potassiumUnits) + growthKg * irrigationK
                 crop.livingConstituents.mineralsKg = crop.livingConstituents.mineralsKg
                     + toKg(crop.minerals.unit, mineralsUnits)
                 settleLivingOrganic(crop.livingConstituents, crop.livingBiomassKg)
@@ -8245,9 +8299,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 crop.lastGrowthKg = growthKg
                 crop.lastCo2DrawnKg = co2DrawnKg
                 crop.lastAssimilationWaterKg = assimilationWaterKg
-                crop.lastNitrogenDrawnKg = toKg(crop.nitrogen.unit, nitrogenUnits)
-                crop.lastPhosphorusDrawnKg = toKg(crop.phosphorus.unit, phosphorusUnits)
-                crop.lastPotassiumDrawnKg = toKg(crop.potassium.unit, potassiumUnits)
+                crop.lastNitrogenDrawnKg = toKg(crop.nitrogen.unit, nitrogenUnits) + growthKg * irrigationN
+                crop.lastPhosphorusDrawnKg = toKg(crop.phosphorus.unit, phosphorusUnits) + growthKg * irrigationP
+                crop.lastPotassiumDrawnKg = toKg(crop.potassium.unit, potassiumUnits) + growthKg * irrigationK
                 crop.lastMineralsDrawnKg = toKg(crop.minerals.unit, mineralsUnits)
                 crop.lastOxygenReleasedKg = oxygenReleasedKg
                 crop.lastTranspiredKg = transpiredKg
@@ -8260,12 +8314,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 crop.lastHeatIntoCompartmentKW = heatIntoCompartmentKJ / fixed_seconds
                 crop.growthKg = crop.growthKg + growthKg
                 crop.co2DrawnKg = crop.co2DrawnKg + co2DrawnKg
-                crop.waterDrawnKg = crop.waterDrawnKg + irrigationActualKg
-                crop.nitrogenDrawnKg = crop.nitrogenDrawnKg + toKg(crop.nitrogen.unit, nitrogenUnits)
-                crop.phosphorusDrawnKg = crop.phosphorusDrawnKg
-                    + toKg(crop.phosphorus.unit, phosphorusUnits)
-                crop.potassiumDrawnKg = crop.potassiumDrawnKg
-                    + toKg(crop.potassium.unit, potassiumUnits)
+                crop.waterDrawnKg = crop.waterDrawnKg + (selective and assimilationWaterKg + transpiredKg or irrigationActualKg)
+                crop.nitrogenDrawnKg = crop.nitrogenDrawnKg + crop.lastNitrogenDrawnKg
+                crop.phosphorusDrawnKg = crop.phosphorusDrawnKg + crop.lastPhosphorusDrawnKg
+                crop.potassiumDrawnKg = crop.potassiumDrawnKg + crop.lastPotassiumDrawnKg
                 crop.mineralsDrawnKg = crop.mineralsDrawnKg
                     + toKg(crop.minerals.unit, mineralsUnits)
                 crop.oxygenReleasedKg = crop.oxygenReleasedKg + oxygenReleasedKg

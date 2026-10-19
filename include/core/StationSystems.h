@@ -1035,6 +1035,9 @@ namespace core
 		"dryOrganics", "nutrientNitrogen", "atmosphericNitrogen", "phosphorus", "potassium", "otherMinerals"};
 	struct WaterTreatmentSettings
 	{
+		// Explicit clearance-only hazard conversion; uncleared feed stays
+		// in the hazardous source, never in a normal-class held inventory.
+		bool releaseToNormalClass{false};
 		std::string id;
 		std::string hazardClass;             // normal or hazardous
 		std::string sourceStoreId;           // raw water drawn from here
@@ -1575,6 +1578,11 @@ namespace core
 	// window, or start above the declared capacity.
 	struct CropPopulationSettings
 	{
+		// Nonempty opts into selective irrigation: take pure water and the
+		// declared fraction of dissolved N/P/K accompanying that water,
+		// capped by growth's nutrient demand. Remaining salts stay in the
+		// loop; separate fertilizer ports supply the deficit. Empty is legacy.
+		std::map<std::string, double> irrigationUptakeFractions;
 		std::string id;
 		std::string atmosphereId;             // compartment the canopy exchanges gas and heat with
 		WaterQualitySettings waterQuality;
@@ -3353,6 +3361,7 @@ namespace core
 	// accounted as retained material pending a disposal capability.
 	struct StationWaterTreatmentSnapshot
 	{
+		bool releaseToNormalClass{false};
 		std::map<std::string, double> removalFractions; // authored overrides; omitted dry species = 1
 		// kg per constituent (water included); the energy slot is kJ.
 		std::map<std::string, double> lastRemovedConstituents, lastPassedConstituents;
@@ -3794,6 +3803,9 @@ namespace core
 	// residue to waste or books it as explicit uncontained loss.
 	struct StationCropPopulationSnapshot
 	{
+		// N/P/K supplied by selective irrigation (kg), not fertilizer ports.
+		std::map<std::string, double> irrigationUptakeFractions;
+		std::map<std::string, double> lastIrrigationUptake, irrigationUptake;
 		StationWaterQualitySnapshot waterQuality;
 		std::string id;
 		std::string atmosphereId;

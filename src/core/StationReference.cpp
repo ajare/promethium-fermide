@@ -515,6 +515,7 @@ namespace core
 				serializer.beginMap("");
 				serializer.writeString("id", treatment.id);
 				serializer.writeString("hazardClass", treatment.hazardClass);
+				if (treatment.releaseToNormalClass) serializer.writeBool("releaseToNormalClass", true);
 				serializer.writeString("sourceStoreId", treatment.sourceStoreId);
 				serializer.writeString("treatedStoreId", treatment.treatedStoreId);
 				serializer.writeString("concentrateStoreId", treatment.concentrateStoreId);
@@ -748,6 +749,13 @@ namespace core
 				serializer.writeString("atmosphereId", crop.atmosphereId);
 				serializer.writeString("waterStoreId", crop.waterStoreId);
 				writeWaterQuality(serializer, crop.waterQuality);
+				if (!crop.irrigationUptakeFractions.empty())
+				{
+					serializer.beginMap("irrigationUptakeFractions");
+					for (auto const& [name, fraction] : crop.irrigationUptakeFractions)
+						serializer.writeDouble(name, fraction);
+					serializer.endMap();
+				}
 				serializer.writeString("nitrogenStoreId", crop.nitrogenStoreId);
 				serializer.writeString("phosphorusStoreId", crop.phosphorusStoreId);
 				serializer.writeString("potassiumStoreId", crop.potassiumStoreId);
@@ -1569,6 +1577,11 @@ namespace core
 				WaterTreatmentSettings treatment;
 				treatment.id = serializer.readString("id");
 				treatment.hazardClass = serializer.readString("hazardClass");
+				if (serializer.hasField("releaseToNormalClass"))
+				{
+					if (version < 101) throw SerializationException("Normal-class treatment release requires schema 101");
+					treatment.releaseToNormalClass = serializer.readBool("releaseToNormalClass");
+				}
 				treatment.sourceStoreId = serializer.readString("sourceStoreId");
 				treatment.treatedStoreId = serializer.readString("treatedStoreId");
 				treatment.concentrateStoreId = serializer.readString("concentrateStoreId");
@@ -1855,6 +1868,14 @@ namespace core
 				crop.atmosphereId = serializer.readString("atmosphereId");
 				crop.waterStoreId = serializer.readString("waterStoreId");
 				readWaterQuality(serializer, crop.waterQuality);
+				if (serializer.hasField("irrigationUptakeFractions"))
+				{
+					if (version < 101) throw SerializationException("Selective crop irrigation requires schema 101");
+					auto const keys = serializer.mapKeys("irrigationUptakeFractions");
+					serializer.beginMap("irrigationUptakeFractions");
+					for (auto const& name : keys) crop.irrigationUptakeFractions[name] = serializer.readDouble(name);
+					serializer.endMap();
+				}
 				crop.nitrogenStoreId = serializer.readString("nitrogenStoreId");
 				crop.phosphorusStoreId = serializer.readString("phosphorusStoreId");
 				crop.potassiumStoreId = serializer.readString("potassiumStoreId");
@@ -2152,8 +2173,8 @@ namespace core
 			// systems, the upper bound is the newest schema this reader
 			// knows. A reference outside that range is refused rather than
 			// read under assumptions the reader has not been checked for.
-			if (document.schemaVersion < 65 || document.schemaVersion > 100)
-				return refuse("Reference station schema version must be from 65 to 100");
+			if (document.schemaVersion < 65 || document.schemaVersion > 101)
+				return refuse("Reference station schema version must be from 65 to 101");
 			if (serializer->hasField("provenance"))
 			{
 				serializer->beginArray("provenance");

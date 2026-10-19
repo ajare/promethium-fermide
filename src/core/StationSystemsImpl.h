@@ -1035,6 +1035,7 @@ using namespace station_detail;
 		// chemical + respired heat + heat into the compartment.
 		struct CropPopulationState
 		{
+			ConstituentLedger lastIrrigationUptake, irrigationUptake;
 			StationWaterQualitySnapshot waterQuality;
 			CropPopulationSettings authored;
 			size_t atmosphereIndex{0};

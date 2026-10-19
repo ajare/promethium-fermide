@@ -54,6 +54,7 @@ namespace core
 			crop.lastGrowthPotentialKg = 0.0;
 			crop.lastGrowthScale = 0.0;
 			crop.lastGrowthLimiter.clear();
+			crop.lastIrrigationUptake.clear();
 			crop.lastGrowthKg = 0.0;
 			crop.lastCo2DrawnKg = 0.0;
 			crop.lastAssimilationWaterKg = 0.0;
@@ -150,6 +151,22 @@ namespace core
 			auto const assimilationWaterPerKgGrowth = organicFraction
 				* StationPhotosynthesisWaterPerOrganicKg;
 			auto const oxygenPerKgGrowth = organicFraction * StationPhotosynthesisO2PerOrganicKg;
+			auto const selective = !crop.authored.irrigationUptakeFractions.empty();
+			auto const waterPerGrowth = assimilationWaterPerKgGrowth + crop.authored.transpirationKgPerKgGrowth;
+			auto const blend = water.authored.composition ? storeComposition(crop.waterStoreIndex) : ResourceCompositionSettings{};
+			auto const waterFraction = water.authored.composition ? blend.moisture : 1.0;
+			auto const uptake = [&](char const* name, double dryFraction, double required) {
+				auto const found = crop.authored.irrigationUptakeFractions.find(name);
+				return found == crop.authored.irrigationUptakeFractions.end() || waterFraction <= 0 ? 0.0
+					: std::min(required, waterPerGrowth * (1 - waterFraction) / waterFraction * dryFraction * found->second);
+			};
+			auto const irrigationN = uptake("nutrientNitrogen", blend.nutrientNitrogen, composition.nutrientNitrogen);
+			auto const irrigationP = uptake("phosphorus", blend.phosphorus, composition.phosphorus);
+			auto const irrigationK = uptake("potassium", blend.potassium, composition.potassium);
+			auto const irrigationPerGrowth = waterPerGrowth + irrigationN + irrigationP + irrigationK;
+			auto const nitrogenPerGrowth = composition.nutrientNitrogen - irrigationN;
+			auto const phosphorusPerGrowth = composition.phosphorus - irrigationP;
+			auto const potassiumPerGrowth = composition.potassium - irrigationK;
 			auto const drawableWaterUnits = std::max(0.0,
 				ports.input(crop.waterStoreIndex, qualified[crop.waterStoreIndex] - water.authored.protectedReserve));
 			auto const drawableNitrogenUnits = std::max(0.0,
@@ -202,28 +219,28 @@ namespace core
 				constrain(std::max(0.0, compartment.carbonDioxideKg),
 					crop.lastGrowthPotentialKg * co2PerKgGrowth,
 					"compartment '" + compartment.authored.id + "' holds no carbon dioxide to fix");
+				if (selective)
+					constrain(massToKg(water.authored.unit, std::max(0.0, qualified[crop.waterStoreIndex]
+						- water.authored.protectedReserve)) * waterFraction,
+						crop.lastGrowthPotentialKg * waterPerGrowth, "stream carries no drawable water");
 				constrain(ports.request(crop.waterStoreIndex, drawableWaterUnits, kgToMass(water.authored.unit, crop.lastGrowthPotentialKg
-						* (assimilationWaterPerKgGrowth + crop.authored.transpirationKgPerKgGrowth))),
-					kgToMass(water.authored.unit, crop.lastGrowthPotentialKg
-						* (assimilationWaterPerKgGrowth + crop.authored.transpirationKgPerKgGrowth)),
+						* irrigationPerGrowth)),
+					kgToMass(water.authored.unit, crop.lastGrowthPotentialKg * irrigationPerGrowth),
 					"irrigation water store '" + water.authored.id
 						+ "' has nothing drawable above its protected reserve");
 				constrain(ports.request(crop.nitrogenStoreIndex, drawableNitrogenUnits, kgToMass(nitrogen.authored.unit, crop.lastGrowthPotentialKg
-						* composition.nutrientNitrogen)),
-					kgToMass(nitrogen.authored.unit, crop.lastGrowthPotentialKg
-						* composition.nutrientNitrogen),
+						* nitrogenPerGrowth)),
+					kgToMass(nitrogen.authored.unit, crop.lastGrowthPotentialKg * nitrogenPerGrowth),
 					"nitrogen store '" + nitrogen.authored.id
 						+ "' has nothing drawable above its protected reserve");
 				constrain(ports.request(crop.phosphorusStoreIndex, drawablePhosphorusUnits, kgToMass(phosphorus.authored.unit, crop.lastGrowthPotentialKg
-						* composition.phosphorus)),
-					kgToMass(phosphorus.authored.unit, crop.lastGrowthPotentialKg
-						* composition.phosphorus),
+						* phosphorusPerGrowth)),
+					kgToMass(phosphorus.authored.unit, crop.lastGrowthPotentialKg * phosphorusPerGrowth),
 					"phosphorus store '" + phosphorus.authored.id
 						+ "' has nothing drawable above its protected reserve");
 				constrain(ports.request(crop.potassiumStoreIndex, drawablePotassiumUnits, kgToMass(potassium.authored.unit, crop.lastGrowthPotentialKg
-						* composition.potassium)),
-					kgToMass(potassium.authored.unit, crop.lastGrowthPotentialKg
-						* composition.potassium),
+						* potassiumPerGrowth)),
+					kgToMass(potassium.authored.unit, crop.lastGrowthPotentialKg * potassiumPerGrowth),
 					"potassium store '" + potassium.authored.id
 						+ "' has nothing drawable above its protected reserve");
 				constrain(ports.request(crop.mineralsStoreIndex, drawableMineralsUnits, kgToMass(minerals.authored.unit, crop.lastGrowthPotentialKg
@@ -251,17 +268,17 @@ namespace core
 			auto const assimilationWaterKg = growthKg * assimilationWaterPerKgGrowth;
 			auto const transpiredKg = growthKg * crop.authored.transpirationKgPerKgGrowth;
 			auto const irrigationUnits = std::min(
-				kgToMass(water.authored.unit, assimilationWaterKg + transpiredKg),
+				kgToMass(water.authored.unit, selective ? growthKg * irrigationPerGrowth : assimilationWaterKg + transpiredKg),
 				drawableWaterUnits);
 			auto const irrigationActualKg = massToKg(water.authored.unit, irrigationUnits);
 			auto const nitrogenUnits = std::min(
-				kgToMass(nitrogen.authored.unit, growthKg * composition.nutrientNitrogen),
+				kgToMass(nitrogen.authored.unit, growthKg * nitrogenPerGrowth),
 				drawableNitrogenUnits);
 			auto const phosphorusUnits = std::min(
-				kgToMass(phosphorus.authored.unit, growthKg * composition.phosphorus),
+				kgToMass(phosphorus.authored.unit, growthKg * phosphorusPerGrowth),
 				drawablePhosphorusUnits);
 			auto const potassiumUnits = std::min(
-				kgToMass(potassium.authored.unit, growthKg * composition.potassium),
+				kgToMass(potassium.authored.unit, growthKg * potassiumPerGrowth),
 				drawablePotassiumUnits);
 			auto const mineralsUnits = std::min(
 				kgToMass(minerals.authored.unit, growthKg * composition.otherMinerals),
@@ -277,10 +294,26 @@ namespace core
 			compartment.cropCarbonDioxideDrawnKg += co2DrawnKg;
 			compartment.oxygenKg += oxygenReleasedKg;
 			compartment.cropOxygenAddedKg += oxygenReleasedKg;
+			auto irrigationActual = ConstituentLedger{};
+			if (selective)
+			{
+				if (water.authored.composition) irrigationActual = {{"water", assimilationWaterKg + transpiredKg},
+					{"nutrientNitrogen", growthKg * irrigationN}, {"phosphorus", growthKg * irrigationP},
+					{"potassium", growthKg * irrigationK}};
+				crop.lastIrrigationUptake = {{"nutrientNitrogen", growthKg * irrigationN},
+					{"phosphorus", growthKg * irrigationP}, {"potassium", growthKg * irrigationK}};
+				addLedger(crop.irrigationUptake, crop.lastIrrigationUptake, 1.0);
+				// Rebase drift for the selective draw: unabsorbed salts stay.
+				if (water.authored.composition)
+				{
+					addComposition(stagedDrift[crop.waterStoreIndex], *water.authored.composition, irrigationActualKg, 1.0);
+					addLedger(stagedDrift[crop.waterStoreIndex], irrigationActual, -1.0);
+				}
+			}
+			else irrigationActual = drawStoreActual(crop.waterStoreIndex,
+				massToKg(water.authored.unit, qualified[crop.waterStoreIndex] + unqualified[crop.waterStoreIndex]), irrigationActualKg);
 			auto const uptakeActual = std::array<ConstituentLedger, 5>{
-				drawStoreActual(crop.waterStoreIndex,
-					massToKg(water.authored.unit, qualified[crop.waterStoreIndex]
-						+ unqualified[crop.waterStoreIndex]), irrigationActualKg),
+				irrigationActual,
 				drawStoreActual(crop.nitrogenStoreIndex,
 					massToKg(nitrogen.authored.unit, qualified[crop.nitrogenStoreIndex]
 						+ unqualified[crop.nitrogenStoreIndex]),
@@ -326,11 +359,11 @@ namespace core
 			// inventory records what the canopy really holds instead of a
 			// declared fraction of a changing total.
 			crop.livingConstituents.nutrientNitrogenKg += massToKg(
-				nitrogen.authored.unit, nitrogenUnits);
+				nitrogen.authored.unit, nitrogenUnits) + growthKg * irrigationN;
 			crop.livingConstituents.phosphorusKg += massToKg(
-				phosphorus.authored.unit, phosphorusUnits);
+				phosphorus.authored.unit, phosphorusUnits) + growthKg * irrigationP;
 			crop.livingConstituents.potassiumKg += massToKg(
-				potassium.authored.unit, potassiumUnits);
+				potassium.authored.unit, potassiumUnits) + growthKg * irrigationK;
 			crop.livingConstituents.mineralsKg += massToKg(
 				minerals.authored.unit, mineralsUnits);
 			settleLivingOrganic(crop.livingConstituents, crop.livingBiomassKg);
@@ -577,9 +610,9 @@ namespace core
 			crop.lastGrowthKg = growthKg;
 			crop.lastCo2DrawnKg = co2DrawnKg;
 			crop.lastAssimilationWaterKg = assimilationWaterKg;
-			crop.lastNitrogenDrawnKg = massToKg(nitrogen.authored.unit, nitrogenUnits);
-			crop.lastPhosphorusDrawnKg = massToKg(phosphorus.authored.unit, phosphorusUnits);
-			crop.lastPotassiumDrawnKg = massToKg(potassium.authored.unit, potassiumUnits);
+			crop.lastNitrogenDrawnKg = massToKg(nitrogen.authored.unit, nitrogenUnits) + growthKg * irrigationN;
+			crop.lastPhosphorusDrawnKg = massToKg(phosphorus.authored.unit, phosphorusUnits) + growthKg * irrigationP;
+			crop.lastPotassiumDrawnKg = massToKg(potassium.authored.unit, potassiumUnits) + growthKg * irrigationK;
 			crop.lastMineralsDrawnKg = massToKg(minerals.authored.unit, mineralsUnits);
 			crop.lastOxygenReleasedKg = oxygenReleasedKg;
 			crop.lastTranspiredKg = transpiredKg;
@@ -590,10 +623,10 @@ namespace core
 			crop.lastRespirationWaterKg = respirationWaterKg;
 			crop.growthKg += growthKg;
 			crop.co2DrawnKg += co2DrawnKg;
-			crop.waterDrawnKg += irrigationActualKg;
-			crop.nitrogenDrawnKg += massToKg(nitrogen.authored.unit, nitrogenUnits);
-			crop.phosphorusDrawnKg += massToKg(phosphorus.authored.unit, phosphorusUnits);
-			crop.potassiumDrawnKg += massToKg(potassium.authored.unit, potassiumUnits);
+			crop.waterDrawnKg += selective ? assimilationWaterKg + transpiredKg : irrigationActualKg;
+			crop.nitrogenDrawnKg += crop.lastNitrogenDrawnKg;
+			crop.phosphorusDrawnKg += crop.lastPhosphorusDrawnKg;
+			crop.potassiumDrawnKg += crop.lastPotassiumDrawnKg;
 			crop.mineralsDrawnKg += massToKg(minerals.authored.unit, mineralsUnits);
 			crop.oxygenReleasedKg += oxygenReleasedKg;
 			crop.transpiredKg += transpiredKg;

@@ -795,6 +795,7 @@ namespace core
 		for (auto const& treatment : mImpl->waterTreatments)
 		{
 			StationWaterTreatmentSnapshot treatmentResult;
+			treatmentResult.releaseToNormalClass = treatment.authored.releaseToNormalClass;
 			treatmentResult.removalFractions = treatment.authored.removalFractions;
 			treatmentResult.lastRemovedConstituents = treatment.lastRemovedConstituents;
 			treatmentResult.lastPassedConstituents = treatment.lastPassedConstituents;
@@ -1235,6 +1236,9 @@ namespace core
 		for (auto const& crop : mImpl->cropPopulations)
 		{
 			StationCropPopulationSnapshot cropResult;
+			cropResult.irrigationUptakeFractions = crop.authored.irrigationUptakeFractions;
+			cropResult.lastIrrigationUptake = crop.lastIrrigationUptake;
+			cropResult.irrigationUptake = crop.irrigationUptake;
 			cropResult.waterQuality = crop.waterQuality;
 			cropResult.id = crop.authored.id;
 			cropResult.atmosphereId = crop.authored.atmosphereId;

@@ -1737,8 +1737,15 @@ forms, draft history and configuration/World serialization retain declarations.
 4 kg feed/day yields 0.048 kg recovered N/day and carries 0.006 kg N/day into
 2.666 kg recovered stream/day, leaving 1.40606 kg residue/day. Its N load is
 0.00225056264 kg/kg, below the crop's 0.003 kg/kg acceptance tolerance. Crop
-nutrient uptake retains the existing separate fertilizer ports; accepting
-loaded irrigation does not implicitly substitute dissolved N for that supply.
+nutrient uptake retains the existing separate fertilizer ports by default;
+accepting loaded irrigation does not implicitly substitute dissolved N for that
+supply. Schema 101's explicit `irrigationUptakeFractions` opt-in does support
+selective dissolved N/P/K uptake with unabsorbed salt retention. See
+[the flagship water scenarios](compound-water.md#selective-crop-irrigation-744)
+for the equations, conserved ledgers and documented purge/failure actuals.
+Hazardous treatment may explicitly select `releaseToNormalClass` to return only
+full-dose, clearance-tested product to a normal-class outlet; uncleared feed
+stays hazardous and generic cross-hazard Transfers remain refused.
 The reference station is unchanged. Focused checks: `station-bioconversionCarryover`,
 `station-crews`, and `station-editor-water-carryover` (Open, edit/undo,
 save/load, Apply and public World ticks).

@@ -448,6 +448,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 					lua_createtable(state, 0, 13);
 					lua_pushstring(state, treatment.id.c_str()); lua_setfield(state, -2, "id");
 					lua_pushstring(state, treatment.hazardClass.c_str()); lua_setfield(state, -2, "hazardClass");
+					lua_pushboolean(state, treatment.releaseToNormalClass); lua_setfield(state, -2, "releaseToNormalClass");
 					lua_pushstring(state, treatment.sourceStoreId.c_str()); lua_setfield(state, -2, "sourceStore");
 					lua_pushstring(state, treatment.treatedStoreId.c_str()); lua_setfield(state, -2, "treatedStore");
 					lua_pushstring(state, treatment.concentrateStoreId.c_str()); lua_setfield(state, -2, "concentrateStore");
@@ -686,6 +687,10 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 					lua_pushstring(state, crop.id.c_str()); lua_setfield(state, -2, "id");
 					lua_pushstring(state, crop.atmosphereId.c_str()); lua_setfield(state, -2, "atmosphere");
 					pushWaterQuality(state, crop.waterQuality);
+					lua_createtable(state, 0, static_cast<int>(crop.irrigationUptakeFractions.size()));
+					for (auto const& [name, fraction] : crop.irrigationUptakeFractions)
+					{ lua_pushnumber(state, fraction); lua_setfield(state, -2, name.c_str()); }
+					lua_setfield(state, -2, "irrigationUptakeFractions");
 					lua_pushstring(state, crop.waterStoreId.c_str()); lua_setfield(state, -2, "waterStore");
 					lua_pushstring(state, crop.nitrogenStoreId.c_str()); lua_setfield(state, -2, "nitrogenStore");
 					lua_pushstring(state, crop.phosphorusStoreId.c_str()); lua_setfield(state, -2, "phosphorusStore");

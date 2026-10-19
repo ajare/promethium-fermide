@@ -547,6 +547,15 @@ namespace core
 					constrain(rawKit, kitDemandUnits / treatmentEta + clearanceFullUnits / clearanceEta,
 						"shared treatment-consumable and release-clearance store cannot cover the combined draw");
 			}
+			if (treatment.authored.releaseToNormalClass)
+				constrain(powerAvailable("Water treatment", treatment.authored.id),
+					treatment.authored.throughputKgPerS * treatment.authored.specificEnergyKWhPerKg * 3600.0,
+					"treatment energy unavailable: hazardous feed retained");
+			if (treatment.authored.releaseToNormalClass && !sharedKit)
+				constrain(ports.request("clearanceStoreId", ports.input("clearanceStoreId",
+					std::max(0.0, qualified[treatment.clearanceIndex]
+						- runtime.stores[treatment.clearanceIndex].authored.protectedReserve)), clearanceFullUnits),
+					clearanceFullUnits, "release clearance unavailable: hazardous feed retained");
 			scale = std::max(0.0, std::min(1.0, scale));
 			ports.limitDemand(powerAvailable("Water treatment", treatment.authored.id),
 				treatment.authored.throughputKgPerS * treatment.authored.specificEnergyKWhPerKg * 3600.0);
@@ -571,6 +580,14 @@ namespace core
 				// moves and no consumable is drawn - a treatment with no
 				// power is not a treatment running for free.
 				treatment.lastHoldReason = "no electrical supply: the treatment cannot run";
+				treatment.status = StationTransferStatus::Rejected;
+				continue;
+			}
+			if (treatment.authored.releaseToNormalClass && suppliedKW + 1e-12 < treatment.lastPowerDemandKW)
+			{
+				treatment.energySuppliedKJ += suppliedKW * static_cast<double>(seconds);
+				totalWaterTreatmentPowerKW += suppliedKW;
+				treatment.lastHoldReason = "treatment energy curtailed: hazardous feed retained";
 				treatment.status = StationTransferStatus::Rejected;
 				continue;
 			}
