@@ -1076,19 +1076,16 @@ namespace
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("id is duplicated") != std::string::npos,
 				"duplicate crop population ids were accepted");
-			// Hazard segregation (#573): the growing compartment is the
-			// containment boundary. The reviewed bypass - hazardous
-			// irrigation water feeding a normal-class canopy whose food and
-			// waste destinations are normal - is refused, and so are
-			// hazardous harvest destinations for a normal population.
+			// Cross-class biology wiring is accepted (#751): the reviewed
+			// bypass - hazardous irrigation water feeding a normal-class
+			// canopy whose food and waste destinations are normal - and
+			// hazardous harvest destinations for a normal population all
+			// validate; the class no longer reserves a store for a process.
 			settings.cropPopulations = { crop() };
 			settings.stores = fullStores();
 			settings.stores[0].hazardClass = "hazardous";
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("irrigation water store 'irrigation' is authored hazardous-class")
-					!= std::string::npos
-				&& diagnostic.find("normal-class compartment") != std::string::npos,
-				"a normal canopy irrigated with hazardous water was accepted");
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				("a normal canopy irrigated with hazardous water was refused: " + diagnostic).c_str());
 			settings.cropPopulations = { crop() };
 			settings.stores = fullStores();
 			settings.stores.push_back(cropStore("cropFood", 10.0, 0.0));
@@ -1097,22 +1094,11 @@ namespace
 			settings.cropPopulations[0].harvestTriggerKg = 10.0;
 			settings.cropPopulations[0].foodStoreId = "cropFood";
 			settings.cropPopulations[0].wasteStoreId = "cropWaste";
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("food store 'cropFood' is authored hazardous-class")
-					!= std::string::npos,
-				"a normal canopy harvesting into a hazardous food store was accepted");
-			settings.cropPopulations = { crop() };
-			settings.stores = fullStores();
-			settings.stores.push_back(cropStore("cropFood", 10.0, 0.0));
-			settings.stores.push_back(cropStore("cropWaste", 10.0, 0.0));
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				("a normal canopy harvesting into a hazardous food store was refused: " + diagnostic).c_str());
 			settings.stores.back().hazardClass = "hazardous";
-			settings.cropPopulations[0].harvestTriggerKg = 10.0;
-			settings.cropPopulations[0].foodStoreId = "cropFood";
-			settings.cropPopulations[0].wasteStoreId = "cropWaste";
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("waste store 'cropWaste' is authored hazardous-class")
-					!= std::string::npos,
-				"a normal canopy harvesting into a hazardous waste store was accepted");
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				("a normal canopy harvesting into hazardous food and waste stores was refused: " + diagnostic).c_str());
 		}
 		// #581 World seam: an overflowed derived capacity is refused by
 		// configureStationSystems before any runtime is built, the World
@@ -2277,38 +2263,29 @@ namespace
 			settings.stores = fullStores();
 			require(core::validateStationSystemsSettings(settings, diagnostic),
 				"a harvest-disabled algae culture was refused");
-			// Hazard segregation (#573): the culture compartment is the
-			// containment boundary; the culture water and every harvest
-			// partition destination must carry its hazard class.
+			// Cross-class biology wiring is accepted (#751): the culture
+			// water and every harvest partition destination may carry any
+			// hazard class; the class no longer reserves a store.
 			settings.algaeCultures = { culture() };
 			settings.stores = fullStores();
 			settings.stores[0].hazardClass = "hazardous";
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("culture water store 'makeup' is authored hazardous-class")
-					!= std::string::npos
-				&& diagnostic.find("normal-class compartment") != std::string::npos,
-				"a normal culture running on hazardous makeup water was accepted");
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				("a normal culture running on hazardous makeup water was refused: " + diagnostic).c_str());
 			settings.algaeCultures = { culture() };
 			settings.stores = fullStores();
 			settings.stores[5].hazardClass = "hazardous";
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("food store 'afood' is authored hazardous-class")
-					!= std::string::npos,
-				"a normal culture harvesting into a hazardous food store was accepted");
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				("a normal culture harvesting into a hazardous food store was refused: " + diagnostic).c_str());
 			settings.algaeCultures = { culture() };
 			settings.stores = fullStores();
 			settings.stores[6].hazardClass = "hazardous";
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("recovery store 'arecovery' is authored hazardous-class")
-					!= std::string::npos,
-				"a normal culture harvesting into a hazardous recovery store was accepted");
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				("a normal culture harvesting into a hazardous recovery store was refused: " + diagnostic).c_str());
 			settings.algaeCultures = { culture() };
 			settings.stores = fullStores();
 			settings.stores[7].hazardClass = "hazardous";
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("waste store 'awaste' is authored hazardous-class")
-					!= std::string::npos,
-				"a normal culture harvesting into a hazardous waste store was accepted");
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				("a normal culture harvesting into a hazardous waste store was refused: " + diagnostic).c_str());
 		}
 		// Basic three-way harvest: the culture crosses its trigger, real
 		// living material is removed, and the declared food/recovery/waste

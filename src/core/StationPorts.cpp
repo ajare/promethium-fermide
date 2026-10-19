@@ -638,14 +638,13 @@ namespace
 	}
 
 	// The store-role rules one link can break, mirroring the whole-config
-	// validator's wording for the family: the store must exist, be plain
-	// mass where the family demands it, and carry the family's own hazard
-	// class - a process may only touch stores of its own class. Empty
-	// hazardClass skips the hazard rule (equipment exchanges carry no
-	// class of their own). Returns the refusal text, empty when satisfied.
+	// validator's wording for the family: the store must exist and be
+	// plain mass where the family demands it. The store's hazard class is
+	// no longer a wiring rule (#751): a process may touch a store of any
+	// class, so a link is judged only on what the connector itself breaks.
 	std::string scopedRoleStoreWiring(StationSystemsSettings const& settings,
 		std::string const& where, std::string const& role, std::string const& storeId,
-		std::string const& hazardClass, bool massDenominated, char const* massPhrase,
+		bool massDenominated, char const* massPhrase,
 		char const* hazardFamily)
 	{
 		if (storeId.empty()) return {};
@@ -660,10 +659,6 @@ namespace
 				+ (std::string_view(hazardFamily) == "water"
 					? "' declares a composition; recovered water streams are plain mass stores, so no dry constituent can be created from pure condensate"
 					: "' declares a composition; handled gas streams are plain mass stores, so no dry constituent can be created from pure gas");
-		if (!hazardClass.empty() && store->hazardClass != hazardClass)
-			return where + " " + role + " store '" + store->id + "' is authored "
-				+ store->hazardClass + "-class but this is a " + hazardClass + "-class "
-				+ hazardFamily + " process; a process may only touch stores of its own hazard class";
 		return {};
 	}
 
@@ -994,12 +989,11 @@ namespace
 		if (mapping.ownerType == "Fuel cell" || mapping.ownerType == "Sabatier"
 			|| mapping.ownerType == "Methane processor")
 		{
-			// The chain families: every store the machine touches carries
-			// the machine's own hazard class, the streams are chemically
-			// distinct roles that may not alias one store, and the heat
-			// sink shares the machine's thermal service class.
+			// The chain families: the streams are chemically distinct roles
+			// that may not alias one store, and the heat sink shares the
+			// machine's thermal service class. The stores' hazard class is
+			// no longer a wiring rule (#751).
 			std::string where;
-			std::string hazardClass;
 			std::string thermalClass;
 			struct RoleRef
 			{
@@ -1014,7 +1008,6 @@ namespace
 					[&](FuelCellSettings const& entry) { return entry.id == mapping.ownerId; });
 				if (found == settings.fuelCells.end()) return false;
 				where = "Station fuel cell '" + found->id + "'";
-				hazardClass = found->hazardClass;
 				thermalClass = found->thermalClass;
 				roles = {{"Hydrogen store", "hydrogen reactant", &found->hydrogenStoreId},
 					{"Oxygen store", "oxygen reactant", &found->oxygenStoreId},
@@ -1027,7 +1020,6 @@ namespace
 					[&](SabatierReactorSettings const& entry) { return entry.id == mapping.ownerId; });
 				if (found == settings.sabatierReactors.end()) return false;
 				where = "Station Sabatier reactor '" + found->id + "'";
-				hazardClass = found->hazardClass;
 				thermalClass = found->thermalClass;
 				roles = {{"CO2 store", "CO2 feed", &found->co2StoreId},
 					{"Hydrogen store", "hydrogen feed", &found->hydrogenStoreId},
@@ -1041,7 +1033,6 @@ namespace
 					[&](MethaneProcessorSettings const& entry) { return entry.id == mapping.ownerId; });
 				if (found == settings.methaneProcessors.end()) return false;
 				where = "Station methane processor '" + found->id + "'";
-				hazardClass = found->hazardClass;
 				thermalClass = found->thermalClass;
 				roles = {{"Methane store", "methane feed", &found->methaneStoreId},
 					{"Hydrogen store", "recovered hydrogen", &found->hydrogenStoreId},
@@ -1073,7 +1064,7 @@ namespace
 						return true;
 					}
 				bool const water = role == "product water";
-				diagnostic = scopedRoleStoreWiring(settings, where, role, value, hazardClass,
+				diagnostic = scopedRoleStoreWiring(settings, where, role, value,
 						true, water ? "water recovery is mass-denominated (g or kg)"
 							: "gas handling is mass-denominated (g or kg)",
 						water ? "water" : "gas");

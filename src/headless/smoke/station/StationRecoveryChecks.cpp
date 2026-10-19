@@ -165,9 +165,11 @@ namespace
 				&& diagnostic.find("does not match heat sink") != std::string::npos,
 				"a thermal class mismatch against the reactor's heat sink was accepted");
 			settings.sabatierReactors = { reactor("sab", "normal"), reactor("sab2", "hazardous") };
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("own hazard class") != std::string::npos,
-				"a hazardous reactor sharing the normal-class CO2 store was accepted");
+			// A hazardous reactor sharing the normal-class CO2 store is
+			// accepted (#751): the class no longer reserves a store, and
+			// the shared inventory is the consequence.
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				"a hazardous reactor sharing the normal-class CO2 store was refused");
 			settings.sabatierReactors = { reactor("sab", "normal") };
 			settings.sabatierReactors[0].maxSinkTemperatureC = -300.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
@@ -185,9 +187,10 @@ namespace
 				&& diagnostic.find("solid carbon store 'ghost' does not exist") != std::string::npos,
 				"a processor with an unknown carbon store was accepted");
 			settings.methaneProcessors = { processor("pyrolysis", "normal"), processor("pyrolysis2", "hazardous") };
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("own hazard class") != std::string::npos,
-				"a hazardous processor sharing the normal-class methane store was accepted");
+			// A hazardous processor sharing the normal-class methane store is
+			// accepted (#751): the shared inventory is the consequence.
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				"a hazardous processor sharing the normal-class methane store was refused");
 			std::vector<core::SabatierReactorSettings> tooMany;
 			for (size_t index = 0; index <= core::MaxStationSabatierReactors; ++index)
 				tooMany.push_back(reactor("sab" + std::to_string(index), "normal"));
@@ -923,9 +926,10 @@ namespace
 				"two chain roles sharing one store were accepted");
 			settings.microbialProcessors = { processor("digester", "normal"),
 				processor("digester2", "hazardous") };
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("own hazard class") != std::string::npos,
-				"a hazardous processor sharing the normal-class waste feed was accepted");
+			// A hazardous processor sharing the normal-class waste feed is
+			// accepted (#751): the shared inventory is the consequence.
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				"a hazardous processor sharing the normal-class waste feed was refused");
 			settings.microbialProcessors = { processor("digester", "normal") };
 			settings.microbialProcessors[0].heatSinkId = "ghost";
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
@@ -983,16 +987,12 @@ namespace
 				&& diagnostic.find("stock units per condition point must be finite and non-negative")
 					!= std::string::npos,
 				"a negative stock units per condition point was accepted");
-			// A hazardous processor may not draw the normal-class stock
-			// store the normal processor uses: the direct authored-class
-			// check (#592) now refuses it before the cross-processor
-			// sharing check is even reached.
+			// A hazardous processor may draw the normal-class stock store
+			// the normal processor uses (#751): the authored-class check is
+			// gone, so the cross-class draw configures and the shared
+			// inventory is the consequence.
 			{
 				auto hStores = settings.stores;
-				// The hazardous processor's chain stores must be authored
-				// hazardous-class: a process may only touch stores of its
-				// own hazard class (#412), so the fixture declares them
-				// as the hazardous-stream stores the test means them to be.
 				auto hazardousStore = [](core::ResourceStoreSettings store)
 				{ store.hazardClass = "hazardous"; return store; };
 				hStores.push_back(hazardousStore(compoundStore("h_waste", 100.0, 10.0, feedComposition)));
@@ -1020,15 +1020,14 @@ namespace
 				hazardous.residueStoreId = "h_residue";
 				hazardous.stockStoreId = "stock";
 				hazardSettings.microbialProcessors = { normal, hazardous };
-				require(!core::validateStationSystemsSettings(hazardSettings, diagnostic)
-					&& diagnostic.find("replacement biological stock store 'stock' is authored normal-class but this is a hazardous-class nutrient process")
-						!= std::string::npos,
-					"a hazardous processor drawing the normal-class replacement stock store was accepted");
+				require(core::validateStationSystemsSettings(hazardSettings, diagnostic),
+					("a hazardous processor drawing the normal-class replacement stock store was refused: " + diagnostic).c_str());
 			}
-			// #592: the consumable and replacement-stock roles are consumed
-			// inputs like the feed: each store's authored hazard class must
-			// match the processor's own class, in both directions, whether
-			// or not another processor also claims the store id.
+			// #751: the consumable and replacement-stock roles are no
+			// longer class-bound. Every cross-class combination that #592
+			// once refuses now validates: the processor draws whatever
+			// media it is wired to, and the quantity it draws is the
+			// whole of the report.
 			{
 				core::StationSystemsSettings probe;
 				probe.enabled = true;
@@ -1038,42 +1037,27 @@ namespace
 				probe.microbialProcessors = { processor("digester", "normal") };
 				probe.microbialProcessors[0].stockStoreId = "stock";
 				probe.microbialProcessors[0].stockUnitsPerConditionPoint = 1.0;
-				// A normal processor may not draw hazardous-class media.
+				// A normal processor drawing hazardous-class media is accepted.
 				probe.stores[3].hazardClass = "hazardous";
-				require(!core::validateStationSystemsSettings(probe, diagnostic)
-					&& diagnostic.find("consumable store 'media' is authored hazardous-class but this is a normal-class nutrient process")
-						!= std::string::npos,
-					"a normal processor drawing hazardous-class media was accepted");
-				// With the media fixed, the same processor may not draw
-				// hazardous-class replacement stock instead.
-				probe.stores[3].hazardClass = "normal";
+				require(core::validateStationSystemsSettings(probe, diagnostic),
+					("a normal processor drawing hazardous-class media was refused: " + diagnostic).c_str());
+				// ...and hazardous-class replacement stock instead.
 				probe.stores.back().hazardClass = "hazardous";
-				require(!core::validateStationSystemsSettings(probe, diagnostic)
-					&& diagnostic.find("replacement biological stock store 'stock' is authored hazardous-class but this is a normal-class nutrient process")
-						!= std::string::npos,
-					"a normal processor drawing hazardous-class replacement stock was accepted");
-				probe.stores.back().hazardClass = "normal";
-				// The reverse direction: a hazardous processor may not draw
-				// normal-class media from an otherwise hazardous chain...
+				require(core::validateStationSystemsSettings(probe, diagnostic),
+					("a normal processor drawing hazardous-class replacement stock was refused: " + diagnostic).c_str());
+				// The reverse direction too: a hazardous processor drawing
+				// normal-class media and stock.
 				for (auto& entry : probe.stores)
 					entry.hazardClass = "hazardous";
 				probe.microbialProcessors = { processor("digester", "hazardous") };
 				probe.microbialProcessors[0].stockStoreId = "stock";
 				probe.microbialProcessors[0].stockUnitsPerConditionPoint = 1.0;
 				probe.stores[3].hazardClass = "normal";
-				require(!core::validateStationSystemsSettings(probe, diagnostic)
-					&& diagnostic.find("consumable store 'media' is authored normal-class but this is a hazardous-class nutrient process")
-						!= std::string::npos,
-					"a hazardous processor drawing normal-class media was accepted");
-				// ...nor normal-class replacement stock.
-				probe.stores[3].hazardClass = "hazardous";
 				probe.stores.back().hazardClass = "normal";
-				require(!core::validateStationSystemsSettings(probe, diagnostic)
-					&& diagnostic.find("replacement biological stock store 'stock' is authored normal-class but this is a hazardous-class nutrient process")
-						!= std::string::npos,
-					"a hazardous processor drawing normal-class replacement stock was accepted");
-				// The fully class-matched hazardous chain is accepted: the
-				// check refuses mismatches, not hazardous processors.
+				require(core::validateStationSystemsSettings(probe, diagnostic),
+					("a hazardous processor drawing normal-class media and stock was refused: " + diagnostic).c_str());
+				// The fully class-matched hazardous chain still validates.
+				probe.stores[3].hazardClass = "hazardous";
 				probe.stores.back().hazardClass = "hazardous";
 				require(core::validateStationSystemsSettings(probe, diagnostic),
 					("the fully hazardous-class chain was refused: " + diagnostic).c_str());
@@ -1097,13 +1081,13 @@ namespace
 			require(!bad.getStationSystemsSnapshot().enabled && bad.getSimulationTick() == 0,
 				"a refused nutrient-recovery configuration mutated the World");
 		}
-		// #592 actual-tick regression through the public configure/tick/
+		// The mirrored consequence through the public configure/tick/
 		// snapshot seam: the reviewed probe configuration - a normal
 		// processor with hazardous-class media and replacement stock while
-		// every other stream is normal - is refused, the World stays
-		// unconfigured, and ticking consumes nothing.
+		// every other stream is normal - is now accepted (#751), runs,
+		// and draws the cross-class media and stock it is wired to.
 		{
-			core::World world("MicrobialHazardBypass", 2, 2);
+			core::World world("MicrobialCrossClassDraw", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
 			auto stores = nutrientStores();
 			stores.push_back(plainStore("stock", 100.0, 10.0));
@@ -1112,14 +1096,25 @@ namespace
 			auto probe = processor("digester", "normal");
 			probe.stockStoreId = "stock";
 			probe.stockUnitsPerConditionPoint = 1.0;
-			require(!nutrientConfigure(world, stores, { probe }, 0.0).first,
-				"the hazardous media/stock bypass was accepted through the public seam");
+			// Start below full condition so recovery draws replacement
+			// stock within the run (#408 coefficients).
+			probe.initialCondition = 0.5;
+			probe.recoveryPerHour = 1.0;
+			require(nutrientConfigure(world, stores, { probe }, 100.0).first,
+				"the cross-class media/stock configuration was refused through the public seam");
 			world.resumeSimulation();
-			require(world.advanceTicks(1),
-				"ticking the World after the refused hazardous media/stock configuration failed");
+			require(world.advanceTicks(60), "the cross-class media/stock rig failed to tick");
 			auto const snap = world.getStationSystemsSnapshot();
-			require(!snap.enabled && snap.stores.empty() && snap.microbialProcessors.empty(),
-				"the refused hazardous media/stock configuration still ran and could consume hazardous material");
+			require(snap.enabled && snap.microbialProcessors.size() == 1,
+				"the cross-class media/stock rig did not run");
+			auto const media = findStore(snap, "media");
+			auto const stock = findStore(snap, "stock");
+			require(media.currentQualified < 10.0 && media.currentQualified > 0.0,
+				"the normal processor did not draw the hazardous-class media it is wired to");
+			require(stock.currentQualified < 10.0 && stock.currentQualified > 0.0,
+				"the normal processor did not draw the hazardous-class replacement stock while recovering");
+			require(snap.microbialProcessors[0].condition > 0.5,
+				"the cross-class rig did not recover condition");
 		}
 		// The mirrored positive case: the same rig with every store authored
 		// hazardous-class and a hazardous processor ticks and consumes its

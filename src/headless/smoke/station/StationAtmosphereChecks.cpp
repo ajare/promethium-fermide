@@ -963,23 +963,50 @@ namespace
 					"a store with an undeclared hazard class was accepted");
 			}
 			{
-				// A normal-class treatment may not draw from a hazardous
-				// store: the store's authored class binds every process.
-				auto settings = core::StationSystemsSettings{};
-				settings.enabled = true;
-				settings.stores = hazStores(5.0);
-				core::WaterTreatmentSettings normal;
-				normal.id = "potablePlant";
-				normal.hazardClass = "normal";
-				normal.sourceStoreId = "hazRaw";
-				normal.treatedStoreId = "potable";
-				normal.concentrateStoreId = "hazConcentrate";
-				normal.consumableStoreId = "hazConsumable";
-				normal.throughputKgPerS = 0.001;
-				settings.waterTreatments = { normal };
-				require(!core::validateStationSystemsSettings(settings, diagnostic)
-					&& diagnostic.find("own hazard class") != std::string::npos,
-					"a normal-class treatment drawing from a hazardous store was accepted");
+				// A normal-class treatment drawing from a hazardous store
+				// is accepted (#751): the class no longer binds the
+				// process, and the crossing is reported by the moved mass.
+				// The consequence is asserted in the CrossClassTreatment
+				// block below.
+				core::WaterTreatmentSettings normalCrossClass;
+				normalCrossClass.id = "potablePlant";
+				normalCrossClass.hazardClass = "normal";
+				normalCrossClass.sourceStoreId = "hazRaw";
+				normalCrossClass.treatedStoreId = "potable";
+				normalCrossClass.concentrateStoreId = "hazConcentrate";
+				normalCrossClass.consumableStoreId = "hazConsumable";
+				normalCrossClass.throughputKgPerS = 0.001;
+				normalCrossClass.recoveryRatio = 0.8;
+				normalCrossClass.specificEnergyKWhPerKg = 0.5;
+				normalCrossClass.consumablePerKg = 0.01;
+				{
+					auto settings = core::StationSystemsSettings{};
+					settings.enabled = true;
+					settings.stores = hazStores(5.0);
+					settings.waterTreatments = { normalCrossClass };
+					require(core::validateStationSystemsSettings(settings, diagnostic),
+						"a normal-class treatment drawing from a hazardous store was refused");
+				}
+				core::World crossWorld("CrossClassTreatment", 2, 2);
+				crossWorld.pauseSimulation(); crossWorld.finishBuild();
+				require(hazConfigure(crossWorld, hazStores(5.0), { normalCrossClass }, {}, 20.0).first,
+					"a cross-class treatment was refused at configuration");
+				crossWorld.resumeSimulation();
+				require(crossWorld.advanceTicks(60), "cross-class treatment run failed");
+				auto const elapsed = 60.0 * dt;
+				auto const snap = crossWorld.getStationSystemsSnapshot();
+				require(snap.waterTreatments.size() == 1,
+					"cross-class treatment missing from snapshot");
+				auto const processed = 0.001 * elapsed;
+				require(approx(findStore(snap, "potable").currentQualified, 50.0 + 0.8 * processed),
+					"the normal destination did not receive the treated hazardous mass");
+				require(approx(findStore(snap, "hazConcentrate").currentUnqualified, 0.2 * processed),
+					"the retained concentrate did not book the unrecovered load");
+				require(approx(findStore(snap, "hazRaw").currentQualified, 100.0 - processed),
+					"the hazardous source did not drain by the processed mass");
+				for (auto const& balance : snap.balances)
+					require(std::abs(balance.residual) <= 1e-6,
+						("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
 			}
 			{
 				// A hazardous treatment without a clearance contract has
@@ -1725,14 +1752,15 @@ namespace
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("names no consumable store") != std::string::npos,
 				"a consumable demand with no consumable store was accepted");
-			// A gas store shared between a normal and a hazardous process is
-			// refused: the two streams may not mix in one store.
+			// A gas store shared between a normal and a hazardous process
+			// is accepted (#751): the class no longer reserves a store for
+			// one process, so both machines wire to it and the shared
+			// inventory is the consequence.
 			settings.co2Captures = { capture("scrub", "normal") };
 			settings.electrolyzers = { electrolyzer("hcell", "hazardous") };
 			settings.electrolyzers[0].hydrogenStoreId = "captured";
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("own hazard class") != std::string::npos,
-				"a shared gas store across hazard classes was accepted");
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				"a shared gas store across hazard classes was refused");
 			std::vector<core::ElectrolyzerSettings> tooMany;
 			for (size_t index = 0; index <= core::MaxStationElectrolyzers; ++index)
 				tooMany.push_back(electrolyzer("cell" + std::to_string(index), "normal"));

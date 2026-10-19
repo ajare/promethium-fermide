@@ -137,8 +137,9 @@ namespace
 			allowed(copy, core::CandidateLink{link.to,link.from});
 			require(core::applyStationLink(copy, {link.to,link.from}) && copy == wired, "biology reconnect changed another reference");
 		}
-		// Every material path refuses the validator's hazard and unknown-store
-		// reason even when the remaining references are still unwired.
+		// The store's hazard class no longer breaks the wiring (#751):
+		// the same cross-class probe that once refused on every material
+		// role now evaluates as allowed.
 		for (auto const& link : links)
 		{
 			auto const& peer = link.from.nodeType == "Store" ? link.from : link.to;
@@ -146,10 +147,10 @@ namespace
 			auto s = wired;
 			auto authored = core::stationAuthoredLinks(wired);
 			auto found = std::find_if(authored.begin(), authored.end(), [&](auto const& e) { return e.from == link.from && e.to == link.to; });
-			require(found != authored.end() && core::clearStationLink(s, found->identity), "hazard probe disconnect failed");
+			require(found != authored.end() && core::clearStationLink(s, found->identity), "class probe disconnect failed");
 			auto store = std::find_if(s.stores.begin(), s.stores.end(), [&](auto const& e) { return e.id == peer.nodeId; });
 			store->hazardClass = "hazardous";
-			refused(s, link, "class");
+			allowed(s, link);
 		}
 		core::CandidateLink stock{{"Store","absent","Inventory out"},{"Microbial processor","microbial","Replacement stock"}};
 		refused(seed, stock, "replacement biological stock store");
@@ -321,7 +322,8 @@ namespace
 			store->unit = "kWh";
 			refused(malformed, link, "must be a mass unit");
 			store->unit = "kg"; store->hazardClass = "hazardous";
-			refused(malformed, link, "hazard class");
+			// The store's hazard class no longer breaks the wiring (#751).
+			allowed(malformed, link);
 		}
 		auto alias = base(); alias.waterTreatments[0].sourceStoreId = "treated";
 		refused(alias, legal[4], "same store");

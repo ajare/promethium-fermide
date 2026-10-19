@@ -179,7 +179,9 @@ namespace
 			bad.crews = {c}; bad.crews[0].greywaterStoreId = "water";
 			require(!core::validateStationSystemsSettings(bad, diagnostic), "aliased greywater accepted");
 			bad.crews = {c}; bad.stores.back().hazardClass = "hazardous";
-			require(!core::validateStationSystemsSettings(bad, diagnostic), "greywater crossed hazard boundary");
+			// The greywater destination's hazard class no longer binds the
+			// crew (#751): the return lands wherever it is wired.
+			require(core::validateStationSystemsSettings(bad, diagnostic), diagnostic.c_str());
 			stores.back().capacity = 100;
 			stores.back().startingQualified = 100;
 			core::World full("GreywaterFull", 2, 2); full.pauseSimulation(); full.finishBuild();
@@ -262,33 +264,25 @@ namespace
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("limited to") != std::string::npos,
 				"more than the declared crew budget was accepted");
-			// Hazard segregation (#573): the breathing compartment is the
-			// containment boundary. The reviewed bypass - hazardous compound
-			// food metabolised by a normal-class crew into normal returns -
-			// is refused, and so is a hazardous return store on a normal
-			// crew: crew returns never relabel material across the boundary.
+			// Cross-class crew wiring is accepted (#751): hazardous food
+			// metabolised by a normal-class crew into normal returns, a
+			// hazardous drinking store and a hazardous return store all
+			// validate; the class no longer reserves a store for a crew.
 			settings.crews = { crew(2, 1.0) };
 			settings.stores = fullStores();
 			settings.stores[0].hazardClass = "hazardous";
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("food store 'food' is authored hazardous-class")
-					!= std::string::npos
-				&& diagnostic.find("normal-class compartment") != std::string::npos,
-				"a normal crew metabolising hazardous food was accepted");
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				("a normal crew metabolising hazardous food was refused: " + diagnostic).c_str());
 			settings.crews = { crew(2, 1.0) };
 			settings.stores = fullStores();
 			settings.stores[1].hazardClass = "hazardous";
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("water store 'water' is authored hazardous-class")
-					!= std::string::npos,
-				"a normal crew drinking hazardous water was accepted");
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				("a normal crew drinking hazardous water was refused: " + diagnostic).c_str());
 			settings.crews = { crew(2, 1.0) };
 			settings.stores = fullStores();
 			settings.stores[3].hazardClass = "hazardous";
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("organic waste store 'organicWaste' is authored hazardous-class")
-					!= std::string::npos,
-				"a normal crew returning into a hazardous organic-waste store was accepted");
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				("a normal crew returning into a hazardous organic-waste store was refused: " + diagnostic).c_str());
 			require(!bad.getStationSystemsSnapshot().enabled && bad.getSimulationTick() == 0,
 				"a refused crew configuration mutated the World");
 		}
@@ -1011,13 +1005,15 @@ namespace
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
 				&& diagnostic.find("plain mass stores") != std::string::npos,
 				"a collector delivering into a compound store was accepted");
-			// Hazard segregation: the same store touched by both classes.
+			// A store shared by a normal collector and a hazardous
+			// treatment is accepted (#751): the class no longer reserves
+			// a store for one process, and the shared inventory is the
+			// consequence.
 			settings.waterCollectors = { collector("cond", "normal", 0.01, 0.5) };
 			settings.stores = waterStores();
 			settings.waterTreatments = { treatment("plant", "hazardous") };
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("own hazard class") != std::string::npos,
-				"a raw water store shared by normal and hazardous processes was accepted");
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				"a raw water store shared by normal and hazardous processes was refused");
 			settings.waterTreatments = { treatment("plant", "normal") };
 			settings.waterTreatments[0].recoveryRatio = 0.0;
 			require(!core::validateStationSystemsSettings(settings, diagnostic)
@@ -1490,11 +1486,11 @@ namespace
 				&& diagnostic.find("does not match heat sink") != std::string::npos,
 				"a thermal class mismatch against the heat sink was accepted");
 			// A gas store shared between a normal and a hazardous process
-			// is refused: the two streams may not mix in one store.
+			// is accepted (#751): both cells wire to it and the shared
+			// inventory is the consequence.
 			settings.fuelCells = { fuelCell("cell", "normal"), fuelCell("hcell", "hazardous") };
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("own hazard class") != std::string::npos,
-				"a shared gas store across hazard classes was accepted");
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				"a shared gas store across hazard classes was refused");
 			std::vector<core::FuelCellSettings> tooMany;
 			for (size_t index = 0; index <= core::MaxStationFuelCells; ++index)
 				tooMany.push_back(fuelCell("cell" + std::to_string(index), "normal"));

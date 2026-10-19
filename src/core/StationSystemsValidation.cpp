@@ -283,9 +283,8 @@ using namespace station_detail;
 			brokenReferences->push_back(std::move(text));
 			throw BrokenDraftEntry{};
 		};
-		std::map<std::string, std::string> waterStoreClass;
 		auto declareWaterStore = [&](std::string const& storeId, char const* role,
-			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+			std::string const& where, bool allowCompound) -> bool
 		{
 			if (allowIncomplete && storeId.empty()) return true;
 			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
@@ -298,16 +297,6 @@ using namespace station_detail;
 			if (found->composition && !allowCompound)
 				return refuse(where + " " + role + " store '" + storeId
 					+ "' declares a composition; recovered water streams are plain mass stores, so no dry constituent can be created from pure condensate");
-			if (found->hazardClass != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is authored "
-					+ found->hazardClass + "-class but this is a " + hazardClass
-					+ "-class water process; a process may only touch stores of its own hazard class");
-			auto const existing = waterStoreClass.find(storeId);
-			if (existing == waterStoreClass.end())
-				waterStoreClass.emplace(storeId, hazardClass);
-			else if (existing->second != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
-					+ existing->second + "-class water process; hazardous and normal water streams may not share a store");
 			return true;
 		};
 		auto const where = "Station water collector '" + collector.id + "'";
@@ -361,8 +350,7 @@ using namespace station_detail;
 			}
 		}
 
-		if (!declareWaterStore(collector.destStoreId, "raw water destination", where,
-			collector.hazardClass, false))
+		if (!declareWaterStore(collector.destStoreId, "raw water destination", where, false))
 			return false;
 		return true;
 	}
@@ -393,9 +381,8 @@ using namespace station_detail;
 			brokenReferences->push_back(std::move(text));
 			return true;
 		};
-		std::map<std::string, std::string> waterStoreClass;
 		auto declareWaterStore = [&](std::string const& storeId, char const* role,
-			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+			std::string const& where, bool allowCompound) -> bool
 		{
 			if (allowIncomplete && storeId.empty()) return true;
 			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
@@ -408,16 +395,6 @@ using namespace station_detail;
 			if (found->composition && !allowCompound)
 				return refuse(where + " " + role + " store '" + storeId
 					+ "' declares a composition; recovered water streams are plain mass stores, so no dry constituent can be created from pure condensate");
-			if (found->hazardClass != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is authored "
-					+ found->hazardClass + "-class but this is a " + hazardClass
-					+ "-class water process; a process may only touch stores of its own hazard class");
-			auto const existing = waterStoreClass.find(storeId);
-			if (existing == waterStoreClass.end())
-				waterStoreClass.emplace(storeId, hazardClass);
-			else if (existing->second != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
-					+ existing->second + "-class water process; hazardous and normal water streams may not share a store");
 			return true;
 		};
 		auto const where = "Station water treatment '" + treatment.id + "'";
@@ -480,12 +457,10 @@ using namespace station_detail;
 					return refuse(where + " " + streamRoles[stream] + " store and " + streamRoles[other]
 						+ " store are the same store '" + streamIds[stream]
 						+ "'; the recovery split needs distinct source, treated and concentrate stores");
-			if (!declareWaterStore(streamIds[stream], streamRoles[stream], where,
-				stream == 1 && treatment.releaseToNormalClass ? "normal" : treatment.hazardClass, true))
+			if (!declareWaterStore(streamIds[stream], streamRoles[stream], where, true))
 				return false;
 		}
-		if (!declareWaterStore(treatment.consumableStoreId, "consumable", where,
-			treatment.hazardClass, true))
+		if (!declareWaterStore(treatment.consumableStoreId, "consumable", where, true))
 			return false;
 		// Release clearance (#412): a hazardous-class treatment must
 		// declare the clearance contract - treated hazardous material is
@@ -506,8 +481,7 @@ using namespace station_detail;
 				if (!streamId.empty() && streamId == treatment.clearanceStoreId)
 					return refuse(where + " release-clearance store is the same store '" + streamId
 						+ "' as a recovery stream; the clearance test consumable is a supplied consumable, not part of the water stream it tests");
-			if (!declareWaterStore(treatment.clearanceStoreId, "release-clearance consumable", where,
-				treatment.hazardClass, true))
+			if (!declareWaterStore(treatment.clearanceStoreId, "release-clearance consumable", where, true))
 				return false;
 			// The clearance kit may be the same store as the treatment
 			// consumable (#574): one stocked kit that both runs and
@@ -532,9 +506,8 @@ using namespace station_detail;
 			brokenReferences->push_back(std::move(text));
 			return true;
 		};
-		std::map<std::string, std::string> waterStoreClass;
 		auto declareWaterStore = [&](std::string const& storeId, char const* role,
-			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+			std::string const& where, bool allowCompound) -> bool
 		{
 			if (allowIncomplete && storeId.empty()) return true;
 			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
@@ -547,21 +520,10 @@ using namespace station_detail;
 			if (found->composition && !allowCompound)
 				return refuse(where + " " + role + " store '" + storeId
 					+ "' declares a composition; recovered water streams are plain mass stores, so no dry constituent can be created from pure condensate");
-			if (found->hazardClass != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is authored "
-					+ found->hazardClass + "-class but this is a " + hazardClass
-					+ "-class water process; a process may only touch stores of its own hazard class");
-			auto const existing = waterStoreClass.find(storeId);
-			if (existing == waterStoreClass.end())
-				waterStoreClass.emplace(storeId, hazardClass);
-			else if (existing->second != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
-					+ existing->second + "-class water process; hazardous and normal water streams may not share a store");
 			return true;
 		};
-		std::map<std::string, std::string> gasStoreClass;
 		auto declareGasStore = [&](std::string const& storeId, char const* role,
-			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+			std::string const& where, bool allowCompound) -> bool
 		{
 			if (allowIncomplete && storeId.empty()) return true;
 			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
@@ -574,16 +536,6 @@ using namespace station_detail;
 			if (found->composition && !allowCompound)
 				return refuse(where + " " + role + " store '" + storeId
 					+ "' declares a composition; handled gas streams are plain mass stores, so no dry constituent can be created from pure gas");
-			if (found->hazardClass != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is authored "
-					+ found->hazardClass + "-class but this is a " + hazardClass
-					+ "-class gas process; a process may only touch stores of its own hazard class");
-			auto const existing = gasStoreClass.find(storeId);
-			if (existing == gasStoreClass.end())
-				gasStoreClass.emplace(storeId, hazardClass);
-			else if (existing->second != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
-					+ existing->second + "-class gas process; hazardous and normal gas streams may not share a store");
 			return true;
 		};
 		auto const where = "Station electrolyzer '" + electrolyzer.id + "'";
@@ -650,15 +602,12 @@ using namespace station_detail;
 			|| (!electrolyzer.oxygenStoreId.empty()
 				&& electrolyzer.waterStoreId == electrolyzer.oxygenStoreId)))
 			return refuse(where + " names the same store for the feed water and a gas product: the machine cannot treat one store as both the water it draws and the gas it produces");
-		if (!declareWaterStore(electrolyzer.waterStoreId, "feed water", where,
-			electrolyzer.hazardClass, true))
+		if (!declareWaterStore(electrolyzer.waterStoreId, "feed water", where, true))
 			return false;
 		if (!electrolyzer.oxygenStoreId.empty()
-			&& !declareGasStore(electrolyzer.oxygenStoreId, "oxygen", where,
-				electrolyzer.hazardClass, false))
+			&& !declareGasStore(electrolyzer.oxygenStoreId, "oxygen", where, false))
 			return false;
-		if (!declareGasStore(electrolyzer.hydrogenStoreId, "hydrogen", where,
-			electrolyzer.hazardClass, false))
+		if (!declareGasStore(electrolyzer.hydrogenStoreId, "hydrogen", where, false))
 			return false;
 		if (!allowIncomplete || !electrolyzer.heatSinkId.empty())
 		{
@@ -686,9 +635,8 @@ using namespace station_detail;
 			brokenReferences->push_back(std::move(text));
 			throw BrokenDraftEntry{};
 		};
-		std::map<std::string, std::string> gasStoreClass;
 		auto declareGasStore = [&](std::string const& storeId, char const* role,
-			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+			std::string const& where, bool allowCompound) -> bool
 		{
 			if (allowIncomplete && storeId.empty()) return true;
 			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
@@ -701,16 +649,6 @@ using namespace station_detail;
 			if (found->composition && !allowCompound)
 				return refuse(where + " " + role + " store '" + storeId
 					+ "' declares a composition; handled gas streams are plain mass stores, so no dry constituent can be created from pure gas");
-			if (found->hazardClass != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is authored "
-					+ found->hazardClass + "-class but this is a " + hazardClass
-					+ "-class gas process; a process may only touch stores of its own hazard class");
-			auto const existing = gasStoreClass.find(storeId);
-			if (existing == gasStoreClass.end())
-				gasStoreClass.emplace(storeId, hazardClass);
-			else if (existing->second != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
-					+ existing->second + "-class gas process; hazardous and normal gas streams may not share a store");
 			return true;
 		};
 		auto const where = "Station CO2 capture machine '" + capture.id + "'";
@@ -744,12 +682,10 @@ using namespace station_detail;
 					+ "'; a hazardous atmosphere's carbon stays on the hazardous side of the capture chain");
 		}
 
-		if (!declareGasStore(capture.captureStoreId, "capture", where,
-			capture.hazardClass, false))
+		if (!declareGasStore(capture.captureStoreId, "capture", where, false))
 			return false;
 		if (!capture.consumableStoreId.empty()
-			&& !declareGasStore(capture.consumableStoreId, "consumable", where,
-				capture.hazardClass, true))
+			&& !declareGasStore(capture.consumableStoreId, "consumable", where, true))
 			return false;
 		return true;
 	}
@@ -885,10 +821,9 @@ using namespace station_detail;
 					return refuse(item
 						+ " crosses a compound-material boundary into the waste store; consumed material may only land in a store with the same declared composition");
 			}
-			if (source->hazardClass != waste->hazardClass)
-				return refuse(item + " crosses the hazard-class boundary ('"
-					+ source->hazardClass + "' -> '" + waste->hazardClass
-					+ "'); consumed material may not cross the containment boundary");
+			// Consumed material no longer has to stay on its own side of
+			// a class boundary (#751): the waste store simply receives
+			// whatever the job consumed.
 		}
 		if (!allowIncomplete && !anyConsumed && !job.wasteStoreId.empty())
 			return refuse(where + " declares a waste store but consumes nothing; the waste store would never receive material");
@@ -1775,13 +1710,12 @@ using namespace station_detail;
 		} catch (BrokenDraftEntry const&) {}
 		// Water recovery contracts (#402). A collector condenses vapour out
 		// of one compartment onto a coolant-loop cold surface; a treatment
-		// turns raw water into treated water plus retained concentrate. Both
-		// carry a hazard class, and the class is what keeps a potable stream
-		// from sharing equipment with a contaminated one: a collector may
-		// only serve a compartment of its own class, since condensate
-		// inherits the hazard of the air it came from, and no store may be
-		// touched by both a normal-class and a hazardous-class water
-		// process. Treatment streams may be compound (#740): dry load is
+		// turns raw water into treated water plus retained concentrate. A
+		// collector may only serve a compartment of its own class, since
+		// condensate inherits the hazard of the air it came from; the
+		// stores it and the treatment touch are no longer class-bound (#751),
+		// so a process may be wired to any store whatever class it carries.
+		// Treatment streams may be compound (#740): dry load is
 		// retained in concentrate, while treated output is pure water. Other
 		// water processes retain their existing plain-store contracts.
 		if (settings.waterCollectors.size() > MaxStationWaterCollectors)
@@ -1797,9 +1731,8 @@ using namespace station_detail;
 			brokenReferences->push_back(std::move(text));
 			return true;
 		};
-		std::map<std::string, std::string> waterStoreClass;
 		auto declareWaterStore = [&](std::string const& storeId, char const* role,
-			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+			std::string const& where, bool allowCompound) -> bool
 		{
 			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
 				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
@@ -1811,16 +1744,6 @@ using namespace station_detail;
 			if (found->composition && !allowCompound)
 				return refuse(where + " " + role + " store '" + storeId
 					+ "' declares a composition; recovered water streams are plain mass stores, so no dry constituent can be created from pure condensate");
-			if (found->hazardClass != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is authored "
-					+ found->hazardClass + "-class but this is a " + hazardClass
-					+ "-class water process; a process may only touch stores of its own hazard class");
-			auto const existing = waterStoreClass.find(storeId);
-			if (existing == waterStoreClass.end())
-				waterStoreClass.emplace(storeId, hazardClass);
-			else if (existing->second != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
-					+ existing->second + "-class water process; hazardous and normal water streams may not share a store");
 			return true;
 		};
 		std::set<std::string> waterIds;
@@ -1848,12 +1771,13 @@ using namespace station_detail;
 		// one compartment atmosphere, never both and never neither. All gas
 		// and water stores in the chain are plain mass stores: a compound
 		// store would create dry constituents out of pure water or pure
-		// gas. Hazard class segregates the whole chain - the feed store,
-		// both product stores and the delivery compartment must carry the
-		// cell's own class - and the heat sink must share the cell's
-		// thermal service class, because spare capacity in one class is
-		// never usable by another. A CO2 capture machine scrubs one
-		// compartment of its own hazard class into a finite capture store;
+		// gas. The delivery compartment must still carry the cell's own
+		// class, and the heat sink must share the cell's thermal service
+		// class, because spare capacity in one class is
+		// never usable by another. The stores the cell touches are no
+		// longer bound to the cell's class (#751). A CO2 capture machine
+		// scrubs one compartment of its own hazard class into a finite
+		// capture store;
 		// if it declares a consumable demand it must name a consumable
 		// store, because a process cannot spend media it has no way to
 		// hold.
@@ -1866,9 +1790,8 @@ using namespace station_detail;
 		if (settings.fuelCells.size() > MaxStationFuelCells)
 			return refuse("Station fuel cells are limited to "
 				+ std::to_string(MaxStationFuelCells) + " entries");
-		std::map<std::string, std::string> gasStoreClass;
 		auto declareGasStore = [&](std::string const& storeId, char const* role,
-			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+			std::string const& where, bool allowCompound) -> bool
 		{
 			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
 				[&](ResourceStoreSettings const& store) { return store.id == storeId; });
@@ -1880,16 +1803,6 @@ using namespace station_detail;
 			if (found->composition && !allowCompound)
 				return refuse(where + " " + role + " store '" + storeId
 					+ "' declares a composition; handled gas streams are plain mass stores, so no dry constituent can be created from pure gas");
-			if (found->hazardClass != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is authored "
-					+ found->hazardClass + "-class but this is a " + hazardClass
-					+ "-class gas process; a process may only touch stores of its own hazard class");
-			auto const existing = gasStoreClass.find(storeId);
-			if (existing == gasStoreClass.end())
-				gasStoreClass.emplace(storeId, hazardClass);
-			else if (existing->second != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
-					+ existing->second + "-class gas process; hazardous and normal gas streams may not share a store");
 			return true;
 		};
 		std::set<std::string> gasIds;
@@ -1917,8 +1830,9 @@ using namespace station_detail;
 		// electrical energy than the reactants' chemical energy is a
 		// perpetual-motion claim, not a machine. The dispatch setpoint may
 		// not exceed the installed rating. All three stores in the chain
-		// are plain mass stores carrying the cell's own hazard class, and
-		// the heat sink must share the cell's thermal service class.
+		// are plain mass stores; none of them is bound to the cell's own
+		// hazard class (#751), and the heat sink must share the cell's
+		// thermal service class.
 		for (auto const& cell : settings.fuelCells) try
 		{
 			auto const where = "Station fuel cell '" + cell.id + "'";
@@ -1952,14 +1866,11 @@ using namespace station_detail;
 			if (!cell.hydrogenStoreId.empty() && cell.hydrogenStoreId == cell.oxygenStoreId)
 				return refuse(where + " names the same store '" + cell.hydrogenStoreId
 					+ "' for both the hydrogen and the oxygen reactant: the cell draws both reactants independently and may not spend one store's stock as both");
-			if (!declareGasStore(cell.hydrogenStoreId, "hydrogen reactant", where,
-				cell.hazardClass, false))
+			if (!declareGasStore(cell.hydrogenStoreId, "hydrogen reactant", where, false))
 				return false;
-			if (!declareGasStore(cell.oxygenStoreId, "oxygen reactant", where,
-				cell.hazardClass, false))
+			if (!declareGasStore(cell.oxygenStoreId, "oxygen reactant", where, false))
 				return false;
-			if (!declareWaterStore(cell.waterStoreId, "product water", where,
-				cell.hazardClass, false))
+			if (!declareWaterStore(cell.waterStoreId, "product water", where, false))
 				return false;
 			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
 				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
@@ -1975,8 +1886,9 @@ using namespace station_detail;
 		// captured CO2 and hydrogen into methane and water; the conversion
 		// is stoichiometric under the declared molar masses, so the mass
 		// ledger closes by construction. All four stores in the chain are
-		// plain mass stores carrying the reactor's own hazard class, and
-		// the heat sink must share the reactor's thermal service class.
+		// plain mass stores; none of them is bound to the reactor's own
+		// hazard class (#751), and the heat sink must share the reactor's
+		// thermal service class.
 		// A methane processor splits methane into recovered hydrogen and
 		// solid carbon; the split is stoichiometric, and because the
 		// reaction is endothermic the authored electrical dose must at
@@ -2044,17 +1956,13 @@ using namespace station_detail;
 							+ reactorRoles[left].first + " and the "
 							+ reactorRoles[right].first
 							+ ": chemically distinct streams may not share one store");
-			if (!declareGasStore(reactor.co2StoreId, "CO2 feed", where,
-				reactor.hazardClass, false))
+			if (!declareGasStore(reactor.co2StoreId, "CO2 feed", where, false))
 				return false;
-			if (!declareGasStore(reactor.hydrogenStoreId, "hydrogen feed", where,
-				reactor.hazardClass, false))
+			if (!declareGasStore(reactor.hydrogenStoreId, "hydrogen feed", where, false))
 				return false;
-			if (!declareGasStore(reactor.methaneStoreId, "methane", where,
-				reactor.hazardClass, false))
+			if (!declareGasStore(reactor.methaneStoreId, "methane", where, false))
 				return false;
-			if (!declareWaterStore(reactor.waterStoreId, "product water", where,
-				reactor.hazardClass, false))
+			if (!declareWaterStore(reactor.waterStoreId, "product water", where, false))
 				return false;
 			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
 				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
@@ -2114,14 +2022,11 @@ using namespace station_detail;
 							+ processorRoles[left].first + " and the "
 							+ processorRoles[right].first
 							+ ": chemically distinct streams may not share one store");
-			if (!declareGasStore(processor.methaneStoreId, "methane feed", where,
-				processor.hazardClass, false))
+			if (!declareGasStore(processor.methaneStoreId, "methane feed", where, false))
 				return false;
-			if (!declareGasStore(processor.hydrogenStoreId, "recovered hydrogen", where,
-				processor.hazardClass, false))
+			if (!declareGasStore(processor.hydrogenStoreId, "recovered hydrogen", where, false))
 				return false;
-			if (!declareGasStore(processor.carbonStoreId, "solid carbon", where,
-				processor.hazardClass, false))
+			if (!declareGasStore(processor.carbonStoreId, "solid carbon", where, false))
 				return false;
 			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
 				settings.thermalReservoirs.end(), [&](ThermalReservoirSettings const& reservoir)
@@ -2166,9 +2071,8 @@ using namespace station_detail;
 			brokenReferences->push_back(std::move(text));
 			throw BrokenDraftEntry{};
 		};
-		std::map<std::string, std::string> waterStoreClass;
 		auto declareWaterStore = [&](std::string const& storeId, char const* role,
-			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+			std::string const& where, bool allowCompound) -> bool
 		{
 			if (allowUnwired && storeId.empty()) return true;
 			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
@@ -2181,21 +2085,10 @@ using namespace station_detail;
 			if (found->composition && !allowCompound)
 				return refuse(where + " " + role + " store '" + storeId
 					+ "' declares a composition; recovered water streams are plain mass stores, so no dry constituent can be created from pure condensate");
-			if (found->hazardClass != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is authored "
-					+ found->hazardClass + "-class but this is a " + hazardClass
-					+ "-class water process; a process may only touch stores of its own hazard class");
-			auto const existing = waterStoreClass.find(storeId);
-			if (existing == waterStoreClass.end())
-				waterStoreClass.emplace(storeId, hazardClass);
-			else if (existing->second != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
-					+ existing->second + "-class water process; hazardous and normal water streams may not share a store");
 			return true;
 		};
-		std::map<std::string, std::string> gasStoreClass;
 		auto declareGasStore = [&](std::string const& storeId, char const* role,
-			std::string const& where, std::string const& hazardClass, bool allowCompound) -> bool
+			std::string const& where, bool allowCompound) -> bool
 		{
 			if (allowUnwired && storeId.empty()) return true;
 			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
@@ -2208,16 +2101,6 @@ using namespace station_detail;
 			if (found->composition && !allowCompound)
 				return refuse(where + " " + role + " store '" + storeId
 					+ "' declares a composition; handled gas streams are plain mass stores, so no dry constituent can be created from pure gas");
-			if (found->hazardClass != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is authored "
-					+ found->hazardClass + "-class but this is a " + hazardClass
-					+ "-class gas process; a process may only touch stores of its own hazard class");
-			auto const existing = gasStoreClass.find(storeId);
-			if (existing == gasStoreClass.end())
-				gasStoreClass.emplace(storeId, hazardClass);
-			else if (existing->second != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
-					+ existing->second + "-class gas process; hazardous and normal gas streams may not share a store");
 			return true;
 		};
 		// Crew contracts (#401): the crew is an authored population and
@@ -2279,8 +2162,7 @@ using namespace station_detail;
 				return refuse(where + " greywater requires a destination store");
 			if (!crew.greywaterStoreId.empty())
 			{
-				if (!declareWaterStore(crew.greywaterStoreId, "greywater", where,
-					habitat == settings.atmospheres.end() ? "normal" : habitat->hazardClass, true)) return false;
+				if (!declareWaterStore(crew.greywaterStoreId, "greywater", where, true)) return false;
 				auto const destination = std::find_if(settings.stores.begin(), settings.stores.end(),
 					[&](auto const& s) { return s.id == crew.greywaterStoreId; });
 				if (destination != settings.stores.end() && !destination->composition)
@@ -2306,18 +2188,10 @@ using namespace station_detail;
 				if (!found->composition)
 					return refuse(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
 						+ "' has no declared composition; crew streams require compound stores to close the element balance");
-				// Hazard segregation (#573): the breathing compartment is the
-				// containment boundary, so every crew stream - food and water in,
-				// urine and organic waste out - is pinned to the compartment's
-				// own hazard class. A hazardous store can never feed or receive a
-				// normal population, and a normal store can never be claimed as
-				// the destination of a hazardous crew's returns: crossing that
-				// boundary is a release process with its own clearance contract,
-				// not metabolism.
-				if (habitat != settings.atmospheres.end() && found->hazardClass != habitat->hazardClass)
-					return refuse(where + " " + streamRoles[stream] + " store '" + streamIds[stream]
-						+ "' is authored " + found->hazardClass + "-class but the crew breathes in '"
-						+ habitat->id + "', a " + habitat->hazardClass + "-class compartment: a crew may only consume and return material of its compartment's hazard class; crew returns never relabel material across the hazard boundary");
+				// The crew's stores are no longer pinned to the breathing
+				// compartment's hazard class (#751): a crew may be wired to
+				// stores of any class, and what it sees is the quantity
+				// consequence, not a wall.
 				streamStores[stream] = &*found;
 			}
 			// Aliased stream roles are refused (#600), the same rule the
@@ -2388,10 +2262,8 @@ using namespace station_detail;
 		if (settings.microbialProcessors.size() > MaxStationMicrobialProcessors)
 			return refuse("Station microbial processors are limited to "
 				+ std::to_string(MaxStationMicrobialProcessors) + " entries");
-		std::map<std::string, std::string> microbialStoreClass;
 		auto declareMicrobialStore = [&](std::string const& storeId, char const* role,
-			std::string const& where, std::string const& hazardClass,
-			bool requireCompound) -> bool
+			std::string const& where, bool requireCompound) -> bool
 		{
 			if (allowUnwired && storeId.empty()) return true;
 			auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
@@ -2407,16 +2279,6 @@ using namespace station_detail;
 			if (!requireCompound && found->composition)
 				return refuse(where + " " + role + " store '" + storeId
 					+ "' declares a composition; recovered product streams land as plain mass, so a compound destination would create tracked constituents out of nothing");
-			if (found->hazardClass != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is authored "
-					+ found->hazardClass + "-class but this is a " + hazardClass
-					+ "-class nutrient process; a process may only touch stores of its own hazard class");
-			auto const existing = microbialStoreClass.find(storeId);
-			if (existing == microbialStoreClass.end())
-				microbialStoreClass.emplace(storeId, hazardClass);
-			else if (existing->second != hazardClass)
-				return refuse(where + " " + role + " store '" + storeId + "' is already used by a "
-					+ existing->second + "-class nutrient process; hazardous and normal nutrient streams may not share a store");
 			return true;
 		};
 		std::set<std::string> microbialIds;
@@ -2519,14 +2381,11 @@ using namespace station_detail;
 						return refuse(where + " " + chainRoles[stream] + " store and "
 							+ chainRoles[other] + " store are the same store '"
 							+ chainIds[stream] + "'; the recovery chain needs distinct stores for every stream");
-			if (!declareMicrobialStore(processor.feedStoreId, "feed", where,
-				processor.hazardClass, true))
+			if (!declareMicrobialStore(processor.feedStoreId, "feed", where, true))
 				return false;
-			if (!declareGasStore(processor.oxygenStoreId, "oxygen", where,
-				processor.hazardClass, false))
+			if (!declareGasStore(processor.oxygenStoreId, "oxygen", where, false))
 				return false;
-			if (!declareWaterStore(processor.waterStoreId, "process water", where,
-				processor.hazardClass, true))
+			if (!declareWaterStore(processor.waterStoreId, "process water", where, true))
 				return false;
 			if (!allowUnwired || !processor.consumableStoreId.empty())
 			{
@@ -2537,27 +2396,11 @@ using namespace station_detail;
 						+ "' does not exist");
 				if (derived && !isMassUnit(found->unit))
 					return refuse(where + " composition-derived consumable must use a mass unit (g or kg)");
-				// #592: the consumable is a consumed input like the feed: its
-				// authored hazard class must match the processor's own class,
-				// not merely stay consistent with other processors' claims on
-				// the same store id. A normal processor may not draw
-				// hazardous-class media, and a hazardous processor may not
-				// draw normal-class media.
-				if (found->hazardClass != processor.hazardClass)
-					return refuse(where + " consumable store '" + processor.consumableStoreId
-						+ "' is authored " + found->hazardClass
-						+ "-class but this is a " + processor.hazardClass
-						+ "-class nutrient process; a process may only touch stores of its own hazard class");
-				auto const existing = microbialStoreClass.find(processor.consumableStoreId);
-				if (existing == microbialStoreClass.end())
-					microbialStoreClass.emplace(processor.consumableStoreId, processor.hazardClass);
-				else if (existing->second != processor.hazardClass)
-					return refuse(where + " consumable store '" + processor.consumableStoreId
-						+ "' is already used by a " + existing->second
-						+ "-class nutrient process; hazardous and normal nutrient streams may not share a store");
+				// The consumable's hazard class no longer binds the
+				// processor (#751): a processor may draw media of any class,
+				// and the quantity it draws is the whole of the consequence.
 			}
-			if (!declareMicrobialStore(processor.nutrientStoreId, "nutrient", where,
-				processor.hazardClass, false))
+			if (!declareMicrobialStore(processor.nutrientStoreId, "nutrient", where, false))
 				return false;
 			for (auto const& [name, fraction] : processor.recoveredWaterCarryoverFractions)
 			{
@@ -2572,19 +2415,15 @@ using namespace station_detail;
 						return refuse(where + " carried '" + name + "' requires a compound recovered water destination");
 				}
 			}
-			if (!declareWaterStore(processor.recoveredWaterStoreId, "recovered water", where,
-				processor.hazardClass, true))
+			if (!declareWaterStore(processor.recoveredWaterStoreId, "recovered water", where, true))
 				return false;
-			if (!declareGasStore(processor.co2StoreId, "CO2", where,
-				processor.hazardClass, false))
+			if (!declareGasStore(processor.co2StoreId, "CO2", where, false))
 				return false;
-			if (!declareMicrobialStore(processor.residueStoreId, "residue", where,
-				processor.hazardClass, false))
+			if (!declareMicrobialStore(processor.residueStoreId, "residue", where, false))
 				return false;
 			// The replacement biological stock store (#408) is an optional
-			// consumed input like the consumable: it must exist, carry the
-			// processor's own authored hazard class (#592), and stay
-			// hazard-class segregated from the rest of the nutrient chain.
+			// consumed input like the consumable: it must exist, and its
+			// hazard class no longer binds the processor (#751).
 			if (!processor.stockStoreId.empty())
 			{
 				auto const found = std::find_if(settings.stores.begin(), settings.stores.end(),
@@ -2592,18 +2431,6 @@ using namespace station_detail;
 				if (found == settings.stores.end())
 					return missing(where + " replacement biological stock store '"
 						+ processor.stockStoreId + "' does not exist");
-				if (found->hazardClass != processor.hazardClass)
-					return refuse(where + " replacement biological stock store '"
-						+ processor.stockStoreId + "' is authored " + found->hazardClass
-						+ "-class but this is a " + processor.hazardClass
-						+ "-class nutrient process; a process may only touch stores of its own hazard class");
-				auto const existing = microbialStoreClass.find(processor.stockStoreId);
-				if (existing == microbialStoreClass.end())
-					microbialStoreClass.emplace(processor.stockStoreId, processor.hazardClass);
-				else if (existing->second != processor.hazardClass)
-					return refuse(where + " replacement biological stock store '"
-						+ processor.stockStoreId + "' is already used by a "
-						+ existing->second + "-class nutrient process; hazardous and normal nutrient streams may not share a store");
 			}
 
 			auto const sink = std::find_if(settings.thermalReservoirs.begin(),
@@ -2709,18 +2536,6 @@ using namespace station_detail;
 						+ uptakePurityNames[stream] + ": the uptake spends the drawn mass exactly as "
 						+ uptakePurityNames[stream]
 						+ " and owns no residual stream to account for any other constituent; only an explicit conversion may cross that boundary");
-				// Hazard segregation (#573): the growing compartment is the
-				// containment boundary, so every store the population touches -
-				// irrigation water and each tracked nutrient in, harvested food
-				// and waste out - must carry the compartment's own hazard class.
-				// Hazardous irrigation can never feed a normal canopy, and a
-				// normal store can never receive a hazardous population's
-				// harvest or death residue: relabelling across the boundary is
-				// a release process, not a harvest.
-				if (compartment != settings.atmospheres.end() && found->hazardClass != compartment->hazardClass)
-					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
-						+ "' is authored " + found->hazardClass + "-class but the population grows in '"
-						+ compartment->id + "', a " + compartment->hazardClass + "-class compartment: a crop may only take up and harvest material of its compartment's hazard class; harvest and death residue never relabel material across the hazard boundary");
 				for (size_t other = stream + 1; other < 5; ++other)
 					if (uptakeIds[stream] == uptakeIds[other])
 						return refuse(where + " " + uptakeRoles[stream] + " store and "
@@ -2832,10 +2647,6 @@ using namespace station_detail;
 				if (found->composition && !compositionsClose(*found->composition, composition))
 					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
 						+ "' declares a composition different from the crop's declared dry-mass composition: harvested material enters a store exactly as declared, and a different compound material is a boundary only an explicit conversion may cross");
-				if (compartment != settings.atmospheres.end() && found->hazardClass != compartment->hazardClass)
-					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
-						+ "' is authored " + found->hazardClass + "-class but the population grows in '"
-						+ compartment->id + "', a " + compartment->hazardClass + "-class compartment: a crop may only take up and harvest material of its compartment's hazard class; harvest and death residue never relabel material across the hazard boundary");
 			}
 		} catch (BrokenDraftEntry const&) {}
 		// Algae culture contracts (#411). A separate Biological population
@@ -2895,13 +2706,6 @@ using namespace station_detail;
 						+ uptakePurityNames[stream] + ": the uptake spends the drawn mass exactly as "
 						+ uptakePurityNames[stream]
 						+ " and owns no residual stream to account for any other constituent; only an explicit conversion may cross that boundary");
-				// Hazard segregation (#573): as with the crops, the culture
-				// compartment is the containment boundary and every uptake and
-				// harvest destination must carry its hazard class.
-				if (compartment != settings.atmospheres.end() && found->hazardClass != compartment->hazardClass)
-					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
-						+ "' is authored " + found->hazardClass + "-class but the culture runs in '"
-						+ compartment->id + "', a " + compartment->hazardClass + "-class compartment: an algae culture may only take up and harvest material of its compartment's hazard class; the harvest partition and death residue never relabel material across the hazard boundary");
 				for (size_t other = stream + 1; other < 5; ++other)
 					if (uptakeIds[stream] == uptakeIds[other])
 						return refuse(where + " " + uptakeRoles[stream] + " store and "
@@ -3017,10 +2821,6 @@ using namespace station_detail;
 				if (found->composition && !compositionsClose(*found->composition, composition))
 					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
 						+ "' declares a composition different from the culture's declared dry-mass composition: harvested material enters a store exactly as declared, and a different compound material is a boundary only an explicit conversion may cross");
-				if (compartment != settings.atmospheres.end() && found->hazardClass != compartment->hazardClass)
-					return refuse(where + " " + destinationRoles[stream] + " store '" + destinationIds[stream]
-						+ "' is authored " + found->hazardClass + "-class but the culture runs in '"
-						+ compartment->id + "', a " + compartment->hazardClass + "-class compartment: an algae culture may only take up and harvest material of its compartment's hazard class; the harvest partition and death residue never relabel material across the hazard boundary");
 			}
 		} catch (BrokenDraftEntry const&) {}
 		diagnostic.clear(); return true;

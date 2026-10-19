@@ -1811,8 +1811,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     'a consuming maintenance requirement needs a declared waste store')
                 assert(store.unit == waste.unit,
                     'maintenance consumed material unit does not match the waste store')
-                assert(store.hazardClass == waste.hazardClass,
-                    'maintenance consumed material crosses the hazard-class boundary')
+                -- The consumed material no longer has to stay on its own
+                -- side of a class boundary (#751): the waste store simply
+                -- receives whatever the job consumed.
                 if store.composition ~= nil or waste.composition ~= nil then
                     assert(store.composition ~= nil and waste.composition ~= nil
                         and math.abs(store.composition.moisture - waste.composition.moisture) <= BALANCE_TOLERANCE
@@ -2118,17 +2119,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             assert(store ~= nil, 'crew ' .. streamRoles[stream] .. ' store is unknown')
             assert(store.composition ~= nil,
                 'crew ' .. streamRoles[stream] .. ' store must declare a composition')
-            -- Hazard segregation (#573): the breathing compartment is the
-            -- containment boundary, so every crew stream is pinned to its
-            -- hazard class. Hazardous feed never enters a normal
-            -- population and normal stores never receive a hazardous
-            -- crew's returns; crossing the boundary is a release
-            -- process, not metabolism.
-            assert(store.hazardClass == compartment.hazardClass,
-                'crew ' .. streamRoles[stream] .. " store '" .. store.id .. "' is authored "
-                    .. store.hazardClass .. "-class but the crew breathes in '" .. compartment.id
-                    .. "', a " .. compartment.hazardClass
-                    .. "-class compartment: a crew may only consume and return material of its compartment's hazard class")
+            -- The crew's stores are no longer pinned to the breathing
+            -- compartment's hazard class (#751): a crew may be wired to
+            -- stores of any class, and what it sees is the quantity
+            -- consequence, not a wall.
             streams[stream] = store
         end
         local food, water, urine, waste = streams[1], streams[2], streams[3], streams[4]
@@ -2161,8 +2155,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             assert(greywater and greywater.composition, 'greywater requires compound destination')
         end
         if greywater then
-            assert(greywater.composition and greywater.hazardClass == compartment.hazardClass,
-                'greywater must stay inside crew hazard class')
+            assert(greywater.composition, 'greywater requires compound destination')
             for _, stream in ipairs(streams) do assert(stream ~= greywater, 'greywater needs distinct store') end
         end
         local foodKg = toKg(food.unit, crew.foodRate)
@@ -2228,33 +2221,20 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     -- than the compartment held above its humidity target, a treatment's
     -- processed mass must leave as treated water plus concentrate and
     -- nothing else, and every treated kilogram is either qualified or
-    -- held. A descriptor that would create water, or mix hazard classes in
-    -- one store, is refused at construction like any other bad descriptor.
+    -- held. A descriptor that would create water is refused at
+    -- construction like any other bad descriptor; the hazard class of
+    -- the stores a water process touches no longer binds it (#751).
     assert(#waterCollectors <= 8, 'station water collectors are limited to 8 entries')
     assert(#waterTreatments <= 8, 'station water treatments are limited to 8 entries')
-    local waterStoreClass = {}
-    local function declareWaterStore(storeId, role, hazardClass, allowCompound)
+    local function declareWaterStore(storeId, role, allowCompound)
         local store = by_id[storeId]
         assert(store ~= nil, 'water ' .. role .. " store '" .. tostring(storeId) .. "' is unknown")
-        assert(store.hazardClass == hazardClass,
-            'water ' .. role .. " store '" .. store.id .. "' is authored "
-                .. store.hazardClass .. '-class but this is a ' .. hazardClass
-                .. '-class water process: a process may only touch stores of its own hazard class')
         assert(store.unit == 'g' or store.unit == 'kg',
             'water ' .. role .. " store '" .. store.id
                 .. "' must be a mass unit; water recovery is mass-denominated")
         assert(allowCompound or store.composition == nil,
             'water ' .. role .. " store '" .. store.id
                 .. "' must be a plain mass store: recovered water carries no dry constituents")
-        local existing = waterStoreClass[store.id]
-        if existing == nil then
-            waterStoreClass[store.id] = hazardClass
-        else
-            assert(existing == hazardClass,
-                'water ' .. role .. " store '" .. store.id .. "' is shared between "
-                    .. existing .. '-class and ' .. hazardClass
-                    .. '-class water processes: hazardous and normal water streams may not share a store')
-        end
         return store
     end
     for index = 1, #waterCollectors do
@@ -2279,8 +2259,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         assert(loop ~= nil, 'water collector cooling loop is unknown')
         assert(loop.reservoir.thermalClass == collector.thermalClass,
             'water collector thermal class must match its coolant loop host reservoir class')
-        local destination = declareWaterStore(collector.destStore, 'raw water destination',
-            collector.hazardClass, false)
+        local destination = declareWaterStore(collector.destStore, 'raw water destination', false)
         object.water_collectors[index] = {
             id = collector.id,
             hazardClass = collector.hazardClass,
@@ -2330,8 +2309,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     'water treatment ' .. streamRoles[stream] .. ' and '
                         .. streamRoles[other] .. ' stores must be distinct')
             end
-            streams[stream] = declareWaterStore(streamIds[stream], streamRoles[stream],
-                stream == 2 and treatment.releaseToNormalClass and 'normal' or treatment.hazardClass, true)
+            streams[stream] = declareWaterStore(streamIds[stream], streamRoles[stream], true)
         end
         local removals = treatment.removalFractions or {}
         local species = {dryOrganics=true, nutrientNitrogen=true, atmosphericNitrogen=true,
@@ -2354,8 +2332,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         end
         assert(not treatment.releaseToNormalClass or treatment.hazardClass == 'hazardous',
             'normal release requires hazardous clearance-gated treatment')
-        local consumable = declareWaterStore(treatment.consumableStore, 'consumable',
-            treatment.hazardClass, true)
+        local consumable = declareWaterStore(treatment.consumableStore, 'consumable', true)
         -- Release clearance (#412): a hazardous-class treatment must
         -- declare its clearance contract; a normal-class one must not.
         -- The sandbox mirrors the host's refusal so a corrupt crossing
@@ -2374,7 +2351,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     'water treatment release-clearance store must be distinct from the source, treated and concentrate stores')
             end
             clearance = declareWaterStore(treatment.clearanceStore,
-                'release-clearance consumable', treatment.hazardClass, true)
+                'release-clearance consumable', true)
         else
             assert(treatment.clearanceStore == nil or #treatment.clearanceStore == 0,
                 'normal-class water treatment cannot configure release-clearance testing')
@@ -2429,29 +2406,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     -- construction like any other bad descriptor.
     assert(#electrolyzers <= 8, 'station electrolyzers are limited to 8 entries')
     assert(#co2Captures <= 8, 'station CO2 capture machines are limited to 8 entries')
-    local gasStoreClass = {}
-    local function declareGasStore(storeId, role, hazardClass, allowCompound)
+    local function declareGasStore(storeId, role, allowCompound)
         local store = by_id[storeId]
         assert(store ~= nil, 'gas ' .. role .. " store '" .. tostring(storeId) .. "' is unknown")
-        assert(store.hazardClass == hazardClass,
-            'gas ' .. role .. " store '" .. store.id .. "' is authored "
-                .. store.hazardClass .. '-class but this is a ' .. hazardClass
-                .. '-class gas process: a process may only touch stores of its own hazard class')
         assert(store.unit == 'g' or store.unit == 'kg',
             'gas ' .. role .. " store '" .. store.id
                 .. "' must be a mass unit; gas handling is mass-denominated")
         assert(allowCompound or store.composition == nil,
             'gas ' .. role .. " store '" .. store.id
                 .. "' must be a plain mass store: handled gas streams carry no dry constituents")
-        local existing = gasStoreClass[store.id]
-        if existing == nil then
-            gasStoreClass[store.id] = hazardClass
-        else
-            assert(existing == hazardClass,
-                'gas ' .. role .. " store '" .. store.id .. "' is shared between "
-                    .. existing .. '-class and ' .. hazardClass
-                    .. '-class gas processes: hazardous and normal gas streams may not share a store')
-        end
         return store
     end
     for index = 1, #electrolyzers do
@@ -2480,12 +2443,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         assert((cell.oxygenStore == nil or #cell.oxygenStore == 0)
             ~= (cell.atmosphere == nil or #cell.atmosphere == 0),
             'electrolyzer must configure exactly one oxygen destination: a gas store or a compartment')
-        local feed = declareWaterStore(cell.waterStore, 'feed water', cell.hazardClass, true)
+        local feed = declareWaterStore(cell.waterStore, 'feed water', true)
         local oxygen = nil
         if cell.oxygenStore ~= nil and #cell.oxygenStore > 0 then
-            oxygen = declareGasStore(cell.oxygenStore, 'oxygen', cell.hazardClass, false)
+            oxygen = declareGasStore(cell.oxygenStore, 'oxygen', false)
         end
-        local hydrogen = declareGasStore(cell.hydrogenStore, 'hydrogen', cell.hazardClass, false)
+        local hydrogen = declareGasStore(cell.hydrogenStore, 'hydrogen', false)
         -- Aliased stream roles are refused (#585), mirroring the host: the
         -- two products are chemically distinct, and the tick sizes each
         -- product against its own store's headroom before either is added,
@@ -2551,12 +2514,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         assert(compartment ~= nil, 'CO2 capture atmosphere compartment is unknown')
         assert(compartment.hazardClass == capture.hazardClass,
             'CO2 capture hazard class must match the compartment it scrubs')
-        local destination = declareGasStore(capture.captureStore, 'capture',
-            capture.hazardClass, false)
+        local destination = declareGasStore(capture.captureStore, 'capture', false)
         local consumable = nil
         if capture.consumableStore ~= nil and #capture.consumableStore > 0 then
-            consumable = declareGasStore(capture.consumableStore, 'consumable',
-                capture.hazardClass, true)
+            consumable = declareGasStore(capture.consumableStore, 'consumable', true)
         end
         object.co2_captures[index] = {
             id = capture.id,
@@ -2576,9 +2537,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     end
     -- Fuel-cell backup contracts (#406). The cell burns its two dedicated
     -- reactant stores for dispatchable electrical power; every axis of
-    -- finiteness is enforced at runtime, and the whole chain - both
-    -- reactant stores and the product water store - carries the cell's
-    -- own hazard class.
+    -- finiteness is enforced at runtime. The stores the cell touches are
+    -- no longer bound to the cell's own hazard class (#751).
     for index = 1, #fuelCells do
         local cell = fuelCells[index]
         assert(type(cell) == 'table', 'fuel cell descriptor must be a table')
@@ -2606,18 +2566,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             and cell.maxSinkTemperatureC == cell.maxSinkTemperatureC
             and cell.maxSinkTemperatureC > -KELVIN_OFFSET,
             'fuel cell maximum sink temperature must be finite and above absolute zero')
-        local hydrogen = declareGasStore(cell.hydrogenStore, 'hydrogen reactant',
-            cell.hazardClass, false)
-        local oxygen = declareGasStore(cell.oxygenStore, 'oxygen reactant',
-            cell.hazardClass, false)
+        local hydrogen = declareGasStore(cell.hydrogenStore, 'hydrogen reactant', false)
+        local oxygen = declareGasStore(cell.oxygenStore, 'oxygen reactant', false)
         -- The same aliased-role rule the electrolyzer carries (#585):
         -- the cell draws each reactant from its own store's drawable
         -- stock, so one store named for both reactants spends the same
         -- stock twice against a stoichiometry that expects two.
         assert(hydrogen ~= oxygen,
             'fuel cell may not name the same store for both the hydrogen and the oxygen reactant: the cell draws both reactants independently and may not spend one store\'s stock as both')
-        local water = declareWaterStore(cell.waterStore, 'product water',
-            cell.hazardClass, false)
+        local water = declareWaterStore(cell.waterStore, 'product water', false)
         local sink = reservoir_by_id[cell.heatSink]
         assert(sink ~= nil, 'fuel cell heat sink reservoir is unknown')
         assert(sink.thermalClass == cell.thermalClass,
@@ -2671,12 +2628,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             and reactor.maxSinkTemperatureC == reactor.maxSinkTemperatureC
             and reactor.maxSinkTemperatureC > -273.15,
             'Sabatier reactor maximum sink temperature must be finite and above absolute zero')
-        local co2 = declareGasStore(reactor.co2Store, 'CO2 feed', reactor.hazardClass, false)
-        local hydrogen = declareGasStore(reactor.hydrogenStore, 'hydrogen feed',
-            reactor.hazardClass, false)
-        local methane = declareGasStore(reactor.methaneStore, 'methane', reactor.hazardClass, false)
-        local water = declareWaterStore(reactor.waterStore, 'product water',
-            reactor.hazardClass, false)
+        local co2 = declareGasStore(reactor.co2Store, 'CO2 feed', false)
+        local hydrogen = declareGasStore(reactor.hydrogenStore, 'hydrogen feed', false)
+        local methane = declareGasStore(reactor.methaneStore, 'methane', false)
+        local water = declareWaterStore(reactor.waterStore, 'product water', false)
         -- Aliased stream roles are refused (#599), mirroring the host: the
         -- four streams are chemically distinct, and the tick sizes each
         -- product against its own store's headroom before either is
@@ -2742,12 +2697,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             and processor.maxSinkTemperatureC == processor.maxSinkTemperatureC
             and processor.maxSinkTemperatureC > -273.15,
             'methane processor maximum sink temperature must be finite and above absolute zero')
-        local methane = declareGasStore(processor.methaneStore, 'methane feed',
-            processor.hazardClass, false)
-        local hydrogen = declareGasStore(processor.hydrogenStore, 'recovered hydrogen',
-            processor.hazardClass, false)
-        local carbon = declareGasStore(processor.carbonStore, 'solid carbon',
-            processor.hazardClass, false)
+        local methane = declareGasStore(processor.methaneStore, 'methane feed', false)
+        local hydrogen = declareGasStore(processor.hydrogenStore, 'recovered hydrogen', false)
+        local carbon = declareGasStore(processor.carbonStore, 'solid carbon', false)
         -- The same aliased-role rule as the Sabatier reactor (#599):
         -- the methane feed, the recovered hydrogen and the solid carbon
         -- are three chemically distinct streams and may not share one
@@ -2806,14 +2758,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     -- classes in one store or release unfunded heat is refused at
     -- construction like any other bad descriptor.
     assert(#microbialProcessors <= 8, 'station microbial processors are limited to 8 entries')
-    local microbialStoreClass = {}
-    local function declareMicrobialStore(storeId, role, hazardClass, requireCompound)
+    local function declareMicrobialStore(storeId, role, requireCompound)
         local store = by_id[storeId]
         assert(store ~= nil, 'nutrient ' .. role .. " store '" .. tostring(storeId) .. "' is unknown")
-        assert(store.hazardClass == hazardClass,
-            'nutrient ' .. role .. " store '" .. store.id .. "' is authored "
-                .. store.hazardClass .. '-class but this is a ' .. hazardClass
-                .. '-class nutrient process: a process may only touch stores of its own hazard class')
         assert(store.unit == 'g' or store.unit == 'kg',
             'nutrient ' .. role .. " store '" .. store.id
                 .. "' must be a mass unit; nutrient recovery is mass-denominated")
@@ -2822,15 +2769,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 .. (requireCompound
                     and "' must declare a composition: a microbial processor recovers bound nutrients from a declared compound feedstock"
                     or "' must be a plain mass store: recovered product streams land as plain mass, so a compound destination would create tracked constituents out of nothing"))
-        local existing = microbialStoreClass[store.id]
-        if existing == nil then
-            microbialStoreClass[store.id] = hazardClass
-        else
-            assert(existing == hazardClass,
-                'nutrient ' .. role .. " store '" .. store.id .. "' is shared between "
-                    .. existing .. '-class and ' .. hazardClass
-                    .. '-class nutrient processes: hazardous and normal nutrient streams may not share a store')
-        end
         return store
     end
     for index = 1, #microbialProcessors do
@@ -2939,64 +2877,25 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         .. "'; the recovery chain needs distinct stores for every stream")
             end
         end
-        local feed = declareMicrobialStore(processor.feedStore, 'feed',
-            processor.hazardClass, true)
-        local oxygen = declareGasStore(processor.oxygenStore, 'oxygen',
-            processor.hazardClass, false)
-        local water = declareWaterStore(processor.waterStore, 'process water',
-            processor.hazardClass, true)
+        local feed = declareMicrobialStore(processor.feedStore, 'feed', true)
+        local oxygen = declareGasStore(processor.oxygenStore, 'oxygen', false)
+        local water = declareWaterStore(processor.waterStore, 'process water', true)
         local consumable = by_id[processor.consumableStore]
         assert(consumable ~= nil, 'microbial processor consumable store is unknown')
-        -- #592: the consumable is a consumed input like the feed: its
-        -- authored hazard class must match the processor's own class, in
-        -- both directions, not merely stay consistent with other
-        -- processors' claims on the same store id.
-        assert(consumable.hazardClass == processor.hazardClass,
-            'microbial processor consumable store ' .. consumable.id
-                .. ' is authored ' .. consumable.hazardClass
-                .. '-class but this is a ' .. processor.hazardClass
-                .. '-class nutrient process: a process may only touch stores of its own hazard class')
-        local consumableExisting = microbialStoreClass[consumable.id]
-        if consumableExisting == nil then
-            microbialStoreClass[consumable.id] = processor.hazardClass
-        else
-            assert(consumableExisting == processor.hazardClass,
-                'microbial processor consumable store ' .. consumable.id
-                    .. ' is shared between ' .. consumableExisting .. '-class and '
-                    .. processor.hazardClass
-                    .. '-class nutrient processes: hazardous and normal nutrient streams may not share a store')
-        end
-        local nutrient = declareMicrobialStore(processor.nutrientStore, 'nutrient',
-            processor.hazardClass, false)
-        local recoveredWater = declareWaterStore(processor.recoveredWaterStore, 'recovered water',
-            processor.hazardClass, true)
-        local co2 = declareGasStore(processor.co2Store, 'CO2',
-            processor.hazardClass, false)
-        local residue = declareMicrobialStore(processor.residueStore, 'residue',
-            processor.hazardClass, false)
+        -- The consumable's hazard class no longer binds the processor
+        -- (#751): a processor may draw media of any class and the
+        -- quantity it draws is the whole of the consequence.
+        local nutrient = declareMicrobialStore(processor.nutrientStore, 'nutrient', false)
+        local recoveredWater = declareWaterStore(processor.recoveredWaterStore, 'recovered water', true)
+        local co2 = declareGasStore(processor.co2Store, 'CO2', false)
+        local residue = declareMicrobialStore(processor.residueStore, 'residue', false)
         -- The replacement biological stock store (#408) is an optional
-        -- consumed input like the consumable: it must exist, carry the
-        -- processor's own authored hazard class (#592), and stay
-        -- hazard-class segregated from the rest of the nutrient chain.
+        -- consumed input like the consumable: it must exist, and its
+        -- hazard class no longer binds the processor (#751).
         local stock = nil
         if processor.stockStore ~= nil and processor.stockStore ~= '' then
             stock = by_id[processor.stockStore]
             assert(stock ~= nil, 'microbial processor replacement biological stock store is unknown')
-            assert(stock.hazardClass == processor.hazardClass,
-                'microbial processor replacement biological stock store ' .. stock.id
-                    .. ' is authored ' .. stock.hazardClass
-                    .. '-class but this is a ' .. processor.hazardClass
-                    .. '-class nutrient process: a process may only touch stores of its own hazard class')
-            local stockExisting = microbialStoreClass[stock.id]
-            if stockExisting == nil then
-                microbialStoreClass[stock.id] = processor.hazardClass
-            else
-                assert(stockExisting == processor.hazardClass,
-                    'microbial processor replacement biological stock store ' .. stock.id
-                        .. ' is shared between ' .. stockExisting .. '-class and '
-                        .. processor.hazardClass
-                        .. '-class nutrient processes: hazardous and normal nutrient streams may not share a store')
-            end
         end
         local composition = feed.composition
         local dryPerKgFeed = 1 - composition.moisture
@@ -3140,15 +3039,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         .. UPTAKE_PURITY_NAMES[role]
                         .. ' and owns no residual stream to account for any other constituent; only an explicit conversion may cross that boundary')
             end
-            -- Hazard segregation (#573): the growing compartment is the
-            -- containment boundary; every uptake store must carry its
-            -- hazard class, so hazardous irrigation can never feed a
-            -- normal canopy.
-            assert(store.hazardClass == compartment.hazardClass,
-                'crop ' .. uptakeRoles[role] .. " store '" .. store.id .. "' is authored "
-                    .. store.hazardClass .. "-class but the population grows in '" .. compartment.id
-                    .. "', a " .. compartment.hazardClass
-                    .. "-class compartment: a crop may only take up and harvest material of its compartment's hazard class")
             for other = role + 1, 5 do
                 assert(uptakeIds[role] ~= uptakeIds[other],
                     'crop ' .. uptakeRoles[role] .. ' store and ' .. uptakeRoles[other]
@@ -3263,15 +3153,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         'crop ' .. destinationRoles[role] .. " store '" .. store.id
                             .. "' declares a composition different from the crop's declared dry-mass composition: harvested material enters a store exactly as declared, and a different compound material is a boundary only an explicit conversion may cross")
                 end
-                -- Hazard segregation (#573): harvested food and waste are
-                -- pinned to the compartment's hazard class; the harvest
-                -- and the death residue never relabel material across
-                -- the hazard boundary.
-                assert(store.hazardClass == compartment.hazardClass,
-                    'crop ' .. destinationRoles[role] .. " store '" .. store.id .. "' is authored "
-                        .. store.hazardClass .. "-class but the population grows in '" .. compartment.id
-                        .. "', a " .. compartment.hazardClass
-                        .. "-class compartment: a crop may only take up and harvest material of its compartment's hazard class")
                 destinationStores[role] = store
             end
         end
@@ -3400,14 +3281,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         .. UPTAKE_PURITY_NAMES[role]
                         .. ' and owns no residual stream to account for any other constituent; only an explicit conversion may cross that boundary')
             end
-            -- Hazard segregation (#573): the culture compartment is the
-            -- containment boundary; every uptake store must carry its
-            -- hazard class.
-            assert(store.hazardClass == compartment.hazardClass,
-                'algae ' .. uptakeRoles[role] .. " store '" .. store.id .. "' is authored "
-                    .. store.hazardClass .. "-class but the culture runs in '" .. compartment.id
-                    .. "', a " .. compartment.hazardClass
-                    .. "-class compartment: an algae culture may only take up and harvest material of its compartment's hazard class")
             for other = role + 1, 5 do
                 assert(uptakeIds[role] ~= uptakeIds[other],
                     'algae ' .. uptakeRoles[role] .. ' store and ' .. uptakeRoles[other]
@@ -3527,15 +3400,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         'algae ' .. destinationRoles[role] .. " store '" .. store.id
                             .. "' declares a composition different from the culture's declared dry-mass composition: harvested material enters a store exactly as declared, and a different compound material is a boundary only an explicit conversion may cross")
                 end
-                -- Hazard segregation (#573): the food, recovery and waste
-                -- destinations of the harvest partition are pinned to the
-                -- compartment's hazard class; the partition and the death
-                -- residue never relabel material across the boundary.
-                assert(store.hazardClass == compartment.hazardClass,
-                    'algae ' .. destinationRoles[role] .. " store '" .. store.id .. "' is authored "
-                        .. store.hazardClass .. "-class but the culture runs in '" .. compartment.id
-                        .. "', a " .. compartment.hazardClass
-                        .. "-class compartment: an algae culture may only take up and harvest material of its compartment's hazard class")
                 destinationStores[role] = store
             end
         end

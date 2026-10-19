@@ -221,7 +221,9 @@ namespace
 			{
 				auto hazardous = draft;
 				hazardous.stores.back().hazardClass = "hazardous";
-				requireRefused(hazardous, candidate, "own hazard class", "a wrong-class process store");
+				// A cross-class process store is accepted (#751): the link
+				// is judged only on what the connector itself breaks.
+				requireAllowed(hazardous, candidate, "a cross-class process store");
 				auto nonMass = draft;
 				nonMass.stores.back().unit = "kJ";
 				requireRefused(nonMass, candidate, "mass unit", "a non-mass process store");
@@ -322,9 +324,9 @@ namespace
 			requireRefused(base(), link(pin("Equipment", "load1", "Heat out"),
 				pin("Reservoir", "ghost", "Heat in")), "unknown thermal reservoir",
 				"equipment heat into a sink that does not exist");
-			requireRefused(base(), link(pin("Store", "brine", "Inventory out"),
-				pin("Fuel cell", "cell1", "Hydrogen in")), "own hazard class",
-				"a hazardous store into a normal-class fuel cell");
+			requireAllowed(base(), link(pin("Store", "brine", "Inventory out"),
+				pin("Fuel cell", "cell1", "Hydrogen in")),
+				"a hazardous store into a normal-class fuel cell (#751)");
 			requireRefused(base(), link(pin("Store", "ghost", "Inventory out"),
 				pin("Equipment", "load1", "Equipment input 1")), "names no entry",
 				"a store reference into an exchange that was never grown");
