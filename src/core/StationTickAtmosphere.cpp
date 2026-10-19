@@ -130,6 +130,7 @@ namespace core
 				auto const moistureRequestedKg = crew.authored.moisturePerCrewKgPerS * crewSeconds;
 				auto const urineRequested = crew.authored.urinePerCrewPerS * crewSeconds;
 				auto const wasteRequested = crew.authored.organicWastePerCrewPerS * crewSeconds;
+				auto const greywaterRequestedKg = crew.authored.greywaterKgPerCrewDay * (crewSeconds / 86400.0);
 				auto const heatFullKW = crew.authored.metabolicHeatPerCrewKW
 					* static_cast<double>(crew.authored.crewCount) * activity;
 				// #553: finite authored values multiplied by a long
@@ -139,7 +140,7 @@ namespace core
 					|| !std::isfinite(waterRequested) || !std::isfinite(oxygenRequestedKg)
 					|| !std::isfinite(co2RequestedKg) || !std::isfinite(moistureRequestedKg)
 					|| !std::isfinite(urineRequested) || !std::isfinite(wasteRequested)
-					|| !std::isfinite(heatFullKW))
+					|| !std::isfinite(greywaterRequestedKg) || !std::isfinite(heatFullKW))
 				{
 					system = "Crew metabolism";
 					return violation = "crew '" + crew.authored.id
@@ -197,6 +198,9 @@ namespace core
 				}
 				capHeadroom(crew.urineStoreIndex, urineRequested, "urine");
 				capHeadroom(crew.organicWasteStoreIndex, wasteRequested, "organic waste");
+				if (!crew.authored.greywaterStoreId.empty())
+					capHeadroom(crew.greywaterStoreIndex, kgToMass(runtime.stores[crew.greywaterStoreIndex].authored.unit,
+						greywaterRequestedKg), "greywater");
 				ConstituentLedger funded, required;
 				addComposition(funded, storeComposition(crew.foodStoreIndex),
 					massToKg(runtime.stores[crew.foodStoreIndex].authored.unit, crew.authored.foodPerCrewPerS), 1.0);
@@ -206,6 +210,7 @@ namespace core
 					massToKg(runtime.stores[crew.urineStoreIndex].authored.unit, crew.authored.urinePerCrewPerS), 1.0);
 				addComposition(required, *runtime.stores[crew.organicWasteStoreIndex].authored.composition,
 					massToKg(runtime.stores[crew.organicWasteStoreIndex].authored.unit, crew.authored.organicWastePerCrewPerS), 1.0);
+				addLedger(required, stationCrewGreywater(crew.authored, 1.0 / 86400.0), 1.0);
 				required["water"] += crew.authored.moisturePerCrewKgPerS;
 				required["energy"] += crew.authored.metabolicHeatPerCrewKW;
 				auto const missing = unfundedConstituent(funded, required);
@@ -255,6 +260,20 @@ namespace core
 				compartment.vapourAddedKg += moistureActualKg;
 				auto const urineActual = deliverCapped(crew.urineStoreIndex, urineRequested);
 				auto const wasteActual = deliverCapped(crew.organicWasteStoreIndex, wasteRequested);
+				crew.lastGreywaterKg = 0.0;
+				crew.lastGreywaterConstituents.clear();
+				if (!crew.authored.greywaterStoreId.empty() && greywaterRequestedKg > 0.0)
+				{
+					auto const& store = runtime.stores[crew.greywaterStoreIndex].authored;
+					auto const units = deliverCapped(crew.greywaterStoreIndex, kgToMass(store.unit, greywaterRequestedKg));
+					crew.lastGreywaterKg = massToKg(store.unit, units);
+					crew.lastGreywaterConstituents = stationCrewGreywater(crew.authored,
+						crew.lastGreywaterKg / crew.authored.greywaterKgPerCrewDay);
+					depositStoreDrift(crew.greywaterStoreIndex, crew.lastGreywaterKg, crew.lastGreywaterConstituents);
+					stagedUnitLoss[store.unit] -= units;
+				}
+				crew.greywaterKg += crew.lastGreywaterKg;
+				addLedger(crew.greywaterConstituents, crew.lastGreywaterConstituents, 1.0);
 				auto const heatKW = heatFullKW * scale;
 				crewHeatByAtmosphere[crew.atmosphereIndex] += heatKW;
 				// Store-boundary ledgers: consumption is a loss and the
@@ -293,6 +312,7 @@ namespace core
 					massToKg(runtime.stores[crew.urineStoreIndex].authored.unit, urineActual), 1.0);
 				addComposition(netChange, *runtime.stores[crew.organicWasteStoreIndex].authored.composition,
 					massToKg(runtime.stores[crew.organicWasteStoreIndex].authored.unit, wasteActual), 1.0);
+				addLedger(netChange, crew.lastGreywaterConstituents, 1.0);
 				for (auto const& entry : netChange)
 					stagedLoss[entry.first] -= entry.second;
 				// Cumulative pathway ledger and the explicit retained
@@ -302,7 +322,7 @@ namespace core
 					+ massToKg(runtime.stores[crew.waterStoreIndex].authored.unit, waterActual)
 					+ oxygenActualKg - co2ActualKg - moistureActualKg
 					- massToKg(runtime.stores[crew.urineStoreIndex].authored.unit, urineActual)
-					- massToKg(runtime.stores[crew.organicWasteStoreIndex].authored.unit, wasteActual);
+					- massToKg(runtime.stores[crew.organicWasteStoreIndex].authored.unit, wasteActual) - crew.lastGreywaterKg;
 				crew.lastActivityLevel = activity;
 				crew.lastScale = scale;
 				crew.lastLimiter = scale >= 1.0 - 1e-12 ? std::string() : limiter;

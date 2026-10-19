@@ -146,6 +146,7 @@ namespace core
 			PortDescriptor{"Airlock cycle", "Atmosphere", StationPortDirection::Input, "gas-draw", "atmosphere-source", 1, {}, false},
 			PortDescriptor{"Crew", "Food in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
 			PortDescriptor{"Crew", "Water in", StationPortDirection::Input, "material", "inventory", 1, {}, false},
+			PortDescriptor{"Crew", "Greywater out", StationPortDirection::Output, "material", "inventory", 1, {}, true},
 			PortDescriptor{"Crew", "Urine out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
 			PortDescriptor{"Crew", "Organic waste out", StationPortDirection::Output, "material", "inventory", 1, {}, false},
 			PortDescriptor{"Crew", "Oxygen uptake", StationPortDirection::Input, "biological-exchange", "biological-atmosphere", 1, {}, false},
@@ -245,6 +246,7 @@ namespace core
 		{
 			fn("Crew", entry.id, "Food in", "foodStoreId", entry.foodStoreId, true, "Store", "Inventory out");
 			fn("Crew", entry.id, "Water in", "waterStoreId", entry.waterStoreId, true, "Store", "Inventory out");
+			fn("Crew", entry.id, "Greywater out", "greywaterStoreId", entry.greywaterStoreId, false, "Store", "Inventory in");
 			fn("Crew", entry.id, "Urine out", "urineStoreId", entry.urineStoreId, false, "Store", "Inventory in");
 			fn("Crew", entry.id, "Organic waste out", "organicWasteStoreId", entry.organicWasteStoreId, false, "Store", "Inventory in");
 			fn("Crew", entry.id, "Oxygen uptake", "atmosphereId", entry.atmosphereId, true, "Atmosphere", "Biology out");

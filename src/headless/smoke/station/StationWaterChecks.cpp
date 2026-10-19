@@ -1,5 +1,6 @@
 #include "StationWaterChecks.h"
 #include "StationRig.h"
+#include "core/StationConfigurationDocument.h"
 #include <limits>
 
 namespace
@@ -125,6 +126,70 @@ namespace
 			auto const ok = world.configureStationSystems(settings, false, &diagnostic);
 			return std::make_pair(ok, diagnostic);
 		};
+		// #743: optional greywater is a funded, uniformly scaled return,
+		// not material created by labelling the destination composition.
+		{
+			struct SourceReset { ~SourceReset() { core::setStationSystemsSourceLoader({}); } } reset;
+			core::setStationSystemsSourceLoader([] {
+				auto source = core::bundledStationSystemsSource();
+				auto const at = source.find("        self.ticks = self.ticks + 1");
+				require(at != std::string::npos, "greywater Lua insertion point missing");
+				source.insert(at, R"lua(
+        local c = self.crews[1]
+        assert(math.abs((c.greywaterConstituents.nutrientNitrogen or 0) - c.greywaterKg * 0.001) < 1e-12)
+        assert(math.abs((c.lastGreywaterConstituents.dryOrganics or 0) - c.lastGreywaterKg * 0.01) < 1e-12)
+)lua");
+				return source;
+			});
+			auto stores = fullStores();
+			core::ResourceCompositionSettings pure; pure.moisture = 0.999;
+			stores.push_back(store("greywater", "kg", 100, 0, pure));
+			stores.back().materialId = "water";
+			auto c = crew(2, 1);
+			c.greywaterStoreId = "greywater";
+			c.greywaterKgPerCrewDay = 8.64; // 0.0001 kg/s from retained mass
+			c.greywaterLoadKgPerCrewDay = {{"dryOrganics", 0.0864}, {"nutrientNitrogen", 0.00864}};
+			core::World world("Greywater", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			auto [ok, diagnostic] = crewConfigure(world, stores, compartment(), {c});
+			require(ok, diagnostic.c_str());
+			world.resumeSimulation(); require(world.advanceTicks(60), "greywater tick failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.healthy, "greywater became unhealthy");
+			require(!snap.forecast.available && snap.forecast.unavailableReason.find("greywater") != std::string::npos,
+				"forecast silently ignored greywater backpressure");
+			auto const& actual = snap.crews.at(0);
+			require(approx(actual.greywaterKg, 2 * 60 * dt * 0.0001), "wrong greywater return");
+			require(approx(actual.greywaterConstituents.at("dryOrganics"), actual.greywaterKg * 0.01), "greywater organic load missing");
+			require(approx(actual.greywaterConstituents.at("nutrientNitrogen"), actual.greywaterKg * 0.001), "greywater N load missing");
+			require(approx(snap.stores.back().actualConstituents.at("dryOrganics"), actual.greywaterKg * 0.01), "greywater load absent from store ledger");
+			for (auto const& balance : snap.constituentBalances)
+				require(approx(balance.residual, 0), "greywater constituent boundary did not close");
+			core::StationConfigurationDocument document, restored;
+			document.settings = world.getStationSystemsSettings();
+			auto const parsed = core::parseStationConfiguration(core::serializeStationConfiguration(document), restored, &diagnostic);
+			require(parsed && restored.settings == document.settings, "greywater declaration lost on save/load");
+			core::StationSystemsSettings bad;
+			bad.enabled = true; bad.stores = stores; bad.atmospheres = {compartment()}; bad.crews = {c};
+			for (double invalid : {-1.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN(), 1000.0})
+			{
+				bad.crews[0].greywaterLoadKgPerCrewDay["dryOrganics"] = invalid;
+				require(!core::validateStationSystemsSettings(bad, diagnostic), "invalid greywater load accepted");
+			}
+			bad.crews = {c}; bad.crews[0].greywaterStoreId = "water";
+			require(!core::validateStationSystemsSettings(bad, diagnostic), "aliased greywater accepted");
+			bad.crews = {c}; bad.stores.back().hazardClass = "hazardous";
+			require(!core::validateStationSystemsSettings(bad, diagnostic), "greywater crossed hazard boundary");
+			stores.back().capacity = 100;
+			stores.back().startingQualified = 100;
+			core::World full("GreywaterFull", 2, 2); full.pauseSimulation(); full.finishBuild();
+			auto [fullOk, fullDiagnostic] = crewConfigure(full, stores, compartment(), {c});
+			require(fullOk, fullDiagnostic.c_str());
+			full.resumeSimulation(); require(full.advanceTicks(1), "full greywater tick failed");
+			auto const blocked = full.getStationSystemsSnapshot().crews.at(0);
+			require(blocked.metabolicScale == 0 && blocked.lastFoodActual == 0 && blocked.greywaterKg == 0
+				&& blocked.limiter.find("greywater") != std::string::npos, "greywater backpressure did not throttle whole crew");
+		}
 		// Refused configurations: every malformed crew contract is
 		// rejected before anything runs, and none of the refusals
 		// mutates the World.

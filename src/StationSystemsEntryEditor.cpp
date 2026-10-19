@@ -169,6 +169,19 @@ bool renderCrewEntry([[maybe_unused]] core::StationSystemsSettings& draft, core:
 	ImGui::PushItemWidth(220);
 	renderIdentity(label, crew.id);
 	renderWaterQuality(crew.waterQuality, label);
+	char greywaterBuffer[core::MaxStationStoreIdLength + 1]{};
+	std::strncpy(greywaterBuffer, crew.greywaterStoreId.c_str(), sizeof(greywaterBuffer) - 1);
+	if (ImGui::InputText((label + " greywater store").c_str(), greywaterBuffer, sizeof(greywaterBuffer)))
+		crew.greywaterStoreId = greywaterBuffer;
+	ImGui::InputDouble((label + " greywater kg per crew-day").c_str(), &crew.greywaterKgPerCrewDay, 0, 0, "%.6f");
+	for (auto const* name : {"dryOrganics", "nutrientNitrogen"})
+	{
+		bool enabled = crew.greywaterLoadKgPerCrewDay.contains(name);
+		if (ImGui::Checkbox((label + " greywater load " + name).c_str(), &enabled))
+		{ if (enabled) crew.greywaterLoadKgPerCrewDay[name] = 0; else crew.greywaterLoadKgPerCrewDay.erase(name); }
+		if (enabled) ImGui::InputDouble((label + " " + name + " kg per crew-day").c_str(),
+			&crew.greywaterLoadKgPerCrewDay.at(name), 0, 0, "%.6f");
+	}
 	char crewAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(crewAtmosphereBuffer, crew.atmosphereId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " atmosphere").c_str(),
@@ -263,6 +276,14 @@ bool renderMicrobialProcessorEntry(core::StationSystemsSettings& draft, core::Mi
 	bool removeProcessor = false;
 	renderIdentity(label, processor.id);
 	renderWaterQuality(processor.waterQuality, label);
+	for (auto const* name : core::StationWaterDryConstituents)
+	{
+		bool enabled = processor.recoveredWaterCarryoverFractions.contains(name);
+		if (ImGui::Checkbox((label + " carry to recovered water: " + name).c_str(), &enabled))
+		{ if (enabled) processor.recoveredWaterCarryoverFractions[name] = 0; else processor.recoveredWaterCarryoverFractions.erase(name); }
+		if (enabled) ImGui::InputDouble((label + " " + name + " carry-over fraction").c_str(),
+			&processor.recoveredWaterCarryoverFractions.at(name), 0, 0, "%.6f");
+	}
 	char processorHazardBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorHazardBuffer, processor.hazardClass.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " hazard class").c_str(),

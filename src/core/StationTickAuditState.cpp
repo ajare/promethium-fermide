@@ -315,6 +315,11 @@ namespace core
 			if (!requireFinite(processor.recoveredWaterKg, where + "cumulative recovered water")) return false;
 			if (!requireFinite(processor.co2ProducedKg, where + "cumulative CO2 produced")) return false;
 			if (!requireFinite(processor.residueProducedKg, where + "cumulative residue produced")) return false;
+			for (auto const& [name, mass] : processor.carriedConstituents)
+			{
+				if (!requireFinite(mass, where + "carried " + name)) return false;
+				if (mass < 0.0) return violation = where + "negative carried " + name, false;
+			}
 			if (!requireFinite(processor.lastNitrifiedNitrogenKg, where + "last nitrified nitrogen")) return false;
 			if (!requireFinite(processor.nitrifiedNitrogenKg, where + "nitrified nitrogen")) return false;
 			if (!requireFinite(processor.nitrogenRecoveredKg, where + "cumulative nitrogen recovered")) return false;

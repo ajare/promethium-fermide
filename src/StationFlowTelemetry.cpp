@@ -337,6 +337,9 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 		storePort("Food in", p->lastFoodActual, p->foodStoreId); storePort("Water in", p->lastWaterActual, p->waterStoreId);
 		storePort("Urine out", p->lastUrineActual, p->urineStoreId); storePort("Organic waste out", p->lastOrganicWasteActual, p->organicWasteStoreId);
 		port("Oxygen uptake", p->lastOxygenActualKg); port("CO2 return", p->lastCo2ProducedKg); port("Moisture return", p->lastMoistureProducedKg);
+		port("Greywater out", p->lastGreywaterKg);
+		for (auto const& [name, mass] : p->lastGreywaterConstituents)
+			out.details.push_back("Greywater " + name + " " + rate(mass));
 		out.ports["Metabolic heat"] = quantity(p->lastHeatKW, "kW");
 	}
 	else if (node.type == "Water collector")
@@ -392,6 +395,8 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 		out.values.push_back("Feed " + rate(p->lastFeedConsumedKg));
 		out.values.push_back("Culture condition " + percent(p->condition));
 		out.values.push_back("Recovered nutrients " + rate(p->lastNutrientProducedKg));
+		for (auto const& [name, mass] : p->lastCarriedConstituents)
+			out.details.push_back("Carried " + name + " " + rate(mass));
 		if (!p->lastStressors.empty()) warn(out, p->lastStressors);
 		port("Feed in", p->lastFeedConsumedKg); port("Oxygen in", p->lastOxygenConsumedKg); port("Water in", p->lastWaterConsumedKg);
 		port("Nutrients out", p->lastNutrientProducedKg); port("Water out", p->lastRecoveredWaterKg);

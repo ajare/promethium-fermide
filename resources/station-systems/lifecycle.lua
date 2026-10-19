@@ -540,6 +540,46 @@ local function microbialRates(p, c)
         nitrifiedNitrogen = nitrified }
 end
 
+local function microbialCarryover(p, c)
+    local dry = 1 - c.moisture
+    local organic = math.max(0, dry * (1 - c.nutrientNitrogen - c.atmosphericNitrogen
+        - c.phosphorus - c.potassium - c.otherMinerals))
+    local rates = microbialRates(p, c)
+    local remaining = {
+        dryOrganics = math.max(0, organic - (p.rateBasis == 'CompositionDerived'
+            and organic * p.organicOxidationFraction or math.min(organic, rates.co2))),
+        nutrientNitrogen = dry * c.nutrientNitrogen * (1 - p.nitrogenRecovery),
+        atmosphericNitrogen = dry * c.atmosphericNitrogen,
+        phosphorus = dry * c.phosphorus * (1 - p.phosphorusRecovery),
+        potassium = dry * c.potassium * (1 - p.potassiumRecovery),
+        otherMinerals = dry * c.otherMinerals * (1 - p.mineralsRecovery),
+    }
+    local result, total = {}, 0
+    for name, fraction in pairs(p.recoveredWaterCarryoverFractions or {}) do
+        assert(remaining[name] ~= nil and isFinite(fraction) and fraction >= 0 and fraction <= 1,
+            'invalid recovered-water carry-over fraction: ' .. name)
+        if fraction > 0 then
+            result[name] = remaining[name] * fraction
+            total = total + result[name]
+        end
+    end
+    return result, total
+end
+
+local function crewGreywater(crew, days)
+    local result, load = {}, 0
+    for name, mass in pairs(crew.greywaterLoadKgPerCrewDay or {}) do
+        assert((name == 'dryOrganics' or name == 'nutrientNitrogen') and isFinite(mass) and mass >= 0,
+            'invalid crew greywater load: ' .. name)
+        result[name] = mass * days
+        load = load + mass
+    end
+    assert(isFinite(crew.greywaterKgPerCrewDay) and crew.greywaterKgPerCrewDay >= load,
+        'greywater mass must fund dissolved load')
+    result.water = (crew.greywaterKgPerCrewDay - load) * days
+    return result
+end
+
 -- Fuel energy is authored in the store's energy unit; the generator's
 -- physics runs in kWh. One factor converts store units to kWh and its
 -- reciprocal converts the required fuel energy back, so host and sandbox
@@ -2119,12 +2159,23 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         .. ': chemically distinct streams may not share one store')
             end
         end
+        local greywater = crew.greywaterStore ~= '' and by_id[crew.greywaterStore] or nil
+        local greywaterReturn = crewGreywater(crew, 1 / 86400)
+        if crew.greywaterKgPerCrewDay > 0 then
+            assert(greywater and greywater.composition, 'greywater requires compound destination')
+        end
+        if greywater then
+            assert(greywater.composition and greywater.hazardClass == compartment.hazardClass,
+                'greywater must stay inside crew hazard class')
+            for _, stream in ipairs(streams) do assert(stream ~= greywater, 'greywater needs distinct store') end
+        end
         local foodKg = toKg(food.unit, crew.foodRate)
         local waterKg = toKg(water.unit, crew.waterRate)
         local urineKg = toKg(urine.unit, crew.urineRate)
         local wasteKg = toKg(waste.unit, crew.organicWasteRate)
         local consumedKg = foodKg + waterKg + crew.oxygenRateKgPerS
         local emittedKg = urineKg + wasteKg + crew.moistureRateKgPerS + crew.co2RateKgPerS
+            + crew.greywaterKgPerCrewDay / 86400
         assert(emittedKg <= consumedKg + BALANCE_TOLERANCE * math.max(1, consumedKg),
             'crew ' .. crew.id
                 .. ' declared returns exceed declared consumption: metabolism may not create mass')
@@ -2134,6 +2185,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         local returned = {}
         addConstituents(returned, urine.composition, urineKg, 1)
         addConstituents(returned, waste.composition, wasteKg, 1)
+        addLedger(returned, greywaterReturn, 1)
         returned.water = (returned.water or 0) + crew.moistureRateKgPerS
         for constituent, amount in pairs(returned) do
             local available = funded[constituent] or 0
@@ -2155,6 +2207,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             compartment = compartment,
             crewCount = crew.crewCount,
             activity = readProfile(activity),
+            greywater = greywater, greywaterKgPerCrewDay = crew.greywaterKgPerCrewDay,
+            greywaterLoadKgPerCrewDay = crew.greywaterLoadKgPerCrewDay,
+            lastGreywaterKg = 0, greywaterKg = 0,
+            lastGreywaterConstituents = {}, greywaterConstituents = {},
             food = food, water = water, urine = urine, organicWaste = waste,
             waterQualitySettings = crew.waterQuality,
             foodRate = crew.foodRate, waterRate = crew.waterRate,
@@ -2914,7 +2970,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         local nutrient = declareMicrobialStore(processor.nutrientStore, 'nutrient',
             processor.hazardClass, false)
         local recoveredWater = declareWaterStore(processor.recoveredWaterStore, 'recovered water',
-            processor.hazardClass, false)
+            processor.hazardClass, true)
         local co2 = declareGasStore(processor.co2Store, 'CO2',
             processor.hazardClass, false)
         local residue = declareMicrobialStore(processor.residueStore, 'residue',
@@ -2949,7 +3005,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             * processor.nitrogenRecovery + composition.phosphorus * processor.phosphorusRecovery
             + composition.potassium * processor.potassiumRecovery
             + composition.otherMinerals * processor.mineralsRecovery)
-        local recoveredWaterPerKgFeed = composition.moisture * processor.waterRecovery
+        local carryover, carried = microbialCarryover(processor, composition)
+        for name in pairs(carryover) do
+            assert(recoveredWater.composition, 'carried ' .. name .. ' requires compound recovered water')
+        end
+        local recoveredWaterPerKgFeed = composition.moisture * processor.waterRecovery + carried
         local rates = microbialRates(processor, composition)
         local derived = processor.rateBasis == 'CompositionDerived'
         assert(not derived or consumable.unit == 'g' or consumable.unit == 'kg',
@@ -2979,6 +3039,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             processWaterTargetMoisture = processor.processWaterTargetMoisture,
             heatReleaseFraction = processor.heatReleaseFraction,
             consumablePerKgOrganicOxidized = processor.consumablePerKgOrganicOxidized,
+            recoveredWaterCarryoverFractions = processor.recoveredWaterCarryoverFractions,
+            lastCarriedConstituents = {}, carriedConstituents = {},
             lastNitrifiedNitrogenKg = 0, nitrifiedNitrogenKg = 0,
             id = processor.id,
             hazardClass = processor.hazardClass,
@@ -4197,6 +4259,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local moistureRequested = crew.moistureRate * crewSeconds
             local urineRequested = crew.urineRate * crewSeconds
             local wasteRequested = crew.organicWasteRate * crewSeconds
+            local greywaterRequestedKg = crew.greywaterKgPerCrewDay * (crewSeconds / 86400)
             local heatFull = crew.heatRate * crew.crewCount * activity
             local scale = 1
             local limiter = ''
@@ -4238,12 +4301,15 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             end
             capHeadroom(crew.urine, urineRequested, 'urine')
             capHeadroom(crew.organicWaste, wasteRequested, 'organic waste')
+            if crew.greywater then capHeadroom(crew.greywater,
+                fromKg(crew.greywater.unit, greywaterRequestedKg), 'greywater') end
             local funded, required = {}, {}
             addConstituents(funded, storeComposition(crew.food), toKg(crew.food.unit, crew.foodRate), 1)
             addConstituents(funded, storeComposition(crew.water), toKg(crew.water.unit, crew.waterRate), 1)
             addConstituents(required, crew.urine.composition, toKg(crew.urine.unit, crew.urineRate), 1)
             addConstituents(required, crew.organicWaste.composition,
                 toKg(crew.organicWaste.unit, crew.organicWasteRate), 1)
+            addLedger(required, crewGreywater(crew, 1 / 86400), 1)
             required.water = (required.water or 0) + crew.moistureRate
             required.energy = (required.energy or 0) + crew.heatRate
             local missing = unfundedConstituent(funded, required)
@@ -4281,6 +4347,17 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             compartment.vapourAdded = compartment.vapourAdded + moistureActual
             local urineActual = deliverCapped(crew.urine, urineRequested)
             local wasteActual = deliverCapped(crew.organicWaste, wasteRequested)
+            crew.lastGreywaterKg, crew.lastGreywaterConstituents = 0, {}
+            if crew.greywater and greywaterRequestedKg > 0 then
+                local units = deliverCapped(crew.greywater, fromKg(crew.greywater.unit, greywaterRequestedKg))
+                crew.lastGreywaterKg = toKg(crew.greywater.unit, units)
+                crew.lastGreywaterConstituents = crewGreywater(crew,
+                    crew.lastGreywaterKg / crew.greywaterKgPerCrewDay)
+                depositStoreDrift(crew.greywater, crew.lastGreywaterKg, crew.lastGreywaterConstituents)
+                self.unit_loss[crew.greywater.unit] = (self.unit_loss[crew.greywater.unit] or 0) - units
+            end
+            crew.greywaterKg = crew.greywaterKg + crew.lastGreywaterKg
+            addLedger(crew.greywaterConstituents, crew.lastGreywaterConstituents, 1)
             local heatKW = heatFull * scale
             compartment.crewHeat = (compartment.crewHeat or 0) + heatKW
             -- Boundary ledgers: consumption is a loss and the waste
@@ -4309,6 +4386,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             addConstituents(net, crew.urine.composition, toKg(crew.urine.unit, urineActual), 1)
             addConstituents(net, crew.organicWaste.composition,
                 toKg(crew.organicWaste.unit, wasteActual), 1)
+            addLedger(net, crew.lastGreywaterConstituents, 1)
             for constituent, change in pairs(net) do
                 self.constituent_loss[constituent] =
                     (self.constituent_loss[constituent] or 0) - change
@@ -4317,7 +4395,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 + toKg(crew.water.unit, waterActual) + oxygenActual
                 - co2Actual - moistureActual
                 - toKg(crew.urine.unit, urineActual)
-                - toKg(crew.organicWaste.unit, wasteActual)
+                - toKg(crew.organicWaste.unit, wasteActual) - crew.lastGreywaterKg
             crew.lastActivity = activity
             crew.lastScale = scale
             crew.lastLimiter = scale >= 1 - 1e-12 and '' or limiter
@@ -7190,6 +7268,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local water = proc.water
             proc.waterQuality = waterQuality(water, proc.waterQualitySettings, 0, fixed_seconds, 'process')
             local consumable = proc.consumable
+            proc.lastCarriedConstituents = {}
             proc.lastNitrifiedNitrogenKg = 0
             proc.lastScale = 0
             proc.lastLimiter = ''
@@ -7340,7 +7419,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         * proc.nitrogenRecovery + composition.phosphorus * proc.phosphorusRecovery
                         + composition.potassium * proc.potassiumRecovery
                         + composition.otherMinerals * proc.mineralsRecovery)
-                    local recoveredWaterPerKgFeed = composition.moisture * proc.waterRecovery
+                    local carryover, carried = microbialCarryover(proc, composition)
+                    local recoveredWaterPerKgFeed = composition.moisture * proc.waterRecovery + carried
                     local noConversion = derived and nutrientPerKgFeed == 0
                         and rates.oxygen == 0 and rates.co2 == 0 and rates.heat == 0
                         and rates.consumable == 0 and rates.nitrifiedNitrogen == 0
@@ -7572,6 +7652,16 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                                 toKg(consumable.unit, consumableUnits))
                             addLedger(self.constituent_loss, feedDrawn, 1)
                             addLedger(self.constituent_loss, procConsumableDrawn, 1)
+                            local recoveredActual = {water = feedActualKg * composition.moisture * proc.waterRecovery}
+                            for name, mass in pairs(carryover) do
+                                proc.lastCarriedConstituents[name] = mass * feedActualKg
+                                recoveredActual[name] = mass * feedActualKg
+                            end
+                            addLedger(proc.carriedConstituents, proc.lastCarriedConstituents, 1)
+                            depositStoreDrift(proc.recoveredWater, recoveredWaterActualKg, recoveredActual)
+                            if proc.recoveredWater.composition then
+                                addLedger(self.constituent_loss, recoveredActual, -1)
+                            end
                             proc.feedChemicalEnergyConsumedKJ = proc.feedChemicalEnergyConsumedKJ
                                 + feedActualKg * dryPerKgFeed * composition.energyKJPerKgDry
                             proc.feedBoundNitrogenConsumedKg = proc.feedBoundNitrogenConsumedKg
@@ -9850,7 +9940,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 + toKg(crew.water.unit, crew.waterConsumed) + crew.oxygenConsumed
             local returned = toKg(crew.urine.unit, crew.urineProduced)
                 + toKg(crew.organicWaste.unit, crew.organicWasteProduced)
-                + crew.co2Produced + crew.moistureProduced
+                + crew.co2Produced + crew.moistureProduced + crew.greywaterKg
             local bound = BALANCE_TOLERANCE * math.max(1, consumed)
             assert(crew.retainedKg >= -bound,
                 "crew '" .. crew.id .. "' retained body mass is negative")

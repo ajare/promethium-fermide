@@ -111,6 +111,71 @@ void tracer(smoke::Context const& context)
 	close(m.lastCo2ProducedKg, 0); close(m.reactionHeatKJ, 0);
 	require(m.lastStressors.empty(), "zero-demand medium caused exhaustion stress");
 }
+void carryover(smoke::Context const& context)
+{
+	auto legacy = urine(context);
+	auto const baseline = run(legacy).microbialProcessors.at(0);
+	auto zero = legacy;
+	zero.microbialProcessors[0].recoveredWaterCarryoverFractions = {{"nutrientNitrogen", 0}};
+	auto const unchanged = run(zero).microbialProcessors.at(0);
+	require(baseline.recoveredWaterKg == unchanged.recoveredWaterKg
+		&& baseline.residueProducedKg == unchanged.residueProducedKg
+		&& baseline.feedConsumedKg == unchanged.feedConsumedKg, "zero carry-over changed legacy split");
+	legacy.stores[5].materialId = "water";
+	legacy.stores[5].composition = core::ResourceCompositionSettings{};
+	legacy.stores[5].composition->moisture = 0.999;
+	legacy.microbialProcessors[0].recoveredWaterCarryoverFractions = {{"nutrientNitrogen", 0.5}};
+	core::StationSystemsSnapshot snap;
+	{
+		SourceScope restoreSource;
+		core::setStationSystemsSourceLoader([] {
+			auto source = core::bundledStationSystemsSource();
+			auto const at = source.find("        self.ticks = self.ticks + 1");
+			require(at != std::string::npos, "carry-over Lua insertion point missing");
+			source.insert(at, R"lua(
+        local p = self.microbial_processors[1]
+        assert(math.abs(p.lastCarriedConstituents.nutrientNitrogen - p.lastFeedConsumed * 0.0015) < 1e-12)
+        assert(math.abs(p.carriedConstituents.nutrientNitrogen - p.feedConsumedTotal * 0.0015) < 1e-12)
+)lua");
+			return source;
+		});
+		snap = run(legacy);
+	}
+	auto const& p = snap.microbialProcessors.at(0);
+	close(p.carriedConstituents.at("nutrientNitrogen"), p.feedConsumedKg * 0.0015);
+	close(p.lastCarriedConstituents.at("nutrientNitrogen") * 60, p.carriedConstituents.at("nutrientNitrogen"));
+	close(p.recoveredWaterKg, baseline.recoveredWaterKg + p.carriedConstituents.at("nutrientNitrogen"));
+	close(p.residueProducedKg, baseline.residueProducedKg - p.carriedConstituents.at("nutrientNitrogen"));
+	close(p.residualKg, 0);
+	close(snap.stores.at(5).actualConstituents.at("nutrientNitrogen"), p.carriedConstituents.at("nutrientNitrogen"));
+	for (auto const& balance : snap.constituentBalances)
+		require(std::abs(balance.residual) < 1e-8, "carry-over constituent boundary did not close");
+	auto saturated = legacy;
+	saturated.stores[5].capacity = p.lastRecoveredWaterKg / 2;
+	auto const limited = run(saturated, 1).microbialProcessors.at(0);
+	close(limited.lastCarriedConstituents.at("nutrientNitrogen"), p.lastCarriedConstituents.at("nutrientNitrogen") / 2);
+	close(limited.lastResidueProducedKg, p.lastResidueProducedKg / 2);
+	std::string error;
+	for (double invalid : {-0.1, 1.1, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
+	{
+		auto bad = legacy; bad.microbialProcessors[0].recoveredWaterCarryoverFractions["nutrientNitrogen"] = invalid;
+		require(!core::validateStationSystemsSettings(bad, error), "invalid carry-over accepted");
+	}
+	auto bad = legacy; bad.microbialProcessors[0].recoveredWaterCarryoverFractions["unknown"] = 0;
+	require(!core::validateStationSystemsSettings(bad, error), "unknown carry-over constituent accepted");
+	bad = legacy; bad.stores[5].composition.reset();
+	require(!core::validateStationSystemsSettings(bad, error) && error.find("nutrientNitrogen") != std::string::npos,
+		"loaded recovered water went to plain destination");
+	// The same scenario document the editor opens feeds public World ticks.
+	core::StationConfigurationDocument doc;
+	auto const loaded = core::loadStationConfiguration(context.fixture("resources/station-systems/scenarios/water-carryover.yaml").string(), doc, &error);
+	require(loaded, error.c_str());
+	auto const bridge = run(doc.settings);
+	close(bridge.microbialProcessors[0].carriedConstituents.at("nutrientNitrogen"), p.carriedConstituents.at("nutrientNitrogen"));
+	require(bridge.cropPopulations[0].lastGrowthKg > 0, "crop refused dilute irrigation");
+	close(bridge.cropPopulations[0].waterQuality.scale, 1);
+	close(bridge.cropPopulations[0].waterQuality.concentrations.at("nutrientNitrogen"), 0.006 / 2.666);
+}
 void hotDigestion(smoke::Context const& context)
 {
 	core::StationConfigurationDocument doc;
@@ -439,7 +504,7 @@ void documents(smoke::Context const& context)
 
 void registerBioconversionChecks(std::vector<smoke::Check>& checks)
 {
-	checks.insert(checks.end(), {{"bioconversionTracer", tracer}, {"bioconversionValidation", validation},
+	checks.insert(checks.end(), {{"bioconversionCarryover", carryover}, {"bioconversionTracer", tracer}, {"bioconversionValidation", validation},
 		{"bioconversionBlend", blend}, {"bioconversionDocuments", documents}, {"bioconversionDegenerate", degenerate},
 		{"bioconversionHotDigestion", hotDigestion}, {"bioconversionOxygenStarvation", oxygenStarvation}});
 }

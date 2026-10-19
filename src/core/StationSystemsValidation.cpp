@@ -2272,6 +2272,33 @@ using namespace station_detail;
 			for (auto const rate : rates)
 				if (!std::isfinite(rate) || rate < 0.0)
 					return refuse(where + " metabolic rates must be finite and non-negative");
+			ConstituentLedger greywater;
+			double greywaterLoad = 0.0;
+			if (!std::isfinite(crew.greywaterKgPerCrewDay) || crew.greywaterKgPerCrewDay < 0.0)
+				return refuse(where + " greywater mass must be finite and non-negative");
+			for (auto const& [name, mass] : crew.greywaterLoadKgPerCrewDay)
+			{
+				if ((name != "dryOrganics" && name != "nutrientNitrogen") || !std::isfinite(mass) || mass < 0.0)
+					return refuse(where + " greywater load '" + name + "' must be finite, non-negative dissolved organics or nitrogen");
+				greywater[name] = mass / 86400.0;
+				greywaterLoad += mass;
+			}
+			if (greywaterLoad > crew.greywaterKgPerCrewDay)
+				return refuse(where + " greywater dissolved load exceeds total greywater mass");
+			greywater["water"] = (crew.greywaterKgPerCrewDay - greywaterLoad) / 86400.0;
+			if (crew.greywaterKgPerCrewDay > 0.0 && crew.greywaterStoreId.empty() && !allowUnwired)
+				return refuse(where + " greywater requires a destination store");
+			if (!crew.greywaterStoreId.empty())
+			{
+				if (!declareWaterStore(crew.greywaterStoreId, "greywater", where,
+					habitat == settings.atmospheres.end() ? "normal" : habitat->hazardClass, true)) return false;
+				auto const destination = std::find_if(settings.stores.begin(), settings.stores.end(),
+					[&](auto const& s) { return s.id == crew.greywaterStoreId; });
+				if (destination != settings.stores.end() && !destination->composition)
+					return refuse(where + " greywater destination must be compound");
+				for (auto const& id : {crew.foodStoreId, crew.waterStoreId, crew.urineStoreId, crew.organicWasteStoreId})
+					if (id == crew.greywaterStoreId) return refuse(where + " greywater needs a distinct store");
+			}
 			ResourceStoreSettings const* streamStores[4]{nullptr, nullptr, nullptr, nullptr};
 			char const* streamRoles[4]{"food", "water", "urine", "organic waste"};
 			std::string const streamIds[4]{crew.foodStoreId, crew.waterStoreId,
@@ -2339,7 +2366,7 @@ using namespace station_detail;
 			auto const wasteKg = massToKg(waste->unit, crew.organicWastePerCrewPerS);
 			auto const consumedKg = foodKg + waterKg + crew.oxygenPerCrewKgPerS;
 			auto const emittedKg = urineKg + wasteKg
-				+ crew.moisturePerCrewKgPerS + crew.co2PerCrewKgPerS;
+				+ crew.moisturePerCrewKgPerS + crew.co2PerCrewKgPerS + crew.greywaterKgPerCrewDay / 86400.0;
 			if (emittedKg > consumedKg + StationBalanceTolerance * std::max(1.0, consumedKg))
 				return refuse(where + " declared returns exceed declared consumption: metabolism may not create mass");
 			ConstituentLedger funded;
@@ -2348,6 +2375,7 @@ using namespace station_detail;
 			ConstituentLedger returned;
 			addComposition(returned, *urine->composition, urineKg, 1.0);
 			addComposition(returned, *waste->composition, wasteKg, 1.0);
+			addLedger(returned, greywater, 1.0);
 			returned["water"] += crew.moisturePerCrewKgPerS;
 			for (auto const& entry : returned)
 			{
@@ -2542,8 +2570,21 @@ using namespace station_detail;
 			if (!declareMicrobialStore(processor.nutrientStoreId, "nutrient", where,
 				processor.hazardClass, false))
 				return false;
+			for (auto const& [name, fraction] : processor.recoveredWaterCarryoverFractions)
+			{
+				if (std::find(StationWaterDryConstituents.begin(), StationWaterDryConstituents.end(), name)
+					== StationWaterDryConstituents.end() || !std::isfinite(fraction) || fraction < 0.0 || fraction > 1.0)
+					return refuse(where + " recovered-water carry-over '" + name + "' must name a known dry constituent with a finite fraction in [0, 1]");
+				if (fraction > 0.0)
+				{
+					auto const destination = std::find_if(settings.stores.begin(), settings.stores.end(),
+						[&](auto const& s) { return s.id == processor.recoveredWaterStoreId; });
+					if (destination != settings.stores.end() && !destination->composition)
+						return refuse(where + " carried '" + name + "' requires a compound recovered water destination");
+				}
+			}
 			if (!declareWaterStore(processor.recoveredWaterStoreId, "recovered water", where,
-				processor.hazardClass, false))
+				processor.hazardClass, true))
 				return false;
 			if (!declareGasStore(processor.co2StoreId, "CO2", where,
 				processor.hazardClass, false))
@@ -2594,7 +2635,10 @@ using namespace station_detail;
 				* processor.nitrogenRecovery + composition.phosphorus * processor.phosphorusRecovery
 				+ composition.potassium * processor.potassiumRecovery
 				+ composition.otherMinerals * processor.mineralsRecovery);
-			auto const recoveredWaterPerKgFeed = composition.moisture * processor.waterRecovery;
+			double carriedPerKgFeed = 0.0;
+			for (auto const& [name, mass] : stationMicrobialCarryover(processor, composition))
+			{ (void)name; carriedPerKgFeed += mass; }
+			auto const recoveredWaterPerKgFeed = composition.moisture * processor.waterRecovery + carriedPerKgFeed;
 			auto const rates = stationMicrobialRates(processor, composition);
 			auto const residuePerKgFeed = 1.0 + rates.oxygen
 				+ rates.water + (derived ? rates.consumable : 0.0) - nutrientPerKgFeed

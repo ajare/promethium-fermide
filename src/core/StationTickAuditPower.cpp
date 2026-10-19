@@ -968,6 +968,9 @@ namespace core
 			if (!requireFinite(crew.organicWasteProduced, where + "cumulative organic waste returned")) return false;
 			if (!requireFinite(crew.heatKJ, where + "cumulative metabolic heat")) return false;
 			if (!requireFinite(crew.retainedKg, where + "cumulative retained body mass")) return false;
+			if (!requireFinite(crew.greywaterKg, where + "cumulative greywater")) return false;
+			for (auto const& [name, mass] : crew.greywaterConstituents)
+				if (!requireFinite(mass, where + "greywater " + name)) return false;
 			if (!(crew.lastScale >= 0.0 && crew.lastScale <= 1.0 + 1e-12))
 				return violation = where + "metabolic scale left the declared [0, 1] range", false;
 			auto const consumedKg = massToKg(runtime.stores[crew.foodStoreIndex].authored.unit, crew.foodConsumed)
@@ -975,7 +978,7 @@ namespace core
 				+ crew.oxygenConsumedKg;
 			auto const returnedKg = massToKg(runtime.stores[crew.urineStoreIndex].authored.unit, crew.urineProduced)
 				+ massToKg(runtime.stores[crew.organicWasteStoreIndex].authored.unit, crew.organicWasteProduced)
-				+ crew.co2ProducedKg + crew.moistureProducedKg;
+				+ crew.co2ProducedKg + crew.moistureProducedKg + crew.greywaterKg;
 			auto const bound = StationBalanceTolerance * std::max(1.0, consumedKg);
 			if (crew.retainedKg < -bound)
 				return violation = where + "retained body mass is negative: the crew emitted more mass than it consumed", false;

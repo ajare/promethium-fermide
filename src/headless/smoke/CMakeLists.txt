@@ -112,7 +112,7 @@ foreach(check scheduledTransfers recurringTransfers scheduledTransferDocuments s
         # #570 registers the microbial condition/recovery gate so its
         # zero-coefficient regression coverage runs in CI.
         harvest algae nutrientConservation bioContainment bioHazardFiles bioCapacityFiles
-        microbialConditionRecovery bioconversionTracer bioconversionValidation bioconversionBlend bioconversionDocuments bioconversionDegenerate
+        microbialConditionRecovery bioconversionCarryover bioconversionTracer bioconversionValidation bioconversionBlend bioconversionDocuments bioconversionDegenerate
         bioconversionHotDigestion bioconversionOxygenStarvation
         # #420: the bounded scenario forecast - projected inventory at
         # resupply, shortfall onset and limiting service, capped accepted
@@ -800,6 +800,8 @@ set_tests_properties(station-editor-algae-observations PROPERTIES LABELS "smoke;
 add_test(NAME station-editor-crop-observations COMMAND pf-smoke-editor --check station/cropObservationWorkflow)
 set_tests_properties(station-editor-crop-observations PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 
+add_test(NAME station-editor-water-carryover COMMAND pf-smoke-editor --check station/waterCarryoverWorkflow)
+set_tests_properties(station-editor-water-carryover PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-bioconversion-foodwaste COMMAND pf-smoke-editor --check station/bioconversionFoodwasteWorkflow)
 set_tests_properties(station-editor-bioconversion-foodwaste PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 120)
 add_test(NAME station-editor-bioconversion-degenerate COMMAND pf-smoke-editor --check station/bioconversionDegenerateWorkflow)

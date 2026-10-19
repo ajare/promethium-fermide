@@ -404,6 +404,12 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 					lua_pushstring(state, crew.foodStoreId.c_str()); lua_setfield(state, -2, "foodStore");
 					pushWaterQuality(state, crew.waterQuality);
 					lua_pushstring(state, crew.waterStoreId.c_str()); lua_setfield(state, -2, "waterStore");
+					lua_pushstring(state, crew.greywaterStoreId.c_str()); lua_setfield(state, -2, "greywaterStore");
+					lua_pushnumber(state, crew.greywaterKgPerCrewDay); lua_setfield(state, -2, "greywaterKgPerCrewDay");
+					lua_createtable(state, 0, static_cast<int>(crew.greywaterLoadKgPerCrewDay.size()));
+					for (auto const& [name, mass] : crew.greywaterLoadKgPerCrewDay)
+					{ lua_pushnumber(state, mass); lua_setfield(state, -2, name.c_str()); }
+					lua_setfield(state, -2, "greywaterLoadKgPerCrewDay");
 					lua_pushstring(state, crew.urineStoreId.c_str()); lua_setfield(state, -2, "urineStore");
 					lua_pushstring(state, crew.organicWasteStoreId.c_str()); lua_setfield(state, -2, "organicWasteStore");
 					lua_pushnumber(state, crew.foodPerCrewPerS); lua_setfield(state, -2, "foodRate");
@@ -631,6 +637,10 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 					lua_pushstring(state, processor.waterStoreId.c_str()); lua_setfield(state, -2, "waterStore");
 					lua_pushstring(state, processor.consumableStoreId.c_str()); lua_setfield(state, -2, "consumableStore");
 					lua_pushstring(state, processor.nutrientStoreId.c_str()); lua_setfield(state, -2, "nutrientStore");
+					lua_createtable(state, 0, static_cast<int>(processor.recoveredWaterCarryoverFractions.size()));
+					for (auto const& [name, fraction] : processor.recoveredWaterCarryoverFractions)
+					{ lua_pushnumber(state, fraction); lua_setfield(state, -2, name.c_str()); }
+					lua_setfield(state, -2, "recoveredWaterCarryoverFractions");
 					lua_pushstring(state, processor.recoveredWaterStoreId.c_str()); lua_setfield(state, -2, "recoveredWaterStore");
 					lua_pushstring(state, processor.co2StoreId.c_str()); lua_setfield(state, -2, "co2Store");
 					lua_pushstring(state, processor.residueStoreId.c_str()); lua_setfield(state, -2, "residueStore");
@@ -1183,6 +1193,7 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 			state.authored = crew;
 			state.foodStoreIndex = storeIndex[crew.foodStoreId];
 			state.waterStoreIndex = storeIndex[crew.waterStoreId];
+			if (!crew.greywaterStoreId.empty()) state.greywaterStoreIndex = storeIndex.at(crew.greywaterStoreId);
 			state.urineStoreIndex = storeIndex[crew.urineStoreId];
 			state.organicWasteStoreIndex = storeIndex[crew.organicWasteStoreId];
 			state.atmosphereIndex = atmosphereIndex[crew.atmosphereId];

@@ -1,0 +1,229 @@
+# #743: G1 -> G2 bridge. Load in Station systems, then Apply.
+# Per day: 4 kg feed, 0.048 kg recovered N, 0.006 kg carried N,
+# 2.666 kg loaded recovered water (2.66 kg water), 1.40606 kg residue.
+# Effluent N concentration = 0.006 / 2.666 = 0.00225056264 kg/kg.
+# Crop irrigation tolerates 0.003 kg/kg N: the dilute stream is accepted.
+# Nutrient uptake remains the existing separate fertilizer-port model;
+# irrigation accepts the N load but does not substitute it for fertilizer.
+# Provisional biology; no inhibition or nitrifier growth yield.
+schemaVersion: 99
+stationSystems:
+  enabled: true
+  observationIntervalSeconds: 1.0
+  trendRetentionSeconds: 3600.0
+  dispatchMode: manual
+  stores:
+  - id: urine
+    unit: kg
+    capacity: 100.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+    composition:
+      moisture: 0.95
+      nutrientNitrogen: 0.3
+      atmosphericNitrogen: 0.0
+      phosphorus: 0.1
+      potassium: 0.35
+      otherMinerals: 0.15
+      energyKJPerKgDry: 800.0
+  - id: processOxygen
+    unit: kg
+    capacity: 100.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: fresh
+    unit: kg
+    capacity: 100.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: digesterMedia
+    unit: kg
+    capacity: 100.0
+    startingQualified: 10.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: nutrients
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: rawWater
+    materialId: water
+    composition: {moisture: 0.999, nutrientNitrogen: 1.0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 0}
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: co2
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: residue
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: bioStock
+    unit: kg
+    capacity: 100.0
+    startingQualified: 0.0
+    startingUnqualified: 0.0
+    protectedReserve: 0.0
+    hazardClass: normal
+  - id: N
+    unit: kg
+    capacity: 100
+    startingQualified: 10
+    startingUnqualified: 0
+    hazardClass: normal
+    composition: {moisture: 0, nutrientNitrogen: 1, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 0}
+  - id: P
+    unit: kg
+    capacity: 100
+    startingQualified: 10
+    startingUnqualified: 0
+    hazardClass: normal
+    composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 1, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 0}
+  - id: K
+    unit: kg
+    capacity: 100
+    startingQualified: 10
+    startingUnqualified: 0
+    hazardClass: normal
+    composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 1, otherMinerals: 0, energyKJPerKgDry: 0}
+  - id: minerals
+    unit: kg
+    capacity: 100
+    startingQualified: 10
+    startingUnqualified: 0
+    hazardClass: normal
+    composition: {moisture: 0, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 1, energyKJPerKgDry: 0}
+  - id: food
+    unit: kg
+    capacity: 100
+    startingQualified: 0
+    startingUnqualified: 0
+    hazardClass: normal
+    composition: {moisture: 0, nutrientNitrogen: 0.5, atmosphericNitrogen: 0, phosphorus: 0.1, potassium: 0.1, otherMinerals: 0.1, energyKJPerKgDry: 3600}
+  atmospheres:
+  - id: greenhouse
+    hazardClass: normal
+    volumeM3: 100
+    startingOxygenKg: 40
+    startingNitrogenKg: 80
+    startingCarbonDioxideKg: 5
+    startingWaterVapourKg: 1
+    startingTemperatureC: 22
+    thermalCapacityKJPerK: 20000
+    minPressureKPa: 1
+    maxPressureKPa: 200
+    minOxygenPartialPressureKPa: 0
+    maxCarbonDioxidePartialPressureKPa: 200
+    reservoirId: ''
+    exchangerConductanceKWPerK: 0
+    occupants: 0
+    oxygenUsePerOccupantKgPerS: 0
+    co2ProductionPerOccupantKgPerS: 0
+    sensibleHeatPerOccupantKW: 0
+    moistureAdditionPerOccupantKgPerS: 0
+    leakRateKgPerS: 0
+  cropPopulations:
+  - id: canopy
+    atmosphereId: greenhouse
+    waterStoreId: rawWater
+    waterQuality:
+      maxConcentrations: {nutrientNitrogen: 0.003}
+    nitrogenStoreId: N
+    phosphorusStoreId: P
+    potassiumStoreId: K
+    mineralsStoreId: minerals
+    composition: {moisture: 0, nutrientNitrogen: 0.5, atmosphericNitrogen: 0, phosphorus: 0.1, potassium: 0.1, otherMinerals: 0.1, energyKJPerKgDry: 3600}
+    growingAreaM2: 10
+    maxBiomassDensityKgPerM2: 2
+    initialBiomassKg: 1
+    lampRatedKW: 0.01
+    illumination: {constantLevel: 1, periodSeconds: 0, segments: []}
+    circulationPowerKW: 0
+    growthYieldKgPerKWh: 0.5
+    respirationPerHour: 0
+    transpirationKgPerKgGrowth: 0.2
+    minGrowingTemperatureC: 10
+    maxGrowingTemperatureC: 35
+    foodStoreId: food
+    wasteStoreId: residue
+    edibleFraction: 0.6
+    harvestTriggerKg: 0
+    harvestFraction: 0.5
+    priority: 1
+  microbialProcessors:
+  - id: urineNitrifier
+    hazardClass: normal
+    feedStoreId: urine
+    oxygenStoreId: processOxygen
+    waterStoreId: fresh
+    consumableStoreId: digesterMedia
+    nutrientStoreId: nutrients
+    recoveredWaterStoreId: rawWater
+    co2StoreId: co2
+    residueStoreId: residue
+    thermalClass: low
+    heatSinkId: processSink
+    rateKgPerS: 4.6296296296296294e-05
+    specificEnergyKWhPerKgFeed: 2.0
+    nitrogenRecovery: 0.8
+    phosphorusRecovery: 0.8
+    potassiumRecovery: 0.8
+    mineralsRecovery: 0.7
+    waterRecovery: 0.7
+    recoveredWaterCarryoverFractions: {nutrientNitrogen: 0.5}
+    minOperatingTemperatureC: 15.0
+    maxSinkTemperatureC: 45.0
+    initialCondition: 1.0
+    starvationDegradePerHour: 0.05
+    consumableExhaustionDegradePerHour: 0.05
+    coldStressDegradePerHour: 0.02
+    heatStressDegradePerHour: 0.1
+    recoveryPerHour: 0.02
+    stockStoreId: bioStock
+    stockUnitsPerConditionPoint: 1.0
+    priority: 1
+    rateBasis: CompositionDerived
+    nitrificationFraction: 1.0
+    organicOxidationFraction: 0.9
+    o2PerKgOrganicOxidized: 1.4
+    o2PerKgNitrifiedN: 4.57
+    co2PerKgOrganicOxidized: 1.8
+    processWaterTargetMoisture: 0.0
+    heatReleaseFraction: 0.7
+    consumablePerKgOrganicOxidized: 0.05
+  solarArrays:
+  - id: solar
+    capacityKW: 10.0
+    illumination:
+      constantLevel: 1.0
+      periodSeconds: 0.0
+      segments: []
+  thermalReservoirs:
+  - id: processSink
+    thermalClass: low
+    heatCapacityKJPerK: 1000000.0
+    startingTemperatureC: 20.0
+    minTemperatureC: -10.0
+    maxTemperatureC: 100.0
+    absorbedHeatKW: 0.0

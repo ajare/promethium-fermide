@@ -45,6 +45,12 @@ namespace core
 				return result;
 			}
 		}
+		for (auto const& crew : settings.crews)
+			if (crew.greywaterKgPerCrewDay > 0.0)
+			{
+				result.unavailableReason = "Crew greywater returns and their quality-dependent downstream use are not modelled by the declared-profile forecast.";
+				return result;
+			}
 		result.available = true;
 		// Exclude the complete material-connected component, not just the
 		// two endpoints: downstream Crew/transfer projections depend on it.

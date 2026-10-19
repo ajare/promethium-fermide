@@ -463,6 +463,11 @@ namespace core
 				serializer.writeString("foodStoreId", crew.foodStoreId);
 				serializer.writeString("waterStoreId", crew.waterStoreId);
 				writeWaterQuality(serializer, crew.waterQuality);
+				serializer.writeString("greywaterStoreId", crew.greywaterStoreId);
+				serializer.writeDouble("greywaterKgPerCrewDay", crew.greywaterKgPerCrewDay);
+				serializer.beginMap("greywaterLoadKgPerCrewDay");
+				for (auto const& [name, mass] : crew.greywaterLoadKgPerCrewDay) serializer.writeDouble(name, mass);
+				serializer.endMap();
 				serializer.writeString("urineStoreId", crew.urineStoreId);
 				serializer.writeString("organicWasteStoreId", crew.organicWasteStoreId);
 				serializer.writeDouble("foodPerCrewPerS", crew.foodPerCrewPerS);
@@ -685,6 +690,9 @@ namespace core
 				writeWaterQuality(serializer, processor.waterQuality);
 				serializer.writeString("consumableStoreId", processor.consumableStoreId);
 				serializer.writeString("nutrientStoreId", processor.nutrientStoreId);
+				serializer.beginMap("recoveredWaterCarryoverFractions");
+				for (auto const& [name, fraction] : processor.recoveredWaterCarryoverFractions) serializer.writeDouble(name, fraction);
+				serializer.endMap();
 				serializer.writeString("recoveredWaterStoreId", processor.recoveredWaterStoreId);
 				serializer.writeString("co2StoreId", processor.co2StoreId);
 				serializer.writeString("residueStoreId", processor.residueStoreId);
@@ -1504,6 +1512,15 @@ namespace core
 				crew.foodStoreId = serializer.readString("foodStoreId");
 				crew.waterStoreId = serializer.readString("waterStoreId");
 				readWaterQuality(serializer, crew.waterQuality);
+				if (serializer.hasField("greywaterStoreId")) crew.greywaterStoreId = serializer.readString("greywaterStoreId");
+				if (serializer.hasField("greywaterKgPerCrewDay")) crew.greywaterKgPerCrewDay = serializer.readDouble("greywaterKgPerCrewDay");
+				if (serializer.hasField("greywaterLoadKgPerCrewDay"))
+				{
+					auto const keys = serializer.mapKeys("greywaterLoadKgPerCrewDay");
+					serializer.beginMap("greywaterLoadKgPerCrewDay");
+					for (auto const& name : keys) crew.greywaterLoadKgPerCrewDay[name] = serializer.readDouble(name);
+					serializer.endMap();
+				}
 				crew.urineStoreId = serializer.readString("urineStoreId");
 				crew.organicWasteStoreId = serializer.readString("organicWasteStoreId");
 				crew.foodPerCrewPerS = serializer.readDouble("foodPerCrewPerS");
@@ -1771,6 +1788,13 @@ namespace core
 				readWaterQuality(serializer, processor.waterQuality);
 				processor.consumableStoreId = serializer.readString("consumableStoreId");
 				processor.nutrientStoreId = serializer.readString("nutrientStoreId");
+				if (serializer.hasField("recoveredWaterCarryoverFractions"))
+				{
+					auto const keys = serializer.mapKeys("recoveredWaterCarryoverFractions");
+					serializer.beginMap("recoveredWaterCarryoverFractions");
+					for (auto const& name : keys) processor.recoveredWaterCarryoverFractions[name] = serializer.readDouble(name);
+					serializer.endMap();
+				}
 				processor.recoveredWaterStoreId = serializer.readString("recoveredWaterStoreId");
 				processor.co2StoreId = serializer.readString("co2StoreId");
 				processor.residueStoreId = serializer.readString("residueStoreId");

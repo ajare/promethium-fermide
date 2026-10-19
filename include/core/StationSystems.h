@@ -953,6 +953,11 @@ namespace core
 		std::string foodStoreId;      // compound mass-unit input store
 		WaterQualitySettings waterQuality;
 		std::string waterStoreId;     // compound mass-unit input store
+		// Optional liquid return. Load values are kg per crew-day, included
+		// in (not added on top of) the declared total greywater mass.
+		std::string greywaterStoreId;
+		double greywaterKgPerCrewDay{0.0};
+		std::map<std::string, double> greywaterLoadKgPerCrewDay;
 		std::string urineStoreId;     // compound mass-unit output store
 		std::string organicWasteStoreId; // compound mass-unit output store
 		double foodPerCrewPerS{0.0};       // food store units per crew per second
@@ -966,6 +971,15 @@ namespace core
 		bool operator==(CrewSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationCrews{8};
+	inline std::map<std::string, double> stationCrewGreywater(CrewSettings const& crew, double crewDays)
+	{
+		std::map<std::string, double> actual;
+		double load = 0.0;
+		for (auto const& [name, mass] : crew.greywaterLoadKgPerCrewDay)
+		{ actual[name] = mass * crewDays; load += mass; }
+		actual["water"] = (crew.greywaterKgPerCrewDay - load) * crewDays;
+		return actual;
+	}
 
 	// Declared water hazard classes (#402). Normal and hazardous water are
 	// segregated services: a collector may only serve a compartment of its
@@ -1415,6 +1429,7 @@ namespace core
 		double phosphorusRecovery{0.8};   // fraction of the feed's P recovered
 		double potassiumRecovery{0.8};    // fraction of the feed's K recovered
 		double mineralsRecovery{0.7};     // fraction of the feed's grouped minerals recovered
+		std::map<std::string, double> recoveredWaterCarryoverFractions;
 		double waterRecovery{0.7};        // fraction of the feed's moisture recovered
 		double reactionHeatKJPerKgFeed{1500.0}; // exothermic heat, capped by the feed's chemical energy
 		double minOperatingTemperatureC{15.0}; // culture runs at or above this interface temperature
@@ -1460,6 +1475,29 @@ namespace core
 			dilution, oxidized * p.consumablePerKgOrganicOxidized,
 			oxidized * p.co2PerKgOrganicOxidized,
 			oxidized * c.energyKJPerKgDry * p.heatReleaseFraction, nitrified};
+	}
+
+	// Actual unrecovered dry constituent mass per kg of feed routed to water.
+	// Omitted fractions leave the legacy arithmetic and product split intact.
+	inline std::map<std::string, double> stationMicrobialCarryover(
+		MicrobialProcessorSettings const& p, ResourceCompositionSettings const& c)
+	{
+		auto const dry = 1.0 - c.moisture;
+		auto const organic = std::max(0.0, dry * (1.0 - c.nutrientNitrogen
+			- c.atmosphericNitrogen - c.phosphorus - c.potassium - c.otherMinerals));
+		auto const rates = stationMicrobialRates(p, c);
+		std::map<std::string, double> remaining{
+			{"dryOrganics", std::max(0.0, organic - (p.rateBasis == StationRateBasis::CompositionDerived
+				? organic * p.organicOxidationFraction : std::min(organic, rates.co2)))},
+			{"nutrientNitrogen", dry * c.nutrientNitrogen * (1.0 - p.nitrogenRecovery)},
+			{"atmosphericNitrogen", dry * c.atmosphericNitrogen},
+			{"phosphorus", dry * c.phosphorus * (1.0 - p.phosphorusRecovery)},
+			{"potassium", dry * c.potassium * (1.0 - p.potassiumRecovery)},
+			{"otherMinerals", dry * c.otherMinerals * (1.0 - p.mineralsRecovery)}};
+		std::map<std::string, double> result;
+		for (auto const& [name, fraction] : p.recoveredWaterCarryoverFractions)
+			if (fraction > 0.0) result[name] = remaining.at(name) * fraction;
+		return result;
 	}
 
 	// The living biological constituent inventory (#571): the actual dry-mass
@@ -3225,6 +3263,11 @@ namespace core
 	// referenced store's unit; gases, moisture and heat are kg and kW.
 	struct StationCrewSnapshot
 	{
+		std::string greywaterStoreId;
+		double greywaterKgPerCrewDay{0.0};
+		std::map<std::string, double> greywaterLoadKgPerCrewDay;
+		double lastGreywaterKg{0.0}, greywaterKg{0.0};
+		std::map<std::string, double> lastGreywaterConstituents, greywaterConstituents;
 		StationWaterQualitySnapshot waterQuality;
 		std::string id;
 		std::string atmosphereId;
@@ -3637,6 +3680,8 @@ namespace core
 		double processWaterTargetMoisture{0.0};
 		double heatReleaseFraction{0.0};
 		double consumablePerKgOrganicOxidized{0.0};
+		std::map<std::string, double> recoveredWaterCarryoverFractions;
+		std::map<std::string, double> lastCarriedConstituents, carriedConstituents;
 		double lastNitrifiedNitrogenKg{0.0};
 		double nitrifiedNitrogenKg{0.0};
 		std::string id;

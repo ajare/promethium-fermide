@@ -624,6 +624,9 @@ using namespace station_detail;
 		// retained body mass, with the retained term explicit.
 		struct CrewState
 		{
+			size_t greywaterStoreIndex{0};
+			double lastGreywaterKg{0.0}, greywaterKg{0.0};
+			ConstituentLedger lastGreywaterConstituents, greywaterConstituents;
 			StationWaterQualitySnapshot waterQuality;
 			CrewSettings authored;
 			size_t foodStoreIndex{0};
@@ -946,6 +949,7 @@ using namespace station_detail;
 		{
 			StationWaterQualitySnapshot waterQuality;
 			MicrobialProcessorSettings authored;
+			ConstituentLedger lastCarriedConstituents, carriedConstituents;
 			double lastNitrifiedNitrogenKg{0.0};
 			double nitrifiedNitrogenKg{0.0};
 			size_t feedStoreIndex{0};

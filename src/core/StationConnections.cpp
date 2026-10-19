@@ -236,6 +236,7 @@ Graph build(core::StationSystemsSettings const& s)
 	});
 	b.connect(s.crews, "Crew", [&](size_t n, auto const& p) {
 		b.feed(n, p.foodStoreId, "Food", Medium::Food); b.feed(n, p.waterStoreId, "Water", Medium::Water);
+		if (!p.greywaterStoreId.empty()) b.product(n, p.greywaterStoreId, "Greywater", Medium::Water);
 		b.product(n, p.urineStoreId, "Urine", Medium::Urine); b.product(n, p.organicWasteStoreId, "Organic waste", Medium::OrganicWaste);
 		atmosphereExchange(n, p.atmosphereId); });
 	b.connect(s.waterCollectors, "Water collector", [&](size_t n, auto const& p) {

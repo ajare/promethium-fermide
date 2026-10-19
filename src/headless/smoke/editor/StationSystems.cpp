@@ -6897,6 +6897,59 @@ void bufferWorkflow(smoke::Context const&)
 		smoke::require(driver.passed(), "Degenerate bioconversion editor workflow failed");
 	}
 
+	void waterCarryoverWorkflow(smoke::Context const& test)
+	{
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 2400};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		DocumentHistory history; StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Carry-over editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		window.setFilePicker([&](bool) -> std::optional<std::string> {
+			return test.fixture("resources/station-systems/scenarios/water-carryover.yaml").string();
+		});
+		headless::TestEngineDriver driver([&] {
+			ImGui::SetNextWindowPos({970, 10}); ImGui::SetNextWindowSize({220, 2350});
+			ImGui::Begin("Configuration"); window.renderFlowContents(world); ImGui::End();
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 2350});
+			window.render(world, history);
+		});
+		window.visible = true; driver.frame(); driver.frame();
+		driver.run("station", "waterCarryoverWorkflow", [&](ImGuiTestContext* ctx) {
+			#define CARRY_REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
+			ctx->SetRef("Configuration"); driver.click(ctx, "Open configuration"); ctx->Yield(3);
+			CARRY_REQ(window.draft().microbialProcessors.size() == 1, "Carry-over document did not open");
+			ctx->SetRef("Station Systems");
+			driver.typeValue(ctx, "Microbial processor 0 nutrientNitrogen carry-over fraction", "0.25"); ctx->Yield(3);
+			CARRY_REQ(window.draft().microbialProcessors[0].recoveredWaterCarryoverFractions.at("nutrientNitrogen") == 0.25,
+				"Carry-over form did not edit");
+			driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+			CARRY_REQ(window.draft().microbialProcessors[0].recoveredWaterCarryoverFractions.at("nutrientNitrogen") == 0.5,
+				"Carry-over undo failed");
+			core::StationConfigurationDocument saved, restored; std::string error;
+			saved.settings = window.draft();
+			auto const parsed = core::parseStationConfiguration(core::serializeStationConfiguration(saved), restored, &error);
+			CARRY_REQ(parsed && restored.settings == saved.settings, "Carry-over save/load failed");
+			driver.click(ctx, "Apply settings"); ctx->Yield(3);
+			CARRY_REQ(world->getStationSystemsSettings() == window.draft(), "Carry-over Apply failed");
+			world->resumeSimulation(); CARRY_REQ(world->advanceTicks(60), "Carry-over editor ticks failed");
+			world->pauseSimulation();
+			auto const snap = world->getStationSystemsSnapshot();
+			auto const daily = 86400.0 / (60.0 * core::World::getFixedTimestep());
+			CARRY_REQ(std::abs(snap.microbialProcessors[0].carriedConstituents.at("nutrientNitrogen") * daily - 0.006) < 1e-10,
+				"Editor-applied carried nitrogen disagrees");
+			CARRY_REQ(snap.cropPopulations[0].lastGrowthKg > 0 && snap.cropPopulations[0].waterQuality.scale == 1,
+				"Crop did not accept dilute recovered water");
+			core::station_connections::Node node; node.type = "Microbial processor"; node.id = "urineNitrifier";
+			auto const telemetry = station_flow::telemetry(node, snap, core::World::getFixedTimestep());
+			CARRY_REQ(telemetry && std::any_of(telemetry->details.begin(), telemetry->details.end(),
+				[](auto const& line) { return line.find("Carried nutrientNitrogen") != std::string::npos; }),
+				"Carried mass telemetry absent");
+			#undef CARRY_REQ
+		});
+		smoke::require(driver.passed(), "Carry-over editor workflow failed");
+	}
+
 	void compoundWaterWorkflow(smoke::Context const& test)
 	{
 		headless::ScopedImGuiContext context;
@@ -8776,6 +8829,7 @@ void cropWorkflow(smoke::Context const&)
 	checks.push_back({"station/generatorWorkflow", generatorWorkflow});
 	checks.push_back({"station/bufferWorkflow", bufferWorkflow});
 	checks.push_back({"station/microbialConditionWorkflow", microbialConditionWorkflow});
+	checks.push_back({"station/waterCarryoverWorkflow", waterCarryoverWorkflow});
 	checks.push_back({"station/bioconversionWorkflow", bioconversionWorkflow});
 	checks.push_back({"station/bioconversionDegenerateWorkflow", bioconversionDegenerateWorkflow});
 	checks.push_back({"station/bioconversionFoodwasteWorkflow", bioconversionFoodwasteWorkflow});

@@ -742,6 +742,7 @@ namespace core
 			processor.lastFeedConsumedKg = 0.0;
 			processor.lastOxygenConsumedKg = 0.0;
 			processor.lastWaterConsumedKg = 0.0;
+			processor.lastCarriedConstituents.clear();
 			processor.lastNitrifiedNitrogenKg = 0.0;
 			processor.lastConsumableRequested = 0.0;
 			processor.lastConsumableUsed = 0.0;
@@ -904,8 +905,11 @@ namespace core
 				* processor.authored.phosphorusRecovery + composition.potassium
 				* processor.authored.potassiumRecovery + composition.otherMinerals
 				* processor.authored.mineralsRecovery);
+			auto const carryover = stationMicrobialCarryover(processor.authored, composition);
+			double carriedPerKgFeed = 0.0;
+			for (auto const& [name, mass] : carryover) { (void)name; carriedPerKgFeed += mass; }
 			auto const recoveredWaterPerKgFeed = composition.moisture
-				* processor.authored.waterRecovery;
+				* processor.authored.waterRecovery + carriedPerKgFeed;
 			// Water-only recovery is pass-through, not bioconversion. With
 			// no recoverable water either, leave all inventories untouched.
 			// Classify the actual blend, not the store declaration.
@@ -1157,6 +1161,18 @@ namespace core
 			// (#601).
 			addLedger(stagedLoss, feedDrawnActual, 1.0);
 			addLedger(stagedLoss, processorConsumableActual, 1.0);
+			// A compound recovered-water product enters with its real blend,
+			// never the destination's authored starting composition.
+			ConstituentLedger recoveredActual{{"water", feedActualKg * composition.moisture
+				* processor.authored.waterRecovery}};
+			for (auto const& [name, mass] : carryover)
+			{
+				processor.lastCarriedConstituents[name] = mass * feedActualKg;
+				recoveredActual[name] = mass * feedActualKg;
+			}
+			addLedger(processor.carriedConstituents, processor.lastCarriedConstituents, 1.0);
+			depositStoreDrift(processor.recoveredWaterStoreIndex, recoveredWaterActualKg, recoveredActual);
+			if (recoveredWater.authored.composition) addLedger(stagedLoss, recoveredActual, -1.0);
 			// #601: remember the actual energy and bound nitrogen the
 			// digested feed carried, so the reaction-heat and
 			// recovery caps audit against real material.

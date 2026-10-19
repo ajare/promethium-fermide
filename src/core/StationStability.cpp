@@ -715,6 +715,9 @@ namespace core
 			fin(crew.co2ProducedKg, tag("co2ProducedKg", crew.id));
 			fin(crew.moistureProducedKg, tag("moistureProducedKg", crew.id));
 			fin(crew.urineProduced, tag("urineProduced", crew.id));
+			fin(crew.greywaterKg, tag("greywaterKg", crew.id));
+			fin(crew.lastGreywaterKg, tag("lastGreywaterKg", crew.id));
+			for (auto const& [name, mass] : crew.greywaterConstituents) fin(mass, tag(("greywater " + name).c_str(), crew.id));
 			fin(crew.organicWasteProduced, tag("organicWasteProduced", crew.id));
 			fin(crew.heatKJ, tag("heatKJ", crew.id));
 			fin(crew.retainedKg, tag("retainedKg", crew.id));
@@ -939,6 +942,7 @@ namespace core
 			fin(microbial.co2ProducedKg, tag("co2ProducedKg", microbial.id));
 			fin(microbial.residueProducedKg, tag("residueProducedKg", microbial.id));
 			fin(microbial.lastNitrifiedNitrogenKg, tag("lastNitrifiedNitrogenKg", microbial.id));
+			for (auto const& [name, mass] : microbial.carriedConstituents) fin(mass, tag(("carried " + name).c_str(), microbial.id));
 			fin(microbial.nitrifiedNitrogenKg, tag("nitrifiedNitrogenKg", microbial.id));
 			fin(microbial.organicOxidationFraction, tag("organicOxidationFraction", microbial.id));
 			fin(microbial.o2PerKgOrganicOxidized, tag("o2PerKgOrganicOxidized", microbial.id));

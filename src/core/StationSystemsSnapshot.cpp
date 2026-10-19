@@ -719,6 +719,13 @@ namespace core
 			crewResult.crewCount = crew.authored.crewCount;
 			crewResult.foodStoreId = crew.authored.foodStoreId;
 			crewResult.waterStoreId = crew.authored.waterStoreId;
+			crewResult.greywaterStoreId = crew.authored.greywaterStoreId;
+			crewResult.greywaterKgPerCrewDay = crew.authored.greywaterKgPerCrewDay;
+			crewResult.greywaterLoadKgPerCrewDay = crew.authored.greywaterLoadKgPerCrewDay;
+			crewResult.lastGreywaterKg = crew.lastGreywaterKg;
+			crewResult.greywaterKg = crew.greywaterKg;
+			crewResult.lastGreywaterConstituents = crew.lastGreywaterConstituents;
+			crewResult.greywaterConstituents = crew.greywaterConstituents;
 			crewResult.urineStoreId = crew.authored.urineStoreId;
 			crewResult.organicWasteStoreId = crew.authored.organicWasteStoreId;
 			crewResult.activityLevel = crew.lastActivityLevel;
@@ -1116,6 +1123,9 @@ namespace core
 			processorResult.processWaterTargetMoisture = processor.authored.processWaterTargetMoisture;
 			processorResult.heatReleaseFraction = processor.authored.heatReleaseFraction;
 			processorResult.consumablePerKgOrganicOxidized = processor.authored.consumablePerKgOrganicOxidized;
+			processorResult.recoveredWaterCarryoverFractions = processor.authored.recoveredWaterCarryoverFractions;
+			processorResult.lastCarriedConstituents = processor.lastCarriedConstituents;
+			processorResult.carriedConstituents = processor.carriedConstituents;
 			processorResult.lastNitrifiedNitrogenKg = processor.lastNitrifiedNitrogenKg;
 			processorResult.nitrifiedNitrogenKg = processor.nitrifiedNitrogenKg;
 			processorResult.id = processor.authored.id;

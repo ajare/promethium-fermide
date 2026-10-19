@@ -1694,6 +1694,55 @@ settings remain unchanged. Focused checks: `station-waterQualityGates`,
 `station-waterQualityValidation`, `station-waterQualityConsumers`, and
 `station-editor-compound-water`.
 
+### Producer dissolved loads (#743)
+
+Microbial processors accept `recoveredWaterCarryoverFractions`, a map from
+known dry constituent names to finite fractions in [0, 1]. Each fraction
+routes that share of the **unrecovered** constituent into recovered water
+instead of residue. N/P/K/minerals use the remainder after nutrient recovery;
+organic load uses the unoxidized remainder, and atmospheric nitrogen remains
+unconverted. A positive fraction requires a compound recovered-water store.
+The water recovery coefficient still controls moisture only: carried dry mass
+adds to the wet product mass and subtracts from residue. Destination capacity
+therefore backpressures the whole process using the loaded product's mass.
+Absent or zero fractions preserve the old split exactly. Actual deposit
+composition, including pure-water deposits, replaces the destination's seed
+composition through the existing drift ledger.
+
+Optional crew greywater declarations use an independent, compound, mass-unit
+output store in the breathing compartment's hazard class:
+
+```yaml
+greywaterStoreId: greywater
+greywaterKgPerCrewDay: 8.64
+greywaterLoadKgPerCrewDay: {dryOrganics: 0.0864, nutrientNitrogen: 0.00864}
+```
+
+The declared total **includes** the dissolved load; the remainder is water.
+All values are finite and non-negative. Loads must fit that total and be
+funded by the food/water consumed, alongside existing returns and heat.
+Population, activity, supply and waste headroom scale every pathway together.
+Greywater reduces retained body mass, never creates material. An omitted
+return preserves existing metabolism. Nonzero greywater returns explicitly
+make the declared-profile forecast unavailable rather than projecting without
+the new return's backpressure.
+
+Processor snapshots/Lua expose `lastCarriedConstituents` and
+`carriedConstituents` (kg this tick and lifetime). Crew snapshots/Lua expose
+`lastGreywaterKg`, `greywaterKg`, `lastGreywaterConstituents` and
+`greywaterConstituents`. The Flow inspector shows producer load rates; shared
+forms, draft history and configuration/World serialization retain declarations.
+
+`scenarios/water-carryover.yaml` bridges the urine nitrifier to crop irrigation:
+4 kg feed/day yields 0.048 kg recovered N/day and carries 0.006 kg N/day into
+2.666 kg recovered stream/day, leaving 1.40606 kg residue/day. Its N load is
+0.00225056264 kg/kg, below the crop's 0.003 kg/kg acceptance tolerance. Crop
+nutrient uptake retains the existing separate fertilizer ports; accepting
+loaded irrigation does not implicitly substitute dissolved N for that supply.
+The reference station is unchanged. Focused checks: `station-bioconversionCarryover`,
+`station-crews`, and `station-editor-water-carryover` (Open, edit/undo,
+save/load, Apply and public World ticks).
+
 ### Oxygen production and CO2 capture (#404)
 
 Oxygen production and carbon-dioxide removal are two authored contracts
