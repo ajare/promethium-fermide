@@ -189,7 +189,7 @@ namespace core
 	// recurrenceSeconds, reusing the same schedule rule and the same
 	// deterministic scenario ordering as resupply deliveries. At equal
 	// occurrence time and priority, arrivals run before ejections.
-	enum class WasteEjectionEligibility : std::uint8_t { QualifiedOnly, HeldOnly };
+	enum class WasteEjectionEligibility : std::uint8_t { QualifiedOnly, HeldOnly, QualifiedAndHeld };
 
 	struct WasteEjectionSettings
 	{

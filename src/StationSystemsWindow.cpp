@@ -1736,7 +1736,8 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 			ejection.lastUnmet, ejection.ejectedTotal, ejection.unmetTotal,
 			static_cast<unsigned long long>(ejection.occurrencesCompleted), ejection.priority);
 		ImGui::Text("  eligibility: %s | qualified/held last %.3f / %.3f; total %.3f / %.3f",
-			ejection.eligibility == core::WasteEjectionEligibility::HeldOnly ? "held only" : "qualified only",
+			ejection.eligibility == core::WasteEjectionEligibility::HeldOnly ? "held only"
+				: ejection.eligibility == core::WasteEjectionEligibility::QualifiedAndHeld ? "qualified then held" : "qualified only",
 			ejection.lastQualifiedEjected, ejection.lastHeldEjected,
 			ejection.qualifiedEjectedTotal, ejection.heldEjectedTotal);
 		if (ejection.exhausted)

@@ -940,7 +940,8 @@ namespace core
 				serializer.writeString("id", ejection.id);
 				serializer.writeString("storeId", ejection.storeId);
 				if (ejection.eligibility != WasteEjectionEligibility::QualifiedOnly)
-					serializer.writeString("eligibility", "heldOnly");
+					serializer.writeString("eligibility", ejection.eligibility == WasteEjectionEligibility::HeldOnly
+						? "heldOnly" : "qualifiedAndHeld");
 				serializer.writeString("unit", ejection.unit);
 				serializer.writeDouble("quantity", ejection.quantity);
 				serializer.writeDouble("firstOccurrenceSeconds", ejection.firstOccurrenceSeconds);
@@ -2059,9 +2060,10 @@ namespace core
 				{
 					if (version < 102) throw SerializationException("Waste ejection eligibility requires schema 102");
 					auto const value = serializer.readString("eligibility");
-					if (value != "qualifiedOnly" && value != "heldOnly") throw SerializationException(
-						"Waste ejection eligibility must be qualifiedOnly or heldOnly");
+					if (value != "qualifiedOnly" && value != "heldOnly" && value != "qualifiedAndHeld") throw SerializationException(
+						"Waste ejection eligibility must be qualifiedOnly, heldOnly or qualifiedAndHeld");
 					ejection.eligibility = value == "heldOnly" ? WasteEjectionEligibility::HeldOnly
+						: value == "qualifiedAndHeld" ? WasteEjectionEligibility::QualifiedAndHeld
 						: WasteEjectionEligibility::QualifiedOnly;
 				}
 				ejection.storeId = serializer.readString("storeId");

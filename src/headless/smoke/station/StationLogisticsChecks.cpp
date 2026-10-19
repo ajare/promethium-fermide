@@ -661,6 +661,63 @@ namespace
 			require(!accepted && diagnostic.find("eligibility") != std::string::npos,
 				"invalid ejection eligibility accepted");
 		}
+		// Emergency drain: qualified-first ordering, honest shortfalls and forecast
+		// partition parity, including the qualified-only trajectory when held is empty (#747).
+		for (double held : {0.0, 7.0})
+		for (double requested : {2.0, 5.0, 15.0})
+		{
+			core::StationSystemsSettings settings;
+			settings.enabled = true; settings.observationIntervalSeconds = 1.0f;
+			settings.stores = {wasteStore("tank", 100.0, 3.0, held)};
+			settings.wasteEjections = {ejection("emergencyDrain", "tank", requested, 1.0)};
+			settings.wasteEjections[0].eligibility = core::WasteEjectionEligibility::QualifiedAndHeld;
+			// A later arrival exposes forecast physical inventory after the drain.
+			settings.deliveries = {delivery("probe", "tank", 1.0, 2.0)};
+			core::World world("EmergencyDrain", 2, 2);
+			configure(world, settings); world.resumeSimulation();
+			require(world.advanceTicks(1), "emergency-drain forecast seed failed");
+			auto const forecast = world.getStationSystemsSnapshot().forecast.stores[0];
+			auto const qualifiedRemoved = std::min(3.0, requested);
+			auto const heldRemoved = std::min(held, requested - qualifiedRemoved);
+			auto const removed = qualifiedRemoved + heldRemoved;
+			require(world.advanceTicks(59), "emergency drain failed");
+			auto const snap = world.getStationSystemsSnapshot();
+			auto const& result = snap.wasteEjections[0];
+			require(result.eligibility == core::WasteEjectionEligibility::QualifiedAndHeld
+				&& result.lastQualifiedEjected == qualifiedRemoved && result.lastHeldEjected == heldRemoved
+				&& result.qualifiedEjectedTotal == qualifiedRemoved && result.heldEjectedTotal == heldRemoved
+				&& result.lastEjected == removed && result.ejectedTotal == removed
+				&& result.lastUnmet == requested - removed && result.unmetTotal == requested - removed
+				&& snap.stores[0].currentQualified == 3.0 - qualifiedRemoved
+				&& snap.stores[0].currentUnqualified == held - heldRemoved
+				&& result.status == (removed < requested ? core::StationTransferStatus::Partial : core::StationTransferStatus::Full),
+				"emergency drain did not consume qualified-first or report the exact partition split");
+			require(snap.balances[0].lost == removed && std::abs(snap.balances[0].residual) < 1e-6
+				&& core::auditStationStability(snap, {}, {}, {}).clean,
+				"emergency drain broke conservation or stability bounds");
+			require(forecast.arrivals.size() == 1
+				&& approx(forecast.arrivals[0].projectedPhysicalBefore,
+					snap.stores[0].currentQualified + snap.stores[0].currentUnqualified)
+				&& approx(forecast.unmetOutflowTotal, requested - removed)
+				&& std::abs(forecast.conservationResidual) < 1e-6,
+				"emergency-drain forecast physical trajectory differs from live removal");
+			require(world.advanceTicks(60), "emergency-drain probe arrival failed");
+			require(approx(forecast.projectedDrawableAtHorizon,
+				world.getStationSystemsSnapshot().stores[0].currentQualified),
+				"emergency-drain forecast qualified trajectory differs from live run");
+			if (held == 0.0)
+			{
+				settings.wasteEjections[0].eligibility = core::WasteEjectionEligibility::QualifiedOnly;
+				core::World baseline("EmergencyDrain", 2, 2);
+				configure(baseline, settings); baseline.resumeSimulation();
+				require(baseline.advanceTicks(120), "qualified-only baseline failed");
+				auto const actual = world.getStationSystemsSnapshot();
+				auto const expected = baseline.getStationSystemsSnapshot();
+				require(actual.stores == expected.stores && actual.balances == expected.balances
+					&& actual.forecast == expected.forecast,
+					"emergency drain changed the empty-held default trajectory");
+			}
+		}
 		// A finite hazardous concentrate tank stalls without declared disposal.
 		for (auto mode : {core::WasteEjectionEligibility::QualifiedOnly, core::WasteEjectionEligibility::HeldOnly})
 		{
@@ -697,7 +754,8 @@ namespace
 			require(core::auditStationStability(snap, {}, {}, {}).clean,
 				"held disposal violated stability bounds");
 		}
-		// Held compound effluent carries actual feed drift, not its authored label.
+		// Compound effluent carries actual feed drift, not its authored label.
+		for (auto mode : {core::WasteEjectionEligibility::HeldOnly, core::WasteEjectionEligibility::QualifiedAndHeld})
 		{
 			core::StationSystemsSettings settings;
 			settings.enabled = true; settings.observationIntervalSeconds = 1.0f;
@@ -719,7 +777,8 @@ namespace
 			for (auto const* name : core::StationWaterDryConstituents) treatment.removalFractions[name] = 0.0;
 			settings.waterTreatments = {treatment};
 			settings.wasteEjections = {ejection("dump", "held", 1.0, 1.0, 1.0)};
-			settings.wasteEjections[0].eligibility = core::WasteEjectionEligibility::HeldOnly;
+			settings.wasteEjections[0].eligibility = mode;
+			settings.stores[1].startingQualified = 0.5;
 			core::World world("HeldDriftDisposal", 2, 2);
 			configure(world, settings); world.resumeSimulation();
 			require(world.advanceTicks(600), "held drift disposal failed");
@@ -730,7 +789,12 @@ namespace
 				require(std::abs(balance.residual) < 1e-6, "held drift ejection broke constituent conservation");
 				if (balance.constituent == "nutrientNitrogen" && balance.lost > 0.0) lostNutrient = true;
 			}
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) < 1e-6, "drift ejection broke unit conservation");
 			require(lostNutrient && snap.wasteEjections[0].heldEjectedTotal > 1.0
+				&& (mode == core::WasteEjectionEligibility::HeldOnly
+					? snap.wasteEjections[0].qualifiedEjectedTotal == 0.0
+					: snap.wasteEjections[0].qualifiedEjectedTotal == 0.5)
 				&& core::auditStationStability(snap, {}, {}, {}).clean,
 				"held disposal lost actual drift or violated stability bounds");
 		}
@@ -850,7 +914,8 @@ namespace
 		// external-loss booking: wrap the bundled source and assert the
 		// sandbox's own ejection ledger inside the model for the same
 		// scenario the host ledger produces below.
-		for (auto mode : {core::WasteEjectionEligibility::QualifiedOnly, core::WasteEjectionEligibility::HeldOnly})
+		for (auto mode : {core::WasteEjectionEligibility::QualifiedOnly, core::WasteEjectionEligibility::HeldOnly,
+			core::WasteEjectionEligibility::QualifiedAndHeld})
 		{
 			auto const bundled = core::bundledStationSystemsSource();
 			core::setStationSystemsSourceLoader([bundled] {
@@ -863,10 +928,11 @@ namespace
 					"local haul = self.waste_ejections[1]\n"
 					"if tick >= 60 then\n"
 					"local held = haul.eligibility == 'heldOnly'\n"
-					"assert(math.abs(haul.ejectedTotal - (held and 5 or 3)) < 1e-9, 'sandbox ejection total wrong')\n"
+					"local both = haul.eligibility == 'qualifiedAndHeld'\n"
+					"assert(math.abs(haul.ejectedTotal - ((held or both) and 5 or 3)) < 1e-9, 'sandbox ejection total wrong')\n"
 					"assert(math.abs(haul.store.qualified - (held and 3 or 0)) < 1e-9, 'sandbox qualified pool wrong')\n"
-					"assert(math.abs(haul.store.unqualified - (held and 2 or 7)) < 1e-9, 'sandbox held pool wrong')\n"
-					"assert(math.abs((self.unit_loss['kg'] or 0) - (held and 5 or 3)) < 1e-9, 'sandbox external loss booking wrong')\n"
+					"assert(math.abs(haul.store.unqualified - (held and 2 or both and 5 or 7)) < 1e-9, 'sandbox held pool wrong')\n"
+					"assert(math.abs((self.unit_loss['kg'] or 0) - ((held or both) and 5 or 3)) < 1e-9, 'sandbox external loss booking wrong')\n"
 					"end\n"
 					"return result\n"
 					"end\n"
@@ -888,9 +954,10 @@ namespace
 			// sandbox asserted: identical removal on both sides.
 			auto const snap = sandbox.getStationSystemsSnapshot();
 			require(snap.healthy
-				&& approx(snap.wasteEjections[0].ejectedTotal, mode == core::WasteEjectionEligibility::HeldOnly ? 5.0 : 3.0)
+				&& approx(snap.wasteEjections[0].ejectedTotal, mode != core::WasteEjectionEligibility::QualifiedOnly ? 5.0 : 3.0)
 				&& approx(snap.stores[0].currentQualified, mode == core::WasteEjectionEligibility::HeldOnly ? 3.0 : 0.0)
-				&& approx(snap.stores[0].currentUnqualified, mode == core::WasteEjectionEligibility::HeldOnly ? 2.0 : 7.0),
+				&& approx(snap.stores[0].currentUnqualified, mode == core::WasteEjectionEligibility::HeldOnly ? 2.0
+					: mode == core::WasteEjectionEligibility::QualifiedAndHeld ? 5.0 : 7.0),
 				"host and sandbox ejection mirror disagree for the same scenario");
 			core::setStationSystemsSourceLoader({});
 		}
@@ -910,7 +977,7 @@ namespace
 			settings.wasteEjections = {ejection("dump", "tank", 1.0, 1.0)};
 			std::string diagnostic;
 			require(!world.configureStationSystems(settings, false, &diagnostic)
-				&& diagnostic.find("eligibility must be qualifiedOnly or heldOnly") != std::string::npos,
+				&& diagnostic.find("eligibility must be qualifiedOnly, heldOnly or qualifiedAndHeld") != std::string::npos,
 				("Lua mirror accepted malformed ejection eligibility: " + diagnostic).c_str());
 			core::setStationSystemsSourceLoader({});
 		}

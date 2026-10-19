@@ -1148,23 +1148,36 @@ namespace
 			require(core::loadWorldDocument(path)->getStationSystemsSettings() == settings,
 				"old document did not retain default qualified-only semantics");
 		}
-		settings.wasteEjections[0].eligibility = core::WasteEjectionEligibility::HeldOnly;
-		original.pauseSimulation();
-		require(original.configureStationSystems(settings, true, &diagnostic), diagnostic);
-		for (auto const* suffix : {".world.yaml", ".world"})
+		for (auto mode : {core::WasteEjectionEligibility::QualifiedAndHeld, core::WasteEjectionEligibility::HeldOnly})
 		{
-			auto const path = directory / (std::string("held-only") + suffix);
-			original.saveTo(path.string());
-			auto const reopened = core::loadWorldDocument(path);
-			require(reopened->getStationSystemsSettings() == settings,
-				"held-only ejection did not round-trip");
-			reopened->resumeSimulation();
-			require(reopened->advanceTicks(60), "held-only reopened run failed");
-			auto const snap = reopened->getStationSystemsSnapshot();
-			require(snap.stores[0].currentQualified == 12.0
-				&& snap.stores[0].currentUnqualified == 0.0
-				&& snap.wasteEjections[0].lastHeldEjected == 5.0,
-				"held-only round-trip changed disposal semantics");
+			settings.wasteEjections[0].eligibility = mode;
+			original.pauseSimulation();
+			require(original.configureStationSystems(settings, true, &diagnostic), diagnostic);
+			for (auto const* suffix : {".world.yaml", ".world"})
+			{
+				auto const path = directory / (std::string(mode == core::WasteEjectionEligibility::HeldOnly
+					? "held-only" : "emergency-drain") + suffix);
+				original.saveTo(path.string());
+				auto const reopened = core::loadWorldDocument(path);
+				require(reopened->getStationSystemsSettings() == settings,
+					"ejection eligibility did not round-trip");
+				reopened->resumeSimulation();
+				require(reopened->advanceTicks(600), "eligibility reopened run failed");
+				auto const snap = reopened->getStationSystemsSnapshot();
+				require(mode == core::WasteEjectionEligibility::HeldOnly
+					? snap.stores[0].currentQualified == 12.0 && snap.stores[0].currentUnqualified == 0.0
+						&& snap.wasteEjections[0].heldEjectedTotal == 5.0
+					: snap.stores[0].currentQualified == 0.0 && snap.stores[0].currentUnqualified == 0.0
+						&& snap.wasteEjections[0].qualifiedEjectedTotal == 12.0 && snap.wasteEjections[0].heldEjectedTotal == 5.0,
+					"eligibility round-trip changed disposal semantics");
+				core::World rerun("Ejection Round Trip", 2, 2);
+				rerun.pauseSimulation(); rerun.finishBuild();
+				require(rerun.configureStationSystems(settings, false, &diagnostic), diagnostic);
+				rerun.resumeSimulation();
+				require(rerun.advanceTicks(600), "eligibility original rerun failed");
+				require(rerun.getStationSystemsSnapshot() == snap,
+					"eligibility document changed the re-run snapshot");
+			}
 		}
 		for (auto const* value : {"qualifiedOnly", "unknown", "false"})
 		{

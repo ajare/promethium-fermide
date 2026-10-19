@@ -1664,8 +1664,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             'waste ejection priority must be a finite integer')
         local eligibility = ejection.eligibility
         if eligibility == nil then eligibility = 'qualifiedOnly' end
-        assert(eligibility == 'qualifiedOnly' or eligibility == 'heldOnly',
-            'waste ejection eligibility must be qualifiedOnly or heldOnly')
+        assert(eligibility == 'qualifiedOnly' or eligibility == 'heldOnly' or eligibility == 'qualifiedAndHeld',
+            'waste ejection eligibility must be qualifiedOnly, heldOnly or qualifiedAndHeld')
         object.waste_ejections[index] = {
             eligibility = eligibility,
             id = ejection.id,
@@ -4177,16 +4177,19 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             elseif arrival.ejection then
                 local ejection = self.waste_ejections[arrival.declaration]
                 local store = ejection.store
-                -- Disposal selects only the explicitly authorised partition.
-                local partition = ejection.eligibility == 'heldOnly' and 'unqualified' or 'qualified'
-                local eligible = math.max(0.0, store[partition])
-                local ejected = math.min(ejection.quantity, eligible)
+                -- Emergency disposal consumes qualified stock first, then held.
+                local qualifiedEjected = ejection.eligibility == 'heldOnly' and 0
+                    or math.min(ejection.quantity, math.max(0, store.qualified))
+                local heldEjected = ejection.eligibility == 'qualifiedOnly' and 0
+                    or math.min(ejection.quantity - qualifiedEjected, math.max(0, store.unqualified))
+                local ejected = qualifiedEjected + heldEjected
                 local unmet = ejection.quantity - ejected
                 assert(ejected >= 0 and unmet >= 0
                     and ejected == ejected and unmet == unmet,
                     "waste ejection amounts are not finite and non-negative")
                 local ejectedKgBefore = toKg(store.unit, store.qualified + store.unqualified)
-                store[partition] = store[partition] - ejected
+                store.qualified = store.qualified - qualifiedEjected
+                store.unqualified = store.unqualified - heldEjected
                 self.unit_loss[store.unit] =
                     (self.unit_loss[store.unit] or 0) + ejected
                 -- #601: what leaves the station is the material the

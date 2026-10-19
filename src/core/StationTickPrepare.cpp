@@ -325,15 +325,18 @@ namespace core
 			{
 				auto& ejection = runtime.wasteEjections[arrival.key.declarationIndex];
 				auto const& store = runtime.stores[ejection.storeIndex].authored;
-				// Disposal selects a partition without making held stock drawable.
-				auto const heldOnly = ejection.authored.eligibility == WasteEjectionEligibility::HeldOnly;
-				auto& partition = heldOnly ? unqualified[ejection.storeIndex] : qualified[ejection.storeIndex];
-				auto const eligible = std::max(0.0, partition);
-				auto const ejected = std::min(ejection.authored.quantity, eligible);
+				// Disposal eligibility never makes held stock drawable for use.
+				auto const mode = ejection.authored.eligibility;
+				auto const qualifiedEjected = mode == WasteEjectionEligibility::HeldOnly ? 0.0
+					: std::min(ejection.authored.quantity, std::max(0.0, qualified[ejection.storeIndex]));
+				auto const heldEjected = mode == WasteEjectionEligibility::QualifiedOnly ? 0.0
+					: std::min(ejection.authored.quantity - qualifiedEjected, std::max(0.0, unqualified[ejection.storeIndex]));
+				auto const ejected = qualifiedEjected + heldEjected;
 				auto const unmet = ejection.authored.quantity - ejected;
 				auto const ejectedStoreKgBefore = massToKg(store.unit,
 					qualified[ejection.storeIndex] + unqualified[ejection.storeIndex]);
-				partition -= ejected;
+				qualified[ejection.storeIndex] -= qualifiedEjected;
+				unqualified[ejection.storeIndex] -= heldEjected;
 				flowOut[ejection.storeIndex] += ejected;
 				// Ejected material crosses the station boundary as an
 				// external loss: the per-unit and per-constituent
@@ -350,8 +353,8 @@ namespace core
 				ejection.lastOccurrenceSeconds = arrival.key.occurrenceSeconds;
 				ejection.lastScheduled = ejection.authored.quantity;
 				ejection.lastEjected = ejected;
-				ejection.lastQualifiedEjected = heldOnly ? 0.0 : ejected;
-				ejection.lastHeldEjected = heldOnly ? ejected : 0.0;
+				ejection.lastQualifiedEjected = qualifiedEjected;
+				ejection.lastHeldEjected = heldEjected;
 				ejection.qualifiedEjectedTotal += ejection.lastQualifiedEjected;
 				ejection.heldEjectedTotal += ejection.lastHeldEjected;
 				ejection.lastUnmet = unmet;

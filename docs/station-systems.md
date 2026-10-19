@@ -2013,23 +2013,45 @@ at-le-one-fixed-tick rule. Normal and hazardous terminal waste are
 kept separate the way every other material in the station is kept
 separate: in their own stores, each with its own ejection contract.
 
-Ejection `eligibility` explicitly selects one partition: `qualifiedOnly`
-(the default when omitted) removes only qualified stock; `heldOnly`
-removes only held (unqualified/untreated) stock, never usable stock.
+Ejection `eligibility` explicitly selects the eligible stock:
+- `qualifiedOnly` (the default when omitted) removes only qualified stock.
+- `heldOnly` removes only held (unqualified/untreated) stock, never usable stock.
+- `qualifiedAndHeld` is an emergency drain: it removes qualified stock first,
+  then held stock only for the remaining requested quantity. With no held stock
+  it follows the default trajectory exactly.
 Held waste is ejected only when the ejection declares it. World and Station
 configuration schema **102** persist the optional selector; older documents
 without it retain qualified-only semantics. This does not
 make held stock drawable by transfers or consumers. Each occurrence
-removes at most the scheduled quantity and the selected partition's
+removes at most the scheduled quantity and the eligible partitions'
 contents; the remainder is unmet, never forced, and never a failure.
 An empty eligible partition reports Rejected and full unmet demand,
 but still counts as an occurrence, so the schedule never stalls. What is
 ejected crosses the station boundary as an external loss: it is
 booked in the per-unit and per-constituent `lost` ledgers, so the
 balance closes as current + lost - delivered - collected == starting
-with the ejected mass explicitly gone from the station and the other
+with the ejected mass explicitly gone from the station and any ineligible
 partition explicitly retained. Snapshots expose eligibility, lastQualifiedEjected,
 lastHeldEjected, qualifiedEjectedTotal and heldEjectedTotal beside the totals.
+
+For an emergency-drain example, start `tank` at 3 kg qualified and 7 kg held:
+```yaml
+wasteEjections:
+  - id: emergencyDrain
+    storeId: tank
+    unit: kg
+    quantity: 5
+    firstOccurrenceSeconds: 1
+    recurrenceSeconds: 0
+    eligibility: qualifiedAndHeld
+```
+At 1 second the snapshot reports 3 kg qualified and 2 kg held ejected,
+leaving 0 kg qualified and 5 kg held. Requesting 15 kg instead removes
+3 + 7 kg and reports 5 kg unmet. The declared-profile forecast projects
+these same partition removals; it does not assume treatment or requalification.
+`station-wasteEjections` exercises this scenario, empty-held equivalence,
+shortfalls, Lua parity and drift-inclusive ledger closure;
+`station-wasteEjectionFiles` checks YAML/binary reload and identical re-runs.
 
 Ejections run in the same scenario-event pass as deliveries, under
 the same total order: occurrence time, then higher priority first,
@@ -2143,7 +2165,7 @@ never crosses into normal inventory, a reservoir, or another loop. Heat
 rides the interface; mass never does.
 
 **Disposal-ready hazardous waste stays segregated.** Each ejection
-contract removes only its own store's declared eligible partition
+contract removes only its own store's declared eligible partitions
 (qualified-only by default); one class's ejection never
 touches the other class's store.
 
@@ -2484,7 +2506,7 @@ no compound or contaminated-stream water chemistry (water-process stores
 are plain mass stores and the model carries no species beyond mass), no
 biological or pathogen modelling, and no reprocessing path for held
 water: a held batch stays held for use (it is ejectable when explicitly
-declared with `heldOnly`), and redistribution and quality
+declared with `heldOnly` or `qualifiedAndHeld`), and redistribution and quality
 recovery are later work.
 Compartment atmospheres are closed authored volumes: this slice adds
 no gas generation or processing (no O₂ generation, CO₂ scrubbing or
