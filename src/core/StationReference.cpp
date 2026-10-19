@@ -939,6 +939,8 @@ namespace core
 				serializer.beginMap("");
 				serializer.writeString("id", ejection.id);
 				serializer.writeString("storeId", ejection.storeId);
+				if (ejection.eligibility != WasteEjectionEligibility::QualifiedOnly)
+					serializer.writeString("eligibility", "heldOnly");
 				serializer.writeString("unit", ejection.unit);
 				serializer.writeDouble("quantity", ejection.quantity);
 				serializer.writeDouble("firstOccurrenceSeconds", ejection.firstOccurrenceSeconds);
@@ -2053,6 +2055,15 @@ namespace core
 				serializer.beginMap("");
 				WasteEjectionSettings ejection;
 				ejection.id = serializer.readString("id");
+				if (serializer.hasField("eligibility"))
+				{
+					if (version < 102) throw SerializationException("Waste ejection eligibility requires schema 102");
+					auto const value = serializer.readString("eligibility");
+					if (value != "qualifiedOnly" && value != "heldOnly") throw SerializationException(
+						"Waste ejection eligibility must be qualifiedOnly or heldOnly");
+					ejection.eligibility = value == "heldOnly" ? WasteEjectionEligibility::HeldOnly
+						: WasteEjectionEligibility::QualifiedOnly;
+				}
 				ejection.storeId = serializer.readString("storeId");
 				ejection.unit = serializer.readString("unit");
 				ejection.quantity = serializer.readDouble("quantity");
@@ -2173,8 +2184,8 @@ namespace core
 			// systems, the upper bound is the newest schema this reader
 			// knows. A reference outside that range is refused rather than
 			// read under assumptions the reader has not been checked for.
-			if (document.schemaVersion < 65 || document.schemaVersion > 101)
-				return refuse("Reference station schema version must be from 65 to 101");
+			if (document.schemaVersion < 65 || document.schemaVersion > 102)
+				return refuse("Reference station schema version must be from 65 to 102");
 			if (serializer->hasField("provenance"))
 			{
 				serializer->beginArray("provenance");

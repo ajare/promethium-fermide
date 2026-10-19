@@ -2013,20 +2013,23 @@ at-le-one-fixed-tick rule. Normal and hazardous terminal waste are
 kept separate the way every other material in the station is kept
 separate: in their own stores, each with its own ejection contract.
 
-Only disposal-ready material is eligible. A waste store's qualified
-contents are disposal-ready; its held (unqualified/untreated)
-contents are not, and an ejection never touches them. Each
-occurrence removes at most the scheduled quantity and at most the
-disposal-ready material the store actually holds; the difference
-between scheduled and ejected is reported as unmet, never forced,
-never taken from held stock, and never a failure. An ejection on an
-empty or fully-held store ejects nothing and still counts as an
-occurrence, so the schedule never stalls or disappears. What is
+Ejection `eligibility` explicitly selects one partition: `qualifiedOnly`
+(the default when omitted) removes only qualified stock; `heldOnly`
+removes only held (unqualified/untreated) stock, never usable stock.
+Held waste is ejected only when the ejection declares it. World and Station
+configuration schema **102** persist the optional selector; older documents
+without it retain qualified-only semantics. This does not
+make held stock drawable by transfers or consumers. Each occurrence
+removes at most the scheduled quantity and the selected partition's
+contents; the remainder is unmet, never forced, and never a failure.
+An empty eligible partition reports Rejected and full unmet demand,
+but still counts as an occurrence, so the schedule never stalls. What is
 ejected crosses the station boundary as an external loss: it is
 booked in the per-unit and per-constituent `lost` ledgers, so the
 balance closes as current + lost - delivered - collected == starting
-with the ejected mass explicitly gone from the station and held waste
-explicitly retained.
+with the ejected mass explicitly gone from the station and the other
+partition explicitly retained. Snapshots expose eligibility, lastQualifiedEjected,
+lastHeldEjected, qualifiedEjectedTotal and heldEjectedTotal beside the totals.
 
 Ejections run in the same scenario-event pass as deliveries, under
 the same total order: occurrence time, then higher priority first,
@@ -2140,8 +2143,8 @@ never crosses into normal inventory, a reservoir, or another loop. Heat
 rides the interface; mass never does.
 
 **Disposal-ready hazardous waste stays segregated.** Each ejection
-contract removes only its own store's qualified (disposal-ready)
-contents; the held stock stays behind, and one class's ejection never
+contract removes only its own store's declared eligible partition
+(qualified-only by default); one class's ejection never
 touches the other class's store.
 
 World schema 88 persists the store hazard class and the treatment's
@@ -2168,7 +2171,7 @@ unqualified); failed evidence (a curtailed dose holds the whole output and
 burns no clearance consumable); heat-only interfaces (the loop's coolant
 inventory and every Resource store are unchanged while the heater and pump
 run and the loop-reservoir heat exchange happens); waste segregation (each
-ejection removes only its own store's qualified contents and the held
+default qualified-only ejection removes only its own store's qualified contents and the held
 stock stays behind); the bundled Lua sandbox mirroring the same clearance
 rule and agreeing with the host ledger for the same scenario; and
 deterministic replay after Reset. File coverage: schema-88 round trips
@@ -2480,7 +2483,8 @@ It adds no concentrate disposal, no water distribution to consumers,
 no compound or contaminated-stream water chemistry (water-process stores
 are plain mass stores and the model carries no species beyond mass), no
 biological or pathogen modelling, and no reprocessing path for held
-water: a held batch stays held, and disposal, redistribution and quality
+water: a held batch stays held for use (it is ejectable when explicitly
+declared with `heldOnly`), and redistribution and quality
 recovery are later work.
 Compartment atmospheres are closed authored volumes: this slice adds
 no gas generation or processing (no O₂ generation, CO₂ scrubbing or

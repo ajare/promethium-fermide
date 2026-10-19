@@ -615,7 +615,7 @@ A named aggregate of station equipment outside the Station systems, with declare
 Material designated for disposal after resource recovery, including unrecoverable residue and recovered material that cannot fit in its appropriate Resource store. Normal and hazardous waste remain segregated in finite storage; storage exhaustion constrains affected processing rather than deleting material.
 
 **Scheduled waste ejection**:
-The removal of available, disposal-ready Terminal waste to space at declared simulation times. Ejected material leaves station inventories and is recorded as a material loss; material awaiting required treatment is not eligible.
+The removal of Terminal waste to space at declared simulation times from an explicitly selected Resource store partition: qualified stock by default, or held stock when declared. Ejected material leaves station inventories and is recorded as a material loss; held stock remains unavailable for use.
 
 ### Station diagram authoring
 

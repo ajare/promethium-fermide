@@ -2065,6 +2065,9 @@ bool renderWasteEjectionEntry([[maybe_unused]] core::StationSystemsSettings& dra
 	std::strncpy(ejectionUnitBuffer, ejection.unit.c_str(), sizeof(ejectionUnitBuffer) - 1);
 	if (ImGui::InputText((label + " unit").c_str(), ejectionUnitBuffer, sizeof(ejectionUnitBuffer)))
 		ejection.unit = ejectionUnitBuffer;
+	int eligibility = static_cast<int>(ejection.eligibility);
+	if (ImGui::Combo((label + " eligibility").c_str(), &eligibility, "Qualified only\0Held only\0"))
+		ejection.eligibility = static_cast<core::WasteEjectionEligibility>(eligibility);
 	ImGui::InputDouble((label + " quantity").c_str(), &ejection.quantity, 0.0, 0.0, "%.3f");
 	ImGui::InputDouble((label + " first occurrence seconds").c_str(),
 		&ejection.firstOccurrenceSeconds, 0.0, 0.0, "%.3f");

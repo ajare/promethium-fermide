@@ -548,13 +548,13 @@ void dispatch(smoke::Context const&)
 			== core::StationDispatchMode::Automatic,
 			"automatic dispatch mode did not survive the round trip");
 		auto stale = text;
-		require(stale.find("version: 101") != std::string::npos,
+		require(stale.find("version: 102") != std::string::npos,
 			"the fixture document carries no version line");
 		require(stale.find("dispatchMode: automatic") != std::string::npos,
 			"the fixture document lost the dispatch mode before the guard test");
 		// A pre-91 document that still carries the dispatch mode is refused
 		// rather than silently dropping the controller setting.
-		stale = replaceAll(stale, "version: 101", "version: 90");
+		stale = replaceAll(stale, "version: 102", "version: 90");
 		bool refused = false;
 		try
 		{
@@ -1567,9 +1567,9 @@ void protectedServices(smoke::Context const&)
 		require(loaded.getStationSystemsSnapshot().worldTick == 0,
 			"the loaded world restored live station state instead of the authored start");
 		auto stale = text;
-		require(stale.find("version: 101") != std::string::npos,
+		require(stale.find("version: 102") != std::string::npos,
 			"the fixture document carries no version line");
-		stale.replace(stale.find("version: 101"), std::string("version: 101").size(),
+		stale.replace(stale.find("version: 102"), std::string("version: 102").size(),
 			"version: 91");
 		bool refused = false;
 		try

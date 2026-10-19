@@ -178,8 +178,8 @@ namespace core
 	// store (#403). Ejection is a scenario event, not a station process:
 	// it carries material out across the station boundary at declared
 	// simulation times, in the store's own unit, and only what is
-	// disposal-ready — the store's qualified contents. Held
-	// (unqualified/untreated) waste is never ejected, and a store that
+	// eligible under the authored partition selector. Held stock is
+	// ejectable only when explicitly declared, and a store that
 	// holds nothing eligible simply ejects nothing: a shortfall is a
 	// valid outcome, never a failure. What is ejected is booked as an
 	// external loss on the station's per-unit and per-constituent
@@ -189,6 +189,8 @@ namespace core
 	// recurrenceSeconds, reusing the same schedule rule and the same
 	// deterministic scenario ordering as resupply deliveries. At equal
 	// occurrence time and priority, arrivals run before ejections.
+	enum class WasteEjectionEligibility : std::uint8_t { QualifiedOnly, HeldOnly };
+
 	struct WasteEjectionSettings
 	{
 		std::string id;
@@ -198,6 +200,7 @@ namespace core
 		double firstOccurrenceSeconds{0.0}; // first ejection, >= 0
 		double recurrenceSeconds{0.0};  // 0 = one-off, else >= one fixed tick
 		int priority{0};                // higher runs first among coincidents
+		WasteEjectionEligibility eligibility{WasteEjectionEligibility::QualifiedOnly};
 		bool operator==(WasteEjectionSettings const&) const = default;
 	};
 	inline constexpr size_t MaxStationWasteEjections{16};
@@ -2360,10 +2363,10 @@ namespace core
 	};
 	// One authored terminal-waste ejection as of the most recent tick:
 	// what its schedule says, what the last occurrence actually
-	// ejected, what it could not eject because the store held no more
-	// disposal-ready material, and when the next ejection is due
-	// (#403). Unmet material never left the store — held waste stays
-	// held, absent material was never there — so it is reported here
+	// ejected, what it could not eject because the selected partition
+	// held no more eligible material, and when the next ejection is due
+	// (#403, #746). Unmet material never left the store — stock in the
+	// other partition stays, absent material was never there — so it is reported here
 	// rather than as a loss; only what was actually ejected is booked
 	// as external loss in the station's boundary ledgers.
 	struct StationWasteEjectionSnapshot
@@ -2386,6 +2389,11 @@ namespace core
 		bool hasNextOccurrence{false};
 		double nextOccurrenceSeconds{0.0};
 		StationTransferStatus status{StationTransferStatus::Idle};
+		WasteEjectionEligibility eligibility{WasteEjectionEligibility::QualifiedOnly};
+		double lastQualifiedEjected{0.0};
+		double lastHeldEjected{0.0};
+		double qualifiedEjectedTotal{0.0};
+		double heldEjectedTotal{0.0};
 		bool operator==(StationWasteEjectionSnapshot const&) const = default;
 	};
 	// One authored installation outage as of the most recent tick (#413):

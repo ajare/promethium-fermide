@@ -218,6 +218,10 @@ using namespace station_detail;
 		struct WasteEjectionState
 		{
 			WasteEjectionSettings authored;
+			double lastQualifiedEjected{0.0};
+			double lastHeldEjected{0.0};
+			double qualifiedEjectedTotal{0.0};
+			double heldEjectedTotal{0.0};
 			size_t storeIndex{0};
 			size_t declarationIndex{0};
 			uint64_t occurrencesFired{0};

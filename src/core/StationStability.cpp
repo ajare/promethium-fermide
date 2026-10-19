@@ -343,6 +343,10 @@ namespace core
 			fin(ejection.lastOccurrenceSeconds, tag("lastOccurrenceSeconds", ejection.id));
 			fin(ejection.lastScheduled, tag("lastScheduled", ejection.id));
 			fin(ejection.lastEjected, tag("lastEjected", ejection.id));
+			fin(ejection.lastQualifiedEjected, tag("lastQualifiedEjected", ejection.id));
+			fin(ejection.lastHeldEjected, tag("lastHeldEjected", ejection.id));
+			fin(ejection.qualifiedEjectedTotal, tag("qualifiedEjectedTotal", ejection.id));
+			fin(ejection.heldEjectedTotal, tag("heldEjectedTotal", ejection.id));
 			fin(ejection.lastUnmet, tag("lastUnmet", ejection.id));
 			fin(ejection.ejectedTotal, tag("ejectedTotal", ejection.id));
 			fin(ejection.unmetTotal, tag("unmetTotal", ejection.id));

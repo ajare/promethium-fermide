@@ -559,6 +559,8 @@ void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
 					auto const& ejection = (*wasteEjections)[index];
 					lua_createtable(state, 0, 7);
 					lua_pushstring(state, ejection.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushstring(state, ejection.eligibility == WasteEjectionEligibility::HeldOnly
+						? "heldOnly" : "qualifiedOnly"); lua_setfield(state, -2, "eligibility");
 					lua_pushstring(state, ejection.storeId.c_str()); lua_setfield(state, -2, "store");
 					lua_pushstring(state, ejection.unit.c_str()); lua_setfield(state, -2, "unit");
 					lua_pushnumber(state, ejection.quantity); lua_setfield(state, -2, "quantity");

@@ -1541,6 +1541,11 @@ namespace core
 		{
 			StationWasteEjectionSnapshot ejectionResult;
 			ejectionResult.id = ejection.authored.id;
+			ejectionResult.eligibility = ejection.authored.eligibility;
+			ejectionResult.lastQualifiedEjected = ejection.lastQualifiedEjected;
+			ejectionResult.lastHeldEjected = ejection.lastHeldEjected;
+			ejectionResult.qualifiedEjectedTotal = ejection.qualifiedEjectedTotal;
+			ejectionResult.heldEjectedTotal = ejection.heldEjectedTotal;
 			ejectionResult.storeId = ejection.authored.storeId;
 			ejectionResult.unit = ejection.authored.unit;
 			ejectionResult.quantity = ejection.authored.quantity;

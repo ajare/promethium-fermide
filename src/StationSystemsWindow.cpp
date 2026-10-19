@@ -1735,6 +1735,10 @@ void StationSystemsWindow::renderContents(std::shared_ptr<core::World> const& wo
 			ejection.lastOccurrenceSeconds, ejection.lastEjected, ejection.lastScheduled,
 			ejection.lastUnmet, ejection.ejectedTotal, ejection.unmetTotal,
 			static_cast<unsigned long long>(ejection.occurrencesCompleted), ejection.priority);
+		ImGui::Text("  eligibility: %s | qualified/held last %.3f / %.3f; total %.3f / %.3f",
+			ejection.eligibility == core::WasteEjectionEligibility::HeldOnly ? "held only" : "qualified only",
+			ejection.lastQualifiedEjected, ejection.lastHeldEjected,
+			ejection.qualifiedEjectedTotal, ejection.heldEjectedTotal);
 		if (ejection.exhausted)
 			ImGui::Text("  one-off schedule spent: no further ejections");
 		else

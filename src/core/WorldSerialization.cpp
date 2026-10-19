@@ -951,7 +951,8 @@ namespace core
 		// Schema 99 adds Continuous / one-off Scheduled Resource transfers.
 		// Schema 100 adds per-constituent water-treatment removal fractions.
 		// Schema 101 adds selective crop irrigation and clearance-only normal-class release.
-		serializer.writeUint32("version", 101);
+		// Schema 102 adds explicit waste-ejection partition eligibility.
+		serializer.writeUint32("version", 102);
 		serializer.writeString("sectorImageSet", mSectorImageSetResourceName);
 		serializer.writeString("agentImageSet", mAgentImageSetResourceName);
 		serializer.writeString("furnitureImageSet", mFurnitureImageSetResourceName);
@@ -1853,7 +1854,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 101)
+		if (version < 1 || version > 102)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}

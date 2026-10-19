@@ -1629,9 +1629,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
     end
     -- Terminal-waste ejection schedules (#403): an authored external
     -- removal of a declared quantity from one waste store at declared
-    -- simulation times, once or recurring. Only disposal-ready
-    -- (qualified) material is eligible; held (unqualified/untreated)
-    -- waste is never ejected, and a store holding nothing eligible
+    -- simulation times, once or recurring. The declared eligibility selects
+    -- qualified stock by default or held stock explicitly;
+    -- a store holding nothing eligible
     -- simply ejects nothing — a shortfall is a valid outcome, never a
     -- failure. What is ejected is booked as an external loss on the
     -- same per-unit and per-constituent boundary the host ledger
@@ -1662,7 +1662,12 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             and ejection.priority == ejection.priority
             and ejection.priority == math.tointeger(ejection.priority),
             'waste ejection priority must be a finite integer')
+        local eligibility = ejection.eligibility
+        if eligibility == nil then eligibility = 'qualifiedOnly' end
+        assert(eligibility == 'qualifiedOnly' or eligibility == 'heldOnly',
+            'waste ejection eligibility must be qualifiedOnly or heldOnly')
         object.waste_ejections[index] = {
+            eligibility = eligibility,
             id = ejection.id,
             store = target,
             unit = ejection.unit,
@@ -4172,22 +4177,16 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             elseif arrival.ejection then
                 local ejection = self.waste_ejections[arrival.declaration]
                 local store = ejection.store
-                -- Only disposal-ready (qualified) material is eligible:
-                -- held (unqualified/untreated) waste is never touched.
-                -- The ejection removes at most what the store can give,
-                -- so a shortfall is reported, never forced, and never
-                -- deletes held material. What is ejected crosses the
-                -- station boundary as an external loss, booked on the
-                -- same per-unit and per-constituent ledgers the host
-                -- closes over (#403).
-                local eligible = math.max(0.0, store.qualified)
+                -- Disposal selects only the explicitly authorised partition.
+                local partition = ejection.eligibility == 'heldOnly' and 'unqualified' or 'qualified'
+                local eligible = math.max(0.0, store[partition])
                 local ejected = math.min(ejection.quantity, eligible)
                 local unmet = ejection.quantity - ejected
                 assert(ejected >= 0 and unmet >= 0
                     and ejected == ejected and unmet == unmet,
                     "waste ejection amounts are not finite and non-negative")
                 local ejectedKgBefore = toKg(store.unit, store.qualified + store.unqualified)
-                store.qualified = store.qualified - ejected
+                store[partition] = store[partition] - ejected
                 self.unit_loss[store.unit] =
                     (self.unit_loss[store.unit] or 0) + ejected
                 -- #601: what leaves the station is the material the

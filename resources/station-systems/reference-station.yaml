@@ -13,7 +13,7 @@
 # provenance entries, with a single growth/auxiliary/reserve margin per
 # budget line (no duplicated margins).
 name: "Meridian reference station"
-schemaVersion: 96
+schemaVersion: 102
 summary: >
   A four-crew deep-space station configuration that demonstrates the
   whole implemented Station system in one internally consistent
@@ -1052,8 +1052,17 @@ stationSystems:
       firstOccurrenceSeconds: 240.0
       recurrenceSeconds: 240.0
       priority: 1
+    - id: ejectConcentrate
+      storeId: concentrate
+      eligibility: heldOnly
+      unit: kg
+      quantity: 0.05
+      firstOccurrenceSeconds: 240.0
+      recurrenceSeconds: 240.0
+      priority: 1
     - id: ejectHazConcentrate
       storeId: hazConcentrate
+      eligibility: heldOnly
       unit: kg
       quantity: 0.05
       firstOccurrenceSeconds: 240.0

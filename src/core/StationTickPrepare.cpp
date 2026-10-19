@@ -325,17 +325,15 @@ namespace core
 			{
 				auto& ejection = runtime.wasteEjections[arrival.key.declarationIndex];
 				auto const& store = runtime.stores[ejection.storeIndex].authored;
-				// Only disposal-ready (qualified) material is eligible:
-				// held (unqualified/untreated) waste is never touched.
-				// The ejection removes at most what the store can give,
-				// so a shortfall is reported, never forced, and never
-				// deletes held material (#403).
-				auto const eligible = std::max(0.0, qualified[ejection.storeIndex]);
+				// Disposal selects a partition without making held stock drawable.
+				auto const heldOnly = ejection.authored.eligibility == WasteEjectionEligibility::HeldOnly;
+				auto& partition = heldOnly ? unqualified[ejection.storeIndex] : qualified[ejection.storeIndex];
+				auto const eligible = std::max(0.0, partition);
 				auto const ejected = std::min(ejection.authored.quantity, eligible);
 				auto const unmet = ejection.authored.quantity - ejected;
 				auto const ejectedStoreKgBefore = massToKg(store.unit,
 					qualified[ejection.storeIndex] + unqualified[ejection.storeIndex]);
-				qualified[ejection.storeIndex] -= ejected;
+				partition -= ejected;
 				flowOut[ejection.storeIndex] += ejected;
 				// Ejected material crosses the station boundary as an
 				// external loss: the per-unit and per-constituent
@@ -352,6 +350,10 @@ namespace core
 				ejection.lastOccurrenceSeconds = arrival.key.occurrenceSeconds;
 				ejection.lastScheduled = ejection.authored.quantity;
 				ejection.lastEjected = ejected;
+				ejection.lastQualifiedEjected = heldOnly ? 0.0 : ejected;
+				ejection.lastHeldEjected = heldOnly ? ejected : 0.0;
+				ejection.qualifiedEjectedTotal += ejection.lastQualifiedEjected;
+				ejection.heldEjectedTotal += ejection.lastHeldEjected;
 				ejection.lastUnmet = unmet;
 				ejection.ejectedTotal += ejected;
 				ejection.unmetTotal += unmet;

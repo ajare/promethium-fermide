@@ -671,10 +671,12 @@ namespace core
 					+ std::to_string(ejection.lastScheduled) + " " + ejection.authored.unit
 					+ " from '" + ejection.authored.storeId + "' as external loss; "
 					+ std::to_string(ejection.lastUnmet)
-					+ " not ejectable: no more disposal-ready material held");
+					+ (ejection.authored.eligibility == WasteEjectionEligibility::HeldOnly
+						? " not ejectable: no more held material" : " not ejectable: no more disposal-ready material held"));
 			else
 				appendBoundedEvent(runtime.events, tick, "waste-ejection", label + "nothing ejected from '"
-					+ ejection.authored.storeId + "': no disposal-ready material held");
+					+ ejection.authored.storeId + (ejection.authored.eligibility == WasteEjectionEligibility::HeldOnly
+						? "': no held material" : "': no disposal-ready material held"));
 		}
 		return true;
 	}

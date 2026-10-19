@@ -1602,6 +1602,9 @@ using namespace station_detail;
 		for (auto const& ejection : settings.wasteEjections) try
 		{
 			auto const where = "Station waste ejection '" + ejection.id + "'";
+			if (ejection.eligibility != WasteEjectionEligibility::QualifiedOnly
+				&& ejection.eligibility != WasteEjectionEligibility::HeldOnly)
+				return refuse(where + " eligibility must be qualifiedOnly or heldOnly");
 			if (ejection.id.empty()) return refuse("Station waste ejection id must not be empty");
 			if (ejection.id.size() > MaxStationStoreIdLength)
 				return refuse("Station waste ejection id exceeds "

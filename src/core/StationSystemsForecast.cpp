@@ -12,8 +12,8 @@ namespace core
 		result.scenarioLabel =
 			"declared-profile scenario: authored transfer, crew and equipment demand profiles continue unchanged; "
 			"a manually commanded generator's fuel draw is projected as deterministic demand; "
-			"scheduled deliveries land as authored with capacity-capped acceptance; ejections remove only projected "
-			"drawable contents; biology and process-chain recovery are never counted as guaranteed supply";
+			"scheduled deliveries land as authored with capacity-capped acceptance; ejections remove only their declared "
+			"projected partition (qualified by default, held when declared); biology and process-chain recovery are never counted as guaranteed supply";
 		result.uncertaintyLabel =
 			"provisional biology: crop, algae and microbial recovery pathways are tunable model assumptions, not "
 			"validated biology, and are flagged and excluded from the guaranteed projection; process-chain production "
@@ -1057,9 +1057,10 @@ namespace core
 					auto const& ejection = ejectionState.authored;
 					auto const storeIndex = ejectionState.storeIndex;
 					auto& store = projected[storeIndex];
+					auto const heldOnly = ejection.eligibility == WasteEjectionEligibility::HeldOnly;
 					auto const ejected = std::min(ejection.quantity,
-						drawableOf(storeIndex));
-					store.qualified -= ejected;
+						heldOnly ? std::max(0.0, store.unqualified) : drawableOf(storeIndex));
+					(heldOnly ? store.unqualified : store.qualified) -= ejected;
 					store.outflowMoved += ejected;
 					// What the store could not eject is uncovered
 					// disposal demand, reported, never dropped.

@@ -104,7 +104,7 @@ namespace
 	{
 		auto const& reference = core::bundledStationReference();
 		require(!reference.name.empty(), "the bundled reference station has no name");
-		require(reference.schemaVersion == 96, "the bundled reference is not on the current station schema");
+		require(reference.schemaVersion == 102, "the bundled reference is not on the current station schema");
 		require(!reference.summary.empty(), "the bundled reference has no summary");
 		require(!reference.provenance.empty(), "the bundled reference records no coefficient provenance");
 		require(!reference.qualification.empty(), "the bundled reference declares no qualification limits");
@@ -215,6 +215,12 @@ namespace
 			: core::StationWaterTreatmentSnapshot{};
 		require(hazWtr.processedKg > 0.0 && hazWtr.acceptedKg > 0.0,
 			"the hazardous water treatment did not run and clear its releases");
+		auto const hazDisposal = std::find_if(snap.wasteEjections.begin(), snap.wasteEjections.end(),
+			[](auto const& e) { return e.id == "ejectHazConcentrate"; });
+		require(hazDisposal != snap.wasteEjections.end()
+			&& hazDisposal->eligibility == core::WasteEjectionEligibility::HeldOnly
+			&& hazDisposal->heldEjectedTotal > 0.0 && hazDisposal->qualifiedEjectedTotal == 0.0,
+			"reference hazardous concentrate ejection remained structurally dead");
 
 		// Hydrogen/carbon balance: electrolysis feeds the Sabatier stage,
 		// pyrolysis recycles hydrogen back, and the loop retains a net
