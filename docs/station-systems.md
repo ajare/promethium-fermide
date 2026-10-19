@@ -1642,11 +1642,57 @@ lifetime removed/passed constituent ledgers.
 water recovery and 95% organics removal: **84.84 kg/day treated** containing
 0.01 kg organics (0.011787%), and **15.16 kg/day concentrate** containing
 0.19 kg organics (1.2533%). Lower removal or higher incoming load raises
-effluent concentration; downstream quality gates are a later ticket.
+effluent concentration; downstream quality gates report the resulting constraint.
 `water-legacy-anchor.yaml` keeps the all-plain default regression.
 Focused checks: `station-compoundWaterPartial`,
 `station-compoundWaterPartialValidation`, `station-compoundWaterDocuments`,
 and `station-editor-compound-water`, alongside the full-removal checks.
+
+### Water quality acceptance (#742)
+
+Crew water, crop irrigation, algae makeup and microbial process-water inputs
+accept optional `waterQuality` settings:
+
+```yaml
+waterQuality:
+  maxConcentrations: {dryOrganics: 0.0005, nutrientNitrogen: 0.0001}
+  maxTotalDissolved: 0.001
+```
+
+Values are finite, non-negative kg constituent per kg stream; the species
+vocabulary is the six dry constituents above. Omitted fields mean **no gate**.
+Gates on producer-only or non-water units are refused, not silently ignored.
+Electrolyzers instead have an immutable zero-total-dissolved gate: compound
+feed is valid configuration, but any live dry load stops splitting before
+spending electricity or water. Plain feed retains the existing operation.
+
+The gate reads the current ledger blend, including dilution and same-tick
+upstream deposits. At full-demand water mass `D`, each tolerance `T` supplies
+a dissolved-load budget `D*T`. A concentration `C > T` caps the common unit
+scale to `T/C`; multiple limits take the minimum. Zero tolerance with load
+means zero operation. Scaling does **not** purify the accepted blend: it limits
+exposure/load relative to full demand, while every other input and output
+scales uniformly. Within-tolerance water passes in full; other resource,
+power and headroom constraints may still reduce operation.
+
+Snapshots and Lua per-consumer `waterQuality` expose live `concentrations`,
+`totalDissolved`, `enabled`, quality-only `scale`, `bindingConcentration`,
+`bindingTolerance`, `limiter`, and `demandKgPerS`/`permittedKgPerS`. The permitted
+rate is a quality ceiling, not a promise of actual service. Named limiters
+also participate in the existing unit limiter surface. The Flow unit inspector
+shows the ceiling versus demand and binding concentration versus tolerance.
+Shared authoring forms offer optional species/total tolerances with no-gate
+defaults, participating in draft undo/redo, configuration/World persistence,
+and Apply.
+
+The greywater scenario includes a demand-only crew `potable-gate`: treated
+water passes its 0.05% organics tolerance after treatment starts. Rewire the
+crew water input to `greywater` to see raw 0.2% organics throttle service to
+25% with the named organic limiter; rewire to `treated` to recover full
+service. The probe is not a health or metabolism model. Reference-station
+settings remain unchanged. Focused checks: `station-waterQualityGates`,
+`station-waterQualityValidation`, `station-waterQualityConsumers`, and
+`station-editor-compound-water`.
 
 ### Oxygen production and CO2 capture (#404)
 

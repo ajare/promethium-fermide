@@ -521,6 +521,27 @@ std::optional<NodeTelemetry> telemetry(Node const& node,
 				&& endurance.basis == core::StationEnduranceBasis::Depleting)
 				out.details.push_back("Endurance " + quantity(endurance.estimateSeconds, "s")
 					+ " at current net rate (not a forecast)");
+	auto const quality = [&](auto const& entries)
+	{
+		auto const* p = find(entries, id); if (!p) return;
+		auto const& q = p->waterQuality;
+		out.details.push_back(q.enabled ? "Water quality gate enabled" : "Water quality: no gate");
+		if (!q.enabled) return;
+		out.details.push_back("Water quality total dissolved " + quantity(q.totalDissolved, "kg/kg"));
+		out.details.push_back("Quality-permitted water " + quantity(q.permittedKgPerS, "kg/s")
+			+ " / demand " + quantity(q.demandKgPerS, "kg/s"));
+		if (!q.limiter.empty())
+		{
+			warn(out, q.limiter);
+			out.details.push_back("Binding concentration " + quantity(q.bindingConcentration, "kg/kg")
+				+ " / tolerance " + quantity(q.bindingTolerance, "kg/kg"));
+		}
+	};
+	if (node.type == "Crew") quality(s.crews);
+	else if (node.type == "Electrolyzer") quality(s.electrolyzers);
+	else if (node.type == "Microbial processor") quality(s.microbialProcessors);
+	else if (node.type == "Crops") quality(s.cropPopulations);
+	else if (node.type == "Algae") quality(s.algaeCultures);
 	if (!s.healthy) warn(out, "Station failed - last committed values", true);
 	else if (!s.enabled) { out.state = TelemetryState::Idle; out.status = "Station disabled"; }
 	else if (s.worldTick == 0) { out.state = TelemetryState::Idle; out.status = "Ready - no completed tick"; out.ports.clear(); }

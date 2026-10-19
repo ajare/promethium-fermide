@@ -29,6 +29,7 @@ core::StationSystemsSettings scenario(smoke::Context const& context, char const*
 	{
 		document.settings.waterTreatments[0].removalFractions.clear();
 		document.settings.stores[1].composition.reset();
+		document.settings.crews.clear(); // legacy/full-removal rig has no potable probe
 	}
 	return document.settings;
 }
@@ -86,6 +87,7 @@ void tracer(smoke::Context const& context)
 void partialRemoval(smoke::Context const& context)
 {
 	auto settings = scenario(context, "water-greywater.yaml", true);
+	settings.crews.clear(); // isolate treatment inventory conservation
 	SourceScope restore;
 	core::setStationSystemsSourceLoader([] {
 		auto source = core::bundledStationSystemsSource();
@@ -163,7 +165,8 @@ void partialRemoval(smoke::Context const& context)
 }
 void partialValidation(smoke::Context const& context)
 {
-	auto const base = scenario(context, "water-greywater.yaml", true);
+	auto base = scenario(context, "water-greywater.yaml", true);
+	base.crews.clear(); // isolate treatment headroom and constituent paths
 	std::string reason;
 	for (double value : {-0.01, 1.01, std::numeric_limits<double>::infinity(),
 		std::numeric_limits<double>::quiet_NaN()})
@@ -361,6 +364,143 @@ void documents(smoke::Context const& context)
 			"reloaded water World did not reproduce exact tick actuals");
 	}
 }
+void qualityGates(smoke::Context const& context)
+{
+	auto settings = scenario(context, "water-greywater.yaml", true);
+	auto const treated = run(settings);
+	close(treated.crews[0].waterQuality.scale, 1);
+	require(treated.crews[0].lastWaterActual > 0, "potable probe did not accept treated water");
+	settings.crews[0].waterStoreId = "greywater";
+	SourceScope restore;
+	core::setStationSystemsSourceLoader([] {
+		auto source = core::bundledStationSystemsSource();
+		auto at = source.find("        self.ticks = self.ticks + 1");
+		source.insert(at, R"lua(
+        local q = self.crews[1].waterQuality
+        assert(q.enabled and math.abs(q.scale - 0.25) < 1e-10)
+        assert(q.limiter == 'water quality: dryOrganics above crew tolerance')
+        assert(math.abs(q.bindingTolerance - 0.0005) < 1e-10)
+        assert(math.abs(q.permittedKgPerS / q.demandKgPerS - 0.25) < 1e-10)
+)lua");
+		return source;
+	});
+	auto const raw = run(settings);
+	close(raw.crews[0].metabolicScale, 0.25);
+	close(raw.crews[0].lastWaterActual, raw.crews[0].lastWaterRequested * 0.25);
+	require(raw.crews[0].limiter.find("water quality: dryOrganics") != std::string::npos, "organic limiter absent");
+	core::setStationSystemsSourceLoader({});
+	settings.crews[0].waterQuality.maxTotalDissolved = 0.0002;
+	auto const total = run(settings);
+	close(total.crews[0].metabolicScale, 0.1);
+	require(total.crews[0].limiter.find("total dissolved") != std::string::npos, "total limiter absent");
+	settings.crews[0].waterQuality.maxTotalDissolved = 0;
+	auto const stopped = run(settings);
+	close(stopped.crews[0].lastWaterActual, 0);
+	close(stopped.crews[0].metabolicScale, 0);
+	// A refused unit must not request material merely to lose it in a
+	// zero-efficiency inlet. Quality caps connection demand as well as use.
+	auto lossy = settings; lossy.waterTreatments.clear();
+	bool found = false;
+	for (auto const& link : core::station_connections::build(lossy).links)
+		if (link.designKey.ownerType == "Crew" && link.designKey.peerId == "greywater")
+		{ lossy.connections[link.designKey].efficiency = 0; found = true; }
+	require(found, "missing crew water connection");
+	close(store(run(lossy), "greywater").currentQualified, lossy.stores[0].startingQualified);
+	settings.crews[0].waterQuality.maxTotalDissolved.reset();
+	settings.crews[0].waterQuality.maxConcentrations["dryOrganics"] = 0;
+	close(run(settings).crews[0].lastWaterActual, 0);
+	settings.crews[0].waterQuality = {};
+	close(run(settings).crews[0].metabolicScale, 1);
+	// Gate uses actual ledger dilution, not authored 0.2% organics.
+	settings.crews[0].waterQuality.maxConcentrations["dryOrganics"] = 0.0005;
+	auto fresh = settings.stores[0]; fresh.id = "fresh"; fresh.composition.reset();
+	fresh.startingQualified = 500; settings.stores.push_back(fresh);
+	core::ResourceTransferSettings dilution;
+	dilution.id = "dilution"; dilution.sourceId = "fresh"; dilution.destinationId = "greywater";
+	dilution.unit = "kg"; dilution.ratePerSecond = 20; settings.transfers = {dilution};
+	require(run(settings).crews[0].waterQuality.scale > raw.crews[0].waterQuality.scale,
+		"quality gate ignored live dilution");
+}
+void qualityValidation(smoke::Context const& context)
+{
+	auto const base = scenario(context, "water-greywater.yaml", true);
+	std::string error;
+	for (auto value : {-1.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
+	{
+		auto s = base; s.crews[0].waterQuality.maxConcentrations["dryOrganics"] = value;
+		require(!core::validateStationSystemsSettings(s, error), "invalid species tolerance accepted");
+		s = base; s.crews[0].waterQuality.maxTotalDissolved = value;
+		require(!core::validateStationSystemsSettings(s, error), "invalid total tolerance accepted");
+	}
+	auto s = base; s.crews[0].waterQuality.maxConcentrations["water"] = 0;
+	require(!core::validateStationSystemsSettings(s, error), "non-dry species gate accepted");
+	core::StationConfigurationDocument document; document.settings = base;
+	core::StationConfigurationDocument restored;
+	auto text = core::serializeStationConfiguration(document);
+	auto at = text.find("throughputKgPerS:");
+	require(at != std::string::npos, "serialized treatment missing");
+	auto const line = text.rfind('\n', at) + 1;
+	text.insert(line, std::string(at - line, ' ') + "waterQuality: {maxTotalDissolved: 0}\n");
+	require(!core::parseStationConfiguration(text, restored, &error)
+		&& error.find("no configurable water quality gate") != std::string::npos, "producer gate silently discarded");
+}
+void qualityConsumers(smoke::Context const&)
+{
+	auto settings = core::bundledStationReference().settings;
+	// Built-in purity is not schema rejection. Declare a loaded feed and
+	// ensure both mirrors reject operation before spending power or feed.
+	auto const id = settings.electrolyzers[0].waterStoreId;
+	for (auto& s : settings.stores) if (s.id == id)
+	{
+		core::ResourceCompositionSettings composition;
+		composition.moisture = 0.99; composition.otherMinerals = 1;
+		s.composition = composition;
+	}
+	auto const snapshot = run(settings, 3);
+	require(snapshot.electrolyzers[0].waterQuality.enabled, "built-in gate not exposed");
+	close(snapshot.electrolyzers[0].lastSplitKg, 0);
+	close(snapshot.electrolyzers[0].lastPowerSuppliedKW, 0);
+	require(snapshot.electrolyzers[0].limiter.find("water quality") != std::string::npos, "electrolyzer purity limiter absent");
+	// Every optional consumer surface round-trips, and zero tolerances
+	// participate in the same uniform operation scale, not a water-only cap.
+	settings = core::bundledStationReference().settings;
+	settings.crews[0].waterQuality.maxTotalDissolved = 0;
+	settings.cropPopulations[0].waterQuality.maxTotalDissolved = 0;
+	settings.algaeCultures[0].waterQuality.maxTotalDissolved = 0;
+	settings.microbialProcessors[0].waterQuality.maxTotalDissolved = 0;
+	core::StationConfigurationDocument doc; doc.settings = settings;
+	core::StationConfigurationDocument restored; std::string error;
+	require(core::parseStationConfiguration(core::serializeStationConfiguration(doc), restored, &error), error.c_str());
+	require(restored.settings == settings, "consumer gate fields did not round-trip");
+	auto const pure = run(settings, 3);
+	require(pure.electrolyzers[0].lastSplitKg > 0, "pure electrolyzer feed changed");
+	close(pure.cropPopulations[0].waterQuality.scale, 1);
+	close(pure.algaeCultures[0].waterQuality.scale, 1);
+	close(pure.microbialProcessors[0].waterQuality.scale, 1);
+	for (auto& s : settings.stores) if (s.id == "fresh")
+	{
+		core::ResourceCompositionSettings composition;
+		composition.moisture = 0.99; composition.otherMinerals = 1;
+		s.composition = composition;
+	}
+	auto const loaded = run(settings, 3);
+	close(loaded.crews[0].lastWaterActual, 0);
+	close(loaded.cropPopulations[0].waterQuality.scale, 0);
+	close(loaded.algaeCultures[0].waterQuality.scale, 0);
+	close(loaded.microbialProcessors[0].waterQuality.scale, 0);
+	close(loaded.cropPopulations[0].lastGrowthKg, 0);
+	close(loaded.algaeCultures[0].lastGrowthKg, 0);
+	close(loaded.microbialProcessors[0].lastWaterConsumedKg, 0);
+	settings.crews[0].waterQuality = {};
+	settings.cropPopulations[0].waterQuality = {};
+	settings.algaeCultures[0].waterQuality = {};
+	settings.microbialProcessors[0].waterQuality = {};
+	auto const ungated = run(settings, 3);
+	require(!ungated.cropPopulations[0].waterQuality.enabled
+		&& ungated.cropPopulations[0].lastGrowthKg > 0, "ungated loaded irrigation was refused");
+	require(ungated.algaeCultures[0].lastGrowthKg > 0, "ungated loaded makeup was refused");
+	require(ungated.microbialProcessors[0].lastWaterConsumedKg > 0, "ungated loaded process water was refused");
+}
 void legacy(smoke::Context const& context)
 {
 	auto settings = scenario(context, "water-legacy-anchor.yaml");
@@ -378,6 +518,9 @@ void legacy(smoke::Context const& context)
 }
 void registerCompoundWaterChecks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"waterQualityGates", qualityGates});
+	checks.push_back({"waterQualityValidation", qualityValidation});
+	checks.push_back({"waterQualityConsumers", qualityConsumers});
 	checks.push_back({"compoundWaterPartial", partialRemoval});
 	checks.push_back({"compoundWaterPartialValidation", partialValidation});
 	checks.push_back({"compoundWaterTracer", tracer});

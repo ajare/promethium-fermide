@@ -22,6 +22,36 @@
 
 namespace core
 {
+	namespace
+	{
+	void writeWaterQuality(Serializer& s, WaterQualitySettings const& gate)
+	{
+		if (gate.maxConcentrations.empty() && !gate.maxTotalDissolved) return;
+		s.beginMap("waterQuality");
+		if (gate.maxTotalDissolved) s.writeDouble("maxTotalDissolved", *gate.maxTotalDissolved);
+		if (!gate.maxConcentrations.empty())
+		{
+			s.beginMap("maxConcentrations");
+			for (auto const& [name, value] : gate.maxConcentrations) s.writeDouble(name, value);
+			s.endMap();
+		}
+		s.endMap();
+	}
+	void readWaterQuality(Serializer& s, WaterQualitySettings& gate)
+	{
+		if (!s.hasField("waterQuality")) return;
+		s.beginMap("waterQuality");
+		if (s.hasField("maxTotalDissolved")) gate.maxTotalDissolved = s.readDouble("maxTotalDissolved");
+		if (s.hasField("maxConcentrations"))
+		{
+			auto const keys = s.mapKeys("maxConcentrations");
+			s.beginMap("maxConcentrations");
+			for (auto const& key : keys) gate.maxConcentrations[key] = s.readDouble(key);
+			s.endMap();
+		}
+		s.endMap();
+	}
+	}
 	void writeStationSystemsSettingsMap(Serializer& serializer, StationSystemsSettings const& settings)
 	{
 		serializer.beginMap("stationSystems");
@@ -432,6 +462,7 @@ namespace core
 				serializer.endMap();
 				serializer.writeString("foodStoreId", crew.foodStoreId);
 				serializer.writeString("waterStoreId", crew.waterStoreId);
+				writeWaterQuality(serializer, crew.waterQuality);
 				serializer.writeString("urineStoreId", crew.urineStoreId);
 				serializer.writeString("organicWasteStoreId", crew.organicWasteStoreId);
 				serializer.writeDouble("foodPerCrewPerS", crew.foodPerCrewPerS);
@@ -651,6 +682,7 @@ namespace core
 				serializer.writeString("feedStoreId", processor.feedStoreId);
 				serializer.writeString("oxygenStoreId", processor.oxygenStoreId);
 				serializer.writeString("waterStoreId", processor.waterStoreId);
+				writeWaterQuality(serializer, processor.waterQuality);
 				serializer.writeString("consumableStoreId", processor.consumableStoreId);
 				serializer.writeString("nutrientStoreId", processor.nutrientStoreId);
 				serializer.writeString("recoveredWaterStoreId", processor.recoveredWaterStoreId);
@@ -707,6 +739,7 @@ namespace core
 				serializer.writeString("id", crop.id);
 				serializer.writeString("atmosphereId", crop.atmosphereId);
 				serializer.writeString("waterStoreId", crop.waterStoreId);
+				writeWaterQuality(serializer, crop.waterQuality);
 				serializer.writeString("nitrogenStoreId", crop.nitrogenStoreId);
 				serializer.writeString("phosphorusStoreId", crop.phosphorusStoreId);
 				serializer.writeString("potassiumStoreId", crop.potassiumStoreId);
@@ -766,6 +799,7 @@ namespace core
 				serializer.writeString("id", algae.id);
 				serializer.writeString("atmosphereId", algae.atmosphereId);
 				serializer.writeString("waterStoreId", algae.waterStoreId);
+				writeWaterQuality(serializer, algae.waterQuality);
 				serializer.writeString("nitrogenStoreId", algae.nitrogenStoreId);
 				serializer.writeString("phosphorusStoreId", algae.phosphorusStoreId);
 				serializer.writeString("potassiumStoreId", algae.potassiumStoreId);
@@ -957,6 +991,24 @@ namespace core
 	{
 		if (version < 65) throw SerializationException("Station systems require World schema 65");
 		serializer.beginMap("stationSystems");
+		// Reject misplaced gates instead of silently discarding authored intent.
+		for (auto const* array : {"stores", "transfers", "conversions", "solarArrays", "equipmentLoads",
+			"batteries", "thermalReservoirs", "radiators", "coolantLoops", "chillers", "generators",
+			"atmospheres", "airlockCycles", "waterCollectors", "waterTreatments", "electrolyzers",
+			"co2Captures", "fuelCells", "thermalBuffers", "sabatierReactors", "methaneProcessors",
+			"deliveries", "wasteEjections", "outages", "maintenanceJobs"})
+		{
+			if (!serializer.hasField(array)) continue;
+			serializer.beginArray(array);
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				if (serializer.hasField("waterQuality"))
+					throw SerializationException(std::string(array) + " has no configurable water quality gate (electrolyzer purity is built in)");
+				serializer.endMap();
+			}
+			serializer.endArray();
+		}
 		stationSettings.enabled = serializer.readBool("enabled");
 		stationSettings.observationIntervalSeconds = serializer.readFloat("observationIntervalSeconds");
 		if (serializer.hasField("connections"))
@@ -1451,6 +1503,7 @@ namespace core
 				serializer.endMap();
 				crew.foodStoreId = serializer.readString("foodStoreId");
 				crew.waterStoreId = serializer.readString("waterStoreId");
+				readWaterQuality(serializer, crew.waterQuality);
 				crew.urineStoreId = serializer.readString("urineStoreId");
 				crew.organicWasteStoreId = serializer.readString("organicWasteStoreId");
 				crew.foodPerCrewPerS = serializer.readDouble("foodPerCrewPerS");
@@ -1715,6 +1768,7 @@ namespace core
 				processor.feedStoreId = serializer.readString("feedStoreId");
 				processor.oxygenStoreId = serializer.readString("oxygenStoreId");
 				processor.waterStoreId = serializer.readString("waterStoreId");
+				readWaterQuality(serializer, processor.waterQuality);
 				processor.consumableStoreId = serializer.readString("consumableStoreId");
 				processor.nutrientStoreId = serializer.readString("nutrientStoreId");
 				processor.recoveredWaterStoreId = serializer.readString("recoveredWaterStoreId");
@@ -1776,6 +1830,7 @@ namespace core
 				crop.id = serializer.readString("id");
 				crop.atmosphereId = serializer.readString("atmosphereId");
 				crop.waterStoreId = serializer.readString("waterStoreId");
+				readWaterQuality(serializer, crop.waterQuality);
 				crop.nitrogenStoreId = serializer.readString("nitrogenStoreId");
 				crop.phosphorusStoreId = serializer.readString("phosphorusStoreId");
 				crop.potassiumStoreId = serializer.readString("potassiumStoreId");
@@ -1846,6 +1901,7 @@ namespace core
 				algae.id = serializer.readString("id");
 				algae.atmosphereId = serializer.readString("atmosphereId");
 				algae.waterStoreId = serializer.readString("waterStoreId");
+				readWaterQuality(serializer, algae.waterQuality);
 				algae.nitrogenStoreId = serializer.readString("nitrogenStoreId");
 				algae.phosphorusStoreId = serializer.readString("phosphorusStoreId");
 				algae.potassiumStoreId = serializer.readString("potassiumStoreId");

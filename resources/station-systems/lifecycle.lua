@@ -421,6 +421,38 @@ local function storeComposition(store)
         toKg(store.unit, store.qualified + store.unqualified), store.drift)
 end
 
+-- Quality is a load budget at full demand: scale <= tolerance / concentration.
+-- Scaling does not purify the accepted blend; zero tolerance refuses any load.
+local function waterQuality(store, gate, demandKg, dt, consumer, pureFeed)
+    gate = gate or {}
+    local maxima = gate.maxConcentrations or {}
+    local result = { enabled = pureFeed or next(maxima) ~= nil or gate.maxTotalDissolved ~= nil,
+        concentrations = {}, totalDissolved = 0, scale = 1, limiter = '',
+        bindingConcentration = 0, bindingTolerance = 0, demandKgPerS = demandKg / dt }
+    local blend = store.composition and compositionLedgerOf(storeComposition(store), 1, 1) or {}
+    for _, name in ipairs({'dryOrganics', 'nutrientNitrogen', 'atmosphericNitrogen',
+        'phosphorus', 'potassium', 'otherMinerals'}) do
+        local value = math.max(0, blend[name] or 0)
+        result.concentrations[name] = value
+        result.totalDissolved = result.totalDissolved + value
+    end
+    local function limit(value, tolerance, name)
+        if value <= tolerance then return end
+        local fraction = tolerance / value
+        if fraction < result.scale then
+            result.scale = fraction
+            result.bindingConcentration, result.bindingTolerance = value, tolerance
+            result.limiter = 'water quality: ' .. name .. ' above ' .. consumer .. ' tolerance'
+        end
+    end
+    for name, tolerance in pairs(maxima) do limit(result.concentrations[name], tolerance, name) end
+    if gate.maxTotalDissolved ~= nil or pureFeed then
+        limit(result.totalDissolved, pureFeed and 0 or gate.maxTotalDissolved, 'total dissolved')
+    end
+    result.permittedKgPerS = result.demandKgPerS * result.scale
+    return result
+end
+
 local function unfundedConstituent(funded, required)
     for key, amount in pairs(required) do
         local available = funded[key] or 0
@@ -2124,6 +2156,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             crewCount = crew.crewCount,
             activity = readProfile(activity),
             food = food, water = water, urine = urine, organicWaste = waste,
+            waterQualitySettings = crew.waterQuality,
             foodRate = crew.foodRate, waterRate = crew.waterRate,
             oxygenRate = crew.oxygenRateKgPerS, co2Rate = crew.co2RateKgPerS,
             moistureRate = crew.moistureRateKgPerS, urineRate = crew.urineRate,
@@ -2392,7 +2425,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         assert((cell.oxygenStore == nil or #cell.oxygenStore == 0)
             ~= (cell.atmosphere == nil or #cell.atmosphere == 0),
             'electrolyzer must configure exactly one oxygen destination: a gas store or a compartment')
-        local feed = declareWaterStore(cell.waterStore, 'feed water', cell.hazardClass, false)
+        local feed = declareWaterStore(cell.waterStore, 'feed water', cell.hazardClass, true)
         local oxygen = nil
         if cell.oxygenStore ~= nil and #cell.oxygenStore > 0 then
             oxygen = declareGasStore(cell.oxygenStore, 'oxygen', cell.hazardClass, false)
@@ -2856,7 +2889,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         local oxygen = declareGasStore(processor.oxygenStore, 'oxygen',
             processor.hazardClass, false)
         local water = declareWaterStore(processor.waterStore, 'process water',
-            processor.hazardClass, false)
+            processor.hazardClass, true)
         local consumable = by_id[processor.consumableStore]
         assert(consumable ~= nil, 'microbial processor consumable store is unknown')
         -- #592: the consumable is a consumed input like the feed: its
@@ -2950,6 +2983,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             id = processor.id,
             hazardClass = processor.hazardClass,
             feed = feed, oxygen = oxygen, water = water, consumable = consumable,
+            waterQualitySettings = processor.waterQuality,
             nutrient = nutrient, recoveredWater = recoveredWater, co2 = co2,
             residue = residue, sink = sink,
             rateKgPerS = processor.rateKgPerS,
@@ -3031,7 +3065,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 'crop ' .. uptakeRoles[role] .. " store '" .. store.id
                     .. "' must be a mass unit; crop uptake is mass-denominated")
             if store.composition then
-                assert(isPureUptakeComposition(store.composition, role),
+                assert(role == 1 or isPureUptakeComposition(store.composition, role),
                     'crop ' .. uptakeRoles[role] .. " store '" .. store.id
                         .. "' declares a compound composition that is not pure "
                         .. UPTAKE_PURITY_NAMES[role]
@@ -3190,6 +3224,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             growthYieldKgPerKWh = crop.growthYieldKgPerKWh,
             respirationPerHour = crop.respirationPerHour,
             transpirationKgPerKgGrowth = crop.transpirationKgPerKgGrowth,
+            waterQualitySettings = crop.waterQuality,
             minGrowingTemperatureC = crop.minGrowingTemperatureC,
             maxGrowingTemperatureC = crop.maxGrowingTemperatureC,
             food = destinationStores[1], waste = destinationStores[2],
@@ -3288,7 +3323,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                 'algae ' .. uptakeRoles[role] .. " store '" .. store.id
                     .. "' must be a mass unit; culture uptake is mass-denominated")
             if store.composition then
-                assert(isPureUptakeComposition(store.composition, role),
+                assert(role == 1 or isPureUptakeComposition(store.composition, role),
                     'algae ' .. uptakeRoles[role] .. " store '" .. store.id
                         .. "' declares a compound composition that is not pure "
                         .. UPTAKE_PURITY_NAMES[role]
@@ -3451,6 +3486,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             growthYieldKgPerKWh = algae.growthYieldKgPerKWh,
             respirationPerHour = algae.respirationPerHour,
             evaporationKgPerKgGrowth = algae.evaporationKgPerKgGrowth,
+            waterQualitySettings = algae.waterQuality,
             minGrowingTemperatureC = algae.minGrowingTemperatureC,
             maxGrowingTemperatureC = algae.maxGrowingTemperatureC,
             food = destinationStores[1], recovery = destinationStores[2],
@@ -4184,6 +4220,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                     scale = fraction
                     limiter = label .. " store '" .. store.id .. "' is at capacity"
                 end
+            end
+            crew.waterQuality = waterQuality(crew.water, crew.waterQualitySettings,
+                toKg(crew.water.unit, waterRequested), fixed_seconds, 'crew')
+            if waterRequested > 0 and crew.waterQuality.scale < scale then
+                scale, limiter = crew.waterQuality.scale, crew.waterQuality.limiter
             end
             capSupply(crew.food, foodRequested, 'food')
             capSupply(crew.water, waterRequested, 'water')
@@ -6512,6 +6553,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         for _, order in ipairs(self.electrolyzer_order) do
             local cell = self.electrolyzers[order]
             local water = cell.feed
+            cell.waterQuality = waterQuality(water, nil, 0, fixed_seconds, 'electrolyzer', true)
             local hydrogen = cell.hydrogen
             cell.lastScale = 0
             cell.lastLimiter = ''
@@ -6553,6 +6595,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             scale = fraction
                             limiter = reason
                         end
+                    end
+                    cell.waterQuality = waterQuality(water, nil, fullKg, fixed_seconds, 'electrolyzer', true)
+                    if cell.waterQuality.scale < scale then
+                        scale, limiter = cell.waterQuality.scale, cell.waterQuality.limiter
                     end
                     constrain(drawableWater, fromKg(water.unit, fullKg),
                         "feed water store '" .. water.id
@@ -7142,6 +7188,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             local feed = proc.feed
             local oxygen = proc.oxygen
             local water = proc.water
+            proc.waterQuality = waterQuality(water, proc.waterQualitySettings, 0, fixed_seconds, 'process')
             local consumable = proc.consumable
             proc.lastNitrifiedNitrogenKg = 0
             proc.lastScale = 0
@@ -7352,6 +7399,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         fromKg(oxygen.unit, fullKg * rates.oxygen),
                         "oxygen store '" .. oxygen.id
                             .. "' has nothing drawable above its protected reserve")
+                    proc.waterQuality = waterQuality(water, proc.waterQualitySettings,
+                        fullKg * rates.water, fixed_seconds, 'process')
+                    if rates.water > 0 and proc.waterQuality.scale < scale then
+                        scale, limiter = proc.waterQuality.scale, proc.waterQuality.limiter
+                    end
                     constrain(drawableWater,
                         fromKg(water.unit, fullKg * rates.water),
                         "process water store '" .. water.id
@@ -7474,6 +7526,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                             local residueActualKg = toKg(proc.residue.unit, residueUnits)
                             feed.qualified = feed.qualified - feedUnits
                             oxygen.qualified = oxygen.qualified - oxygenUnits
+                            addLedger(self.constituent_loss, drawStoreActual(water,
+                                toKg(water.unit, water.qualified + water.unqualified), waterActualKg), 1)
                             water.qualified = water.qualified - waterUnits
                             consumable.qualified = consumable.qualified - consumableUnits
                             proc.nutrient.qualified = proc.nutrient.qualified + nutrientUnits
@@ -7624,6 +7678,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- simply stops at the declared capacity.
         for _, order in ipairs(self.crop_order) do
             local crop = self.crop_populations[order]
+            crop.waterQuality = waterQuality(crop.water, crop.waterQualitySettings, 0, fixed_seconds, 'crop')
             local compartment = crop.compartment
             crop.lastIllumination = 0
             crop.lastLightRequested = 0
@@ -7746,6 +7801,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         and 'no light delivered: the illumination profile is dark, photosynthesis cannot run'
                         or 'no light energy delivered: the lamps received no power, photosynthesis cannot run for free'
                 else
+                    crop.waterQuality = waterQuality(crop.water, crop.waterQualitySettings,
+                        crop.lastGrowthPotential * (assimilationWaterPerKgGrowth + crop.transpirationKgPerKgGrowth), fixed_seconds, 'crop')
+                    if crop.waterQuality.demandKgPerS > 0 and crop.waterQuality.scale < scale then
+                        scale, limiter = crop.waterQuality.scale, crop.waterQuality.limiter
+                    end
                     constrain(circulationFraction * crop.lastGrowthPotential,
                         crop.lastGrowthPotential,
                         'canopy circulation is not supplied: the gas, water and nutrient exchange cannot run')
@@ -8169,6 +8229,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         -- being discarded for free.
         for _, order in ipairs(self.algae_order) do
             local culture = self.algae_cultures[order]
+            culture.waterQuality = waterQuality(culture.water, culture.waterQualitySettings, 0, fixed_seconds, 'algae')
             local compartment = culture.compartment
             culture.lastIllumination = 0
             culture.lastLightRequested = 0
@@ -8287,6 +8348,11 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
                         and 'no light delivered: the illumination profile is dark, photosynthesis cannot run'
                         or 'no light energy delivered: the lamps received no power, photosynthesis cannot run for free'
                 else
+                    culture.waterQuality = waterQuality(culture.water, culture.waterQualitySettings,
+                        culture.lastGrowthPotential * (assimilationWaterPerKgGrowth + culture.evaporationKgPerKgGrowth), fixed_seconds, 'algae')
+                    if culture.waterQuality.demandKgPerS > 0 and culture.waterQuality.scale < scale then
+                        scale, limiter = culture.waterQuality.scale, culture.waterQuality.limiter
+                    end
                     constrain(circulationFraction * culture.lastGrowthPotential,
                         culture.lastGrowthPotential,
                         'culture circulation is not supplied: the gas, nutrient and light distribution cannot run')

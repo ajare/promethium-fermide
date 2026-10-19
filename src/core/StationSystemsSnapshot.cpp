@@ -713,6 +713,7 @@ namespace core
 		for (auto const& crew : mImpl->crews)
 		{
 			StationCrewSnapshot crewResult;
+			crewResult.waterQuality = crew.waterQuality;
 			crewResult.id = crew.authored.id;
 			crewResult.atmosphereId = crew.authored.atmosphereId;
 			crewResult.crewCount = crew.authored.crewCount;
@@ -852,6 +853,7 @@ namespace core
 		for (auto const& cell : mImpl->electrolyzers)
 		{
 			StationElectrolyzerSnapshot cellResult;
+			cellResult.waterQuality = cell.waterQuality;
 			cellResult.id = cell.authored.id;
 			cellResult.hazardClass = cell.authored.hazardClass;
 			cellResult.waterStoreId = cell.authored.waterStoreId;
@@ -1104,6 +1106,7 @@ namespace core
 		for (auto const& processor : mImpl->microbialProcessors)
 		{
 			StationMicrobialProcessorSnapshot processorResult;
+			processorResult.waterQuality = processor.waterQuality;
 			processorResult.rateBasis = processor.authored.rateBasis;
 			processorResult.organicOxidationFraction = processor.authored.organicOxidationFraction;
 			processorResult.o2PerKgOrganicOxidized = processor.authored.o2PerKgOrganicOxidized;
@@ -1222,6 +1225,7 @@ namespace core
 		for (auto const& crop : mImpl->cropPopulations)
 		{
 			StationCropPopulationSnapshot cropResult;
+			cropResult.waterQuality = crop.waterQuality;
 			cropResult.id = crop.authored.id;
 			cropResult.atmosphereId = crop.authored.atmosphereId;
 			cropResult.waterStoreId = crop.authored.waterStoreId;
@@ -1349,6 +1353,7 @@ namespace core
 		for (auto const& culture : mImpl->algaeCultures)
 		{
 			StationAlgaeCultureSnapshot algaeResult;
+			algaeResult.waterQuality = culture.waterQuality;
 			algaeResult.id = culture.authored.id;
 			algaeResult.atmosphereId = culture.authored.atmosphereId;
 			algaeResult.waterStoreId = culture.authored.waterStoreId;

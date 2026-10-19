@@ -926,6 +926,24 @@ namespace core
 	// streams. The consumed mass the waste streams do not carry away is
 	// reported as explicit retained body mass - accounted, never
 	// discarded - and this slice models no further body composition.
+	// kg dissolved species per kg stream. Empty fields mean no acceptance gate.
+	struct WaterQualitySettings
+	{
+		std::map<std::string, double> maxConcentrations;
+		std::optional<double> maxTotalDissolved;
+		bool operator==(WaterQualitySettings const&) const = default;
+	};
+	struct StationWaterQualitySnapshot
+	{
+		bool enabled{false};
+		std::map<std::string, double> concentrations;
+		double totalDissolved{0.0};
+		double scale{1.0}; // quality-permitted fraction of the full-demand load budget
+		std::string limiter;
+		double bindingConcentration{0.0}, bindingTolerance{0.0};
+		double demandKgPerS{0.0}, permittedKgPerS{0.0};
+		bool operator==(StationWaterQualitySnapshot const&) const = default;
+	};
 	struct CrewSettings
 	{
 		std::string id;
@@ -933,6 +951,7 @@ namespace core
 		int crewCount{0};             // authored population, >= 0; 0 disables the crew
 		ProfileSettings activityProfile; // [0, 1] activity level scaling all rates
 		std::string foodStoreId;      // compound mass-unit input store
+		WaterQualitySettings waterQuality;
 		std::string waterStoreId;     // compound mass-unit input store
 		std::string urineStoreId;     // compound mass-unit output store
 		std::string organicWasteStoreId; // compound mass-unit output store
@@ -1368,6 +1387,7 @@ namespace core
 		std::string hazardClass;            // normal or hazardous; the whole chain carries it
 		std::string feedStoreId;            // compound organic-waste feed
 		std::string oxygenStoreId;          // O2 drawn per kg of feed
+		WaterQualitySettings waterQuality;
 		std::string waterStoreId;           // process water drawn per kg of feed
 		std::string consumableStoreId;      // microbial culture medium per kg of feed
 		std::string nutrientStoreId;        // recovered N/P/K/mineral product
@@ -1519,6 +1539,7 @@ namespace core
 	{
 		std::string id;
 		std::string atmosphereId;             // compartment the canopy exchanges gas and heat with
+		WaterQualitySettings waterQuality;
 		std::string waterStoreId;             // irrigation water above the protected reserve
 		std::string nitrogenStoreId;          // bound nutrient nitrogen available for uptake
 		std::string phosphorusStoreId;        // phosphorus available for uptake
@@ -1605,6 +1626,7 @@ namespace core
 	{
 		std::string id;
 		std::string atmosphereId;             // compartment the culture exchanges gas and heat with
+		WaterQualitySettings waterQuality;
 		std::string waterStoreId;             // culture makeup water above the protected reserve
 		std::string nitrogenStoreId;          // bound nutrient nitrogen available for uptake
 		std::string phosphorusStoreId;        // phosphorus available for uptake
@@ -3203,6 +3225,7 @@ namespace core
 	// referenced store's unit; gases, moisture and heat are kg and kW.
 	struct StationCrewSnapshot
 	{
+		StationWaterQualitySnapshot waterQuality;
 		std::string id;
 		std::string atmosphereId;
 		int crewCount{0};
@@ -3354,6 +3377,7 @@ namespace core
 	// never a third destination and never vanished.
 	struct StationElectrolyzerSnapshot
 	{
+		StationWaterQualitySnapshot waterQuality;
 		std::string id;
 		std::string hazardClass;
 		std::string waterStoreId;
@@ -3603,6 +3627,7 @@ namespace core
 	// names what bound it.
 	struct StationMicrobialProcessorSnapshot
 	{
+		StationWaterQualitySnapshot waterQuality;
 		StationRateBasis rateBasis{StationRateBasis::FixedPerFeedMass};
 		double organicOxidationFraction{0.0};
 		double o2PerKgOrganicOxidized{0.0};
@@ -3724,6 +3749,7 @@ namespace core
 	// residue to waste or books it as explicit uncontained loss.
 	struct StationCropPopulationSnapshot
 	{
+		StationWaterQualitySnapshot waterQuality;
 		std::string id;
 		std::string atmosphereId;
 		std::string waterStoreId;
@@ -3881,6 +3907,7 @@ namespace core
 	// other's.
 	struct StationAlgaeCultureSnapshot
 	{
+		StationWaterQualitySnapshot waterQuality;
 		std::string id;
 		std::string atmosphereId;
 		std::string waterStoreId;

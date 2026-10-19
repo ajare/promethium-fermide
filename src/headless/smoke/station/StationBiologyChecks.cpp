@@ -1025,10 +1025,8 @@ namespace
 			nutrientSolution.moisture = 0.99;
 			nutrientSolution.nutrientNitrogen = 0.01;
 			settings.stores[0].composition = nutrientSolution;
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("irrigation water store 'irrigation' declares a compound composition that is not pure water")
-					!= std::string::npos,
-				"a nutrient solution was accepted as pure irrigation water");
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				"compound irrigation water must be accepted by schema; quality gates govern operation (#742)");
 			settings.cropPopulations = { crop() };
 			settings.stores = fullStores();
 			core::ResourceCompositionSettings pureNitrogen;
@@ -2254,10 +2252,8 @@ namespace
 			mineralSolution.moisture = 0.995;
 			mineralSolution.otherMinerals = 0.005;
 			settings.stores[0].composition = mineralSolution;
-			require(!core::validateStationSystemsSettings(settings, diagnostic)
-				&& diagnostic.find("culture water store 'makeup' declares a compound composition that is not pure water")
-					!= std::string::npos,
-				"a mineral solution was accepted as pure culture water");
+			require(core::validateStationSystemsSettings(settings, diagnostic),
+				"compound culture water must be accepted by schema; quality gates govern operation (#742)");
 			settings.algaeCultures = { culture() };
 			settings.stores = fullStores();
 			core::ResourceCompositionSettings purePotassium;

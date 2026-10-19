@@ -177,6 +177,11 @@ namespace core
 							+ "' is at capacity";
 					}
 				};
+				crew.waterQuality = waterQuality(crew.waterStoreIndex, crew.authored.waterQuality,
+					massToKg(runtime.stores[crew.waterStoreIndex].authored.unit, waterRequested), "crew");
+				if (waterRequested > 0.0) ports.limitDemand(crew.waterQuality.scale, 1.0);
+				if (waterRequested > 0.0 && crew.waterQuality.scale < scale)
+				{ scale = crew.waterQuality.scale; limiter = crew.waterQuality.limiter; }
 				capSupply(crew.foodStoreIndex, foodRequested, "food");
 				capSupply(crew.waterStoreIndex, waterRequested, "water");
 				if (oxygenRequestedKg > 0.0)

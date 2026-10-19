@@ -41,6 +41,7 @@ namespace core
 			auto ports = materialPorts("Crops", crop.authored.id);
 			auto& compartment = runtime.atmospheres[crop.atmosphereIndex];
 			auto& water = runtime.stores[crop.waterStoreIndex];
+			crop.waterQuality = waterQuality(crop.waterStoreIndex, crop.authored.waterQuality, 0.0, "crop");
 			auto& nitrogen = runtime.stores[crop.nitrogenStoreIndex];
 			auto& phosphorus = runtime.stores[crop.phosphorusStoreIndex];
 			auto& potassium = runtime.stores[crop.potassiumStoreIndex];
@@ -190,6 +191,11 @@ namespace core
 			}
 			else
 			{
+				crop.waterQuality = waterQuality(crop.waterStoreIndex, crop.authored.waterQuality,
+					crop.lastGrowthPotentialKg * (assimilationWaterPerKgGrowth + crop.authored.transpirationKgPerKgGrowth), "crop");
+				if (crop.waterQuality.demandKgPerS > 0.0) ports.limitDemand(crop.waterQuality.scale, 1.0);
+				if (crop.waterQuality.demandKgPerS > 0.0 && crop.waterQuality.scale < scale)
+				{ scale = crop.waterQuality.scale; limiter = crop.waterQuality.limiter; }
 				constrain(circulationFraction * crop.lastGrowthPotentialKg,
 					crop.lastGrowthPotentialKg,
 					"canopy circulation is not supplied: the gas, water and nutrient exchange cannot run");
@@ -649,6 +655,7 @@ namespace core
 			auto ports = materialPorts("Algae", culture.authored.id);
 			auto& compartment = runtime.atmospheres[culture.atmosphereIndex];
 			auto& water = runtime.stores[culture.waterStoreIndex];
+			culture.waterQuality = waterQuality(culture.waterStoreIndex, culture.authored.waterQuality, 0.0, "algae");
 			auto& nitrogen = runtime.stores[culture.nitrogenStoreIndex];
 			auto& phosphorus = runtime.stores[culture.phosphorusStoreIndex];
 			auto& potassium = runtime.stores[culture.potassiumStoreIndex];
@@ -787,6 +794,11 @@ namespace core
 			}
 			else
 			{
+				culture.waterQuality = waterQuality(culture.waterStoreIndex, culture.authored.waterQuality,
+					culture.lastGrowthPotentialKg * (assimilationWaterPerKgGrowth + culture.authored.evaporationKgPerKgGrowth), "algae");
+				if (culture.waterQuality.demandKgPerS > 0.0) ports.limitDemand(culture.waterQuality.scale, 1.0);
+				if (culture.waterQuality.demandKgPerS > 0.0 && culture.waterQuality.scale < scale)
+				{ scale = culture.waterQuality.scale; limiter = culture.waterQuality.limiter; }
 				constrain(circulationFraction * culture.lastGrowthPotentialKg,
 					culture.lastGrowthPotentialKg,
 					"culture circulation is not supplied: the gas, nutrient and light distribution cannot run");

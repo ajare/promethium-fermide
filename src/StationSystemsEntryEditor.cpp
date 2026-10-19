@@ -13,6 +13,28 @@ namespace
 {
 // Identity changes must use Flow's preflight/confirmation/atomic cascade.
 // Shared by the inspector and forms so neither can write a dangling ID.
+void renderWaterQuality(core::WaterQualitySettings& gate, std::string const& label)
+{
+	ImGui::PushID(label.c_str());
+	if (ImGui::TreeNode("Water quality tolerances"))
+	{
+		ImGui::TextUnformatted("Concentrations in kg constituent per kg stream");
+		bool total = gate.maxTotalDissolved.has_value();
+		if (ImGui::Checkbox("Gate total dissolved (default: no gate)", &total))
+		{ if (total) gate.maxTotalDissolved = 0.0; else gate.maxTotalDissolved.reset(); }
+		if (total) ImGui::InputDouble("Maximum total dissolved", &*gate.maxTotalDissolved, 0, 0, "%.6f");
+		for (auto const* name : core::StationWaterDryConstituents)
+		{
+			auto found = gate.maxConcentrations.find(name);
+			bool enabled = found != gate.maxConcentrations.end();
+			if (ImGui::Checkbox((std::string("Gate ") + name).c_str(), &enabled))
+			{ if (enabled) gate.maxConcentrations[name] = 0.0; else gate.maxConcentrations.erase(name); }
+			if (enabled) ImGui::InputDouble(name, &gate.maxConcentrations.at(name), 0, 0, "%.6f");
+		}
+		ImGui::TreePop();
+	}
+	ImGui::PopID();
+}
 void renderIdentity(std::string const& label, std::string const& id)
 {
 	char buffer[core::MaxStationStoreIdLength + 1]{};
@@ -146,6 +168,7 @@ bool renderCrewEntry([[maybe_unused]] core::StationSystemsSettings& draft, core:
 	bool removeCrew = false;
 	ImGui::PushItemWidth(220);
 	renderIdentity(label, crew.id);
+	renderWaterQuality(crew.waterQuality, label);
 	char crewAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(crewAtmosphereBuffer, crew.atmosphereId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " atmosphere").c_str(),
@@ -239,6 +262,7 @@ bool renderMicrobialProcessorEntry(core::StationSystemsSettings& draft, core::Mi
 {
 	bool removeProcessor = false;
 	renderIdentity(label, processor.id);
+	renderWaterQuality(processor.waterQuality, label);
 	char processorHazardBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(processorHazardBuffer, processor.hazardClass.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " hazard class").c_str(),
@@ -396,6 +420,7 @@ bool renderCropPopulationEntry([[maybe_unused]] core::StationSystemsSettings& dr
 	bool removeCrop = false;
 	ImGui::PushItemWidth(220);
 	renderIdentity(label, crop.id);
+	renderWaterQuality(crop.waterQuality, label);
 	char cropAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(cropAtmosphereBuffer, crop.atmosphereId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " atmosphere").c_str(),
@@ -536,6 +561,7 @@ bool renderAlgaeCultureEntry([[maybe_unused]] core::StationSystemsSettings& draf
 	bool removeAlgae = false;
 	ImGui::PushItemWidth(220);
 	renderIdentity(label, algae.id);
+	renderWaterQuality(algae.waterQuality, label);
 	char algaeAtmosphereBuffer[core::MaxStationStoreIdLength + 1]{};
 	std::strncpy(algaeAtmosphereBuffer, algae.atmosphereId.c_str(), core::MaxStationStoreIdLength);
 	if (ImGui::InputText((label + " atmosphere").c_str(),

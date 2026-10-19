@@ -4,6 +4,17 @@ namespace core
 {
 namespace {
 StationSystemsSourceLoader sourceLoader;
+void pushWaterQuality(lua_State* state, WaterQualitySettings const& gate)
+{
+	lua_createtable(state, 0, 2);
+	if (gate.maxTotalDissolved)
+	{ lua_pushnumber(state, *gate.maxTotalDissolved); lua_setfield(state, -2, "maxTotalDissolved"); }
+	lua_createtable(state, 0, static_cast<int>(gate.maxConcentrations.size()));
+	for (auto const& [name, value] : gate.maxConcentrations)
+	{ lua_pushnumber(state, value); lua_setfield(state, -2, name.c_str()); }
+	lua_setfield(state, -2, "maxConcentrations");
+	lua_setfield(state, -2, "waterQuality");
+}
 		struct Construction
 		{
 			ScriptObject* object;
@@ -391,6 +402,7 @@ StationSystemsSourceLoader sourceLoader;
 					pushProfile(state, crew.activityProfile);
 					lua_setfield(state, -2, "activity");
 					lua_pushstring(state, crew.foodStoreId.c_str()); lua_setfield(state, -2, "foodStore");
+					pushWaterQuality(state, crew.waterQuality);
 					lua_pushstring(state, crew.waterStoreId.c_str()); lua_setfield(state, -2, "waterStore");
 					lua_pushstring(state, crew.urineStoreId.c_str()); lua_setfield(state, -2, "urineStore");
 					lua_pushstring(state, crew.organicWasteStoreId.c_str()); lua_setfield(state, -2, "organicWasteStore");
@@ -615,6 +627,7 @@ StationSystemsSourceLoader sourceLoader;
 					lua_pushnumber(state, processor.consumablePerKgOrganicOxidized); lua_setfield(state, -2, "consumablePerKgOrganicOxidized");
 					lua_pushstring(state, processor.feedStoreId.c_str()); lua_setfield(state, -2, "feedStore");
 					lua_pushstring(state, processor.oxygenStoreId.c_str()); lua_setfield(state, -2, "oxygenStore");
+					pushWaterQuality(state, processor.waterQuality);
 					lua_pushstring(state, processor.waterStoreId.c_str()); lua_setfield(state, -2, "waterStore");
 					lua_pushstring(state, processor.consumableStoreId.c_str()); lua_setfield(state, -2, "consumableStore");
 					lua_pushstring(state, processor.nutrientStoreId.c_str()); lua_setfield(state, -2, "nutrientStore");
@@ -662,6 +675,7 @@ StationSystemsSourceLoader sourceLoader;
 					lua_createtable(state, 0, 20);
 					lua_pushstring(state, crop.id.c_str()); lua_setfield(state, -2, "id");
 					lua_pushstring(state, crop.atmosphereId.c_str()); lua_setfield(state, -2, "atmosphere");
+					pushWaterQuality(state, crop.waterQuality);
 					lua_pushstring(state, crop.waterStoreId.c_str()); lua_setfield(state, -2, "waterStore");
 					lua_pushstring(state, crop.nitrogenStoreId.c_str()); lua_setfield(state, -2, "nitrogenStore");
 					lua_pushstring(state, crop.phosphorusStoreId.c_str()); lua_setfield(state, -2, "phosphorusStore");
@@ -708,6 +722,7 @@ StationSystemsSourceLoader sourceLoader;
 					lua_createtable(state, 0, 2);
 					lua_pushstring(state, algae.id.c_str()); lua_setfield(state, -2, "id");
 					lua_pushstring(state, algae.atmosphereId.c_str()); lua_setfield(state, -2, "atmosphere");
+					pushWaterQuality(state, algae.waterQuality);
 					lua_pushstring(state, algae.waterStoreId.c_str()); lua_setfield(state, -2, "waterStore");
 					lua_pushstring(state, algae.nitrogenStoreId.c_str()); lua_setfield(state, -2, "nitrogenStore");
 					lua_pushstring(state, algae.phosphorusStoreId.c_str()); lua_setfield(state, -2, "phosphorusStore");

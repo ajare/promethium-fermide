@@ -657,7 +657,7 @@ using namespace station_detail;
 				&& electrolyzer.waterStoreId == electrolyzer.oxygenStoreId)))
 			return refuse(where + " names the same store for the feed water and a gas product: the machine cannot treat one store as both the water it draws and the gas it produces");
 		if (!declareWaterStore(electrolyzer.waterStoreId, "feed water", where,
-			electrolyzer.hazardClass, false))
+			electrolyzer.hazardClass, true))
 			return false;
 		if (!electrolyzer.oxygenStoreId.empty()
 			&& !declareGasStore(electrolyzer.oxygenStoreId, "oxygen", where,
@@ -918,6 +918,22 @@ using namespace station_detail;
 			brokenReferences->push_back(std::move(text));
 			throw BrokenDraftEntry{};
 		};
+		auto const validateGates = [&](auto const& entries)
+		{
+			for (auto const& entry : entries)
+			{
+				auto const& gate = entry.waterQuality;
+				if (gate.maxTotalDissolved && (!std::isfinite(*gate.maxTotalDissolved) || *gate.maxTotalDissolved < 0.0))
+					return refuse("Station '" + entry.id + "' water quality total tolerance must be finite and non-negative");
+				for (auto const& [name, value] : gate.maxConcentrations)
+					if (std::find(StationWaterDryConstituents.begin(), StationWaterDryConstituents.end(), name)
+						== StationWaterDryConstituents.end() || !std::isfinite(value) || value < 0.0)
+						return refuse("Station '" + entry.id + "' water quality tolerance '" + name + "' must name a dry constituent and be finite and non-negative");
+			}
+			return true;
+		};
+		if (!validateGates(settings.crews) || !validateGates(settings.microbialProcessors)
+			|| !validateGates(settings.cropPopulations) || !validateGates(settings.algaeCultures)) return false;
 		for (auto const& [key, properties] : settings.connections)
 		{
 			if (key.ownerType.empty() || key.ownerId.empty() || key.reference.empty() || key.relation.empty()
@@ -2493,7 +2509,7 @@ using namespace station_detail;
 				processor.hazardClass, false))
 				return false;
 			if (!declareWaterStore(processor.waterStoreId, "process water", where,
-				processor.hazardClass, false))
+				processor.hazardClass, true))
 				return false;
 			if (!allowUnwired || !processor.consumableStoreId.empty())
 			{
@@ -2647,7 +2663,7 @@ using namespace station_detail;
 				if (!isMassUnit(found->unit))
 					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
 						+ "' must be a mass unit; crop uptake is mass-denominated (g or kg)");
-				if (found->composition && !isPureUptakeComposition(*found->composition, stream))
+				if (found->composition && stream != 0 && !isPureUptakeComposition(*found->composition, stream))
 					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
 						+ "' declares a compound composition that is not pure "
 						+ uptakePurityNames[stream] + ": the uptake spends the drawn mass exactly as "
@@ -2833,7 +2849,7 @@ using namespace station_detail;
 				if (!isMassUnit(found->unit))
 					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
 						+ "' must be a mass unit; culture uptake is mass-denominated (g or kg)");
-				if (found->composition && !isPureUptakeComposition(*found->composition, stream))
+				if (found->composition && stream != 0 && !isPureUptakeComposition(*found->composition, stream))
 					return refuse(where + " " + uptakeRoles[stream] + " store '" + uptakeIds[stream]
 						+ "' declares a compound composition that is not pure "
 						+ uptakePurityNames[stream] + ": the uptake spends the drawn mass exactly as "

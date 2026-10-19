@@ -1,4 +1,8 @@
-# #741 partial removal (quality gates are a later slice).
+# #741 partial removal + #742 potable quality gate.
+# Crew 'potable-gate' draws treated water after the first treatment tick.
+# Rewire its waterStoreId to greywater: the 0.0005 kg/kg organic tolerance
+# caps its whole demand to 25%; treated effluent passes in full.
+# This demand-only crew is an acceptance probe, not a metabolic model.
 # 100 kg/day at 0.2% organics, water recovery 85%, organics removal 95%:
 # treated 84.84 kg/day at 0.011787% organics; concentrate 15.16 kg/day
 # at 1.2533% organics. Every drawn constituent is retained exactly once.
@@ -56,6 +60,65 @@ stationSystems:
     capacity: 100
     startingQualified: 10
     startingUnqualified: 0
+  - id: gate-food
+    unit: kg
+    capacity: 1
+    startingQualified: 0
+    startingUnqualified: 0
+    composition: {moisture: 0.5, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 0}
+  - id: gate-urine
+    unit: kg
+    capacity: 1
+    startingQualified: 0
+    startingUnqualified: 0
+    composition: {moisture: 0.5, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 0}
+  - id: gate-waste
+    unit: kg
+    capacity: 1
+    startingQualified: 0
+    startingUnqualified: 0
+    composition: {moisture: 0.5, nutrientNitrogen: 0, atmosphericNitrogen: 0, phosphorus: 0, potassium: 0, otherMinerals: 0, energyKJPerKgDry: 0}
+  atmospheres:
+  - id: gate-habitat
+    hazardClass: normal
+    volumeM3: 100
+    startingOxygenKg: 20
+    startingNitrogenKg: 80
+    startingCarbonDioxideKg: 0
+    startingWaterVapourKg: 0
+    startingTemperatureC: 20
+    thermalCapacityKJPerK: 100
+    reservoirId: ''
+    exchangerConductanceKWPerK: 0
+    occupants: 0
+    oxygenUsePerOccupantKgPerS: 0
+    co2ProductionPerOccupantKgPerS: 0
+    sensibleHeatPerOccupantKW: 0
+    moistureAdditionPerOccupantKgPerS: 0
+    leakRateKgPerS: 0
+    minPressureKPa: 1
+    maxPressureKPa: 200
+    minOxygenPartialPressureKPa: 0
+    maxCarbonDioxidePartialPressureKPa: 0
+  crews:
+  - id: potable-gate
+    atmosphereId: gate-habitat
+    crewCount: 1
+    foodStoreId: gate-food
+    waterStoreId: treated
+    urineStoreId: gate-urine
+    organicWasteStoreId: gate-waste
+    foodPerCrewPerS: 0
+    waterPerCrewPerS: 0.00001
+    oxygenPerCrewKgPerS: 0
+    co2PerCrewKgPerS: 0
+    moisturePerCrewKgPerS: 0
+    urinePerCrewPerS: 0
+    organicWastePerCrewPerS: 0
+    metabolicHeatPerCrewKW: 0
+    activity: {constantLevel: 1, periodSeconds: 0, segments: []}
+    waterQuality:
+      maxConcentrations: {dryOrganics: 0.0005}
   solarArrays:
   - id: supply
     capacityKW: 10

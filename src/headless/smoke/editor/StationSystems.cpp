@@ -6919,8 +6919,8 @@ void bufferWorkflow(smoke::Context const&)
 			#define WATER_REQ(cond, msg) do { if (!driver.require((cond), (msg))) return; } while (0)
 			ctx->SetRef("Configuration");
 			driver.click(ctx, "Open configuration"); ctx->Yield(3);
-			WATER_REQ(window.draft().stores.size() == 4 && window.draft().stores[0].composition,
-				"Compound water configuration did not open");
+			WATER_REQ(window.draft().stores.size() == 7 && window.draft().stores[0].composition,
+				(std::string("Compound water configuration did not open; stores=") + std::to_string(window.draft().stores.size())).c_str());
 			ctx->SetRef("Station Systems");
 			driver.typeValue(ctx, "Store 0 moisture fraction", "0.99"); ctx->Yield(3);
 			WATER_REQ(window.draft().stores[0].composition->moisture == 0.99,
@@ -6948,6 +6948,16 @@ void bufferWorkflow(smoke::Context const&)
 				window.draft().waterTreatments[0]);
 			WATER_REQ(std::abs(preview.at("dryOrganics") / (preview.at("water") + preview.at("dryOrganics"))
 				- 0.01 / 84.84) < 1e-10, "Effluent preview disagrees with declared-source actuals");
+			driver.click(ctx, "Crew 0/Water quality tolerances"); ctx->Yield(3);
+			driver.typeValue(ctx, "**/dryOrganics", "0.0004"); ctx->Yield(3);
+			WATER_REQ(window.draft().crews[0].waterQuality.maxConcentrations.at("dryOrganics") == 0.0004,
+				"Quality tolerance form did not edit");
+			driver.click(ctx, "Undo configuration"); ctx->Yield(3);
+			WATER_REQ(window.draft().crews[0].waterQuality.maxConcentrations.at("dryOrganics") == 0.0005,
+				"Quality tolerance undo failed");
+			driver.click(ctx, "Redo configuration"); ctx->Yield(3);
+			WATER_REQ(window.draft().crews[0].waterQuality.maxConcentrations.at("dryOrganics") == 0.0004,
+				"Quality tolerance redo failed");
 			core::StationConfigurationDocument saved, restored; std::string error;
 			saved.settings = window.draft();
 			auto const parsed = core::parseStationConfiguration(core::serializeStationConfiguration(saved), restored, &error);
@@ -6967,6 +6977,11 @@ void bufferWorkflow(smoke::Context const&)
 			WATER_REQ(telemetry && std::any_of(telemetry->details.begin(), telemetry->details.end(),
 				[](auto const& line) { return line.find("Live dryOrganics concentration") != std::string::npos; }),
 				"Live water concentration inspector readout absent");
+			node.type = "Crew"; node.id = "potable-gate";
+			auto const gate = station_flow::telemetry(node, snap, core::World::getFixedTimestep());
+			WATER_REQ(gate && std::any_of(gate->details.begin(), gate->details.end(),
+				[](auto const& line) { return line.find("Quality-permitted water") != std::string::npos; }),
+				"Quality gate inspector readout absent");
 			#undef WATER_REQ
 		});
 		smoke::require(driver.passed(), "Compound water editor workflow failed");

@@ -624,6 +624,7 @@ using namespace station_detail;
 		// retained body mass, with the retained term explicit.
 		struct CrewState
 		{
+			StationWaterQualitySnapshot waterQuality;
 			CrewSettings authored;
 			size_t foodStoreIndex{0};
 			size_t waterStoreIndex{0};
@@ -752,6 +753,7 @@ using namespace station_detail;
 		// the compartment's own oxygen closure accounts for every gram.
 		struct ElectrolyzerState
 		{
+			StationWaterQualitySnapshot waterQuality;
 			ElectrolyzerSettings authored;
 			size_t waterStoreIndex{0};
 			size_t oxygenStoreIndex{SIZE_MAX}; // SIZE_MAX: delivering to the compartment
@@ -942,6 +944,7 @@ using namespace station_detail;
 		// sink reservoir without any dynamic culture condition.
 		struct MicrobialProcessorState
 		{
+			StationWaterQualitySnapshot waterQuality;
 			MicrobialProcessorSettings authored;
 			double lastNitrifiedNitrogenKg{0.0};
 			double nitrifiedNitrogenKg{0.0};
@@ -1028,6 +1031,7 @@ using namespace station_detail;
 		// chemical + respired heat + heat into the compartment.
 		struct CropPopulationState
 		{
+			StationWaterQualitySnapshot waterQuality;
 			CropPopulationSettings authored;
 			size_t atmosphereIndex{0};
 			size_t waterStoreIndex{0};
@@ -1128,6 +1132,7 @@ using namespace station_detail;
 		// from, or mutated by any crop population.
 		struct AlgaeCultureState
 		{
+			StationWaterQualitySnapshot waterQuality;
 			AlgaeCultureSettings authored;
 			size_t atmosphereIndex{0};
 			size_t waterStoreIndex{0};
@@ -1653,6 +1658,8 @@ using namespace station_detail;
 		double totalChillerSuppliedKW{};
 		std::map<std::string, std::array<double, 5>> classRollups{};
 		ConstituentLedger drawStoreActual(size_t storeIndex, double totalKgBefore, double drawnKg);
+		StationWaterQualitySnapshot waterQuality(size_t index, WaterQualitySettings const& gate,
+			double demandKg, char const* consumer, bool pureFeed = false);
 		ResourceCompositionSettings storeComposition(size_t index);
 		void depositStoreDrift(size_t storeIndex, double depositedKg, ConstituentLedger const& actual);
 		void moveStoreDrift(size_t sourceIndex, size_t destinationIndex, double sourceKgBefore, double movedKg);

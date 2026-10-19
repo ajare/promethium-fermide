@@ -26,6 +26,7 @@ namespace core
 			auto ports = materialPorts("Electrolyzer", cell.authored.id);
 			auto& water = runtime.stores[cell.waterStoreIndex];
 			auto& hydrogen = runtime.stores[cell.hydrogenStoreIndex];
+			cell.waterQuality = waterQuality(cell.waterStoreIndex, {}, 0.0, "electrolyzer", true);
 			cell.lastScale = 0.0;
 			cell.lastLimiter.clear();
 			cell.lastRequestedKg = 0.0;
@@ -74,6 +75,9 @@ namespace core
 				auto const fraction = available / required;
 				if (fraction < scale) { scale = fraction; limiter = reason; }
 			};
+			cell.waterQuality = waterQuality(cell.waterStoreIndex, {}, fullKg, "electrolyzer", true);
+			ports.limitDemand(cell.waterQuality.scale, 1.0);
+			if (cell.waterQuality.scale < scale) { scale = cell.waterQuality.scale; limiter = cell.waterQuality.limiter; }
 			constrain(ports.request(cell.waterStoreIndex, drawableWaterUnits, kgToMass(water.authored.unit, fullKg)), kgToMass(water.authored.unit, fullKg),
 				"feed water store '" + water.authored.id
 				+ "' has nothing drawable above its protected reserve");
@@ -722,6 +726,7 @@ namespace core
 			auto& feed = runtime.stores[processor.feedStoreIndex];
 			auto& oxygen = runtime.stores[processor.oxygenStoreIndex];
 			auto& water = runtime.stores[processor.waterStoreIndex];
+			processor.waterQuality = waterQuality(processor.waterStoreIndex, processor.authored.waterQuality, 0.0, "process");
 			auto& consumable = runtime.stores[processor.consumableStoreIndex];
 			auto& nutrient = runtime.stores[processor.nutrientStoreIndex];
 			auto& recoveredWater = runtime.stores[processor.recoveredWaterStoreIndex];
@@ -977,6 +982,11 @@ namespace core
 					fullKg * rates.oxygen),
 				"oxygen store '" + oxygen.authored.id
 				+ "' has nothing drawable above its protected reserve");
+			processor.waterQuality = waterQuality(processor.waterStoreIndex, processor.authored.waterQuality,
+				fullKg * rates.water, "process");
+			if (rates.water > 0.0) ports.limitDemand(processor.waterQuality.scale, 1.0);
+			if (rates.water > 0.0 && processor.waterQuality.scale < scale)
+			{ scale = processor.waterQuality.scale; limiter = processor.waterQuality.limiter; }
 			constrain(ports.request(processor.waterStoreIndex, drawableWaterUnits, kgToMass(water.authored.unit,
 					fullKg * rates.water)),
 				kgToMass(water.authored.unit,
@@ -1106,6 +1116,12 @@ namespace core
 					qualified[processor.consumableStoreIndex]
 						+ unqualified[processor.consumableStoreIndex]),
 				massToKg(consumable.authored.unit, consumableUnits));
+			// Process water may now carry dry load. Its actual blend leaves
+			// the compound-store boundary with the consumed stream, just as
+			// feed and medium do; never leave drift behind in a drained store.
+			addLedger(stagedLoss, drawStoreActual(processor.waterStoreIndex,
+				massToKg(water.authored.unit, qualified[processor.waterStoreIndex]
+					+ unqualified[processor.waterStoreIndex]), waterActualKg), 1.0);
 			qualified[processor.feedStoreIndex] -= feedUnits;
 			flowOut[processor.feedStoreIndex] += feedUnits;
 			qualified[processor.oxygenStoreIndex] -= oxygenUnits;

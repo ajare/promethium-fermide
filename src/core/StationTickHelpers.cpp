@@ -21,6 +21,44 @@ namespace core
 		return actual;
 	}
 
+	StationWaterQualitySnapshot StationSystemsRuntime::Impl::Tick::waterQuality(size_t index,
+		WaterQualitySettings const& gate, double demandKg, char const* consumer, bool pureFeed)
+	{
+		StationWaterQualitySnapshot result;
+		result.enabled = pureFeed || !gate.maxConcentrations.empty() || gate.maxTotalDissolved.has_value();
+		result.demandKgPerS = demandKg / static_cast<double>(seconds);
+		auto const& store = runtime.stores[index];
+		if (store.authored.composition)
+		{
+			auto const blend = compositionLedgerOf(storeComposition(index), 1.0, 1.0);
+			for (auto const* name : StationWaterDryConstituents)
+			{
+				auto const found = blend.find(name);
+				auto const value = found == blend.end() ? 0.0 : std::max(0.0, found->second);
+				result.concentrations[name] = value;
+				result.totalDissolved += value;
+			}
+		}
+		auto const limit = [&](double concentration, double tolerance, std::string const& name)
+		{
+			if (concentration <= tolerance) return;
+			auto const fraction = tolerance / concentration;
+			if (fraction < result.scale)
+			{
+				result.scale = fraction;
+				result.bindingConcentration = concentration;
+				result.bindingTolerance = tolerance;
+				result.limiter = "water quality: " + name + " above " + consumer + " tolerance";
+			}
+		};
+		for (auto const& [name, tolerance] : gate.maxConcentrations)
+			limit(result.concentrations[name], tolerance, name);
+		if (gate.maxTotalDissolved || pureFeed)
+			limit(result.totalDissolved, pureFeed ? 0.0 : *gate.maxTotalDissolved, "total dissolved");
+		result.permittedKgPerS = result.demandKgPerS * result.scale;
+		return result;
+	}
+
 	ResourceCompositionSettings StationSystemsRuntime::Impl::Tick::storeComposition(size_t index)
 	{
 		return effectiveCompositionOf(*runtime.stores[index].authored.composition,
