@@ -194,15 +194,16 @@ namespace
 				pin("Transfer", "t1", "Source")), "a store onto a source the user disconnected");
 		}
 
-		// Semantic refusals carry the validator's own diagnostic for the rule
-		// the link breaks, never a generic message.
+		// Semantic link judgements carry the validator's own diagnostic for
+		// the rule the link breaks, never a generic message. Cross-class
+		// links are legal (#750): the class no longer refuses a transfer.
 		{
 			auto hazard = base();
 			hazard.transfers[0].sourceId.clear();
 			hazard.transfers[0].destinationId = "brine";
-			requireRefused(hazard, link(pin("Store", "water", "Inventory out"),
-				pin("Transfer", "t1", "Source")), "crosses the hazard-class boundary",
-				"a normal store into a hazardous transfer");
+			requireAllowed(hazard, link(pin("Store", "water", "Inventory out"),
+				pin("Transfer", "t1", "Source")),
+				"a normal store into a hazardous-class transfer");
 			auto units = base();
 			units.transfers[0].sourceId.clear();
 			requireRefused(units, link(pin("Store", "litres", "Inventory out"),
@@ -224,9 +225,9 @@ namespace
 			requireRefused(backSide, link(pin("Transfer", "t1", "Destination"),
 				pin("Store", "litres", "Inventory in")), "does not match",
 				"a transfer destination into a mismatched store");
-			requireRefused(backSide, link(pin("Transfer", "t1", "Destination"),
-				pin("Store", "brine", "Inventory in")), "crosses the hazard-class boundary",
-				"a transfer destination into a hazardous store");
+			requireAllowed(backSide, link(pin("Transfer", "t1", "Destination"),
+				pin("Store", "brine", "Inventory in")),
+				"a transfer destination into a hazardous-class store");
 		}
 
 		// The validator diff: a half-built draft stays buildable. An unrelated
@@ -242,16 +243,17 @@ namespace
 			require(!core::validateStationSystemsSettings(unrelatedStore, whole)
 				&& whole.find("gravel") != std::string::npos,
 				"the seeded unrelated invalid store is not what the whole-configuration validator reports");
-			auto legal = unrelatedStore;
-			legal.transfers.push_back(transfer("t2", "", "tank", "kg"));
-			requireAllowed(legal, link(pin("Store", "water", "Inventory out"),
-				pin("Transfer", "t2", "Source")), "a legal link beside an unrelated invalid store");
-			auto illegal = legal;
-			illegal.transfers.back().destinationId = "brine";
-			requireRefused(illegal, link(pin("Store", "water", "Inventory out"),
-				pin("Transfer", "t2", "Source")), "crosses the hazard-class boundary",
-				"an illegal link beside an unrelated invalid store");
-			require(core::evaluateStationLink(illegal, link(pin("Store", "water", "Inventory out"),
+			auto crossClass = unrelatedStore;
+			crossClass.transfers.push_back(transfer("t2", "", "tank", "kg"));
+			requireAllowed(crossClass,
+				link(pin("Store", "water", "Inventory out"),
+					pin("Transfer", "t2", "Source")),
+				"a legal link beside an unrelated invalid store");
+			crossClass.transfers.back().destinationId = "brine";
+			requireAllowed(crossClass, link(pin("Store", "water", "Inventory out"),
+				pin("Transfer", "t2", "Source")),
+				"a cross-class link beside an unrelated invalid store");
+			require(core::evaluateStationLink(crossClass, link(pin("Store", "water", "Inventory out"),
 				pin("Transfer", "t2", "Source"))).reason.find("gravel") == std::string::npos,
 				"the unrelated invalid store was reported as this link's reason");
 
@@ -264,12 +266,11 @@ namespace
 			legalToo.transfers.push_back(transfer("t2", "", "tank", "kg"));
 			requireAllowed(legalToo, link(pin("Store", "water", "Inventory out"),
 				pin("Transfer", "t2", "Source")), "a legal link beside an unrelated invalid transfer");
-			auto illegalToo = legalToo;
-			illegalToo.transfers.back().destinationId = "brine";
-			requireRefused(illegalToo, link(pin("Store", "water", "Inventory out"),
-				pin("Transfer", "t2", "Source")), "crosses the hazard-class boundary",
-				"an illegal link beside an unrelated invalid transfer");
-			require(core::evaluateStationLink(illegalToo, link(pin("Store", "water", "Inventory out"),
+			legalToo.transfers.back().destinationId = "brine";
+			requireAllowed(legalToo, link(pin("Store", "water", "Inventory out"),
+				pin("Transfer", "t2", "Source")),
+				"a cross-class link beside an unrelated invalid transfer");
+			require(core::evaluateStationLink(legalToo, link(pin("Store", "water", "Inventory out"),
 				pin("Transfer", "t2", "Source"))).reason.find("ghostly") == std::string::npos,
 				"the unrelated invalid transfer was reported as this link's reason");
 		}
@@ -816,8 +817,8 @@ namespace
 			requireRefused(wired, link(pin("Store", "silage", "Inventory in"),
 				pin("Conversion", "c1", "Conversion output 1")), "more than once",
 				"the same store on both ends of one conversion");
-			requireRefused(wired, link(pin("Store", "brine", "Inventory in"),
-				pin("Conversion", "c1", "Conversion output 1")), "hazard-class boundary",
+			requireAllowed(wired, link(pin("Store", "brine", "Inventory in"),
+				pin("Conversion", "c1", "Conversion output 1")),
 				"a hazardous output beside a normal input of the same conversion");
 			requireRefused(wired, link(pin("Store", "grain", "Inventory out"),
 				pin("Conversion", "c1", "Conversion input 1")), "already joins",
@@ -827,9 +828,9 @@ namespace
 				"a link into a slot that was never grown");
 			auto mixed = base();
 			mixed.conversions[0].inputs = {{"silage", 1.0}, {"brine", 1.0}, {}};
-			requireRefused(mixed, link(pin("Store", "meal", "Inventory out"),
-				pin("Conversion", "c1", "Conversion input 3")), "hazard-class boundary",
-				"a new link must agree with every sibling, not just the first");
+			requireAllowed(mixed, link(pin("Store", "meal", "Inventory out"),
+				pin("Conversion", "c1", "Conversion input 3")),
+				"a cross-class sibling mix is no longer judged by the new link");
 			// Wiring the last open slot of a half-built conversion is still
 			// possible: the remaining open flows are the user's next action.
 			auto nearlyDone = base();

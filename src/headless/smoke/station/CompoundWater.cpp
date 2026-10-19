@@ -672,8 +672,8 @@ void contamination(smoke::Context const& context)
 	{
 		auto s = base;
 		if (!clearance) for (auto& entry : s.stores) if (entry.id == "clearance") entry.startingQualified = 0;
-		// Assert every authored transfer is class-matched, then assert both
-		// directions of a forbidden crossing at the public World boundary.
+		// Assert every authored transfer is class-matched; the crossing
+		// itself is exercised below, where it is now legal (#750).
 		for (auto const& transfer : s.transfers)
 		{
 			auto const source = std::find_if(s.stores.begin(), s.stores.end(), [&](auto const& x) { return x.id == transfer.sourceId; });
@@ -704,21 +704,33 @@ void contamination(smoke::Context const& context)
 			require(treatment.limiter.find("release clearance unavailable") != std::string::npos, "missing clearance hold reason");
 		}
 	}
-	core::World world("Refuse hazard bypass", 2, 2); world.pauseSimulation(); world.finishBuild(); std::string error;
-	require(world.configureStationSystems(base, false, &error), error.c_str());
+	std::string error;
+	// Cross-class transfer bypass is legal (#750): the crossing the class
+	// boundary once refused now configures and moves mass in both
+	// directions; the moved mass is the report.
 	for (bool reverse : {false, true})
 	{
-		auto bad = base;
-		// Equal declarations isolate hazard segregation from the separate
-		// composition-boundary refusal (which is checked first).
-		bad.stores[2].composition = bad.stores[1].composition;
-		auto bypass = bad.transfers[0]; bypass.id = "bypass";
+		core::World world("CrossClassBypass", 2, 2); world.pauseSimulation(); world.finishBuild();
+		require(world.configureStationSystems(base, false, &error), error.c_str());
+		auto wired = base;
+		// Equal declarations isolate the class crossing from the separate
+		// composition-boundary rule (which is checked first).
+		wired.stores[2].composition = wired.stores[1].composition;
+		auto bypass = wired.transfers[0]; bypass.id = "bypass";
 		bypass.sourceId = reverse ? "cleared" : "loop"; bypass.destinationId = reverse ? "loop" : "cleared";
-		bad.transfers.push_back(bypass);
-		require(!world.configureStationSystems(bad, false, &error) && error.find("hazard") != std::string::npos,
-			"cross-hazard transfer bypass accepted");
-		require(world.getStationSystemsSettings() == base, "refused hazard bypass mutated World");
+		wired.transfers.push_back(bypass);
+		require(world.configureStationSystems(wired, false, &error),
+			("cross-class transfer bypass was refused: " + error).c_str());
+		world.resumeSimulation();
+		require(world.advanceTicks(10), "cross-class bypass run failed");
+		bool moved = false;
+		for (auto const& entry : world.getStationSystemsSnapshot().transfers)
+			if (entry.id == "bypass" && entry.lastCompleted > 0.0) moved = true;
+		require(moved, reverse ? "the cleared-to-loop bypass did not move mass"
+			: "the loop-to-cleared bypass did not move mass");
 	}
+	core::World world("Refuse consumer bypass", 2, 2); world.pauseSimulation(); world.finishBuild();
+	require(world.configureStationSystems(base, false, &error), error.c_str());
 	for (bool crew : {true, false})
 	{
 		auto bad = base;

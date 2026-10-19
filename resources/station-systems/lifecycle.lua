@@ -767,12 +767,9 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
         assert(source ~= destination, "transfer source and destination must differ")
         assert(transfer.unit == source.unit and transfer.unit == destination.unit,
             "transfer unit must match both stores")
-        -- A generic transfer never crosses the hazard-class boundary
-        -- (#412): hazardous contents are a protected reserve of their
-        -- own class. The host refuses this at configuration; the sandbox
-        -- re-checks so a corrupt crossing fails contained here too.
-        assert(source.hazardClass == destination.hazardClass,
-            "transfer crosses the hazard-class boundary: hazardous and normal material may not share a generic transfer")
+        -- Cross-class transfers are legal (#750): the hazard class no
+        -- longer gates wiring, so the sandbox mirrors the host and
+        -- accepts a transfer between stores of differing class.
         assert(type(transfer.rate) == "number" and transfer.rate == transfer.rate
             and (transfer.rate > 0 or transfer.scheduled) and transfer.rate < math.huge,
             "transfer rate must be finite and positive")
@@ -822,8 +819,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             and #conversion.outputs <= 5, "resource conversion needs 1 to 5 outputs")
         local seen = {}
         local inflow, outflow = {}, {}
-        -- One conversion stays inside one hazard class (#412).
-        local endpointClass = nil
+        -- Cross-class conversion endpoints are legal (#750): the sandbox
+        -- mirrors the host and accepts endpoints of differing class.
         local function readFlow(flow, kind, totals)
             assert(type(flow) == "table", "conversion flow must be a table")
             local store = by_id[flow.store]
@@ -831,12 +828,6 @@ return function(name, stores, transfers, conversions, solar, loads, batteries, d
             assert(not seen[flow.store], "conversion store used more than once")
             assert(store.composition ~= nil,
                 "conversion stores require a declared composition")
-            if endpointClass == nil then
-                endpointClass = store.hazardClass
-            else
-                assert(store.hazardClass == endpointClass,
-                    "conversion crosses the hazard-class boundary: one conversion may only transform material within a single hazard class")
-            end
             local rate = kind == 'input' and flow.rate or flow.yield
             assert(type(rate) == "number" and rate == rate and rate > 0 and rate < math.huge,
                 "conversion " .. kind .. " rate must be finite and positive")

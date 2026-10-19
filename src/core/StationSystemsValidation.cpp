@@ -129,17 +129,9 @@ using namespace station_detail;
 				|| !compositionsClose(*source->composition, *destination->composition))
 				return refuse(where + " crosses a compound-material boundary; transfers between stores with different declared compositions require an explicit conversion");
 		}
-		// A generic transfer never crosses the hazard-class boundary
-		// (#412): a hazardous store's contents are a protected reserve
-		// of their own class, and an accidentally-wired transfer cannot
-		// siphon hazardous material into the normal inventory or dilute
-		// hazardous containment with normal material. Recovery of
-		// hazardous material runs inside the hazardous class, between
-		// stores of that class only.
-		if (source->hazardClass != destination->hazardClass)
-			return refuse(where + " crosses the hazard-class boundary ('"
-				+ source->hazardClass + "' -> '" + destination->hazardClass
-				+ "'); hazardous and normal material may not share a generic transfer");
+		// Cross-class transfers are legal (#750): the hazard class no
+		// longer gates wiring, so a transfer between stores of differing
+		// class is accepted and the moved mass is the only report.
 		return true;
 	}
 	namespace
@@ -1047,12 +1039,9 @@ using namespace station_detail;
 					+ std::to_string(MaxStationConversionFlows) + " outputs");
 			std::set<std::string> endpoints;
 			ConstituentLedger inflow, outflow;
-			// A conversion never crosses the hazard-class boundary either
-			// (#412): every endpoint of one conversion carries the same
-			// class, so a declared process can never transmute hazardous
-			// material into normal inventory or feed normal material into a
-			// hazardous chain.
-			std::string endpointClass;
+			// Cross-class conversion endpoints are legal (#750): a
+			// conversion whose input and output stores differ in hazard
+			// class is accepted and produces its declared outputs.
 			auto const addFlow = [&](std::string const& storeId, double rate, bool input)
 			{
 				auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
@@ -1068,12 +1057,6 @@ using namespace station_detail;
 				if (!std::isfinite(rate) || rate <= 0.0)
 					return refuse(where + " " + (input ? "input rate" : "output yield")
 						+ " for store '" + storeId + "' must be finite and positive");
-				if (endpointClass.empty())
-					endpointClass = it->hazardClass;
-				else if (it->hazardClass != endpointClass)
-					return refuse(where + " crosses the hazard-class boundary at store '" + storeId
-						+ "' ('" + it->hazardClass + "' vs '" + endpointClass
-						+ "'); one conversion may only transform material within a single hazard class");
 				addComposition(input ? inflow : outflow, *it->composition,
 					massToKg(it->unit, rate), 1.0);
 				return true;

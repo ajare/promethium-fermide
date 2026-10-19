@@ -853,13 +853,15 @@ namespace
 		}
 	}
 
-	// Hazardous treatment and containment boundaries (#412): stores carry
-	// an authored hazard class and every generic pathway is refused at
-	// configuration before it can cross it; a hazardous treatment's
-	// treated output is released only on a passed release-clearance test,
-	// and unknown or failed clearance holds the material where generic
-	// recovery cannot reach it. Heat-only interfaces move heat and never
-	// mass. The tests run through the World tick/snapshot seam.
+	// Hazardous treatment and containment boundaries (#412, amended by
+	// #750): stores carry an authored hazard class but the class no
+	// longer gates wiring — cross-class transfers and conversions are
+	// accepted and move mass, the report is the moved mass itself. A
+	// hazardous treatment's treated output is released only on a passed
+	// release-clearance test, and unknown or failed clearance holds the
+	// material where generic recovery cannot reach it. Heat-only
+	// interfaces move heat and never mass. Tests run through the World
+	// tick/snapshot seam.
 	void containment(smoke::Context const&)
 	{
 		auto const dt = static_cast<double>(core::World::getFixedTimestep());
@@ -944,9 +946,9 @@ namespace
 			auto const ok = world.configureStationSystems(settings, false, &diagnostic);
 			return std::make_pair(ok, diagnostic);
 		};
-		// Refused configurations: nothing that crosses a hazard-class
-		// boundary, bypasses a clearance contract or misdeclares a class
-		// reaches runtime, and a refusal never mutates the World.
+		// Refused configurations: nothing that misdeclares a class or
+		// bypasses a clearance contract reaches runtime, and a refusal
+		// never mutates the World.
 		{
 			core::World world("ContainmentRefused", 2, 2);
 			world.pauseSimulation(); world.finishBuild();
@@ -959,50 +961,6 @@ namespace
 				require(!core::validateStationSystemsSettings(settings, diagnostic)
 					&& diagnostic.find("unknown hazard class") != std::string::npos,
 					"a store with an undeclared hazard class was accepted");
-			}
-			{
-				auto settings = core::StationSystemsSettings{};
-				settings.enabled = true;
-				settings.stores = hazStores(5.0);
-				core::ResourceTransferSettings cross;
-				cross.id = "cross";
-				cross.sourceId = "potable";
-				cross.destinationId = "hazReserve";
-				cross.unit = "kg";
-				cross.ratePerSecond = 0.001;
-				settings.transfers = { cross };
-				require(!core::validateStationSystemsSettings(settings, diagnostic)
-					&& diagnostic.find("hazard-class boundary") != std::string::npos,
-					"a generic transfer from normal into hazardous material was accepted");
-				settings.transfers = { };
-				cross.sourceId = "hazReserve";
-				cross.destinationId = "potable";
-				settings.transfers = { cross };
-				require(!core::validateStationSystemsSettings(settings, diagnostic)
-					&& diagnostic.find("hazard-class boundary") != std::string::npos,
-					"a generic recovery from a hazardous store into the normal inventory was accepted");
-			}
-			{
-				// A conversion may not transmute hazardous material into
-				// normal inventory either: every endpoint shares one class.
-				auto settings = core::StationSystemsSettings{};
-				settings.enabled = true;
-				settings.stores = hazStores(5.0);
-				core::ResourceCompositionSettings composition;
-				composition.moisture = 0.5;
-				for (auto& entry : settings.stores)
-				{
-					if (entry.id == "hazRaw" || entry.id == "potable")
-						entry.composition = composition;
-				}
-				core::ResourceConversionSettings cross;
-				cross.id = "launder";
-				cross.inputs.push_back({ "hazRaw", 0.001 });
-				cross.outputs.push_back({ "potable", 0.0005 });
-				settings.conversions = { cross };
-				require(!core::validateStationSystemsSettings(settings, diagnostic)
-					&& diagnostic.find("hazard-class boundary") != std::string::npos,
-					"a conversion crossing the hazard-class boundary was accepted");
 			}
 			{
 				// A normal-class treatment may not draw from a hazardous
@@ -1062,6 +1020,98 @@ namespace
 			}
 			require(!world.getStationSystemsSnapshot().enabled && world.getSimulationTick() == 0,
 				"a refused containment configuration mutated the World");
+		}
+		// Cross-class transfers are legal (#750): wiring that the class
+		// boundary once refuses now configures, runs, and moves mass in
+		// both directions; the destination fills and the ledger closes.
+		{
+			core::World world("CrossClassTransfer", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::ResourceTransferSettings down;
+			down.id = "down";
+			down.sourceId = "potable";
+			down.destinationId = "hazReserve";
+			down.unit = "kg";
+			down.ratePerSecond = 0.001;
+			core::ResourceTransferSettings up;
+			up.id = "up";
+			up.sourceId = "hazRaw";
+			up.destinationId = "normTreated";
+			up.unit = "kg";
+			up.ratePerSecond = 0.002;
+			std::string diagnostic;
+			require(hazConfigure(world, hazStores(5.0), {}, { down, up }, 20.0).first,
+				"a cross-class transfer pair was refused at configuration");
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "cross-class transfer run failed");
+			auto const elapsed = 60.0 * dt;
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.transfers.size() == 2, "cross-class transfers missing from snapshot");
+			require(approx(snap.transfers[0].lastCompleted, 0.001 * dt)
+				&& snap.transfers[0].status == core::StationTransferStatus::Full,
+				"the normal-to-hazardous transfer did not run at full rate");
+			require(approx(snap.transfers[1].lastCompleted, 0.002 * dt)
+				&& snap.transfers[1].status == core::StationTransferStatus::Full,
+				"the hazardous-to-normal transfer did not run at full rate");
+			require(approx(findStore(snap, "hazReserve").currentQualified, 0.001 * elapsed),
+				"the hazardous destination did not fill with transferred normal mass");
+			require(approx(findStore(snap, "normTreated").currentQualified, 0.002 * elapsed),
+				"the normal destination did not fill with transferred hazardous mass");
+			require(approx(findStore(snap, "potable").currentQualified, 50.0 - 0.001 * elapsed),
+				"the normal source did not drain by the transferred mass");
+			require(approx(findStore(snap, "hazRaw").currentQualified, 100.0 - 0.002 * elapsed),
+				"the hazardous source did not drain by the transferred mass");
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
+		}
+		// Cross-class conversions are legal (#750): a conversion whose
+		// endpoints differ in class is accepted and produces its declared
+		// outputs; the loss below the input is booked, not created.
+		{
+			core::World world("CrossClassConversion", 2, 2);
+			world.pauseSimulation(); world.finishBuild();
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = hazStores(5.0);
+			core::ResourceCompositionSettings composition;
+			composition.moisture = 0.5;
+			for (auto& entry : settings.stores)
+			{
+				if (entry.id == "hazRaw" || entry.id == "potable")
+					entry.composition = composition;
+			}
+			core::ResourceConversionSettings cross;
+			cross.id = "launder";
+			cross.inputs.push_back({ "hazRaw", 0.001 });
+			cross.outputs.push_back({ "potable", 0.0005 });
+			settings.conversions = { cross };
+			core::SolarArraySettings field;
+			field.id = "field";
+			field.capacityKW = 20.0f;
+			settings.solarArrays = { field };
+			std::string diagnostic;
+			require(core::validateStationSystemsSettings(settings, diagnostic), diagnostic.c_str());
+			require(world.configureStationSystems(settings, false, &diagnostic), diagnostic.c_str());
+			world.resumeSimulation();
+			require(world.advanceTicks(60), "cross-class conversion run failed");
+			auto const elapsed = 60.0 * dt;
+			auto const snap = world.getStationSystemsSnapshot();
+			require(snap.conversions.size() == 1, "cross-class conversion missing from snapshot");
+			auto const& launder = snap.conversions[0];
+			require(launder.lastScale > 0.99 && launder.status == core::StationTransferStatus::Full,
+				"the cross-class conversion did not run at full declared throughput");
+			require(approx(launder.inputs[0].completed, 0.001 * dt)
+				&& approx(launder.outputs[0].completed, 0.0005 * dt),
+				"the cross-class conversion did not produce its declared outputs");
+			require(approx(findStore(snap, "potable").currentQualified, 50.0 + 0.0005 * elapsed),
+				"the normal destination did not fill with converted hazardous mass");
+			require(approx(findStore(snap, "hazRaw").currentQualified, 100.0 - 0.001 * elapsed),
+				"the hazardous source did not drain by the converted mass");
+			for (auto const& balance : snap.balances)
+				require(std::abs(balance.residual) <= 1e-6,
+					("per-unit boundary residual for '" + balance.unit + "' not closed").c_str());
 		}
 		// Cleared recovery: a hazardous treatment with a full power dose
 		// and a passed clearance test releases qualified material, the

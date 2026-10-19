@@ -441,8 +441,8 @@ namespace
 				(dragPin.y + legalPin.y) * 0.5f}); ctx->Yield(2);
 			REQ(window.flowPinEligibility("Store", "a", "Inventory out") == true
 				&& window.flowPinEligibility("Store", "litres", "Inventory out") == false
-				&& window.flowPinEligibility("Store", "hazard", "Inventory out") == false,
-				"reverse drag feedback diverged from the core unit or hazard rules");
+				&& window.flowPinEligibility("Store", "hazard", "Inventory out") == true,
+				"reverse drag feedback diverged from the core unit rule (#750: class no longer gates transfers)");
 			ctx->MouseUp(); ctx->Yield(3);
 			REQ(!window.flowPinEligibility("Store", "a", "Inventory out"),
 				"dropping a reverse drag in empty space retained feedback");
@@ -453,11 +453,16 @@ namespace
 			REQ(rejection().find("does not match") != std::string::npos,
 				("a unit-breaking link did not report the unit rule: " + rejection()).c_str());
 			REQ(wired().empty(), "a refused link still wrote the draft");
+			// Cross-class links are legal (#750): the hazardous-class store
+			// wires into the transfer and the draft takes the reference.
 			REQ(drag("Store", "hazard", "Inventory out", "Transfer", "t1", "Source"),
 				"hazard/store connectors were not drawn");
-			REQ(rejection().find("hazard-class boundary") != std::string::npos,
-				("a hazard-breaking link did not report the hazard rule: " + rejection()).c_str());
-			REQ(wired().empty(), "a refused hazard link still wrote the draft");
+			REQ(wired() == "hazard" && rejection().empty()
+				&& window.draftHistory().undoCount() == 2,
+				"a cross-class link was not accepted and committed as one entry");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(wired().empty() && window.draftHistory().undoCount() == 1,
+				"undo did not rewind the cross-class link");
 			// The legal link lands, clears the refusal, and commits one entry.
 			REQ(drag("Store", "a", "Inventory out", "Transfer", "t1", "Source"),
 				"store/t1 connectors were not drawn");
@@ -923,14 +928,18 @@ namespace
 			ctx->MouseTeleportToPos(canvasPoint(60, 60)); ctx->Yield(3);
 			REQ(driver.contains("Conversion input 2 (input) - connected"),
 				"the wired grown slot did not read as connected");
-			// A hazard-crossing link into the same conversion is refused by
-			// the core rule and writes nothing.
+			// A cross-class link into the same conversion is legal (#750):
+			// it lands as one entry and rewinds as one entry.
 			REQ(drag("Store", "brine", "Inventory out", "Conversion", "conversion1", "Conversion input 1"),
 				"the floor input connector was not drawn for dragging");
-			REQ(window.flowLinkRejection().find("hazard-class boundary") != std::string::npos
-				&& window.draft().conversions[0].inputs[0].storeId.empty()
+			REQ(window.flowLinkRejection().empty()
+				&& window.draft().conversions[0].inputs[0].storeId == "brine"
+				&& window.draftHistory().undoCount() == 2 * core::MaxStationConversionFlows + 3,
+				"a cross-class conversion link was not accepted and committed as one entry");
+			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
+			REQ(window.draft().conversions[0].inputs[0].storeId.empty()
 				&& window.draftHistory().undoCount() == 2 * core::MaxStationConversionFlows + 2,
-				"a hazard-crossing conversion link was not refused without writing");
+				"undo did not rewind the cross-class conversion link");
 			// Undo rewinds the wiring, redo restores it.
 			ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z); ctx->Yield(3);
 			REQ(window.draft().conversions[0].inputs[1].storeId.empty(),

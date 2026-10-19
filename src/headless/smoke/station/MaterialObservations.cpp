@@ -125,9 +125,12 @@ namespace
 		auto const requestGap = core::queryStationChart(chart(world, transferId), missingRequest);
 		require(std::isfinite(requestGap.series[0].values[0]) && std::isnan(requestGap.series[1].values[0]),
 			"missing request contaminated actual or became zero");
-		// Hazard/material constraints remain authoritative even with observations installed.
-		auto invalid = s; invalid.stores[0].hazardClass = "hazardous";
-		require(!world.configureStationSystems(invalid, true), "exchange views bypassed hazard enforcement");
+		// Cross-class conversion endpoints are legal (#750): the crossing
+		// the class boundary once refused now configures with exchange
+		// views installed.
+		auto crossClass = s; crossClass.stores[0].hazardClass = "hazardous";
+		require(world.configureStationSystems(crossClass, true),
+			"cross-class conversion refused with exchange views installed");
 		// Catalogue grouping must not conflate equal role labels and units of different materials.
 		auto descriptors = std::vector<core::StationMetricDescriptor>{};
 		for (auto const& h : histories) if (h.descriptor.equipmentType == "Resource conversion") descriptors.push_back(h.descriptor);

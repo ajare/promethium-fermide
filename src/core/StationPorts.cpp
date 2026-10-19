@@ -710,9 +710,9 @@ namespace
 	// next action, not this link's defect. Rates and the constituent balance
 	// belong to the complete entry and stay with the whole-configuration
 	// validator; what one connector can break is the store it names: it must
-	// exist, be compound, be used once, and share one hazard class with the
-	// conversion's other wired endpoints. Wording mirrors the whole-config
-	// validator's rules so the same boundary reads the same from either seam.
+	// exist, be compound, and be used once. Hazard-class agreement between
+	// endpoints is no longer a rule (#750): a cross-class conversion link is
+	// judged only on what the connector itself breaks.
 	bool scopedConversionWiring(StationSystemsSettings const& settings,
 		ResourceConversionSettings const& conversion, std::string const& field,
 		std::string& diagnostic)
@@ -753,18 +753,8 @@ namespace
 			+ "' has no declared composition; conversions require compound stores";
 			return true;
 		}
-		// Every other resolvable wired endpoint of this conversion must share
-		// one hazard class with the store this link names, and none of them may
-		// already be this same store.
-		std::string otherClass;
-		bool sawOther = false;
-		auto observeClass = [&](ResourceStoreSettings const& otherStore)
-		{
-			// Keep any mismatch, not just the first wired sibling's class:
-			// a partially edited draft may already contain mixed classes.
-			if (!sawOther || otherStore.hazardClass != store->hazardClass)
-			{ otherClass = otherStore.hazardClass; sawOther = true; }
-		};
+		// Every other resolvable wired endpoint of this conversion must not
+		// already be this same store; class agreement is no longer judged.
 		for (size_t other = 0; other < conversion.inputs.size(); ++other)
 		{
 			if (isInput && other == index) continue;
@@ -775,7 +765,6 @@ namespace
 				diagnostic = where + " uses store '" + storeId + "' more than once";
 				return true;
 			}
-			if (auto const* otherStore = findStore(otherId)) observeClass(*otherStore);
 		}
 		for (size_t other = 0; other < conversion.outputs.size(); ++other)
 		{
@@ -787,14 +776,6 @@ namespace
 				diagnostic = where + " uses store '" + storeId + "' more than once";
 				return true;
 			}
-			if (auto const* otherStore = findStore(otherId)) observeClass(*otherStore);
-		}
-		if (sawOther && otherClass != store->hazardClass)
-		{
-			diagnostic = where + " crosses the hazard-class boundary at store '" + store->id
-			+ "' ('" + store->hazardClass + "' vs '" + otherClass
-			+ "'); one conversion may only transform material within a single hazard class";
-			return true;
 		}
 		return true;
 	}

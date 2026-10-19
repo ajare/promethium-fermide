@@ -260,7 +260,7 @@ void scheduledTransfers(smoke::Context const&)
     // Every invalid Apply is a true no-op. Inactive finite fields do not execute.
     auto before = lossless.getStationSystemsSettings(); auto live = lossless.getStationSystemsSnapshot();
     lossless.pauseSimulation();
-    for (int test = 0; test < 8; ++test)
+    for (int test = 0; test < 7; ++test)
     {
         auto bad = before; auto& transfer = bad.transfers[0];
         if (test == 0) transfer.quantity = 0;
@@ -269,8 +269,9 @@ void scheduledTransfers(smoke::Context const&)
         if (test == 3) transfer.firstOccurrenceSeconds = std::numeric_limits<double>::infinity();
         if (test == 4) transfer.recurrenceSeconds = dt * 0.5;
         if (test == 5) transfer.sourceId = transfer.destinationId;
-        if (test == 6) bad.stores[1].hazardClass = "hazardous";
-        if (test == 7) transfer.ratePerSecond = std::numeric_limits<double>::infinity();
+        // Cross-class transfers are legal (#750), so the class mismatch
+        // is no longer an invalid Apply case.
+        if (test == 6) transfer.ratePerSecond = std::numeric_limits<double>::infinity();
         std::string why;
         require(!lossless.configureStationSystems(bad, true, &why) && !why.empty()
             && lossless.getStationSystemsSettings() == before && lossless.getStationSystemsSnapshot() == live,
