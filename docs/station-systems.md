@@ -319,9 +319,14 @@ construct a runtime with authored settings and a base quantum (seconds), call
 pipeline are needed. Non-finite, negative and unrepresentable targets return
 false without mutation; already-reached targets are successful no-ops.
 Ratio 1 retains the original physics durations and elapsed-time arithmetic.
-The clock seam (#763), scheduled-event integration (#767) and continuous-transfer
-saturation crossings (#769) are implemented; protection changes, persistence of the ratio and certification remain
-follow-up slices of #762. Rendering never executes station scripts. Public World methods
+The clock seam (#763), scheduled-event integration (#767), continuous-transfer
+saturation crossings (#769), rate-aware protection and ratio persistence are implemented.
+The certified protection ratio is **6**: above it the runtime remains deterministic,
+finite and conserving, but authors must not claim the certified admitted-work
+protection margin. The `station-timestep-invariance` CTest label owns the fast
+ratios 1 and 6 plus exhaustive ratios 30 and 600, the long-duration reference,
+and the measured coarse-step performance gate. See [ADR 0025](adr/0025-station-systems-clock-and-timestep-certification.md)
+and [the protection evidence](tickets/771-rate-aware-protection.md). Rendering never executes station scripts. Public World methods
 `getStationSystemsSnapshot`, `getStationSystemsEvents` and
 `getStationSystemsDiagnostics` return read-only value copies. Events retain at
 most 256 entries; a failure is terminal until Reset, so diagnostics are bounded.

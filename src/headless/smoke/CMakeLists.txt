@@ -110,10 +110,34 @@ set_tests_properties(station-clock-boundary PROPERTIES LABELS "smoke;functional;
 add_test(NAME station-seconds-lint COMMAND ${Python3_EXECUTABLE}
     "${PROJECT_SOURCE_DIR}/scripts/tests/station_seconds_lint.py")
 set_tests_properties(station-seconds-lint PROPERTIES LABELS "smoke;functional;validation-fast;station" TIMEOUT 10)
+# #774: the default and certified coarse ratio gate every pull request. The
+# exhaustive extremes and long-reference run are intentionally separately
+# labelled so CI can schedule them outside the fast lane.
+foreach(ratio 1 6)
+    add_test(NAME station-timestep-invariance-fast-${ratio}
+        COMMAND pf-smoke-station --step-ratio ${ratio} --check invariance)
+    set_tests_properties(station-timestep-invariance-fast-${ratio} PROPERTIES
+        LABELS "smoke;functional;validation-fast;station;station-timestep-invariance" TIMEOUT 120)
+endforeach()
+foreach(ratio 30 600)
+    add_test(NAME station-timestep-invariance-exhaustive-${ratio}
+        COMMAND pf-smoke-station --step-ratio ${ratio} --check invariance)
+    set_tests_properties(station-timestep-invariance-exhaustive-${ratio} PROPERTIES
+        LABELS "smoke;functional;station;station-timestep-invariance;validation-exhaustive" TIMEOUT 120)
+endforeach()
+add_test(NAME station-timestep-invariance-long-reference
+    COMMAND pf-smoke-station --check invarianceLongRun)
+add_test(NAME station-timestep-invariance-performance
+    COMMAND pf-smoke-station --check invariancePerformance)
+set_tests_properties(station-timestep-invariance-long-reference PROPERTIES
+    LABELS "smoke;functional;station;station-timestep-invariance;validation-exhaustive" TIMEOUT 240)
+set_tests_properties(station-timestep-invariance-performance PROPERTIES
+    LABELS "smoke;functional;validation-fast;station;station-timestep-invariance" TIMEOUT 120)
+# Compatibility name retained for existing CI callers.
 add_test(NAME station-step-ratio-runner COMMAND pf-smoke-station --step-ratio 6 --check invariance)
-set_tests_properties(station-step-ratio-runner PROPERTIES LABELS "smoke;functional;validation-fast;station" TIMEOUT 60)
+set_tests_properties(station-step-ratio-runner PROPERTIES LABELS "smoke;functional;validation-fast;station;station-timestep-invariance" TIMEOUT 120)
 
-foreach(check rateAwareProtection protectionReallocation protectionFreeze protectionGrossExcursion saturationCrossing eventSplit eventOrder eventRollback maintenanceSplit reportingSystemsTime scheduledTransfers recurringTransfers scheduledTransferDocuments scheduledPantry invariance connectionTransfers connectionConversions connectionPower connectionThermal connectionProcesses connectionLifecycle connectionForecast connectionMaterialDiagnostics connectionBlockedZeroEfficiency connectionBatteryTelemetry clock clockIntegration lifecycle batching eventBound persistence stores transfers linkSeam growablePorts completeThermalChain schedulesSeam biologySeam waterGasSeam powerChainSeam thermalReservoirSeam radiatorSeam coolantLoopSeam chillerSeam compounds power
+foreach(check rateAwareProtection protectionReallocation protectionFreeze protectionGrossExcursion saturationCrossing eventSplit eventOrder eventRollback maintenanceSplit reportingSystemsTime scheduledTransfers recurringTransfers scheduledTransferDocuments scheduledPantry invariance invarianceLongRun invariancePerformance connectionTransfers connectionConversions connectionPower connectionThermal connectionProcesses connectionLifecycle connectionForecast connectionMaterialDiagnostics connectionBlockedZeroEfficiency connectionBatteryTelemetry clock clockIntegration lifecycle batching eventBound persistence stores transfers linkSeam growablePorts completeThermalChain schedulesSeam biologySeam waterGasSeam powerChainSeam thermalReservoirSeam radiatorSeam coolantLoopSeam chillerSeam compounds power
         observationIntegration observationBounds scheduledExchangeObservations algaeExchangeObservations cropExchangeObservations microbialExchangeObservations carbonExchangeObservations waterGasExchangeObservations crewAtmosphereExchangeObservations thermalExchangeObservations electricalExchangeObservations exchangeObservations materialObservations fluidInventoryObservations compoundInventoryObservations livingInventoryObservations materialRelationshipObservations materialCanonicalUnits batteryObservations batteriesConfig batteriesHourDischarge batteriesHourCharge batteriesHourChargeLoss
         batteriesHourDischargeLoss batteriesCharging batteriesEclipse batteriesLimited
         batteriesLosses batteriesDischarging batteriesQuick
@@ -167,6 +191,11 @@ foreach(check rateAwareProtection protectionReallocation protectionFreeze protec
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()
+# #774's direct ratio-1 reference runs and timing measurement deliberately
+# cover long simulated durations; retain them outside the generic one-minute
+# station-check budget.
+set_tests_properties(station-invariance station-invarianceLongRun station-invariancePerformance
+    PROPERTIES TIMEOUT 120)
 # The #547 analytical hour-scale crossings run multi-hour simulated runs.
 set_tests_properties(station-batteriesEclipse PROPERTIES TIMEOUT 180)
 set_tests_properties(station-batteriesCharging PROPERTIES TIMEOUT 120)
